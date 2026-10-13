@@ -327,7 +327,7 @@ Durable:
 | `trigger_fired` | `source`, `idempotency_key`, `principal`, `revision`, `payload_digest` |
 | `files_skipped` | `files` — the agent, skill, command and workflow files a session found at a start and did not read, each `{kind, name, path, reason}`: on a pod, a working copy's file of a name its bundle has or a built-in agent's, which those beat unless the profile sets `repositoryOverridesBundle`; in a git worktree, one the main checkout has not committed (Decision 826); a workspace's `.troupe/` file, or directory, that is a link out of it, a skill whose `SKILL.md` can't be read, and what a workspace's `skills.json` links from outside the repository while the workspace is not trusted (Decision 829). A directory not looked into has a null `name`. Written when the list differs from the one the log last recorded, so an empty list says the files went away |
 | `fs_changed` | `path`, `hash`, `size` |
-| `scratch_updated` | `name`, `path`, `kind`, `title`, `size`, `hash`, `version`, `call_id` — a document the `show` tool wrote to the session's scratchpad, or replaced (Decision 870): a plan, report, comparison, diagram or table the agent shows the person beside the chat instead of printing it there. `path` is where `fs.read` reads it (`scratch:/<name>`), `kind` how to show it (`markdown`, `mermaid`, `json`, `csv` or `text`), `hash` the same `sha256:…` `fs.read` answers, `version` the writes of that name in the session from 1, and `call_id` the `show` call that wrote it, so a client puts a card where the call was rather than the call's `content`. `scratch.list` lists the documents |
+| `scratch_updated` | `name`, `path`, `kind`, `title`, `size`, `hash`, `version`, `call_id` — a document the `show` tool wrote to the session's scratchpad, or replaced (Decision 870), or the `patch` tool revised in place: a plan, report, comparison, diagram or table the agent shows the person beside the chat instead of printing it there. `path` is where `fs.read` reads it (`scratch:/<name>`), `kind` how to show it (`markdown`, `mermaid`, `json`, `csv` or `text`), `hash` the same `sha256:…` `fs.read` answers, `version` the writes of that name in the session from 1, and `call_id` the `show` or `patch` call that wrote it, so a client puts a card where the call was rather than the call's `content`. `scratch.list` lists the documents |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 | `mounts_resolved` | `mounts` — the volumes a pod session's working tree was given, as the session started |
 | `published` | `source`, `destination`, `hash`, `bytes`, `direction` — a file the `publish` tool copied to or from a shared volume |
@@ -763,7 +763,7 @@ at rest: the session is `dormant` afterwards, as one that went to sleep is.
 
 #### `session.archive` → `{"session_id", "state": "dormant"}`; stops the session's agents and makes it dormant. On a daemon the log stays where it is; on a plane the pod keeps no copy of a dormant session.
 
-#### `session.pin` / `session.unpin` → `{"session_id", "pinned"}`; a pinned session is exempt from the plane's retention. A daemon has no retention: it marks a running session pinned in its listing, and the mark does not outlive the session's going dormant.
+#### `session.pin` / `session.unpin` → `{"session_id", "pinned"}`; a pinned session is exempt from the plane's retention. A daemon has no retention: it marks the session pinned in its listing, running or dormant, and keeps the mark in a file beside the session's log, so it outlives the session's going dormant and the daemon's stopping. A session it has no log of is `not_found`.
 
 #### `session.erase` → `{"session_id", "erased", "state"}`; irreversible.
 
@@ -1167,7 +1167,13 @@ written.
 Needs `control`: putting a file into a workspace is steering the session. The write is
 recorded as an `fs_changed` event, carrying the file's `hash` and `size`, whose actor is
 the client that uploaded it, not the session. `scratch:/` is read-only to it: only the
-agent's `show` puts a document on the scratchpad.
+agent's `show` and `patch` write the scratchpad.
+
+Where it lands is `session:/`, the directory the session works in (Decision 896). On a pod
+that is the session's own, erased with it. On a daemon it is the checkout the session
+was started in: git sees the file, another session in that checkout sees it, and erasing
+the session leaves it there. A `path` whose prefix names no mount (`plans:/x`) is
+`forbidden`, with a `reason` naming the ones there are, as every file tool refuses it.
 
 #### `scratch.list`
 ```json
@@ -1177,10 +1183,11 @@ agent's `show` puts a document on the scratchpad.
 "updated_at"}]}`
 
 The session's scratchpad (Decision 870): the documents its agents showed the person with
-the `show` tool, the latest version of each name, in the order each was first shown.
-Each row is what that name's last `scratch_updated` said, and `updated_at` when it was
-written. It is a fold over the log, so a dormant session answers it as a running one
-does, and a client that attaches late has the same rows from its replay. Read a
+the `show` tool and revised with `patch`, the latest version of each name, in the order
+each was first shown. Each row is what that name's last `scratch_updated` said, and
+`updated_at` when it was written. It is a fold over the log, so a dormant session
+answers it as a running one does, and a client that attaches late has the same rows from
+its replay. Read a
 document's words with `fs.read` of its `path`, the one read path there is. The documents
 are the session's own, beside its log rather than in its workspace: an erasure takes
 them, and a fork carries the ones its history shows.
@@ -1283,7 +1290,9 @@ no agent has (the keys are `description`, `mode`, `model`, `tools`, `permissions
 `max_turns`, `budget_share`, `skills`, `override` and `delegation`, and onboarding's
 `imported_*`); `delegation` not `ask` or `auto`;
 `mode` missing or not `primary`/`subagent`; `tools` or `skills` not `"all"` or a list; a
-tool that does not exist (with the nearest that do); a permission not `auto`, `ask` or
+tool that does not exist (with the nearest that do; a pod's GitHub tools, `git_push`,
+`pr_open`, `pr_comment` and `pr_checks`, exist everywhere here, though only a pod session with a
+repository has them); a permission not `auto`, `ask` or
 `deny`; a permission that grants (`auto` or `ask`) a tool `tools` does not list, which
 could never apply (a `deny` of one is allowed, as the built-ins write it); a model the
 provider does not serve, by the list the daemon keeps (Decision 778), with the nearest it
@@ -1637,9 +1646,17 @@ reads. There is no second settings file.
 ```
 `config.get` (`observe`; `workspace` optional) → `{"config_dir", "path", "exists",
 "provider", "base_url", "auth", "api_key_set", "api_key_source", "models": {"default",
-"cheap", "expensive"}, "overrides": [{"source", "detail"}], "workspace", "trusted",
+"cheap", "expensive"}, "overrides": [{"source", "detail"}], "provider_types", "workspace", "trusted",
 "files", "organisation", "keys", "warnings", "errors"}`. The first fields are what the user's **file**
-says, since that is what the model panel's save changes. The key is never in the answer:
+says, since that is what the model panel's save changes. `provider_types` is what a screen
+offers to choose from, the one list of the provider types every party reads
+(`Troupe.Protocol.ProviderTypes`, issue #658): `[{"name", "label", "summary", "url",
+"default_url", "url_example", "key", "key_var"}]`, every type but `fake`. `url` is `own`
+(the vendor's endpoint, which a gateway speaking its API stands in for at a `base_url`),
+`server` (a server of the person's, `default_url` unless one is given) or `required` (no
+default; `url_example` shows its shape); `key` is `required` or `none`, and `key_var` the
+variable read when no key is given. A daemon before #658 sends no `provider_types`, and
+takes `anthropic` and `openai`. The key is never in the answer:
 `api_key_set` says whether one is in force and `api_key_source` where from (`file`, `env`
 or null; a daemon before Decision 828 also said `opencode`). `overrides` names what beats
 the file anyway: a project's `.troupe/config.yaml` or `.troupe/config.local.yaml` (only
@@ -1732,13 +1749,18 @@ of its own is stale, and a screen sees the edit the next time it asks.
 {"command_id": "c-13", "from": "opencode"}
 ```
 `config.import` (`admin`) → the `config.get` answer after the write, plus `"imported":
-{"from", "providers", "kept", "default"}`. Copies opencode's providers into the file's
-`providers:` block (type, base URL, auth style, models, and the key as opencode has it
+{"from", "providers", "kept", "skipped", "default"}`. Copies opencode's providers into the
+file's `providers:` block (type, base URL, auth style, models, and the key as opencode has it
 written: an `{env:VAR}` stays a reference, a literal key is copied), once: a session never
 reads opencode's config (Decision 828). A provider the file already names is kept as it is
-and listed under `kept`; opencode's default model becomes `models.default` only when the file
-has none. `from` is `opencode`, the only source; with no opencode providers the call fails
-with `invalid_params`. Nothing is written when nothing would change.
+and listed under `kept`. A provider is copied only where its key goes to the host it was set
+up for: its SDK package is one Troupe has a type for, or the file names its `baseURL`. Any
+other (`@ai-sdk/mistral` with no `baseURL`, say) is not copied and is listed under `skipped`
+as `{"provider", "reason"}`, the reason a sentence. opencode's default model becomes
+`models.default` only when the file has none and its provider is in the file. `from` is
+`opencode`, the only source; with no opencode providers, or none that can be copied, the
+call fails with `invalid_params` and the reasons. Nothing is written when nothing would
+change.
 
 ```json
 {"command_id": "c-15", "plane_url": "https://plane.example.com",
@@ -1771,20 +1793,30 @@ at a later one, without ever travelling back to a client.
 {}
 ```
 `setup.get` (`observe`) → `{"needed", "completed", "step", "steps": [{"name",
-"done"}], "answers", "detected", "key_storage", "offered", "suggested", "check",
+"done"}], "answers", "detected", "kinds", "key_storage", "offered", "suggested", "check",
 "suggested_prompt", "daemon", "session"}`. `needed` says whether a client should offer the
 questions: nothing recorded, no `config.yaml`, and no model that can be asked.
 `completed` is `null` or `{"completed_at", "choice", "subject"}`, recorded once for every
 client in the daemon's state directory. `step` is the step to answer next — `where`,
 `provider`, `key`, `models`, `workspace`, `daemon`, `finish`, and `done` once `finish` is
 answered — and `steps` the ones this path
-takes, since a plane finishes at once and reused settings skip the key and the models.
+takes, since a plane finishes at once, reused settings skip the key and the models, and a
+provider that takes no key skips the key.
+`kinds` is every way the `provider` step may be answered, in the order a screen offers
+them (issue #658): each provider type a person may pick, as `config.get`'s
+`provider_types` has it, then `gateway` and `litellm`, the two ways to an
+OpenAI-compatible server at its address. Each is `{"id", "provider", "label", "summary",
+"url", "default_url", "url_example", "key", "key_var"}`: `id` is the `kind` to answer with
+and `provider` what is written; an address is asked where `url` is `required` (a gateway,
+Azure's resource) or `server` (Ollama's, `default_url` when none is given), and a key
+unless `key` is `none`, with `optional` letting a gateway go without. A daemon before #658
+sends no `kinds`, and takes `anthropic`, `openai` and the two gateways.
 `daemon` says whether the daemon starts when this user logs in (Decision 762):
 `{"at_login", "kind": "startup_folder" | "launch_agent" | "systemd" | "autostart",
 "path", "command"}`, the entry's file and the `troupe-daemon` it starts, `command` being
 `null` when there is none to start.
-`detected` is what is already here: `env` (which of `ANTHROPIC_API_KEY` and
-`OPENAI_API_KEY` are set, names only), `opencode` (`path`, `providers`, `default`),
+`detected` is what is already here: `env` (which of the vendors' variables, the
+`key_var` of each kind that has one, are set, names only), `opencode` (`path`, `providers`, `default`),
 `config` (the user's file: `exists`, `path`, `provider`, `base_url`, `api_key_set`,
 `api_key_source`, `models` and `usable`) and `plane` (`url`,
 `linked`). `key_storage` says where a key goes: `{"kind": "file", "path", "keychain":
@@ -1803,8 +1835,8 @@ whose person wants the question again. Each step's `answer`:
 | step | answer | what it does |
 | --- | --- | --- |
 | `where` | `{"choice": "local"}` or `{"choice": "plane", "plane_url"?}` | a plane records the choice and goes to `finish`; signing in is the client's |
-| `provider` | `{"provider": "anthropic" \| "openai" \| "fake", "kind"?: "anthropic" \| "openai" \| "gateway" \| "litellm", "base_url"?, "auth"?}`, or `{"reuse": "opencode" \| "config"}` | a gateway and a LiteLLM proxy are `openai` with their URL; `reuse` copies opencode's providers in as `config.import` does, or keeps a `config.yaml` that works, and goes to `workspace` |
-| `key` | `{"api_key"}`, `{"env": "VAR"}` (kept as `{env:VAR}`) or `{}` for a gateway that wants none | checked with a real request, the provider's model listing: `check` is `{"state": "ok" \| "refused" \| "unknown", "reason"}`. Refused stays on `key`; `ok` fills `offered` (`{"id", "context", "max_output", "input", "output"}`, prices per million tokens) and `suggested` (`{"default", "cheap"}`, a safe answer); `unknown` goes on with nothing listed |
+| `provider` | `{"provider": <a provider type, or "fake">, "kind"?: <a kind's id>, "base_url"?, "auth"?}`, or `{"reuse": "opencode" \| "config"}` | a gateway and a LiteLLM proxy are `openai` with their URL, which they and `azure_openai` are refused without; a kind whose `key` is `none` (Ollama) is asked for its models at once, as `key` would ask, and goes to `models`; `reuse` copies opencode's providers in as `config.import` does (the answer recorded lists them under `providers`, and those not copied under `skipped`, as `config.import` does), or keeps a `config.yaml` that works, and goes to `workspace` |
+| `key` | `{"api_key"}`, `{"env": "VAR"}` (kept as `{env:VAR}`) or `{}` for a gateway that wants none | checked with a real request, the provider's model listing: `check` is `{"state": "ok" \| "refused" \| "unknown", "reason"}`. Refused stays on `key`; `ok` fills `offered` (`{"id", "context", "max_output", "input", "output"}`, prices per million tokens) and `suggested` (`{"default", "cheap"}`, a safe answer); `unknown` goes on with nothing listed, as it does for Azure, which lists its deployments to no key. A vendor at its own endpoint, and `azure_openai`, are refused `{}` |
 | `models` | `{"default", "cheap"?}` | writes the provider, the key and the models into the user's `config.yaml` |
 | `workspace` | `{"workspace", "approvals": "ask" \| "auto"}` | the first project directory, which must exist. `ask` is the default; `auto` writes `auto_approve: true`, and `ask` writes `false` only over a file that runs everything |
 | `daemon` | `{"at_login": true \| false}` | `true` writes the platform's login entry, which starts `troupe-daemon run` at the next login and keeps it up; `false` removes it. The answer is the state, so answering again turns it the other way; nothing is started or stopped now |
@@ -2026,6 +2058,9 @@ call the pod sends again after a drop (section 8) is answered from the first rat
 made twice.
 
 #### `workspace.recent` → `{"workspaces": [{"path", "last_used_at", "sessions"}]}`
+
+Most recently used first, at most `limit` of them (20 where it is absent).
+
 #### `workspace.search`
 ```json
 {"query": "trou", "limit": 20}
@@ -2496,17 +2531,17 @@ that team.
 | `admin.profile.delete` | platform | removes one; `managed_by_gitops` in gitops mode, except for a profile the cluster has no resource for, whose row alone it deletes |
 | `admin.pod.drain` | platform | drains a pod, returning what it held |
 | `admin.teams.list` | either | teams, with grants, budgets, volumes and retention |
-| `admin.team.enable` | platform | makes an IdP group a team |
+| `admin.team.enable` | platform | makes an IdP group a team; a name another team has is `conflict` unless `link` is true, which links the group into that team |
 | `admin.team.update` | either | budget, retention, default visibility, volume; `allow_unenforced_workers` a platform admin's; keys it does not declare, a team's name and group among them, are left alone |
 | `admin.team.grant` / `admin.team.revoke` | platform | a team's access to a profile |
-| `admin.sessions.list` | either | session *metadata*, never content |
+| `admin.sessions.list` | either | session *metadata*, never content: with the `repository` it was created with and `github`, what it did there (as `admin.runs.list` has it); `filter.team` narrows to one team, another team's name `not_found` for a team admin |
 | `admin.session.erase` | either | erases one, for authorised roles |
 | `admin.bundles.list` | either | every version of a channel, each with its `summary` (names of agents, skills and MCP servers) |
 | `admin.bundle.get` | either | one version in full: the document, its `detail` (agents with mode and skills, skills with files, MCP servers with the Secret to create), and adoption per profile |
 | `admin.bundle.validate` | platform | checks a document the way publishing will, without publishing; `{ok: true, summary, hash}` or `invalid_params` with `data.errors` |
 | `admin.bundle.publish` / `admin.bundle.retire` | platform | publish a version — refused as `invalid_params` with `data.errors`, one sentence per problem, when the document is malformed or names an MCP host outside `allowedEgress` — or retire one |
 | `admin.mcp.check` | either | `{host, allowed}`: whether the cluster policy lets a pod reach an MCP server's host |
-| `admin.audit.list` | either | who changed what, with diffs, each change keyed by its path (`spec.llm.model`) |
+| `admin.audit.list` | either | who changed what, with diffs, each change keyed by its path (`spec.llm.model`); a team admin's is the rows about their teams (the team, its triggers, principals and sessions) |
 | `admin.provisioning.mode` | either | `direct` or `gitops`: whether the plane writes profiles to the cluster, or reads them and the triggers from resources a repository holds and refuses to write them |
 | `admin.settings.list` | either | every platform setting with its value, where that value came from (`stored`, `deployed`, `unset`), what changing it does and when it takes effect; a secret is reported as set and never returned |
 | `admin.setting.put` | platform | `{key, value}` — parsed against the setting's declared type and refused if it does not fit, or if the deployment owns it |
@@ -2524,12 +2559,12 @@ that team.
 | `admin.trigger.delete` | either | `{team, name}`; the runs go with it, the sessions they made do not; `managed_by_gitops` in gitops mode, except for a trigger the cluster has no resource for |
 | `admin.trigger.run` | either | `{team, name}`: fire it now, with a manual idempotency key naming the caller and the minute; in either mode |
 | `admin.trigger.key.rotate` | either | `{team, name}` → `{team, name, url, key, rotated_at}`: the trigger's own key, shown once, the old one dead at once; in either mode, since the key is never in a resource |
-| `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status, its `done_reason` and `failed_reason` (a turn the harness stopped, `tool_failures` or `agent_failed`, which makes the run `failed`), and the `revision` and `revision_hash` it actually ran |
+| `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status, its `done_reason` and `failed_reason` (a turn the harness stopped, `tool_failures` or `agent_failed`, which makes the run `failed`), the `revision` and `revision_hash` it actually ran, and `github`: what its session did on GitHub, or `null` (`base`, `branch`, `commit`, `tree`, `pushes`, `pushed_at`, `pull_request: {number, url}`, `rounds: [{commit, state, failing, at}]`, `stopped: {at, reason}`; [github.md](docs/admin/github.md#7-the-fix-loop)) |
 | `admin.trigger.revisions` | either | `{team, name}` → every revision of a trigger, newest first: the number, the hash, who made it and when, and whether it was reconstructed by the migration that introduced them |
 | `admin.profile.preview` | platform | what policy makes of a profile and what would change, without writing anything |
 | `admin.provisioners.list` | either | what can make a worker, and which guarantee each substrate does not give: admission policy, network policy, egress by hostname, disruption budget |
 | `admin.hosts.list` | platform | `{profile}` → every machine registered to a profile, with whether it has ever enrolled |
-| `admin.host.register` / `admin.host.rotate` | platform | register a machine against a profile and mint the secret it enrols with, shown once; or a new secret for one, keeping the machine |
+| `admin.host.register` / `admin.host.rotate` | platform | register a machine against a profile and mint the secret it enrols with, shown once; or a new secret for one, keeping the machine. Either answers `ca` too, the PEM of the CA that signed the control port's certificate, which the machine pins: it enrols over TLS only. Refused (`unavailable`) while the control port has no certificate |
 | `admin.host.enabled` | platform | stop a machine enrolling, or let it again |
 | `admin.groups.list` | either | every identity-provider group the plane knows about, which is what a team links to |
 | `admin.team.link` / `admin.team.unlink` | platform | draw a team's members from one more group, or stop; `admin.team.unlink.preview` says first who would lose access and how many sessions they can open |
@@ -2540,7 +2575,7 @@ that team.
 | `admin.integrations.list` | either | MCP servers carried by more than one profile, every host anything here dials with whether the cluster policy allows it, and each trigger's notification target |
 | `admin.connections.list` | either | who has connected a personal credential to which person-mode server, and whose identity each session carries |
 | `admin.run.review` | either | marks the run behind a session as looked at, by whoever asks |
-| `admin.audit.verify` | platform | checks the audit trail's hash chain and names the first row that does not verify |
+| `admin.audit.verify` | platform | checks the audit trail's hash chain: `result` is `ok`, or the first row that does not verify with its `reason` (`altered`, `chain_broken`) |
 | `admin.setting.effective` | either | for a setting decided at more than one rung: the value in force, the rung that decided it, and every rung that had an opinion |
 | `admin.person.budget` | platform | sets or clears a person's own monthly spend ceiling, in millionths, across every team they are in |
 | `admin.budget.explain` | platform | every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, its period, and the rung that set it |

@@ -20,10 +20,11 @@ defmodule Troupe.Scratch do
   **What the log says.** The listing is a fold over the log's `scratch_updated` events,
   the latest of each name, so it is the same for a running session and a dormant one and
   rebuilt by a replay. The documents themselves are files; their words are in the log
-  already, as the `show` call's arguments. Between compactions nothing replaces those, so
-  the prompt prefix stays the same (Decisions 863 and 867); a compaction, where it changes
-  anyway, leaves each out for a pointer, and the agent reads a document back with
-  `read_file`, here and nowhere else (`readable/2`, Decision 878).
+  already, as the `show` call's arguments, and a revision's as the `patch` call's
+  (`patch/4`), which carries the change and not the document again. Between compactions
+  nothing replaces those, so the prompt prefix stays the same; a compaction, where it
+  changes anyway, leaves each out for a pointer, and the agent reads a document back with
+  `read_file`, here and nowhere else (`readable/2`).
   """
 
   alias Troupe.{Config, Mounts}
@@ -140,31 +141,137 @@ defmodule Troupe.Scratch do
          "(scratch_max_documents). Replace one by showing it again under its name, or " <>
          "answer in the chat."}
     else
-      with {:ok, path} <- resolve(ctx.session_id, name),
-           :ok <- File.write(path, content) do
-        document = %{
-          name: name,
-          path: "scratch:/" <> name,
-          kind: kind,
-          title: title,
-          size: byte_size(content),
-          hash: hash(content),
-          version: if(previous, do: previous.version + 1, else: 1),
-          updated_at: nil
-        }
+      put(ctx, %{name: name, kind: kind, title: title}, content, previous)
+    end
+  end
 
-        Log.append(
-          ctx.session_id,
-          ctx.agent_path,
-          :scratch_updated,
-          event_data(document, ctx.call_id)
-        )
+  @doc """
+  Revise a document in place and log the result as its next version: `old`, which must
+  appear in it exactly once, replaced with `new`, or with no `old` (`nil` or `""`), `new`
+  added to its end (`revise/3`). Its title and kind stay as they were.
 
-        {:ok, document}
-      else
-        {:error, reason} ->
-          {:error, "The document could not be written: #{:file.format_error(reason)}."}
-      end
+  Refused, with a sentence the model can act on, for a name the session has not shown, a
+  span that is not in the document or is in it more than once, and a result past
+  `scratch_max_bytes`. Under the same lock as `write/2`, so two patches in one response
+  each revise what the other left.
+  """
+  @spec patch(Troupe.Tool.Ctx.t(), String.t(), String.t() | nil, String.t()) ::
+          {:ok, document()} | {:error, String.t()}
+  def patch(ctx, name, old, new) do
+    config = ctx.config || %Config{}
+
+    :global.trans(
+      {{__MODULE__, ctx.session_id}, self()},
+      fn -> patch_locked(ctx, config, name, old, new) end,
+      [node()]
+    )
+  end
+
+  defp patch_locked(ctx, config, name, old, new) do
+    case Enum.find(list(ctx.session_id), &(&1.name == name)) do
+      nil ->
+        {:error,
+         "#{name} is not a document on this session's scratchpad. Show it first with show; " <>
+           "patch revises a document show put there."}
+
+      previous ->
+        with {:ok, content} <- words(ctx.session_id, name),
+             {:ok, revised} <- revised(content, old, new, name),
+             :ok <- fits(revised, config) do
+          put(ctx, previous, revised, previous)
+        end
+    end
+  end
+
+  defp words(session_id, name) do
+    with {:ok, path} <- resolve(session_id, name),
+         {:ok, content} <- File.read(path) do
+      {:ok, content}
+    else
+      {:error, reason} ->
+        {:error,
+         "#{name} could not be read (#{:file.format_error(reason)}). Show it again under " <>
+           "its name."}
+    end
+  end
+
+  defp revised(content, old, new, name) do
+    case revise(content, old, new) do
+      {:ok, revised} ->
+        {:ok, revised}
+
+      {:error, :not_found} ->
+        {:error,
+         "old_string is not in #{name} as written. Read it with " <>
+           "read_file(path: \"scratch:/#{name}\") and give a span of it exactly, or leave " <>
+           "old_string out to add new_string to its end."}
+
+      {:error, {:found, n}} ->
+        {:error,
+         "old_string appears #{n} times in #{name}. Give more of the text around it, so " <>
+           "that it appears once."}
+    end
+  end
+
+  defp fits(content, config) do
+    if byte_size(content) > config.scratch_max_bytes do
+      {:error,
+       "The revised document would be #{byte_size(content)} bytes, and a scratchpad " <>
+         "document is at most #{config.scratch_max_bytes} (scratch_max_bytes). Shorten it, " <>
+         "or split it across names."}
+    else
+      :ok
+    end
+  end
+
+  @doc """
+  A document's words with one revision made, the rule `patch/4` writes by: `old`, which
+  must appear in them exactly once, replaced with `new`; or with no `old`, `new` added to
+  the end, on a line of its own, so a document written in parts reads as one.
+  """
+  @spec revise(String.t(), String.t() | nil, String.t()) ::
+          {:ok, String.t()} | {:error, :not_found | {:found, pos_integer()}}
+  def revise(content, old, new) when old in [nil, ""] do
+    if content == "" or String.ends_with?(content, "\n") or String.starts_with?(new, "\n"),
+      do: {:ok, content <> new},
+      else: {:ok, content <> "\n" <> new}
+  end
+
+  def revise(content, old, new) do
+    case length(:binary.matches(content, old)) do
+      1 -> {:ok, String.replace(content, old, new, global: false)}
+      0 -> {:error, :not_found}
+      n -> {:error, {:found, n}}
+    end
+  end
+
+  # A document's words written, and logged as the next version of its name: `show`'s whole
+  # document and `patch`'s revision alike, each a `scratch_updated` under the call.
+  defp put(ctx, %{name: name, kind: kind, title: title}, content, previous) do
+    with {:ok, path} <- resolve(ctx.session_id, name),
+         :ok <- File.write(path, content) do
+      document = %{
+        name: name,
+        path: "scratch:/" <> name,
+        kind: kind,
+        title: title,
+        size: byte_size(content),
+        hash: hash(content),
+        version: if(previous, do: previous.version + 1, else: 1),
+        updated_at: nil
+      }
+
+      Log.append(
+        ctx.session_id,
+        ctx.agent_path,
+        :scratch_updated,
+        event_data(document, ctx.call_id)
+      )
+
+      {:ok, document}
+    else
+      {:error, reason} ->
+        {:error, "The document could not be written: #{:file.format_error(reason)}."}
     end
   end
 
@@ -302,12 +409,12 @@ defmodule Troupe.Scratch do
   end
 
   @doc """
-  Where `read_file` reads `scratch:/<name>`, the path a compaction's pointer names
-  (Decision 878), or the sentence it is refused with.
+  Where `read_file` reads `scratch:/<name>`, the path a compaction's pointer names, or the
+  sentence it is refused with.
 
   Against a table of the scratchpad alone, read-only: the agent reads its session's
-  documents back, and writes them only with `show`, which logs each one. No other file
-  tool and no command reaches the scratchpad.
+  documents back, and writes them only with `show` and `patch`, which log each write. No
+  other file tool and no command reaches the scratchpad.
   """
   @spec readable(String.t() | nil, String.t()) :: {:ok, Path.t()} | {:error, String.t()}
   def readable(session_id, path) when is_binary(session_id) do

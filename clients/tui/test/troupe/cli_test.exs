@@ -326,6 +326,29 @@ defmodule Troupe.CLITest do
     refute contents(io) =~ "spawned /root"
   end
 
+  # D125: `branch_spawned` carries no `seq`, so the copy read back from the journal and the
+  # copy published live were both printed. A branch is spawned once, so it is said once.
+  test "a branch's spawned line is printed once, however many copies of it arrive" do
+    {sid, _, _} = start_session!(script: [])
+    {io, pid} = printer!(sid)
+
+    spawned = %Troupe.Event{
+      session_id: sid,
+      agent_path: "build-1",
+      type: :branch_spawned,
+      seq: nil,
+      ts: 1,
+      data: %{name: "build", isolation: :worktree, prompt: "go"}
+    }
+
+    send(pid, {:troupe_event, spawned})
+    send(pid, {:troupe_event, spawned})
+    _ = :sys.get_state(pid)
+
+    lines = contents(io) |> String.split("\n") |> Enum.filter(&(&1 =~ "spawned /build"))
+    assert lines == ["build-1> spawned /build (worktree)"]
+  end
+
   # The daemon can go — stopped, or crashed — and a run must not wait for ever on a rest
   # that cannot come. A connection back within the bound costs nothing.
   test "headless printer ends a run 1 when the daemon's connection stays down" do

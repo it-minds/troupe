@@ -87,6 +87,23 @@ defmodule Troupe.ConfigSetupTest do
       assert text =~ "copied into #{@path}: gateway, portal"
     end
 
+    test "a provider the copy left out is named, with the reason" do
+      imported = %{
+        "providers" => ["gateway"],
+        "kept" => [],
+        "skipped" => [%{"provider" => "mistral", "reason" => "it names no baseURL"}],
+        "default" => nil
+      }
+
+      daemon = fn
+        "config.get", _ -> {:ok, @nothing}
+        "config.import", _ -> {:ok, %{"path" => @path, "imported" => imported}}
+      end
+
+      assert ConfigSetup.run("/w", io(daemon: daemon, opencode: @opencode, answers: [""])) == 0
+      assert Enum.join(said(), "\n") =~ "not copied: mistral: it names no baseURL"
+    end
+
     test "no copies nothing, and offers the other ways on" do
       daemon = settings(@nothing)
 
@@ -257,6 +274,56 @@ defmodule Troupe.ConfigSetupTest do
       assert ConfigSetup.run("/w", io(daemon: daemon, answers: setup ++ ["y"])) == 0
       refute_received {:troupe_daemon, _}
       refute_received {:ask, "Start troupe-daemon" <> _}
+    end
+
+    # Issue #658: every provider type is offered, numbered in the one list's order, and each
+    # asks what it needs. On the chunk's tip the question offered Anthropic and OpenAI, and
+    # 3 was Anthropic.
+    test "every provider type is offered, and each asks only what it needs" do
+      daemon = fn
+        "config.get", _ -> {:ok, @nothing}
+        "config.models", _ -> {:ok, %{"models" => [], "failures" => []}}
+        "config.set", _ -> {:ok, %{"path" => @path, "api_key_set" => false}}
+      end
+
+      # Ollama: its server's address, no key asked.
+      answers = ["1", "3", "http://127.0.0.1:11434", "qwen3:8b", "", ""]
+      assert ConfigSetup.run("/w", io(daemon: daemon, answers: answers)) == 0
+
+      assert_received {:ask,
+                       "provider: 1 Anthropic, 2 OpenAI or a gateway that speaks its API (LiteLLM, vLLM), " <>
+                         "3 Ollama, 4 OpenRouter, 5 Azure OpenAI, 6 Gemini [1]: "}
+
+      assert_received {:ask, "base URL (Enter for http://localhost:11434): "}
+      refute_received {:secret, _}
+      assert_received {:call, "config.set", params}
+      assert %{"provider" => "ollama", "base_url" => "http://127.0.0.1:11434"} = params
+      assert params["models"] == %{"default" => "qwen3:8b"}
+      refute Map.has_key?(params, "api_key")
+
+      # Azure: its resource's address, required, and a key with no variable to stand in.
+      azure = "https://res.openai.azure.example.test"
+      answers = ["1", "5", azure, "azure-key", "standin-deployment", "", ""]
+      assert ConfigSetup.run("/w", io(daemon: daemon, answers: answers)) == 0
+      assert_received {:ask, "base URL (yours, such as https://<resource>.openai.azure.com): "}
+      assert_received {:secret, "API key, or {env:VAR} to read it from the environment: "}
+      assert_received {:ask, "default model id: "}
+      assert_received {:call, "config.set", %{"provider" => "azure_openai"} = params}
+      assert params["api_key"] == "azure-key"
+
+      assert ConfigSetup.run("/w", io(daemon: daemon, answers: ["1", "5", ""])) == 1
+      assert Enum.join(said(), "\n") =~ "Azure OpenAI needs the address of your resource"
+
+      assert ConfigSetup.run("/w", io(daemon: daemon, answers: ["1", "5", azure, ""])) == 1
+      assert Enum.join(said(), "\n") =~ "Azure OpenAI needs a key; nothing saved"
+
+      # Gemini: a vendor, whose variable is what Enter at the key saves.
+      answers = ["1", "6", "", "", "gemini-2.5-pro", "", ""]
+      assert ConfigSetup.run("/w", io(daemon: daemon, answers: answers)) == 0
+      assert_received {:secret, "API key, or {env:VAR} to read it from the environment [" <> var}
+      assert var == "{env:GEMINI_API_KEY}]: "
+      assert_received {:call, "config.set", %{"provider" => "gemini"} = params}
+      assert params["api_key"] == "{env:GEMINI_API_KEY}"
     end
 
     test "saying no at the end saves nothing" do

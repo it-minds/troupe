@@ -826,6 +826,8 @@ defmodule Troupe.Plane.Triggers do
       "pending_approvals" => session && session.pending_approvals,
       "pending_questions" => session && session.pending_questions,
       "cost_micros" => session && session.cost_micros,
+      # The branch, last commit and draft pull request the run's session left on GitHub.
+      "github" => session && session.github,
       "reviewed_by" => run.reviewed_by,
       "reviewed_at" => run.reviewed_at && DateTime.to_iso8601(run.reviewed_at)
     }

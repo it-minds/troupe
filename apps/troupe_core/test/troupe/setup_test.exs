@@ -1,3 +1,5 @@
+Code.require_file("../support/fake_providers.exs", __DIR__)
+
 defmodule Troupe.SetupTest do
   @moduledoc """
   The first run's state machine (Decision 705): which steps a path takes, what each
@@ -13,10 +15,13 @@ defmodule Troupe.SetupTest do
 
   alias Troupe.Config
   alias Troupe.Config.ModelSettings
+  alias Troupe.LLM.ProviderType
   alias Troupe.Setup
+  alias Troupe.Test.FakeProviders
 
   @vars ~w(TROUPE_CONFIG_HOME TROUPE_STATE_HOME TROUPE_OPENCODE_CONFIG TROUPE_OPENCODE_AUTH TROUPE_API_KEY
-           TROUPE_AUTH_TOKEN TROUPE_PROVIDER TROUPE_MODEL ANTHROPIC_API_KEY OPENAI_API_KEY SETUP_TEST_KEY)
+           TROUPE_AUTH_TOKEN TROUPE_PROVIDER TROUPE_MODEL ANTHROPIC_API_KEY OPENAI_API_KEY SETUP_TEST_KEY
+           OPENROUTER_API_KEY GEMINI_API_KEY)
 
   setup do
     base = Path.join(System.tmp_dir!(), "troupe-setup-#{System.unique_integer([:positive])}")
@@ -340,6 +345,137 @@ defmodule Troupe.SetupTest do
     end
   end
 
+  # Issue #658: every provider type a person may pick is a way to set one up, from the one
+  # list of them, and each asks only what it needs. The servers are the stand-ins of
+  # `fake_providers.exs`; nothing reaches a real provider.
+  describe "every provider type" do
+    test "is a kind the provider step takes, in the list's order, before the two gateways" do
+      assert Enum.map(Setup.kinds(), & &1["id"]) == ProviderType.named() ++ ~w(gateway litellm)
+      assert Setup.report(Setup.new())["kinds"] == Setup.kinds()
+
+      for kind <- Setup.kinds() do
+        assert kind["label"] != "" and kind["summary"] != "", kind["id"]
+        assert kind["url"] in ~w(own server required), kind["id"]
+        assert kind["key"] in ~w(required optional none), kind["id"]
+      end
+
+      by_id = Map.new(Setup.kinds(), &{&1["id"], &1})
+      assert %{"url" => "server", "default_url" => "http://localhost:11434", "key" => "none"} =
+               by_id["ollama"]
+
+      assert %{"url" => "required", "default_url" => nil, "key" => "required", "key_var" => nil} =
+               by_id["azure_openai"]
+
+      assert %{"url" => "own", "key_var" => "GEMINI_API_KEY"} = by_id["gemini"]
+      assert %{"url" => "own", "key_var" => "OPENROUTER_API_KEY"} = by_id["openrouter"]
+    end
+
+    # The reproduction: on the chunk's tip the provider step refused every type but
+    # anthropic, openai and the fake ("provider must be one of anthropic, openai, fake").
+    test "ollama is asked no key: its models are listed from the server as it is answered", ctx do
+      fake = FakeProviders.start(:ollama)
+      on_exit(fn -> FakeProviders.stop(fake) end)
+
+      {:ok, flow} = Setup.answer(Setup.new(), "where", %{"choice" => "local"})
+
+      assert {:ok, flow} =
+               Setup.answer(flow, "provider", %{
+                 "provider" => "ollama",
+                 "kind" => "ollama",
+                 "base_url" => fake.base_url
+               })
+
+      assert flow.step == "models"
+      assert flow.answers["key"] == %{"source" => "none"}
+      assert flow.check == %{"state" => "ok", "reason" => nil}
+      assert Enum.map(flow.offered, & &1.id) == Enum.sort(FakeProviders.models(:ollama))
+
+      report = Setup.report(flow)
+
+      assert Enum.map(report["steps"], & &1["name"]) ==
+               ~w(where provider models workspace daemon finish)
+
+      # Asked with no key at all.
+      assert [%{path: "/v1/models", authorization: nil}] = FakeProviders.requests(fake)
+
+      assert {:ok, _flow} = Setup.answer(flow, "models", %{"default" => "qwen3:8b"})
+      written = File.read!(ctx.config_file)
+      assert written =~ ~s(provider: "ollama")
+      assert written =~ ~s(base_url: "#{fake.base_url}")
+      refute written =~ "api_key"
+      assert {:ok, config, _layers} = Config.resolve(ctx.workspace)
+      assert {config.provider, config.model} == {"ollama", "qwen3:8b"}
+    end
+
+    test "azure_openai asks its resource's address and a key, and is not asked for a list", ctx do
+      fake = FakeProviders.start(:azure_openai)
+      on_exit(fn -> FakeProviders.stop(fake) end)
+
+      {:ok, flow} = Setup.answer(Setup.new(), "where", %{"choice" => "local"})
+
+      assert {:error, reason} =
+               Setup.answer(flow, "provider", %{
+                 "provider" => "azure_openai",
+                 "kind" => "azure_openai"
+               })
+
+      assert reason =~ "azure_openai needs the address of your resource"
+      assert reason =~ "https://<resource>.openai.azure.com"
+
+      assert {:ok, flow} =
+               Setup.answer(flow, "provider", %{
+                 "provider" => "azure_openai",
+                 "kind" => "azure_openai",
+                 "base_url" => fake.base_url
+               })
+
+      assert flow.step == "key"
+      assert {:error, "azure_openai needs a key; paste one"} = Setup.answer(flow, "key", %{})
+
+      assert {:ok, flow} = Setup.answer(flow, "key", %{"api_key" => FakeProviders.key()})
+      assert flow.step == "models"
+      assert %{"state" => "unknown", "reason" => reason} = flow.check
+      assert reason =~ "Azure OpenAI does not list its deployments"
+      assert FakeProviders.requests(fake) == []
+
+      assert {:ok, _flow} = Setup.answer(flow, "models", %{"default" => "standin-deployment"})
+      written = File.read!(ctx.config_file)
+      assert written =~ ~s(provider: "azure_openai")
+      assert written =~ ~s(base_url: "#{fake.base_url}")
+      assert written =~ ~s(api_key: "#{FakeProviders.key()}")
+    end
+
+    test "openrouter and gemini are vendors: their variables are offered, and their key is checked",
+         ctx do
+      System.put_env("GEMINI_API_KEY", FakeProviders.key())
+      assert "GEMINI_API_KEY" in Setup.detect()["env"]
+
+      fake = FakeProviders.start(:openrouter)
+      on_exit(fn -> FakeProviders.stop(fake) end)
+
+      {:ok, flow} = Setup.answer(Setup.new(), "where", %{"choice" => "local"})
+
+      {:ok, flow} =
+        Setup.answer(flow, "provider", %{
+          "provider" => "openrouter",
+          "kind" => "openrouter",
+          "base_url" => fake.base_url
+        })
+
+      assert flow.step == "key"
+      assert {:ok, refused} = Setup.answer(flow, "key", %{"api_key" => "sk-not-this-one"})
+      assert %{step: "key", check: %{"state" => "refused"}} = refused
+
+      assert {:ok, flow} = Setup.answer(flow, "key", %{"api_key" => FakeProviders.key()})
+      assert flow.step == "models"
+      assert Enum.map(flow.offered, & &1.id) == Enum.sort(FakeProviders.models(:openrouter))
+      assert flow.suggested["default"] == "anthropic/claude-sonnet-4.5"
+
+      {:ok, _flow} = Setup.answer(flow, "models", flow.suggested)
+      assert File.read!(ctx.config_file) =~ ~s(provider: "openrouter")
+    end
+  end
+
   # The login entry goes to the suite's scratch home (test_helper.exs), never the real one.
   describe "the daemon step" do
     test "comes after the project: yes writes the login entry, no removes it, and finish follows",
@@ -483,7 +619,7 @@ defmodule Troupe.SetupTest do
       assert reason =~ "is not a step"
 
       {:ok, flow} = Setup.answer(flow, "where", %{"choice" => "local"})
-      assert {:error, reason} = Setup.answer(flow, "provider", %{"provider" => "gemini"})
+      assert {:error, reason} = Setup.answer(flow, "provider", %{"provider" => "bedrock"})
       assert reason =~ "provider must be one of"
 
       {:ok, flow} = Setup.answer(flow, "provider", %{"provider" => "fake"})

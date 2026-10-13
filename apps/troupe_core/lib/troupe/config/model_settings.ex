@@ -25,6 +25,7 @@ defmodule Troupe.Config.ModelSettings do
   alias Troupe.Config.{Migrate, OpenCode, Schema}
   alias Troupe.LLM.{Catalog, ProviderType}
   alias Troupe.LLM.Catalog.Store
+  alias Troupe.Protocol.ProviderTypes
 
   # Every type a file may name (`Troupe.LLM.ProviderType`), so saving a file whose provider
   # a screen has no name for keeps it: the fake too, so a packaged binary's first run can
@@ -58,7 +59,8 @@ defmodule Troupe.Config.ModelSettings do
   @type description :: %{String.t() => term()}
 
   @doc """
-  The user's file as a settings screen shows it, and what overrides it.
+  The user's file as a settings screen shows it, and what overrides it, with the
+  provider types the screen offers (`provider_types`, `Troupe.Protocol.ProviderTypes`).
 
   With a workspace, a project `.troupe/config.yaml` there is reported as an override;
   without one only the machine-wide sources are. The paths are as a person on this
@@ -81,7 +83,9 @@ defmodule Troupe.Config.ModelSettings do
       "api_key_set" => key_source(file) != nil,
       "api_key_source" => key_source(file),
       "models" => models,
-      "overrides" => overrides(workspace)
+      "overrides" => overrides(workspace),
+      # What a screen offers to choose from, and what each choice asks for.
+      "provider_types" => ProviderTypes.wire()
     }
   end
 
@@ -168,18 +172,26 @@ defmodule Troupe.Config.ModelSettings do
   and models) with its key as it is written there. An `{env:VAR}` reference stays a
   reference; a literal key, or one from opencode's `auth.json`, is copied, which is what
   a person asking for the copy asked for. A provider the file already names is left as it
-  is, and opencode's default model becomes `models.default` only when the file has none.
+  is, and opencode's default model becomes `models.default` only when the file has none
+  and its provider is there.
+
+  A provider whose key could go to a host it was not set up for is not copied
+  (`Troupe.Config.OpenCode`): an SDK package Troupe has no type for, with no `baseURL`.
 
   The answer is `describe/1`'s plus `"imported"`: `"from"` (opencode's config),
-  `"providers"` (copied), `"kept"` (already in the file) and `"default"` (set, or nil).
-  Nothing is written when there is nothing to copy.
+  `"providers"` (copied), `"kept"` (already in the file), `"skipped"` (not copied, each
+  `{"provider", "reason"}`) and `"default"` (set, or nil). Nothing is written when there
+  is nothing to copy, and when opencode has providers and none can be copied, that is
+  the error, with each one's reason.
   """
   @spec import_opencode(Path.t() | nil) :: {:ok, description()} | {:error, String.t()}
   def import_opencode(workspace \\ nil) do
     path = Config.user_path()
-    providers = OpenCode.providers(as_written: true)
+    {skipped, providers} = Enum.split_with(OpenCode.providers(as_written: true), &skipped?/1)
+    providers = Map.new(providers)
+    skipped = skipped |> Enum.sort() |> Enum.map(fn {name, p} -> {name, p.skipped} end)
 
-    with :ok <- any_providers(providers),
+    with :ok <- any_providers(providers, skipped),
          {:ok, raw} <- parse_existing(path) do
       existing = file_providers(raw)
 
@@ -189,12 +201,14 @@ defmodule Troupe.Config.ModelSettings do
         |> Enum.sort()
         |> Enum.split_with(&(not Map.has_key?(existing, &1)))
 
-      default = if file_models(raw)["default"], do: nil, else: OpenCode.default_model()
+      default = if file_models(raw)["default"], do: nil, else: default_of(copied ++ kept)
 
       imported = %{
         "from" => OpenCode.config_path(),
         "providers" => copied,
         "kept" => kept,
+        "skipped" =>
+          Enum.map(skipped, fn {name, why} -> %{"provider" => name, "reason" => why} end),
         "default" => default
       }
 
@@ -217,10 +231,30 @@ defmodule Troupe.Config.ModelSettings do
   defp save_unless(true = _nothing_new, _path, _updated), do: :ok
   defp save_unless(false, path, updated), do: save(path, updated)
 
-  defp any_providers(providers) when map_size(providers) == 0,
+  defp skipped?({_name, provider}), do: Map.has_key?(provider, :skipped)
+
+  defp any_providers(providers, []) when map_size(providers) == 0,
     do: {:error, "there are no providers in #{OpenCode.config_path()} to copy"}
 
-  defp any_providers(_providers), do: :ok
+  defp any_providers(providers, skipped) when map_size(providers) == 0,
+    do:
+      {:error,
+       "none of the providers in #{OpenCode.config_path()} can be copied: " <>
+         Enum.map_join(skipped, "; ", &elem(&1, 1))}
+
+  defp any_providers(_providers, _skipped), do: :ok
+
+  # opencode's default, as `provider/model`, only where that provider is in the file: one
+  # naming a provider that was not copied would be a default no session can reach.
+  defp default_of(names) do
+    with model when is_binary(model) <- OpenCode.default_model(),
+         [provider, _model] <- String.split(model, "/", parts: 2),
+         true <- provider in names do
+      model
+    else
+      _ -> nil
+    end
+  end
 
   # One opencode provider as `providers:` spells it, so it loads back to the same spec.
   defp provider_yaml(provider) do

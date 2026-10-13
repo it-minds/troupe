@@ -170,6 +170,14 @@ if config_env() == :prod do
 
   # -- the plane ------------------------------------------------------------
 
+  # Where the plane writes its WorkerProfiles and Triggers, the chart's `namespace`, and the
+  # prefix every worker namespace carries, its `policy.namespacePrefix`, which enrolment
+  # takes off a pod's namespace to name its profile. Outside the autostart gate below, like
+  # the operator's settings, so that what a release reads can be read without a plane.
+  config :troupe_plane,
+    namespace: System.get_env("TROUPE_PLANE_NAMESPACE", "troupe-system"),
+    namespace_prefix: System.get_env("TROUPE_NAMESPACE_PREFIX", "troupe-w-")
+
   # The database is configured whenever there is one to configure, and *not* inside the
   # autostart gate below: `bin/troupe_plane eval Troupe.Plane.Release.migrate()` is a
   # release that reaches its repo and serves nothing, and gating the database on whether
@@ -378,6 +386,10 @@ if config_env() == :prod do
       # default; an empty value is a plane that ships without one, and the index then
       # offers no door rather than one that answers 404.
       app_url: System.get_env("TROUPE_APP_URL", "/app"),
+      # And where the administrative console is, which the index's console door and the
+      # LiveView console's landing page point at. The chart serves it at `/console` on
+      # this host; an empty value is a plane without one, and both then keep `/admin`.
+      console_url: System.get_env("TROUPE_CONSOLE_URL", "/console"),
       # And where the terminal client is published. Nothing here builds one — this
       # repository is deployed to a cluster and installs on no machine — so there is no
       # sensible default: unset, the page says to ask an administrator; set, it links.
@@ -390,6 +402,10 @@ if config_env() == :prod do
       issuer: base_url,
       cors_origins: cors_origins,
       control_port: String.to_integer(System.get_env("TROUPE_PLANE_CONTROL_PORT", "4001")),
+      # Where the control port's certificate is: the Secret cert-manager writes for the
+      # control Service, mounted by the chart. Unset, the port speaks plaintext alone and
+      # no machine can be registered, since a machine enrols over TLS only.
+      control_tls: presence.(System.get_env("TROUPE_PLANE_CONTROL_TLS_DIR")),
       groups_claim: System.get_env("TROUPE_GROUPS_CLAIM", "groups"),
       scim_token: presence.(System.get_env("TROUPE_SCIM_TOKEN")),
       platform_admin_group: System.get_env("TROUPE_PLATFORM_ADMIN_GROUP"),
@@ -471,6 +487,20 @@ if config_env() == :prod do
       end
   end
 
+  # And the CA it trusts for the plane's certificate: the one a machine's registration
+  # answered, which it pins. With one the link dials with TLS; a machine's secret is never
+  # sent without it. The name the certificate must carry is the one dialled, unless the
+  # machine dials through a tunnel or an address the certificate does not name.
+  worker_tls = fn
+    nil ->
+      nil
+
+    plane_opts ->
+      plane_opts
+      |> Keyword.put(:ca, presence.(System.get_env("TROUPE_PLANE_CA_PATH")))
+      |> Keyword.put(:server_name, presence.(System.get_env("TROUPE_PLANE_SERVER_NAME")))
+  end
+
   # -- a worker pod ---------------------------------------------------------
 
   if System.get_env("TROUPE_WORKER_AUTOSTART") == "true" do
@@ -482,11 +512,23 @@ if config_env() == :prod do
     config :troupe_core, usage_sink: Troupe.Worker.Usage
 
     # Every command a session starts runs in the sandbox here, whatever its mounts or
-    # bundle (Decision 832): a pod's sessions share its volume, and a namespace holding one
+    # bundle: a pod's sessions share its volume, and a namespace holding one
     # session's mounts is what keeps each from the others' files. The worker's, not a
     # setting: one that cannot start bubblewrap refuses the command rather than run it
     # outside.
     config :troupe_core, sandbox: :always
+
+    # The fix loop's tools: a session created with a GitHub repository pushes its troupe/*
+    # branch, opens its draft pull request, comments on it and reads its CI through these,
+    # as the plane's App and with a token the agent's shell never holds. A session with no
+    # repository is not offered them.
+    config :troupe_core,
+      extra_tools: [
+        Troupe.Worker.Tools.GitPush,
+        Troupe.Worker.Tools.PrOpen,
+        Troupe.Worker.Tools.PrComment,
+        Troupe.Worker.Tools.PrChecks
+      ]
 
     config :troupe_worker,
       autostart: true,
@@ -520,7 +562,7 @@ if config_env() == :prod do
       token_issuer: presence.(System.get_env("TROUPE_TOKEN_ISSUER")),
       # Absent means there is no plane to dial. A pod configured without one does not
       # start the link at all rather than retrying a name that does not resolve.
-      plane: enrolment.(plane_control.(plane)) |> worker_token.(),
+      plane: enrolment.(plane_control.(plane)) |> worker_token.() |> worker_tls.(),
       kms: [
         address: System.get_env("TROUPE_BAO_ADDR", "http://openbao.troupe-system.svc:8200"),
         token: presence.(System.get_env("TROUPE_BAO_TOKEN")),

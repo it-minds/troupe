@@ -440,6 +440,19 @@ defmodule Troupe.Client do
   def revocation_text(_none), do: "nothing was held to revoke"
 
   @doc """
+  The ways a first run may set a provider up, as the daemon's flow lists them
+  (`setup.get`'s `kinds`, from `Troupe.Protocol.ProviderTypes`). A daemon from before the
+  provider types were its to say lists none, and takes Anthropic, OpenAI and the two ways
+  to a gateway, which are this build's kinds of those two providers.
+  """
+  @spec setup_kinds(map()) :: [map()]
+  def setup_kinds(%{"kinds" => [_ | _] = kinds}), do: kinds
+
+  def setup_kinds(_flow) do
+    Enum.filter(Troupe.Protocol.ProviderTypes.kinds(), &(&1["provider"] in ~w(anthropic openai)))
+  end
+
+  @doc """
   The agents the session's workspace has, through the daemon (root Decision 841):
   `agents.list`, `agents.get` (with the session, so its answer names the windows of the
   session's family that run it), `agents.validate`, `agents.put` and `agents.delete`,

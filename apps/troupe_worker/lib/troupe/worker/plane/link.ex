@@ -17,6 +17,20 @@ defmodule Troupe.Worker.Plane.Link do
   A link that cannot reach the plane is not an error the rest of the worker hears about.
   Sealing carries on, dormancy carries on, and the reports queue: durability must not
   depend on the plane being up.
+
+  ## TLS, and the CA it trusts
+
+  Given a CA (`:ca`, a PEM file: `TROUPE_PLANE_CA_PATH`), the link dials with TLS and
+  trusts that CA and nothing else for the plane's certificate, checked against the name it
+  dials or the one `:server_name` gives (`TROUPE_PLANE_SERVER_NAME`, for a tunnel or an
+  address the certificate does not name). That is how a registered machine dials: its
+  registration answered the CA, and the machine pins it.
+
+  A registered machine's secret is never sent without it. A link holding one (`twh_`) and
+  no CA does not dial at all, and says so: the plane would refuse the secret in plaintext,
+  but by then it would have crossed the network. A pod, whose token is projected for the
+  plane's audience and expires within the hour, dials the control Service in plaintext
+  where it has no CA, as it always has.
   """
 
   use GenServer
@@ -53,6 +67,10 @@ defmodule Troupe.Worker.Plane.Link do
     :opts,
     :heartbeat_timer,
     :reconnect_timer,
+    :ca,
+    :server_name,
+    :refused,
+    transport: :gen_tcp,
     buffer: "",
     next_id: 1,
     pending: %{},
@@ -133,7 +151,7 @@ defmodule Troupe.Worker.Plane.Link do
       state -> state
     end)
     |> Map.replace_lazy(:message, fn
-      {:tcp, socket, _data} -> {:tcp, socket, :redacted}
+      {tag, socket, _data} when tag in [:tcp, :ssl] -> {tag, socket, :redacted}
       message -> message
     end)
   end
@@ -156,6 +174,8 @@ defmodule Troupe.Worker.Plane.Link do
       port: Keyword.get(opts, :port, Keyword.get(configured, :port, 4001)),
       token:
         Keyword.get(opts, :token, Keyword.get(configured, :token, {:file, @default_token_path})),
+      ca: Keyword.get(opts, :ca, Keyword.get(configured, :ca)),
+      server_name: Keyword.get(opts, :server_name, Keyword.get(configured, :server_name)),
       claims: Keyword.get(opts, :claims, %{}),
       opts: opts
     }
@@ -176,7 +196,9 @@ defmodule Troupe.Worker.Plane.Link do
        queued: length(state.queue),
        connects: state.connects,
        port: state.port,
-       object_store: state.object_store
+       object_store: state.object_store,
+       tls: state.transport == :ssl,
+       refused: state.refused
      }, state}
   end
 
@@ -205,17 +227,19 @@ defmodule Troupe.Worker.Plane.Link do
 
   def handle_info(:heartbeat, state), do: {:noreply, state}
 
-  def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
+  def handle_info({tag, socket, data}, %{socket: socket} = state) when tag in [:tcp, :ssl] do
     state = consume(state.buffer <> data, state)
-    :ok = :inet.setopts(socket, active: :once)
+    :ok = setopts(state, active: :once)
     {:noreply, state}
   end
 
-  def handle_info({:tcp_closed, socket}, %{socket: socket} = state) do
+  def handle_info({tag, socket}, %{socket: socket} = state)
+      when tag in [:tcp_closed, :ssl_closed] do
     {:noreply, disconnected(state, :closed)}
   end
 
-  def handle_info({:tcp_error, socket, reason}, %{socket: socket} = state) do
+  def handle_info({tag, socket, reason}, %{socket: socket} = state)
+      when tag in [:tcp_error, :ssl_error] do
     {:noreply, disconnected(state, reason)}
   end
 
@@ -227,70 +251,142 @@ defmodule Troupe.Worker.Plane.Link do
 
   @impl GenServer
   def terminate(_reason, state) do
-    if state.socket, do: :gen_tcp.close(state.socket)
+    if state.socket, do: state.transport.close(state.socket)
     :ok
   end
 
   # -- connecting and enrolling -----------------------------------------------
 
+  # The credential is read first, because which it is decides whether the link may dial
+  # at all: a machine's secret goes over TLS or nowhere.
   defp connect(state) do
-    options = [:binary, active: false, packet: :raw, send_timeout: 5_000]
-
-    case :gen_tcp.connect(state.host, state.port, options, 5_000) do
-      {:ok, socket} ->
-        enrol(%{
+    with {:ok, token} <- token(state.token) |> no_token(),
+         {:ok, transport, options} <- transport(state, token),
+         {:ok, socket} <- dial(transport, state, options) do
+      enrol(
+        %{
           state
           | socket: socket,
+            transport: transport,
             buffer: "",
             status: :connected,
+            refused: nil,
             connects: state.connects + 1
-        })
+        },
+        token
+      )
+    else
+      {:refused, why} ->
+        if why != state.refused, do: Logger.error("troupe worker: not dialling the plane: #{why}")
+        schedule_reconnect(%{state | socket: nil, status: :disconnected, refused: why}, :refused)
 
       {:error, reason} ->
         schedule_reconnect(%{state | socket: nil, status: :disconnected}, reason)
     end
   end
 
+  defp no_token({:ok, token}), do: {:ok, token}
+  defp no_token({:error, reason}), do: {:error, {:no_token, reason}}
+
+  # TLS against the CA this link was given, and only that CA; plaintext where it was given
+  # none, unless what it would send is a machine's secret.
+  defp transport(%{ca: nil}, "twh_" <> _),
+    do:
+      {:refused,
+       "a registered machine's secret is sent over TLS only, and this worker has no CA for " <>
+         "the plane: set TROUPE_PLANE_CA_PATH to the CA its registration answered"}
+
+  defp transport(%{ca: nil}, _token),
+    do: {:ok, :gen_tcp, [:binary, active: false, packet: :raw, send_timeout: 5_000]}
+
+  defp transport(state, _token) do
+    with {:ok, cacerts} <- ca_certificates(state.ca) do
+      name = to_charlist(state.server_name || state.host)
+
+      {:ok, :ssl,
+       [
+         :binary,
+         active: false,
+         packet: :raw,
+         send_timeout: 5_000,
+         versions: [:"tlsv1.3", :"tlsv1.2"],
+         verify: :verify_peer,
+         cacerts: cacerts,
+         server_name_indication: name,
+         customize_hostname_check: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]
+       ]}
+    end
+  end
+
+  # Read at each dial, so a CA put in place of the old one is the one the next dial trusts.
+  defp ca_certificates(path) do
+    with {:ok, pem} <- File.read(path),
+         [_ | _] = certs <-
+           for({:Certificate, der, :not_encrypted} <- :public_key.pem_decode(pem), do: der) do
+      {:ok, certs}
+    else
+      [] ->
+        {:refused, "the plane's CA, #{path}, holds no certificate"}
+
+      {:error, reason} ->
+        {:refused, "the plane's CA, #{path}, cannot be read (#{:file.format_error(reason)})"}
+    end
+  end
+
+  defp dial(:gen_tcp, state, options),
+    do: :gen_tcp.connect(state.host, state.port, options, 5_000)
+
+  # A certificate this CA did not sign, or for another name, fails here: before a byte of
+  # the credential is written. Said once, since it does not mend itself on the next dial.
+  defp dial(:ssl, state, options) do
+    case :ssl.connect(state.host, state.port, options, 5_000) do
+      {:ok, socket} ->
+        {:ok, socket}
+
+      {:error, {:tls_alert, {alert, _description}}} ->
+        {:refused,
+         "the plane's certificate was refused (#{alert}): it must be signed by the CA in " <>
+           "#{state.ca} and name #{state.server_name || state.host}"}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   # Enrolment is synchronous on purpose: nothing else may be sent until the plane has
   # said which profile this pod is, and a queued report sent before that would be
   # refused and lost.
-  defp enrol(state) do
-    case token(state.token) do
-      {:ok, token} ->
-        # Whether this pod is draining is the pod's own fact, and a fresh pod says no:
-        # that is how a restart after a drain gets its flag lowered (Decision 633).
-        params =
-          state.claims
-          |> with_bundle_hash()
-          |> Map.put("draining", Drain.draining?())
-          |> Map.put("token", token)
+  defp enrol(state, token) do
+    # Whether this pod is draining is the pod's own fact, and a fresh pod says no: that is
+    # how a restart after a drain gets its flag lowered.
+    params =
+      state.claims
+      |> with_bundle_hash()
+      |> Map.put("draining", Drain.draining?())
+      |> Map.put("token", token)
 
-        case exchange(state, "enrol", params) do
-          {:ok, result} ->
-            Logger.info("troupe worker: enrolled with the plane as #{result["profile"]}")
-            # Every token for this pod carries its worker id as the audience, so nothing
-            # can be verified until the plane has said what that id is.
-            announce_identity(result)
-            apply_pending_erasures(result)
-            check_object_store(state)
+    case exchange(state, "enrol", params) do
+      {:ok, result} ->
+        Logger.info("troupe worker: enrolled with the plane as #{result["profile"]}")
+        # Every token for this pod carries its worker id as the audience, so nothing can
+        # be verified until the plane has said what that id is.
+        announce_identity(result)
+        apply_pending_erasures(result)
+        check_object_store(state)
 
-            %{
-              state
-              | status: :enrolled,
-                profile: result["profile"],
-                worker_id: result["worker_id"]
-            }
-            |> reset_backoff()
-            |> activate_socket()
-            |> flush_queue()
-            |> schedule_heartbeat()
-
-          {:error, reason} ->
-            schedule_reconnect(close(state), {:enrol_failed, reason})
-        end
+        %{
+          state
+          | status: :enrolled,
+            profile: result["profile"],
+            worker_id: result["worker_id"]
+        }
+        |> reset_backoff()
+        |> activate_socket()
+        |> flush_queue()
+        |> schedule_heartbeat()
 
       {:error, reason} ->
-        schedule_reconnect(close(state), {:no_token, reason})
+        schedule_reconnect(close(state), {:enrol_failed, reason})
     end
   end
 
@@ -299,8 +395,8 @@ defmodule Troupe.Worker.Plane.Link do
   defp exchange(state, method, params) do
     frame = [JSONRPC.encode({:request, 0, method, params}), ?\n]
 
-    with :ok <- :gen_tcp.send(state.socket, frame),
-         {:ok, line} <- recv_line(state.socket, "", 10_000) do
+    with :ok <- state.transport.send(state.socket, frame),
+         {:ok, line} <- recv_line(state, "", 10_000) do
       case JSONRPC.decode(String.trim(line)) do
         {:ok, {:result, _id, result}} -> {:ok, result}
         {:ok, {:error, _id, error}} -> {:error, error}
@@ -309,12 +405,12 @@ defmodule Troupe.Worker.Plane.Link do
     end
   end
 
-  defp recv_line(socket, acc, timeout) do
-    case :gen_tcp.recv(socket, 0, timeout) do
+  defp recv_line(state, acc, timeout) do
+    case state.transport.recv(state.socket, 0, timeout) do
       {:ok, data} ->
         case String.split(acc <> data, "\n", parts: 2) do
           [line, _rest] -> {:ok, line}
-          [partial] -> recv_line(socket, partial, timeout)
+          [partial] -> recv_line(state, partial, timeout)
         end
 
       error ->
@@ -387,12 +483,15 @@ defmodule Troupe.Worker.Plane.Link do
   end
 
   defp activate_socket(state) do
-    :ok = :inet.setopts(state.socket, active: :once)
+    :ok = setopts(state, active: :once)
     state
   end
 
+  defp setopts(%{transport: :ssl} = state, opts), do: :ssl.setopts(state.socket, opts)
+  defp setopts(state, opts), do: :inet.setopts(state.socket, opts)
+
   defp close(state) do
-    if state.socket, do: :gen_tcp.close(state.socket)
+    if state.socket, do: state.transport.close(state.socket)
     %{state | socket: nil, status: :disconnected}
   end
 
@@ -511,7 +610,9 @@ defmodule Troupe.Worker.Plane.Link do
   end
 
   defp write(%{socket: nil}, _message), do: {:error, :disconnected}
-  defp write(state, message), do: :gen_tcp.send(state.socket, [JSONRPC.encode(message), ?\n])
+
+  defp write(state, message),
+    do: state.transport.send(state.socket, [JSONRPC.encode(message), ?\n])
 
   # -- receiving --------------------------------------------------------------
 

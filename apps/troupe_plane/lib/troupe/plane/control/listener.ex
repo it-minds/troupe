@@ -3,9 +3,12 @@ defmodule Troupe.Plane.Control.Listener do
   Where workers dial in.
 
   Never exposed through ingress. A worker's NetworkPolicy allows exactly this port on
-  exactly the plane's namespace, and nothing outside the cluster can reach it — which is
-  why the enrolment token is the whole of the authentication and there is no second
-  factor to get wrong.
+  exactly the plane's namespace, and the chart admits nothing else to it — which is why
+  the enrolment token is the whole of the authentication and there is no second factor to
+  get wrong. A machine registered outside the cluster reaches it through a route of the
+  installation's own, and over TLS alone: each connection says which it speaks by its
+  first byte, and `Troupe.Plane.Control.Connection` refuses a machine's secret in
+  plaintext.
 
   Workers dial the plane rather than the other way round because a pod's address is a
   property of the cluster and a plane replica's is not: the worker knows where the
@@ -15,7 +18,7 @@ defmodule Troupe.Plane.Control.Listener do
 
   use GenServer
 
-  alias Troupe.Plane.Control.Connections
+  alias Troupe.Plane.Control.{Connections, TLS}
 
   require Logger
 
@@ -47,7 +50,7 @@ defmodule Troupe.Plane.Control.Listener do
     case :gen_tcp.listen(port, @socket_opts) do
       {:ok, socket} ->
         {:ok, actual} = :inet.port(socket)
-        Logger.info("troupe plane: control listener on #{actual}")
+        Logger.info("troupe plane: control listener on #{actual}, #{tls_note(opts)}")
 
         state = %__MODULE__{socket: socket, port: actual, options: opts}
         {:ok, %{state | acceptor: spawn_acceptor(socket)}}
@@ -92,6 +95,15 @@ defmodule Troupe.Plane.Control.Listener do
   def terminate(_reason, state) do
     :gen_tcp.close(state.socket)
     :ok
+  end
+
+  # Said once, at start, so a plane that cannot enrol a single machine says why where an
+  # operator looks first.
+  defp tls_note(opts) do
+    case TLS.server_options(Keyword.get_lazy(opts, :tls, &TLS.dir/0)) do
+      {:ok, _options} -> "TLS with its certificate, plaintext for pods"
+      {:error, why} -> "plaintext only: #{why}"
+    end
   end
 
   defp spawn_acceptor(socket) do

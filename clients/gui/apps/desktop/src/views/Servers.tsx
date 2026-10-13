@@ -13,7 +13,9 @@
 // A server that wants you signed in (troupe-remote Decision 741) has a Sign in button:
 // the daemon runs the sign-in and listens for the browser on this computer, this panel
 // opens the URL it answers and reads how the sign-in stands every two seconds while a
-// browser is out. No token ever reaches this screen.
+// browser is out. No token ever reaches this screen. A scope a server asked for that the
+// sign-in does not carry is shown beside a Sign in for it, and Sign out says whether the
+// provider revoked the sign-in, and why not when it did not.
 //
 // Skills also come from an `.agents/skills` (troupe Decision 822), the repository's or
 // your `~/.agents/skills`, read where they are and never written: Remove on one says whose
@@ -22,6 +24,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
+import { revocationText } from "@troupe/client";
 import type { DaemonClient, LocalServer, LocalSkill, ScopedParams, ServerAuth, SkippedSkill, SourceScope } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import { shell } from "../shell";
@@ -170,11 +173,12 @@ export function Servers({ client }: { client: DaemonClient }): JSX.Element {
       return `${server.name}: finish signing in in your browser. A session waiting for it carries on once you have.`;
     });
 
+  // Whether the provider was told, and why not when it was not.
   const signOut = (server: LocalServer): Promise<void> =>
     act(`sign-out:${server.name}`, async () => {
-      await client.signOutServer(ws ? { workspace: ws, name: server.name } : { name: server.name });
+      const out = await client.signOutServer(ws ? { workspace: ws, name: server.name } : { name: server.name });
       forget(server.name);
-      return `${server.name}: signed out on this computer.`;
+      return `${server.name}: signed out on this computer; ${revocationText(out.revocation)}.`;
     });
 
   const removeServer = (server: LocalServer): Promise<void> =>
@@ -278,11 +282,12 @@ export function Servers({ client }: { client: DaemonClient }): JSX.Element {
                   <button onClick={() => void check(server)} disabled={busy !== null || Boolean(server.refused)}>
                     {busy === `check:${server.name}` ? "Checking…" : "Check"}
                   </button>{" "}
-                  {server.auth && server.auth.state !== "signed_in" && (
+                  {server.auth && (server.auth.state !== "signed_in" || server.auth.step_up) && (
                     <>
                       <button className="primary" onClick={() => void signIn(server)} disabled={busy !== null || Boolean(server.refused)}>
                         {server.auth.state === "expired" ? "Sign in again" : "Sign in"}
                       </button>{" "}
+                      {server.auth.step_up ? <span className="micro">Wants {server.auth.step_up} </span> : null}
                     </>
                   )}
                   {server.auth?.state === "signed_in" && (

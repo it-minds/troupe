@@ -58,6 +58,7 @@ defmodule Troupe.Plane.Web.Index do
     url = Keyword.fetch!(opts, :url)
     app_url = Keyword.get(opts, :app_url)
     cli_url = Keyword.get(opts, :cli_url)
+    console_url = Keyword.get(opts, :console_url)
 
     Page.render(
       title: "#{name} — Troupe plane",
@@ -67,14 +68,40 @@ defmodule Troupe.Plane.Web.Index do
       url: url,
       name: name,
       nav: :index,
-      body: body(name, url, app_url, cli_url)
+      body: body(name, url, app_url, cli_url, console_url)
     )
   end
 
-  defp body(name, url, app_url, cli_url) do
+  @doc """
+  Where the administrative console is mounted on this host, or `nil` where there is none.
+
+  The console is an app of its own, served beside the plane rather than by it, so the
+  plane cannot tell whether one is there: the deployment says, with `TROUPE_CONSOLE_URL`,
+  and an empty value is a plane without one. The index's console door and the LiveView
+  console's landing page point at it; without one, both keep the LiveView console at
+  `/admin`, which stays either way as the way in when the console cannot be used.
+  """
+  @spec console_url() :: String.t() | nil
+  def console_url do
+    case Application.get_env(:troupe_plane, :console_url, "/console") do
+      "" -> nil
+      url -> url
+    end
+  end
+
+  @doc """
+  What the LiveView console's pages are given at each request: where the console is.
+
+  Handed over by the router rather than read by a page, because a LiveView is an admin API
+  client and reaches nothing else in the plane.
+  """
+  @spec live_session(Plug.Conn.t()) :: %{String.t() => String.t() | nil}
+  def live_session(_conn), do: %{"console_url" => console_url()}
+
+  defp body(name, url, app_url, cli_url, console_url) do
     """
     #{hero(name, url)}
-    #{doors(app_url)}
+    #{doors(app_url, console_url)}
 
       <h2>Start in one minute</h2>
 
@@ -149,22 +176,24 @@ defmodule Troupe.Plane.Web.Index do
   # The row a person reads first. With a GUI mounted the app is the primary door, because
   # it is the one thing here that needs nothing installed; without one, the page that
   # explains the place takes that weight rather than sending a newcomer to the console.
-  defp doors(nil) do
+  defp doors(nil, console_url) do
     """
       <nav class="doors" aria-label="Ways in">
         #{docs_door(primary: true)}
-        #{admin_door()}
+        #{admin_door(console_url)}
       </nav>
+      #{previous_console(console_url)}
     """
   end
 
-  defp doors(app_url) do
+  defp doors(app_url, console_url) do
     """
       <nav class="doors" aria-label="Ways in">
         #{Page.door(app_url, "Open the app", "Start a session, watch it work and answer it, in a browser. Nothing to install. Sign in with your usual company account.", primary: true)}
         #{docs_door([])}
-        #{admin_door()}
+        #{admin_door(console_url)}
       </nav>
+      #{previous_console(console_url)}
     """
   end
 
@@ -177,12 +206,35 @@ defmodule Troupe.Plane.Web.Index do
     )
   end
 
-  defp admin_door do
+  # The console door goes to the console, where there is one; the LiveView console at
+  # `/admin` is the door only on a plane without it.
+  defp admin_door(nil) do
     Page.door(
       "/admin",
       "Admin console",
       "Fleet, teams, budgets, profiles, audit. Sign in with the identity provider; a platform or team admin gets in."
     )
+  end
+
+  defp admin_door(console_url) do
+    Page.door(
+      console_url,
+      "Admin console",
+      "Teams, sessions, spend and the audit, and every change previewed before it is made. Sign in with the identity provider; a platform or team admin gets in."
+    )
+  end
+
+  # The LiveView console stays, for what the console does not do yet and as the way in when
+  # it cannot be used: break-glass is a sign-in of its own there.
+  defp previous_console(nil), do: ""
+
+  defp previous_console(_console_url) do
+    """
+    <p class="note">
+        The previous console is at <a href="/admin">/admin</a>, for what the console does not
+        do yet and as the way in when it cannot be used: break-glass included.
+      </p>
+    """
   end
 
   # -- the three steps --------------------------------------------------------
@@ -217,8 +269,10 @@ defmodule Troupe.Plane.Web.Index do
     #{Page.pre("troupe login " <> url)}
       <p>
         It asks this plane which provider to use and prints a code for you to enter in a
-        browser. A refresh token lands in <code>~/.config/troupe/credentials.json</code>;
-        that is the only thing stored, and the plane never sees your password.
+        browser. A refresh token lands in <code>credentials.json</code> beside your
+        <code>config.yaml</code> (<code>~/.config/troupe</code>, or
+        <code>%APPDATA%\\troupe</code> on Windows); that is the only thing stored, and the
+        plane never sees your password.
       </p>
     """
   end

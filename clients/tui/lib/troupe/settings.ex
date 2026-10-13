@@ -17,7 +17,10 @@ defmodule Troupe.Settings do
   A change is `config.set` with the scope it is written to, which `target/3` picks: the
   one the person chose on the page, else the file the value on screen came from, else the
   user's own. Nothing here writes a file. `watch` is the one setting a session takes live,
-  through the protocol (`Troupe.Client.put_setting/4`), and the theme, blinking and
+  through the protocol (`Troupe.Client.put_setting/4`). `provider` is a menu of the
+  provider types a person may pick (`Troupe.Protocol.ProviderTypes`, the list every
+  screen offers), each saying what else it needs: an address or a key, which `troupe
+  setup` asks for. The theme, blinking and
   `transcript.detail` (TUI Decision 161, a menu of its three levels) are the TUI's own,
   which it takes the moment the daemon says they changed; everything else is for the next
   session.
@@ -25,8 +28,9 @@ defmodule Troupe.Settings do
 
   alias Troupe.Config
   alias Troupe.Config.Schema
+  alias Troupe.Protocol.ProviderTypes
 
-  @type type :: :bool | :int | :float | :string | :model | :theme | :detail
+  @type type :: :bool | :int | :float | :string | :model | :theme | :detail | :provider
   @type effect :: :now | :next_run
 
   @type field :: %{
@@ -77,6 +81,7 @@ defmodule Troupe.Settings do
   end
 
   defp type(["models" | _], :string), do: :model
+  defp type(["provider"], {:enum, _types}), do: :provider
   defp type(["ui", "theme"], :string), do: :theme
   defp type(["transcript", "detail"], {:enum, _levels}), do: :detail
   defp type(_path, :boolean), do: :bool
@@ -228,6 +233,14 @@ defmodule Troupe.Settings do
     end
   end
 
+  def parse(%{type: :provider, key: key}, text) do
+    name = String.trim(text)
+
+    if name in ProviderTypes.names(),
+      do: {:ok, name},
+      else: {:error, "#{key} is one of #{Enum.join(ProviderTypes.names(), ", ")}"}
+  end
+
   def parse(%{type: :detail, key: key}, text) do
     case Troupe.UI.TUI.Model.detail(text) do
       nil -> {:error, "#{key} is quiet, tools or everything"}
@@ -268,6 +281,21 @@ defmodule Troupe.Settings do
     |> Enum.sort_by(&(&1.value != current))
   end
 
+  # Every type a person may pick (`Troupe.Protocol.ProviderTypes`), each saying what else
+  # it needs, which the setup asks for and this page does not: an address, a key. The fake
+  # is offered only where it is the provider already.
+  def choices(%{type: :provider}, _cfg, current) do
+    for type <- ProviderTypes.all(), type.named or type.name == current do
+      needs = needs(type)
+
+      %{
+        value: type.name,
+        label: type.label,
+        notes: [type.summary <> " " <> needs, needs, ""]
+      }
+    end
+  end
+
   def choices(%{type: :theme}, _cfg, _current) do
     for theme <- Troupe.UI.TUI.Palette.themes() do
       %{
@@ -291,6 +319,14 @@ defmodule Troupe.Settings do
   end
 
   def choices(_field, _cfg, _current), do: []
+
+  # What a type needs beside its name, in a few words.
+  defp needs(%{url: :required, url_example: example}),
+    do: "Needs base_url, such as #{example}, and a key."
+
+  defp needs(%{url: :server, default_url: url}), do: "No key; #{url} unless base_url says."
+  defp needs(%{key: :required, key_var: var}) when is_binary(var), do: "A key, or #{var}."
+  defp needs(_type), do: "Nothing more."
 
   @doc """
   How a model reads in a menu: its context window, where it came from, and whether a
@@ -332,7 +368,8 @@ defmodule Troupe.Settings do
       {"Setup commands", setup},
       {"Where things live",
        [
-         "settings         ~/.config/troupe/config.yaml, and a project's .troupe/config.yaml",
+         # The one directory a person's own files are in, as this platform writes it.
+         "settings         #{Troupe.Paths.display(Config.user_path())}, and a project's .troupe/config.yaml",
          "sessions         the daemon's state directory; `troupe daemon status` says where",
          "logs             troupe.log and daemon.log, in that same directory",
          "models           `troupe models` lists what this machine can address"

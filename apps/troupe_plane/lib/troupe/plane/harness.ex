@@ -493,6 +493,8 @@ defmodule Troupe.Plane.Harness do
           # A sibling is as visible as its parent and no more. A private session that
           # could spawn a team-visible one would be a way to publish its own work.
           "visibility" => parent.visibility,
+          # And it works on its parent's repository, checked again as a create checks one.
+          "repository" => parent.repository,
           "origin" =>
             Origin.agent(
               parent: parent.id,
@@ -536,6 +538,8 @@ defmodule Troupe.Plane.Harness do
           # As visible as its parent and no more, except an import, which is a private
           # session becoming a team one and says so by being asked for.
           "visibility" => if(reason == "import", do: "team", else: parent.visibility),
+          # The parent's repository, checked again against the profile the fork starts on.
+          "repository" => parent.repository,
           "fork" => %{
             "parent" => parent.id,
             "parent_team" => team_name(parent),
@@ -2640,6 +2644,9 @@ defmodule Troupe.Plane.Harness do
       "origin" => session.origin,
       "terms" => session.terms,
       "repository" => session.repository,
+      # What it did there, as its pod reported it: the branch, the last commit, the draft
+      # pull request and its CI rounds. Never what the session wrote.
+      "github" => session.github,
       "reviewed_by" => session.reviewed_by,
       "reviewed_at" => session.reviewed_at && DateTime.to_iso8601(session.reviewed_at),
       "your_role" => role_name(Sessions.role_for(user, session))

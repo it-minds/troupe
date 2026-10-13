@@ -48,6 +48,7 @@ defmodule Troupe.Bench.Scenarios do
 
   defp measure_tool_calls(ctx) do
     [first | _] = calls = agent_calls(ctx)
+    {request, _task, _usage} = hd(ctx.requests)
     last = List.last(calls)
     largest = calls |> Enum.map(& &1.total) |> Enum.max()
 
@@ -66,8 +67,25 @@ defmodule Troupe.Bench.Scenarios do
      ],
      [
        {"ended", "the turn ended with the answer", ended?(ctx)},
-       {"no_failures", "every tool call succeeded", failures(ctx) == 0}
+       {"no_failures", "every tool call succeeded", failures(ctx) == 0},
+       {"scratchpad_said",
+        "the prompt and show say the scratchpad is for a document or a long answer",
+        scratchpad_said?(request)},
+       {"not_shown", "the short answer went in the reply, not to the scratchpad",
+        not Enum.any?(ctx.events, &(&1.type == "scratch_updated"))}
      ]}
+  end
+
+  # A short answer nobody asked to keep goes in the reply (issue #616): the system prompt
+  # and `show`'s description both say the scratchpad is for a document the person asks for
+  # or an answer past about 80 lines. A scripted model cannot judge which an answer is, so
+  # what is checked is that the words reached the model, and that the turn left the
+  # scratchpad empty.
+  defp scratchpad_said?(request) do
+    show = Enum.find(request.tools, &(&1.name == "show"))
+
+    Model.prompt_text(request) =~ "about 80 lines" and show != nil and
+      show.description =~ "about 80 lines"
   end
 
   # -- a tool result over the limit --------------------------------------------------

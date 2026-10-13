@@ -60,6 +60,7 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
        substrates: [],
        hosts: %{},
        flash_message: nil,
+       ca: nil,
        error: nil
      )
      |> load()}
@@ -71,14 +72,14 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
 
     case Admin.host_register(socket.assigns.actor, profile, attrs) do
       {:ok, host} -> shown_once(socket, host, "registered")
-      {:error, error} -> {:noreply, assign(socket, flash_message: describe(error))}
+      {:error, error} -> {:noreply, assign(socket, flash_message: describe(error), ca: nil)}
     end
   end
 
   def handle_event("rotate-host", %{"profile" => profile, "name" => name}, socket) do
     case Admin.host_rotate(socket.assigns.actor, profile, name) do
       {:ok, host} -> shown_once(socket, host, "has a new secret")
-      {:error, error} -> {:noreply, assign(socket, flash_message: describe(error))}
+      {:error, error} -> {:noreply, assign(socket, flash_message: describe(error), ca: nil)}
     end
   end
 
@@ -88,7 +89,7 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
     case Admin.host_set_enabled(socket.assigns.actor, profile, name, enabled?) do
       {:ok, _host} ->
         said = if enabled?, do: "may enrol again", else: "will not enrol again"
-        {:noreply, socket |> assign(flash_message: "#{name} #{said}") |> load()}
+        {:noreply, socket |> assign(flash_message: "#{name} #{said}", ca: nil) |> load()}
 
       {:error, error} ->
         {:noreply, assign(socket, flash_message: describe(error))}
@@ -97,10 +98,10 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
 
   # Once, in the notice. The worker on that machine is configured with it and the plane
   # keeps only a hash — there is no method that shows it again, and losing it means
-  # rotating rather than looking it up.
+  # rotating rather than looking it up. The CA it pins goes with it, which is no secret.
   defp shown_once(socket, host, what) do
     message = "#{host.name} #{what} — secret, shown once: #{host.secret}"
-    {:noreply, socket |> assign(flash_message: message) |> load()}
+    {:noreply, socket |> assign(flash_message: message, ca: host.ca) |> load()}
   end
 
   # Three answers, all through `Admin`. What a substrate guarantees is not read out of
@@ -203,6 +204,13 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
       </p>
 
       <p :if={@flash_message} class="banner" role="status">{@flash_message}</p>
+      <div :if={@ca} class="panel">
+        <p class="field-help">
+          The CA the worker on that machine pins, as the file <code>TROUPE_PLANE_CA_PATH</code>
+          names: it enrols over TLS only, and trusts this CA and nothing else for it.
+        </p>
+        <pre id="host-ca">{@ca}</pre>
+      </div>
       <p :if={@error} class="banner banner--breakglass" role="alert">{@error}</p>
 
       <section class="panel">

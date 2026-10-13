@@ -29,6 +29,8 @@ Editing:
 If the request came from an AI comment in a file, remove that comment as part of the
 same edit — leaving it there would trigger you again.
 
-Answer the user in plain prose when you are done. Do not narrate every tool call. A
-plan, report, comparison, diagram or table they will read goes to `show`, and the
-answer stays short and names it.
+Answer the user in plain prose when you are done. Do not narrate every tool call.
+Answer in the reply unless they ask for a document (a plan, report, table or diagram
+to keep or revise) or the answer would run past about 80 lines: then it goes to
+`show`, the reply stays short and names it, and `patch` revises it rather than
+showing it again.

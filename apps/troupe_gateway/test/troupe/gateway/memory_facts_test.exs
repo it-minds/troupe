@@ -152,4 +152,31 @@ defmodule Troupe.Gateway.MemoryFactsTest do
     assert {:ok, %{"facts" => [kept]}} = Client.call(client, "memory.get", %{"workspace" => ws})
     assert kept["id"] == fact["id"]
   end
+
+  # D126: the facts file was rewritten without the fact, and then the brief's view could
+  # not be removed. The fact is forgotten, so the answer is not that there was no such
+  # fact: it is the daemon's failure to finish, saying the fact went and what was left.
+  test "memory.forget of a fact it forgot, when memory.md cannot be removed after, is not not_found",
+       %{workspace: ws, client: client} do
+    {:ok, fact} =
+      Facts.put(ws, %{kind: "note", claim: "the last one", anchors: [], scope: nil}, %{
+        by: "person"
+      })
+
+    dir = Path.join(ws, ".troupe")
+    assert File.exists?(Path.join(dir, "memory.md"))
+    File.chmod!(dir, 0o555)
+    on_exit(fn -> File.chmod(dir, 0o755) end)
+
+    assert {:error, %Error{message: "internal_error", data: %{"reason" => reason}}} =
+             Client.call(client, "memory.forget", %{
+               "command_id" => Client.command_id(),
+               "workspace" => ws,
+               "id" => fact["id"]
+             })
+
+    assert reason =~ "forgotten"
+    assert reason =~ "memory.md"
+    assert {:ok, %{"facts" => []}} = Client.call(client, "memory.get", %{"workspace" => ws})
+  end
 end

@@ -30,6 +30,7 @@ defmodule Troupe.Plane.PanelTest do
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Plane.Web.Live.ProfileEditor
+  alias Troupe.Protocol.ProviderTypes
 
   @moduletag timeout: 60_000
 
@@ -172,6 +173,26 @@ defmodule Troupe.Plane.PanelTest do
       refute item =~ "--size-glyph-column", "the status is squeezed into the glyph column"
       assert css =~ ~r/\.attention__item > \.status\s*\{[^}]*flex:\s*0 0 170px/
     end
+
+    # The landing page of this console points at the console that replaces it, and says
+    # this one stays: for what that one does not do yet, and as the way in when it cannot
+    # be used.
+    test "points at the console, and says this one stays", context do
+      {:ok, _view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin")
+
+      assert html =~ ~s(<a href="/console">/console</a>)
+      assert html =~ "This one stays"
+    end
+
+    test "names no console on a plane without one", context do
+      Application.put_env(:troupe_plane, :console_url, "")
+      on_exit(fn -> Application.delete_env(:troupe_plane, :console_url) end)
+
+      {:ok, _view, html} = context.conn |> sign_in(context.root.subject) |> live("/admin")
+
+      refute html =~ "new-console"
+      refute html =~ ~s(href="/console")
+    end
   end
 
   describe "the workers page" do
@@ -305,6 +326,32 @@ defmodule Troupe.Plane.PanelTest do
 
       assert html =~ mine.id
       refute html =~ theirs.id
+    end
+
+    test "shows what a session did on GitHub: its draft pull request, or its branch", context do
+      opened = session!(context.engineering, "dev")
+      pushed = session!(context.engineering, "dev")
+      url = "https://github.example.test/example-org/widgets/pull/12"
+
+      github = fn session, record ->
+        session |> Ecto.Changeset.change(%{github: record}) |> Repo.update!()
+      end
+
+      github.(opened, %{
+        "branch" => "troupe/fix-widgets",
+        "commit" => String.duplicate("a", 40),
+        "pull_request" => %{"number" => 12, "url" => url}
+      })
+
+      github.(pushed, %{"branch" => "troupe/try-gadgets", "commit" => String.duplicate("b", 40)})
+
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/sessions")
+
+      assert html =~ "on GitHub"
+      assert html =~ ~s(href="#{url}")
+      assert html =~ "#12"
+      assert html =~ "troupe/try-gadgets bbbbbbb"
     end
 
     test "erasing takes two clicks", context do
@@ -476,6 +523,25 @@ defmodule Troupe.Plane.PanelTest do
       assert html =~ "lead@example.test"
       assert html =~ "budget_micros"
     end
+
+    # #695: the page reads `admin.audit.list`, and a team admin's is about their teams.
+    test "a team admin sees the rows about their own teams and no other's", context do
+      {:ok, _} = Audit.record(context.root.subject, "team.update", "engineering", %{"x" => 1})
+      {:ok, _} = Audit.record(context.root.subject, "team.update", "design", %{"x" => 2})
+      {:ok, _} = Audit.record(context.root.subject, "setting.put", "pins_allowed", %{})
+
+      {:ok, _view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/audit")
+
+      assert html =~ "engineering"
+      refute html =~ "<td>design</td>"
+      refute html =~ "pins_allowed"
+
+      {:ok, _view, root_html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/audit")
+
+      assert root_html =~ "<td>design</td>"
+      assert root_html =~ "pins_allowed"
+    end
   end
 
   describe "the bundles page" do
@@ -594,6 +660,56 @@ defmodule Troupe.Plane.PanelTest do
           ) do
         refute html =~ ~s(name="#{gone}"), "the editor still asks for #{gone}"
       end
+    end
+
+    # Issue #658: the provider is any of the types, the one list the clients offer, and
+    # each asks only what it needs. On the chunk's tip it offered openai, anthropic and fake.
+    test "offers every provider type, and asks each only what it needs", context do
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      for type <- ProviderTypes.names() do
+        assert html =~ ~s(<option value="#{type}"), "the editor does not offer #{type}"
+      end
+
+      pick = fn provider ->
+        view |> element("form") |> render_change(%{"name" => "dev", "llm.provider" => provider})
+      end
+
+      # Ollama takes no key: there is no credential to reference.
+      html = pick.("ollama")
+      refute html =~ ~s(name="llm.secretRef.name")
+      assert html =~ "ollama takes no key"
+      assert html =~ ~s(placeholder="http://localhost:11434")
+
+      # Azure has no address of its own: the endpoint is the resource's, and required.
+      html = pick.("azure_openai")
+
+      assert html =~ ~s(name="llm.secretRef.name")
+      assert html =~ "https://&lt;resource&gt;.openai.azure.com"
+      assert html =~ "azure_openai has no address of its own: this is required."
+    end
+
+    # A model and a key without an endpoint would be settings the pods are never given; on
+    # the chunk's tip the editor saved them, and the operator dropped them without a word.
+    test "refuses model settings without an endpoint, and says what to do", context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      view
+      |> element("form")
+      |> render_change(%{
+        "name" => "dev",
+        "image" => "ghcr.io/troupe/worker:1",
+        "llm.provider" => "gemini",
+        "llm.model" => "gemini-2.5-pro"
+      })
+
+      html = view |> element("#profile-editor") |> render_submit()
+
+      assert html =~ "llm.provider and llm.model are set without llm.endpoint"
+      assert html =~ "Set llm.endpoint, or take them out"
+      refute get_in(Fleet.get_profile("dev").spec, ["llm", "model"]) == "gemini-2.5-pro"
     end
 
     test "saves the storage class it asks for", context do
@@ -722,7 +838,13 @@ defmodule Troupe.Plane.PanelTest do
       {:ok, _} =
         Fleet.put_profile(%{
           name: "dev",
-          spec: %{"llm" => %{"model" => "qwen3-235b", "prices" => prices}}
+          spec: %{
+            "llm" => %{
+              "endpoint" => "https://llm-gw.example.test/v1",
+              "model" => "qwen3-235b",
+              "prices" => prices
+            }
+          }
         })
 
       {:ok, view, _html} =
@@ -837,6 +959,27 @@ defmodule Troupe.Plane.PanelTest do
 
       html = view |> element("#review-scope") |> render_submit()
       assert html =~ context.root.subject
+    end
+
+    test "names the draft pull request a run opened, and that it stopped", context do
+      url = "https://github.example.test/example-org/widgets/pull/7"
+
+      context.session
+      |> Ecto.Changeset.change(%{
+        github: %{
+          "branch" => "troupe/issue-7",
+          "pull_request" => %{"number" => 7, "url" => url},
+          "stopped" => %{"at" => "2026-10-13T10:00:00Z", "reason" => "3 red CI rounds"}
+        }
+      })
+      |> Repo.update!()
+
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/review")
+
+      assert html =~ ~s(href="#{url}")
+      assert html =~ "#7"
+      assert html =~ "stopped after its red CI rounds"
     end
   end
 

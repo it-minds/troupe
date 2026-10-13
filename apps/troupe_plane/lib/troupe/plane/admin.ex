@@ -49,6 +49,7 @@ defmodule Troupe.Plane.Admin do
     Ledger
   }
 
+  alias Troupe.Plane.Control.TLS
   alias Troupe.Plane.Fleet.{Bundle, Provisioner, SizeClass, Worker}
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
@@ -554,13 +555,19 @@ defmodule Troupe.Plane.Admin do
   bound to a policy at all: enrolment proves the host is *this* host of *that* profile, and
   the profile's grants decide the rest. A host registered against a profile no substrate
   enforces is why `allow_unenforced_workers` exists.
+
+  **And the CA it pins.** The answer carries `ca`, the PEM of the CA that signed the
+  control port's certificate: the machine dials with TLS, trusts that CA and nothing else
+  for the channel, and its secret never crosses it in plaintext. A plane whose control
+  port has no certificate registers nothing, since a secret it minted could never be used.
   """
   @spec host_register(actor(), String.t(), map()) :: result()
   def host_register(actor, profile, attrs) do
     attrs = settable(attrs, @host_keys)
 
     with :ok <- require_platform_admin(actor),
-         {:ok, _profile} <- fetch_profile(profile) do
+         {:ok, _profile} <- fetch_profile(profile),
+         {:ok, ca} <- control_ca() do
       # Who registered it, from the actor rather than from the caller: a field a client
       # filled in is a field a client can put somebody else's name in.
       attrs = Map.put(attrs, "registered_by", actor.subject)
@@ -573,7 +580,7 @@ defmodule Troupe.Plane.Admin do
               "address" => host.address
             })
 
-          {:ok, host |> host_summary() |> Map.put(:secret, secret)}
+          {:ok, host |> host_summary() |> Map.merge(%{secret: secret, ca: ca})}
 
         {:error, %Ecto.Changeset{} = changeset} ->
           {:error, invalid(changeset)}
@@ -584,20 +591,31 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # The control port's CA, which a machine pins; without one no machine can enrol.
+  defp control_ca do
+    case TLS.ca() do
+      {:ok, ca} -> {:ok, ca}
+      {:error, why} -> {:error, Error.new(:unavailable, %{reason: why})}
+    end
+  end
+
   @doc """
   Mint a new secret for a host, keeping the host.
 
   The id has to survive: a rotation that made a new row would leave the new secret naming a
   host nothing knows about, which is indistinguishable from a rotation that did not take.
-  The old secret stops working the moment this returns.
+  The old secret stops working the moment this returns. The answer carries the CA as
+  registering does, which is how a machine registered before the control port had TLS
+  gets it.
   """
   @spec host_rotate(actor(), String.t(), String.t()) :: result()
   def host_rotate(actor, profile, name) do
     with :ok <- require_platform_admin(actor),
-         {:ok, host} <- fetch_host(profile, name) do
+         {:ok, host} <- fetch_host(profile, name),
+         {:ok, ca} <- control_ca() do
       {:ok, rotated, secret} = Fleet.Hosts.rotate(host, actor.subject)
       {:ok, _} = Audit.record(actor.subject, "host.rotate", "#{profile}/#{name}", %{})
-      {:ok, rotated |> host_summary() |> Map.put(:secret, secret)}
+      {:ok, rotated |> host_summary() |> Map.merge(%{secret: secret, ca: ca})}
     end
   end
 
@@ -709,11 +727,16 @@ defmodule Troupe.Plane.Admin do
   Groups are created just by being seen at login, so this is the step that turns "these
   people exist" into "these people may use Troupe" — which is why it is a platform
   admin's and not a team admin's.
+
+  A name another team already has is refused unless `link` is true: under it, the group
+  would be linked into that team and the team's settings changed, which is a different act
+  from making a team. Enabling a team's own group again is the same team, as it always was.
   """
-  @spec team_enable(actor(), String.t(), map()) :: result()
-  def team_enable(actor, group_id, attrs \\ %{}) do
+  @spec team_enable(actor(), String.t(), map(), boolean() | nil) :: result()
+  def team_enable(actor, group_id, attrs \\ %{}, link \\ false) do
     with :ok <- require_platform_admin(actor),
-         %Identity.Group{} = group <- Identity.get_group(group_id) do
+         %Identity.Group{} = group <- Identity.get_group(group_id),
+         :ok <- not_another_team(group, attrs, link == true) do
       # Its name and its settings. The group it is enabled from, and when and by whom, are
       # the record of this call, written by it.
       attrs =
@@ -732,6 +755,34 @@ defmodule Troupe.Plane.Admin do
     else
       nil -> {:error, Error.new(:not_found, %{group: group_id})}
       other -> other
+    end
+  end
+
+  # The name the team would have, against the teams there are: free, the group's own team
+  # already, or another team's, which only `link` takes. A name that is not a string is
+  # the changeset's to refuse.
+  defp not_another_team(group, attrs, link?) do
+    name = Identity.team_name(group, settable(attrs, ["name"]))
+    drawing = group |> Identity.teams_drawing_from() |> Enum.map(& &1.id)
+
+    case is_binary(name) && Identity.get_team(name) do
+      none when none in [nil, false] ->
+        :ok
+
+      %Identity.Team{id: id} = team ->
+        if link? or id in drawing do
+          :ok
+        else
+          {:error,
+           Error.new(:conflict, %{
+             team: team.name,
+             group: group.external_id,
+             reason:
+               "#{team.name} is already a team: enabling #{group.external_id} under its name " <>
+                 "would link the group into it and change its settings. Send link: true to " <>
+                 "mean that, or give the team another name."
+           })}
+        end
     end
   end
 
@@ -1179,8 +1230,21 @@ defmodule Troupe.Plane.Admin do
   """
   @spec sessions_list(actor(), keyword()) :: result()
   def sessions_list(actor, opts \\ []) do
-    with :ok <- require_admin(actor) do
+    with :ok <- require_admin(actor),
+         {:ok, opts} <- team_filter(actor, opts) do
       {:ok, actor |> Sessions.for_admin(team_ids(actor), opts) |> Enum.map(&session_summary/1)}
+    end
+  end
+
+  # `team` names one, by the rule every team lookup here keeps: another team's name is not
+  # found for a team admin. The listing narrows by its id.
+  defp team_filter(actor, opts) do
+    case Keyword.pop(opts, :team) do
+      {nil, opts} ->
+        {:ok, opts}
+
+      {name, opts} ->
+        with {:ok, team} <- fetch_team(actor, name), do: {:ok, [{:team_id, team.id} | opts]}
     end
   end
 
@@ -2938,10 +3002,22 @@ defmodule Troupe.Plane.Admin do
 
   # -- audit ------------------------------------------------------------------
 
-  @doc "Who changed what, newest first."
+  @doc """
+  Who changed what, newest first.
+
+  A platform admin reads the whole trail. A team admin reads the rows about the teams they
+  administer and nothing else, by the rule `teams_list/1` keeps: which other teams exist,
+  and who works in them, is not theirs to learn. A row about the plane as a whole (a
+  profile, a setting, the identity provider) is about no team.
+  """
   @spec audit_list(actor(), keyword()) :: result()
   def audit_list(actor, opts \\ []) do
     with :ok <- require_admin(actor) do
+      opts =
+        if actor.role == :platform_admin,
+          do: Keyword.delete(opts, :teams),
+          else: Keyword.put(opts, :teams, visible_teams(actor))
+
       {:ok, opts |> Audit.list() |> Enum.map(&audit_summary/1)}
     end
   end
@@ -2961,11 +3037,19 @@ defmodule Troupe.Plane.Admin do
 
   A platform admin's, not a team admin's: the trail is the whole plane's, and a check that
   answered "somewhere in the part you cannot see" would be worse than no check.
+
+  `result` is `:ok`, or the first row that does not verify with its `reason`: an answer
+  every surface can carry, JSON included, which a tagged tuple is not.
   """
   @spec audit_verify(actor()) :: result()
   def audit_verify(actor) do
     with :ok <- require_platform_admin(actor) do
-      {:ok, Audit.verify()}
+      integrity = Audit.verify()
+
+      case integrity.result do
+        :ok -> {:ok, integrity}
+        {:error, row} -> {:ok, %{integrity | result: row}}
+      end
     end
   end
 
@@ -3311,7 +3395,11 @@ defmodule Troupe.Plane.Admin do
       workspace_bytes: session.workspace_bytes,
       pinned: session.pinned,
       pinned_by: session.pinned_by,
-      last_active_at: session.last_active_at
+      last_active_at: session.last_active_at,
+      # The repository it was created with, and its branch, last commit and draft pull
+      # request there: metadata the pod reported, never what the session said.
+      repository: session.repository,
+      github: session.github
     }
   end
 

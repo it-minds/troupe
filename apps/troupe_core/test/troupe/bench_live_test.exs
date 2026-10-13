@@ -320,6 +320,37 @@ defmodule Troupe.BenchLiveTest do
       assert {:ok, table} = Bench.compare(history: path, ref: "0.7.0-beta")
       assert table =~ "| write_file | runs | none earlier | 2, 0.8.2-beta, openai/a |  |"
     end
+
+    # D125: a live bench writes its history under the configured `state_dir`, and the
+    # comparison read the default one, so it said nothing was recorded.
+    test "is read where the configured state_dir keeps it, where a live bench writes it",
+         %{tmp_dir: dir} do
+      config_home = Path.join(dir, "config")
+      configured = Path.join(dir, "configured-state")
+      File.mkdir_p!(config_home)
+      File.write!(Path.join(config_home, "config.yaml"), "state_dir: #{configured}\n")
+
+      previous = Map.new(~w(TROUPE_CONFIG_HOME TROUPE_STATE_HOME), &{&1, System.get_env(&1)})
+      System.put_env("TROUPE_CONFIG_HOME", config_home)
+      System.put_env("TROUPE_STATE_HOME", Path.join(dir, "default-state"))
+
+      on_exit(fn ->
+        Enum.each(previous, fn
+          {name, nil} -> System.delete_env(name)
+          {name, value} -> System.put_env(name, value)
+        end)
+      end)
+
+      for {bench, cost} <- [{"2026-10-01T10:00:00Z", 4_000}, {"2026-10-02T10:00:00Z", 5_000}] do
+        History.append(
+          History.path(configured),
+          line(bench, "0.8.2-beta", "openai/a", cost, true, 1)
+        )
+      end
+
+      assert {:ok, table} = Bench.compare()
+      assert table =~ "| write_file | median cost | $0.0040 | $0.0050 | +25% |"
+    end
   end
 
   # Issue #465's two options against the stand-in as Anthropic (Decision 815): a model that
@@ -671,8 +702,9 @@ defmodule Troupe.BenchLiveTest do
     end
   end
 
-  # Issue #616 (Decision 878): a long session that compacts before its fourth turn, with the
-  # scratchpad and without it. Its window is its own, whatever the person's say.
+  # Issue #616: a long session that writes and revises a plan and a checklist and compacts
+  # on the way, with the scratchpad and without it. Its window is its own, whatever the
+  # person's say.
   describe "issue #616's long session" do
     test "runs by name, both under their window, the one without the scratchpad on build as it was" do
       assert {:ok, [pad, plain]} =
@@ -680,10 +712,89 @@ defmodule Troupe.BenchLiveTest do
 
       assert {pad.name, plain.name} == {"scratchpad_session", "scratchpad_session_without"}
       assert pad.prompt == plain.prompt and pad.follow_ups == plain.follow_ups
-      assert length(pad.follow_ups) == 4
+      assert length(pad.follow_ups) == 7
       assert pad.config[:context_window] == plain.config[:context_window]
+      assert pad.config[:context_window] == 24_000
       assert plain.files[".troupe/agents/build.md"] == LiveScenarios.build_without_show()
       refute Map.has_key?(pad.files, ".troupe/agents/build.md")
+    end
+
+    # With the scratchpad the plan the person last reads is the document, a `show` and the
+    # patches after it; a refused patch changed nothing.
+    test "reads the plan as its show and its patches left it" do
+      {:ok, [pad]} = LiveScenarios.select(nil, ["scratchpad_session"])
+      plan = "1. Copy the notes.\n2. Switch the reads.\n3. Roll back: restore the SQLite file.\n"
+
+      counted = %{
+        "name" => "plan.md",
+        "old_string" => "1. Copy the notes.\n",
+        "new_string" => "1. Copy the notes.\n1a. Compare the row counts.\n"
+      }
+
+      missed = %{"name" => "plan.md", "old_string" => "not in it", "new_string" => "read-only"}
+      kept = %{"name" => "plan.md", "new_string" => "4. Keep the SQLite file read-only."}
+
+      events = [
+        typed(1),
+        call(2, "c1", "show", %{"name" => "Plan.md", "title" => "Plan", "content" => plan}),
+        done(3, "c1", "show", true),
+        event(4, "scratch_updated", %{"name" => "plan.md", "version" => 1}),
+        reply(5, "The plan is in plan.md."),
+        typed(6),
+        reply(7, "two"),
+        typed(8),
+        reply(9, "three"),
+        typed(10),
+        reply(11, "The copy step takes 400 seconds."),
+        event(12, "compacted", %{}),
+        typed(13),
+        call(14, "c2", "patch", counted),
+        done(15, "c2", "patch", true),
+        event(16, "scratch_updated", %{"name" => "plan.md", "version" => 2}),
+        call(17, "c3", "patch", missed),
+        done(18, "c3", "patch", false),
+        reply(19, "plan.md is revised."),
+        typed(20),
+        typed(21),
+        typed(22)
+      ]
+
+      {[], checks} = pad.measure.(%{events: events})
+      assert for({name, _label, false} <- checks, do: name) == ["kept"]
+
+      events = events ++ [call(30, "c4", "patch", kept), done(31, "c4", "patch", true)]
+      {[], checks} = pad.measure.(%{events: events})
+      assert for({name, _label, false} <- checks, do: name) == []
+    end
+
+    test "a run says what it spent from its first compaction on" do
+      fake =
+        start_fake(
+          scripts: [
+            {"read the notes",
+             Enum.map(1..8, &{:tools, [{"read_file", %{"path" => "notes/#{&1}.txt"}}]}) ++
+               [{:text, "Read them all."}]}
+          ]
+        )
+
+      scenario = %Scenario{
+        name: "windowed",
+        title: "reads under a window of the scenario's own",
+        prompt: "read the notes, one at a time",
+        files: Map.new(1..8, &{"notes/#{&1}.txt", "note #{&1}\n"}),
+        config: [context_window: 5_000, compact_at: 0.8],
+        measure: fn _ctx -> {[], []} end
+      }
+
+      {:ok, plan} = Bench.plan(config: person(fake), scenarios: [scenario], history: nil)
+      [run] = plan |> Bench.live() |> scenario("windowed") |> Map.fetch!("runs")
+
+      since = run["since_compaction"]
+      [first | _] = Enum.drop_while(run["calls"], &(not &1["summariser"]))
+      assert first["summariser"]
+      assert since["model_calls"] < run["model_calls"]
+      assert since["output_tokens"] < run["output_tokens"]
+      assert since["cost_micros"] < run["cost_micros"]
     end
 
     test "a scenario's window is the run's model's, whatever the person's say" do
@@ -1201,6 +1312,23 @@ defmodule Troupe.BenchLiveTest do
   end
 
   defp scenario(report, name), do: Enum.find(report["scenarios"], &(&1["name"] == name))
+
+  # A run's events as a measure reads them: the root's, in the order they were logged.
+  defp event(seq, type, data), do: %Event{seq: seq, type: type, agent: ["root"], data: data}
+  defp typed(seq), do: event(seq, "user_input", %{"source" => "user", "text" => "next"})
+
+  defp call(seq, id, name, args),
+    do: event(seq, "tool_call_started", %{"call_id" => id, "name" => name, "args" => args})
+
+  defp done(seq, id, name, ok),
+    do: event(seq, "tool_call_completed", %{"call_id" => id, "name" => name, "ok" => ok})
+
+  defp reply(seq, text),
+    do:
+      event(seq, "llm_response", %{
+        "message" => %{"content" => [%{"type" => "text", "text" => text}]}
+      })
+
   defp tool(run, name), do: Enum.find(run["tools"], &(&1["name"] == name))
 
   defp metric(entry, name),

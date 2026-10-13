@@ -446,10 +446,11 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("memory.forget", %{"id" => id} = params, _context) when is_binary(id) do
     with {:ok, workspace} <- fetch(params, "workspace") do
       workspace = Path.expand(workspace)
+      kept? = kept?(workspace, id)
 
       case Facts.delete(workspace, id) do
         :ok -> {:ok, %{"forgotten" => true, "id" => id}}
-        {:error, reason} -> {:error, not_forgotten(workspace, id, reason)}
+        {:error, reason} -> {:error, not_forgotten(workspace, id, kept?, reason)}
       end
     end
   end
@@ -571,8 +572,15 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  defp handle("workspace.recent", _params, _context) do
-    {:ok, %{"workspaces" => Troupe.recent_workspaces()}}
+  # At most `limit` of them, twenty where it is not a positive number.
+  defp handle("workspace.recent", params, _context) do
+    limit =
+      case Map.get(params, "limit") do
+        limit when is_integer(limit) and limit > 0 -> limit
+        _none -> 20
+      end
+
+    {:ok, %{"workspaces" => Troupe.recent_workspaces(limit)}}
   end
 
   defp handle("workspace.search", params, _context) do
@@ -1693,10 +1701,14 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp start_error(other), do: inspect(other)
 
+  # Running or dormant: the mark is kept beside the session's log.
   defp pin(params, pinned?) do
     with {:ok, session_id} <- fetch(params, "session_id") do
-      Troupe.pin_session(session_id, pinned?)
-      {:ok, %{"session_id" => session_id, "pinned" => pinned?}}
+      case Troupe.pin_session(session_id, pinned?) do
+        :ok -> {:ok, %{"session_id" => session_id, "pinned" => pinned?}}
+        {:error, :not_found} -> {:error, Error.new(:not_found, %{session_id: session_id})}
+        {:error, reason} -> {:error, Error.new(:internal_error, %{reason: reason})}
+      end
     end
   end
 
@@ -1719,13 +1731,26 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  # `memory.forget` of a fact (Decision 839): an id no fact has is `not_found`; one that is
+  # `memory.forget` of a fact: an id no fact had is `not_found`; one that was
   # there and could not be forgotten (its file could not be written) is the store's reason.
-  defp not_forgotten(workspace, id, reason) do
-    if Enum.any?(Facts.list(workspace), &(&1["id"] == id)),
-      do: Error.new(:internal_error, %{reason: inspect(reason)}),
-      else: Error.new(:not_found, %{kind: "fact", id: id})
+  # Whether it was there is asked before the delete: the facts file can be rewritten without
+  # it and the view beside it then fail to follow, and a fact that went that way is
+  # forgotten, which is said, not taken for one that never was.
+  defp not_forgotten(workspace, id, kept?, reason) do
+    cond do
+      not kept? ->
+        Error.new(:not_found, %{kind: "fact", id: id})
+
+      kept?(workspace, id) ->
+        Error.new(:internal_error, %{reason: inspect(reason)})
+
+      true ->
+        said = if is_binary(reason), do: reason, else: inspect(reason)
+        Error.new(:internal_error, %{reason: "the fact is forgotten, but " <> said})
+    end
   end
+
+  defp kept?(workspace, id), do: Enum.any?(Facts.list(workspace), &(&1["id"] == id))
 
   # Whether the workspace's default model can be asked, and why not in words a client shows.
   defp model_json(nil), do: %{"usable" => true, "reason" => nil}

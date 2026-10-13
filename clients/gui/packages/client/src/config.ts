@@ -13,18 +13,62 @@
 import { TroupeRpcError } from "./connection.js";
 import { ErrorCodes } from "./types.js";
 
-export type ModelProvider = "anthropic" | "openai";
+/** A provider type's name, as the daemon's `provider_types` lists them (troupe #658). */
+export type ModelProvider = string;
 export type ModelAuth = "api_key" | "bearer";
 export type ModelRole = "default" | "cheap" | "expensive";
 
 /** The three roles, in the order a person reads them. */
 export const MODEL_ROLES: readonly ModelRole[] = ["default", "cheap", "expensive"];
 
-/** Where a request goes when no base URL is set, as each provider's own client defaults it. */
-export const PROVIDER_DEFAULT_URLS: Record<ModelProvider, string> = {
-  anthropic: "https://api.anthropic.com",
-  openai: "https://api.openai.com/v1",
-};
+/**
+ * One provider type a person may pick, as `config.get` says (troupe #658), from the one
+ * list of them every screen offers: what it is called, where it is when no address is
+ * given (`default_url`; none for one whose address only the person knows, which
+ * `url_example` shows the shape of), and whether it takes a key at all.
+ */
+export interface ProviderTypeInfo {
+  name: string;
+  label: string;
+  summary: string;
+  url: "own" | "server" | "required";
+  default_url: string | null;
+  url_example: string | null;
+  key: "required" | "none";
+  key_var: string | null;
+}
+
+/**
+ * What a daemon from before the provider types were its to say takes, which it does not
+ * list. A newer daemon's `provider_types` replace these.
+ */
+export const OLDER_DAEMON_PROVIDER_TYPES: readonly ProviderTypeInfo[] = [
+  {
+    name: "anthropic",
+    label: "Anthropic",
+    summary: "Claude, at Anthropic's own endpoint.",
+    url: "own",
+    default_url: "https://api.anthropic.com",
+    url_example: null,
+    key: "required",
+    key_var: "ANTHROPIC_API_KEY",
+  },
+  {
+    name: "openai",
+    label: "OpenAI-compatible (LiteLLM, vLLM, gateways…)",
+    summary: "OpenAI's Chat Completions, or any server that speaks it.",
+    url: "own",
+    default_url: "https://api.openai.com",
+    url_example: null,
+    key: "required",
+    key_var: "OPENAI_API_KEY",
+  },
+];
+
+/** The provider types this daemon offers, in its order. */
+export function providerTypes(config: Pick<ModelConfig, "provider_types">): readonly ProviderTypeInfo[] {
+  return config.provider_types && config.provider_types.length > 0 ? config.provider_types : OLDER_DAEMON_PROVIDER_TYPES;
+}
 
 /** Something with a stronger claim than the file the panel edits. */
 export interface ConfigOverride {
@@ -69,6 +113,8 @@ export interface ModelConfig {
   api_key_source: "file" | "env" | "opencode" | null;
   models: Partial<Record<ModelRole, string | null>>;
   overrides: ConfigOverride[];
+  /** The provider types a screen offers; absent from a daemon older than troupe #658. */
+  provider_types?: ProviderTypeInfo[];
   /** Every key with where it came from; absent from a daemon older than troupe #57. */
   keys?: ConfigKey[];
   files?: Array<{ scope: ConfigScope; path: string; exists: boolean }>;

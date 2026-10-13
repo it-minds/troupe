@@ -12,7 +12,7 @@ defmodule Troupe.Plane.ClientDefaultsTest do
 
   alias Troupe.Plane.{Admin, Audit, Harness, Identity, Settings}
   alias Troupe.Plane.Admin.API, as: AdminAPI
-  alias Troupe.Protocol.Organisation
+  alias Troupe.Protocol.{Organisation, ProviderTypes}
 
   @keys ~w(client_provider client_base_url client_auth client_model_default client_model_cheap client_model_expensive client_enforced)
 
@@ -62,11 +62,29 @@ defmodule Troupe.Plane.ClientDefaultsTest do
   end
 
   test "the provider is a closed choice, and the auth style defaults to the provider's own", context do
-    assert {:error, _} = Settings.put("client_provider", "gemini", "root@example.test")
+    assert {:error, _} = Settings.put("client_provider", "bedrock", "root@example.test")
     {:ok, _} = Settings.put("client_provider", "anthropic", "root@example.test")
 
     assert {:ok, %{"configured" => true, "auth" => "api_key"}} =
              Harness.call("me.client_defaults", %{}, as(context.ada))
+  end
+
+  # Issue #658: the provider people's machines are offered is any type they may pick
+  # there, from the one list the clients offer. On the chunk's tip `gemini` was refused
+  # ("must be one of: anthropic, openai").
+  test "every provider type a machine may be set up with may be offered to it", context do
+    setting = Enum.find(Settings.all(), &(&1.key == "client_provider"))
+    assert Enum.map(setting.values, &to_string/1) == ProviderTypes.named()
+
+    for type <- ~w(gemini ollama openrouter azure_openai) do
+      assert {:ok, _} = Settings.put("client_provider", type, "root@example.test")
+
+      assert {:ok, %{"configured" => true, "provider" => ^type}} =
+               Harness.call("me.client_defaults", %{}, as(context.ada))
+    end
+
+    # Only the session-wide provider may be the fake: nobody's machine is offered it.
+    assert {:error, _} = Settings.put("client_provider", "fake", "root@example.test")
   end
 
   test "there is no setting a key could be stored in" do

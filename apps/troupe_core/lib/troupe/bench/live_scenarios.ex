@@ -29,8 +29,9 @@ defmodule Troupe.Bench.LiveScenarios do
   same session, where `goal_complete` was offered on the loop's turn alone (issue #606,
   Decision 871). `scratchpad` and `scratchpad_without`, by name too, are one migration plan
   with the scratchpad and without it (issue #472, Decision 870), and
-  `scratchpad_session` and `scratchpad_session_without` a session of five turns that
-  revises it and compacts, under a window of its own (issue #616, Decision 878).
+  `scratchpad_session` and `scratchpad_session_without` a session of eight turns that
+  writes a plan and a checklist, revises both, and compacts on the way, under a window of
+  its own (issue #616).
 
   `fix_test_orchestrate`, `rename_symbol_orchestrate` and `follow_steps_orchestrate`, by
   name as well, are those three tasks on `orchestrate` rather than the default agent
@@ -42,6 +43,7 @@ defmodule Troupe.Bench.LiveScenarios do
 
   alias Troupe.Agent.Definitions
   alias Troupe.Bench.Scenario
+  alias Troupe.Scratch
 
   @suites %{
     "smoke" => ~w(write_file fix_test delegate recover),
@@ -807,26 +809,32 @@ defmodule Troupe.Bench.LiveScenarios do
     }
   end
 
-  # Issue #616 (Decision 878): a long session that writes its documents and revises them,
-  # and compacts on the way, with the scratchpad and without it. A window of its own puts
-  # the first compaction before the fourth turn whatever the model's window is: with the
-  # scratchpad after the second turn, where the revised plan's call is behind its short
-  # reply, and without it after the third. The fourth and fifth turns need the plan again,
-  # so they are the same work after a compaction on both sides.
+  # Issue #616: a long session that writes a plan and a checklist, revises each, asks
+  # about them, and compacts on the way, with the scratchpad and without it. The person
+  # reads the whole plan after each revision: in the reply without the scratchpad, beside
+  # the chat with it, where a revision is a `patch`. The window is the scenario's own
+  # whatever the model's is: four times the session's first prompt, so each side compacts
+  # once or twice over its eight turns, after several calls each time, rather than after
+  # nearly every call as a window of twice the first prompt made it. A smaller window makes
+  # the side whose tail holds whole plans compact after every turn; a larger one, a session
+  # several times as long and as dear before either compacts.
   @session_follow_ups [
     "Revise the plan: the notes are copied in batches of 1,000 rows that resume where they stopped after a failure, and the full-text index is rebuilt after the copy. Give the whole plan again, revised.",
     "Now write a checklist for the night of the switch: what to check before, during and after it, one line an item.",
     "Which step of the plan copies the notes, and how long does that step take for 2,000,000 notes at 5,000 rows a second? Answer in two sentences.",
-    "Add a step to the plan, right after the copy, that compares the row counts of both databases, and give the whole plan again."
+    "Add a step to the plan, right after the copy, that compares the row counts of both databases, and give the whole plan again.",
+    "Add to the checklist, under during the switch: the row counts match before the reads move. Give the whole checklist again.",
+    "What does the plan say to do if the row counts differ? Answer in two sentences.",
+    "Revise the rollback: the SQLite file stays read-only for a week after the switch, and the reads go back to it by turning the flag off. Give the whole plan again, revised."
   ]
 
   @session_config [
-    context_window: 14_000,
-    compact_at: 0.8,
-    max_turns: 30,
-    max_input_tokens: 300_000,
-    max_output_tokens: 40_000,
-    wall_clock_ms: 600_000
+    context_window: 24_000,
+    compact_at: 0.75,
+    max_turns: 40,
+    max_input_tokens: 600_000,
+    max_output_tokens: 60_000,
+    wall_clock_ms: 900_000
   ]
 
   defp scratchpad_session do
@@ -838,17 +846,22 @@ defmodule Troupe.Bench.LiveScenarios do
       files: %{"db/schema.sql" => @schema_sql, "app/store.py" => @store_py},
       config: @session_config,
       measure: fn ctx ->
+        plan = last_plan(ctx.events)
+
         {[],
          [
-           {"five_turns", "all five turns were taken", typed(ctx.events) == 5},
-           {"compacted", "the session compacted before its fourth turn",
-            compacted_before?(ctx.events, 4)},
-           {"shown", "the plan went to the scratchpad, and was shown again revised",
+           {"eight_turns", "all eight turns were taken", typed(ctx.events) == 8},
+           {"compacted", "the session compacted before its last turn",
+            compacted_before?(ctx.events, 8)},
+           {"shown", "the plan went to the scratchpad, and was revised there",
             Enum.any?(shown_versions(ctx.events), &(&1 > 1))},
+           {"patched", "a revision went by patch", patched(ctx.events) > 0},
            {"timed", "the fourth reply says the copy takes 400 seconds",
             timed?(answers(ctx.events), 3)},
-           {"counted", "the last plan compares the row counts",
-            last_shown(ctx.events) =~ ~r/row counts?/i}
+           {"counted", "the plan as last written compares the row counts",
+            plan =~ ~r/row counts?/i},
+           {"kept", "the plan as last written keeps the SQLite file read-only",
+            plan =~ ~r/read-only/i}
          ]}
       end
     }
@@ -867,15 +880,18 @@ defmodule Troupe.Bench.LiveScenarios do
       },
       config: @session_config,
       measure: fn ctx ->
+        plan = reply(ctx)
+
         {[],
          [
-           {"five_turns", "all five turns were taken", typed(ctx.events) == 5},
-           {"compacted", "the session compacted before its fourth turn",
-            compacted_before?(ctx.events, 4)},
+           {"eight_turns", "all eight turns were taken", typed(ctx.events) == 8},
+           {"compacted", "the session compacted before its last turn",
+            compacted_before?(ctx.events, 8)},
            {"not_shown", "nothing went to a scratchpad", shown(ctx.events) == []},
            {"timed", "the fourth reply says the copy takes 400 seconds",
             timed?(answers(ctx.events), 3)},
-           {"counted", "the last plan compares the row counts", reply(ctx) =~ ~r/row counts?/i}
+           {"counted", "the last plan compares the row counts", plan =~ ~r/row counts?/i},
+           {"kept", "the last plan keeps the SQLite file read-only", plan =~ ~r/read-only/i}
          ]}
       end
     }
@@ -933,19 +949,60 @@ defmodule Troupe.Bench.LiveScenarios do
     end)
   end
 
-  # The versions each document reached, and the words of the last one shown.
+  # The versions each document reached.
   defp shown_versions(events),
     do: for(%{type: "scratch_updated", data: %{"version" => version}} <- events, do: version)
 
-  defp last_shown(events) do
-    events
-    |> Enum.filter(&(&1.type == "tool_call_started" and &1.data["name"] == "show"))
-    |> List.last()
-    |> case do
-      %{data: %{"args" => %{"content" => content}}} when is_binary(content) -> content
-      _none -> ""
+  # The patches that revised a document.
+  defp patched(events) do
+    Enum.count(
+      events,
+      &(&1.type == "tool_call_completed" and &1.data["name"] == "patch" and &1.data["ok"])
+    )
+  end
+
+  # The words of the first document the run showed, its plan, as the run last wrote them:
+  # its `show` and every `patch` after it, in the order the calls were made, by the rule
+  # the scratchpad writes by. A call refused, or never answered, changed nothing.
+  defp last_plan(events) do
+    case shown(events) do
+      [plan | _] -> events |> written() |> Map.get(plan, "")
+      [] -> ""
     end
   end
+
+  defp written(events) do
+    done =
+      for %{type: "tool_call_completed", data: %{"ok" => true, "call_id" => id}} <- events,
+          into: MapSet.new(),
+          do: id
+
+    events
+    |> Enum.filter(&(&1.type == "tool_call_started" and MapSet.member?(done, &1.data["call_id"])))
+    |> Enum.reduce(%{}, fn %{data: data}, documents ->
+      write(documents, data["name"], data["args"] || %{})
+    end)
+  end
+
+  defp write(documents, "show", %{"name" => raw, "content" => content}) when is_binary(content) do
+    case Scratch.name(raw) do
+      {:ok, name} -> Map.put(documents, name, content)
+      {:error, _refused} -> documents
+    end
+  end
+
+  defp write(documents, "patch", %{"name" => raw, "new_string" => new} = args)
+       when is_binary(new) do
+    with {:ok, name} <- Scratch.name(raw),
+         {:ok, content} <- Map.fetch(documents, name),
+         {:ok, revised} <- Scratch.revise(content, args["old_string"], new) do
+      Map.put(documents, name, revised)
+    else
+      _unchanged -> documents
+    end
+  end
+
+  defp write(documents, _tool, _args), do: documents
 
   # The names of the documents the run showed, and their sizes.
   defp shown(events),
@@ -962,12 +1019,12 @@ defmodule Troupe.Bench.LiveScenarios do
 
     body =
       Regex.replace(
-        ~r/\s+A\s+plan,\s+report,\s+comparison,\s+diagram\s+or\s+table\s+they\s+will\s+read\s+goes\s+to\s+`show`,\s+and\s+the\s+answer\s+stays\s+short\s+and\s+names\s+it\./,
+        ~r/\s+Answer\s+in\s+the\s+reply\s+unless\s+they\s+ask\s+for\s+a\s+document\b.*?\s+rather\s+than\s+showing\s+it\s+again\./s,
         body,
         ""
       )
 
-    "---\n" <> front <> "\npermissions:\n  show: deny\n---\n" <> body
+    "---\n" <> front <> "\npermissions:\n  show: deny\n  patch: deny\n---\n" <> body
   end
 
   # The task list as the run left it.

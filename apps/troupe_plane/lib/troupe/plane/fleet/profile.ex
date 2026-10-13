@@ -20,6 +20,8 @@ defmodule Troupe.Plane.Fleet.Profile do
   import Ecto.Changeset
 
   alias Troupe.Plane.Fleet.{Provisioner, SizeClass}
+  alias Troupe.Plane.GitHub
+  alias Troupe.Protocol.ProviderTypes
 
   @primary_key {:name, :string, autogenerate: false}
   @derive {Phoenix.Param, key: :name}
@@ -109,16 +111,18 @@ defmodule Troupe.Plane.Fleet.Profile do
   end
 
   # `repositoryOverridesBundle` lets a repository's agents and skills replace the bundle's,
-  # and the built-ins, of the same name on this profile's pods (Decision 826), and is read
-  # as on only when it is `true`. A string `"true"` would read as off, so it is refused
-  # rather than saved: a profile whose admin believes they turned something on must not
-  # quietly have it off. The resource's schema refuses one too, and this is the check for a
-  # profile that is never one, on hosts.
+  # and the built-ins, of the same name on this profile's pods, where otherwise theirs win
+  # and the working copy's are skipped and listed; it is read as on only when it is
+  # `true`. A string `"true"` would read as off, so it is refused rather than saved: a
+  # profile whose admin believes they turned something on must not quietly have it off.
+  # The resource's schema refuses one too, and this is the check for a profile that is
+  # never one, on hosts.
   #
   # `personalTools` says whether a person may offer a session on the profile's pods their
-  # own signed-in tools (Decision 862): `allow`, the default, or `forbid`. Anything else is
-  # refused for the same reason: a pod reads only `forbid` as forbidding, and a `"Forbid"`
-  # saved would leave the pods taking what the admin believes they refuse.
+  # own signed-in tools, which the pods refuse with a sentence when it forbids them:
+  # `allow`, the default, or `forbid`. Anything else is refused for the same reason: a pod
+  # reads only `forbid` as forbidding, and a `"Forbid"` saved would leave the pods taking
+  # what the admin believes they refuse.
   defp spec_switches(:spec, spec) when is_map(spec) do
     overrides =
       case Map.fetch(spec, "repositoryOverridesBundle") do
@@ -138,10 +142,65 @@ defmodule Troupe.Plane.Fleet.Profile do
           []
       end
 
-    overrides ++ personal
+    # `github.permissions` is what the profile's sessions' fix-loop token may do on GitHub,
+    # in GitHub's own names. A name or a level it may not grant is refused rather than
+    # dropped: a profile saved with `contents: Write` would push nothing, and one with
+    # `administration: write` would be asking for what no session is given.
+    github = Enum.map(GitHub.spec_problems(Map.get(spec, "github")), &{:spec, &1})
+
+    overrides ++ personal ++ github ++ llm_problems(Map.get(spec, "llm"))
   end
 
   defp spec_switches(:spec, _spec), do: []
+
+  # `llm.provider` is one of the provider types, the list the clients offer, which the
+  # resource's schema declares in the same words, so a profile that is never a resource,
+  # on hosts, is refused where a resource would be.
+  #
+  # And every other `llm` field needs `llm.endpoint`. The operator hands the pods the
+  # `llm` settings only with an endpoint, so without one a provider, a model or a key
+  # would be a setting that silently does nothing while the pods run on the built-in
+  # model settings. It is refused instead, naming the fields, as the resource's schema
+  # refuses it.
+  @llm_fields ~w(provider model smallModel secretRef prices)
+
+  defp llm_problems(llm) when is_map(llm), do: llm_type(llm["provider"]) ++ llm_endpoint(llm)
+  defp llm_problems(_llm), do: []
+
+  defp llm_type(nil), do: []
+
+  defp llm_type(provider) do
+    if provider in ProviderTypes.names() do
+      []
+    else
+      names = Enum.join(ProviderTypes.names(), ", ")
+      [spec: "llm.provider must be one of #{names}, not #{inspect(provider)}"]
+    end
+  end
+
+  defp llm_endpoint(llm) do
+    set = for field <- @llm_fields, llm[field] not in [nil, "", %{}, []], do: "llm." <> field
+
+    if set == [] or llm["endpoint"] not in [nil, ""] do
+      []
+    else
+      {verb, pronoun} = if length(set) == 1, do: {"is", "it"}, else: {"are", "them"}
+
+      [
+        spec:
+          "#{listed(set)} #{verb} set without llm.endpoint, and the pods are given the llm " <>
+            "settings only with an endpoint: without one they would run on Troupe's built-in " <>
+            "model settings instead. Set llm.endpoint, or take #{pronoun} out"
+      ]
+    end
+  end
+
+  defp listed([one]), do: one
+  defp listed(many), do: Enum.join(Enum.drop(many, -1), ", ") <> " and " <> List.last(many)
+
+  @doc "The `llm` fields a profile may set only beside `llm.endpoint`, as the resource names them."
+  @spec llm_fields() :: [String.t()]
+  def llm_fields, do: @llm_fields
 
   # The class is the answer, so the fields it decides are written from it rather than
   # taken from the caller. A profile whose `sessionsPerPod` disagreed with its class

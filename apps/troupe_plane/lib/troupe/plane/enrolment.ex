@@ -9,7 +9,8 @@ defmodule Troupe.Plane.Enrolment do
   * the **audience**. The token is projected with audience `troupe-plane`, so a token
     minted for the Kubernetes API cannot be replayed here and this one cannot be
     replayed there.
-  * the **namespace**. A profile's pods run in `troupe-w-<profile>` and nowhere else, so
+  * the **namespace**. A profile's pods run in `<prefix><profile>` (`troupe-w-<profile>`
+    unless the policy's `namespacePrefix` says otherwise) and nowhere else, so
     the namespace in the review decides the profile. A pod cannot claim to be a profile
     it is not, because it cannot mint a token from another namespace's ServiceAccount.
 
@@ -165,11 +166,22 @@ defmodule Troupe.Plane.Enrolment do
 
   defp service_account(_user), do: {:error, :not_a_service_account}
 
-  # The namespace is the profile. Nothing the worker says about itself is involved.
+  # The namespace is the profile. Nothing the worker says about itself is involved. One
+  # without the prefix is refused, and the log says which prefix this plane was deployed
+  # with: a policy whose `namespacePrefix` differs from the chart's leaves every pod here.
   defp profile_of(namespace, prefix) do
     case String.split(namespace, prefix, parts: 2) do
-      ["", profile] when profile != "" -> {:ok, profile}
-      _ -> {:error, {:not_a_worker_namespace, namespace}}
+      ["", profile] when profile != "" ->
+        {:ok, profile}
+
+      _ ->
+        Logger.warning(
+          "troupe plane: refused a worker enrolling from namespace #{namespace}: worker " <>
+            "namespaces here start with #{prefix} (the chart's policy.namespacePrefix, " <>
+            "TROUPE_NAMESPACE_PREFIX), which must match the TroupePolicy's namespacePrefix"
+        )
+
+        {:error, {:not_a_worker_namespace, namespace}}
     end
   end
 

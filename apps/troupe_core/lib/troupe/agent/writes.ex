@@ -27,7 +27,7 @@ defmodule Troupe.Agent.Writes do
 
   @doc """
   The writes of the agent at `path` and every agent under it, in the order they ran, and
-  how many commands they ran.
+  how many commands they ran: a `shell` call whose approval was refused is not one.
   """
   @spec of([Event.t()], [String.t()]) :: {[write()], non_neg_integer()}
   def of(events, path) do
@@ -48,7 +48,19 @@ defmodule Troupe.Agent.Writes do
           %{} = write <- [write(name, data["args"])],
           do: write
 
-    {writes, Enum.count(started, fn {_agent, data} -> data["name"] == "shell" end)}
+    # A command whose approval was refused never ran, and changed nothing to count.
+    refused =
+      for %Event{type: "approval_decided", agent: agent, data: %{"decision" => "deny"} = data} <-
+            mine,
+          into: MapSet.new(),
+          do: {agent, data["call_id"]}
+
+    commands =
+      Enum.count(started, fn {agent, data} ->
+        data["name"] == "shell" and not MapSet.member?(refused, {agent, data["call_id"]})
+      end)
+
+    {writes, commands}
   end
 
   @doc """

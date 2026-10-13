@@ -89,7 +89,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "spec",
       type: :object,
       description:
-        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount, repositoryOverridesBundle, personalTools, storage.storageClassName. configBundleChannel is the bundle channel the profile follows, stable where absent. repositoryOverridesBundle true lets a session's working copy replace the bundle's agents and skills, and the built-in agents, of the same name with its own; absent or false, those win and the working copy's are skipped and listed. personalTools is allow (the default, also when absent) or forbid: forbid has the profile's pods refuse a person's offer of their own signed-in tools (tools.register), saying why. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. storage.storageClassName is the storage class a worker's disk comes from, one the cluster policy allows; absent is the cluster's default. mcpIdentities says who the profile is at each server its bundle calls with client credentials: {server, clientId, scope, tokenUrl, transitKey, keyVersion, certificateThumbprint, algorithm}, none of it secret; the answer's identity_problems lists a server the bundle marks client_credentials that has none, or an identity that is incomplete. Replicas, sessionsPerPod, resources and storage.size are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
+        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount, repositoryOverridesBundle, personalTools, github, storage.storageClassName. configBundleChannel is the bundle channel the profile follows, stable where absent. repositoryOverridesBundle true lets a session's working copy replace the bundle's agents and skills, and the built-in agents, of the same name with its own; absent or false, those win and the working copy's are skipped and listed. personalTools is allow (the default, also when absent) or forbid: forbid has the profile's pods refuse a person's offer of their own signed-in tools (tools.register), saying why. github.permissions is what a session's token may do on GitHub beyond cloning, in GitHub's names: contents (read or write: write pushes its troupe/* branch), pull_requests (read or write: write opens its draft pull request and comments), checks and statuses (read: its CI); absent, sessions clone and do no more. Every llm field but endpoint needs llm.endpoint, without which the pods are given none of them, and is refused without it. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. storage.storageClassName is the storage class a worker's disk comes from, one the cluster policy allows; absent is the cluster's default. mcpIdentities says who the profile is at each server its bundle calls with client credentials: {server, clientId, scope, tokenUrl, transitKey, keyVersion, certificateThumbprint, algorithm}, none of it secret; the answer's identity_problems lists a server the bundle marks client_credentials that has none, or an identity that is incomplete. Replicas, sessionsPerPod, resources and storage.size are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
     }
   ]
 
@@ -431,7 +431,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.host.register",
       function: :host_register,
       summary:
-        "Register a machine against a profile and mint the secret it enrols with. The secret is returned once and stored only as a hash; there is no method that shows it again.",
+        "Register a machine against a profile and mint the secret it enrols with. The secret is returned once and stored only as a hash; there is no method that shows it again. The answer also carries ca, the PEM of the CA that signed the control port's certificate, which the machine pins: it enrols over TLS only. Refused while the control port has no certificate.",
       risk: :write,
       arguments: [
         %Argument{
@@ -466,7 +466,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.host.rotate",
       function: :host_rotate,
       summary:
-        "Mint a new enrolment secret for a machine, keeping the machine. The old secret stops working immediately, and the new one is shown once.",
+        "Mint a new enrolment secret for a machine, keeping the machine. The old secret stops working immediately, and the new one is shown once, with ca as registering answers it.",
       risk: :write,
       arguments: [
         %Argument{name: "profile", type: :string, required: true, description: "The profile."},
@@ -599,7 +599,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.team.enable",
       function: :team_enable,
       summary:
-        "Make an identity-provider group into a team. Enabling is the only thing Troupe adds to a group: membership stays the provider's.",
+        "Make an identity-provider group into a team. Enabling is the only thing Troupe adds to a group: membership stays the provider's. A name another team already has is refused as conflict unless link is true, because under it the group would be linked into that team and the team's settings changed; enabling a team's own group again is the same team.",
       risk: :write,
       arguments: [
         %Argument{
@@ -614,6 +614,12 @@ defmodule Troupe.Plane.Admin.API do
           description:
             "The team's name, and anything to set at the same time, as in admin.team.update.",
           properties: @team_enable_properties
+        },
+        %Argument{
+          name: "link",
+          type: :boolean,
+          description:
+            "true to link the group into the team that already has the name, changing its settings to those sent. Absent or false refuses that name."
         }
       ]
     },
@@ -808,7 +814,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.audit.verify",
       function: :audit_verify,
       summary:
-        "Check the audit trail's hash chain and name the first row that does not verify: altered content, or a predecessor that is not the one that was there. Rows written before the chain existed are counted as unchained rather than reported as bad.",
+        "Check the audit trail's hash chain and name the first row that does not verify: altered content, or a predecessor that is not the one that was there. result is ok, or that row with its reason (altered or chain_broken). Rows written before the chain existed are counted as unchained rather than reported as bad.",
       risk: :read
     },
     %Method{
@@ -1084,7 +1090,8 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.audit.list",
       function: :audit_list,
-      summary: "Who changed what, newest first, with the diff of each change.",
+      summary:
+        "Who changed what, newest first, with the diff of each change. A team admin reads the rows about the teams they administer (the team, its triggers, principals and sessions); a platform admin reads them all.",
       risk: :read,
       arguments: [
         %Argument{

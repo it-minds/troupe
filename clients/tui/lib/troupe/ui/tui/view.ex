@@ -1437,6 +1437,7 @@ defmodule Troupe.UI.TUI.View do
     do: "#{length(choices)} models detected"
 
   defp picker_count(%{choices: choices}, :detail), do: "#{length(choices)} levels"
+  defp picker_count(%{choices: choices}, :provider), do: "#{length(choices)} provider types"
   defp picker_count(%{choices: choices}, _type), do: "#{length(choices)} themes"
 
   defp picked_type(s), do: Map.get(Enum.at(Settings.fields(), s.cursor) || %{}, :type)
@@ -1768,7 +1769,13 @@ defmodule Troupe.UI.TUI.View do
   end
 
   defp settings_command_line(%{settings: %{picker: p} = s}) when p != nil do
-    what = if picked_type(s) == :detail, do: "level", else: "theme"
+    what =
+      case picked_type(s) do
+        :detail -> "level"
+        :provider -> "provider type"
+        _theme -> "theme"
+      end
+
     {s.status || "", " choose a #{what} — ↑↓ move · Enter picks · Esc back "}
   end
 
@@ -1779,6 +1786,7 @@ defmodule Troupe.UI.TUI.View do
         %{type: :model} -> "Enter opens the model menu"
         %{type: :theme} -> "Enter opens the theme menu"
         %{type: :detail} -> "Enter opens the levels"
+        %{type: :provider} -> "Enter opens the provider types"
         _ -> "Enter edits"
       end
 

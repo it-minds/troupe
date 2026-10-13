@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { describeCheck, vendorKeyVar } from "@troupe/client";
+import { answeredKind, describeCheck, vendorKeyVar } from "@troupe/client";
 import { Actions, StepFrame } from "./Step";
 import type { StepProps } from "./Step";
 
@@ -12,16 +12,19 @@ type Source = "env" | "typed" | "none";
 
 export function Key({ flow, busy, error, onAnswer, onBack }: StepProps): JSX.Element {
   const provider = flow.answers.provider ?? {};
-  const providerName = String(provider["provider"] ?? "anthropic");
+  const kind = answeredKind(flow);
   const baseUrl = (provider["base_url"] as string | null) ?? null;
-  const vendorVar = vendorKeyVar(providerName, baseUrl);
+  const vendorVar = vendorKeyVar(kind, baseUrl);
   const inEnv = vendorVar !== null && flow.detected.env.includes(vendorVar);
-  // A vendor wants a key; a gateway may not, and only a gateway is offered "none".
-  const gateway = baseUrl !== null && vendorVar === null;
+  // A vendor wants a key, and so does a provider whose address is always the person's own
+  // (Azure's resource); a gateway may not, and only a gateway is offered "none".
+  const gateway = baseUrl !== null && vendorVar === null && kind?.key !== "required";
   const [source, setSource] = useState<Source>(inEnv ? "env" : "typed");
   const [key, setKey] = useState("");
   const refused = flow.check?.state === "refused";
-  const label = providerName === "anthropic" ? "Anthropic" : providerName === "openai" && !gateway ? "OpenAI" : "the gateway";
+  // A type by its name; a gateway, or a vendor's API at an address of the person's, is the gateway.
+  const named = kind && kind.id === kind.provider && (baseUrl === null || kind.url === "required" || kind.url === "server");
+  const label = named ? kind.label : "the gateway";
 
   return (
     <StepFrame

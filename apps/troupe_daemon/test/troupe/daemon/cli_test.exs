@@ -105,6 +105,20 @@ defmodule Troupe.Daemon.CLITest do
              CLI.import_report(%{imported | "providers" => [], "default" => nil}, "/c.yaml")
 
     assert line =~ "nothing to copy"
+
+    # What it did not copy, by name and with the reason, whether or not it copied anything.
+    skipped = [%{"provider" => "mistral", "reason" => "uses @ai-sdk/mistral, which ..."}]
+
+    assert List.last(CLI.import_report(Map.put(imported, "skipped", skipped), "/c.yaml")) ==
+             "  skipped    mistral: uses @ai-sdk/mistral, which ..."
+
+    assert [first, "  skipped    mistral: uses @ai-sdk/mistral, which ..."] =
+             CLI.import_report(
+               %{imported | "providers" => [], "default" => nil} |> Map.put("skipped", skipped),
+               "/c.yaml"
+             )
+
+    assert first == "nothing new copied from /oc.jsonc into /c.yaml"
   end
 
   # Into a scratch home, as a systemd user unit whatever runs the test: never the login

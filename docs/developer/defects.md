@@ -172,8 +172,6 @@ Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
 
 ### D37 - Small leftovers from the 0.6.1 work (low)
 
-- The settings help's "Where things live" says `~/.config/troupe/config.yaml`; on
-  Windows the file is under `%APPDATA%\troupe`.
 - `troupe --watch` still walks the whole workspace for `.gitignore` rules at start (PR
   #240 moved that walk out of every other session start).
 
@@ -1306,7 +1304,7 @@ Found by the chunk 30 fixers, 2026-10-11.
   - On a binding model, compaction, an `AI?` turn's `plan` prompt and a profile or model switch still change the prefix; what an enforcing account does after such a change is D92's first item.
 - **The scratchpad at compaction** (Decision 878, #616). The compaction summariser once wrote a whole plan from only the prompt and two files, and once a one-sentence summary that dropped all earlier context.
 - **Personal tools on a pod** (Decision 879). `personalTools: forbid` takes effect at a session's next activation. A session that is awake when an administrator changes it keeps accepting registrations until it is activated again.
-- **The terminal client's connection.** Every fleet call goes on one connection, and the gateway answers a connection's calls one at a time, so one slow call blocks the rest (`worktree.list` now has its own, #621). `branch_profile/2` turns any `profiles` error into "unknown command /X; available: /worktree", where it should say the daemon didn't answer.
+- **The terminal client's connection.** Every fleet call goes on one connection, and the gateway answers a connection's calls one at a time, so one slow call blocks the rest (`worktree.list` now has its own, #621).
 - **A fresh daemon's first `session.create`.** Twice, a `session.create` sent about 2 seconds after an installed daemon started got no answer for over 120 seconds; one sent later answered in under a second. Not confirmed: it may be the test harness or a startup race. The release runs with distribution off, so it couldn't be attached to.
 
 Found by the chunk 31 fixers, 2026-10-12. Its test items were fixed in chunk 32 (D8 says
@@ -1315,7 +1313,6 @@ what is left).
 ### D125 - Docs, policy, ceilings and workspaces after chunk 32 (low)
 
 - **The plane and its chart.**
-  - The plane hard-codes the `troupe-system` namespace and the `troupe-w-` prefix (`provision.ex`, `enrolment.ex`), so a non-default `namespace` or `policy.namespacePrefix` breaks provisioning or enrolment. The admin docs say to keep the defaults.
   - A TeamVolume's `status.claimName` says `team-<team>`, but the claim is `troupe-team-<team>`.
   - The Trigger CRD's `notifyUrl` description says only "not loopback". The console's Bundles page names a removed `troupe admin bundle publish` command. The plane's index page still shows `troupe mcp`. `admin.profile.put`'s description lists `mcpServers` as admin-set.
   - Bundles' `@builtin_primaries` (`build`, `plan`) is hand-kept, and eight built-ins are primary.
@@ -1327,11 +1324,8 @@ what is left).
   - A GUI served anywhere but the plane's host needs `operator.workerAllowedOrigins`.
 - **The daemon and the gateway.**
   - Command-id replay is keyed by the principal's subject, and every local connection shares it. Two local clients counting their own ids could collide; every real client uses random ids.
-  - `session.pin` on a daemon isn't persisted, and does nothing on a dormant session.
   - A worker advertises `watch: true` but refuses `watch.*` to every token a plane mints.
-  - `workspace.recent` ignores `limit`.
   - `Link.call` answers a failed write with a bare `unavailable` and keeps the dead client until it hears of the disconnect.
-  - `config.yaml` (which may hold a key) is restricted on unix but not on Windows, and `Troupe.Remote.Credentials` keeps its own copy of the `icacls` logic beside `Troupe.OwnerOnly`.
 - **Ceilings** (Decision 880).
   - An OpenAI-compatible reasoning model under a low ceiling can spend all of `max_completion_tokens` reasoning and answer nothing; Troupe sends the effort unchanged and says nothing.
   - Models that think unasked still think at their own default inside the ceiling when thinking is "off" (recorded in 880).
@@ -1342,10 +1336,7 @@ what is left).
   - A `worktree.list` row the time budget didn't reach can't be fetched later.
   - `/worktree <prompt>` in an ignored folder works in the folder and doesn't say no worktree was made.
 - **The clients and the CLI.**
-  - `troupe daemon` with no daemon installed suggests piping `install.sh` from `main`.
-  - `troupe bench --compare` reads the default history file, not the one under `state_dir`.
-  - The headless printer can print a branch's "spawned" line twice (`branch_spawned` has no `seq`), and a run whose only shell call was refused still says "not counted: what its 1 command changed".
-  - The TUI's settings page edits `transcript.detail` as text, not a menu. The VS Code Files row opens a plane's organisation document URL as a file.
+  - The VS Code Files row opens a plane's organisation document URL as a file.
   - `docs/user/updating.md`'s `TROUPE_BIN_DIR` doesn't change what `troupe update` updates; the running binary's path wins.
   - With `TROUPE_INSTALL_DIR` set, Burrito prints a line on stdout that corrupts `--json`; `clients/tui/scripts/build-local` uses the same variable.
 - **Stale strings and comments.** `scripts/remote-up`'s WebSocket URL; `gateway/daemon.ex`'s supervision strategy (it is `rest_for_one`); `plane/harness.ex`'s `session.create` order; the source file `status.ex` names; `tokens.json`'s `$meta` and motion notes; `signal.tokens.json`'s `default`; `Approval.tsx`'s "runs on the platform" for a local shell; the TUI's empty state suggesting `/code`; and comments citing another repository's decisions.
@@ -1372,25 +1363,56 @@ Found by the chunk 32 fixers, 2026-10-12.
   - Installation tokens aren't revoked when a session goes dormant; they run out their hour.
   - `git.credential` is answered synchronously on the pod's control connection, so a slow GitHub delays that pod's other traffic.
   - `sessions.workspace_source` is stored from the client and never read.
-  - `session.spawn` and `session.fork` don't carry `repository` over.
   - A pod that enrols marks dormant a session placed on it a moment earlier that it didn't report; the tests allow for it, and `person_credentials_test.exs` has the same latent race.
 - **The console** (Decision 886).
   - An upgraded deployment serves `/console` before its identity provider allows the redirect URI, so sign-in fails until it is registered (the error says what to register).
-  - Form inputs may be named by their placeholder rather than their label; worth a screen-reader check.
-  - The "last set by" line upper-cases the email address.
 - **Providers** (Decision 887).
   - Catalogue listings send the HTTP library's default User-Agent, not Troupe's.
-  - The plane's profile provider list and a worker profile's `llm.provider` can't choose the new types.
   - An organisation that enforces `provider: azure_openai` without enforcing `base_url` leaves a session-wide Azure provider without a URL unrefused.
   - OpenRouter's `reasoning_details` isn't handed back (Anthropic models with tools through OpenRouter), and its usage `cost` isn't used.
 - **Orchestration** (Decision 888). The bench has no task where `orchestrate` could pay off (larger multi-file work, a reviewer catching a mistake), and `docs/user/bench.md` says a by-name scenario's limits are printed by the plan, where `describe/1` prints only the plan-wide ones.
 - **The clients.**
-  - The terminal client renders `tools_registered` as a raw event and logs it as unknown; it shows beside the offered-tools sentence.
-  - `memory.forget` can answer `not_found` for a fact it did forget, when `memory.md` can't be removed after `facts.jsonl` was rewritten.
   - A `fleet` subscription has no per-session access filter; on a pod, authorisation limits it to tokens without a session id.
-- **Tests.** `FailoverTest`'s node name is the same in every worktree, so two worker suites at once fail its setup.
 
 Found by the chunk 33 fixers, 2026-10-13.
+
+### D127 - The GitHub fix loop, control TLS, the scratchpad and providers after chunk 34 (low)
+
+- **The GitHub fix loop** (Decision 891).
+  - `git_push` commits the whole working tree (`git add -A`). Anything the agent can read and copy into the workspace, a secret on one of its mounts included, can land on a `troupe/*` branch, which is public for a public repository. Until a later slice's policy can refuse public repositories or restrict paths, grant the App private repositories only.
+  - CI output reaches the agent fenced as data, but text in it can still steer the agent within its own branch, pull request and comments; the rules enforced in code hold.
+  - A profile that grants neither checks nor statuses gets no round counting, only its budget.
+  - If the plane can't record a push after GitHub moved the branch, the session's next push is refused as "commits this session did not push", and a person has to sort it out.
+  - If the plane can't take the clone's base commit, that session can never push; the worker only logs a warning.
+  - Installation tokens still aren't revoked when a session goes dormant (D126).
+- **The plane's profile editor.** The LiveView editor rebuilds `spec` from its form fields, so saving a profile drops `spec.mcpIdentities` without saying so; only `github` is carried through. The new console has no profile editor yet. (medium)
+- **Control TLS** (Decision 893).
+  - The TLS sniff uses `:gen_tcp.unrecv/2`, which is undocumented and works only on the default inet backend. A release switched to `inet_backend: socket` would refuse every TLS handshake.
+  - Worker pods still enrol in plaintext. The operator could copy `ca.crt` into each worker namespace and set `TROUPE_PLANE_CA_PATH`, after which plaintext could be refused for pods too.
+  - `OwnerOnly` was added to the TUI's harness doors and the TUI's own `icacls` code removed, with no TUI decision recording it.
+- **Team admins and namespaces** (Decisions 896, 897).
+  - A team admin's audit list leaves out `profile.put`, `host.*` and `pod.drain` as rows about the plane as a whole, so a team admin no longer sees changes to profiles their team is granted. Whether to show them is a product question.
+  - The enrolment prefix comes from the chart's `policy.namespacePrefix`, not the live TroupePolicy; a separately installed policy with another prefix gets its pods refused (with a log line).
+  - `admin.team.enable` on a team's own group with new settings still changes them without saying so.
+  - D124's other half is open: one connection for every fleet call.
+- **The scratchpad** (Decision 895).
+  - A session near the compaction threshold compacts mid-turn and then reads the same document again.
+  - Asked for "the whole plan again", models show the document again rather than patch it.
+  - The default `max_tokens` of 8192 cuts a whole-document `show` short on Sonnet 5.5.
+  - Agents still try `grep` and `edit_file` on `scratch:` paths.
+  - The desktop app draws a `patch` call as a generic tool row.
+  - The "only when asked, or past about 80 lines" wording hasn't been measured live.
+- **Providers** (Decision 894). The GUI's fake daemon keeps its own copy of the provider types; generating it from `ProviderTypes.wire/0` would keep it from drifting.
+- **Tests.**
+  - The TUI's `InterruptTest` ("a console that cannot be read...") fails now and then with `:noproc`, a race in its own setup.
+  - Plane suites run at once against the shared `troupe_plane_test` database deadlock (`40P01`).
+  - The core and gateway suites in one VM make gateway tests fail on sessions core left behind; CI runs them apart.
+  - The gateway's `PrivateTest` (two tests) fails under load.
+  - The cluster suite's UpgradeTest changes `commonLabels`, which no chart template uses, so its upgrade "that renders every template differently" only reruns the hook jobs.
+  - A `helm upgrade` from `dev/kind/values.yaml` alone, on a development cluster `scripts/remote-up` set up with a gateway URL, narrows the policy back to the placeholder host, after which every write to the dev profile is refused.
+- **History.** Merge commits b41e250f and 13f907b3 keep git's `# Conflicts:` lines in their messages.
+
+Found by the chunk 34 fixers, 2026-10-13.
 
 ## Taken
 

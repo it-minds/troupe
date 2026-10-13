@@ -48,7 +48,10 @@ defmodule Troupe.Tools do
     # Onboarding another tool's files into Troupe's own (Decision 823).
     Troupe.Tools.OnboardWrite,
     # A document shown beside the chat (Decision 870), on every call: never gated here.
-    Troupe.Tools.Show
+    Troupe.Tools.Show,
+    # And revised in place, wherever `show` is and on every call, never gated either: a
+    # tool that came and went would change the front of every prompt.
+    Troupe.Tools.Patch
   ]
 
   # The task list's tools, and the model calls a turn makes before a profile that did not
@@ -63,7 +66,8 @@ defmodule Troupe.Tools do
   @named_only ~w(onboard_write)
 
   @doc """
-  Every tool available, built-ins plus anything registered in `:extra_tools`.
+  Every tool available, built-ins plus anything registered in `:extra_tools` that this
+  session has (`Troupe.Tool.available?/2`).
 
   The extension point exists so a later MCP adapter can register remote tools as
   ordinary `Troupe.Tool` implementations without touching the agent loop, and the
@@ -74,7 +78,7 @@ defmodule Troupe.Tools do
   to one person on one session, and a pod-wide list would hand it to everybody.
   """
   @spec all(String.t() | nil) :: [Tool.handle()]
-  def all(session_id \\ nil), do: @builtins ++ extra() ++ mcp(session_id)
+  def all(session_id \\ nil), do: @builtins ++ extra(session_id) ++ mcp(session_id)
 
   @doc """
   The tools that come and go during a session: the pod's and the session's MCP servers'
@@ -95,7 +99,13 @@ defmodule Troupe.Tools do
   defp local(nil), do: []
   defp local(session_id), do: Troupe.Session.MCP.tools(session_id)
 
-  defp extra, do: Application.get_env(:troupe_core, :extra_tools, [])
+  # The host's own, less those it says this session does not have (`Tool.available?/2`): a
+  # worker's GitHub tools exist only for a session created with a repository.
+  defp extra(session_id) do
+    :troupe_core
+    |> Application.get_env(:extra_tools, [])
+    |> Enum.filter(&Tool.available?(&1, session_id))
+  end
 
   # Tools discovered from MCP servers, as values rather than modules. They go through
   # everything below exactly as a built-in does — which is the point.
@@ -178,9 +188,10 @@ defmodule Troupe.Tools do
   defp task_list(tools, _definition, _ctx), do: tools
 
   # The profile's tools, with the MCP servers' and the person's clients' as the turn's
-  # first call found them (Decision 871).
-  defp offered(definition, %Ctx{turn_tools: held}) when is_list(held),
-    do: profile_tools(@builtins ++ extra() ++ held, definition)
+  # first call found them: one that comes or goes changes the tools at the next turn, never
+  # in the middle of one.
+  defp offered(definition, %Ctx{turn_tools: held} = ctx) when is_list(held),
+    do: profile_tools(@builtins ++ extra(ctx.session_id) ++ held, definition)
 
   defp offered(definition, %Ctx{} = ctx), do: for_definition(definition, ctx.session_id)
 

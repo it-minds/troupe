@@ -1,0 +1,90 @@
+{{- if and .Values.plane.enabled .Values.plane.controlTls.enabled .Values.plane.controlTls.certManager }}
+{{- $tls := .Values.plane.controlTls }}
+{{- $ns := .Values.namespace }}
+# The control port's certificate, issued by cert-manager for the control Service.
+#
+# A registered machine dials this port from outside the cluster and enrols over TLS only.
+# Its registration answers `ca.crt`, the CA that signed this certificate, and the machine
+# trusts that CA and nothing else for the channel: it pins it. So the issuer is a CA the
+# installation keeps, never a public ACME one, which would not issue for a
+# cluster-internal name and whose CA would vouch for anybody's host.
+{{- if not $tls.issuer.name }}
+#
+# With no issuer named, the chart makes one for this certificate alone: a self-signed
+# issuer, a CA certificate from it, and an issuer from that. The CA lasts ten years and
+# keeps its key when cert-manager renews it, so a CA a machine pinned stays good for the
+# certificates issued after; the certificate under it is renewed on cert-manager's own
+# schedule, and the plane reads the new one at its next handshake.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: troupe-plane-control-selfsigned
+  namespace: {{ $ns }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: troupe-plane-control-ca
+  namespace: {{ $ns }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  isCA: true
+  commonName: troupe-plane-control-ca
+  secretName: troupe-plane-control-ca
+  duration: 87600h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Never
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: troupe-plane-control-selfsigned
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: troupe-plane-control-ca
+  namespace: {{ $ns }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: troupe-plane-control-ca
+---
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: troupe-plane-control
+  namespace: {{ $ns }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $tls.secretName }}
+  # The control Service by each name a client in the cluster may use, and whatever a
+  # machine outside it dials.
+  dnsNames:
+    - troupe-plane-control
+    - troupe-plane-control.{{ $ns }}
+    - troupe-plane-control.{{ $ns }}.svc
+    - troupe-plane-control.{{ $ns }}.svc.cluster.local
+    {{- range $tls.dnsNames }}
+    - {{ . | quote }}
+    {{- end }}
+  {{- with $tls.ipAddresses }}
+  ipAddresses:
+    {{- range . }}
+    - {{ . | quote }}
+    {{- end }}
+  {{- end }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: {{ $tls.issuer.kind | default "Issuer" }}
+    name: {{ $tls.issuer.name | default "troupe-plane-control-ca" }}
+{{- end }}

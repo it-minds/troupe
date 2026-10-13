@@ -21,6 +21,9 @@ defmodule Troupe.Plane.AdminTest do
     Triggers
   }
 
+  alias Troupe.Plane.Fleet.Profile
+  alias Troupe.Protocol.ProviderTypes
+
   @moduletag timeout: 60_000
 
   setup do
@@ -730,6 +733,106 @@ defmodule Troupe.Plane.AdminTest do
       refute Map.has_key?(field, "default")
     end
 
+    # Issue #658: a profile's pods may speak to any provider type, the one list the clients
+    # offer, and the resource declares the same names, so a profile written in a repository
+    # is refused by the API server where the console would refuse it. On the chunk's tip
+    # the resource declared anthropic, openai and fake, and refused gemini.
+    test "the WorkerProfile resource declares llm.provider as the provider types" do
+      crd =
+        "../../../../../charts/troupe/crds/workerprofile.yaml"
+        |> Path.expand(__DIR__)
+        |> YamlElixir.read_from_file!()
+
+      [%{"schema" => %{"openAPIV3Schema" => schema}}] = crd["spec"]["versions"]
+      llm = schema["properties"]["spec"]["properties"]["llm"]
+      field = llm["properties"]["provider"]
+
+      assert field["enum"] == ProviderTypes.names()
+      # No default: one the API server filled in would be a setting nobody wrote, which the
+      # rule below would refuse. The operator reads an absent provider as openai.
+      refute Map.has_key?(field, "default")
+    end
+
+    # The resource refuses an `llm` field without `llm.endpoint` as the plane does, so a
+    # profile kept in a repository is refused by the API server where the console would
+    # refuse it. On the chunk's tip the resource had no rule, and the operator dropped every
+    # such setting without a word. An API server compiles and runs the rule in the cluster
+    # job (its dry run of a profile without an endpoint); here it is held to the plane's
+    # list of fields, and to a plain message, which the API server requires beside a rule
+    # it cannot show as it is.
+    test "the WorkerProfile resource refuses llm settings without llm.endpoint, as the plane does" do
+      crd =
+        "../../../../../charts/troupe/crds/workerprofile.yaml"
+        |> Path.expand(__DIR__)
+        |> YamlElixir.read_from_file!()
+
+      [%{"schema" => %{"openAPIV3Schema" => schema}}] = crd["spec"]["versions"]
+      llm = schema["properties"]["spec"]["properties"]["llm"]
+      assert [%{"rule" => rule, "message" => message}] = llm["x-kubernetes-validations"]
+
+      refute rule =~ "\n"
+      assert rule =~ "(has(self.endpoint) && self.endpoint != '') || !("
+
+      named = ~r/has\(self\.(\w+)\)/ |> Regex.scan(rule) |> Enum.map(&List.last/1)
+      fields = Enum.sort(Profile.llm_fields())
+      assert Enum.sort(named -- ["endpoint"]) == fields
+      assert Enum.sort(Map.keys(llm["properties"]) -- ["endpoint"]) == fields
+
+      assert message =~ "llm settings need llm.endpoint"
+      assert message =~ "Troupe's built-in model settings"
+    end
+
+    test "llm.provider is a provider type, and every llm field needs llm.endpoint", context do
+      put = fn llm ->
+        Admin.profile_put(context.root, %{
+          "name" => "llm-dev",
+          "image" => "ghcr.io/troupe/worker:1",
+          "spec" => %{"llm" => llm}
+        })
+      end
+
+      for {provider, endpoint} <- [
+            {"gemini", "https://generativelanguage.googleapis.com/v1beta/openai"},
+            {"ollama", "http://ollama.models.example.test:11434"},
+            {"azure_openai", "https://res.openai.azure.example.test"},
+            {"openrouter", "https://openrouter.ai/api/v1"}
+          ] do
+        llm = %{"provider" => provider, "endpoint" => endpoint}
+        assert {:ok, _} = put.(llm)
+        assert Fleet.get_profile("llm-dev").spec["llm"] == llm
+      end
+
+      # An endpoint alone, or nothing at all, is a profile too.
+      assert {:ok, _} = put.(%{"endpoint" => "https://llm-gw.example.test/v1"})
+      assert {:ok, _} = put.(%{})
+
+      key = %{"name" => "llm-credentials", "key" => "api-key"}
+      prices = %{"m" => %{"input" => 1, "output" => 2}}
+
+      for {llm, words} <- [
+            {%{"provider" => "bedrock", "endpoint" => "https://x.example.test"},
+             "llm.provider must be one of anthropic, openai, ollama"},
+            {%{"provider" => "Gemini", "endpoint" => "https://x.example.test"},
+             "llm.provider must be one of"},
+            {%{"provider" => "azure_openai"},
+             "llm.provider is set without llm.endpoint, and the pods are given the llm settings only with an endpoint"},
+            {%{"model" => "gpt-4o"}, "llm.model is set without llm.endpoint"},
+            {%{"smallModel" => "mini", "endpoint" => ""},
+             "llm.smallModel is set without llm.endpoint"},
+            {%{"secretRef" => key}, "llm.secretRef is set without llm.endpoint"},
+            {%{"prices" => prices}, "llm.prices is set without llm.endpoint"},
+            {%{"provider" => "gemini", "model" => "gemini-2.5-pro", "secretRef" => key},
+             "llm.provider, llm.model and llm.secretRef are set without llm.endpoint"}
+          ] do
+        assert {:error, error} = put.(llm)
+        assert error.message == "invalid_params"
+        assert error.data.reason =~ words
+      end
+
+      # Nothing the refusals named was written.
+      assert Fleet.get_profile("llm-dev").spec["llm"] == %{}
+    end
+
     # Who the profile is at a server its bundle calls with client credentials (Decision
     # 747): the owner's to write, and nothing in it secret, so the plane keeps it as it keeps
     # the rest of the spec and says what is missing rather than refusing.
@@ -889,7 +992,10 @@ defmodule Troupe.Plane.AdminTest do
     session
   end
 
+  # `repository` and `github` are metadata too: the repository a session was created with,
+  # and the branch, commit and pull request its pod reported there, never what it wrote.
   defp expected_session_keys do
-    ~w(epoch id last_active_at last_seq object_bytes owner pinned pinned_by profile state visibility workspace_bytes)a
+    ~w(epoch github id last_active_at last_seq object_bytes owner pinned pinned_by profile)a ++
+      ~w(repository state visibility workspace_bytes)a
   end
 end

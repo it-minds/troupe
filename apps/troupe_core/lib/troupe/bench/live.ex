@@ -667,6 +667,7 @@ defmodule Troupe.Bench.Live do
       "wall_ms" => wall,
       "retries" => acc.retries,
       "compactions" => count(events, "compacted"),
+      "since_compaction" => since_compaction(calls),
       "approvals" => count(events, "approval_requested"),
       "tools" => tools(events, acc.tool_ms),
       "tool_calls" => tool_calls,
@@ -684,6 +685,27 @@ defmodule Troupe.Bench.Live do
   defp largest(tool_calls),
     do: tool_calls |> Enum.map(& &1["result_bytes"]) |> Enum.max(fn -> 0 end)
 
+  # What the run spent from its first compaction on, the summary's call included: where a
+  # document the compaction left out stops being sent, which is what issue #616 measures.
+  # `nil` for a run that never compacted.
+  defp since_compaction(calls) do
+    case Enum.drop_while(calls, &(not &1["summariser"])) do
+      [] ->
+        nil
+
+      since ->
+        costs = numbers(since, "cost_micros")
+
+        %{
+          "model_calls" => length(since),
+          "input_tokens" => sum(since, "input_tokens"),
+          "cached_tokens" => sum(since, "cached_tokens"),
+          "output_tokens" => sum(since, "output_tokens"),
+          "cost_micros" => if(costs == [], do: nil, else: Enum.sum(costs))
+        }
+    end
+  end
+
   # A run that never got going: nothing counted, and why.
   defp failed(plan, error) do
     %{
@@ -699,6 +721,7 @@ defmodule Troupe.Bench.Live do
       "wall_ms" => nil,
       "retries" => 0,
       "compactions" => 0,
+      "since_compaction" => nil,
       "approvals" => 0,
       "tools" => [],
       "tool_calls" => [],

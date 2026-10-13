@@ -45,7 +45,7 @@ defmodule Troupe.Worker.Session.Manager do
   alias Troupe.Sessions.{Context, Sealer}
   alias Troupe.Worker.Cache
   alias Troupe.Worker.Connections
-  alias Troupe.Worker.GitCredentials
+  alias Troupe.Worker.{GitCredentials, GitHub}
   alias Troupe.Worker.Session.{Clone, Restore, Workspace}
   alias Troupe.Worker.Sessions
   alias Troupe.Worker.Usage
@@ -292,8 +292,9 @@ defmodule Troupe.Worker.Session.Manager do
     # The key-manager token this session's person-mode servers were reaching through.
     # Held for the life of the session and no longer, exactly as the data key is.
     Connections.forget(state.session_id)
-    # And its GitHub token, for the same reason.
+    # And its GitHub tokens and tools, for the same reason.
     GitCredentials.forget(state.session_id)
+    GitHub.forget(state.session_id)
 
     :ok
   end
@@ -341,7 +342,7 @@ defmodule Troupe.Worker.Session.Manager do
   # there. What it found is left: a log a reader restored and may still be serving, or a
   # workspace a pod that stopped without putting the session to sleep left behind, which
   # may hold files no archive has. The pod's cache is sealed bytes the activation only
-  # read, and stays (Decision 725).
+  # read, and stays.
   defp put_back(state, context, root) do
     # Under the lock a reader writes its log under, and this manager holds the session's
     # name by now: a reader that was writing the log as it registered has finished, and its
@@ -351,6 +352,8 @@ defmodule Troupe.Worker.Session.Manager do
     # A token a previous activation here held is not this one's: the next use asks the
     # plane for a new one, which is how an activation refreshes it.
     GitCredentials.forget(context.session_id)
+    # A session created with a repository has the fix loop's tools, and one without has none.
+    GitHub.hold(context.session_id, Keyword.get(state.opts, :repository))
 
     try do
       with {:ok, log} <- Restore.events(context, root),

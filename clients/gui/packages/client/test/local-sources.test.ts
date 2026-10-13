@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { DaemonClient } from "../src/index.js";
+import { DaemonClient, revocationText } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 
 describe("your own servers and skills, over the daemon", () => {
@@ -111,7 +111,7 @@ describe("your own servers and skills, over the daemon", () => {
 
     const listed = (await client.listServers({ session_id: "s-1" })).servers;
     const notes = listed.find((s) => s.name === "notes")!;
-    assert.deepEqual(notes.auth, { state: "signed_out", account: null, error: null });
+    assert.deepEqual(notes.auth, { state: "signed_out", account: null, error: null, step_up: null });
     assert.equal(notes.oauth?.client_id, "troupe-test-client");
     assert.equal(notes.state, "sign_in", "a session waits for the sign-in");
     assert.equal(listed.find((s) => s.name === "plain")!.auth, null, "a server that takes none has no sign-in");
@@ -126,12 +126,37 @@ describe("your own servers and skills, over the daemon", () => {
 
     daemon.finishSignIn("notes");
     const after = (await client.listServers({ session_id: "s-1" })).servers.find((s) => s.name === "notes")!;
-    assert.deepEqual(after.auth, { state: "signed_in", account: "ada@example.test", error: null });
+    assert.deepEqual(after.auth, { state: "signed_in", account: "ada@example.test", error: null, step_up: null });
     assert.equal(after.state, "ready");
 
     const out = await client.signOutServer({ name: "notes" });
     assert.equal(out.auth?.state, "signed_out");
     await assert.rejects(client.signInServer({ name: "plain" }), /takes no sign-in/);
     daemon.servers = daemon.servers.filter((s) => s.name !== "notes" && s.name !== "plain");
+  });
+
+  // troupe #619: the scope a server asked for that the sign-in
+  // does not carry, and whether signing out told the provider.
+  it("carries the scope a server wants and what the provider said to a sign-out", async () => {
+    daemon.servers.push({ name: "notes", layer: "user", source: "/home/ada/.config/troupe/mcp.json", url: "https://mcp.example.test/mcp", oauth: { client_id: "troupe-test-client" } });
+    daemon.finishSignIn("notes");
+    daemon.wantScope("notes", "notes.write");
+
+    const listed = (await client.listServers()).servers.find((s) => s.name === "notes")!;
+    assert.equal(listed.auth?.state, "signed_in");
+    assert.equal(listed.auth?.step_up, "notes.write");
+
+    daemon.revocations["notes"] = { state: "failed", reason: "the provider did not answer in time" };
+    const out = await client.signOutServer({ name: "notes" });
+    assert.deepEqual(out.revocation, { state: "failed", reason: "the provider did not answer in time" });
+    assert.equal(revocationText(out.revocation), "the provider was not told (the provider did not answer in time), so the sign-in stays good there until it runs out");
+
+    // Signed out already, there was nothing to revoke.
+    const again = await client.signOutServer({ name: "notes" });
+    assert.equal(again.revocation.state, "none");
+    assert.equal(revocationText(again.revocation), "nothing was held to revoke");
+    assert.equal(revocationText({ state: "revoked", reason: null }), "the provider revoked the sign-in");
+    assert.equal(revocationText({ state: "unsupported", reason: null }), "the provider offers no way to revoke it, so the sign-in stays good there until it runs out");
+    daemon.servers = daemon.servers.filter((s) => s.name !== "notes");
   });
 });

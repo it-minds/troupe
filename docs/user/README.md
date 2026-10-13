@@ -23,7 +23,10 @@ machine and you see the same transcript; two people can open the same session at
 3. `troupe` in a project directory opens a session; `troupe run "a task" --headless` does
    one task and exits.
 4. The settings are one file, `config.yaml` in `~/.config/troupe/` (`%APPDATA%\troupe\` on
-   Windows), and `troupe config` shows what is in force. Your organisation may set
+   Windows, with every other file of your own; [where your files
+   are](configuration/files.md)), and `troupe config` shows what is in force. The
+   [cookbook](configuration/cookbook.md) has a complete file for each provider and more.
+   Your organisation may set
    defaults below it and limits above it; `troupe config --explain` says which
    ([configuration](configuration.md#your-organisations-defaults-and-limits)).
 5. `troupe config validate` checks that file after you edit it by hand;
@@ -204,6 +207,15 @@ versions. A session is pinned to the version current when it started.
 **Trigger.** A scheduled or externally fired job that starts a session as a service
 principal. Such sessions are flagged for review until somebody looks at them.
 
+**Repository.** A session on the plane may be created with a GitHub repository
+(`owner/name`), and its pod starts from a clone of it. On a profile that allows it, the
+agent then pushes its work to a `troupe/*` branch, opens a draft pull request, reads CI on
+it and pushes fixes, as your organisation's GitHub App and never as you; after three red
+CI rounds it stops, says on the pull request what still fails, and leaves the draft for a
+person. Each push and the pull request's link are in the transcript, and the session's
+listing shows its branch, last commit and pull request
+([the GitHub App](../admin/github.md#7-the-fix-loop)).
+
 ## Reading a transcript
 
 A turn shows its answer, not its working. Everything rendered from something is a frame
@@ -241,11 +253,18 @@ began, above the answer: `▸ 7 steps · 1 failed · grep, read_file, edit_file 
 
 ## The scratchpad
 
-A long answer, such as a plan, a report, a comparison, a diagram or a table, does not
+A document you want to keep, such as a plan, a report, a table or a diagram, does not
 belong in the chat, where it scrolls away and has to be printed again to be revised. An
 agent puts it on the session's scratchpad instead, with its `show` tool, and keeps its
-reply to the short answer and the document's name. Showing a document again under the
-same name replaces it, so a plan is revised in place.
+reply to the short answer and the document's name. It revises a document in place with
+`patch`, which replaces an exact span of it or adds to its end, so the conversation
+carries the change and not the whole document again; you see the whole document,
+revised. Showing a document again under the same name replaces it.
+
+**When an agent uses it.** Only when you ask for a document (a plan, report, table or
+diagram to keep or revise), or when its answer would run past about 80 lines. Anything
+else it answers in the chat, as it always has. Ask for "a plan as a document" to get one
+on the scratchpad; ask it to "answer here" to keep a long answer in the chat.
 
 - **In the terminal UI** each document is a card in the transcript where the agent showed
   it: its title, its name, its size, and `new` or `updated 3 times`. `/scratch` lists the
@@ -261,16 +280,21 @@ same name replaces it, so a plan is revised in place.
   a fork has the ones its history shows. Your own program reads one as `scratch:/<name>`
   (`scratch.list` and `fs.read` in [PROTOCOL.md](../../PROTOCOL.md)).
 - **Limits.** 256 KiB a document (`scratch_max_bytes`) and 50 documents a session
-  (`scratch_max_documents`). Past either, `show` refuses and says so, and the agent
-  replaces a document or answers in the chat.
-- **What it costs.** Until the conversation is compacted, the document's words are in it
-  as the call's arguments, so it costs about what the same answer in the chat would. A
-  compaction leaves each document out for a one-line pointer (its name, title, version
-  and size), and the summary it writes lists every document on the scratchpad, so from
-  then on the model is not sent them again but knows they are there. When the agent needs
-  a document after that, it reads it back with `read_file` on `scratch:/<name>`; that read
-  is the only way the agent's tools reach the scratchpad, and it writes there only with
-  `show`.
+  (`scratch_max_documents`). Past either, `show` and `patch` refuse and say so, and the
+  agent replaces a document or answers in the chat. A document too long for one reply of
+  the model's is written in parts: the agent shows its start and patches the rest on.
+- **What it costs.** Until the conversation is compacted, a document's words are in it as
+  the `show` call's arguments, so it costs about what the same answer in the chat would,
+  and a `patch` carries only its change. A compaction leaves each document out for a
+  one-line pointer (its name, title, version and size), and a long patch too, and the
+  summary it writes lists every document on the scratchpad, so from then on the model is
+  not sent them again but knows they are there. When the agent needs a document after
+  that, it reads it back with `read_file` on `scratch:/<name>`; that read is the only way
+  the agent's tools reach the scratchpad, and it writes there only with `show` and
+  `patch`. In a long session that compacts often, the scratchpad costs more than answering
+  in the chat, not less: each revision is a call of its own and a reply, and each read
+  back after a compaction is another ([bench.md](../developer/bench.md) has the
+  measurement). That is why an agent uses it only when asked or for a long answer.
 
 ## What Troupe never does
 
@@ -285,6 +309,9 @@ same name replaces it, so a plan is revised in place.
   and the log records that client as the approver.
 - **It never uses your machine unasked.** Offering your own tool server to a session takes
   a deliberate confirmation, and everyone on the session sees it.
+- **It never merges.** A session pushes only its own `troupe/*` branch, never with force,
+  and opens a pull request only as a draft; a person reviews and merges it. The agent's
+  shell never holds a GitHub token: the pod's own tools do the pushing.
 
 Everything it does unasked, and what it never does, in one place for a reviewer:
 [security](../admin/security.md). How it works underneath:

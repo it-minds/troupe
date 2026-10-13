@@ -15,7 +15,7 @@ defmodule Troupe.Plane.ProvisionerTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Enrolment, FakeWorkerProfiles, Fleet, Identity}
+  alias Troupe.Plane.{Admin, ControlTLSFixture, Enrolment, FakeWorkerProfiles, Fleet, Identity}
   alias Troupe.Plane.Admin.API
   alias Troupe.Plane.Fleet.{Host, Hosts, Provisioner}
 
@@ -268,8 +268,38 @@ defmodule Troupe.Plane.ProvisionerTest do
       Application.put_env(:troupe_plane, :platform_admin_group, "platform")
       on_exit(fn -> Application.delete_env(:troupe_plane, :platform_admin_group) end)
 
+      # The control port's certificate, as the chart mounts it: a machine is given its CA.
+      base = Path.join(System.tmp_dir!(), "troupe-hosts-#{System.unique_integer([:positive])}")
+      tls = ControlTLSFixture.write!(base)
+      Application.put_env(:troupe_plane, :control_tls, tls.dir)
+
+      on_exit(fn ->
+        Application.delete_env(:troupe_plane, :control_tls)
+        File.rm_rf!(base)
+      end)
+
       _laptops = profile("laptops", %{provisioner: "ssh"})
-      %{actor: Admin.actor_for_subject("root@example.test")}
+      %{actor: Admin.actor_for_subject("root@example.test"), ca: File.read!(tls.ca)}
+    end
+
+    test "answers the CA the machine pins beside the secret, and again on a rotation",
+         context do
+      assert {:ok, host} = Admin.host_register(context.actor, "laptops", %{"name" => "build-box"})
+      assert host.ca == context.ca
+
+      assert {:ok, rotated} = Admin.host_rotate(context.actor, "laptops", "build-box")
+      assert rotated.ca == context.ca
+    end
+
+    test "registers nothing on a plane whose control port has no certificate", context do
+      Application.delete_env(:troupe_plane, :control_tls)
+
+      assert {:error, error} =
+               Admin.host_register(context.actor, "laptops", %{"name" => "build-box"})
+
+      assert error.message == "unavailable"
+      assert error.data.reason =~ "a registered machine enrols over TLS only"
+      assert Hosts.for_profile("laptops") == []
     end
 
     test "mints a secret that crosses once and is kept only as a hash", context do

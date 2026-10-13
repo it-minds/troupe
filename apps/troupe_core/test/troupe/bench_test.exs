@@ -33,6 +33,11 @@ defmodule Troupe.BenchTest do
     assert value(tool_calls, "model_calls") == 31
     assert value(tool_calls, "largest_prompt_bytes") > value(tool_calls, "first_prompt_bytes")
 
+    # #616: a short answer nobody asked to keep goes in the reply. The scripted model
+    # cannot judge that, so the turn checks the words that say it reached the model.
+    assert %{"scratchpad_said" => true, "not_shown" => true} =
+             Map.new(tool_calls["checks"], &{&1["name"], &1["passed"]})
+
     # Compaction came at the configured share of the window and not before it.
     compaction = scenario(report, "compaction")
     assert value(compaction, "fired_at_share") >= %Troupe.Config{}.compact_at

@@ -41,6 +41,8 @@ defmodule Mix.Tasks.Troupe.Xref do
       Troupe.Bench                                 the offline suite `troupe bench` runs on this binary's harness
       Troupe.Update                                 `troupe update`: a signed release, checked and swapped in
       Troupe.Protocol.ClientUpdate                  a plane's version policy, and the sentence its refusal is
+      Troupe.OwnerOnly                              a file its owner alone may read, as the daemon's own are
+      Troupe.Protocol.ProviderTypes                 the provider types a person picks from, and what each asks
 
   A new call into, say, the agent tree or the session log fails here, and the way to add
   one is to put it in the protocol. What the import table cannot see is a module named as
@@ -83,7 +85,9 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.Onboard,
     Troupe.Bench,
     Troupe.Update,
-    Troupe.Protocol.ClientUpdate
+    Troupe.Protocol.ClientUpdate,
+    Troupe.OwnerOnly,
+    Troupe.Protocol.ProviderTypes
   ]
 
   @impl true

@@ -107,6 +107,11 @@ export interface FakeDaemonOptions {
    */
   servesKeys?: boolean;
   /**
+   * False is a daemon from before troupe #658: `config.get` lists no `provider_types`,
+   * `setup.get` no `kinds`, and only Anthropic, OpenAI and the fake are providers it takes.
+   */
+  servesProviderTypes?: boolean;
+  /**
    * The machine's config says `auto_approve: true`, so every session it starts approves
    * every tool call itself, and a workspace's command asks before it is first sent
    * (troupe Decision 814).
@@ -180,6 +185,8 @@ export interface FakeAuth {
   state: "signed_out" | "signing_in" | "signed_in" | "expired";
   account: string | null;
   error: string | null;
+  /** A scope a server asked for that the sign-in does not carry, until a sign-in lands. */
+  step_up: string | null;
 }
 
 /** A skill in one of the daemon's layers; `user_agents` and `agents` are the `.agents/skills` read in place (troupe Decision 822). */
@@ -430,7 +437,42 @@ const OFFERS: Record<string, Array<Record<string, unknown>>> = {
     { id: "glm-5.2", context: 128_000, max_output: null, input: null, output: null },
     { id: "qwen3.6-35b", context: 32_768, max_output: 8_192, input: null, output: null },
   ],
+  // An Ollama server lists what is pulled there, asked with no key, and prices nothing.
+  ollama: [
+    { id: "llama3.2:latest", context: null, max_output: null, input: null, output: null },
+    { id: "qwen3:8b", context: null, max_output: null, input: null, output: null },
+  ],
+  openrouter: [
+    { id: "anthropic/claude-sonnet-4.5", context: 1_000_000, max_output: 64_000, input: 3.0, output: 15.0 },
+    { id: "deepseek/deepseek-chat-v3.1", context: 163_840, max_output: null, input: 0.2, output: 0.8 },
+  ],
+  // Azure lists its deployments only to its management API: nothing, to a key.
+  azure_openai: [],
+  gemini: [
+    { id: "gemini-2.5-flash", context: null, max_output: null, input: null, output: null },
+    { id: "gemini-2.5-pro", context: null, max_output: null, input: null, output: null },
+  ],
 };
+
+/**
+ * The provider types a screen offers, as the daemon's `config.get` and `setup.get` say
+ * (troupe #658): `Troupe.Protocol.ProviderTypes.wire/0`'s answer at this version.
+ */
+export const PROVIDER_TYPES: Array<Record<string, unknown>> = [
+  { name: "anthropic", label: "Anthropic", summary: "Claude, at Anthropic's own endpoint, with a key from console.anthropic.com.", url: "own", default_url: "https://api.anthropic.com", url_example: null, key: "required", key_var: "ANTHROPIC_API_KEY" },
+  { name: "openai", label: "OpenAI", summary: "GPT, at OpenAI's own endpoint, with a key from platform.openai.com.", url: "own", default_url: "https://api.openai.com", url_example: null, key: "required", key_var: "OPENAI_API_KEY" },
+  { name: "ollama", label: "Ollama", summary: "Models you run yourself, on an Ollama server on this computer or your network. No key, and nothing leaves that server.", url: "server", default_url: "http://localhost:11434", url_example: null, key: "none", key_var: null },
+  { name: "openrouter", label: "OpenRouter", summary: "Many vendors' models behind one key from openrouter.ai, each priced as OpenRouter lists it.", url: "own", default_url: "https://openrouter.ai/api/v1", url_example: null, key: "required", key_var: "OPENROUTER_API_KEY" },
+  { name: "azure_openai", label: "Azure OpenAI", summary: "OpenAI's models in your own Azure resource, at its address, with its key. A model is a deployment's name.", url: "required", default_url: null, url_example: "https://<resource>.openai.azure.com", key: "required", key_var: null },
+  { name: "gemini", label: "Gemini", summary: "Google's Gemini models, through the Gemini API, with a key from aistudio.google.com.", url: "own", default_url: "https://generativelanguage.googleapis.com/v1beta/openai", url_example: null, key: "required", key_var: "GEMINI_API_KEY" },
+];
+
+/** The ways `setup.get` says a provider may be set up: every type, then the two gateways. */
+export const SETUP_KINDS: Array<Record<string, unknown>> = [
+  ...PROVIDER_TYPES.map(({ name, ...rest }) => ({ id: name, provider: name, ...rest })),
+  { id: "gateway", provider: "openai", label: "An OpenAI-compatible gateway", summary: "Anything speaking Chat Completions at a URL of yours: vLLM, LM Studio, a company gateway. Some want no key.", url: "required", default_url: null, url_example: "https://llm-gw.example/v1", key: "optional", key_var: null },
+  { id: "litellm", provider: "openai", label: "A LiteLLM proxy", summary: "A LiteLLM proxy at its URL. The one gateway that says what each model costs.", url: "required", default_url: null, url_example: "https://llm-gw.example/v1", key: "optional", key_var: null },
+];
 
 function reply(ws: WebSocket, id: unknown, result: unknown, error?: unknown): void {
   ws.send(JSON.stringify(error ? { jsonrpc: "2.0", id, error } : { jsonrpc: "2.0", id, result }));
@@ -500,6 +542,8 @@ export class FakeDaemon {
   servers: FakeServer[] = [];
   /** Sign-ins by server name (troupe-remote Decision 741); a server with `oauth` and no entry is signed out. */
   signIns: Record<string, FakeAuth> = {};
+  /** What the provider says to a sign-out, by server name: evoked where nothing is set and there was a sign-in. */
+  revocations: Record<string, { state: "revoked" | "failed" | "unsupported" | "none"; reason: string | null }> = {};
   /** The access token each sign-in left in the state directory, which no answer carries. */
   readonly signInTokens: Record<string, string> = {};
   /** Every call `mcp.call` made to a server, as the server would have received it (troupe Decision 748). */
@@ -560,6 +604,7 @@ export class FakeDaemon {
   private readonly env: Record<string, string>;
   private readonly opencode: { providers: string[]; default: string | null };
   private readonly servesKeys: boolean;
+  private readonly servesProviderTypes: boolean;
   private readonly servesOnboard: boolean;
   private readonly servesAgents: boolean;
   private nextId = 1;
@@ -574,6 +619,7 @@ export class FakeDaemon {
     this.env = opts.env ?? {};
     this.opencode = opts.opencode ?? { providers: [], default: null };
     this.servesKeys = opts.servesKeys ?? true;
+    this.servesProviderTypes = opts.servesProviderTypes ?? true;
     this.servesOnboard = opts.onboard ?? true;
     this.servesAgents = opts.agentsApi ?? true;
     this.agents = new FakeAgents(`/home/${this.osUser}/.config/troupe`);
@@ -1415,8 +1461,10 @@ export class FakeDaemon {
 
     if (method === "config.models") {
       const provider = String(params["provider"] ?? s.provider ?? "anthropic");
-      const offers = OFFERS[provider];
+      const offers = this.offers(provider);
       if (!offers) return invalid(`unknown provider ${provider}`);
+      // Asked with no key at all, as an Ollama server is.
+      if (provider === "ollama") return reply(ws, id, { models: offers, failures: [] });
       const key = params["api_key"] === undefined ? s.api_key : String(params["api_key"]);
       // A provider refuses a missing or wrong key with a 401, and the daemon reports
       // that as a failure beside an empty list rather than as an error: a person trying
@@ -1433,7 +1481,7 @@ export class FakeDaemon {
     if (this.servesKeys && ("key" in params || "path" in params)) return this.setKey(ws, id, params);
     const before = { ...s, models: { ...s.models } };
     const provider = String(params["provider"] ?? "");
-    if (!OFFERS[provider]) return invalid(`provider must be one of ${Object.keys(OFFERS).join(", ")}`);
+    if (!this.offers(provider)) return invalid(`provider must be one of ${this.providers().join(", ")}`);
     const auth = params["auth"];
     if (auth !== undefined && auth !== "api_key" && auth !== "bearer") return invalid("auth must be api_key or bearer");
 
@@ -1550,11 +1598,24 @@ export class FakeDaemon {
           break;
         }
         const provider = String(answer["provider"] ?? "");
-        if (!OFFERS[provider]) return invalid(`provider must be one of anthropic, openai, fake, not ${JSON.stringify(provider)}`);
+        if (!this.offers(provider)) return invalid(`provider must be one of ${[...this.providers(), "fake"].join(", ")}, not ${JSON.stringify(provider)}`);
         const kind = String(answer["kind"] ?? provider);
         const baseUrl = ((answer["base_url"] as string | null) ?? "").trim() || null;
         if ((kind === "gateway" || kind === "litellm") && !baseUrl) return invalid(`a ${kind} needs its base URL, ending in /v1`);
+        if (provider === "azure_openai" && !baseUrl) {
+          return invalid("azure_openai needs the address of your resource, such as https://<resource>.openai.azure.com");
+        }
         advance({ provider, kind, base_url: baseUrl, auth: (answer["auth"] as string) ?? "api_key" }, "key");
+        // A provider that takes no key is asked for its models at once, and the key step is
+        // not on its path.
+        if (kind === "ollama") {
+          flow.offered = OFFERS["ollama"]!;
+          const ids = flow.offered.map((m) => String(m["id"]));
+          flow.suggested = { default: ids[0] ?? null, cheap: ids[1] ?? ids[0] ?? null };
+          flow.check = { state: "ok", reason: null };
+          flow.answers["key"] = { source: "none" };
+          flow.step = "models";
+        }
         break;
       }
       case "key": {
@@ -1570,15 +1631,18 @@ export class FakeDaemon {
           if (!value) return invalid(`${answer["env"]} is not set where the daemon runs; paste the key, or set it and start the daemon again`);
           key = value;
           source = { source: "env", var: answer["env"] };
+        } else if (provider["provider"] === "azure_openai") {
+          return invalid("azure_openai needs a key; paste one");
         } else if (provider["base_url"]) {
           key = null;
           source = { source: "none" };
         } else {
-          return invalid(`${provider["provider"]} needs a key; paste one, or keep it in ${provider["provider"] === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"}`);
+          const kindVar = SETUP_KINDS.find((k) => k["id"] === provider["kind"])?.["key_var"];
+          return invalid(`${provider["provider"]} needs a key; paste one, or keep it in ${String(kindVar ?? "its variable")}`);
         }
         // The real daemon lists the provider's models with the key; here a key is right
         // when it looks like one, and a gateway given none cannot be asked.
-        if (key && !key.startsWith("sk-")) {
+        if (key && !key.startsWith("sk-") && provider["provider"] !== "azure_openai") {
           flow.check = { state: "refused", reason: "401 unauthorized: the key was refused" };
           break;
         }
@@ -1586,7 +1650,12 @@ export class FakeDaemon {
         flow.offered = key ? OFFERS[String(provider["provider"])]! : [];
         const ids = flow.offered.map((m) => String(m["id"]));
         flow.suggested = { default: ids[0] ?? null, cheap: ids[1] ?? ids[0] ?? null };
-        flow.check = key ? { state: "ok", reason: null } : { state: "unknown", reason: "no key was given, so nothing was asked" };
+        flow.check =
+          provider["provider"] === "azure_openai"
+            ? { state: "unknown", reason: "Azure OpenAI does not list its deployments to a key, so the key was not tried; type a deployment's name" }
+            : key
+              ? { state: "ok", reason: null }
+              : { state: "unknown", reason: "no key was given, so nothing was asked" };
         advance(source, "models");
         break;
       }
@@ -1650,6 +1719,15 @@ export class FakeDaemon {
       : "Look around this directory and tell me what you find.";
   }
 
+  /** What a provider offers, or nothing for one this daemon does not take. */
+  private offers(provider: string): Array<Record<string, unknown>> | undefined {
+    return this.providers().includes(provider) ? OFFERS[provider] : undefined;
+  }
+
+  private providers(): string[] {
+    return this.servesProviderTypes ? Object.keys(OFFERS) : ["anthropic", "openai"];
+  }
+
   private setupJson(): Record<string, unknown> {
     const flow = this.setup;
     const path =
@@ -1657,16 +1735,22 @@ export class FakeDaemon {
         ? ["where", "finish"]
         : typeof flow.answers["provider"]?.["reuse"] === "string"
           ? ["where", "provider", "workspace", "daemon", "finish"]
-          : [...SETUP_STEPS];
+          : flow.answers["provider"]?.["kind"] === "ollama"
+            ? SETUP_STEPS.filter((s) => s !== "key")
+            : [...SETUP_STEPS];
     const config = this.configJson();
+    const vendorVars = this.servesProviderTypes
+      ? PROVIDER_TYPES.map((t) => t["key_var"]).filter((v): v is string => typeof v === "string")
+      : ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
     return {
       needed: this.setupCompleted === null && !this.settings.exists,
       completed: this.setupCompleted,
       step: flow.step,
       steps: path.map((name) => ({ name, done: name in flow.answers })),
       answers: flow.answers,
+      ...(this.servesProviderTypes ? { kinds: SETUP_KINDS } : {}),
       detected: {
-        env: Object.keys(this.env).filter((v) => v === "ANTHROPIC_API_KEY" || v === "OPENAI_API_KEY"),
+        env: Object.keys(this.env).filter((v) => vendorVars.includes(v)),
         opencode: { path: `/home/${this.osUser}/.config/opencode/opencode.jsonc`, ...this.opencode },
         config: { ...config, usable: this.settings.exists && this.settings.api_key !== null },
         plane: { url: this.linked?.plane_url ?? null, linked: this.linked !== null },
@@ -1688,8 +1772,14 @@ export class FakeDaemon {
 
   /** The person came back from the browser: a sign-in started with `mcp.sign_in` lands. */
   finishSignIn(name: string, account: string | null = "ada@example.test"): void {
-    this.signIns[name] = { state: "signed_in", account, error: null };
+    this.signIns[name] = { state: "signed_in", account, error: null, step_up: null };
     this.signInTokens[name] = `at-${name}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  /** A tool of the server asked for a scope the sign-in does not carry: `mcp.list` says so until a sign-in lands. */
+  wantScope(name: string, scope: string): void {
+    const now = this.signIns[name] ?? { state: "signed_out", account: null, error: null, step_up: null };
+    this.signIns[name] = { ...now, step_up: scope };
   }
 
   /**
@@ -1707,7 +1797,7 @@ export class FakeDaemon {
     if (scope === "workspace" && !workspace) return invalid("the workspace scope needs a workspace");
 
     const visible = <T extends { layer: string }>(rows: T[]): T[] => rows.filter((r) => r.layer === "user" || r.layer === "user_agents" || Boolean(workspace));
-    const authOf = (s: FakeServer): FakeAuth | null => (s.oauth ? (this.signIns[s.name] ?? { state: "signed_out", account: null, error: null }) : null);
+    const authOf = (s: FakeServer): FakeAuth | null => (s.oauth ? (this.signIns[s.name] ?? { state: "signed_out", account: null, error: null, step_up: null }) : null);
     const liveOf = (s: FakeServer) =>
       s.disabled
         ? { state: "disabled", tools: [], error: null }
@@ -1808,10 +1898,12 @@ export class FakeDaemon {
         if (!known) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "mcp_server", name } });
         if (!known.oauth) return invalid(`${name} takes no sign-in: give its entry an oauth.client_id to sign in to it`);
         if (method === "mcp.sign_out") {
+          const held = this.signIns[name]?.state === "signed_in" || this.signIns[name]?.state === "expired";
+          const revocation = held ? (this.revocations[name] ?? { state: "revoked", reason: null }) : { state: "none", reason: null };
           delete this.signIns[name];
-          return reply(ws, id, { server: name, auth: authOf(known) });
+          return reply(ws, id, { server: name, auth: authOf(known), revocation });
         }
-        this.signIns[name] = { state: "signing_in", account: this.signIns[name]?.account ?? null, error: null };
+        this.signIns[name] = { state: "signing_in", account: this.signIns[name]?.account ?? null, error: null, step_up: this.signIns[name]?.step_up ?? null };
         const query = new URLSearchParams({ client_id: known.oauth.client_id, response_type: "code", redirect_uri: "http://127.0.0.1:53682/callback" });
         return reply(ws, id, {
           server: name,
@@ -2063,6 +2155,7 @@ export class FakeDaemon {
       api_key_source: s.api_key !== null ? "file" : null,
       models: { ...s.models },
       overrides: this.overrides,
+      ...(this.servesProviderTypes ? { provider_types: PROVIDER_TYPES } : {}),
     };
     if (!this.servesKeys) return answer;
 

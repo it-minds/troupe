@@ -36,17 +36,12 @@ defmodule Troupe.Worker.FailoverTest do
 
       # The replica runs the whole application, so its listener is started by the
       # supervision tree rather than with options — which is why the verifier goes
-      # through configuration here.
-      env = [
-        control_port: peer_port(),
-        http_port: peer_port() + 1,
-        enrolment_verifier: &EnrolmentStub.verify/1
-      ]
-
-      case Replica.start(env: env) do
+      # through configuration here. Its port is whichever was free, read back once it
+      # is listening.
+      case Replica.start(env: [enrolment_verifier: &EnrolmentStub.verify/1]) do
         {:ok, peer, node} ->
           on_exit(fn -> Replica.stop(peer) end)
-          {:ok, peer: peer, peer_node: node, peer_port: peer_port()}
+          {:ok, peer: peer, peer_node: node, peer_port: Replica.control_port(node)}
 
         {:error, reason} ->
           IO.puts(:stderr, "\nSKIPPED: could not start a second replica (#{inspect(reason)}).\n")
@@ -177,10 +172,6 @@ defmodule Troupe.Worker.FailoverTest do
        claims: %{"pod_name" => "troupe-w-dev-0", "capacity" => 4, "disk_total_bytes" => 1_000_000}}
     )
   end
-
-  # The peer runs the whole application, including its own control listener, so it needs
-  # a port this node is not using.
-  defp peer_port, do: 42_101
 
   defp requires_peer(%{peer_port: _} = context), do: context
   defp requires_peer(_context), do: flunk("no second replica; see the message from setup_all")
