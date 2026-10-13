@@ -15,7 +15,8 @@
 //   CONSOLE_AS=carol     somebody who administers nothing
 //
 // HOLD_MS holds every admin answer that long (250 by default), so the loading states are
-// there to be seen; HOLD_MS=0 for none.
+// there to be seen; HOLD_MS=0 for none. GITOPS=1 is a plane in gitops mode, whose profiles
+// and triggers a repository holds, so the Configure area shows them locked.
 
 import { exampleAdmin } from "../packages/client/test/support/admin.js";
 import { FakeIdp } from "../packages/client/test/support/idp.js";
@@ -39,6 +40,10 @@ idp.redirectSubject = as;
 const worker = await FakeWorker.start();
 const admin = exampleAdmin();
 admin.holdMs = Number(process.env["HOLD_MS"] ?? 250);
+if (process.env["GITOPS"]) {
+  admin.mode = "gitops";
+  admin.gitopsSource = "https://git.example.com/platform/troupe.git";
+}
 const plane = await FakePlane.start({ idp, worker, corsOrigins: origins, admin });
 
 console.log(`
@@ -46,6 +51,7 @@ console.log(`
   plane              ${plane.baseUrl}
   CORS allowlist     ${origins.join(", ")}
   signed in as       ${as.displayName} (${as.subject}), ${admin.role(as.subject).replace("_", " ")}
+  provisioning       ${admin.mode}
 
 Open ${origins[0]} (pnpm console) and sign in to
   ${plane.baseUrl}

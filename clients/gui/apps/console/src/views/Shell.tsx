@@ -15,7 +15,10 @@ import { useConsole } from "../console";
 import { shownMode, useMode } from "../theme";
 import { Wordmark } from "./brand";
 import { Audit } from "./Audit";
+import { Bundles, Channel, Version } from "./Bundles";
 import { ClientVersions } from "./ClientVersions";
+import { Profile, Profiles } from "./Profiles";
+import { TriggerPage, Triggers } from "./Triggers";
 import { Organisation } from "./Organisation";
 import { Overview } from "./Overview";
 import { Sessions } from "./Sessions";
@@ -33,12 +36,13 @@ export function Shell(): JSX.Element {
   // An area this role is not shown is not reachable by its address either.
   const here = nav.some((g) => g.areas.some((a) => a.id === route.page)) ? route : START;
   const current = area(here.page)!;
-  const title = here.team ?? current.label;
-  const crumb = here.team ? `${groupOf(here.page)} / Teams` : groupOf(here.page);
+  const within = here.path ?? [];
+  const title = here.team ?? titleWithin(here.page, within) ?? current.label;
+  const crumb = here.team ? `${groupOf(here.page)} / Teams` : within.length ? `${groupOf(here.page)} / ${current.label}` : groupOf(here.page);
   // The folded map is open on the screen it was opened on, so choosing an area folds it
   // again with nothing to fold it. An effect that folded it on each new screen also ran
   // once the shell first drew, and undid a Menu pressed before that.
-  const screen = `${here.page}/${here.team ?? ""}/${here.tab ?? ""}`;
+  const screen = `${here.page}/${here.team ?? ""}/${here.tab ?? ""}/${within.join("/")}`;
   const [openOn, setOpenOn] = useState<string | null>(null);
   const open = openOn === screen;
 
@@ -49,7 +53,7 @@ export function Shell(): JSX.Element {
   // A new screen starts at its top, not wherever the last one was scrolled to.
   useEffect(() => {
     globalThis.scrollTo?.(0, 0);
-  }, [here.page, here.team, here.tab]);
+  }, [here.page, here.team, here.tab, within.join("/")]);
 
   return (
     <div className="console">
@@ -113,7 +117,24 @@ export function Shell(): JSX.Element {
   );
 }
 
+/** A screen within an area is named by what it shows: a profile, a channel and its version, a trigger. */
+function titleWithin(page: string, path: string[]): string | null {
+  const [first, second] = path;
+  if (!first) return null;
+  if (page === "bundles") return second ? `${first} v${second}` : first;
+  if (page === "triggers") return second ?? null;
+  return first;
+}
+
 function Screen({ route }: { route: Route }): JSX.Element {
+  const { role } = useConsole();
+  const [first, second] = route.path ?? [];
+  if (route.page === "profiles") return first && role === "platform_admin" ? <Profile name={first} key={first} /> : <Profiles />;
+  if (route.page === "bundles" && first && second && /^\d+$/.test(second)) return <Version channel={first} version={Number(second)} key={`${first}/${second}`} />;
+  if (route.page === "bundles" && first) return <Channel channel={first} key={first} />;
+  if (route.page === "bundles") return <Bundles />;
+  if (route.page === "triggers" && first && second) return <TriggerPage team={first} name={second} key={`${first}/${second}`} />;
+  if (route.page === "triggers") return <Triggers team={first ?? null} />;
   if (route.page === "teams" && route.team) return <Team name={route.team} tab={route.tab ?? "members"} />;
   if (route.page === "teams") return <Teams />;
   if (route.page === "overview") return <Overview />;

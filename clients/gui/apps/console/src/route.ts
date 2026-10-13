@@ -13,6 +13,12 @@ export interface Route {
   page: string;
   team?: string;
   tab?: TeamTab;
+  /**
+   * What within the area, for an area other than Teams: a profile (`#/profiles/dev`), a
+   * channel and a version (`#/bundles/stable/2`), a team's triggers and one of them
+   * (`#/triggers/core/nightly-deps`).
+   */
+  path?: string[];
 }
 
 export function parse(hash: string): Route | null {
@@ -26,11 +32,12 @@ export function parse(hash: string): Route | null {
   if (page === "teams" && team) {
     return { page, team, tab: (TEAM_TABS as readonly string[]).includes(tab ?? "") ? (tab as TeamTab) : "members" };
   }
+  if (page !== "teams" && parts.length > 1) return { page, path: parts.slice(1) };
   return { page };
 }
 
 export function href(route: Route): string {
-  const parts = [route.page, route.team, route.team ? (route.tab ?? "members") : undefined].filter((p): p is string => Boolean(p));
+  const parts = [route.page, route.team, route.team ? (route.tab ?? "members") : undefined, ...(route.team ? [] : (route.path ?? []))].filter((p): p is string => Boolean(p));
   return `#/${parts.map((p) => encodeURIComponent(p)).join("/")}`;
 }
 
