@@ -184,7 +184,7 @@ export type {
 } from "./agents.js";
 export { DESKTOP_CLIENT, askPlane, suggestion, updateRequiredSentence } from "./update.js";
 export type { ClientUpdate, PlaneVersionWord, UpdateRequired, VersionPolicy } from "./update.js";
-export { DaemonClient, DaemonSource, claimRefusal, daemonUrl, rowFromDaemon } from "./daemon.js";
+export { DaemonClient, DaemonSource, claimRefusal, daemonUrl, revocationText, rowFromDaemon } from "./daemon.js";
 export type {
   ClaimResult,
   CreateLocalParams,
@@ -198,12 +198,14 @@ export type {
   LocalSkill,
   RecentWorkspace,
   RemoveResult,
+  Revocation,
   ScopedParams,
   ServerAuth,
   ServerTool,
   ServerToolResult,
   ServerTools,
   SignInStarted,
+  SignedOut,
   SkippedSkill,
   SourceLayer,
   SourceScope,

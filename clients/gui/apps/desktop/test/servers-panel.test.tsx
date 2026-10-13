@@ -160,4 +160,41 @@ describe("the servers and skills panel", () => {
       globalThis.open = before;
     }
   });
+
+  // troupe #619: a scope the server asked for that the
+  // sign-in does not carry is shown beside a Sign in for it, and a sign-out says whether
+  // the provider revoked the sign-in, and why not when it did not.
+  it("shows the scope a server wants beside its Sign in, and what the provider said to a sign-out", async () => {
+    daemon.servers.push({
+      name: "notes",
+      layer: "user",
+      source: "/home/ada/.config/troupe/mcp.json",
+      url: "https://mcp.example.test/mcp",
+      oauth: { client_id: "troupe-test-client" },
+    });
+    daemon.finishSignIn("notes");
+    daemon.wantScope("notes", "notes.write");
+
+    unmount = render(<Servers client={client} />).unmount;
+    const row = await waitFor(() => [...document.querySelectorAll("tr")].find((r) => r.textContent?.includes("Signed in as ada@example.test")), "the server's row");
+    expect(row.textContent).toContain("Wants notes.write");
+    expect(button("Sign in", row)).toBeTruthy();
+
+    daemon.revocations["notes"] = { state: "failed", reason: "the provider did not answer in time" };
+    button("Sign out", row)!.click();
+    await waitFor(
+      () => says("notes: signed out on this computer; the provider was not told (the provider did not answer in time), so the sign-in stays good there until it runs out"),
+      "the sign-out says what the provider was told",
+    );
+
+    // Signed in again with nothing more wanted, a sign-out the provider revoked says so.
+    delete daemon.revocations["notes"];
+    daemon.finishSignIn("notes");
+    const signedOut = await waitFor(() => [...document.querySelectorAll("tr")].find((r) => r.textContent?.includes("Not signed in")), "the row signed out");
+    button("Check", signedOut)!.click();
+    const again = await waitFor(() => [...document.querySelectorAll("tr")].find((r) => r.textContent?.includes("Signed in as ada@example.test")), "the row signed in again", 5000);
+    expect(again.textContent).not.toContain("Wants");
+    button("Sign out", again)!.click();
+    await waitFor(() => says("notes: signed out on this computer; the provider revoked the sign-in"), "the revoked sign-out");
+  });
 });
