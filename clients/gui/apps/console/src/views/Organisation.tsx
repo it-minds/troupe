@@ -13,8 +13,8 @@ import { useState } from "react";
 import type { JSX } from "react";
 import type { EnforceableKey, PlatformSetting, SettingChanged } from "@troupe/client";
 import { show, useConsole, useLoad } from "../console";
-import { AuditNote, Empty, Loaded, Preview, Region, Status, changed } from "./bits";
-import type { DiffLine } from "./bits";
+import { AuditNote, Empty, Field, Loaded, Preview, Region, Status, changed } from "./bits";
+import type { DiffLine, FieldProps } from "./bits";
 
 const GROUP = "client_defaults";
 const ENFORCED = "client_enforced";
@@ -32,7 +32,7 @@ export function Organisation(): JSX.Element {
 
   return (
     <div className="page">
-      {done && <AuditNote action={done.action} subject={done.answer.key} changes={done.answer.changes} />}
+      {done && <AuditNote action={done.action} subject={done.answer.key} detail={done.answer.changes} />}
       <Loaded load={load} what="the organisation's document" retry={reload}>
         {(list) => {
           const group = list.groups.find((g) => g.key === GROUP);
@@ -114,21 +114,22 @@ function DefaultRow({
             setPreviewing("put");
           }}
         >
-          <label>
-            {setting.key}
-            {setting.values ? (
-              <select value={draft} onChange={(e) => setDraft(e.target.value)}>
-                {!setting.values.includes(draft) && <option value={draft}>{draft || "unset"}</option>}
-                {setting.values.map((v) => (
-                  <option key={v} value={v}>
-                    {v}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={false} />
-            )}
-          </label>
+          <Field label={<code>{setting.key}</code>}>
+            {(p) =>
+              setting.values ? (
+                <select {...p} value={draft} onChange={(e) => setDraft(e.target.value)}>
+                  {!setting.values.includes(draft) && <option value={draft}>{draft || "unset"}</option>}
+                  {setting.values.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input {...p} value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={false} />
+              )
+            }
+          </Field>
           <div className="actions">
             <button type="submit" className="primary" disabled={lines.length === 0}>
               Preview
@@ -249,11 +250,9 @@ function EnforcedSet({ setting, editable, onPut }: { setting: PlatformSetting; e
           }}
         >
           {keys.map((k) => (
-            <label key={k.key}>
-              <code>{k.key}</code>
-              <span className="hint">{k.meaning}</span>
-              <Field spec={k} value={draft[k.key] ?? ""} onChange={(v) => setDraft({ ...draft, [k.key]: v })} />
-            </label>
+            <Field key={k.key} label={<code>{k.key}</code>} hint={keyHint(k)}>
+              {(p) => <KeyField spec={k} value={draft[k.key] ?? ""} onChange={(v) => setDraft({ ...draft, [k.key]: v })} control={p} />}
+            </Field>
           ))}
           <div className="actions">
             <button type="submit" className="primary" disabled={lines.length === 0}>
@@ -285,12 +284,22 @@ function EnforcedSet({ setting, editable, onPut }: { setting: PlatformSetting; e
   );
 }
 
+/** What a key's field says beside it: what the value is to a machine, and what blank means. */
+function keyHint(spec: EnforceableKey): string {
+  const blank = spec.type === "integer" ? `Blank is not enforced; ${spec.min ?? 0} or more.` : spec.type === "string" ? "Blank is not enforced." : "";
+  return [`${capitalise(spec.meaning)}.`, blank].filter(Boolean).join(" ");
+}
+
+function capitalise(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /** A field for one enforceable key, of the type the plane says its value takes. */
-function Field({ spec, value, onChange }: { spec: EnforceableKey; value: string; onChange: (v: string) => void }): JSX.Element {
+function KeyField({ spec, value, onChange, control }: { spec: EnforceableKey; value: string; onChange: (v: string) => void; control: FieldProps }): JSX.Element {
   if (spec.type === "enum" || spec.type === "boolean") {
     const choices = spec.type === "boolean" ? [["false", "off"], ["true", "on"]] : (spec.values ?? []).map((v) => [v, v]);
     return (
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <select {...control} value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">not enforced</option>
         {choices.map(([v, label]) => (
           <option key={v} value={v}>
@@ -300,15 +309,7 @@ function Field({ spec, value, onChange }: { spec: EnforceableKey; value: string;
       </select>
     );
   }
-  return (
-    <input
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      inputMode={spec.type === "integer" ? "numeric" : undefined}
-      placeholder={spec.type === "integer" ? `not enforced; ${spec.min ?? 0} or more` : "not enforced"}
-      spellCheck={false}
-    />
-  );
+  return <input {...control} value={value} onChange={(e) => onChange(e.target.value)} inputMode={spec.type === "integer" ? "numeric" : undefined} spellCheck={false} />;
 }
 
 /** What enforcing a key at a value does on people's machines, in words. */

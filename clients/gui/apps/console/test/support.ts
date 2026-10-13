@@ -132,10 +132,13 @@ export function link(label: string, within: ParentNode = document): HTMLAnchorEl
   return [...within.querySelectorAll("a")].find((a) => (a.textContent ?? "").trim().startsWith(label)) ?? null;
 }
 
-/** The field a label names, by the label's words. */
+/** The field a label names, by the label's words: the control it is for, or the one inside it. */
 export function field(label: string, within: ParentNode = document): HTMLInputElement | HTMLSelectElement | null {
   const found = [...within.querySelectorAll("label")].find((l) => (l.textContent ?? "").trim().startsWith(label));
-  return found?.querySelector<HTMLInputElement | HTMLSelectElement>("input, select") ?? null;
+  if (!found) return null;
+  const control = found.htmlFor ? document.getElementById(found.htmlFor) : null;
+  if (control instanceof HTMLInputElement || control instanceof HTMLSelectElement) return control;
+  return found.querySelector<HTMLInputElement | HTMLSelectElement>("input, select");
 }
 
 /** Type into a field, or choose in a select, the way React hears it. */

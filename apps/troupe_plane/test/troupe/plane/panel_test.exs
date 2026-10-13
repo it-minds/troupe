@@ -172,6 +172,26 @@ defmodule Troupe.Plane.PanelTest do
       refute item =~ "--size-glyph-column", "the status is squeezed into the glyph column"
       assert css =~ ~r/\.attention__item > \.status\s*\{[^}]*flex:\s*0 0 170px/
     end
+
+    # The landing page of this console points at the console that replaces it, and says
+    # this one stays: for what that one does not do yet, and as the way in when it cannot
+    # be used.
+    test "points at the console, and says this one stays", context do
+      {:ok, _view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin")
+
+      assert html =~ ~s(<a href="/console">/console</a>)
+      assert html =~ "This one stays"
+    end
+
+    test "names no console on a plane without one", context do
+      Application.put_env(:troupe_plane, :console_url, "")
+      on_exit(fn -> Application.delete_env(:troupe_plane, :console_url) end)
+
+      {:ok, _view, html} = context.conn |> sign_in(context.root.subject) |> live("/admin")
+
+      refute html =~ "new-console"
+      refute html =~ ~s(href="/console")
+    end
   end
 
   describe "the workers page" do

@@ -19,6 +19,7 @@ defmodule Troupe.Plane.Web.Live.Overview do
   import Troupe.Plane.Web.Live.Layout
 
   alias Troupe.Plane.Admin
+  alias Troupe.Plane.Web.Index
   alias Troupe.Plane.Web.Live.Status
 
   @refresh_ms 2_000
@@ -30,7 +31,9 @@ defmodule Troupe.Plane.Web.Live.Overview do
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
     if connected?(socket), do: :timer.send_interval(@refresh_ms, :refresh)
-    {:ok, load(socket)}
+    # The landing page of this console points at the new one, where there is one; this one
+    # stays for what that does not do yet, and as the way in when it cannot be used.
+    {:ok, socket |> assign(console_url: Index.console_url()) |> load()}
   end
 
   @impl Phoenix.LiveView
@@ -169,6 +172,12 @@ defmodule Troupe.Plane.Web.Live.Overview do
     ~H"""
     <.shell actor={@actor} breakglass={@breakglass} page={:overview}>
       <h1>Overview</h1>
+
+      <p :if={@console_url} class="notice" id="new-console">
+        The console is at <a href={@console_url}>{@console_url}</a>: the overview, sessions,
+        teams and the audit, with every change previewed before it is made. This one stays
+        for what that does not do yet, and as the way in when it cannot be used.
+      </p>
 
       <p :if={@error} class="banner banner--breakglass" role="alert">{@error}</p>
 
