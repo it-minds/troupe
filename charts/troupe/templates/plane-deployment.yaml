@@ -269,6 +269,10 @@ spec:
               value: {{ join "," .Values.plane.corsOrigins | quote }}
             - name: TROUPE_PLANE_NAMESPACE
               value: {{ .Values.namespace | quote }}
+            # What enrolment takes off a worker pod's namespace to name its profile: the
+            # prefix the policy gives every worker namespace.
+            - name: TROUPE_NAMESPACE_PREFIX
+              value: {{ .Values.policy.namespacePrefix | quote }}
             - name: TROUPE_PROVISIONING_MODE
               value: {{ .Values.plane.provisioningMode | quote }}
             # Shown beside "Locked to gitops"; the plane never reads the repository it names.

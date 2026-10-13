@@ -1627,10 +1627,11 @@ defmodule Troupe.UI.TUI.Server do
 
   ## Uploads and messages
 
-  # `/upload <path>` sends a local file to the session's own mount. The path is
-  # read here rather than on the worker: the worker has no access to this
-  # machine, which is the point of the mount. Its size is asked first, so a file
-  # larger than the daemon takes in a message is refused without being read (D115).
+  # `/upload <path>` sends a local file to `session:/`, where the session works: a pod
+  # session's own directory, or a local session's checkout, as `/upload`'s help says. The
+  # path is read here rather than on the worker: the worker has no access to this machine.
+  # Its size is asked first, so a file larger than the daemon takes in a message is
+  # refused without being read (D115).
   defp upload(_sid, ""), do: {:error, "usage: /upload <path>"}
 
   defp upload(sid, path) do
@@ -3080,7 +3081,7 @@ defmodule Troupe.UI.TUI.Server do
   defp settings_change(_enter_or_space, field, %{settings: s} = state) do
     case field.type do
       :bool -> apply_setting(state, field.key, Settings.value(s.view, s.config, field.key) != true)
-      type when type in [:model, :theme, :provider] -> open_picker(state)
+      type when type in [:model, :theme, :detail, :provider] -> open_picker(state)
       _ -> put_settings(state, editing: shown(s, field.key), status: nil)
     end
   end

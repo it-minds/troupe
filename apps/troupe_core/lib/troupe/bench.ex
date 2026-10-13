@@ -171,7 +171,16 @@ defmodule Troupe.Bench do
   """
   @spec compare(keyword()) :: {:ok, String.t()} | {:error, String.t()}
   def compare(opts \\ []) do
-    History.compare(Keyword.get_lazy(opts, :history, &History.path/0), Keyword.get(opts, :ref))
+    History.compare(Keyword.get_lazy(opts, :history, &history/0), Keyword.get(opts, :ref))
+  end
+
+  # Where a live bench writes it: under the person's configured `state_dir`, or the default
+  # one where the configuration names none or cannot be read.
+  defp history do
+    case Troupe.Config.resolve(nil) do
+      {:ok, config, _layers} -> History.path(config.state_dir)
+      {:error, _error} -> History.path()
+    end
   end
 
   # -- the two formats --------------------------------------------------------------

@@ -118,6 +118,30 @@ defmodule Troupe.SharedSettingsTest do
     assert %{"value" => "limelight"} = Enum.find(served, &(&1["key"] == "ui.theme"))
   end
 
+  # D125: the page edited `transcript.detail` as text, though it has a menu of its levels.
+  test "transcript.detail is offered as a menu of its three levels", ctx do
+    {pid, session} = start_tui(ctx.sid)
+    type(pid, "/settings")
+    press(pid, "enter")
+    eventually(fn -> screen_text(pid, session) =~ "settings —" end)
+    to_setting(pid, "transcript.detail")
+    press(pid, "enter")
+
+    assert %{choices: choices, cursor: cursor, typed?: false} = user_state(pid).settings.picker
+    assert Enum.map(choices, & &1.value) == ~w(quiet tools everything)
+    assert user_state(pid).settings.editing == nil
+    refute screen_text(pid, session) =~ "type one instead"
+
+    target = Enum.find_index(choices, &(&1.value == "everything"))
+    for _ <- 1..(target - cursor)//1, do: press(pid, "down")
+    press(pid, "enter")
+
+    assert_receive {:troupe_notification, "config.changed", %{"keys" => keys}}, 5_000
+    assert "transcript.detail" in keys
+    assert {:ok, %{"keys" => served}} = Protocol.call(ctx.desktop, "config.get", %{})
+    assert %{"value" => "everything"} = Enum.find(served, &(&1["key"] == "transcript.detail"))
+  end
+
   test "a theme the terminal does not know is drawn as Afterglow and said so once", ctx do
     {pid, _session} = start_tui(ctx.sid)
     set = fn key, value -> desktop_set(ctx.desktop, key, value) end

@@ -523,6 +523,25 @@ defmodule Troupe.Plane.PanelTest do
       assert html =~ "lead@example.test"
       assert html =~ "budget_micros"
     end
+
+    # #695: the page reads `admin.audit.list`, and a team admin's is about their teams.
+    test "a team admin sees the rows about their own teams and no other's", context do
+      {:ok, _} = Audit.record(context.root.subject, "team.update", "engineering", %{"x" => 1})
+      {:ok, _} = Audit.record(context.root.subject, "team.update", "design", %{"x" => 2})
+      {:ok, _} = Audit.record(context.root.subject, "setting.put", "pins_allowed", %{})
+
+      {:ok, _view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/audit")
+
+      assert html =~ "engineering"
+      refute html =~ "<td>design</td>"
+      refute html =~ "pins_allowed"
+
+      {:ok, _view, root_html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/audit")
+
+      assert root_html =~ "<td>design</td>"
+      assert root_html =~ "pins_allowed"
+    end
   end
 
   describe "the bundles page" do

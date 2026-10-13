@@ -396,12 +396,15 @@ defmodule Troupe.Commands do
             "transcript.detail setting is the default.",
         example: "/detail everything"
       ),
-      entry("upload", "workspace", "Send a local file into the session's own mount",
+      entry("upload", "workspace", "Send a local file into the session's workspace",
         usage: "/upload <path>",
         args: [arg("path", true, "file")],
         detail:
-          "The file is read on this machine and written to session:/<name>; a worker " <>
-            "never sees this machine's disk.",
+          "The file is read on this machine and written to session:/<name>, the directory " <>
+            "the session works in. On a pod that is the session's own, gone when it is " <>
+            "erased, and a worker never sees this machine's disk. In a local session it is " <>
+            "the checkout: git sees the file, other sessions there see it, and erasing the " <>
+            "session leaves it.",
         example: "/upload notes.md"
       ),
       entry("copy", "workspace", "Copy a transcript to the clipboard",

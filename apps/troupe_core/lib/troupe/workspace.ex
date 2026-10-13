@@ -94,6 +94,7 @@ defmodule Troupe.Workspace do
           | {:error,
              {:outside_workspace, String.t()}
              | {:read_only_mount, String.t()}
+             | {:unknown_mount, String.t()}
              | {:git_dir, String.t()}}
   def resolve(ws, path, mode \\ :read)
 
@@ -124,6 +125,8 @@ defmodule Troupe.Workspace do
       # A read-only mount is a different answer from a path that does not exist here,
       # and a model that is told so can pick a different destination instead of retrying.
       {:error, {:read_only_mount, name}} -> {:error, {:read_only_mount, name}}
+      # And a prefix that names no mount says which ones there are.
+      {:error, {:unknown_mount, word}} -> {:error, {:unknown_mount, word}}
       {:error, {:git_dir, _path}} -> {:error, {:git_dir, path}}
       {:error, _reason} -> {:error, {:outside_workspace, path}}
     end

@@ -152,12 +152,46 @@ export interface LocalServer {
  * Your sign-in to a server that wants you (troupe-remote Decision 741). `signing_in`
  * while a browser is out, `expired` when it ran out or was refused and you sign in
  * again; `account` is whose it is, when the provider said; `error` why the last
- * attempt failed.
+ * attempt failed; `step_up` a scope the server asked for that the sign-in does not
+ * carry, which the next sign-in asks for.
  */
 export interface ServerAuth {
   state: "signed_out" | "signing_in" | "signed_in" | "expired";
   account: string | null;
   error: string | null;
+  step_up?: string | null;
+}
+
+/**
+ * What signing out told the provider: `revoked`; `failed`,
+ * with why, when it refused, did not answer or could not be reached; `unsupported` when it
+ * offers no revocation; `none` when nothing was held. The sign-in is forgotten on this
+ * computer whichever it is.
+ */
+export interface Revocation {
+  state: "revoked" | "failed" | "unsupported" | "none";
+  reason?: string | null;
+}
+
+/** What `mcp.sign_out` answers for one server. */
+export interface SignedOut {
+  server: string;
+  auth: ServerAuth | null;
+  revocation: Revocation;
+}
+
+/** A revocation in the words the terminal's `/mcp` page and `troupe logout` use. */
+export function revocationText(revocation: Revocation | null | undefined): string {
+  switch (revocation?.state) {
+    case "revoked":
+      return "the provider revoked the sign-in";
+    case "failed":
+      return `the provider was not told${revocation.reason ? ` (${revocation.reason})` : ""}, so the sign-in stays good there until it runs out`;
+    case "unsupported":
+      return "the provider offers no way to revoke it, so the sign-in stays good there until it runs out";
+    default:
+      return "nothing was held to revoke";
+  }
 }
 
 /** What `mcp.sign_in` answers: the URL to open, where the browser comes back to, and when the daemon stops waiting. */
@@ -783,9 +817,9 @@ export class DaemonClient {
     return this.command<SignInStarted>("mcp.sign_in", { ...params });
   }
 
-  /** Forget your sign-in to a server on this computer. */
-  signOutServer(params: { name: string; workspace?: string; session_id?: string }): Promise<{ server: string; auth: ServerAuth | null }> {
-    return this.command("mcp.sign_out", { ...params });
+  /** Forget your sign-in to a server on this computer, and say what the provider was told (`revocation`). */
+  signOutServer(params: { name: string; workspace?: string; session_id?: string }): Promise<SignedOut> {
+    return this.command<SignedOut>("mcp.sign_out", { ...params });
   }
 
   /**

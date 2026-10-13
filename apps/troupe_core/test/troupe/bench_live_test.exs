@@ -320,6 +320,37 @@ defmodule Troupe.BenchLiveTest do
       assert {:ok, table} = Bench.compare(history: path, ref: "0.7.0-beta")
       assert table =~ "| write_file | runs | none earlier | 2, 0.8.2-beta, openai/a |  |"
     end
+
+    # D125: a live bench writes its history under the configured `state_dir`, and the
+    # comparison read the default one, so it said nothing was recorded.
+    test "is read where the configured state_dir keeps it, where a live bench writes it",
+         %{tmp_dir: dir} do
+      config_home = Path.join(dir, "config")
+      configured = Path.join(dir, "configured-state")
+      File.mkdir_p!(config_home)
+      File.write!(Path.join(config_home, "config.yaml"), "state_dir: #{configured}\n")
+
+      previous = Map.new(~w(TROUPE_CONFIG_HOME TROUPE_STATE_HOME), &{&1, System.get_env(&1)})
+      System.put_env("TROUPE_CONFIG_HOME", config_home)
+      System.put_env("TROUPE_STATE_HOME", Path.join(dir, "default-state"))
+
+      on_exit(fn ->
+        Enum.each(previous, fn
+          {name, nil} -> System.delete_env(name)
+          {name, value} -> System.put_env(name, value)
+        end)
+      end)
+
+      for {bench, cost} <- [{"2026-10-01T10:00:00Z", 4_000}, {"2026-10-02T10:00:00Z", 5_000}] do
+        History.append(
+          History.path(configured),
+          line(bench, "0.8.2-beta", "openai/a", cost, true, 1)
+        )
+      end
+
+      assert {:ok, table} = Bench.compare()
+      assert table =~ "| write_file | median cost | $0.0040 | $0.0050 | +25% |"
+    end
   end
 
   # Issue #465's two options against the stand-in as Anthropic (Decision 815): a model that

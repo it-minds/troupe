@@ -143,10 +143,11 @@ defmodule Troupe.Mounts do
   end
 
   # Five prefixes and nothing else: `session:`, `org:`, `skills:`, `team:<name>`, and
-  # `scratch:`, the session's scratchpad (Decision 870), which only `show` and a client's
-  # `fs.read` have in their table. Anything that is not one of them is a session-relative
+  # `scratch:`, the session's scratchpad, which only `show` and a client's `fs.read` have
+  # in their table. Anything that is not one of them is a session-relative
   # path, which is both what every existing tool call means and what keeps a Windows drive
-  # letter from being read as a mount name.
+  # letter from being read as a mount name, except a word that looks like a prefix and is
+  # none of them (`unknown_prefix/4`).
   defp entry_for(mounts, path) do
     case String.split(path, ":", parts: 2) do
       ["session", rest] -> of_kind(mounts, :session, String.trim_leading(rest, "/"))
@@ -154,10 +155,24 @@ defmodule Troupe.Mounts do
       ["skills", rest] -> of_kind(mounts, :bundle, String.trim_leading(rest, "/"))
       ["scratch", rest] -> of_kind(mounts, :scratch, String.trim_leading(rest, "/"))
       ["team", rest] -> team(mounts, rest)
+      [word, rest] -> unknown_prefix(mounts, path, word, rest)
       # No prefix: the session's own root, and the path is passed through untouched so
       # that an absolute one stays absolute and is rejected rather than reinterpreted.
       _ -> of_kind(mounts, :session, path)
     end
+  end
+
+  # What a prefix looks like: a word of two or more letters, digits, dashes or underscores,
+  # its colon, then a slash or nothing. One that names no mount is refused, where taken as
+  # a relative path it made a directory named `plans:` in the session. A colon later in a
+  # name (`notes:2026.md`) and a drive letter (`C:/`) are not prefixes, and are what they
+  # were.
+  @prefix ~r/\A[A-Za-z][A-Za-z0-9_-]+\z/
+
+  defp unknown_prefix(mounts, path, word, rest) do
+    if Regex.match?(@prefix, word) and (rest == "" or String.starts_with?(rest, "/")),
+      do: {:error, {:unknown_mount, word}},
+      else: of_kind(mounts, :session, path)
   end
 
   defp of_kind(mounts, kind, rest) do

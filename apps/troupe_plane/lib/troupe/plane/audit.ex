@@ -20,6 +20,7 @@ defmodule Troupe.Plane.Audit do
 
   alias Troupe.Plane.Audit.Event
   alias Troupe.Plane.Repo
+  alias Troupe.Plane.Sessions.Session
   alias Troupe.Protocol.Canonical
   alias Troupe.Protocol.Principal
 
@@ -266,7 +267,40 @@ defmodule Troupe.Plane.Audit do
       {:kind, kind}, acc -> from(e in acc, where: e.subject_kind == ^kind)
       {:subject_id, id}, acc -> from(e in acc, where: e.subject_id == ^id)
       {:since, since}, acc -> from(e in acc, where: e.occurred_at >= ^since)
+      {:teams, teams}, acc -> about(acc, teams)
       _other, acc -> acc
     end)
+  end
+
+  # The rows about these teams and no other: a team's own changes, which name it; its
+  # triggers' (`<team>/<name>`) and its principals' (`svc:<team>/<name>`), whose subjects
+  # name it; and its sessions' and their runs', which name one of its sessions, or carry
+  # one in their detail as a token minted for it does. A row about the plane as a whole
+  # names no team and is about none.
+  defp about(query, teams) do
+    names = Enum.map(teams, & &1.name)
+    ids = Enum.map(teams, & &1.id)
+    sessions = from(s in Session, where: s.team_id in ^ids, select: s.id)
+
+    where(query, ^dynamic(^naming(names) or ^of_sessions(sessions)))
+  end
+
+  defp naming(names) do
+    dynamic(
+      [e],
+      (e.subject_kind == "team" and e.subject_id in ^names) or
+        (e.subject_kind == "trigger" and
+           fragment("split_part(?, '/', 1)", e.subject_id) in ^names) or
+        (e.subject_kind == "principal" and like(e.subject_id, "svc:%") and
+           fragment("split_part(substr(?, 5), '/', 1)", e.subject_id) in ^names)
+    )
+  end
+
+  defp of_sessions(sessions) do
+    dynamic(
+      [e],
+      (e.subject_kind in ["session", "run"] and e.subject_id in subquery(sessions)) or
+        fragment("?->>'session_id'", e.detail) in subquery(sessions)
+    )
   end
 end

@@ -185,6 +185,8 @@ export interface FakeAuth {
   state: "signed_out" | "signing_in" | "signed_in" | "expired";
   account: string | null;
   error: string | null;
+  /** A scope a server asked for that the sign-in does not carry, until a sign-in lands. */
+  step_up: string | null;
 }
 
 /** A skill in one of the daemon's layers; `user_agents` and `agents` are the `.agents/skills` read in place (troupe Decision 822). */
@@ -540,6 +542,8 @@ export class FakeDaemon {
   servers: FakeServer[] = [];
   /** Sign-ins by server name (troupe-remote Decision 741); a server with `oauth` and no entry is signed out. */
   signIns: Record<string, FakeAuth> = {};
+  /** What the provider says to a sign-out, by server name: evoked where nothing is set and there was a sign-in. */
+  revocations: Record<string, { state: "revoked" | "failed" | "unsupported" | "none"; reason: string | null }> = {};
   /** The access token each sign-in left in the state directory, which no answer carries. */
   readonly signInTokens: Record<string, string> = {};
   /** Every call `mcp.call` made to a server, as the server would have received it (troupe Decision 748). */
@@ -1768,8 +1772,14 @@ export class FakeDaemon {
 
   /** The person came back from the browser: a sign-in started with `mcp.sign_in` lands. */
   finishSignIn(name: string, account: string | null = "ada@example.test"): void {
-    this.signIns[name] = { state: "signed_in", account, error: null };
+    this.signIns[name] = { state: "signed_in", account, error: null, step_up: null };
     this.signInTokens[name] = `at-${name}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  /** A tool of the server asked for a scope the sign-in does not carry: `mcp.list` says so until a sign-in lands. */
+  wantScope(name: string, scope: string): void {
+    const now = this.signIns[name] ?? { state: "signed_out", account: null, error: null, step_up: null };
+    this.signIns[name] = { ...now, step_up: scope };
   }
 
   /**
@@ -1787,7 +1797,7 @@ export class FakeDaemon {
     if (scope === "workspace" && !workspace) return invalid("the workspace scope needs a workspace");
 
     const visible = <T extends { layer: string }>(rows: T[]): T[] => rows.filter((r) => r.layer === "user" || r.layer === "user_agents" || Boolean(workspace));
-    const authOf = (s: FakeServer): FakeAuth | null => (s.oauth ? (this.signIns[s.name] ?? { state: "signed_out", account: null, error: null }) : null);
+    const authOf = (s: FakeServer): FakeAuth | null => (s.oauth ? (this.signIns[s.name] ?? { state: "signed_out", account: null, error: null, step_up: null }) : null);
     const liveOf = (s: FakeServer) =>
       s.disabled
         ? { state: "disabled", tools: [], error: null }
@@ -1888,10 +1898,12 @@ export class FakeDaemon {
         if (!known) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "mcp_server", name } });
         if (!known.oauth) return invalid(`${name} takes no sign-in: give its entry an oauth.client_id to sign in to it`);
         if (method === "mcp.sign_out") {
+          const held = this.signIns[name]?.state === "signed_in" || this.signIns[name]?.state === "expired";
+          const revocation = held ? (this.revocations[name] ?? { state: "revoked", reason: null }) : { state: "none", reason: null };
           delete this.signIns[name];
-          return reply(ws, id, { server: name, auth: authOf(known) });
+          return reply(ws, id, { server: name, auth: authOf(known), revocation });
         }
-        this.signIns[name] = { state: "signing_in", account: this.signIns[name]?.account ?? null, error: null };
+        this.signIns[name] = { state: "signing_in", account: this.signIns[name]?.account ?? null, error: null, step_up: this.signIns[name]?.step_up ?? null };
         const query = new URLSearchParams({ client_id: known.oauth.client_id, response_type: "code", redirect_uri: "http://127.0.0.1:53682/callback" });
         return reply(ws, id, {
           server: name,

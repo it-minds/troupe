@@ -1385,19 +1385,24 @@ defmodule Troupe.Client.Daemon do
   # renders the plan (troupe-remote Decision 648), and `orchestrate` runs it.
   defp branch_profile(_sid, "workflow"), do: {:ok, "orchestrate", "always", :workflow}
 
+  # A name that is no primary agent is an unknown command; agents the daemon did not list
+  # are not a list of none, and the line says the daemon did not answer instead.
   defp branch_profile(sid, name) do
-    primaries =
-      case profiles({:local, workspace(sid)}, nil) do
-        {:ok, profiles} -> Enum.map(profiles, & &1.name)
-        _ -> []
-      end
+    case profiles({:local, workspace(sid)}, nil) do
+      {:ok, profiles} ->
+        primaries = Enum.map(profiles, & &1.name)
 
-    if name in primaries do
-      {:ok, name, "auto", :agent}
-    else
-      {:error,
-       "unknown command /#{name}; available: " <>
-         Enum.map_join(Enum.uniq(primaries ++ ["worktree", "workflow"]), ", ", &("/" <> &1))}
+        if name in primaries do
+          {:ok, name, "auto", :agent}
+        else
+          {:error,
+           "unknown command /#{name}; available: " <>
+             Enum.map_join(Enum.uniq(primaries ++ ["worktree", "workflow"]), ", ", &("/" <> &1))}
+        end
+
+      {:error, reason} ->
+        {:error,
+         "the daemon did not answer with the agents here, so /#{name} was not started (#{reason})"}
     end
   end
 
