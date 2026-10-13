@@ -170,6 +170,14 @@ if config_env() == :prod do
 
   # -- the plane ------------------------------------------------------------
 
+  # Where the plane writes its WorkerProfiles and Triggers, the chart's `namespace`, and the
+  # prefix every worker namespace carries, its `policy.namespacePrefix`, which enrolment
+  # takes off a pod's namespace to name its profile. Outside the autostart gate below, like
+  # the operator's settings, so that what a release reads can be read without a plane.
+  config :troupe_plane,
+    namespace: System.get_env("TROUPE_PLANE_NAMESPACE", "troupe-system"),
+    namespace_prefix: System.get_env("TROUPE_NAMESPACE_PREFIX", "troupe-w-")
+
   # The database is configured whenever there is one to configure, and *not* inside the
   # autostart gate below: `bin/troupe_plane eval Troupe.Plane.Release.migrate()` is a
   # release that reaches its repo and serves nothing, and gating the database on whether
