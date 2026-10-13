@@ -7,7 +7,6 @@
 // end against the fake daemon, so a change on either side fails here.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { after, before, describe, it } from "node:test";
 import {
   DaemonClient,
@@ -25,7 +24,7 @@ import {
   tokenCount,
 } from "../src/index.js";
 import type { ConfigChanged, DaemonEndpoint, ModelConfig, ModelForm } from "../src/index.js";
-import { FakeDaemon, SETUP_KINDS } from "./support/daemon.js";
+import { FakeDaemon } from "./support/daemon.js";
 import { startHarness, type Harness } from "./support/harness.js";
 import { GATEWAY_DEFAULTS } from "./support/plane.js";
 
@@ -231,16 +230,6 @@ describe("the model settings on the daemon", () => {
       providerTypes({}).map((t) => t.name),
       ["anthropic", "openai"],
     );
-  });
-
-  // The fake kept a copy of the daemon's list of its own, which nothing held to the daemon's.
-  it("offers exactly the list the daemon carries, as the protocol writes it", async () => {
-    const written = JSON.parse(
-      readFileSync(new URL("../../../../../protocol/schema/config/provider-types.json", import.meta.url), "utf8"),
-    ) as { types: unknown[]; kinds: unknown[] };
-    const saved = await client.modelConfig();
-    assert.deepEqual(saved.provider_types, written.types);
-    assert.deepEqual(SETUP_KINDS, written.kinds);
   });
 
   it("an older daemon is told apart from a broken one", async () => {

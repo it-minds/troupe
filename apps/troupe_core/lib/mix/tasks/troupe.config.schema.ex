@@ -18,10 +18,12 @@ defmodule Mix.Tasks.Troupe.Config.Schema do
   `<!-- provider-types:begin -->` and `<!-- provider-types:end -->`, written from
   `Troupe.LLM.ProviderType`; the rest of the page is written by hand.
 
-  It writes `protocol/schema/config/provider-types.json` too: the provider types and the
-  ways to set one up exactly as the daemon's `config.get` and `setup.get` carry them
-  (`Troupe.Protocol.ProviderTypes.wire/0` and `kinds/0`), which the GUI's fake daemon
-  serves, so the fake cannot offer a list the daemon does not.
+  It writes `clients/gui/packages/client/test/support/provider-types.ts` too: the provider
+  types and the ways to set one up exactly as the daemon's `config.get` and `setup.get`
+  carry them (`Troupe.Protocol.ProviderTypes.wire/0` and `kinds/0`), which the GUI's fake
+  daemon serves, so the fake cannot offer a list the daemon does not. A module rather than
+  a file it reads, because the GUI's tests also run in an image built from `clients/gui`
+  alone, where nothing above it is.
   """
 
   use Mix.Task
@@ -44,7 +46,7 @@ defmodule Mix.Tasks.Troupe.Config.Schema do
     schema_path = Path.join([root, "protocol", "schema", "config", "v1.json"])
     page_path = Path.join([root, "docs", "user", "configuration.md"])
 
-    types_path = Path.join([root, "protocol", "schema", "config", "provider-types.json"])
+    types_path = Path.join(root, "clients/gui/packages/client/test/support/provider-types.ts")
 
     schema = Jason.encode!(Schema.json_schema(), pretty: true) <> "\n"
     page = page_path |> File.read!() |> with_reference()
@@ -74,8 +76,16 @@ defmodule Mix.Tasks.Troupe.Config.Schema do
   end
 
   defp provider_types do
-    types = %{"types" => ProviderTypes.wire(), "kinds" => ProviderTypes.kinds()}
-    Jason.encode!(types, pretty: true) <> "\n"
+    """
+    // Written by `mix troupe.config.schema` from `Troupe.Protocol.ProviderTypes`; do not edit.
+    // `--check` fails in CI when it is not what the daemon's `config.get` and `setup.get` carry.
+
+    /** The provider types a screen offers: `ProviderTypes.wire/0`. */
+    export const PROVIDER_TYPES: Array<Record<string, unknown>> = #{Jason.encode!(ProviderTypes.wire(), pretty: true)};
+
+    /** The ways `setup.get` says a provider may be set up: `ProviderTypes.kinds/0`. */
+    export const SETUP_KINDS: Array<Record<string, unknown>> = #{Jason.encode!(ProviderTypes.kinds(), pretty: true)};
+    """
   end
 
   defp with_reference(page) do

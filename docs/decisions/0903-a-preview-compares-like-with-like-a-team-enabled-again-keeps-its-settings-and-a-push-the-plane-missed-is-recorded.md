@@ -19,7 +19,7 @@ paths:
   - clients/gui/apps/desktop/src-tauri/src/daemon.rs
   - clients/gui/packages/client/test/support/daemon.ts
   - apps/troupe_core/lib/mix/tasks/troupe.config.schema.ex
-  - protocol/schema/config/provider-types.json
+  - clients/gui/packages/client/test/support/provider-types.ts
 symbols:
   - Troupe.Plane.Admin.preview/2
   - Troupe.Plane.Admin.team_enable/4
@@ -83,10 +83,13 @@ of 901 stands. It also does two things Decision 899 lists as not done there.
   belt-and-braces working, not an error.
 - **The desktop app starts a daemon with `CREATE_NO_WINDOW` on Windows**, so the
   `troupe-daemon.cmd` shim, run by `cmd.exe`, opens no console window.
-- **The GUI's fake daemon reads the provider types from the protocol's list.**
-  `mix troupe.config.schema` writes `protocol/schema/config/provider-types.json` from
-  `Troupe.Protocol.ProviderTypes.wire/0` and `kinds/0`, `--check` holds it there in CI, and
-  the fake serves it, so it cannot offer a list the daemon does not.
+- **The GUI's fake daemon serves the protocol's list of provider types.**
+  `mix troupe.config.schema` writes `clients/gui/packages/client/test/support/provider-types.ts`
+  from `Troupe.Protocol.ProviderTypes.wire/0` and `kinds/0`, `--check` holds it there in CI,
+  and the fake imports it, so it cannot offer a list the daemon does not. A module beside the
+  fake rather than a file under `protocol/schema` it reads: the GUI's tests also run in an
+  image built from `clients/gui` alone, which the cluster job found when a first try read the
+  file from the repository root.
 
 **Proof:** each was a failing test on the chunk tip first, apart from the TUI race and the
 cluster test's comment. Over `/rpc`, `admin.profile.get` of a refused profile answered 500
@@ -96,7 +99,7 @@ kept `max_sessions` at 6; the team kept no `budget_micros` when enabled again wi
 the rebuild named the removed person's subject; the push after a lost record was refused as
 "commits this session did not push", and one with no base as having nothing to build on;
 the audit logged `[error]` three times for one profile's identities; `cargo test` found the
-daemon's command on the test's own console; and the fake's list had no file to agree with.
-The tests are in `admin_api_test.exs`, `panel_test.exs`, `one_row_per_person_test.exs`,
-`admin_test.exs`, the worker's `index_rebuild_test.exs` and `github_fix_loop_test.exs`,
-`daemon.rs` and the client's `config.test.ts`.
+daemon's command on the test's own console; and a label changed in the fake's generated
+list fails `mix troupe.config.schema --check`. The tests are in `admin_api_test.exs`,
+`panel_test.exs`, `one_row_per_person_test.exs`, `admin_test.exs`, the worker's
+`index_rebuild_test.exs` and `github_fix_loop_test.exs`, and `daemon.rs`.
