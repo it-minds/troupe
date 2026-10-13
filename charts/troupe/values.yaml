@@ -133,6 +133,30 @@ plane:
     limits: {cpu: "1", memory: 1Gi}
   # The control listener workers dial. Never exposed through ingress.
   controlPort: 4001
+  # TLS on the control port. A registered machine (docs/admin/single-machine.md) dials it
+  # from outside the cluster and enrols over TLS only, pinning the CA its registration
+  # answered; a pod may still dial it in plaintext on the pod network. Without a
+  # certificate the port speaks plaintext alone and no machine can be registered.
+  controlTls:
+    enabled: true
+    # cert-manager issues the control Service's certificate, as a `Certificate` this chart
+    # renders. Needs cert-manager's CRDs. `false`: the Secret below must hold `tls.crt`,
+    # `tls.key` and `ca.crt` already, put there by somebody else.
+    certManager: true
+    # The issuer, `kind` Issuer (in this namespace) or ClusterIssuer. It must be a CA a
+    # machine can pin, and one that issues for a cluster-internal name, which a public
+    # ACME issuer does not. Empty: the chart makes a CA of its own for this alone, a
+    # self-signed issuer and a CA certificate of ten years, whose key is kept when it is
+    # renewed, so a machine's pinned CA stays good.
+    issuer:
+      kind: ""
+      name: ""
+    # Where the certificate is, and what the plane mounts.
+    secretName: troupe-plane-control-tls
+    # More names, and addresses, for the certificate besides the control Service's own:
+    # what a machine dials when the installation routes the port out of the cluster.
+    dnsNames: []
+    ipAddresses: []
   httpPort: 4000
   # Where the Erlang distribution listener is pinned when `distribution` is `name`, so
   # the NetworkPolicy can open exactly that port between plane pods rather than the

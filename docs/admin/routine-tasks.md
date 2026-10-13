@@ -222,6 +222,7 @@ daemon's next connection, and the plane's log says how many were left and why (D
 
 ## Machines and hosts
 
-`admin.host.register` (the secret is shown once), `admin.host.rotate`,
+`admin.host.register` (the secret is shown once, with the CA the machine pins),
+`admin.host.rotate`,
 `admin.host.enabled`, `admin.hosts.list`, `admin.provisioners.list`:
 [single-machine.md](single-machine.md).

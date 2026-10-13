@@ -117,15 +117,51 @@ defmodule Troupe.E2E.EnrolmentTest do
     end
   end
 
+  # A registered machine is the worker outside the cluster, so it enrols over TLS only,
+  # with the certificate the chart mounted for the control Service (`scripts/remote-up`
+  # makes it here, as cert-manager would elsewhere). Neither secret below is a machine's:
+  # what is shown is what the release's own listener does with one, before and after TLS.
+  describe "a registered machine's secret" do
+    setup do
+      %{port: World.port_forward(World.namespace(), "deployment/troupe-plane", @control_port)}
+    end
+
+    test "is refused in plaintext with a sentence, before it is looked at", %{port: port} do
+      assert {:error, error} = enrol(port, "twh_e2e-not-a-real-secret", "e2e-machine")
+      assert error["message"] == "forbidden", "the plane answered #{inspect(error)}"
+      assert error["data"]["reason"] =~ "a registered machine enrols over TLS only"
+    end
+
+    test "is read over TLS against the CA the control certificate names", %{port: port} do
+      {:ok, _} = Application.ensure_all_started(:ssl)
+
+      ca =
+        ["get", "secret", "troupe-plane-control-tls", "--namespace", World.namespace()]
+        |> Kernel.++(["--output", "jsonpath={.data.ca\\.crt}"])
+        |> World.kubectl!()
+        |> Base.decode64!()
+
+      cacerts = for {:Certificate, der, _} <- :public_key.pem_decode(ca), do: der
+      assert cacerts != [], "troupe-plane-control-tls holds no CA"
+
+      # Unknown to the plane, so the answer is the one refusal every wrong secret gets:
+      # which is the proof it was read, over TLS, and not refused for the transport.
+      assert {:error, error} =
+               enrol(port, "twh_e2e-not-a-real-secret", "e2e-machine", cacerts: cacerts)
+
+      assert error["message"] == "unauthenticated", "the plane answered #{inspect(error)}"
+    end
+  end
+
   # -- the control channel ----------------------------------------------------
   #
-  # Line-delimited JSON-RPC over TCP, which is what a worker speaks. Written out here
-  # rather than borrowed from the plane's test support, because the operator may not
-  # depend on the plane and because a suite that used the plane's own helper would be
-  # asserting through the code under test.
+  # Line-delimited JSON-RPC over TCP, which is what a worker speaks, or over TLS with the
+  # CA given. Written out here rather than borrowed from the plane's test support, because
+  # the operator may not depend on the plane and because a suite that used the plane's own
+  # helper would be asserting through the code under test.
 
-  defp enrol(port, token, pod_name) do
-    {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false, packet: :raw], 10_000)
+  defp enrol(port, token, pod_name, opts \\ []) do
+    {transport, socket} = dial(port, opts[:cacerts])
 
     request =
       Jason.encode!(%{
@@ -140,14 +176,45 @@ defmodule Troupe.E2E.EnrolmentTest do
         }
       })
 
-    :ok = :gen_tcp.send(socket, [request, ?\n])
-    answer = read_answer(socket)
-    :gen_tcp.close(socket)
+    :ok = transport.send(socket, [request, ?\n])
+    answer = read_answer(transport, socket)
+    transport.close(socket)
     answer
   end
 
-  defp read_answer(socket) do
-    case :gen_tcp.recv(socket, 0, 20_000) do
+  defp dial(port, nil) do
+    {:ok, socket} =
+      :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false, packet: :raw], 10_000)
+
+    {:gen_tcp, socket}
+  end
+
+  # As a machine dials: that CA and nothing else, and the control Service's name.
+  defp dial(port, cacerts) do
+    {:ok, socket} =
+      :ssl.connect(
+        ~c"127.0.0.1",
+        port,
+        [
+          :binary,
+          active: false,
+          packet: :raw,
+          verify: :verify_peer,
+          cacerts: cacerts,
+          server_name_indication:
+            String.to_charlist("troupe-plane-control.#{World.namespace()}.svc"),
+          customize_hostname_check: [
+            match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+          ]
+        ],
+        10_000
+      )
+
+    {:ssl, socket}
+  end
+
+  defp read_answer(transport, socket) do
+    case transport.recv(socket, 0, 20_000) do
       {:ok, data} ->
         data
         |> String.split("\n", trim: true)

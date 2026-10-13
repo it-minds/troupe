@@ -431,7 +431,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.host.register",
       function: :host_register,
       summary:
-        "Register a machine against a profile and mint the secret it enrols with. The secret is returned once and stored only as a hash; there is no method that shows it again.",
+        "Register a machine against a profile and mint the secret it enrols with. The secret is returned once and stored only as a hash; there is no method that shows it again. The answer also carries ca, the PEM of the CA that signed the control port's certificate, which the machine pins: it enrols over TLS only. Refused while the control port has no certificate.",
       risk: :write,
       arguments: [
         %Argument{
@@ -466,7 +466,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.host.rotate",
       function: :host_rotate,
       summary:
-        "Mint a new enrolment secret for a machine, keeping the machine. The old secret stops working immediately, and the new one is shown once.",
+        "Mint a new enrolment secret for a machine, keeping the machine. The old secret stops working immediately, and the new one is shown once, with ca as registering answers it.",
       risk: :write,
       arguments: [
         %Argument{name: "profile", type: :string, required: true, description: "The profile."},

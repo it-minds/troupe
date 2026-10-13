@@ -72,6 +72,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_LOG_FORMAT` | text | `"json"`: one object per line with `request_id`, `session_id` | none |
 | `RELEASE_DISTRIBUTION`, `TROUPE_NODE_BASENAME`, `TROUPE_PLANE_SELECTOR` | set by chart | `name` clusters replicas through libcluster's Kubernetes topology | `plane.distribution` |
 | `TROUPE_PLANE_CONTROL_PORT` | `4001` | the control listener workers dial | `plane.controlPort` |
+| `TROUPE_PLANE_CONTROL_TLS_DIR` | unset | where the control port's certificate is (`tls.crt`, `tls.key`, `ca.crt`, as cert-manager writes them), read at each handshake; a registered machine enrols over TLS only and is given `ca.crt` at registration. Unset: plaintext alone, and no machine can be registered | `/etc/troupe/control-tls` from `plane.controlTls.secretName`, with `plane.controlTls.enabled` |
 | `TROUPE_GROUPS_CLAIM` | `groups` | deployed `groups_claim` | `plane.groupsClaim` |
 | `TROUPE_PLATFORM_ADMIN_GROUP` | unset (nobody); the chart's is `troupe-platform-admins` | deployed `platform_admin_group` | `plane.platformAdminGroup` |
 | `TROUPE_DEPLOYMENT_BUDGET_MICROS` | `0` (no ceiling) | the deployment's monthly ceiling on everything the plane spends, in millionths; the console's `platform_budget_micros` may narrow it, never raise it | `plane.deploymentBudgetMicros` |
@@ -110,6 +111,7 @@ Worker pods are created by the operator, so the chart sets none of these.
 | `TROUPE_MCP_IDENTITIES_PATH` | none | the file holding the profile's `mcpIdentities`, read again whenever a token is asked for ([profiles](profiles-and-policy.md#calling-an-mcp-server-as-the-profile)) | yes, when there are any |
 | `TROUPE_KMS_TOKEN_PATH` | `/var/run/secrets/troupe/kms-token` | projected token (audience `troupe-kms`) for OpenBao | path matches |
 | `TROUPE_TOKEN_PATH`, `TROUPE_HOST_SECRET` | unset | a registered machine's enrolment secret, from a file or directly ([single-machine.md](single-machine.md)) | no |
+| `TROUPE_PLANE_CA_PATH`, `TROUPE_PLANE_SERVER_NAME` | unset, the host dialled | the CA the link trusts for the plane's certificate, and nothing else: with it the link dials with TLS, and a machine's secret is never sent without it. The name the certificate must carry, for a tunnel or an address it does not name | no |
 | `TROUPE_BAO_ADDR`, `TROUPE_BAO_TOKEN`, `TROUPE_BAO_MOUNT` | as the plane, unset, `secret` | KV v2 for session keys; without a token, Kubernetes auth | address only |
 | `TROUPE_BAO_ROLE` | `troupe-worker` | the Kubernetes-auth role the pod logs in under; the client token is kept until shortly before its lease ends | `troupe-worker-<profile>` with `bao.workerRolePerProfile` |
 | `TROUPE_OBJECT_*` | as the plane | the object store; credentials from `TROUPE_OBJECT_SECRET_NAME` | yes |
@@ -169,6 +171,7 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 | `plane.ingress.enabled`, `.bodySize`, `.rateLimit.{rps,burstMultiplier,connections}` | `true`, `1m`, `20`/`5`/`100` | the plane's Ingress and its nginx limits, per client IP; `rateLimit: null` turns them off |
 | `plane.ingressClassName`, `plane.certIssuer`, `plane.tlsSecretName` | `nginx`, `""`, `""` | the plane's Ingress class and TLS |
 | `plane.distPort`, `plane.maxPorts` | `9100`, `65536` | Erlang distribution port; `+Q` |
+| `plane.controlTls.enabled`, `.certManager`, `.issuer.{kind,name}`, `.secretName`, `.dnsNames`, `.ipAddresses` | `true`, `true`, the chart's own CA, `troupe-plane-control-tls`, `[]`, `[]` | TLS on the control port: a cert-manager `Certificate` for `troupe-plane-control` by its in-cluster names and these, from the named issuer (a CA, not ACME) or from a CA the chart makes (ten years, its key kept on renewal), mounted into the plane. `certManager: false` mounts the Secret as somebody else put it there. A string for either flag is refused ([single-machine.md](single-machine.md)) |
 | `*.resources` | small requests and limits | container resources; `limits.cpu` also sets `+S` |
 | `gui.enabled`, `gui.replicas`, `gui.basePath` | `true`, `2`, `/app` | the GUI's Deployment, Service, Ingress on `plane.host` and NetworkPolicy. `basePath` must match the image's `TROUPE_GUI_BASE`; `/` is refused |
 | `console.enabled`, `console.basePath` | `true`, `/console` | the [console](console.md)'s Ingress on `plane.host`, to the GUI's Service, which runs while either is enabled. `basePath` must match the image's `TROUPE_CONSOLE_BASE`; `/` and `gui.basePath` are refused |
@@ -298,6 +301,7 @@ Troupe creates no Secrets. Each must exist before the pod that references it sta
 | `troupe-mcp-<server>` | `troupe-w-<profile>` | `token` | every bundle MCP server with a `credential_ref` |
 | pull secrets | `troupe-system` and every worker namespace | `.dockerconfigjson` | private registries |
 | `troupe-plane-tls`, the A2A TLS secret, worker TLS | their namespaces | `tls.crt`, `tls.key` | per-pod worker certificates are written by cert-manager when `operator.certIssuer` is set |
+| `troupe-plane-control-tls` | `troupe-system` | `tls.crt`, `tls.key`, `ca.crt` | written by cert-manager from the chart's `Certificate`; yours to provide with `plane.controlTls.certManager: false`. Mounted optionally: until it is there the plane registers no machine and says why |
 
 The operator's `SecretMissing` condition looks in the worker namespace, but its ClusterRole
 grants no verb on `secrets`, so the check cannot see a Secret that is there. Put the
@@ -311,7 +315,7 @@ Secrets where the pods read them and do not rely on the condition.
 |---|---|---|
 | 4000 | plane HTTP (`/rpc`, `/mcp`, console, discovery) | Service `troupe-plane` → Ingress `plane.host` |
 | 4000 | worker WebSocket `/v1/socket`, `/health/live`, `/health/ready` | per-pod Service → Ingress `<ordinal>-<profile>.<workersDomain>` |
-| 4001 | plane control listener (NDJSON over TCP) | Service `troupe-plane-control`, never an Ingress |
+| 4001 | plane control listener (NDJSON over TCP, or over TLS with the control certificate; a registered machine over TLS only) | Service `troupe-plane-control`, never an Ingress; a machine outside the cluster through a route of your own |
 | 4002 | A2A facade | Service `troupe-a2a` → Ingress `a2a.host` |
 | 4100 | worker raw NDJSON harness | in-pod only |
 | 4369, 9100 | epmd and Erlang distribution on plane pods, when clustered | pod to pod only |
