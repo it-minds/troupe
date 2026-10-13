@@ -15,17 +15,23 @@ defmodule Troupe.Plane.Control.Connection do
   ## TLS, and who may go without it
 
   The port speaks TLS and plaintext both, told apart by the first byte a client sends: a
-  TLS handshake opens with `22`, and a JSON-RPC line with `{`. Over TLS the plane serves
-  the certificate cert-manager issued for the control Service (`Troupe.Plane.Control.TLS`).
+  TLS handshake opens with `22`, and a JSON-RPC line with `{`. That one byte is read, and
+  handed on: to TLS ahead of the rest of the handshake (`Troupe.Plane.Control.Replay`), or
+  to the line reader as the start of its first line. Over TLS the plane serves the
+  certificate cert-manager issued for the control Service (`Troupe.Plane.Control.TLS`).
 
   A registered machine enrols over TLS only. It is the worker that is outside the cluster,
   reaching this port across whatever network the installation routed it through, and its
   secret, unlike a pod's projected token, lasts until somebody rotates it. So an `enrol`
   with a host secret on a plaintext connection is refused with a sentence before the
-  secret is looked at, and the worker's own link never sends one without TLS. A pod may
-  still enrol in plaintext: it dials the control Service on the pod network, which the
-  chart's NetworkPolicy opens to worker namespaces alone, and its token is bound to this
-  plane's audience and expires within the hour.
+  secret is looked at, and the worker's own link never sends one without TLS.
+
+  A pod dials with TLS too where the operator gave its namespace the plane's CA, and may
+  still enrol in plaintext where it did not: it dials the control Service on the pod
+  network, which the chart's NetworkPolicy opens to worker namespaces alone, and its token
+  is bound to this plane's audience and expires within the hour. A plane told to take TLS
+  only (`:require_tls`, the chart's `plane.controlTls.requireTls`) closes a plaintext
+  connection once its first byte says what it is, before anything after it is read.
   """
 
   use GenServer, restart: :temporary
@@ -47,7 +53,7 @@ defmodule Troupe.Plane.Control.Connection do
     Triggers
   }
 
-  alias Troupe.Plane.Control.{Connections, Router, TLS}
+  alias Troupe.Plane.Control.{Connections, Replay, Router, TLS}
   alias Troupe.Plane.Fleet.Bundle
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.Session
@@ -59,7 +65,8 @@ defmodule Troupe.Plane.Control.Connection do
   # Short: this runs on every enrolment, and a pod that cannot answer promptly is
   # better left alone than waited on.
   @index_timeout_ms 10_000
-  # A client that opened a handshake and does not finish it is not waited on for longer.
+  # A client that opened a handshake and does not finish it is not waited on for longer,
+  # and nor is one that connected and says nothing at all.
   @handshake_timeout_ms 10_000
 
   # The first byte of a TLS record that opens a handshake.
@@ -71,6 +78,7 @@ defmodule Troupe.Plane.Control.Connection do
     :identity,
     :worker,
     :tls_dir,
+    require_tls: false,
     transport: :gen_tcp,
     mode: :unknown,
     buffer: "",
@@ -110,7 +118,8 @@ defmodule Troupe.Plane.Control.Connection do
        verify: Keyword.get_lazy(opts, :verify, &default_verifier/0),
        # Where the control port's certificate is: the listener's option in a test, the
        # chart's mounted Secret in a pod.
-       tls_dir: Keyword.get_lazy(opts, :tls, &TLS.dir/0)
+       tls_dir: Keyword.get_lazy(opts, :tls, &TLS.dir/0),
+       require_tls: Keyword.get_lazy(opts, :require_tls, &TLS.required?/0)
      }}
   end
 
@@ -118,31 +127,34 @@ defmodule Troupe.Plane.Control.Connection do
     Application.get_env(:troupe_plane, :enrolment_verifier, &Enrolment.verify/1)
   end
 
+  # The first byte says which this connection is, and is the only one read before that is
+  # known: a handshake's goes to TLS ahead of the rest, anything else starts a plaintext
+  # line.
   @impl GenServer
   def handle_info(:socket_ready, state) do
-    :ok = setopts(state, active: :once)
-    {:noreply, state}
-  end
+    case :gen_tcp.recv(state.socket, 1, @handshake_timeout_ms) do
+      {:ok, <<@tls_handshake>> = byte} ->
+        case handshake(state, byte) do
+          {:ok, state} -> {:noreply, ready(state)}
+          :error -> {:stop, :normal, state}
+        end
 
-  # The first bytes say which this connection is: a handshake is put back for TLS to read
-  # from the start, anything else is the first of a plaintext line.
-  def handle_info(
-        {:tcp, socket, <<@tls_handshake, _::binary>> = data},
-        %{socket: socket, mode: :unknown} = state
-      ) do
-    case handshake(state, data) do
-      {:ok, state} ->
-        :ok = setopts(state, active: :once)
-        {:noreply, state}
+      {:ok, _byte} when state.require_tls ->
+        refuse_plaintext(state)
+        {:stop, :normal, state}
 
-      :error ->
+      {:ok, byte} ->
+        {:noreply, ready(%{state | mode: :plaintext, buffer: byte})}
+
+      {:error, reason} ->
+        # Closed before it said anything, or silent for too long: nobody to answer.
+        Logger.debug("troupe plane: a control connection said nothing (#{inspect(reason)})")
+        :gen_tcp.close(state.socket)
         {:stop, :normal, state}
     end
   end
 
   def handle_info({tag, socket, data}, %{socket: socket} = state) when tag in [:tcp, :ssl] do
-    state = if state.mode == :unknown, do: %{state | mode: :plaintext}, else: state
-
     case consume(state.buffer <> data, state) do
       {:ok, state} ->
         :ok = setopts(state, active: :once)
@@ -167,13 +179,17 @@ defmodule Troupe.Plane.Control.Connection do
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  # A connection whose first bytes open a TLS handshake. Without a certificate there is
-  # nothing to answer it with, and it is closed: a worker that asked for TLS is one that
-  # would not have sent its credential without it.
-  defp handshake(state, data) do
+  defp ready(state) do
+    :ok = setopts(state, active: :once)
+    state
+  end
+
+  # A connection whose first byte opens a TLS handshake, handed to TLS with that byte.
+  # Without a certificate there is nothing to answer it with, and it is closed: a worker
+  # that asked for TLS is one that would not have sent its credential without it.
+  defp handshake(state, read) do
     with {:ok, options} <- TLS.server_options(state.tls_dir),
-         :ok <- :gen_tcp.unrecv(state.socket, data),
-         {:ok, socket} <- :ssl.handshake(state.socket, options, @handshake_timeout_ms) do
+         {:ok, socket} <- Replay.handshake(state.socket, read, options, @handshake_timeout_ms) do
       {:ok, %{state | socket: socket, transport: :ssl, mode: :tls}}
     else
       {:error, reason} ->
@@ -181,6 +197,19 @@ defmodule Troupe.Plane.Control.Connection do
         :gen_tcp.close(state.socket)
         :error
     end
+  end
+
+  # Said for each one, with where it came from: a pod still dialling in plaintext after
+  # TLS was required is one made before the operator gave its namespace the CA, and its
+  # address is how somebody finds it.
+  defp refuse_plaintext(state) do
+    Logger.warning(
+      "troupe plane: refused a plaintext control connection from #{peer(state)}: this plane " <>
+        "takes TLS only (the chart's plane.controlTls.requireTls), and a worker dials with " <>
+        "TLS when it is given the plane's CA (TROUPE_PLANE_CA_PATH)"
+    )
+
+    :gen_tcp.close(state.socket)
   end
 
   defp describe_tls(reason) when is_binary(reason), do: reason
@@ -283,8 +312,11 @@ defmodule Troupe.Plane.Control.Connection do
       {:ok, worker, identity} ->
         register(worker)
 
+        # How it came in, too: before TLS is required of pods, this is where somebody sees
+        # whether any still dial without it.
         Logger.info(
-          "troupe plane: #{worker.namespace}/#{worker.pod_name} enrolled as #{worker.profile}"
+          "troupe plane: #{worker.namespace}/#{worker.pod_name} enrolled as #{worker.profile} " <>
+            if(state.mode == :tls, do: "over TLS", else: "in plaintext")
         )
 
         # Erasures this pod missed go out with the enrolment answer. It applies them

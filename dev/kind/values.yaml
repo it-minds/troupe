@@ -40,6 +40,10 @@ plane:
   controlTls:
     certManager: false
     secretName: troupe-plane-control-tls
+    # TLS only, as a later release will default to: the operator gives the dev profile's
+    # namespace the CA, its pods dial with TLS, and the cluster suite proves a plaintext
+    # dial from a worker namespace is refused.
+    requireTls: true
   provisioningMode: direct
   platformAdminGroup: troupe-platform-admins
   resources:

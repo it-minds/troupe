@@ -71,6 +71,45 @@ defmodule Troupe.Operator.SettingsTest do
     end
   end
 
+  describe "the plane's CA for the pods" do
+    test "is where the chart mounts it, and none when it mounts none" do
+      path = "/etc/troupe/plane-control-ca/ca.crt"
+      assert read(%{"TROUPE_PLANE_CONTROL_CA" => path}).plane_ca_path == path
+      assert read(%{"TROUPE_PLANE_CONTROL_CA" => ""}).plane_ca_path == nil
+      assert read(%{"TROUPE_PLANE_CONTROL_CA" => nil}).plane_ca_path == nil
+    end
+
+    @tag :tmp_dir
+    test "is read as its certificates alone, whatever else the file holds", %{tmp_dir: dir} do
+      %{cert: cert, key: key} =
+        :public_key.pkix_test_root_cert(~c"troupe-plane-control-ca", [
+          {:key, {:namedCurve, :secp256r1}}
+        ])
+
+      path = Path.join(dir, "ca.crt")
+      certificate = {:Certificate, cert, :not_encrypted}
+
+      key_entry = {:ECPrivateKey, :public_key.der_encode(:ECPrivateKey, key), :not_encrypted}
+      File.write!(path, :public_key.pem_encode([certificate, key_entry]))
+
+      settings = Settings.with_plane_ca(%Settings{plane_ca_path: path})
+      assert settings.plane_ca == :public_key.pem_encode([certificate])
+      refute settings.plane_ca =~ "PRIVATE KEY"
+    end
+
+    @tag :tmp_dir
+    test "is none where the file is not there yet, or holds no certificate", %{tmp_dir: dir} do
+      missing = Path.join(dir, "not-mounted/ca.crt")
+      assert Settings.with_plane_ca(%Settings{plane_ca_path: missing}).plane_ca == nil
+
+      empty = Path.join(dir, "ca.crt")
+      File.write!(empty, "")
+      assert Settings.with_plane_ca(%Settings{plane_ca_path: empty}).plane_ca == nil
+
+      assert Settings.with_plane_ca(%Settings{plane_ca: "stale"}).plane_ca == nil
+    end
+  end
+
   # `config/runtime.exs` read as a release reads it, with `vars` set (a `nil` unset) and put
   # back afterwards, and the operator's settings out of it.
   defp read(vars) do

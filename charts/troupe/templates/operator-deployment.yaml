@@ -67,6 +67,13 @@ spec:
               value: "troupe-plane-control.{{ .Values.namespace }}.svc"
             - name: TROUPE_PLANE_CONTROL_PORT
               value: {{ .Values.plane.controlPort | quote }}
+            {{- if and .Values.plane.enabled .Values.plane.controlTls.enabled }}
+            # The control certificate's CA, which the operator copies into every worker
+            # namespace for the pods to dial the control port with TLS against. Read on
+            # every pass, so a renewed CA reaches the namespaces at the next.
+            - name: TROUPE_PLANE_CONTROL_CA
+              value: /etc/troupe/plane-control-ca/ca.crt
+            {{- end }}
             - name: TROUPE_OBJECT_SECRET_NAME
               value: {{ .Values.objectStore.secretName | quote }}
             - name: TROUPE_MAX_PORTS
@@ -149,6 +156,24 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if and .Values.plane.enabled .Values.plane.controlTls.enabled }}
+            - name: plane-control-ca
+              mountPath: /etc/troupe/plane-control-ca
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if and .Values.plane.enabled .Values.plane.controlTls.enabled }}
+        # `ca.crt` alone out of the plane's Secret: the kubelet writes only the keys listed,
+        # so the certificate's key never reaches this pod. Optional, as it is for the plane,
+        # so the operator starts before cert-manager has issued the certificate; the pods
+        # it makes in the meantime wait for the CA rather than dial without it.
+        - name: plane-control-ca
+          secret:
+            secretName: {{ .Values.plane.controlTls.secretName }}
+            optional: true
+            items:
+              - key: ca.crt
+                path: ca.crt
+        {{- end }}

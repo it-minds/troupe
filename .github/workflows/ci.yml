@@ -495,6 +495,28 @@ jobs:
             exit 1
           fi
 
+      # The operator copies the control certificate's CA into every worker namespace, and it
+      # is given that one key of the Secret, never the certificate's key. A control port
+      # told to take TLS only with no certificate would enrol nobody, and a string "false"
+      # would read as on.
+      - name: The chart gives the operator the control CA alone, and refuses TLS-only without TLS
+        run: |
+          operator=$(helm template troupe charts/troupe --show-only templates/operator-deployment.yaml)
+          if ! grep -q 'name: TROUPE_PLANE_CONTROL_CA' <<<"$operator" \
+              || ! grep -qx '              - key: ca.crt' <<<"$operator" \
+              || grep -q 'key: tls.key' <<<"$operator"; then
+            echo "the operator is not given ca.crt alone from the control certificate's Secret"
+            exit 1
+          fi
+          for bad in "--set plane.controlTls.requireTls=true --set plane.controlTls.enabled=false" \
+              "--set-string plane.controlTls.requireTls=false"; do
+            # shellcheck disable=SC2086
+            if helm template troupe charts/troupe $bad >/dev/null 2>&1; then
+              echo "$bad rendered; the chart must refuse it"
+              exit 1
+            fi
+          done
+
       # The GUI shares the plane's host, and the root of that host is the plane's.
       - name: The chart refuses a GUI mounted at /
         run: |

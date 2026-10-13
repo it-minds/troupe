@@ -1383,8 +1383,6 @@ Found by the chunk 33 fixers, 2026-10-13.
   - If the plane can't take the clone's base commit, that session can never push; the worker only logs a warning.
   - Installation tokens still aren't revoked when a session goes dormant (D126).
 - **Control TLS** (Decision 893).
-  - The TLS sniff uses `:gen_tcp.unrecv/2`, which is undocumented and works only on the default inet backend. A release switched to `inet_backend: socket` would refuse every TLS handshake.
-  - Worker pods still enrol in plaintext. The operator could copy `ca.crt` into each worker namespace and set `TROUPE_PLANE_CA_PATH`, after which plaintext could be refused for pods too.
   - `OwnerOnly` was added to the TUI's harness doors and the TUI's own `icacls` code removed, with no TUI decision recording it.
 - **Team admins and namespaces** (Decisions 896, 897).
   - A team admin's audit list leaves out `profile.put`, `host.*` and `pod.drain` as rows about the plane as a whole, so a team admin no longer sees changes to profiles their team is granted. Whether to show them is a product question.

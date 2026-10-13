@@ -78,6 +78,14 @@ defmodule Troupe.Operator.Names do
   @spec mcp_identities() :: String.t()
   def mcp_identities, do: "troupe-mcp-identities"
 
+  @doc """
+  The ConfigMap the plane's control CA reaches a profile's pods in: `ca.crt`, which the
+  pod's link trusts for the plane's certificate and nothing else. A file the kubelet
+  replaces in place, so a renewed CA needs no restart.
+  """
+  @spec plane_ca() :: String.t()
+  def plane_ca, do: "troupe-plane-ca"
+
   @doc "The audience of the projected token a pod presents when it enrols."
   @spec enrolment_audience() :: String.t()
   def enrolment_audience, do: "troupe-plane"

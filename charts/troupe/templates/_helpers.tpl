@@ -48,10 +48,13 @@ the worker admits by itself. A page whose origin is not here gets no socket.
 {{- fail (printf "plane.replicas is %d but plane.distribution is %q: replicas that do not form an Erlang cluster each place sessions as if alone. Set plane.distribution to \"name\", or plane.replicas to 1." (int .Values.plane.replicas) .Values.plane.distribution) }}
 {{- end }}
 {{- $tls := .Values.plane.controlTls }}
-{{- range $key := list "enabled" "certManager" }}
+{{- range $key := list "enabled" "certManager" "requireTls" }}
 {{- if not (kindIs "bool" (get $tls $key)) }}
 {{- fail (printf "plane.controlTls.%s is %v (%s), and it is true or false: a string such as \"false\" would read as on." $key (get $tls $key) (kindOf (get $tls $key))) }}
 {{- end }}
+{{- end }}
+{{- if and $tls.requireTls (not $tls.enabled) }}
+{{- fail "plane.controlTls.requireTls is true and plane.controlTls.enabled is false: a control port that takes TLS only needs a certificate, or no worker can enrol." }}
 {{- end }}
 {{- if and $tls.enabled (not $tls.secretName) }}
 {{- fail "plane.controlTls.secretName is empty: it names the Secret the control port's certificate is in, which the plane mounts." }}

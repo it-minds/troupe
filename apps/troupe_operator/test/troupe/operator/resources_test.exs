@@ -1517,6 +1517,95 @@ defmodule Troupe.Operator.ResourcesTest do
     end
   end
 
+  # The CA of the plane's control certificate, which a pod's link trusts for the control
+  # port and nothing else: copied into the worker namespace, since a pod mounts only what
+  # its own namespace has, and only the CA, never the plane's key.
+  describe "the plane's CA" do
+    setup %{policy: policy} do
+      ca = ca_pem()
+
+      settings = %Settings{plane_ca_path: "/etc/troupe/plane-control-ca/ca.crt", plane_ca: ca}
+      resources = profile() |> Profile.from_resource() |> Resources.for_profile(policy, settings)
+
+      %{resources: resources, ca: ca, ca_settings: settings}
+    end
+
+    test "reaches the namespace as a ConfigMap holding ca.crt and nothing else", context do
+      config_map = find(context.resources, "ConfigMap", Names.plane_ca())
+
+      assert config_map["metadata"]["namespace"] == "troupe-w-dev"
+      assert config_map["data"] == %{"ca.crt" => context.ca}
+      assert config_map["metadata"]["labels"]["troupe.dev/managed"] == "operator"
+    end
+
+    test "is mounted read-only as a directory, and the link is told where", context do
+      pod = pod_spec(context.resources)
+      worker = container(context.resources)
+
+      # Optional, so a pod made before the CA could be read still starts and says why it
+      # does not dial; the directory and not the file, so a renewed CA reaches it.
+      volume = %{
+        "name" => "plane-ca",
+        "configMap" => %{"name" => "troupe-plane-ca", "optional" => true}
+      }
+
+      assert volume in pod["volumes"]
+
+      mount = %{"name" => "plane-ca", "mountPath" => "/etc/troupe/plane-ca", "readOnly" => true}
+      assert mount in worker["volumeMounts"]
+      refute Enum.any?(worker["volumeMounts"], &Map.has_key?(&1, "subPath"))
+
+      assert %{"name" => "TROUPE_PLANE_CA_PATH", "value" => "/etc/troupe/plane-ca/ca.crt"} in worker[
+               "env"
+             ]
+
+      # And it dials the control Service by the name its certificate carries; no other
+      # name is given to check it against.
+      assert %{
+               "name" => "TROUPE_PLANE_CONTROL",
+               "value" => "troupe-plane-control.troupe-system.svc:4001"
+             } in worker["env"]
+
+      refute Enum.find(worker["env"], &(&1["name"] == "TROUPE_PLANE_SERVER_NAME"))
+    end
+
+    test "a renewed CA changes the ConfigMap and not the pod template", context do
+      renewed =
+        profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(context.policy, %{context.ca_settings | plane_ca: ca_pem()})
+
+      template = &get_in(find(&1, "StatefulSet", "troupe-w-dev"), ["spec", "template"])
+      config_map = &find(&1, "ConfigMap", Names.plane_ca())
+
+      assert template.(renewed) == template.(context.resources)
+      refute config_map.(renewed) == config_map.(context.resources)
+    end
+
+    test "a pass that could not read it writes no ConfigMap and changes no pod", context do
+      unread =
+        profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(context.policy, %{context.ca_settings | plane_ca: nil})
+
+      refute find(unread, "ConfigMap", Names.plane_ca())
+
+      assert get_in(find(unread, "StatefulSet", "troupe-w-dev"), ["spec", "template"]) ==
+               get_in(find(context.resources, "StatefulSet", "troupe-w-dev"), ["spec", "template"])
+    end
+
+    test "an installation that gives pods none has no ConfigMap, volume or variable", context do
+      resources =
+        profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(context.policy, %Settings{})
+
+      refute find(resources, "ConfigMap", Names.plane_ca())
+      refute Enum.any?(pod_spec(resources)["volumes"], &(&1["name"] == "plane-ca"))
+      refute Enum.find(container(resources)["env"], &(&1["name"] == "TROUPE_PLANE_CA_PATH"))
+    end
+  end
+
   # A gateway streaming a response says nothing of its cost, and a pod has no catalog, so
   # without these a profile's models cost nothing on the ledger (#160, Decision 689).
   describe "model prices" do
@@ -1623,6 +1712,17 @@ defmodule Troupe.Operator.ResourcesTest do
   end
 
   defp container(resources), do: hd(pod_spec(resources)["containers"])
+
+  # A CA certificate of its own each time, as PEM, the way `Settings.with_plane_ca/1`
+  # writes one out.
+  defp ca_pem do
+    %{cert: der} =
+      :public_key.pkix_test_root_cert(~c"troupe-plane-control-ca", [
+        {:key, {:namedCurve, :secp256r1}}
+      ])
+
+    :public_key.pem_encode([{:Certificate, der, :not_encrypted}])
+  end
 
   # Every exact name the CiliumNetworkPolicy admits, in the order it lists them.
   defp fqdn_names(resources) do
