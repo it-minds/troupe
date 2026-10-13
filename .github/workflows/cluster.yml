@@ -67,6 +67,39 @@ jobs:
             exit 1
           fi
 
+      # What the worker's AppArmor profile does on this kernel, before any cluster: bubblewrap
+      # run on the runner itself as its unprivileged user, with a unix socket, unconfined
+      # and under the profile as each parser compiles it, the runner's (Ubuntu's) and the
+      # one the chart's loader runs (Debian 12's, in the operator image). Says what it
+      # found and fails nothing: the cluster below is the proof.
+      - name: The worker's AppArmor profile on this kernel, as each parser compiles it
+        run: |
+          sudo apt-get install -y -qq --no-install-recommends bubblewrap >/dev/null 2>&1 || true
+          dir="$RUNNER_TEMP/apparmor"; mkdir -p "$dir"
+          named() { sed -E "s/(profile |peer=)troupe-worker([ ,])/\1$1\2/" charts/troupe/files/worker-apparmor; }
+          named troupe-worker-ubuntu > "$dir/ubuntu"
+          named troupe-worker-debian12 > "$dir/debian12"
+          sudo apparmor_parser --replace --skip-cache "$dir/ubuntu" && echo "loaded with the runner's parser"
+          docker run --rm --privileged -v /sys/kernel/security:/sys/kernel/security -v "$dir:/p:ro" \
+            debian:bookworm-slim sh -c 'apt-get update -qq && apt-get install -y -qq --no-install-recommends apparmor >/dev/null 2>&1 &&
+              apparmor_parser --version | head -1 && apparmor_parser --replace --skip-cache /p/debian12' \
+            && echo "loaded with Debian 12's parser"
+          cat > "$dir/probe.sh" <<'PROBE'
+          attr=/proc/self/attr/apparmor/exec; [ -e "$attr" ] || attr=/proc/self/attr/exec
+          if [ -n "$1" ]; then echo "exec $1" > "$attr" || echo "could not ask for $1"; fi
+          exec /bin/sh -c '
+            cat /proc/self/attr/current
+            python3 -c "import socket; socket.socketpair(); print(\"unix socket ok\")" 2>&1 | tail -1
+            bwrap --die-with-parent --unshare-pid --unshare-ipc --unshare-uts --new-session \
+              --proc /proc --dev /dev --tmpfs /tmp --ro-bind /usr /usr --symlink usr/bin /bin \
+              --symlink usr/lib /lib --symlink usr/lib64 /lib64 -- /bin/cat /proc/1/comm 2>&1'
+          PROBE
+          for profile in "" troupe-worker-ubuntu troupe-worker-debian12; do
+            echo "== ${profile:-unconfined}"
+            sh "$dir/probe.sh" "$profile" 2>&1 || true
+          done
+          sudo dmesg | grep 'apparmor="DENIED"' | grep troupe-worker | tail -20 || true
+
       - name: A cluster whose CNI enforces policy
         run: scripts/kind-up
 

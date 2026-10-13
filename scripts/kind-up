@@ -95,15 +95,14 @@ for node in $(kind get nodes --name "$cluster"); do
       DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends apparmor >/dev/null'
     changed=true
   fi
-  # containerd's default profile declares no policy ABI, so the parser compiles it for
-  # whatever the kernel mediates, and a newer kernel than the profile was written for
-  # mediates more (fine-grained unix sockets among it) than its rules allow. Pinned to the
-  # ABI it was written for, as a distribution pins policy without an ABI. The workers'
-  # profile declares its own.
-  if ! docker exec "$node" grep -q '^policy-features=' /etc/apparmor/parser.conf; then
-    docker exec "$node" sh -c \
-      'echo "policy-features=/etc/apparmor.d/abi/kernel-5.4-vanilla" >> /etc/apparmor/parser.conf'
-    changed=true
+  # containerd's default profile, compiled by the host's parser rather than the node's: the
+  # node's is its Debian image's, older than a current Ubuntu kernel, and what it compiles
+  # for one refuses every unix socket ("failed protocol match"), so nothing that opens one
+  # starts. containerd uses a profile of that name that is already loaded. Needs root on the
+  # host; without it, this says so and the node compiles its own.
+  if command -v apparmor_parser >/dev/null; then
+    sudo -n apparmor_parser --replace --skip-cache dev/kind/cri-containerd.apparmor.d ||
+      echo "kind-up: could not load containerd's default AppArmor profile with this host's parser (sudo)" >&2
   fi
   # containerd and the kubelet each decide once, when they start, whether the node has
   # AppArmor: the kubelet refuses a pod that asks for a profile if it had none then.

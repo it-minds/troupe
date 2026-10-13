@@ -17,6 +17,7 @@ paths:
   - config/runtime.exs
   - docker/Dockerfile
   - dev/kind/values.yaml
+  - dev/kind/cri-containerd.apparmor.d
   - scripts/kind-up
   - scripts/remote-up
   - .github/workflows/cluster.yml
@@ -109,8 +110,12 @@ had lifted that sysctl on its runner (#686), which is why it never saw the secon
   (CI's Ubuntu runner, an Ubuntu laptop), `scripts/kind-up` gives each node
   `apparmor_parser` and securityfs and restarts containerd, which takes AppArmor for absent
   without the parser ("apparmor is not supported"); every other pod there then runs under
-  containerd's default profile, as on an Ubuntu node. `scripts/remote-up` turns the profile
-  on where a node's runtime can apply it.
+  containerd's default profile, as on an Ubuntu node. That default is compiled by the
+  host's parser (`dev/kind/cri-containerd.apparmor.d`, loaded before the node would load
+  its own): the node's parser is its Debian 12 image's, and on CI's runner kernel (6.17)
+  what it compiled refused every unix socket ("failed protocol match"), so ingress-nginx
+  never started (runs 38470446711 and 38471703207). `scripts/remote-up` turns the
+  profile on where a node's runtime can apply it.
 - **Upgrading** renames the DaemonSet (Helm removes `troupe-worker-seccomp` and makes
   `troupe-worker-profiles`) and adds the loader's privilege. The setting changes every
   profile's pod template: each reports `UpgradePending` and its pods are replaced as they
