@@ -3,19 +3,88 @@ defmodule Troupe.Paths do
   Platform locations for configuration and state.
 
   Config lives in `$XDG_CONFIG_HOME/troupe` (Linux, macOS) or `%APPDATA%\\troupe`
-  (Windows); state — session logs — in `$XDG_STATE_HOME/troupe` or
-  `%LOCALAPPDATA%\\troupe`. Nothing Troupe writes ever lands in the user's repository,
-  which is why every caller goes through here instead of joining paths itself.
+  (Windows), all of a person's own files in that one directory (`config_dir/0`); state —
+  session logs — in `$XDG_STATE_HOME/troupe` or `%LOCALAPPDATA%\\troupe`. Nothing Troupe
+  writes ever lands in the user's repository, which is why every caller goes through here
+  instead of joining paths itself. `docs/user/configuration/files.md` is the page that
+  says where each file is.
   """
 
   @app "troupe"
 
-  @doc "Directory holding `config.yaml` and the global `agents/` definitions."
+  @doc """
+  The one directory that holds a person's own files: `config.yaml`, `mcp.json`,
+  `credentials.json`, and `agents/`, `skills/` and `commands/`.
+  """
   @spec config_dir() :: Path.t()
-  def config_dir do
+  def config_dir, do: config_dir(:os.type())
+
+  defp config_dir(os_type) do
     case override("TROUPE_CONFIG_HOME") do
-      nil -> Path.join(default_config_home(), @app)
+      nil -> Path.join(default_config_home(os_type), @app)
       dir -> dir
+    end
+  end
+
+  @doc """
+  A file of the config directory, by name, for the files an older build kept elsewhere:
+  `credentials.json` and `mcp.json`.
+
+  On Windows those two were under `~\\.config\\troupe` (or `%XDG_CONFIG_HOME%\\troupe`)
+  while `config.yaml` was under `%APPDATA%\\troupe`. One found there, and not here, is
+  moved here the first time it is asked for, and made readable by its owner alone, so a
+  person's sign-in and servers keep working and every later read and write is of the one
+  copy. Nothing is moved when `TROUPE_CONFIG_HOME` names the directory, which the older
+  build honoured too, nor when both places hold one: this one is read, and the other is
+  left as it is. Elsewhere the two places were always the same.
+
+  Options: `:os` stands in for this machine's `:os.type()`, and `:run` for the program
+  that restricts a file on Windows (`Troupe.OwnerOnly.restrict/2`).
+  """
+  @spec config_file(String.t(), keyword()) :: Path.t()
+  def config_file(name, opts \\ []) do
+    os_type = Keyword.get(opts, :os, :os.type())
+    path = Path.join(config_dir(os_type), name)
+    _ = adopt(path, name, os_type, opts)
+    path
+  end
+
+  defp adopt(path, name, {:win32, _} = os_type, opts) do
+    with nil <- override("TROUPE_CONFIG_HOME"),
+         false <- File.exists?(path),
+         home when is_binary(home) <- older_config_home(),
+         from = Path.join([home, @app, name]),
+         true <- File.regular?(from) and Path.expand(from) != Path.expand(path),
+         :ok <- File.mkdir_p(Path.dirname(path)),
+         :ok <- move(from, path) do
+      Troupe.OwnerOnly.restrict(path, Keyword.put(opts, :os, os_type))
+    else
+      _not_moved -> :ok
+    end
+  end
+
+  defp adopt(_path, _name, _os_type, _opts), do: :ok
+
+  # Where the older build looked: `XDG_CONFIG_HOME`, else `.config` in the home directory.
+  defp older_config_home do
+    case {override("XDG_CONFIG_HOME"), System.user_home()} do
+      {nil, nil} -> nil
+      {nil, home} -> Path.join(home, ".config")
+      {dir, _home} -> dir
+    end
+  end
+
+  # A rename, or across volumes a copy and then the original removed.
+  defp move(from, to) do
+    case File.rename(from, to) do
+      :ok ->
+        :ok
+
+      {:error, :exdev} ->
+        with :ok <- File.cp(from, to), do: File.rm(from)
+
+      error ->
+        error
     end
   end
 
@@ -144,8 +213,8 @@ defmodule Troupe.Paths do
     end
   end
 
-  defp default_config_home do
-    case :os.type() do
+  defp default_config_home(os_type) do
+    case os_type do
       {:win32, _} -> System.get_env("APPDATA") || fallback_home(".config")
       _ -> System.get_env("XDG_CONFIG_HOME") || fallback_home(".config")
     end
