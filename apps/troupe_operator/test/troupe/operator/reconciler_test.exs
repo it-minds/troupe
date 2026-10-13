@@ -64,6 +64,48 @@ defmodule Troupe.Operator.ReconcilerTest do
     assert MapSet.subset?(prunable, kinds(everything))
   end
 
+  # The plane's control CA, read from the file the chart mounts on every pass: a renewed CA
+  # reaches the namespace at the next pass, one this pass could not read leaves the CA
+  # there, and an installation that stops giving pods one has it taken away.
+  describe "the plane's CA" do
+    @plane_ca {"v1", "ConfigMap", "troupe-w-dev", "troupe-plane-ca"}
+
+    @tag :tmp_dir
+    test "follows the file, and stays when the file is gone for a pass", %{tmp_dir: dir} do
+      path = Path.join(dir, "ca.crt")
+      conn = FakeCluster.start([policy(), profile()])
+
+      first = ca_pem()
+      File.write!(path, first)
+      assert {:ok, _result} = reconcile(conn, plane_ca_path: path)
+      assert get(@plane_ca)["data"] == %{"ca.crt" => first}
+
+      renewed = ca_pem()
+      File.write!(path, renewed)
+      assert {:ok, %{pruned: 0}} = reconcile(conn, plane_ca_path: path)
+      assert get(@plane_ca)["data"] == %{"ca.crt" => renewed}
+
+      File.rm!(path)
+      assert {:ok, %{pruned: 0}} = reconcile(conn, plane_ca_path: path)
+      assert get(@plane_ca)["data"] == %{"ca.crt" => renewed}
+      assert FakeCluster.deleted() == []
+    end
+
+    @tag :tmp_dir
+    test "is taken away when the installation gives pods none", %{tmp_dir: dir} do
+      path = Path.join(dir, "ca.crt")
+      File.write!(path, ca_pem())
+      conn = FakeCluster.start([policy(), profile()])
+
+      assert {:ok, _result} = reconcile(conn, plane_ca_path: path)
+      assert get(@plane_ca)
+
+      assert {:ok, %{pruned: 1}} = reconcile(conn, plane_ca_path: nil)
+      refute get(@plane_ca)
+      assert FakeCluster.deleted() == [@plane_ca]
+    end
+  end
+
   describe "an egress entry that is not a pattern" do
     # A bare `*` in the policy used to admit a bare `*` in a profile, and the operator wrote
     # it as a `matchPattern` that is every name there is.
@@ -493,13 +535,25 @@ defmodule Troupe.Operator.ReconcilerTest do
 
   # One pass, with the installation's settings as Helm would have rendered them, over the
   # profile as the cluster holds it now: with the status the last pass wrote.
-  defp reconcile(conn, cilium: cilium?) do
-    Application.put_env(:troupe_operator, :settings, cilium_available: cilium?)
+  defp reconcile(conn, cilium: cilium?), do: reconcile_with(conn, cilium_available: cilium?)
+  defp reconcile(conn, plane_ca_path: path), do: reconcile_with(conn, plane_ca_path: path)
+
+  defp reconcile_with(conn, settings) do
+    Application.put_env(:troupe_operator, :settings, settings)
 
     Reconcilers.reconcile(
       conn,
       get({"troupe.dev/v1alpha1", "WorkerProfile", "troupe-system", "dev"})
     )
+  end
+
+  defp ca_pem do
+    %{cert: der} =
+      :public_key.pkix_test_root_cert(~c"troupe-plane-control-ca", [
+        {:key, {:namedCurve, :secp256r1}}
+      ])
+
+    :public_key.pem_encode([{:Certificate, der, :not_encrypted}])
   end
 
   defp condition(type) do

@@ -29,6 +29,12 @@ defmodule Troupe.Operator.Resources do
   @identities_dir "/etc/troupe/mcp-identities"
   @identities_file "identities.json"
 
+  # Where the plane's control CA is in a pod, mounted the same way and for the same
+  # reason: the kubelet replaces the file when the operator writes a renewed CA, and the
+  # link reads it again at each dial.
+  @plane_ca_dir "/etc/troupe/plane-ca"
+  @plane_ca_file "ca.crt"
+
   # The cluster's resolver, as both network policies select it: CoreDNS keeps the
   # `k8s-app` label kube-dns had, in the namespace kube-dns ran in.
   @dns_namespace "kube-system"
@@ -47,6 +53,7 @@ defmodule Troupe.Operator.Resources do
       namespace(namespace, profile),
       service_account(namespace, profile),
       mcp_identities(namespace, profile),
+      plane_ca(namespace, profile, settings),
       team_claims(namespace, profile),
       org_claim(namespace, profile, policy),
       headless_service(namespace, profile, policy),
@@ -155,6 +162,23 @@ defmodule Troupe.Operator.Resources do
       "kind" => "ConfigMap",
       "metadata" => metadata(Names.mcp_identities(), namespace, profile),
       "data" => %{@identities_file => Jason.encode!(entries)}
+    }
+  end
+
+  # The CA of the plane's control certificate, copied into the namespace because a pod can
+  # mount a ConfigMap of its own namespace only, and the Secret it comes from is the
+  # plane's and holds the plane's key. Only the certificates (`Settings.with_plane_ca/1`),
+  # and not secret: it proves nothing on its own. None where the installation gives pods
+  # no CA, and none on a pass that could not read it, which the reconciler then leaves
+  # standing rather than prunes.
+  defp plane_ca(_namespace, _profile, %Settings{plane_ca: nil}), do: []
+
+  defp plane_ca(namespace, profile, %Settings{plane_ca: pem}) do
+    %{
+      "apiVersion" => "v1",
+      "kind" => "ConfigMap",
+      "metadata" => metadata(Names.plane_ca(), namespace, profile),
+      "data" => %{@plane_ca_file => pem}
     }
   end
 
@@ -748,7 +772,7 @@ defmodule Troupe.Operator.Resources do
       "enableServiceLinks" => false,
       "terminationGracePeriodSeconds" => settings.drain_timeout_seconds,
       "containers" => [container(profile, policy, settings)],
-      "volumes" => volumes(profile)
+      "volumes" => volumes(profile, settings)
     }
     |> put_unless_nil("imagePullSecrets", pull_secrets(settings))
     |> Map.merge(user_namespace(settings))
@@ -791,7 +815,7 @@ defmodule Troupe.Operator.Resources do
       "ports" => [%{"name" => "harness", "containerPort" => 4000}],
       "env" => env(profile, policy, settings),
       "resources" => profile.resources,
-      "volumeMounts" => volume_mounts(profile),
+      "volumeMounts" => volume_mounts(profile, settings),
       "readinessProbe" => probe("/health/ready"),
       "livenessProbe" => probe("/health/live"),
       "securityContext" =>
@@ -882,6 +906,7 @@ defmodule Troupe.Operator.Resources do
     ]
 
     base ++
+      plane_ca_env(settings) ++
       bao_role_env(profile, settings) ++
       workers_port_env(settings) ++
       allowed_origins_env(settings) ++
@@ -896,6 +921,16 @@ defmodule Troupe.Operator.Resources do
 
   defp bao_role_env(profile, _settings),
     do: [%{"name" => "TROUPE_BAO_ROLE", "value" => KMSPolicy.worker_role_name(profile.name)}]
+
+  # With a CA the link dials the control port with TLS, trusts that CA and nothing else,
+  # and checks the certificate against the name in `TROUPE_PLANE_CONTROL`, the control
+  # Service's, which the certificate carries. By whether the installation gives pods the
+  # CA, not by whether this pass could read it, so a pass that could not changes no pod.
+  defp plane_ca_env(%Settings{plane_ca_path: nil}), do: []
+
+  defp plane_ca_env(_settings) do
+    [%{"name" => "TROUPE_PLANE_CA_PATH", "value" => Path.join(@plane_ca_dir, @plane_ca_file)}]
+  end
 
   # Where the file is, which never changes; what is in it may.
   defp identities_env(%Profile{mcp_identities: []}), do: []
@@ -1072,7 +1107,7 @@ defmodule Troupe.Operator.Resources do
   defp credential_ref(server), do: MCPServer.credential_env(server)
 
   # The projected token is the pod's enrolment credential, and the only one it has.
-  defp volumes(profile) do
+  defp volumes(profile, settings) do
     # Two projected tokens rather than one automounted one. The default ServiceAccount
     # token is good at the API server and lasts as long as the pod; these are audience
     # -bound and short, so the one the plane accepts cannot open a session key and the one
@@ -1122,7 +1157,7 @@ defmodule Troupe.Operator.Resources do
         []
       end
 
-    [token] ++ identities_volume(profile) ++ team_volumes ++ org
+    [token] ++ identities_volume(profile) ++ plane_ca_volume(settings) ++ team_volumes ++ org
   end
 
   defp identities_volume(%Profile{mcp_identities: []}), do: []
@@ -1131,7 +1166,16 @@ defmodule Troupe.Operator.Resources do
     [%{"name" => "mcp-identities", "configMap" => %{"name" => Names.mcp_identities()}}]
   end
 
-  defp volume_mounts(profile) do
+  # Optional, so a pod made before the operator could first read the CA still starts: its
+  # link says in its log that the CA is not there yet, and dials once the kubelet has put
+  # the ConfigMap in place. It never falls back to plaintext.
+  defp plane_ca_volume(%Settings{plane_ca_path: nil}), do: []
+
+  defp plane_ca_volume(_settings) do
+    [%{"name" => "plane-ca", "configMap" => %{"name" => Names.plane_ca(), "optional" => true}}]
+  end
+
+  defp volume_mounts(profile, settings) do
     base =
       [
         %{"name" => Names.data_volume(), "mountPath" => @state_dir},
@@ -1146,6 +1190,10 @@ defmodule Troupe.Operator.Resources do
           else: [
             %{"name" => "mcp-identities", "mountPath" => @identities_dir, "readOnly" => true}
           ]
+        ) ++
+        if(settings.plane_ca_path == nil,
+          do: [],
+          else: [%{"name" => "plane-ca", "mountPath" => @plane_ca_dir, "readOnly" => true}]
         )
 
     teams =

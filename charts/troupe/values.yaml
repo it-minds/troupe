@@ -135,10 +135,18 @@ plane:
   controlPort: 4001
   # TLS on the control port. A registered machine (docs/admin/single-machine.md) dials it
   # from outside the cluster and enrols over TLS only, pinning the CA its registration
-  # answered; a pod may still dial it in plaintext on the pod network. Without a
-  # certificate the port speaks plaintext alone and no machine can be registered.
+  # answered. The operator gives every worker namespace the certificate's CA (`ca.crt`
+  # alone, never the key), and the pods dial with TLS against it. Without a certificate
+  # the port speaks plaintext alone, pods dial in plaintext, and no machine can be
+  # registered.
   controlTls:
     enabled: true
+    # Refuse plaintext on the control port, a pod's included: a plaintext connection is
+    # closed once its first byte says what it is, with a line in the plane's log. Off by
+    # default in 0.19, so pods made before the operator handed them the CA still enrol
+    # while they roll; turn it on once the plane's log says every pod enrolled "over
+    # TLS". Needs `enabled`.
+    requireTls: false
     # cert-manager issues the control Service's certificate, as a `Certificate` this chart
     # renders. Needs cert-manager's CRDs. `false`: the Secret below must hold `tls.crt`,
     # `tls.key` and `ca.crt` already, put there by somebody else.

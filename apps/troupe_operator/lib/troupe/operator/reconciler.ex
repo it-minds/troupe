@@ -130,7 +130,7 @@ defmodule Troupe.Operator.Reconciler do
   end
 
   defp apply_profile(conn, resource, profile, policy) do
-    settings = Settings.from_env()
+    settings = plane_ca(Settings.from_env())
     desired = Resources.for_profile(profile, policy, settings)
     namespace = namespace_of(desired)
     missing = missing_secrets(conn, profile, settings, namespace)
@@ -143,7 +143,7 @@ defmodule Troupe.Operator.Reconciler do
     applied = applied ++ Bonny.Resource.apply_async(rest, conn, apply_opts())
 
     failures = Enum.filter(applied, &match?({_resource, {:error, _}}, &1))
-    pruned = prune(conn, profile, policy, desired)
+    pruned = prune(conn, profile, policy, desired, settings)
 
     status =
       resource
@@ -164,6 +164,23 @@ defmodule Troupe.Operator.Reconciler do
   end
 
   defp apply_opts, do: [field_manager: @field_manager, force: true]
+
+  # The plane's control CA as it is on this pass, so one cert-manager renewed reaches the
+  # worker namespaces at the next. A CA the installation gives pods and this pass could not
+  # read is said, and the namespaces keep the one they have (`prune/5`).
+  defp plane_ca(settings) do
+    settings = Settings.with_plane_ca(settings)
+
+    if settings.plane_ca_path && is_nil(settings.plane_ca) do
+      Logger.warning(
+        "troupe operator: no CA in #{settings.plane_ca_path} yet (the plane's " <>
+          "plane.controlTls Secret); worker namespaces keep the one they have, and a new " <>
+          "one's pods wait for it before they dial the plane"
+      )
+    end
+
+    settings
+  end
 
   defp status_for(resource, desired, [], pruned, namespace) do
     resource
@@ -453,9 +470,14 @@ defmodule Troupe.Operator.Reconciler do
   # team removes the claim that bound its volume — neither of which an owner reference
   # could do, because owner references may not cross namespaces and these objects live
   # in a different one from the profile.
-  defp prune(conn, profile, policy, desired) do
+  #
+  # The plane's CA is kept wherever the installation gives pods one, whether or not this
+  # pass could read it: a pass that could not, before cert-manager has issued the
+  # certificate or while its Secret is being replaced, must not take away the CA every
+  # pod's next dial reads.
+  defp prune(conn, profile, policy, desired, settings) do
     namespace = Names.namespace(policy.namespace_prefix, profile.name)
-    wanted = Resources.identities(desired)
+    wanted = desired |> Resources.identities() |> keep_plane_ca(settings)
 
     @prunable
     |> Enum.flat_map(&list_managed(conn, &1, namespace, profile.name))
@@ -466,6 +488,11 @@ defmodule Troupe.Operator.Reconciler do
       identity(resource)
     end)
   end
+
+  defp keep_plane_ca(wanted, %Settings{plane_ca_path: nil}), do: wanted
+
+  defp keep_plane_ca(wanted, _settings),
+    do: MapSet.put(wanted, {"v1", "ConfigMap", Names.plane_ca()})
 
   defp list_managed(conn, {api_version, kind}, namespace, profile) do
     selector =

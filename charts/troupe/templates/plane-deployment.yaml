@@ -243,6 +243,11 @@ spec:
             # in place and the kubelet swaps the files under the running pod.
             - name: TROUPE_PLANE_CONTROL_TLS_DIR
               value: /etc/troupe/control-tls
+            {{- if .Values.plane.controlTls.requireTls }}
+            # TLS only: a plaintext connection, a pod's included, is closed before it is read.
+            - name: TROUPE_PLANE_CONTROL_REQUIRE_TLS
+              value: "true"
+            {{- end }}
             {{- end }}
             - name: TROUPE_HOST
               value: {{ .Values.plane.host | quote }}

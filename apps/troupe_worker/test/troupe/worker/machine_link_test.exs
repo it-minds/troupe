@@ -1,7 +1,8 @@
 defmodule Troupe.Worker.MachineLinkTest do
   @moduledoc """
   A registered machine's link to the plane: TLS against the CA its registration answered,
-  and its secret never on the wire without it.
+  and its secret never on the wire without it. And a pod's, given the CA the operator puts
+  in its namespace, to a plane that requires TLS.
 
   A real plane listener on the other end, serving a certificate written as cert-manager
   writes one, with a recording relay in between where the question is what crossed.
@@ -18,6 +19,8 @@ defmodule Troupe.Worker.MachineLinkTest do
   @moduletag timeout: 120_000
 
   @secret "twh_not-a-real-secret-0123456789"
+  # A pod's projected token, as far as the stub verifier cares.
+  @pod_token "pod-token-not-a-real-one"
 
   setup context do
     context = requires_tier(context)
@@ -42,13 +45,28 @@ defmodule Troupe.Worker.MachineLinkTest do
              ordinal: 0
            }}
 
+        @pod_token ->
+          send(test, :verified)
+
+          {:ok,
+           %{
+             profile: "dev",
+             namespace: "troupe-w-dev",
+             pod_name: nil,
+             service_account: "troupe-worker"
+           }}
+
         _ ->
           {:error, :unauthenticated}
       end
 
       start_supervised!({Registry, keys: :duplicate, name: Troupe.Plane.Control.Registry})
       start_supervised!(Connections)
-      start_supervised!({Listener, port: 0, verify: verify, tls: tls.dir})
+
+      start_supervised!(
+        {Listener,
+         port: 0, verify: verify, tls: tls.dir, require_tls: context[:require_tls] == true}
+      )
 
       Map.merge(context, Map.put(tls, :port, Listener.port()))
     else
@@ -109,6 +127,50 @@ defmodule Troupe.Worker.MachineLinkTest do
     refute_received :verified
   end
 
+  # A pod's link is the same link with a projected token: given the CA the operator puts in
+  # its namespace, it dials with TLS too, and that is all a plane requiring TLS accepts.
+  describe "a pod, where the plane requires TLS" do
+    @describetag :require_tls
+
+    test "given the CA, dials with TLS and enrols, and its token is not in the traffic",
+         context do
+      {proxy, port} = start_proxy!(context.port)
+
+      link =
+        start_link!(context,
+          port: port,
+          ca: context.ca,
+          token: @pod_token,
+          claims: %{"pod_name" => "troupe-w-dev-0"}
+        )
+
+      eventually(fn -> Link.connected?(link) end)
+      assert %{tls: true, profile: "dev", refused: nil} = Link.info(link)
+      assert_received :verified
+
+      captured = RecordingProxy.captured(proxy)
+      refute captured =~ @pod_token
+      refute captured =~ "enrol"
+    end
+
+    test "with no CA, dials in plaintext and is closed before its token is read", context do
+      {proxy, port} = start_proxy!(context.port)
+
+      link =
+        start_link!(context,
+          port: port,
+          token: @pod_token,
+          claims: %{"pod_name" => "troupe-w-dev-0"}
+        )
+
+      # It tried, and got nowhere: the plane read the first byte and hung up.
+      eventually(fn -> RecordingProxy.captured(proxy) =~ "enrol" end)
+      refute Link.connected?(link)
+      assert Fleet.list_workers("dev") == []
+      refute_received :verified
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   defp start_link!(context, opts) do
@@ -118,10 +180,14 @@ defmodule Troupe.Worker.MachineLinkTest do
          name: nil,
          host: "127.0.0.1",
          port: Keyword.get(opts, :port, context.port),
-         token: @secret,
+         token: Keyword.get(opts, :token, @secret),
          server_name: Keyword.get(opts, :server_name, ControlTLSFixture.name()),
          disk_path: context.base,
-         claims: %{"capacity" => 2, "disk_total_bytes" => 1_000_000, "version" => "test"}
+         claims:
+           Map.merge(
+             %{"capacity" => 2, "disk_total_bytes" => 1_000_000, "version" => "test"},
+             Keyword.get(opts, :claims, %{})
+           )
        ] ++ Keyword.take(opts, [:ca])}
     )
   end

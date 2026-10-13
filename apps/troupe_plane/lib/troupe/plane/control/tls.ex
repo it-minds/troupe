@@ -20,6 +20,14 @@ defmodule Troupe.Plane.Control.TLS do
   def dir, do: Application.get_env(:troupe_plane, :control_tls)
 
   @doc """
+  Whether the control port takes TLS only (`TROUPE_PLANE_CONTROL_REQUIRE_TLS`, the chart's
+  `plane.controlTls.requireTls`): a plaintext connection, a pod's included, is then closed
+  before any of it is read.
+  """
+  @spec required?() :: boolean()
+  def required?, do: Application.get_env(:troupe_plane, :control_require_tls, false) == true
+
+  @doc """
   What `:ssl.handshake/3` takes to serve the certificate in `dir`: TLS 1.3 or 1.2, the
   certificate with its chain, and its key. An error is a sentence saying what is missing.
   """
