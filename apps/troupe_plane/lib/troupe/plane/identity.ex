@@ -284,9 +284,9 @@ defmodule Troupe.Plane.Identity do
   @doc """
   The person SCIM calls this `externalId`, or `nil`.
 
-  At most one: the column is unique where it is set. A push or a sign-in
-  that finds nobody under its subject asks this before it makes anybody, because a person
-  moved to another claim's value keeps the `externalId` SCIM gave them.
+  At most one: the column is unique where it is set. A push or a sign-in that finds nobody
+  under its subject asks this before it makes anybody, because a person moved to another
+  claim's value keeps the `externalId` SCIM gave them.
   """
   @spec get_user_by_external_id(String.t() | nil) :: User.t() | nil
   def get_user_by_external_id(nil), do: nil
@@ -377,15 +377,6 @@ defmodule Troupe.Plane.Identity do
           %User{} = user -> User.kms_name(user)
           nil -> owner
         end
-    end
-  end
-
-  @doc "The tombstone a removed person's marker names, or `nil`."
-  @spec get_tombstone(String.t()) :: Tombstone.t() | nil
-  def get_tombstone(marker) do
-    case Tombstone.parse_marker(marker) do
-      {:ok, id} -> Repo.get(Tombstone, id)
-      :error -> nil
     end
   end
 
