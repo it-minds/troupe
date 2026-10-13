@@ -127,6 +127,11 @@ defmodule Troupe.Tool.Result do
       "#{name} is mounted read-only for this session and cannot be written to. " <>
         "Write to session:/ instead, and use `publish` if it needs to go to #{name}."
 
+  def describe({:unknown_mount, word}),
+    do:
+      "#{word}: is not a mount here; a path is relative to the session, or starts with " <>
+        "session:/, team:<name>/, org:/, skills:/ or scratch:/."
+
   def describe({:git_dir, path}),
     do:
       "#{path} is inside a .git directory (or is a .git file), which holds the repository's " <>

@@ -88,6 +88,26 @@ defmodule Troupe.MountsTest do
 
       assert {:error, {:no_such_mount, "org"}} = Mounts.resolve(mounts, "org:/handbook.md")
     end
+
+    # #620: a word and a colon that is no mount's prefix was taken as a relative path, so a
+    # write made a directory named `plans:` in the session. It is refused, with the prefixes
+    # there are; a colon later in a name, and a drive letter, are what they were.
+    test "a prefix that names no mount is refused, and a colon in a name is not one", context do
+      assert {:error, {:unknown_mount, "plans"}} =
+               Mounts.resolve(context.mounts, "plans:/plan.md", :write)
+
+      assert {:error, {:unknown_mount, "https"}} =
+               Mounts.resolve(context.mounts, "https://example.test/x")
+
+      assert {:error, {:unknown_mount, "plans"}} = Mounts.resolve(context.mounts, "plans:")
+
+      assert Troupe.Tool.Result.describe({:unknown_mount, "plans"}) =~
+               "plans: is not a mount here; a path is relative to the session, or starts with session:/"
+
+      assert {:ok, resolved, _} = Mounts.resolve(context.mounts, "notes:2026.md")
+      assert resolved == Path.join(context.session, "notes:2026.md")
+      refute match?({:error, {:unknown_mount, _}}, Mounts.resolve(context.mounts, "C:/Windows/x"))
+    end
   end
 
   describe "modes" do
