@@ -2,6 +2,9 @@
 // deep link to every screen, light and dark, and the loading, error and empty states a
 // screen goes through.
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { applyMode, storedMode } from "../src/theme";
@@ -47,9 +50,27 @@ describe("the shell", () => {
     expect(says("alice@example.com", rail())).toBe(true);
     expect(says("platform admin", rail())).toBe(true);
     expect(says(`fake · ${new URL(fake!.plane.baseUrl).host}`, rail())).toBe(true);
-    // It opens on Teams, the first area it draws.
-    await waitFor(() => heading() === "Teams", "the Teams screen");
-    expect(link("Teams", rail())!.getAttribute("aria-current")).toBe("page");
+    // It opens on the Overview, the first area of the map.
+    await waitFor(() => heading() === "Overview", "the Overview");
+    expect(link("Overview", rail())!.getAttribute("aria-current")).toBe("page");
+  });
+
+  it("folds the map behind one button at a narrow width, and folds it again once an area is chosen", async () => {
+    await open();
+    const menu = button("Menu", rail())!;
+    expect(menu.getAttribute("aria-expanded")).toBe("false");
+    expect(menu.getAttribute("aria-controls")).toBe("console-map");
+    expect(document.getElementById("console-map")).not.toBeNull();
+    menu.click();
+    await waitFor(() => rail().classList.contains("open") && button("Close", rail())?.getAttribute("aria-expanded") === "true", "the map unfolded");
+    link("Sessions", rail())!.click();
+    await waitFor(() => heading() === "Sessions" && !rail().classList.contains("open"), "the map folded again on the chosen area");
+    // Folded only where the stylesheet says the screen is narrow.
+    const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css"), "utf8");
+    const narrow = css.slice(css.indexOf("@media (max-width: 760px)"));
+    expect(narrow).toMatch(/\.rail \.map\s*\{[^}]*display:\s*none/);
+    expect(narrow).toMatch(/\.rail\.open \.map\s*\{[^}]*display:\s*flex/);
+    expect(css.slice(0, css.indexOf("@media (max-width: 760px)"))).toMatch(/\.rail \.menu\s*\{[^}]*display:\s*none/);
   });
 
   it("links an area it does not draw yet to the same area in the plane's current console", async () => {
@@ -72,7 +93,7 @@ describe("the shell", () => {
   it("does not open an area by its address for a role it is hidden from", async () => {
     visit("#/profiles");
     await open(PEOPLE.bob);
-    await waitFor(() => heading() === "Teams", "the Teams screen instead");
+    await waitFor(() => heading() === "Overview", "the Overview instead");
   });
 
   it("switches between light and dark, and the choice outlives a reload", async () => {

@@ -50,6 +50,22 @@ export async function standing(auth: AuthSession, admin: AdminApi): Promise<Stan
   }
 }
 
+/**
+ * The audit's own record of a change this person just made, read back with
+ * `admin.audit.list`, for a write whose answer does not carry its diff. The newest row of
+ * that action on that subject by them; `null` where the audit could not be read, which the
+ * note then says, since the change itself is made either way.
+ */
+export async function recorded(admin: AdminApi, actor: string, action: string, subject: string): Promise<Record<string, unknown> | null> {
+  try {
+    const rows = await admin.audit({ actor, kind: action.split(".")[0] ?? action, subject_id: subject, limit: 10 });
+    const row = rows.find((r) => r.action === action);
+    return row ? (row.detail ?? {}) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function planeOf(auth: AuthSession, discovery: Discovery | null): Signed["plane"] {
   const plane = (discovery?.plane ?? {}) as { name?: unknown; build?: { version?: unknown } };
   return {
