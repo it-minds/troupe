@@ -4,9 +4,10 @@
 //   pnpm console         # then open http://localhost:5174 and sign in to the plane it printed
 //
 // The same identity provider and plane the tests use, with the administrative half the
-// console's tests run against (`packages/client/test/support/admin.ts`): three teams, a
-// version policy, an organisation's defaults and enforced set, and an audit that every
-// change lands in. The provider signs a browser in as whoever CONSOLE_AS names, straight
+// console's tests run against (`packages/client/test/support/admin.ts`): three teams and
+// the groups they draw on, four profiles with their pods, sessions on them, a version
+// policy, an organisation's defaults and enforced set, and an audit with some history that
+// every change lands in. The provider signs a browser in as whoever CONSOLE_AS names, straight
 // back with no page:
 //
 //   CONSOLE_AS=alice     a platform admin (the default)

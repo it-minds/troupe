@@ -2,11 +2,53 @@
 // a glyph and a word as well as a colour, and the one way the console changes anything —
 // a preview of what will happen, a plain confirm, and the audit's own note of what moved.
 
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { JSX, ReactNode } from "react";
-import type { AuditChanges } from "@troupe/client";
 import { describeError, show } from "../console";
 import type { Load } from "../console";
+
+/** What a field's control is given, so its label names it and its hint describes it. */
+export interface FieldProps {
+  id: string;
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
+}
+
+/**
+ * A form field named by its label, for a screen reader as for the eye: the label's words
+ * are the control's name, the hint beside it is its description rather than part of the
+ * name, and a placeholder is never what names it.
+ */
+export function Field({
+  label,
+  hint,
+  error,
+  children,
+}: {
+  label: ReactNode;
+  hint?: ReactNode;
+  error?: string | null;
+  children: (props: FieldProps) => ReactNode;
+}): JSX.Element {
+  const id = useId();
+  const described = [hint ? `${id}-hint` : null, error ? `${id}-error` : null].filter(Boolean).join(" ");
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      {children({ id, ...(described ? { "aria-describedby": described } : {}), ...(error ? { "aria-invalid": true } : {}) })}
+      {hint && (
+        <span id={`${id}-hint`} className="hint">
+          {hint}
+        </span>
+      )}
+      {error && (
+        <span id={`${id}-error`} className="field-error">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function Loading({ what }: { what: string }): JSX.Element {
   return (
@@ -96,8 +138,15 @@ export function Preview({
   const [error, setError] = useState<unknown>(null);
   const [typed, setTyped] = useState("");
   const blocked = Boolean(typeToConfirm) && typed !== typeToConfirm;
+  // Asked for from a row far down a list, the preview is where the eye and the keyboard go
+  // next, not somewhere above the fold.
+  const here = useRef<HTMLElement>(null);
+  useEffect(() => {
+    here.current?.scrollIntoView?.({ block: "nearest" });
+    here.current?.focus({ preventScroll: true });
+  }, []);
   return (
-    <section className="preview" aria-label="What will happen">
+    <section className="preview" aria-label="What will happen" ref={here} tabIndex={-1}>
       <Region tone="waiting">What will happen</Region>
       <div className="box">
         <div className="diff mono">
@@ -122,10 +171,17 @@ export function Preview({
           </ul>
         )}
         {typeToConfirm && (
-          <label className="type-to-confirm">
-            Type <code>{typeToConfirm}</code> to confirm
-            <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" spellCheck={false} />
-          </label>
+          <div className="type-to-confirm">
+            <Field
+              label={
+                <>
+                  Type <code>{typeToConfirm}</code> to confirm
+                </>
+              }
+            >
+              {(p) => <input {...p} value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" spellCheck={false} />}
+            </Field>
+          </div>
         )}
         {error !== null && (
           <p className="field-error" role="alert">
@@ -162,31 +218,56 @@ export function Preview({
 }
 
 /**
- * What the plane recorded: the audit's own diff for the change just made, as the write
- * answered it, so the person sees the record rather than the console's idea of it.
+ * What the plane recorded: the audit's own detail for the change just made, as the write
+ * answered it or as `admin.audit.list` reads it back, so the person sees the record rather
+ * than the console's idea of it. A field that moved reads from → to; one that names what
+ * the change was about (a group, a profile, a person) reads as itself. `detail` is null
+ * where the record could not be read back, which is said rather than hidden.
  */
-export function AuditNote({ action, subject, changes }: { action: string; subject: string; changes: AuditChanges }): JSX.Element {
-  const moved = Object.entries(changes);
+export function AuditNote({ action, subject, detail }: { action: string; subject: string; detail: Record<string, unknown> | null }): JSX.Element {
+  const entries = Object.entries(detail ?? {});
   return (
     <div className="audit-note" role="status">
       <span className="status running">
         <span aria-hidden="true">●</span> Applied
       </span>{" "}
-      <span>
-        Recorded in the audit as <code>{action}</code> on <code>{subject}</code>
-        {moved.length === 0 ? ", with nothing that moved." : ":"}
-      </span>
-      {moved.length > 0 && (
-        <ul>
-          {moved.map(([field, { from, to }]) => (
-            <li key={field}>
-              <code>{field}</code> <span className="from">{show(from)}</span> → <span className="to">{show(to)}</span>
-            </li>
-          ))}
-        </ul>
+      {detail === null ? (
+        <span>
+          The plane applied it as <code>{action}</code> on <code>{subject}</code>; its audit record could not be read back here.
+        </span>
+      ) : (
+        <span>
+          Recorded in the audit as <code>{action}</code> on <code>{subject}</code>
+          {entries.length === 0 ? ", with nothing that moved." : ":"}
+        </span>
       )}
+      {entries.length > 0 && <DetailList detail={detail ?? {}} />}
     </div>
   );
+}
+
+/** An audit row's detail, a line per field: from → to where it moved, else what it named. */
+export function DetailList({ detail }: { detail: Record<string, unknown> }): JSX.Element {
+  return (
+    <ul className="detail">
+      {Object.entries(detail).map(([field, value]) => (
+        <li key={field}>
+          <code>{field}</code>{" "}
+          {moved(value) ? (
+            <>
+              <span className="from">{show(value.from)}</span> → <span className="to">{show(value.to)}</span>
+            </>
+          ) : (
+            <span className="to">{show(value)}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function moved(value: unknown): value is { from: unknown; to: unknown } {
+  return typeof value === "object" && value !== null && "from" in value && "to" in value;
 }
 
 /** The fields that differ between what is and what is asked, as a preview shows them. */
@@ -200,6 +281,25 @@ export function changed(before: Record<string, unknown>, after: Record<string, u
 export function money(micros: number | null | undefined): string {
   if (micros === null || micros === undefined) return "—";
   return (micros / 1_000_000).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Bytes, in binary units, as a volume and a disk are measured and `kubectl` shows them. */
+export function bytes(count: number | null | undefined): string {
+  if (count === null || count === undefined) return "—";
+  if (count < 1024) return `${count} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let n = count / 1024;
+  let unit = 0;
+  while (n >= 1024 && unit < units.length - 1) {
+    n /= 1024;
+    unit += 1;
+  }
+  return `${n.toFixed(1)} ${units[unit]}`;
+}
+
+/** How many of something, with the word in the right number: `1 fork`, `3 forks`. */
+export function count(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 /** A time the plane wrote, as a date and a minute, in UTC like the audit. */

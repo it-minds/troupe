@@ -13,21 +13,87 @@
 //   * `forbidden` carries `data.required_role`, and `not_found` is what a team admin
 //     gets for a team that is not theirs — whether it exists is itself privileged.
 
-/** What a session costs, what it is doing, and nothing it said. */
+/**
+ * A session as `admin.sessions.list` describes it: who owns it, where it runs, what state
+ * it is in and what it holds, and nothing it said. The plane's answer names no team and
+ * no cost; a field it adds later arrives through the index signature.
+ */
 export interface AdminSessionRow {
   id: string;
   owner: string;
-  team: string | null;
   profile: string | null;
   state: string;
-  status: string | null;
-  done_reason: string | null;
-  pending_approvals: number | null;
-  cost_micros: number | null;
+  visibility: string | null;
+  epoch?: number | null;
+  last_seq?: number | null;
   object_bytes: number | null;
   workspace_bytes: number | null;
+  pinned: boolean | null;
+  pinned_by: string | null;
   last_active_at: string | null;
   [k: string]: unknown;
+}
+
+/**
+ * What erasing a session would do: what it holds, and the forks that survive it, since a
+ * fork has its own key. `confirm` is what the typed confirmation must match.
+ */
+export interface SessionErasePreview {
+  session_id: string;
+  owner: string;
+  profile: string | null;
+  object_bytes: number | null;
+  workspace_bytes: number | null;
+  survivors: string[];
+  survivor_count: number;
+  confirm: string;
+}
+
+/** What `admin.session.erase` answers: `erasure_pending` where the key was not destroyed, and erasing again retries. */
+export interface SessionErased {
+  session_id: string;
+  head_hash: string | null;
+  state: "erased" | "erasure_pending" | string;
+}
+
+/**
+ * What `admin.audit.verify` answers: how many rows the chain covers, how many were written
+ * before it existed, from when, and `"ok"` or the first row that does not verify.
+ */
+export interface AuditIntegrity {
+  checked: number;
+  unchained: number;
+  from: string | null;
+  /** `"ok"`, or what the plane says of the first row that does not verify. */
+  result: unknown;
+}
+
+/** What `admin.team.link` answers: the team, the group now counted, and how many people it has. */
+export interface TeamLinked {
+  team: string;
+  group: string;
+  members: number;
+}
+
+/**
+ * What unlinking a group would do, and what `admin.team.unlink` did: who is in the group,
+ * who keeps the team through another group, who loses it, and how many sessions those
+ * people can open now. Sessions do not move; their team is fixed when they start.
+ */
+export interface TeamUnlinkEffect {
+  team: string;
+  group: string;
+  in_group: number;
+  keep_access: number;
+  lose_access: number;
+  losing: string[];
+  sessions_they_can_open: number;
+}
+
+/** What naming or removing a team admin answers: the team's administrators as they now are. */
+export interface TeamAdmins {
+  team: string;
+  admins: string[];
 }
 
 export interface AdminPod {
@@ -377,6 +443,14 @@ export interface AdminFilter {
   team?: string;
   profile?: string;
   trigger?: string;
+  /** Sessions in one state: `active`, `dormant` or `read_only`. */
+  state?: string;
+  /** Sessions an unattended run left for a person to look at. */
+  needs_review?: boolean;
+  /** Audit rows by one actor, of one kind (`team`, `setting`), or about one thing. */
+  actor?: string;
+  kind?: string;
+  subject_id?: string;
   [k: string]: unknown;
 }
 
@@ -416,12 +490,41 @@ export class AdminApi {
     return this.rpc("admin.groups.list", {});
   }
 
-  grantTeam(name: string, profile: string, volumeMode?: string): Promise<unknown> {
-    return this.rpc("admin.team.grant", { name, profile, attrs: volumeMode ? { volume_mode: volumeMode } : {} });
+  /** Make a group a team. A platform admin's; `attrs.name` is the team's name, made from the group's where absent. */
+  enableTeam(group: string, attrs: Record<string, unknown> = {}): Promise<AdminTeam> {
+    return this.rpc<AdminTeam>("admin.team.enable", { group, attrs });
   }
 
-  revokeTeam(name: string, profile: string): Promise<unknown> {
-    return this.rpc("admin.team.revoke", { name, profile });
+  /** Draw a team's members from one more group. */
+  linkTeam(name: string, group: string): Promise<TeamLinked> {
+    return this.rpc<TeamLinked>("admin.team.link", { name, group });
+  }
+
+  /** What unlinking a group would do. Read this first; the dialog shows it. */
+  unlinkTeamPreview(name: string, group: string): Promise<TeamUnlinkEffect> {
+    return this.rpc<TeamUnlinkEffect>("admin.team.unlink.preview", { name, group });
+  }
+
+  /** Stop drawing a team's members from a group. Destructive: confirmed by typing the group's id. */
+  unlinkTeam(name: string, group: string): Promise<TeamUnlinkEffect> {
+    return this.rpc<TeamUnlinkEffect>("admin.team.unlink", { name, group });
+  }
+
+  grantTeam(name: string, profile: string, volumeMode?: string): Promise<AdminTeam> {
+    return this.rpc<AdminTeam>("admin.team.grant", { name, profile, attrs: volumeMode ? { volume_mode: volumeMode } : {} });
+  }
+
+  /** Take a profile away. The team's sessions on it turn read-only. */
+  revokeTeam(name: string, profile: string): Promise<AdminTeam> {
+    return this.rpc<AdminTeam>("admin.team.revoke", { name, profile });
+  }
+
+  addTeamAdmin(name: string, subject: string): Promise<TeamAdmins> {
+    return this.rpc<TeamAdmins>("admin.team.admin.add", { name, subject });
+  }
+
+  removeTeamAdmin(name: string, subject: string): Promise<TeamAdmins> {
+    return this.rpc<TeamAdmins>("admin.team.admin.remove", { name, subject });
   }
 
   /** What deleting a team would take with it. Read this first; the dialog shows it. */
@@ -438,8 +541,14 @@ export class AdminApi {
     return this.rpc<AdminSessionRow[]>("admin.sessions.list", { filter });
   }
 
-  eraseSession(sessionId: string): Promise<unknown> {
-    return this.rpc("admin.session.erase", { session_id: sessionId });
+  /** What erasing a session would destroy, and which forks survive it. Read this first. */
+  eraseSessionPreview(sessionId: string): Promise<SessionErasePreview> {
+    return this.rpc<SessionErasePreview>("admin.session.erase.preview", { session_id: sessionId });
+  }
+
+  /** Erase a session. Irreversible: confirmed by typing its id. */
+  eraseSession(sessionId: string): Promise<SessionErased> {
+    return this.rpc<SessionErased>("admin.session.erase", { session_id: sessionId });
   }
 
   bundles(channel: string): Promise<BundleSummary[]> {
@@ -465,6 +574,11 @@ export class AdminApi {
 
   audit(filter: AdminFilter = {}): Promise<AuditRow[]> {
     return this.rpc<AuditRow[]>("admin.audit.list", { filter });
+  }
+
+  /** Walk the audit's hash chain and name the first row that does not verify. A platform admin's. */
+  verifyAudit(): Promise<AuditIntegrity> {
+    return this.rpc<AuditIntegrity>("admin.audit.verify", {});
   }
 
   provisioningMode(): Promise<{ mode?: string } | string> {

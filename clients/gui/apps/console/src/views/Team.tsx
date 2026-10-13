@@ -1,11 +1,14 @@
 // One team, in five tabs: who is in it and from which groups, which profiles it may use,
 // who administers it, its limits, and what removing it would take with it.
 //
-// Every tab reads. Limits also changes: each value says what is in force and which rung
-// of the ladder decided it, and an edit is previewed, field by field and in words, before
-// it is sent. The other changes a tab will offer (linking a group, granting and revoking
-// a profile, naming an administrator, removing the team) are in the plane's current
-// console until this one has them, and each tab says so.
+// Every tab reads, and every tab changes what it shows: a group linked or unlinked, a
+// profile granted or revoked, an administrator named or removed, a limit narrowed, the
+// team removed. Each change is previewed (what moves, and what that does in words), then
+// confirmed: plainly where it can be changed back, and by typing the name of what goes
+// where it takes something away that nobody can simply give back (a group's people, a
+// profile's running sessions, the team). Once made, it is shown as the audit recorded it.
+// The edits other than the limits are a platform admin's, as the plane holds them, and a
+// team admin is not offered them.
 //
 // The plane has no read of one team: `admin.teams.list` is the read, and a team a team
 // admin does not administer is not in their answer, so it is "not found" here as it is
@@ -13,13 +16,14 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { AdminTeam, LadderValue, TeamUpdated } from "@troupe/client";
+import type { AdminProfile, AdminTeam, LadderValue, TeamDisableEffect, TeamUnlinkEffect } from "@troupe/client";
 import { currentConsole } from "../plane";
 import { TEAM_TABS, href } from "../route";
 import type { TeamTab } from "../route";
-import { show, useConsole, useLoad } from "../console";
-import { AuditNote, Empty, Loaded, Preview, Region, Status, changed, money } from "./bits";
-import type { DiffLine } from "./bits";
+import { recorded, show, useConsole, useLoad } from "../console";
+import type { Load } from "../console";
+import { AuditNote, Empty, Field, Loaded, Preview, Region, Status, changed, count, money } from "./bits";
+import type { DiffLine, FieldProps } from "./bits";
 import { Spend } from "./Teams";
 
 const TAB_LABELS: Record<TeamTab, string> = {
@@ -61,9 +65,9 @@ export function Team({ name, tab }: { name: string; tab: TeamTab }): JSX.Element
                   </a>
                 ))}
               </nav>
-              {tab === "members" && <Members team={team} />}
-              {tab === "access" && <Access team={team} />}
-              {tab === "admins" && <Admins team={team} />}
+              {tab === "members" && <Members team={team} onApplied={reload} />}
+              {tab === "access" && <Access team={team} onApplied={reload} />}
+              {tab === "admins" && <Admins team={team} onApplied={reload} />}
               {tab === "limits" && <Limits team={team} onApplied={reload} />}
               {tab === "danger" && role === "platform_admin" && <Danger team={team} />}
             </>
@@ -74,7 +78,31 @@ export function Team({ name, tab }: { name: string; tab: TeamTab }): JSX.Element
   );
 }
 
-/** Where a change a tab does not offer yet is made for now. */
+/** A change once made: what the audit recorded, read back where the write did not say. */
+interface Done {
+  action: string;
+  subject: string;
+  detail: Record<string, unknown> | null;
+}
+
+/**
+ * Make a change and show it as recorded: send it, read the audit's row for it back, tell
+ * the person, and read the team again. A refusal throws, and the preview shows it where
+ * the change was asked for.
+ */
+function useChange(onApplied: () => void): { done: Done | null; apply: (action: string, subject: string, write: () => Promise<unknown>, said: string) => Promise<void> } {
+  const { admin, me, notify } = useConsole();
+  const [done, setDone] = useState<Done | null>(null);
+  const apply = async (action: string, subject: string, write: () => Promise<unknown>, said: string): Promise<void> => {
+    await write();
+    setDone({ action, subject, detail: await recorded(admin, me.subject, action, subject) });
+    notify(said);
+    onApplied();
+  };
+  return { done, apply };
+}
+
+/** Where a change this console does not offer yet is made for now. */
 function Elsewhere({ what }: { what: string }): JSX.Element {
   const { plane } = useConsole();
   return (
@@ -84,13 +112,26 @@ function Elsewhere({ what }: { what: string }): JSX.Element {
   );
 }
 
-function Members({ team }: { team: AdminTeam }): JSX.Element {
-  const { role } = useConsole();
+// -- members and groups ------------------------------------------------------------------
+
+function Members({ team, onApplied }: { team: AdminTeam; onApplied: () => void }): JSX.Element {
+  const { admin, role } = useConsole();
+  const platform = role === "platform_admin";
+  const { done, apply } = useChange(onApplied);
+  const [linking, setLinking] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [unlinking, setUnlinking] = useState<string | null>(null);
+  const [groups, reloadGroups] = useLoad(() => (linking !== null ? admin.groups() : Promise.resolve([])), [admin, linking !== null]);
+  const ids = team.groups.map((g) => g.external_id);
+  const busy = linking !== null || unlinking !== null;
+
   return (
     <section className="tab">
       <p className="lead">
-        Membership is the identity provider's: a person is in {team.name} because they are in one of its groups. Nothing here adds or removes a person.
+        Membership is the identity provider's: a person is in {team.name} because they are in one of its groups. Nothing here adds or removes a person;
+        linking a group brings in everyone in it, and unlinking one takes away whoever is in {team.name} only through it.
       </p>
+      {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
       <Region>Groups</Region>
       {team.groups.length === 0 ? (
         <Empty title="No group linked">Nobody can be in this team until a group is linked to it.</Empty>
@@ -101,6 +142,7 @@ function Members({ team }: { team: AdminTeam }): JSX.Element {
               <th>Group</th>
               <th>Id at the provider</th>
               <th>Linked by</th>
+              {platform && <th aria-label="Actions" />}
             </tr>
           </thead>
           <tbody>
@@ -109,10 +151,90 @@ function Members({ team }: { team: AdminTeam }): JSX.Element {
                 <td>{g.display_name ?? g.external_id}</td>
                 <td className="mono">{g.external_id}</td>
                 <td>{g.linked_by ?? "—"}</td>
+                {platform && (
+                  <td className="row-actions">
+                    {!busy && (
+                      <button type="button" onClick={() => setUnlinking(g.external_id)}>
+                        Unlink
+                      </button>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
+      )}
+      {unlinking !== null && (
+        <Unlink
+          team={team}
+          group={unlinking}
+          onCancel={() => setUnlinking(null)}
+          onConfirm={async () => {
+            await apply("team.unlink", team.name, () => admin.unlinkTeam(team.name, unlinking), `${unlinking} is unlinked from ${team.name}.`);
+            setUnlinking(null);
+          }}
+        />
+      )}
+      {platform && !busy && (
+        <button type="button" onClick={() => setLinking("")}>
+          Link a group
+        </button>
+      )}
+      {linking !== null && !previewing && (
+        <Loaded load={groups} what="the identity provider's groups" retry={reloadGroups}>
+          {(all) => {
+            const offered = all.filter((g) => !ids.includes(g.external_id));
+            return (
+              <form
+                className="edit"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setPreviewing(true);
+                }}
+              >
+                <Field label="Group" hint="Every group the identity provider has told the plane about that this team does not draw on yet.">
+                  {(p) => (
+                    <select {...p} value={linking} onChange={(e) => setLinking(e.target.value)}>
+                      <option value="">choose a group</option>
+                      {offered.map((g) => (
+                        <option key={g.external_id} value={g.external_id}>
+                          {g.display_name ? `${g.display_name} (${g.external_id})` : g.external_id}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </Field>
+                {offered.length === 0 && <p className="hint">This team draws on every group the plane knows of.</p>}
+                <div className="actions">
+                  <button type="submit" className="primary" disabled={!linking}>
+                    Preview
+                  </button>
+                  <button type="button" onClick={() => setLinking(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            );
+          }}
+        </Loaded>
+      )}
+      {linking && previewing && (
+        <Preview
+          title={`team/${team.name}`}
+          lines={[{ field: "groups", from: ids, to: [...ids, linking] }]}
+          effects={[
+            `Everyone in ${groupName(groups, linking)} is in ${team.name} from their next sign-in or the provider's next push, and may use what ${team.name} is granted.`,
+            `Nobody already in ${team.name} loses anything.`,
+          ]}
+          verb="Link"
+          onCancel={() => setPreviewing(false)}
+          onConfirm={async () => {
+            await apply("team.link", team.name, () => admin.linkTeam(team.name, linking), `${linking} is linked to ${team.name}.`);
+            setPreviewing(false);
+            setLinking(null);
+          }}
+        />
       )}
       <Region>People</Region>
       {team.members.length === 0 ? (
@@ -139,18 +261,73 @@ function Members({ team }: { team: AdminTeam }): JSX.Element {
           </tbody>
         </table>
       )}
-      {role === "platform_admin" && <Elsewhere what="Linking and unlinking a group, with a preview of who joins and who leaves," />}
+      <Elsewhere what="Setting a person's own spending cap" />
     </section>
   );
 }
 
-function Access({ team }: { team: AdminTeam }): JSX.Element {
+function groupName(load: Load<Array<{ external_id: string; display_name: string | null }>>, id: string): string {
+  const found = load.state === "ready" ? load.data.find((g) => g.external_id === id) : undefined;
+  return found?.display_name ?? id;
+}
+
+/** Unlinking a group: who loses the team, read from the plane first, then typed by the group's id. */
+function Unlink({ team, group, onCancel, onConfirm }: { team: AdminTeam; group: string; onCancel: () => void; onConfirm: () => Promise<void> }): JSX.Element {
+  const { admin } = useConsole();
+  const [load, reload] = useLoad(() => admin.unlinkTeamPreview(team.name, group), [admin, team.name, group]);
+  const ids = team.groups.map((g) => g.external_id);
+  return (
+    <Loaded load={load} what={`what unlinking ${group} would do`} retry={reload}>
+      {(effect) => (
+        <Preview
+          title={`team/${team.name}`}
+          lines={[{ field: "groups", from: ids, to: ids.filter((id) => id !== group) }]}
+          effects={unlinkWords(team.name, effect)}
+          verb={`Unlink ${group}`}
+          typeToConfirm={group}
+          onCancel={onCancel}
+          onConfirm={onConfirm}
+        />
+      )}
+    </Loaded>
+  );
+}
+
+function unlinkWords(team: string, e: TeamUnlinkEffect): string[] {
+  const out = [`${count(e.in_group, "person", "people")} ${e.in_group === 1 ? "is" : "are"} in ${e.group}.`];
+  if (e.lose_access === 0) {
+    out.push(`Nobody loses ${team}: everyone in ${e.group} is in ${team} through another group too.`);
+  } else {
+    out.push(`${count(e.lose_access, "person", "people")} ${e.lose_access === 1 ? "loses" : "lose"} ${team}: ${e.losing.join(", ")}.`);
+    out.push(`${e.lose_access === 1 ? "They" : "Together they"} can open ${count(e.sessions_they_can_open, "session")} now through ${team}.`);
+  }
+  if (e.keep_access > 0) out.push(`${e.keep_access} ${e.keep_access === 1 ? "keeps" : "keep"} it through another group.`);
+  out.push("Sessions do not move: a session's team is fixed when it starts, and only who may open it changes.");
+  return out;
+}
+
+// -- access ------------------------------------------------------------------------------
+
+const VOLUME: Record<string, string> = { ro: "read only", rw: "read and write" };
+
+function Access({ team, onApplied }: { team: AdminTeam; onApplied: () => void }): JSX.Element {
+  const { admin, role } = useConsole();
+  const platform = role === "platform_admin";
+  const { done, apply } = useChange(onApplied);
+  const [granting, setGranting] = useState<{ profile: string; volume: string } | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const [profiles, reloadProfiles] = useLoad(() => (granting !== null ? admin.profiles() : Promise.resolve([] as AdminProfile[])), [admin, granting !== null]);
+  const granted = team.grants.map((g) => g.profile);
+  const busy = granting !== null || revoking !== null;
+
   return (
     <section className="tab">
       <p className="lead">
         A profile grant is the only way {team.name} gains reach. Revoking one turns every {team.name} session on that profile read-only the moment it
         lands.
       </p>
+      {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
       {team.grants.length === 0 ? (
         <Empty title="No profile granted">This team can start no session until a platform admin grants it a profile.</Empty>
       ) : (
@@ -159,49 +336,241 @@ function Access({ team }: { team: AdminTeam }): JSX.Element {
             <tr>
               <th>Profile</th>
               <th>Team volume</th>
+              {platform && <th aria-label="Actions" />}
             </tr>
           </thead>
           <tbody>
             {team.grants.map((g) => (
               <tr key={g.profile}>
                 <td>{g.profile}</td>
-                <td>{g.volume_mode ?? <span className="muted">none</span>}</td>
+                <td>{g.volume_mode ? (VOLUME[g.volume_mode] ?? g.volume_mode) : <span className="muted">none</span>}</td>
+                {platform && (
+                  <td className="row-actions">
+                    {!busy && (
+                      <button type="button" onClick={() => setRevoking(g.profile)}>
+                        Revoke
+                      </button>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      <Elsewhere what="Granting a profile, and revoking one behind a warning of the sessions it turns read-only," />
+      {revoking !== null && (
+        <Preview
+          title={`team/${team.name}`}
+          lines={[{ field: "grants", from: granted, to: granted.filter((p) => p !== revoking) }]}
+          effects={[
+            `Every ${team.name} session on ${revoking} turns read-only the moment this lands: it keeps its history and can still be read, and nobody can steer it until ${team.name} is granted ${revoking} again.`,
+            `No new ${team.name} session can start on ${revoking}.`,
+          ]}
+          verb={`Revoke ${revoking}`}
+          typeToConfirm={revoking}
+          onCancel={() => setRevoking(null)}
+          onConfirm={async () => {
+            await apply("team.revoke", team.name, () => admin.revokeTeam(team.name, revoking), `${team.name} no longer has ${revoking}; its sessions there are read-only.`);
+            setRevoking(null);
+          }}
+        />
+      )}
+      {platform && !busy && (
+        <button type="button" onClick={() => setGranting({ profile: "", volume: "ro" })}>
+          Grant a profile
+        </button>
+      )}
+      {granting !== null && !previewing && (
+        <Loaded load={profiles} what="the profiles" retry={reloadProfiles}>
+          {(all) => {
+            const offered = all.filter((p) => !granted.includes(p.name));
+            return (
+              <form
+                className="edit"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setPreviewing(true);
+                }}
+              >
+                <Field label="Profile" hint="Every profile this plane has that the team is not granted yet.">
+                  {(p) => (
+                    <select {...p} value={granting.profile} onChange={(e) => setGranting({ ...granting, profile: e.target.value })}>
+                      <option value="">choose a profile</option>
+                      {offered.map((o) => (
+                        <option key={o.name} value={o.name}>
+                          {o["unenforced"] ? `${o.name} (nothing enforced)` : o.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </Field>
+                <Field label="Team volume" hint="How the team's shared volume is mounted in its sessions on this profile.">
+                  {(p) => (
+                    <select {...p} value={granting.volume} onChange={(e) => setGranting({ ...granting, volume: e.target.value })}>
+                      <option value="ro">read only</option>
+                      <option value="rw">read and write</option>
+                    </select>
+                  )}
+                </Field>
+                <div className="actions">
+                  <button type="submit" className="primary" disabled={!granting.profile}>
+                    Preview
+                  </button>
+                  <button type="button" onClick={() => setGranting(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            );
+          }}
+        </Loaded>
+      )}
+      {granting?.profile && previewing && (
+        <Preview
+          title={`team/${team.name}`}
+          lines={[{ field: "grants", from: granted, to: [...granted, granting.profile] }]}
+          effects={grantWords(team, granting.profile, granting.volume, profiles.state === "ready" ? profiles.data.find((p) => p.name === granting.profile) : undefined)}
+          verb="Grant"
+          onCancel={() => setPreviewing(false)}
+          onConfirm={async () => {
+            await apply("team.grant", team.name, () => admin.grantTeam(team.name, granting.profile, granting.volume), `${team.name} may use ${granting.profile}.`);
+            setPreviewing(false);
+            setGranting(null);
+          }}
+        />
+      )}
     </section>
   );
 }
 
-function Admins({ team }: { team: AdminTeam }): JSX.Element {
+function grantWords(team: AdminTeam, profile: string, volume: string, spec: AdminProfile | undefined): string[] {
+  const out: string[] = [];
+  const missing = Array.isArray(spec?.["missing_guarantees"]) ? (spec["missing_guarantees"] as string[]) : [];
+  if (spec?.["unenforced"] && !team.allow_unenforced_workers) {
+    out.push(
+      `The plane will refuse this: ${profile} runs where nothing is enforced${missing.length ? ` (${missing.join(", ")} missing)` : ""}, and ${team.name} may not use such workers. A platform admin allows that on ${team.name}'s Limits tab first.`,
+    );
+  }
+  out.push(`${team.name}'s people may start sessions on ${profile} from now; sessions already running are unchanged.`);
+  out.push(`The team volume is mounted ${VOLUME[volume] ?? volume} on ${profile}.`);
+  return out;
+}
+
+// -- admins ------------------------------------------------------------------------------
+
+function Admins({ team, onApplied }: { team: AdminTeam; onApplied: () => void }): JSX.Element {
+  const { admin, role } = useConsole();
+  const platform = role === "platform_admin";
+  const { done, apply } = useChange(onApplied);
+  const [naming, setNaming] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const busy = naming !== null || removing !== null;
+  const asked = naming?.trim() ?? "";
+  const listId = `${team.name}-members`;
+
   return (
     <section className="tab">
       <p className="lead">Who may administer {team.name}: change its limits and see its sessions, its members and its spend. Platform admins may as well.</p>
+      {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
       {team.admins.length === 0 ? (
         <Empty title="No team admin">Only platform admins administer this team.</Empty>
       ) : (
         <ul className="plain">
           {team.admins.map((a) => (
-            <li key={a} className="mono">
-              {a}
+            <li key={a} className="with-actions">
+              <span className="mono">{a}</span>
+              {platform && !busy && (
+                <button type="button" onClick={() => setRemoving(a)}>
+                  Remove
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
-      <Elsewhere what="Naming an administrator, and removing one behind a confirmation of what they lose," />
+      {removing !== null && (
+        <Preview
+          title={`team/${team.name}`}
+          lines={[{ field: "admins", from: team.admins, to: team.admins.filter((a) => a !== removing) }]}
+          effects={[
+            `${removing} stops administering ${team.name} at their next click. They stay in ${team.name} while a linked group has them.`,
+            team.admins.length === 1 ? `Nobody but the platform admins administers ${team.name} after this.` : "",
+          ].filter(Boolean)}
+          verb={`Remove ${removing}`}
+          onCancel={() => setRemoving(null)}
+          onConfirm={async () => {
+            await apply("team.admin.remove", team.name, () => admin.removeTeamAdmin(team.name, removing), `${removing} no longer administers ${team.name}.`);
+            setRemoving(null);
+          }}
+        />
+      )}
+      {platform && !busy && (
+        <button type="button" onClick={() => setNaming("")}>
+          Name an administrator
+        </button>
+      )}
+      {naming !== null && !previewing && (
+        <form
+          className="edit"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setPreviewing(true);
+          }}
+        >
+          <Field
+            label="Subject"
+            hint="The person as the identity provider names them, usually their email. Their sign-in need not have happened yet."
+            error={team.admins.includes(asked) ? `${asked} already administers ${team.name}.` : null}
+          >
+            {(p) => <input {...p} value={naming} onChange={(e) => setNaming(e.target.value)} list={listId} autoComplete="off" spellCheck={false} />}
+          </Field>
+          <datalist id={listId}>
+            {team.members
+              .filter((m) => !team.admins.includes(m.subject))
+              .map((m) => (
+                <option key={m.subject} value={m.subject}>
+                  {m.display_name ?? m.subject}
+                </option>
+              ))}
+          </datalist>
+          <div className="actions">
+            <button type="submit" className="primary" disabled={!asked || team.admins.includes(asked)}>
+              Preview
+            </button>
+            <button type="button" onClick={() => setNaming(null)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+      {naming !== null && previewing && (
+        <Preview
+          title={`team/${team.name}`}
+          lines={[{ field: "admins", from: team.admins, to: [...team.admins, asked].sort() }]}
+          effects={[
+            `${asked} may change ${team.name}'s limits and see its sessions, members and spend, from their next click.`,
+            team.members.some((m) => m.subject === asked) ? "" : `${asked} is not in ${team.name} today; they administer it all the same.`,
+          ].filter(Boolean)}
+          verb="Name"
+          onCancel={() => setPreviewing(false)}
+          onConfirm={async () => {
+            await apply("team.admin.add", team.name, () => admin.addTeamAdmin(team.name, asked), `${asked} administers ${team.name}.`);
+            setPreviewing(false);
+            setNaming(null);
+          }}
+        />
+      )}
     </section>
   );
 }
 
 // -- limits ------------------------------------------------------------------------------
 
-type Field = "budget_micros" | "budget_period" | "idle_timeout_seconds" | "cache_eviction_days" | "erase_after_days" | "members_may_control" | "pins_allowed" | "volume_size" | "volume_storage_class" | "allow_unenforced_workers";
+type LimitKey = "budget_micros" | "budget_period" | "idle_timeout_seconds" | "cache_eviction_days" | "erase_after_days" | "members_may_control" | "pins_allowed" | "volume_size" | "volume_storage_class" | "allow_unenforced_workers";
 
 interface Limit {
-  field: Field;
+  field: LimitKey;
   label: string;
   kind: "money" | "period" | "seconds" | "days" | "switch" | "text";
   platformOnly?: boolean;
@@ -256,7 +625,7 @@ function Limits({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
   const [why, setWhy] = useState<string | null>(null);
   const [form, setForm] = useState<Record<string, string> | null>(null);
   const [previewing, setPreviewing] = useState(false);
-  const [done, setDone] = useState<TeamUpdated | null>(null);
+  const [done, setDone] = useState<Done | null>(null);
   const own = team as unknown as Record<string, unknown>;
   const ladder = new Map<string, LadderValue>((team.effective ?? []).map((e) => [e.field, e]));
   const limits = LIMITS.filter((l) => !l.platformOnly || role === "platform_admin" || own[l.field] !== undefined);
@@ -271,7 +640,7 @@ function Limits({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
   return (
     <section className="tab">
       <p className="lead">Every limit says what is in force and which rung decided it. A team may narrow what the platform allows, never widen it.</p>
-      {done && <AuditNote action="team.update" subject={team.name} changes={done.changes} />}
+      {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
       {!form && (
         <div className="limits">
           {limits.map((l) => {
@@ -307,11 +676,9 @@ function Limits({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
           }}
         >
           {editable.map((l) => (
-            <label key={l.field}>
-              {l.label}
-              <LimitField limit={l} value={form[l.field] ?? ""} onChange={(v) => setForm({ ...form, [l.field]: v })} />
-              {ladder.get(l.field) && <span className="hint">The platform allows at most {valueWords(l, ladder.get(l.field)!.ceiling)}.</span>}
-            </label>
+            <Field key={l.field} label={l.label} hint={hintFor(l, ladder.get(l.field))}>
+              {(p) => <LimitField limit={l} value={form[l.field] ?? ""} onChange={(v) => setForm({ ...form, [l.field]: v })} control={p} />}
+            </Field>
           ))}
           <div className="actions">
             <button type="submit" className="primary" disabled={lines.length === 0}>
@@ -336,7 +703,7 @@ function Limits({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
             const answer = await admin.updateTeam(team.name, changes);
             setForm(null);
             setPreviewing(false);
-            setDone(answer);
+            setDone({ action: "team.update", subject: team.name, detail: answer.changes });
             notify(`${team.name}'s limits are applied.`);
             onApplied();
           }}
@@ -348,6 +715,13 @@ function Limits({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
 
 function limitOf(field: string): Limit {
   return LIMITS.find((l) => l.field === field)!;
+}
+
+/** What a limit's field says beside it: its unit, and the ceiling the rungs above allow. */
+function hintFor(limit: Limit, laddered: LadderValue | undefined): string | undefined {
+  const unit = limit.kind === "money" ? "In currency units; 0 is no ceiling." : limit.kind === "seconds" ? "In seconds." : limit.kind === "days" ? "In days." : "";
+  const ceiling = laddered ? `The platform allows at most ${valueWords(limit, laddered.ceiling)}.` : "";
+  return [unit, ceiling].filter(Boolean).join(" ") || undefined;
 }
 
 /** The ladder for one value: every rung that had an opinion, and the one in force. */
@@ -386,10 +760,10 @@ function fromForm(limit: Limit, text: string): unknown {
   return t;
 }
 
-function LimitField({ limit, value, onChange }: { limit: Limit; value: string; onChange: (v: string) => void }): JSX.Element {
+function LimitField({ limit, value, onChange, control }: { limit: Limit; value: string; onChange: (v: string) => void; control: FieldProps }): JSX.Element {
   if (limit.kind === "switch") {
     return (
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <select {...control} value={value} onChange={(e) => onChange(e.target.value)}>
         {value === "" && <option value="">unset</option>}
         <option value="true">yes</option>
         <option value="false">no</option>
@@ -399,15 +773,14 @@ function LimitField({ limit, value, onChange }: { limit: Limit; value: string; o
   if (limit.kind === "period") {
     const periods = ["monthly", "never"];
     return (
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <select {...control} value={value} onChange={(e) => onChange(e.target.value)}>
         {!periods.includes(value) && <option value={value}>{value || "unset"}</option>}
         <option value="monthly">monthly, from the 1st (UTC)</option>
         <option value="never">never turns over</option>
       </select>
     );
   }
-  const unit = limit.kind === "money" ? "in currency units; 0 is no ceiling" : limit.kind === "seconds" ? "seconds" : limit.kind === "days" ? "days" : "";
-  return <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={unit} spellCheck={false} />;
+  return <input {...control} value={value} onChange={(e) => onChange(e.target.value)} inputMode={limit.kind === "text" ? undefined : "decimal"} spellCheck={false} />;
 }
 
 /** What one changed limit does, in words, and whether the plane will refuse it. */
@@ -449,32 +822,72 @@ function consequence(team: string, line: DiffLine, laddered: LadderValue | undef
 // -- danger zone -------------------------------------------------------------------------
 
 function Danger({ team }: { team: AdminTeam }): JSX.Element {
-  const { admin } = useConsole();
+  const { admin, me, notify } = useConsole();
   const [load, reload] = useLoad(() => admin.disableTeamPreview(team.name), [admin, team.name]);
+  const [previewing, setPreviewing] = useState(false);
+  const [done, setDone] = useState<Done | null>(null);
+
+  if (done) {
+    // The team is gone, so its page is not read again: what was done stays on the screen.
+    return (
+      <section className="tab danger">
+        <AuditNote action={done.action} subject={done.subject} detail={done.detail} />
+        <p>
+          {team.name} is no longer a team. <a href={href({ page: "teams" })}>All teams</a>
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section className="tab danger">
       <p className="lead">Removing {team.name} stops it being a team. Its people stay people, its groups stay groups, and its sessions stay, with no team.</p>
       <Loaded load={load} what="what removing it would take" retry={reload}>
         {(effect) => (
-          <div className="card">
-            <Region tone="waiting">What removing it would take</Region>
-            <ul className="effects">
-              <li>{effect.grants.length ? `Grants revoked: ${effect.grants.join(", ")}, and their sessions turned read-only.` : "No grant to revoke."}</li>
-              <li>{effect.groups.length ? `Group links removed: ${effect.groups.join(", ")}.` : "No group link."}</li>
-              <li>
-                {effect.members} {effect.members === 1 ? "person loses" : "people lose"} this team.
-              </li>
-              <li>{effect.admins.length ? `Administrators removed: ${effect.admins.join(", ")}.` : "No team admin."}</li>
-              <li>{effect.principals.length ? `Service principals removed: ${effect.principals.join(", ")}.` : "No service principal."}</li>
-              <li>{effect.triggers.length ? `Triggers removed: ${effect.triggers.join(", ")}.` : "No trigger."}</li>
-              <li>
-                {effect.sessions_kept} {effect.sessions_kept === 1 ? "session is" : "sessions are"} kept, with no team.
-              </li>
-            </ul>
-          </div>
+          <>
+            <div className="card">
+              <Region tone="waiting">What removing it would take</Region>
+              <ul className="effects">
+                {disableWords(effect).map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            </div>
+            {!previewing && (
+              <button type="button" className="danger" onClick={() => setPreviewing(true)}>
+                Remove {team.name}
+              </button>
+            )}
+            {previewing && (
+              <Preview
+                title={`team/${team.name}`}
+                lines={[{ field: "team", from: team.name, to: null }]}
+                effects={[...disableWords(effect), "It cannot be undone: enabling the group again makes a new team, with none of this one's grants, administrators, principals or triggers."]}
+                verb={`Remove ${team.name}`}
+                typeToConfirm={effect.confirm || team.name}
+                onCancel={() => setPreviewing(false)}
+                onConfirm={async () => {
+                  await admin.disableTeam(team.name);
+                  setDone({ action: "team.disable", subject: team.name, detail: await recorded(admin, me.subject, "team.disable", team.name) });
+                  notify(`${team.name} is removed.`);
+                }}
+              />
+            )}
+          </>
         )}
       </Loaded>
-      <Elsewhere what={`Removing ${team.name}, confirmed by typing its name,`} />
     </section>
   );
+}
+
+function disableWords(effect: TeamDisableEffect): string[] {
+  return [
+    effect.grants.length ? `Grants revoked: ${effect.grants.join(", ")}, and their sessions turned read-only.` : "No grant to revoke.",
+    effect.groups.length ? `Group links removed: ${effect.groups.join(", ")}.` : "No group link.",
+    `${effect.members} ${effect.members === 1 ? "person loses" : "people lose"} this team.`,
+    effect.admins.length ? `Administrators removed: ${effect.admins.join(", ")}.` : "No team admin.",
+    effect.principals.length ? `Service principals removed: ${effect.principals.join(", ")}.` : "No service principal.",
+    effect.triggers.length ? `Triggers removed: ${effect.triggers.join(", ")}.` : "No trigger.",
+    `${effect.sessions_kept} ${effect.sessions_kept === 1 ? "session is" : "sessions are"} kept, with no team.`,
+  ];
 }
