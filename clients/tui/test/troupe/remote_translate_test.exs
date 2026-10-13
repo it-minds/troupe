@@ -655,6 +655,48 @@ defmodule Troupe.RemoteTranslateTest do
     assert nobody.data.text == "somebody offered tools that run on their own machine"
   end
 
+  # D126: written beside `session_tainted` each time a person's tools are offered, and
+  # taken away when their connection goes; drawn raw and logged as unknown until now.
+  test "tools registered and unregistered are sentences saying whose and which" do
+    registered = %{
+      "tools" => ["client.notes.read", "client.notes.search"],
+      "connection" => "#PID<0.1.0>",
+      "consent" => %{"granted" => true}
+    }
+
+    Logger.put_module_level(Translate, :info)
+    on_exit(fn -> Logger.delete_module_level(Translate) end)
+
+    {{[note], memory}, log} =
+      ExUnit.CaptureLog.with_log(fn ->
+        Translate.durable(
+          "s-1",
+          durable("tools_registered", registered),
+          Translate.remember(Translate.memory(), "root")
+        )
+      end)
+
+    sentence =
+      "Martin offered the session client.notes.read, client.notes.search; it can call them now"
+
+    assert note.type == :remote_note
+    assert note.data.text == sentence
+    assert {:system, sentence} in folded([note]).transcript
+    assert memory.unknown == MapSet.new()
+    refute log =~ "unknown event type"
+
+    [gone] =
+      translate(
+        durable("tools_unregistered", %{
+          "tools" => ["client.notes.read"],
+          "connection" => "#PID<0.1.0>",
+          "reason" => "disconnected"
+        })
+      )
+
+    assert gone.data.text == "client.notes.read no longer offered to the session: disconnected"
+  end
+
   test "the session's goal is set and cleared as events of its own, not as notes" do
     [set] = translate(durable("goal_set", %{"text" => "ship it", "command_id" => "c-1"}))
     assert set.type == :goal_set
