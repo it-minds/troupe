@@ -912,6 +912,122 @@ ul.plain li {
   color: var(--diff-add-fg);
 }
 
+/* -- configure: profiles, bundles and triggers --------------------------------- */
+
+textarea {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: var(--bw-hairline) solid var(--border-strong);
+  border-radius: var(--radius-none);
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  font: var(--t-code);
+  resize: vertical;
+}
+textarea.source {
+  min-height: 320px;
+}
+.fields dd {
+  overflow-wrap: anywhere;
+}
+.fields dd .hint {
+  display: block;
+}
+/* A spec's own paths, spelled as the resource spells them. */
+.fields.paths dt {
+  font: var(--t-code);
+  letter-spacing: 0;
+  text-transform: none;
+  overflow-wrap: anywhere;
+}
+.banner.locked {
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--dormant-bd);
+  border-left-width: var(--bw-marker);
+  background: var(--dormant-bg);
+  color: var(--text-body);
+}
+.banner.locked p {
+  margin: var(--space-2) 0 0;
+  max-width: var(--measure-reading);
+}
+.gitops-problem {
+  margin-top: var(--space-2);
+}
+.gitops-problem ul {
+  margin-top: var(--space-1);
+}
+.page > .actions,
+.page > button {
+  margin-top: var(--space-4);
+}
+.edit.grid .screen,
+.edit.grid .servers,
+.edit.grid .note,
+.edit.grid .field-error {
+  grid-column: 1 / -1;
+}
+.edit.grid .screen {
+  margin-bottom: 0;
+}
+.servers {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+fieldset.server {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3);
+  width: 100%;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-panel);
+}
+fieldset.server legend {
+  padding: 0 var(--space-2);
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+fieldset.server .actions,
+fieldset.server .note {
+  grid-column: 1 / -1;
+}
+pre.prompt,
+ol.revisions pre {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-sunken);
+  font: var(--t-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+ol.revisions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+ol.revisions li {
+  padding: var(--space-2) 0;
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+}
+ol.revisions summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+ol.revisions pre {
+  margin-top: var(--space-2);
+}
+.toolbar .field select {
+  min-width: 200px;
+}
+
 .toast {
   position: fixed;
   right: var(--space-5);

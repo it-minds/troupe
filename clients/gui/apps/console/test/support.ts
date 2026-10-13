@@ -133,17 +133,17 @@ export function link(label: string, within: ParentNode = document): HTMLAnchorEl
 }
 
 /** The field a label names, by the label's words: the control it is for, or the one inside it. */
-export function field(label: string, within: ParentNode = document): HTMLInputElement | HTMLSelectElement | null {
+export function field(label: string, within: ParentNode = document): HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null {
   const found = [...within.querySelectorAll("label")].find((l) => (l.textContent ?? "").trim().startsWith(label));
   if (!found) return null;
   const control = found.htmlFor ? document.getElementById(found.htmlFor) : null;
-  if (control instanceof HTMLInputElement || control instanceof HTMLSelectElement) return control;
-  return found.querySelector<HTMLInputElement | HTMLSelectElement>("input, select");
+  if (control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement) return control;
+  return found.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input, select, textarea");
 }
 
 /** Type into a field, or choose in a select, the way React hears it. */
-export function type(el: HTMLInputElement | HTMLSelectElement, value: string): void {
-  const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+export function type(el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, value: string): void {
+  const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value);
   el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
 }

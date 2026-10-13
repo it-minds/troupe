@@ -4,7 +4,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import type { JSX, ReactNode } from "react";
-import { describeError, show } from "../console";
+import { describeError, recorded, show, useConsole } from "../console";
 import type { Load } from "../console";
 
 /** What a field's control is given, so its label names it and its hint describes it. */
@@ -149,20 +149,7 @@ export function Preview({
     <section className="preview" aria-label="What will happen" ref={here} tabIndex={-1}>
       <Region tone="waiting">What will happen</Region>
       <div className="box">
-        <div className="diff mono">
-          <div className="hunk">@@ {title} @@</div>
-          {lines.length === 0 && <div className="ctx">nothing changes</div>}
-          {lines.map((l) => (
-            <div key={l.field} className="change">
-              <div className="del">
-                <span aria-hidden="true">−</span> {l.field}: {show(l.from)}
-              </div>
-              <div className="add">
-                <span aria-hidden="true">+</span> {l.field}: {show(l.to)}
-              </div>
-            </div>
-          ))}
-        </div>
+        <Diff title={title} lines={lines} />
         {effects.length > 0 && (
           <ul className="effects">
             {effects.map((e) => (
@@ -214,6 +201,130 @@ export function Preview({
         </div>
       </div>
     </section>
+  );
+}
+
+/** A diff in the one shape the console shows every diff in: a hunk header, then each field from and to. */
+export function Diff({ title, lines }: { title: string; lines: DiffLine[] }): JSX.Element {
+  return (
+    <div className="diff mono">
+      <div className="hunk">@@ {title} @@</div>
+      {lines.length === 0 && <div className="ctx">nothing changes</div>}
+      {lines.map((l) => (
+        <div key={l.field} className="change">
+          <div className="del">
+            <span aria-hidden="true">−</span> {l.field}: {show(l.from)}
+          </div>
+          <div className="add">
+            <span aria-hidden="true">+</span> {l.field}: {show(l.to)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The audit's diff (a dotted path per field that moved) as a preview's lines, in path order. */
+export function linesOf(changes: Record<string, { from: unknown; to: unknown }>): DiffLine[] {
+  return Object.entries(changes)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([field, c]) => ({ field, from: c.from, to: c.to }));
+}
+
+/** A change once made, as the audit recorded it. */
+export interface Done {
+  action: string;
+  subject: string;
+  detail: Record<string, unknown> | null;
+}
+
+/**
+ * Make a change and show it as recorded: send it, take the audit's diff from the answer
+ * where the write gives one or read the audit's row back where it does not, tell the
+ * person, and read the screen again. A refusal throws, and the preview shows it where the
+ * change was asked for.
+ */
+export function useChange(onApplied: () => void): {
+  done: Done | null;
+  clear: () => void;
+  apply: (action: string, subject: string, write: () => Promise<unknown>, said: string, changes?: (answer: unknown) => Record<string, unknown> | undefined) => Promise<void>;
+} {
+  const { admin, me, notify } = useConsole();
+  const [done, setDone] = useState<Done | null>(null);
+  const apply = async (action: string, subject: string, write: () => Promise<unknown>, said: string, changes?: (answer: unknown) => Record<string, unknown> | undefined): Promise<void> => {
+    const answer = await write();
+    const given = changes?.(answer);
+    setDone({ action, subject, detail: given ?? (await recorded(admin, me.subject, action, subject)) });
+    notify(said);
+    onApplied();
+  };
+  return { done, clear: () => setDone(null), apply };
+}
+
+/**
+ * What a plane in `gitops` mode holds in a repository rather than here: said first, with
+ * where the repository is, because a screen with nothing to press and no reason given reads
+ * as a broken one. The plane refuses a write to any of it, so nothing here offers one.
+ */
+export function Locked({ things, source, children }: { things: string; source: string | null | undefined; children?: ReactNode }): JSX.Element {
+  return (
+    <section className="banner locked" role="note" aria-label="Held in a repository">
+      <Status kind="dormant" glyph="◆">
+        Held in a repository
+      </Status>
+      <p>
+        This plane is in <code>gitops</code> mode: its {things} are resources a repository holds{source ? <> (<code>{source}</code>)</> : null}, and a change
+        to one is a commit there. The plane refuses a write from here, so nothing on this screen offers one.
+      </p>
+      {children}
+    </section>
+  );
+}
+
+/** What the last pass made of something a repository holds, when it was not simply used. */
+export function GitopsProblem({ gitops }: { gitops: { problem: string | null; reasons?: string[]; generation?: number | null } | null | undefined }): JSX.Element | null {
+  if (!gitops?.problem) return null;
+  const words: Record<string, string> = {
+    refused: "The plane refused the resource, and does not use it",
+    missing: "The cluster has no resource for it: the plane kept the row from before it read the cluster",
+    plane_only: "Nothing applies it from a repository yet",
+    unwritten: "The plane has not written it to the cluster",
+  };
+  return (
+    <div className="gitops-problem" role="status">
+      <Status kind={gitops.problem === "refused" ? "denied" : "waiting"} glyph={gitops.problem === "refused" ? "✕" : "◆"}>
+        {gitops.problem.replace("_", " ")}
+      </Status>{" "}
+      <span>{words[gitops.problem] ?? gitops.problem}.</span>
+      {gitops.reasons && gitops.reasons.length > 0 && (
+        <ul className="plain">
+          {gitops.reasons.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** How a plane provisions, from `admin.provisioning.mode`'s answer, whichever shape it takes. */
+export function modeOf(answer: unknown): string | null {
+  if (typeof answer === "string") return answer;
+  if (typeof answer === "object" && answer !== null && typeof (answer as { mode?: unknown }).mode === "string") return (answer as { mode: string }).mode;
+  return null;
+}
+
+/** A title block: what a thing is configured as, a labelled field each, in a fixed order. */
+export function Fields({ rows, paths = false }: { rows: Array<[string, ReactNode]>; paths?: boolean }): JSX.Element {
+  return (
+    <dl className={paths ? "fields paths" : "fields"}>
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
