@@ -2,13 +2,16 @@
 //
 // On a deployment the console is on the plane's own host, so the address is the page's
 // own and the screen is one button. On load it first finishes a sign-in the provider is
-// sending back, then tries the one this tab already holds; either way no questions.
+// sending back, then tries the one this tab already holds; either way no questions. A deep
+// link opened signed out is where the console lands once the provider sends the browser
+// back, not its first screen.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { AuthSession, PlaneUnreachableError } from "@troupe/client";
-import { likelyPlaneUrl, newSession, redirectUri, rememberPlane } from "../plane";
+import { likelyPlaneUrl, newSession, redirectUri, rememberPlace, rememberPlane, restorePlace } from "../plane";
 import { Wordmark } from "./brand";
+import { Field } from "./bits";
 
 export function SignIn({
   onSignedIn,
@@ -35,7 +38,13 @@ export function SignIn({
     (async () => {
       if (AuthSession.returning) {
         setStatus("Finishing your sign-in…");
-        if (await auth.completeRedirectSignIn()) return auth;
+        try {
+          if (await auth.completeRedirectSignIn()) return auth;
+        } finally {
+          // Back from the provider, signed in or not: the place asked for goes back in the
+          // address, so the console opens there, or a second try keeps it.
+          restorePlace();
+        }
       }
       return (await auth.restore()) ? auth : null;
     })().then(
@@ -67,6 +76,7 @@ export function SignIn({
       // `select_account`: on a shared machine the last account is not reliably the one
       // the person means, and an administrator's is the one to be sure of.
       const { url: there } = await auth.beginRedirectSignIn({ prompt: "select_account", redirectUri: redirectUri() });
+      rememberPlace(globalThis.location?.hash ?? "");
       navigate(there);
     } catch (e) {
       setError(describe(e));
@@ -98,10 +108,9 @@ export function SignIn({
         }}
       >
         {!mounted && (
-          <label>
-            The plane's address
-            <input value={planeUrl} onChange={(e) => setPlaneUrl(e.target.value)} placeholder="https://troupe.example.com" spellCheck={false} disabled={busy} />
-          </label>
+          <Field label="The plane's address">
+            {(p) => <input {...p} value={planeUrl} onChange={(e) => setPlaneUrl(e.target.value)} placeholder="https://troupe.example.com" spellCheck={false} disabled={busy} />}
+          </Field>
         )}
         <button type="submit" className="primary" disabled={busy || !planeUrl.trim()}>
           {busy ? status || "Signing in…" : "Sign in"}

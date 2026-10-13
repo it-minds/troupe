@@ -74,7 +74,8 @@ defmodule Troupe.Plane.Web.Router do
         name: config(:plane_name, "troupe"),
         url: base_url(conn),
         app_url: app_url(),
-        cli_url: cli_url()
+        cli_url: cli_url(),
+        console_url: Index.console_url()
       )
     )
   end

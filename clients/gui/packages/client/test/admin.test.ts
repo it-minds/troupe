@@ -99,6 +99,38 @@ describe("the team methods", () => {
     ]);
   });
 
+  it("name the team's groups, admins, sessions and audit the way the plane does", async () => {
+    const { api, calls } = recording();
+
+    await api.enableTeam("grp-research", { name: "research" });
+    await api.linkTeam("engineering", "grp-platform");
+    await api.unlinkTeamPreview("engineering", "grp-platform");
+    await api.unlinkTeam("engineering", "grp-platform");
+    await api.addTeamAdmin("engineering", "lead@example.test");
+    await api.removeTeamAdmin("engineering", "lead@example.test");
+    await api.sessions({ state: "active", profile: "dev" });
+    await api.eraseSessionPreview("s-1");
+    await api.eraseSession("s-1");
+    await api.audit({ actor: "root@example.test", kind: "team", subject_id: "engineering", limit: 5 });
+    await api.verifyAudit();
+    await api.overview();
+
+    assert.deepEqual(calls, [
+      { method: "admin.team.enable", params: { group: "grp-research", attrs: { name: "research" } } },
+      { method: "admin.team.link", params: { name: "engineering", group: "grp-platform" } },
+      { method: "admin.team.unlink.preview", params: { name: "engineering", group: "grp-platform" } },
+      { method: "admin.team.unlink", params: { name: "engineering", group: "grp-platform" } },
+      { method: "admin.team.admin.add", params: { name: "engineering", subject: "lead@example.test" } },
+      { method: "admin.team.admin.remove", params: { name: "engineering", subject: "lead@example.test" } },
+      { method: "admin.sessions.list", params: { filter: { state: "active", profile: "dev" } } },
+      { method: "admin.session.erase.preview", params: { session_id: "s-1" } },
+      { method: "admin.session.erase", params: { session_id: "s-1" } },
+      { method: "admin.audit.list", params: { filter: { actor: "root@example.test", kind: "team", subject_id: "engineering", limit: 5 } } },
+      { method: "admin.audit.verify", params: {} },
+      { method: "admin.overview", params: {} },
+    ]);
+  });
+
   it("carry the preview's shape through untouched", async () => {
     const effect: TeamDisableEffect = {
       team: "engineering",

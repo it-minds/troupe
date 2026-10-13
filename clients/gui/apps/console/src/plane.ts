@@ -97,6 +97,36 @@ export function rememberPlane(url: string): void {
   }
 }
 
+const RETURN_KEY = "troupe.console.returnTo";
+
+/**
+ * Keep the place a person asked for across the provider's page and back. The redirect URI
+ * is registered without a fragment, so the provider sends the browser back to the bare
+ * address and a deep link would otherwise land on the first screen. Kept in this tab's
+ * storage, as the sign-in's own verifier is.
+ */
+export function rememberPlace(hash: string): void {
+  try {
+    if (hash && hash !== "#") globalThis.sessionStorage?.setItem(RETURN_KEY, hash);
+    else globalThis.sessionStorage?.removeItem(RETURN_KEY);
+  } catch {
+    // Lands on the first screen instead.
+  }
+}
+
+/** Put the kept place back in the address, once, unless the address already names one. */
+export function restorePlace(): void {
+  try {
+    const hash = globalThis.sessionStorage?.getItem(RETURN_KEY);
+    globalThis.sessionStorage?.removeItem(RETURN_KEY);
+    const { location, history } = globalThis;
+    if (!hash || !location || !history?.replaceState || (location.hash && location.hash !== "#")) return;
+    history.replaceState(history.state, "", `${location.pathname}${location.search}${hash}`);
+  } catch {
+    // Lands on the first screen instead.
+  }
+}
+
 /** Where the plane's current console is, for the areas this one does not cover yet. */
 export function currentConsole(planeUrl: string, path: string): string {
   return `${planeUrl.replace(/\/+$/, "")}/admin${path}`;

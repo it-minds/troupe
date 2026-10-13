@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, signedInAs, startFake, type, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -52,13 +52,35 @@ describe("signing in to the console", () => {
     await waitFor(() => says("platform admin"), "the console, signed in");
     expect(says("Alice")).toBe(true);
     expect(location.search).toBe("");
-    await waitFor(() => says("core") && says("design"), "the teams");
+    await waitFor(() => says("core") && says("design"), "the overview's teams");
 
     const toPlane = recorded.calls.filter((c) => c.url.startsWith(fake.plane.baseUrl));
     expect(toPlane.some((c) => c.url.endsWith("/auth/exchange"))).toBe(true);
     const methods = toPlane.map((c) => c.method).filter((m): m is string => m !== null);
-    expect(methods).toContain("admin.teams.list");
+    expect(methods).toContain("admin.overview");
     expect(methods.filter((m) => m !== "me" && !m.startsWith("admin."))).toEqual([]);
+  });
+
+  it("lands on the page a deep link asked for once the provider sends the browser back, not on the first screen", async () => {
+    visit("#/teams/core/limits");
+    let leftFor: string | null = null;
+    unmount = render(<App navigate={(url) => (leftFor = url)} />).unmount;
+    type(await waitFor(() => field("The plane's address"), "the sign-in screen"), fake.plane.baseUrl);
+    button("Sign in")!.click();
+    const there = await waitFor(() => leftFor, "the way to the provider");
+
+    // The provider sends the browser back to the console's own address, which carries no
+    // fragment: the redirect URI is registered without one.
+    const back = await fetch(there, { redirect: "manual" });
+    const returned = new URL(back.headers.get("location")!);
+    expect(returned.hash).toBe("");
+    unmount();
+    history.replaceState(null, "", `/${returned.search}`);
+    unmount = render(<App />).unmount;
+
+    await waitFor(() => document.querySelector("h1")?.textContent === "core" && says("Every limit says what is in force"), "core's limits");
+    expect(location.hash).toBe("#/teams/core/limits");
+    expect(location.search).toBe("");
   });
 
   it("keeps the sign-in for this tab, and signing out forgets it", async () => {

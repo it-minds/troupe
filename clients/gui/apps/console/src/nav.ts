@@ -33,8 +33,8 @@ export const NAV: Group[] = [
   {
     label: "Watch",
     areas: [
-      { id: "overview", label: "Overview", built: false, teamAdmin: true, current: "/", lead: "What needs attention, how each profile's fleet is doing, and what every team has spent against its budget." },
-      { id: "sessions", label: "Sessions", built: false, teamAdmin: true, current: "/sessions", lead: "Every session's owner, team, profile, state, size and cost, and never what was said in it." },
+      { id: "overview", label: "Overview", built: true, teamAdmin: true, current: "/", lead: "What needs attention, how each profile's fleet is doing, and what every team has spent against its budget." },
+      { id: "sessions", label: "Sessions", built: true, teamAdmin: true, current: "/sessions", lead: "Every session's owner, team, profile, state, size and cost, and never what was said in it." },
       { id: "connections", label: "Connections", built: false, teamAdmin: false, current: "/connections", lead: "Which MCP servers each session is talking to, and which identity its calls go out as." },
       { id: "runs", label: "Runs and review", built: false, teamAdmin: true, current: "/review", lead: "Trigger runs, what fired them, how they ended and what they cost, and who has read them." },
     ],
@@ -65,7 +65,7 @@ export const NAV: Group[] = [
       { id: "policy", label: "Policy and settings", built: false, teamAdmin: true, current: "/policy", lead: "Every platform setting, where its value came from, and the ladder it is decided on." },
       { id: "clients", label: "Client versions", built: true, teamAdmin: true, current: "/policy", lead: "" },
       { id: "organisation", label: "Organisation", built: true, teamAdmin: true, current: "/policy", lead: "" },
-      { id: "audit", label: "Audit", built: false, teamAdmin: true, current: "/audit", lead: "Who changed what and when, field by field, and a check that the record is whole." },
+      { id: "audit", label: "Audit", built: true, teamAdmin: true, current: "/audit", lead: "Who changed what and when, field by field, and a check that the record is whole." },
       { id: "memory", label: "Company memory", built: false, teamAdmin: true, current: null, lead: "What the troupe remembers about the organisation, its teams and its profiles." },
     ],
   },
