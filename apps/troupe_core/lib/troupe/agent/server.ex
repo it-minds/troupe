@@ -79,7 +79,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions, Shell}
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
-  alias Troupe.Tools.{Delegate, Finish, Output, ReadFile, ReadOutput, Show}
+  alias Troupe.Tools.{Delegate, Finish, Output, Patch, ReadFile, ReadOutput, Show}
   alias Troupe.Watch.Trigger
 
   require Logger
@@ -2155,6 +2155,11 @@ defmodule Troupe.Agent.Server do
                     "token cap, so its input could not be parsed and it was not run. Re-issue it on " <>
                     "its own, with a shorter argument."
 
+  # A document too long for one reply is not shorter when it is asked again: it goes in
+  # parts, the start shown and the rest added with `patch`, each part a reply of its own.
+  @truncated_document " A document too long for one reply goes in parts: show its start, then " <>
+                        "add the rest with patch and no old_string, one part a call."
+
   @empty_note "Your previous reply contained no text and no tool call, so there was nothing to " <>
                 "act on. Continue the task: make a tool call, or call `finish` with a summary of " <>
                 "what you did."
@@ -2403,6 +2408,12 @@ defmodule Troupe.Agent.Server do
     |> Map.put("principal", Principal.to_json(principal))
   end
 
+  defp cut_call(name) do
+    if name in [Show.name(), Patch.name()],
+      do: @truncated_call <> @truncated_document,
+      else: @truncated_call
+  end
+
   # Arguments the reply's output cap cut mid-JSON (Decision 659). Running a tool on a
   # fragment is worse than saying so, and every `tool_use` still owes a `tool_result` or
   # the next request is refused outright — so the call is answered, not run.
@@ -2410,7 +2421,7 @@ defmodule Troupe.Agent.Server do
     call = %Call{id: tool_use.id, name: tool_use.name, args: %{}}
     state = %{state | pending: Map.put(state.pending, call.id, call)}
     log(state, :tool_call_started, %{"call_id" => call.id, "name" => call.name, "args" => %{}})
-    send(self(), {:tool_result, call.id, Result.error(call.id, call.name, @truncated_call)})
+    send(self(), {:tool_result, call.id, Result.error(call.id, call.name, cut_call(call.name))})
     state
   end
 
@@ -3711,10 +3722,10 @@ defmodule Troupe.Agent.Server do
     identifiers exact. Tool calls are written as [called <tool> <arguments>], each
     followed by what it returned or why it failed: say what the calls that matter
     did (the tool, the arguments that matter, the gist of the result), not their
-    output. A document shown with show stays on the session's scratchpad and is
-    written here as a pointer: keep its name and the read_file call that reads it
-    back. Drop pleasantries and anything already reflected in the current state
-    of the files.
+    output. A document shown with show, or revised with patch, stays on the
+    session's scratchpad and is written here as a pointer: keep its name and the
+    read_file call that reads it back. Drop pleasantries and anything already
+    reflected in the current state of the files.
     """
     |> String.trim()
   end

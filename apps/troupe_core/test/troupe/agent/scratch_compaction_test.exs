@@ -119,7 +119,8 @@ defmodule Troupe.Agent.ScratchCompactionTest do
       assert Message.text(summary) =~ "summary: the plan is plan.md on the scratchpad"
 
       assert Message.text(summary) =~
-               ~s|On this session's scratchpad, each read with read_file(path: "scratch:/<name>"):\n| <>
+               ~s|On this session's scratchpad, each read with read_file(path: "scratch:/<name>") | <>
+                 ~s|and revised with patch:\n| <>
                  ~s|- plan.md ("Migration plan", version 1, #{byte_size(@plan)} bytes)|
     end
 
@@ -155,6 +156,49 @@ defmodule Troupe.Agent.ScratchCompactionTest do
       read_back(fake, session.id)
       assert [%ToolResult{error?: false, content: read}] = last_results(fake)
       assert read =~ "6\t4. Count the rows on both sides before the switch."
+    end
+
+    # A revision is a patch, which carries the change: a long one, a part of a document
+    # written in parts, is left out as a show's words are; a short one is shorter than its
+    # pointer and stays as it was.
+    test "has a pointer for a long patch, and keeps a short one whole", context do
+      rest = Enum.map_join(4..12, "", &"#{&1}. Count the rows of table #{&1} on both sides.\n")
+      short = %{"name" => "plan.md", "old_string" => "3. Drop", "new_string" => "3. Remove"}
+
+      steps = [
+        {:text, "first answer"},
+        show("plan.md", "Migration plan", @plan),
+        {:tools, [{"patch", %{"name" => "plan.md", "new_string" => rest}}]},
+        {:tools, [{"patch", short}]},
+        {:text, "The plan is in plan.md."},
+        @overflow,
+        {:text, "summary of the first turn"},
+        {:text, "carried on"}
+      ]
+
+      %{session: session, fake: fake} = start_session(context, steps: steps)
+      Troupe.subscribe(session.id)
+      Enum.each(["first", "write the plan in parts", "carry on"], &turn(session.id, &1))
+
+      assert [_] = events_of_type(session.id, "compacted")
+      after_compaction = fake |> Fake.requests() |> List.last()
+
+      assert [long, ^short] =
+               for(%ToolUse{name: "patch"} = call <- blocks(after_compaction), do: call.input)
+
+      written = @plan <> rest
+
+      assert long["new_string"] =~
+               ~s|plan.md (version 2, #{byte_size(written)} bytes) left out since a compaction|
+
+      assert long["new_string"] =~ ~s|read_file(path: "scratch:/plan.md")|
+      refute Map.has_key?(long, "old_string")
+      refute Enum.any?(texts(after_compaction), &(&1 =~ "Count the rows of table 7"))
+
+      assert File.read!(Path.join(Scratch.dir(session.id), "plan.md")) ==
+               String.replace(written, "3. Drop", "3. Remove")
+
+      assert [%{name: "plan.md", version: 3}] = Scratch.list(session.id)
     end
 
     # As Decision 771 keeps whole a result the model has not answered: a call it sees changed
