@@ -47,11 +47,24 @@ jobs:
 
       - uses: azure/setup-helm@v5
 
-      # The runner's kernel is the node's. Ubuntu 24.04 restricts unprivileged user
-      # namespaces through AppArmor, and one is how a worker's bubblewrap builds the sandbox
-      # every command on a pod runs in; left on, the suite would be testing the runner.
-      - name: Unprivileged user namespaces, which a worker's sandbox needs
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # The runner's kernel is the node's, and it is left as Ubuntu 24.04 has it: AppArmor
+      # enforced, and unprivileged user namespaces restricted
+      # (`kernel.apparmor_restrict_unprivileged_userns=1`), as on an Ubuntu node pool. A
+      # worker's bubblewrap builds the sandbox every command on a pod runs in from a user
+      # namespace, and the chart's AppArmor profile is what lets it there; `kind-up` gives the
+      # nodes the parser their runtime needs to apply one. Said here, so a runner image that
+      # changes either shows in the log.
+      - name: The runner's kernel, as an Ubuntu node's
+        run: |
+          echo "kernel $(uname -r)"
+          echo "AppArmor enabled: $(cat /sys/module/apparmor/parameters/enabled)"
+          echo "$(apparmor_parser --version | head -1)"
+          restrict=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)
+          echo "kernel.apparmor_restrict_unprivileged_userns=$restrict"
+          if [ "$restrict" != 1 ]; then
+            echo "the runner does not restrict unprivileged user namespaces, so it proves nothing about a node that does"
+            exit 1
+          fi
 
       - name: A cluster whose CNI enforces policy
         run: scripts/kind-up
@@ -100,6 +113,81 @@ jobs:
         env:
           TROUPE_GATEWAY_URL: https://api.openai.com/v1
         run: scripts/remote-up
+
+      # Why the workers' AppArmor profile is there, on a kernel that restricts unprivileged
+      # user namespaces. The worker image, with the worker container's security context, runs
+      # bubblewrap with the sandbox's flags three times: under the runtime's default profile
+      # it is refused its mounts ("Failed to make / slave"), unconfined it is refused the
+      # namespace's uid map ("setting up uid map"), and under the chart's profile it runs. The
+      # suite then runs a session's command in the sandbox on a worker pod.
+      - name: Bubblewrap on a worker needs the chart's AppArmor profile here
+        run: |
+          kc() { kubectl --context kind-troupe-dev "$@"; }
+          profile=$(kc get deployment troupe-operator -n troupe-system \
+            -o 'jsonpath={.spec.template.spec.containers[0].env[?(@.name=="TROUPE_WORKER_APPARMOR_PROFILE")].value}')
+          if [ -z "$profile" ]; then
+            echo "remote-up gave the workers no AppArmor profile: the kind node's runtime applies none"
+            exit 1
+          fi
+          check=troupe-apparmor-check
+          kc create namespace "$check"
+          trap 'kc delete namespace "$check" --wait=false' EXIT
+          probe='cat /proc/self/attr/current;
+            exec bwrap --die-with-parent --unshare-pid --unshare-ipc --unshare-uts --new-session \
+              --proc /proc --dev /dev --tmpfs /tmp --ro-bind /usr /usr --ro-bind /bin /bin \
+              --ro-bind /lib /lib --ro-bind /lib64 /lib64 -- /bin/cat /proc/1/comm'
+          # A pod named $1 whose worker container wears the AppArmor profile $2 (nothing for
+          # the runtime's default); prints what it said, and its phase last.
+          run() {
+            kc apply -f - <<YAML >/dev/null
+          apiVersion: v1
+          kind: Pod
+          metadata: {name: $1, namespace: $check}
+          spec:
+            hostUsers: false
+            restartPolicy: Never
+            automountServiceAccountToken: false
+            securityContext: {runAsNonRoot: true, runAsUser: 1000, seccompProfile: {type: Unconfined}}
+            containers:
+              - name: worker
+                image: ghcr.io/it-minds/troupe-worker:dev
+                imagePullPolicy: Never
+                command: ["/bin/sh", "-c", $(jq -Rn --arg p "$probe" '$p')]
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities: {drop: ["ALL"]}
+                  procMount: Unmasked
+                  ${2:+appArmorProfile: $2}
+          YAML
+            phase=""
+            for _ in $(seq 1 90); do
+              phase=$(kc get pod "$1" -n "$check" -o 'jsonpath={.status.phase}')
+              case "$phase" in Succeeded|Failed) break ;; esac
+              sleep 2
+            done
+            kc logs "$1" -n "$check" 2>&1 || kc describe pod "$1" -n "$check"
+            echo "$phase"
+          }
+          default=$(run runtime-default "")
+          echo "== the runtime's default profile:"; echo "$default"
+          unconfined=$(run unconfined "{type: Unconfined}")
+          echo "== unconfined:"; echo "$unconfined"
+          chart=$(run chart-profile "{type: Localhost, localhostProfile: $profile}")
+          echo "== $profile:"; echo "$chart"
+          failed=0
+          if [ "$(tail -1 <<<"$default")" != Failed ] || ! grep -q '^bwrap: ' <<<"$default"; then
+            echo "bubblewrap was not refused under the runtime's default profile: the node applies no AppArmor default, and this proves nothing"
+            failed=1
+          fi
+          if [ "$(tail -1 <<<"$unconfined")" != Failed ] || ! grep -q '^bwrap: ' <<<"$unconfined"; then
+            echo "bubblewrap was not refused unconfined: the kernel does not restrict unprivileged user namespaces, and this proves nothing"
+            failed=1
+          fi
+          if [ "$(tail -1 <<<"$chart")" != Succeeded ] || ! grep -qx 'bwrap' <<<"$chart"; then
+            echo "bubblewrap did not run its command under $profile"
+            failed=1
+          fi
+          exit "$failed"
 
       # Something answering at the cloud metadata address, where a pod reaches it as it
       # would a cloud's: out through its node, to a host that answers there. Without it a

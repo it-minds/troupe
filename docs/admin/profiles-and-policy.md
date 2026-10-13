@@ -252,8 +252,9 @@ changes, so a new identity or a rotation reaches running pods without a new revi
 
 The pod runs as non-root uid 1000 with seccomp `RuntimeDefault`, and by default in a user
 namespace of its own (`hostUsers: false`); its worker container has the installation's
-`worker.seccomp` profile and, in that user namespace, an unmasked `/proc`, which together
-let bubblewrap start ([installing.md](installing.md#the-workers-seccomp-profile)). Every
+`worker.seccomp` profile, its `worker.appArmor` profile and, in that user namespace, an
+unmasked `/proc`, which together let bubblewrap start
+([installing.md](installing.md#the-workers-seccomp-profile)). Every
 capability is dropped, `enableServiceLinks: false`, readiness `/health/ready` and liveness
 `/health/live`. A
 projected volume at `/var/run/secrets/troupe` carries two ServiceAccount tokens — audience

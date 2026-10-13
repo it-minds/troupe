@@ -91,10 +91,16 @@ ARG RELEASE=troupe_operator
 # deleted file never, so a client attached to a remote session never learned that one was
 # gone. Like `git` it is GPL-2.0 and, like both, a separate program the VM starts, not
 # code linked into the release; Debian keeps its licence at /usr/share/doc/inotify-tools.
+#
+# `apparmor` is `apparmor_parser`, in the operator's image alone: the chart's
+# `troupe-worker-profiles` DaemonSet runs this image to load the workers' AppArmor profile
+# into each node's kernel. Nothing of the operator calls it, and it loads nothing without
+# `MAC_ADMIN`, which only that DaemonSet's container is given.
 RUN apt-get update -y \
  && apt-get install -y --no-install-recommends \
       libstdc++6 openssl libncurses6 locales ca-certificates \
       $(if [ "${RELEASE}" = "troupe_worker" ]; then echo git bubblewrap inotify-tools; fi) \
+      $(if [ "${RELEASE}" = "troupe_operator" ]; then echo apparmor; fi) \
  && rm -rf /var/lib/apt/lists/* \
  && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 

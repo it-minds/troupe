@@ -17,6 +17,7 @@ is a worked example.
 | Cilium, optionally | egress by hostname: a worker reaches its allowlist and nothing else | a worker reaches any public host on 443 and 80; the allowlist is checked at admission, not on the wire; a profile's own endpoint on another port, or given as an address, opens that port or that address; one at a loopback, unspecified, link-local or cloud metadata address is refused, as it is with Cilium |
 | An ingress controller | how a client reaches a worker | sessions are created and cannot be attached to from outside |
 | Nodes that allow unprivileged user namespaces, and the chart's seccomp profile on them | every command on a pod runs in bubblewrap, which builds its sandbox from a user namespace ([below](#the-workers-seccomp-profile)) | a pod refuses every command, saying bubblewrap could not start |
+| Where nodes enforce AppArmor (Ubuntu's), the chart's AppArmor profile loaded on them | the runtime's default AppArmor profile refuses bubblewrap's mounts, and Ubuntu's restriction on unprivileged user namespaces refuses an unconfined one its uid map ([below](#the-workers-apparmor-profile)) | a pod refuses every command, saying bubblewrap could not start; on nodes without AppArmor, `worker.appArmor.enabled: false` |
 | Kubernetes ≥ 1.33, containerd ≥ 2.0 (runc ≥ 1.2), Linux ≥ 6.3, storage that takes idmapped mounts, `privileged` Pod Security in worker namespaces | each worker pod runs in a user namespace of its own with its `/proc` unmasked, which bubblewrap's own `/proc` needs ([below](#the-workers-user-namespaces)) | a worker pod is refused or does not start; with `worker.userNamespaces: false` it starts and refuses every command |
 
 Label the ingress controller's namespace, or every worker drops its traffic:
@@ -118,15 +119,16 @@ worker:
   the calls bubblewrap makes its user, mount and PID namespaces with, and never a network,
   cgroup or time namespace ([security.md §3](security.md#3-a-worker-isolation-and-egress)
   says what it allows and why). The kubelet reads it from the node, so it must be on every
-  node that runs workers. The chart's DaemonSet `troupe-worker-seccomp` puts it there: one
-  pod per node copies it from a ConfigMap and waits, ready while the file is in place. It
-  mounts that one directory from the host (`/var/lib/kubelet/seccomp/troupe`) and nothing
-  else, and runs as root with every capability dropped, because the directory is root's,
-  so **`troupe-system` needs the `privileged` Pod Security level** for it. Where the
-  kubelet runs with another `--root-dir`, set `kubeletSeccompDir` to `<root-dir>/seccomp`.
-  A worker pod that reaches a node before the file waits in `CreateContainerError`
-  ("cannot load seccomp profile") and starts once it is there:
-  `kubectl -n troupe-system rollout status daemonset/troupe-worker-seccomp`.
+  node that runs workers. The chart's DaemonSet `troupe-worker-profiles` puts it there:
+  its `seccomp` container, one per node, copies it from a ConfigMap and waits, ready while
+  the file is in place. It mounts that one directory from the host
+  (`/var/lib/kubelet/seccomp/troupe`) and nothing else, and runs as root with every
+  capability dropped, because the directory is root's, so **`troupe-system` needs the
+  `privileged` Pod Security level** for it. Where the kubelet runs with another
+  `--root-dir`, set `kubeletSeccompDir` to `<root-dir>/seccomp`. A worker pod that reaches
+  a node before the file waits in `CreateContainerError` ("cannot load seccomp profile")
+  and starts once it is there:
+  `kubectl -n troupe-system rollout status daemonset/troupe-worker-profiles`.
 - **With the Security Profiles Operator**, or nodes built with the file, set
   `install.enabled: false` and point `localhostProfile` at where it is. For the operator,
   apply a `SeccompProfile` in `troupe-system` whose spec is the rules of
@@ -135,6 +137,55 @@ worker:
 - **`RuntimeDefault`** keeps the runtime's own profile: workers start and run no command.
 - **`Unconfined`** is no filter at all, for a development cluster (`dev/kind/values.yaml`).
   The `baseline` and `restricted` Pod Security levels refuse it.
+
+### The workers' AppArmor profile
+
+Where a node enforces AppArmor, as Ubuntu's do, two things of AppArmor's stop bubblewrap:
+
+- **The runtime's default AppArmor profile** (containerd's `cri-containerd.apparmor.d`)
+  has `deny mount`, so bubblewrap stops at its first mount: "bwrap: Failed to make /
+  slave: Permission denied".
+- **Ubuntu's restriction on unprivileged user namespaces**
+  (`kernel.apparmor_restrict_unprivileged_userns=1`, the default from Ubuntu 23.10, so on
+  24.04 node pools). An unconfined process that makes a user namespace is moved into a
+  profile with no capabilities, so a container with no AppArmor profile at all
+  (`Unconfined`) gets one step further and stops at the namespace's uid map: "bwrap:
+  setting up uid map: Permission denied".
+
+`worker.appArmor` gives the worker container a profile of its own, which answers both
+without touching the node's sysctl: it is the runtime's default with bubblewrap's mounts
+and `pivot_root` allowed, and a worker under it is confined, not unconfined, when it makes
+the namespace, so the restriction does not apply to it
+([security.md §3](security.md#3-a-worker-isolation-and-egress) says what it allows and
+denies). The default needs nothing from you:
+
+```yaml
+worker:
+  appArmor:
+    enabled: true            # false on nodes without AppArmor
+    profile: troupe-worker   # the name it is loaded under
+    install:
+      enabled: true          # the DaemonSet's `apparmor` container
+```
+
+- **Loaded on every node** by the `apparmor` container of `troupe-worker-profiles`, with
+  `apparmor_parser --replace` from the operator's image, and then it waits, ready while the
+  kernel has the profile in enforce mode. Loading a profile takes root in the node's user
+  namespace with the `MAC_ADMIN` capability, no AppArmor profile of its own, and the host's
+  `/sys/kernel/security`, and that container has those and nothing else (every other
+  capability dropped, a read-only root, no API token). A worker pod that reaches a node
+  before the profile is loaded waits in `CreateContainerError` ("apparmor profile not
+  found") and starts once it is; it never runs without it.
+- **A node without AppArmor**: the container loads nothing and says so in its log. The
+  kubelet refuses a pod that asks for a profile there ("Cannot enforce AppArmor: AppArmor
+  is not enabled on the host"), so a cluster whose nodes run no AppArmor sets
+  `enabled: false`, and the worker container keeps the runtime's default, as before 0.19.0.
+- **With the Security Profiles Operator**, or nodes built with the profile, set
+  `install.enabled: false` and `profile` to the name it is loaded under. The profile is
+  `charts/troupe/files/worker-apparmor`.
+- **Not the sysctl.** Setting `kernel.apparmor_restrict_unprivileged_userns=0` would lift
+  the restriction for every process on the node, and a managed node pool often gives no
+  way to set it. The chart never sets it, and the worker container is never `Unconfined`.
 
 ### The workers' user namespaces
 
@@ -163,7 +214,10 @@ command outside the sandbox.
 
 **Check your cluster** before installing, with no secret and nothing of Troupe's but the
 worker image. This makes a namespace, a volume on the storage class your profiles use, and
-one pod as a worker pod would be, then runs a sandbox the way a worker does:
+one pod as a worker pod would be, then runs a sandbox the way a worker does. Where the
+nodes enforce AppArmor, run it once the chart's DaemonSet has loaded the profile
+(`kubectl -n troupe-system rollout status daemonset/troupe-worker-profiles`), or install
+with the check first and come back:
 
 ```bash
 kubectl version | grep Server                    # 1.33 or later
@@ -193,6 +247,7 @@ spec:
         allowPrivilegeEscalation: false
         capabilities: {drop: ["ALL"]}
         seccompProfile: {type: Localhost, localhostProfile: troupe/worker.json}  # once the chart's DaemonSet has run; else Unconfined, for the check only
+        appArmorProfile: {type: Localhost, localhostProfile: troupe-worker}       # where nodes enforce AppArmor, once the DaemonSet has loaded it; leave it out on nodes without
         procMount: Unmasked
       volumeMounts: [{name: data, mountPath: /var/lib/troupe}]
   volumes: [{name: data, persistentVolumeClaim: {claimName: data}}]
@@ -209,7 +264,19 @@ kubectl delete namespace troupe-check
 
 A pod that never becomes ready says why in `kubectl -n troupe-check describe pod
 worker-check`: `hostUsers` dropped or refused (Kubernetes or the runtime too old), an
-idmapped mount refused (the storage), or the seccomp profile missing from the node.
+idmapped mount refused (the storage), the seccomp profile missing from the node, the
+AppArmor profile not loaded ("apparmor profile not found"), or AppArmor absent from the node
+("Cannot enforce AppArmor": leave `appArmorProfile` out, and set
+`worker.appArmor.enabled: false`).
+
+What the last line, bubblewrap's, says when it does not print `bwrap`:
+
+| bubblewrap says | what refused it | what fixes it |
+| --- | --- | --- |
+| `No permissions to create new namespace` | the seccomp profile: the runtime's default refuses a user namespace | `worker.seccomp.type: Localhost`, with the profile on the node |
+| `Failed to make / slave: Permission denied` | AppArmor: the container runs under the runtime's default profile, which refuses every mount | `worker.appArmor.enabled: true`, with the profile loaded on the node, and `appArmorProfile` as above in the check |
+| `setting up uid map: Permission denied` | AppArmor's restriction on unprivileged user namespaces (`kernel.apparmor_restrict_unprivileged_userns=1`): the container runs with no AppArmor profile (`Unconfined`), and an unconfined process that makes a user namespace is moved into a profile with no capabilities | the same: under the chart's profile the worker is confined, and the restriction does not apply. Never `Unconfined`, and the sysctl can stay as it is |
+| `Can't mount proc on /newroot/proc: Operation not permitted` | the container's `/proc` is masked | `hostUsers: false` and `procMount: Unmasked` (`worker.userNamespaces: true`) |
 
 ## 3. Prove it is up
 

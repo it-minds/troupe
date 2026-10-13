@@ -63,6 +63,30 @@ defmodule Troupe.Operator.SettingsTest do
     end
   end
 
+  describe "the worker's AppArmor profile" do
+    test "is the profile the chart names, as Localhost" do
+      settings = read(%{"TROUPE_WORKER_APPARMOR_PROFILE" => "troupe-worker"})
+
+      assert Settings.worker_apparmor(settings) == %{
+               "type" => "Localhost",
+               "localhostProfile" => "troupe-worker"
+             }
+    end
+
+    test "is none, the runtime's default, when the chart names none" do
+      assert Settings.worker_apparmor(read(%{"TROUPE_WORKER_APPARMOR_PROFILE" => nil})) == nil
+      assert Settings.worker_apparmor(read(%{"TROUPE_WORKER_APPARMOR_PROFILE" => ""})) == nil
+    end
+
+    test "stops the operator at boot when it is no name a kubelet takes" do
+      for name <- ["unconfined/x", "../troupe-worker", "-x", "two words"] do
+        assert_raise RuntimeError, ~r/TROUPE_WORKER_APPARMOR_PROFILE/, fn ->
+          read(%{"TROUPE_WORKER_APPARMOR_PROFILE" => name})
+        end
+      end
+    end
+  end
+
   describe "a user namespace for each worker pod" do
     test "is what the chart says, and off when it says nothing" do
       assert read(%{"TROUPE_WORKER_USER_NAMESPACES" => "true"}).worker_user_namespaces == true

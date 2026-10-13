@@ -65,10 +65,18 @@ plane:
 # `Unconfined` needs. Never this anywhere else. User namespaces stay on, as the chart has
 # them (`worker.userNamespaces`): `scripts/kind-up` lets a user-namespaced pod reach kind's
 # createContainer hook.
+#
+# The worker's AppArmor profile is off here, and `scripts/remote-up` turns it on where the
+# kind node's kernel runs AppArmor (`scripts/kind-up` gives such a node the parser its
+# runtime needs to apply profiles), as on CI's Ubuntu runner, whose kernel restricts
+# unprivileged user namespaces as an Ubuntu node's does. Docker Desktop's kernel runs no
+# AppArmor, and its kubelet would refuse a pod that asked for a profile.
 worker:
   image: {tag: dev}
   seccomp:
     type: Unconfined
+  appArmor:
+    enabled: false
 
 bao:
   address: http://openbao.troupe-system.svc:8200

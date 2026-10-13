@@ -133,6 +133,36 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   the development cluster uses, removes the filter entirely. The pod as a whole keeps the
   runtime's default; only the worker container has this one. `RuntimeDefault` remains a
   choice, under which no command runs on a pod.
+- **The worker container's AppArmor profile lets bubblewrap mount the sandbox, and no
+  more** (`worker.appArmor`, Decision 898). Where a node enforces AppArmor, the runtime's
+  default profile refuses every mount, and Ubuntu's restriction on unprivileged user
+  namespaces (`kernel.apparmor_restrict_unprivileged_userns=1`) refuses an unconfined
+  process the uid map of one it makes. The chart ships its own
+  (`charts/troupe/files/worker-apparmor`), and a DaemonSet loads it on every node
+  ([installing.md](installing.md#the-workers-apparmor-profile)). It is containerd's default
+  profile with these changes:
+  - `mount` and `pivot_root` are allowed, where the default denies every mount. As with
+    seccomp, a process with no capabilities can mount only inside a user and mount
+    namespace it made itself, so these reach the sandbox's mounts, never the pod's;
+  - a worker is confined by it, so the kernel's restriction on unprivileged user
+    namespaces, which applies to unconfined processes, does not move it into a profile with
+    no capabilities. Whether it may make one is the profile's to say: it is written for the
+    AppArmor 3.0 policy ABI, which the parser that loads it speaks and which does not mediate
+    user namespaces, so a worker may. The node's sysctl is left as it is, so every other
+    process on the node keeps the restriction;
+  - denied beyond the default: mounting sysfs, cgroup and cgroup2, mqueue, fuse, overlay,
+    bpf, ramfs and binder filesystems even inside the sandbox; the capabilities that mean
+    something only in the node's own namespace (`mac_admin`, `mac_override`, `sys_module`,
+    `sys_rawio`, `sys_boot`, `sys_time`, `syslog`, `audit_control`); and raw and packet
+    sockets. The default's denials stay: no writes to the kernel's files in `/proc` or to
+    sysfs outside cgroups, nothing of `/proc/kcore`, `/proc/sysrq-trigger`, firmware or
+    `/sys/kernel/security`.
+
+  The loader is the one new privilege: a container per node, root in the node's user
+  namespace with `MAC_ADMIN` alone, unconfined by AppArmor (the default profile would refuse
+  it `/sys/kernel/security`), with the host's `/sys/kernel/security` and nothing else of
+  the host. The worker container is never `Unconfined`, and on a node without AppArmor the
+  kubelet refuses a worker pod that asks for the profile rather than run it without.
 - **Network.** Each profile's namespace has a NetworkPolicy: ingress only from the
   namespace labelled `troupe.dev/ingress=true`, egress to DNS, the plane, OpenBao, object
   storage, the model, the MCP servers and the git hosts. **With Cilium** the profile's

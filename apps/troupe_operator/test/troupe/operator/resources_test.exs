@@ -519,6 +519,42 @@ defmodule Troupe.Operator.ResourcesTest do
       end
     end
 
+    # Where a node enforces AppArmor, the runtime's default profile refuses bubblewrap's
+    # mounts, and a kernel that restricts unprivileged user namespaces refuses an unconfined
+    # process the sandbox's uid map: the worker container runs under the installation's
+    # profile, and nothing else about its confinement changes.
+    test "the worker container runs under the installation's Localhost AppArmor profile",
+         context do
+      settings = %{
+        context.settings
+        | worker_apparmor_profile: "troupe-worker",
+          worker_user_namespaces: true,
+          worker_seccomp_type: "Localhost",
+          worker_seccomp_profile: "troupe/worker.json"
+      }
+
+      resources = Resources.for_profile(context.profile, context.policy, settings)
+      security = container(resources)["securityContext"]
+
+      assert security["appArmorProfile"] == %{
+               "type" => "Localhost",
+               "localhostProfile" => "troupe-worker"
+             }
+
+      assert security["procMount"] == "Unmasked"
+      assert pod_spec(resources)["hostUsers"] == false
+      assert security["seccompProfile"]["localhostProfile"] == "troupe/worker.json"
+      assert security["capabilities"]["drop"] == ["ALL"]
+      assert security["allowPrivilegeEscalation"] == false
+      # The pod as a whole, and so anything else that ever runs in it, keeps the runtime's.
+      refute Map.has_key?(pod_spec(resources)["securityContext"], "appArmorProfile")
+    end
+
+    test "with no AppArmor profile named, the container keeps the runtime's default",
+         %{resources: resources} do
+      refute Map.has_key?(container(resources)["securityContext"], "appArmorProfile")
+    end
+
     test "a seccomp profile no kubelet takes is refused, not rendered", context do
       for {type, path} <- [{"Localhost", nil}, {"Localhost", ""}, {"unconfined", nil}, {nil, nil}] do
         settings = %{context.settings | worker_seccomp_type: type, worker_seccomp_profile: path}
