@@ -567,9 +567,11 @@ again from when the last subscriber leaves. `fleet` names no session and reads n
   first `question_asked` on), and last error. Summary diffs are throttled
   to at most 4 per second.
 - **`fleet`** carries only session lifecycle events — created, state changes,
-  archived, erased — for the sessions the principal can see that are running when the
-  subscription is answered; a session created or woken after that does not join it.
-  `fleet` ignores `from_seq`, and replays nothing.
+  archived, erased — for every session the principal can see, the ones created or woken
+  after the subscription was answered among them. `fleet` ignores `from_seq`, and
+  replays nothing. Beside a subscription to one of those sessions on the same
+  connection, each event arrives once on each, and dropping `fleet` leaves the other as
+  it was.
 - **`presence:<id>`** carries `presence` and nothing else, and is the only topic that
   does. It ignores `level` and `from_seq`, answers `head_seq: 0` with
   `"cursored": false`, and is the first thing the server stops sending when a client
@@ -670,9 +672,11 @@ in that tree, in its directory or a folder of it; refused with `invalid_params`,
 
 `workflow`: run the prompt as a named **workflow**: the step list at
 `<workspace>/.troupe/workflows/<name>.json` (or the built-in `default` pipeline) is
-rendered around the prompt as the plan the `workflow` agent starts from, and `profile`
-defaults to `workflow`. `workflows.list {workspace}` says which names exist. A workflow
-is meant for a worktree of its own (`worktree: "always"`), since its subagents write.
+rendered around the prompt as the plan the `orchestrate` agent starts from, and `profile`
+defaults to `orchestrate`; `workflow`, the name of the agent that ran workflows before
+`orchestrate` took its place, is taken as `orchestrate` (Decision 888).
+`workflows.list {workspace}` says which names exist. A workflow is meant for a worktree
+of its own (`worktree: "always"`), since its subagents write.
 
 `parent`: the session this one is a **branch** of — a second agent a person started
 from the first one's screen. The daemon records it in `session_created`, returns it in
@@ -2509,6 +2513,8 @@ that team.
 | `admin.setting.reset` | platform | `{key}` — drops the stored value, so the setting goes back to what the plane was deployed with |
 | `admin.clients.get` | either | `{clients: {tui, daemon, desktop}}`, each `{component, recommended, minimum, blocked, updated_by, updated_at}`: which versions of its clients this plane serves ([Client versions](#client-versions)) |
 | `admin.clients.put` | platform | `{component, policy: {recommended?, minimum?, blocked?}}` → the component's policy as it now stands, with `changes`. Only the keys sent change, `null` clears one, `blocked` is the whole list; `invalid_params` with `data.field` and `data.reason` for a version SemVer cannot read, a `minimum` newer than `recommended`, or a `recommended` that is blocked. Audited as `clients.put` |
+| `admin.github.get` | either | the plane's GitHub App: `{configured, app_id, api_url, git_url, installations: [{owner, installation_id}], private_key: {set, type, fingerprint, transit_key, version}, permissions, updated_by, updated_at}`; never the key |
+| `admin.github.put` | platform | `{app: {app_id?, api_url?, installations?, private_key?}}` (or flat) → the App as it now stands, with `changes`. Only the keys sent change and `installations` is the whole list; `private_key`, the PEM GitHub downloads, is imported into OpenBao transit as a key that cannot be exported and is in no answer afterwards. `invalid_params` with `data.field` and `data.reason`, and nothing written, for anything that does not read. Audited as `github.put`, the key as its fingerprint ([github.md](docs/admin/github.md)) |
 | `admin.identity.check` | either | four named checks with what each proved and how long it took: provider discovery, its signing keys, the endpoints this plane was given, and who actually carries the platform admin group. `{group}` checks a candidate group *before* it is saved |
 | `admin.principals.list` | either | a team's service principals: subject, profiles, last use, whether enabled — never a secret or its hash |
 | `admin.principal.create` | either | `{team, name, description, profiles, sponsor}` → the principal, with `secret` exactly once; `profiles` must be within the team's grants, and `sponsor`, the person who answers for it, is required |

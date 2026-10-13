@@ -6,13 +6,15 @@ defmodule Troupe.LLM.Identify do
     * **`User-Agent: troupe/<version> (<client>; <os>/<arch>)`**, on every call to every
       endpoint. A gateway records it with each request (LiteLLM tags its spend with it),
       and it is the only convention the vendors' own APIs have.
-    * **To a gateway** — an endpoint that is neither a vendor's own API nor OpenRouter —
-      LiteLLM's `x-litellm-tags` (`troupe`, `troupe-<client>`, `troupe-<version>`) and
+    * **To a gateway** — an endpoint of an `anthropic`, `openai` or `gemini` provider that
+      is neither the vendor's own API nor OpenRouter — LiteLLM's `x-litellm-tags`
+      (`troupe`, `troupe-<client>`, `troupe-<version>`) and
       `x-litellm-spend-logs-metadata`: the session's id, and its team, worker profile and
       agent where the plane attributes the session. A server that is not LiteLLM ignores
-      both.
-    * **To OpenRouter**, `HTTP-Referer` (the project's page) and `X-Title: Troupe`, which
-      name the app there, and nothing of LiteLLM's.
+      both. An `ollama` server and an `azure_openai` resource are sent neither.
+    * **To OpenRouter** (an `openrouter` provider, or any at openrouter.ai),
+      `HTTP-Referer` (the project's page) and `X-Title: Troupe`, which name the app
+      there, and nothing of LiteLLM's.
     * **In an OpenAI-compatible body**, `troupe_client` and `troupe_version` beside the
       session's id in `metadata` (`metadata/1`).
 
@@ -28,7 +30,7 @@ defmodule Troupe.LLM.Identify do
   `identify: false` sends none of this, and the User-Agent is the HTTP client's own.
   """
 
-  alias Troupe.LLM.{Endpoint, Request}
+  alias Troupe.LLM.{Endpoint, ProviderType, Request}
 
   @clients ~w(tui headless desktop acp worker other)
   @project_url "https://github.com/it-minds/troupe"
@@ -76,11 +78,24 @@ defmodule Troupe.LLM.Identify do
     [{"user-agent", user_agent(request.client)} | endpoint_headers(request, type)]
   end
 
+  # What a type says beyond the User-Agent is its row's (`Troupe.LLM.ProviderType`): a
+  # local server or a resource of the person's own (`ollama`, `azure_openai`) is no
+  # gateway, and OpenRouter has headers of its own wherever it is reached from.
   defp endpoint_headers(%Request{base_url: url} = request, type) do
+    identify = ProviderType.fetch(type) |> then(&(&1 && &1.identify))
+
     cond do
-      openrouter?(url) -> [{"http-referer", @project_url}, {"x-title", "Troupe"}]
-      Endpoint.vendor_api?(type, url) -> []
-      true -> [{"x-litellm-tags", tags(request.client)} | spend_metadata(request)]
+      identify == :openrouter or openrouter?(url) ->
+        [{"http-referer", @project_url}, {"x-title", "Troupe"}]
+
+      identify != :gateway ->
+        []
+
+      Endpoint.vendor_api?(type, url) ->
+        []
+
+      true ->
+        [{"x-litellm-tags", tags(request.client)} | spend_metadata(request)]
     end
   end
 

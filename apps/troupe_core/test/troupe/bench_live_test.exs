@@ -730,6 +730,131 @@ defmodule Troupe.BenchLiveTest do
     end
   end
 
+  # Issue #554: three tasks on `orchestrate` beside the same tasks on the default agent.
+  describe "issue #554's orchestrate pairs" do
+    @pairs ~w(fix_test_orchestrate rename_symbol_orchestrate follow_steps_orchestrate)
+
+    test "each is its pair's task on orchestrate, run by name and in no suite" do
+      assert {:ok, orchestrated} = LiveScenarios.select(nil, @pairs)
+      assert Enum.map(orchestrated, & &1.name) == @pairs
+
+      for scenario <- orchestrated do
+        [plain] = only([String.replace_suffix(scenario.name, "_orchestrate", "")])
+
+        assert {scenario.prompt, scenario.files, scenario.outcome, scenario.follow_ups} ==
+                 {plain.prompt, plain.files, plain.outcome, plain.follow_ups}
+
+        assert scenario.config[:default_agent] == "orchestrate"
+        assert plain.config[:default_agent] == nil
+      end
+
+      for suite <- LiveScenarios.suites() do
+        {:ok, scenarios} = LiveScenarios.select(suite)
+        refute Enum.any?(scenarios, &(&1.name in @pairs)), suite
+      end
+    end
+
+    test "a run on orchestrate gets the change done through a subagent, every call of its tree in the record" do
+      fake =
+        start_fake(
+          scripts: [
+            {"line_total becomes subtotal", renamer()},
+            {"Rename the function", briefer()}
+          ]
+        )
+
+      {:ok, plan} =
+        Bench.plan(config: person(fake), only: ["rename_symbol_orchestrate"], history: nil)
+
+      report = Bench.live(plan)
+      entry = scenario(report, "rename_symbol_orchestrate")
+      assert entry["passed"], Bench.markdown(report)
+      assert [%{"succeeded" => true, "error" => nil} = run] = entry["runs"]
+
+      assert Enum.map(run["checks"], &{&1["name"], &1["passed"]}) ==
+               [{"old_name_gone", true}, {"test_kept", true}, {"delegated", true}]
+
+      # The root's two calls and the implementer's three, and the cost is all five's.
+      assert run["calls"] |> Enum.map(& &1["agent"]) |> Enum.frequencies() ==
+               %{"root" => 2, "root/implementer#1" => 3}
+
+      assert run["model_calls"] == 5
+      assert run["cost_micros"] == run["calls"] |> Enum.map(& &1["cost_micros"]) |> Enum.sum()
+    end
+
+    test "on orchestrate, a root that edits rather than delegates changes nothing and scores nothing" do
+      # The default agent's script: orchestrate is refused every edit it makes.
+      fake = start_fake()
+
+      {:ok, plan} =
+        Bench.plan(config: person(fake), only: ["rename_symbol_orchestrate"], history: nil)
+
+      [run] = plan |> Bench.live() |> scenario("rename_symbol_orchestrate") |> Map.fetch!("runs")
+      assert %{"succeeded" => false, "outcome" => false} = run
+
+      assert %{"delegated" => false, "old_name_gone" => false} =
+               Map.new(run["checks"], &{&1["name"], &1["passed"]})
+    end
+  end
+
+  # What the orchestrate root of `rename_symbol_orchestrate` sends, against the stand-in.
+  defp briefer do
+    [
+      {:tools,
+       [
+         {"delegate",
+          %{
+            "agent" => "implementer",
+            "goal" => "line_total becomes subtotal in lib/, and elixir shop_test.exs passes.",
+            "context" => "lib/cart.exs defines it; lib/receipt.exs and lib/discount.exs call it.",
+            "constraints" => "Only the three files under lib/.",
+            "deliverable" => "The rename, and the test's result.",
+            "do_not" => "Do not change shop_test.exs."
+          }}
+       ]},
+      {:text, "The implementer renamed it, and the tests pass."}
+    ]
+  end
+
+  # And its implementer: the default agent's edits, then a finish in its parts.
+  defp renamer do
+    [
+      {:tools,
+       for {path, old} <- [
+             {"lib/cart.exs", "def line_total("},
+             {"lib/receipt.exs", "Shop.Cart.line_total("},
+             {"lib/discount.exs", "Shop.Cart.line_total("}
+           ] do
+         {"edit_file",
+          %{
+            "path" => path,
+            "old_string" => old,
+            "new_string" => String.replace(old, "line_total", "subtotal")
+          }}
+       end},
+      {:tools,
+       [
+         {"edit_file",
+          %{
+            "path" => "lib/cart.exs",
+            "old_string" => "&line_total/1",
+            "new_string" => "&subtotal/1"
+          }}
+       ]},
+      {:tools,
+       [
+         {"finish",
+          %{
+            "summary" => "Renamed line_total to subtotal in lib/.",
+            "ran" => "nothing",
+            "passed" => "nothing",
+            "unverified" => "the test",
+            "needs" => "nothing"
+          }}
+       ]}
+    ]
+  end
+
   # The stand-in as Anthropic's API, serving Claude Opus 5.5 at its price.
   defp anthropic(fake, extra \\ []) do
     Troupe.Config.load(

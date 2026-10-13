@@ -18,7 +18,7 @@ defmodule Troupe.Tools.TodoWrite do
   def mode, do: :inline
 
   # Nothing about when a list is worth writing: a profile with every tool is offered this
-  # one only once its turn has run long (Decision 793), and `plan` and `workflow` always.
+  # one only once its turn has run long (Decision 793), and `plan` and `orchestrate` always.
   # A model that binds its thinking to the tools is offered it from the first call
   # (Decision 867) and `build.md` says when a list is worth it: the description is part of
   # the tools, so it is the same everywhere.

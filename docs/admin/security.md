@@ -90,14 +90,49 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
 
 ## 3. A worker: isolation and egress
 
-- **The pod** (`Troupe.Operator.Resources`) runs as uid 1000, not root, with seccomp
-  `RuntimeDefault`, every capability dropped and no privilege escalation. Its root
-  filesystem is writable. No ServiceAccount token is mounted; two projected tokens are, one
-  for enrolling with the plane and one for OpenBao.
+- **The pod** (`Troupe.Operator.Resources`) runs as uid 1000, not root, every capability
+  dropped and no privilege escalation. Its root filesystem is writable. No ServiceAccount
+  token is mounted; two projected tokens are, one for enrolling with the plane and one for
+  OpenBao.
+- **The pod runs in a user namespace of its own** (`hostUsers: false`, `worker.userNamespaces`,
+  Decision 890), so its root and every other user in it, uid 1000 included, are
+  unprivileged users on the node, mapped to a range no other pod has: a process that
+  escaped the container would be nobody there. Its worker container's `/proc` is unmasked
+  (`procMount: Unmasked`), because bubblewrap mounts a fresh `/proc` for the sandbox and
+  the kernel refuses that while paths in the container's own are masked over. Kubernetes
+  allows that only inside a pod's own user namespace, and the operator writes the two
+  together or neither; what the masks hid (`/proc/kcore`, `/proc/sys`, ...) is the pod's
+  user namespace's to see, where its root has no privilege over the node. The Pod Security
+  levels `baseline` and `restricted` refuse an unmasked `/proc` all the same, so worker
+  namespaces are `privileged`.
 - **Every command runs in bubblewrap**, the shell's and every process Troupe starts there
   (git, ripgrep, a stdio MCP server), over the session's own directory. A pod that cannot
   start bubblewrap refuses the command with a sentence; it never runs one unconfined
   (Decision 832).
+- **The worker container's seccomp profile lets bubblewrap make its namespaces, and no
+  more** (`worker.seccomp`, Decision 890). Bubblewrap needs an unprivileged user namespace,
+  and a container runtime's default profile refuses one, so by default the chart ships its
+  own (`charts/troupe/files/worker-seccomp.json`) and a DaemonSet puts it on every node
+  ([installing.md](installing.md#the-workers-seccomp-profile)). It is containerd's default
+  profile for a container with no capabilities, with three changes:
+  - `clone` and `unshare` may make a user, mount, PID, IPC or UTS namespace, the ones the
+    sandbox is made of;
+  - `mount`, `umount2` and `pivot_root` are allowed, which a process with no capabilities
+    can use only inside a user namespace it made, where bubblewrap builds the sandbox's
+    root;
+  - nothing else. A network, cgroup or time namespace is still refused, so a command never
+    owns a network namespace and the netfilter it would bring (`CAP_NET_ADMIN` there is
+    where many kernel exploits through user namespaces start), and `setns`, `bpf`,
+    `keyctl`, `perf_event_open`, io_uring and the new mount API stay refused as in the
+    default.
+
+  What this adds is the kernel's user-namespace code, reachable from a worker container
+  and so from a command a session runs. That is the price of a sandbox built without
+  privileges, and less than the alternatives: `CAP_SYS_ADMIN` would let the default profile
+  allow all of this and mounting in the pod's own namespace besides, and `Unconfined`, which
+  the development cluster uses, removes the filter entirely. The pod as a whole keeps the
+  runtime's default; only the worker container has this one. `RuntimeDefault` remains a
+  choice, under which no command runs on a pod.
 - **Network.** Each profile's namespace has a NetworkPolicy: ingress only from the
   namespace labelled `troupe.dev/ingress=true`, egress to DNS, the plane, OpenBao, object
   storage, the model, the MCP servers and the git hosts. **With Cilium** the profile's
@@ -120,6 +155,13 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   the deployment lists (`operator.workerAllowedOrigins`, and the plane's own where the
   chart serves the GUI); with none listed, no page does. The desktop app and `troupe` are
   not pages and need no entry (Decision 884).
+- **A repository is cloned with a token the session never holds.** A session that names
+  a GitHub repository is cloned on its first activation with an installation token the
+  plane mints for that one repository, `contents: read`, for an hour. The pod's own git
+  takes it from its environment through a credential helper on its command line; the
+  workspace's `.git/config`, the agent's `shell` and every tool's output have no way to it,
+  and no log names it. Each token is an audit entry (Decision 885,
+  [github.md](github.md)).
 - **One OpenBao role for every profile, by default.** Every worker logs in as
   `troupe-worker`. `bao.workerRolePerProfile` gives each profile a role of its own, so one
   profile's pods cannot read another's session keys
@@ -140,6 +182,7 @@ OpenBao holds the rest, under policies rendered by `Troupe.KMS.Policy`:
 | A team session's data key | KV v2, `troupe/teams/<team>/sessions/<id>` | the pods of a profile granted to the team create and read it (every profile's, while they share one role); the plane can only destroy it |
 | A private session's data key | KV v2, `troupe/people/<name>/sessions/<id>` | the person's own daemon, through an assertion the plane signs; no pod role covers it |
 | The key that signs session tokens | transit, `troupe-session-tokens` | the plane signs with it; it is not exportable |
+| The GitHub App's private key | transit, `troupe-github-app` | imported once through `admin.github.put` and not exportable; the plane signs the App's JWT with it and keeps only its fingerprint ([github.md](github.md)) |
 
 A session's data in object storage is AES-256-GCM under its data key, with a fresh nonce
 per object and the session's id as associated data, so an object moved to another

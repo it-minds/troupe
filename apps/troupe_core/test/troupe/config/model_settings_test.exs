@@ -222,8 +222,11 @@ defmodule Troupe.Config.ModelSettingsTest do
     test "refuses what it does not understand, and never overwrites a file it cannot parse", %{
       path: path
     } do
-      assert {:error, reason} = ModelSettings.write(%{"provider" => "gemini"})
-      assert reason =~ "provider must be one of"
+      assert {:error, reason} = ModelSettings.write(%{"provider" => "bedrock"})
+
+      assert reason =~
+               "provider must be one of anthropic, openai, ollama, openrouter, azure_openai, gemini, fake"
+
       assert {:error, _} = ModelSettings.write(%{"provider" => "openai", "auth" => "basic"})
 
       assert {:error, _} =

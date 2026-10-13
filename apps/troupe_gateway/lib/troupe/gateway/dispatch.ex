@@ -477,7 +477,7 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, config} <- workspace_config(workspace) do
       case Onboarding.decline_brief(workspace, config: config) do
         :ok -> {:ok, %{"declined" => true}}
-        {:error, reason} -> {:error, Error.new(:internal, %{reason: reason})}
+        {:error, reason} -> {:error, Error.new(:internal_error, %{reason: reason})}
       end
     end
   end
@@ -1585,7 +1585,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   # A client cannot see this machine's filesystem, so "it did not work" is useless to
   # it — say which of the things it asked for was impossible.
-  # A workflow is a plan the `workflow` agent starts from: the named step list rendered
+  # A workflow is a plan the one orchestrator starts from: the named step list rendered
   # around the prompt. Loaded from the workspace a client named, not the worktree the
   # session may get, since that is where `.troupe/workflows/` lives.
   defp workflow_of(params, workspace) do
@@ -1593,7 +1593,7 @@ defmodule Troupe.Gateway.Dispatch do
       name when is_binary(name) and name != "" ->
         steps = workspace |> Path.expand() |> Workflow.load(name)
 
-        {Map.get(params, "profile") || "workflow",
+        {Workflow.agent(Map.get(params, "profile")),
          Workflow.plan(steps, Map.get(params, "prompt") || "")}
 
       _ ->
@@ -1684,8 +1684,7 @@ defmodule Troupe.Gateway.Dispatch do
   # Names the file, the key and the fix, which is all a person needs to act on it.
   defp start_error(%Troupe.Config.Error{} = error), do: Exception.message(error)
   # Naming the alternatives, because the name people reach for is the gateway they talk
-  # to — `litellm`, `vllm`, `openrouter` — and every one of those is `openai` plus a
-  # `base_url`.
+  # to — `litellm`, `vllm` — and every one of those is `openai` plus a `base_url`.
   defp start_error({:unknown_provider, name}) do
     "config sets provider #{inspect(to_string(name))}; it must be one of " <>
       Enum.map_join(Provider.known(), ", ", &to_string/1) <>
@@ -1724,7 +1723,7 @@ defmodule Troupe.Gateway.Dispatch do
   # there and could not be forgotten (its file could not be written) is the store's reason.
   defp not_forgotten(workspace, id, reason) do
     if Enum.any?(Facts.list(workspace), &(&1["id"] == id)),
-      do: Error.new(:internal, %{reason: inspect(reason)}),
+      do: Error.new(:internal_error, %{reason: inspect(reason)}),
       else: Error.new(:not_found, %{kind: "fact", id: id})
   end
 

@@ -1,7 +1,7 @@
 defmodule Troupe.WorkflowTest do
   @moduledoc """
-  The workflow module is pure: it loads step lists and renders the plan the `workflow`
-  agent starts from. The agents it names have to exist, with the shape the plan assumes.
+  The workflow module is pure: it loads step lists and renders the plan `orchestrate`
+  starts from. The agents it names have to exist, with the shape the plan assumes.
   """
 
   use ExUnit.Case, async: true
@@ -42,15 +42,39 @@ defmodule Troupe.WorkflowTest do
       assert {:ok, %{mode: :subagent}} = Definitions.fetch(defs, agent)
     end
 
-    {:ok, workflow} = Definitions.fetch(defs, "workflow")
-    assert workflow.mode == :primary
-    assert workflow.model == "expensive"
-    names = Enum.map(Troupe.Tools.for_definition(workflow), &Troupe.Tool.name/1)
+    {:ok, runner} = Definitions.fetch(defs, Workflow.agent())
+    assert runner.mode == :primary
+    assert runner.model == "expensive"
+    names = Enum.map(Troupe.Tools.for_definition(runner), &Troupe.Tool.name/1)
     assert "delegate" in names
     assert "read_branch" in names
+    assert "todo_write" in names
     refute "write_file" in names
     refute "edit_file" in names
     refute "shell" in names
+  end
+
+  # #554: a workflow is `orchestrate` with its plan written down in advance, not a second
+  # orchestrator beside it.
+  test "one built-in orchestrates: a workflow runs on orchestrate, and there is no workflow agent",
+       %{ws: ws} do
+    defs = Definitions.load(ws)
+    assert Workflow.agent() == "orchestrate"
+    assert {:error, {:unknown_agent, "workflow"}} = Definitions.fetch(defs, "workflow")
+    refute "workflow" in Enum.map(Definitions.primaries(defs), & &1.name)
+
+    # What the `workflow` agent's own instruction said a plan is, orchestrate's says now.
+    runner = Definitions.fetch!(defs, Workflow.agent())
+    assert runner.prompt =~ "When your prompt is a workflow"
+    assert runner.prompt =~ "[you]"
+    assert runner.prompt =~ "test or verify step"
+  end
+
+  test "a workflow runs on the profile a client names, and on orchestrate for none or the old name" do
+    assert Workflow.agent(nil) == "orchestrate"
+    assert Workflow.agent("") == "orchestrate"
+    assert Workflow.agent("workflow") == "orchestrate"
+    assert Workflow.agent("release-captain") == "release-captain"
   end
 
   test "available lists default first, then the workflows on disk", %{ws: ws} do

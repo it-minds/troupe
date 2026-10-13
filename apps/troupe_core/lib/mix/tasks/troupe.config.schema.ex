@@ -14,17 +14,22 @@ defmodule Mix.Tasks.Troupe.Config.Schema do
   table says, and CI runs it, so neither can drift from the loader.
 
   The reference is the part of the page between `<!-- config-keys:begin -->` and
-  `<!-- config-keys:end -->`; the rest of the page is written by hand.
+  `<!-- config-keys:end -->`, and the provider-type table the part between
+  `<!-- provider-types:begin -->` and `<!-- provider-types:end -->`, written from
+  `Troupe.LLM.ProviderType`; the rest of the page is written by hand.
   """
 
   use Mix.Task
 
   alias Troupe.Config.Schema
+  alias Troupe.LLM.ProviderType
 
   @requirements ["app.config"]
 
   @begin "<!-- config-keys:begin -->"
   @finish "<!-- config-keys:end -->"
+  @types_begin "<!-- provider-types:begin -->"
+  @types_finish "<!-- provider-types:end -->"
 
   @impl Mix.Task
   def run(argv) do
@@ -54,12 +59,18 @@ defmodule Mix.Tasks.Troupe.Config.Schema do
   end
 
   defp with_reference(page) do
-    case String.split(page, [@begin, @finish]) do
+    page
+    |> between(@begin, @finish, Schema.reference(), "the key reference")
+    |> between(@types_begin, @types_finish, ProviderType.reference(), "the provider-type table")
+  end
+
+  defp between(page, begin, finish, generated, what) do
+    case String.split(page, [begin, finish]) do
       [head, _old, tail] ->
-        head <> @begin <> "\n" <> Schema.reference() <> @finish <> tail
+        head <> begin <> "\n" <> generated <> finish <> tail
 
       _ ->
-        Mix.raise("docs/user/configuration.md needs #{@begin} and #{@finish} around the key reference")
+        Mix.raise("docs/user/configuration.md needs #{begin} and #{finish} around #{what}")
     end
   end
 

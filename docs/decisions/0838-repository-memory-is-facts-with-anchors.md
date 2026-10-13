@@ -19,7 +19,7 @@ paths:
   - apps/troupe_core/priv/agents/explore.md
   - apps/troupe_core/priv/agents/plan.md
   - apps/troupe_core/priv/agents/reviewer.md
-  - apps/troupe_core/priv/agents/workflow.md
+  - apps/troupe_core/priv/agents/orchestrate.md
   - apps/troupe_core/test/troupe/memory/facts_test.exs
   - apps/troupe_core/test/troupe/tools/recall_test.exs
   - apps/troupe_core/test/troupe/memory_test.exs

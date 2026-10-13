@@ -1,3 +1,4 @@
+{{- include "troupe.worker.seccomp.validate" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -113,6 +114,17 @@ spec:
               value: {{ .Values.operator.ciliumAvailable | quote }}
             - name: TROUPE_DRAIN_TIMEOUT_SECONDS
               value: {{ .Values.operator.drainTimeoutSeconds | quote }}
+            # The seccomp profile the operator puts on every worker container
+            # (`worker.seccomp`): under the runtime's default, bubblewrap cannot start and a
+            # pod runs no command.
+            - name: TROUPE_WORKER_SECCOMP_TYPE
+              value: {{ .Values.worker.seccomp.type | quote }}
+            - name: TROUPE_WORKER_SECCOMP_PROFILE
+              value: {{ if eq .Values.worker.seccomp.type "Localhost" }}{{ .Values.worker.seccomp.localhostProfile | quote }}{{ else }}""{{ end }}
+            # A user namespace for every worker pod and its `/proc` unmasked, without which
+            # bubblewrap cannot mount the sandbox's own (`worker.userNamespaces`).
+            - name: TROUPE_WORKER_USER_NAMESPACES
+              value: {{ .Values.worker.userNamespaces | quote }}
             - name: POD_NAME
               valueFrom: {fieldRef: {fieldPath: metadata.name}}
           resources: {{- toYaml .Values.operator.resources | nindent 12 }}

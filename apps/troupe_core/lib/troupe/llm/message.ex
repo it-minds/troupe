@@ -6,10 +6,23 @@ defmodule Troupe.LLM.Text do
 end
 
 defmodule Troupe.LLM.ToolUse do
-  @moduledoc "A model's request to call a tool."
+  @moduledoc """
+  A model's request to call a tool.
+
+  `extra` is what the provider attached to the call to be handed back with it, by the
+  provider type that attached it (`%{"gemini" => %{"google" => %{"thought_signature" =>
+  ...}}}`): opaque and provider-bound, as a `Troupe.LLM.Reasoning` block is, so it goes
+  back to that type and to no other. `nil` for nearly every call.
+  """
   @enforce_keys [:id, :name, :input]
-  defstruct [:id, :name, :input]
-  @type t :: %__MODULE__{id: String.t(), name: String.t(), input: map()}
+  defstruct [:id, :name, :input, extra: nil]
+
+  @type t :: %__MODULE__{
+          id: String.t(),
+          name: String.t(),
+          input: map(),
+          extra: %{optional(String.t()) => term()} | nil
+        }
 end
 
 defmodule Troupe.LLM.ToolResult do
@@ -370,8 +383,12 @@ defmodule Troupe.LLM.Message do
 
   defp block_to_json(%Text{text: t}), do: %{"type" => "text", "text" => t}
 
-  defp block_to_json(%ToolUse{id: id, name: name, input: input}),
+  # `extra` only where a provider attached something, so every other call is what it was.
+  defp block_to_json(%ToolUse{id: id, name: name, input: input, extra: nil}),
     do: %{"type" => "tool_use", "id" => id, "name" => name, "input" => input}
+
+  defp block_to_json(%ToolUse{id: id, name: name, input: input, extra: extra}),
+    do: %{"type" => "tool_use", "id" => id, "name" => name, "input" => input, "extra" => extra}
 
   defp block_to_json(%ToolResult{tool_use_id: id, content: c, error?: e}),
     do: %{"type" => "tool_result", "tool_use_id" => id, "content" => c, "error" => e}
@@ -388,8 +405,8 @@ defmodule Troupe.LLM.Message do
 
   defp block_from_json(%{"type" => "text", "text" => t}), do: %Text{text: t}
 
-  defp block_from_json(%{"type" => "tool_use", "id" => id, "name" => n, "input" => i}),
-    do: %ToolUse{id: id, name: n, input: i}
+  defp block_from_json(%{"type" => "tool_use", "id" => id, "name" => n, "input" => i} = b),
+    do: %ToolUse{id: id, name: n, input: i, extra: extra(Map.get(b, "extra"))}
 
   defp block_from_json(%{"type" => "tool_result", "tool_use_id" => id, "content" => c} = b),
     do: %ToolResult{tool_use_id: id, content: c, error?: Map.get(b, "error", false)}
@@ -402,6 +419,9 @@ defmodule Troupe.LLM.Message do
       redacted: Map.get(b, "redacted", false)
     }
   end
+
+  defp extra(%{} = extra) when map_size(extra) > 0, do: extra
+  defp extra(_none), do: nil
 
   # A provider this build has no adapter for — a log written by a newer one — replays as
   # a block no adapter claims, so it is carried and never sent, rather than crashing the

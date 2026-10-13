@@ -157,12 +157,15 @@ defmodule Troupe.Worker.SandboxTest do
     test "with a bubblewrap the kernel refuses says what it said, and logs it once", context do
       context = requires_tier(context)
 
-      # A `bwrap` that answers as one does where unprivileged user namespaces are off.
+      # A `bwrap` that answers as the worker image's does on a pod whose seccomp profile
+      # refuses it a user namespace (the runtime's default, which a pod gets unless the
+      # installation chose another), or where unprivileged user namespaces are off. Word for
+      # word what a pod said in the cluster suite under the runtime's default.
       refused = Path.join(context.base, "bwrap")
 
       File.write!(refused, """
       #!/bin/sh
-      echo 'bwrap: No permissions to create a new namespace' >&2
+      echo 'bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>.' >&2
       exit 1
       """)
 
@@ -175,7 +178,7 @@ defmodule Troupe.Worker.SandboxTest do
       for completed <- [first, second] do
         assert completed["ok"] == false
         assert completed["content"] =~ "could not start one"
-        assert completed["content"] =~ "No permissions to create a new namespace"
+        assert completed["content"] =~ "No permissions to create new namespace"
         # The sandbox's own exit is not a command's (Decision 837).
         refute Map.has_key?(completed, "exit_status")
       end

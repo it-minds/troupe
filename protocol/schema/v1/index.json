@@ -91,6 +91,7 @@
     "events/agent_restarted.json",
     "events/agent_started.json",
     "events/agent_state.json",
+    "events/agent_woken.json",
     "events/approval_decided.json",
     "events/approval_requested.json",
     "events/approval_resolved.json",

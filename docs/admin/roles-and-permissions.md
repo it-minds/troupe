@@ -121,6 +121,7 @@ with `personalTools: forbid` refuses it on its pods, and the platform's
 | Surface | Credential | Actor |
 |---|---|---|
 | Console `/admin/*` | a signed cookie carrying the subject only; `/admin/login` → provider → `/admin/callback` (authorization code with the client secret) | resolved on every LiveView mount; break-glass, else admin, else refused. Profile pages are platform admin only |
+| Console `/console` ([console.md](console.md)) | the plane token below, from the provider's authorization code with PKCE in the page and `/auth/exchange`; kept for the browser tab | as `POST /rpc`: the role is worked out on every `admin.*` call, so no token says "administrator" |
 | `POST /rpc` | `Bearer <plane token>`, `aud` = `TROUPE_PLANE_AUDIENCE`, JWKS from OpenBao | subject resolved per request; `admin.*` to the admin API, everything else to the harness as the person |
 | `POST /mcp` | a plane token, or the provider's own token with `aud` in `client_id`, `api://<client_id>`, `<base_url>/mcp` | a 401 carries `WWW-Authenticate … resource_metadata=` for OAuth-capable clients |
 | Control channel (TCP 4001) | a projected ServiceAccount token (audience `troupe-plane`), or a registered machine's secret | `TokenReview`: ServiceAccount `troupe-worker`, and the namespace decides the profile |
@@ -155,19 +156,21 @@ Rendered by `Troupe.KMS.Policy`, so the tested string and the installed one are 
 | `troupe-plane` | delete, list, read on `<mount>/metadata/troupe/teams/+/sessions/*` and `<mount>/metadata/troupe/people/+/sessions/*`, list and read on `<mount>/metadata/troupe/people/+/mcp/*`, and nothing on the data path: it destroys an erased session's key, a team's or a person's (Decisions 756 and 811), says whether a person has connected a server, and reads no value |
 | `troupe-person` | create, read, update on `<mount>/data/troupe/people/<name>/*` and read, list on its metadata, templated on the name OpenBao's JWT auth vouched for: a person's own daemon, logging in at the `jwt` auth path with an assertion the plane signs (audience `troupe-kms`), for their private sessions' keys and their own MCP credentials |
 | signing | create, update on `transit/sign/troupe-session-tokens`, read on its key; not exportable |
+| the GitHub App's key | read on `transit/wrapping_key` and `transit/keys/troupe-github-app`, create and update on its `import` and `import_version` and on `transit/sign/troupe-github-app` (`Policy.github_app/2`): the plane imports the App's key once and signs its JWT; nothing exports it ([github.md](github.md)) |
 | `troupe-worker-mcp-identity` | update on `transit/sign/<the pod's namespace>.*`, templated on the namespace Kubernetes auth vouched for (`Policy.mcp_identity/2`, Decision 747): a pod signs its profile's MCP assertions with the keys named after its own namespace and with no other, never the session-token key |
 
 The Kubernetes-auth roles in `dev/kind/dependencies.yaml` (`troupe-worker` for the
 ServiceAccount of that name in any namespace, audience `troupe-kms`; `troupe-plane` in
 `troupe-system`) are the shape production needs. A production plane role needs the plane
-policy **and** the signing policy. A worker role whose profiles call an MCP server as
+policy **and** the signing policy, and the GitHub App's where the plane has one. A worker role whose profiles call an MCP server as
 themselves also needs `troupe-worker-mcp-identity`, written once with the Kubernetes auth
 mount's accessor (`bao read -field=accessor sys/auth/kubernetes`), as the dev manifest
 writes it.
 
 **One worker role, or one per profile.** By default every worker pod logs in as
 `troupe-worker`, so whatever policy that role carries is every profile's: the dev manifest
-gives it one wide policy over every team. For a pod of one profile to be refused another's
+gives it one wide policy over every team, `troupe-shared-worker`, named so that no profile's
+own policy is called the same. For a pod of one profile to be refused another's
 session keys, make a role per profile, named as its policy, and turn on
 `bao.workerRolePerProfile`. The operator then gives each profile's pods
 `TROUPE_BAO_ROLE=troupe-worker-<profile>` and they log in under it (Decision 753):

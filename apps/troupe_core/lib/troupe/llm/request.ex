@@ -55,6 +55,12 @@ defmodule Troupe.LLM.Request do
     # The adapter this request goes through, when the model named a provider other
     # than the session's. `nil` means the agent's own.
     provider: nil,
+    # The provider type it goes to (`Troupe.LLM.ProviderType`): what an adapter that
+    # speaks to several types does differently for this one
+    # (`Troupe.LLM.Providers.Compatible`). `nil` is `openai`.
+    type: nil,
+    # Azure OpenAI's `api-version`, when the provider names one.
+    api_version: nil,
     timeout_ms: 300_000,
     max_retries: 4,
     # Who this call is for, as the gateway is to record it. Every request a worker makes
@@ -91,6 +97,8 @@ defmodule Troupe.LLM.Request do
           api_key: String.t() | {:refused, String.t()} | nil,
           auth: :api_key | :bearer,
           provider: module() | nil,
+          type: atom() | nil,
+          api_version: String.t() | nil,
           timeout_ms: pos_integer(),
           max_retries: non_neg_integer(),
           attribution: map(),

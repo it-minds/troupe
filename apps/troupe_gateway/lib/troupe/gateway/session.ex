@@ -62,6 +62,15 @@ defmodule Troupe.Gateway.Session do
 
   def parse_topic(_topic), do: :error
 
+  @doc """
+  Which delivery feeds a subscription: `:fleet` for `fleet`, which follows every session at
+  once, and `:session` for the rest, which follow the session they name. An event reaches
+  a connection once from each it follows, so a subscription takes it only from its own.
+  """
+  @spec delivery(Subscription.t()) :: :fleet | :session
+  def delivery(%Subscription{topic: "fleet"}), do: :fleet
+  def delivery(%Subscription{}), do: :session
+
   @doc "Whether this topic carries anything worth keeping a cursor for."
   @spec cursored?(String.t()) :: boolean()
   def cursored?("presence:" <> _session_id), do: false
@@ -100,11 +109,9 @@ defmodule Troupe.Gateway.Session do
   handover from replay to live gapless and duplicate-free.
   """
   @spec subscribe(String.t()) :: :ok
-  def subscribe("fleet") do
-    # Fleet spans every session, so the connection follows each of them and filters.
-    Enum.each(Troupe.session_ids(), &Troupe.subscribe/1)
-    :ok
-  end
+  # Fleet spans every session, the ones started or woken after it was answered too, so the
+  # connection follows them all at once, on a delivery of its own, and filters.
+  def subscribe("fleet"), do: Troupe.subscribe_fleet()
 
   def subscribe("session:" <> session_id), do: Troupe.subscribe(session_id)
 
@@ -113,11 +120,9 @@ defmodule Troupe.Gateway.Session do
   # comes out on.
   def subscribe("presence:" <> session_id), do: Troupe.subscribe(session_id)
 
+  # Only the fleet's own delivery: a session this connection follows by name stays followed.
   @spec unsubscribe(String.t()) :: :ok
-  def unsubscribe("fleet") do
-    Enum.each(Troupe.session_ids(), &Troupe.unsubscribe/1)
-    :ok
-  end
+  def unsubscribe("fleet"), do: Troupe.unsubscribe_fleet()
 
   def unsubscribe("session:" <> session_id), do: Troupe.unsubscribe(session_id)
 

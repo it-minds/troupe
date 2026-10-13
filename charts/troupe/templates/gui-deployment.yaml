@@ -13,11 +13,31 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if and $base (ne $base "/") }}{{ $base }}{{ end -}}
 {{- end -}}
 
-{{- if and .Values.gui.enabled .Values.plane.enabled }}
-{{- if not (include "troupe.gui.base" .) }}
+{{- define "troupe.console.base" -}}
+{{- $base := trimSuffix "/" .Values.console.basePath -}}
+{{- if and $base (ne $base "/") }}{{ $base }}{{ end -}}
+{{- end -}}
+
+{{/*
+Whether the image runs at all: it serves the GUI, the console, or both, and either is
+reason to run it. "true" or empty.
+*/}}
+{{- define "troupe.gui.served" -}}
+{{- if and .Values.plane.enabled (or .Values.gui.enabled .Values.console.enabled) }}true{{ end -}}
+{{- end -}}
+
+{{- if include "troupe.gui.served" . }}
+{{- if and .Values.gui.enabled (not (include "troupe.gui.base" .)) }}
 {{- fail "gui.basePath is the root of the plane's host, which the plane itself serves. Mount the GUI under a path, such as /app." }}
 {{- end }}
-# The graphical client (`clients/gui`), served at `gui.basePath` on the plane's own host.
+{{- if and .Values.console.enabled (not (include "troupe.console.base" .)) }}
+{{- fail "console.basePath is the root of the plane's host, which the plane itself serves. Mount the console under a path, such as /console." }}
+{{- end }}
+{{- if and .Values.gui.enabled .Values.console.enabled (eq (include "troupe.gui.base" .) (include "troupe.console.base" .)) }}
+{{- fail "gui.basePath and console.basePath are the same path. The GUI and the console are two apps, and each needs a path of its own." }}
+{{- end }}
+# The graphical client (`clients/gui`), served at `gui.basePath` on the plane's own host,
+# and the administrative console beside it at `console.basePath`.
 #
 # It was a release of its own with its own chart, installed beside this one onto the
 # same host; it is part of this chart now, on by default, because the product is the
@@ -26,6 +46,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 # privileges, nothing configured at runtime — what it serves was decided when the image
 # was built. A cluster whose people bring their own client sets `gui.enabled: false` and
 # points `plane.appUrl` at it.
+#
+# The console is an app of its own, built into the same image: the one Deployment runs
+# while either is enabled, and each has an Ingress of its own, so either can be turned off
+# without the other. It is on the plane's own origin, so its calls to `/rpc` need no CORS
+# entry, and it opens no socket to a worker, so it needs no worker origin either.
 apiVersion: v1
 kind: Service
 metadata:
@@ -100,6 +125,7 @@ spec:
       volumes:
         - {name: cache, emptyDir: {}}
         - {name: run, emptyDir: {}}
+{{- if .Values.gui.enabled }}
 ---
 {{- $base := include "troupe.gui.base" . }}
 apiVersion: networking.k8s.io/v1
@@ -137,4 +163,38 @@ spec:
               service:
                 name: troupe-gui
                 port: {name: http}
+{{- end }}
+{{- if .Values.console.enabled }}
+---
+{{- $base := include "troupe.console.base" . }}
+# The console, at `console.basePath` on the plane's host, from the same image. The image
+# serves it at `/console/`, so the prefix is rewritten to that rather than stripped:
+# `{{ $base }}/assets/x.js` becomes `/console/assets/x.js`, and a deep link anywhere under
+# it the console's own `index.html`.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: troupe-console
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /console/$2
+spec:
+  ingressClassName: {{ .Values.plane.ingressClassName }}
+  {{- if .Values.plane.tlsSecretName }}
+  tls:
+    - hosts: [{{ .Values.plane.host | quote }}]
+      secretName: {{ .Values.plane.tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.plane.host | quote }}
+      http:
+        paths:
+          - path: {{ printf "%s(/|$)(.*)" $base | quote }}
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: troupe-gui
+                port: {name: http}
+{{- end }}
 {{- end }}

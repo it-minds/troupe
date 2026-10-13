@@ -22,6 +22,15 @@ defmodule Troupe.E2E.EgressTest do
   all and every "refused" below would be vacuous. That is reported as a failure and not as
   a skip, because a suite that quietly skips its only negative claim is a suite that says
   egress works.
+
+  ## Neighbours and the cloud
+
+  A worker reaches no pod but the plane, the key manager and the object store it is given,
+  and no pod reaches a worker but from a namespace labelled as the ingress controller's; so
+  one team's worker and another's cannot reach each other. A cloud's metadata service is
+  denied to a worker by address, whatever else admits it. Each refusal is set beside a pod
+  under no policy (`World.outsider!/1`) that does get through, so a refusal is the rule's
+  and not an address nobody answers on.
   """
 
   use ExUnit.Case, async: false
@@ -35,13 +44,32 @@ defmodule Troupe.E2E.EgressTest do
   # lets a pod open a connection to it is a cluster with no egress control whatsoever.
   @denied {"example.com", 80}
 
+  # Where a cloud's metadata service answers, and what it hands a pod there: the node's
+  # credentials. CI puts a stand-in there (`cluster.yml`) and says so in this variable.
+  @metadata {"169.254.169.254", 80}
+  @stand_in "TROUPE_E2E_METADATA_STAND_IN"
+
+  # The metadata addresses in the forms a worker's policy denies: EC2's and Alibaba
+  # Cloud's in IPv4, EC2's in IPv6, and the IPv4 ones as NAT64's well-known prefix
+  # carries them to a cluster that has it.
+  @metadata_forms [
+    "169.254.169.254",
+    "100.100.100.200",
+    "fd00:ec2::254",
+    "64:ff9b::a9fe:a9fe",
+    "64:ff9b::6464:64c8"
+  ]
+
+  # A policy of the test's own, beside the operator's, of the kind an installation adds.
+  @admitting "troupe-e2e-admits-metadata"
+
   setup_all do
     case World.ready?() do
       :ok -> :ok
       {:error, message} -> raise message
     end
 
-    Plane.ready!()
+    Map.put(Plane.ready!(), :outsider, World.outsider!())
   end
 
   test "a worker cannot dial a host no policy admits", context do
@@ -138,24 +166,226 @@ defmodule Troupe.E2E.EgressTest do
     end
   end
 
-  # -- the witness ------------------------------------------------------------
+  describe "a neighbour" do
+    test "is not reached by a worker, and reaches a worker only as the ingress", context do
+      pod = pod(context.profile)
+      namespace = World.worker_namespace(context.profile)
+      outsider = context.outsider
 
-  # Attempted from inside the pod, with what the image already has. The exit status is
-  # the answer; the output is there so a failure says which way it went.
-  defp connects?(namespace, pod, {host, port}) do
-    {_output, status} =
-      World.exec(namespace, pod, [
-        "perl",
-        "-e",
-        ~S|use IO::Socket::INET; my ($h, $p) = @ARGV;| <>
-          ~S| my $s = IO::Socket::INET->new(PeerAddr => $h, PeerPort => $p,| <>
-          ~S| Proto => "tcp", Timeout => 5);| <>
-          ~S| print $s ? "connected\n" : "refused\n"; exit($s ? 0 : 1)|,
-        host,
-        to_string(port)
+      # A pod in another namespace, listening, with nothing on its side to refuse anybody.
+      # A worker that reached it would reach another team's pod the same way: what keeps
+      # them apart is the worker's own egress, which admits no pod it was not told of.
+      refute connects?(namespace, pod, {outsider.ip, outsider.port}), """
+      A worker pod opened a connection to #{outsider.ip}:#{outsider.port}, a pod in
+      #{outsider.namespace}, which no rule of a worker's admits. A worker can reach its
+      neighbours' pods.
+      """
+
+      # And the other way. A worker admits a connection on its port from a namespace the
+      # cluster's administrator labelled as the ingress controller's, and from nowhere else.
+      worker = World.pod_ip(namespace, pod)
+
+      refute connects?(outsider.namespace, outsider.pod, {worker, 4000}), """
+      A pod in #{outsider.namespace}, a namespace not labelled troupe.dev/ingress=true,
+      opened a connection to the worker #{pod} at #{worker}:4000. Any pod in the cluster can
+      reach a worker, and so another team's session on it.
+      """
+
+      # The same pod, its namespace labelled, gets through: so the refusal above was the
+      # rule, and not a worker that was not listening.
+      World.kubectl!([
+        "label",
+        "namespace",
+        outsider.namespace,
+        "troupe.dev/ingress=true",
+        "--overwrite"
       ])
 
-    status == 0
+      on_exit(fn ->
+        World.kubectl(["label", "namespace", outsider.namespace, "troupe.dev/ingress-"])
+      end)
+
+      World.eventually(fn -> connects?(outsider.namespace, outsider.pod, {worker, 4000}) end,
+        timeout: 120_000,
+        every: 5_000,
+        what: "a pod of a namespace labelled as the ingress's to reach #{pod}:4000"
+      )
+    end
+  end
+
+  describe "a cloud's metadata address" do
+    test "is refused to a worker, even where another policy admits it", context do
+      pod = pod(context.profile)
+      namespace = World.worker_namespace(context.profile)
+      outsider = context.outsider
+
+      if connects?(outsider.namespace, outsider.pod, @metadata) do
+        # Another policy, of the kind an installation adds to a worker namespace, admitting
+        # the metadata address by address, and the outsider. A name in the allowlist that
+        # resolves there is admitted the same way: Cilium learns its address and admits it.
+        # The operator's deny is meant to hold against any of them.
+        World.apply!(admitting(namespace, outsider))
+
+        # And gone again before the next test, which may be the neighbour's: Cilium takes a
+        # moment to drop a rule, as it does to add one.
+        on_exit(fn ->
+          World.kubectl([
+            "delete",
+            "ciliumnetworkpolicy",
+            @admitting,
+            "-n",
+            namespace,
+            "--ignore-not-found"
+          ])
+
+          World.eventually(fn -> not connects?(namespace, pod, {outsider.ip, outsider.port}) end,
+            timeout: 120_000,
+            every: 5_000,
+            what: "#{@admitting} to stop admitting #{pod}'s connection to the outsider"
+          )
+        end)
+
+        # That it is in force, seen through the half the deny does not touch: a worker
+        # otherwise reaches no other namespace's pod.
+        World.eventually(fn -> connects?(namespace, pod, {outsider.ip, outsider.port}) end,
+          timeout: 120_000,
+          every: 5_000,
+          what: "#{@admitting} to admit #{pod}'s connection to the outsider"
+        )
+
+        refute connects?(namespace, pod, @metadata), """
+        A worker pod opened a connection to #{elem(@metadata, 0)}, where a cloud's metadata
+        service answers with the node's credentials, because another policy admitted it. The
+        worker's CiliumNetworkPolicy denies link-local and the metadata addresses outright,
+        and a deny holds against any allow; this one did not.
+        """
+      else
+        no_stand_in()
+      end
+    end
+
+    test "is denied in each form a worker's policy names, as Cilium holds the policy", context do
+      # IPv6 and NAT64 are forms this cluster cannot carry a connection to: a kind cluster
+      # with no IPv6 and no NAT64 refuses every one, whatever the policy says. So these are
+      # read from what the Cilium agent enforces for the worker, which is the operator's
+      # rule as Cilium understood it, not the object as the operator wrote it.
+      denied = denied_by_cilium(World.worker_namespace(context.profile))
+
+      for address <- @metadata_forms do
+        assert Enum.any?(denied, &denies?(&1, address)), """
+        The Cilium agent denies #{address} to no worker of #{context.profile}. What it holds:
+        #{inspect(denied)}
+        """
+      end
+    end
+  end
+
+  # -- the witness ------------------------------------------------------------
+
+  defp connects?(namespace, pod, endpoint), do: World.connects?(namespace, pod, endpoint)
+
+  # Without anything at the metadata address, a refusal there would be a refusal of an
+  # address nobody answers on, so the claim is not tested here. CI puts a stand-in there
+  # and sets the variable, so there a missing one fails rather than skips.
+  defp no_stand_in do
+    message = """
+    nothing answered at #{elem(@metadata, 0)}:#{elem(@metadata, 1)} from a pod under no
+    policy, so whether a worker reaches the metadata address was not tested. CI puts a
+    stand-in there (.github/workflows/cluster.yml); a cluster on a laptop has none.
+    """
+
+    if System.get_env(@stand_in) == "1" do
+      flunk("#{@stand_in} is set, but " <> message)
+    else
+      IO.puts(:stderr, "\nSKIPPED: " <> message)
+    end
+  end
+
+  defp admitting(namespace, outsider) do
+    {address, _port} = @metadata
+
+    %{
+      "apiVersion" => "cilium.io/v2",
+      "kind" => "CiliumNetworkPolicy",
+      "metadata" => %{"name" => @admitting, "namespace" => namespace},
+      "spec" => %{
+        "endpointSelector" => %{"matchLabels" => %{"app.kubernetes.io/name" => "troupe-worker"}},
+        "egress" => [
+          %{"toCIDR" => ["#{address}/32"]},
+          %{
+            "toEndpoints" => [
+              %{
+                "matchLabels" => %{
+                  "k8s:io.kubernetes.pod.namespace" => outsider.namespace,
+                  "app" => "troupe-e2e-outsider"
+                }
+              }
+            ],
+            "toPorts" => [
+              %{"ports" => [%{"port" => to_string(outsider.port), "protocol" => "TCP"}]}
+            ]
+          }
+        ]
+      }
+    }
+  end
+
+  # The blocks the agent denies a worker namespace's pods, each with what it leaves out,
+  # read from the rules it imported from that namespace's `troupe-egress`. `policy get`
+  # prints the rules as JSON and then their revision; anything before the JSON, such as a
+  # word about the command being deprecated, is not the answer.
+  defp denied_by_cilium(namespace) do
+    output =
+      World.cilium!([
+        "policy",
+        "get",
+        "k8s:io.cilium.k8s.policy.name=troupe-egress",
+        "k8s:io.cilium.k8s.policy.namespace=#{namespace}"
+      ])
+
+    rules = rules(output)
+    assert rules != [], "the Cilium agent holds no troupe-egress rule for #{namespace}"
+
+    for rule <- rules,
+        deny <- rule["egressDeny"] || [],
+        entry <- (deny["toCIDRSet"] || []) ++ Enum.map(deny["toCIDR"] || [], &%{"cidr" => &1}),
+        do: {entry["cidr"], entry["except"] || []}
+  end
+
+  defp rules(output) do
+    json =
+      case Regex.run(~r/[\[{].*/s, output |> String.split(~r/\n\s*Revision:/) |> hd()) do
+        [json] -> json
+        nil -> ""
+      end
+
+    case Jason.decode(json) do
+      {:ok, rules} when is_list(rules) -> rules
+      {:ok, %{"policy" => policy}} when is_binary(policy) -> Jason.decode!(policy)
+      _other -> flunk("cilium-dbg policy get printed what this cannot read:\n#{output}")
+    end
+  end
+
+  defp denies?({block, except}, address) do
+    within?(address, block) and not Enum.any?(except, &within?(address, &1))
+  end
+
+  defp within?(address, block) do
+    [network, size] = String.split(block, "/")
+    {:ok, network} = :inet.parse_strict_address(String.to_charlist(network))
+    {:ok, address} = :inet.parse_strict_address(String.to_charlist(address))
+    size = String.to_integer(size)
+
+    tuple_size(network) == tuple_size(address) and
+      prefix(bits(network), size) == prefix(bits(address), size)
+  end
+
+  defp bits({a, b, c, d}), do: <<a, b, c, d>>
+  defp bits(groups), do: for(group <- Tuple.to_list(groups), into: <<>>, do: <<group::16>>)
+
+  defp prefix(bits, size) do
+    <<prefix::bitstring-size(^size), _rest::bitstring>> = bits
+    prefix
   end
 
   defp pod(profile) do

@@ -28,11 +28,11 @@ defmodule Troupe.Plane.TeamDisableTest do
     {:ok, _} = Identity.grant(team, "review")
     {:ok, _} = Identity.add_team_admin(team, lead.subject, root.subject)
 
-    {:ok, _} = Identity.upsert_group(%{external_id: "itm-platform", display_name: "Platform"})
-    _bea = person("bea@example.test", ["itm-platform"])
+    {:ok, _} = Identity.upsert_group(%{external_id: "org-platform", display_name: "Platform"})
+    _bea = person("bea@example.test", ["org-platform"])
 
     actor = Admin.actor_for(root)
-    {:ok, _} = Admin.team_link(actor, "engineering", "itm-platform")
+    {:ok, _} = Admin.team_link(actor, "engineering", "org-platform")
 
     {:ok, principal, _secret} =
       principal!(team, %{name: "bot", profiles: ["dev"], sponsor: lead.subject}, root.subject)
@@ -77,7 +77,7 @@ defmodule Troupe.Plane.TeamDisableTest do
       assert {:ok, effect} = Admin.team_disable_preview(context.root, "engineering")
 
       assert effect.team == "engineering"
-      assert Enum.sort(effect.groups) == ["backend", "itm-platform"]
+      assert Enum.sort(effect.groups) == ["backend", "org-platform"]
       assert effect.members == 2
       assert Enum.sort(effect.grants) == ["dev", "review"]
       assert effect.admins == ["lead@example.test"]
@@ -122,7 +122,7 @@ defmodule Troupe.Plane.TeamDisableTest do
       # because the grant that allowed it is gone.
       assert Identity.get_user("lead@example.test")
       assert Identity.get_group("backend")
-      assert Identity.get_group("itm-platform")
+      assert Identity.get_group("org-platform")
 
       session = Sessions.get(context.session.id)
       assert is_nil(session.team_id)
@@ -149,7 +149,7 @@ defmodule Troupe.Plane.TeamDisableTest do
       # The table: one row per team, with what somebody arriving here wants to know.
       assert html =~ ~s(id="team-row-engineering")
       row = view |> element("#team-row-engineering") |> render()
-      assert row =~ "backend, itm-platform"
+      assert row =~ "backend, org-platform"
       assert row =~ "dev, review"
 
       # Asking first: the warning carries the preview's numbers, and nothing has happened.

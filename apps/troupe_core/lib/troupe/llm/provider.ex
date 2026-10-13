@@ -17,7 +17,7 @@ defmodule Troupe.LLM.Provider do
   """
 
   alias Troupe.Config
-  alias Troupe.LLM.Request
+  alias Troupe.LLM.{ProviderType, Request}
 
   @callback stream(Request.t(), reply_to :: pid(), ref :: reference()) :: :ok
 
@@ -272,19 +272,17 @@ defmodule Troupe.LLM.Provider do
   defp detail(detail), do: " (" <> String.slice(text(detail), 0, 200) <> ")"
 
   @doc """
-  Every provider name a config may use.
-
-  Short on purpose: an OpenAI-compatible gateway — LiteLLM, vLLM, OpenRouter — is
-  `openai` with a `base_url`, not a name of its own.
+  Every provider name a config may use: the types of `Troupe.LLM.ProviderType`. A
+  gateway that speaks the OpenAI API — LiteLLM, vLLM — is `openai` with a `base_url`, not
+  a name of its own.
   """
   @spec known() :: [atom()]
-  def known, do: [:anthropic, :openai, :fake]
+  def known, do: Enum.map(ProviderType.all(), & &1.name)
 
-  @doc "Resolve a provider name from config to its adapter module."
+  @doc """
+  Resolve a provider name from config to its adapter module. A name nobody implements is
+  an error, never an atom made from it.
+  """
   @spec adapter(String.t() | atom()) :: {:ok, module()} | {:error, {:unknown_provider, term()}}
-  def adapter(name) when is_binary(name), do: adapter(String.to_atom(name))
-  def adapter(:anthropic), do: {:ok, Troupe.LLM.Providers.Anthropic}
-  def adapter(:openai), do: {:ok, Troupe.LLM.Providers.OpenAI}
-  def adapter(:fake), do: {:ok, Troupe.LLM.Providers.Fake}
-  def adapter(other), do: {:error, {:unknown_provider, other}}
+  def adapter(name), do: ProviderType.adapter(name)
 end

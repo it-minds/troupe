@@ -10,12 +10,17 @@ defmodule Troupe.Events do
   Publishing is a fan-out of `send/2` into subscriber mailboxes and never waits on
   anyone: this is the boundary that keeps a slow or wedged client from applying
   backpressure to an agent. Subscribers receive
-  `{:troupe_event, session_id, %Troupe.Protocol.Event{}}`.
+  `{:troupe_event, session_id, %Troupe.Protocol.Event{}}`, and followers of every session
+  (`subscribe_fleet/0`) `{:troupe_fleet_event, session_id, %Troupe.Protocol.Event{}}`.
   """
 
   alias Troupe.Protocol.Event
 
   @registry Troupe.EventsRegistry
+
+  # The key every-session followers register under. A session id is a string, so no
+  # session's key is this.
+  @fleet :fleet
 
   @doc false
   def child_spec(_opts) do
@@ -51,11 +56,39 @@ defmodule Troupe.Events do
   end
 
   @doc """
+  Follow every session at once, the ones started or woken after this call among them: what
+  a `fleet` subscription is. A session's durable events arrive as
+  `{:troupe_fleet_event, session_id, event}`, a delivery apart from the session's own, so a
+  process that also follows a session by name has each event once from each and can tell
+  which is which. Ephemerals are not sent: the fleet carries what is written down.
+
+  Idempotent per process, like `subscribe/2`. Following each session by name instead could
+  only reach the sessions running when it was asked, and a session started a moment later
+  never reached it.
+  """
+  @spec subscribe_fleet() :: :ok
+  def subscribe_fleet do
+    unless @fleet in Registry.keys(@registry, self()) do
+      {:ok, _registered} = Registry.register(@registry, @fleet, :viewer)
+    end
+
+    :ok
+  end
+
+  @doc "Stop following every session at once. A session followed by name is still followed."
+  @spec unsubscribe_fleet() :: :ok
+  def unsubscribe_fleet, do: Registry.unregister(@registry, @fleet)
+
+  @doc """
   Whether anybody outside the session follows it: a client's connection, a worker's
   uplink, a test. A session nobody watches can sleep sooner (`Troupe.Sessions.Index`).
+  A fleet follower follows every session, so while there is one every session is watched.
   """
   @spec watched?(String.t()) :: boolean()
-  def watched?(session_id), do: Registry.match(@registry, session_id, :viewer) != []
+  def watched?(session_id) do
+    Registry.match(@registry, session_id, :viewer) != [] or
+      Registry.lookup(@registry, @fleet) != []
+  end
 
   @doc """
   Note that the calling process is a client reading this session: subscribed to it, by
@@ -106,9 +139,13 @@ defmodule Troupe.Events do
   """
   @spec publish(String.t(), Event.t()) :: :ok
   def publish(session_id, %Event{} = event) do
-    message = {:troupe_event, session_id, event}
+    fan_out(session_id, {:troupe_event, session_id, event})
+    unless event.ephemeral?, do: fan_out(@fleet, {:troupe_fleet_event, session_id, event})
+    :ok
+  end
 
-    Registry.dispatch(@registry, session_id, fn subscribers ->
+  defp fan_out(key, message) do
+    Registry.dispatch(@registry, key, fn subscribers ->
       Enum.each(subscribers, fn {pid, _} -> send(pid, message) end)
     end)
   end

@@ -449,6 +449,16 @@ defmodule Troupe do
   def unsubscribe(session_id), do: Events.unsubscribe(session_id)
 
   @doc """
+  Receive `{:troupe_fleet_event, session_id, event}` for everything every session writes
+  down, the sessions started or woken from now on among them.
+  """
+  @spec subscribe_fleet() :: :ok
+  def subscribe_fleet, do: Events.subscribe_fleet()
+
+  @spec unsubscribe_fleet() :: :ok
+  def unsubscribe_fleet, do: Events.unsubscribe_fleet()
+
+  @doc """
   The calling process is a client reading this session, from its head on: it is not put to
   sleep while they are there, and what they have read is not news (`Troupe.Sessions.Unseen`).
   The gateway says so for a subscription that names the session, and takes it back with

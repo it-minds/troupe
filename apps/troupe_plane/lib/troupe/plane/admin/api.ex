@@ -115,6 +115,33 @@ defmodule Troupe.Plane.Admin.API do
     }
   ]
 
+  # The plane's GitHub App, as `admin.github.put` takes it.
+  @github_properties [
+    %Argument{
+      name: "app_id",
+      type: :integer,
+      description: "The App ID GitHub shows on the App's settings page. Null clears it."
+    },
+    %Argument{
+      name: "api_url",
+      type: :string,
+      description:
+        "Where GitHub's API is: https://api.github.com (the default, also when null), https://api.<name>.ghe.com for GitHub Enterprise Cloud, or https://<host>/api/v3 for GitHub Enterprise Server. Clones come from the matching host, which a worker profile must declare in egress.gitHosts."
+    },
+    %Argument{
+      name: "installations",
+      type: :array,
+      description:
+        "Every installation the plane may use, as [{\"owner\": \"example-org\", \"installation_id\": 123}]: the organisation or account the App is installed on, and the number at the end of that installation's settings URL. The whole list; a session may name a repository only of an owner listed here."
+    },
+    %Argument{
+      name: "private_key",
+      type: :string,
+      description:
+        "The App's private key, the PEM file GitHub downloads, as text. Imported into OpenBao's transit engine as a key that cannot be exported; a key already there gets this one as its next version, and the plane signs with the newest. Blank or absent leaves the key as it is."
+    }
+  ]
+
   @filter_properties [
     %Argument{name: "limit", type: :integer, description: "How many rows at most."},
     %Argument{name: "team", type: :string, description: "Narrow to one team, by name."},
@@ -1168,6 +1195,30 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.github.get",
+      function: :github_get,
+      summary:
+        "The plane's GitHub App: its App ID, API URL and where clones come from, the installations it may use, whether its private key is set (type, fingerprint and the OpenBao transit version, never the key), what a session's token is given, and who changed it last. configured is true once there is an App ID, a key and an installation.",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
+      name: "admin.github.put",
+      function: :github_put,
+      summary:
+        "Change the plane's GitHub App, the one identity its pods clone with. Only the keys sent change; installations is the whole list; private_key is imported into OpenBao transit and never readable again, by anybody. Refused with the field and the reason, and nothing written, for anything that does not read.",
+      risk: :write,
+      arguments: [
+        %Argument{
+          name: "app",
+          type: :object,
+          required: true,
+          description: "The keys to change.",
+          properties: @github_properties
+        }
+      ]
+    },
+    %Method{
       name: "admin.identity.check",
       function: :identity_check,
       summary:
@@ -1443,7 +1494,7 @@ defmodule Troupe.Plane.Admin.API do
     |> Enum.reject(&present?(&1, params))
   end
 
-  defp present?(name, params) when name in ~w(profile principal trigger) do
+  defp present?(name, params) when name in ~w(profile principal trigger app) do
     is_map(params[name]) or map_size(Map.drop(params, ["confirm"])) > 0
   end
 
@@ -1455,13 +1506,14 @@ defmodule Troupe.Plane.Admin.API do
   # `filter` and `attrs` are the two shapes a method takes a bag of options in; the rest
   # are plain values. A keyword list for the former because that is what the context
   # takes, and a context that took maps would be awkward for the CLI. A `profile`, a
-  # `principal` or a `trigger` is the whole params map when it is not nested, so a
-  # client may send the object flat or under its name.
+  # `principal`, a `trigger` or the GitHub `app` is the whole params map when it is not
+  # nested, so a client may send the object flat or under its name.
   defp argument("filter", params), do: options(params["filter"] || params)
   defp argument("attrs", params), do: params["attrs"] || %{}
   defp argument("profile", params), do: params["profile"] || params
   defp argument("principal", params), do: params["principal"] || params
   defp argument("trigger", params), do: params["trigger"] || params
+  defp argument("app", params), do: params["app"] || params
   defp argument("content", params), do: params["content"] || %{}
   defp argument(name, params), do: params[name]
 

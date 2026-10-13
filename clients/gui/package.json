@@ -12,8 +12,10 @@
     "dev": "pnpm --filter @troupe/desktop dev",
     "dev:local": "tsx scripts/dev-local.ts",
     "fake": "tsx scripts/fake-deployment.ts",
+    "console": "pnpm --filter @troupe/console dev",
+    "console:fake": "tsx scripts/fake-console.ts",
     "tokens": "tsx scripts/tokens.ts",
-    "tokens:check": "tsx scripts/tokens.ts && git diff --exit-code apps/desktop/src/tokens.css apps/desktop/src/mark.ts",
+    "tokens:check": "tsx scripts/tokens.ts && git diff --exit-code apps/desktop/src/tokens.css apps/desktop/src/mark.ts apps/console/src/tokens.css apps/console/src/mark.ts",
     "icons": "tsx scripts/icons.ts",
     "icons:check": "tsx scripts/icons.ts --check",
     "first-token": "tsx scripts/first-token.ts"

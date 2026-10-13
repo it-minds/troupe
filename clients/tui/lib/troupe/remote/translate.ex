@@ -612,8 +612,8 @@ defmodule Troupe.Remote.Translate do
       type when type in ["acl.revoked", "acl_revoked"] ->
         {[emit.(:remote_note, %{text: "access revoked" <> subject(data)})], memory}
 
-      "session.tainted" ->
-        {[emit.(:remote_note, %{text: "session tainted" <> because(data)})], memory}
+      type when type in ["session.tainted", "session_tainted"] ->
+        {[emit.(:remote_note, %{text: tainted(data)})], memory}
 
       other when is_binary(other) ->
         {[emit.(:remote_note, %{text: generic(other, data)})], note_unknown(other, memory)}
@@ -996,8 +996,18 @@ defmodule Troupe.Remote.Translate do
     what <> then
   end
 
-  defp because(%{"reason" => reason}) when is_binary(reason), do: ": #{reason}"
-  defp because(_data), do: ""
+  # A person's own tools offered to the session (PROTOCOL.md section 8): who offered them and
+  # which, since everyone in the session is entitled to know a tool runs on somebody's
+  # machine. The desktop app says the same sentence.
+  defp tainted(data) do
+    who = if is_binary(data["actor"]), do: data["actor"], else: "somebody"
+    said = "#{who} offered tools that run on their own machine"
+
+    case Enum.filter(List.wrap(data["tools"]), &is_binary/1) do
+      [] -> said
+      tools -> "#{said}: #{Enum.join(tools, ", ")}"
+    end
+  end
 
   # How many of each kind, then each reason once with the files it covers: a worktree's
   # one reason fits every file, while a pod's names the file it is about. An empty list

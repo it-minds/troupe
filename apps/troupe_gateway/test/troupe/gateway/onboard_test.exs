@@ -204,6 +204,25 @@ defmodule Troupe.Gateway.OnboardTest do
     assert {:ok, %{"brief" => %{"due" => "none", "recorded" => 0}}} = plan(client, ws)
   end
 
+  # A no that cannot be written down is answered as the daemon's own failure, in words, and
+  # the connection that asked stays up. It used to raise in the answer and take the
+  # connection with it.
+  test "memory.decline that cannot write its answer is an internal error the caller is told",
+       %{workspace: ws, state_dir: state_dir, client: client} do
+    File.chmod!(state_dir, 0o555)
+    on_exit(fn -> File.chmod(state_dir, 0o755) end)
+
+    assert {:error, %Error{message: "internal_error", data: %{"reason" => reason}}} =
+             Client.call(client, "memory.decline", %{"workspace" => ws})
+
+    assert reason =~ "cannot write"
+
+    File.chmod!(state_dir, 0o755)
+
+    assert {:ok, %{"declined" => true}} =
+             Client.call(client, "memory.decline", %{"workspace" => ws})
+  end
+
   test "on a machine a worker runs on the plan says the pod's sentence and the rest refuse",
        %{workspace: ws, client: client} do
     write(ws, "CLAUDE.md", @claude)

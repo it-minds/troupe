@@ -23,12 +23,13 @@ defmodule Troupe.Config.ModelSettings do
 
   alias Troupe.Config
   alias Troupe.Config.{Migrate, OpenCode, Schema}
-  alias Troupe.LLM.Catalog
+  alias Troupe.LLM.{Catalog, ProviderType}
   alias Troupe.LLM.Catalog.Store
 
-  # The fake too, so a packaged binary's first run can be driven to a written file with
-  # no model behind it (Decision 705); a screen offers the first two.
-  @providers ~w(anthropic openai fake)
+  # Every type a file may name (`Troupe.LLM.ProviderType`), so saving a file whose provider
+  # a screen has no name for keeps it: the fake too, so a packaged binary's first run can
+  # be driven to a written file with no model behind it (Decision 705).
+  @providers ProviderType.names()
   @auths ~w(api_key bearer)
   @roles ~w(default cheap expensive)
 
@@ -107,7 +108,7 @@ defmodule Troupe.Config.ModelSettings do
         providers: %{}
       }
 
-      if key do
+      if key || ProviderType.listed_without_key?(provider) do
         {entries, failures} = Store.discover(config)
 
         {:ok,

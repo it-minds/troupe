@@ -40,8 +40,8 @@ Decision 826).
 **Validation.** At most 4 MiB; only those five keys; names `^[a-z0-9][a-z0-9-]{0,63}$`,
 unique per kind. An agent's definition must parse as frontmatter plus prompt, may list only
 skills the bundle has, and replaces an agent Troupe ships (`build`, `plan`, `general`,
-`explore`, `quick`, `answer`, `ask`, `reviewer`, `implementer`, `librarian`, `orchestrate`,
-`workflow`: every file in `troupe_core`'s `priv/agents/`) only with `override: true`;
+`explore`, `quick`, `answer`, `ask`, `reviewer`, `implementer`, `librarian`,
+`orchestrate`: every file in `troupe_core`'s `priv/agents/`) only with `override: true`;
 without it the bundle is refused, naming the agent. A skill
 needs `SKILL.md` (whose `name`, if present, must be its own), relative text files with no
 `..`, at most 512 KiB. An MCP `url` is `https://`, or `http://` to a `.svc` host, and its

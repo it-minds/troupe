@@ -347,6 +347,56 @@ defmodule Troupe.Config.OrgTest do
       assert Enum.any?(layers.refusals, &(&1.key == "providers.mine"))
     end
 
+    test "ollama, openrouter and gemini are fixed and defaulted as openai and anthropic are",
+         ctx do
+      File.write!(ctx.managed, """
+      defaults:
+        providers:
+          router: {type: openrouter, api_key: k}
+      enforced:
+        provider: ollama
+        base_url: http://127.0.0.1:11434
+      """)
+
+      File.write!(ctx.user, """
+      provider: gemini
+      providers:
+        local: {type: ollama, base_url: "http://127.0.0.1:11434"}
+        elsewhere: {type: ollama, base_url: "http://10.0.0.9:11434"}
+        cloud: {type: gemini, base_url: "http://127.0.0.1:11434", api_key: k}
+      """)
+
+      assert {:ok, config, layers} = resolve(ctx)
+      assert config.provider == "ollama"
+      assert config.base_url == "http://127.0.0.1:11434"
+
+      assert Enum.any?(
+               layers.warnings,
+               &(&1.key == "provider" and &1.message =~ "fixes it at ollama")
+             )
+
+      refute Map.has_key?(config.providers["local"], :refused)
+
+      assert config.providers["elsewhere"].refused =~
+               "your organisation fixes the URL at http://127.0.0.1:11434"
+
+      assert config.providers["cloud"].refused =~
+               "providers.cloud speaks gemini, and your organisation fixes the provider at ollama"
+
+      # The organisation's default provider is there as the user's would be, and held to
+      # the enforced type like any other.
+      assert config.providers["router"].type == :openrouter
+      assert config.providers["router"].refused =~ "providers.router speaks openrouter"
+
+      assert {:ok, %{"provider" => "azure_openai"}} =
+               Organisation.check(%{"provider" => "azure_openai"})
+
+      assert {:error, [why]} = Organisation.check(%{"provider" => "bedrock"})
+
+      assert why =~
+               "provider must be one of anthropic, openai, ollama, openrouter, azure_openai, gemini, fake"
+    end
+
     test "a key the schema does not mark is not enforced, with the reason", ctx do
       File.write!(ctx.managed, "enforced:\n  auto_approve: false\n  max_turns: 9\n")
       File.write!(ctx.user, "auto_approve: true\n")

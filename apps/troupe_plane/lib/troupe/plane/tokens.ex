@@ -184,11 +184,18 @@ defmodule Troupe.Plane.Tokens do
     end
   end
 
-  # The credential comes from `Credential`, which is also told when OpenBao refuses it.
-  # A 403 on a token that was exchanged for a ServiceAccount token means the lease has
-  # gone, one way or another, and is worth exactly one fresh login and one more try; a
-  # 403 on a static token is a policy problem that a retry would only repeat.
-  defp request(method, path, body, opts) do
+  @doc """
+  A request to the plane's OpenBao, with the plane's own credential: what every call here
+  makes, and what `Troupe.Plane.GitHub.Key` makes for the GitHub App's transit key.
+
+  The credential comes from `Credential`, which is also told when OpenBao refuses it.
+  A 403 on a token that was exchanged for a ServiceAccount token means the lease has
+  gone, one way or another, and is worth exactly one fresh login and one more try; a
+  403 on a static token is a policy problem that a retry would only repeat.
+  """
+  @spec request(:get | :post, String.t(), map() | nil, keyword()) ::
+          {:ok, term()} | {:error, term()}
+  def request(method, path, body, opts \\ []) do
     config = config(opts)
 
     with {:ok, address} <- address(config),
@@ -244,7 +251,10 @@ defmodule Troupe.Plane.Tokens do
     end
   end
 
-  defp mount(opts), do: config(opts)[:mount] || "transit"
+  @doc "Where the plane's transit engine is mounted in its OpenBao."
+  @spec mount(keyword()) :: String.t()
+  def mount(opts \\ []), do: config(opts)[:mount] || "transit"
+
   defp key_name(opts), do: config(opts)[:key] || @key_name
 
   defp issuer, do: Application.get_env(:troupe_plane, :issuer)
