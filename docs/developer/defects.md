@@ -1388,7 +1388,6 @@ Found by the chunk 32 fixers, 2026-10-12.
   - The terminal client renders `tools_registered` as a raw event and logs it as unknown; it shows beside the offered-tools sentence.
   - `memory.forget` can answer `not_found` for a fact it did forget, when `memory.md` can't be removed after `facts.jsonl` was rewritten.
   - A `fleet` subscription has no per-session access filter; on a pod, authorisation limits it to tokens without a session id.
-- **Tests.** `FailoverTest`'s node name is the same in every worktree, so two worker suites at once fail its setup.
 
 Found by the chunk 33 fixers, 2026-10-13.
 
