@@ -753,7 +753,11 @@ export class FakeAdmin {
         if (typeof name !== "string" || name === "") return refuse(INVALID_PARAMS, "invalid_params", { reason: "a profile has a name", missing: ["name"] });
         const before = this.profiles.find((p) => p.name === name) ?? null;
         if (method === "admin.profile.preview") {
-          return { result: { policy: this.verdict(attrs), changes: diff(this.comparable_profile(before), this.comparable_attrs(attrs)), mode: this.mode } };
+          // The stored profile with the write laid over it, as the plane compares them: what
+          // the write does not send stays as it is, and the name says which profile.
+          const was = this.comparable_profile(before);
+          const { name: _name, ...sent } = this.comparable_attrs(attrs);
+          return { result: { policy: this.verdict(attrs), changes: diff(was, { ...was, ...sent }), mode: this.mode } };
         }
         const held = this.heldByRepository(subject, "profile.put", name, "WorkerProfile");
         if (held) return held;

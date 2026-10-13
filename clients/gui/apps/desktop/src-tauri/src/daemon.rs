@@ -113,17 +113,32 @@ fn candidates(binary: Option<String>) -> Vec<(String, Vec<&'static str>)> {
     out
 }
 
+/// The command that starts a daemon: detached from this process's console and streams,
+/// because the daemon outlives the window that started it and its output is its own log,
+/// not ours.
+///
+/// On Windows it is also started with no console window. The app has no console, so a
+/// console program it starts is given a new one, and `troupe-daemon.cmd` is a batch file
+/// run by `cmd.exe`: without `CREATE_NO_WINDOW` that is a black window standing open for
+/// as long as the daemon runs.
+fn daemon_command(program: &str, args: &[&str]) -> Command {
+    let mut command = Command::new(program);
+    command.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    command
+}
+
 fn spawn_any(binary: Option<String>) -> Result<String, String> {
     let mut tried = Vec::new();
     for (program, args) in candidates(binary) {
-        // Detached from this process's console and streams: the daemon outlives the
-        // window that started it, and its output is its own log, not ours.
-        let attempt = Command::new(&program)
-            .args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
+        let attempt = daemon_command(&program, &args).spawn();
         match attempt {
             Ok(_child) => return Ok(format!("{program} {}", args.join(" "))),
             Err(e) => tried.push(format!("{program}: {e}")),
@@ -247,6 +262,48 @@ mod tests {
             .expect("an endpoint");
 
         assert_eq!((found.port, found.token.as_str()), (port, "the-token"));
+    }
+
+    #[cfg(windows)]
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetConsoleProcessList(list: *mut u32, count: u32) -> u32;
+    }
+
+    /// The processes attached to this test's console, or `None` where it has none.
+    #[cfg(windows)]
+    fn on_this_console() -> Option<Vec<u32>> {
+        let mut list = vec![0u32; 256];
+        // SAFETY: the buffer holds `list.len()` entries and the call writes no more.
+        let count = unsafe { GetConsoleProcessList(list.as_mut_ptr(), list.len() as u32) } as usize;
+        if count == 0 || count > list.len() {
+            return None;
+        }
+        list.truncate(count);
+        Some(list)
+    }
+
+    // A daemon started from the app had a console window of its own standing open: the
+    // `.cmd` shim is `cmd.exe`, and a console program started without `CREATE_NO_WINDOW`
+    // shares its parent's console or, from the app, which has none, gets a new one.
+    #[cfg(windows)]
+    #[test]
+    fn the_daemon_is_started_with_no_console_window() {
+        let Some(_) = on_this_console() else {
+            eprintln!("this test has no console to compare with; nothing to check");
+            return;
+        };
+
+        let mut child = daemon_command("cmd.exe", &["/d", "/c", "ping -n 4 127.0.0.1 >nul"]).spawn().unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let attached = on_this_console().unwrap_or_default();
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(
+            !attached.contains(&child.id()),
+            "the daemon's command was started on this process's console rather than with none of its own"
+        );
     }
 
     #[test]

@@ -1,0 +1,158 @@
+// Written by `mix troupe.config.schema` from `Troupe.Protocol.ProviderTypes`; do not edit.
+// `--check` fails in CI when it is not what the daemon's `config.get` and `setup.get` carry.
+
+/** The provider types a screen offers: `ProviderTypes.wire/0`. */
+export const PROVIDER_TYPES: Array<Record<string, unknown>> = [
+  {
+    "default_url": "https://api.anthropic.com",
+    "key": "required",
+    "key_var": "ANTHROPIC_API_KEY",
+    "label": "Anthropic",
+    "name": "anthropic",
+    "summary": "Claude, at Anthropic's own endpoint, with a key from console.anthropic.com.",
+    "url": "own",
+    "url_example": null
+  },
+  {
+    "default_url": "https://api.openai.com",
+    "key": "required",
+    "key_var": "OPENAI_API_KEY",
+    "label": "OpenAI",
+    "name": "openai",
+    "summary": "GPT, at OpenAI's own endpoint, with a key from platform.openai.com.",
+    "url": "own",
+    "url_example": null
+  },
+  {
+    "default_url": "http://localhost:11434",
+    "key": "none",
+    "key_var": null,
+    "label": "Ollama",
+    "name": "ollama",
+    "summary": "Models you run yourself, on an Ollama server on this computer or your network. No key, and nothing leaves that server.",
+    "url": "server",
+    "url_example": null
+  },
+  {
+    "default_url": "https://openrouter.ai/api/v1",
+    "key": "required",
+    "key_var": "OPENROUTER_API_KEY",
+    "label": "OpenRouter",
+    "name": "openrouter",
+    "summary": "Many vendors' models behind one key from openrouter.ai, each priced as OpenRouter lists it.",
+    "url": "own",
+    "url_example": null
+  },
+  {
+    "default_url": null,
+    "key": "required",
+    "key_var": null,
+    "label": "Azure OpenAI",
+    "name": "azure_openai",
+    "summary": "OpenAI's models in your own Azure resource, at its address, with its key. A model is a deployment's name.",
+    "url": "required",
+    "url_example": "https://<resource>.openai.azure.com"
+  },
+  {
+    "default_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "key": "required",
+    "key_var": "GEMINI_API_KEY",
+    "label": "Gemini",
+    "name": "gemini",
+    "summary": "Google's Gemini models, through the Gemini API, with a key from aistudio.google.com.",
+    "url": "own",
+    "url_example": null
+  }
+];
+
+/** The ways `setup.get` says a provider may be set up: `ProviderTypes.kinds/0`. */
+export const SETUP_KINDS: Array<Record<string, unknown>> = [
+  {
+    "default_url": "https://api.anthropic.com",
+    "id": "anthropic",
+    "key": "required",
+    "key_var": "ANTHROPIC_API_KEY",
+    "label": "Anthropic",
+    "provider": "anthropic",
+    "summary": "Claude, at Anthropic's own endpoint, with a key from console.anthropic.com.",
+    "url": "own",
+    "url_example": null
+  },
+  {
+    "default_url": "https://api.openai.com",
+    "id": "openai",
+    "key": "required",
+    "key_var": "OPENAI_API_KEY",
+    "label": "OpenAI",
+    "provider": "openai",
+    "summary": "GPT, at OpenAI's own endpoint, with a key from platform.openai.com.",
+    "url": "own",
+    "url_example": null
+  },
+  {
+    "default_url": "http://localhost:11434",
+    "id": "ollama",
+    "key": "none",
+    "key_var": null,
+    "label": "Ollama",
+    "provider": "ollama",
+    "summary": "Models you run yourself, on an Ollama server on this computer or your network. No key, and nothing leaves that server.",
+    "url": "server",
+    "url_example": null
+  },
+  {
+    "default_url": "https://openrouter.ai/api/v1",
+    "id": "openrouter",
+    "key": "required",
+    "key_var": "OPENROUTER_API_KEY",
+    "label": "OpenRouter",
+    "provider": "openrouter",
+    "summary": "Many vendors' models behind one key from openrouter.ai, each priced as OpenRouter lists it.",
+    "url": "own",
+    "url_example": null
+  },
+  {
+    "default_url": null,
+    "id": "azure_openai",
+    "key": "required",
+    "key_var": null,
+    "label": "Azure OpenAI",
+    "provider": "azure_openai",
+    "summary": "OpenAI's models in your own Azure resource, at its address, with its key. A model is a deployment's name.",
+    "url": "required",
+    "url_example": "https://<resource>.openai.azure.com"
+  },
+  {
+    "default_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "id": "gemini",
+    "key": "required",
+    "key_var": "GEMINI_API_KEY",
+    "label": "Gemini",
+    "provider": "gemini",
+    "summary": "Google's Gemini models, through the Gemini API, with a key from aistudio.google.com.",
+    "url": "own",
+    "url_example": null
+  },
+  {
+    "default_url": null,
+    "id": "gateway",
+    "key": "optional",
+    "key_var": null,
+    "label": "An OpenAI-compatible gateway",
+    "provider": "openai",
+    "summary": "Anything speaking Chat Completions at a URL of yours: vLLM, LM Studio, a company gateway. Some want no key.",
+    "url": "required",
+    "url_example": "https://llm-gw.example/v1"
+  },
+  {
+    "default_url": null,
+    "id": "litellm",
+    "key": "optional",
+    "key_var": null,
+    "label": "A LiteLLM proxy",
+    "provider": "openai",
+    "summary": "A LiteLLM proxy at its URL. The one gateway that says what each model costs.",
+    "url": "required",
+    "url_example": "https://llm-gw.example/v1"
+  }
+];

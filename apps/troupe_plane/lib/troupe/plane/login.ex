@@ -43,9 +43,20 @@ defmodule Troupe.Plane.Login do
   # sends whoever reads it looking in the wrong place.
   defp fetch_subject(claims, claim) do
     case Map.get(claims, claim) do
-      subject when is_binary(subject) and subject != "" -> {:ok, subject}
+      subject when is_binary(subject) and subject != "" -> unreserved(subject, claim)
       _ -> {:error, {:no_subject, claim}}
     end
+  end
+
+  # The plane's own subjects: a removed person's sessions are owned by `removed:<id>` and a
+  # service principal is `svc:<team>/<name>`. Somebody signing in under either would be
+  # the owner of what it names, so a subject that starts with one is no person's.
+  @reserved ["removed:", "svc:"]
+
+  defp unreserved(subject, claim) do
+    if String.starts_with?(subject, @reserved),
+      do: {:error, {:reserved_subject, claim}},
+      else: {:ok, subject}
   end
 
   # A plane switched to another claim already knows its people by their `sub`. Somebody

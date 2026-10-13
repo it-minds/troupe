@@ -54,6 +54,10 @@ defmodule Troupe.Worker.GitHub.API do
     })
   end
 
+  @doc "A commit as the Git data API has it: its `tree`, its `parents` and its `message`."
+  @spec get_commit(map(), String.t()) :: {:ok, map()} | {:error, error()}
+  def get_commit(credential, commit), do: call(credential, :get, "/git/commits/" <> commit)
+
   @doc "Where a branch is on GitHub, or `:none`."
   @spec branch(map(), String.t()) :: {:ok, String.t() | :none} | {:error, error()}
   def branch(credential, branch) do

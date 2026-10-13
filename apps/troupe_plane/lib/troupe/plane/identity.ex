@@ -359,6 +359,31 @@ defmodule Troupe.Plane.Identity do
   end
 
   @doc """
+  The marker of the person removed under `subject` at or after `at`, the first of them, or
+  `nil`: who owns a session whose manifest names `subject` and was last written at `at`.
+
+  A removed person's sessions are handed to their tombstone's marker and frozen, so one
+  written no later than the removal was theirs; somebody who arrived under the subject
+  afterwards wrote theirs after it.
+  """
+  @spec removed_owner(String.t() | nil, DateTime.t()) :: String.t() | nil
+  def removed_owner(nil, _at), do: nil
+
+  def removed_owner(subject, %DateTime{} = at) do
+    Repo.one(
+      from(t in Tombstone,
+        where: t.subject == ^subject and t.removed_at >= ^at,
+        order_by: [asc: t.removed_at],
+        limit: 1
+      )
+    )
+    |> case do
+      nil -> nil
+      tombstone -> Tombstone.marker(tombstone)
+    end
+  end
+
+  @doc """
   The name at the key manager of whoever a session's `owner_subject` names: a person's,
   a removed person's from their tombstone, else the value itself, as a principal's and a
   row from before the column are.

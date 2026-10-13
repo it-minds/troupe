@@ -393,6 +393,22 @@ defmodule Troupe.Plane.FakeGitHub do
     end
   end
 
+  defp api("GET", ["git", "commits", sha], _asked, ctx) do
+    with {raw, 0} <- git(ctx.path, ["cat-file", "commit", sha]),
+         [head, message] <- String.split(raw, "\n\n", parts: 2) do
+      lines = String.split(head, "\n")
+
+      answer(ctx.conn, 200, %{
+        "sha" => sha,
+        "tree" => %{"sha" => hd(header(lines, "tree"))},
+        "parents" => Enum.map(header(lines, "parent"), &%{"sha" => &1}),
+        "message" => message
+      })
+    else
+      _none -> answer(ctx.conn, 404, %{"message" => "Not Found"})
+    end
+  end
+
   defp api("GET", ["git", "ref", "heads" | branch], _asked, ctx) do
     ref = "refs/heads/" <> Enum.join(branch, "/")
 
@@ -723,6 +739,13 @@ defmodule Troupe.Plane.FakeGitHub do
       nil -> {:error, 404, "Not Found"}
       found -> {:ok, found}
     end
+  end
+
+  # The values of one header of a raw commit: `tree <sha>`, `parent <sha>`.
+  defp header(lines, name) do
+    for line <- lines,
+        String.starts_with?(line, name <> " "),
+        do: String.replace_prefix(line, name <> " ", "")
   end
 
   defp answer(conn, status, body) do
