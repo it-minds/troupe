@@ -327,7 +327,7 @@ Durable:
 | `trigger_fired` | `source`, `idempotency_key`, `principal`, `revision`, `payload_digest` |
 | `files_skipped` | `files` — the agent, skill, command and workflow files a session found at a start and did not read, each `{kind, name, path, reason}`: on a pod, a working copy's file of a name its bundle has or a built-in agent's, which those beat unless the profile sets `repositoryOverridesBundle`; in a git worktree, one the main checkout has not committed (Decision 826); a workspace's `.troupe/` file, or directory, that is a link out of it, a skill whose `SKILL.md` can't be read, and what a workspace's `skills.json` links from outside the repository while the workspace is not trusted (Decision 829). A directory not looked into has a null `name`. Written when the list differs from the one the log last recorded, so an empty list says the files went away |
 | `fs_changed` | `path`, `hash`, `size` |
-| `scratch_updated` | `name`, `path`, `kind`, `title`, `size`, `hash`, `version`, `call_id` — a document the `show` tool wrote to the session's scratchpad, or replaced (Decision 870): a plan, report, comparison, diagram or table the agent shows the person beside the chat instead of printing it there. `path` is where `fs.read` reads it (`scratch:/<name>`), `kind` how to show it (`markdown`, `mermaid`, `json`, `csv` or `text`), `hash` the same `sha256:…` `fs.read` answers, `version` the writes of that name in the session from 1, and `call_id` the `show` call that wrote it, so a client puts a card where the call was rather than the call's `content`. `scratch.list` lists the documents |
+| `scratch_updated` | `name`, `path`, `kind`, `title`, `size`, `hash`, `version`, `call_id` — a document the `show` tool wrote to the session's scratchpad, or replaced (Decision 870), or the `patch` tool revised in place: a plan, report, comparison, diagram or table the agent shows the person beside the chat instead of printing it there. `path` is where `fs.read` reads it (`scratch:/<name>`), `kind` how to show it (`markdown`, `mermaid`, `json`, `csv` or `text`), `hash` the same `sha256:…` `fs.read` answers, `version` the writes of that name in the session from 1, and `call_id` the `show` or `patch` call that wrote it, so a client puts a card where the call was rather than the call's `content`. `scratch.list` lists the documents |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 | `mounts_resolved` | `mounts` — the volumes a pod session's working tree was given, as the session started |
 | `published` | `source`, `destination`, `hash`, `bytes`, `direction` — a file the `publish` tool copied to or from a shared volume |
@@ -1167,7 +1167,7 @@ written.
 Needs `control`: putting a file into a workspace is steering the session. The write is
 recorded as an `fs_changed` event, carrying the file's `hash` and `size`, whose actor is
 the client that uploaded it, not the session. `scratch:/` is read-only to it: only the
-agent's `show` puts a document on the scratchpad.
+agent's `show` and `patch` write the scratchpad.
 
 #### `scratch.list`
 ```json
@@ -1177,10 +1177,11 @@ agent's `show` puts a document on the scratchpad.
 "updated_at"}]}`
 
 The session's scratchpad (Decision 870): the documents its agents showed the person with
-the `show` tool, the latest version of each name, in the order each was first shown.
-Each row is what that name's last `scratch_updated` said, and `updated_at` when it was
-written. It is a fold over the log, so a dormant session answers it as a running one
-does, and a client that attaches late has the same rows from its replay. Read a
+the `show` tool and revised with `patch`, the latest version of each name, in the order
+each was first shown. Each row is what that name's last `scratch_updated` said, and
+`updated_at` when it was written. It is a fold over the log, so a dormant session
+answers it as a running one does, and a client that attaches late has the same rows from
+its replay. Read a
 document's words with `fs.read` of its `path`, the one read path there is. The documents
 are the session's own, beside its log rather than in its workspace: an erasure takes
 them, and a fork carries the ones its history shows.

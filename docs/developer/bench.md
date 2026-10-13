@@ -197,7 +197,8 @@ Six more run only when named, each for a measurement [prompt-prefix.md](prompt-p
 describes: `long_turn` (one turn of thirteen calls, Decision 867), `loop_turn` (a `/loop`
 turn and then a person's, Decision 871), and `scratchpad`, `scratchpad_without`,
 `scratchpad_session` and `scratchpad_session_without` (a migration plan, and a session of
-five turns, with the scratchpad and without it, Decision 870).
+eight turns, with the scratchpad and without it, Decisions 870 and 895; see "The
+scratchpad's cost" below).
 
 Three more, by name too, are issue #554's comparison of `build` with `orchestrate`
 (Decision 888): `fix_test_orchestrate`, `rename_symbol_orchestrate` and
@@ -285,6 +286,7 @@ Schema 1, with `"mode": "live"`, and these added:
 | a scenario | `checks[]` | each held in every run; the label says in how many |
 | a scenario | `error` | which runs did not end by themselves, and why |
 | a run | `error`, `checks[]`, `succeeded` | why it did not end by itself; its own checks; no error, the outcome held and every check held |
+| a run | `since_compaction` | what the run spent from its first compaction on, the summary's call included: `model_calls`, `input_tokens`, `cached_tokens`, `output_tokens`, `cost_micros`; `null` for a run that never compacted (Decision 895) |
 | a run | `tool_calls[]`, `largest_tool_result_bytes` | each tool call as it ended, `{agent, name, ok, ms, result_bytes, cut}`: the bytes of the result the model was given (a blob resolved), and whether it says part was left out; never its input or output (issue #406) |
 | a call | `agent`, `cached_tokens`, `cost_micros` | which agent made it (`root`, `root/<subagent>`), and its cache reads and cost |
 

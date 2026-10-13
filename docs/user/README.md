@@ -244,8 +244,10 @@ began, above the answer: `▸ 7 steps · 1 failed · grep, read_file, edit_file 
 A long answer, such as a plan, a report, a comparison, a diagram or a table, does not
 belong in the chat, where it scrolls away and has to be printed again to be revised. An
 agent puts it on the session's scratchpad instead, with its `show` tool, and keeps its
-reply to the short answer and the document's name. Showing a document again under the
-same name replaces it, so a plan is revised in place.
+reply to the short answer and the document's name. It revises a document in place with
+`patch`, which replaces an exact span of it or adds to its end, so the conversation
+carries the change and not the whole document again; you see the whole document,
+revised. Showing a document again under the same name replaces it.
 
 - **In the terminal UI** each document is a card in the transcript where the agent showed
   it: its title, its name, its size, and `new` or `updated 3 times`. `/scratch` lists the
@@ -261,16 +263,18 @@ same name replaces it, so a plan is revised in place.
   a fork has the ones its history shows. Your own program reads one as `scratch:/<name>`
   (`scratch.list` and `fs.read` in [PROTOCOL.md](../../PROTOCOL.md)).
 - **Limits.** 256 KiB a document (`scratch_max_bytes`) and 50 documents a session
-  (`scratch_max_documents`). Past either, `show` refuses and says so, and the agent
-  replaces a document or answers in the chat.
-- **What it costs.** Until the conversation is compacted, the document's words are in it
-  as the call's arguments, so it costs about what the same answer in the chat would. A
-  compaction leaves each document out for a one-line pointer (its name, title, version
-  and size), and the summary it writes lists every document on the scratchpad, so from
-  then on the model is not sent them again but knows they are there. When the agent needs
-  a document after that, it reads it back with `read_file` on `scratch:/<name>`; that read
-  is the only way the agent's tools reach the scratchpad, and it writes there only with
-  `show`.
+  (`scratch_max_documents`). Past either, `show` and `patch` refuse and say so, and the
+  agent replaces a document or answers in the chat. A document too long for one reply of
+  the model's is written in parts: the agent shows its start and patches the rest on.
+- **What it costs.** Until the conversation is compacted, a document's words are in it as
+  the `show` call's arguments, so it costs about what the same answer in the chat would,
+  and a revision costs only its change. A compaction leaves each document out for a
+  one-line pointer (its name, title, version and size), and a long patch too, and the
+  summary it writes lists every document on the scratchpad, so from then on the model is
+  not sent them again but knows they are there. When the agent needs a document after
+  that, it reads it back with `read_file` on `scratch:/<name>`; that read is the only way
+  the agent's tools reach the scratchpad, and it writes there only with `show` and
+  `patch`.
 
 ## What Troupe never does
 
