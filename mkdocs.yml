@@ -97,6 +97,13 @@ nav:
       - What a task costs: user/bench.md
       - The daemon: apps/troupe_daemon/README.md
       - Configuration: user/configuration.md
+      - Configuration cookbook:
+          - user/configuration/cookbook.md
+          - Where your files are: user/configuration/files.md
+          - Providers: user/configuration/providers.md
+          - A team's file and your own: user/configuration/team-and-personal.md
+          - MCP servers, an agent, a skill: user/configuration/mcp-agents-skills.md
+          - An unattended session: user/configuration/unattended.md
       - The desktop app, unsigned: clients/gui/docs/install.md
       - Glossary: glossary.md
   - Running a deployment:
