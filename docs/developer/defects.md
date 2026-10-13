@@ -1366,11 +1366,8 @@ Found by the chunk 32 fixers, 2026-10-12.
   - A pod that enrols marks dormant a session placed on it a moment earlier that it didn't report; the tests allow for it, and `person_credentials_test.exs` has the same latent race.
 - **The console** (Decision 886).
   - An upgraded deployment serves `/console` before its identity provider allows the redirect URI, so sign-in fails until it is registered (the error says what to register).
-  - Form inputs may be named by their placeholder rather than their label; worth a screen-reader check.
-  - The "last set by" line upper-cases the email address.
 - **Providers** (Decision 887).
   - Catalogue listings send the HTTP library's default User-Agent, not Troupe's.
-  - The plane's profile provider list and a worker profile's `llm.provider` can't choose the new types.
   - An organisation that enforces `provider: azure_openai` without enforcing `base_url` leaves a session-wide Azure provider without a URL unrefused.
   - OpenRouter's `reasoning_details` isn't handed back (Anthropic models with tools through OpenRouter), and its usage `cost` isn't used.
 - **Orchestration** (Decision 888). The bench has no task where `orchestrate` could pay off (larger multi-file work, a reviewer catching a mistake), and `docs/user/bench.md` says a by-name scenario's limits are printed by the plan, where `describe/1` prints only the plan-wide ones.
@@ -1378,6 +1375,44 @@ Found by the chunk 32 fixers, 2026-10-12.
   - A `fleet` subscription has no per-session access filter; on a pod, authorisation limits it to tokens without a session id.
 
 Found by the chunk 33 fixers, 2026-10-13.
+
+### D127 - The GitHub fix loop, control TLS, the scratchpad and providers after chunk 34 (low)
+
+- **The GitHub fix loop** (Decision 891).
+  - `git_push` commits the whole working tree (`git add -A`). Anything the agent can read and copy into the workspace, a secret on one of its mounts included, can land on a `troupe/*` branch, which is public for a public repository. Until a later slice's policy can refuse public repositories or restrict paths, grant the App private repositories only.
+  - CI output reaches the agent fenced as data, but text in it can still steer the agent within its own branch, pull request and comments; the rules enforced in code hold.
+  - A profile that grants neither checks nor statuses gets no round counting, only its budget.
+  - If the plane can't record a push after GitHub moved the branch, the session's next push is refused as "commits this session did not push", and a person has to sort it out.
+  - If the plane can't take the clone's base commit, that session can never push; the worker only logs a warning.
+  - Installation tokens still aren't revoked when a session goes dormant (D126).
+- **The plane's profile editor.** The LiveView editor rebuilds `spec` from its form fields, so saving a profile drops `spec.mcpIdentities` without saying so; only `github` is carried through. The new console has no profile editor yet. (medium)
+- **Control TLS** (Decision 893).
+  - The TLS sniff uses `:gen_tcp.unrecv/2`, which is undocumented and works only on the default inet backend. A release switched to `inet_backend: socket` would refuse every TLS handshake.
+  - Worker pods still enrol in plaintext. The operator could copy `ca.crt` into each worker namespace and set `TROUPE_PLANE_CA_PATH`, after which plaintext could be refused for pods too.
+  - `OwnerOnly` was added to the TUI's harness doors and the TUI's own `icacls` code removed, with no TUI decision recording it.
+- **Team admins and namespaces** (Decisions 896, 897).
+  - A team admin's audit list leaves out `profile.put`, `host.*` and `pod.drain` as rows about the plane as a whole, so a team admin no longer sees changes to profiles their team is granted. Whether to show them is a product question.
+  - The enrolment prefix comes from the chart's `policy.namespacePrefix`, not the live TroupePolicy; a separately installed policy with another prefix gets its pods refused (with a log line).
+  - `admin.team.enable` on a team's own group with new settings still changes them without saying so.
+  - D124's other half is open: one connection for every fleet call.
+- **The scratchpad** (Decision 895).
+  - A session near the compaction threshold compacts mid-turn and then reads the same document again.
+  - Asked for "the whole plan again", models show the document again rather than patch it.
+  - The default `max_tokens` of 8192 cuts a whole-document `show` short on Sonnet 5.5.
+  - Agents still try `grep` and `edit_file` on `scratch:` paths.
+  - The desktop app draws a `patch` call as a generic tool row.
+  - The "only when asked, or past about 80 lines" wording hasn't been measured live.
+- **Providers** (Decision 894). The GUI's fake daemon keeps its own copy of the provider types; generating it from `ProviderTypes.wire/0` would keep it from drifting.
+- **Tests.**
+  - The TUI's `InterruptTest` ("a console that cannot be read...") fails now and then with `:noproc`, a race in its own setup.
+  - Plane suites run at once against the shared `troupe_plane_test` database deadlock (`40P01`).
+  - The core and gateway suites in one VM make gateway tests fail on sessions core left behind; CI runs them apart.
+  - The gateway's `PrivateTest` (two tests) fails under load.
+  - The cluster suite's UpgradeTest changes `commonLabels`, which no chart template uses, so its upgrade "that renders every template differently" only reruns the hook jobs.
+  - A `helm upgrade` from `dev/kind/values.yaml` alone, on a development cluster `scripts/remote-up` set up with a gateway URL, narrows the policy back to the placeholder host, after which every write to the dev profile is refused.
+- **History.** Merge commits b41e250f and 13f907b3 keep git's `# Conflicts:` lines in their messages.
+
+Found by the chunk 34 fixers, 2026-10-13.
 
 ## Taken
 
