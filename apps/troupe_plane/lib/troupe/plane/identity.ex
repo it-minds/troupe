@@ -378,7 +378,7 @@ defmodule Troupe.Plane.Identity do
     # enabling a team with any attributes at all worked from the panel and raised from the
     # CLI and the API.
     wanted = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
-    name = wanted["name"] || default_team_name(group)
+    name = team_name(group, wanted)
 
     # By name, not by group. Keying on the group meant enabling one under a second name
     # silently *renamed* the first team instead of making another — one group, one team,
@@ -427,6 +427,11 @@ defmodule Troupe.Plane.Identity do
       true -> enable_team(group, Map.put(attrs, "name", name))
     end
   end
+
+  @doc "The name `enable_team/2` gives the team: the one `attrs` asks for, else one made from the group's."
+  @spec team_name(Group.t(), map()) :: term()
+  def team_name(%Group{} = group, attrs),
+    do: Map.get(attrs, "name") || Map.get(attrs, :name) || default_team_name(group)
 
   @doc "Every team that draws members from a group, through any link."
   @spec teams_drawing_from(Group.t()) :: [Team.t()]
