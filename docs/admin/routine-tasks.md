@@ -51,9 +51,33 @@ user namespace of its own with its `/proc` unmasked (`worker.userNamespaces`)
    `worker.seccomp.install.enabled: false` and install the profile another way.
 
 After step 2 of the upgrade, `kubectl -n troupe-system rollout status
-daemonset/troupe-worker-seccomp`. Both settings change every profile's pod template, so
-each reports `UpgradePending` and its pods are replaced as they empty (step 4); a pod
-replaced before the DaemonSet reached its node waits in `CreateContainerError` until it has.
+daemonset/troupe-worker-profiles` (`troupe-worker-seccomp` before 0.19.0). Both settings
+change every profile's pod template, so each reports `UpgradePending` and its pods are
+replaced as they empty (step 4); a pod replaced before the DaemonSet reached its node waits
+in `CreateContainerError` until it has.
+
+**Upgrading to 0.19.0 from earlier, with workers running.** On nodes that enforce
+AppArmor (Ubuntu's), workers before it ran under the runtime's default AppArmor profile,
+which refuses bubblewrap's mounts ("Failed to make / slave"), so their pods refused every
+command there. The chart now gives the worker container an AppArmor profile of its own
+(`worker.appArmor`, on by default) and loads it into every node's kernel
+([installing.md](installing.md#the-workers-apparmor-profile)). The node sysctl
+`kernel.apparmor_restrict_unprivileged_userns` stays as the node has it. What changes:
+
+1. The DaemonSet is now `troupe-worker-profiles` (Helm removes `troupe-worker-seccomp` and
+   makes it), and it has a second container, `apparmor`, with **a new privilege**: root in
+   the node's user namespace with the `MAC_ADMIN` capability, no AppArmor profile of its own
+   (`Unconfined`), and the host's `/sys/kernel/security` mounted. `troupe-system` already
+   needs the `privileged` Pod Security level for the DaemonSet; nothing else is needed.
+2. The operator's image carries `apparmor_parser` for it, and the DaemonSet runs that image.
+3. Where the nodes run no AppArmor (most non-Ubuntu node images), set
+   `worker.appArmor.enabled: false`: the kubelet refuses a pod that asks for a profile on a
+   node without it ("Cannot enforce AppArmor"). Where something else loads the profile,
+   set `worker.appArmor.install.enabled: false` and `worker.appArmor.profile` to its name.
+
+The setting changes every profile's pod template: each reports `UpgradePending` and its
+pods are replaced as they empty, under the profile. `kubectl -n troupe-system rollout status
+daemonset/troupe-worker-profiles` says every node has it.
 
 A release publishes the chart and the images and deploys nothing; every deployment rolls
 it this way, from wherever it keeps its own values.

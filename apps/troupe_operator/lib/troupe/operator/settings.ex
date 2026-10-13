@@ -72,6 +72,14 @@ defmodule Troupe.Operator.Settings do
             # and refuses rather than runs.
             worker_seccomp_type: "RuntimeDefault",
             worker_seccomp_profile: nil,
+            # The name of the AppArmor profile, loaded on the nodes, that every worker
+            # container runs under (`Localhost`), or nil for the runtime's default. Where a
+            # node enforces AppArmor, the runtime's default profile refuses the mounts
+            # bubblewrap builds its sandbox with, and with no profile at all a kernel that
+            # restricts unprivileged user namespaces refuses the sandbox's uid map: under
+            # either a pod refuses every command. The chart ships a profile that allows the
+            # sandbox and loads it, and names it here; never `Unconfined`.
+            worker_apparmor_profile: nil,
             # Whether a worker pod runs in a user namespace of its own (`hostUsers: false`)
             # with its `/proc` unmasked (`procMount: Unmasked`). Bubblewrap mounts a fresh
             # `/proc` for the sandbox, and the kernel refuses that inside a user namespace
@@ -114,4 +122,16 @@ defmodule Troupe.Operator.Settings do
           "the worker's seccomp profile #{inspect(type)} is not Localhost with a path, " <>
             "RuntimeDefault or Unconfined"
   end
+
+  @doc """
+  The worker container's `appArmorProfile`, as these settings name it: the named profile
+  as `Localhost`, or nil, which leaves the field off and the container on the runtime's
+  default. Never `Unconfined`: a name is all these settings hold.
+  """
+  @spec worker_apparmor(t()) :: map() | nil
+  def worker_apparmor(%__MODULE__{worker_apparmor_profile: name})
+      when is_binary(name) and name != "",
+      do: %{"type" => "Localhost", "localhostProfile" => name}
+
+  def worker_apparmor(%__MODULE__{}), do: nil
 end
