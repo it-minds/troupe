@@ -10,6 +10,7 @@ defmodule Troupe.MountsTest do
   use ExUnit.Case, async: true
 
   alias Troupe.Mounts
+  alias Troupe.Tool.Result
 
   setup do
     base = Path.join(System.tmp_dir!(), "troupe-mounts-#{System.unique_integer([:positive])}")
@@ -101,7 +102,7 @@ defmodule Troupe.MountsTest do
 
       assert {:error, {:unknown_mount, "plans"}} = Mounts.resolve(context.mounts, "plans:")
 
-      assert Troupe.Tool.Result.describe({:unknown_mount, "plans"}) =~
+      assert Result.describe({:unknown_mount, "plans"}) =~
                "plans: is not a mount here; a path is relative to the session, or starts with session:/"
 
       assert {:ok, resolved, _} = Mounts.resolve(context.mounts, "notes:2026.md")
