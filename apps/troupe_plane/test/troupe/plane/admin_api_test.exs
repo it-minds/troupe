@@ -303,6 +303,117 @@ defmodule Troupe.Plane.AdminAPITest do
                  "attrs" => %{"name" => "design"}
                })
     end
+
+    # Enabling a team's own group again with settings that differ changed them, and the
+    # answer was the team as if nothing had: no diff, no refusal, and a team's settings
+    # put back to the plane's defaults when none were sent at all.
+    test "admin.team.enable on a team's own group changes no setting unless asked to link",
+         context do
+      {:ok, _} =
+        Admin.team_update(Admin.actor_for(context.root), "design", %{budget_micros: 7_000})
+
+      # Again with nothing to set: the same team, its settings as they were.
+      assert %{"result" => %{"name" => "design", "budget_micros" => 7_000}} =
+               rpc(context.root, "admin.team.enable", %{
+                 "group" => "design",
+                 "attrs" => %{"name" => "design"}
+               })
+
+      # With a setting that differs: refused, naming it, and nothing changes.
+      assert %{"error" => error} =
+               rpc(context.root, "admin.team.enable", %{
+                 "group" => "design",
+                 "attrs" => %{"name" => "design", "budget_micros" => 1}
+               })
+
+      assert error["message"] == "conflict"
+      assert error["data"]["team"] == "design"
+      assert error["data"]["settings"] == ["budget_micros"]
+      assert error["data"]["reason"] =~ "admin.team.update"
+      assert Identity.get_team("design").budget_micros == 7_000
+
+      # With the same value it is no change, and with link it is what was asked.
+      assert %{"result" => %{"budget_micros" => 7_000}} =
+               rpc(context.root, "admin.team.enable", %{
+                 "group" => "design",
+                 "attrs" => %{"name" => "design", "budget_micros" => 7_000}
+               })
+
+      assert %{"result" => %{"budget_micros" => 1}} =
+               rpc(context.root, "admin.team.enable", %{
+                 "group" => "design",
+                 "attrs" => %{"name" => "design", "budget_micros" => 1},
+                 "link" => true
+               })
+    end
+
+    # `Provision.verdict/1` carried the policy's violations as the tuples the checker
+    # makes, which JSON cannot carry: a profile the cluster refuses, the one case the
+    # verdict is for, answered a 500 over /rpc.
+    test "admin.profile.get and admin.profile.preview say why the policy refuses a profile",
+         context do
+      Application.put_env(:troupe_plane, :policy, %{
+        "spec" => %{
+          "allowedImageRepositories" => ["ghcr.io/troupe"],
+          "maxReplicas" => 4,
+          "maxSessionsPerPod" => 8,
+          "namespacePrefix" => "troupe-w-"
+        }
+      })
+
+      on_exit(fn -> Application.delete_env(:troupe_plane, :policy) end)
+
+      {:ok, _} = Fleet.put_profile(%{name: "dev", image: "docker.io/someone/whatever:1"})
+
+      assert %{"result" => got} = rpc(context.root, "admin.profile.get", %{"name" => "dev"})
+      refute got["policy"]["allowed?"]
+      assert [_ | _] = violations = got["policy"]["violations"]
+      assert Enum.all?(violations, &is_binary/1)
+      assert Enum.any?(violations, &(&1 =~ "docker.io/someone/whatever"))
+
+      assert %{"result" => preview} =
+               rpc(context.root, "admin.profile.preview", %{
+                 "profile" => %{"name" => "dev", "image" => "docker.io/someone/else:2"}
+               })
+
+      refute preview["policy"]["allowed?"]
+      assert Enum.any?(preview["policy"]["violations"], &(&1 =~ "docker.io/someone/else"))
+    end
+
+    # The preview compared the stored row, every column of it, with the write as sent, so
+    # every preview said the name, the replicas and the sessions per pod were changing,
+    # none of which a write sends.
+    test "admin.profile.preview compares what the write sends with what is stored", context do
+      {:ok, _} =
+        Fleet.put_profile(%{name: "dev", image: "ghcr.io/troupe/worker:1", max_sessions: 4})
+
+      assert %{"result" => %{"changes" => changes}} =
+               rpc(context.root, "admin.profile.preview", %{
+                 "profile" => %{
+                   "name" => "dev",
+                   "image" => "ghcr.io/troupe/worker:2",
+                   "max_sessions" => nil
+                 }
+               })
+
+      assert changes == %{
+               "image" => %{
+                 "from" => "ghcr.io/troupe/worker:1",
+                 "to" => "ghcr.io/troupe/worker:2"
+               },
+               "max_sessions" => %{"from" => 4, "to" => nil}
+             }
+
+      # What a put of the same writes is the same diff.
+      assert {:ok, put} =
+               Admin.profile_put(Admin.actor_for(context.root), %{
+                 "name" => "dev",
+                 "image" => "ghcr.io/troupe/worker:2",
+                 "max_sessions" => nil
+               })
+
+      assert put.changes == changes
+    end
   end
 
   # -- helpers ----------------------------------------------------------------

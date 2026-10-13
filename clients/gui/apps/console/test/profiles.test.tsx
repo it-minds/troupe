@@ -114,7 +114,8 @@ describe("the editor", () => {
     button("Preview")!.click();
     await waitFor(() => says("What will happen"), "the preview");
     expect(says("spec.egress.fqdns")).toBe(true);
-    // The plane's diff, as far as the write sends it: not its replicas, nor the name.
+    // The plane's diff, of the stored profile with the write laid over it: not its
+    // replicas, which no write sends, nor the name, which says which profile.
     expect(says("replicas:")).toBe(false);
     expect(says("Applying changes the cluster now.")).toBe(true);
     expect(says("spec.sessionsPerPod is the plane's to write")).toBe(true);

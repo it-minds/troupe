@@ -30,7 +30,9 @@
 // fake worker does: a test that passes against a fake that agrees with the client by
 // construction has proved nothing.
 
+import { existsSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
 import { FakeAgents, agentHash, checkAgent } from "./agents.js";
@@ -455,24 +457,30 @@ const OFFERS: Record<string, Array<Record<string, unknown>>> = {
 };
 
 /**
- * The provider types a screen offers, as the daemon's `config.get` and `setup.get` say
- * (troupe #658): `Troupe.Protocol.ProviderTypes.wire/0`'s answer at this version.
+ * The provider types a screen offers, and the ways `setup.get` says a provider may be set
+ * up (every type, then the two gateways), as the daemon's `config.get` and `setup.get`
+ * carry them (troupe #658). Read from `protocol/schema/config/provider-types.json`, which
+ * `mix troupe.config.schema` writes from `Troupe.Protocol.ProviderTypes` and CI holds to
+ * it, rather than kept here as a copy that could drift from the daemon's. Found from the
+ * directory the tests run in, since a page's test environment gives `import.meta.url` as
+ * no file.
  */
-export const PROVIDER_TYPES: Array<Record<string, unknown>> = [
-  { name: "anthropic", label: "Anthropic", summary: "Claude, at Anthropic's own endpoint, with a key from console.anthropic.com.", url: "own", default_url: "https://api.anthropic.com", url_example: null, key: "required", key_var: "ANTHROPIC_API_KEY" },
-  { name: "openai", label: "OpenAI", summary: "GPT, at OpenAI's own endpoint, with a key from platform.openai.com.", url: "own", default_url: "https://api.openai.com", url_example: null, key: "required", key_var: "OPENAI_API_KEY" },
-  { name: "ollama", label: "Ollama", summary: "Models you run yourself, on an Ollama server on this computer or your network. No key, and nothing leaves that server.", url: "server", default_url: "http://localhost:11434", url_example: null, key: "none", key_var: null },
-  { name: "openrouter", label: "OpenRouter", summary: "Many vendors' models behind one key from openrouter.ai, each priced as OpenRouter lists it.", url: "own", default_url: "https://openrouter.ai/api/v1", url_example: null, key: "required", key_var: "OPENROUTER_API_KEY" },
-  { name: "azure_openai", label: "Azure OpenAI", summary: "OpenAI's models in your own Azure resource, at its address, with its key. A model is a deployment's name.", url: "required", default_url: null, url_example: "https://<resource>.openai.azure.com", key: "required", key_var: null },
-  { name: "gemini", label: "Gemini", summary: "Google's Gemini models, through the Gemini API, with a key from aistudio.google.com.", url: "own", default_url: "https://generativelanguage.googleapis.com/v1beta/openai", url_example: null, key: "required", key_var: "GEMINI_API_KEY" },
-];
+const PROVIDERS = JSON.parse(readFileSync(inRepository("protocol/schema/config/provider-types.json"), "utf8")) as {
+  types: Array<Record<string, unknown>>;
+  kinds: Array<Record<string, unknown>>;
+};
 
-/** The ways `setup.get` says a provider may be set up: every type, then the two gateways. */
-export const SETUP_KINDS: Array<Record<string, unknown>> = [
-  ...PROVIDER_TYPES.map(({ name, ...rest }) => ({ id: name, provider: name, ...rest })),
-  { id: "gateway", provider: "openai", label: "An OpenAI-compatible gateway", summary: "Anything speaking Chat Completions at a URL of yours: vLLM, LM Studio, a company gateway. Some want no key.", url: "required", default_url: null, url_example: "https://llm-gw.example/v1", key: "optional", key_var: null },
-  { id: "litellm", provider: "openai", label: "A LiteLLM proxy", summary: "A LiteLLM proxy at its URL. The one gateway that says what each model costs.", url: "required", default_url: null, url_example: "https://llm-gw.example/v1", key: "optional", key_var: null },
-];
+function inRepository(path: string): string {
+  for (let dir = process.cwd(); ; dir = dirname(dir)) {
+    const file = join(dir, path);
+    if (existsSync(file)) return file;
+    if (dirname(dir) === dir) throw new Error(`${path} is above none of the directories from ${process.cwd()}: run in the repository`);
+  }
+}
+
+export const PROVIDER_TYPES: Array<Record<string, unknown>> = PROVIDERS.types;
+
+export const SETUP_KINDS: Array<Record<string, unknown>> = PROVIDERS.kinds;
 
 function reply(ws: WebSocket, id: unknown, result: unknown, error?: unknown): void {
   ws.send(JSON.stringify(error ? { jsonrpc: "2.0", id, error } : { jsonrpc: "2.0", id, result }));

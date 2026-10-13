@@ -15,7 +15,8 @@ defmodule Mix.Tasks.Troupe.Index.Rebuild do
   object metadata, so this needs no key and reads nothing it is not allowed to read.
 
   Safe to run against a populated index: rows are overwritten from storage rather than
-  duplicated, and a session with a tombstone is left erased.
+  duplicated, and a session with a tombstone is left erased. A removed person's sessions
+  stay their tombstone's, read-only, though the manifest names the subject they had.
   """
 
   use Mix.Task

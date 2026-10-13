@@ -23,6 +23,7 @@ defmodule Troupe.Plane.Index do
 
   alias Troupe.ObjectStore
   alias Troupe.Plane.{Erasure, Identity, Repo, Sessions}
+  alias Troupe.Plane.Identity.Tombstone
   alias Troupe.Plane.Sessions.Anchor
   alias Troupe.Sessions.Storage
 
@@ -136,16 +137,18 @@ defmodule Troupe.Plane.Index do
     existing = session_id |> Sessions.get() |> existing_fields()
     {epoch, last_seq, head_hash} = position(manifest, List.last(chain))
     kind = manifest["kind"] || existing[:kind] || "team"
+    {owner_subject, owner_id} = owner(manifest, existing)
 
     {:ok,
      %{
        id: session_id,
        kind: kind,
-       owner_subject: manifest["owner_subject"] || existing[:owner_subject],
-       owner_id: owner_id(manifest["owner_subject"]) || existing[:owner_id],
+       owner_subject: owner_subject,
+       owner_id: owner_id,
        # Nothing is running after a rebuild, by definition: this index was just
-       # reconstructed from storage and no pod has been told about any of it.
-       state: "dormant",
+       # reconstructed from storage and no pod has been told about any of it. A session
+       # that was read-only stays so, and a removed person's is.
+       state: state(owner_subject, existing),
        epoch: epoch,
        worker_id: nil,
        last_seq: last_seq,
@@ -205,6 +208,31 @@ defmodule Troupe.Plane.Index do
       })
       |> Repo.insert(on_conflict: :nothing, conflict_target: [:session_id, :epoch, :last_seq])
     end)
+  end
+
+  # Whose a session is. The manifest names the subject its owner had, and a removed
+  # person's sessions are their tombstone's marker's instead, and read-only: a row that says
+  # so keeps it, and with no row, one last written no later than the removal is the
+  # tombstone's. Either way nobody who later arrives under the subject is given them.
+  defp owner(manifest, existing) do
+    subject = manifest["owner_subject"]
+
+    cond do
+      Tombstone.parse_marker(existing[:owner_subject]) != :error ->
+        {existing[:owner_subject], nil}
+
+      marker = Identity.removed_owner(subject, written_at(manifest)) ->
+        {marker, nil}
+
+      true ->
+        {subject || existing[:owner_subject], owner_id(subject) || existing[:owner_id]}
+    end
+  end
+
+  defp state(owner_subject, existing) do
+    if existing[:state] == "read_only" or Tombstone.parse_marker(owner_subject) != :error,
+      do: "read_only",
+      else: "dormant"
   end
 
   # `nil` for a session the index has never heard of, so every lookup below is a plain

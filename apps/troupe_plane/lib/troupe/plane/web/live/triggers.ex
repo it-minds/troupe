@@ -167,8 +167,9 @@ defmodule Troupe.Plane.Web.Live.Triggers do
     end
   end
 
-  # The two sources a form can express. A webhook needs no field of its own — its URL and
-  # key are minted when it is made — and anything else is a document somebody writes. The
+  # The two sources a form can express. A webhook needs no field of its own — it has no key
+  # until one is made on its row, which is when its URL and key are shown — and anything
+  # else is a document somebody writes. The
   # zone is `tz`, as everywhere else a trigger is written down: saved as `timezone` it was
   # read by nothing, and the trigger fired in UTC whatever the field said.
   defp source_from(%{"kind" => "webhook"}), do: %{"kind" => "webhook"}
@@ -321,8 +322,8 @@ defmodule Troupe.Plane.Web.Live.Triggers do
           <label for="new-trigger-cron">Schedule</label>
           <input id="new-trigger-cron" name="cron" placeholder="0 3 * * 1-5" autocomplete="off" />
           <p class="field-help">
-            Five fields, in UTC. Ignored for a webhook, whose URL and key are minted when it
-            is made and shown once.
+            Five fields, in UTC. Ignored for a webhook, which has no key until you make one
+            with make a key on its row below; its URL and key are shown then, once.
           </p>
 
           <label for="new-trigger-timezone">Timezone</label>

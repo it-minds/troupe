@@ -733,7 +733,7 @@ export function ProfileEditor({
         admin.previewProfile(draft).then(
           (answer) => {
             setAsking(false);
-            const lines = sentLines(answer.changes, draft);
+            const lines = linesOf(answer.changes);
             setPreview({ lines, effects: effectsOf(answer.policy, answer.mode, draft, detail, lines) });
           },
           (e: unknown) => {
@@ -932,18 +932,6 @@ const SERVER_HINTS: Record<(typeof SERVER_FIELDS)[number], string> = {
   header: "Where the token goes. Empty is authorization.",
   timeoutMs: "Empty is 30000.",
 };
-
-/**
- * The plane's diff, as far as this write sends it. The preview compares the profile as it
- * is with the write as sent, so what the plane writes itself (its replicas, its sessions
- * per pod) and the name, which a write always carries, would read as changing when they
- * do not; they are left out.
- */
-function sentLines(changes: Record<string, { from: unknown; to: unknown }>, draft: ProfileWrite): DiffLine[] {
-  const sent = new Set([...Object.keys(draft), "config_bundle_channel"]);
-  sent.delete("name");
-  return linesOf(changes).filter((l) => sent.has(l.field.split(".")[0]!));
-}
 
 function effectsOf(policy: { "allowed?": boolean; violations: unknown[] }, mode: string, draft: ProfileWrite, detail: ProfileDetail | null, lines: DiffLine[]): string[] {
   const out: string[] = [];

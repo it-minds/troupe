@@ -730,18 +730,23 @@ defmodule Troupe.Plane.Admin do
 
   A name another team already has is refused unless `link` is true: under it, the group
   would be linked into that team and the team's settings changed, which is a different act
-  from making a team. Enabling a team's own group again is the same team, as it always was.
+  from making a team. Enabling a team's own group again is the same team, as it always was,
+  and changes none of its settings: one sent that differs from the team's is refused as
+  well, unless `link` is true, since changing a team is `team_update/3`. A team that is
+  there already takes only the settings sent; the plane's defaults are a new team's.
   """
   @spec team_enable(actor(), String.t(), map(), boolean() | nil) :: result()
   def team_enable(actor, group_id, attrs \\ %{}, link \\ false) do
     with :ok <- require_platform_admin(actor),
          %Identity.Group{} = group <- Identity.get_group(group_id),
-         :ok <- not_another_team(group, attrs, link == true) do
+         {:ok, existing} <- not_another_team(group, attrs, link == true),
+         :ok <- same_settings(existing, group, attrs, link == true) do
       # Its name and its settings. The group it is enabled from, and when and by whom, are
       # the record of this call, written by it.
+      sent = settable(attrs, ["name" | @team_keys])
+
       attrs =
-        team_defaults()
-        |> Map.merge(settable(attrs, ["name" | @team_keys]))
+        if(existing, do: sent, else: Map.merge(team_defaults(), sent))
         |> Map.put("enabled_by", actor.subject)
 
       case Identity.enable_team(group, attrs) do
@@ -767,11 +772,11 @@ defmodule Troupe.Plane.Admin do
 
     case is_binary(name) && Identity.get_team(name) do
       none when none in [nil, false] ->
-        :ok
+        {:ok, nil}
 
       %Identity.Team{id: id} = team ->
         if link? or id in drawing do
-          :ok
+          {:ok, team}
         else
           {:error,
            Error.new(:conflict, %{
@@ -783,6 +788,37 @@ defmodule Troupe.Plane.Admin do
                  "mean that, or give the team another name."
            })}
         end
+    end
+  end
+
+  # Enabling a team's group again changes nothing: a setting sent that is not the team's
+  # already is refused by name rather than written without a word, as cast by the team's
+  # own changeset, so `"5"` from a form and `5` from JSON are the same answer.
+  defp same_settings(nil, _group, _attrs, _link?), do: :ok
+  defp same_settings(_team, _group, _attrs, true), do: :ok
+
+  defp same_settings(team, group, attrs, false) do
+    changed =
+      team
+      |> Identity.Team.changeset(settable(attrs, @team_keys))
+      |> Map.get(:changes)
+      |> Map.keys()
+      |> Enum.map(&to_string/1)
+      |> Enum.sort()
+
+    if changed == [] do
+      :ok
+    else
+      {:error,
+       Error.new(:conflict, %{
+         team: team.name,
+         group: group.external_id,
+         settings: changed,
+         reason:
+           "#{team.name} is a team already, and enabling #{group.external_id} again changes " <>
+             "none of its settings: change #{Enum.join(changed, ", ")} with " <>
+             "admin.team.update, or send link: true to mean it here."
+       })}
     end
   end
 
@@ -1518,10 +1554,28 @@ defmodule Troupe.Plane.Admin do
       {:ok,
        %{
          policy: Provision.verdict(attrs),
-         changes: Audit.diff(comparable(current), attrs |> comparable_attrs() |> with_channel()),
+         changes: Audit.diff(comparable(current), as_written(current, attrs)),
          mode: Provision.mode()
        }}
     end
+  end
+
+  # The stored profile with the write laid over it, which is what a put leaves: what the
+  # write does not send stays as it is, the name included, which a write carries to say
+  # which profile and does not change. The write alone against the whole row read the
+  # row's every other column as going away.
+  defp as_written(current, attrs) do
+    sent =
+      attrs
+      |> comparable_attrs()
+      |> Map.take(@profile_keys)
+      |> with_channel()
+      |> Map.delete("name")
+
+    current
+    |> comparable()
+    |> Map.new(fn {key, value} -> {to_string(key), value} end)
+    |> Map.merge(sent)
   end
 
   # -- the platform's own settings --------------------------------------------

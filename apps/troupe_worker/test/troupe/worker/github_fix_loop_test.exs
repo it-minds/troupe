@@ -439,6 +439,71 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
     finish()
   end
 
+  # GitHub moved the branch and the plane never recorded it: on the tip, every push after
+  # that was refused as going over commits the session did not push, for good.
+  @tag grants: %{"contents" => "write", "pull_requests" => "write"}
+  test "a push GitHub took and the plane did not record is recorded by the next one", context do
+    {:ok, _} = activate_with_repository(context)
+    ws = context.workspace
+    id = context.session_id
+
+    # The first push, and the plane's record of it lost.
+    File.write!(Path.join(ws, "FIX.md"), "one\n")
+    before_first = PlaneSessions.get(id).github
+    assert {:ok, first} = GitHub.push(id, ws, "One", "troupe/kept")
+    forget_last_push(id, before_first)
+
+    # The next push names the same branch: the one GitHub has is this session's, by its
+    # trailer and its tree, so it is recorded and built on.
+    File.write!(Path.join(ws, "FIX.md"), "two\n")
+    assert {:ok, second} = GitHub.push(id, ws, "Two", "troupe/kept")
+    {parent, 0} = git(context.upstream, ["rev-parse", second.commit <> "^"])
+    assert String.trim(parent) == first.commit
+
+    # And a later push whose record was lost, the same.
+    after_second = PlaneSessions.get(id).github
+    File.write!(Path.join(ws, "FIX.md"), "three\n")
+    assert {:ok, third} = GitHub.push(id, ws, "Three", nil)
+    forget_last_push(id, after_second)
+
+    File.write!(Path.join(ws, "FIX.md"), "four\n")
+    assert {:ok, fourth} = GitHub.push(id, ws, "Four", nil)
+    {parent, 0} = git(context.upstream, ["rev-parse", fourth.commit <> "^"])
+    assert String.trim(parent) == third.commit
+    assert PlaneSessions.get(id).github["commit"] == fourth.commit
+
+    # A person's commit on the branch is still nobody's to build on.
+    theirs = commit_on(context.upstream, "refs/heads/troupe/kept", "a person's change")
+    File.write!(Path.join(ws, "FIX.md"), "five\n")
+    assert {:error, why} = GitHub.push(id, ws, "Five", nil)
+    assert why =~ "commits on GitHub this session did not push"
+    {head, 0} = git(context.upstream, ["rev-parse", "refs/heads/troupe/kept"])
+    assert String.trim(head) == theirs
+    finish()
+  end
+
+  # The clone could not tell the plane where it started, and only a warning was logged: on
+  # the tip the session could never push.
+  @tag grants: %{"contents" => "write", "pull_requests" => "write"}
+  test "a session whose starting commit the plane never took takes it at its first push",
+       context do
+    {:ok, _} = activate_with_repository(context)
+    ws = context.workspace
+    id = context.session_id
+
+    {:ok, _} =
+      Repo.update(Ecto.Changeset.change(PlaneSessions.get(id), github: %{}))
+
+    File.write!(Path.join(ws, "FIX.md"), "one\n")
+    assert {:ok, pushed} = GitHub.push(id, ws, "One", "troupe/late-base")
+
+    {main, 0} = git(context.upstream, ["rev-parse", "refs/heads/main"])
+    {parent, 0} = git(context.upstream, ["rev-parse", pushed.commit <> "^"])
+    assert String.trim(parent) == String.trim(main)
+    assert PlaneSessions.get(id).github["base"] == String.trim(main)
+    finish()
+  end
+
   test "a hostile issue body that asks to push elsewhere, merge, or print the token gets " <>
          "none of it",
        context do
@@ -611,6 +676,12 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
       Process.sleep(300)
       PlaneSessions.get(session_id).worker_id == pod.id
     end)
+  end
+
+  # The plane's record as it was before a push, as if recording that push had failed after
+  # GitHub took it.
+  defp forget_last_push(session_id, record) do
+    {:ok, _} = Repo.update(Ecto.Changeset.change(PlaneSessions.get(session_id), github: record))
   end
 
   # A commit somebody else made on a branch, as a person pushing to it would.

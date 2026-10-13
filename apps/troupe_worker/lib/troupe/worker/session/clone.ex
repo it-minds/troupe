@@ -84,8 +84,8 @@ defmodule Troupe.Worker.Session.Clone do
 
   # The commit the clone checked out is what the session's first push builds on, so the
   # plane keeps it: read now, before the agent has run anything in the tree. A plane that
-  # cannot take it leaves the session able to work and unable to push, which its first
-  # push says.
+  # cannot take it now is asked again by the session's first push, which reads it from the
+  # workspace's history then.
   defp record_base(session_id, root, opts) do
     with {:ok, base} <- Tree.head(root),
          {:ok, _record} <- GitHub.record(session_id, %{"base" => base}, opts) do

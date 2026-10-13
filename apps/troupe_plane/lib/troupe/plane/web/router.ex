@@ -537,7 +537,7 @@ defmodule Troupe.Plane.Web.Router do
         end
 
       _ ->
-        scim_put_user(conn, 200)
+        scim_replace_user(conn, id)
     end
   end
 
@@ -603,6 +603,16 @@ defmodule Troupe.Plane.Web.Router do
     case SCIM.put_user(conn.body_params) do
       {:ok, user} -> scim_resource(conn, status, SCIM.render_user(user))
       {:error, reason} -> send_json(conn, 400, %{"status" => "400", "detail" => inspect(reason)})
+    end
+  end
+
+  # A replace of somebody the plane has (RFC 7644 §3.5.1), so an id that names nobody is a
+  # 404, as a GET of it is. A push is keyed on its subject, and without this a provider
+  # replacing a person it had deleted made them again.
+  defp scim_replace_user(conn, id) do
+    case Identity.get_user_by_id(id) do
+      nil -> scim_error(conn, :not_found)
+      _user -> scim_put_user(conn, 200)
     end
   end
 

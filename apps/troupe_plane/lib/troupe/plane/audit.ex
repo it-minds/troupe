@@ -228,14 +228,16 @@ defmodule Troupe.Plane.Audit do
   @doc """
   Replace anything that looks like a secret value with a marker.
 
-  The plane does not hold secret values, so this should never fire. It firing is a bug
-  report, and it says so in the log rather than quietly hiding the thing it caught.
+  The plane does not hold secret values, but names do look like them: an ordinary
+  profile's diff carries `secretRef.key`, an identity's `tokenUrl` and `transitKey`, and
+  each is redacted on every save. So it is said at `debug`, where somebody looking for
+  what was caught finds it, and not as an error on work that is going as it should.
   """
   @spec redact(term()) :: term()
   def redact(%{} = map) when not is_struct(map) do
     Map.new(map, fn {key, value} ->
       if suspicious?(key) and is_binary(value) and value != "" do
-        Logger.error("troupe plane: an audit detail carried #{inspect(key)}, which was redacted")
+        Logger.debug("troupe plane: an audit detail carried #{inspect(key)}, which was redacted")
         {key, "[redacted]"}
       else
         {key, redact(value)}

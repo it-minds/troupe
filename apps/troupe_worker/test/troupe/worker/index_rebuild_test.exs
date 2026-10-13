@@ -147,6 +147,39 @@ defmodule Troupe.Worker.IndexRebuildTest do
     assert PlaneSessions.get(context.session_id).epoch != 9
   end
 
+  # A removed person's sessions are owned by their tombstone's marker and read-only
+  # (Decision 899). The manifest still names the subject they had, and a rebuild that
+  # trusted it handed the sessions back to that subject, which is whoever arrives under it
+  # next.
+  test "a removed person's session keeps the tombstone's marker through a rebuild", context do
+    _original = run_a_real_session(context)
+    {:ok, tombstone, _effect} = Identity.remove_user(context.user, "scim")
+    marker = Identity.Tombstone.marker(tombstone)
+
+    # Somebody new under the same subject.
+    {:ok, newcomer} =
+      Identity.upsert_user(%{
+        subject: "ada@example.test",
+        email: "ada@example.test",
+        display_name: "Ada"
+      })
+
+    # Over the row the removal left.
+    assert {:ok, _} = Index.rebuild(store: context.store)
+    rebuilt = PlaneSessions.get(context.session_id)
+    assert rebuilt.owner_subject == marker
+    assert rebuilt.owner_id == nil
+    assert rebuilt.state == "read_only"
+
+    # And with no row at all: the manifest was last written before the removal.
+    PlaneSessions.delete(context.session_id)
+    assert {:ok, _} = Index.rebuild(store: context.store)
+    rebuilt = PlaneSessions.get(context.session_id)
+    assert rebuilt.owner_subject == marker
+    refute rebuilt.owner_id == newcomer.id
+    assert rebuilt.state == "read_only"
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   # A session that really ran: real turns, real segments, real seals, then dormancy —

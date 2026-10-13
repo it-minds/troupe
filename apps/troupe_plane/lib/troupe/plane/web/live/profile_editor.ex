@@ -338,10 +338,12 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       "name" => fields["name"],
       "image" => fields["image"],
       "size_class" => fields["sizeClass"],
-      "max_sessions" => to_integer(fields["maxSessions"]),
       "warm_workers" => to_integer(fields["warmWorkers"]) || 0,
       "spec" => spec
     })
+    # Always sent, blank as none: the field says "empty is no ceiling", and dropped when
+    # blank, a ceiling once set could never be taken away from this page.
+    |> Map.put("max_sessions", to_integer(fields["maxSessions"]))
   end
 
   defp servers_for(servers) do

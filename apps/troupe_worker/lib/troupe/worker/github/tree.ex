@@ -39,6 +39,21 @@ defmodule Troupe.Worker.GitHub.Tree do
     with {:ok, out} <- git(root, ["rev-parse", "--verify", "HEAD^{commit}"]), do: name(out)
   end
 
+  @doc """
+  The commit the clone started from: the root of `HEAD`'s history, which in a clone of
+  depth one is the commit it checked out, whatever was committed on it since. More than one
+  root is a history this cannot read a start from.
+  """
+  @spec start(Path.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def start(root) do
+    with {:ok, out} <- git(root, ["rev-list", "--max-parents=0", "HEAD"]) do
+      case String.split(out, "\n", trim: true) do
+        [one] -> name(one)
+        roots -> {:error, "HEAD's history has #{length(roots)} roots, not one"}
+      end
+    end
+  end
+
   @doc "The tree of `commit`, which must be in the workspace's repository."
   @spec tree_of(Path.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def tree_of(root, commit) do

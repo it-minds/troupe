@@ -44,9 +44,12 @@ defmodule Troupe.E2E.UpgradeTest do
     before = identity(namespace, pod)
     epoch = Plane.call!("session.get", %{"session_id" => id})["epoch"]
 
-    # The upgrade. Not a no-op: a value is changed so that every template renders
-    # differently and Helm has something to apply, which is what an upgrade in anger
-    # looks like and what a no-op would not test.
+    # The upgrade: a new release revision, with its pre-upgrade hooks run again. The value
+    # set here, `commonLabels`, is one no template reads, so every object renders as it did
+    # and nothing the chart deploys changes; what this tests is that an upgrade as such,
+    # hooks included, leaves a running session where it was. It does not test a change to a
+    # template being applied: no value every template renders exists to change, and a
+    # change that rolled the plane or the operator would be a different test.
     #
     # On the release's own values, as a person upgrading keeps them. `scripts/remote-up`
     # installs with the model gateway's host set into the policy's allowed egress; an

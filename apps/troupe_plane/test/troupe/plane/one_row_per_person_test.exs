@@ -137,6 +137,33 @@ defmodule Troupe.Plane.OneRowPerPersonTest do
       assert [%Tombstone{kms_name: @sub}] = Repo.all(Tombstone)
     end
 
+    # A PUT was keyed on the body and never read the id in its path, so a provider
+    # replacing somebody it had deleted made them again under the id nobody has.
+    test "a PUT to a removed person's id is a 404, as a GET is, and makes nobody", context do
+      assert {201, pushed, _} = scim(context, :post, "/scim/v2/Users", ada())
+      assert {204, nil, _} = scim(context, :delete, path(pushed))
+
+      assert {404, %{"status" => "404"}, _} = scim(context, :put, path(pushed), ada())
+      assert {404, _, _} = scim(context, :put, "/scim/v2/Users/" <> Ecto.UUID.generate(), ada())
+      assert Identity.list_users() == []
+    end
+
+    # A removed person's sessions are owned by `removed:<id>`, and a principal is
+    # `svc:<team>/<name>`. A provider whose subject claim carried either would sign in as
+    # the owner of what those name.
+    test "a sign-in under a subject in the plane's own namespaces is refused", context do
+      assert {201, pushed, _} = scim(context, :post, "/scim/v2/Users", ada())
+      assert {204, nil, _} = scim(context, :delete, path(pushed))
+      [tombstone] = Repo.all(Tombstone)
+
+      for subject <- [Tombstone.marker(tombstone), "svc:engineering/nightly"] do
+        assert {:error, {:reserved_subject, "sub"}} =
+                 Login.from_claims(Map.put(claims(), "sub", subject))
+      end
+
+      assert Identity.list_users() == []
+    end
+
     test "a group's delete removes it and disables the team drawn from it alone", context do
       %{team: engineering} = context
       eng = Identity.get_group("g-eng")
