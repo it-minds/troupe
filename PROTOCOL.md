@@ -763,7 +763,7 @@ at rest: the session is `dormant` afterwards, as one that went to sleep is.
 
 #### `session.archive` → `{"session_id", "state": "dormant"}`; stops the session's agents and makes it dormant. On a daemon the log stays where it is; on a plane the pod keeps no copy of a dormant session.
 
-#### `session.pin` / `session.unpin` → `{"session_id", "pinned"}`; a pinned session is exempt from the plane's retention. A daemon has no retention: it marks a running session pinned in its listing, and the mark does not outlive the session's going dormant.
+#### `session.pin` / `session.unpin` → `{"session_id", "pinned"}`; a pinned session is exempt from the plane's retention. A daemon has no retention: it marks the session pinned in its listing, running or dormant, and keeps the mark in a file beside the session's log, so it outlives the session's going dormant and the daemon's stopping. A session it has no log of is `not_found`.
 
 #### `session.erase` → `{"session_id", "erased", "state"}`; irreversible.
 
@@ -1168,6 +1168,12 @@ Needs `control`: putting a file into a workspace is steering the session. The wr
 recorded as an `fs_changed` event, carrying the file's `hash` and `size`, whose actor is
 the client that uploaded it, not the session. `scratch:/` is read-only to it: only the
 agent's `show` and `patch` write the scratchpad.
+
+Where it lands is `session:/`, the directory the session works in (Decision 896). On a pod
+that is the session's own, erased with it. On a daemon it is the checkout the session
+was started in: git sees the file, another session in that checkout sees it, and erasing
+the session leaves it there. A `path` whose prefix names no mount (`plans:/x`) is
+`forbidden`, with a `reason` naming the ones there are, as every file tool refuses it.
 
 #### `scratch.list`
 ```json
@@ -2034,6 +2040,9 @@ call the pod sends again after a drop (section 8) is answered from the first rat
 made twice.
 
 #### `workspace.recent` → `{"workspaces": [{"path", "last_used_at", "sessions"}]}`
+
+Most recently used first, at most `limit` of them (20 where it is absent).
+
 #### `workspace.search`
 ```json
 {"query": "trou", "limit": 20}
@@ -2504,17 +2513,17 @@ that team.
 | `admin.profile.delete` | platform | removes one; `managed_by_gitops` in gitops mode, except for a profile the cluster has no resource for, whose row alone it deletes |
 | `admin.pod.drain` | platform | drains a pod, returning what it held |
 | `admin.teams.list` | either | teams, with grants, budgets, volumes and retention |
-| `admin.team.enable` | platform | makes an IdP group a team |
+| `admin.team.enable` | platform | makes an IdP group a team; a name another team has is `conflict` unless `link` is true, which links the group into that team |
 | `admin.team.update` | either | budget, retention, default visibility, volume; `allow_unenforced_workers` a platform admin's; keys it does not declare, a team's name and group among them, are left alone |
 | `admin.team.grant` / `admin.team.revoke` | platform | a team's access to a profile |
-| `admin.sessions.list` | either | session *metadata*, never content: with the `repository` it was created with and `github`, what it did there (as `admin.runs.list` has it) |
+| `admin.sessions.list` | either | session *metadata*, never content: with the `repository` it was created with and `github`, what it did there (as `admin.runs.list` has it); `filter.team` narrows to one team, another team's name `not_found` for a team admin |
 | `admin.session.erase` | either | erases one, for authorised roles |
 | `admin.bundles.list` | either | every version of a channel, each with its `summary` (names of agents, skills and MCP servers) |
 | `admin.bundle.get` | either | one version in full: the document, its `detail` (agents with mode and skills, skills with files, MCP servers with the Secret to create), and adoption per profile |
 | `admin.bundle.validate` | platform | checks a document the way publishing will, without publishing; `{ok: true, summary, hash}` or `invalid_params` with `data.errors` |
 | `admin.bundle.publish` / `admin.bundle.retire` | platform | publish a version — refused as `invalid_params` with `data.errors`, one sentence per problem, when the document is malformed or names an MCP host outside `allowedEgress` — or retire one |
 | `admin.mcp.check` | either | `{host, allowed}`: whether the cluster policy lets a pod reach an MCP server's host |
-| `admin.audit.list` | either | who changed what, with diffs, each change keyed by its path (`spec.llm.model`) |
+| `admin.audit.list` | either | who changed what, with diffs, each change keyed by its path (`spec.llm.model`); a team admin's is the rows about their teams (the team, its triggers, principals and sessions) |
 | `admin.provisioning.mode` | either | `direct` or `gitops`: whether the plane writes profiles to the cluster, or reads them and the triggers from resources a repository holds and refuses to write them |
 | `admin.settings.list` | either | every platform setting with its value, where that value came from (`stored`, `deployed`, `unset`), what changing it does and when it takes effect; a secret is reported as set and never returned |
 | `admin.setting.put` | platform | `{key, value}` — parsed against the setting's declared type and refused if it does not fit, or if the deployment owns it |
@@ -2548,7 +2557,7 @@ that team.
 | `admin.integrations.list` | either | MCP servers carried by more than one profile, every host anything here dials with whether the cluster policy allows it, and each trigger's notification target |
 | `admin.connections.list` | either | who has connected a personal credential to which person-mode server, and whose identity each session carries |
 | `admin.run.review` | either | marks the run behind a session as looked at, by whoever asks |
-| `admin.audit.verify` | platform | checks the audit trail's hash chain and names the first row that does not verify |
+| `admin.audit.verify` | platform | checks the audit trail's hash chain: `result` is `ok`, or the first row that does not verify with its `reason` (`altered`, `chain_broken`) |
 | `admin.setting.effective` | either | for a setting decided at more than one rung: the value in force, the rung that decided it, and every rung that had an opinion |
 | `admin.person.budget` | platform | sets or clears a person's own monthly spend ceiling, in millionths, across every team they are in |
 | `admin.budget.explain` | platform | every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, its period, and the rung that set it |

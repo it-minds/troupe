@@ -47,7 +47,14 @@ defmodule Troupe.E2E.UpgradeTest do
     # The upgrade. Not a no-op: a value is changed so that every template renders
     # differently and Helm has something to apply, which is what an upgrade in anger
     # looks like and what a no-op would not test.
-    assert {output, 0} = World.helm(["upgrade", "troupe", "charts/troupe", "--namespace", World.namespace(), "--values", "dev/kind/values.yaml", "--set", "commonLabels.e2e=#{System.unique_integer([:positive])}", "--wait", "--timeout", "5m"]),
+    #
+    # On the release's own values, as a person upgrading keeps them. `scripts/remote-up`
+    # installs with the model gateway's host set into the policy's allowed egress; an
+    # upgrade from `dev/kind/values.yaml` alone put the placeholder back, the TroupePolicy
+    # stopped allowing the endpoint the shared profile calls, and every later write to that
+    # WorkerProfile (a scale-down, a finished drain) was refused at admission, leaving the
+    # profile where it stood for every test after this one.
+    assert {output, 0} = World.helm(["upgrade", "troupe", "charts/troupe", "--namespace", World.namespace(), "--reuse-values", "--set", "commonLabels.e2e=#{System.unique_integer([:positive])}", "--wait", "--timeout", "5m"]),
            "helm upgrade failed"
 
     assert output =~ "STATUS: deployed"

@@ -615,6 +615,14 @@ defmodule Troupe.Remote.Translate do
       type when type in ["session.tainted", "session_tainted"] ->
         {[emit.(:remote_note, %{text: tainted(data)})], memory}
 
+      # Written beside the taint each time somebody's tools are offered, and when their
+      # connection takes them away: whose they are and which, as a sentence.
+      "tools_registered" ->
+        {[emit.(:remote_note, %{text: registered(actor_of(event), data)})], memory}
+
+      "tools_unregistered" ->
+        {[emit.(:remote_note, %{text: unregistered(data)})], memory}
+
       other when is_binary(other) ->
         {[emit.(:remote_note, %{text: generic(other, data)})], note_unknown(other, memory)}
 
@@ -1008,6 +1016,26 @@ defmodule Troupe.Remote.Translate do
       tools -> "#{said}: #{Enum.join(tools, ", ")}"
     end
   end
+
+  defp registered(who, data) do
+    who = if is_binary(who), do: who, else: "somebody"
+
+    case tool_names(data) do
+      [] -> "#{who} offered the session tools from their own machine"
+      tools -> "#{who} offered the session #{Enum.join(tools, ", ")}; it can call them now"
+    end
+  end
+
+  defp unregistered(data) do
+    why = if is_binary(data["reason"]), do: ": " <> data["reason"], else: ""
+
+    case tool_names(data) do
+      [] -> "tools from somebody's machine no longer offered to the session" <> why
+      tools -> "#{Enum.join(tools, ", ")} no longer offered to the session" <> why
+    end
+  end
+
+  defp tool_names(data), do: Enum.filter(List.wrap(data["tools"]), &is_binary/1)
 
   # How many of each kind, then each reason once with the files it covers: a worktree's
   # one reason fits every file, while a pod's names the file it is about. An empty list

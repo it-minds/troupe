@@ -169,11 +169,11 @@ defmodule Troupe.Plane.Web.Live.Audit do
   # Two failures, said apart because the repairs differ: a row whose content no longer
   # hashes to what it claims has been altered, and a row whose predecessor is not the one
   # that was there means something was removed or inserted.
-  defp reason_of({:error, %{reason: :altered}}), do: "altered"
-  defp reason_of({:error, %{reason: :chain_broken}}), do: "a row is missing or inserted"
+  defp reason_of(%{reason: :altered}), do: "altered"
+  defp reason_of(%{reason: :chain_broken}), do: "a row is missing or inserted"
   defp reason_of(_other), do: "unverified"
 
-  defp bad_row({:error, row}), do: row
+  defp bad_row(%{} = row), do: row
 
   defp short(nil), do: "—"
   defp short("sha256:" <> hex), do: String.slice(hex, 0, 12)

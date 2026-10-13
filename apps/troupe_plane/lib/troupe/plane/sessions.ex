@@ -809,6 +809,9 @@ defmodule Troupe.Plane.Sessions do
       {:profile, profile}, acc ->
         from(s in acc, where: s.profile == ^profile)
 
+      {:team_id, team_id}, acc ->
+        from(s in acc, where: s.team_id == ^team_id)
+
       {:kind, kind}, acc ->
         from(s in acc, where: s.kind == ^kind)
 

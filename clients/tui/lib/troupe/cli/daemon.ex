@@ -10,8 +10,16 @@ defmodule Troupe.CLI.Daemon do
   `troupe-daemon` on the `PATH`.
   """
 
-  @install_sh "curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | sh"
-  @install_ps1 "irm https://raw.githubusercontent.com/it-minds/troupe/main/install.ps1 | iex"
+  # The latest release's installers, downloaded, then run: read first if you like, and
+  # pinned to that release, as the README's quick start gives them.
+  @install_sh [
+    "curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh",
+    "sh install.sh --tui"
+  ]
+  @install_ps1 [
+    "irm https://github.com/it-minds/troupe/releases/latest/download/install.ps1 -OutFile install.ps1",
+    "powershell -ExecutionPolicy Bypass -File .\\install.ps1 -Tui"
+  ]
 
   @port [:binary, :exit_status, :hide, :stderr_to_stdout]
 
@@ -159,10 +167,10 @@ defmodule Troupe.CLI.Daemon do
     """
     troupe-daemon is not installed (not in TROUPE_DAEMON_COMMAND, not on the PATH).
 
-    Install it:
-      #{@install_sh}
-    or on Windows:
-      #{@install_ps1}
+    Install it with the latest release's installer, which you can read before running it:
+      #{Enum.join(@install_sh, "\n  ")}
+    or on Windows, in PowerShell:
+      #{Enum.join(@install_ps1, "\n  ")}
     """
   end
 end

@@ -599,7 +599,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.team.enable",
       function: :team_enable,
       summary:
-        "Make an identity-provider group into a team. Enabling is the only thing Troupe adds to a group: membership stays the provider's.",
+        "Make an identity-provider group into a team. Enabling is the only thing Troupe adds to a group: membership stays the provider's. A name another team already has is refused as conflict unless link is true, because under it the group would be linked into that team and the team's settings changed; enabling a team's own group again is the same team.",
       risk: :write,
       arguments: [
         %Argument{
@@ -614,6 +614,12 @@ defmodule Troupe.Plane.Admin.API do
           description:
             "The team's name, and anything to set at the same time, as in admin.team.update.",
           properties: @team_enable_properties
+        },
+        %Argument{
+          name: "link",
+          type: :boolean,
+          description:
+            "true to link the group into the team that already has the name, changing its settings to those sent. Absent or false refuses that name."
         }
       ]
     },
@@ -808,7 +814,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.audit.verify",
       function: :audit_verify,
       summary:
-        "Check the audit trail's hash chain and name the first row that does not verify: altered content, or a predecessor that is not the one that was there. Rows written before the chain existed are counted as unchained rather than reported as bad.",
+        "Check the audit trail's hash chain and name the first row that does not verify: altered content, or a predecessor that is not the one that was there. result is ok, or that row with its reason (altered or chain_broken). Rows written before the chain existed are counted as unchained rather than reported as bad.",
       risk: :read
     },
     %Method{
@@ -1084,7 +1090,8 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.audit.list",
       function: :audit_list,
-      summary: "Who changed what, newest first, with the diff of each change.",
+      summary:
+        "Who changed what, newest first, with the diff of each change. A team admin reads the rows about the teams they administer (the team, its triggers, principals and sessions); a platform admin reads them all.",
       risk: :read,
       arguments: [
         %Argument{

@@ -337,6 +337,65 @@ defmodule Troupe.Tools.DelegateContractTest do
       refute described =~ "f21 +1"
       assert described =~ "and 2 more"
     end
+
+    # D125: a command whose approval was refused never ran, so it changed nothing and is
+    # not one whose changes went uncounted.
+    test "a refused command is not counted as one that ran" do
+      agent = ["root", "general#1"]
+
+      call = fn id ->
+        [
+          %Event{
+            type: "tool_call_started",
+            agent: agent,
+            data: %{"call_id" => id, "name" => "shell", "args" => %{"command" => "rm -rf x"}}
+          },
+          %Event{
+            type: "approval_requested",
+            agent: agent,
+            data: %{"call_id" => id, "tool" => "shell"}
+          }
+        ]
+      end
+
+      refused =
+        call.("c1") ++
+          [
+            %Event{
+              type: "approval_decided",
+              agent: agent,
+              data: %{"call_id" => "c1", "tool" => "shell", "decision" => "deny"}
+            },
+            %Event{
+              type: "tool_call_completed",
+              agent: agent,
+              data: %{"call_id" => "c1", "ok" => false}
+            }
+          ]
+
+      assert {[], 0} = Writes.of(refused, agent)
+      described = refused |> Writes.changed(agent, "s") |> Writes.describe()
+      assert described == "nothing"
+
+      allowed =
+        call.("c2") ++
+          [
+            %Event{
+              type: "approval_decided",
+              agent: agent,
+              data: %{"call_id" => "c2", "tool" => "shell", "decision" => "allow"}
+            },
+            %Event{
+              type: "tool_call_completed",
+              agent: agent,
+              data: %{"call_id" => "c2", "ok" => true}
+            }
+          ]
+
+      assert {[], 1} = Writes.of(refused ++ allowed, agent)
+      assert Writes.describe(Writes.changed(refused ++ allowed, agent, "s")) =~
+               "what its 1 command changed"
+    end
   end
 
   defp delegate_result(session_id) do

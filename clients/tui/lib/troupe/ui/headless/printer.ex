@@ -164,15 +164,21 @@ defmodule Troupe.UI.Headless.Printer do
   # transient event has none and is never replayed anyway. One durable event can become
   # several local ones, all with its `seq` (`cancelled` is a note and a state), so the
   # type is part of the key, or only the first of them would ever be handled.
-  defp first_time(%{seq: seq, agent_path: path, type: type}, state) when is_integer(seq) do
-    key = {path, seq, type}
+  defp first_time(%{seq: seq, agent_path: path, type: type}, state) when is_integer(seq),
+    do: once({path, seq, type}, state)
 
+  # A branch's window opening carries no `seq`, and comes both ways like a durable event
+  # does; a window opens once, so it is handled once.
+  defp first_time(%{type: :branch_spawned, agent_path: path}, state),
+    do: once({path, :branch_spawned}, state)
+
+  defp first_time(_event, state), do: {:ok, state}
+
+  defp once(key, state) do
     if MapSet.member?(state.seen, key),
       do: :seen,
       else: {:ok, %{state | seen: MapSet.put(state.seen, key)}}
   end
-
-  defp first_time(_event, state), do: {:ok, state}
 
   defp react(event, state) do
     case event do

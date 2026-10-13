@@ -174,7 +174,17 @@ defmodule Troupe.CLIDaemonTest do
 
     assert Troupe.CLI.Daemon.command() == :error
     output = capture_io(:stderr, fn -> assert Troupe.CLI.Daemon.run(["run"]) == 1 end)
-    assert output =~ "install.sh"
+
+    # The release's installers, downloaded and then run, as the README says (D125): not
+    # a script from the main branch piped into a shell.
+    assert output =~
+             "curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh"
+
+    assert output =~ "sh install.sh --tui"
+    assert output =~ "powershell -ExecutionPolicy Bypass -File .\\install.ps1 -Tui"
+    refute output =~ "raw.githubusercontent.com"
+    refute output =~ "| sh"
+    refute output =~ "| iex"
   end
 
   defp alive?(pid), do: match?({_, 0}, System.cmd("kill", ["-0", pid], stderr_to_stdout: true))

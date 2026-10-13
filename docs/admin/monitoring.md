@@ -44,8 +44,10 @@ Every administrative change is an `audit_events` row: `actor`, `action`, `subjec
 `subject_id`, a `detail` diff keyed by dotted path (`spec.llm.model`) and the time. Values
 whose key looks like a secret are redacted. Break-glass writes `admin.breakglass` on success
 and on refusal. A refused change writes nothing. `admin.audit.list` filters by `actor`,
-`kind`, `subject_id` and `limit`, and is **not** team-scoped: a team admin reads
-every team's changes. `admin.audit.verify` checks the trail's integrity.
+`kind`, `subject_id` and `limit`. A team admin reads the rows about the teams they
+administer (the team, its triggers, principals and sessions) and none about the plane as a
+whole; a platform admin reads them all. `admin.audit.verify` checks the trail's integrity
+and answers the first row that does not verify, with its reason.
 
 ## 5. Logs
 

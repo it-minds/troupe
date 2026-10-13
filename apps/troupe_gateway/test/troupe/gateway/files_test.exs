@@ -156,6 +156,27 @@ defmodule Troupe.Gateway.FilesTest do
     assert event.actor.subject == "someone@example.test"
   end
 
+  # #620: a path with a prefix that is no mount here is refused with the ones there are,
+  # rather than taken as a relative path and written as a directory named `plans:`.
+  test "fs.upload to an unknown mount prefix is refused, naming the known ones", context do
+    assert {:error, error} =
+             Dispatch.call(
+               "fs.upload",
+               %{
+                 "session_id" => context.session.id,
+                 "path" => "plans:/plan.md",
+                 "content" => "x"
+               },
+               context(:control)
+             )
+
+    assert error.message == "forbidden"
+    assert error.data.reason =~ "plans: is not a mount"
+    assert error.data.reason =~ "session:/"
+    assert error.data.reason =~ "scratch:/"
+    refute File.exists?(Path.join(context.workspace, "plans:"))
+  end
+
   @tag @native_only
   test "a file removed reaches subscribers with a null hash", context do
     File.write!(Path.join(context.workspace, "doomed.txt"), "here for now")
