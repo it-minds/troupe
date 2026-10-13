@@ -6,9 +6,10 @@ defmodule Troupe.OwnerOnly do
   `File.chmod/2` does nothing on Windows, so a file there has whatever its folder hands
   down, which in `%LOCALAPPDATA%` is the person, `SYSTEM` and the machine's
   administrators. `icacls <file> /inheritance:r /grant:r <user>:F` replaces that with one
-  entry, the person's, as the terminal client does for `credentials.json`. For the files
-  that hold a secret: the daemon's port and token (`daemon.json`), and a person's sign-ins
-  to their own MCP servers (`mcp-oauth.json`).
+  entry, the person's. For the files that hold a secret: the daemon's port and token
+  (`daemon.json`), a person's sign-ins to their own MCP servers (`mcp-oauth.json`), their
+  settings, which may hold a model key (`config.yaml` and its `.previous`), and the
+  terminal client's plane sign-in (`credentials.json`).
 
   On Windows a file that cannot be restricted (no `icacls` on the `PATH`, no `USERNAME`)
   is still written, in the person's own profile, and a warning says which; a daemon that

@@ -34,6 +34,12 @@ plane:
   baseUrl: http://plane.localtest.me:30080
   ingressClassName: nginx
   tlsSecretName: ""
+  # The control port's certificate without cert-manager, which this cluster does not run:
+  # `scripts/remote-up` makes a CA and a certificate for the control Service with openssl
+  # and puts them in this Secret, as cert-manager would.
+  controlTls:
+    certManager: false
+    secretName: troupe-plane-control-tls
   provisioningMode: direct
   platformAdminGroup: troupe-platform-admins
   resources:

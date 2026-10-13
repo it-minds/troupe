@@ -1,5 +1,6 @@
-// Sessions, as metadata: who owns each, where it runs, what state it is in, what it holds
-// and whether somebody pinned it. Never what it said: no administrative method returns
+// Sessions, as metadata: who owns each, where it runs, what state it is in, what it holds,
+// whether somebody pinned it, and the branch and draft pull request it left on GitHub.
+// Never what it said: no administrative method returns
 // that, so there is nothing here that could show it. Every session for a platform admin,
 // their teams' for a team admin, as `admin.sessions.list` answers each.
 //
@@ -9,7 +10,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { AdminSessionRow, SessionErasePreview, SessionErased } from "@troupe/client";
+import type { AdminSessionRow, SessionErasePreview, SessionErased, SessionGitHub } from "@troupe/client";
 import { recorded, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Loaded, Preview, Status, bytes, count, when } from "./bits";
 import type { StatusKind } from "./bits";
@@ -124,6 +125,7 @@ export function Sessions(): JSX.Element {
                       <th className="num">Objects</th>
                       <th className="num">Workspace</th>
                       <th>Pinned</th>
+                      <th>On GitHub</th>
                       <th>Last active</th>
                       <th aria-label="Actions" />
                     </tr>
@@ -176,6 +178,9 @@ function SessionRow({ session: s, busy, onErase }: { session: AdminSessionRow; b
       <td className="num">{bytes(s.object_bytes)}</td>
       <td className="num">{bytes(s.workspace_bytes)}</td>
       <td>{s.pinned ? (s.pinned_by ? `pinned by ${s.pinned_by}` : "pinned") : <span className="muted">no</span>}</td>
+      <td>
+        <OnGitHub github={s.github ?? null} />
+      </td>
       <td>{when(s.last_active_at)}</td>
       <td className="row-actions">
         {!busy && (
@@ -189,6 +194,27 @@ function SessionRow({ session: s, busy, onErase }: { session: AdminSessionRow; b
 }
 
 /** What erasing one session takes, read from the plane first, then typed by its id. */
+// What the session did on GitHub, as its pod reported it: its draft pull request as a link,
+// or its branch and last commit before it has opened one, and that it stopped after its
+// red CI rounds and left the draft for a person.
+function OnGitHub({ github }: { github: SessionGitHub | null }): JSX.Element {
+  if (!github?.branch) return <span className="muted">—</span>;
+  const pr = github.pull_request;
+  return (
+    <span>
+      {pr ? (
+        <a href={pr.url} target="_blank" rel="noreferrer">
+          #{pr.number}
+        </a>
+      ) : (
+        <span className="mono">{(github.commit ?? "").slice(0, 7)}</span>
+      )}{" "}
+      <span className="mono muted">{github.branch}</span>
+      {github.stopped && <span className="muted"> · stopped after its red CI rounds</span>}
+    </span>
+  );
+}
+
 function Erase({ session, onCancel, onConfirm }: { session: AdminSessionRow; onCancel: () => void; onConfirm: () => Promise<void> }): JSX.Element {
   const { admin } = useConsole();
   const id = session.id;

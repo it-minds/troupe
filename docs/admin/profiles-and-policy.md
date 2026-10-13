@@ -21,7 +21,7 @@ manifest's ([§6](#6-provisioning-direct-or-from-a-repository)).
 | `size_class` | `standard` (several sessions share a worker) or `heavy` (fewer, with more CPU, memory and disk each). A resource question, not a safety one: sessions cannot see each other's files either way |
 | `max_sessions` | how far it may grow, in sessions at once. Absent is no ceiling, bounded by the team's budget |
 | `warm_workers` | workers kept up when nothing runs. `0` scales to zero, and the next session waits about half a minute |
-| `spec` | the rest of the resource in its own camelCase: `llm`, `egress`, `configBundleChannel`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, and `storage.storageClassName`, the class a worker's disk comes from (one `allowedStorageClasses` names; absent is the cluster's default) |
+| `spec` | the rest of the resource in its own camelCase: `llm`, `egress`, `configBundleChannel`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, `github`, and `storage.storageClassName`, the class a worker's disk comes from (one `allowedStorageClasses` names; absent is the cluster's default) |
 
 `replicas`, `sessionsPerPod`, `resources` and `storage.size` are the plane's: it writes them
 from the size class and from what is running, and **refuses** a request that sends them
@@ -50,6 +50,7 @@ Other `spec` fields:
 | `orgMount` | mount the policy's org volume at `/mnt/org`, always read-only |
 | `repositoryOverridesBundle` | `true` lets a session's working copy replace the bundle's agents and skills, and Troupe's built-in agents, of the same name; absent or `false`, those win ([below](#a-repositorys-agents-and-skills-on-a-pod)) |
 | `personalTools` | `allow` (the default, and what absent means) lets a person offer a session on these pods the tools of MCP servers they signed in to on their own machine; `forbid` has the pods refuse ([below](#a-persons-own-tools-on-a-pod)) |
+| `github.permissions` | what a session's token may do on GitHub beyond cloning its repository, in GitHub's names: `contents` (`read` or `write`, which pushes its `troupe/*` branch), `pull_requests` (`read` or `write`, which opens its draft pull request and comments on it), `checks` and `statuses` (`read`, its CI). Absent, sessions clone and do no more; a profile that pushes also declares the API's host in `egress.gitHosts` ([github.md](github.md#5-let-a-profile-reach-github)) |
 | `mcpIdentities` | who the profile is at each MCP server its bundle calls with client credentials ([below](#calling-an-mcp-server-as-the-profile)). Yours to write, in direct and gitops mode alike; nothing in it is secret |
 | `mcpServers`, `teams` | **written by the plane** from the channel's bundle and from grants; do not set them |
 
@@ -529,7 +530,7 @@ What a profile takes from its resource:
 | `warm_workers` | annotation `troupe.dev/warm-workers`, 0 to 10; absent is 0 |
 | `provisioner` | annotation `troupe.dev/provisioner`; absent is `kubernetes` |
 | channel | `spec.configBundleChannel`; absent is `stable` |
-| `spec` | the rest: `llm`, `egress`, `storage`, `resources`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, `mcpIdentities` |
+| `spec` | the rest: `llm`, `egress`, `storage`, `resources`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, `github`, `mcpIdentities` |
 
 CPU, memory and disk are the manifest's to size, within the policy; the class the plane
 places and scales by is read off `sessionsPerPod`.

@@ -11,6 +11,21 @@ defmodule Troupe.Plane.Control.Connection do
   The first message must be `enrol`, carrying the pod's projected ServiceAccount token.
   Until Kubernetes has said which namespace that token belongs to, the connection has
   no identity and every other method is refused.
+
+  ## TLS, and who may go without it
+
+  The port speaks TLS and plaintext both, told apart by the first byte a client sends: a
+  TLS handshake opens with `22`, and a JSON-RPC line with `{`. Over TLS the plane serves
+  the certificate cert-manager issued for the control Service (`Troupe.Plane.Control.TLS`).
+
+  A registered machine enrols over TLS only. It is the worker that is outside the cluster,
+  reaching this port across whatever network the installation routed it through, and its
+  secret, unlike a pod's projected token, lasts until somebody rotates it. So an `enrol`
+  with a host secret on a plaintext connection is refused with a sentence before the
+  secret is looked at, and the worker's own link never sends one without TLS. A pod may
+  still enrol in plaintext: it dials the control Service on the pod network, which the
+  chart's NetworkPolicy opens to worker namespaces alone, and its token is bound to this
+  plane's audience and expires within the hour.
   """
 
   use GenServer, restart: :temporary
@@ -32,7 +47,7 @@ defmodule Troupe.Plane.Control.Connection do
     Triggers
   }
 
-  alias Troupe.Plane.Control.{Connections, Router}
+  alias Troupe.Plane.Control.{Connections, Router, TLS}
   alias Troupe.Plane.Fleet.Bundle
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.Session
@@ -44,9 +59,25 @@ defmodule Troupe.Plane.Control.Connection do
   # Short: this runs on every enrolment, and a pod that cannot answer promptly is
   # better left alone than waited on.
   @index_timeout_ms 10_000
+  # A client that opened a handshake and does not finish it is not waited on for longer.
+  @handshake_timeout_ms 10_000
+
+  # The first byte of a TLS record that opens a handshake.
+  @tls_handshake 22
 
   @enforce_keys [:socket]
-  defstruct [:socket, :identity, :worker, buffer: "", next_id: 1, pending: %{}, verify: nil]
+  defstruct [
+    :socket,
+    :identity,
+    :worker,
+    :tls_dir,
+    transport: :gen_tcp,
+    mode: :unknown,
+    buffer: "",
+    next_id: 1,
+    pending: %{},
+    verify: nil
+  ]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
@@ -76,7 +107,10 @@ defmodule Troupe.Plane.Control.Connection do
        # is a TokenReview against the API server and nothing else. Configuration is the
        # third way in, for a replica started as a whole application rather than as a
        # listener with options — which is what a second node in a failover test is.
-       verify: Keyword.get_lazy(opts, :verify, &default_verifier/0)
+       verify: Keyword.get_lazy(opts, :verify, &default_verifier/0),
+       # Where the control port's certificate is: the listener's option in a test, the
+       # chart's mounted Secret in a pod.
+       tls_dir: Keyword.get_lazy(opts, :tls, &TLS.dir/0)
      }}
   end
 
@@ -86,14 +120,32 @@ defmodule Troupe.Plane.Control.Connection do
 
   @impl GenServer
   def handle_info(:socket_ready, state) do
-    :ok = :inet.setopts(state.socket, active: :once)
+    :ok = setopts(state, active: :once)
     {:noreply, state}
   end
 
-  def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
+  # The first bytes say which this connection is: a handshake is put back for TLS to read
+  # from the start, anything else is the first of a plaintext line.
+  def handle_info(
+        {:tcp, socket, <<@tls_handshake, _::binary>> = data},
+        %{socket: socket, mode: :unknown} = state
+      ) do
+    case handshake(state, data) do
+      {:ok, state} ->
+        :ok = setopts(state, active: :once)
+        {:noreply, state}
+
+      :error ->
+        {:stop, :normal, state}
+    end
+  end
+
+  def handle_info({tag, socket, data}, %{socket: socket} = state) when tag in [:tcp, :ssl] do
+    state = if state.mode == :unknown, do: %{state | mode: :plaintext}, else: state
+
     case consume(state.buffer <> data, state) do
       {:ok, state} ->
-        :ok = :inet.setopts(socket, active: :once)
+        :ok = setopts(state, active: :once)
         {:noreply, state}
 
       {:stop, state} ->
@@ -101,17 +153,38 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
-  def handle_info({:tcp_closed, socket}, %{socket: socket} = state) do
+  def handle_info({tag, socket}, %{socket: socket} = state)
+      when tag in [:tcp_closed, :ssl_closed] do
     gone(state)
     {:stop, :normal, state}
   end
 
-  def handle_info({:tcp_error, socket, _reason}, %{socket: socket} = state) do
+  def handle_info({tag, socket, _reason}, %{socket: socket} = state)
+      when tag in [:tcp_error, :ssl_error] do
     gone(state)
     {:stop, :normal, state}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  # A connection whose first bytes open a TLS handshake. Without a certificate there is
+  # nothing to answer it with, and it is closed: a worker that asked for TLS is one that
+  # would not have sent its credential without it.
+  defp handshake(state, data) do
+    with {:ok, options} <- TLS.server_options(state.tls_dir),
+         :ok <- :gen_tcp.unrecv(state.socket, data),
+         {:ok, socket} <- :ssl.handshake(state.socket, options, @handshake_timeout_ms) do
+      {:ok, %{state | socket: socket, transport: :ssl, mode: :tls}}
+    else
+      {:error, reason} ->
+        Logger.warning("troupe plane: refusing a TLS control connection: #{describe_tls(reason)}")
+        :gen_tcp.close(state.socket)
+        :error
+    end
+  end
+
+  defp describe_tls(reason) when is_binary(reason), do: reason
+  defp describe_tls(reason), do: "the handshake failed (#{inspect(reason)})"
 
   @impl GenServer
   def handle_call({:request, method, params}, from, state) do
@@ -125,8 +198,12 @@ defmodule Troupe.Plane.Control.Connection do
 
   def handle_call(:info, _from, state) do
     {:reply,
-     %{identity: state.identity, worker: state.worker, enrolled?: not is_nil(state.worker)},
-     state}
+     %{
+       identity: state.identity,
+       worker: state.worker,
+       enrolled?: not is_nil(state.worker),
+       tls?: state.mode == :tls
+     }, state}
   end
 
   @impl GenServer
@@ -137,7 +214,7 @@ defmodule Troupe.Plane.Control.Connection do
 
   @impl GenServer
   def terminate(_reason, state) do
-    :gen_tcp.close(state.socket)
+    state.transport.close(state.socket)
     :ok
   end
 
@@ -187,6 +264,19 @@ defmodule Troupe.Plane.Control.Connection do
   end
 
   # -- messages ---------------------------------------------------------------
+
+  # Before the secret is looked at: which host it is, and whether it is valid, is nothing
+  # this connection should learn or answer.
+  defp handle_message({:request, id, "enrol", %{"token" => "twh_" <> _}}, %{mode: mode} = state)
+       when mode != :tls do
+    Logger.warning(
+      "troupe plane: refused a registered machine's enrolment on a plaintext connection " <>
+        "from #{peer(state)}; its secret crossed the network unencrypted and should be rotated"
+    )
+
+    write(state, {:error, id, Error.new(:forbidden, %{reason: plaintext_refusal()})})
+    {:stop, state}
+  end
 
   defp handle_message({:request, id, "enrol", params}, %{worker: nil} = state) do
     case enrol(params, state) do
@@ -474,10 +564,46 @@ defmodule Troupe.Plane.Control.Connection do
   # App's own. A session whose owner has been deactivated gets none, as it gets no
   # assertion. Every token is in the audit trail, by session, repository and expiry, and
   # the token itself is in the answer and nowhere else.
+  #
+  # `access: "write"` asks for the fix loop's token rather than the clone's: what the
+  # session's worker profile grants, which the plane reads from the profile, not the pod.
   defp dispatch("git.credential", params, state) do
+    case {session_of(params["session_id"], state.worker), access(params["access"])} do
+      {_session, :error} ->
+        {:error, Error.new(:invalid_params, %{reason: "access is read or write"}), state}
+
+      {%Session{repository: %{}} = session, access} ->
+        git_credential(session, access, state)
+
+      {%Session{}, _access} ->
+        {:error,
+         Error.new(:not_found, %{
+           session_id: params["session_id"],
+           reason: GitHub.explain(:no_repository)
+         }), state}
+
+      {nil, _access} ->
+        {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+    end
+  end
+
+  # What a session did on GitHub, as its pod reports each step of the fix loop: the
+  # commit its clone started from, a push, its draft pull request, a CI round. Metadata
+  # only; the plane checks it against the session's own repository and branch, keeps it on
+  # the row and audits it, and answers the record as it now is. Asked with no change, it
+  # answers the record, which is how a pod that has just activated the session learns it.
+  defp dispatch("github.record", params, state) do
     case session_of(params["session_id"], state.worker) do
       %Session{repository: %{}} = session ->
-        git_credential(session, state)
+        changes = Map.drop(params, ["session_id"])
+
+        case GitHub.record(session, changes, "worker:#{state.worker.pod_name}") do
+          {:ok, %{github: github, stopped_now: stopped_now}} ->
+            {:ok, %{"github" => github, "stopped_now" => stopped_now}, state}
+
+          {:error, reason} ->
+            {:error, Error.new(:invalid_params, %{reason: GitHub.explain(reason)}), state}
+        end
 
       %Session{} ->
         {:error,
@@ -562,13 +688,18 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
-  defp git_credential(%Session{} = session, state) do
+  defp access(nil), do: :read
+  defp access("read"), do: :read
+  defp access("write"), do: :write
+  defp access(_other), do: :error
+
+  defp git_credential(%Session{} = session, access, state) do
     case Identity.get_user(session.owner_subject) do
       %User{active: false} ->
         {:error, Error.new(:forbidden, %{reason: "the session's owner is deactivated"}), state}
 
       _user ->
-        case GitHub.credential(session) do
+        case GitHub.credential(session, access: access) do
           {:ok, credential} ->
             {:ok, _} =
               Audit.record(
@@ -813,6 +944,19 @@ defmodule Troupe.Plane.Control.Connection do
     Registry.register(registry, {:profile, worker.profile}, worker.id)
   end
 
+  defp plaintext_refusal,
+    do:
+      "a registered machine enrols over TLS only, and this connection is plaintext: give " <>
+        "the worker the CA its registration answered (TROUPE_PLANE_CA_PATH) so it dials " <>
+        "with TLS, and rotate the machine's secret, which has crossed the network unencrypted"
+
+  defp peer(state) do
+    case :inet.peername(state.socket) do
+      {:ok, {address, port}} -> "#{:inet.ntoa(address)}:#{port}"
+      {:error, _} -> "an address it no longer has"
+    end
+  end
+
   defp error_for({:missing, key}), do: Error.new(:invalid_params, %{missing: key})
   defp error_for(:unauthenticated), do: Error.new(:unauthenticated)
   defp error_for(:wrong_audience), do: Error.new(:unauthenticated, %{reason: "wrong audience"})
@@ -841,6 +985,9 @@ defmodule Troupe.Plane.Control.Connection do
   end
 
   defp write(state, message) do
-    :gen_tcp.send(state.socket, [JSONRPC.encode(message), ?\n])
+    state.transport.send(state.socket, [JSONRPC.encode(message), ?\n])
   end
+
+  defp setopts(%{transport: :ssl} = state, opts), do: :ssl.setopts(state.socket, opts)
+  defp setopts(state, opts), do: :inet.setopts(state.socket, opts)
 end

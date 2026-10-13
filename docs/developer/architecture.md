@@ -121,7 +121,7 @@ person, one `PlatformBudget`, and the fleet scaler, GitOps and erasure-retry sin
 `Fleet.Sweeper`, the keepers of the trigger scheduler, the fleet scaler, GitOps
 (`Gitops.Keeper`) and the erasure retry (`Erasure.Retry.Keeper`), `Erasure.Tasks`, `Fleet.ReleaseImage` (rewrites
 `release` profiles after an upgrade), the control channel's registry, connections and `:gen_tcp`
-listener on 4001, `Ledger.Cache`, `Tokens.Credential` (the OpenBao login), the Phoenix
+listener on 4001 (plaintext or TLS, told apart by the first byte), `Ledger.Cache`, `Tokens.Credential` (the OpenBao login), the Phoenix
 endpoint on 4000, and libcluster when `RELEASE_DISTRIBUTION=name`. The `:global` actors
 are why the chart refuses more than one replica without distribution.
 

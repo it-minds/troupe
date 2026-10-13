@@ -122,6 +122,7 @@ export type {
   AdminPod,
   AdminProfile,
   AdminSessionRow,
+  SessionGitHub,
   AdminTeam,
   AdminTeamGroup,
   AdminTeamMember,

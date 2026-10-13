@@ -1289,7 +1289,9 @@ no agent has (the keys are `description`, `mode`, `model`, `tools`, `permissions
 `max_turns`, `budget_share`, `skills`, `override` and `delegation`, and onboarding's
 `imported_*`); `delegation` not `ask` or `auto`;
 `mode` missing or not `primary`/`subagent`; `tools` or `skills` not `"all"` or a list; a
-tool that does not exist (with the nearest that do); a permission not `auto`, `ask` or
+tool that does not exist (with the nearest that do; a pod's GitHub tools, `git_push`,
+`pr_open`, `pr_comment` and `pr_checks`, exist everywhere here, though only a pod session with a
+repository has them); a permission not `auto`, `ask` or
 `deny`; a permission that grants (`auto` or `ask`) a tool `tools` does not list, which
 could never apply (a `deny` of one is allowed, as the built-ins write it); a model the
 provider does not serve, by the list the daemon keeps (Decision 778), with the nearest it
@@ -1738,13 +1740,18 @@ of its own is stale, and a screen sees the edit the next time it asks.
 {"command_id": "c-13", "from": "opencode"}
 ```
 `config.import` (`admin`) → the `config.get` answer after the write, plus `"imported":
-{"from", "providers", "kept", "default"}`. Copies opencode's providers into the file's
-`providers:` block (type, base URL, auth style, models, and the key as opencode has it
+{"from", "providers", "kept", "skipped", "default"}`. Copies opencode's providers into the
+file's `providers:` block (type, base URL, auth style, models, and the key as opencode has it
 written: an `{env:VAR}` stays a reference, a literal key is copied), once: a session never
 reads opencode's config (Decision 828). A provider the file already names is kept as it is
-and listed under `kept`; opencode's default model becomes `models.default` only when the file
-has none. `from` is `opencode`, the only source; with no opencode providers the call fails
-with `invalid_params`. Nothing is written when nothing would change.
+and listed under `kept`. A provider is copied only where its key goes to the host it was set
+up for: its SDK package is one Troupe has a type for, or the file names its `baseURL`. Any
+other (`@ai-sdk/mistral` with no `baseURL`, say) is not copied and is listed under `skipped`
+as `{"provider", "reason"}`, the reason a sentence. opencode's default model becomes
+`models.default` only when the file has none and its provider is in the file. `from` is
+`opencode`, the only source; with no opencode providers, or none that can be copied, the
+call fails with `invalid_params` and the reasons. Nothing is written when nothing would
+change.
 
 ```json
 {"command_id": "c-15", "plane_url": "https://plane.example.com",
@@ -1809,7 +1816,7 @@ whose person wants the question again. Each step's `answer`:
 | step | answer | what it does |
 | --- | --- | --- |
 | `where` | `{"choice": "local"}` or `{"choice": "plane", "plane_url"?}` | a plane records the choice and goes to `finish`; signing in is the client's |
-| `provider` | `{"provider": "anthropic" \| "openai" \| "fake", "kind"?: "anthropic" \| "openai" \| "gateway" \| "litellm", "base_url"?, "auth"?}`, or `{"reuse": "opencode" \| "config"}` | a gateway and a LiteLLM proxy are `openai` with their URL; `reuse` copies opencode's providers in as `config.import` does, or keeps a `config.yaml` that works, and goes to `workspace` |
+| `provider` | `{"provider": "anthropic" \| "openai" \| "fake", "kind"?: "anthropic" \| "openai" \| "gateway" \| "litellm", "base_url"?, "auth"?}`, or `{"reuse": "opencode" \| "config"}` | a gateway and a LiteLLM proxy are `openai` with their URL; `reuse` copies opencode's providers in as `config.import` does (the answer recorded lists them under `providers`, and those not copied under `skipped`, as `config.import` does), or keeps a `config.yaml` that works, and goes to `workspace` |
 | `key` | `{"api_key"}`, `{"env": "VAR"}` (kept as `{env:VAR}`) or `{}` for a gateway that wants none | checked with a real request, the provider's model listing: `check` is `{"state": "ok" \| "refused" \| "unknown", "reason"}`. Refused stays on `key`; `ok` fills `offered` (`{"id", "context", "max_output", "input", "output"}`, prices per million tokens) and `suggested` (`{"default", "cheap"}`, a safe answer); `unknown` goes on with nothing listed |
 | `models` | `{"default", "cheap"?}` | writes the provider, the key and the models into the user's `config.yaml` |
 | `workspace` | `{"workspace", "approvals": "ask" \| "auto"}` | the first project directory, which must exist. `ask` is the default; `auto` writes `auto_approve: true`, and `ask` writes `false` only over a file that runs everything |
@@ -2508,7 +2515,7 @@ that team.
 | `admin.team.enable` | platform | makes an IdP group a team; a name another team has is `conflict` unless `link` is true, which links the group into that team |
 | `admin.team.update` | either | budget, retention, default visibility, volume; `allow_unenforced_workers` a platform admin's; keys it does not declare, a team's name and group among them, are left alone |
 | `admin.team.grant` / `admin.team.revoke` | platform | a team's access to a profile |
-| `admin.sessions.list` | either | session *metadata*, never content; `filter.team` narrows to one team, another team's name `not_found` for a team admin |
+| `admin.sessions.list` | either | session *metadata*, never content: with the `repository` it was created with and `github`, what it did there (as `admin.runs.list` has it); `filter.team` narrows to one team, another team's name `not_found` for a team admin |
 | `admin.session.erase` | either | erases one, for authorised roles |
 | `admin.bundles.list` | either | every version of a channel, each with its `summary` (names of agents, skills and MCP servers) |
 | `admin.bundle.get` | either | one version in full: the document, its `detail` (agents with mode and skills, skills with files, MCP servers with the Secret to create), and adoption per profile |
@@ -2533,12 +2540,12 @@ that team.
 | `admin.trigger.delete` | either | `{team, name}`; the runs go with it, the sessions they made do not; `managed_by_gitops` in gitops mode, except for a trigger the cluster has no resource for |
 | `admin.trigger.run` | either | `{team, name}`: fire it now, with a manual idempotency key naming the caller and the minute; in either mode |
 | `admin.trigger.key.rotate` | either | `{team, name}` → `{team, name, url, key, rotated_at}`: the trigger's own key, shown once, the old one dead at once; in either mode, since the key is never in a resource |
-| `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status, its `done_reason` and `failed_reason` (a turn the harness stopped, `tool_failures` or `agent_failed`, which makes the run `failed`), and the `revision` and `revision_hash` it actually ran |
+| `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status, its `done_reason` and `failed_reason` (a turn the harness stopped, `tool_failures` or `agent_failed`, which makes the run `failed`), the `revision` and `revision_hash` it actually ran, and `github`: what its session did on GitHub, or `null` (`base`, `branch`, `commit`, `tree`, `pushes`, `pushed_at`, `pull_request: {number, url}`, `rounds: [{commit, state, failing, at}]`, `stopped: {at, reason}`; [github.md](docs/admin/github.md#7-the-fix-loop)) |
 | `admin.trigger.revisions` | either | `{team, name}` → every revision of a trigger, newest first: the number, the hash, who made it and when, and whether it was reconstructed by the migration that introduced them |
 | `admin.profile.preview` | platform | what policy makes of a profile and what would change, without writing anything |
 | `admin.provisioners.list` | either | what can make a worker, and which guarantee each substrate does not give: admission policy, network policy, egress by hostname, disruption budget |
 | `admin.hosts.list` | platform | `{profile}` → every machine registered to a profile, with whether it has ever enrolled |
-| `admin.host.register` / `admin.host.rotate` | platform | register a machine against a profile and mint the secret it enrols with, shown once; or a new secret for one, keeping the machine |
+| `admin.host.register` / `admin.host.rotate` | platform | register a machine against a profile and mint the secret it enrols with, shown once; or a new secret for one, keeping the machine. Either answers `ca` too, the PEM of the CA that signed the control port's certificate, which the machine pins: it enrols over TLS only. Refused (`unavailable`) while the control port has no certificate |
 | `admin.host.enabled` | platform | stop a machine enrolling, or let it again |
 | `admin.groups.list` | either | every identity-provider group the plane knows about, which is what a team links to |
 | `admin.team.link` / `admin.team.unlink` | platform | draw a team's members from one more group, or stop; `admin.team.unlink.preview` says first who would lose access and how many sessions they can open |

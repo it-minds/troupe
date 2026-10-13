@@ -37,7 +37,9 @@ defmodule Troupe.Agent.Validate do
 
   # Tools the harness offers outside the pod-wide list: the skill tool, when the session's
   # bundle or files have skills the profile names, and a loop's verdict.
-  @scoped_tools ~w(skill goal_complete)
+  # And a worker's GitHub tools, which a pod offers to a session created with a repository
+  # and nowhere else: an agent made for that work names them wherever it is written.
+  @scoped_tools ~w(skill goal_complete git_push pr_open pr_comment pr_checks)
 
   @type finding :: %{field: String.t(), message: String.t()}
   @type result :: %{ok: boolean(), errors: [finding()], warnings: [finding()]}

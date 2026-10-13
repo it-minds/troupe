@@ -154,6 +154,7 @@ defmodule Troupe.Plane.Web.Live.Review do
                 <th>ran</th>
                 <th>how it ended</th>
                 <th>cost</th>
+                <th>on GitHub</th>
                 <th>read by</th>
                 <th></th>
               </tr>
@@ -165,6 +166,7 @@ defmodule Troupe.Plane.Web.Live.Review do
                 <td>{revision_of(run)}</td>
                 <td>{outcome(run)}</td>
                 <td><.amount micros={run["cost_micros"]} /></td>
+                <td><.on_github github={run["github"]} /></td>
                 <td>
                   <span :if={reviewed?(run)}>{run["reviewed_by"]}</span>
                   <span :if={not reviewed?(run)} class="none">nobody</span>

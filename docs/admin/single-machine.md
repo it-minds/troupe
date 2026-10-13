@@ -58,7 +58,7 @@ makes the worker exist.
 ## 2. Register the machine
 
 On **Provisioners**, under *Machines registered to &lt;profile&gt;*, give the machine a name
-and register it. You get a secret, **once**:
+and register it. You get a secret, **once**, and under it the CA the machine will pin:
 
 ```
 build-box registered — secret, shown once: twh_9f3c…
@@ -67,6 +67,12 @@ build-box registered — secret, shown once: twh_9f3c…
 There is no method that shows it again, in any surface. The plane keeps a hash, the same
 way it keeps a service principal's, because a secret it could show twice is a secret it is
 keeping. Lose it and you rotate.
+
+The CA is no secret. It signed the certificate the plane's control port serves, which
+cert-manager issues for the control Service through the chart (`plane.controlTls`), and
+`admin.host.register` and `admin.host.rotate` answer it as `ca`. The machine dials the plane
+with TLS, trusts that CA and nothing else for it, and never sends its secret any other way.
+A plane whose control port has no certificate registers no machine, and says so.
 
 The address field is for you. **Nothing here connects to it** — the worker dials the plane,
 never the other way round, which is what makes a machine behind NAT work at all and why
@@ -84,9 +90,11 @@ bubblewrap and unprivileged user namespaces, or it refuses every command (Decisi
 ```bash
 install -d -m 700 /etc/troupe
 printf '%s' 'twh_9f3c…' > /etc/troupe/token && chmod 600 /etc/troupe/token
+cat > /etc/troupe/plane-ca.pem    # paste the CA the registration showed, then Ctrl-D
 
 TROUPE_WORKER_AUTOSTART=true \
-TROUPE_PLANE_CONTROL=troupe.example.com:4001 \
+TROUPE_PLANE_CONTROL=control.example.com:4001 \
+TROUPE_PLANE_CA_PATH=/etc/troupe/plane-ca.pem \
 TROUPE_TOKEN_PATH=/etc/troupe/token \
 TROUPE_PROFILE=laptops \
 TROUPE_OBJECT_ENDPOINT=https://s3.example.com TROUPE_OBJECT_ACCESS_KEY_ID=… TROUPE_OBJECT_SECRET_ACCESS_KEY=… \
@@ -97,10 +105,24 @@ TROUPE_BAO_ADDR=https://bao.example.com TROUPE_BAO_TOKEN=… \
 A pod logs in to OpenBao with its projected token, which a machine does not have, so the
 machine needs `TROUPE_BAO_TOKEN`, and the object store's credentials as a pod's
 `troupe-object-store` Secret gives them ([configuration.md A.3](configuration.md#a3-worker-troupe_worker)).
-The chart does not expose the plane's control port outside the cluster (no Ingress, and
-its NetworkPolicy admits it only from worker namespaces and the operator), and the channel
-is plain TCP, the secret included: reaching `4001` from a machine takes an encrypted tunnel
-or a route of your own, and a policy that admits it.
+
+**The control channel is TLS, and the machine checks whom it is talking to.** With
+`TROUPE_PLANE_CA_PATH` the worker dials with TLS and accepts only a certificate that CA
+signed, for the name it dials. Without it, a worker holding a machine's secret does not
+dial at all and logs why; and a plane that is sent a machine's secret in plaintext refuses
+it with a sentence before looking at it, and says in its log to rotate it, since it has
+crossed the network unencrypted. A pod dials the same port on the pod network and may
+still do so in plaintext.
+
+The chart does not expose the control port outside the cluster: no Ingress, and its
+NetworkPolicy admits the port only from worker namespaces and the operator. Reaching
+`4001` from a machine takes a route of your own (a `LoadBalancer` Service, a node port) and
+a policy that admits it, and the name or address the machine dials goes into the
+certificate: `plane.controlTls.dnsNames` or `.ipAddresses`. Where it dials through
+something else, an SSH tunnel to `localhost` say, `TROUPE_PLANE_SERVER_NAME` names what the
+certificate is checked against instead, such as `troupe-plane-control.troupe-system.svc`.
+No tunnel is needed for the secret's sake any more; one still helps where you would rather
+not open the port to the network the machine is on at all.
 
 `TROUPE_HOST_SECRET` takes the secret directly, for a one-liner. The file is the better of
 the two and is shown first for that reason: an environment variable is readable in `/proc`

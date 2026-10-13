@@ -1328,7 +1328,6 @@ what is left).
   - Command-id replay is keyed by the principal's subject, and every local connection shares it. Two local clients counting their own ids could collide; every real client uses random ids.
   - A worker advertises `watch: true` but refuses `watch.*` to every token a plane mints.
   - `Link.call` answers a failed write with a bare `unavailable` and keeps the dead client until it hears of the disconnect.
-  - `config.yaml` (which may hold a key) is restricted on unix but not on Windows, and `Troupe.Remote.Credentials` keeps its own copy of the `icacls` logic beside `Troupe.OwnerOnly`.
 - **Ceilings** (Decision 880).
   - An OpenAI-compatible reasoning model under a low ceiling can spend all of `max_completion_tokens` reasoning and answer nothing; Troupe sends the effort unchanged and says nothing.
   - Models that think unasked still think at their own default inside the ceiling when thinking is "off" (recorded in 880).
@@ -1379,7 +1378,6 @@ Found by the chunk 32 fixers, 2026-10-12.
 - **Orchestration** (Decision 888). The bench has no task where `orchestrate` could pay off (larger multi-file work, a reviewer catching a mistake), and `docs/user/bench.md` says a by-name scenario's limits are printed by the plan, where `describe/1` prints only the plan-wide ones.
 - **The clients.**
   - A `fleet` subscription has no per-session access filter; on a pod, authorisation limits it to tokens without a session id.
-- **Tests.** `FailoverTest`'s node name is the same in every worktree, so two worker suites at once fail its setup.
 
 Found by the chunk 33 fixers, 2026-10-13.
 

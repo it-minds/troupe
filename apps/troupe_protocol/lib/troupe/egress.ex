@@ -77,7 +77,9 @@ defmodule Troupe.Egress do
       kind: :configured,
       host: nil,
       setting: "egress.gitHosts (per profile)",
-      why: "the git remotes a session may clone from and push to"
+      why:
+        "the git remotes a session clones from, and the GitHub API host a profile that " <>
+          "pushes and opens pull requests declares beside them, which the pod calls itself"
     },
     %{
       component: "worker",

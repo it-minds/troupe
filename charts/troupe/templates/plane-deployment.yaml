@@ -5,7 +5,9 @@
 # Two Services on purpose. `troupe-plane` is what the Ingress routes to, and it carries
 # HTTP only. `troupe-plane-control` is the port workers dial and is never exposed through
 # an Ingress — a control channel reachable from outside the cluster would be the plane
-# in the data path of every session, which the spec forbids.
+# in the data path of every session, which the spec forbids. A machine registered outside
+# the cluster reaches it through a route the installation makes, and over TLS alone, with
+# the certificate `plane-control-tls.yaml` has cert-manager issue for this Service.
 apiVersion: v1
 kind: Service
 metadata:
@@ -236,6 +238,12 @@ spec:
               value: {{ .Values.plane.httpPort | quote }}
             - name: TROUPE_PLANE_CONTROL_PORT
               value: {{ .Values.plane.controlPort | quote }}
+            {{- if .Values.plane.controlTls.enabled }}
+            # The control port's certificate, read at each handshake: cert-manager renews it
+            # in place and the kubelet swaps the files under the running pod.
+            - name: TROUPE_PLANE_CONTROL_TLS_DIR
+              value: /etc/troupe/control-tls
+            {{- end }}
             - name: TROUPE_HOST
               value: {{ .Values.plane.host | quote }}
             - name: TROUPE_BASE_URL
@@ -425,14 +433,22 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
             capabilities: {drop: ["ALL"]}
-          {{- if not .Values.bao.tokenSecretName }}
+          {{- if or (not .Values.bao.tokenSecretName) .Values.plane.controlTls.enabled }}
           volumeMounts:
+            {{- if not .Values.bao.tokenSecretName }}
             - name: bao-token
               mountPath: /var/run/secrets/troupe
               readOnly: true
+            {{- end }}
+            {{- if .Values.plane.controlTls.enabled }}
+            - name: control-tls
+              mountPath: /etc/troupe/control-tls
+              readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if not .Values.bao.tokenSecretName }}
+      {{- if or (not .Values.bao.tokenSecretName) .Values.plane.controlTls.enabled }}
       volumes:
+        {{- if not .Values.bao.tokenSecretName }}
         - name: bao-token
           projected:
             sources:
@@ -440,6 +456,16 @@ spec:
                   path: bao-token
                   audience: troupe-kms
                   expirationSeconds: 3600
+        {{- end }}
+        {{- if .Values.plane.controlTls.enabled }}
+        # Optional, so a plane whose certificate is not issued yet still starts: its pods
+        # enrol as before, it registers no machine and says why, and the files arrive when
+        # the Secret does.
+        - name: control-tls
+          secret:
+            secretName: {{ .Values.plane.controlTls.secretName }}
+            optional: true
+        {{- end }}
       {{- end }}
 {{- if gt (int .Values.plane.replicas) 1 }}
 ---

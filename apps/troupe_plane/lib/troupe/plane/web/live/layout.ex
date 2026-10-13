@@ -332,6 +332,29 @@ defmodule Troupe.Plane.Web.Live.Layout do
   end
 
   @doc """
+  What a session did on GitHub, from its record (`sessions.github`): its draft pull request
+  as a link, its branch and last commit where it has opened none, and that it stopped after
+  its red CI rounds. An em dash for a session that has done nothing there.
+  """
+  attr(:github, :map, default: nil)
+
+  def on_github(assigns) do
+    ~H"""
+    <span :if={@github && @github["pull_request"]}>
+      <a href={@github["pull_request"]["url"]}>#{@github["pull_request"]["number"]}</a>
+      <span :if={@github["branch"]} class="mono muted">{@github["branch"]}</span>
+    </span>
+    <span :if={@github && !@github["pull_request"] && @github["branch"]} class="mono">
+      {@github["branch"]} {String.slice(@github["commit"] || "", 0, 7)}
+    </span>
+    <span :if={@github && @github["stopped"]} class="muted">
+      stopped after its red CI rounds
+    </span>
+    <span :if={!(@github && @github["branch"])} class="none">—</span>
+    """
+  end
+
+  @doc """
   A team's spend against its ceiling: a bar, and the figures beside it in text.
 
   The figures are not optional. A bar alone says "quite full", which is not a number
