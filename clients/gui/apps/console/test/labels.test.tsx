@@ -124,6 +124,29 @@ describe("the console's fields", () => {
       await waitFor(() => document.querySelector(".enforced form"), "the form");
     })));
 
+    visit("#/profiles");
+    found.push(...(await check("a new profile", async () => {
+      (await waitFor(() => button("New profile"), "the profiles")).click();
+      await waitFor(() => document.querySelector("form.profile-editor"), "the editor");
+    })));
+
+    visit("#/profiles/dev");
+    found.push(...(await check("changing a profile, its MCP servers included", async () => {
+      (await waitFor(() => button("Change dev"), "dev")).click();
+      await waitFor(() => document.querySelector("form.profile-editor fieldset.server"), "the editor");
+    })));
+
+    visit("#/bundles");
+    found.push(...(await check("the channels", async () => {
+      await waitFor(() => says("Another channel") && document.querySelector("table.channels"), "the channels");
+    })));
+
+    visit("#/triggers/core");
+    found.push(...(await check("a new trigger", async () => {
+      (await waitFor(() => button("New trigger"), "core's triggers")).click();
+      await waitFor(() => says("Runs as") && says("Schedule"), "the form");
+    })));
+
     visit("#/sessions");
     found.push(...(await check("sessions' filters", async () => {
       await waitFor(() => document.querySelector("table.sessions"), "the sessions");

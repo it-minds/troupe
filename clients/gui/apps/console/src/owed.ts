@@ -34,19 +34,9 @@ export const OWED: Owed[] = [
     methods: ["admin.runs.list", "admin.run.review"],
   },
   {
-    area: "profiles",
-    why: "Reading, writing, previewing and deleting a worker profile, with its MCP servers checked; the current console's profile editor does it.",
-    methods: ["admin.profile.get", "admin.profile.put", "admin.profile.preview", "admin.profile.delete", "admin.mcp.check", "admin.provisioning.mode"],
-  },
-  {
-    area: "bundles",
-    why: "Configuration bundles, their versions, and validating, previewing, publishing and retiring one; the current console's Bundles page does it.",
-    methods: ["admin.bundles.list", "admin.bundle.get", "admin.bundle.validate", "admin.bundle.preview", "admin.bundle.publish", "admin.bundle.retire"],
-  },
-  {
     area: "triggers",
-    why: "Scheduled and webhook triggers per team, their revisions, a run by hand and a key rotated; the current console's Triggers page does it.",
-    methods: ["admin.triggers.list", "admin.trigger.put", "admin.trigger.delete", "admin.trigger.revisions", "admin.trigger.run", "admin.trigger.key.rotate"],
+    why: "Running a trigger by hand, and minting its webhook key behind a typed confirm; a trigger's page links to the current console's Triggers page for both.",
+    methods: ["admin.trigger.run", "admin.trigger.key.rotate"],
   },
   {
     area: "integrations",
@@ -70,8 +60,8 @@ export const OWED: Owed[] = [
   },
   {
     area: "identity",
-    why: "A team's service principals: made with their secret shown once, rotated and disabled; the current console's Identity page does it.",
-    methods: ["admin.principals.list", "admin.principal.create", "admin.principal.rotate", "admin.principal.disable"],
+    why: "A team's service principals: made with their secret shown once, rotated and disabled; the current console's Identity page does it. A trigger's form lists them already.",
+    methods: ["admin.principal.create", "admin.principal.rotate", "admin.principal.disable"],
   },
   {
     area: "identity",
