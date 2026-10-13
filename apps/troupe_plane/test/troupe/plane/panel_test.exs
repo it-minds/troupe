@@ -690,6 +690,28 @@ defmodule Troupe.Plane.PanelTest do
       assert html =~ "azure_openai has no address of its own: this is required."
     end
 
+    # A model and a key without an endpoint would be settings the pods are never given; on
+    # the chunk's tip the editor saved them, and the operator dropped them without a word.
+    test "refuses model settings without an endpoint, and says what to do", context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      view
+      |> element("form")
+      |> render_change(%{
+        "name" => "dev",
+        "image" => "ghcr.io/troupe/worker:1",
+        "llm.provider" => "gemini",
+        "llm.model" => "gemini-2.5-pro"
+      })
+
+      html = view |> element("#profile-editor") |> render_submit()
+
+      assert html =~ "llm.provider and llm.model are set without llm.endpoint"
+      assert html =~ "Set llm.endpoint, or take them out"
+      refute get_in(Fleet.get_profile("dev").spec, ["llm", "model"]) == "gemini-2.5-pro"
+    end
+
     test "saves the storage class it asks for", context do
       {:ok, view, _html} =
         context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
@@ -816,7 +838,13 @@ defmodule Troupe.Plane.PanelTest do
       {:ok, _} =
         Fleet.put_profile(%{
           name: "dev",
-          spec: %{"llm" => %{"model" => "qwen3-235b", "prices" => prices}}
+          spec: %{
+            "llm" => %{
+              "endpoint" => "https://llm-gw.example.test/v1",
+              "model" => "qwen3-235b",
+              "prices" => prices
+            }
+          }
         })
 
       {:ok, view, _html} =

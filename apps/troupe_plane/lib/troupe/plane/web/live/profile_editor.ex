@@ -583,7 +583,9 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
               label="endpoint"
               placeholder={@provider && (@provider.url_example || @provider.default_url)}
             >
-              The base URL. Egress has to allow its host, or every call times out.
+              The base URL. The pods are given the model settings on this panel only with one,
+              so a profile that sets any of them needs it. Egress has to allow its host, or
+              every call times out.
               <span :if={@provider && @provider.url == :required}>
                 {@provider.name} has no address of its own: this is required.
               </span>

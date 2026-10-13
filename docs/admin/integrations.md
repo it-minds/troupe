@@ -94,8 +94,10 @@ endpoint, and, for models that endpoint does not price, `llm.prices`.
 - `llm.provider` is one of the provider types a person's own machine takes
   ([the table](../user/configuration.md#provider-types)): `anthropic`, `openai`, `ollama`,
   `openrouter`, `azure_openai`, `gemini`, or `fake`. The plane and the resource's schema
-  refuse any other name. `azure_openai` needs `llm.endpoint`, the resource's own address;
-  `ollama` takes no key, so its profile has no `llm.secretRef`. The profile editor under
+  refuse any other name. Every `llm` field needs `llm.endpoint` (for `azure_openai`, the
+  resource's own address): without one the pods are given none of them, so a profile that
+  sets one without an endpoint is refused. `ollama` takes no key, so its profile has no
+  `llm.secretRef`. The profile editor under
   `/admin` offers them all and asks each only for what it needs, and the provider offered
   to people's own machines (`client_provider`) takes the same names.
 - `openai` posts to `<endpoint>/v1/chat/completions` with a bearer token and

@@ -440,7 +440,9 @@ defmodule Troupe.Plane.GitopsTest do
           "image" => "release",
           "max_sessions" => 8,
           "warm_workers" => 1,
-          "spec" => %{"llm" => %{"model" => "gpt-4o"}}
+          "spec" => %{
+            "llm" => %{"endpoint" => "https://gateway.example.test/v1", "model" => "gpt-4o"}
+          }
         })
 
       team_with_grant("engineering", "dev",
@@ -478,7 +480,10 @@ defmodule Troupe.Plane.GitopsTest do
              }
 
       assert manifest["spec"]["sessionsPerPod"] == 4
-      assert manifest["spec"]["llm"] == %{"model" => "gpt-4o"}
+      assert manifest["spec"]["llm"] == %{
+               "endpoint" => "https://gateway.example.test/v1",
+               "model" => "gpt-4o"
+             }
 
       assert manifest["metadata"]["annotations"] == %{
                "troupe.dev/max-sessions" => "8",
@@ -559,7 +564,7 @@ defmodule Troupe.Plane.GitopsTest do
           "size_class" => "heavy",
           "max_sessions" => 4,
           "spec" => %{
-            "llm" => %{"model" => "gpt-4o"},
+            "llm" => %{"endpoint" => "https://gateway.example.test/v1", "model" => "gpt-4o"},
             "egress" => %{"fqdns" => ["gateway.example.test"]}
           }
         })

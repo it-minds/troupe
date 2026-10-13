@@ -70,6 +70,25 @@ jobs:
               --show-only templates/admission-policy.yaml --show-only templates/policy-default.yaml \
             | kubectl --context kind-troupe-dev apply --dry-run=server -f -
 
+      # The WorkerProfile's rule for its model settings, as the API server runs it: a model
+      # without llm.endpoint is refused with the rule's plain message, and the same with one
+      # is taken. A server-side dry run in the default namespace writes nothing.
+      - name: A WorkerProfile's model settings need an endpoint, as the API server says
+        run: |
+          profile() {
+            printf 'apiVersion: troupe.dev/v1alpha1\nkind: WorkerProfile\nmetadata: {name: llm-rule}\n'
+            printf 'spec:\n  image: {repository: ghcr.io/it-minds/troupe-worker}\n  llm: %s\n' "$1"
+          }
+          if refused=$(profile '{provider: gemini, model: gemini-2.5-pro}' \
+              | kubectl --context kind-troupe-dev apply --dry-run=server -n default -f - 2>&1); then
+            echo "a WorkerProfile with a model and no llm.endpoint was taken"; exit 1
+          fi
+          if ! grep -q 'llm settings need llm.endpoint' <<<"$refused"; then
+            echo "refused, but not by the llm rule:"; echo "$refused"; exit 1
+          fi
+          profile '{endpoint: "https://llm-gw.example.test/v1", provider: gemini, model: gemini-2.5-pro}' \
+            | kubectl --context kind-troupe-dev apply --dry-run=server -n default -f -
+
       # The same script a developer runs, so that a cluster failure here is reproducible
       # by one command on a laptop. It builds the five images and `kind load`s them,
       # which is why nothing is pushed for this job.

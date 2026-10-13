@@ -1,6 +1,6 @@
 ---
 number: 894
-title: Every place a person picks a provider offers the provider types from one list in the protocol app, which the core, the plane and the daemon's answers to clients read, each asking only what its type needs; and every file of a person's own is in the one config directory, the two an older build kept under ~/.config on Windows moved in the first time they are asked for
+title: Every place a person picks a provider offers the provider types from one list in the protocol app, which the core, the plane and the daemon's answers to clients read, each asking only what its type needs, a WorkerProfile's llm settings refused without llm.endpoint rather than ignored; and every file of a person's own is in the one config directory, the two an older build kept under ~/.config on Windows moved in the first time they are asked for
 date: 2026-10-13
 status: accepted
 issue: 658
@@ -30,13 +30,15 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
   - apps/troupe_plane/lib/troupe/plane/web/live/profile_editor.ex
   - charts/troupe/crds/workerprofile.yaml
+  - apps/troupe_operator/lib/troupe/operator/resources.ex
+  - .github/workflows/cluster.yml
   - docs/user/configuration/*.md
   - apps/troupe_core/test/troupe/config/cookbook_test.exs
 symbols:
   - Troupe.Protocol.ProviderTypes.wire/0
   - Troupe.Setup.kinds/0
   - Troupe.Paths.config_file/2
-gist: Provider types are Troupe.Protocol.ProviderTypes; every chooser reads it or the daemon's copy, asks per type; own files in one dir, old Windows ones moved
+gist: Provider types are Troupe.Protocol.ProviderTypes for every chooser; a profile's llm fields need llm.endpoint; own files in one dir, old Windows ones moved
 ---
 
 Issue #658, slice 2, after Decision 887: the four new provider types offered everywhere a
@@ -93,6 +95,30 @@ settings page offers `provider` as a menu, each type saying what else it needs, 
 the address and key to `troupe setup`: the page edits one key at a time, and `provider` is
 now a labelled key of the schema, so it is the desktop app's to show too.
 
+**A WorkerProfile's `llm` settings need `llm.endpoint`.** The operator hands the pods
+the `llm` settings only with an endpoint (`llm_env`): without one it drops the whole
+block, and the pods run on Troupe's built-in model settings. With every type choosable
+for a profile, `provider: gemini` and a model without an endpoint would have been a
+choice that silently did nothing. It is refused instead, failing closed, in two places
+with one meaning: the plane's profile check (`admin.profile.put`, the editor and every
+`admin.*` write, and a GitOps read of a resource) refuses a profile that sets `provider`,
+`model`, `smallModel`, `secretRef` or `prices` without `llm.endpoint`, naming the fields
+and saying what the pods would otherwise run on; and the resource's schema has a CEL
+rule on `spec.llm` with the same meaning and a plain `message`, so a profile kept in a
+repository is refused by the API server too. `llm.provider` loses its schema default
+(`openai`): a default the API server filled in would be a setting nobody wrote, and the
+rule would refuse an `llm: {}` for it; the operator reads an absent provider as `openai`,
+as it did, so no pod changes. `llm_env` itself is unchanged.
+
+An existing profile the cluster holds with such settings keeps running as it did, its
+`llm` settings ignored. The API server's validation ratcheting keeps it valid while
+`spec.llm` is unchanged, so an edit elsewhere in it goes through; an edit that touches
+`spec.llm` is refused until it adds `llm.endpoint` or takes the other fields out. On a
+cluster without ratcheting (Kubernetes before 1.30, or with the feature off) any edit of
+it is refused until then. A GitOps plane reports such a resource as refused, with the
+sentence, and keeps the profile's row as it was. Release note: a WorkerProfile's `llm`
+settings without `llm.endpoint` are now refused; they used to be ignored.
+
 **The Windows path split: one directory, with the older files moved in.** #122 named
 `config.yaml` under `%APPDATA%` and `credentials.json` and `mcp.json` under `~/.config`.
 That was the old command-line client's layout (its credentials, and a personal MCP file
@@ -130,9 +156,15 @@ tip with `provider must be one of anthropic, openai, fake, not "ollama"`;
 restricted, both places, `TROUPE_CONFIG_HOME`, elsewhere, one directory for all);
 `Troupe.Config.CookbookTest`; `Troupe.Plane.ClientDefaultsTest` (every type offered to
 machines; `gemini` refused on the tip), `Troupe.Plane.AdminTest` (the resource's enum is
-the protocol's names; `llm.provider` checked, Azure's endpoint required),
+the protocol's names with no default; its `spec.llm` rule names the plane's fields and
+carries a plain message; `llm.provider` checked; every `llm` field refused without
+`llm.endpoint`, naming the fields, each failing on the tip),
 `Troupe.Plane.PanelTest` (the editor offers every type, no credential for Ollama, Azure's
-endpoint required); the terminal client's `ConfigSetupTest` (every type numbered, Ollama
+endpoint required, and refuses a model without an endpoint on apply),
+`Troupe.Operator.ResourcesTest` (a profile with an endpoint gives the pods every setting,
+an absent provider still `openai`), and the cluster job's server-side dry run of a
+profile with a model and no endpoint, refused with the rule's message, and of the same
+with one, taken; the terminal client's `ConfigSetupTest` (every type numbered, Ollama
 with no key, Azure's address and key, Gemini's variable), `SettingsTest` (the provider
 menu) and `SetupScreenDaemonTest` (Ollama's stand-in through the screen against the
 daemon, with no key step, writing the file `troupe config`'s questions write for the same
