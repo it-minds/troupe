@@ -29,23 +29,26 @@ export function Shell(): JSX.Element {
   const signed = useConsole();
   const route = useRoute(START);
   const [mode, setMode] = useMode();
-  const [open, setOpen] = useState(false);
   const nav = navFor(signed.role);
   // An area this role is not shown is not reachable by its address either.
   const here = nav.some((g) => g.areas.some((a) => a.id === route.page)) ? route : START;
   const current = area(here.page)!;
   const title = here.team ?? current.label;
   const crumb = here.team ? `${groupOf(here.page)} / Teams` : groupOf(here.page);
+  // The folded map is open on the screen it was opened on, so choosing an area folds it
+  // again with nothing to fold it. An effect that folded it on each new screen also ran
+  // once the shell first drew, and undid a Menu pressed before that.
+  const screen = `${here.page}/${here.team ?? ""}/${here.tab ?? ""}`;
+  const [openOn, setOpenOn] = useState<string | null>(null);
+  const open = openOn === screen;
 
   useEffect(() => {
     globalThis.document.title = `${title} · Troupe console`;
   }, [title]);
 
-  // A new screen starts at its top, not wherever the last one was scrolled to, and with
-  // the folded map folded again.
+  // A new screen starts at its top, not wherever the last one was scrolled to.
   useEffect(() => {
     globalThis.scrollTo?.(0, 0);
-    setOpen(false);
   }, [here.page, here.team, here.tab]);
 
   return (
@@ -55,7 +58,7 @@ export function Shell(): JSX.Element {
           <a className="home" href={href(START)} aria-label="Troupe console">
             <Wordmark size={26} />
           </a>
-          <button type="button" className="menu" aria-expanded={open} aria-controls="console-map" onClick={() => setOpen(!open)}>
+          <button type="button" className="menu" aria-expanded={open} aria-controls="console-map" onClick={() => setOpenOn(open ? null : screen)}>
             {open ? "Close" : "Menu"}
             <span className="visually-hidden"> the console's map</span>
           </button>
