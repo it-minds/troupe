@@ -95,6 +95,16 @@ for node in $(kind get nodes --name "$cluster"); do
       DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends apparmor >/dev/null'
     changed=true
   fi
+  # containerd's default profile declares no policy ABI, so the parser compiles it for
+  # whatever the kernel mediates, and a newer kernel than the profile was written for
+  # mediates more (fine-grained unix sockets among it) than its rules allow. Pinned to the
+  # ABI it was written for, as a distribution pins policy without an ABI. The workers'
+  # profile declares its own.
+  if ! docker exec "$node" grep -q '^policy-features=' /etc/apparmor/parser.conf; then
+    docker exec "$node" sh -c \
+      'echo "policy-features=/etc/apparmor.d/abi/kernel-5.4-vanilla" >> /etc/apparmor/parser.conf'
+    changed=true
+  fi
   # containerd and the kubelet each decide once, when they start, whether the node has
   # AppArmor: the kubelet refuses a pod that asks for a profile if it had none then.
   if [ "$changed" = true ]; then

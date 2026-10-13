@@ -59,6 +59,7 @@ jobs:
           echo "kernel $(uname -r)"
           echo "AppArmor enabled: $(cat /sys/module/apparmor/parameters/enabled)"
           echo "$(apparmor_parser --version | head -1)"
+          echo "parser.conf: $(grep -v '^#' /etc/apparmor/parser.conf | grep . | tr '\n' ' ')"
           restrict=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)
           echo "kernel.apparmor_restrict_unprivileged_userns=$restrict"
           if [ "$restrict" != 1 ]; then
@@ -241,6 +242,15 @@ jobs:
           kubectl logs -n troupe-system deployment/troupe-operator --tail=20000 > cluster-logs/operator.log 2>&1 || true
           kubectl get pods -A -o wide > cluster-logs/pods.txt 2>&1 || true
           kubectl get events -A --sort-by=.lastTimestamp > cluster-logs/events.txt 2>&1 || true
+          # The runner's kernel is the nodes', so what AppArmor refused anywhere in the
+          # cluster is in its log.
+          sudo dmesg | grep 'apparmor=' | tail -500 > cluster-logs/apparmor.txt 2>&1 || true
+          kubectl logs -n troupe-system daemonset/troupe-worker-profiles --all-containers \
+            > cluster-logs/worker-profiles.log 2>&1 || true
+          kubectl logs -n ingress-nginx deployment/ingress-nginx-controller \
+            > cluster-logs/ingress.log 2>&1 || true
+          kubectl logs -n ingress-nginx deployment/ingress-nginx-controller --previous \
+            >> cluster-logs/ingress.log 2>&1 || true
 
       - uses: actions/upload-artifact@v7
         if: failure()
