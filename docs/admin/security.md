@@ -155,6 +155,16 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   the deployment lists (`operator.workerAllowedOrigins`, and the plane's own where the
   chart serves the GUI); with none listed, no page does. The desktop app and `troupe` are
   not pages and need no entry (Decision 884).
+- **The control channel.** A worker dials the plane's control port, never the other way
+  round. A pod enrols with its projected token, bound to the plane's audience and good for
+  an hour, on the pod network, where the plane's NetworkPolicy admits the port from worker
+  namespaces alone; it may do so in plaintext. A machine registered outside the cluster
+  ([single-machine.md](single-machine.md)) enrols with a secret that lasts until it is
+  rotated, so it does so over TLS only: the port serves a certificate cert-manager issues
+  for the control Service, the machine is given that certificate's CA when it is registered
+  and trusts no other, and a worker holding a machine's secret and no CA does not dial. A
+  machine's secret sent in plaintext anyway is refused before it is looked at, with a
+  sentence saying to rotate it (Decision 893).
 - **A repository is cloned with a token the session never holds.** A session that names
   a GitHub repository is cloned on its first activation with an installation token the
   plane mints for that one repository, `contents: read`, for an hour. The pod's own git

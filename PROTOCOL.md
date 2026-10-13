@@ -2534,7 +2534,7 @@ that team.
 | `admin.profile.preview` | platform | what policy makes of a profile and what would change, without writing anything |
 | `admin.provisioners.list` | either | what can make a worker, and which guarantee each substrate does not give: admission policy, network policy, egress by hostname, disruption budget |
 | `admin.hosts.list` | platform | `{profile}` → every machine registered to a profile, with whether it has ever enrolled |
-| `admin.host.register` / `admin.host.rotate` | platform | register a machine against a profile and mint the secret it enrols with, shown once; or a new secret for one, keeping the machine |
+| `admin.host.register` / `admin.host.rotate` | platform | register a machine against a profile and mint the secret it enrols with, shown once; or a new secret for one, keeping the machine. Either answers `ca` too, the PEM of the CA that signed the control port's certificate, which the machine pins: it enrols over TLS only. Refused (`unavailable`) while the control port has no certificate |
 | `admin.host.enabled` | platform | stop a machine enrolling, or let it again |
 | `admin.groups.list` | either | every identity-provider group the plane knows about, which is what a team links to |
 | `admin.team.link` / `admin.team.unlink` | platform | draw a team's members from one more group, or stop; `admin.team.unlink.preview` says first who would lose access and how many sessions they can open |
