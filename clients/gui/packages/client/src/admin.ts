@@ -167,6 +167,17 @@ export interface AdminTeamGroup {
   linked_by?: string | null;
 }
 
+/**
+ * A group the identity provider has told the plane about. `looks_duplicated` is set when
+ * another group has its display name under a different id, which is usually a groups claim
+ * naming it by its name while SCIM pushes its id: the other ids, and that mismatch in words.
+ */
+export interface AdminGroup {
+  external_id: string;
+  display_name: string | null;
+  looks_duplicated?: { others: string[]; likely: string } | null;
+}
+
 /** A person in a team, with their own spend beside the team's. Read-only, always. */
 export interface AdminTeamMember {
   subject: string;
@@ -507,7 +518,7 @@ export class AdminApi {
   }
 
   /** Every group the identity provider has told the plane about: what a team links to. */
-  groups(): Promise<Array<{ external_id: string; display_name: string | null }>> {
+  groups(): Promise<AdminGroup[]> {
     return this.rpc("admin.groups.list", {});
   }
 

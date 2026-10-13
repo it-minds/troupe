@@ -71,6 +71,9 @@ defmodule Troupe.Plane.Identity.User do
     |> cast(attrs, [:subject, :external_id, :user_name, :email, :display_name, :active])
     |> validate_required([:subject])
     |> unique_constraint(:subject)
+    # One person per `externalId`: a push that would give a second row the
+    # value is refused rather than raised.
+    |> unique_constraint(:external_id)
     |> unique_constraint(:kms_name)
   end
 

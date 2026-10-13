@@ -349,7 +349,7 @@ defmodule Troupe.Plane.SCIMEntraTest do
       assert length(Identity.list_users()) == 2
     end
 
-    test "a DELETE empties the group and keeps it", context do
+    test "a DELETE removes the group, and leaves its members", context do
       ada = create_user(context, @ada_oid, "ada@example.test", "Ada Lovelace")
 
       eng = create_group(context, @eng_oid, "Engineering")
@@ -359,8 +359,9 @@ defmodule Troupe.Plane.SCIMEntraTest do
 
       assert {204, nil} = request(context, :delete, "/scim/v2/Groups/" <> eng["id"])
 
-      assert members(eng) == []
-      assert Identity.get_group(@eng_oid)
+      refute Identity.get_group(@eng_oid)
+      assert Identity.get_user(@ada_oid)
+      assert {404, _} = request(context, :delete, "/scim/v2/Groups/" <> eng["id"])
       assert {404, _} = request(context, :delete, "/scim/v2/Groups/" <> Ecto.UUID.generate())
     end
 

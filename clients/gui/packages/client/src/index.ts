@@ -124,6 +124,7 @@ export type {
   AdminSessionRow,
   SessionGitHub,
   AdminTeam,
+  AdminGroup,
   AdminTeamGroup,
   AdminTeamMember,
   AuditChanges,
