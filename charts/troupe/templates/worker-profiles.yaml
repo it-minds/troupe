@@ -1,0 +1,191 @@
+{{- $seccomp := and (eq .Values.worker.seccomp.type "Localhost") .Values.worker.seccomp.install.enabled }}
+{{- $apparmor := and .Values.worker.appArmor.enabled .Values.worker.appArmor.install.enabled }}
+{{- if or $seccomp $apparmor }}
+{{- include "troupe.worker.seccomp.validate" . }}
+{{- include "troupe.worker.apparmor.validate" . }}
+{{- $apparmorProfile := regexReplaceAll "(profile |peer=)troupe-worker([ ,])" (.Files.Get "files/worker-apparmor") (printf "${1}%s${2}" .Values.worker.appArmor.profile) }}
+{{- if $seccomp }}
+# The seccomp profile every worker container runs under (`worker.seccomp`), and what puts it
+# on the nodes. The kubelet reads a `Localhost` profile from its own seccomp directory on
+# the node the pod lands on, so it has to be there on every node before a worker starts;
+# a worker pod that lands first fails to start and is retried until it is.
+#
+# The profile is containerd's default, as it renders for a container with every capability
+# dropped, plus what bubblewrap needs to build the sandbox every command on a pod runs in:
+# `clone` and `unshare` with a user, mount, PID, IPC or UTS namespace, and `mount`,
+# `umount2` and `pivot_root`, which a process can use only inside a user namespace it made.
+# A network, cgroup or time namespace stays refused, and so does everything else the
+# default refuses. docs/admin/security.md says why each is there.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: troupe-worker-seccomp
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+data:
+  {{ base .Values.worker.seccomp.localhostProfile }}: |-
+{{ .Files.Get "files/worker-seccomp.json" | trim | indent 4 }}
+---
+{{- end }}
+{{- if $apparmor }}
+# The AppArmor profile every worker container runs under (`worker.appArmor`), which the
+# DaemonSet below loads into each node's kernel. A runtime takes a `Localhost` AppArmor
+# profile only once it is loaded, so a worker pod that lands on a node first fails to start
+# ("apparmor profile not found") and is retried until it is; it never runs without it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: troupe-worker-apparmor
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+data:
+  {{ .Values.worker.appArmor.profile }}: |-
+{{ $apparmorProfile | trim | indent 4 }}
+---
+{{- end }}
+# One pod per node, which puts the worker's profiles in place and then waits, so the
+# DaemonSet says by its readiness that every node has them. Each container is given the
+# least its own profile needs, and nothing from the host the other needs.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: troupe-worker-profiles
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: troupe
+      app.kubernetes.io/component: worker-profiles
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: troupe
+        app.kubernetes.io/component: worker-profiles
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        # A new profile in a new release rolls the DaemonSet, which puts it in place again.
+        {{- if $seccomp }}
+        checksum/seccomp: {{ .Files.Get "files/worker-seccomp.json" | sha256sum }}
+        {{- end }}
+        {{- if $apparmor }}
+        checksum/apparmor: {{ $apparmorProfile | sha256sum }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        seccompProfile: {type: RuntimeDefault}
+      terminationGracePeriodSeconds: 5
+      containers:
+        {{- if $seccomp }}
+        # Copies the seccomp profile into the kubelet's directory. The least it can be
+        # given: the one host directory the profile goes in, root because that directory is
+        # root's on the node, every capability dropped, nothing else from the host.
+        #
+        # The operator's image: this release's own, from the registry the chart already
+        # pulls from, with a shell, `cp`, `mv` and `cmp`. None of the operator runs.
+        - name: seccomp
+          image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          # Written beside itself and renamed, so the kubelet never reads half a profile.
+          args:
+            - |
+              set -eu
+              cp /profile/{{ base .Values.worker.seccomp.localhostProfile }} /host/.{{ base .Values.worker.seccomp.localhostProfile }}.new
+              mv -f /host/.{{ base .Values.worker.seccomp.localhostProfile }}.new /host/{{ base .Values.worker.seccomp.localhostProfile }}
+              echo "worker seccomp profile at {{ include "troupe.worker.seccomp.hostDir" . }}/{{ base .Values.worker.seccomp.localhostProfile }}"
+              exec sleep infinity
+          readinessProbe:
+            exec:
+              command: ["cmp", "-s", "/profile/{{ base .Values.worker.seccomp.localhostProfile }}", "/host/{{ base .Values.worker.seccomp.localhostProfile }}"]
+            periodSeconds: 30
+          resources: {{- toYaml .Values.worker.seccomp.install.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - name: seccomp-profile
+              mountPath: /profile
+              readOnly: true
+            - name: seccomp
+              mountPath: /host
+        {{- end }}
+        {{- if $apparmor }}
+        # Loads the AppArmor profile into the node's kernel with `apparmor_parser --replace`,
+        # which the operator's image carries for this. Loading a profile takes three things
+        # and this container has only those: root in the node's user namespace with
+        # `MAC_ADMIN` (every other capability dropped), no AppArmor profile of its own (the
+        # runtime's default refuses `/sys/kernel/security`), and the host's
+        # `/sys/kernel/security` mounted, the one thing from the host it sees. It is not
+        # privileged and reaches nothing else of the node. On a node whose kernel runs no
+        # AppArmor it loads nothing, says so, and is ready: a worker pod that asks for the
+        # profile there is refused by the kubelet ("Cannot enforce AppArmor"), and
+        # `worker.appArmor.enabled: false` is for such a cluster.
+        - name: apparmor
+          image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              if [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" != "Y" ] || [ ! -d /sys/kernel/security/apparmor ]; then
+                echo "AppArmor is not enabled on this node: no profile loaded, and a worker pod that asks for {{ .Values.worker.appArmor.profile }} is refused here (worker.appArmor.enabled false is for a cluster whose nodes have none)"
+                exec sleep infinity
+              fi
+              apparmor_parser --replace --skip-cache /profile/{{ .Values.worker.appArmor.profile }}
+              echo "worker AppArmor profile {{ .Values.worker.appArmor.profile }} loaded"
+              exec sleep infinity
+          # Ready while the kernel has the profile, in enforce mode, or runs no AppArmor.
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - '[ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" != "Y" ] || [ ! -d /sys/kernel/security/apparmor ] || grep -qxF "{{ .Values.worker.appArmor.profile }} (enforce)" /sys/kernel/security/apparmor/profiles'
+            periodSeconds: 30
+          resources: {{- toYaml .Values.worker.appArmor.install.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"], add: ["MAC_ADMIN"]}
+            appArmorProfile: {type: Unconfined}
+          volumeMounts:
+            - name: apparmor-profile
+              mountPath: /profile
+              readOnly: true
+            - name: securityfs
+              mountPath: /sys/kernel/security
+        {{- end }}
+      volumes:
+        {{- if $seccomp }}
+        - name: seccomp-profile
+          configMap:
+            name: troupe-worker-seccomp
+        - name: seccomp
+          hostPath:
+            path: {{ include "troupe.worker.seccomp.hostDir" . }}
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if $apparmor }}
+        - name: apparmor-profile
+          configMap:
+            name: troupe-worker-apparmor
+        - name: securityfs
+          hostPath:
+            path: /sys/kernel/security
+            type: Directory
+        {{- end }}
+{{- end }}

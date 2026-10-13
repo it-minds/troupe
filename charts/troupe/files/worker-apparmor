@@ -1,0 +1,94 @@
+# The AppArmor profile every worker container runs under (`worker.appArmor`), loaded into
+# each node's kernel by the chart's `troupe-worker-profiles` DaemonSet. The chart puts the
+# name from `worker.appArmor.profile` where this file says the default one.
+#
+# It is containerd's default profile for a container (`cri-containerd.apparmor.d`), with
+# its `deny mount` replaced by what bubblewrap builds a command's sandbox with, and a few
+# more denials. bubblewrap makes a user, mount, PID, IPC and UTS namespace, makes `/` a
+# slave of the pod's mounts, puts a tmpfs where it builds the new root, binds the system's
+# read-only roots and the session's mounts into it and remounts the read-only ones, mounts
+# a fresh proc, a `/dev` of its own with a devpts and a tmpfs at `/tmp`, and pivots into it.
+# The kernel lets a process without capabilities, as a worker's are, make any of those
+# mounts only inside a user and mount namespace it made itself, so they reach the
+# sandbox's own mounts and never the pod's or the node's.
+#
+# The user namespace. A process under this profile is confined, so the kernel's restriction
+# on unprivileged user namespaces (`kernel.apparmor_restrict_unprivileged_userns=1`), which
+# moves an unconfined process that makes one into a profile with no capabilities and so no
+# uid map, does not apply to it: whether it may make one is this profile's to say. The
+# installer's parser is AppArmor 3.0's, whose policy ABI has no user-namespace rule and so
+# does not mediate them, and the kernel lets a task under a profile that does not mediate
+# them make one: this profile allows them by that. A parser of AppArmor 4 says the same
+# with `abi <abi/4.0>,` and a `userns,` rule. docs/admin/security.md has the rest.
+abi <abi/3.0>,
+
+profile troupe-worker flags=(attach_disconnected,mediate_deleted) {
+  # As the default: the network, files and capabilities as the kernel gives them, and
+  # unmounting. Every capability is dropped from a worker container, so a capability is
+  # only ever one a process holds in a user namespace it made.
+  network,
+  unix,
+  capability,
+  file,
+  umount,
+
+  # The sandbox's mounts, and moving into it.
+  mount,
+  pivot_root,
+
+  # Filesystems the sandbox never mounts, refused even inside it.
+  deny mount fstype=sysfs,
+  deny mount fstype=cgroup,
+  deny mount fstype=cgroup2,
+  deny mount fstype=mqueue,
+  deny mount fstype=fuse,
+  deny mount fstype=overlay,
+  deny mount fstype=bpf,
+  deny mount fstype=ramfs,
+  deny mount fstype=binder,
+
+  # Capabilities that mean something only in the node's own namespace: never a worker's.
+  deny capability mac_admin,
+  deny capability mac_override,
+  deny capability sys_module,
+  deny capability sys_rawio,
+  deny capability sys_boot,
+  deny capability sys_time,
+  deny capability syslog,
+  deny capability audit_control,
+
+  # Sockets a worker has no use for: raw IP and the link layer. Netlink's raw sockets stay,
+  # which listing the network interfaces (getifaddrs) uses.
+  deny network inet raw,
+  deny network inet6 raw,
+  deny network packet,
+
+  # Signals as the default has them: from the node's runtime, and among the worker's own.
+  signal (receive) peer=unconfined,
+  signal (receive) peer=runc,
+  signal (receive) peer=crun,
+  signal (send,receive) peer=troupe-worker,
+
+  # The worker's processes may trace and read each other, as the default allows.
+  ptrace (trace,tracedby,read,readby) peer=troupe-worker,
+
+  # As the default: no writes to the kernel's files directly in /proc, or outside
+  # /proc/<pid> and /proc/sys/kernel/shm*, and nothing of sysrq-trigger or kcore.
+  deny /proc/* w,
+  deny /proc/{[^1-9],[^1-9][^0-9],[^1-9s][^0-9y][^0-9s],[^1-9][^0-9][^0-9][^0-9/]*}/** w,
+  deny /proc/sys/[^k]** w,
+  deny /proc/sys/kernel/{?,??,[^s][^h][^m]**} w,
+  deny /proc/sysrq-trigger rwklx,
+  deny /proc/kcore rwklx,
+
+  # As the default: sysfs is read-only but for cgroups, and its firmware, power capping and
+  # security files are not read at all.
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+}

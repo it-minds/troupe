@@ -792,6 +792,18 @@ defmodule Troupe.Operator.Resources do
 
   defp container_user_namespace(_settings), do: %{}
 
+  # The installation's AppArmor profile, which allows the mounts bubblewrap makes and keeps
+  # the worker confined when it makes the sandbox's user namespace. Where a node enforces
+  # AppArmor, the runtime's default profile refuses those mounts, and an unconfined process
+  # is refused the namespace's uid map where the kernel restricts unprivileged user
+  # namespaces. Off, the field is left out and the container keeps the runtime's default.
+  defp container_apparmor(settings) do
+    case Settings.worker_apparmor(settings) do
+      nil -> %{}
+      profile -> %{"appArmorProfile" => profile}
+    end
+  end
+
   defp pull_secrets(%Settings{image_pull_secrets: []}), do: nil
   defp pull_secrets(%Settings{image_pull_secrets: names}), do: Enum.map(names, &%{"name" => &1})
 
@@ -821,7 +833,7 @@ defmodule Troupe.Operator.Resources do
             # needs, or `Unconfined` on a development cluster.
             "seccompProfile" => Settings.worker_seccomp(settings)
           },
-          container_user_namespace(settings)
+          Map.merge(container_user_namespace(settings), container_apparmor(settings))
         )
     }
   end

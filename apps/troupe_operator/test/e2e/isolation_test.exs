@@ -146,6 +146,50 @@ defmodule Troupe.E2E.IsolationTest do
              "#{pod}'s worker container runs under #{inspect(worn)}, and the installation chose #{chosen}"
     end
 
+    # Where a node enforces AppArmor, the runtime's default profile refuses bubblewrap's
+    # mounts, and a kernel that restricts unprivileged user namespaces refuses an unconfined
+    # process the sandbox's uid map: the worker container runs under the AppArmor profile the
+    # installation names. What the pod says it wears, and what the kernel says it runs under.
+    test "runs on a container under the AppArmor profile the installation chose", context do
+      namespace = World.worker_namespace(context.profile)
+      pod = World.pod(namespace, "app.kubernetes.io/name=troupe-worker")
+      assert pod, "#{namespace} has no worker pod to look at"
+
+      chosen =
+        World.kubectl!([
+          "get",
+          "deployment",
+          "troupe-operator",
+          "-n",
+          World.namespace(),
+          "-o",
+          ~s|jsonpath={.spec.template.spec.containers[0].env[?(@.name=="TROUPE_WORKER_APPARMOR_PROFILE")].value}|
+        ])
+
+      worn =
+        World.kubectl!([
+          "get",
+          "pod",
+          pod,
+          "-n",
+          namespace,
+          "-o",
+          ~s|jsonpath={.spec.containers[?(@.name=="worker")].securityContext.appArmorProfile}|
+        ])
+
+      if chosen == "" do
+        assert worn == "", "#{pod} wears #{worn}, and the installation chose no AppArmor profile"
+      else
+        assert Jason.decode!(worn) == %{"type" => "Localhost", "localhostProfile" => chosen},
+               "#{pod}'s worker container wears #{inspect(worn)}, and the installation chose #{chosen}"
+
+        {current, 0} = World.exec(namespace, pod, ["cat", "/proc/self/attr/current"])
+
+        assert String.trim(current) == "#{chosen} (enforce)",
+               "#{pod}'s worker container runs under #{inspect(String.trim(current))}, not #{chosen}"
+      end
+    end
+
     # Bubblewrap mounts a fresh /proc for the sandbox, which the kernel refuses inside a user
     # namespace while the container's own /proc has paths masked over; Kubernetes unmasks it
     # only for a pod in a user namespace of its own. What the pod says it is, and what the
