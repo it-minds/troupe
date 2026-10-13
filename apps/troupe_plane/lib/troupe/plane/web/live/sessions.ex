@@ -143,6 +143,7 @@ defmodule Troupe.Plane.Web.Live.Sessions do
             <th>objects</th>
             <th>workspace</th>
             <th>pinned</th>
+            <th>on GitHub</th>
             <th></th>
           </tr>
         </thead>
@@ -156,6 +157,7 @@ defmodule Troupe.Plane.Web.Live.Sessions do
             <td>{bytes(session.object_bytes)}</td>
             <td>{bytes(session.workspace_bytes)}</td>
             <td>{if session.pinned, do: session.pinned_by || "yes", else: "—"}</td>
+            <td><.on_github github={Map.get(session, :github)} /></td>
             <td>
               <button
                 :if={@confirming != session.id}
@@ -167,7 +169,7 @@ defmodule Troupe.Plane.Web.Live.Sessions do
             </td>
           </tr>
           <tr :if={@sessions == []}>
-            <td colspan="9">no sessions you can see</td>
+            <td colspan="10">no sessions you can see</td>
           </tr>
         </tbody>
       </table>

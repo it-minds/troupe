@@ -20,8 +20,10 @@ defmodule Troupe.Plane.Replica do
   @doc """
   Start a replica, or say why not.
 
-  `:env` is merged over this node's `:troupe_plane` configuration, which is how a caller
-  gives the replica its own control port — two listeners in one test cannot share one.
+  `:env` is merged over this node's `:troupe_plane` configuration. The replica's control
+  listener takes a port nobody holds unless `:env` names one, and `control_port/1` says
+  which: a fixed port is still held, a moment after the run that used it, by the replica
+  of a suite run just before, and by the replica of another suite running beside it.
   """
   @spec start(keyword()) :: {:ok, pid(), node()} | {:error, term()}
   def start(opts \\ []) do
@@ -30,11 +32,21 @@ defmodule Troupe.Plane.Replica do
          {:ok, peer, node} <- start_peer() do
       :ok = :erpc.call(node, :code, :add_paths, [:code.get_path()])
       :ok = :erpc.call(node, Application, :put_all_env, [[troupe_plane: env(opts)]])
-      {:ok, _started} = :erpc.call(node, Application, :ensure_all_started, [:troupe_plane], 30_000)
 
-      {:ok, peer, node}
+      case :erpc.call(node, Application, :ensure_all_started, [:troupe_plane], 30_000) do
+        {:ok, _started} ->
+          {:ok, peer, node}
+
+        {:error, reason} ->
+          stop(peer)
+          {:error, reason}
+      end
     end
   end
+
+  @doc "The port a replica's control listener took."
+  @spec control_port(node()) :: :inet.port_number()
+  def control_port(node), do: :erpc.call(node, Troupe.Plane.Control.Listener, :port, [])
 
   defp start_peer do
     :peer.start_link(%{
@@ -52,6 +64,7 @@ defmodule Troupe.Plane.Replica do
     :troupe_plane
     |> Application.get_all_env()
     |> Keyword.put(:autostart, true)
+    |> Keyword.put(:control_port, 0)
     |> Keyword.update(Repo, [pool_size: 5], fn repo_config ->
       repo_config |> Keyword.put(:pool_size, 5) |> Keyword.delete(:pool)
     end)
@@ -112,8 +125,10 @@ defmodule Troupe.Plane.Replica do
     error -> {:error, {:epmd, error}}
   end
 
+  # Named for this OS process, so two suites running at once, each in a worktree of its
+  # own, are two nodes rather than two claims on one name, which EPMD gives the first.
   defp ensure_distributed do
-    case :net_kernel.start([:"troupe_plane_test@127.0.0.1", :longnames]) do
+    case :net_kernel.start([:"troupe_plane_test_#{System.pid()}@127.0.0.1", :longnames]) do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
       error -> error

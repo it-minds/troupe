@@ -889,7 +889,10 @@ defmodule Troupe.Plane.AdminTest do
     session
   end
 
+  # `repository` and `github` are metadata too: the repository a session was created with,
+  # and the branch, commit and pull request its pod reported there, never what it wrote.
   defp expected_session_keys do
-    ~w(epoch id last_active_at last_seq object_bytes owner pinned pinned_by profile state visibility workspace_bytes)a
+    ~w(epoch github id last_active_at last_seq object_bytes owner pinned pinned_by profile)a ++
+      ~w(repository state visibility workspace_bytes)a
   end
 end

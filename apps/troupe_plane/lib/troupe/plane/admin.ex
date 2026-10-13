@@ -49,6 +49,7 @@ defmodule Troupe.Plane.Admin do
     Ledger
   }
 
+  alias Troupe.Plane.Control.TLS
   alias Troupe.Plane.Fleet.{Bundle, Provisioner, SizeClass, Worker}
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
@@ -554,13 +555,19 @@ defmodule Troupe.Plane.Admin do
   bound to a policy at all: enrolment proves the host is *this* host of *that* profile, and
   the profile's grants decide the rest. A host registered against a profile no substrate
   enforces is why `allow_unenforced_workers` exists.
+
+  **And the CA it pins.** The answer carries `ca`, the PEM of the CA that signed the
+  control port's certificate: the machine dials with TLS, trusts that CA and nothing else
+  for the channel, and its secret never crosses it in plaintext. A plane whose control
+  port has no certificate registers nothing, since a secret it minted could never be used.
   """
   @spec host_register(actor(), String.t(), map()) :: result()
   def host_register(actor, profile, attrs) do
     attrs = settable(attrs, @host_keys)
 
     with :ok <- require_platform_admin(actor),
-         {:ok, _profile} <- fetch_profile(profile) do
+         {:ok, _profile} <- fetch_profile(profile),
+         {:ok, ca} <- control_ca() do
       # Who registered it, from the actor rather than from the caller: a field a client
       # filled in is a field a client can put somebody else's name in.
       attrs = Map.put(attrs, "registered_by", actor.subject)
@@ -573,7 +580,7 @@ defmodule Troupe.Plane.Admin do
               "address" => host.address
             })
 
-          {:ok, host |> host_summary() |> Map.put(:secret, secret)}
+          {:ok, host |> host_summary() |> Map.merge(%{secret: secret, ca: ca})}
 
         {:error, %Ecto.Changeset{} = changeset} ->
           {:error, invalid(changeset)}
@@ -584,20 +591,31 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # The control port's CA, which a machine pins; without one no machine can enrol.
+  defp control_ca do
+    case TLS.ca() do
+      {:ok, ca} -> {:ok, ca}
+      {:error, why} -> {:error, Error.new(:unavailable, %{reason: why})}
+    end
+  end
+
   @doc """
   Mint a new secret for a host, keeping the host.
 
   The id has to survive: a rotation that made a new row would leave the new secret naming a
   host nothing knows about, which is indistinguishable from a rotation that did not take.
-  The old secret stops working the moment this returns.
+  The old secret stops working the moment this returns. The answer carries the CA as
+  registering does, which is how a machine registered before the control port had TLS
+  gets it.
   """
   @spec host_rotate(actor(), String.t(), String.t()) :: result()
   def host_rotate(actor, profile, name) do
     with :ok <- require_platform_admin(actor),
-         {:ok, host} <- fetch_host(profile, name) do
+         {:ok, host} <- fetch_host(profile, name),
+         {:ok, ca} <- control_ca() do
       {:ok, rotated, secret} = Fleet.Hosts.rotate(host, actor.subject)
       {:ok, _} = Audit.record(actor.subject, "host.rotate", "#{profile}/#{name}", %{})
-      {:ok, rotated |> host_summary() |> Map.put(:secret, secret)}
+      {:ok, rotated |> host_summary() |> Map.merge(%{secret: secret, ca: ca})}
     end
   end
 
@@ -3311,7 +3329,11 @@ defmodule Troupe.Plane.Admin do
       workspace_bytes: session.workspace_bytes,
       pinned: session.pinned,
       pinned_by: session.pinned_by,
-      last_active_at: session.last_active_at
+      last_active_at: session.last_active_at,
+      # The repository it was created with, and its branch, last commit and draft pull
+      # request there: metadata the pod reported, never what the session said.
+      repository: session.repository,
+      github: session.github
     }
   end
 

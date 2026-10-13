@@ -37,9 +37,9 @@ defmodule Troupe.Worker.Application do
   # person-mode server discovered at start-up is one whose credentials may be asked for
   # on the first turn; `ClientCredentials` too, because discovering a server the profile
   # calls as itself takes its token. The MCP sessions the servers issue before all of
-  # them, and stopped after them, which is when each is ended at its server (Decision 746).
+  # them, and stopped after them, which is when each is ended at its server.
   # The pod's OpenBao login first of all, since a session's key and a profile's signature
-  # are both asked for with it (Decision 753).
+  # are both asked for with it.
   defp children do
     [
       Troupe.KMS.OpenBao.Login,
@@ -48,6 +48,7 @@ defmodule Troupe.Worker.Application do
       {Troupe.MCP.Sessions, name: Troupe.Worker.MCP.Sessions},
       Troupe.Worker.Connections,
       Troupe.Worker.GitCredentials,
+      Troupe.Worker.GitHub,
       Troupe.Worker.ClientCredentials,
       Troupe.Worker.MCP,
       Troupe.Worker.Bundles,

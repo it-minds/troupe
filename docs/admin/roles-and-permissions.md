@@ -124,7 +124,7 @@ with `personalTools: forbid` refuses it on its pods, and the platform's
 | Console `/console` ([console.md](console.md)) | the plane token below, from the provider's authorization code with PKCE in the page and `/auth/exchange`; kept for the browser tab | as `POST /rpc`: the role is worked out on every `admin.*` call, so no token says "administrator" |
 | `POST /rpc` | `Bearer <plane token>`, `aud` = `TROUPE_PLANE_AUDIENCE`, JWKS from OpenBao | subject resolved per request; `admin.*` to the admin API, everything else to the harness as the person |
 | `POST /mcp` | a plane token, or the provider's own token with `aud` in `client_id`, `api://<client_id>`, `<base_url>/mcp` | a 401 carries `WWW-Authenticate … resource_metadata=` for OAuth-capable clients |
-| Control channel (TCP 4001) | a projected ServiceAccount token (audience `troupe-plane`), or a registered machine's secret | `TokenReview`: ServiceAccount `troupe-worker`, and the namespace decides the profile |
+| Control channel (TCP 4001, or TLS on the same port) | a projected ServiceAccount token (audience `troupe-plane`), or a registered machine's secret, over TLS only | `TokenReview`: ServiceAccount `troupe-worker`, and the namespace decides the profile; a machine's secret in plaintext is refused before it is looked at |
 | `POST /mcp/session` | a plane token | the caller, offered four harness tools: `session_create`, `session_get`, `sessions_list`, `trigger_fire` |
 | `POST /trigger/<id>` | that trigger's own key | fires that one trigger as its principal, and nothing else |
 | `/scim/v2/*` | the SCIM bearer (console-minted or `TROUPE_SCIM_TOKEN`) | no person |

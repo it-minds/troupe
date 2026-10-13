@@ -363,7 +363,12 @@ owner's name at the key manager, which the pod reads their slots under. `git.cre
 installation token the plane mints with its App for the repository on the session's row,
 narrowed to it and to `contents: read`, with the URL to clone it from; the pod's own git
 uses it for the clone on the session's first activation, and the session never sees it
-(Decision 885).
+(Decision 885). With `access: "write"` it answers the fix loop's token instead, with what
+the session's worker profile grants (`spec.github.permissions`), which the pod's own
+`git_push`, `pr_open`, `pr_comment` and `pr_checks` use outside the sandbox to push the
+session's `troupe/*` branch through GitHub's API, open its draft pull request and read
+its CI; the pod reports each step with `github.record {session_id, ...}`, metadata the
+plane checks, keeps on the session's row and audits (Decision 891).
 
 **The harness API** (`/rpc`) is a fleet API: `me`, `teams.list`, `profiles.list`,
 `sessions.list`, `session.get`, `session.create`, `session.open`, `token.mint`, archive,

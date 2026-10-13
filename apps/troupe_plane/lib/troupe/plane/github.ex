@@ -21,18 +21,32 @@ defmodule Troupe.Plane.GitHub do
   to clone from as well as what to clone with: the URL is the plane's, built from the App's
   API URL, never one the pod or the session chose.
 
-  ## A token is one repository's, read-only, and an hour long
+  ## A token is one repository's, as narrow as its use, and an hour long
 
   Each answer is a new installation token, asked of GitHub with the App's JWT and
-  narrowed in the request to the session's one repository and `contents: read`. GitHub
-  ends it after an hour. The pod holds it for the activation and asks again when the
-  session is next activated, or when it is about to run out. Nothing here logs it, and
-  the audit entry for it names the session, the repository and when it expires.
+  narrowed in the request to the session's one repository. The clone's is
+  `contents: read`. The fix loop's (`access: :write`) carries what the session's worker
+  profile grants in `spec.github.permissions` and nothing more: some of `contents`,
+  `pull_requests`, `checks` and `statuses`. GitHub ends either after an hour. The pod
+  holds it for the activation and asks again when the session is next activated, or when
+  it is about to run out. Nothing here logs it, and the audit entry for it names the
+  session, the repository, the permissions and when it expires.
+
+  ## What a session did there
+
+  The pod reports each step of the fix loop (`record/3`): the commit its clone started
+  from, the `troupe/*` branch it pushed and its last commit there, its draft pull request,
+  and each CI round on that pull request. The row keeps it (`sessions.github`), every
+  listing of the session shows it, and each step is an audit entry. After the third red
+  round the session's pushes are closed: the record says it stopped, and a write token is
+  minted from then on with `contents: read`, so a pod could not push if it tried. The
+  pull request stays a draft for a person.
   """
 
   import Ecto.Changeset
+  import Ecto.Query, only: [from: 2]
 
-  alias Troupe.Plane.{Fleet, Repo}
+  alias Troupe.Plane.{Audit, Fleet, Repo}
   alias Troupe.Plane.GitHub.{App, Key}
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Policy
@@ -41,9 +55,26 @@ defmodule Troupe.Plane.GitHub do
 
   @default_api "https://api.github.com"
 
-  # What a session's token may do: read the repository's contents, which is what a clone
-  # needs and all it needs. Metadata comes with every App token whether asked for or not.
+  # What a session's clone token may do: read the repository's contents, which is what a
+  # clone needs and all it needs. Metadata comes with every App token whether asked for or
+  # not.
   @permissions %{"contents" => "read"}
+
+  # What a worker profile may grant its sessions' fix-loop token, in GitHub's own names,
+  # and how far each may go: the push, the draft pull request and its comments, and
+  # reading CI. Nothing else: not issues, not administration, not workflows.
+  @grantable %{
+    "contents" => ["read", "write"],
+    "pull_requests" => ["read", "write"],
+    "checks" => ["read"],
+    "statuses" => ["read"]
+  }
+
+  # Red CI rounds on a session's own pull request before its pushes are closed.
+  @red_rounds 3
+
+  # A commit or tree name, SHA-1 or SHA-256, as GitHub writes it.
+  @object ~r/\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z/
 
   # An App JWT may live ten minutes at most. Nine, issued a minute in the past, is what
   # GitHub asks for so that a clock a little ahead of its own is not refused.
@@ -55,9 +86,70 @@ defmodule Troupe.Plane.GitHub do
   @owner ~r/\A[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\z/
   @name ~r/\A[A-Za-z0-9._-]{1,100}\z/
 
-  @doc "What a session's installation token is asked for with."
+  @doc "What a session's clone token is asked for with."
   @spec permissions() :: %{String.t() => String.t()}
   def permissions, do: @permissions
+
+  @doc "How many red CI rounds on its own pull request close a session's pushes."
+  @spec red_rounds() :: pos_integer()
+  def red_rounds, do: @red_rounds
+
+  # -- what a worker profile grants -------------------------------------------
+
+  @doc """
+  What a worker profile's `spec.github.permissions` grants its sessions' fix-loop token,
+  or `contents: read` where it grants nothing: a session on it may clone and no more.
+  """
+  @spec grants(String.t() | nil) :: %{String.t() => String.t()}
+  def grants(profile) do
+    case profile && Fleet.get_profile(profile) do
+      %{spec: %{"github" => %{"permissions" => %{} = granted}}} when map_size(granted) > 0 ->
+        granted
+
+      _none ->
+        @permissions
+    end
+  end
+
+  @doc """
+  The problems with a profile's `spec.github`, as sentences, for `admin.profile.put` and a
+  resource read in GitOps mode alike: an object with `permissions`, each one GitHub's name
+  for a permission this may grant, at a level it may be granted.
+  """
+  @spec spec_problems(term()) :: [String.t()]
+  def spec_problems(nil), do: []
+
+  def spec_problems(%{} = github) do
+    case Map.keys(github) -- ["permissions"] do
+      [] -> permission_problems(github["permissions"])
+      [key | _] -> ["github takes permissions, not #{key}"]
+    end
+  end
+
+  def spec_problems(_other), do: ["github is an object: {permissions: {contents: write, ...}}"]
+
+  defp permission_problems(nil), do: []
+
+  defp permission_problems(%{} = permissions),
+    do: permissions |> Enum.sort() |> Enum.flat_map(&permission_problem/1)
+
+  defp permission_problems(_other),
+    do: ["github.permissions is an object, such as {contents: write, pull_requests: write}"]
+
+  defp permission_problem({name, level}) do
+    case Map.fetch(@grantable, name) do
+      {:ok, levels} ->
+        if level in levels,
+          do: [],
+          else: [
+            "github.permissions.#{name} is #{Enum.join(levels, " or ")}, not #{inspect(level)}"
+          ]
+
+      :error ->
+        names = @grantable |> Map.keys() |> Enum.sort() |> Enum.join(", ")
+        ["github.permissions takes #{names}, not #{name}"]
+    end
+  end
 
   # -- the App, as an administrator reads and writes it -------------------------
 
@@ -415,26 +507,31 @@ defmodule Troupe.Plane.GitHub do
   defp reachable(profile, app) do
     host = app |> api_url() |> git_url() |> URI.parse() |> Map.get(:host)
 
-    declared =
-      case profile && Fleet.get_profile(profile) do
-        %{spec: spec} when is_map(spec) -> get_in(spec, ["egress", "gitHosts"]) || []
-        _ -> []
-      end
-
-    if Enum.any?(declared, &Policy.matches?(host, &1)),
+    if Enum.any?(declared(profile), &Policy.matches?(host, &1)),
       do: :ok,
       else: {:error, {:host_not_declared, profile, host}}
+  end
+
+  defp declared(profile) do
+    case profile && Fleet.get_profile(profile) do
+      %{spec: spec} when is_map(spec) -> get_in(spec, ["egress", "gitHosts"]) || []
+      _ -> []
+    end
   end
 
   # -- a session's token ------------------------------------------------------
 
   @doc """
   A new installation token for a session's repository, and where to clone it from:
-  `{token, expires_at, url, host, username, ref, repository, installation_id}`.
+  `{token, expires_at, url, host, username, ref, repository, installation_id,
+  permissions}`, and with `access: :write` the `api_url` the fix loop's calls go to.
 
-  Asked of GitHub every time, narrowed to the one repository and `permissions/0`. The
-  checks `repository/2` made at creation are made again, since the App, its installations
-  and the profile may all have changed since.
+  Asked of GitHub every time, narrowed to the one repository. `access: :read` (the
+  default) is the clone's, `permissions/0`; `access: :write` is the fix loop's, what the
+  session's profile grants (`grants/1`), refused where that is reading alone, and with
+  `contents: read` once the session's pushes are closed. The checks `repository/2` made
+  at creation are made again, since the App, its installations and the profile may all
+  have changed since; a write token also needs the profile to declare the API's host.
   """
   @spec credential(Session.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def credential(session, opts \\ [])
@@ -443,29 +540,65 @@ defmodule Troupe.Plane.GitHub do
         %Session{repository: %{"owner" => owner, "name" => name} = repository} = session,
         opts
       ) do
+    access = Keyword.get(opts, :access, :read)
+
     with {:ok, app} <- configured(),
          {:ok, installation} <- installation_for(app, owner),
          :ok <- reachable(session.profile, app),
+         {:ok, permissions} <- permissions_for(access, session),
+         :ok <- api_reachable(access, session.profile, app),
          {:ok, jwt} <- jwt(app, opts),
-         {:ok, token, expires_at} <- exchange(app, installation, name, jwt) do
+         {:ok, token, expires_at} <- exchange(app, installation, name, permissions, jwt) do
       git = git_url(api_url(app))
 
+      credential = %{
+        "token" => token,
+        "expires_at" => expires_at,
+        "url" => "#{git}/#{owner}/#{name}.git",
+        "host" => URI.parse(git).host,
+        "username" => "x-access-token",
+        "ref" => repository["ref"],
+        "repository" => "#{owner}/#{name}",
+        "installation_id" => installation["installation_id"],
+        "permissions" => permissions
+      }
+
       {:ok,
-       %{
-         "token" => token,
-         "expires_at" => expires_at,
-         "url" => "#{git}/#{owner}/#{name}.git",
-         "host" => URI.parse(git).host,
-         "username" => "x-access-token",
-         "ref" => repository["ref"],
-         "repository" => "#{owner}/#{name}",
-         "installation_id" => installation["installation_id"],
-         "permissions" => @permissions
-       }}
+       if(access == :write, do: Map.put(credential, "api_url", api_url(app)), else: credential)}
     end
   end
 
   def credential(%Session{}, _opts), do: {:error, :no_repository}
+
+  # The clone's is read-only whatever the profile says. The fix loop's is the profile's
+  # grant, and only where it grants something to write with; once three red rounds have
+  # closed the session's pushes, it still comments and reads CI, and can no longer push.
+  defp permissions_for(:read, _session), do: {:ok, @permissions}
+
+  defp permissions_for(:write, %Session{} = session) do
+    granted = grants(session.profile)
+
+    cond do
+      "write" not in Map.values(granted) -> {:error, {:no_write, session.profile}}
+      stopped?(session.github) -> {:ok, Map.put(granted, "contents", "read")}
+      true -> {:ok, granted}
+    end
+  end
+
+  defp permissions_for(other, _session), do: {:error, {:access, other}}
+
+  # The fix loop's calls go to the API from the pod, so a profile whose sessions make them
+  # declares the API's host as well as the Git host: `api.github.com` beside `github.com`.
+  # An Enterprise Server has both on one host, which `reachable/2` has checked already.
+  defp api_reachable(:write, profile, app) do
+    host = app |> api_url() |> URI.parse() |> Map.get(:host)
+
+    if Enum.any?(declared(profile), &Policy.matches?(host, &1)),
+      do: :ok,
+      else: {:error, {:api_not_declared, profile, host}}
+  end
+
+  defp api_reachable(_access, _profile, _app), do: :ok
 
   @doc """
   The App's JWT: `iss` the App id, issued a minute ago, nine minutes to live, signed RS256
@@ -485,13 +618,13 @@ defmodule Troupe.Plane.GitHub do
 
   # The token is in the answer and nowhere else: not in an error, which names GitHub's
   # status and message, and not in a log line.
-  defp exchange(app, installation, name, jwt) do
+  defp exchange(app, installation, name, permissions, jwt) do
     url = "#{api_url(app)}/app/installations/#{installation["installation_id"]}/access_tokens"
 
     case Req.request(
            method: :post,
            url: url,
-           json: %{"repositories" => [name], "permissions" => @permissions},
+           json: %{"repositories" => [name], "permissions" => permissions},
            headers: [
              {"authorization", "Bearer " <> jwt},
              {"accept", "application/vnd.github+json"},
@@ -520,6 +653,215 @@ defmodule Troupe.Plane.GitHub do
   defp message(%{"message" => message}) when is_binary(message), do: message
   defp message(_body), do: nil
 
+  # -- what a session did there -----------------------------------------------
+
+  @doc """
+  Record a step of a session's fix loop, as the pod that holds it reports it, and answer
+  the record as it now is: `{github, stopped_now}`.
+
+  `changes` has one or more of:
+
+  - `base`: the commit the session's clone started from, once;
+  - `push`: `{branch, commit, tree}`, a commit the session pushed. The branch is under
+    `troupe/` and is the session's one branch: the first push names it and every later one
+    is refused another. None once the session has stopped;
+  - `pull_request`: `{number, url}`, its draft pull request, once, after a push; the URL is
+    this repository's pull request on the App's host and no other;
+  - `round`: `{commit, state, failing}`, the CI of its last push on that pull request,
+    `red` or `green` with the names of the checks that failed, once a commit. The third red
+    one stops the session: `stopped` says when and why, and `stopped_now` is true in the
+    answer that did it.
+
+  Checked whole before anything is written, under the row's lock, so two reports at once
+  cannot both be the first push or both miss the third red round. Each step is an audit
+  entry by `actor` for the session's owner. Metadata only: a commit message, a pull
+  request's text or CI's output is never sent here.
+  """
+  @spec record(Session.t(), map(), String.t()) ::
+          {:ok, %{github: map(), stopped_now: boolean()}} | {:error, term()}
+  def record(%Session{repository: %{}} = session, changes, actor) when is_map(changes) do
+    Repo.transaction(fn ->
+      locked =
+        Repo.one!(from(s in Session, where: s.id == ^session.id, lock: "FOR UPDATE"))
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
+      case apply_changes(locked.github || %{}, changes, locked, now) do
+        {:ok, github, steps} -> keep(locked, github, steps, actor)
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  def record(%Session{}, _changes, _actor), do: {:error, :no_repository}
+
+  defp keep(session, github, steps, actor) do
+    if github != (session.github || %{}), do: session |> change(github: github) |> Repo.update!()
+    Enum.each(steps, &audit(&1, session, actor))
+    %{github: github, stopped_now: Enum.any?(steps, &match?({:stopped, _}, &1))}
+  end
+
+  @doc "Whether a session's record says its pushes are closed."
+  @spec stopped?(map() | nil) :: boolean()
+  def stopped?(%{"stopped" => %{}}), do: true
+  def stopped?(_github), do: false
+
+  @changes ~w(base push pull_request round)
+
+  # In a fixed order, so a report of a push and its round together applies the push first.
+  defp apply_changes(record, changes, session, now) do
+    case Map.keys(changes) -- @changes do
+      [] ->
+        @changes
+        |> Enum.filter(&Map.has_key?(changes, &1))
+        |> Enum.reduce_while({:ok, record, []}, fn key, {:ok, acc, steps} ->
+          step(change_record(key, changes[key], acc, session, now), steps)
+        end)
+
+      [unknown | _] ->
+        {:error, "a record takes #{Enum.join(@changes, ", ")}, not #{unknown}"}
+    end
+  end
+
+  defp step({:ok, record, more}, steps), do: {:cont, {:ok, record, steps ++ more}}
+  defp step({:error, reason}, _steps), do: {:halt, {:error, reason}}
+
+  defp change_record("base", base, record, _session, _now) do
+    cond do
+      not object?(base) -> {:error, "base is a commit name"}
+      record["base"] in [nil, base] -> {:ok, Map.put(record, "base", base), []}
+      true -> {:error, "the session's starting commit is recorded already"}
+    end
+  end
+
+  defp change_record("push", %{} = push, record, _session, now) do
+    branch = push["branch"]
+
+    cond do
+      stopped?(record) ->
+        {:error,
+         "this session's pushes are closed after #{@red_rounds} red CI rounds on its pull request"}
+
+      not troupe_branch?(branch) ->
+        {:error, "a session pushes only to a branch under troupe/, not #{inspect(branch)}"}
+
+      record["branch"] not in [nil, branch] ->
+        {:error, "this session pushes to #{record["branch"]} and no other branch"}
+
+      not (object?(push["commit"]) and object?(push["tree"])) ->
+        {:error, "a push names its commit and its tree"}
+
+      true ->
+        {:ok,
+         Map.merge(record, %{
+           "branch" => branch,
+           "commit" => push["commit"],
+           "tree" => push["tree"],
+           "pushed_at" => now,
+           "pushes" => (record["pushes"] || 0) + 1
+         }), [{:push, %{"branch" => branch, "commit" => push["commit"]}}]}
+    end
+  end
+
+  defp change_record("pull_request", %{"number" => number, "url" => url}, record, session, _now)
+       when is_integer(number) and number > 0 and is_binary(url) do
+    pull_request = %{"number" => number, "url" => url}
+
+    cond do
+      is_nil(record["branch"]) ->
+        {:error, "a pull request comes after the session's first push"}
+
+      String.downcase(url) != String.downcase(pull_request_url(session, number)) ->
+        {:error, "a pull request's URL is the session's repository's, on the App's host"}
+
+      record["pull_request"] == pull_request ->
+        {:ok, record, []}
+
+      is_nil(record["pull_request"]) ->
+        {:ok, Map.put(record, "pull_request", pull_request), [{:pull_request, pull_request}]}
+
+      true ->
+        {:error, "this session has its pull request already"}
+    end
+  end
+
+  defp change_record(
+         "round",
+         %{"commit" => commit, "state" => state} = round,
+         record,
+         _session,
+         now
+       )
+       when state in ["red", "green"] do
+    rounds = record["rounds"] || []
+
+    cond do
+      is_nil(record["pull_request"]) ->
+        {:error, "a CI round is one on the session's pull request, and it has none"}
+
+      commit != record["commit"] ->
+        {:error, "a CI round is the session's last push's"}
+
+      Enum.any?(rounds, &(&1["commit"] == commit)) ->
+        {:ok, record, []}
+
+      true ->
+        entry = %{"commit" => commit, "state" => state, "failing" => failing(round), "at" => now}
+        record = Map.put(record, "rounds", rounds ++ [entry])
+        red = Enum.count(record["rounds"], &(&1["state"] == "red"))
+
+        if red >= @red_rounds and not stopped?(record) do
+          stopped = %{"at" => now, "reason" => "#{@red_rounds} red CI rounds"}
+          {:ok, Map.put(record, "stopped", stopped), [{:round, entry}, {:stopped, stopped}]}
+        else
+          {:ok, record, [{:round, entry}]}
+        end
+    end
+  end
+
+  defp change_record(key, _value, _record, _session, _now),
+    do: {:error, "#{key} is not one this takes in that shape"}
+
+  # The checks that failed, by name: what a person reading the run sees first. Bounded,
+  # since the names are the repository's CI's to choose.
+  defp failing(%{"failing" => names}) when is_list(names) do
+    names
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&String.slice(&1, 0, 100))
+    |> Enum.take(20)
+  end
+
+  defp failing(_round), do: []
+
+  defp pull_request_url(%Session{repository: %{"owner" => owner, "name" => name}}, number) do
+    git = (stored() || %App{}) |> api_url() |> git_url()
+    "#{git}/#{owner}/#{name}/pull/#{number}"
+  end
+
+  defp object?(name), do: is_binary(name) and Regex.match?(@object, name)
+
+  @doc """
+  Whether `branch` is one a session may push: under `troupe/`, and a name git takes as a
+  branch, with nothing that could be read as an option or climb out of `refs/heads/`.
+  """
+  @spec troupe_branch?(term()) :: boolean()
+  def troupe_branch?("troupe/" <> rest = branch) when rest != "" do
+    match?({:ok, _}, ref(branch)) and not String.contains?(branch, "@{")
+  end
+
+  def troupe_branch?(_branch), do: false
+
+  defp audit({step, data}, session, actor) do
+    {:ok, _} =
+      Audit.record(
+        actor,
+        "github.#{step}",
+        "#{session.repository["owner"]}/#{session.repository["name"]}",
+        Map.put(data, "session_id", session.id),
+        on_behalf_of: session.owner_subject
+      )
+  end
+
   # -- saying why ---------------------------------------------------------------
 
   @doc "Why a repository or a token could not be had, as a sentence."
@@ -544,6 +886,18 @@ defmodule Troupe.Plane.GitHub do
       "the worker profile #{profile || "(none)"} does not declare #{host} in egress.gitHosts, " <>
         "so its pods cannot reach it"
 
+  def explain({:api_not_declared, profile, host}),
+    do:
+      "the worker profile #{profile || "(none)"} does not declare #{host}, where GitHub's API " <>
+        "is, in egress.gitHosts, so its pods cannot push or open a pull request"
+
+  def explain({:no_write, profile}),
+    do:
+      "the worker profile #{profile || "(none)"} grants GitHub nothing to write with " <>
+        "(spec.github.permissions), so its sessions clone and do no more"
+
+  def explain({:access, access}), do: "#{inspect(access)} is not read or write"
+
   def explain(:no_repository), do: "the session names no repository"
   def explain(:no_key), do: "the App's private key is not in OpenBao"
 
@@ -559,7 +913,8 @@ defmodule Troupe.Plane.GitHub do
   def explain({:github, 422, message, owner, name}),
     do:
       "GitHub would not narrow a token to #{owner}/#{name} (#{message || "422"}): the " <>
-        "installation does not include that repository, or the App lacks Contents: read"
+        "installation does not include that repository, or the App has not been granted a " <>
+        "permission asked for"
 
   def explain({:github, status, message, _owner, _name}),
     do: "GitHub answered #{status}#{if message, do: " (#{message})"}"

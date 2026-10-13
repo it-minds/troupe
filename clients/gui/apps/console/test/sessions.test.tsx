@@ -58,6 +58,22 @@ describe("sessions", () => {
     await waitFor(() => says('No session matches "nobody-at-all"'), "the empty search");
   });
 
+  it("shows what a session did on GitHub: its draft pull request as a link, or its branch, and that it stopped", async () => {
+    await open();
+    await waitFor(() => row("s-7f3a9c24"), "the sessions");
+    const fixed = row("s-7f3a9c24")!;
+    const link = fixed.querySelector<HTMLAnchorElement>("a[href]")!;
+    expect(link.getAttribute("href")).toBe("https://github.example.com/example-org/widgets/pull/7");
+    expect(says("#7", fixed)).toBe(true);
+    expect(says("troupe/issue-7-fix-login", fixed)).toBe(true);
+    expect(says("stopped after its red CI rounds", fixed)).toBe(true);
+    const pushed = row("s-7f3a9c23")!;
+    expect(says("9e8d7c6", pushed)).toBe(true);
+    expect(says("troupe/session-s-7f3a9c23", pushed)).toBe(true);
+    expect(pushed.querySelector("a[href]")).toBeNull();
+    expect(says("—", row("s-7f3a9c21")!)).toBe(true);
+  });
+
   it("shows a team admin their own team's sessions and none of another's", async () => {
     await open(PEOPLE.bob);
     await waitFor(() => row("s-4b81d003"), "the design team's sessions");

@@ -184,6 +184,26 @@ spec:
                     gitHosts:
                       type: array
                       items: {type: string}
+                github:
+                  type: object
+                  description: >-
+                    What a session on this profile may do on GitHub through the plane's App,
+                    beyond cloning the repository it names. The fix loop's token is narrowed
+                    to these and to the one repository. Absent, a session clones and does no
+                    more.
+                    The plane reads it at every token it mints; no pod restarts.
+                  properties:
+                    permissions:
+                      type: object
+                      description: >-
+                        GitHub's own permission names. contents write pushes the session's
+                        troupe/* branch, pull_requests write opens its draft pull request and
+                        comments on it, checks and statuses read its CI.
+                      properties:
+                        contents: {type: string, enum: [read, write]}
+                        pull_requests: {type: string, enum: [read, write]}
+                        checks: {type: string, enum: [read]}
+                        statuses: {type: string, enum: [read]}
                 configBundleChannel: {type: string, default: stable}
                 storage:
                   type: object

@@ -9,13 +9,21 @@ defmodule Troupe.Worker.GitCredentials do
   memory for the activation, never on disk, never in the session's environment, its
   workspace or its log.
 
+  ## Two of them: the clone's and the fix loop's
+
+  `access: :read`, the default, is the clone's: `contents: read`. `access: :write` is the
+  fix loop's: what the session's worker profile grants, which the plane reads from the
+  profile and the pod cannot widen. Each is held apart, so the clone's git is never given
+  a token that could write.
+
   ## Where it goes, and where it does not
 
-  To the git the pod runs for the session itself, outside the agent's reach: the clone on
-  the first activation (`Troupe.Worker.Session.Clone`), and in a later slice the push.
-  That git is given the token in its own environment and a credential helper scoped to the
-  one Git host, on its command line; the workspace's `.git/config` names the remote and
-  no credential. The agent's `shell` never has it: not in its environment, not in a file,
+  To the pod's own work for the session, outside the agent's reach: the git of the clone
+  on the first activation (`Troupe.Worker.Session.Clone`), given the token in its own
+  environment and a credential helper scoped to the one Git host on its command line; and
+  the fix loop's calls to GitHub's API (`Troupe.Worker.GitHub`), made from this VM with
+  the token in a request header. The workspace's `.git/config` names the remote and no
+  credential. The agent's `shell` never has it: not in its environment, not in a file,
   not through a helper it could call, which is why no tool's output can carry it.
 
   ## For how long
@@ -42,26 +50,38 @@ defmodule Troupe.Worker.GitCredentials do
 
   @doc """
   The session's credential: `%{"token", "expires_at", "url", "host", "username", "ref",
-  "repository"}`, held or asked for. `{:error, reason}` names what the plane said, without
-  a token in it: there is none to name.
+  "repository", "permissions"}`, and for `access: :write` the `"api_url"` too, held or
+  asked for. `{:error, reason}` names what the plane said, without a token in it: there
+  is none to name.
   """
   @spec credential(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def credential(session_id, opts \\ []) do
     now = Keyword.get(opts, :now, System.system_time(:second))
+    access = Keyword.get(opts, :access, :read)
 
-    case lookup(session_id) do
+    case lookup({session_id, access}) do
       {:ok, %{"expires_at" => expires_at} = held} ->
-        if usable?(expires_at, now), do: {:ok, held}, else: ask(session_id, opts)
+        if usable?(expires_at, now), do: {:ok, held}, else: ask(session_id, access, opts)
 
       :none ->
-        ask(session_id, opts)
+        ask(session_id, access, opts)
     end
   end
 
-  @doc "Drop a session's token: its activation starts, or the session has gone."
-  @spec forget(String.t()) :: :ok
-  def forget(session_id) do
-    if :ets.whereis(@table) != :undefined, do: :ets.delete(@table, session_id)
+  @doc """
+  Drop a session's tokens: its activation starts, or the session has gone. `access:` drops
+  only that one, which is how the fix loop asks again for a token whose permissions the
+  plane has narrowed since.
+  """
+  @spec forget(String.t(), keyword()) :: :ok
+  def forget(session_id, opts \\ []) do
+    if :ets.whereis(@table) != :undefined do
+      case Keyword.fetch(opts, :access) do
+        {:ok, access} -> :ets.delete(@table, {session_id, access})
+        :error -> :ets.match_delete(@table, {{session_id, :_}, :_})
+      end
+    end
+
     :ok
   end
 
@@ -69,8 +89,15 @@ defmodule Troupe.Worker.GitCredentials do
   @spec sessions() :: [String.t()]
   def sessions do
     case :ets.whereis(@table) do
-      :undefined -> []
-      _table -> @table |> :ets.tab2list() |> Enum.map(&elem(&1, 0)) |> Enum.sort()
+      :undefined ->
+        []
+
+      _table ->
+        @table
+        |> :ets.tab2list()
+        |> Enum.map(fn {{id, _access}, _} -> id end)
+        |> Enum.uniq()
+        |> Enum.sort()
     end
   end
 
@@ -85,25 +112,32 @@ defmodule Troupe.Worker.GitCredentials do
 
   # -- asking the plane -------------------------------------------------------
 
-  defp lookup(session_id) do
+  defp lookup(key) do
     case :ets.whereis(@table) do
       :undefined ->
         :none
 
       _table ->
-        case :ets.lookup(@table, session_id) do
-          [{^session_id, held}] -> {:ok, held}
+        case :ets.lookup(@table, key) do
+          [{^key, held}] -> {:ok, held}
           [] -> :none
         end
     end
   end
 
-  defp ask(session_id, opts) do
+  defp ask(session_id, access, opts) do
     link = Keyword.get(opts, :link, Link)
 
-    case Link.request(link, "git.credential", %{"session_id" => session_id}) do
+    params =
+      if access == :write,
+        do: %{"session_id" => session_id, "access" => "write"},
+        else: %{"session_id" => session_id}
+
+    case Link.request(link, "git.credential", params) do
       {:ok, %{"token" => token} = credential} when is_binary(token) ->
-        if :ets.whereis(@table) != :undefined, do: :ets.insert(@table, {session_id, credential})
+        if :ets.whereis(@table) != :undefined,
+          do: :ets.insert(@table, {{session_id, access}, credential})
+
         {:ok, credential}
 
       {:ok, _other} ->

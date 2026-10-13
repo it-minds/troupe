@@ -155,6 +155,16 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   the deployment lists (`operator.workerAllowedOrigins`, and the plane's own where the
   chart serves the GUI); with none listed, no page does. The desktop app and `troupe` are
   not pages and need no entry (Decision 884).
+- **The control channel.** A worker dials the plane's control port, never the other way
+  round. A pod enrols with its projected token, bound to the plane's audience and good for
+  an hour, on the pod network, where the plane's NetworkPolicy admits the port from worker
+  namespaces alone; it may do so in plaintext. A machine registered outside the cluster
+  ([single-machine.md](single-machine.md)) enrols with a secret that lasts until it is
+  rotated, so it does so over TLS only: the port serves a certificate cert-manager issues
+  for the control Service, the machine is given that certificate's CA when it is registered
+  and trusts no other, and a worker holding a machine's secret and no CA does not dial. A
+  machine's secret sent in plaintext anyway is refused before it is looked at, with a
+  sentence saying to rotate it (Decision 893).
 - **A repository is cloned with a token the session never holds.** A session that names
   a GitHub repository is cloned on its first activation with an installation token the
   plane mints for that one repository, `contents: read`, for an hour. The pod's own git
@@ -162,6 +172,15 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   workspace's `.git/config`, the agent's `shell` and every tool's output have no way to it,
   and no log names it. Each token is an audit entry (Decision 885,
   [github.md](github.md)).
+- **A session pushes only its own `troupe/*` branch, and never merges.** On a profile that
+  grants it (`spec.github.permissions`), a session pushes, opens a draft pull request,
+  comments on it and reads its CI through four tools the pod runs outside the sandbox,
+  with a token narrowed to the repository and to what the profile grants, which the
+  agent's shell never holds. A push is a commit GitHub makes and signs as the App's bot,
+  naming the session in a trailer; it goes only to the session's one `troupe/*` branch,
+  never with force, and no tool merges, approves or marks a pull request ready. After
+  three red CI rounds the session's tokens can no longer push. Each push, pull request, CI
+  round and stop is an audit entry (Decision 891, [github.md](github.md#7-the-fix-loop)).
 - **One OpenBao role for every profile, by default.** Every worker logs in as
   `troupe-worker`. `bao.workerRolePerProfile` gives each profile a role of its own, so one
   profile's pods cannot read another's session keys
@@ -193,8 +212,8 @@ content, is plaintext.
 
 | What | Where | How it is held |
 |---|---|---|
-| The model key | `config.yaml`, or an environment variable it names (`{env:VAR}`) | a file the person owns |
-| A plane sign-in | `<config>/credentials.json` | readable by its owner only: mode 0600, or on Windows an ACL naming the user alone (`Troupe.Remote.Credentials`) |
+| The model key | `config.yaml`, or an environment variable it names (`{env:VAR}`) | readable by its owner only, and its `.previous` copy too: mode 0600, or on Windows an ACL naming the user alone, set before the file is put in place (`Troupe.OwnerOnly`, through `Troupe.Config.Migrate`) |
+| A plane sign-in | `<config>/credentials.json` | readable by its owner only: mode 0600, or on Windows an ACL naming the user alone (`Troupe.Remote.Credentials`, through `Troupe.OwnerOnly`) |
 | The daemon's loopback port and token | `daemon.json` | readable by its owner only: mode 0600, or on Windows an ACL naming the user alone, set before the token is written (`Troupe.OwnerOnly`); a new token each time the daemon starts (`Troupe.Protocol.Endpoint`) |
 | Sign-ins to the person's own MCP servers | `<state>/mcp-oauth.json` | as above (`Troupe.MCP.OAuth.Store`); the tokens never leave the machine (Decision 741) |
 | The plane token a client hands the daemon | the daemon's memory | never written (`Troupe.Gateway.Plane`) |
