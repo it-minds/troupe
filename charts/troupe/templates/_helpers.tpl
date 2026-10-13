@@ -94,6 +94,27 @@ profile's own directory from the host, and a path with `..` in it would mount an
 {{- end }}
 {{- end -}}
 
+{{/*
+The worker container's AppArmor profile. Refused here rather than in the cluster: a string
+"false" would read as on, and a name the kubelet does not take is a pod that never starts,
+said only in an event on each StatefulSet. Only a name: the worker container is never
+Unconfined.
+*/}}
+{{- define "troupe.worker.apparmor.validate" -}}
+{{- $apparmor := .Values.worker.appArmor -}}
+{{- if not (kindIs "bool" $apparmor.enabled) }}
+{{- fail (printf "worker.appArmor.enabled is %v (%s), and it is true or false: a string such as \"false\" would read as on." $apparmor.enabled (kindOf $apparmor.enabled)) }}
+{{- end }}
+{{- if not (kindIs "bool" $apparmor.install.enabled) }}
+{{- fail (printf "worker.appArmor.install.enabled is %v (%s), and it is true or false: a string such as \"false\" would read as on." $apparmor.install.enabled (kindOf $apparmor.install.enabled)) }}
+{{- end }}
+{{- if $apparmor.enabled }}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*$" ($apparmor.profile | default "" | toString)) }}
+{{- fail (printf "worker.appArmor.profile is %q: it is the name the worker's AppArmor profile is loaded under on the nodes, such as troupe-worker, starting with a letter or a digit." (toString $apparmor.profile)) }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
 {{/* Where the installer writes the profile on a node, and the one directory it mounts. */}}
 {{- define "troupe.worker.seccomp.hostDir" -}}
 {{- printf "%s/%s" (trimSuffix "/" .Values.worker.seccomp.install.kubeletSeccompDir) (dir .Values.worker.seccomp.localhostProfile) -}}

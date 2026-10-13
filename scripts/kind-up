@@ -72,5 +72,49 @@ for node in $(kind get nodes --name "$cluster"); do
     { mkdir -p /mnt/sysfs && mount -t sysfs -o ro,nosuid,nodev,noexec sysfs /mnt/sysfs; }'
 done
 
+# Where the host's kernel runs AppArmor (an Ubuntu runner or laptop; not Docker Desktop), a
+# node's runtime applies AppArmor profiles as a real node's does, so that the workers' own
+# profile (`worker.appArmor`) is what they run under. The node image has no
+# `apparmor_parser`, without which containerd takes AppArmor for absent and refuses a pod
+# that asks for a profile ("apparmor is not supported"), and the node may not have
+# securityfs mounted where the kubelet and containerd look for it. Every other pod then runs
+# under containerd's default profile, as on an Ubuntu node. Not kept across a restart of
+# the node: this script puts it back.
+for node in $(kind get nodes --name "$cluster"); do
+  if [ "$(docker exec "$node" cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" != "Y" ]; then
+    continue
+  fi
+  changed=false
+  if ! docker exec "$node" mountpoint -q /sys/kernel/security; then
+    docker exec "$node" mount -t securityfs -o nosuid,nodev,noexec securityfs /sys/kernel/security
+    changed=true
+  fi
+  if ! docker exec "$node" sh -c 'command -v apparmor_parser' >/dev/null; then
+    echo "kind-up: $node: the host runs AppArmor; installing apparmor_parser for its runtime"
+    docker exec "$node" sh -c 'apt-get update -qq &&
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends apparmor >/dev/null'
+    changed=true
+  fi
+  # containerd's default profile, compiled by the host's parser rather than the node's: the
+  # node's is its Debian image's, older than a current Ubuntu kernel, and what it compiles
+  # for one refuses every unix socket ("failed protocol match"), so nothing that opens one
+  # starts. containerd uses a profile of that name that is already loaded. Needs root on the
+  # host; without it, this says so and the node compiles its own.
+  if command -v apparmor_parser >/dev/null; then
+    sudo -n apparmor_parser --replace --skip-cache dev/kind/cri-containerd.apparmor.d ||
+      echo "kind-up: could not load containerd's default AppArmor profile with this host's parser (sudo)" >&2
+  fi
+  # containerd and the kubelet each decide once, when they start, whether the node has
+  # AppArmor: the kubelet refuses a pod that asks for a profile if it had none then.
+  if [ "$changed" = true ]; then
+    docker exec "$node" systemctl restart containerd
+    for _ in $(seq 1 60); do
+      docker exec "$node" crictl info >/dev/null 2>&1 && break
+      sleep 1
+    done
+    docker exec "$node" systemctl restart kubelet
+  fi
+done
+
 kubectl --context "kind-${cluster}" version --output=yaml | head -20
 kubectl --context "kind-${cluster}" get nodes

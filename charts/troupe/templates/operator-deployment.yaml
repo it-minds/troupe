@@ -1,4 +1,5 @@
 {{- include "troupe.worker.seccomp.validate" . }}
+{{- include "troupe.worker.apparmor.validate" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -123,6 +124,11 @@ spec:
               value: {{ if eq .Values.worker.seccomp.type "Localhost" }}{{ .Values.worker.seccomp.localhostProfile | quote }}{{ else }}""{{ end }}
             # A user namespace for every worker pod and its `/proc` unmasked, without which
             # bubblewrap cannot mount the sandbox's own (`worker.userNamespaces`).
+            # The AppArmor profile, by name, the operator puts on every worker container
+            # (`worker.appArmor`); empty leaves the runtime's default, which refuses the
+            # sandbox's mounts where a node enforces AppArmor.
+            - name: TROUPE_WORKER_APPARMOR_PROFILE
+              value: {{ if .Values.worker.appArmor.enabled }}{{ .Values.worker.appArmor.profile | quote }}{{ else }}""{{ end }}
             - name: TROUPE_WORKER_USER_NAMESPACES
               value: {{ .Values.worker.userNamespaces | quote }}
             - name: POD_NAME
