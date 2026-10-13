@@ -4,6 +4,7 @@ title: "A plane holds one row per person and per group: a push or a sign-in that
 date: 2026-10-13
 status: accepted
 issue: 707
+supersedes: [754, 759]
 paths:
   - apps/troupe_plane/lib/troupe/plane/scim.ex
   - apps/troupe_plane/lib/troupe/plane/login.ex
