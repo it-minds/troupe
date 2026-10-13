@@ -277,13 +277,16 @@ revised. Showing a document again under the same name replaces it.
   the model's is written in parts: the agent shows its start and patches the rest on.
 - **What it costs.** Until the conversation is compacted, a document's words are in it as
   the `show` call's arguments, so it costs about what the same answer in the chat would,
-  and a revision costs only its change. A compaction leaves each document out for a
+  and a `patch` carries only its change. A compaction leaves each document out for a
   one-line pointer (its name, title, version and size), and a long patch too, and the
   summary it writes lists every document on the scratchpad, so from then on the model is
   not sent them again but knows they are there. When the agent needs a document after
   that, it reads it back with `read_file` on `scratch:/<name>`; that read is the only way
   the agent's tools reach the scratchpad, and it writes there only with `show` and
-  `patch`.
+  `patch`. In a long session that compacts often, the scratchpad costs more than answering
+  in the chat, not less: each revision is a call of its own and a reply, and each read
+  back after a compaction is another; [bench.md](../developer/bench.md) has the
+  measurement.
 
 ## What Troupe never does
 

@@ -43,6 +43,9 @@ On the chunk's tip a revision could only be a `show` of the whole document again
 eight cases of `Troupe.Tools.PatchTest` all failed there (no `patch` was offered, so the
 revision was refused as an unknown tool, and the scratchpad stayed at version 1).
 
+The tool, the parts and the words are in. The live measure is still not met; the numbers
+and why are under **Live**.
+
 **What changed.**
 
 - **`patch`.** `name`, `new_string` and an optional `old_string`. With `old_string`, which
@@ -96,16 +99,63 @@ a question about the plan, and the rollback revised, each revision asking for th
 plan or checklist again. The person reads it whole either way: in the reply without the
 scratchpad, beside the chat with it. The window is 24,000 tokens at the default
 `compact_at` of 0.75, four times the session's first prompt (about 6,500 tokens of system
-prompt and tool definitions), where 878's was twice it. Two bounds set it. Without the
-scratchpad a compaction keeps the last six messages, two of which are whole plans, so the
-prompt after it is about 15,000 to 18,000 tokens: a threshold below that compacts after
-every turn, as 878's did. With the scratchpad and `patch` the conversation grows by a
-patch, not a plan, a revision, so it reaches 18,000 only late in the session: a threshold
-much above that never compacts at all in a session one can afford to run three times
-each. A real model's window, 200,000 tokens, would be the second case for a session
-several times as long and as dear.
+prompt and tool definitions), where 878's was twice it. It was chosen from #648's logs:
+without the scratchpad a compaction keeps the last six messages, two of which are whole
+plans, so the prompt after it is about 15,000 to 18,000 tokens, and a threshold below that
+compacts after every turn, as 878's did; a threshold much above 18,000 compacts no more
+than once in eight turns on either side, and a session long enough to compact under a real
+model's window, 200,000 tokens, costs several times what a $3 cap pays for three times
+each. The expectation that the session with `patch` would grow slowly and compact late was
+wrong (below).
 
-**Live.** _Filled in from the installed build's runs._
+**Live**, on the installed build, Claude Sonnet 5.5 ($2 in, $10 out, $0.20 a cache read,
+$2.50 a cache write per million; the summaries on Claude Haiku 4.5), on Windows,
+2026-10-13. Two runs each, $2.41 of the slot's $3: a run may cost up to $0.74, and a third
+pair did not fit. Tokens are fresh / read from the cache / output.
+
+| | with the scratchpad | without |
+|---|---:|---:|
+| runs whose checks held | 2 of 2 | 2 of 2 |
+| the agent's model calls | 21, 26 | 10, 9 |
+| compactions, after turns | 7 (2, 3, 5, 6, 6, 8, 8); 5 (2, 5, 6, 7, 8) | 2 (4, 6); 5 (3, 4, 6, 7, 8) |
+| the whole run | $0.6574; $0.7557, its cap reached in the last turn | $0.4343; $0.5670 |
+| its tokens | 123,630 / 225,821 / 38,825; 111,187 / 300,279 / 47,827 | 53,624 / 93,911 / 31,134; 96,833 / 68,208 / 39,305 |
+| from the first compaction | $0.4789 (22 calls); $0.4938 (25) | $0.2641 (6); $0.3891 (10) |
+| the seventh and eighth turns | $0.1338; $0.2719 | $0.1106; $0.1661 |
+
+**The issue's measure is not met.** The session with the scratchpad cost 51% and 33% more
+over the run, and 81% and 27% more from its first compaction.
+
+- **It makes two to three times the calls, and so compacts more.** A revision is a `show`
+  or `patch` call and a reply, and after a compaction the agent reads a document back
+  (seven and six reads) before it patches it or answers about it. Every call's prompt
+  counts against the threshold, so the session compacts in the middle of turns, and each
+  compaction writes the prompt to the cache again and calls the summariser: the agent's
+  cache writes were 97,420 and 84,804 tokens against 43,906 and 74,421, the summaries
+  $0.07 and $0.05 against $0.03 and $0.07.
+- **`patch` did not save output in this session.** The agent wrote 29,680 output tokens
+  against 28,073 and 29,670; the second run's 43,635 holds two cut replies. Sonnet 5.5
+  revised many places at once: thirteen patches in one turn took 6,169 output tokens,
+  where the whole revised plan as a reply took 5,465 and 6,590. A narrow revision was
+  cheap (six patches, 1,954 tokens, for the row-count step).
+- **"Give the whole plan again" was a whole `show` again** in four revisions of eight,
+  `build.md`'s sentence notwithstanding. Two were cut at 8,192 output tokens, $0.19 of the
+  second run: after one the model went on in parts as the cut call's answer says (a show
+  of 7,478 bytes, then a patch to 13,000), after the other it asked again whole and fit.
+- **Agents still tried other tools on `scratch:` paths** in the second run: `grep` twice,
+  each refused with the sentence naming `read_file` and `patch`, after which the model
+  read the document back; and its last response asked for `edit_file` on one four times
+  beside a `patch`, which the run's cap stopped before they ran.
+- **The window is still small for this session.** Without the scratchpad the second run
+  compacted after nearly every turn from the third on: its tail holds two whole plans.
+
+What would meet it is not in this decision: a window where a compaction is rare against
+the calls after it, which is where a pointer saves money and which needs a session several
+times as long as this; and a revision that costs less output than the document, which
+these runs did not get from `patch` when the person asks for the whole document again.
+Run it again with `troupe bench --live --scenario
+scratchpad_session,scratchpad_session_without --repeat 3 --model claude-sonnet-5-5`; a
+run's `since_compaction` is the measure.
 
 **Proof.** `Troupe.Tools.PatchTest`: offered on every call of `build` on two models and
 of `plan`; a span replaced in place as version 2 with the title, kind and call kept; an
@@ -123,4 +173,9 @@ summary's call on. The offline bench's `tool_calls` turn on `build`: tool defini
 14,688 bytes against 14,174, the system prompt 1,598 against 1,548, the first prompt
 16,418 against 15,854, the largest 31,915 against 31,351, and 188,499 of the stand-in's
 tokens over the thirty-one calls against 184,128 (2.4% more); the budgets move to 14,800,
-1,650, 16,500, 32,050 and 189,500.
+1,650, 16,500, 32,050 and 189,500. And the installed daemon on scratch homes, against a
+stand-in behind a proxy that logged each request: `patch` was offered on every agent call,
+the call after a one-line patch was 549 bytes larger than the one before it where the plan
+is 12,846, the plan's words went once in every request after it was shown, `edit_file` on
+`scratch:/plan.md` was refused naming `patch(name: "plan.md", ...)`, and an appended part
+left the scratchpad's plan at version 3, revised and whole.

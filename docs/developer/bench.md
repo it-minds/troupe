@@ -314,6 +314,58 @@ was made in, a 400 for a block sent back after that changed, or with the thinkin
 beta and `drop_block` the block dropped, and a prompt cache read where a mark wrote it; a
 provider of `type: anthropic` with its URL is one.
 
+### The scratchpad's cost
+
+Issue #616 asks whether a long session that writes and revises documents costs no more
+with the scratchpad than without it, from its first compaction on. `scratchpad_session`
+and `scratchpad_session_without` are that session: eight turns that write a migration plan
+and a checklist, revise each, ask about them, and ask for the whole plan or checklist
+again after each revision, on `build` with the scratchpad and on `build` with `show` and
+`patch` denied and their sentence taken out. Their window is 24,000 tokens at
+`compact_at` 0.75, four times the session's first prompt, whatever the model's own is.
+A run's `since_compaction` is the measure; `--keep` leaves the logs to look into:
+
+```
+troupe bench --live --scenario scratchpad_session,scratchpad_session_without --repeat 3 --model claude-sonnet-5-5
+```
+
+On the 0.17.0-beta build with `patch` (Decision 895), Claude Sonnet 5.5 with its summaries
+on Claude Haiku 4.5, two runs each, which is what a $3 cap paid for: a run costs up to its
+$0.74 share, and the runs with the scratchpad came close to it. Tokens are fresh (sent
+uncached or written to the cache) / read from the cache / output.
+
+| | with the scratchpad | without |
+|---|---:|---:|
+| runs whose checks held | 2 of 2 | 2 of 2 |
+| the agent's model calls; compactions | 21, 26; 7, 5 | 10, 9; 2, 5 |
+| the whole run | $0.6574, $0.7557 | $0.4343, $0.5670 |
+| its tokens | 123,630 / 225,821 / 38,825; 111,187 / 300,279 / 47,827 | 53,624 / 93,911 / 31,134; 96,833 / 68,208 / 39,305 |
+| from the first compaction | $0.4789, $0.4938 | $0.2641, $0.3891 |
+| the seventh and eighth turns | $0.1338, $0.2719 | $0.1106, $0.1661 |
+
+The second run with the scratchpad reached its cap in its last turn, after its last plan
+was written. **The session with the scratchpad cost more**, a third to a half more over the
+run, and why is in the logs:
+
+- **More calls, so more compactions.** Each revision is a `show` or `patch` call and then
+  a reply, and after each compaction the agent reads a document back before it can patch
+  it or answer about it (six and seven reads a run). Every call's prompt counts against
+  the threshold, so the session compacts in the middle of a turn, more often, and each
+  compaction writes the prompt to the cache again: the agent wrote 97,420 and 84,804
+  tokens to the cache against 43,906 and 74,421.
+- **Patches did not save output here.** The agent's output was 29,680 tokens against
+  28,073 and 29,670 (the second run's 43,635 holds two cut replies). A revision of many
+  places was a dozen patches: one turn's thirteen took 6,169 output tokens, where the whole
+  revised plan as a reply took 5,465 and 6,590.
+- **"Give the whole plan again" was shown whole again** in four revisions of eight. Two of
+  those shows were cut at 8,192 output tokens ($0.19 of the second run): one went on in
+  parts as the answer to the cut call says, one asked again whole and fit.
+- **The window is still small for this session.** The session without the scratchpad
+  compacted after nearly every turn too in its second run: its tail after a compaction
+  holds two whole plans. A window where a compaction is rare against the calls after it,
+  the one place the pointers save money, needs a session several times as long as this,
+  which a $3 cap does not pay for three times each.
+
 ## What is not here yet
 
 - **The nightly.** The live bench is on demand. Decision 773 says how the nightly should
