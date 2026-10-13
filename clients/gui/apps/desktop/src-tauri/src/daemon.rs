@@ -17,7 +17,7 @@
 // a token, and the web bundle speaks to it with the same client it uses for a worker.
 
 use std::net::{SocketAddr, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -49,7 +49,10 @@ pub(crate) fn home() -> Option<PathBuf> {
 }
 
 pub(crate) fn read_endpoint() -> Option<DaemonEndpoint> {
-    let path = discovery_path()?;
+    read_endpoint_at(&discovery_path()?)
+}
+
+fn read_endpoint_at(path: &Path) -> Option<DaemonEndpoint> {
     let contents = std::fs::read_to_string(path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&contents).ok()?;
     let ws = json.get("ws")?;
@@ -141,21 +144,34 @@ fn spawn_any(binary: Option<String>) -> Result<String, String> {
 /// idempotent and rewrites the file. Then wait: the process is up before the file is
 /// written, and a `null` because the answer was a second away would send the person to a
 /// dialog asking them to type a port.
+///
+/// This is what the app calls first, at launch and at Find, and not `daemon_endpoint`: a
+/// read returns the dead port of a daemon that was killed, which only this replaces.
 #[tauri::command]
 pub fn daemon_start(binary: Option<String>) -> Result<Option<DaemonEndpoint>, String> {
-    if let Some(running) = read_endpoint() {
+    start_with(read_endpoint, || spawn_any(binary), Duration::from_secs(30))
+}
+
+/// `daemon_start` with where the file is read from and how a daemon is started given to
+/// it, so a test can leave a stale file somewhere of its own and start something there.
+fn start_with(
+    read: impl Fn() -> Option<DaemonEndpoint>,
+    spawn: impl FnOnce() -> Result<String, String>,
+    wait: Duration,
+) -> Result<Option<DaemonEndpoint>, String> {
+    if let Some(running) = read() {
         if alive(&running) {
             return Ok(Some(running));
         }
     }
 
-    let started = spawn_any(binary)?;
+    let started = spawn()?;
 
     // Whatever the file says once something answers on it: a new daemon rewrites the
     // file, and one that happened to get the old port back answers on the old one.
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + wait;
     while Instant::now() < deadline {
-        if let Some(endpoint) = read_endpoint() {
+        if let Some(endpoint) = read() {
             if alive(&endpoint) {
                 return Ok(Some(endpoint));
             }
@@ -163,5 +179,92 @@ pub fn daemon_start(binary: Option<String>) -> Result<Option<DaemonEndpoint>, St
         std::thread::sleep(Duration::from_millis(200));
     }
 
-    Err(format!("`{started}` started but did not publish a working endpoint within thirty seconds"))
+    Err(format!("`{started}` started but did not publish a working endpoint within {} seconds", wait.as_secs()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::net::TcpListener;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("troupe-desktop-daemon-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("daemon.json")
+    }
+
+    /// What a daemon publishes: its loopback WebSocket among its transports.
+    fn publish(file: &Path, port: u16, token: &str) {
+        let json = serde_json::json!({ "ws": { "port": port, "token": token }, "tcp": { "port": 1, "token": "x" } });
+        std::fs::write(file, json.to_string()).unwrap();
+    }
+
+    /// A port nothing listens on any more: one the kernel gave out and was handed back.
+    fn closed_port() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
+    // Issue #706: a daemon that was killed leaves its file behind, naming its port.
+    #[test]
+    fn a_daemon_json_naming_a_closed_port_has_a_daemon_started_over_it() {
+        let file = scratch("stale");
+        let dead = closed_port();
+        publish(&file, dead, "the-old-token");
+
+        // `troupe-daemon run`, as far as the file can tell: a new port, a new token.
+        let daemon = RefCell::new(None);
+        let found = start_with(
+            || read_endpoint_at(&file),
+            || {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                publish(&file, listener.local_addr().unwrap().port(), "the-new-token");
+                *daemon.borrow_mut() = Some(listener);
+                Ok("troupe-daemon run".into())
+            },
+            Duration::from_secs(5),
+        )
+        .unwrap()
+        .expect("an endpoint");
+
+        let started = daemon.borrow().as_ref().expect("a daemon was started").local_addr().unwrap().port();
+        assert_ne!(found.port, dead);
+        assert_eq!(found.port, started);
+        assert_eq!(found.token, "the-new-token");
+    }
+
+    #[test]
+    fn a_daemon_that_answers_is_returned_and_nothing_is_started() {
+        let file = scratch("alive");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        publish(&file, port, "the-token");
+
+        let found = start_with(|| read_endpoint_at(&file), || panic!("started a second daemon"), Duration::from_secs(5))
+            .unwrap()
+            .expect("an endpoint");
+
+        assert_eq!((found.port, found.token.as_str()), (port, "the-token"));
+    }
+
+    #[test]
+    fn no_file_has_a_daemon_started() {
+        let file = scratch("absent");
+        let daemon = RefCell::new(None);
+        let found = start_with(
+            || read_endpoint_at(&file),
+            || {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                publish(&file, listener.local_addr().unwrap().port(), "the-token");
+                *daemon.borrow_mut() = Some(listener);
+                Ok("troupe-daemon run".into())
+            },
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert_eq!(found.map(|e| e.token), Some("the-token".to_string()));
+    }
 }
