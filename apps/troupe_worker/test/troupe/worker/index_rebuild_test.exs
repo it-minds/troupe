@@ -147,8 +147,8 @@ defmodule Troupe.Worker.IndexRebuildTest do
     assert PlaneSessions.get(context.session_id).epoch != 9
   end
 
-  # A removed person's sessions are owned by their tombstone's marker and read-only
-  # (Decision 899). The manifest still names the subject they had, and a rebuild that
+  # A removed person's sessions are owned by their tombstone's marker and read-only. The
+  # manifest still names the subject they had, and a rebuild that
   # trusted it handed the sessions back to that subject, which is whoever arrives under it
   # next.
   test "a removed person's session keeps the tombstone's marker through a rebuild", context do
