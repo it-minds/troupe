@@ -1306,7 +1306,7 @@ Found by the chunk 30 fixers, 2026-10-11.
   - On a binding model, compaction, an `AI?` turn's `plan` prompt and a profile or model switch still change the prefix; what an enforcing account does after such a change is D92's first item.
 - **The scratchpad at compaction** (Decision 878, #616). The compaction summariser once wrote a whole plan from only the prompt and two files, and once a one-sentence summary that dropped all earlier context.
 - **Personal tools on a pod** (Decision 879). `personalTools: forbid` takes effect at a session's next activation. A session that is awake when an administrator changes it keeps accepting registrations until it is activated again.
-- **The terminal client's connection.** Every fleet call goes on one connection, and the gateway answers a connection's calls one at a time, so one slow call blocks the rest (`worktree.list` now has its own, #621). `branch_profile/2` turns any `profiles` error into "unknown command /X; available: /worktree", where it should say the daemon didn't answer.
+- **The terminal client's connection.** Every fleet call goes on one connection, and the gateway answers a connection's calls one at a time, so one slow call blocks the rest (`worktree.list` now has its own, #621).
 - **A fresh daemon's first `session.create`.** Twice, a `session.create` sent about 2 seconds after an installed daemon started got no answer for over 120 seconds; one sent later answered in under a second. Not confirmed: it may be the test harness or a startup race. The release runs with distribution off, so it couldn't be attached to.
 
 Found by the chunk 31 fixers, 2026-10-12. Its test items were fixed in chunk 32 (D8 says
@@ -1315,7 +1315,6 @@ what is left).
 ### D125 - Docs, policy, ceilings and workspaces after chunk 32 (low)
 
 - **The plane and its chart.**
-  - The plane hard-codes the `troupe-system` namespace and the `troupe-w-` prefix (`provision.ex`, `enrolment.ex`), so a non-default `namespace` or `policy.namespacePrefix` breaks provisioning or enrolment. The admin docs say to keep the defaults.
   - A TeamVolume's `status.claimName` says `team-<team>`, but the claim is `troupe-team-<team>`.
   - The Trigger CRD's `notifyUrl` description says only "not loopback". The console's Bundles page names a removed `troupe admin bundle publish` command. The plane's index page still shows `troupe mcp`. `admin.profile.put`'s description lists `mcpServers` as admin-set.
   - Bundles' `@builtin_primaries` (`build`, `plan`) is hand-kept, and eight built-ins are primary.
@@ -1327,9 +1326,7 @@ what is left).
   - A GUI served anywhere but the plane's host needs `operator.workerAllowedOrigins`.
 - **The daemon and the gateway.**
   - Command-id replay is keyed by the principal's subject, and every local connection shares it. Two local clients counting their own ids could collide; every real client uses random ids.
-  - `session.pin` on a daemon isn't persisted, and does nothing on a dormant session.
   - A worker advertises `watch: true` but refuses `watch.*` to every token a plane mints.
-  - `workspace.recent` ignores `limit`.
   - `Link.call` answers a failed write with a bare `unavailable` and keeps the dead client until it hears of the disconnect.
   - `config.yaml` (which may hold a key) is restricted on unix but not on Windows, and `Troupe.Remote.Credentials` keeps its own copy of the `icacls` logic beside `Troupe.OwnerOnly`.
 - **Ceilings** (Decision 880).
@@ -1342,10 +1339,7 @@ what is left).
   - A `worktree.list` row the time budget didn't reach can't be fetched later.
   - `/worktree <prompt>` in an ignored folder works in the folder and doesn't say no worktree was made.
 - **The clients and the CLI.**
-  - `troupe daemon` with no daemon installed suggests piping `install.sh` from `main`.
-  - `troupe bench --compare` reads the default history file, not the one under `state_dir`.
-  - The headless printer can print a branch's "spawned" line twice (`branch_spawned` has no `seq`), and a run whose only shell call was refused still says "not counted: what its 1 command changed".
-  - The TUI's settings page edits `transcript.detail` as text, not a menu. The VS Code Files row opens a plane's organisation document URL as a file.
+  - The VS Code Files row opens a plane's organisation document URL as a file.
   - `docs/user/updating.md`'s `TROUPE_BIN_DIR` doesn't change what `troupe update` updates; the running binary's path wins.
   - With `TROUPE_INSTALL_DIR` set, Burrito prints a line on stdout that corrupts `--json`; `clients/tui/scripts/build-local` uses the same variable.
 - **Stale strings and comments.** `scripts/remote-up`'s WebSocket URL; `gateway/daemon.ex`'s supervision strategy (it is `rest_for_one`); `plane/harness.ex`'s `session.create` order; the source file `status.ex` names; `tokens.json`'s `$meta` and motion notes; `signal.tokens.json`'s `default`; `Approval.tsx`'s "runs on the platform" for a local shell; the TUI's empty state suggesting `/code`; and comments citing another repository's decisions.
@@ -1372,7 +1366,6 @@ Found by the chunk 32 fixers, 2026-10-12.
   - Installation tokens aren't revoked when a session goes dormant; they run out their hour.
   - `git.credential` is answered synchronously on the pod's control connection, so a slow GitHub delays that pod's other traffic.
   - `sessions.workspace_source` is stored from the client and never read.
-  - `session.spawn` and `session.fork` don't carry `repository` over.
   - A pod that enrols marks dormant a session placed on it a moment earlier that it didn't report; the tests allow for it, and `person_credentials_test.exs` has the same latent race.
 - **The console** (Decision 886).
   - An upgraded deployment serves `/console` before its identity provider allows the redirect URI, so sign-in fails until it is registered (the error says what to register).
@@ -1385,8 +1378,6 @@ Found by the chunk 32 fixers, 2026-10-12.
   - OpenRouter's `reasoning_details` isn't handed back (Anthropic models with tools through OpenRouter), and its usage `cost` isn't used.
 - **Orchestration** (Decision 888). The bench has no task where `orchestrate` could pay off (larger multi-file work, a reviewer catching a mistake), and `docs/user/bench.md` says a by-name scenario's limits are printed by the plan, where `describe/1` prints only the plan-wide ones.
 - **The clients.**
-  - The terminal client renders `tools_registered` as a raw event and logs it as unknown; it shows beside the offered-tools sentence.
-  - `memory.forget` can answer `not_found` for a fact it did forget, when `memory.md` can't be removed after `facts.jsonl` was rewritten.
   - A `fleet` subscription has no per-session access filter; on a pod, authorisation limits it to tokens without a session id.
 - **Tests.** `FailoverTest`'s node name is the same in every worktree, so two worker suites at once fail its setup.
 
