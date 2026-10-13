@@ -238,11 +238,18 @@ defmodule Troupe.Config.ModelSettingsTest do
       assert File.read!(path) == "models: [unclosed\n"
     end
 
-    test "on Unix, the file holding a key is readable by its owner alone", %{path: path} do
-      if match?({:unix, _}, :os.type()) do
-        {:ok, _} = ModelSettings.write(%{"provider" => "anthropic", "api_key" => "k"})
-        assert Bitwise.band(File.stat!(path).mode, 0o077) == 0
-      end
+    # Mode 0600 on Unix, and on Windows an access list naming the owner alone: the same
+    # check `daemon.json` is held to, on whichever platform this runs.
+    test "the file holding a key, and the copy of what it held, are readable by their owner alone",
+         %{path: path} do
+      {:ok, _} = ModelSettings.write(%{"provider" => "anthropic", "api_key" => "k"})
+      {:ok, _} = ModelSettings.write(%{"provider" => "anthropic", "api_key" => "k2"})
+
+      assert Troupe.OwnerOnly.restricted?(path)
+      assert Troupe.OwnerOnly.restricted?(path <> ".previous")
+
+      if match?({:unix, _}, :os.type()),
+        do: assert(Bitwise.band(File.stat!(path).mode, 0o077) == 0)
     end
   end
 

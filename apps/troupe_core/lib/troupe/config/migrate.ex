@@ -279,8 +279,9 @@ defmodule Troupe.Config.Migrate do
   map that spells one setting two ways is written neither way.
 
   Written to a temporary file and renamed over the target, so a crash mid-write leaves
-  the old file rather than half a new one. The file may hold a key, so on Unix only its
-  owner may read it, and the copy likewise.
+  the old file rather than half a new one. The file may hold a key, so only its owner
+  may read it, and the copy likewise (`Troupe.OwnerOnly`: mode `0600`, or on Windows an
+  access list naming the owner alone, set before the rename puts it in place).
   """
   @spec write(Path.t(), map()) :: :ok | {:error, String.t()}
   def write(path, map) do
@@ -340,12 +341,9 @@ defmodule Troupe.Config.Migrate do
       "# Written by troupe; the file before the last save is #{Path.basename(path)}.previous.\n"
   end
 
-  defp restrict(path) do
-    case :os.type() do
-      {:unix, _} -> File.chmod(path, 0o600)
-      _ -> :ok
-    end
-  end
+  # On Windows a file that cannot be restricted is still written, with a warning naming
+  # it: losing a person's settings over an access list would be worse.
+  defp restrict(path), do: Troupe.OwnerOnly.restrict(path)
 
   # -- paths ----------------------------------------------------------------------
 

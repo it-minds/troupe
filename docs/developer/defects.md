@@ -1331,7 +1331,6 @@ what is left).
   - A worker advertises `watch: true` but refuses `watch.*` to every token a plane mints.
   - `workspace.recent` ignores `limit`.
   - `Link.call` answers a failed write with a bare `unavailable` and keeps the dead client until it hears of the disconnect.
-  - `config.yaml` (which may hold a key) is restricted on unix but not on Windows, and `Troupe.Remote.Credentials` keeps its own copy of the `icacls` logic beside `Troupe.OwnerOnly`.
 - **Ceilings** (Decision 880).
   - An OpenAI-compatible reasoning model under a low ceiling can spend all of `max_completion_tokens` reasoning and answer nothing; Troupe sends the effort unchanged and says nothing.
   - Models that think unasked still think at their own default inside the ceiling when thinking is "off" (recorded in 880).

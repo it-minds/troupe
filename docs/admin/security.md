@@ -193,8 +193,8 @@ content, is plaintext.
 
 | What | Where | How it is held |
 |---|---|---|
-| The model key | `config.yaml`, or an environment variable it names (`{env:VAR}`) | a file the person owns |
-| A plane sign-in | `<config>/credentials.json` | readable by its owner only: mode 0600, or on Windows an ACL naming the user alone (`Troupe.Remote.Credentials`) |
+| The model key | `config.yaml`, or an environment variable it names (`{env:VAR}`) | readable by its owner only, and its `.previous` copy too: mode 0600, or on Windows an ACL naming the user alone, set before the file is put in place (`Troupe.OwnerOnly`, through `Troupe.Config.Migrate`) |
+| A plane sign-in | `<config>/credentials.json` | readable by its owner only: mode 0600, or on Windows an ACL naming the user alone (`Troupe.Remote.Credentials`, through `Troupe.OwnerOnly`) |
 | The daemon's loopback port and token | `daemon.json` | readable by its owner only: mode 0600, or on Windows an ACL naming the user alone, set before the token is written (`Troupe.OwnerOnly`); a new token each time the daemon starts (`Troupe.Protocol.Endpoint`) |
 | Sign-ins to the person's own MCP servers | `<state>/mcp-oauth.json` | as above (`Troupe.MCP.OAuth.Store`); the tokens never leave the machine (Decision 741) |
 | The plane token a client hands the daemon | the daemon's memory | never written (`Troupe.Gateway.Plane`) |
