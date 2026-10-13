@@ -410,9 +410,6 @@ Found by the chunk 13 fixers of slots A13, D13 and E13 (PRs #339, #345, #343), 2
 - A refused `POST` or `PUT` answers `400` as `{"status", "detail"}` without SCIM's error
   schema, and a user body with neither `externalId` nor `userName` (or a group body with
   neither `externalId` nor `id`) raises and answers `500`.
-- A deleted user stays visible to `GET` by id and to filters (the plane deactivates rather
-  than deletes, for the audit trail and a later reactivation); RFC 7644 section 3.6 has a
-  `404` and leaves it out. That is deliberate but no decision says so.
 - Responses carry `application/json`, not `application/scim+json`.
 - Unconfirmed: a `POST` or `PUT` passes `active` to the changeset unread, so a string
   `"False"` is probably refused where a `PATCH` reads it as false.

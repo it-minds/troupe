@@ -133,6 +133,7 @@ defmodule Troupe.Plane.Admin.Console do
     # Identity runs the same check; a function is placed once and neither caller is a lie.
     identity_check: {:screen, :policy},
     groups_list: {:screen, :identity},
+    identity_duplicates: {:screen, :identity},
     principals_list: {:screen, :identity},
     principal_create: {:screen, :identity},
     principal_rotate: {:screen, :identity},
@@ -175,8 +176,10 @@ defmodule Troupe.Plane.Admin.Console do
   def owed do
     # The GitHub App arrived as the console's redo (#56) began: its page belongs to the new
     # console, beside the other integrations, and this one is not being extended. Until
-    # then it is set with `admin.github.put` over `/rpc` or the admin MCP tools.
-    %{github_get: :integrations, github_put: :integrations}
+    # then it is set with `admin.github.put` over `/rpc` or the admin MCP tools. The people
+    # and groups that look held twice belong on the new console's Identity area, which is
+    # where it lists them; until then they are read over `/rpc` or the MCP tools.
+    %{github_get: :integrations, github_put: :integrations, identity_duplicates: :identity}
   end
 
   @doc """

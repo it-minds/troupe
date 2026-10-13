@@ -64,6 +64,11 @@ export const OWED: Owed[] = [
     methods: ["admin.principal.create", "admin.principal.rotate", "admin.principal.disable"],
   },
   {
+    area: "identity",
+    why: "People and groups that look held twice, the same email or display name under different keys, with the mismatch each most likely comes from; the Identity area's people and groups list is where it belongs, and until it is drawn it is read over /rpc or the admin MCP tools. Enabling a team already marks a group that looks held twice.",
+    methods: ["admin.identity.duplicates"],
+  },
+  {
     area: "signin",
     why: "The identity provider's connection, tested before it is saved, and the SCIM connector's token and switch; the current console's Identity provider page does it.",
     methods: [

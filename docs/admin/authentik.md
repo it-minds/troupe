@@ -28,12 +28,15 @@ where the people running the plane will find them.
 | Which groups SCIM pushes | Name them. An explicit list, not the whole directory |
 | Break-glass | Required for a move: it is the only way in while `platform_admin_group` still names a group of the old provider that nobody carries (`breakglass.ex`) |
 
-Leaving has one meaning here, whatever is decided: **deactivate, and the row stays**.
-Sign-in is refused, every request is refused, sponsored principals stop firing, and
-history and audit survive. It is not reversed by re-running a sync: a person deactivated
-by a push is not reactivated by signing in (`login.ex`, `upsert/2`). Rows SCIM never
-pushes, such as the people from before a move, are left alone, because deleting them would
-take the audit trail with them. Turning deactivation into a delete would be new work.
+Leaving has two meanings here, and the provider picks one. **Deactivated** (`active`
+false in a push or a PATCH): the row stays, sign-in is refused, every request is refused,
+and sponsored principals stop firing. It is not reversed by signing in (`login.ex`,
+`upsert/2`), only by a push that makes them active again. **Deleted** (a SCIM `DELETE`):
+the row goes and a tombstone keeps what outlives them. Their sessions turn read-only under
+a "removed person" owner, they lose any team they administered, their principals stop, and
+the audit trail keeps their name; somebody pushed or signing in later under the same
+subject is a new person. Rows SCIM never pushes, such as the people from before a move, are
+left alone.
 
 ---
 
@@ -75,7 +78,11 @@ every `sub` changes, and nothing links a person's old one to their new one.
 A team draws its members from groups, and `Group.external_id` is the key. It is set by
 whichever path saw the group first: the `groups` claim at login (`login.ex`,
 `sync_groups/2`) or a SCIM group push. **Use the group's UUID on both sides**, for the
-same reason.
+same reason. A plane that already holds a group twice, once by name and once by UUID, says
+so: `admin.identity.duplicates` lists the pair, and so do people who look held twice, and
+the console marks the group where a team is enabled from one. Which of the two is right is
+the provider's to say, so nothing merges them; fix the claim, link the team to the group
+that stays, and the other is left empty.
 
 `platform_admin_group` is then a UUID too, as it is an object id under Entra ID.
 
@@ -278,8 +285,8 @@ refusal rather than a degraded answer:
 | `POST` / `PUT` a whole resource | yes |
 | `PATCH` | `add`, `replace` and `remove` on what a push sets, and on a group's members |
 | `GET` with a filter | one `<attribute> eq "<value>"` on `userName` or `externalId` (a group: `displayName` or `externalId`), and any other filter is refused with `invalidFilter` |
-| `DELETE` a user | soft. The row stays, inactive |
-| `DELETE` a group | empties it, keeps it |
+| `DELETE` a user | removes the row and leaves a tombstone; the id answers `404` afterwards |
+| `DELETE` a group | removes it, and disables a team drawn from it alone |
 | Pagination, sort, bulk, ETag, `/Schemas`, `/ResourceTypes` | no |
 
 Refusing an unreadable filter is deliberate. A provider asks `userName eq "…"` to find
@@ -306,8 +313,8 @@ Each of these is a thing somebody watched happen, not a thing that ought to work
 6. First real sync, with the counts recorded.
 7. Group membership arrived for the named groups, and a team drawn from one has the
    people in it.
-8. A removal, end to end: the person is deactivated here, their next request is refused,
-   and any principal they sponsored has stopped firing.
+8. A removal, end to end: the person is deactivated or removed here, their next request is
+   refused, and any principal they sponsored has stopped firing.
 9. Break-glass still works.
 10. Service principals still work. They do not touch the identity provider, so this should
    be uneventful, and it is the check that proves triggers survived the switch.

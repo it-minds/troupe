@@ -22,9 +22,14 @@ defmodule Troupe.Plane.SCIM do
 
   import Ecto.Query
 
-  alias Troupe.Plane.{Audit, Identity, Principals, Repo, Settings}
+  alias Troupe.Plane.{Audit, Identity, Principals, Provision, Repo, Settings, Triggers}
   alias Troupe.Plane.Identity.{Group, User}
   alias Troupe.Plane.SCIM.{Connector, Filter, Patch}
+
+  require Logger
+
+  # Who writes a profile's teams again when a group's deletion disables a team on it.
+  @scim_actor %{subject: "scim", role: :platform_admin, teams: []}
 
   @user_schema "urn:ietf:params:scim:schemas:core:2.0:User"
   @group_schema "urn:ietf:params:scim:schemas:core:2.0:Group"
@@ -46,9 +51,11 @@ defmodule Troupe.Plane.SCIM do
   """
   @spec put_user(map()) :: {:ok, User.t()} | {:error, term()}
   def put_user(resource) do
+    external_id = Map.get(resource, "externalId")
+
     save_user(%{
-      subject: subject_of(resource),
-      external_id: Map.get(resource, "externalId"),
+      subject: subject_for(subject_of(resource), external_id),
+      external_id: external_id,
       user_name: Map.get(resource, "userName"),
       email: primary_email(resource),
       display_name: display_name(resource),
@@ -111,17 +118,52 @@ defmodule Troupe.Plane.SCIM do
     Identity.set_group_members(group, Enum.map(wanted, & &1.id))
   end
 
-  @doc "Mark a user inactive. SCIM deletes are soft, because an audit trail outlives a person's account."
+  # The subject a push keys the person on. Somebody nobody is under, who carries an
+  # `externalId` a row already has, is that row's person: one a sign-in moved to another
+  # claim's value keeps the `externalId` SCIM gave them, and a push that made them again
+  # under it was a second row for one person.
+  defp subject_for(subject, external_id) do
+    with nil <- Identity.get_user(subject),
+         %User{subject: moved} <- Identity.get_user_by_external_id(external_id) do
+      moved
+    else
+      _found_or_nobody -> subject
+    end
+  end
+
+  @doc """
+  Mark a user inactive: what `active: false` does, in a push or a PATCH. The row stays,
+  and a later push with `active: true` makes them active again; a `DELETE` is
+  `delete_user/1`.
+  """
   @spec deactivate_user(String.t()) :: {:ok, User.t()} | {:error, term()}
   def deactivate_user(id) do
     with {:ok, user} <- fetch_user(id), do: update_user(user, %{active: false})
   end
 
+  @doc """
+  Remove the user the plane gave this id, which is what a SCIM `DELETE` of one does.
+
+  The row goes, so the id answers `404` from now on, and a tombstone keeps what outlives
+  them (`Identity.remove_user/2`): their sessions, read-only under a "removed person"
+  marker, and the name the audit trail and every `*_by` already carry. The principals they
+  sponsor stop, as a deactivation stops them, and they administer nothing. Somebody the
+  provider sends later under the same subject is somebody new.
+  """
+  @spec delete_user(String.t()) :: {:ok, Identity.Tombstone.t()} | {:error, term()}
+  def delete_user(id) do
+    with {:ok, user} <- fetch_user(id),
+         {:ok, tombstone, effect} <- Identity.remove_user(user, "scim") do
+      {:ok, _} = Audit.record("scim", "person.remove", user.subject, effect)
+      {:ok, tombstone}
+    end
+  end
+
   # Every change SCIM makes to somebody it already has, under the subject they have.
   defp update_user(user, changes), do: save_user(Map.put(changes, :subject, user.subject))
 
-  # Every change SCIM makes to a person, whether a push, a PATCH or a DELETE carried it, so
-  # a deactivation is the same however it arrives.
+  # Every change SCIM makes to a person, whether a push or a PATCH carried it, so a
+  # deactivation is the same however it arrives.
   defp save_user(attrs) do
     if Map.get(attrs, :active) == false do
       # And everything that person was answerable for. A service principal is a
@@ -391,22 +433,78 @@ defmodule Troupe.Plane.SCIM do
   defp rename_group(group, _attrs), do: {:ok, group}
 
   @doc """
-  Empty a group, which is what a SCIM delete of one does here.
+  Remove a group, which is what a SCIM delete of one does.
 
-  Soft, as a user's is: the group may be a team, whose grants are the plane's and outlive
-  the push, and a group nobody is in grants nobody anything.
+  The row goes, with its members and its links, and the id answers `404`. A team built on
+  it and on no other group is disabled, as an administrator disabling it would: its grants
+  are revoked, its sessions go read-only, its triggers go, and the audit trail says `scim`
+  did it. A team that draws from other groups too keeps them, and is recorded as enabled
+  from one of them instead.
   """
-  @spec empty_group(String.t()) :: {:ok, Group.t()} | {:error, :not_found}
-  def empty_group(id) do
+  @spec delete_group(String.t()) :: {:ok, Group.t()} | {:error, :not_found}
+  def delete_group(id) do
     case Identity.get_group_by_id(id) do
       nil ->
         {:error, :not_found}
 
       group ->
-        :ok = Identity.set_group_members(group, [])
+        {disabled, kept} =
+          group |> Identity.teams_built_on() |> Enum.split_with(&(others(&1, group) == []))
+
+        Enum.each(disabled, &disable_team(&1, group))
+        Enum.each(kept, &record_other_group(&1, group))
+
+        {:ok, _} = Repo.delete(group)
+
+        {:ok, _} =
+          Audit.record("scim", "group.delete", group.external_id, %{
+            "display_name" => group.display_name,
+            "teams_disabled" => Enum.map(disabled, & &1.name),
+            "teams_kept" => Enum.map(kept, & &1.name)
+          })
+
         {:ok, group}
     end
   end
+
+  defp others(team, group) do
+    team |> Identity.links_of() |> Enum.reject(&(&1.group_id == group.id))
+  end
+
+  # What `Admin.team_disable/2` does, in its order, with `scim` as the one who did it:
+  # every grant revoked and the profile's teams written again, then the triggers, which a
+  # principal cannot outlive, then the row.
+  defp disable_team(team, group) do
+    for grant <- Identity.grants_for_team(team) do
+      :ok = Identity.revoke(team, grant.profile)
+
+      case Provision.sync_teams(grant.profile, @scim_actor) do
+        {:ok, _state} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("troupe plane: #{grant.profile}'s teams are stale: #{inspect(reason)}")
+      end
+    end
+
+    Enum.each(Triggers.list(team), &Triggers.delete/1)
+    {:ok, _} = Identity.disable_team(team)
+
+    {:ok, _} =
+      Audit.record("scim", "team.disable", team.name, %{
+        "group" => group.external_id,
+        "by" => "scim"
+      })
+  end
+
+  # `group_id` records which group a team was enabled from, and the database deletes a team
+  # with the group it records.
+  defp record_other_group(%{group_id: group_id} = team, %{id: group_id} = group) do
+    [link | _] = others(team, group)
+    {:ok, _} = Identity.update_team(team, %{group_id: link.group_id})
+  end
+
+  defp record_other_group(_team, _group), do: :ok
 
   defp fetch_user(id) do
     case Identity.get_user_by_id(id) do

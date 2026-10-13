@@ -25,6 +25,7 @@ defmodule Troupe.Plane.Identity do
     Team,
     TeamAdmin,
     TeamGroupLink,
+    Tombstone,
     User
   }
 
@@ -49,12 +50,15 @@ defmodule Troupe.Plane.Identity do
   end
 
   # A person's name at the key manager is fixed here, when they are first known, and
-  # nothing changes it afterwards (Decision 755). Their subject, so the key manager's tree
+  # nothing changes it afterwards. Their subject, so the key manager's tree
   # reads as the people in it and a plane that never switches its claim sees what it
   # always did. Where that is already somebody's name, which only a switched claim can
-  # make so, their own id, which nobody else's can be.
+  # make so, their own id, which nobody else's can be. A removed person's name is still
+  # theirs: what they stored is under it until it is erased, and somebody arriving later
+  # under the same subject is somebody new.
   defp new_user(subject) do
-    if Repo.exists?(from(u in User, where: u.kms_name == ^subject)) do
+    if Repo.exists?(from(u in User, where: u.kms_name == ^subject)) or
+         Repo.exists?(from(t in Tombstone, where: t.kms_name == ^subject)) do
       id = Ecto.UUID.generate()
       %User{id: id, kms_name: id}
     else
@@ -278,6 +282,105 @@ defmodule Troupe.Plane.Identity do
   end
 
   @doc """
+  The person SCIM calls this `externalId`, or `nil`.
+
+  At most one: the column is unique where it is set. A push or a sign-in that finds nobody
+  under its subject asks this before it makes anybody, because a person moved to another
+  claim's value keeps the `externalId` SCIM gave them.
+  """
+  @spec get_user_by_external_id(String.t() | nil) :: User.t() | nil
+  def get_user_by_external_id(nil), do: nil
+  def get_user_by_external_id(value), do: Repo.get_by(User, external_id: value)
+
+  @doc """
+  Remove a person the identity provider removed, leaving a tombstone.
+
+  Their row goes, so a lookup by the id the provider holds answers nobody and nobody signs
+  in as them. What outlives them stays, under the tombstone: their sessions, read-only and
+  owned by its marker, so somebody who later arrives under the same subject is somebody
+  new and does not see them; and their name at the key manager, under which what they
+  stored is until an erasure removes it. They stop administering any team, their ACL
+  entries and the shares made out to them end, and the principals they sponsor stop. The
+  audit trail and every `*_by` keep the name they were written with.
+
+  Their running sessions are parked first, one at a time, giving back their slots and
+  their slices under the subject they were reserved for; the rest happens in one
+  transaction with the row held.
+  """
+  @spec remove_user(User.t(), String.t()) :: {:ok, Tombstone.t(), map()} | {:error, term()}
+  def remove_user(%User{} = user, by) do
+    parked = user.subject |> Sessions.holding_owned_by() |> Enum.map(&Drain.withdraw/1)
+
+    Repo.transaction(fn ->
+      case Repo.one(from(u in User, where: u.id == ^user.id, lock: "FOR UPDATE")) do
+        nil -> Repo.rollback(:not_found)
+        locked -> bury(locked, by, parked)
+      end
+    end)
+    |> case do
+      {:ok, {tombstone, effect}} -> {:ok, tombstone, effect}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp bury(user, by, parked) do
+    tombstone =
+      %Tombstone{}
+      |> Tombstone.changeset(%{
+        former_id: user.id,
+        subject: user.subject,
+        external_id: user.external_id,
+        user_name: user.user_name,
+        display_name: user.display_name,
+        kms_name: User.kms_name(user),
+        removed_by: by,
+        removed_at: DateTime.utc_now()
+      })
+      |> Repo.insert!()
+
+    administered = Enum.map(teams_administered_by(user), & &1.name)
+    Repo.delete_all(from(a in TeamAdmin, where: a.subject == ^user.subject))
+
+    :ok = Sessions.drop_access(user.subject, by)
+    {:ok, stopped} = Principals.sponsor_left(user.subject)
+    sessions = Sessions.hand_to_removed(user.subject, Tombstone.marker(tombstone))
+
+    Repo.delete!(user)
+
+    {tombstone,
+     %{
+       "id" => user.id,
+       "tombstone" => tombstone.id,
+       "sessions" => sessions,
+       "parked" => length(parked),
+       "team_admin_of" => administered,
+       "principals_stopped" => Enum.map(stopped, & &1.subject)
+     }}
+  end
+
+  @doc """
+  The name at the key manager of whoever a session's `owner_subject` names: a person's,
+  a removed person's from their tombstone, else the value itself, as a principal's and a
+  row from before the column are.
+  """
+  @spec kms_name_of(String.t()) :: String.t()
+  def kms_name_of(owner) do
+    case Tombstone.parse_marker(owner) do
+      {:ok, id} ->
+        case Repo.get(Tombstone, id) do
+          %Tombstone{kms_name: name} -> name
+          nil -> owner
+        end
+
+      :error ->
+        case get_user(owner) do
+          %User{} = user -> User.kms_name(user)
+          nil -> owner
+        end
+    end
+  end
+
+  @doc """
   Replace a group's membership with exactly these users.
 
   The mirror image of `set_memberships/2`, for the direction SCIM pushes in. Replace,
@@ -363,6 +466,100 @@ defmodule Troupe.Plane.Identity do
   @spec list_groups() :: [Group.t()]
   def list_groups, do: Repo.all(from(g in Group, order_by: g.display_name))
 
+  @doc """
+  People and groups that look like one held twice: the same email or display name under
+  different keys.
+
+  Nothing merges these, because nothing proves they are one: two people may share an
+  address, and only the provider knows which of a group's two ids is right. Each set comes
+  with the mismatch it most likely comes from, for an administrator to settle at the
+  provider.
+  """
+  @spec lookalikes() :: %{people: [map()], groups: [map()]}
+  def lookalikes, do: %{people: people_alike(), groups: group_lookalikes()}
+
+  defp people_alike do
+    users = list_users()
+    by_email = alike(users, & &1.email)
+
+    by_name =
+      users
+      |> alike(& &1.display_name)
+      |> Enum.reject(fn rows -> Enum.any?(by_email, &subset?(rows, &1)) end)
+
+    claim = Settings.get("subject_claim")
+
+    Enum.map(by_email, &person_set(&1, "email", claim)) ++
+      Enum.map(by_name, &person_set(&1, "display_name", claim))
+  end
+
+  @doc "The groups half of `lookalikes/0`: groups sharing a display name under different ids."
+  @spec group_lookalikes() :: [map()]
+  def group_lookalikes do
+    list_groups()
+    |> alike(& &1.display_name)
+    |> Enum.map(fn groups ->
+      # A group a `groups` claim made is named by what the claim carried; one SCIM pushed
+      # has its own id beside its name.
+      from_claim = Enum.filter(groups, &(&1.display_name == &1.external_id))
+
+      likely =
+        if from_claim != [] and length(from_claim) < length(groups),
+          do:
+            "the groups claim names this group by its name and SCIM by its id: send the same value in both, the group's id, and link its teams to the group that stays",
+          else: "the provider sent two groups of this name under different ids"
+
+      %{
+        by: "display_name",
+        groups: Enum.map(groups, &Map.take(&1, [:external_id, :display_name])),
+        likely: likely
+      }
+    end)
+  end
+
+  # Rows sharing a value, ignoring case, in sets of more than one.
+  defp alike(rows, key) do
+    rows
+    |> Enum.filter(&is_binary(key.(&1)))
+    |> Enum.group_by(&(&1 |> key.() |> String.downcase()))
+    |> Map.values()
+    |> Enum.filter(&match?([_, _ | _], &1))
+    |> Enum.sort_by(&key.(hd(&1)))
+  end
+
+  defp subset?(rows, of), do: Enum.all?(rows, fn row -> Enum.any?(of, &(&1.id == row.id)) end)
+
+  defp person_set(users, by, claim) do
+    origins = users |> Enum.map(&origin/1) |> Enum.uniq() |> Enum.sort()
+
+    likely =
+      case origins do
+        ["scim", "sign-in"] ->
+          "a sign-in keyed one on the #{claim} claim and SCIM the other on its externalId (else its userName), and the two values differ: make them the same at the provider"
+
+        ["scim"] ->
+          "SCIM pushed them under two externalIds (or userNames): the provider holds two records, or its mapping changed"
+
+        ["sign-in"] ->
+          "they signed in under two subjects: the #{claim} claim changed for them, or two accounts share the #{String.replace(by, "_", " ")}"
+      end
+
+    %{
+      by: by,
+      people:
+        Enum.map(users, fn user ->
+          user
+          |> Map.take([:id, :subject, :external_id, :user_name, :email, :display_name])
+          |> Map.put(:origin, origin(user))
+        end),
+      likely: likely
+    }
+  end
+
+  # A push writes `userName` whatever else it sends, and a sign-in writes neither.
+  defp origin(%User{external_id: nil, user_name: nil}), do: "sign-in"
+  defp origin(%User{}), do: "scim"
+
   # -- teams ------------------------------------------------------------------
 
   @doc """
@@ -444,6 +641,17 @@ defmodule Troupe.Plane.Identity do
         order_by: t.name
       )
     )
+  end
+
+  @doc """
+  Every team built on a group: drawing members from it, or enabled from it, which is the
+  group its `group_id` records.
+  """
+  @spec teams_built_on(Group.t()) :: [Team.t()]
+  def teams_built_on(%Group{} = group) do
+    (teams_drawing_from(group) ++ Repo.all(from(t in Team, where: t.group_id == ^group.id)))
+    |> Enum.uniq_by(& &1.id)
+    |> Enum.sort_by(& &1.name)
   end
 
   # A name a person will type: the display name, lowercased, with anything that is not

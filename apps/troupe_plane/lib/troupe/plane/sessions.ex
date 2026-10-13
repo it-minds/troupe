@@ -347,6 +347,69 @@ defmodule Troupe.Plane.Sessions do
     count
   end
 
+  @doc """
+  The team sessions a person owns that are running or waiting for room: what removing the
+  person parks one at a time (`Drain.withdraw/1`), each giving back its slot and its
+  slice, before `hand_to_removed/2` freezes the rest.
+  """
+  @spec holding_owned_by(String.t()) :: [Session.t()]
+  def holding_owned_by(subject) do
+    Repo.all(
+      from(s in Session,
+        where:
+          s.owner_subject == ^subject and s.kind == "team" and s.state in ["active", "pending"],
+        order_by: s.id
+      )
+    )
+  end
+
+  @doc """
+  Every session a removed person owns, read-only and owned by their tombstone's marker
+  from now on. The count of them.
+
+  Read-only as a revoked grant leaves a team's: history is history, and nothing activates
+  them again. Owned by the marker rather than by their subject, so that somebody the
+  provider later sends under the same subject is somebody new, who does not see them. The
+  sessions' other names, who pinned or reviewed one, are history and stay.
+  """
+  @spec hand_to_removed(String.t(), String.t()) :: non_neg_integer()
+  def hand_to_removed(subject, marker) do
+    now = DateTime.utc_now()
+
+    Repo.update_all(
+      from(s in Session,
+        where: s.owner_subject == ^subject and s.state in ["active", "dormant", "pending"]
+      ),
+      set: [state: "read_only", worker_id: nil, pending_prompt: nil, updated_at: now]
+    )
+
+    {count, _} =
+      Repo.update_all(from(s in Session, where: s.owner_subject == ^subject),
+        set: [owner_subject: marker, updated_at: now]
+      )
+
+    count
+  end
+
+  @doc """
+  End every way a removed person had into somebody else's session: their ACL entries go,
+  and the shares made out to them are revoked, by `by`. Who granted or made those is
+  history, and the rows that say so stay where they are kept.
+  """
+  @spec drop_access(String.t(), String.t()) :: :ok
+  def drop_access(subject, by) do
+    Repo.delete_all(from(a in ACL, where: a.subject == ^subject))
+
+    now = DateTime.utc_now()
+
+    Repo.update_all(
+      from(s in Share, where: s.audience == ^subject and is_nil(s.revoked_at)),
+      set: [revoked_at: now, revoked_by: by, revoked_reason: "person removed", updated_at: now]
+    )
+
+    :ok
+  end
+
   @doc "Record which bundle version a session is pinned to."
   @spec pin_bundle(String.t(), integer()) :: {:ok, Session.t()} | {:error, term()}
   def pin_bundle(session_id, version), do: put_fields(session_id, %{bundle_version: version})
