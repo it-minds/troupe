@@ -31,7 +31,28 @@ export interface AdminSessionRow {
   pinned: boolean | null;
   pinned_by: string | null;
   last_active_at: string | null;
+  /** The GitHub repository it was created with, which its pod cloned; null for none. */
+  repository?: { owner: string; name: string; ref?: string | null } | null;
+  /** What it did there, as its pod reported it; null until it has done something. */
+  github?: SessionGitHub | null;
   [k: string]: unknown;
+}
+
+/**
+ * A session's fix loop on GitHub, as the plane keeps it: the commit its clone started
+ * from, the `troupe/*` branch it pushes and its last commit there, its draft pull request,
+ * each CI round on it, and when it stopped after three red ones. Metadata only.
+ */
+export interface SessionGitHub {
+  base?: string | null;
+  branch?: string | null;
+  commit?: string | null;
+  tree?: string | null;
+  pushes?: number | null;
+  pushed_at?: string | null;
+  pull_request?: { number: number; url: string } | null;
+  rounds?: { commit: string; state: "red" | "green"; failing: string[]; at: string }[] | null;
+  stopped?: { at: string; reason: string } | null;
 }
 
 /**

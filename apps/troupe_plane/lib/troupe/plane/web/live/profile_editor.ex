@@ -291,9 +291,12 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
         "orgMount" => fields["orgMount"] == true,
         # The same, and the bundle winning is what false says (Decision 826).
         "repositoryOverridesBundle" => fields["repositoryOverridesBundle"] == true,
-        # Written whichever way it is, as the two above, so a save from here can lift it
-        # (Decision 862).
-        "personalTools" => if(fields["forbidPersonalTools"] == true, do: "forbid", else: "allow")
+        # Written whichever way it is, as the two above, so a save from here can lift it.
+        "personalTools" => if(fields["forbidPersonalTools"] == true, do: "forbid", else: "allow"),
+        # What its sessions' tokens may do on GitHub: set through `admin.profile.put` and
+        # not on this page, and carried through as it was loaded, as the prices are, so a
+        # save from here does not take a profile's pushes away.
+        "github" => fields["github"]
       })
 
     compact(%{
@@ -428,7 +431,8 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       "configBundleChannel" => Map.get(spec, "configBundleChannel"),
       "orgMount" => Map.get(spec, "orgMount") == true,
       "repositoryOverridesBundle" => Map.get(spec, "repositoryOverridesBundle") == true,
-      "forbidPersonalTools" => Map.get(spec, "personalTools") == "forbid"
+      "forbidPersonalTools" => Map.get(spec, "personalTools") == "forbid",
+      "github" => Map.get(spec, "github")
     }
   end
 

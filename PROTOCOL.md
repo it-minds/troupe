@@ -1283,7 +1283,9 @@ no agent has (the keys are `description`, `mode`, `model`, `tools`, `permissions
 `max_turns`, `budget_share`, `skills`, `override` and `delegation`, and onboarding's
 `imported_*`); `delegation` not `ask` or `auto`;
 `mode` missing or not `primary`/`subagent`; `tools` or `skills` not `"all"` or a list; a
-tool that does not exist (with the nearest that do); a permission not `auto`, `ask` or
+tool that does not exist (with the nearest that do; a pod's GitHub tools, `git_push`,
+`pr_open`, `pr_comment` and `pr_checks`, exist everywhere here, though only a pod session with a
+repository has them); a permission not `auto`, `ask` or
 `deny`; a permission that grants (`auto` or `ask`) a tool `tools` does not list, which
 could never apply (a `deny` of one is allowed, as the built-ins write it); a model the
 provider does not serve, by the list the daemon keeps (Decision 778), with the nearest it
@@ -2499,7 +2501,7 @@ that team.
 | `admin.team.enable` | platform | makes an IdP group a team |
 | `admin.team.update` | either | budget, retention, default visibility, volume; `allow_unenforced_workers` a platform admin's; keys it does not declare, a team's name and group among them, are left alone |
 | `admin.team.grant` / `admin.team.revoke` | platform | a team's access to a profile |
-| `admin.sessions.list` | either | session *metadata*, never content |
+| `admin.sessions.list` | either | session *metadata*, never content: with the `repository` it was created with and `github`, what it did there (as `admin.runs.list` has it) |
 | `admin.session.erase` | either | erases one, for authorised roles |
 | `admin.bundles.list` | either | every version of a channel, each with its `summary` (names of agents, skills and MCP servers) |
 | `admin.bundle.get` | either | one version in full: the document, its `detail` (agents with mode and skills, skills with files, MCP servers with the Secret to create), and adoption per profile |
@@ -2524,7 +2526,7 @@ that team.
 | `admin.trigger.delete` | either | `{team, name}`; the runs go with it, the sessions they made do not; `managed_by_gitops` in gitops mode, except for a trigger the cluster has no resource for |
 | `admin.trigger.run` | either | `{team, name}`: fire it now, with a manual idempotency key naming the caller and the minute; in either mode |
 | `admin.trigger.key.rotate` | either | `{team, name}` → `{team, name, url, key, rotated_at}`: the trigger's own key, shown once, the old one dead at once; in either mode, since the key is never in a resource |
-| `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status, its `done_reason` and `failed_reason` (a turn the harness stopped, `tool_failures` or `agent_failed`, which makes the run `failed`), and the `revision` and `revision_hash` it actually ran |
+| `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status, its `done_reason` and `failed_reason` (a turn the harness stopped, `tool_failures` or `agent_failed`, which makes the run `failed`), the `revision` and `revision_hash` it actually ran, and `github`: what its session did on GitHub, or `null` (`base`, `branch`, `commit`, `tree`, `pushes`, `pushed_at`, `pull_request: {number, url}`, `rounds: [{commit, state, failing, at}]`, `stopped: {at, reason}`; [github.md](docs/admin/github.md#7-the-fix-loop)) |
 | `admin.trigger.revisions` | either | `{team, name}` → every revision of a trigger, newest first: the number, the hash, who made it and when, and whether it was reconstructed by the migration that introduced them |
 | `admin.profile.preview` | platform | what policy makes of a profile and what would change, without writing anything |
 | `admin.provisioners.list` | either | what can make a worker, and which guarantee each substrate does not give: admission policy, network policy, egress by hostname, disruption budget |

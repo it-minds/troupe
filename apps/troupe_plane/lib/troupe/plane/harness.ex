@@ -2640,6 +2640,9 @@ defmodule Troupe.Plane.Harness do
       "origin" => session.origin,
       "terms" => session.terms,
       "repository" => session.repository,
+      # What it did there, as its pod reported it: the branch, the last commit, the draft
+      # pull request and its CI rounds. Never what the session wrote.
+      "github" => session.github,
       "reviewed_by" => session.reviewed_by,
       "reviewed_at" => session.reviewed_at && DateTime.to_iso8601(session.reviewed_at),
       "your_role" => role_name(Sessions.role_for(user, session))
