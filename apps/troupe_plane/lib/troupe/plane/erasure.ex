@@ -41,7 +41,7 @@ defmodule Troupe.Plane.Erasure do
   alias Troupe.ObjectStore
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.{Drain, Fleet, Identity, Repo, Sessions}
-  alias Troupe.Plane.Identity.{Team, User}
+  alias Troupe.Plane.Identity.Team
   alias Troupe.Plane.Sessions.{Session, Tombstone}
   alias Troupe.Plane.Tokens.Credential
   alias Troupe.Sessions.Storage
@@ -300,12 +300,8 @@ defmodule Troupe.Plane.Erasure do
     end
   end
 
-  defp owner_name(session) do
-    case Identity.get_user(session.owner_subject) do
-      %User{} = user -> User.kms_name(user)
-      nil -> session.owner_subject
-    end
-  end
+  # A removed person's sessions name their tombstone, which keeps their name.
+  defp owner_name(session), do: Identity.kms_name_of(session.owner_subject)
 
   @doc """
   Try again every key an erasure has not yet destroyed, and say how many went.

@@ -522,7 +522,7 @@ defmodule Troupe.Plane.Web.Router do
   defp scim(conn, ["Users", id]) do
     case conn.method do
       "DELETE" ->
-        scim_no_content(conn, SCIM.deactivate_user(id))
+        scim_no_content(conn, SCIM.delete_user(id))
 
       "GET" ->
         case Identity.get_user_by_id(id) do
@@ -565,7 +565,7 @@ defmodule Troupe.Plane.Web.Router do
     case conn.method do
       "GET" -> scim_get_group(conn, id)
       "PATCH" -> scim_no_content(conn, SCIM.patch_group(id, conn.body_params))
-      "DELETE" -> scim_no_content(conn, SCIM.empty_group(id))
+      "DELETE" -> scim_no_content(conn, SCIM.delete_group(id))
       _ -> scim_put_group(conn, 200)
     end
   end

@@ -309,6 +309,29 @@ describe("a team's edits", () => {
     await waitFor(() => link("platform"), "the new team in the list");
   });
 
+  it("says which group looks held twice, and the mismatch the plane thinks made it, before it is chosen", async () => {
+    // A groups claim that names the group by its name, beside the one SCIM pushed by its id.
+    const likely = "the groups claim names this group by its name and SCIM by its id";
+    fake.admin.groups.push({ external_id: "Platform owners", display_name: "Platform owners", looks_duplicated: { others: ["grp-platform"], likely } });
+    const pushed = fake.admin.groups.find((g) => g.external_id === "grp-platform")!;
+    pushed.looks_duplicated = { others: ["Platform owners"], likely };
+
+    await signedInAs(fake, PEOPLE.alice);
+    visit("#/teams");
+    unmount = render(<App />).unmount;
+    (await waitFor(() => button("Enable a group as a team"), "the team list")).click();
+    const group = await waitFor(() => field("Group"), "the form");
+    expect(says("Platform owners (grp-platform) · looks held twice")).toBe(true);
+    expect(says("looks held twice:")).toBe(false);
+
+    type(group, "grp-platform");
+    await waitFor(() => says("Platform owners looks held twice: Platform owners has the same name."), "the flag");
+    expect(says(`Most likely ${likely}.`)).toBe(true);
+
+    type(group, "grp-core");
+    await waitFor(() => !says("looks held twice:"), "the flag going with the other group");
+  });
+
   it("offers a team admin none of a platform admin's edits", async () => {
     await signedInAs(fake, PEOPLE.bob);
     visit("#/teams/design/members");

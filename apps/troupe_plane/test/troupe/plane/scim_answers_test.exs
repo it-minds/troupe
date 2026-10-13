@@ -68,11 +68,14 @@ defmodule Troupe.Plane.SCIMAnswersTest do
   end
 
   describe "a delete" do
-    test "answers 204 for somebody the plane has, and 404 for an id it does not", context do
+    test "answers 204 for somebody the plane has, who is then gone, and 404 for an id it does not",
+         context do
       {201, user, _} = request(context, :post, "/scim/v2/Users", user("ada"))
 
       assert {204, nil, _} = request(context, :delete, path(user))
-      refute Identity.get_user("idp|ada").active
+      refute Identity.get_user("idp|ada")
+      assert {404, %{"schemas" => @error}, _} = request(context, :get, path(user))
+      assert {404, _, _} = request(context, :delete, path(user))
 
       for id <- [Ecto.UUID.generate(), "not-an-id"] do
         assert {404, %{"schemas" => @error, "status" => "404"}, _} =
@@ -82,7 +85,7 @@ defmodule Troupe.Plane.SCIMAnswersTest do
                  request(context, :delete, "/scim/v2/Groups/" <> id)
       end
 
-      assert [_ada] = Identity.list_users()
+      assert Identity.list_users() == []
     end
   end
 

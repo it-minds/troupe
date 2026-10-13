@@ -259,7 +259,7 @@ export function diff(before: Record<string, unknown>, now: Record<string, unknow
 export class FakeAdmin {
   readonly platformAdmins: Set<string>;
   readonly teams = new Map<string, FakeTeam>();
-  readonly groups: Array<{ external_id: string; display_name: string | null }>;
+  readonly groups: Array<{ external_id: string; display_name: string | null; looks_duplicated?: { others: string[]; likely: string } | null }>;
   /** Who is in each group, by its external id, as the identity provider says: membership is never the plane's. */
   readonly memberships: Record<string, string[]>;
   /** People's display names, by subject, for a member a link brings in. */
@@ -283,7 +283,7 @@ export class FakeAdmin {
     opts: {
       platformAdmins?: string[];
       teams?: FakeTeam[];
-      groups?: Array<{ external_id: string; display_name: string | null }>;
+      groups?: Array<{ external_id: string; display_name: string | null; looks_duplicated?: { others: string[]; likely: string } | null }>;
       memberships?: Record<string, string[]>;
       names?: Record<string, string>;
       profiles?: FakeProfile[];

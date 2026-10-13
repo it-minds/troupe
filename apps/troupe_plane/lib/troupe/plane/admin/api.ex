@@ -644,7 +644,14 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.groups.list",
       function: :groups_list,
       summary:
-        "Every identity-provider group this plane knows about, which is what a team links to.",
+        "Every identity-provider group this plane knows about, which is what a team links to. A group that looks like another one held twice carries `looks_duplicated`: the other group's identifier and the mismatch it most likely comes from.",
+      risk: :read
+    },
+    %Method{
+      name: "admin.identity.duplicates",
+      function: :identity_duplicates,
+      summary:
+        "People and groups that look like one held twice: the same email or display name under different keys. Each set says which rows, where each came from (a sign-in or SCIM), and the mismatch it most likely comes from. Nothing is merged on this evidence.",
       risk: :read
     },
     %Method{

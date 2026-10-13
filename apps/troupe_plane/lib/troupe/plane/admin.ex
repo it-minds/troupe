@@ -964,11 +964,41 @@ defmodule Troupe.Plane.Admin do
   @spec groups_list(actor()) :: result()
   def groups_list(actor) do
     with :ok <- require_admin(actor) do
+      alike = groups_alike()
+
       {:ok,
        Enum.map(Identity.list_groups(), fn group ->
-         %{external_id: group.external_id, display_name: group.display_name}
+         %{
+           external_id: group.external_id,
+           display_name: group.display_name,
+           looks_duplicated: Map.get(alike, group.external_id)
+         }
        end)}
     end
+  end
+
+  # A group that looks like another one held twice says so, with the mismatch it most
+  # likely comes from, so whoever links a team to it can pick the one that stays.
+  defp groups_alike do
+    for set <- Identity.group_lookalikes(), group <- set.groups, into: %{} do
+      others = for other <- set.groups, other != group, do: other.external_id
+      {group.external_id, %{others: others, likely: set.likely}}
+    end
+  end
+
+  @doc """
+  People and groups that look like one held twice, with the mismatch each most likely
+  comes from.
+
+  The same email or display name under different keys: a sign-in and a SCIM push that
+  name somebody differently, or a groups claim that names a group by its name while SCIM
+  uses its id. Nothing is merged on this evidence, since only the provider knows; the
+  answer says what to make agree there. Rows that share an `externalId` are not here, as
+  the plane holds one row per `externalId` and merged those when it upgraded.
+  """
+  @spec identity_duplicates(actor()) :: result()
+  def identity_duplicates(actor) do
+    with :ok <- require_platform_admin(actor), do: {:ok, Identity.lookalikes()}
   end
 
   @doc """
