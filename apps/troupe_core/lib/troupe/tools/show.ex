@@ -8,6 +8,12 @@ defmodule Troupe.Tools.Show do
   and calling it again under the same name replaces it, so a plan is revised rather than
   printed twice. `Troupe.Scratch` holds the rules; this is the model's side of them.
 
+  It is for a document the person asks for, or an answer past about 80 lines, and nothing
+  else: every other answer goes in the reply. A document costs a call of its own, a reply
+  after it, and a read back after each compaction, and on the live bench a long session
+  that put every plan here cost a third to a half more than the same session answering in
+  the chat. The description, `build.md` and `plan.md` say so in the same words.
+
   Offered to every agent that has every tool, and to the built-in primaries that name it,
   on every call and every model: it is part of the tools, which are the start of every
   prompt, so it is never offered on some calls and not others (Decision 867). Its
@@ -39,9 +45,10 @@ defmodule Troupe.Tools.Show do
   @impl Troupe.Tool
   def description do
     """
-    Show the person a document beside the chat: a plan, report, comparison, Mermaid
-    diagram or table they will read, instead of a long answer in the chat, which then
-    stays short and names it. The same name again replaces it; patch revises it in place.
+    Show the person a document beside the chat, only when they ask for one (a plan,
+    report, table or Mermaid diagram to keep or revise) or the answer would run past
+    about 80 lines; otherwise answer in the reply. The reply then stays short and names
+    it. The same name again replaces it; patch revises it in place.
     """
   end
 

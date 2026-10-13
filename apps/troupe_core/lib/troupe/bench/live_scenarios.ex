@@ -1019,7 +1019,7 @@ defmodule Troupe.Bench.LiveScenarios do
 
     body =
       Regex.replace(
-        ~r/\s+A\s+plan,\s+report,\s+comparison,\s+diagram\s+or\s+table\s+they\s+will\s+read\s+goes\s+to\s+`show`,\s+and\s+the\s+answer\s+stays\s+short\s+and\s+names\s+it\.\s+Revise\s+one\s+with\s+`patch`,\s+not\s+by\s+showing\s+it\s+again\./,
+        ~r/\s+Answer\s+in\s+the\s+reply\s+unless\s+they\s+ask\s+for\s+a\s+document\b.*?\s+rather\s+than\s+showing\s+it\s+again\./s,
         body,
         ""
       )

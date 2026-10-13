@@ -1,9 +1,10 @@
 ---
 number: 895
-title: "An agent revises a scratchpad document in place with `patch`, which replaces an exact span of it or adds to its end and is offered wherever `show` is, on every call; a document too long for one reply goes in parts, `show` its start and `patch` the rest on; a compaction leaves a long patch out for a pointer as it does a shown document; and the live session that measures it runs under a window four times its first prompt"
+title: "An agent revises a scratchpad document in place with `patch`, which replaces an exact span of it or adds to its end and is offered wherever `show` is, on every call; a document too long for one reply goes in parts, `show` its start and `patch` the rest on; a compaction leaves a long patch out for a pointer as it does a shown document; the live session that measures it runs under a window four times its first prompt; and, since that session cost more with the scratchpad, an agent uses it only when the person asks for a document or the answer would run past about 80 lines, and answers in the reply otherwise"
 date: 2026-10-13
 status: accepted
 issue: 616
+supersedes: [870]
 paths:
   - apps/troupe_core/lib/troupe/tools/patch.ex
   - apps/troupe_core/lib/troupe/tools/show.ex
@@ -16,7 +17,10 @@ paths:
   - apps/troupe_core/priv/bench/budgets.json
   - apps/troupe_core/lib/troupe/bench/live.ex
   - apps/troupe_core/lib/troupe/bench/live_scenarios.ex
+  - apps/troupe_core/lib/troupe/bench/scenarios.ex
   - apps/troupe_core/test/troupe/tools/patch_test.exs
+  - apps/troupe_core/test/troupe/tools/show_test.exs
+  - apps/troupe_core/test/troupe/bench_test.exs
   - apps/troupe_core/test/troupe/agent/scratch_compaction_test.exs
   - apps/troupe_core/test/troupe/bench_live_test.exs
   - docs/user/README.md
@@ -26,7 +30,7 @@ symbols:
   - Troupe.Scratch.patch/4
   - Troupe.Scratch.revise/3
   - Troupe.Tools.Show.left_out/1
-gist: "patch: one exact span or an append, every call beside show; long docs in parts; a compaction points a long patch; session bench window 24k"
+gist: "show only for a document asked for or past ~80 lines, else reply; patch revises in place; both on every call; long docs in parts; long patches pointed"
 ---
 
 Issue #616, the rest of it. Decision 878 made a compaction leave each shown document out
@@ -44,7 +48,8 @@ eight cases of `Troupe.Tools.PatchTest` all failed there (no `patch` was offered
 revision was refused as an unknown tool, and the scratchpad stayed at version 1).
 
 The tool, the parts and the words are in. The live measure is still not met; the numbers
-and why are under **Live**.
+and why are under **Live**, and what the maintainer decided from them under **When an
+agent uses the scratchpad**.
 
 **What changed.**
 
@@ -156,6 +161,38 @@ these runs did not get from `patch` when the person asks for the whole document 
 Run it again with `troupe bench --live --scenario
 scratchpad_session,scratchpad_session_without --repeat 3 --model claude-sonnet-5-5`; a
 run's `since_compaction` is the measure.
+
+**When an agent uses the scratchpad.** Decided by the maintainer on 2026-10-13, from these
+runs, and the issue closes with it: the scratchpad is not the default place for an
+answer. An agent puts output there only when the person asks for a document (a plan,
+report, table or diagram they want to keep or revise) or when the answer would run past
+about 80 lines; every other answer goes in the reply, as before the scratchpad. A
+document already there is revised with `patch`. This replaces 870's "a plan, report,
+comparison, diagram or table they will read goes to `show`", which sent every plan there
+whatever its length or whether anyone asked: in the runs above a session that did so cost
+51% and 33% more over the run, and 81% and 27% more from its first compaction, because a
+document costs a call of its own, a reply after it and a read back after each
+compaction, and patches did not make a broad revision cheaper than writing it again.
+
+- **The words.** `build.md`: answer in the reply unless they ask for a document or the
+  answer would run past about 80 lines, then `show`, a short reply naming it, and `patch`
+  to revise it. `plan.md` says the same of a plan. `show`'s description says it in one
+  sentence ("only when they ask for one ... or the answer would run past about 80 lines;
+  otherwise answer in the reply"). At 80 lines, the threshold the maintainer named, the
+  live session's plans (146 to 163 lines) are past it and its checklists (51 to 54
+  lines) are not, unless the person asks for one to keep. `patch`'s description is
+  unchanged.
+- **The tools stay on every call.** `show` and `patch` are still offered on every call of
+  every agent that has them; only the words say when, since a tool that came and went
+  would change the front of every prompt.
+- **What it costs offline.** The `tool_calls` turn on `build`: the system prompt 1,693
+  bytes against 1,598 with this file's first wording, the tool definitions 14,750 against
+  14,688, the first prompt 16,575, the largest 32,072, and 189,708 of the stand-in's
+  tokens; the budgets move to 1,750, 14,800, 16,650, 32,150 and 190,500. The turn also
+  checks that the prompt and `show`'s description reached the model saying so, and that
+  its short answer left the scratchpad empty: a scripted model cannot judge whether an
+  answer is a document, so the words are what is checked.
+- No live run measured the wording: the slot's cap was spent on the runs above.
 
 **Proof.** `Troupe.Tools.PatchTest`: offered on every call of `build` on two models and
 of `plan`; a span replaced in place as version 2 with the title, kind and call kept; an

@@ -250,13 +250,18 @@ began, above the answer: `▸ 7 steps · 1 failed · grep, read_file, edit_file 
 
 ## The scratchpad
 
-A long answer, such as a plan, a report, a comparison, a diagram or a table, does not
+A document you want to keep, such as a plan, a report, a table or a diagram, does not
 belong in the chat, where it scrolls away and has to be printed again to be revised. An
 agent puts it on the session's scratchpad instead, with its `show` tool, and keeps its
 reply to the short answer and the document's name. It revises a document in place with
 `patch`, which replaces an exact span of it or adds to its end, so the conversation
 carries the change and not the whole document again; you see the whole document,
 revised. Showing a document again under the same name replaces it.
+
+**When an agent uses it.** Only when you ask for a document (a plan, report, table or
+diagram to keep or revise), or when its answer would run past about 80 lines. Anything
+else it answers in the chat, as it always has. Ask for "a plan as a document" to get one
+on the scratchpad; ask it to "answer here" to keep a long answer in the chat.
 
 - **In the terminal UI** each document is a card in the transcript where the agent showed
   it: its title, its name, its size, and `new` or `updated 3 times`. `/scratch` lists the
@@ -285,8 +290,8 @@ revised. Showing a document again under the same name replaces it.
   the agent's tools reach the scratchpad, and it writes there only with `show` and
   `patch`. In a long session that compacts often, the scratchpad costs more than answering
   in the chat, not less: each revision is a call of its own and a reply, and each read
-  back after a compaction is another; [bench.md](../developer/bench.md) has the
-  measurement.
+  back after a compaction is another ([bench.md](../developer/bench.md) has the
+  measurement). That is why an agent uses it only when asked or for a long answer.
 
 ## What Troupe never does
 

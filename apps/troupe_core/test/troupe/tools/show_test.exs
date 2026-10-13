@@ -47,6 +47,25 @@ defmodule Troupe.Tools.ShowTest do
       end
     end
 
+    # A document the person asks for, or an answer past about 80 lines; every other answer
+    # goes in the reply (issue #616).
+    test "its words, build's and plan's say when: a document asked for, or a long answer",
+         context do
+      assert Show.description() =~ "only when they ask for one"
+      assert Show.description() =~ "about 80 lines"
+      assert Show.description() =~ "otherwise answer in the reply"
+
+      for agent <- ["build", "plan"] do
+        %{session: session, fake: fake} = start(context, agent: agent, steps: [{:text, "hi"}])
+        turn(session, "hello")
+        [request] = Fake.requests(fake)
+        assert prompt_text(request) =~ ~r/asks? for a document/, agent
+        assert prompt_text(request) =~ "about 80 lines", agent
+        assert prompt_text(request) =~ "`patch` revises it", agent
+        Troupe.stop_session(session.id)
+      end
+    end
+
     test "writes the document, logs it, and the same name again replaces it", context do
       %{session: session} =
         start(context,

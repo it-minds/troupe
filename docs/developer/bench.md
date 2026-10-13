@@ -68,7 +68,7 @@ above both.
 
 | scenario | what it shows |
 |---|---|
-| `tool_calls` | one turn of thirty `read_file` calls: thirty-one model calls, the system prompt and tool definitions each prompt starts with, the largest prompt, the growth per tool round trip, the input tokens over the turn (#389's number), the events the turn logs |
+| `tool_calls` | one turn of thirty `read_file` calls: thirty-one model calls, the system prompt and tool definitions each prompt starts with, the largest prompt, the growth per tool round trip, the input tokens over the turn (#389's number), the events the turn logs; and that the prompt and `show`'s description say the scratchpad is for a document asked for or an answer past about 80 lines, and that the turn's short answer left it empty (Decision 895) |
 | `cut_output` | a `grep` result over `tool_output_limit`'s default is cut, kept, and read back with `read_output`; the cut result's size as the next prompt carries it |
 | `compaction` | in a window of 16,000 tokens, compaction fires once the prompt reaches `compact_at`'s default share of it, never before, and within one round trip after; how much smaller the next prompt is |
 | `cancel` | a cancel during a model call ends the call's task, no call is made afterwards, the agent rests and answers the next input |
@@ -365,6 +365,12 @@ run, and why is in the logs:
   holds two whole plans. A window where a compaction is rare against the calls after it,
   the one place the pointers save money, needs a session several times as long as this,
   which a $3 cap does not pay for three times each.
+
+From these runs the maintainer decided that the scratchpad is not where an answer goes by
+default: an agent uses it only when the person asks for a document or the answer would
+run past about 80 lines, and answers in the reply otherwise (Decision 895). No live run
+has measured that wording yet; the offline `tool_calls` turn checks that it reaches the
+model.
 
 ## What is not here yet
 
