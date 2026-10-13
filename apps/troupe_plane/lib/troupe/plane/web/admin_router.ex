@@ -39,7 +39,9 @@ defmodule Troupe.Plane.Web.AdminRouter do
     get("/breakglass", Troupe.Plane.Web.AdminAuth, :breakglass)
     post("/breakglass", Troupe.Plane.Web.AdminAuth, :breakglass_submit)
 
-    live_session :admin, on_mount: {Live.Auth, :admin} do
+    live_session :admin,
+      on_mount: {Live.Auth, :admin},
+      session: {Troupe.Plane.Web.Index, :live_session, []} do
       live("/", Live.Overview)
       live("/workers", Live.Workers)
       live("/workers/:profile", Live.Workers)
