@@ -286,7 +286,7 @@ describe("a team's edits", () => {
     go().click();
     await waitFor(() => says("Recorded in the audit as team.disable on research"), "the audit's note");
     expect(fake.admin.teams.has("research")).toBe(false);
-    expect(link("All teams")).not.toBeNull();
+    await waitFor(() => link("All teams"), "the way back to the list");
   });
 
   it("enables a group as a team from the list, and will not send a name that is already a team's", async () => {
@@ -305,7 +305,8 @@ describe("a team's edits", () => {
     button("Enable")!.click();
     await waitFor(() => says("Recorded in the audit as team.enable on platform"), "the audit's note");
     expect(fake.admin.teams.get("platform")!.groups.map((g) => g.external_id)).toEqual(["grp-platform"]);
-    expect(link("platform")).not.toBeNull();
+    // The note is drawn from the write's answer; the list is read again after it.
+    await waitFor(() => link("platform"), "the new team in the list");
   });
 
   it("offers a team admin none of a platform admin's edits", async () => {
