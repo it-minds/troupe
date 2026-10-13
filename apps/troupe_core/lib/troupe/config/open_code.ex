@@ -182,28 +182,26 @@ defmodule Troupe.Config.OpenCode do
     type = Map.get(@sdk_types, package)
 
     cond do
-      type && (package != @compatible or present?(base_url)) ->
-        {type, nil}
-
-      present?(base_url) ->
-        {:openai, nil}
-
-      package == @compatible and is_binary(npm) ->
-        {nil,
-         "opencode's provider #{name} speaks #{@compatible} with no baseURL, so which host " <>
-           "its key is for is opencode's to know and not in the file; it is not copied"}
-
-      package == @compatible ->
-        {nil,
-         "opencode's provider #{name} names neither an SDK package nor a baseURL, so which " <>
-           "host its key is for is not in the file; it is not copied"}
-
-      true ->
-        {nil,
-         "opencode's provider #{name} uses #{package}, which Troupe has no provider type for, " <>
-           "and names no baseURL; copied as openai its key would go to OpenAI, so it is not copied"}
+      type && (package != @compatible or present?(base_url)) -> {type, nil}
+      present?(base_url) -> {:openai, nil}
+      true -> {nil, not_copied(name, npm, package)}
     end
   end
+
+  defp not_copied(name, npm, @compatible) when is_binary(npm),
+    do:
+      "opencode's provider #{name} speaks #{@compatible} with no baseURL, so which host " <>
+        "its key is for is opencode's to know and not in the file; it is not copied"
+
+  defp not_copied(name, _npm, @compatible),
+    do:
+      "opencode's provider #{name} names neither an SDK package nor a baseURL, so which " <>
+        "host its key is for is not in the file; it is not copied"
+
+  defp not_copied(name, _npm, package),
+    do:
+      "opencode's provider #{name} uses #{package}, which Troupe has no provider type for, " <>
+        "and names no baseURL; copied as openai its key would go to OpenAI, so it is not copied"
 
   defp present?(value), do: is_binary(value) and value != ""
 
