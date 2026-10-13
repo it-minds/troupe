@@ -474,10 +474,46 @@ defmodule Troupe.Plane.Control.Connection do
   # App's own. A session whose owner has been deactivated gets none, as it gets no
   # assertion. Every token is in the audit trail, by session, repository and expiry, and
   # the token itself is in the answer and nowhere else.
+  #
+  # `access: "write"` asks for the fix loop's token rather than the clone's: what the
+  # session's worker profile grants, which the plane reads from the profile, not the pod.
   defp dispatch("git.credential", params, state) do
+    case {session_of(params["session_id"], state.worker), access(params["access"])} do
+      {_session, :error} ->
+        {:error, Error.new(:invalid_params, %{reason: "access is read or write"}), state}
+
+      {%Session{repository: %{}} = session, access} ->
+        git_credential(session, access, state)
+
+      {%Session{}, _access} ->
+        {:error,
+         Error.new(:not_found, %{
+           session_id: params["session_id"],
+           reason: GitHub.explain(:no_repository)
+         }), state}
+
+      {nil, _access} ->
+        {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+    end
+  end
+
+  # What a session did on GitHub, as its pod reports each step of the fix loop: the
+  # commit its clone started from, a push, its draft pull request, a CI round. Metadata
+  # only; the plane checks it against the session's own repository and branch, keeps it on
+  # the row and audits it, and answers the record as it now is. Asked with no change, it
+  # answers the record, which is how a pod that has just activated the session learns it.
+  defp dispatch("github.record", params, state) do
     case session_of(params["session_id"], state.worker) do
       %Session{repository: %{}} = session ->
-        git_credential(session, state)
+        changes = Map.drop(params, ["session_id"])
+
+        case GitHub.record(session, changes, "worker:#{state.worker.pod_name}") do
+          {:ok, %{github: github, stopped_now: stopped_now}} ->
+            {:ok, %{"github" => github, "stopped_now" => stopped_now}, state}
+
+          {:error, reason} ->
+            {:error, Error.new(:invalid_params, %{reason: GitHub.explain(reason)}), state}
+        end
 
       %Session{} ->
         {:error,
@@ -562,13 +598,18 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
-  defp git_credential(%Session{} = session, state) do
+  defp access(nil), do: :read
+  defp access("read"), do: :read
+  defp access("write"), do: :write
+  defp access(_other), do: :error
+
+  defp git_credential(%Session{} = session, access, state) do
     case Identity.get_user(session.owner_subject) do
       %User{active: false} ->
         {:error, Error.new(:forbidden, %{reason: "the session's owner is deactivated"}), state}
 
       _user ->
-        case GitHub.credential(session) do
+        case GitHub.credential(session, access: access) do
           {:ok, credential} ->
             {:ok, _} =
               Audit.record(

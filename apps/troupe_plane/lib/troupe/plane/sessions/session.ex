@@ -62,6 +62,10 @@ defmodule Troupe.Plane.Sessions.Session do
     # ref}`, checked against the plane's App when the session was created. What a pod may
     # ask a token for is read from here, never from the pod.
     field(:repository, :map)
+    # What the session did there (`Troupe.Plane.GitHub.record/3`): its starting commit, its
+    # branch, its last commit, its draft pull request and the CI rounds on it. Metadata the
+    # pod reports, never anything the session wrote.
+    field(:github, :map)
     field(:bundle_version, :integer)
     field(:retention_class, :string)
     field(:pinned, :boolean, default: false)
@@ -147,6 +151,7 @@ defmodule Troupe.Plane.Sessions.Session do
     :title,
     :workspace_source,
     :repository,
+    :github,
     :bundle_version,
     :retention_class,
     :pinned,

@@ -204,6 +204,15 @@ versions. A session is pinned to the version current when it started.
 **Trigger.** A scheduled or externally fired job that starts a session as a service
 principal. Such sessions are flagged for review until somebody looks at them.
 
+**Repository.** A session on the plane may be created with a GitHub repository
+(`owner/name`), and its pod starts from a clone of it. On a profile that allows it, the
+agent then pushes its work to a `troupe/*` branch, opens a draft pull request, reads CI on
+it and pushes fixes, as your organisation's GitHub App and never as you; after three red
+CI rounds it stops, says on the pull request what still fails, and leaves the draft for a
+person. Each push and the pull request's link are in the transcript, and the session's
+listing shows its branch, last commit and pull request
+([the GitHub App](../admin/github.md#7-the-fix-loop)).
+
 ## Reading a transcript
 
 A turn shows its answer, not its working. Everything rendered from something is a frame
@@ -285,6 +294,9 @@ same name replaces it, so a plan is revised in place.
   and the log records that client as the approver.
 - **It never uses your machine unasked.** Offering your own tool server to a session takes
   a deliberate confirmation, and everyone on the session sees it.
+- **It never merges.** A session pushes only its own `troupe/*` branch, never with force,
+  and opens a pull request only as a draft; a person reviews and merges it. The agent's
+  shell never holds a GitHub token: the pod's own tools do the pushing.
 
 Everything it does unasked, and what it never does, in one place for a reviewer:
 [security](../admin/security.md). How it works underneath:

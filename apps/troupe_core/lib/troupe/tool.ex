@@ -215,14 +215,19 @@ defmodule Troupe.Tool do
 
     * `must_ask?/1` — a call a person must answer whatever the profile's permission or
       the session's `auto_approve` says (a profile's `deny` still denies):
-      `onboard_write` into the config directory (Decision 823).
+      `onboard_write` into the config directory, whose files decide what runs.
+
+    * `available?/1` — whether a session has the tool at all, for a tool a host registers
+      that only some of its sessions can use: a worker's GitHub tools, for a session
+      created with a repository. A session it answers `false` for is neither offered the
+      tool nor let call it, as if it were not registered. The answer must not change
+      during a session.
 
   `run/2` returns `{:ok, content}` or `{:error, reason}`; inline tools may also return
   `{:ok, content, updates}` to change agent state, or `{:defer, instruction}` to hand
   an effect to the agent and have the call completed later. Any tool may return
   `{:ok, content, %{fields: fields}}`: the call's `tool_call_completed` carries `fields`
-  beside `ok`, and the model never sees them (`shell`'s `exit_status` or `timed_out`,
-  Decision 837).
+  beside `ok`, and the model never sees them (`shell`'s `exit_status` or `timed_out`).
   """
 
   alias Troupe.Tool.Ctx
@@ -250,8 +255,9 @@ defmodule Troupe.Tool do
   @callback mode() :: :task | :inline
   @callback describe(Ctx.t()) :: String.t()
   @callback must_ask?(args :: map()) :: boolean()
+  @callback available?(session_id :: String.t() | nil) :: boolean()
 
-  @optional_callbacks mode: 0, describe: 1, must_ask?: 1
+  @optional_callbacks mode: 0, describe: 1, must_ask?: 1, available?: 1
 
   @typedoc """
   A tool, as the harness holds one.
@@ -294,6 +300,15 @@ defmodule Troupe.Tool do
   end
 
   def must_ask?(%{}, _args), do: false
+
+  @doc "Whether a session has this tool at all; every tool that does not say is everybody's."
+  @spec available?(handle(), String.t() | nil) :: boolean()
+  def available?(module, session_id) when is_atom(module) do
+    not (Code.ensure_loaded?(module) and function_exported?(module, :available?, 1)) or
+      module.available?(session_id) == true
+  end
+
+  def available?(%{}, _session_id), do: true
 
   @doc "A tool's description for this session, context-sensitive when the tool asks."
   @spec describe(handle(), Ctx.t()) :: String.t()

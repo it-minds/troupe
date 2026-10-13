@@ -482,11 +482,23 @@ if config_env() == :prod do
     config :troupe_core, usage_sink: Troupe.Worker.Usage
 
     # Every command a session starts runs in the sandbox here, whatever its mounts or
-    # bundle (Decision 832): a pod's sessions share its volume, and a namespace holding one
+    # bundle: a pod's sessions share its volume, and a namespace holding one
     # session's mounts is what keeps each from the others' files. The worker's, not a
     # setting: one that cannot start bubblewrap refuses the command rather than run it
     # outside.
     config :troupe_core, sandbox: :always
+
+    # The fix loop's tools: a session created with a GitHub repository pushes its troupe/*
+    # branch, opens its draft pull request, comments on it and reads its CI through these,
+    # as the plane's App and with a token the agent's shell never holds. A session with no
+    # repository is not offered them.
+    config :troupe_core,
+      extra_tools: [
+        Troupe.Worker.Tools.GitPush,
+        Troupe.Worker.Tools.PrOpen,
+        Troupe.Worker.Tools.PrComment,
+        Troupe.Worker.Tools.PrChecks
+      ]
 
     config :troupe_worker,
       autostart: true,

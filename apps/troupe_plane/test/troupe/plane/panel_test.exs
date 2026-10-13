@@ -307,6 +307,32 @@ defmodule Troupe.Plane.PanelTest do
       refute html =~ theirs.id
     end
 
+    test "shows what a session did on GitHub: its draft pull request, or its branch", context do
+      opened = session!(context.engineering, "dev")
+      pushed = session!(context.engineering, "dev")
+      url = "https://github.example.test/example-org/widgets/pull/12"
+
+      github = fn session, record ->
+        session |> Ecto.Changeset.change(%{github: record}) |> Repo.update!()
+      end
+
+      github.(opened, %{
+        "branch" => "troupe/fix-widgets",
+        "commit" => String.duplicate("a", 40),
+        "pull_request" => %{"number" => 12, "url" => url}
+      })
+
+      github.(pushed, %{"branch" => "troupe/try-gadgets", "commit" => String.duplicate("b", 40)})
+
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/sessions")
+
+      assert html =~ "on GitHub"
+      assert html =~ ~s(href="#{url}")
+      assert html =~ "#12"
+      assert html =~ "troupe/try-gadgets bbbbbbb"
+    end
+
     test "erasing takes two clicks", context do
       session = session!(context.engineering, "dev")
 
@@ -837,6 +863,27 @@ defmodule Troupe.Plane.PanelTest do
 
       html = view |> element("#review-scope") |> render_submit()
       assert html =~ context.root.subject
+    end
+
+    test "names the draft pull request a run opened, and that it stopped", context do
+      url = "https://github.example.test/example-org/widgets/pull/7"
+
+      context.session
+      |> Ecto.Changeset.change(%{
+        github: %{
+          "branch" => "troupe/issue-7",
+          "pull_request" => %{"number" => 7, "url" => url},
+          "stopped" => %{"at" => "2026-10-13T10:00:00Z", "reason" => "3 red CI rounds"}
+        }
+      })
+      |> Repo.update!()
+
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/review")
+
+      assert html =~ ~s(href="#{url}")
+      assert html =~ "#7"
+      assert html =~ "stopped after its red CI rounds"
     end
   end
 

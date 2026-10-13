@@ -162,6 +162,15 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   workspace's `.git/config`, the agent's `shell` and every tool's output have no way to it,
   and no log names it. Each token is an audit entry (Decision 885,
   [github.md](github.md)).
+- **A session pushes only its own `troupe/*` branch, and never merges.** On a profile that
+  grants it (`spec.github.permissions`), a session pushes, opens a draft pull request,
+  comments on it and reads its CI through four tools the pod runs outside the sandbox,
+  with a token narrowed to the repository and to what the profile grants, which the
+  agent's shell never holds. A push is a commit GitHub makes and signs as the App's bot,
+  naming the session in a trailer; it goes only to the session's one `troupe/*` branch,
+  never with force, and no tool merges, approves or marks a pull request ready. After
+  three red CI rounds the session's tokens can no longer push. Each push, pull request, CI
+  round and stop is an audit entry (Decision 891, [github.md](github.md#7-the-fix-loop)).
 - **One OpenBao role for every profile, by default.** Every worker logs in as
   `troupe-worker`. `bao.workerRolePerProfile` gives each profile a role of its own, so one
   profile's pods cannot read another's session keys

@@ -23,10 +23,15 @@ defmodule Troupe.Worker.Session.Clone do
   archive of the workspace holds none.
 
   What git says when it fails is returned with the token taken out, and logged so too.
+
+  The commit the clone checked out is told to the plane (`github.record`, `base`), before
+  the agent has run anything: it is what the session's first push builds on
+  (`Troupe.Worker.GitHub`).
   """
 
   alias Troupe.Reaper
-  alias Troupe.Worker.GitCredentials
+  alias Troupe.Worker.{GitCredentials, GitHub}
+  alias Troupe.Worker.GitHub.Tree
 
   require Logger
 
@@ -65,6 +70,7 @@ defmodule Troupe.Worker.Session.Clone do
           " for #{session_id}"
       )
 
+      record_base(session_id, root, opts)
       :ok
     else
       {:error, reason} ->
@@ -73,6 +79,22 @@ defmodule Troupe.Worker.Session.Clone do
         )
 
         {:error, {:clone_failed, named, reason}}
+    end
+  end
+
+  # The commit the clone checked out is what the session's first push builds on, so the
+  # plane keeps it: read now, before the agent has run anything in the tree. A plane that
+  # cannot take it leaves the session able to work and unable to push, which its first
+  # push says.
+  defp record_base(session_id, root, opts) do
+    with {:ok, base} <- Tree.head(root),
+         {:ok, _record} <- GitHub.record(session_id, %{"base" => base}, opts) do
+      :ok
+    else
+      {:error, reason} ->
+        Logger.warning(
+          "troupe worker: the plane does not know where #{session_id}'s clone started: #{reason}"
+        )
     end
   end
 

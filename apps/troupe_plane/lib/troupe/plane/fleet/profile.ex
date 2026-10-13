@@ -20,6 +20,7 @@ defmodule Troupe.Plane.Fleet.Profile do
   import Ecto.Changeset
 
   alias Troupe.Plane.Fleet.{Provisioner, SizeClass}
+  alias Troupe.Plane.GitHub
 
   @primary_key {:name, :string, autogenerate: false}
   @derive {Phoenix.Param, key: :name}
@@ -109,16 +110,18 @@ defmodule Troupe.Plane.Fleet.Profile do
   end
 
   # `repositoryOverridesBundle` lets a repository's agents and skills replace the bundle's,
-  # and the built-ins, of the same name on this profile's pods (Decision 826), and is read
-  # as on only when it is `true`. A string `"true"` would read as off, so it is refused
-  # rather than saved: a profile whose admin believes they turned something on must not
-  # quietly have it off. The resource's schema refuses one too, and this is the check for a
-  # profile that is never one, on hosts.
+  # and the built-ins, of the same name on this profile's pods, where otherwise theirs win
+  # and the working copy's are skipped and listed; it is read as on only when it is
+  # `true`. A string `"true"` would read as off, so it is refused rather than saved: a
+  # profile whose admin believes they turned something on must not quietly have it off.
+  # The resource's schema refuses one too, and this is the check for a profile that is
+  # never one, on hosts.
   #
   # `personalTools` says whether a person may offer a session on the profile's pods their
-  # own signed-in tools (Decision 862): `allow`, the default, or `forbid`. Anything else is
-  # refused for the same reason: a pod reads only `forbid` as forbidding, and a `"Forbid"`
-  # saved would leave the pods taking what the admin believes they refuse.
+  # own signed-in tools, which the pods refuse with a sentence when it forbids them:
+  # `allow`, the default, or `forbid`. Anything else is refused for the same reason: a pod
+  # reads only `forbid` as forbidding, and a `"Forbid"` saved would leave the pods taking
+  # what the admin believes they refuse.
   defp spec_switches(:spec, spec) when is_map(spec) do
     overrides =
       case Map.fetch(spec, "repositoryOverridesBundle") do
@@ -138,7 +141,13 @@ defmodule Troupe.Plane.Fleet.Profile do
           []
       end
 
-    overrides ++ personal
+    # `github.permissions` is what the profile's sessions' fix-loop token may do on GitHub,
+    # in GitHub's own names. A name or a level it may not grant is refused rather than
+    # dropped: a profile saved with `contents: Write` would push nothing, and one with
+    # `administration: write` would be asking for what no session is given.
+    github = Enum.map(GitHub.spec_problems(Map.get(spec, "github")), &{:spec, &1})
+
+    overrides ++ personal ++ github
   end
 
   defp spec_switches(:spec, _spec), do: []
