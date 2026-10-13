@@ -19,6 +19,7 @@ import {
   discoveryParams,
   formFromConfig,
   modelConfigError,
+  providerTypes,
   servesKeys,
   tokenCount,
 } from "../src/index.js";
@@ -207,8 +208,27 @@ describe("the model settings on the daemon", () => {
 
   it("refuses a provider it does not know, and says why", async () => {
     await assert.rejects(
-      () => client.setModelConfig({ provider: "gemini" }),
+      () => client.setModelConfig({ provider: "bedrock" }),
       (e: unknown) => /provider must be one of/.test(modelConfigError(e)),
+    );
+  });
+
+  // troupe #658: the provider types a screen offers are the daemon's, and gemini is one.
+  it("lists the provider types a screen offers, and takes each of them", async () => {
+    const saved = await client.modelConfig();
+    assert.deepEqual(
+      providerTypes(saved).map((t) => t.name),
+      ["anthropic", "openai", "ollama", "openrouter", "azure_openai", "gemini"],
+    );
+    const ollama = providerTypes(saved).find((t) => t.name === "ollama")!;
+    assert.equal(ollama.key, "none");
+    assert.equal(ollama.default_url, "http://localhost:11434");
+    const next = await client.setModelConfig({ provider: "gemini" });
+    assert.equal(next.provider, "gemini");
+    // A daemon from before lists none, and a screen offers what it takes.
+    assert.deepEqual(
+      providerTypes({}).map((t) => t.name),
+      ["anthropic", "openai"],
     );
   });
 

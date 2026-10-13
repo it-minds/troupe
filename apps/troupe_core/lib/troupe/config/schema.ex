@@ -187,7 +187,8 @@ defmodule Troupe.Config.Schema do
           default: "anthropic",
           scope: :trusted,
           field: :provider,
-          enforce: :fixed
+          enforce: :fixed,
+          label: "provider"
         ),
         spec("base_url", :string, "The session-wide provider's URL. Unset: the vendor's own endpoint.",
           scope: :trusted,

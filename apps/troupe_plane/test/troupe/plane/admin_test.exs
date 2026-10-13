@@ -21,6 +21,8 @@ defmodule Troupe.Plane.AdminTest do
     Triggers
   }
 
+  alias Troupe.Protocol.ProviderTypes
+
   @moduletag timeout: 60_000
 
   setup do
@@ -728,6 +730,55 @@ defmodule Troupe.Plane.AdminTest do
       assert field["type"] == "string"
       assert field["enum"] == ["allow", "forbid"]
       refute Map.has_key?(field, "default")
+    end
+
+    # Issue #658: a profile's pods may speak to any provider type, the one list the clients
+    # offer, and the resource declares the same names, so a profile written in a repository
+    # is refused by the API server where the console would refuse it. On the chunk's tip
+    # the resource declared anthropic, openai and fake, and refused gemini.
+    test "the WorkerProfile resource declares llm.provider as the provider types" do
+      crd =
+        "../../../../../charts/troupe/crds/workerprofile.yaml"
+        |> Path.expand(__DIR__)
+        |> YamlElixir.read_from_file!()
+
+      [%{"schema" => %{"openAPIV3Schema" => schema}}] = crd["spec"]["versions"]
+      field = schema["properties"]["spec"]["properties"]["llm"]["properties"]["provider"]
+
+      assert field["enum"] == ProviderTypes.names()
+      assert field["default"] == "openai"
+    end
+
+    test "llm.provider is a provider type, and one with no address of its own needs llm.endpoint",
+         context do
+      put = fn llm ->
+        Admin.profile_put(context.root, %{
+          "name" => "llm-dev",
+          "image" => "ghcr.io/troupe/worker:1",
+          "spec" => %{"llm" => llm}
+        })
+      end
+
+      for {provider, endpoint} <- [
+            {"gemini", "https://generativelanguage.googleapis.com/v1beta/openai"},
+            {"ollama", "http://ollama.models.example.test:11434"},
+            {"azure_openai", "https://res.openai.azure.example.test"},
+            {"openrouter", "https://openrouter.ai/api/v1"}
+          ] do
+        llm = %{"provider" => provider, "endpoint" => endpoint}
+        assert {:ok, _} = put.(llm)
+        assert Fleet.get_profile("llm-dev").spec["llm"] == llm
+      end
+
+      for {llm, words} <- [
+            {%{"provider" => "bedrock"}, "llm.provider must be one of anthropic, openai, ollama"},
+            {%{"provider" => "Gemini"}, "llm.provider must be one of"},
+            {%{"provider" => "azure_openai"}, "llm.provider azure_openai needs llm.endpoint"}
+          ] do
+        assert {:error, error} = put.(llm)
+        assert error.message == "invalid_params"
+        assert error.data.reason =~ words
+      end
     end
 
     # Who the profile is at a server its bundle calls with client credentials (Decision

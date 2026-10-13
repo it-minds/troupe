@@ -56,8 +56,7 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
   import Troupe.Plane.Web.Live.Layout
 
   alias Troupe.Plane.Admin
-
-  @providers ~w(openai anthropic fake)
+  alias Troupe.Protocol.ProviderTypes
 
   # Every scalar field, in the order it appears. The form's names are paths into the
   # resource, so a field and the thing it writes are spelled the same and there is no
@@ -485,7 +484,8 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       assigns
       |> assign(:decision, decision(assigns))
       |> assign(:changes, changes_of(assigns))
-      |> assign(:providers, @providers)
+      |> assign(:providers, ProviderTypes.names())
+      |> assign(:provider, ProviderTypes.fetch(get_in(assigns, [:fields, "llm.provider"])))
       |> assign(:size_classes, Admin.size_classes())
       |> assign(:release_image, Admin.release_image())
 
@@ -570,14 +570,24 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
               which is what makes the cost of a call knowable.
             </p>
 
-            <.field form={@fields} name="llm.endpoint" label="endpoint">
-              The base URL. Egress has to allow its host, or every call times out.
-            </.field>
-
             <.choice form={@fields} name="llm.provider" label="provider" options={@providers}>
-              Which adapter speaks to it. openai is plain Chat Completions, which is what a
-              gateway serves; anthropic is the Messages API; fake answers without a network.
+              Which API the endpoint speaks. openai is plain Chat Completions, which is what a
+              gateway such as LiteLLM serves, and anthropic the Messages API; the others are
+              those providers' own, and fake answers without a network.
+              <span :if={@provider}>{@provider.label}: {@provider.summary}</span>
             </.choice>
+
+            <.field
+              form={@fields}
+              name="llm.endpoint"
+              label="endpoint"
+              placeholder={@provider && (@provider.url_example || @provider.default_url)}
+            >
+              The base URL. Egress has to allow its host, or every call times out.
+              <span :if={@provider && @provider.url == :required}>
+                {@provider.name} has no address of its own: this is required.
+              </span>
+            </.field>
 
             <.field form={@fields} name="llm.model" label="model">
               What a session uses for its work.
@@ -585,12 +595,25 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
             <.field form={@fields} name="llm.smallModel" label="small model">
               Used only to summarise a long conversation, where a cheaper model is enough.
             </.field>
-            <.field form={@fields} name="llm.secretRef.name" label="credential: secret name">
+            <p :if={@provider && @provider.key == :none} class="field-help">
+              {@provider.name} takes no key, so there is no credential to reference.
+            </p>
+            <.field
+              :if={!(@provider && @provider.key == :none)}
+              form={@fields}
+              name="llm.secretRef.name"
+              label="credential: secret name"
+            >
               The name of a Secret in the worker's namespace. A reference, read at call time
               by the pod: neither the plane nor this page ever holds the value, and there is
               nothing here that could show it to you.
             </.field>
-            <.field form={@fields} name="llm.secretRef.key" label="credential: key">
+            <.field
+              :if={!(@provider && @provider.key == :none)}
+              form={@fields}
+              name="llm.secretRef.key"
+              label="credential: key"
+            >
               The key inside that Secret. Empty means api-key.
             </.field>
           </section>
@@ -802,6 +825,7 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
   attr(:name, :string, required: true)
   attr(:label, :string, required: true)
   attr(:type, :string, default: "text")
+  attr(:placeholder, :string, default: nil)
   slot(:inner_block, required: true)
 
   # The help is required rather than optional: every field here names something outside
@@ -812,7 +836,7 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
     <div class="setting">
       <label>
         {@label}
-        <input type={@type} name={@name} value={Map.get(@form, @name)} />
+        <input type={@type} name={@name} value={Map.get(@form, @name)} placeholder={@placeholder} />
       </label>
       <p class="field-help">{render_slot(@inner_block)}</p>
     </div>

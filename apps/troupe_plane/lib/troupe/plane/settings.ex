@@ -389,12 +389,16 @@ defmodule Troupe.Plane.Settings do
     # What a person's own machine should talk to, offered to the clients through
     # `me.client_defaults`. Never a key: whoever can sign in could read it, so the key
     # stays each person's to paste into their own settings.
+    # Every type a machine may be set up with, from the one list of them the clients offer.
     %Setting{
       key: "client_provider",
       group: :client_defaults,
       type: :enum,
-      values: [:anthropic, :openai],
-      summary: "The provider people's own machines use: Anthropic's API, or anything that speaks OpenAI's Chat Completions.",
+      values: Enum.map(Troupe.Protocol.ProviderTypes.named(), &String.to_atom/1),
+      summary:
+        "The provider people's own machines use: " <>
+          Enum.join(Troupe.Protocol.ProviderTypes.named(), ", ") <>
+          ". A gateway such as LiteLLM is the type of the API it speaks, openai or anthropic.",
       consequence:
         "Unset means the clients offer no organisation defaults at all. Changing it changes what a client pre-fills next time somebody asks; nobody's saved settings change.",
       effect: :immediate
@@ -404,7 +408,9 @@ defmodule Troupe.Plane.Settings do
       group: :client_defaults,
       type: :string,
       summary: "Where that provider is: a gateway's URL, or empty for the provider's own API.",
-      consequence: "An OpenAI-compatible provider needs one; for Anthropic, empty means api.anthropic.com.",
+      consequence:
+        "A gateway needs one, and so does azure_openai: the resource's own address. Empty means the provider's own: " <>
+          "api.anthropic.com, api.openai.com, a machine's own Ollama at localhost, and so on.",
       effect: :immediate
     },
     %Setting{

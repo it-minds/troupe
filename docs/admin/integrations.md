@@ -91,6 +91,13 @@ endpoint, and, for models that endpoint does not price, `llm.prices`.
 - Per profile: `llm.endpoint`, `llm.provider`, `llm.model`, and `llm.secretRef` for the key
   ([profiles-and-policy.md §1](profiles-and-policy.md#1-what-an-administrator-sets)). The
   endpoint's host must be in `allowedEgress`.
+- `llm.provider` is one of the provider types a person's own machine takes
+  ([the table](../user/configuration.md#provider-types)): `anthropic`, `openai`, `ollama`,
+  `openrouter`, `azure_openai`, `gemini`, or `fake`. The plane and the resource's schema
+  refuse any other name. `azure_openai` needs `llm.endpoint`, the resource's own address;
+  `ollama` takes no key, so its profile has no `llm.secretRef`. The profile editor under
+  `/admin` offers them all and asks each only for what it needs, and the provider offered
+  to people's own machines (`client_provider`) takes the same names.
 - `openai` posts to `<endpoint>/v1/chat/completions` with a bearer token and
   `stream_options.include_usage`; `anthropic` to `/v1/messages` with `x-api-key`. `/v1` is
   not doubled.

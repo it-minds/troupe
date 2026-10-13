@@ -219,7 +219,7 @@ export type {
 } from "./daemon.js";
 export {
   MODEL_ROLES,
-  PROVIDER_DEFAULT_URLS,
+  OLDER_DAEMON_PROVIDER_TYPES,
   applyClientDefaults,
   clientDefaults,
   configKey,
@@ -229,6 +229,7 @@ export {
   discoveryParams,
   formFromConfig,
   modelConfigError,
+  providerTypes,
   servesKeys,
   tokenCount,
 } from "./config.js";
@@ -246,16 +247,29 @@ export type {
   ModelProvider,
   ModelRole,
   ModelsParams,
+  ProviderTypeInfo,
 } from "./config.js";
-export { APPROVAL_CHOICES, PROVIDER_KINDS, describeCheck, nextStep, previousStep, setupError, setupUnsupported, vendorKeyVar } from "./setup.js";
+export {
+  APPROVAL_CHOICES,
+  OLDER_DAEMON_KINDS,
+  answeredKind,
+  asksAddress,
+  describeCheck,
+  nextStep,
+  previousStep,
+  setupError,
+  setupKinds,
+  setupUnsupported,
+  vendorKeyVar,
+} from "./setup.js";
 export type {
-  ProviderKind,
   SetupAnswer,
   SetupCheck,
   SetupCompleted,
   SetupDaemon,
   SetupDetected,
   SetupFlow,
+  SetupKind,
   SetupSession,
   SetupStep,
   SetupStepName,

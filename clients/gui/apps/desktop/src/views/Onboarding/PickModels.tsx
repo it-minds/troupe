@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { describeCheck, describeOffer } from "@troupe/client";
+import { answeredKind, describeCheck, describeOffer } from "@troupe/client";
 import type { ModelOffer } from "@troupe/client";
 import { Actions, StepFrame } from "./Step";
 import type { StepProps } from "./Step";
@@ -14,7 +14,9 @@ export function PickModels({ flow, busy, error, onAnswer, onBack }: StepProps): 
   const [main, setMain] = useState<string>((earlier?.["default"] as string | null) ?? flow.suggested.default ?? "");
   const [small, setSmall] = useState<string>((earlier?.["cheap"] as string | null) ?? flow.suggested.cheap ?? "");
   const offered = flow.offered;
-  const unconfirmed = flow.check?.state === "unknown" ? describeCheck(flow.check) : null;
+  // A provider that takes no key was asked for its models with none: what failed is the listing.
+  const keyless = answeredKind(flow)?.key === "none";
+  const unconfirmed = flow.check?.state === "unknown" ? describeCheck(flow.check, { keyless }) : null;
 
   return (
     <StepFrame

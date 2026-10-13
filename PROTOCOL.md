@@ -1639,9 +1639,17 @@ reads. There is no second settings file.
 ```
 `config.get` (`observe`; `workspace` optional) → `{"config_dir", "path", "exists",
 "provider", "base_url", "auth", "api_key_set", "api_key_source", "models": {"default",
-"cheap", "expensive"}, "overrides": [{"source", "detail"}], "workspace", "trusted",
+"cheap", "expensive"}, "overrides": [{"source", "detail"}], "provider_types", "workspace", "trusted",
 "files", "organisation", "keys", "warnings", "errors"}`. The first fields are what the user's **file**
-says, since that is what the model panel's save changes. The key is never in the answer:
+says, since that is what the model panel's save changes. `provider_types` is what a screen
+offers to choose from, the one list of the provider types every party reads
+(`Troupe.Protocol.ProviderTypes`, issue #658): `[{"name", "label", "summary", "url",
+"default_url", "url_example", "key", "key_var"}]`, every type but `fake`. `url` is `own`
+(the vendor's endpoint, which a gateway speaking its API stands in for at a `base_url`),
+`server` (a server of the person's, `default_url` unless one is given) or `required` (no
+default; `url_example` shows its shape); `key` is `required` or `none`, and `key_var` the
+variable read when no key is given. A daemon before #658 sends no `provider_types`, and
+takes `anthropic` and `openai`. The key is never in the answer:
 `api_key_set` says whether one is in force and `api_key_source` where from (`file`, `env`
 or null; a daemon before Decision 828 also said `opencode`). `overrides` names what beats
 the file anyway: a project's `.troupe/config.yaml` or `.troupe/config.local.yaml` (only
@@ -1778,20 +1786,30 @@ at a later one, without ever travelling back to a client.
 {}
 ```
 `setup.get` (`observe`) → `{"needed", "completed", "step", "steps": [{"name",
-"done"}], "answers", "detected", "key_storage", "offered", "suggested", "check",
+"done"}], "answers", "detected", "kinds", "key_storage", "offered", "suggested", "check",
 "suggested_prompt", "daemon", "session"}`. `needed` says whether a client should offer the
 questions: nothing recorded, no `config.yaml`, and no model that can be asked.
 `completed` is `null` or `{"completed_at", "choice", "subject"}`, recorded once for every
 client in the daemon's state directory. `step` is the step to answer next — `where`,
 `provider`, `key`, `models`, `workspace`, `daemon`, `finish`, and `done` once `finish` is
 answered — and `steps` the ones this path
-takes, since a plane finishes at once and reused settings skip the key and the models.
+takes, since a plane finishes at once, reused settings skip the key and the models, and a
+provider that takes no key skips the key.
+`kinds` is every way the `provider` step may be answered, in the order a screen offers
+them (issue #658): each provider type a person may pick, as `config.get`'s
+`provider_types` has it, then `gateway` and `litellm`, the two ways to an
+OpenAI-compatible server at its address. Each is `{"id", "provider", "label", "summary",
+"url", "default_url", "url_example", "key", "key_var"}`: `id` is the `kind` to answer with
+and `provider` what is written; an address is asked where `url` is `required` (a gateway,
+Azure's resource) or `server` (Ollama's, `default_url` when none is given), and a key
+unless `key` is `none`, with `optional` letting a gateway go without. A daemon before #658
+sends no `kinds`, and takes `anthropic`, `openai` and the two gateways.
 `daemon` says whether the daemon starts when this user logs in (Decision 762):
 `{"at_login", "kind": "startup_folder" | "launch_agent" | "systemd" | "autostart",
 "path", "command"}`, the entry's file and the `troupe-daemon` it starts, `command` being
 `null` when there is none to start.
-`detected` is what is already here: `env` (which of `ANTHROPIC_API_KEY` and
-`OPENAI_API_KEY` are set, names only), `opencode` (`path`, `providers`, `default`),
+`detected` is what is already here: `env` (which of the vendors' variables, the
+`key_var` of each kind that has one, are set, names only), `opencode` (`path`, `providers`, `default`),
 `config` (the user's file: `exists`, `path`, `provider`, `base_url`, `api_key_set`,
 `api_key_source`, `models` and `usable`) and `plane` (`url`,
 `linked`). `key_storage` says where a key goes: `{"kind": "file", "path", "keychain":
@@ -1810,8 +1828,8 @@ whose person wants the question again. Each step's `answer`:
 | step | answer | what it does |
 | --- | --- | --- |
 | `where` | `{"choice": "local"}` or `{"choice": "plane", "plane_url"?}` | a plane records the choice and goes to `finish`; signing in is the client's |
-| `provider` | `{"provider": "anthropic" \| "openai" \| "fake", "kind"?: "anthropic" \| "openai" \| "gateway" \| "litellm", "base_url"?, "auth"?}`, or `{"reuse": "opencode" \| "config"}` | a gateway and a LiteLLM proxy are `openai` with their URL; `reuse` copies opencode's providers in as `config.import` does (the answer recorded lists them under `providers`, and those not copied under `skipped`, as `config.import` does), or keeps a `config.yaml` that works, and goes to `workspace` |
-| `key` | `{"api_key"}`, `{"env": "VAR"}` (kept as `{env:VAR}`) or `{}` for a gateway that wants none | checked with a real request, the provider's model listing: `check` is `{"state": "ok" \| "refused" \| "unknown", "reason"}`. Refused stays on `key`; `ok` fills `offered` (`{"id", "context", "max_output", "input", "output"}`, prices per million tokens) and `suggested` (`{"default", "cheap"}`, a safe answer); `unknown` goes on with nothing listed |
+| `provider` | `{"provider": <a provider type, or "fake">, "kind"?: <a kind's id>, "base_url"?, "auth"?}`, or `{"reuse": "opencode" \| "config"}` | a gateway and a LiteLLM proxy are `openai` with their URL, which they and `azure_openai` are refused without; a kind whose `key` is `none` (Ollama) is asked for its models at once, as `key` would ask, and goes to `models`; `reuse` copies opencode's providers in as `config.import` does (the answer recorded lists them under `providers`, and those not copied under `skipped`, as `config.import` does), or keeps a `config.yaml` that works, and goes to `workspace` |
+| `key` | `{"api_key"}`, `{"env": "VAR"}` (kept as `{env:VAR}`) or `{}` for a gateway that wants none | checked with a real request, the provider's model listing: `check` is `{"state": "ok" \| "refused" \| "unknown", "reason"}`. Refused stays on `key`; `ok` fills `offered` (`{"id", "context", "max_output", "input", "output"}`, prices per million tokens) and `suggested` (`{"default", "cheap"}`, a safe answer); `unknown` goes on with nothing listed, as it does for Azure, which lists its deployments to no key. A vendor at its own endpoint, and `azure_openai`, are refused `{}` |
 | `models` | `{"default", "cheap"?}` | writes the provider, the key and the models into the user's `config.yaml` |
 | `workspace` | `{"workspace", "approvals": "ask" \| "auto"}` | the first project directory, which must exist. `ask` is the default; `auto` writes `auto_approve: true`, and `ask` writes `false` only over a file that runs everything |
 | `daemon` | `{"at_login": true \| false}` | `true` writes the platform's login entry, which starts `troupe-daemon run` at the next login and keeps it up; `false` removes it. The answer is the state, so answering again turns it the other way; nothing is started or stopped now |

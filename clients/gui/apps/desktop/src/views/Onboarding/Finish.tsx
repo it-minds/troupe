@@ -5,15 +5,16 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { PROVIDER_KINDS } from "@troupe/client";
+import { setupKinds } from "@troupe/client";
+import type { SetupKind } from "@troupe/client";
 import { Actions, StepFrame } from "./Step";
 import type { StepProps } from "./Step";
 
 /** A provider as the card the person pressed named it: a gateway is not "openai" to them. */
-function providerWords(provider: Record<string, unknown> | undefined): string {
+function providerWords(provider: Record<string, unknown> | undefined, kinds: readonly SetupKind[]): string {
   if (provider?.["reuse"] === "opencode") return "opencode's providers, copied in";
   if (provider?.["reuse"] === "config") return "the config.yaml that was already here";
-  const kind = PROVIDER_KINDS.find((k) => k.id === provider?.["kind"]);
+  const kind = kinds.find((k) => k.id === provider?.["kind"]);
   const name = kind?.label ?? String(provider?.["provider"] ?? "");
   return provider?.["base_url"] ? `${name} at ${String(provider["base_url"])}` : name;
 }
@@ -57,7 +58,7 @@ export function Finish({ flow, busy, error, onAnswer, onBack }: StepProps): JSX.
     >
       <dl className="facts wide">
         <dt>Provider</dt>
-        <dd>{providerWords(provider)}</dd>
+        <dd>{providerWords(provider, setupKinds(flow))}</dd>
         {models && (
           <>
             <dt>Models</dt>

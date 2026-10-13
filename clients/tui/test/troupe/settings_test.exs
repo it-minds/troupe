@@ -38,6 +38,33 @@ defmodule Troupe.SettingsTest do
       assert Enum.all?(choices, &(length(&1.notes) == 3))
     end
 
+    # Issue #658: the provider is offered where a person picks one, here too, from the one
+    # list of the types, each saying what else it needs. On the chunk's tip the page had no
+    # provider at all.
+    test "the provider is a menu of every type a person may pick, each saying what it needs" do
+      assert {:ok, %{type: :provider} = field} = Settings.fetch("provider")
+      choices = Settings.choices(field, %Config{}, "anthropic")
+
+      assert Enum.map(choices, & &1.value) == Troupe.Protocol.ProviderTypes.named()
+
+      assert Enum.map(choices, & &1.label) ==
+               ~w(Anthropic OpenAI Ollama OpenRouter) ++ ["Azure OpenAI", "Gemini"]
+
+      assert Enum.all?(choices, &(length(&1.notes) == 3))
+
+      notes = Map.new(choices, &{&1.value, Enum.at(&1.notes, 1)})
+      assert notes["ollama"] == "No key; http://localhost:11434 unless base_url says."
+      assert notes["azure_openai"] =~ "Needs base_url, such as https://<resource>.openai.azure.com"
+      assert notes["gemini"] == "A key, or GEMINI_API_KEY."
+
+      # The fake is offered only where it is the provider already.
+      refute "fake" in Enum.map(choices, & &1.value)
+      assert "fake" in Enum.map(Settings.choices(field, %Config{}, "fake"), & &1.value)
+
+      assert Settings.parse(field, " ollama ") == {:ok, "ollama"}
+      assert {:error, "provider is one of anthropic, openai" <> _} = Settings.parse(field, "x")
+    end
+
     test "every field reads back out of a default config and formats" do
       cfg = %Config{}
       view = Settings.view(%{})
@@ -142,13 +169,41 @@ defmodule Troupe.SettingsTest do
 
       text = screen_text(pid, session)
       assert text =~ "settings — a change goes to"
-      assert text =~ "▸ model"
+      assert text =~ "▸ provider"
+      assert text =~ "model"
       assert text =~ "auto approve"
       assert text =~ ~r/max turns\s+40  · project/
       assert text =~ "set by: project (#{Path.join(ws, ".troupe/config.yaml")})"
 
       press(pid, "esc")
       assert user_state(pid).focus == :command
+    end
+
+    # Picking one writes it as any menu's pick does; a provider is a trusted key, which in
+    # this suite's untrusted workspace goes to the user's file every test reads, so this
+    # stops at the menu.
+    test "Enter on the provider opens the provider types, starting on the one in use" do
+      {sid, _fake, _ws} = start_session!(config: @own)
+      {pid, session} = start_tui(sid)
+
+      type(pid, "/settings")
+      press(pid, "enter")
+      to_setting(pid, "provider")
+      assert screen_text(pid, session) =~ "Enter opens the provider types"
+      press(pid, "enter")
+
+      text = screen_text(pid, session)
+      assert text =~ "7 provider types — Enter picks"
+      assert text =~ "choose a provider type"
+      assert text =~ "▸ The fake provider"
+
+      for label <- ["Anthropic", "OpenAI", "Ollama", "OpenRouter", "Azure OpenAI", "Gemini"],
+          do: assert(text =~ label, label)
+
+      for _ <- 1..4, do: press(pid, "up")
+      assert screen_text(pid, session) =~ "▸ Ollama"
+      press(pid, "esc")
+      refute user_state(pid).settings.picker
     end
 
     test "Enter toggles a boolean and persists it to the file it came from" do

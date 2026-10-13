@@ -15,15 +15,30 @@ defmodule Troupe.LLM.ProviderType do
   `Troupe.LLM.Providers.Compatible`. `reference/0` is the table in
   `docs/user/configuration.md`, written by `mix troupe.config.schema`.
 
+  The types themselves, their names and what choosing one asks of a person (its label,
+  where it is, whether it takes a key and which variable stands in for one) are
+  `Troupe.Protocol.ProviderTypes`, the list the plane and the clients read too; this
+  module adds what speaking to each takes, and does not compile with a type that list
+  lacks or one it does not have.
+
   A type nobody implements is not a type: a file that names one is refused, naming the
   file, the key and these. Bedrock and Vertex are not here: each signs its requests with
   its cloud's own credentials (SigV4, a Google service account) rather than taking a key.
   """
 
+  alias Troupe.Protocol.ProviderTypes
+
   @enforce_keys [:name]
   defstruct [
     :name,
     :adapter,
+    # What a person choosing it reads, and what choosing it asks
+    # (`Troupe.Protocol.ProviderTypes`).
+    :label,
+    :summary,
+    :url,
+    :url_example,
+    :key,
     # Where it is when the config gives no `base_url`; `nil` where there is no such place
     # and the config must say (`azure_openai`), or no place at all (`fake`).
     :base_url,
@@ -54,12 +69,12 @@ defmodule Troupe.LLM.ProviderType do
 
   @type t :: %__MODULE__{}
 
-  @table [
+  # What speaking to each type takes, in `Troupe.Protocol.ProviderTypes`' order; the rest
+  # of a row is that list's.
+  @speaking [
     %{
       name: :anthropic,
       adapter: Troupe.LLM.Providers.Anthropic,
-      base_url: "https://api.anthropic.com",
-      key_var: "ANTHROPIC_API_KEY",
       vendor_url: "https://api.anthropic.com",
       listing: :anthropic,
       identify: :gateway,
@@ -81,8 +96,6 @@ defmodule Troupe.LLM.ProviderType do
     %{
       name: :openai,
       adapter: Troupe.LLM.Providers.OpenAI,
-      base_url: "https://api.openai.com",
-      key_var: "OPENAI_API_KEY",
       vendor_url: "https://api.openai.com",
       listing: :openai,
       identify: :gateway,
@@ -106,9 +119,7 @@ defmodule Troupe.LLM.ProviderType do
     %{
       name: :ollama,
       adapter: Troupe.LLM.Providers.OpenAI,
-      base_url: "http://localhost:11434",
       listing: :openai,
-      keyless: true,
       endpoint:
         "Ollama's OpenAI-compatible endpoint, at `http://localhost:11434` unless `base_url` says.",
       auth:
@@ -124,8 +135,6 @@ defmodule Troupe.LLM.ProviderType do
     %{
       name: :openrouter,
       adapter: Troupe.LLM.Providers.OpenAI,
-      base_url: "https://openrouter.ai/api/v1",
-      key_var: "OPENROUTER_API_KEY",
       vendor_url: "https://openrouter.ai",
       listing: :openrouter,
       identify: :openrouter,
@@ -148,7 +157,6 @@ defmodule Troupe.LLM.ProviderType do
       name: :azure_openai,
       adapter: Troupe.LLM.Providers.OpenAI,
       listing: nil,
-      needs_base_url: true,
       endpoint:
         "Your Azure OpenAI resource, which `base_url` names: `https://<resource>.openai.azure.com`. A call goes to " <>
           "`/openai/deployments/<model>/chat/completions?api-version=<api_version>`, so a model's name, or its " <>
@@ -168,8 +176,6 @@ defmodule Troupe.LLM.ProviderType do
     %{
       name: :gemini,
       adapter: Troupe.LLM.Providers.OpenAI,
-      base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
-      key_var: "GEMINI_API_KEY",
       vendor_url: "https://generativelanguage.googleapis.com",
       listing: :gemini,
       identify: :gateway,
@@ -188,8 +194,6 @@ defmodule Troupe.LLM.ProviderType do
     %{
       name: :fake,
       adapter: Troupe.LLM.Providers.Fake,
-      named: false,
-      keyless: true,
       endpoint:
         "None: scripted answers, for a packaged binary's smoke test. The session-wide `provider` only.",
       auth: "None.",
@@ -199,6 +203,32 @@ defmodule Troupe.LLM.ProviderType do
       caching: "None."
     }
   ]
+
+  # A type the protocol's list has and this one does not, or the other way round, is a
+  # build that would offer a person a type nothing speaks, or speak one nobody is offered.
+  unless Enum.map(@speaking, &Atom.to_string(&1.name)) == ProviderTypes.names() do
+    raise CompileError,
+      description:
+        "Troupe.LLM.ProviderType's types #{inspect(Enum.map(@speaking, & &1.name))} are not " <>
+          "Troupe.Protocol.ProviderTypes' #{inspect(ProviderTypes.names())}, in that order"
+  end
+
+  @table Enum.map(@speaking, fn speaking ->
+           type = ProviderTypes.fetch(speaking.name)
+
+           Map.merge(speaking, %{
+             label: type.label,
+             summary: type.summary,
+             url: type.url,
+             url_example: type.url_example,
+             key: type.key,
+             base_url: type.default_url,
+             key_var: type.key_var,
+             keyless: type.key == :none,
+             needs_base_url: type.url == :required,
+             named: type.named
+           })
+         end)
 
   @by_name Map.new(@table, &{Atom.to_string(&1.name), &1})
 

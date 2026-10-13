@@ -30,6 +30,7 @@ defmodule Troupe.Plane.PanelTest do
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Plane.Web.Live.ProfileEditor
+  alias Troupe.Protocol.ProviderTypes
 
   @moduletag timeout: 60_000
 
@@ -640,6 +641,34 @@ defmodule Troupe.Plane.PanelTest do
           ) do
         refute html =~ ~s(name="#{gone}"), "the editor still asks for #{gone}"
       end
+    end
+
+    # Issue #658: the provider is any of the types, the one list the clients offer, and
+    # each asks only what it needs. On the chunk's tip it offered openai, anthropic and fake.
+    test "offers every provider type, and asks each only what it needs", context do
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      for type <- ProviderTypes.names() do
+        assert html =~ ~s(<option value="#{type}"), "the editor does not offer #{type}"
+      end
+
+      pick = fn provider ->
+        view |> element("form") |> render_change(%{"name" => "dev", "llm.provider" => provider})
+      end
+
+      # Ollama takes no key: there is no credential to reference.
+      html = pick.("ollama")
+      refute html =~ ~s(name="llm.secretRef.name")
+      assert html =~ "ollama takes no key"
+      assert html =~ ~s(placeholder="http://localhost:11434")
+
+      # Azure has no address of its own: the endpoint is the resource's, and required.
+      html = pick.("azure_openai")
+
+      assert html =~ ~s(name="llm.secretRef.name")
+      assert html =~ "https://&lt;resource&gt;.openai.azure.com"
+      assert html =~ "azure_openai has no address of its own: this is required."
     end
 
     test "saves the storage class it asks for", context do

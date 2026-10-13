@@ -25,6 +25,7 @@ defmodule Troupe.Config.ModelSettings do
   alias Troupe.Config.{Migrate, OpenCode, Schema}
   alias Troupe.LLM.{Catalog, ProviderType}
   alias Troupe.LLM.Catalog.Store
+  alias Troupe.Protocol.ProviderTypes
 
   # Every type a file may name (`Troupe.LLM.ProviderType`), so saving a file whose provider
   # a screen has no name for keeps it: the fake too, so a packaged binary's first run can
@@ -58,7 +59,8 @@ defmodule Troupe.Config.ModelSettings do
   @type description :: %{String.t() => term()}
 
   @doc """
-  The user's file as a settings screen shows it, and what overrides it.
+  The user's file as a settings screen shows it, and what overrides it, with the
+  provider types the screen offers (`provider_types`, `Troupe.Protocol.ProviderTypes`).
 
   With a workspace, a project `.troupe/config.yaml` there is reported as an override;
   without one only the machine-wide sources are. The paths are as a person on this
@@ -81,7 +83,9 @@ defmodule Troupe.Config.ModelSettings do
       "api_key_set" => key_source(file) != nil,
       "api_key_source" => key_source(file),
       "models" => models,
-      "overrides" => overrides(workspace)
+      "overrides" => overrides(workspace),
+      # What a screen offers to choose from, and what each choice asks for.
+      "provider_types" => ProviderTypes.wire()
     }
   end
 

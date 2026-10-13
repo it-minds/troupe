@@ -323,7 +323,7 @@ defmodule Troupe.UI.Setup do
   end
 
   defp asking(state, "key"),
-    do: "asking #{provider_name(provider(state))} whether it takes the key…"
+    do: "asking #{provider_name(state, provider(state))} whether it takes the key…"
 
   defp asking(_state, _step), do: "asking the daemon…"
 
@@ -393,14 +393,20 @@ defmodule Troupe.UI.Setup do
 
   ## What the daemon said
 
-  # A key the provider refused keeps the step, and says why.
-  defp answered({:answer, "key"}, {:ok, %{"step" => "key"} = flow}, state) do
+  # A key the provider refused keeps the step, and says why; so does a server that takes
+  # no key turning the asking away, which puts the key step back in front of the person.
+  defp answered(
+         {:answer, step},
+         {:ok, %{"step" => "key", "check" => %{"state" => "refused"}} = flow},
+         state
+       )
+       when step in ~w(provider key) do
     {:noreply, %{enter(%{state | flow: flow}, "key") | error: check_words(flow["check"])}}
   end
 
   defp answered({:answer, step}, {:ok, flow}, state) do
-    state = %{state | flow: flow, said: said(step, flow)}
-    {:noreply, enter(state, flow["step"])}
+    state = %{state | flow: flow}
+    {:noreply, enter(%{state | said: said(state, step, flow)}, flow["step"])}
   end
 
   defp answered({:back, step}, {:ok, flow}, state),
@@ -423,14 +429,26 @@ defmodule Troupe.UI.Setup do
 
   defp answered(_tag, {:error, reason}, state), do: {:noreply, %{state | error: refusal(reason)}}
 
-  defp said("where", %{"answers" => %{"where" => %{"choice" => "plane"}}}), do: nil
-  defp said("where", _flow), do: "This computer, with a key of your own."
+  defp said(_state, "where", %{"answers" => %{"where" => %{"choice" => "plane"}}}), do: nil
+  defp said(_state, "where", _flow), do: "This computer, with a key of your own."
 
-  defp said("provider", %{"answers" => %{"provider" => %{"reuse" => "config"}}} = flow),
+  defp said(_state, "provider", %{"answers" => %{"provider" => %{"reuse" => "config"}}} = flow),
     do: "#{flow["detected"]["config"]["path"]} is kept as it is."
 
-  defp said("provider", flow), do: provider_words(flow["answers"]["provider"]) <> "."
-  defp said("key", flow), do: check_words(flow["check"])
+  # A provider that takes no key was asked for its models as it was answered.
+  defp said(state, "provider", %{"step" => "models"} = flow),
+    do: provider_words(state, flow["answers"]["provider"]) <> ". " <> listed_words(flow["check"])
+
+  defp said(state, "provider", flow), do: provider_words(state, flow["answers"]["provider"]) <> "."
+  defp said(_state, "key", flow), do: check_words(flow["check"])
+
+  defp listed_words(%{"state" => "ok"}), do: "It answered with the models it has."
+
+  defp listed_words(%{"state" => "unknown", "reason" => reason}),
+    do:
+      "Its models could not be listed: #{reason || "it did not answer"}. You can go on and type a model id."
+
+  defp listed_words(_check), do: ""
 
   defp check_words(%{"state" => "ok"}), do: "The provider accepted the key."
 
@@ -501,15 +519,26 @@ defmodule Troupe.UI.Setup do
     end
   end
 
-  # The steps this run takes: a plane finishes at once, and settings reused from opencode
-  # or a `config.yaml` skip the key and the models, as the daemon's flow does.
+  # The steps this run takes: a plane finishes at once, settings reused from opencode or a
+  # `config.yaml` skip the key and the models, and a provider that takes no key skips the
+  # key unless its server turned the asking away, as the daemon's flow does.
   defp path(state) do
     cond do
-      plane?(state) -> ~w(where finish)
-      provider(state)["reuse"] in ~w(opencode config) -> ~w(where provider workspace daemon finish)
-      true -> @steps
+      plane?(state) ->
+        ~w(where finish)
+
+      provider(state)["reuse"] in ~w(opencode config) ->
+        ~w(where provider workspace daemon finish)
+
+      asks_no_key?(state) and get_in(state.flow, ["check", "state"]) != "refused" ->
+        @steps -- ["key"]
+
+      true ->
+        @steps
     end
   end
+
+  defp asks_no_key?(state), do: kind_of(state, provider(state)["kind"])["key"] == "none"
 
   defp plane?(state), do: get_in(state.flow, ["answers", "where", "choice"]) == "plane"
 
@@ -537,41 +566,23 @@ defmodule Troupe.UI.Setup do
     ]
   end
 
-  # What is already on the machine first: the shortest first run reuses it.
+  # What is already on the machine first: the shortest first run reuses it. Then every way
+  # the daemon says a provider may be set up (`setup.get`'s `kinds`), each asking for an
+  # address only where it needs one.
   defp choices(%{step: "provider"} = state) do
     detected = state.flow["detected"]
-    already = env_choices(detected) ++ opencode_choice(detected) ++ config_choice(detected)
-    url = %{label: "the address, ending in /v1", secret?: false}
+    already = env_choices(state) ++ opencode_choice(detected) ++ config_choice(detected)
 
-    kinds = [
-      %{
-        id: "anthropic",
-        label: "Anthropic",
-        note: "Claude, at Anthropic's own endpoint, with a key from console.anthropic.com.",
-        answer: %{"provider" => "anthropic", "kind" => "anthropic"}
-      },
-      %{
-        id: "openai",
-        label: "OpenAI",
-        note: "GPT, at OpenAI's own endpoint, with a key from platform.openai.com.",
-        answer: %{"provider" => "openai", "kind" => "openai"}
-      },
-      %{
-        id: "gateway",
-        label: "An OpenAI-compatible gateway",
-        note:
-          "Anything speaking Chat Completions at a URL of yours: vLLM, OpenRouter, a company gateway. Some want no key.",
-        answer: %{"provider" => "openai", "kind" => "gateway"},
-        field: url
-      },
-      %{
-        id: "litellm",
-        label: "A LiteLLM proxy",
-        note: "A LiteLLM proxy at its URL. The one gateway that says what each model costs.",
-        answer: %{"provider" => "openai", "kind" => "litellm"},
-        field: url
-      }
-    ]
+    kinds =
+      for kind <- kinds(state) do
+        %{
+          id: kind["id"],
+          label: kind["label"],
+          note: kind["summary"],
+          answer: %{"provider" => kind["provider"], "kind" => kind["id"]}
+        }
+        |> with_address(kind)
+      end
 
     # The scripted provider, offered only where someone set a script up for it.
     fake =
@@ -593,7 +604,7 @@ defmodule Troupe.UI.Setup do
   defp choices(%{step: "key"} = state) do
     provider = provider(state)
     var = Troupe.Config.vendor_key_var(provider["provider"], provider["base_url"])
-    name = provider_name(provider)
+    name = provider_name(state, provider)
 
     env =
       if var && var in state.flow["detected"]["env"],
@@ -620,7 +631,8 @@ defmodule Troupe.UI.Setup do
         provider["provider"] == "fake" ->
           [%{id: :none, label: "The fake provider needs no key", note: "Nothing is sent anywhere."}]
 
-        var == nil ->
+        # A provider whose endpoint is the person's own (Azure's resource) still wants its key.
+        var == nil and kind_of(state, provider["kind"])["key"] != "required" ->
           [
             %{
               id: :none,
@@ -724,21 +736,39 @@ defmodule Troupe.UI.Setup do
 
   defp choices(%{step: "finish"}), do: []
 
-  defp env_choices(detected) do
-    for {var, provider, name} <- [
-          {"ANTHROPIC_API_KEY", "anthropic", "Anthropic"},
-          {"OPENAI_API_KEY", "openai", "OpenAI"}
-        ],
-        var in (detected["env"] || []) do
+  # A vendor's variable that is set, for each kind that has one.
+  defp env_choices(state) do
+    for kind <- kinds(state),
+        var = kind["key_var"],
+        var in (state.flow["detected"]["env"] || []) do
       %{
         id: {:env, var},
         label: "#{var} is set on this computer",
         note:
-          "Use #{name} with that key. It stays in the environment; the settings only refer to it.",
-        answer: %{"provider" => provider, "kind" => provider}
+          "Use #{kind["label"]} with that key. It stays in the environment; the settings only refer to it.",
+        answer: %{"provider" => kind["provider"], "kind" => kind["id"]}
       }
     end
   end
+
+  # The ways a provider may be set up, as the daemon says (`Troupe.Client.setup_kinds/1`).
+  defp kinds(state), do: Troupe.Client.setup_kinds(state.flow)
+
+  defp kind_of(state, id), do: Enum.find(kinds(state), &(&1["id"] == id))
+
+  # The address a kind asks for: one of its own (a gateway, an Azure resource), or a
+  # server's, whose default Enter alone takes.
+  defp with_address(choice, %{"url" => "required", "url_example" => example}),
+    do: Map.put(choice, :field, %{label: "the address, such as #{example}", secret?: false})
+
+  defp with_address(choice, %{"url" => "server", "default_url" => default}),
+    do:
+      Map.put(choice, :field, %{
+        label: "the server's address (Enter alone: #{default})",
+        secret?: false
+      })
+
+  defp with_address(choice, _kind), do: choice
 
   defp opencode_choice(%{"opencode" => %{"providers" => [_ | _] = providers} = opencode}) do
     start = if opencode["default"], do: ", and start from #{opencode["default"]}", else: ""
@@ -851,30 +881,38 @@ defmodule Troupe.UI.Setup do
 
   ## Words
 
-  defp provider_name(%{"provider" => "anthropic", "base_url" => nil}), do: "Anthropic"
-  defp provider_name(%{"provider" => "openai", "base_url" => nil}), do: "OpenAI"
-  defp provider_name(%{"provider" => "fake"}), do: "the fake provider"
-  defp provider_name(_provider), do: "the gateway"
+  # Who a key is sent to: a type by its name, anything at an address of the person's the
+  # gateway, unless it is a type whose address is always theirs (Azure's resource).
+  defp provider_name(_state, %{"provider" => "fake"}), do: "the fake provider"
+
+  defp provider_name(state, %{"kind" => kind} = provider) do
+    card = kind_of(state, kind)
+
+    cond do
+      card == nil or card["provider"] != kind -> "the gateway"
+      card["url"] in ~w(required server) or provider["base_url"] == nil -> card["label"]
+      true -> "the gateway"
+    end
+  end
+
+  defp provider_name(_state, _provider), do: "the gateway"
 
   # A provider as the choice the person made named it: a gateway is not "openai" to them.
-  defp provider_words(%{"reuse" => "opencode"}), do: "opencode's providers, copied in"
-  defp provider_words(%{"reuse" => "config"}), do: "the config.yaml that was already here"
+  defp provider_words(_state, %{"reuse" => "opencode"}), do: "opencode's providers, copied in"
+  defp provider_words(_state, %{"reuse" => "config"}), do: "the config.yaml that was already here"
 
-  defp provider_words(%{"kind" => kind} = provider) do
+  defp provider_words(state, %{"kind" => kind} = provider) do
     name =
-      case {kind, provider["provider"]} do
-        {"gateway", _} -> "An OpenAI-compatible gateway"
-        {"litellm", _} -> "A LiteLLM proxy"
-        {_, "anthropic"} -> "Anthropic"
-        {_, "openai"} -> "OpenAI"
-        {_, "fake"} -> "The fake provider"
-        {_, other} -> to_string(other)
+      case {kind_of(state, kind), provider["provider"]} do
+        {_card, "fake"} -> "The fake provider"
+        {%{"label" => label}, _provider} -> label
+        {nil, other} -> to_string(other)
       end
 
     if provider["base_url"], do: "#{name} at #{provider["base_url"]}", else: name
   end
 
-  defp provider_words(_provider), do: ""
+  defp provider_words(_state, _provider), do: ""
 
   defp describe_offer(offer) do
     context = if offer["context"], do: "#{tokens(offer["context"])} tokens of context"
@@ -926,7 +964,7 @@ defmodule Troupe.UI.Setup do
   defp lede(%{step: "key"} = state) do
     storage = get_in(state.flow, ["key_storage", "path"]) || "config.yaml"
 
-    "It is tried once, with a real request to #{provider_name(provider(state))}, before anything is kept. It goes into #{storage} on this computer, readable by you alone (there is no keychain in this build), and it is never shown back."
+    "It is tried once, with a real request to #{provider_name(state, provider(state))}, before anything is kept. It goes into #{storage} on this computer, readable by you alone (there is no keychain in this build), and it is never shown back."
   end
 
   defp lede(%{step: "models", part: :main}),
@@ -1008,7 +1046,7 @@ defmodule Troupe.UI.Setup do
 
     daemon = if at_login, do: "starts when you log in", else: "starts when an app needs it"
 
-    [{"Provider", provider_words(provider)}] ++
+    [{"Provider", provider_words(state, provider)}] ++
       key_line ++
       model_line ++
       [

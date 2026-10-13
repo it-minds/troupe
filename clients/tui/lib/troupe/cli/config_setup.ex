@@ -10,9 +10,11 @@ defmodule Troupe.CLI.ConfigSetup do
     * opencode is set up here: Troupe reads none of opencode's settings (root Decision
       828), so this offers to copy its providers into `config.yaml` (`config.import`),
       keys as opencode has them written; a no goes on to the ways below.
-    * otherwise, three ways on: set a provider up here (Anthropic first, then OpenAI or a
-      gateway: provider, URL and key, then a model from what the provider lists, through
-      `config.models` and `config.set`); take an organisation's settings from a Troupe
+    * otherwise, three ways on: set a provider up here (every type a person may pick,
+      Anthropic first, in `Troupe.Protocol.ProviderTypes`' order, a gateway being the
+      type of the API it speaks: provider, URL and key, as the type needs them, then a
+      model from what the provider lists, through `config.models` and `config.set`);
+      take an organisation's settings from a Troupe
       plane (`troupe login`, then `troupe config pull`); or not now, which says where
       each of those lives.
 
@@ -39,6 +41,7 @@ defmodule Troupe.CLI.ConfigSetup do
   alias Troupe.CLI.Remote, as: RemoteCLI
   alias Troupe.Client.Daemon.Link
   alias Troupe.Protocol.Client, as: Protocol
+  alias Troupe.Protocol.ProviderTypes
 
   @typedoc """
   Everything this touches outside itself, so a test can play a person and a daemon:
@@ -345,8 +348,10 @@ defmodule Troupe.CLI.ConfigSetup do
   # takes it.
   defp choose(path, io) do
     io.say.("")
+    labels = for type <- ProviderTypes.all(), type.named, do: type.label
+
     io.say.("How should this machine reach a model?")
-    io.say.("  1  set up a provider here: an Anthropic or OpenAI key, or a gateway such as LiteLLM")
+    io.say.("  1  set up a provider here: #{Enum.join(labels, ", ")}, or a gateway such as LiteLLM")
     io.say.("  2  take your organisation's settings from its Troupe plane")
     io.say.("  3  not now")
 
@@ -394,21 +399,18 @@ defmodule Troupe.CLI.ConfigSetup do
     end
   end
 
+  # Every type a person may pick, numbered in the list's order, so 1 and 2 stay Anthropic
+  # and OpenAI; each then asks what it needs: an address, required where it has none of
+  # its own, and a key, unless it takes none.
   defp set_up_here(path, io) do
-    provider =
-      case io.ask.(
-             "provider: 1 Anthropic, 2 OpenAI or an OpenAI-compatible gateway (LiteLLM, vLLM, OpenRouter) [1]: "
-           ) do
-        "2" -> "openai"
-        _ -> "anthropic"
-      end
+    types = Enum.filter(ProviderTypes.all(), & &1.named)
+    type = pick_type(types, io.ask.(provider_prompt(types)))
+    provider = type.name
 
-    base_url = io.ask.(base_url_prompt(provider)) |> blank_to_nil()
-    fallback = vendor_key(provider, base_url)
-    key = blank_to_nil(io.secret.(key_prompt(fallback))) || fallback
-    params = %{"provider" => provider, "base_url" => base_url, "api_key" => key}
-
-    with {:ok, default, cheap} <- pick_models(params, io),
+    with {:ok, base_url} <- ask_base_url(type, io),
+         {:ok, key} <- ask_key(type, base_url, io),
+         params = %{"provider" => provider, "base_url" => base_url, "api_key" => key},
+         {:ok, default, cheap} <- pick_models(params, io),
          true <-
            yes?(io, "Save #{provider}#{at(base_url)}, default model #{default}, to #{path}?", true) do
       save(params, %{"default" => default, "cheap" => cheap}, io)
@@ -423,10 +425,64 @@ defmodule Troupe.CLI.ConfigSetup do
     end
   end
 
-  defp base_url_prompt("openai"),
+  # The type a gateway's card speaks is said beside it: a gateway is that type at its URL.
+  defp provider_prompt(types) do
+    spoken = for kind <- ProviderTypes.kinds(), kind["id"] != kind["provider"], do: kind["provider"]
+
+    choices =
+      types
+      |> Enum.with_index(1)
+      |> Enum.map_join(", ", fn {type, n} ->
+        gateway =
+          if type.name in spoken,
+            do: " or a gateway that speaks its API (LiteLLM, vLLM)",
+            else: ""
+
+        "#{n} #{type.label}#{gateway}"
+      end)
+
+    "provider: #{choices} [1]: "
+  end
+
+  defp pick_type(types, answer) do
+    case Integer.parse(answer || "") do
+      {n, ""} when n >= 1 and n <= length(types) -> Enum.at(types, n - 1)
+      _ -> hd(types)
+    end
+  end
+
+  defp ask_base_url(type, io) do
+    case {type.url, io.ask.(base_url_prompt(type)) |> blank_to_nil()} do
+      {:required, nil} ->
+        {:error,
+         "#{type.label} needs the address of your resource, such as #{type.url_example}; nothing saved"}
+
+      {_url, url} ->
+        {:ok, url}
+    end
+  end
+
+  defp base_url_prompt(%{url: :required} = type),
+    do: "base URL (yours, such as #{type.url_example}): "
+
+  defp base_url_prompt(%{name: "openai"}),
     do: "base URL (a gateway's, ending in /v1; Enter for api.openai.com): "
 
-  defp base_url_prompt(_), do: "base URL (Enter for the provider's own): "
+  defp base_url_prompt(%{url: :server} = type), do: "base URL (Enter for #{type.default_url}): "
+  defp base_url_prompt(_type), do: "base URL (Enter for the provider's own): "
+
+  # A type that takes no key is not asked for one; one whose endpoint is always the
+  # person's own, with no variable to stand in, is not saved without one.
+  defp ask_key(%{key: :none}, _base_url, _io), do: {:ok, nil}
+
+  defp ask_key(type, base_url, io) do
+    fallback = vendor_key(type.name, base_url)
+
+    case {blank_to_nil(io.secret.(key_prompt(fallback))) || fallback, type.key_var} do
+      {nil, nil} when type.url == :required -> {:error, "#{type.label} needs a key; nothing saved"}
+      {key, _var} -> {:ok, key}
+    end
+  end
 
   # The vendor's own variable, at the vendor's own endpoint: what Enter at the key prompt
   # saves, so the simplest setup is a key in the environment and a reference to it in the

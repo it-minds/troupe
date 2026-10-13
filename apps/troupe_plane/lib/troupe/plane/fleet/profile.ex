@@ -21,6 +21,7 @@ defmodule Troupe.Plane.Fleet.Profile do
 
   alias Troupe.Plane.Fleet.{Provisioner, SizeClass}
   alias Troupe.Plane.GitHub
+  alias Troupe.Protocol.ProviderTypes
 
   @primary_key {:name, :string, autogenerate: false}
   @derive {Phoenix.Param, key: :name}
@@ -147,10 +148,36 @@ defmodule Troupe.Plane.Fleet.Profile do
     # `administration: write` would be asking for what no session is given.
     github = Enum.map(GitHub.spec_problems(Map.get(spec, "github")), &{:spec, &1})
 
-    overrides ++ personal ++ github
+    overrides ++ personal ++ github ++ llm_problems(Map.get(spec, "llm"))
   end
 
   defp spec_switches(:spec, _spec), do: []
+
+  # `llm.provider` is one of the provider types, the list the clients offer, which the
+  # resource's schema declares in the same words, so a profile that is never a resource,
+  # on hosts, is refused where a resource would be. A type with no address of its own
+  # (`azure_openai`, the person's resource) needs `llm.endpoint`, as a config file's needs
+  # its `base_url`: without one the pods would be handed a provider and nowhere to call.
+  defp llm_problems(%{"provider" => provider} = llm) when is_binary(provider) do
+    cond do
+      provider not in ProviderTypes.names() ->
+        not_a_type(provider)
+
+      ProviderTypes.needs_url?(provider) and Map.get(llm, "endpoint") in [nil, ""] ->
+        [spec: "llm.provider #{provider} needs llm.endpoint, the resource's own address"]
+
+      true ->
+        []
+    end
+  end
+
+  defp llm_problems(%{"provider" => provider}) when not is_nil(provider), do: not_a_type(provider)
+  defp llm_problems(_llm), do: []
+
+  defp not_a_type(provider) do
+    names = Enum.join(ProviderTypes.names(), ", ")
+    [spec: "llm.provider must be one of #{names}, not #{inspect(provider)}"]
+  end
 
   # The class is the answer, so the fields it decides are written from it rather than
   # taken from the caller. A profile whose `sessionsPerPod` disagreed with its class

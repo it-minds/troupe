@@ -3080,7 +3080,7 @@ defmodule Troupe.UI.TUI.Server do
   defp settings_change(_enter_or_space, field, %{settings: s} = state) do
     case field.type do
       :bool -> apply_setting(state, field.key, Settings.value(s.view, s.config, field.key) != true)
-      type when type in [:model, :theme] -> open_picker(state)
+      type when type in [:model, :theme, :provider] -> open_picker(state)
       _ -> put_settings(state, editing: shown(s, field.key), status: nil)
     end
   end

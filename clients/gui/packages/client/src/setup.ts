@@ -66,6 +66,26 @@ export interface SetupSession {
   error?: string;
 }
 
+/**
+ * One way a provider may be set up, as the daemon says (troupe #658): every provider type
+ * a person may pick, from the one list of them, then a gateway and a LiteLLM proxy. `id` is
+ * the `kind` the provider step is answered with and `provider` what is written; `url` and
+ * `key` say what it asks. An address is asked where it is `required` (a gateway, Azure's
+ * resource) or `server` (Ollama's, with `default_url` offered); a key unless it is `none`,
+ * and `optional` lets a gateway go without.
+ */
+export interface SetupKind {
+  id: string;
+  provider: string;
+  label: string;
+  summary: string;
+  url: "own" | "server" | "required" | "none";
+  default_url: string | null;
+  url_example: string | null;
+  key: "required" | "optional" | "none";
+  key_var: string | null;
+}
+
 /** `setup.get`, and what `setup.answer` answers with. */
 export interface SetupFlow {
   needed: boolean;
@@ -74,6 +94,8 @@ export interface SetupFlow {
   steps: SetupStep[];
   answers: Partial<Record<SetupStepName, Record<string, unknown>>>;
   detected: SetupDetected;
+  /** Absent from a daemon from before the provider types were its to say. */
+  kinds?: SetupKind[];
   key_storage: { kind: "file"; path: string; keychain: boolean };
   offered: ModelOffer[];
   suggested: { default: string | null; cheap: string | null };
@@ -87,46 +109,73 @@ export interface SetupFlow {
 /** One step's answer; the step decides the fields (PROTOCOL.md, `setup.answer`). */
 export type SetupAnswer = Record<string, unknown>;
 
-/** A provider as a card names it: what the daemon is told, and what it means for the reader. */
-export interface ProviderKind {
-  id: "anthropic" | "openai" | "gateway" | "litellm";
-  provider: "anthropic" | "openai";
-  label: string;
-  consequence: string;
-  /** Whether the card asks for a base URL. */
-  url: boolean;
-}
-
-export const PROVIDER_KINDS: readonly ProviderKind[] = [
+/**
+ * What a daemon from before the provider types were its to say takes, which it does not
+ * list: Anthropic, OpenAI and the two ways to a gateway. A newer daemon's `kinds` replace
+ * these; offering one of today's types to an older daemon would only be refused.
+ */
+export const OLDER_DAEMON_KINDS: readonly SetupKind[] = [
   {
     id: "anthropic",
     provider: "anthropic",
     label: "Anthropic",
-    consequence: "Claude, at Anthropic's own endpoint, with a key from console.anthropic.com.",
-    url: false,
+    summary: "Claude, at Anthropic's own endpoint, with a key from console.anthropic.com.",
+    url: "own",
+    default_url: "https://api.anthropic.com",
+    url_example: null,
+    key: "required",
+    key_var: "ANTHROPIC_API_KEY",
   },
   {
     id: "openai",
     provider: "openai",
     label: "OpenAI",
-    consequence: "GPT, at OpenAI's own endpoint, with a key from platform.openai.com.",
-    url: false,
+    summary: "GPT, at OpenAI's own endpoint, with a key from platform.openai.com.",
+    url: "own",
+    default_url: "https://api.openai.com",
+    url_example: null,
+    key: "required",
+    key_var: "OPENAI_API_KEY",
   },
   {
     id: "gateway",
     provider: "openai",
     label: "An OpenAI-compatible gateway",
-    consequence: "Anything speaking Chat Completions at a URL of yours: vLLM, OpenRouter, a company gateway. Some want no key.",
-    url: true,
+    summary: "Anything speaking Chat Completions at a URL of yours: vLLM, OpenRouter, a company gateway. Some want no key.",
+    url: "required",
+    default_url: null,
+    url_example: "https://llm-gw.example/v1",
+    key: "optional",
+    key_var: null,
   },
   {
     id: "litellm",
     provider: "openai",
     label: "A LiteLLM proxy",
-    consequence: "A LiteLLM proxy at its URL. The one gateway that says what each model costs.",
-    url: true,
+    summary: "A LiteLLM proxy at its URL. The one gateway that says what each model costs.",
+    url: "required",
+    default_url: null,
+    url_example: "https://llm-gw.example/v1",
+    key: "optional",
+    key_var: null,
   },
 ];
+
+/** The ways this flow's daemon says a provider may be set up, in its order. */
+export function setupKinds(flow: Pick<SetupFlow, "kinds">): readonly SetupKind[] {
+  return flow.kinds && flow.kinds.length > 0 ? flow.kinds : OLDER_DAEMON_KINDS;
+}
+
+/** The kind the provider step was answered with, if the flow has one. */
+export function answeredKind(flow: Pick<SetupFlow, "kinds" | "answers">): SetupKind | undefined {
+  const id = flow.answers.provider?.["kind"];
+  return setupKinds(flow).find((k) => k.id === id);
+}
+
+/** Whether a kind asks for an address, and whether it may be left empty (a server's default). */
+export function asksAddress(kind: SetupKind): { asked: boolean; required: boolean } {
+  return { asked: kind.url === "required" || kind.url === "server", required: kind.url === "required" };
+}
 
 /** The approval model, as the daemon states it: two sentences each, the safe default first. */
 export const APPROVAL_CHOICES: readonly { id: "ask" | "auto"; label: string; consequence: string }[] = [
@@ -144,17 +193,26 @@ export const APPROVAL_CHOICES: readonly { id: "ask" | "auto"; label: string; con
   },
 ];
 
-/** The vendor's own variable for a provider at its own endpoint, which the key step may offer. */
-export function vendorKeyVar(provider: string, baseUrl: string | null | undefined): string | null {
-  if (baseUrl && baseUrl.trim() !== "") return null;
-  if (provider === "anthropic") return "ANTHROPIC_API_KEY";
-  if (provider === "openai") return "OPENAI_API_KEY";
-  return null;
+/**
+ * The vendor's own variable for a kind at its own endpoint, which the key step may offer:
+ * a key in it is sent to the vendor alone, so a provider at an address of the person's
+ * is offered none.
+ */
+export function vendorKeyVar(kind: SetupKind | undefined, baseUrl: string | null | undefined): string | null {
+  if (!kind || (baseUrl && baseUrl.trim() !== "")) return null;
+  return kind.key_var;
 }
 
-/** What a check said, as the sentence to show. */
-export function describeCheck(check: SetupCheck | null): string | null {
+/**
+ * What a check said, as the sentence to show. A provider that takes no key was asked for
+ * its models with none, so what failed is the listing, not a key.
+ */
+export function describeCheck(check: SetupCheck | null, opts: { keyless?: boolean } = {}): string | null {
   if (!check) return null;
+  if (opts.keyless && check.state === "ok") return "It answered with the models it has.";
+  if (opts.keyless && check.state === "unknown") {
+    return `Its models could not be listed: ${check.reason ?? "it did not answer"}. You can go on and type a model id.`;
+  }
   if (check.state === "ok") return "The provider accepted the key.";
   if (check.state === "refused") return `The provider refused the key: ${check.reason ?? "no reason given"}. Check it and try again.`;
   return `The key could not be confirmed: ${check.reason ?? "the provider did not answer"}. You can go on and type a model id.`;

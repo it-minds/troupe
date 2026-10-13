@@ -49,9 +49,13 @@ spec:
                     endpoint: {type: string}
                     provider:
                       type: string
-                      enum: [anthropic, openai, fake]
+                      enum: [anthropic, openai, ollama, openrouter, azure_openai, gemini, fake]
                       default: openai
-                      description: Which adapter speaks to the endpoint. `openai` is plain Chat Completions, which is what a gateway serves.
+                      description: >-
+                        Which API the endpoint speaks: one of the provider types
+                        (docs/user/configuration.md, Provider types). `openai` is plain Chat
+                        Completions, which is what a gateway serves; `azure_openai` needs the
+                        resource's own address as the endpoint, and `ollama` takes no key.
                     model: {type: string}
                     smallModel:
                       type: string
