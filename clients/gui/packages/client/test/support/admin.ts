@@ -95,6 +95,8 @@ export interface FakeSession {
   parent: string | null;
   origin: "user" | "trigger";
   reviewed: boolean;
+  repository?: { owner: string; name: string; ref?: string | null } | null;
+  github?: Record<string, unknown> | null;
 }
 
 interface Setting {
@@ -766,6 +768,8 @@ export class FakeAdmin {
       pinned: s.pinned,
       pinned_by: s.pinned_by,
       last_active_at: s.last_active_at,
+      repository: s.repository ?? null,
+      github: s.github ?? null,
     };
   }
 
@@ -1086,8 +1090,26 @@ export function exampleAdmin(): FakeAdmin {
     sessions: [
       session("s-7f3a9c21", "alice@example.com", "core", "dev", { last_active_at: "2026-10-13T08:52:00Z", last_seq: 212 }),
       session("s-7f3a9c22", "dan@example.com", "core", "dev", { state: "dormant", pinned: true, pinned_by: "dan@example.com", last_active_at: "2026-10-12T17:10:00Z" }),
-      session("s-7f3a9c23", "erin@example.com", "core", "ux", { last_active_at: "2026-10-13T08:40:00Z", workspace_bytes: 64_000_000 }),
-      session("s-7f3a9c24", "svc:core/nightly", "core", "dev", { origin: "trigger", visibility: "team", last_active_at: "2026-10-13T03:05:00Z" }),
+      session("s-7f3a9c23", "erin@example.com", "core", "ux", {
+        last_active_at: "2026-10-13T08:40:00Z",
+        workspace_bytes: 64_000_000,
+        // Pushed its branch and opened no pull request yet.
+        repository: { owner: "example-org", name: "gadgets", ref: "main" },
+        github: { branch: "troupe/session-s-7f3a9c23", commit: "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d", pushes: 1 },
+      }),
+      session("s-7f3a9c24", "svc:core/nightly", "core", "dev", {
+        origin: "trigger",
+        visibility: "team",
+        last_active_at: "2026-10-13T03:05:00Z",
+        repository: { owner: "example-org", name: "widgets", ref: null },
+        github: {
+          branch: "troupe/issue-7-fix-login",
+          commit: "4f1c2a9e0b7d6c5a4f3e2d1c0b9a8f7e6d5c4b3a",
+          pushes: 3,
+          pull_request: { number: 7, url: "https://github.example.com/example-org/widgets/pull/7" },
+          stopped: { at: "2026-10-13T03:40:00Z", reason: "3 red CI rounds" },
+        },
+      }),
       session("s-7f3a9c25", "dan@example.com", "core", "dev", { state: "dormant", parent: "s-7f3a9c22", last_active_at: "2026-10-11T15:00:00Z" }),
       session("s-7f3a9c26", "erin@example.com", "core", "dev", { state: "read_only", last_active_at: "2026-10-09T11:20:00Z", object_bytes: 9_800_000 }),
       session("s-7f3a9c27", "alice@example.com", "core", "ux", { state: "dormant", visibility: "private", last_active_at: "2026-10-10T09:45:00Z" }),

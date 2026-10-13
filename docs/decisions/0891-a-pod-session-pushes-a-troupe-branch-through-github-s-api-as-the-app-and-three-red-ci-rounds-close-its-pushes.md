@@ -18,6 +18,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/web/live/profile_editor.ex
   - apps/troupe_plane/lib/troupe/plane/web/live/review.ex
   - apps/troupe_plane/lib/troupe/plane/web/live/sessions.ex
+  - clients/gui/apps/console/src/views/Sessions.tsx
   - apps/troupe_plane/priv/repo/migrations/20261013000891_github_run.exs
   - apps/troupe_plane/test/support/fake_github.ex
   - apps/troupe_plane/test/troupe/plane/github_run_test.exs
@@ -134,17 +135,17 @@ named git_push."
   the App's host; a round on the last push) under the row's lock, keeps it and audits it
   (`github.push`, `github.pull_request`, `github.round`, `github.stopped`). Metadata only.
   `session.get`, `sessions.list`, `admin.sessions.list` and `admin.runs.list` carry it as
-  `github`, and the plane's Sessions and Review pages show the pull request as a link (or
-  the branch and commit before there is one, and that a run stopped); the session's own
+  `github`; the console's Sessions screen and the plane's Sessions and Review pages show the
+  pull request as a link (or the branch and commit before there is one, and that a run
+  stopped); the session's own
   transcript, in every client, shows each tool's answer with the branch, commit and pull
   request.
 - **Out of this decision.** The webhook and label trigger, and a trigger naming a
   repository (slice 3); autonomy policy per team or repository, such as a draft only, or
   merging (slice 4); a tool to read the issue or the pull request's comments, and a review
   comment sending the session back; the notify payload's content field; revoking tokens at
-  dormancy; which teams may name which repositories; the new console's rendering of the
-  record, whose Sessions and Runs screens are not built yet (the data is in the methods they
-  will read).
+  dormancy; which teams may name which repositories; the console's Runs screen, which is not
+  built yet (`admin.runs.list` carries the record for it).
 - **Proof.** `github_fix_loop_test.exs` in the worker, with a real plane on the link, the
   sandbox on, the fake GitHub serving the Git data API, pull requests, comments and
   scripted CI against each token's permissions, and a ruleset letting the App write only
@@ -165,7 +166,7 @@ named git_push."
   not declare the API's host, before GitHub is asked; `contents: read` after three red
   rounds; the record's steps, refusals and audit; `session.get` and a run carrying it; and
   `github.record` and `git.credential access: write` over the control channel only for a
-  session the pod holds. `panel_test.exs`: the Sessions and Review pages link the pull
-  request, show the branch before one, and say a run stopped. On the installed daemon,
+  session the pod holds. `panel_test.exs` and the console's `sessions.test.tsx`: the Sessions
+  and Review pages link the pull request, show the branch before one, and say a run stopped. On the installed daemon,
   `agents.validate` of an agent naming the four tools: refused on 0.17.0 ("git_push is not
   a tool"), taken after.

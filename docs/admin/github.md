@@ -264,8 +264,8 @@ Rulesets**, two branch rulesets:
 Then the App can push only `troupe/*` branches, and nothing it opens reaches the default
 branch without a person.
 
-**What the run records.** The session's row keeps what it did there; the plane's Sessions
-and Review pages show its pull request as a link, and `session.get`, `sessions.list`,
+**What the run records.** The session's row keeps what it did there; the console's Sessions
+screen and the plane's Sessions and Review pages show its pull request as a link, and `session.get`, `sessions.list`,
 `admin.sessions.list` and `admin.runs.list` carry it as `github`: the commit its clone started
 from (`base`), its `branch`, its last `commit`, how many `pushes`, its `pull_request`
 (`number` and `url`), each CI `round` (`commit`, `state` red or green, the checks that
