@@ -59,7 +59,8 @@ had lifted that sysctl on its runner (#686), which is why it never saw the secon
   namespace it made, so these reach the sandbox's mounts and never the pod's. It adds
   denials, so what a worker never needs is written down: sysfs, cgroup, cgroup2, mqueue,
   fuse, overlay, bpf, ramfs and binder mounts even inside the sandbox; the capabilities
-  that mean something only in the node's own namespace; raw and packet sockets.
+  that mean something only in the node's own namespace; raw IP and packet sockets (not
+  netlink's raw ones, which `getifaddrs` uses).
 - **The user namespace.** A worker under the profile is confined, and the restriction
   applies only to an unconfined task; for a confined one the kernel asks its profile. The
   profile is written for the AppArmor 3.0 policy ABI (`abi <abi/3.0>,`), because the

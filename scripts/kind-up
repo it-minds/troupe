@@ -84,18 +84,26 @@ for node in $(kind get nodes --name "$cluster"); do
   if [ "$(docker exec "$node" cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" != "Y" ]; then
     continue
   fi
-  docker exec "$node" sh -c 'mountpoint -q /sys/kernel/security ||
-    mount -t securityfs -o nosuid,nodev,noexec securityfs /sys/kernel/security'
+  changed=false
+  if ! docker exec "$node" mountpoint -q /sys/kernel/security; then
+    docker exec "$node" mount -t securityfs -o nosuid,nodev,noexec securityfs /sys/kernel/security
+    changed=true
+  fi
   if ! docker exec "$node" sh -c 'command -v apparmor_parser' >/dev/null; then
     echo "kind-up: $node: the host runs AppArmor; installing apparmor_parser for its runtime"
     docker exec "$node" sh -c 'apt-get update -qq &&
       DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends apparmor >/dev/null'
-    # containerd decides once, when it starts, whether the node has AppArmor.
+    changed=true
+  fi
+  # containerd and the kubelet each decide once, when they start, whether the node has
+  # AppArmor: the kubelet refuses a pod that asks for a profile if it had none then.
+  if [ "$changed" = true ]; then
     docker exec "$node" systemctl restart containerd
     for _ in $(seq 1 60); do
       docker exec "$node" crictl info >/dev/null 2>&1 && break
       sleep 1
     done
+    docker exec "$node" systemctl restart kubelet
   fi
 done
 

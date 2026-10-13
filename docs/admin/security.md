@@ -153,8 +153,8 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   - denied beyond the default: mounting sysfs, cgroup and cgroup2, mqueue, fuse, overlay,
     bpf, ramfs and binder filesystems even inside the sandbox; the capabilities that mean
     something only in the node's own namespace (`mac_admin`, `mac_override`, `sys_module`,
-    `sys_rawio`, `sys_boot`, `sys_time`, `syslog`, `audit_control`); and raw and packet
-    sockets. The default's denials stay: no writes to the kernel's files in `/proc` or to
+    `sys_rawio`, `sys_boot`, `sys_time`, `syslog`, `audit_control`); and raw IP and packet
+    sockets (netlink's stay, which listing the network interfaces needs). The default's denials stay: no writes to the kernel's files in `/proc` or to
     sysfs outside cgroups, nothing of `/proc/kcore`, `/proc/sysrq-trigger`, firmware or
     `/sys/kernel/security`.
 

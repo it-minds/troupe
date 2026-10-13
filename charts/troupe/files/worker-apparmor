@@ -57,8 +57,10 @@ profile troupe-worker flags=(attach_disconnected,mediate_deleted) {
   deny capability syslog,
   deny capability audit_control,
 
-  # Sockets a worker has no use for: raw packets and the link layer.
-  deny network raw,
+  # Sockets a worker has no use for: raw IP and the link layer. Netlink's raw sockets stay,
+  # which listing the network interfaces (getifaddrs) uses.
+  deny network inet raw,
+  deny network inet6 raw,
   deny network packet,
 
   # Signals as the default has them: from the node's runtime, and among the worker's own.
