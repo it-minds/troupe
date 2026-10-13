@@ -19,7 +19,6 @@ defmodule Troupe.Plane.Web.Live.Overview do
   import Troupe.Plane.Web.Live.Layout
 
   alias Troupe.Plane.Admin
-  alias Troupe.Plane.Web.Index
   alias Troupe.Plane.Web.Live.Status
 
   @refresh_ms 2_000
@@ -29,11 +28,12 @@ defmodule Troupe.Plane.Web.Live.Overview do
   @near_budget 0.8
 
   @impl Phoenix.LiveView
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     if connected?(socket), do: :timer.send_interval(@refresh_ms, :refresh)
     # The landing page of this console points at the new one, where there is one; this one
-    # stays for what that does not do yet, and as the way in when it cannot be used.
-    {:ok, socket |> assign(console_url: Index.console_url()) |> load()}
+    # stays for what that does not do yet, and as the way in when it cannot be used. The
+    # router says where it is.
+    {:ok, socket |> assign(console_url: session["console_url"]) |> load()}
   end
 
   @impl Phoenix.LiveView

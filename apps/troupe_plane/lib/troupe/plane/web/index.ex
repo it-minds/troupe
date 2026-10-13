@@ -89,6 +89,15 @@ defmodule Troupe.Plane.Web.Index do
     end
   end
 
+  @doc """
+  What the LiveView console's pages are given at each request: where the console is.
+
+  Handed over by the router rather than read by a page, because a LiveView is an admin API
+  client and reaches nothing else in the plane.
+  """
+  @spec live_session(Plug.Conn.t()) :: %{String.t() => String.t() | nil}
+  def live_session(_conn), do: %{"console_url" => console_url()}
+
   defp body(name, url, app_url, cli_url, console_url) do
     """
     #{hero(name, url)}
