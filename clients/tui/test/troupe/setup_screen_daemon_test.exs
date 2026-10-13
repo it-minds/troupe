@@ -183,7 +183,15 @@ defmodule Troupe.SetupScreenDaemonTest do
 
     press(pid, "enter")
     to_choice(pid, session, "the same as the main model")
-    for _ <- 1..4, do: press(pid, "enter")
+    for _ <- 1..3, do: press(pid, "enter")
+
+    # The summary says what is written, and names no key.
+    assert step(pid) == {"finish", :main}
+    summary = screen_text(pid, session)
+    assert summary =~ "the provider and the models into"
+    refute summary =~ "the key and the models"
+
+    press(pid, "enter")
     assert_receive {:done, {:session, sid, workspace}}, 15_000
     assert {:ok, ^sid} = Client.open_session({:local, workspace}, sid)
     on_exit(fn -> Client.stop_session(sid) end)

@@ -1060,11 +1060,13 @@ defmodule Troupe.UI.Setup do
   defp writes(state, config, at_login) do
     status = state.flow["daemon"] || %{}
 
+    # A provider that wants no key is written with none, which takes a saved one away.
     settings =
-      case provider(state) do
-        %{"reuse" => "config"} -> []
-        %{"reuse" => "opencode"} -> ["opencode's providers into #{config}"]
-        _ -> ["the provider, the key and the models into #{config}"]
+      case {provider(state), get_in(state.flow, ["answers", "key", "source"])} do
+        {%{"reuse" => "config"}, _source} -> []
+        {%{"reuse" => "opencode"}, _source} -> ["opencode's providers into #{config}"]
+        {_provider, "none"} -> ["the provider and the models into #{config}, with no key"]
+        _typed_or_env -> ["the provider, the key and the models into #{config}"]
       end
 
     settings =
