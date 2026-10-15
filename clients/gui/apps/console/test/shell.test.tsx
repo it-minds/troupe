@@ -75,10 +75,10 @@ describe("the shell", () => {
 
   it("links an area it does not draw yet to the same area in the plane's current console", async () => {
     await open();
-    link("Worker profiles", rail())!.click();
-    await waitFor(() => heading() === "Worker profiles", "the area");
+    link("Integrations", rail())!.click();
+    await waitFor(() => heading() === "Integrations", "the area");
     expect(says("Not in this console yet")).toBe(true);
-    expect(link("Worker profiles in the current console")!.href).toBe(`${fake!.plane.baseUrl}/admin/workers`);
+    expect(link("Integrations in the current console")!.href).toBe(`${fake!.plane.baseUrl}/admin/integrations`);
   });
 
   it("opens straight at a deep link, a team's tab included, and keeps it across a reload", async () => {
@@ -91,7 +91,7 @@ describe("the shell", () => {
   });
 
   it("does not open an area by its address for a role it is hidden from", async () => {
-    visit("#/profiles");
+    visit("#/integrations");
     await open(PEOPLE.bob);
     await waitFor(() => heading() === "Overview", "the Overview instead");
   });

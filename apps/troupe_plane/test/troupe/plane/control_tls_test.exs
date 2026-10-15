@@ -5,7 +5,7 @@ defmodule Troupe.Plane.ControlTLSTest do
   A registered machine is the worker outside the cluster, and its secret lasts until
   somebody rotates it: it enrols over TLS with the certificate cert-manager issued for the
   control Service, and is refused in plaintext before its secret is looked at. A pod on
-  the pod network may still enrol in plaintext, and over TLS too.
+  the pod network enrols over TLS, and in plaintext too unless the plane requires TLS.
   """
 
   use Troupe.Plane.DataCase, async: false
@@ -60,31 +60,88 @@ defmodule Troupe.Plane.ControlTLSTest do
     end
 
     dir = if context[:no_certificate], do: Path.join(base, "nothing-mounted"), else: tls.dir
-    start_supervised!({Listener, port: 0, verify: verify, tls: dir})
+
+    start_supervised!(
+      {Listener,
+       port: 0,
+       verify: verify,
+       tls: dir,
+       require_tls: context[:require_tls] == true,
+       inet_backend: context[:inet_backend]}
+    )
+
     Map.merge(tls, %{port: Listener.port()})
   end
 
-  describe "a registered machine" do
-    test "dials with TLS against the CA it pinned, and enrols", context do
-      assert {:ok, socket} = tls_connect(context.port, context.ca)
+  # Both of the VM's socket backends: the listener looks at a connection's first byte
+  # without taking it off the socket, and hands the socket to TLS or to the line reader
+  # as it came. `inet_backend: :socket` has no `unrecv`, which the listener once used.
+  for backend <- [:inet, :socket] do
+    describe "on the #{backend} backend" do
+      @describetag inet_backend: backend
 
-      assert {:ok, result} =
-               call(socket, "enrol", %{
-                 "token" => @secret,
-                 "capacity" => 2,
-                 "disk_total_bytes" => 1
-               })
+      test "a machine dials with TLS against the CA it pinned, and enrols", context do
+        assert {:ok, socket} = tls_connect(context.port, context.ca)
 
-      assert result["profile"] == "laptops"
-      assert_received {:verified, @secret}
+        assert {:ok, result} =
+                 call(socket, "enrol", %{
+                   "token" => @secret,
+                   "capacity" => 2,
+                   "disk_total_bytes" => 1
+                 })
 
-      assert [worker] = Fleet.list_workers("laptops")
-      assert worker.pod_name == "build-box"
+        assert result["profile"] == "laptops"
+        assert_received {:verified, @secret}
 
-      connection = Connections.for_pod("ssh:laptops", "build-box")
-      assert %{tls?: true, enrolled?: true} = Connection.info(connection)
+        assert [worker] = Fleet.list_workers("laptops")
+        assert worker.pod_name == "build-box"
+
+        connection = Connections.for_pod("ssh:laptops", "build-box")
+        assert %{tls?: true, enrolled?: true} = Connection.info(connection)
+      end
+
+      test "a pod enrols in plaintext, its first line read whole", context do
+        {:ok, socket} =
+          :gen_tcp.connect(~c"127.0.0.1", context.port, [:binary, active: false, packet: :line])
+
+        assert {:ok, %{"profile" => "dev"}} =
+                 call(socket, "enrol", %{"token" => "dev-token", "pod_name" => "troupe-w-dev-0"})
+
+        assert %{tls?: false} =
+                 Connection.info(Connections.for_pod("troupe-w-dev", "troupe-w-dev-0"))
+      end
+
+      @tag :require_tls
+      test "with TLS required, a plaintext connection is closed before it is read", context do
+        {:ok, socket} =
+          :gen_tcp.connect(~c"127.0.0.1", context.port, [:binary, active: false, packet: :line])
+
+        log =
+          ExUnit.CaptureLog.capture_log(fn ->
+            line = Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "enrol"})
+            :ok = :gen_tcp.send(socket, [line, ?\n])
+            assert {:error, :closed} = :gen_tcp.recv(socket, 0, 5_000)
+          end)
+
+        assert log =~ "refused a plaintext control connection"
+        assert log =~ "plane.controlTls.requireTls"
+        refute_received {:verified, _}
+      end
+
+      @tag :require_tls
+      test "with TLS required, a pod dials with TLS and enrols", context do
+        assert {:ok, socket} = tls_connect(context.port, context.ca)
+
+        assert {:ok, %{"profile" => "dev"}} =
+                 call(socket, "enrol", %{"token" => "dev-token", "pod_name" => "troupe-w-dev-0"})
+
+        assert %{tls?: true} =
+                 Connection.info(Connections.for_pod("troupe-w-dev", "troupe-w-dev-0"))
+      end
     end
+  end
 
+  describe "a registered machine" do
     test "is refused in plaintext with a sentence, before its secret is looked at", context do
       {:ok, socket} =
         :gen_tcp.connect(~c"127.0.0.1", context.port, [:binary, active: false, packet: :line])
@@ -116,18 +173,7 @@ defmodule Troupe.Plane.ControlTLSTest do
   end
 
   describe "a pod" do
-    test "still enrols in plaintext, on the pod network", context do
-      {:ok, socket} =
-        :gen_tcp.connect(~c"127.0.0.1", context.port, [:binary, active: false, packet: :line])
-
-      assert {:ok, %{"profile" => "dev"}} =
-               call(socket, "enrol", %{"token" => "dev-token", "pod_name" => "troupe-w-dev-0"})
-
-      assert %{tls?: false} =
-               Connection.info(Connections.for_pod("troupe-w-dev", "troupe-w-dev-0"))
-    end
-
-    test "may dial with TLS too", context do
+    test "may dial with TLS", context do
       assert {:ok, socket} = tls_connect(context.port, context.ca)
 
       assert {:ok, %{"profile" => "dev"}} =

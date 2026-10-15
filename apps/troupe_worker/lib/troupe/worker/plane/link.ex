@@ -24,13 +24,16 @@ defmodule Troupe.Worker.Plane.Link do
   trusts that CA and nothing else for the plane's certificate, checked against the name it
   dials or the one `:server_name` gives (`TROUPE_PLANE_SERVER_NAME`, for a tunnel or an
   address the certificate does not name). That is how a registered machine dials: its
-  registration answered the CA, and the machine pins it.
+  registration answered the CA, and the machine pins it. And how a pod dials: the operator
+  puts the plane's CA in its namespace and mounts it, and the certificate is checked
+  against the control Service's name the pod dials. The file is read again at each dial,
+  so a CA the kubelet has replaced is the one the next dial trusts.
 
   A registered machine's secret is never sent without it. A link holding one (`twh_`) and
   no CA does not dial at all, and says so: the plane would refuse the secret in plaintext,
   but by then it would have crossed the network. A pod, whose token is projected for the
   plane's audience and expires within the hour, dials the control Service in plaintext
-  where it has no CA, as it always has.
+  where it was given no CA, and a plane that requires TLS closes that connection.
   """
 
   use GenServer

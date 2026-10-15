@@ -135,10 +135,18 @@ plane:
   controlPort: 4001
   # TLS on the control port. A registered machine (docs/admin/single-machine.md) dials it
   # from outside the cluster and enrols over TLS only, pinning the CA its registration
-  # answered; a pod may still dial it in plaintext on the pod network. Without a
-  # certificate the port speaks plaintext alone and no machine can be registered.
+  # answered. The operator gives every worker namespace the certificate's CA (`ca.crt`
+  # alone, never the key), and the pods dial with TLS against it. Without a certificate
+  # the port speaks plaintext alone, pods dial in plaintext, and no machine can be
+  # registered.
   controlTls:
     enabled: true
+    # Refuse plaintext on the control port, a pod's included: a plaintext connection is
+    # closed once its first byte says what it is, with a line in the plane's log. Off by
+    # default in 0.19, so pods made before the operator handed them the CA still enrol
+    # while they roll; turn it on once the plane's log says every pod enrolled "over
+    # TLS". Needs `enabled`.
+    requireTls: false
     # cert-manager issues the control Service's certificate, as a `Certificate` this chart
     # renders. Needs cert-manager's CRDs. `false`: the Secret below must hold `tls.crt`,
     # `tls.key` and `ca.crt` already, put there by somebody else.
@@ -297,6 +305,34 @@ worker:
       resources:
         requests: {cpu: 5m, memory: 8Mi}
         limits: {cpu: 50m, memory: 32Mi}
+  # The AppArmor profile of every worker container, `Localhost`, by the name it is loaded
+  # under. Where a node enforces AppArmor (Ubuntu's do), the runtime's default profile
+  # refuses the mounts bubblewrap builds the sandbox with ("Failed to make / slave"), and a
+  # kernel that restricts unprivileged user namespaces
+  # (`kernel.apparmor_restrict_unprivileged_userns=1`, Ubuntu 23.10 and later) refuses an
+  # unconfined process the sandbox's uid map ("setting up uid map: Permission denied"). The
+  # chart's profile (`files/worker-apparmor`) is the runtime's default with the sandbox's
+  # mounts allowed and a few more denials; a worker under it is confined when it makes the
+  # namespace, so the node's sysctl stays as it is.
+  #
+  # Off (`enabled: false`) for a cluster whose nodes run no AppArmor: the kubelet refuses a
+  # pod that asks for a profile on such a node ("Cannot enforce AppArmor"), and the worker
+  # container keeps the runtime's default, as before. Changing it changes every profile's
+  # pod template, so each profile reports `UpgradePending` until its pods are replaced.
+  appArmor:
+    enabled: true
+    profile: troupe-worker
+    # Loads the shipped profile into the kernel of every node, from the same DaemonSet as
+    # the seccomp profile (`troupe-worker-profiles`), and then waits. Its container runs as
+    # root with one capability, `MAC_ADMIN`, unconfined by AppArmor, with the host's
+    # `/sys/kernel/security` mounted: loading a profile needs all three. On a node without
+    # AppArmor it loads nothing. Off where something else loads the profile, such as the
+    # Security Profiles Operator; `profile` is then the name it loads it under.
+    install:
+      enabled: true
+      resources:
+        requests: {cpu: 5m, memory: 16Mi}
+        limits: {cpu: 200m, memory: 64Mi}
 
 # The graphical client (`clients/gui`), served on the plane's own host at `basePath`
 # (Decision 670). Static files behind nginx: no secrets, no database, nothing configured

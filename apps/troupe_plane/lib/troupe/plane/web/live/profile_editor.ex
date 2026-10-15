@@ -15,7 +15,10 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
   name the input carries, and `@servers` is the MCP rows. Both are rebuilt on change and
   both are what apply reads — so there is no second copy to drift, and a button that is not
   a submit (adding a row, checking a host) does not lose what has been typed, which is what
-  happens when a handler tries to read a form it was not sent.
+  happens when a handler tries to read a form it was not sent. What the spec holds that no
+  field edits — `mcpIdentities`, `github`, `llm.prices`, a server's credential settings —
+  is `@kept` as it was loaded and goes back under them, so a save changes only what the
+  form shows.
 
   **Empty is absent.** A blank field does not write an empty string into the custom
   resource; the branch it belongs to disappears entirely if nothing under it is set. The
@@ -77,6 +80,32 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
 
   @server_fields ~w(name url credentialRef header timeoutMs)
 
+  # The paths in the spec the form writes. Everything else a loaded spec holds is carried
+  # through a save as it was loaded: `mcpIdentities`, `github`, `llm.prices`, and whatever
+  # the resource gains that this page has no field for. A draft rebuilt from the form
+  # alone dropped all of it without a word, and a profile's identities or pushes went with
+  # a change to its egress.
+  @form_paths [
+    ~w(llm endpoint),
+    ~w(llm provider),
+    ~w(llm model),
+    ~w(llm smallModel),
+    ~w(llm secretRef),
+    ~w(egress fqdns),
+    ~w(egress gitHosts),
+    ~w(storage),
+    ~w(mcpServers),
+    ~w(configBundleChannel),
+    ~w(orgMount),
+    ~w(repositoryOverridesBundle),
+    ~w(personalTools)
+  ]
+
+  # What the plane writes into the resource itself, from the row, the size class and the
+  # grants. A spec read back from the cluster may hold them, and they are not the page's to
+  # send: `admin.profile.put` refuses the first three outright.
+  @plane_written ~w(replicas sessionsPerPod resources teams image)
+
   @impl Phoenix.LiveView
   def mount(params, _session, socket) do
     {:ok,
@@ -104,7 +133,7 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
     {:noreply,
      socket
      |> assign(fields: merge_fields(socket.assigns.fields, params))
-     |> assign(servers: rows_from(params))
+     |> assign(servers: merge_rows(socket.assigns.servers, rows_from(params)))
      |> preview()}
   end
 
@@ -239,6 +268,15 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
     end)
   end
 
+  # A row as the form sends it, over the row as it was: a server's `secretRef`,
+  # `credentialMode` and `credentialSlot` have no input here, and are kept rather than
+  # dropped by the next keystroke anywhere on the page.
+  defp merge_rows(rows, typed) do
+    typed
+    |> Enum.with_index()
+    |> Enum.map(fn {row, index} -> Map.merge(Enum.at(rows, index) || %{}, row) end)
+  end
+
   defp preview(socket) do
     draft = draft(socket.assigns)
 
@@ -255,8 +293,8 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
   where a mis-spelled path in the form would turn into a field the cluster ignores.
   """
   @spec draft(map()) :: map()
-  def draft(%{fields: fields, servers: servers}) do
-    spec =
+  def draft(%{fields: fields, servers: servers} = assigns) do
+    typed =
       compact(%{
         "llm" =>
           compact(%{
@@ -268,11 +306,7 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
               compact(%{
                 "name" => fields["llm.secretRef.name"],
                 "key" => fields["llm.secretRef.key"]
-              }),
-            # Set through `admin.profile.put` and not on this page, and carried through
-            # as it was loaded: a draft rebuilt from the form alone would drop them, and
-            # the profile's models would go back to costing nothing (Decision 689).
-            "prices" => fields["llm.prices"]
+              })
           }),
         "egress" =>
           compact(%{
@@ -291,28 +325,31 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
         # The same, and the bundle winning is what false says (Decision 826).
         "repositoryOverridesBundle" => fields["repositoryOverridesBundle"] == true,
         # Written whichever way it is, as the two above, so a save from here can lift it.
-        "personalTools" => if(fields["forbidPersonalTools"] == true, do: "forbid", else: "allow"),
-        # What its sessions' tokens may do on GitHub: set through `admin.profile.put` and
-        # not on this page, and carried through as it was loaded, as the prices are, so a
-        # save from here does not take a profile's pushes away.
-        "github" => fields["github"]
+        "personalTools" => if(fields["forbidPersonalTools"] == true, do: "forbid", else: "allow")
       })
+
+    # What the page has no field for, as it was loaded, under what the form says: the
+    # prices (without them a profile's models go back to costing nothing on the ledger),
+    # what its sessions' tokens may do on GitHub, the identities its bundle's servers are
+    # called as, and anything the resource gains later.
+    spec = assigns |> Map.get(:kept, %{}) |> deep_merge(typed) |> compact()
 
     compact(%{
       "name" => fields["name"],
       "image" => fields["image"],
       "size_class" => fields["sizeClass"],
-      "max_sessions" => to_integer(fields["maxSessions"]),
       "warm_workers" => to_integer(fields["warmWorkers"]) || 0,
       "spec" => spec
     })
+    # Always sent, blank as none: the field says "empty is no ceiling", and dropped when
+    # blank, a ceiling once set could never be taken away from this page.
+    |> Map.put("max_sessions", to_integer(fields["maxSessions"]))
   end
 
   defp servers_for(servers) do
     servers
     |> Enum.map(fn server ->
       server
-      |> Map.take(@server_fields)
       |> Map.new(fn {field, value} -> {field, cast_server(field, value)} end)
       |> compact()
     end)
@@ -321,6 +358,29 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
 
   defp cast_server("timeoutMs", value), do: to_integer(value)
   defp cast_server(_field, value), do: value
+
+  defp deep_merge(%{} = under, %{} = over) do
+    Map.merge(under, over, fn
+      _key, %{} = a, %{} = b -> deep_merge(a, b)
+      _key, _a, b -> b
+    end)
+  end
+
+  # The loaded spec without what the form writes or the plane does.
+  defp kept(spec) do
+    spec
+    |> Map.drop(@plane_written)
+    |> then(&Enum.reduce(@form_paths, &1, fn path, acc -> without(acc, path) end))
+  end
+
+  defp without(map, [key]), do: Map.delete(map, key)
+
+  defp without(map, [key | rest]) do
+    case Map.get(map, key) do
+      %{} = inner -> Map.put(map, key, without(inner, rest))
+      _other -> map
+    end
+  end
 
   # Absent, not empty. A blank field is one nobody filled in, and the difference between
   # "no storage class" and "the storage class is the empty string" is the difference
@@ -359,7 +419,8 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
         "repositoryOverridesBundle" => false,
         "forbidPersonalTools" => false
       },
-      servers: []
+      servers: [],
+      kept: %{}
     )
   end
 
@@ -372,7 +433,11 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
         |> assign(current: detail, verdict: detail.policy, preview: nil)
         |> assign(gitops: Map.get(detail, :gitops))
         |> with_mode()
-        |> assign(fields: fields_from(name, detail, spec), servers: servers_of(spec))
+        |> assign(
+          fields: fields_from(name, detail, spec),
+          servers: servers_of(spec),
+          kept: kept(spec)
+        )
 
       {:error, error} ->
         socket
@@ -385,7 +450,8 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
             "repositoryOverridesBundle" => false,
             "forbidPersonalTools" => false
           },
-          servers: []
+          servers: [],
+          kept: %{}
         )
         |> assign(error: error.message)
     end
@@ -421,7 +487,6 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       "llm.provider" => get_in(spec, ["llm", "provider"]),
       "llm.model" => get_in(spec, ["llm", "model"]),
       "llm.smallModel" => get_in(spec, ["llm", "smallModel"]),
-      "llm.prices" => get_in(spec, ["llm", "prices"]),
       "llm.secretRef.name" => get_in(spec, ["llm", "secretRef", "name"]),
       "llm.secretRef.key" => get_in(spec, ["llm", "secretRef", "key"]),
       "egress.fqdns" => joined(get_in(spec, ["egress", "fqdns"])),
@@ -430,8 +495,7 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       "configBundleChannel" => Map.get(spec, "configBundleChannel"),
       "orgMount" => Map.get(spec, "orgMount") == true,
       "repositoryOverridesBundle" => Map.get(spec, "repositoryOverridesBundle") == true,
-      "forbidPersonalTools" => Map.get(spec, "personalTools") == "forbid",
-      "github" => Map.get(spec, "github")
+      "forbidPersonalTools" => Map.get(spec, "personalTools") == "forbid"
     }
   end
 

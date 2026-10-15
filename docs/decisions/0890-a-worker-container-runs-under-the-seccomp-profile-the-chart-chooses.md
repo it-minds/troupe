@@ -11,7 +11,7 @@ paths:
   - apps/troupe_operator/test/troupe/operator/settings_test.exs
   - config/runtime.exs
   - charts/troupe/files/worker-seccomp.json
-  - charts/troupe/templates/worker-seccomp.yaml
+  - charts/troupe/templates/worker-profiles.yaml
   - charts/troupe/templates/operator-deployment.yaml
   - charts/troupe/templates/_helpers.tpl
   - charts/troupe/values.yaml

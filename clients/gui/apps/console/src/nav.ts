@@ -42,9 +42,9 @@ export const NAV: Group[] = [
   {
     label: "Configure",
     areas: [
-      { id: "profiles", label: "Worker profiles", built: false, teamAdmin: false, current: "/workers", lead: "Each kind of worker: its image, size, model, egress and MCP servers." },
-      { id: "bundles", label: "Configuration bundles", built: false, teamAdmin: false, current: "/bundles", lead: "Versioned agents, skills and MCP servers that sessions pick up from a channel." },
-      { id: "triggers", label: "Triggers", built: false, teamAdmin: true, current: "/triggers", lead: "Scheduled and webhook runs per team, each as a named service principal." },
+      { id: "profiles", label: "Worker profiles", built: true, teamAdmin: true, current: "/workers", lead: "Each kind of worker: its image, size, model, egress and MCP servers." },
+      { id: "bundles", label: "Configuration bundles", built: true, teamAdmin: true, current: "/bundles", lead: "Versioned agents, skills and MCP servers that sessions pick up from a channel." },
+      { id: "triggers", label: "Triggers", built: true, teamAdmin: true, current: "/triggers", lead: "Scheduled and webhook runs per team, each as a named service principal." },
       { id: "integrations", label: "Integrations", built: false, teamAdmin: false, current: "/integrations", lead: "Every external host anything dials, and which profiles share which servers." },
     ],
   },

@@ -599,7 +599,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.team.enable",
       function: :team_enable,
       summary:
-        "Make an identity-provider group into a team. Enabling is the only thing Troupe adds to a group: membership stays the provider's. A name another team already has is refused as conflict unless link is true, because under it the group would be linked into that team and the team's settings changed; enabling a team's own group again is the same team.",
+        "Make an identity-provider group into a team. Enabling is the only thing Troupe adds to a group: membership stays the provider's. A name another team already has is refused as conflict unless link is true, because under it the group would be linked into that team and the team's settings changed; enabling a team's own group again is the same team, and a setting sent that differs from the team's is refused as conflict too, naming it in `settings`, unless link is true (a team's settings change with admin.team.update). A team that exists takes only the settings sent; the plane's defaults are a new team's.",
       risk: :write,
       arguments: [
         %Argument{
@@ -619,7 +619,7 @@ defmodule Troupe.Plane.Admin.API do
           name: "link",
           type: :boolean,
           description:
-            "true to link the group into the team that already has the name, changing its settings to those sent. Absent or false refuses that name."
+            "true to link the group into the team that already has the name, changing its settings to those sent. Absent or false refuses that name, and refuses settings that differ from those of a team the group is already in."
         }
       ]
     },
@@ -644,7 +644,14 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.groups.list",
       function: :groups_list,
       summary:
-        "Every identity-provider group this plane knows about, which is what a team links to.",
+        "Every identity-provider group this plane knows about, which is what a team links to. A group that looks like another one held twice carries `looks_duplicated`: the other group's identifier and the mismatch it most likely comes from.",
+      risk: :read
+    },
+    %Method{
+      name: "admin.identity.duplicates",
+      function: :identity_duplicates,
+      summary:
+        "People and groups that look like one held twice: the same email or display name under different keys. Each set says which rows, where each came from (a sign-in or SCIM), and the mismatch it most likely comes from. Nothing is merged on this evidence.",
       risk: :read
     },
     %Method{

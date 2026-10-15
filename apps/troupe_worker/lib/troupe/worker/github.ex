@@ -139,9 +139,11 @@ defmodule Troupe.Worker.GitHub do
            {:ok, message} <- commit_message(message, session_id),
            {:ok, %{"github" => record}} <- record(session_id, %{}, opts),
            :ok <- open_for_pushes(record),
+           {:ok, record} <- with_base(session_id, record, root, opts),
            {:ok, branch} <- branch_for(branch, record, session_id),
            {:ok, credential} <- credential(session_id, opts),
            :ok <- granted(credential, "contents", "write", "push"),
+           {:ok, record} <- reconcile(session_id, credential, branch, record, root, opts),
            :ok <- ci_settled(session_id, credential, record, opts),
            {:ok, {parent, parent_tree}} <- parent(record, root),
            {:ok, tree} <- Tree.write(root),
@@ -231,6 +233,96 @@ defmodule Troupe.Worker.GitHub do
   end
 
   def troupe_branch?(_branch), do: false
+
+  # The commit the clone started from, taken now where the clone could not give it to the
+  # plane: without it a session's first push has nothing to build on, and it would never
+  # push. Read from the workspace's own history, whose root is the commit a clone of depth
+  # one checked out; one GitHub does not have is refused there, when the commit is made.
+  defp with_base(_session_id, %{"commit" => commit} = record, _root, _opts)
+       when is_binary(commit),
+       do: {:ok, record}
+
+  defp with_base(_session_id, %{"base" => base} = record, _root, _opts) when is_binary(base),
+    do: {:ok, record}
+
+  defp with_base(session_id, _record, root, opts) do
+    with {:ok, base} <- Tree.start(root),
+         {:ok, %{"github" => record}} <- record(session_id, %{"base" => base}, opts) do
+      Logger.info(
+        "troupe worker: took #{session_id}'s starting commit #{Tree.short(base)} at its push"
+      )
+
+      {:ok, record}
+    else
+      {:error, reason} ->
+        {:error,
+         "the commit this session's clone started from is not recorded, and taking it now " <>
+           "failed (#{reason}): nothing was pushed"}
+    end
+  end
+
+  # A push GitHub took and the plane never heard of, because recording it failed: the
+  # branch is a commit ahead of the record, and every later push would be refused as going
+  # over commits this session did not push. It is this session's when it sits on the
+  # session's last commit, carries its trailer, and its tree is one this workspace wrote,
+  # which is in no other place than here and on GitHub; then it is recorded, and the push
+  # builds on it. Anything else is left as it is, and `move/4` refuses to go over it.
+  defp reconcile(session_id, credential, branch, record, root, opts) do
+    last = record["commit"] || record["base"]
+
+    case API.branch(credential, branch) do
+      {:ok, head} when head == :none or head == last ->
+        {:ok, record}
+
+      {:ok, head} when is_binary(head) ->
+        with true <- object?(head),
+             {:ok, commit} <- api(API.get_commit(credential, head)),
+             true <- ours?(commit, session_id, last, root) do
+          adopt(session_id, branch, head, commit, opts)
+        else
+          false -> {:ok, record}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, API.explain(reason)}
+    end
+  end
+
+  defp ours?(commit, session_id, last, root) do
+    tree = get_in(commit, ["tree", "sha"])
+    parents = Enum.map(commit["parents"] || [], & &1["sha"])
+    trailer = ~r/^Troupe-Session: #{Regex.escape(session_id)}[ \t]*$/m
+
+    is_binary(last) and parents == [last] and object?(tree) and
+      Regex.match?(trailer, commit["message"] || "") and
+      Tree.tree_of(root, tree) == {:ok, tree}
+  end
+
+  # A name as git writes one, before it goes into a path on GitHub or onto git's command
+  # line.
+  defp object?(name) when is_binary(name),
+    do: Regex.match?(~r/\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z/, name)
+
+  defp object?(_name), do: false
+
+  defp adopt(session_id, branch, head, commit, opts) do
+    tree = get_in(commit, ["tree", "sha"])
+
+    with {:ok, %{"github" => now}} <-
+           record(
+             session_id,
+             %{"push" => %{"branch" => branch, "commit" => head, "tree" => tree}},
+             opts
+           ) do
+      Logger.info(
+        "troupe worker: recorded #{Tree.short(head)} on #{branch} for #{session_id}, which " <>
+          "GitHub had from its last push and the plane had not"
+      )
+
+      {:ok, now}
+    end
+  end
 
   # The commit the push builds on: the session's last one, or for its first push the one
   # its clone started from. Both are on GitHub, so the push sends one commit and no other.

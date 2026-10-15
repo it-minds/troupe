@@ -27,7 +27,7 @@ const NEAR_BUDGET = 0.8;
 
 type State = "broken" | "unknown" | "degraded" | "draining" | "over" | "near" | "waiting" | "healthy";
 
-const STATES: Record<State, { kind: StatusKind; glyph: string; word: string; rank: number }> = {
+export const STATES: Record<State, { kind: StatusKind; glyph: string; word: string; rank: number }> = {
   broken: { kind: "denied", glyph: "✕", word: "broken", rank: 0 },
   over: { kind: "denied", glyph: "✕", word: "at ceiling", rank: 0 },
   waiting: { kind: "waiting", glyph: "◆", word: "waiting on you", rank: 1 },
@@ -214,7 +214,7 @@ function podState(pod: AdminPod): State {
   return "healthy";
 }
 
-function profileState(profile: AdminProfile): State {
+export function profileState(profile: AdminProfile): State {
   if (profile.replicas !== null && profile.pods.length < profile.replicas) return "degraded";
   if (profile.pods.length === 0) return "unknown";
   return profile.pods.map(podState).sort((a, b) => STATES[a].rank - STATES[b].rank)[0] ?? "healthy";

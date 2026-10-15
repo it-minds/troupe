@@ -2,8 +2,9 @@ defmodule Troupe.Plane.DeactivationTest do
   @moduledoc """
   What stops when the identity provider says somebody has gone.
 
-  SCIM deletes are soft — an audit trail outlives a person's account — so deactivation is
-  a flag on a row, and a flag nothing reads is a deprovision that did not happen. Three
+  A provider that deactivates somebody, rather than deleting them, leaves their row, so
+  deactivation is a flag on it, and a flag nothing reads is a deprovision that did not
+  happen. Three
   doors, and the third is the one that is easy to miss:
 
   * signing in, which must not *resurrect* the account it is refusing;

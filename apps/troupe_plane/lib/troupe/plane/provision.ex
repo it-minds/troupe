@@ -98,12 +98,16 @@ defmodule Troupe.Plane.Provision do
     get(attrs, :config_bundle_channel) || spec_map(attrs)["configBundleChannel"] || "stable"
   end
 
-  @doc "What the policy makes of a profile, as the panel renders it."
+  @doc """
+  What the policy makes of a profile, as the panel renders it: each violation a sentence,
+  as `check/1` gives them, because this goes over `/rpc` and MCP as it is and a tuple is
+  what JSON cannot carry.
+  """
   @spec verdict(Profile.t() | map()) :: map()
   def verdict(profile) do
     case violations(profile) do
       [] -> %{allowed?: true, violations: []}
-      found -> %{allowed?: false, violations: found}
+      found -> %{allowed?: false, violations: Enum.map(found, &Policy.describe/1)}
     end
   end
 

@@ -20,6 +20,154 @@ const FORBIDDEN = -32004;
 const NOT_FOUND = -32005;
 const INVALID_PARAMS = -32602;
 const METHOD_NOT_FOUND = -32601;
+const MANAGED_BY_GITOPS = -32015;
+
+/** The size classes, with what each is for, as `Fleet.SizeClass` says. */
+const SIZE_CLASSES: Record<string, string> = {
+  standard: "Several sessions share a worker. Right for most work.",
+  heavy: "Fewer sessions to a worker, each with more CPU, memory and disk: large repositories, builds and long runs.",
+};
+
+/** A trigger's fields `admin.trigger.put` writes, and what an absent one is on a new trigger. */
+const TRIGGER_KEYS = ["principal", "profile", "agent", "enabled", "source", "prompt_template", "terms", "visibility", "review", "notify", "notify_url", "concurrency"] as const;
+const TRIGGER_DEFAULTS: Record<string, unknown> = { enabled: true, visibility: "team", review: "required", notify: [], concurrency: 1 };
+
+/** The `llm` fields a profile may set only beside `llm.endpoint`. */
+const LLM_FIELDS = ["provider", "model", "smallModel", "secretRef", "prices"];
+
+/** The plane's sentence for `llm` settings without an endpoint, or null where they have one or set nothing. */
+export function llmProblem(llm: Record<string, unknown>): string | null {
+  const empty = (v: unknown) => v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0) || (typeof v === "object" && v !== null && Object.keys(v).length === 0);
+  const set = LLM_FIELDS.filter((f) => !empty(llm[f])).map((f) => `llm.${f}`);
+  if (set.length === 0 || !empty(llm["endpoint"])) return null;
+  const listed = set.length === 1 ? set[0] : `${set.slice(0, -1).join(", ")} and ${set.at(-1)}`;
+  const [verb, pronoun] = set.length === 1 ? ["is", "it"] : ["are", "them"];
+  return `${listed} ${verb} set without llm.endpoint, and the pods are given the llm settings only with an endpoint: without one they would run on Troupe's built-in model settings instead. Set llm.endpoint, or take ${pronoun} out`;
+}
+
+function hostOf(url: unknown): string | null {
+  if (typeof url !== "string") return null;
+  try {
+    const host = new URL(url).hostname;
+    return host === "" ? null : host;
+  } catch {
+    return null;
+  }
+}
+
+/** A stable content hash, shaped as the plane's: the same document, the same hash. */
+function hashOf(value: unknown): string {
+  const text = canonical(value);
+  let a = 0x811c9dc5;
+  let b = 0x01000193;
+  for (let i = 0; i < text.length; i++) {
+    a = Math.imul(a ^ text.charCodeAt(i), 0x01000193) >>> 0;
+    b = Math.imul(b ^ text.charCodeAt(text.length - 1 - i), 0x811c9dc5) >>> 0;
+  }
+  return `sha256:${a.toString(16).padStart(8, "0")}${b.toString(16).padStart(8, "0")}`;
+}
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical((value as Record<string, unknown>)[k])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+function revisionJson(r: { revision: number; hash: string; created_by: string; created_at: string }): Record<string, unknown> {
+  return { id: `rev-${r.revision}-${r.hash.slice(7, 15)}`, revision: r.revision, hash: r.hash, reconstructed: false, created_by: r.created_by, created_at: r.created_at };
+}
+
+const SECTIONS = { agents: "agent", skills: "skill", mcp_servers: "mcp_server", acp_agents: "acp_agent" } as const;
+type Section = keyof typeof SECTIONS;
+
+function entries(content: unknown, section: Section): Array<Record<string, unknown>> {
+  const list = (content as Record<string, unknown> | null)?.[section];
+  return Array.isArray(list) ? (list as Array<Record<string, unknown>>) : [];
+}
+
+/** What a bundle carries, by name, as `Troupe.Protocol.Bundle.summary/1` says. */
+function bundleSummaryOf(content: Record<string, unknown>): Record<string, unknown> {
+  return {
+    schema: content["schema"] ?? 0,
+    agents: entries(content, "agents").map((e) => e["name"]),
+    skills: entries(content, "skills").map((e) => e["name"]),
+    mcp_servers: entries(content, "mcp_servers").map((e) => e["name"]),
+    acp_agents: entries(content, "acp_agents").map((e) => e["name"]),
+  };
+}
+
+/** Everything a version carries but its files' text, as `Bundles.describe/1` reads it. */
+function describeBundle(content: Record<string, unknown>): Record<string, unknown> {
+  const front = (definition: unknown, key: string): string | null => {
+    const m = typeof definition === "string" ? new RegExp(`^${key}:\\s*(.+)$`, "m").exec(definition) : null;
+    return m ? m[1]!.trim() : null;
+  };
+  return {
+    schema: content["schema"] ?? 0,
+    agents: entries(content, "agents").map((a) => ({ name: a["name"], mode: front(a["definition"], "mode"), description: front(a["definition"], "description"), skills: a["skills"] ?? [] })),
+    skills: entries(content, "skills").map((s) => ({ name: s["name"], description: s["description"] ?? null, files: Object.keys((s["files"] ?? {}) as Record<string, unknown>).sort() })),
+    mcp_servers: entries(content, "mcp_servers").map((m) => ({
+      name: m["name"],
+      url: m["url"],
+      credential_ref: m["credential_ref"] ?? null,
+      header: m["header"] ?? "authorization",
+      permission: m["permission"] ?? "ask",
+      tools: m["tools"] ?? null,
+      secret: m["credential_ref"] ? `troupe-mcp-${String(m["name"])}` : null,
+    })),
+  };
+}
+
+/** What publishing would refuse, a sentence each, as the plane's `data.errors`. */
+function bundleProblems(content: unknown, egress: string[]): string[] {
+  if (typeof content !== "object" || content === null || Array.isArray(content)) return ["a bundle is a JSON object"];
+  const doc = content as Record<string, unknown>;
+  const out: string[] = [];
+  if (doc["schema"] !== undefined && doc["schema"] !== 1) out.push(`schema ${JSON.stringify(doc["schema"])} is not one this plane reads; it reads 1`);
+  for (const section of Object.keys(SECTIONS) as Section[]) {
+    if (doc[section] !== undefined && !Array.isArray(doc[section])) {
+      out.push(`${section} is a list`);
+      continue;
+    }
+    const seen = new Set<string>();
+    for (const e of entries(doc, section)) {
+      const name = e["name"];
+      if (typeof name !== "string" || !/^[a-z0-9-]+$/.test(name)) out.push(`${section}: ${JSON.stringify(name)} is not a name: lowercase letters, digits and dashes`);
+      else if (seen.has(name)) out.push(`${section}: ${name} is named twice`);
+      else seen.add(name);
+    }
+  }
+  const skills = new Set(entries(doc, "skills").map((s) => s["name"]));
+  for (const a of entries(doc, "agents")) {
+    if (typeof a["definition"] !== "string" || a["definition"].trim() === "") out.push(`agent ${String(a["name"])} has no definition`);
+    for (const s of (a["skills"] ?? []) as unknown[]) if (!skills.has(s)) out.push(`agent ${String(a["name"])} lists the skill ${String(s)}, which this bundle does not have`);
+  }
+  for (const s of entries(doc, "skills")) {
+    if (typeof (s["files"] as Record<string, unknown> | undefined)?.["SKILL.md"] !== "string") out.push(`skill ${String(s["name"])} has no SKILL.md`);
+  }
+  for (const m of entries(doc, "mcp_servers")) {
+    const url = typeof m["url"] === "string" ? m["url"] : "";
+    const host = hostOf(url);
+    if (!host || !(url.startsWith("https://") || (url.startsWith("http://") && /\.svc(\.cluster\.local)?$/.test(host)))) {
+      out.push(`mcp server ${String(m["name"])}: its url is https://, or http:// to a cluster-internal .svc host`);
+    } else if (!(egress.includes(host) || /\.svc(\.cluster\.local)?$/.test(host))) {
+      out.push(`mcp server ${String(m["name"])}: the cluster policy does not let a pod reach ${host}`);
+    }
+  }
+  return out;
+}
+
+/** Every entry the earlier summary had that the later one does not, by the kind a grant names. */
+function removedEntries(before: Record<string, unknown>, after: Record<string, unknown>): Array<{ kind: string; name: string }> {
+  return (Object.keys(SECTIONS) as Section[]).flatMap((section) =>
+    ((before[section] ?? []) as string[]).filter((n) => !((after[section] ?? []) as string[]).includes(n)).map((name) => ({ kind: SECTIONS[section], name })),
+  );
+}
 
 export interface FakeTeam {
   name: string;
@@ -72,6 +220,56 @@ export interface FakeProfile {
   missing_guarantees: string[];
   unenforced: boolean;
   pods: FakePod[];
+  max_sessions?: number | null;
+  warm_workers?: number;
+  /** The rest of the WorkerProfile spec, in the resource's camelCase, as `admin.profile.put` was sent it. */
+  spec?: Record<string, unknown>;
+  /** On a gitops plane: the resource generation it was read at, and what the last pass said of it. */
+  gitops?: { generation: number | null; problem: string | null; reasons: string[] };
+}
+
+/** One published version of a configuration channel. */
+export interface FakeBundle {
+  channel: string;
+  version: number;
+  hash: string;
+  content: Record<string, unknown>;
+  published_at: string;
+  published_by: string;
+  retired_at: string | null;
+}
+
+/** A team's trigger, as the plane keeps one, with its revisions. */
+export interface FakeTrigger {
+  id: string;
+  team: string;
+  name: string;
+  principal: string;
+  profile: string;
+  agent: string | null;
+  enabled: boolean;
+  source: Record<string, unknown>;
+  prompt_template: string | null;
+  terms: Record<string, unknown> | null;
+  visibility: string;
+  review: string;
+  notify: string[];
+  notify_url: string | null;
+  concurrency: number;
+  last_fired_at: string | null;
+  created_by: string;
+  updated_at: string;
+  revisions: Array<{ revision: number; hash: string; created_by: string; created_at: string; document: Record<string, unknown> }>;
+  gitops?: { generation: number | null; problem: string | null; reasons: string[] };
+}
+
+/** An entitlement row: what a team may use of a bundle on a profile, which a publish can take away. */
+export interface FakeEntitlement {
+  team: string;
+  profile: string;
+  kind: "agent" | "skill" | "mcp_server" | "acp_agent";
+  name: string;
+  mode: "allow" | "deny";
 }
 
 /**
@@ -259,7 +457,7 @@ export function diff(before: Record<string, unknown>, now: Record<string, unknow
 export class FakeAdmin {
   readonly platformAdmins: Set<string>;
   readonly teams = new Map<string, FakeTeam>();
-  readonly groups: Array<{ external_id: string; display_name: string | null }>;
+  readonly groups: Array<{ external_id: string; display_name: string | null; looks_duplicated?: { others: string[]; likely: string } | null }>;
   /** Who is in each group, by its external id, as the identity provider says: membership is never the plane's. */
   readonly memberships: Record<string, string[]>;
   /** People's display names, by subject, for a member a link brings in. */
@@ -278,12 +476,25 @@ export class FakeAdmin {
   holdMs = 0;
   /** The keys the enforced set may hold, as this plane lists them; `null` is a plane from before it listed any. */
   enforceable: ReadonlyArray<Record<string, unknown> & { key: string }> | null = ENFORCEABLE;
+  /** How this plane provisions: `direct` writes profiles and triggers, `gitops` reads them from a repository and refuses a write. */
+  mode: "direct" | "gitops" = "direct";
+  /** Where a gitops plane reads from, as its `gitops_source` setting says. */
+  gitopsSource: string | null = null;
+  /** Every published version, by channel, oldest first. */
+  readonly bundles = new Map<string, FakeBundle[]>();
+  readonly triggerRows: FakeTrigger[] = [];
+  readonly entitlements: FakeEntitlement[] = [];
+  /** The cluster policy, as far as a profile and a bundle are checked against it. */
+  readonly policy = {
+    imageRepositories: ["registry.example.com/troupe"],
+    egress: ["llm-gw.example.com", "mcp.example.com", "wiki.example.com", "github.example.com", "hooks.example.com"],
+  };
 
   constructor(
     opts: {
       platformAdmins?: string[];
       teams?: FakeTeam[];
-      groups?: Array<{ external_id: string; display_name: string | null }>;
+      groups?: Array<{ external_id: string; display_name: string | null; looks_duplicated?: { others: string[]; likely: string } | null }>;
       memberships?: Record<string, string[]>;
       names?: Record<string, string>;
       profiles?: FakeProfile[];
@@ -380,7 +591,7 @@ export class FakeAdmin {
           grants: t.grants.map((g) => g.profile),
           admins: t.admins,
           principals: t.principals,
-          triggers: t.triggers,
+          triggers: [...new Set([...t.triggers, ...this.triggerRows.filter((r) => r.team === t.name).map((r) => r.name)])].sort(),
           sessions_kept: this.sessions.filter((s) => s.team === t.name && s.state !== "erased").length,
           confirm: t.name,
         };
@@ -393,6 +604,7 @@ export class FakeAdmin {
             s.team = null;
           }
           this.teams.delete(t.name);
+          for (let i = this.triggerRows.length - 1; i >= 0; i--) if (this.triggerRows[i]!.team === t.name) this.triggerRows.splice(i, 1);
           const { confirm: _confirm, ...recorded } = effect;
           this.record(subject, "team.disable", t.name, recorded);
         }
@@ -513,6 +725,262 @@ export class FakeAdmin {
 
       case "admin.profiles.list":
         return admin ? { result: this.profilesFor(subject).map((p) => this.profileJson(p)) } : notAdmin;
+
+      case "admin.provisioning.mode":
+        return admin ? { result: this.mode } : notAdmin;
+
+      case "admin.profile.get": {
+        if (role !== "platform_admin") return notPlatform;
+        const p = this.profiles.find((x) => x.name === params["name"]);
+        if (!p) return refuse(NOT_FOUND, "not_found", { profile: params["name"] });
+        return {
+          result: {
+            profile: this.profileJson(p),
+            spec: p.spec ?? {},
+            policy: this.verdict({ name: p.name, image: p.image, spec: p.spec ?? {} }),
+            bundle: this.bundleState(p),
+            identity_problems: this.identityProblems(p.spec ?? {}),
+            gitops: this.gitopsOf(p.gitops),
+          },
+        };
+      }
+
+      case "admin.profile.preview":
+      case "admin.profile.put": {
+        if (role !== "platform_admin") return notPlatform;
+        const attrs = ((typeof params["profile"] === "object" && params["profile"] !== null ? params["profile"] : params) ?? {}) as Record<string, unknown>;
+        const name = attrs["name"];
+        if (typeof name !== "string" || name === "") return refuse(INVALID_PARAMS, "invalid_params", { reason: "a profile has a name", missing: ["name"] });
+        const before = this.profiles.find((p) => p.name === name) ?? null;
+        if (method === "admin.profile.preview") {
+          // The stored profile with the write laid over it, as the plane compares them: what
+          // the write does not send stays as it is, and the name says which profile.
+          const was = this.comparable_profile(before);
+          const { name: _name, ...sent } = this.comparable_attrs(attrs);
+          return { result: { policy: this.verdict(attrs), changes: diff(was, { ...was, ...sent }), mode: this.mode } };
+        }
+        const held = this.heldByRepository(subject, "profile.put", name, "WorkerProfile");
+        if (held) return held;
+        const refused = this.profileRefusal(attrs);
+        if (refused) return refused;
+        const spec = (attrs["spec"] ?? {}) as Record<string, unknown>;
+        const sizeClass = typeof attrs["size_class"] === "string" ? attrs["size_class"] : (before?.size_class ?? "standard");
+        const after: FakeProfile = before ?? {
+          name,
+          size_class: sizeClass,
+          replicas: 0,
+          sessions_per_pod: 0,
+          channel: null,
+          image: null,
+          provisioner: "kubernetes",
+          missing_guarantees: [],
+          unenforced: false,
+          pods: [],
+        };
+        const was = this.comparable_profile(before);
+        // A field not sent is left as it was, as a changeset casts only what it is given;
+        // `null` sent clears it.
+        after.image = attrs["image"] as string;
+        after.size_class = sizeClass;
+        after.sessions_per_pod = sizeClass === "heavy" ? 2 : 4;
+        if ("max_sessions" in attrs) after.max_sessions = typeof attrs["max_sessions"] === "number" ? attrs["max_sessions"] : null;
+        if ("warm_workers" in attrs) after.warm_workers = typeof attrs["warm_workers"] === "number" ? attrs["warm_workers"] : 0;
+        if (typeof attrs["provisioner"] === "string") after.provisioner = attrs["provisioner"];
+        if ("spec" in attrs) {
+          after.spec = spec;
+          after.channel = typeof spec["configBundleChannel"] === "string" && spec["configBundleChannel"] !== "" ? spec["configBundleChannel"] : "stable";
+        }
+        if (!before) this.profiles.push(after);
+        const changes = diff(was, this.comparable_profile(after));
+        this.record(subject, "profile.put", name, changes);
+        return { result: { profile: this.profileJson(after), changes, provisioning: { mode: this.mode, state: "applied" }, identity_problems: this.identityProblems(spec) } };
+      }
+
+      case "admin.profile.delete": {
+        if (role !== "platform_admin") return notPlatform;
+        const p = this.profiles.find((x) => x.name === params["name"]);
+        if (!p) return refuse(NOT_FOUND, "not_found", { profile: params["name"] });
+        if (p.gitops?.problem !== "missing") {
+          const held = this.heldByRepository(subject, "profile.delete", p.name, "WorkerProfile");
+          if (held) return held;
+        }
+        this.record(subject, "profile.delete", p.name, this.comparable_profile(p));
+        // Its grants go with it, and the sessions that ran on it turn read-only, not away.
+        for (const t of this.teams.values()) t.grants = t.grants.filter((g) => g.profile !== p.name);
+        for (const s of this.sessions) if (s.profile === p.name && (s.state === "active" || s.state === "dormant")) s.state = "read_only";
+        this.profiles.splice(this.profiles.indexOf(p), 1);
+        return { result: { profile: p.name, deleted: true, provisioning: { mode: this.mode, state: p.gitops ? "row_deleted" : "deleted" } } };
+      }
+
+      case "admin.mcp.check": {
+        if (!admin) return notAdmin;
+        const host = hostOf(params["url"]);
+        if (!host) return refuse(INVALID_PARAMS, "invalid_params", { reason: "not a URL with a host", url: params["url"] });
+        return { result: { host, allowed: this.egressAllowed(host) } };
+      }
+
+      case "admin.bundles.list": {
+        if (!admin) return notAdmin;
+        if (typeof params["channel"] !== "string") return refuse(INVALID_PARAMS, "invalid_params", { method, missing: ["channel"] });
+        return { result: [...(this.bundles.get(params["channel"]) ?? [])].reverse().map((b) => this.bundleSummary(b)) };
+      }
+
+      case "admin.bundle.get": {
+        if (!admin) return notAdmin;
+        const b = this.bundleAt(params["channel"], params["version"]);
+        if (!b) return refuse(NOT_FOUND, "not_found", { channel: params["channel"], version: params["version"] });
+        return {
+          result: {
+            ...this.bundleSummary(b),
+            content: b.content,
+            detail: describeBundle(b.content),
+            adoption: this.profiles.filter((p) => p.channel === b.channel).map((p) => this.adoption(p, b.hash)),
+          },
+        };
+      }
+
+      case "admin.bundle.validate": {
+        if (role !== "platform_admin") return notPlatform;
+        const errors = bundleProblems(params["content"], this.policy.egress);
+        if (errors.length) return refuse(INVALID_PARAMS, "invalid_params", { errors });
+        return { result: { ok: true, summary: bundleSummaryOf(params["content"] as Record<string, unknown>), hash: hashOf(params["content"]) } };
+      }
+
+      case "admin.bundle.preview": {
+        if (!admin) return notAdmin;
+        const channel = params["channel"];
+        if (typeof channel !== "string") return refuse(INVALID_PARAMS, "invalid_params", { method, missing: ["channel"] });
+        const errors = bundleProblems(params["content"], this.policy.egress);
+        if (errors.length) return refuse(INVALID_PARAMS, "invalid_params", { errors });
+        const base = params["from"] === undefined || params["from"] === null ? this.current(channel) : this.bundleAt(channel, params["from"]);
+        if (params["from"] !== undefined && params["from"] !== null && !base) return refuse(NOT_FOUND, "not_found", { channel, version: params["from"] });
+        const was = base ? bundleSummaryOf(base.content) : null;
+        const now = bundleSummaryOf(params["content"] as Record<string, unknown>);
+        const removed = was ? removedEntries(was, now) : [];
+        const losers = this.entitlements
+          .filter((e) => e.mode === "allow" && removed.some((r) => r.kind === e.kind && r.name === e.name))
+          .filter((e) => this.profiles.some((p) => p.name === e.profile && p.channel === channel))
+          .map(({ team, profile, kind, name }) => ({ team, profile, kind, name }));
+        return { result: { channel, from: base?.version ?? null, hash: hashOf(params["content"]), changes: diff(was ?? {}, now), removed, losers } };
+      }
+
+      case "admin.bundle.publish": {
+        if (role !== "platform_admin") return notPlatform;
+        const channel = params["channel"];
+        if (typeof channel !== "string" || channel === "") return refuse(INVALID_PARAMS, "invalid_params", { method, missing: ["channel"] });
+        const errors = bundleProblems(params["content"], this.policy.egress);
+        if (errors.length) return refuse(INVALID_PARAMS, "invalid_params", { errors });
+        const versions = this.bundles.get(channel) ?? [];
+        const content = params["content"] as Record<string, unknown>;
+        const b: FakeBundle = {
+          channel,
+          version: (versions.at(-1)?.version ?? 0) + 1,
+          hash: hashOf(content),
+          content,
+          published_at: new Date().toISOString(),
+          published_by: subject,
+          retired_at: null,
+        };
+        this.bundles.set(channel, [...versions, b]);
+        this.record(subject, "bundle.publish", channel, { version: b.version, hash: b.hash, summary: bundleSummaryOf(content) });
+        return { result: this.bundleSummary(b) };
+      }
+
+      case "admin.bundle.retire": {
+        if (role !== "platform_admin") return notPlatform;
+        const b = this.bundleAt(params["channel"], params["version"]);
+        if (!b) return refuse(NOT_FOUND, "not_found", { reason: ":not_found" });
+        b.retired_at = new Date().toISOString();
+        this.record(subject, "bundle.retire", b.channel, { version: b.version });
+        return { result: this.bundleSummary(b) };
+      }
+
+      case "admin.principals.list": {
+        const found = this.fetchTeam(subject, params["team"]);
+        if ("error" in found) return found;
+        return {
+          result: found.team.principals.map((p) => ({
+            subject: p,
+            name: p.split("/").at(-1) ?? p,
+            description: null,
+            profiles: found.team.grants.map((g) => g.profile),
+            created_by: "alice@example.com",
+            created_at: "2026-10-01T09:30:00Z",
+            disabled_at: null,
+            last_used_at: null,
+            enabled: true,
+          })),
+        };
+      }
+
+      case "admin.triggers.list": {
+        const found = this.fetchTeam(subject, params["team"]);
+        if ("error" in found) return found;
+        return { result: this.triggerRows.filter((t) => t.team === found.team.name).sort((a, b) => a.name.localeCompare(b.name)).map((t) => this.triggerJson(t)) };
+      }
+
+      case "admin.trigger.put": {
+        const attrs = ((typeof params["trigger"] === "object" && params["trigger"] !== null ? params["trigger"] : params) ?? {}) as Record<string, unknown>;
+        const found = this.fetchTeam(subject, attrs["team"]);
+        if ("error" in found) return found;
+        const t = found.team;
+        const name = attrs["name"];
+        if (typeof name !== "string" || name === "") return refuse(INVALID_PARAMS, "invalid_params", { reason: "a trigger has a name", missing: "name" });
+        const held = this.heldByRepository(subject, "trigger.put", `${t.name}/${name}`, "Trigger");
+        if (held) return held;
+        if (typeof attrs["profile"] === "string" && !this.profiles.some((p) => p.name === attrs["profile"])) {
+          return refuse(INVALID_PARAMS, "invalid_params", { profile: attrs["profile"], reason: `${String(attrs["profile"])} is not a profile this plane has` });
+        }
+        const existing = this.triggerRows.find((r) => r.team === t.name && r.name === name) ?? null;
+        const refused = this.triggerRefusal(t, attrs, existing);
+        if (refused) return refused;
+        const before = existing ? this.comparable_trigger(existing) : {};
+        const now = new Date().toISOString();
+        const row: FakeTrigger = existing ?? {
+          id: `trg-${t.name}-${name}`,
+          team: t.name,
+          name,
+          principal: "",
+          profile: "",
+          agent: null,
+          enabled: true,
+          source: {},
+          prompt_template: null,
+          terms: null,
+          visibility: "team",
+          review: "required",
+          notify: [],
+          notify_url: null,
+          concurrency: 1,
+          last_fired_at: null,
+          created_by: subject,
+          updated_at: now,
+          revisions: [],
+        };
+        for (const key of TRIGGER_KEYS) if (key in attrs) (row as unknown as Record<string, unknown>)[key] = attrs[key] ?? TRIGGER_DEFAULTS[key] ?? null;
+        row.updated_at = now;
+        if (!existing) this.triggerRows.push(row);
+        const changes = diff(before, this.comparable_trigger(row));
+        const revision = this.revise(row, subject);
+        this.record(subject, "trigger.put", `${t.name}/${name}`, { ...changes, __revision__: revision.revision, __revision_hash__: revision.hash });
+        return { result: { trigger: this.triggerJson(row), changes, revision: revisionJson(revision) } };
+      }
+
+      case "admin.trigger.delete":
+      case "admin.trigger.revisions": {
+        const found = this.fetchTeam(subject, params["team"]);
+        if ("error" in found) return found;
+        const row = this.triggerRows.find((r) => r.team === found.team.name && r.name === params["name"]);
+        if (!row) return refuse(NOT_FOUND, "not_found", { trigger: params["name"] });
+        if (method === "admin.trigger.revisions") return { result: [...row.revisions].reverse().map((r) => ({ ...revisionJson(r), document: r.document })) };
+        if (row.gitops?.problem !== "missing") {
+          const held = this.heldByRepository(subject, "trigger.delete", `${row.team}/${row.name}`, "Trigger");
+          if (held) return held;
+        }
+        this.record(subject, "trigger.delete", `${row.team}/${row.name}`, this.comparable_trigger(row));
+        this.triggerRows.splice(this.triggerRows.indexOf(row), 1);
+        return { result: { team: row.team, name: row.name, deleted: true } };
+      }
 
       case "admin.sessions.list": {
         if (!admin) return notAdmin;
@@ -738,6 +1206,10 @@ export class FakeAdmin {
     return {
       name: p.name,
       size_class: p.size_class,
+      size_class_summary: SIZE_CLASSES[p.size_class] ?? null,
+      max_sessions: p.max_sessions ?? null,
+      warm_workers: p.warm_workers ?? 0,
+      gitops: this.gitopsOf(p.gitops),
       replicas: p.replicas,
       sessions_per_pod: p.sessions_per_pod,
       capacity_sessions: p.replicas * p.sessions_per_pod,
@@ -770,6 +1242,221 @@ export class FakeAdmin {
       last_active_at: s.last_active_at,
       repository: s.repository ?? null,
       github: s.github ?? null,
+    };
+  }
+
+  /** What the audit compares of a profile, as the plane's `comparable/1` takes it. */
+  private comparable_profile(p: FakeProfile | null): Record<string, unknown> {
+    if (!p) return {};
+    return {
+      size_class: p.size_class,
+      max_sessions: p.max_sessions ?? null,
+      warm_workers: p.warm_workers ?? 0,
+      provisioner: p.provisioner,
+      replicas: p.replicas,
+      sessions_per_pod: p.sessions_per_pod,
+      config_bundle_channel: p.channel,
+      image: p.image,
+      spec: p.spec ?? {},
+    };
+  }
+
+  /** A write's fields as the plane's preview compares them: what was sent, and the channel its spec names. */
+  private comparable_attrs(attrs: Record<string, unknown>): Record<string, unknown> {
+    const spec = attrs["spec"];
+    if (typeof spec !== "object" || spec === null) return { ...attrs };
+    const channel = (spec as Record<string, unknown>)["configBundleChannel"];
+    return { ...attrs, config_bundle_channel: typeof channel === "string" && channel !== "" ? channel : "stable" };
+  }
+
+  /** What the plane refuses of a profile before it writes one, in its words. */
+  private profileRefusal(attrs: Record<string, unknown>): Refusal | null {
+    const spec = (attrs["spec"] ?? {}) as Record<string, unknown>;
+    const storage = spec["storage"];
+    const derived = ["replicas", "sessionsPerPod", "sessions_per_pod", "resources", "storage"].filter((k) =>
+      k === "storage"
+        ? "storage" in attrs || (storage !== undefined && (typeof storage !== "object" || storage === null || Object.keys(storage).some((s) => s !== "storageClassName")))
+        : k in attrs || k in spec,
+    );
+    if (derived.length) {
+      return refuse(INVALID_PARAMS, "invalid_params", { reason: "the plane writes these; set size_class, max_sessions and warm_workers instead", not_yours: derived });
+    }
+    if ("config_bundle_channel" in attrs) {
+      return refuse(INVALID_PARAMS, "invalid_params", { reason: "a profile's bundle channel is spec.configBundleChannel, which its pods follow", not_yours: ["config_bundle_channel"] });
+    }
+    if (typeof attrs["image"] !== "string" || attrs["image"] === "") return refuse(INVALID_PARAMS, "invalid_params", { reason: "image: can't be blank" });
+    const llm = spec["llm"];
+    if (typeof llm === "object" && llm !== null) {
+      const problem = llmProblem(llm as Record<string, unknown>);
+      if (problem) return refuse(INVALID_PARAMS, "invalid_params", { reason: `spec: ${problem}` });
+    }
+    const verdict = this.verdict(attrs);
+    if (!verdict["allowed?"]) return refuse(INVALID_PARAMS, "invalid_params", { policy_violations: verdict.violations });
+    return null;
+  }
+
+  /** What the cluster policy makes of a profile: its image's repository, and the hosts its egress names. */
+  private verdict(attrs: Record<string, unknown>): { "allowed?": boolean; violations: string[] } {
+    const violations: string[] = [];
+    const image = attrs["image"];
+    if (typeof image === "string" && image !== "release" && !this.policy.imageRepositories.some((r) => image === r || image.startsWith(`${r}/`) || image.startsWith(`${r}:`) || image.startsWith(`${r}@`))) {
+      violations.push(`image ${image} is not from a repository the cluster policy allows (${this.policy.imageRepositories.join(", ")})`);
+    }
+    const egress = ((attrs["spec"] ?? {}) as Record<string, unknown>)["egress"] as Record<string, unknown> | undefined;
+    for (const host of (egress?.["fqdns"] as string[] | undefined) ?? []) {
+      if (!this.egressAllowed(host)) violations.push(`egress to ${host} is not a host the cluster policy allows`);
+    }
+    return { "allowed?": violations.length === 0, violations };
+  }
+
+  private egressAllowed(host: string): boolean {
+    return this.policy.egress.includes(host) || host.endsWith(".svc") || host.endsWith(".svc.cluster.local");
+  }
+
+  /** A server the channel's bundle calls with client credentials that the profile names no identity for. */
+  private identityProblems(spec: Record<string, unknown>): string[] {
+    const channel = typeof spec["configBundleChannel"] === "string" ? spec["configBundleChannel"] : "stable";
+    const servers = ((this.current(channel)?.content["mcp_servers"] ?? []) as Array<Record<string, unknown>>).filter((s) => s["credential_mode"] === "client_credentials");
+    const named = new Set(((spec["mcpIdentities"] ?? []) as Array<Record<string, unknown>>).map((i) => i["server"]));
+    return servers.filter((s) => !named.has(s["name"])).map((s) => `mcp server ${String(s["name"])} is called with client credentials, and the profile gives it no identity in mcpIdentities`);
+  }
+
+  private gitopsOf(g: FakeProfile["gitops"]): Record<string, unknown> | null {
+    if (this.mode !== "gitops") return null;
+    return { locked: true, source: this.gitopsSource, generation: g?.generation ?? null, problem: g?.problem ?? null, problem_generation: null, reasons: g?.reasons ?? [] };
+  }
+
+  /** The refusal every write to what a repository holds gets on a gitops plane, recorded as the attempt it is. */
+  private heldByRepository(subject: string, action: string, name: string, kind: string): Refusal | null {
+    if (this.mode !== "gitops") return null;
+    this.record(subject, action, name, { outcome: "refused", reason: "managed_by_gitops" });
+    return refuse(MANAGED_BY_GITOPS, "managed_by_gitops", {
+      kind,
+      name,
+      source: this.gitopsSource,
+      reason: `this plane is in gitops mode: a ${kind} is a resource a repository holds${this.gitopsSource ? ` (${this.gitopsSource})` : ""}, and a change to one is a commit there`,
+    });
+  }
+
+  // -- bundles -------------------------------------------------------------------------
+
+  private bundleSummary(b: FakeBundle): Record<string, unknown> {
+    return {
+      channel: b.channel,
+      version: b.version,
+      hash: b.hash,
+      summary: bundleSummaryOf(b.content),
+      published_at: b.published_at,
+      published_by: b.published_by,
+      retired_at: b.retired_at,
+    };
+  }
+
+  private bundleAt(channel: unknown, version: unknown): FakeBundle | null {
+    if (typeof channel !== "string") return null;
+    const n = typeof version === "string" ? Number(version) : version;
+    return (this.bundles.get(channel) ?? []).find((b) => b.version === n) ?? null;
+  }
+
+  /** The newest version of a channel that is not retired: what a new session gets. */
+  private current(channel: string): FakeBundle | null {
+    return [...(this.bundles.get(channel) ?? [])].reverse().find((b) => b.retired_at === null) ?? null;
+  }
+
+  private adoption(p: FakeProfile, hash: string): Record<string, unknown> {
+    const current = p.pods.filter((pod) => pod.bundle_hash === hash);
+    const stale = p.pods.filter((pod) => pod.bundle_hash !== hash).map((pod) => ({ pod: pod.pod, reported: pod.bundle_hash }));
+    return { profile: p.name, expected: hash, pods: p.pods.length, current: current.map((pod) => pod.pod), ahead: [], stale, "adopted?": stale.length === 0 && p.pods.length > 0 };
+  }
+
+  private bundleState(p: FakeProfile): Record<string, unknown> {
+    const channel = p.channel ?? "stable";
+    const b = this.current(channel);
+    if (!b) return { channel, published: null, "adopted?": null };
+    return { channel, published: b.version, ...this.adoption(p, b.hash) };
+  }
+
+  // -- triggers ------------------------------------------------------------------------
+
+  private comparable_trigger(row: FakeTrigger): Record<string, unknown> {
+    return Object.fromEntries(TRIGGER_KEYS.map((k) => [k, (row as unknown as Record<string, unknown>)[k] ?? null]));
+  }
+
+  /** What `trigger_put` refuses, in its words: what creating one needs, and each field's rule. */
+  private triggerRefusal(team: FakeTeam, attrs: Record<string, unknown>, existing: FakeTrigger | null): Refusal | null {
+    if (!existing) {
+      for (const needed of ["principal", "profile", "source"]) {
+        if (attrs[needed] === undefined || attrs[needed] === null || attrs[needed] === "") return refuse(INVALID_PARAMS, "invalid_params", { missing: needed });
+      }
+    }
+    if ("principal" in attrs && !team.principals.includes(String(attrs["principal"]))) {
+      return refuse(INVALID_PARAMS, "invalid_params", { reason: `${String(attrs["principal"])} is not a service principal of ${team.name}` });
+    }
+    if ("source" in attrs) {
+      const source = (attrs["source"] ?? {}) as Record<string, unknown>;
+      if (!["schedule", "webhook", "manual"].includes(String(source["kind"]))) return refuse(INVALID_PARAMS, "invalid_params", { reason: "source: has a kind of schedule, webhook, manual" });
+      if (source["kind"] === "schedule" && (typeof source["cron"] !== "string" || source["cron"].trim().split(/\s+/).length !== 5)) {
+        return refuse(INVALID_PARAMS, "invalid_params", { reason: "source: a schedule's cron is five fields, minute hour day-of-month month day-of-week" });
+      }
+      if (source["tz"] !== undefined && source["tz"] !== null && source["tz"] !== "" && source["tz"] !== "UTC") {
+        return refuse(INVALID_PARAMS, "invalid_params", { reason: `source: ${String(source["tz"])} is not a zone this plane keeps; it keeps UTC` });
+      }
+    }
+    if ("visibility" in attrs && !["private", "team"].includes(String(attrs["visibility"]))) return refuse(INVALID_PARAMS, "invalid_params", { reason: "visibility: is private or team" });
+    if ("review" in attrs && !["required", "none"].includes(String(attrs["review"]))) return refuse(INVALID_PARAMS, "invalid_params", { reason: "review: is required or none" });
+    if ("concurrency" in attrs && attrs["concurrency"] !== null && !(Number.isInteger(attrs["concurrency"]) && (attrs["concurrency"] as number) >= 1 && (attrs["concurrency"] as number) <= 100)) {
+      return refuse(INVALID_PARAMS, "invalid_params", { reason: "concurrency: is 1 to 100" });
+    }
+    const terms = (attrs["terms"] ?? {}) as Record<string, unknown>;
+    if (terms["max_turns"] !== undefined && !(Number.isInteger(terms["max_turns"]) && (terms["max_turns"] as number) >= 1 && (terms["max_turns"] as number) <= 500)) {
+      return refuse(INVALID_PARAMS, "invalid_params", { reason: "terms: max_turns is 1 to 500" });
+    }
+    if (typeof attrs["notify_url"] === "string" && attrs["notify_url"] !== "") {
+      const host = hostOf(attrs["notify_url"]);
+      if (!host || !/^https?:\/\//.test(attrs["notify_url"])) return refuse(INVALID_PARAMS, "invalid_params", { reason: "notify_url: is an absolute http or https URL" });
+      if (!this.egressAllowed(host)) return refuse(INVALID_PARAMS, "invalid_params", { reason: `notify_url: ${host} is not a host this deployment's egress policy allows` });
+    }
+    return null;
+  }
+
+  /** A new revision where the document moved; the last one where it did not, as switching it on or off does not. */
+  revise(row: FakeTrigger, by: string, at = new Date().toISOString()): FakeTrigger["revisions"][number] {
+    const { enabled: _enabled, ...document } = this.comparable_trigger(row);
+    const hash = hashOf(document);
+    const last = row.revisions.at(-1);
+    if (last && last.hash === hash) return last;
+    const made = { revision: (last?.revision ?? 0) + 1, hash, created_by: by, created_at: at, document };
+    row.revisions.push(made);
+    return made;
+  }
+
+  private triggerJson(row: FakeTrigger): Record<string, unknown> {
+    const last = row.revisions.at(-1);
+    const kind = (row.source ?? {})["kind"];
+    return {
+      id: row.id,
+      team: row.team,
+      name: row.name,
+      principal: row.principal,
+      profile: row.profile,
+      agent: row.agent,
+      enabled: row.enabled,
+      source: row.source,
+      prompt_template: row.prompt_template,
+      terms: row.terms,
+      visibility: row.visibility,
+      review: row.review,
+      notify: row.notify,
+      notify_url: row.notify_url,
+      concurrency: row.concurrency,
+      has_key: kind === "webhook",
+      key_rotated_at: kind === "webhook" ? row.updated_at : null,
+      key_rotated_by: kind === "webhook" ? row.created_by : null,
+      last_fired_at: row.last_fired_at,
+      created_by: row.created_by,
+      updated_at: row.updated_at,
+      revision: last ? revisionJson(last) : null,
+      ...(this.mode === "gitops" ? { gitops: { ...this.gitopsOf(row.gitops), resource: `${row.team}.${row.name}` } } : {}),
     };
   }
 
@@ -1023,7 +1710,6 @@ export function exampleAdmin(): FakeAdmin {
         members: [member("alice@example.com", "Alice", 80_000_000), member("dan@example.com", "Dan", 120_000_000, 150_000_000), member("erin@example.com", "Erin", 12_400_000)],
         spend_by_model: [{ model: "sonnet", spent_micros: 180_000_000 }],
         principals: ["svc:core/nightly"],
-        triggers: ["nightly-deps"],
       }),
       team("design", {
         budget_micros: 250_000_000,
@@ -1034,6 +1720,7 @@ export function exampleAdmin(): FakeAdmin {
         grants: [{ profile: "ux", volume_mode: "ro" }],
         groups: [{ external_id: "grp-design", display_name: "Design", issuer: "https://idp.example.com", linked_by: "alice@example.com" }],
         members: [member("bob@example.com", "Bob", 200_000_000), member("fay@example.com", "Fay", 61_100_000)],
+        principals: ["svc:design/digest"],
       }),
       team("research"),
     ],
@@ -1049,6 +1736,52 @@ export function exampleAdmin(): FakeAdmin {
         missing_guarantees: [],
         unenforced: false,
         pods: [pod("troupe-w-dev-0", 0, { active_sessions: 3 }), pod("troupe-w-dev-1", 1, { draining: true, active_sessions: 1 })],
+        max_sessions: 12,
+        warm_workers: 1,
+        // Every part of a spec: what the editor has fields for, what it has none for
+        // (identities, GitHub, prices, a server's credential settings, a field the console
+        // has never heard of) and what the plane writes itself (`sessionsPerPod`).
+        spec: {
+          llm: {
+            endpoint: "https://llm-gw.example.com/v1",
+            provider: "openai",
+            model: "glm-5.2",
+            smallModel: "qwen3.6-35b",
+            secretRef: { name: "llm-gateway", key: "api-key" },
+            prices: { "glm-5.2": { input: 0.5, output: 1.5 } },
+          },
+          egress: { fqdns: ["llm-gw.example.com", "mcp.example.com"], gitHosts: ["github.example.com"] },
+          storage: { storageClassName: "fast-ssd" },
+          mcpServers: [
+            {
+              name: "jira",
+              url: "https://mcp.example.com/jira",
+              credentialRef: "JIRA_TOKEN",
+              header: "authorization",
+              timeoutMs: 30000,
+              secretRef: { name: "jira-mcp", key: "token" },
+              credentialMode: "profile",
+            },
+          ],
+          mcpIdentities: [
+            {
+              server: "wiki",
+              clientId: "troupe-dev",
+              scope: "wiki.read",
+              tokenUrl: "https://login.example.com/oauth2/token",
+              transitKey: "troupe-dev",
+              keyVersion: 2,
+              algorithm: "RS256",
+            },
+          ],
+          github: { permissions: { contents: "write", pull_requests: "write", checks: "read" } },
+          configBundleChannel: "stable",
+          orgMount: true,
+          repositoryOverridesBundle: false,
+          personalTools: "allow",
+          sandboxHints: { tmpfs: "1Gi" },
+          sessionsPerPod: 4,
+        },
       },
       {
         name: "ux",
@@ -1061,18 +1794,22 @@ export function exampleAdmin(): FakeAdmin {
         missing_guarantees: [],
         unenforced: false,
         pods: [pod("troupe-w-ux-0", 0, { active_sessions: 2 })],
+        warm_workers: 1,
+        spec: { egress: { fqdns: ["mcp.example.com"] }, configBundleChannel: "stable", personalTools: "forbid" },
       },
       {
         name: "heavy",
         size_class: "heavy",
         replicas: 2,
         sessions_per_pod: 2,
-        channel: "stable",
+        channel: "canary",
         image: "registry.example.com/troupe/worker:0.17.0-beta",
         provisioner: "kubernetes",
         missing_guarantees: [],
         unenforced: false,
-        pods: [pod("troupe-w-heavy-0", 0, { capacity: 2 })],
+        pods: [pod("troupe-w-heavy-0", 0, { capacity: 2, bundle_hash: "sha256:c4a7e9d2" })],
+        max_sessions: 4,
+        spec: { configBundleChannel: "canary" },
       },
       {
         name: "build-box",
@@ -1118,6 +1855,97 @@ export function exampleAdmin(): FakeAdmin {
       session("s-4b81d005", "bob@example.com", "design", "ux", { state: "dormant", last_active_at: "2026-10-08T10:00:00Z" }),
     ],
   });
+  // Two versions of stable, the second current and on every pod; one of canary, which
+  // the heavy profile follows.
+  const reviewer = { name: "pr-reviewer", definition: "---\nmode: primary\ndescription: Reviews a pull request against the checklist.\n---\nYou review pull requests.", skills: ["review-checklist"] };
+  const checklist = { name: "review-checklist", description: "How we review.", files: { "SKILL.md": "---\nname: review-checklist\n---\nRead the diff twice.", "checklist.md": "- tests\n- docs" } };
+  const jira = { name: "jira", url: "https://mcp.example.com/jira", credential_ref: "JIRA_TOKEN", permission: "ask", tools: ["search_issues", "get_issue"] };
+  admin.bundles.set("stable", [
+    {
+      channel: "stable",
+      version: 1,
+      hash: "sha256:9b2f41aa",
+      content: { schema: 1, agents: [reviewer], skills: [checklist], mcp_servers: [jira] },
+      published_at: "2026-10-02T10:00:00Z",
+      published_by: "alice@example.com",
+      retired_at: null,
+    },
+    {
+      channel: "stable",
+      version: 2,
+      hash: "sha256:5d1c0b7e",
+      content: {
+        schema: 1,
+        agents: [reviewer, { name: "docs-writer", definition: "---\nmode: subagent\ndescription: Writes the docs a change needs.\n---\nYou write docs." }],
+        skills: [checklist],
+        mcp_servers: [jira, { name: "wiki", url: "https://wiki.example.com/mcp", credential_mode: "client_credentials", permission: "auto" }],
+      },
+      published_at: "2026-10-09T14:20:00Z",
+      published_by: "alice@example.com",
+      retired_at: null,
+    },
+  ]);
+  admin.bundles.set("canary", [
+    {
+      channel: "canary",
+      version: 1,
+      hash: "sha256:c4a7e9d2",
+      content: { schema: 1, agents: [reviewer], skills: [checklist], mcp_servers: [] },
+      published_at: "2026-10-11T08:00:00Z",
+      published_by: "alice@example.com",
+      retired_at: null,
+    },
+  ]);
+  // Core may use the reviewer on dev: a version without it takes that away from core.
+  admin.entitlements.push({ team: "core", profile: "dev", kind: "agent", name: "pr-reviewer", mode: "allow" });
+  const nightly = {
+    principal: "svc:core/nightly",
+    profile: "dev",
+    agent: "pr-reviewer",
+    source: { kind: "schedule", cron: "0 3 * * 1-5", tz: "UTC" },
+    prompt_template: "Update the dependencies of {{trigger.name}} and open a pull request.",
+    terms: { max_turns: 80, approvals: "deny" },
+    visibility: "team",
+    review: "required",
+    notify: ["dan@example.com"],
+    notify_url: null,
+    concurrency: 1,
+  };
+  admin.triggerRows.push(
+    {
+      id: "trg-core-nightly-deps",
+      team: "core",
+      name: "nightly-deps",
+      enabled: true,
+      ...nightly,
+      last_fired_at: "2026-10-13T03:00:00Z",
+      created_by: "dan@example.com",
+      updated_at: "2026-10-05T12:00:00Z",
+      revisions: [],
+    },
+    {
+      id: "trg-design-weekly-digest",
+      team: "design",
+      name: "weekly-digest",
+      principal: "svc:design/digest",
+      profile: "ux",
+      agent: null,
+      enabled: false,
+      source: { kind: "webhook", provider: "github" },
+      prompt_template: "Summarise what changed in {{event.repository}} this week.",
+      terms: null,
+      visibility: "team",
+      review: "none",
+      notify: [],
+      notify_url: "https://hooks.example.com/troupe",
+      concurrency: 2,
+      last_fired_at: null,
+      created_by: "bob@example.com",
+      updated_at: "2026-10-08T09:00:00Z",
+      revisions: [],
+    },
+  );
+  for (const row of admin.triggerRows) admin.revise(row, row.created_by, row.updated_at);
   admin.stored.set("client_model_default", "glm-5.2");
   admin.stored.set("client_enforced", { approvals: "wait", max_turns: 200 });
   admin.stored.set("default_erase_after_days", 180);

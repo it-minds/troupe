@@ -17,7 +17,7 @@
 // a token, and the web bundle speaks to it with the same client it uses for a worker.
 
 use std::net::{SocketAddr, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -49,7 +49,10 @@ pub(crate) fn home() -> Option<PathBuf> {
 }
 
 pub(crate) fn read_endpoint() -> Option<DaemonEndpoint> {
-    let path = discovery_path()?;
+    read_endpoint_at(&discovery_path()?)
+}
+
+fn read_endpoint_at(path: &Path) -> Option<DaemonEndpoint> {
     let contents = std::fs::read_to_string(path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&contents).ok()?;
     let ws = json.get("ws")?;
@@ -110,17 +113,32 @@ fn candidates(binary: Option<String>) -> Vec<(String, Vec<&'static str>)> {
     out
 }
 
+/// The command that starts a daemon: detached from this process's console and streams,
+/// because the daemon outlives the window that started it and its output is its own log,
+/// not ours.
+///
+/// On Windows it is also started with no console window. The app has no console, so a
+/// console program it starts is given a new one, and `troupe-daemon.cmd` is a batch file
+/// run by `cmd.exe`: without `CREATE_NO_WINDOW` that is a black window standing open for
+/// as long as the daemon runs.
+fn daemon_command(program: &str, args: &[&str]) -> Command {
+    let mut command = Command::new(program);
+    command.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    command
+}
+
 fn spawn_any(binary: Option<String>) -> Result<String, String> {
     let mut tried = Vec::new();
     for (program, args) in candidates(binary) {
-        // Detached from this process's console and streams: the daemon outlives the
-        // window that started it, and its output is its own log, not ours.
-        let attempt = Command::new(&program)
-            .args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
+        let attempt = daemon_command(&program, &args).spawn();
         match attempt {
             Ok(_child) => return Ok(format!("{program} {}", args.join(" "))),
             Err(e) => tried.push(format!("{program}: {e}")),
@@ -141,21 +159,34 @@ fn spawn_any(binary: Option<String>) -> Result<String, String> {
 /// idempotent and rewrites the file. Then wait: the process is up before the file is
 /// written, and a `null` because the answer was a second away would send the person to a
 /// dialog asking them to type a port.
+///
+/// This is what the app calls first, at launch and at Find, and not `daemon_endpoint`: a
+/// read returns the dead port of a daemon that was killed, which only this replaces.
 #[tauri::command]
 pub fn daemon_start(binary: Option<String>) -> Result<Option<DaemonEndpoint>, String> {
-    if let Some(running) = read_endpoint() {
+    start_with(read_endpoint, || spawn_any(binary), Duration::from_secs(30))
+}
+
+/// `daemon_start` with where the file is read from and how a daemon is started given to
+/// it, so a test can leave a stale file somewhere of its own and start something there.
+fn start_with(
+    read: impl Fn() -> Option<DaemonEndpoint>,
+    spawn: impl FnOnce() -> Result<String, String>,
+    wait: Duration,
+) -> Result<Option<DaemonEndpoint>, String> {
+    if let Some(running) = read() {
         if alive(&running) {
             return Ok(Some(running));
         }
     }
 
-    let started = spawn_any(binary)?;
+    let started = spawn()?;
 
     // Whatever the file says once something answers on it: a new daemon rewrites the
     // file, and one that happened to get the old port back answers on the old one.
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + wait;
     while Instant::now() < deadline {
-        if let Some(endpoint) = read_endpoint() {
+        if let Some(endpoint) = read() {
             if alive(&endpoint) {
                 return Ok(Some(endpoint));
             }
@@ -163,5 +194,134 @@ pub fn daemon_start(binary: Option<String>) -> Result<Option<DaemonEndpoint>, St
         std::thread::sleep(Duration::from_millis(200));
     }
 
-    Err(format!("`{started}` started but did not publish a working endpoint within thirty seconds"))
+    Err(format!("`{started}` started but did not publish a working endpoint within {} seconds", wait.as_secs()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::net::TcpListener;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("troupe-desktop-daemon-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("daemon.json")
+    }
+
+    /// What a daemon publishes: its loopback WebSocket among its transports.
+    fn publish(file: &Path, port: u16, token: &str) {
+        let json = serde_json::json!({ "ws": { "port": port, "token": token }, "tcp": { "port": 1, "token": "x" } });
+        std::fs::write(file, json.to_string()).unwrap();
+    }
+
+    /// A port nothing listens on any more: one the kernel gave out and was handed back.
+    fn closed_port() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
+    // Issue #706: a daemon that was killed leaves its file behind, naming its port.
+    #[test]
+    fn a_daemon_json_naming_a_closed_port_has_a_daemon_started_over_it() {
+        let file = scratch("stale");
+        let dead = closed_port();
+        publish(&file, dead, "the-old-token");
+
+        // `troupe-daemon run`, as far as the file can tell: a new port, a new token.
+        let daemon = RefCell::new(None);
+        let found = start_with(
+            || read_endpoint_at(&file),
+            || {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                publish(&file, listener.local_addr().unwrap().port(), "the-new-token");
+                *daemon.borrow_mut() = Some(listener);
+                Ok("troupe-daemon run".into())
+            },
+            Duration::from_secs(5),
+        )
+        .unwrap()
+        .expect("an endpoint");
+
+        let started = daemon.borrow().as_ref().expect("a daemon was started").local_addr().unwrap().port();
+        assert_ne!(found.port, dead);
+        assert_eq!(found.port, started);
+        assert_eq!(found.token, "the-new-token");
+    }
+
+    #[test]
+    fn a_daemon_that_answers_is_returned_and_nothing_is_started() {
+        let file = scratch("alive");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        publish(&file, port, "the-token");
+
+        let found = start_with(|| read_endpoint_at(&file), || panic!("started a second daemon"), Duration::from_secs(5))
+            .unwrap()
+            .expect("an endpoint");
+
+        assert_eq!((found.port, found.token.as_str()), (port, "the-token"));
+    }
+
+    #[cfg(windows)]
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetConsoleProcessList(list: *mut u32, count: u32) -> u32;
+    }
+
+    /// The processes attached to this test's console, or `None` where it has none.
+    #[cfg(windows)]
+    fn on_this_console() -> Option<Vec<u32>> {
+        let mut list = vec![0u32; 256];
+        // SAFETY: the buffer holds `list.len()` entries and the call writes no more.
+        let count = unsafe { GetConsoleProcessList(list.as_mut_ptr(), list.len() as u32) } as usize;
+        if count == 0 || count > list.len() {
+            return None;
+        }
+        list.truncate(count);
+        Some(list)
+    }
+
+    // A daemon started from the app had a console window of its own standing open: the
+    // `.cmd` shim is `cmd.exe`, and a console program started without `CREATE_NO_WINDOW`
+    // shares its parent's console or, from the app, which has none, gets a new one.
+    #[cfg(windows)]
+    #[test]
+    fn the_daemon_is_started_with_no_console_window() {
+        let Some(_) = on_this_console() else {
+            eprintln!("this test has no console to compare with; nothing to check");
+            return;
+        };
+
+        let mut child = daemon_command("cmd.exe", &["/d", "/c", "ping -n 4 127.0.0.1 >nul"]).spawn().unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let attached = on_this_console().unwrap_or_default();
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(
+            !attached.contains(&child.id()),
+            "the daemon's command was started on this process's console rather than with none of its own"
+        );
+    }
+
+    #[test]
+    fn no_file_has_a_daemon_started() {
+        let file = scratch("absent");
+        let daemon = RefCell::new(None);
+        let found = start_with(
+            || read_endpoint_at(&file),
+            || {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                publish(&file, listener.local_addr().unwrap().port(), "the-token");
+                *daemon.borrow_mut() = Some(listener);
+                Ok("troupe-daemon run".into())
+            },
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert_eq!(found.map(|e| e.token), Some("the-token".to_string()));
+    }
 }

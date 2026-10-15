@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { AdminTeam } from "@troupe/client";
+import type { AdminGroup, AdminTeam } from "@troupe/client";
 import { href } from "../route";
 import { recorded, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Loaded, Preview, Status, money } from "./bits";
@@ -116,6 +116,21 @@ function nameFrom(group: { external_id: string; display_name: string | null }): 
 }
 
 /**
+ * What the plane says about a group that looks held twice: the same display name under
+ * another id, and the mismatch that most likely made it. Nothing merges the two, since only
+ * the provider knows which id is right, so the person choosing is told before they choose.
+ */
+function Twice({ group }: { group: AdminGroup | undefined }): JSX.Element | null {
+  if (!group?.looks_duplicated) return null;
+  const { others, likely } = group.looks_duplicated;
+  return (
+    <p className="note" role="note">
+      {group.display_name ?? group.external_id} looks held twice: {others.join(", ")} has the same name. Most likely {likely}.
+    </p>
+  );
+}
+
+/**
  * Make a group a team. The plane keys a team on its name and, given a name that is
  * already a team's, links the group into that team and changes it rather than making a
  * new one; so a name already taken is refused here, before anything is sent.
@@ -178,12 +193,14 @@ function Enable({ teams, onApplied }: { teams: AdminTeam[]; onApplied: () => voi
                         <option key={g.external_id} value={g.external_id}>
                           {g.display_name ? `${g.display_name} (${g.external_id})` : g.external_id}
                           {drawing.length ? ` · ${drawing.join(", ")} ${drawing.length === 1 ? "draws" : "draw"} on it` : ""}
+                          {g.looks_duplicated ? " · looks held twice" : ""}
                         </option>
                       );
                     })}
                   </select>
                 )}
               </Field>
+              <Twice group={all.find((x) => x.external_id === form.group)} />
               <Field
                 label="Team name"
                 hint="Lowercase letters, digits and dashes, starting and ending with a letter or digit, at most 58 characters: it becomes part of a Kubernetes name."

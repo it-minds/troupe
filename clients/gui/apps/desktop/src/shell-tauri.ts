@@ -60,22 +60,22 @@ function keychainStore(): TokenStore {
 /**
  * The daemon on this computer, started if it is not running.
  *
- * Reading first and starting second, because the common case is that it is already up —
- * a `troupe` session in a terminal, or the last time this app was opened. Starting is
- * safe to ask for regardless: the daemon takes a lock, so two callers produce one
- * daemon rather than a race.
+ * Straight to `daemon_start`, which returns a daemon that answers where `daemon.json`
+ * says without starting anything, and starts one over a file that names a port nothing
+ * listens on. Reading the file first returned that dead port whenever a daemon had been
+ * killed or had crashed, since only a clean stop removes the file, and the app dialled
+ * it at every launch and at every press of Find. Starting is safe to ask for regardless:
+ * the daemon takes a lock, so two callers produce one daemon rather than a race.
  */
 async function findDaemon(): Promise<DaemonEndpoint | null> {
-  const running = await readDaemon();
-  if (running) return running;
   const { invoke } = await import("@tauri-apps/api/core");
   return (await invoke<DaemonEndpoint | null>("daemon_start", { binary: null })) ?? null;
 }
 
 /**
- * What `daemon.json` says now, and nothing started: the first half of `findDaemon`, and
- * what the client reads before dialling again after the socket dropped, which is how a
- * daemon that restarted on a new port with a new token is found without a person.
+ * What `daemon.json` says now, and nothing started or probed: what the client reads
+ * before dialling again after the socket dropped, which is how a daemon that restarted
+ * on a new port with a new token is found without a person.
  */
 async function readDaemon(): Promise<DaemonEndpoint | null> {
   const { invoke } = await import("@tauri-apps/api/core");

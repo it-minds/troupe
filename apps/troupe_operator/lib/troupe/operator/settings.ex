@@ -11,6 +11,15 @@ defmodule Troupe.Operator.Settings do
   defstruct plane_control_host: "troupe-plane-control.troupe-system.svc",
             plane_control_port: 4001,
             plane_namespace: "troupe-system",
+            # Where the CA of the plane's control certificate is, as the chart mounts it in
+            # the operator: `ca.crt` alone, out of the Secret the plane serves from, and never
+            # its key. Set, every worker namespace is given that CA and every pod dials the
+            # control port with TLS against it, checking the name it dials; unset, pods dial
+            # in plaintext, as they did before.
+            plane_ca_path: nil,
+            # What that file holds, read again on every pass (`with_plane_ca/1`), so a CA
+            # cert-manager renews reaches the worker namespaces at the next one.
+            plane_ca: nil,
             bao_address: "http://openbao.troupe-system.svc:8200",
             # Whether the installation made an OpenBao role per profile (Decision 753).
             # Then each profile's pods log in as `troupe-worker-<profile>`, the role its
@@ -72,6 +81,14 @@ defmodule Troupe.Operator.Settings do
             # and refuses rather than runs.
             worker_seccomp_type: "RuntimeDefault",
             worker_seccomp_profile: nil,
+            # The name of the AppArmor profile, loaded on the nodes, that every worker
+            # container runs under (`Localhost`), or nil for the runtime's default. Where a
+            # node enforces AppArmor, the runtime's default profile refuses the mounts
+            # bubblewrap builds its sandbox with, and with no profile at all a kernel that
+            # restricts unprivileged user namespaces refuses the sandbox's uid map: under
+            # either a pod refuses every command. The chart ships a profile that allows the
+            # sandbox and loads it, and names it here; never `Unconfined`.
+            worker_apparmor_profile: nil,
             # Whether a worker pod runs in a user namespace of its own (`hostUsers: false`)
             # with its `/proc` unmasked (`procMount: Unmasked`). Bubblewrap mounts a fresh
             # `/proc` for the sandbox, and the kernel refuses that inside a user namespace
@@ -90,6 +107,32 @@ defmodule Troupe.Operator.Settings do
   def from_env do
     config = Application.get_env(:troupe_operator, :settings, [])
     struct(__MODULE__, config)
+  end
+
+  @doc """
+  These settings with the plane's CA as it is now, read from `plane_ca_path`: the
+  certificates in the file, written out again on their own, so whatever else the file
+  might hold, a key above all, never reaches a worker namespace. `nil` where there is no
+  path, or no certificate in the file yet, as before cert-manager has issued one.
+  """
+  @spec with_plane_ca(t()) :: t()
+  def with_plane_ca(%__MODULE__{plane_ca_path: nil} = settings), do: %{settings | plane_ca: nil}
+
+  def with_plane_ca(%__MODULE__{plane_ca_path: path} = settings) do
+    certificates =
+      case File.read(path) do
+        {:ok, pem} ->
+          for {:Certificate, _der, :not_encrypted} = entry <- :public_key.pem_decode(pem),
+              do: entry
+
+        {:error, _reason} ->
+          []
+      end
+
+    case certificates do
+      [] -> %{settings | plane_ca: nil}
+      certificates -> %{settings | plane_ca: :public_key.pem_encode(certificates)}
+    end
   end
 
   @doc """
@@ -114,4 +157,16 @@ defmodule Troupe.Operator.Settings do
           "the worker's seccomp profile #{inspect(type)} is not Localhost with a path, " <>
             "RuntimeDefault or Unconfined"
   end
+
+  @doc """
+  The worker container's `appArmorProfile`, as these settings name it: the named profile
+  as `Localhost`, or nil, which leaves the field off and the container on the runtime's
+  default. Never `Unconfined`: a name is all these settings hold.
+  """
+  @spec worker_apparmor(t()) :: map() | nil
+  def worker_apparmor(%__MODULE__{worker_apparmor_profile: name})
+      when is_binary(name) and name != "",
+      do: %{"type" => "Localhost", "localhostProfile" => name}
+
+  def worker_apparmor(%__MODULE__{}), do: nil
 end

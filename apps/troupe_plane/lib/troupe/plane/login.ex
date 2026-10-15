@@ -32,6 +32,7 @@ defmodule Troupe.Plane.Login do
 
     with {:ok, subject} <- fetch_subject(claims, claim),
          :ok <- rekey(claims, claim, subject),
+         :ok <- adopt(subject, claim),
          {:ok, user} <- upsert(subject, claims),
          :ok <- sync_groups(user, groups_in(claims)) do
       {:ok, user, Identity.teams_for(user)}
@@ -42,9 +43,20 @@ defmodule Troupe.Plane.Login do
   # sends whoever reads it looking in the wrong place.
   defp fetch_subject(claims, claim) do
     case Map.get(claims, claim) do
-      subject when is_binary(subject) and subject != "" -> {:ok, subject}
+      subject when is_binary(subject) and subject != "" -> unreserved(subject, claim)
       _ -> {:error, {:no_subject, claim}}
     end
+  end
+
+  # The plane's own subjects: a removed person's sessions are owned by `removed:<id>` and a
+  # service principal is `svc:<team>/<name>`. Somebody signing in under either would be
+  # the owner of what it names, so a subject that starts with one is no person's.
+  @reserved ["removed:", "svc:"]
+
+  defp unreserved(subject, claim) do
+    if String.starts_with?(subject, @reserved),
+      do: {:error, {:reserved_subject, claim}},
+      else: {:ok, subject}
   end
 
   # A plane switched to another claim already knows its people by their `sub`. Somebody
@@ -69,6 +81,23 @@ defmodule Troupe.Plane.Login do
 
       _same_or_absent ->
         :ok
+    end
+  end
+
+  # Somebody nobody is under, whose subject is the `externalId` SCIM gave a row, is that
+  # row's person: SCIM names a person by the value the subject claim carries, and their row
+  # is under another value only because a sign-in under another claim moved it there. They
+  # are moved back once, here, as a re-key moves anybody, rather than made a second time.
+  defp adopt(subject, claim) do
+    with nil <- Identity.get_user(subject),
+         %User{subject: old} <- Identity.get_user_by_external_id(subject) do
+      case Identity.rekey(old, subject) do
+        {:ok, :none} -> :ok
+        {:ok, outcome} -> announce(outcome, old, subject, claim)
+        {:error, reason} -> {:error, {:rekey_failed, reason}}
+      end
+    else
+      _known_or_nobody -> :ok
     end
   end
 

@@ -534,6 +534,32 @@ defmodule Troupe.Plane.AdminTest do
       # the thing an operator most needs to see.
       assert event.detail["llm_secret_ref"] == "troupe-llm-key"
     end
+
+    # An ordinary profile's diff names `secretRef.key`, `tokenUrl` and `transitKey`, which
+    # are names and addresses, and every save logged an error for redacting them.
+    test "redacting what a name looks like is not logged as an error", _context do
+      log =
+        ExUnit.CaptureLog.capture_log([level: :info], fn ->
+          {:ok, _event} =
+            Audit.record("someone@example.test", "profile.put", "dev", %{
+              "spec.llm" => %{
+                "from" => nil,
+                "to" => %{"secretRef" => %{"name" => "llm", "key" => "api-key"}}
+              },
+              "spec.mcpIdentities" => %{
+                "from" => nil,
+                "to" => [
+                  %{
+                    "tokenUrl" => "https://login.example.test/token",
+                    "transitKey" => "troupe-w-identity-dev.jira"
+                  }
+                ]
+              }
+            })
+        end)
+
+      refute log =~ "redacted"
+    end
   end
 
   describe "config bundles" do

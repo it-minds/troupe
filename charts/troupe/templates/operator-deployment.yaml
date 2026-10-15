@@ -1,4 +1,5 @@
 {{- include "troupe.worker.seccomp.validate" . }}
+{{- include "troupe.worker.apparmor.validate" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -67,6 +68,13 @@ spec:
               value: "troupe-plane-control.{{ .Values.namespace }}.svc"
             - name: TROUPE_PLANE_CONTROL_PORT
               value: {{ .Values.plane.controlPort | quote }}
+            {{- if and .Values.plane.enabled .Values.plane.controlTls.enabled }}
+            # The control certificate's CA, which the operator copies into every worker
+            # namespace for the pods to dial the control port with TLS against. Read on
+            # every pass, so a renewed CA reaches the namespaces at the next.
+            - name: TROUPE_PLANE_CONTROL_CA
+              value: /etc/troupe/plane-control-ca/ca.crt
+            {{- end }}
             - name: TROUPE_OBJECT_SECRET_NAME
               value: {{ .Values.objectStore.secretName | quote }}
             - name: TROUPE_MAX_PORTS
@@ -123,6 +131,11 @@ spec:
               value: {{ if eq .Values.worker.seccomp.type "Localhost" }}{{ .Values.worker.seccomp.localhostProfile | quote }}{{ else }}""{{ end }}
             # A user namespace for every worker pod and its `/proc` unmasked, without which
             # bubblewrap cannot mount the sandbox's own (`worker.userNamespaces`).
+            # The AppArmor profile, by name, the operator puts on every worker container
+            # (`worker.appArmor`); empty leaves the runtime's default, which refuses the
+            # sandbox's mounts where a node enforces AppArmor.
+            - name: TROUPE_WORKER_APPARMOR_PROFILE
+              value: {{ if .Values.worker.appArmor.enabled }}{{ .Values.worker.appArmor.profile | quote }}{{ else }}""{{ end }}
             - name: TROUPE_WORKER_USER_NAMESPACES
               value: {{ .Values.worker.userNamespaces | quote }}
             - name: POD_NAME
@@ -149,6 +162,24 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if and .Values.plane.enabled .Values.plane.controlTls.enabled }}
+            - name: plane-control-ca
+              mountPath: /etc/troupe/plane-control-ca
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if and .Values.plane.enabled .Values.plane.controlTls.enabled }}
+        # `ca.crt` alone out of the plane's Secret: the kubelet writes only the keys listed,
+        # so the certificate's key never reaches this pod. Optional, as it is for the plane,
+        # so the operator starts before cert-manager has issued the certificate; the pods
+        # it makes in the meantime wait for the CA rather than dial without it.
+        - name: plane-control-ca
+          secret:
+            secretName: {{ .Values.plane.controlTls.secretName }}
+            optional: true
+            items:
+              - key: ca.crt
+                path: ca.crt
+        {{- end }}

@@ -410,9 +410,6 @@ Found by the chunk 13 fixers of slots A13, D13 and E13 (PRs #339, #345, #343), 2
 - A refused `POST` or `PUT` answers `400` as `{"status", "detail"}` without SCIM's error
   schema, and a user body with neither `externalId` nor `userName` (or a group body with
   neither `externalId` nor `id`) raises and answers `500`.
-- A deleted user stays visible to `GET` by id and to filters (the plane deactivates rather
-  than deletes, for the audit trail and a later reactivation); RFC 7644 section 3.6 has a
-  `404` and leaves it out. That is deliberate but no decision says so.
 - Responses carry `application/json`, not `application/scim+json`.
 - Unconfirmed: a `POST` or `PUT` passes `active` to the changeset unread, so a string
   `"False"` is probably refused where a `PATCH` reads it as false.
@@ -1382,18 +1379,12 @@ Found by the chunk 33 fixers, 2026-10-13.
   - `git_push` commits the whole working tree (`git add -A`). Anything the agent can read and copy into the workspace, a secret on one of its mounts included, can land on a `troupe/*` branch, which is public for a public repository. Until a later slice's policy can refuse public repositories or restrict paths, grant the App private repositories only.
   - CI output reaches the agent fenced as data, but text in it can still steer the agent within its own branch, pull request and comments; the rules enforced in code hold.
   - A profile that grants neither checks nor statuses gets no round counting, only its budget.
-  - If the plane can't record a push after GitHub moved the branch, the session's next push is refused as "commits this session did not push", and a person has to sort it out.
-  - If the plane can't take the clone's base commit, that session can never push; the worker only logs a warning.
   - Installation tokens still aren't revoked when a session goes dormant (D126).
-- **The plane's profile editor.** The LiveView editor rebuilds `spec` from its form fields, so saving a profile drops `spec.mcpIdentities` without saying so; only `github` is carried through. The new console has no profile editor yet. (medium)
 - **Control TLS** (Decision 893).
-  - The TLS sniff uses `:gen_tcp.unrecv/2`, which is undocumented and works only on the default inet backend. A release switched to `inet_backend: socket` would refuse every TLS handshake.
-  - Worker pods still enrol in plaintext. The operator could copy `ca.crt` into each worker namespace and set `TROUPE_PLANE_CA_PATH`, after which plaintext could be refused for pods too.
   - `OwnerOnly` was added to the TUI's harness doors and the TUI's own `icacls` code removed, with no TUI decision recording it.
 - **Team admins and namespaces** (Decisions 896, 897).
   - A team admin's audit list leaves out `profile.put`, `host.*` and `pod.drain` as rows about the plane as a whole, so a team admin no longer sees changes to profiles their team is granted. Whether to show them is a product question.
   - The enrolment prefix comes from the chart's `policy.namespacePrefix`, not the live TroupePolicy; a separately installed policy with another prefix gets its pods refused (with a log line).
-  - `admin.team.enable` on a team's own group with new settings still changes them without saying so.
   - D124's other half is open: one connection for every fleet call.
 - **The scratchpad** (Decision 895).
   - A session near the compaction threshold compacts mid-turn and then reads the same document again.
@@ -1402,17 +1393,51 @@ Found by the chunk 33 fixers, 2026-10-13.
   - Agents still try `grep` and `edit_file` on `scratch:` paths.
   - The desktop app draws a `patch` call as a generic tool row.
   - The "only when asked, or past about 80 lines" wording hasn't been measured live.
-- **Providers** (Decision 894). The GUI's fake daemon keeps its own copy of the provider types; generating it from `ProviderTypes.wire/0` would keep it from drifting.
 - **Tests.**
-  - The TUI's `InterruptTest` ("a console that cannot be read...") fails now and then with `:noproc`, a race in its own setup.
   - Plane suites run at once against the shared `troupe_plane_test` database deadlock (`40P01`).
   - The core and gateway suites in one VM make gateway tests fail on sessions core left behind; CI runs them apart.
   - The gateway's `PrivateTest` (two tests) fails under load.
-  - The cluster suite's UpgradeTest changes `commonLabels`, which no chart template uses, so its upgrade "that renders every template differently" only reruns the hook jobs.
   - A `helm upgrade` from `dev/kind/values.yaml` alone, on a development cluster `scripts/remote-up` set up with a gateway URL, narrows the policy back to the placeholder host, after which every write to the dev profile is refused.
 - **History.** Merge commits b41e250f and 13f907b3 keep git's `# Conflicts:` lines in their messages.
 
 Found by the chunk 34 fixers, 2026-10-13.
+
+### D128 - AppArmor, identity, control TLS and the console after chunk 35 (low)
+
+- **Worker AppArmor** (Decision 898).
+  - The profile is written for `abi <abi/3.0>`, because the release images' parser is Debian 12's AppArmor 3.0.8, and user namespaces are allowed because that ABI doesn't mediate them. An explicit `userns,` rule (and `deny io_uring,`) waits for images on Debian 13.
+  - `ci.yml`'s test job still lifts `kernel.apparmor_restrict_unprivileged_userns` on its runner for the host bubblewrap tests; loading the worker profile there and running bwrap under it would let the lift go.
+  - kind still runs workers with seccomp `Unconfined`, so CI never starts bubblewrap under the shipped seccomp profile.
+  - On a 6.17 kernel, containerd's default profile as Debian 12's parser compiles it refuses every unix socket; kind's nodes now take the host's compile. A node whose runtime compiles its default with an old parser would meet the same.
+- **Identity** (Decision 899).
+  - There is no admin action to fold a claim-named group into SCIM's UUID group, so the stale one stays, empty.
+  - The console flags look-alike groups only where a group is enabled as a team, not on a team's "Link a group" picker, and the people half is API-only (`admin.identity.duplicates`).
+  - Session lists show a removed owner as `removed:<uuid>`, not the tombstone's display name.
+  - Triggers' `notify` lists and usage records still name a removed subject, so a person later provisioned under it gets those notifications and that month's spend.
+  - SCIM `PUT /Users/<id>` keys on the body for an id that exists, so a body naming another subject updates that one; and a SCIM push can still make a `removed:` or `svc:` subject (inert, since sign-in refuses them).
+  - A session read-only because its grant was revoked, whose index row is gone entirely, rebuilds as dormant.
+- **Control TLS** (Decision 902).
+  - `plane.controlTls.requireTls` is off by default in 0.19 and turns on in 0.20.
+  - A worker namespace whose `troupe-plane-ca` was never written shows nothing on the WorkerProfile; a `PlaneCAMissing` condition would.
+  - With `requireTls` on, a pod still dialling plaintext is logged once per connection, every second or two, until it is replaced.
+  - `scripts/verify-local.ps1` can't pass on scratch homes: it compares the listening process's path with `$env:LOCALAPPDATA\Programs`.
+  - OTP 28.5's `:inet.getfd/1` raises on an `inet_backend: socket` socket (upstream).
+- **The console** (Decision 901).
+  - The admin API serves neither the provider types nor the size classes, so the console takes the provider as free text and offers two sizes it knows, short of Decision 894's one list.
+  - A webhook trigger has no key until one is made on its row; whether `trigger.put` should mint one at create is open.
+  - Overview's profile links still go to the previous console's Workers page.
+  - `Team.tsx` keeps its own copy of `useChange`, which now lives in `bits.tsx`.
+- **The audit** replaces `secretRef.key`, `tokenUrl` and `transitKey` values with `[redacted]` in profile diffs, so changes to those names don't show.
+- **The desktop app.**
+  - `daemon_start` is a synchronous Tauri command, so the window doesn't repaint for up to 30 s while it starts a daemon after a crash.
+  - `alive` checks only that something accepts on the port; a stale port another program took reads as a running daemon.
+  - CI runs no `cargo test` for the desktop crate, and nothing checks Rust formatting.
+- **Tests.**
+  - The worker's `IndexRebuildTest` logs dozens of errors from earlier runs' session prefixes left in MinIO's test bucket.
+  - The fake GitHub asks `contents: write` for every `git/*` call, GET included.
+  - PanelTest's provisioners-page test failed once and passed on the next run.
+
+Found by the chunk 35 fixers, 2026-10-14.
 
 ## Taken
 

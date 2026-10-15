@@ -48,10 +48,13 @@ the worker admits by itself. A page whose origin is not here gets no socket.
 {{- fail (printf "plane.replicas is %d but plane.distribution is %q: replicas that do not form an Erlang cluster each place sessions as if alone. Set plane.distribution to \"name\", or plane.replicas to 1." (int .Values.plane.replicas) .Values.plane.distribution) }}
 {{- end }}
 {{- $tls := .Values.plane.controlTls }}
-{{- range $key := list "enabled" "certManager" }}
+{{- range $key := list "enabled" "certManager" "requireTls" }}
 {{- if not (kindIs "bool" (get $tls $key)) }}
 {{- fail (printf "plane.controlTls.%s is %v (%s), and it is true or false: a string such as \"false\" would read as on." $key (get $tls $key) (kindOf (get $tls $key))) }}
 {{- end }}
+{{- end }}
+{{- if and $tls.requireTls (not $tls.enabled) }}
+{{- fail "plane.controlTls.requireTls is true and plane.controlTls.enabled is false: a control port that takes TLS only needs a certificate, or no worker can enrol." }}
 {{- end }}
 {{- if and $tls.enabled (not $tls.secretName) }}
 {{- fail "plane.controlTls.secretName is empty: it names the Secret the control port's certificate is in, which the plane mounts." }}
@@ -90,6 +93,27 @@ profile's own directory from the host, and a path with `..` in it would mount an
 {{- if or (not (regexMatch "^/[A-Za-z0-9._/-]*[A-Za-z0-9._-]$" $dir)) (contains ".." $dir) }}
 {{- fail (printf "worker.seccomp.install.kubeletSeccompDir is %q: it is the absolute path of the kubelet's seccomp directory on the nodes, /var/lib/kubelet/seccomp unless the kubelet's --root-dir says otherwise." $dir) }}
 {{- end }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
+The worker container's AppArmor profile. Refused here rather than in the cluster: a string
+"false" would read as on, and a name the kubelet does not take is a pod that never starts,
+said only in an event on each StatefulSet. Only a name: the worker container is never
+Unconfined.
+*/}}
+{{- define "troupe.worker.apparmor.validate" -}}
+{{- $apparmor := .Values.worker.appArmor -}}
+{{- if not (kindIs "bool" $apparmor.enabled) }}
+{{- fail (printf "worker.appArmor.enabled is %v (%s), and it is true or false: a string such as \"false\" would read as on." $apparmor.enabled (kindOf $apparmor.enabled)) }}
+{{- end }}
+{{- if not (kindIs "bool" $apparmor.install.enabled) }}
+{{- fail (printf "worker.appArmor.install.enabled is %v (%s), and it is true or false: a string such as \"false\" would read as on." $apparmor.install.enabled (kindOf $apparmor.install.enabled)) }}
+{{- end }}
+{{- if $apparmor.enabled }}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*$" ($apparmor.profile | default "" | toString)) }}
+{{- fail (printf "worker.appArmor.profile is %q: it is the name the worker's AppArmor profile is loaded under on the nodes, such as troupe-worker, starting with a letter or a digit." (toString $apparmor.profile)) }}
 {{- end }}
 {{- end }}
 {{- end -}}

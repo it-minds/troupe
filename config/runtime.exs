@@ -121,6 +121,21 @@ if config_env() == :prod do
       :ok
   end
 
+  # The AppArmor profile every worker container runs under (`worker.appArmor` in the
+  # chart), by the name it is loaded under on the nodes. Unset leaves the container on the
+  # runtime's default, as it always was. A name the kubelet would not take stops the
+  # operator here rather than in an event on every StatefulSet.
+  worker_apparmor_profile = presence.(System.get_env("TROUPE_WORKER_APPARMOR_PROFILE"))
+
+  if worker_apparmor_profile &&
+       not Regex.match?(~r/\A[A-Za-z0-9][A-Za-z0-9._-]*\z/, worker_apparmor_profile) do
+    raise """
+    TROUPE_WORKER_APPARMOR_PROFILE is #{inspect(worker_apparmor_profile)}, and it is the name \
+    of an AppArmor profile loaded on the nodes, letters, digits, dots, dashes and \
+    underscores (worker.appArmor.profile in the chart).
+    """
+  end
+
   config :troupe_operator,
     autostart: System.get_env("TROUPE_OPERATOR_AUTOSTART") == "true",
     settings: [
@@ -128,6 +143,10 @@ if config_env() == :prod do
         System.get_env("TROUPE_PLANE_CONTROL_HOST", "troupe-plane-control.troupe-system.svc"),
       plane_control_port: String.to_integer(System.get_env("TROUPE_PLANE_CONTROL_PORT", "4001")),
       plane_namespace: System.get_env("TROUPE_PLANE_NAMESPACE", "troupe-system"),
+      # The plane's control CA, `ca.crt` alone, as the chart mounts it from the plane's
+      # Secret (`plane.controlTls`). Set, every worker namespace is given it and every pod
+      # dials the control port with TLS; unset, pods dial in plaintext.
+      plane_ca_path: presence.(System.get_env("TROUPE_PLANE_CONTROL_CA")),
       bao_address: System.get_env("TROUPE_BAO_ADDR", "http://openbao.troupe-system.svc:8200"),
       bao_role_per_profile: System.get_env("TROUPE_BAO_WORKER_ROLE_PER_PROFILE") == "true",
       object_store_endpoint:
@@ -147,6 +166,7 @@ if config_env() == :prod do
         String.to_integer(System.get_env("TROUPE_DRAIN_TIMEOUT_SECONDS", "300")),
       worker_seccomp_type: worker_seccomp_type,
       worker_seccomp_profile: worker_seccomp_profile,
+      worker_apparmor_profile: worker_apparmor_profile,
       # A user namespace for every worker pod and its `/proc` unmasked
       # (`worker.userNamespaces` in the chart). Unset is off, as it always was.
       worker_user_namespaces: System.get_env("TROUPE_WORKER_USER_NAMESPACES") == "true",
@@ -406,6 +426,10 @@ if config_env() == :prod do
       # control Service, mounted by the chart. Unset, the port speaks plaintext alone and
       # no machine can be registered, since a machine enrols over TLS only.
       control_tls: presence.(System.get_env("TROUPE_PLANE_CONTROL_TLS_DIR")),
+      # Whether the port takes TLS only, pods included: a plaintext connection is closed
+      # before any of it is read. Unset is off, so pods made before the operator handed
+      # them the CA still enrol.
+      control_require_tls: System.get_env("TROUPE_PLANE_CONTROL_REQUIRE_TLS") == "true",
       groups_claim: System.get_env("TROUPE_GROUPS_CLAIM", "groups"),
       scim_token: presence.(System.get_env("TROUPE_SCIM_TOKEN")),
       platform_admin_group: System.get_env("TROUPE_PLATFORM_ADMIN_GROUP"),

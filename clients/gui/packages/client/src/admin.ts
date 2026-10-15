@@ -145,6 +145,73 @@ export interface AdminProfile {
   [k: string]: unknown;
 }
 
+/**
+ * Where a profile or a trigger comes from on a plane in `gitops` mode, and what the last
+ * pass made of it: `refused` (with the reasons), `missing` (a row the cluster has no
+ * resource for), `plane_only` or `unwritten`. Absent, or null, in `direct` mode.
+ */
+export interface GitopsState {
+  locked: boolean;
+  source: string | null;
+  /** The Trigger resource's name, for a trigger. */
+  resource?: string | null;
+  generation: number | null;
+  problem: string | null;
+  problem_generation?: number | null;
+  reasons: string[];
+}
+
+/** What the cluster policy makes of a profile: allowed, or the violations admission would refuse. */
+export interface PolicyVerdict {
+  "allowed?": boolean;
+  violations: unknown[];
+}
+
+/**
+ * One profile in full, as `admin.profile.get` answers: the summary the list gives, the
+ * spec as it was asked for (in the resource's own camelCase, every field of it), what the
+ * cluster policy makes of it, the channel's bundle and how far its pods have it, and any
+ * server the bundle calls as the profile that the profile names no identity for.
+ */
+export interface ProfileDetail {
+  profile: AdminProfile;
+  spec: Record<string, unknown> | null;
+  policy: PolicyVerdict | null;
+  bundle: { channel: string | null; published: number | null; "adopted?"?: boolean | null; pods?: number; current?: string[]; stale?: unknown[]; [k: string]: unknown } | null;
+  identity_problems: string[];
+  gitops: GitopsState | null;
+}
+
+/**
+ * A profile as `admin.profile.put` and `admin.profile.preview` take it: an
+ * administrator's answers, and the rest of the spec. The whole thing: absent fields are
+ * not kept by the plane.
+ */
+export interface ProfileWrite {
+  name: string;
+  image?: string;
+  size_class?: string;
+  max_sessions?: number | null;
+  warm_workers?: number;
+  provisioner?: string;
+  spec?: Record<string, unknown>;
+}
+
+/** What a profile would become, unwritten: the policy's verdict and the diff the audit would record. */
+export interface ProfilePreview {
+  policy: PolicyVerdict;
+  changes: AuditChanges;
+  mode: string;
+}
+
+/** What `admin.profile.put` answers: the profile, what moved, and how it reached the cluster. */
+export interface ProfilePut {
+  profile: AdminProfile;
+  changes: AuditChanges;
+  provisioning: unknown;
+  identity_problems: string[];
+}
+
 export interface TeamSpend {
   name: string;
   budget_micros: number | null;
@@ -165,6 +232,17 @@ export interface AdminTeamGroup {
   display_name: string | null;
   issuer?: string | null;
   linked_by?: string | null;
+}
+
+/**
+ * A group the identity provider has told the plane about. `looks_duplicated` is set when
+ * another group has its display name under a different id, which is usually a groups claim
+ * naming it by its name while SCIM pushes its id: the other ids, and that mismatch in words.
+ */
+export interface AdminGroup {
+  external_id: string;
+  display_name: string | null;
+  looks_duplicated?: { others: string[]; likely: string } | null;
 }
 
 /** A person in a team, with their own spend beside the team's. Read-only, always. */
@@ -305,8 +383,30 @@ export interface BundleSummary {
 
 export interface BundleDetail extends BundleSummary {
   content: Record<string, unknown>;
-  detail: Record<string, unknown>;
-  adoption: Array<{ profile?: string; pods?: number; on_hash?: number; [k: string]: unknown }>;
+  /** What the version carries, read whole: null for one an older plane published and this one cannot read. */
+  detail: {
+    schema?: unknown;
+    agents?: Array<{ name: string; mode?: string | null; description?: string | null; skills?: string[] | null }>;
+    skills?: Array<{ name: string; description?: string | null; files?: string[] }>;
+    mcp_servers?: Array<{ name: string; url: string; credential_ref?: string | null; header?: string | null; permission?: string | null; tools?: string[] | null; secret?: string | null }>;
+    [k: string]: unknown;
+  } | null;
+  /** Per profile on the channel: how many pods it has, which report this version, and which are behind. */
+  adoption: Array<{ profile?: string; pods?: number; current?: string[]; ahead?: string[]; stale?: Array<{ pod: string; reported: string | null }>; "adopted?"?: boolean; [k: string]: unknown }>;
+}
+
+/**
+ * What publishing a document would change against the channel's current version (or the
+ * one named as `from`), from the same diff the audit is written from, and which teams lose
+ * an entry they were allowed because this version no longer has it.
+ */
+export interface BundlePreview {
+  channel: string;
+  from: number | null;
+  hash: string;
+  changes: AuditChanges;
+  removed: Array<{ kind: string; name: string }>;
+  losers: Array<{ team: string; profile: string; kind: string; name: string }>;
 }
 
 export interface AuditRow {
@@ -344,12 +444,42 @@ export interface Trigger {
   prompt_template: string | null;
   terms: Record<string, unknown> | null;
   visibility: string | null;
-  review: boolean | null;
-  notify: Record<string, unknown> | null;
+  /** `required` or `none`: whether a person is expected to look at each run. */
+  review: string | boolean | null;
+  /** Subjects made collaborators on every run's session. */
+  notify: string[] | Record<string, unknown> | null;
+  notify_url?: string | null;
   concurrency: number | null;
   last_fired_at: string | null;
   created_by: string | null;
   updated_at: string | null;
+  /** Whether it has a webhook key and when that was minted; never the key. */
+  has_key?: boolean;
+  key_rotated_at?: string | null;
+  key_rotated_by?: string | null;
+  /** The revision its document now hashes to. */
+  revision?: TriggerRevision | null;
+  /** On a `gitops` plane: the resource it comes from, and what the last pass made of it. */
+  gitops?: GitopsState | null;
+}
+
+/** One revision of a trigger's document: what it froze, who made it and when. */
+export interface TriggerRevision {
+  id?: string;
+  revision: number;
+  hash: string;
+  reconstructed?: boolean;
+  created_by: string | null;
+  created_at: string | null;
+  /** In `admin.trigger.revisions`' answer: the document this revision froze. */
+  document?: Record<string, unknown>;
+}
+
+/** What `admin.trigger.put` answers: the trigger as it now is, what moved, and its revision. */
+export interface TriggerPut {
+  trigger: Trigger;
+  changes: AuditChanges;
+  revision: TriggerRevision;
 }
 
 export interface TriggerRun {
@@ -494,6 +624,31 @@ export class AdminApi {
     return this.rpc<AdminProfile[]>("admin.profiles.list", {});
   }
 
+  /** One profile in full: its spec, what policy makes of it, its bundle. A platform admin's. */
+  profile(name: string): Promise<ProfileDetail> {
+    return this.rpc<ProfileDetail>("admin.profile.get", { name });
+  }
+
+  /** Create or update one. The whole profile: the plane keeps nothing that is not sent. */
+  putProfile(profile: ProfileWrite): Promise<ProfilePut> {
+    return this.rpc<ProfilePut>("admin.profile.put", { profile });
+  }
+
+  /** What policy makes of a profile and what would change, writing nothing. */
+  previewProfile(profile: ProfileWrite): Promise<ProfilePreview> {
+    return this.rpc<ProfilePreview>("admin.profile.preview", { profile });
+  }
+
+  /** Remove one. Its sessions turn read-only and its grants go. Destructive: confirmed by its name. */
+  deleteProfile(name: string): Promise<{ profile: string; deleted: boolean; provisioning: unknown }> {
+    return this.rpc("admin.profile.delete", { name });
+  }
+
+  /** Whether the cluster's egress policy lets a pod reach an MCP server at this URL. */
+  mcpCheck(url: string): Promise<{ host: string; allowed: boolean }> {
+    return this.rpc("admin.mcp.check", { url });
+  }
+
   drainPod(workerId: string): Promise<unknown> {
     return this.rpc("admin.pod.drain", { worker_id: workerId });
   }
@@ -507,7 +662,7 @@ export class AdminApi {
   }
 
   /** Every group the identity provider has told the plane about: what a team links to. */
-  groups(): Promise<Array<{ external_id: string; display_name: string | null }>> {
+  groups(): Promise<AdminGroup[]> {
     return this.rpc("admin.groups.list", {});
   }
 
@@ -585,6 +740,11 @@ export class AdminApi {
     return this.rpc("admin.bundle.validate", { content });
   }
 
+  /** What publishing this would change, against the channel's current version or `from`, and who loses an entry. */
+  previewBundle(channel: string, content: Record<string, unknown>, from?: number): Promise<BundlePreview> {
+    return this.rpc<BundlePreview>("admin.bundle.preview", from === undefined ? { channel, content } : { channel, content, from });
+  }
+
   publishBundle(channel: string, content: Record<string, unknown>): Promise<BundleSummary> {
     return this.rpc<BundleSummary>("admin.bundle.publish", { channel, content });
   }
@@ -602,6 +762,7 @@ export class AdminApi {
     return this.rpc<AuditIntegrity>("admin.audit.verify", {});
   }
 
+  /** `direct`, where the plane writes profiles and triggers itself, or `gitops`, where a repository holds them and a write is refused. */
   provisioningMode(): Promise<{ mode?: string } | string> {
     return this.rpc("admin.provisioning.mode", {});
   }
@@ -696,12 +857,17 @@ export class AdminApi {
   }
 
   /** Upsert by team and name; partial on update, so `{enabled: false}` is a switch-off. */
-  putTrigger(trigger: Partial<Trigger> & { team: string; name: string }): Promise<unknown> {
-    return this.rpc("admin.trigger.put", { trigger });
+  putTrigger(trigger: Partial<Trigger> & { team: string; name: string }): Promise<TriggerPut> {
+    return this.rpc<TriggerPut>("admin.trigger.put", { trigger });
   }
 
   deleteTrigger(team: string, name: string): Promise<unknown> {
     return this.rpc("admin.trigger.delete", { team, name });
+  }
+
+  /** Every revision of a trigger, newest first, each with the document it froze. */
+  triggerRevisions(team: string, name: string): Promise<TriggerRevision[]> {
+    return this.rpc<TriggerRevision[]>("admin.trigger.revisions", { team, name });
   }
 
   runTrigger(team: string, name: string): Promise<TriggerRun> {

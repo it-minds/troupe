@@ -40,6 +40,10 @@ plane:
   controlTls:
     certManager: false
     secretName: troupe-plane-control-tls
+    # TLS only, as a later release will default to: the operator gives the dev profile's
+    # namespace the CA, its pods dial with TLS, and the cluster suite proves a plaintext
+    # dial from a worker namespace is refused.
+    requireTls: true
   provisioningMode: direct
   platformAdminGroup: troupe-platform-admins
   resources:
@@ -65,10 +69,18 @@ plane:
 # `Unconfined` needs. Never this anywhere else. User namespaces stay on, as the chart has
 # them (`worker.userNamespaces`): `scripts/kind-up` lets a user-namespaced pod reach kind's
 # createContainer hook.
+#
+# The worker's AppArmor profile is off here, and `scripts/remote-up` turns it on where the
+# kind node's kernel runs AppArmor (`scripts/kind-up` gives such a node the parser its
+# runtime needs to apply profiles), as on CI's Ubuntu runner, whose kernel restricts
+# unprivileged user namespaces as an Ubuntu node's does. Docker Desktop's kernel runs no
+# AppArmor, and its kubelet would refuse a pod that asked for a profile.
 worker:
   image: {tag: dev}
   seccomp:
     type: Unconfined
+  appArmor:
+    enabled: false
 
 bao:
   address: http://openbao.troupe-system.svc:8200

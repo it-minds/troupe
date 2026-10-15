@@ -43,12 +43,15 @@ The map is the brief's, in four groups: **Watch**, **Configure**, **Operate** an
 the new console does not draw yet says what it is for and links to the same page in the
 previous console (marked ↗). On a narrow screen the map folds behind a **Menu** button.
 
-Six areas are drawn:
+Nine areas are drawn:
 
 | Area | What it does |
 |---|---|
 | **Overview** | Where the console opens. *Needs attention* first, worst first, each with where it is fixed: a pod that is broken, has never reported or is draining, a profile short of pods, a team at or near its ceiling, unattended runs nobody has looked at. Then each profile's fleet (pods, capacity, in use) and each team's spend against its budget. Scoped to what you administer. |
 | **Sessions** | Every session you may see, with owner, profile, state, what it holds, whether it is pinned, what it did on GitHub (its draft pull request as a link, or its `troupe/*` branch, and whether it stopped after three red CI rounds; [github.md](github.md#7-the-fix-loop)) and when it was last active; filtered by state and profile, searched, and paged. Metadata only: no role reads what a session said. **Erase** shows what goes (its key, every object version) and the forks that survive, then waits for the session's id to be typed. |
+| **Worker profiles** | Every profile, with its state, its pods, its image and the teams granted it. A profile's page reads every field of its spec, those with no section of their own listed as they are. A platform admin changes one in an editor that writes only the fields it shows and keeps the rest of the spec as it was (identities at MCP servers, GitHub permissions, model prices, a server's credential settings, anything newer than the console), says before sending that model settings need an endpoint, and checks whether a pod can reach an MCP server; makes a new one; and deletes one, after the warning that its grants go and its sessions turn read-only, typed by its name ([profiles-and-policy.md](profiles-and-policy.md)). A team admin sees the profiles their teams are granted. |
+| **Configuration bundles** | Each channel a profile follows, with its current version and who follows it. A version reads whole: its agents, skills and MCP servers, the Secret each server's credential needs, which profiles use it and which pods are behind, and what changed from the version before. A platform admin publishes a new version (JSON, checked and previewed first, with the teams that lose an entry they were allowed; typed by the channel's name when one does), publishes an older version's content again, and retires a version. A team admin reads them. |
+| **Triggers** | A team's triggers, with what fires them, what they run as and when they last fired. A trigger's page reads every field and every revision of its document. Make one, change one (only what moved is sent), pause or resume one, and delete one, typed by its name. Running one by hand and minting its webhook key are still in the previous console. |
 | **Teams** | The teams you administer, searched by name, group or admin, with people, groups, profiles, admins and spend. A platform admin **enables a group as a team** here, with a name the plane will not mistake for an existing team's. A team opens in five tabs: *Members and groups* (link a group; unlink one, after the count of who loses the team, typed by the group's id), *Access* (grant a profile, warned when the plane will refuse one nothing is enforced on; revoke one, after the warning that the team's sessions on it turn read-only, typed by the profile's name), *Admins* (name and remove a team admin), *Limits* (each limit with what is in force, the rung that decided it and *Why?*; a shorter retention is typed by the team's name) and, for a platform admin, *Danger zone* (what removing the team would take, then removal typed by its name). |
 | **Client versions** | Per kind of client (the terminal, the daemon, the desktop app), the recommended version, the minimum and the blocked versions ([routine-tasks.md](routine-tasks.md#client-versions)). A platform admin changes them; a team admin reads them. |
 | **Organisation** | The organisation's document for people's own machines: its defaults, below each person's own settings, with where each came from, and its enforced set, above everything a person sets ([configuration.md](configuration.md)). The keys the set may hold are the plane's list, each with what enforcing it means. A platform admin changes them; a team admin reads them. |
@@ -59,8 +62,14 @@ something nobody can simply give back waits for a name to be typed as well. The 
 refusal is shown where it was made, with nothing written; and once applied, the console
 shows the change as the audit recorded it.
 
-Still in the previous console, for now: a person's own spending cap, and every area marked
-↗ (Connections, Runs and review, Worker profiles, Configuration bundles, Triggers,
+On a plane in `gitops` mode ([profiles-and-policy.md](profiles-and-policy.md#6-provisioning-direct-or-from-a-repository)),
+profiles and triggers are a repository's: the console shows them under *Held in a
+repository*, with where they come from and what the plane made of each, and offers no
+change, since the plane refuses one. A profile or trigger the cluster has no resource for
+can still be deleted.
+
+Still in the previous console, for now: a person's own spending cap, running a trigger by
+hand and minting its key, and every area marked ↗ (Connections, Runs and review,
 Integrations, Workers and pods, Provisioners and hosts, Budgets, Identity, Sign-in, Policy
 and settings). `apps/console/src/owed.ts` lists each administrative method that waits for
 one of them, and a test fails when the plane serves a method the console neither reaches
@@ -76,4 +85,4 @@ pnpm console         # then open http://localhost:5174 and sign in to the plane 
 ```
 
 `CONSOLE_AS=bob pnpm console:fake` signs in as a team admin, and `CONSOLE_AS=carol` as
-somebody who administers nothing.
+somebody who administers nothing. `GITOPS=1` makes the fake plane one in `gitops` mode.

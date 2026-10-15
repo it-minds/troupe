@@ -8,7 +8,7 @@ defmodule Troupe.Plane.Control.Listener do
   get wrong. A machine registered outside the cluster reaches it through a route of the
   installation's own, and over TLS alone: each connection says which it speaks by its
   first byte, and `Troupe.Plane.Control.Connection` refuses a machine's secret in
-  plaintext.
+  plaintext, and every plaintext connection where TLS is required.
 
   Workers dial the plane rather than the other way round because a pod's address is a
   property of the cluster and a plane replica's is not: the worker knows where the
@@ -18,7 +18,7 @@ defmodule Troupe.Plane.Control.Listener do
 
   use GenServer
 
-  alias Troupe.Plane.Control.{Connections, TLS}
+  alias Troupe.Plane.Control.{Connections, Replay, TLS}
 
   require Logger
 
@@ -44,10 +44,11 @@ defmodule Troupe.Plane.Control.Listener do
   def init(opts) do
     Process.flag(:trap_exit, true)
     Process.set_label("troupe control listener")
+    :ok = Replay.start()
 
     port = Keyword.get(opts, :port, Application.get_env(:troupe_plane, :control_port, 4001))
 
-    case :gen_tcp.listen(port, @socket_opts) do
+    case :gen_tcp.listen(port, backend(opts) ++ @socket_opts) do
       {:ok, socket} ->
         {:ok, actual} = :inet.port(socket)
         Logger.info("troupe plane: control listener on #{actual}, #{tls_note(opts)}")
@@ -100,9 +101,22 @@ defmodule Troupe.Plane.Control.Listener do
   # Said once, at start, so a plane that cannot enrol a single machine says why where an
   # operator looks first.
   defp tls_note(opts) do
-    case TLS.server_options(Keyword.get_lazy(opts, :tls, &TLS.dir/0)) do
-      {:ok, _options} -> "TLS with its certificate, plaintext for pods"
-      {:error, why} -> "plaintext only: #{why}"
+    certificate = TLS.server_options(Keyword.get_lazy(opts, :tls, &TLS.dir/0))
+
+    case {certificate, Keyword.get_lazy(opts, :require_tls, &TLS.required?/0)} do
+      {{:ok, _options}, true} -> "TLS only"
+      {{:ok, _options}, _} -> "TLS with its certificate, plaintext for pods"
+      {{:error, why}, true} -> "TLS only, and no worker can enrol until it has one: #{why}"
+      {{:error, why}, _} -> "plaintext only: #{why}"
+    end
+  end
+
+  # The VM's own socket backend unless one is named, which the tests do to run the
+  # listener on each. It has to be the first of the options, or `gen_tcp` refuses it.
+  defp backend(opts) do
+    case Keyword.get(opts, :inet_backend) do
+      nil -> []
+      backend -> [inet_backend: backend]
     end
   end
 

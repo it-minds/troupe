@@ -35,11 +35,20 @@ defmodule Troupe.InterruptTest do
   end
 
   test "a console that cannot be read ends the watch, and the command goes on" do
-    for event <- [fn -> {:error, "The handle is invalid."} end, fn -> raise "no NIF" end] do
+    for read <- [fn -> {:error, "The handle is invalid."} end, fn -> raise "no NIF" end] do
+      # The console is read only once the watch is monitored: a watch that ended before
+      # the monitor was set answered `:noproc`, which says nothing about how it ended.
+      event = fn ->
+        receive do
+          :monitored -> read.()
+        end
+      end
+
       opts = [event: event] ++ @binary_on_windows
       assert {:ok, pid} = Interrupt.watch(fn -> flunk("stopped") end, opts)
 
       ref = Process.monitor(pid)
+      send(pid, :monitored)
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
     end
   end

@@ -63,11 +63,74 @@ defmodule Troupe.Operator.SettingsTest do
     end
   end
 
+  describe "the worker's AppArmor profile" do
+    test "is the profile the chart names, as Localhost" do
+      settings = read(%{"TROUPE_WORKER_APPARMOR_PROFILE" => "troupe-worker"})
+
+      assert Settings.worker_apparmor(settings) == %{
+               "type" => "Localhost",
+               "localhostProfile" => "troupe-worker"
+             }
+    end
+
+    test "is none, the runtime's default, when the chart names none" do
+      assert Settings.worker_apparmor(read(%{"TROUPE_WORKER_APPARMOR_PROFILE" => nil})) == nil
+      assert Settings.worker_apparmor(read(%{"TROUPE_WORKER_APPARMOR_PROFILE" => ""})) == nil
+    end
+
+    test "stops the operator at boot when it is no name a kubelet takes" do
+      for name <- ["unconfined/x", "../troupe-worker", "-x", "two words"] do
+        assert_raise RuntimeError, ~r/TROUPE_WORKER_APPARMOR_PROFILE/, fn ->
+          read(%{"TROUPE_WORKER_APPARMOR_PROFILE" => name})
+        end
+      end
+    end
+  end
+
   describe "a user namespace for each worker pod" do
     test "is what the chart says, and off when it says nothing" do
       assert read(%{"TROUPE_WORKER_USER_NAMESPACES" => "true"}).worker_user_namespaces == true
       assert read(%{"TROUPE_WORKER_USER_NAMESPACES" => "false"}).worker_user_namespaces == false
       assert read(%{"TROUPE_WORKER_USER_NAMESPACES" => nil}).worker_user_namespaces == false
+    end
+  end
+
+  describe "the plane's CA for the pods" do
+    test "is where the chart mounts it, and none when it mounts none" do
+      path = "/etc/troupe/plane-control-ca/ca.crt"
+      assert read(%{"TROUPE_PLANE_CONTROL_CA" => path}).plane_ca_path == path
+      assert read(%{"TROUPE_PLANE_CONTROL_CA" => ""}).plane_ca_path == nil
+      assert read(%{"TROUPE_PLANE_CONTROL_CA" => nil}).plane_ca_path == nil
+    end
+
+    @tag :tmp_dir
+    test "is read as its certificates alone, whatever else the file holds", %{tmp_dir: dir} do
+      %{cert: cert, key: key} =
+        :public_key.pkix_test_root_cert(~c"troupe-plane-control-ca", [
+          {:key, {:namedCurve, :secp256r1}}
+        ])
+
+      path = Path.join(dir, "ca.crt")
+      certificate = {:Certificate, cert, :not_encrypted}
+
+      key_entry = {:ECPrivateKey, :public_key.der_encode(:ECPrivateKey, key), :not_encrypted}
+      File.write!(path, :public_key.pem_encode([certificate, key_entry]))
+
+      settings = Settings.with_plane_ca(%Settings{plane_ca_path: path})
+      assert settings.plane_ca == :public_key.pem_encode([certificate])
+      refute settings.plane_ca =~ "PRIVATE KEY"
+    end
+
+    @tag :tmp_dir
+    test "is none where the file is not there yet, or holds no certificate", %{tmp_dir: dir} do
+      missing = Path.join(dir, "not-mounted/ca.crt")
+      assert Settings.with_plane_ca(%Settings{plane_ca_path: missing}).plane_ca == nil
+
+      empty = Path.join(dir, "ca.crt")
+      File.write!(empty, "")
+      assert Settings.with_plane_ca(%Settings{plane_ca_path: empty}).plane_ca == nil
+
+      assert Settings.with_plane_ca(%Settings{plane_ca: "stale"}).plane_ca == nil
     end
   end
 

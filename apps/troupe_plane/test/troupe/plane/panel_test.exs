@@ -408,6 +408,17 @@ defmodule Troupe.Plane.PanelTest do
       refute design_html =~ "nightly-deps"
     end
 
+    # The form said a webhook's key is minted when the trigger is made, and `trigger.put`
+    # mints none: the trigger has no key until somebody makes one on its row.
+    test "the form says how a webhook gets its key, which is not by being made", context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.lead.subject) |> live("/admin/triggers")
+
+      refute html =~ "minted when it"
+      assert html =~ "has no key until"
+      assert html =~ "make a key"
+    end
+
     # The form saved the zone where nothing read it, and the trigger fired in UTC.
     test "the zone typed in the form is the one the trigger keeps, and one it cannot keep is refused",
          context do
@@ -628,10 +639,42 @@ defmodule Troupe.Plane.PanelTest do
       assert html =~ "What will happen"
       assert html =~ "Change something to see what would be written"
 
-      html = view |> element("form") |> render_change(%{"name" => "dev", "replicas" => "5"})
+      html = view |> element("form") |> render_change(%{"name" => "dev", "maxSessions" => "5"})
 
-      assert html =~ "replicas"
-      assert html =~ "5"
+      assert html =~ "max_sessions"
+      assert html =~ "+ 5"
+
+      # Only what the write changes: not the name it carries, nor the numbers the plane
+      # writes itself and no write sends.
+      refute html =~ ~s(<span class="diff__field mono">replicas</span>)
+      refute html =~ ~s(<span class="diff__field mono">sessions_per_pod</span>)
+      refute html =~ ~s(<span class="diff__field mono">name</span>)
+    end
+
+    # The draft dropped a blank field, so a ceiling once set could never be taken away
+    # from this page: the save left the column as it was.
+    test "a blank \"most sessions at once\" takes the ceiling away", context do
+      {:ok, _} =
+        Fleet.put_profile(%{name: "dev", image: "ghcr.io/troupe/worker:1", max_sessions: 6})
+
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      assert html =~ ~s(name="maxSessions" value="6")
+
+      html =
+        view
+        |> element("form")
+        |> render_change(%{
+          "name" => "dev",
+          "image" => "ghcr.io/troupe/worker:1",
+          "maxSessions" => ""
+        })
+
+      assert html =~ ~s(<span class="diff__field mono">max_sessions</span>)
+
+      view |> element("#profile-editor") |> render_submit()
+      assert Fleet.get_profile("dev").max_sessions == nil
     end
 
     test "edits every part of the spec, not four fields of it", context do
@@ -861,6 +904,80 @@ defmodule Troupe.Plane.PanelTest do
 
       assert html =~ "qwen3-32b"
       refute html =~ "prices"
+    end
+
+    # A draft rebuilt from the form's fields alone dropped `mcpIdentities`, a server row's
+    # credential settings, and anything else in the spec the page has no field for, without
+    # saying so.
+    test "keeps every part of the spec it has no field for, so a save from here drops none of it",
+         context do
+      identity = %{
+        "server" => "jira",
+        "clientId" => "client-dev",
+        "scope" => "api://jira/.default",
+        "tokenUrl" => "https://login.example.test/token",
+        "transitKey" => "troupe-w-identity-dev.jira",
+        "certificateThumbprint" => String.duplicate("A", 43)
+      }
+
+      jira = %{
+        "name" => "jira",
+        "url" => "https://mcp.example.test/jira",
+        "credentialMode" => "client_credentials"
+      }
+
+      wiki = %{
+        "name" => "wiki",
+        "url" => "https://mcp.example.test/wiki",
+        "secretRef" => %{"name" => "wiki-token", "key" => "token"}
+      }
+
+      github = %{"permissions" => %{"contents" => "write"}}
+      later = %{"a field this page has never heard of" => true}
+
+      {:ok, _} =
+        Fleet.put_profile(%{
+          name: "dev",
+          image: "ghcr.io/troupe/worker:1",
+          spec: %{
+            "mcpIdentities" => [identity],
+            "mcpServers" => [jira, wiki],
+            "github" => github,
+            "later" => later,
+            "egress" => %{"fqdns" => ["mcp.example.test"]},
+            # As a row read back from the cluster holds it: the plane's to write, and
+            # refused from anyone else, so not sent back.
+            "sessionsPerPod" => 4
+          }
+        })
+
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      # A change the way a browser sends one: every field of the form, one of them new.
+      view
+      |> element("form")
+      |> render_change(%{
+        "name" => "dev",
+        "image" => "ghcr.io/troupe/worker:1",
+        "egress.fqdns" => "mcp.example.test\nregistry.example.test",
+        "mcp.0.name" => "jira",
+        "mcp.0.url" => "https://mcp.example.test/jira",
+        "mcp.1.name" => "wiki",
+        "mcp.1.url" => "https://mcp.example.test/wiki",
+        "mcp.1.timeoutMs" => "5000"
+      })
+
+      html = view |> element("#profile-editor") |> render_submit()
+      refute html =~ "banner--breakglass"
+
+      spec = Fleet.get_profile("dev").spec
+      assert spec["egress"]["fqdns"] == ~w(mcp.example.test registry.example.test)
+      assert spec["mcpIdentities"] == [identity]
+      assert spec["github"] == github
+      assert spec["later"] == later
+      assert spec["mcpServers"] == [jira, Map.put(wiki, "timeoutMs", 5000)]
+      refute Map.has_key?(spec, "sessionsPerPod")
     end
 
     test "an MCP row with no url is a row being typed, not a server" do
