@@ -229,9 +229,9 @@ describe("a team's edits", () => {
     expect(fake.admin.teams.get("core")!.grants).toContainEqual({ profile: "heavy", volume_mode: "rw" });
 
     button("Revoke", groupRow("dev")!)!.click();
+    // The team is read again after the grant, so heavy can join the lines a moment after the warning.
     await waitFor(() => says("Every core session on dev turns read-only"), "the warning");
-    expect(says("grants: dev, ux, heavy")).toBe(true);
-    expect(says("grants: ux, heavy")).toBe(true);
+    await waitFor(() => says("grants: dev, ux, heavy") && says("grants: ux, heavy"), "the grants before and after");
     expect(button("Revoke dev")!.disabled).toBe(true);
     type(field("Type dev to confirm")!, "dev");
     await waitFor(() => !button("Revoke dev")!.disabled, "the confirmation");
