@@ -166,7 +166,7 @@ defmodule Troupe.Plane.GitHubPolicyTest do
   end
 
   describe "a team's repositories" do
-    test "are its own administrators' to list, checked by name, audited and shown", context do
+    test "are its own administrators' to list, checked by name, audited and shown" do
       assert {:ok, %{team: team}} =
                API.call(
                  "admin.team.update",

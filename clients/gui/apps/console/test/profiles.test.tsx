@@ -232,6 +232,7 @@ describe("the editor", () => {
       orgMount: false,
       repositoryOverridesBundle: false,
       forbidPersonalTools: false,
+      budget: "",
       allowPublic: false,
       denyPaths: "secrets/\n *.tfstate \n",
       maxPushes: "3",
