@@ -26,10 +26,12 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
   alias Troupe.Plane.Audit
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.{FakeGitHub, Fleet, Repo}
+  alias Troupe.Plane.GitHub.{Issue, Review}
   alias Troupe.Plane.Sessions, as: PlaneSessions
   alias Troupe.Sandbox
+  alias Troupe.Session.Log
   alias Troupe.Worker.{GitCredentials, GitHub}
-  alias Troupe.Worker.Plane.Link
+  alias Troupe.Worker.Plane.{Commands, Link}
   alias Troupe.Worker.PlaneHelper
 
   @moduletag timeout: 300_000
@@ -625,8 +627,8 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
     }
 
     source = %{"kind" => "webhook", "provider" => "github", "repository" => "example-org/widgets"}
-    event = Troupe.Plane.GitHub.Issue.event("issues", "d-1", payload, source)
-    prompt = Troupe.Plane.GitHub.Issue.prompt("Fix it.", %{"event" => event})
+    event = Issue.event("issues", "d-1", payload, source)
+    prompt = Issue.prompt("Fix it.", %{"event" => event})
 
     obey = [
       {:tools, [{"git_push", %{"branch" => "main", "message" => "Straight to main"}}]},
@@ -662,7 +664,7 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
     [pull] = context.fake |> FakeGitHub.pulls("example-org/widgets") |> Map.values()
 
     text =
-      Troupe.Plane.GitHub.Review.input(
+      Review.input(
         %{number: pull["number"], url: pull["html_url"]},
         %{
           state: "changes_requested",
@@ -682,7 +684,7 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
     :ok = Troupe.subscribe(context.session_id)
 
     assert {:ok, %{"queued" => true}} =
-             Troupe.Worker.Plane.Commands.handle("session.input", %{
+             Commands.handle("session.input", %{
                "session_id" => context.session_id,
                "epoch" => 1,
                "input" => %{"id" => "github-review-d-2", "text" => text},
@@ -703,7 +705,7 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
 
     # The review was the session's input, said to be the plane's for a GitHub review, with
     # its delivery's id.
-    events = Troupe.Session.Log.replay(context.session_id)
+    events = Log.replay(context.session_id)
 
     assert %Event{actor: actor, data: data} =
              Enum.find(
@@ -716,14 +718,14 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
 
     # A stale epoch, or a session not up here, takes nothing.
     assert {:error, %{message: "conflict"}} =
-             Troupe.Worker.Plane.Commands.handle("session.input", %{
+             Commands.handle("session.input", %{
                "session_id" => context.session_id,
                "epoch" => 9,
                "input" => %{"id" => "github-review-d-3", "text" => "x"}
              })
 
     assert {:error, %{message: "not_found"}} =
-             Troupe.Worker.Plane.Commands.handle("session.input", %{
+             Commands.handle("session.input", %{
                "session_id" => Troupe.Session.generate_id(),
                "epoch" => 1,
                "input" => %{"id" => "github-review-d-4", "text" => "x"}

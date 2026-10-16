@@ -15,7 +15,7 @@ defmodule Troupe.Plane.TriggerIngressTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, FakePod, Triggers}
+  alias Troupe.Plane.{Admin, FakePod, Fleet, Triggers}
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.Web.Router
 
@@ -57,7 +57,7 @@ defmodule Troupe.Plane.TriggerIngressTest do
     # Before, a webhook trigger had no key until somebody found the button that made one on
     # its row, and a trigger that cannot be fired was half made.
     test "is minted when a webhook trigger is made, answered once, and fires it", context do
-      {:ok, _} = Troupe.Plane.Fleet.put_profile(%{name: "dev"})
+      {:ok, _} = Fleet.put_profile(%{name: "dev"})
 
       attrs = %{
         "team" => "engineering",
