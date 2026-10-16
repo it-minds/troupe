@@ -831,8 +831,19 @@ export interface LookalikePerson {
  * Nothing is merged on this; a set may carry more the plane says about it.
  */
 export interface IdentityDuplicates {
-  people: Array<{ by: string; people: LookalikePerson[]; likely: string; [k: string]: unknown }>;
+  /** A set `by: "external_id"` is a refused adoption: `subject` is the value, `row` the id of the row SCIM gave it. */
+  people: Array<{ by: string; people: LookalikePerson[]; likely: string; subject?: string; row?: string; [k: string]: unknown }>;
   groups: Array<{ by: string; groups: Array<{ external_id: string; display_name: string | null }>; likely: string; [k: string]: unknown }>;
+}
+
+/** What `admin.identity.adopt` answers: the pair settled, and the row folded into SCIM's, if any. */
+export interface IdentityAdopted {
+  subject: string;
+  row: string;
+  row_subject: string | null;
+  folded: { id: string; subject: string } | null;
+  kms_names_left: string[];
+  via: string;
 }
 
 /** What a substrate gives a profile's workers, and what it does not, by name. */
@@ -1090,6 +1101,15 @@ export class AdminApi {
   /** People and groups that look like one held twice, and what most likely makes them so. A platform admin's. */
   identityDuplicates(): Promise<IdentityDuplicates> {
     return this.rpc<IdentityDuplicates>("admin.identity.duplicates", {});
+  }
+
+  /**
+   * Settle a refused adoption: SCIM's `row` is the person under `subject`. A row a sign-in
+   * made under the subject is folded into it; with none, the next push or sign-in adopts it.
+   * A platform admin's. Destructive: confirmed in the dialog by typing the subject.
+   */
+  adoptIdentity(row: string, subject: string): Promise<IdentityAdopted> {
+    return this.rpc<IdentityAdopted>("admin.identity.adopt", { row, subject });
   }
 
   /** Make a group a team. A platform admin's; `attrs.name` is the team's name, made from the group's where absent. */

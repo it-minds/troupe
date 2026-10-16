@@ -455,6 +455,20 @@ defmodule Troupe.Plane.GitopsTriggersTest do
 
     test "rotating its key works, and the key survives the repository changing the trigger",
          context do
+      # A schedule has no key to rotate; the repository makes it a webhook first.
+      assert {:error, refused} =
+               API.call(
+                 "admin.trigger.key.rotate",
+                 %{"team" => "engineering", "name" => "nightly-digest"},
+                 context.root
+               )
+
+      assert refused.data.reason =~ "is fired by its schedule, so it has no key"
+
+      webhook = %{"source" => %{"kind" => "webhook", "provider" => "generic"}}
+      flux(manifest("engineering.nightly-digest", webhook))
+      assert %{"engineering.nightly-digest" => %{state: :changed}} = pass()
+
       assert {:ok, minted} =
                API.call(
                  "admin.trigger.key.rotate",
@@ -465,7 +479,13 @@ defmodule Troupe.Plane.GitopsTriggersTest do
       assert minted.url == "/trigger/#{context.trigger.id}"
       assert Triggers.by_key(context.trigger.id, minted.key)
 
-      flux(manifest("engineering.nightly-digest", %{"promptTemplate" => "Summarise last week."}))
+      flux(
+        manifest(
+          "engineering.nightly-digest",
+          Map.put(webhook, "promptTemplate", "Summarise last week.")
+        )
+      )
+
       assert %{"engineering.nightly-digest" => %{state: :changed}} = pass()
 
       assert %{prompt_template: "Summarise last week."} =
@@ -540,7 +560,7 @@ defmodule Troupe.Plane.GitopsTriggersTest do
           "principal" => "svc:engineering/nightly",
           "profile" => "dev",
           "agent" => "reviewer",
-          "source" => %{"kind" => "schedule", "cron" => "0 3 * * 1-5", "tz" => "UTC"},
+          "source" => %{"kind" => "webhook", "provider" => "generic"},
           "prompt_template" => "Summarise what changed yesterday.\nKeep it short.",
           "terms" => %{"max_turns" => 30, "approvals" => "deny"},
           "notify_url" => "https://hooks.example.test/troupe"
@@ -574,7 +594,7 @@ defmodule Troupe.Plane.GitopsTriggersTest do
                  "profile" => "dev",
                  "agent" => "reviewer",
                  "enabled" => true,
-                 "source" => %{"kind" => "schedule", "cron" => "0 3 * * 1-5", "tz" => "UTC"},
+                 "source" => %{"kind" => "webhook", "provider" => "generic"},
                  "promptTemplate" => "Summarise what changed yesterday.\nKeep it short.",
                  "terms" => %{"maxTurns" => 30, "approvals" => "deny"},
                  "visibility" => "team",

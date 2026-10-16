@@ -199,6 +199,27 @@ defmodule Troupe.Plane.TriggerSourcesTest do
       assert_receive {:pushed, "session.activate", pushed}, 5_000
       assert pushed["origin"]["source"] == "manual"
     end
+
+    # The caller and the minute, as PROTOCOL.md says and a webhook's own window is drawn: a
+    # second click, or a retry of a call whose answer was lost a second or two later, is
+    # the run the first one made rather than a second session.
+    test "the console's run is one run per person per minute", context do
+      trigger!(context, %{"name" => "triage", "concurrency" => 2})
+      actor = platform_admin()
+
+      second = DateTime.utc_now().second
+      if second >= 55, do: Process.sleep((61 - second) * 1_000)
+
+      assert {:ok, first} = Admin.trigger_run(actor, "engineering", "triage")
+      assert_receive {:pushed, "session.activate", _pushed}, 5_000
+      Process.sleep(1_100)
+      assert {:ok, again} = Admin.trigger_run(actor, "engineering", "triage")
+
+      assert again["run"]["id"] == first["run"]["id"]
+      assert again["session_id"] == first["session_id"]
+      assert [_one] = Triggers.runs(context.team)
+      refute_receive {:pushed, "session.activate", _pushed}, 200
+    end
   end
 
   describe "the payload digest" do

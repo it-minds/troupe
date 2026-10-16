@@ -1285,7 +1285,7 @@ defmodule Troupe.Plane.HarnessTest do
         "id" => 0,
         "method" => "enrol",
         "params" => %{
-          "token" => token,
+          "token" => FakePod.token(token),
           "pod_name" => pod_name,
           "capacity" => 4,
           "disk_total_bytes" => 1_000_000
@@ -1322,7 +1322,7 @@ defmodule Troupe.Plane.HarnessTest do
         "id" => 0,
         "method" => "enrol",
         "params" => %{
-          "token" => token,
+          "token" => FakePod.token(token),
           "pod_name" => pod_name,
           "capacity" => 4,
           "disk_total_bytes" => 1_000_000
@@ -1402,10 +1402,18 @@ defmodule Troupe.Plane.HarnessTest do
     end
   end
 
-  defp verify("dev-token") do
-    {:ok,
-     %{profile: "dev", namespace: "troupe-w-dev", pod_name: nil, service_account: "troupe-worker"}}
+  # The suite's own mark on the token, as `FakePod` sends it: a worker link another
+  # checkout's suite runs sends `dev-token` too, and is refused.
+  defp verify(token) do
+    if token == FakePod.token("dev-token"),
+      do:
+        {:ok,
+         %{
+           profile: "dev",
+           namespace: "troupe-w-dev",
+           pod_name: nil,
+           service_account: "troupe-worker"
+         }},
+      else: {:error, :unauthenticated}
   end
-
-  defp verify(_token), do: {:error, :unauthenticated}
 end

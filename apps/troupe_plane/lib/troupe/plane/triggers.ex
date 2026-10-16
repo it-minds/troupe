@@ -343,7 +343,7 @@ defmodule Troupe.Plane.Triggers do
   def by_key(id, key) when is_binary(id) and is_binary(key) do
     case fetch(id) do
       %Trigger{key_hash: hash, key_salt: salt} = trigger when is_binary(hash) and is_binary(salt) ->
-        if key_matches?(trigger, key), do: trigger
+        if keyed?(trigger) and key_matches?(trigger, key), do: trigger
 
       _none ->
         nil
@@ -351,6 +351,19 @@ defmodule Troupe.Plane.Triggers do
   end
 
   def by_key(_id, _key), do: nil
+
+  @doc """
+  Whether a trigger is one its own key fires: a webhook that names no GitHub repository.
+
+  A schedule is fired by the plane's clock, a repository's trigger by the App's signed
+  deliveries, and a manual one by a person or a principal who signed in. A key on any of
+  those would be a second door, through which whoever held it fired the trigger with any
+  event body they liked. So none is minted for them, and one they still carry from before
+  their source changed opens nothing.
+  """
+  @spec keyed?(Trigger.t()) :: boolean()
+  def keyed?(%Trigger{source: %{"kind" => "webhook"} = source}), do: not Issue.repository?(source)
+  def keyed?(%Trigger{}), do: false
 
   # 256 bits, URL-safe so it survives a shell, a YAML file and a CI secret store. Prefixed
   # so that a key found in a log or a repository says what it is and what to rotate — the

@@ -775,7 +775,7 @@ defmodule Troupe.Plane.GitHubTest do
     {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false, packet: :line])
 
     send_line(socket, 0, "enrol", %{
-      "token" => "dev-token",
+      "token" => FakePod.token("dev-token"),
       "pod_name" => pod_name,
       "capacity" => 4,
       "disk_total_bytes" => 1_000

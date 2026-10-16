@@ -112,6 +112,35 @@ defmodule Troupe.Plane.Login do
 
       {:refused, held} ->
         refuse_adoption(held, subject, claim)
+
+      {:fold, signed, held} ->
+        fold(signed, held, subject, claim)
+    end
+  end
+
+  # A row of its own was all an earlier sign-in under this subject could be given: its
+  # token carried nothing that agreed with SCIM's row, or nothing at all, as an MCP
+  # client's access token minted without the email or profile scopes does. This token
+  # carries what agrees, by the rule an adoption needs, so the two are one person: the
+  # sign-in's row is folded into SCIM's, which takes the subject (`Identity.fold/2`).
+  defp fold(signed, held, subject, claim) do
+    case Identity.fold(held, signed) do
+      {:ok, detail} ->
+        Logger.info(
+          "troupe plane: a sign-in under #{subject}, the #{claim} claim, now agrees with " <>
+            "the row SCIM gave that externalId (#{held.id}); folded the row an earlier " <>
+            "sign-in made (#{signed.id}) into it"
+        )
+
+        detail = Map.merge(detail, %{"via" => "sign-in", "claim" => claim})
+        {:ok, _} = Audit.record(subject, "person.adopt", subject, detail)
+        :ok
+
+      {:error, :settled} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, {:rekey_failed, reason}}
     end
   end
 
