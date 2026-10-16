@@ -19,6 +19,9 @@ apps/*/priv/reaper
 # `mix release` compiles lib/ and nothing under test/. The fixtures are the tests'.
 test
 apps/*/test
+# Bar the per-tool rule cases, which the GUI's image build tests its client's reading of a
+# rule against, from the `licences` context; no server image copies them.
+!apps/troupe_protocol/test/support/permission_rules.json
 fixtures
 
 # Documentation and the chart are read by people and by CI, not by the release.
