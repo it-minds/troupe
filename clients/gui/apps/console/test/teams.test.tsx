@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, render, says, sees, seesLink, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -32,15 +32,15 @@ describe("the team list", () => {
     visit("#/teams");
     unmount = render(<App />).unmount;
     await waitFor(() => link("core") && link("design") && link("research"), "the teams");
-    expect(says("Core engineering")).toBe(true);
-    expect(says("dev, ux")).toBe(true);
-    expect(says("dan@example.com")).toBe(true);
-    expect(says("over budget")).toBe(true);
-    expect(says("no ceiling")).toBe(true);
+    await sees("Core engineering");
+    await sees("dev, ux");
+    await sees("dan@example.com");
+    await sees("over budget");
+    await sees("no ceiling");
 
     type(document.querySelector<HTMLInputElement>('[aria-label="Search teams"]')!, "bob@");
     await waitFor(() => link("core") === null, "the search");
-    expect(link("design")).not.toBeNull();
+    await seesLink("design");
     type(document.querySelector<HTMLInputElement>('[aria-label="Search teams"]')!, "nobody-at-all");
     await waitFor(() => says('No team matches "nobody-at-all"'), "the empty search");
   });
@@ -51,7 +51,7 @@ describe("the team list", () => {
     visit("#/teams");
     unmount = render(<App />).unmount;
     await waitFor(() => says("No teams yet"), "the empty state");
-    expect(says("Enable a group as a team to begin")).toBe(true);
+    await sees("Enable a group as a team to begin");
     expect(button("Enable a group as a team")).not.toBeNull();
   });
 });
@@ -63,17 +63,17 @@ describe("a team", () => {
     unmount = render(<App />).unmount;
     await waitFor(() => heading() === "core" && says("Membership is the identity provider's"), "the members tab");
     expect(tabs()).toEqual(["Members and groups", "Access", "Admins", "Limits", "Danger zone"]);
-    expect(says("grp-core")).toBe(true);
-    expect(says("erin@example.com")).toBe(true);
-    expect(says("150.00")).toBe(true);
+    await sees("grp-core");
+    await sees("erin@example.com");
+    await sees("150.00");
 
     link("Access")!.click();
     await waitFor(() => says("A profile grant is the only way core gains reach"), "the access tab");
-    expect(says("read and write")).toBe(true);
+    await sees("read and write");
 
     link("Admins")!.click();
     await waitFor(() => says("Who may administer core"), "the admins tab");
-    expect(says("dan@example.com")).toBe(true);
+    await sees("dan@example.com");
   });
 
   it("shows a platform admin what removing a team would take, and reads it from the plane", async () => {
@@ -81,9 +81,9 @@ describe("a team", () => {
     visit("#/teams/core/danger");
     unmount = render(<App />).unmount;
     await waitFor(() => says("What removing it would take") && says("nightly-deps"), "the danger zone");
-    expect(says("Grants revoked: dev, ux")).toBe(true);
-    expect(says("svc:core/nightly")).toBe(true);
-    expect(says("7 sessions are kept, with no team.")).toBe(true);
+    await sees("Grants revoked: dev, ux");
+    await sees("svc:core/nightly");
+    await sees("7 sessions are kept, with no team.");
     expect(fake.admin.teams.has("core")).toBe(true);
   });
 
@@ -104,14 +104,14 @@ describe("a team", () => {
     unmount = render(<App />).unmount;
     const erase = await waitFor(() => limit("Sessions erased after"), "the limits");
     // The team asked for 90 days; the platform stored 180 and the deployment 365, so the team's is in force.
-    expect(says("90 days", erase)).toBe(true);
-    expect(says("team", erase)).toBe(true);
+    await sees("90 days", erase);
+    await sees("team", erase);
     const idle = limit("Idle before it goes dormant")!;
-    expect(says("1200 s", idle)).toBe(true);
+    await sees("1200 s", idle);
     button("Why?", erase)!.click();
     await waitFor(() => says("deployment", limit("Sessions erased after")!) && says("365 days", limit("Sessions erased after")!), "the ladder");
-    expect(says("180 days", limit("Sessions erased after")!)).toBe(true);
-    expect(says("500.00", limit("Budget")!)).toBe(true);
+    await sees("180 days", limit("Sessions erased after")!);
+    await sees("500.00", limit("Budget")!);
   });
 
   it("previews a narrower limit in words, applies it on confirm, and shows what the audit recorded", async () => {
@@ -120,13 +120,13 @@ describe("a team", () => {
     unmount = render(<App />).unmount;
     (await waitFor(() => button("Change core's limits"), "the limits")).click();
     type(await waitFor(() => field("Idle before it goes dormant"), "the form"), "600");
-    expect(says("The platform allows at most 1800 s.")).toBe(true);
+    await sees("The platform allows at most 1800 s.");
     button("Preview")!.click();
 
     await waitFor(() => says("What will happen"), "the preview");
-    expect(says("idle_timeout_seconds: 1200 s")).toBe(true);
-    expect(says("idle_timeout_seconds: 600 s")).toBe(true);
-    expect(says("A core session idle for 600 seconds goes dormant")).toBe(true);
+    await sees("idle_timeout_seconds: 1200 s");
+    await sees("idle_timeout_seconds: 600 s");
+    await sees("A core session idle for 600 seconds goes dormant");
     expect(fake.admin.teams.get("core")!.idle_timeout_seconds).toBe(1200);
 
     button("Apply")!.click();
@@ -193,18 +193,18 @@ describe("a team's edits", () => {
     type(await waitFor(() => field("Group"), "the form"), "grp-platform");
     button("Preview")!.click();
     await waitFor(() => says("What will happen") && says("Everyone in Platform owners is in core"), "the preview");
-    expect(says("groups: grp-core, grp-platform")).toBe(true);
+    await sees("groups: grp-core, grp-platform");
     expect(fake.admin.teams.get("core")!.groups).toHaveLength(1);
     button("Link")!.click();
     await waitFor(() => says("Recorded in the audit as team.link on core"), "the audit's note");
-    expect(says("grp-platform", document.querySelector(".audit-note")!)).toBe(true);
+    await sees("grp-platform", document.querySelector(".audit-note")!);
     expect(fake.admin.teams.get("core")!.groups.map((g) => g.external_id)).toEqual(["grp-core", "grp-platform"]);
     await waitFor(() => says("hana@example.com"), "the person the group brought in");
 
     button("Unlink", groupRow("grp-platform")!)!.click();
     await waitFor(() => says("1 person loses core: hana@example.com"), "the unlink preview");
-    expect(says("1 keeps it through another group")).toBe(true);
-    expect(says("Sessions do not move")).toBe(true);
+    await sees("1 keeps it through another group");
+    await sees("Sessions do not move");
     expect(button("Unlink grp-platform")!.disabled).toBe(true);
     type(field("Type grp-platform to confirm")!, "grp-platform");
     await waitFor(() => !button("Unlink grp-platform")!.disabled, "the confirmation");
@@ -321,12 +321,12 @@ describe("a team's edits", () => {
     unmount = render(<App />).unmount;
     (await waitFor(() => button("Enable a group as a team"), "the team list")).click();
     const group = await waitFor(() => field("Group"), "the form");
-    expect(says("Platform owners (grp-platform) · looks held twice")).toBe(true);
+    await sees("Platform owners (grp-platform) · looks held twice");
     expect(says("looks held twice:")).toBe(false);
 
     type(group, "grp-platform");
     await waitFor(() => says("Platform owners looks held twice: Platform owners has the same name."), "the flag");
-    expect(says(`Most likely ${likely}.`)).toBe(true);
+    await sees(`Most likely ${likely}.`);
 
     type(group, "grp-core");
     await waitFor(() => !says("looks held twice:"), "the flag going with the other group");

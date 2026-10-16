@@ -66,10 +66,25 @@ if Mix.env() in [:dev, :test] do
     pool_size: 10
 
   if Mix.env() == :test do
+    # A test database per checkout: two checkouts' suites on one database lock the same
+    # rows from two sandboxes and deadlock (Postgres `40P01`). The name carries a hash of
+    # the checkout's path, and the suite creates and migrates it
+    # (`apps/troupe_plane/test/support/test_database.exs`). CI has one checkout and keeps
+    # the plain name; `TROUPE_PLANE_TEST_DB` names one outright.
+    checkout = Path.expand("..", __DIR__)
+
+    test_database =
+      System.get_env("TROUPE_PLANE_TEST_DB") ||
+        if(System.get_env("CI") in [nil, "", "false"],
+          do: "troupe_plane_test_#{checkout |> :erlang.phash2() |> Integer.to_string(36) |> String.downcase()}",
+          else: "troupe_plane_test"
+        )
+
     # A pool big enough for the concurrency the tests actually exercise: the placement
     # test makes fifty creates at once, which is the point of it, and a pool of ten
     # would be measuring the pool rather than the actor.
     config :troupe_plane, Troupe.Plane.Repo,
+      database: test_database,
       pool: Ecto.Adapters.SQL.Sandbox,
       pool_size: 30,
       queue_target: 5_000,

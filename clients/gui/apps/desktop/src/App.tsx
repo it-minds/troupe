@@ -91,13 +91,15 @@ export function App(): JSX.Element {
   // What the plane makes of this version, and the app's own update (Decision 874). A
   // plane that does not serve this version is not used: the app keeps to this computer,
   // as it does offline, and says what to install instead.
-  const rowsNow = useRef<FleetRow[]>([]);
+  const rowsNow = useRef<FleetRow[] | null>(null);
   const updates = useUpdates(auth, daemon.client, () => rowsNow.current);
   const refused = updates.required !== null;
   const planeAuth = refused ? null : auth;
   const mode: AppMode = localOnly || offline || refused ? "local" : "plane";
   const { snapshot, store, refresh } = useFleet(planeAuth, daemon.client);
-  rowsNow.current = snapshot.rows;
+  // Not known while the daemon is still being found, or has not answered its first list.
+  const daemonUnheard = daemon.status === "searching" || (daemon.client !== null && !snapshot.sources["daemon"]);
+  rowsNow.current = daemonUnheard ? null : snapshot.rows;
   // Only the Review screen still needs it: `admin.runs.list` is how a reviewer finds
   // the runs nobody has looked at. Administration itself is the console's, at /admin.
   const adminApi = useAdmin(planeAuth);

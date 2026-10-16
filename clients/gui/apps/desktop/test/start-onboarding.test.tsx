@@ -14,7 +14,7 @@ import { App } from "../src/App";
 import { FakeDaemon, exampleOnboarding } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, render, says, startOnTheList, type, waitFor } from "./support";
+import { button, render, says, sees, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -90,7 +90,7 @@ describe("a session's start in a workspace onboarding is due in", () => {
 
     const question = await asking(QUESTION);
     // The harness's own line is in the stream too, as it was before anything asked.
-    expect(says("Other tools' files are here")).toBe(true);
+    await sees("Other tools' files are here");
     // The files it is about, and what it passed over.
     expect([...question.querySelectorAll(".onboard-files li")].map((li) => li.textContent)).toEqual([
       "AGENTS.md new, and not there yet, from CLAUDE.md with .claude/CLAUDE.md",
@@ -174,11 +174,14 @@ describe("a session's start in a workspace onboarding is due in", () => {
 
   it("says no to all with Not now, and asks nothing when the session is opened again", async () => {
     daemon.onboarding[REPO] = exampleOnboarding();
+    // A busy machine: the no is said before the brief's step has asked what it needs, and
+    // the panel goes only once it has.
+    daemon.delayMs["config.get"] = 300;
     await startIn(REPO);
     await asking(QUESTION);
     await press("Not now");
     await waitFor(() => says("Onboarding: not now."), "the no, said");
-    expect(panel()).toBeNull();
+    await waitFor(() => panel() === null, "the panel gone");
     expect(calls()).toEqual([
       ["onboard.plan", REPO],
       ["onboard.decline", "all"],

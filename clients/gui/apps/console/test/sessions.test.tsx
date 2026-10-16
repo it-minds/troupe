@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -36,13 +36,13 @@ describe("sessions", () => {
     await open();
     await waitFor(() => row("s-7f3a9c21"), "the sessions");
     expect(rows()).toHaveLength(10);
-    expect(says("s-7f3a9c21", rows()[0]!)).toBe(true);
+    await sees("s-7f3a9c21", rows()[0]!);
     const pinned = row("s-7f3a9c22")!;
-    expect(says("dan@example.com", pinned)).toBe(true);
-    expect(says("dormant", pinned)).toBe(true);
-    expect(says("pinned by dan@example.com", pinned)).toBe(true);
-    expect(says("171.7 MiB", row("s-7f3a9c21")!)).toBe(true);
-    expect(says("Metadata only")).toBe(true);
+    await sees("dan@example.com", pinned);
+    await sees("dormant", pinned);
+    await sees("pinned by dan@example.com", pinned);
+    await sees("171.7 MiB", row("s-7f3a9c21")!);
+    await sees("Metadata only");
   });
 
   it("searches, filters by state and profile at the plane, and says what to do when nothing matches", async () => {
@@ -64,14 +64,14 @@ describe("sessions", () => {
     const fixed = row("s-7f3a9c24")!;
     const link = fixed.querySelector<HTMLAnchorElement>("a[href]")!;
     expect(link.getAttribute("href")).toBe("https://github.example.com/example-org/widgets/pull/7");
-    expect(says("#7", fixed)).toBe(true);
-    expect(says("troupe/issue-7-fix-login", fixed)).toBe(true);
-    expect(says("stopped after its red CI rounds", fixed)).toBe(true);
+    await sees("#7", fixed);
+    await sees("troupe/issue-7-fix-login", fixed);
+    await sees("stopped after its red CI rounds", fixed);
     const pushed = row("s-7f3a9c23")!;
-    expect(says("9e8d7c6", pushed)).toBe(true);
-    expect(says("troupe/session-s-7f3a9c23", pushed)).toBe(true);
+    await sees("9e8d7c6", pushed);
+    await sees("troupe/session-s-7f3a9c23", pushed);
     expect(pushed.querySelector("a[href]")).toBeNull();
-    expect(says("—", row("s-7f3a9c21")!)).toBe(true);
+    await sees("—", row("s-7f3a9c21")!);
   });
 
   it("shows a team admin their own team's sessions and none of another's", async () => {
@@ -86,8 +86,8 @@ describe("sessions", () => {
     await waitFor(() => row("s-7f3a9c22"), "the sessions");
     button("Erase", row("s-7f3a9c22")!)!.click();
     await waitFor(() => says("What will happen") && says("s-7f3a9c25"), "the preview, with the fork that survives");
-    expect(says("1 fork survives")).toBe(true);
-    expect(says("Its key is destroyed")).toBe(true);
+    await sees("1 fork survives");
+    await sees("Its key is destroyed");
     expect(button("Erase s-7f3a9c22")!.disabled).toBe(true);
     type(field("Type s-7f3a9c22 to confirm")!, "s-7f3a9c2");
     expect(button("Erase s-7f3a9c22")!.disabled).toBe(true);
@@ -109,7 +109,7 @@ describe("sessions", () => {
     await open();
     await waitFor(() => row("s-7f3a9c21"), "the sessions");
     expect(rows()).toHaveLength(25);
-    expect(says("1–25 of 40")).toBe(true);
+    await sees("1–25 of 40");
     button("Next")!.click();
     await waitFor(() => says("26–40 of 40"), "the second page");
     expect(rows()).toHaveLength(15);

@@ -145,6 +145,16 @@ export function says(text: string): boolean {
   return (document.body.textContent ?? "").includes(text);
 }
 
+/**
+ * Wait until the page says this. The assertion for anything that shows after an async
+ * step: a line drawn by another render than the one a `waitFor` saw is not there yet in
+ * the same tick, on a busy machine. `expect(says(…)).toBe(true)` is refused by
+ * `waits.test.ts` unless its line says why it is meant at once (`// at once: <why>`).
+ */
+export async function sees(text: string): Promise<void> {
+  await waitFor(() => says(text), `the page to say "${text}"`);
+}
+
 /** The button whose words begin with `label`, inside `within` if given. */
 export function button(label: string, within: ParentNode = document): HTMLButtonElement | null {
   return [...within.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim().startsWith(label)) ?? null;

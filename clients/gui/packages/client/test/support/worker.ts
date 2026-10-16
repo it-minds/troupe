@@ -147,7 +147,10 @@ export class FakeWorker {
       c.ws.terminate();
     }
     await new Promise<void>((r) => this.wss.close(() => r()));
-    await new Promise<void>((r) => this.server.close(() => r()));
+    // Ends what a page left open, a request its unmount cut off, which a close waits for.
+    const closed = new Promise<void>((r) => this.server.close(() => r()));
+    this.server.closeAllConnections();
+    await closed;
   }
 
   /** How many sockets are attached right now. */

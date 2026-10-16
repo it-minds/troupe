@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -41,18 +41,18 @@ describe("the runs", () => {
     expect(rows().length).toBe(4);
 
     const fix = row("nightly-deps", "2026-10-15 03:00")!;
-    expect(says("example-org/widgets", fix)).toBe(true);
+    await sees("example-org/widgets", fix);
     expect(link("#7", fix)!.href).toBe("https://github.example.com/example-org/widgets/issues/7");
     expect(link("#21", fix)!.href).toBe("https://github.example.com/example-org/widgets/pull/21");
-    expect(says("2 CI rounds, 1 red", fix)).toBe(true);
-    expect(says("3.40", fix)).toBe(true);
+    await sees("2 CI rounds, 1 red", fix);
+    await sees("3.40", fix);
     expect(link("nightly-deps", fix)!.getAttribute("href")).toBe("#/triggers/core/nightly-deps");
 
     // A run that ended and nobody has read is said to be unread; one somebody read, by whom.
-    expect(says("not yet", row("nightly-deps", "2026-10-14 03:00")!)).toBe(true);
-    expect(says("failed", row("nightly-deps", "2026-10-14 03:00")!)).toBe(true);
-    expect(says("by dan@example.com", row("nightly-deps", "2026-10-13 03:00")!)).toBe(true);
-    expect(says("waiting on a person", row("weekly-digest", "2026-10-12 08:00")!)).toBe(true);
+    await sees("not yet", row("nightly-deps", "2026-10-14 03:00")!);
+    await sees("failed", row("nightly-deps", "2026-10-14 03:00")!);
+    await sees("by dan@example.com", row("nightly-deps", "2026-10-13 03:00")!);
+    await sees("waiting on a person", row("weekly-digest", "2026-10-12 08:00")!);
 
     type(field("Showing")!, "github");
     await waitFor(() => rows().length === 1, "only the GitHub run");
@@ -79,11 +79,11 @@ describe("a run", () => {
   it("reads its record, links to its session, and is marked read", async () => {
     await open("#/runs/run-fix-7");
     await waitFor(() => says("On GitHub") && says("troupe/issue-7"), "the run's page");
-    expect(says("example-org/widgets")).toBe(true);
-    expect(says("Widgets wobble")).toBe(true);
+    await sees("example-org/widgets");
+    await sees("Widgets wobble");
     expect(link("core/nightly-deps")!.getAttribute("href")).toBe("#/triggers/core/nightly-deps");
     expect(link("#21")!.href).toBe("https://github.example.com/example-org/widgets/pull/21");
-    expect(says("test (ubuntu)")).toBe(true);
+    await sees("test (ubuntu)");
     const rounds = [...document.querySelectorAll<HTMLTableRowElement>("table.rounds tbody tr")];
     expect(rounds.map((r) => (r.cells[2]?.textContent ?? "").replace(/[^a-z]/g, ""))).toEqual(["red", "green"]);
 
@@ -107,7 +107,7 @@ describe("a run", () => {
   it("says a run that started no session has nothing on GitHub", async () => {
     await open("#/runs/run-nightly-13");
     await waitFor(() => says("none: it did not start one"), "the skipped run");
-    expect(says("the run names no repository")).toBe(true);
+    await sees("the run names no repository");
     expect(button("Mark it read")).toBeNull();
   });
 });

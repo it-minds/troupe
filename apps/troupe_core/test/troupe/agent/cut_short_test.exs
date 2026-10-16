@@ -32,25 +32,42 @@ defmodule Troupe.Agent.CutShortTest do
     # The subagent's slice: the turns its parent was first given, and a quarter of the
     # tokens and time its parent has left. The fake bills 100 input tokens a request and
     # output tokens by length; `delay_ms` is time for the clock to run out on.
-    for {limit, budget, delay_ms} <- [
-          {"max_turns", [max_turns: 4], 0},
-          {"max_input_tokens", [max_input_tokens: 1_200], 0},
-          {"max_output_tokens", [max_output_tokens: 200], 0},
-          {"wall_clock", [wall_clock_ms: 4_000], 150}
+    #
+    # The clock's case delegates to an agent whose share is a twentieth: its slice is the
+    # one second the smallest slice is, as a quarter of four seconds was, while the root
+    # keeps nineteen of its twenty. With four, the root's own clock ran out too on a busy
+    # machine, and it waited on a budget question nobody was there to answer.
+    for {limit, budget, delay_ms, agent} <- [
+          {"max_turns", [max_turns: 4], 0, "general"},
+          {"max_input_tokens", [max_input_tokens: 1_200], 0, "general"},
+          {"max_output_tokens", [max_output_tokens: 200], 0, "general"},
+          {"wall_clock", [wall_clock_ms: 20_000], 150, "timed"}
         ] do
-      @tag limit: limit, budget: budget, delay_ms: delay_ms
+      @tag limit: limit, budget: budget, delay_ms: delay_ms, agent: agent
       test "by #{limit} makes no further model call, leaves nothing running, and sleeps",
            context do
+        write_file(context, ".troupe/agents/timed.md", """
+        ---
+        description: a subagent with a small share of the time, for this test
+        mode: subagent
+        budget_share: 0.05
+        ---
+        You look into things.
+        """)
+
+        agent = context.agent
+        path = ["root", "#{agent}#1"]
+
         %{session: session, fake: fake} =
           start_session(context,
             config_overrides: context.budget,
             delay_ms: context.delay_ms,
             routes: %{
               "root" => [
-                {:tools, [{"delegate", brief("general", "look into it")}]},
+                {:tools, [{"delegate", brief(agent, "look into it")}]},
                 {:text, "root done"}
               ],
-              "general" =>
+              agent =>
                 [
                   {:text_and_tools, "Found the retry logic in lib/retry.ex.",
                    [{"todo_read", %{}}]}
@@ -72,7 +89,7 @@ defmodule Troupe.Agent.CutShortTest do
                    "this may be incomplete]\n\nFound the retry logic in lib/retry.ex."
 
         # Its part of the log ends at the cut, with nothing left open.
-        child = events_of(sid, @child)
+        child = events_of(sid, path)
 
         assert [
                  %{type: "agent_done", data: %{"reason" => "budget_exhausted", "limit" => cut}},
@@ -84,11 +101,11 @@ defmodule Troupe.Agent.CutShortTest do
         refute unanswered_request?(child)
 
         # The requests it made are the ones its log shows, fewer than its script had.
-        requests = length(Fake.requests_for(fake, "general"))
+        requests = length(Fake.requests_for(fake, agent))
         assert requests == Enum.count(child, &(&1.type == "llm_request"))
         assert requests <= @steps
 
-        stopped(sid, @child)
+        stopped(sid, path)
 
         # With nobody watching, the session sleeps: nothing is owed on the subagent's behalf.
         index = sweep(context, session, @short)
@@ -96,8 +113,8 @@ defmodule Troupe.Agent.CutShortTest do
         assert %{state: :dormant, status: :idle} = GenServer.call(index, {:get, sid})
         eventually(fn -> sid not in Troupe.session_ids() end)
 
-        assert length(Fake.requests_for(fake, "general")) == requests
-        assert steps(logged(context, sid, @child)) == steps(child)
+        assert length(Fake.requests_for(fake, agent)) == requests
+        assert steps(logged(context, sid, path)) == steps(child)
       end
     end
   end

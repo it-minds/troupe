@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, render, says, waitFor } from "./support";
+import { button, render, says, sees, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -90,6 +90,6 @@ describe("a daemon that restarts while the app is open", () => {
     settings!.click();
     await waitFor(() => says(`ws://127.0.0.1:${daemon.port}/v1/socket`), "the new address on This computer");
     expect(says("Not answering")).toBe(false);
-    expect(says("Connected")).toBe(true);
+    await sees("Connected");
   });
 });

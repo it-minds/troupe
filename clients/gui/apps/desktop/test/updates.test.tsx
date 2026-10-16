@@ -19,7 +19,7 @@ import { updateTiming } from "../src/updates";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, render, says, sleep, waitFor } from "./support";
+import { button, render, says, sees, sleep, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -162,18 +162,18 @@ describe("the plane's word on this version", () => {
 });
 
 describe("the app's own update", () => {
-  async function onThisComputer(updater: Updater): Promise<FakeDaemon> {
+  // `findingMs` is how long the shell takes to find the daemon: a busy machine, where the
+  // release's offer is on screen before this computer's sessions are.
+  async function onThisComputer(updater: Updater, findingMs = 0): Promise<FakeDaemon> {
     localStorage.setItem("troupe.pref.localOnly", "yes");
     localStorage.setItem("troupe.pref.start", "sessions");
     const d = new FakeDaemon({ osUser: "ada" });
     await d.start();
-    window.troupe = {
-      name: "Test shell",
-      version: "0",
-      updater,
-      findDaemon: async () => ({ transport: "ws", port: d.port, token: d.token }),
-      readDaemon: async () => ({ transport: "ws", port: d.port, token: d.token }),
+    const found = async () => {
+      await sleep(findingMs);
+      return { transport: "ws" as const, port: d.port, token: d.token };
     };
+    window.troupe = { name: "Test shell", version: "0", updater, findDaemon: found, readDaemon: found };
     unmount = render(<App />).unmount;
     return d;
   }
@@ -188,7 +188,7 @@ describe("the app's own update", () => {
 
     button("Update", banner()!)!.click();
     await waitFor(() => button("Restart now", banner()!), "the question before restarting");
-    expect(says("checked against the release key")).toBe(true);
+    await sees("checked against the release key");
     expect(updater.installs).toEqual([]);
 
     button("Restart now", banner()!)!.click();
@@ -218,7 +218,7 @@ describe("the app's own update", () => {
     const busy = daemon.seed("/home/ada/repo", { status: "thinking" });
 
     await waitFor(() => button("Update", banner() ?? document.body), "the offer");
-    expect(says("troupe-daemon 0.13.0-beta is replaced with it")).toBe(true);
+    await sees("troupe-daemon 0.13.0-beta is replaced with it");
     button("Update", banner()!)!.click();
     (await waitFor(() => button("Restart now", banner()!), "the question before restarting")).click();
 
@@ -230,6 +230,22 @@ describe("the app's own update", () => {
     await waitFor(() => updater.installs.length > 0, "the install, once the turn ended");
     expect(updater.installs).toEqual([true]);
     expect(daemon.stopsAsked).toBeGreaterThan(0);
+  });
+
+  it("does not restart before this computer's daemon has said what is at work", async () => {
+    const updater = new Updater();
+    updater.answer = offer("99.0.0", { daemon: { from: "0.13.0-beta", to: "99.0.0", lib: "/home/ada/.local/lib/troupe-daemon" } });
+    daemon = await onThisComputer(updater, 1_500);
+    const busy = daemon.seed("/home/ada/repo", { status: "thinking" });
+
+    (await waitFor(() => button("Update", banner() ?? document.body), "the offer")).click();
+    (await waitFor(() => button("Restart now", banner()!), "the question before restarting")).click();
+
+    await waitFor(() => says("Restarts when the turn in /home/ada/repo ends"), "the wait for the turn");
+    expect(updater.installs).toEqual([]);
+    busy.status = "idle";
+    await waitFor(() => updater.installs.length > 0, "the install, once the turn ended");
+    expect(updater.installs).toEqual([true]);
   });
 
   it("a release the shell cannot check is refused with its sentence, and nothing is installed", async () => {

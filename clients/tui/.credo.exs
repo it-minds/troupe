@@ -17,7 +17,9 @@
         # A program started by name is found on PATH alone, through
         # Troupe.OS.Process.executable/2 (Decision 846); tests may use find_executable.
         extra: [
-          {Troupe.Credo.PathOnlyLookup, [files: %{included: ["lib/"]}]}
+          {Troupe.Credo.PathOnlyLookup, [files: %{included: ["lib/"]}]},
+          # An async test module sets no environment variable but one of its own.
+          {Troupe.Credo.AsyncEnv, [files: %{included: ["test/"]}]}
         ]
       }
     }

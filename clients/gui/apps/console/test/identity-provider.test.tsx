@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -36,8 +36,8 @@ describe("the identity provider", () => {
   it("says what the registration needs, every value with where it came from, and a secret as set", async () => {
     await open();
     await waitFor(() => says("Single sign-on") && says("https://troupe.example.com/admin/callback"), "the provider");
-    expect(says("https://idp.example.com", sso())).toBe(true);
-    expect(says("set · never shown", sso())).toBe(true);
+    await sees("https://idp.example.com", sso());
+    await sees("set · never shown", sso());
     expect(says("deployed-client-secret")).toBe(false);
   });
 

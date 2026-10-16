@@ -120,7 +120,10 @@ export class FakePlane {
   }
 
   async stop(): Promise<void> {
-    await new Promise<void>((r) => this.server.close(() => r()));
+    // Ends what a page left open, a request its unmount cut off, which a close waits for.
+    const closed = new Promise<void>((r) => this.server.close(() => r()));
+    this.server.closeAllConnections();
+    await closed;
   }
 
   /** Put a session on the worker and in the index, as `session.create` would. */

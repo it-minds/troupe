@@ -12,7 +12,7 @@ import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, render, says, startOnTheList, waitFor } from "./support";
+import { button, render, says, sees, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -119,7 +119,7 @@ describe("your own servers in a team session", () => {
     row.click();
 
     await waitFor(() => says("Your servers could not be offered here: the worker profile dev does not take a person's own tools"), "the line saying why");
-    expect(says("(personalTools: forbid)")).toBe(true);
+    await sees("(personalTools: forbid)");
     expect(document.querySelector('section[aria-label="Offer your servers"]')).toBeNull();
     expect(harness.worker.tools.size).toBe(0);
   });

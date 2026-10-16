@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, freshBrowser, link, render, says, signedInAs, startFake, visit, waitFor } from "./support";
+import { PEOPLE, freshBrowser, link, render, says, sees, signedInAs, startFake, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -46,10 +46,10 @@ describe("the overview", () => {
     expect(link("Runs and review")!.getAttribute("href")).toBe("#/runs");
     expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);
 
-    expect(says("4", metric("Active sessions")!)).toBe(true);
-    expect(says("5 dormant, 1 read-only", metric("Active sessions")!)).toBe(true);
-    expect(says("3 / 5", metric("Pods")!)).toBe(true);
-    expect(says("473.50", metric("Spent")!)).toBe(true);
+    await sees("4", metric("Active sessions")!);
+    await sees("5 dormant, 1 read-only", metric("Active sessions")!);
+    await sees("3 / 5", metric("Pods")!);
+    await sees("473.50", metric("Spent")!);
   });
 
   it("shows each profile's fleet and each team's spend against its budget", async () => {
@@ -59,7 +59,7 @@ describe("the overview", () => {
     await waitFor(() => says("Fleet · per profile") && link("build-box"), "the fleet");
     // A profile is linked to its own page in this console.
     expect(link("build-box")!.getAttribute("href")).toBe("#/profiles/build-box");
-    expect(says("over budget")).toBe(true);
+    await sees("over budget");
     expect(link("core")!.getAttribute("href")).toBe("#/teams/core/limits");
   });
 
@@ -69,7 +69,7 @@ describe("the overview", () => {
     await waitFor(() => says("Spend · per team") && link("design"), "the overview, as the design team's admin");
     expect(link("core")).toBeNull();
     expect(link("dev")).toBeNull();
-    expect(says("2 dormant, 0 read-only", metric("Active sessions")!)).toBe(true);
+    await sees("2 dormant, 0 read-only", metric("Active sessions")!);
   });
 
   it("says so when nothing needs attention", async () => {
@@ -79,6 +79,6 @@ describe("the overview", () => {
     await signedInAs(fake, PEOPLE.alice);
     unmount = render(<App />).unmount;
     await waitFor(() => says("Nothing needs attention"), "the empty list");
-    expect(says("Nothing is unhealthy, at its ceiling or waiting on a person.")).toBe(true);
+    await sees("Nothing is unhealthy, at its ceiling or waiting on a person.");
   });
 });

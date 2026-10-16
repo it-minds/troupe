@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, sees, seesLink, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -50,7 +50,7 @@ describe("signing in to the console", () => {
     unmount = render(<App />).unmount;
 
     await waitFor(() => says("platform admin"), "the console, signed in");
-    expect(says("Alice")).toBe(true);
+    await sees("Alice");
     expect(location.search).toBe("");
     await waitFor(() => says("core") && says("design"), "the overview's teams");
 
@@ -105,19 +105,19 @@ describe("signing in to the console", () => {
     expect(link("Workers and pods")).toBeNull();
     expect(link("Sign-in")).toBeNull();
     expect(link("Connections")).toBeNull();
-    expect(link("Triggers")).not.toBeNull();
+    await seesLink("Triggers");
     // What the plane answers a team admin: the integrations to read, and their team's principals.
-    expect(link("Integrations")).not.toBeNull();
-    expect(link("Identity")).not.toBeNull();
-    expect(link("Teams")).not.toBeNull();
-    expect(link("Client versions")).not.toBeNull();
+    await seesLink("Integrations");
+    await seesLink("Identity");
+    await seesLink("Teams");
+    await seesLink("Client versions");
   });
 
   it("tells somebody who administers nothing so, rather than showing them a console of refusals", async () => {
     await signedInAs(fake, PEOPLE.carol);
     unmount = render(<App />).unmount;
     await waitFor(() => says("Nothing to administer here"), "the refusal");
-    expect(says("Carol")).toBe(true);
+    await sees("Carol");
     expect(link("Teams")).toBeNull();
   });
 
@@ -126,6 +126,6 @@ describe("signing in to the console", () => {
     type(await waitFor(() => field("The plane's address"), "the sign-in screen"), "http://127.0.0.1:1");
     button("Sign in")!.click();
     await waitFor(() => document.querySelector(".banner.error"), "the error");
-    expect(says("could not reach the plane")).toBe(true);
+    await sees("could not reach the plane");
   });
 });

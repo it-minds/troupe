@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { budgetMicros, draftOf, keptOf, llmWithoutEndpoint } from "../src/views/Profiles";
-import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import { PROVIDER_TYPES } from "../../../packages/client/test/support/provider-types.js";
 import type { FakeDeployment } from "./support";
 
@@ -38,14 +38,14 @@ describe("the profile list", () => {
   it("lists every profile with its state, its pods, its image and the teams it is granted to", async () => {
     await open("#/profiles");
     await waitFor(() => row("dev") && row("build-box"), "the profiles");
-    expect(says("draining", row("dev")!)).toBe(true);
-    expect(says("2 / 2", row("dev")!)).toBe(true);
-    expect(says("registry.example.com/troupe/worker:0.17.0-beta", row("dev")!)).toBe(true);
-    expect(says("core", row("dev")!)).toBe(true);
-    expect(says("core, design", row("ux")!)).toBe(true);
-    expect(says("degraded", row("heavy")!)).toBe(true);
-    expect(says("none", row("heavy")!)).toBe(true);
-    expect(says("unknown", row("build-box")!)).toBe(true);
+    await sees("draining", row("dev")!);
+    await sees("2 / 2", row("dev")!);
+    await sees("registry.example.com/troupe/worker:0.17.0-beta", row("dev")!);
+    await sees("core", row("dev")!);
+    await sees("core, design", row("ux")!);
+    await sees("degraded", row("heavy")!);
+    await sees("none", row("heavy")!);
+    await sees("unknown", row("build-box")!);
     expect(link("dev", row("dev")!)!.getAttribute("href")).toBe("#/profiles/dev");
     expect(button("New profile")).not.toBeNull();
   });
@@ -55,7 +55,7 @@ describe("the profile list", () => {
     await waitFor(() => row("ux"), "design's profiles");
     expect(row("dev")).toBeNull();
     expect(link("ux", row("ux")!)).toBeNull();
-    expect(says("A profile's settings are a platform admin's")).toBe(true);
+    await sees("A profile's settings are a platform admin's");
     expect(button("New profile")).toBeNull();
 
     visit("#/profiles/ux");
@@ -69,41 +69,41 @@ describe("a profile", () => {
     await open("#/profiles/dev");
     await waitFor(() => heading() === "dev" && says("What the cluster policy makes of it"), "dev");
     // The fields the editor writes.
-    expect(says("https://llm-gw.example.com/v1")).toBe(true);
-    expect(says("qwen3.6-35b")).toBe(true);
-    expect(says("llm-gateway · api-key")).toBe(true);
-    expect(says("llm-gw.example.com, mcp.example.com")).toBe(true);
-    expect(says("fast-ssd")).toBe(true);
+    await sees("https://llm-gw.example.com/v1");
+    await sees("qwen3.6-35b");
+    await sees("llm-gateway · api-key");
+    await sees("llm-gw.example.com, mcp.example.com");
+    await sees("fast-ssd");
     // Those it has none for: prices, a server's credential settings, identities, GitHub.
-    expect(says("glm-5.2: 0.5 in, 1.5 out")).toBe(true);
-    expect(says("credentialMode: profile")).toBe(true);
-    expect(says('secretRef: {"name":"jira-mcp","key":"token"}')).toBe(true);
-    expect(says("troupe-dev")).toBe(true);
-    expect(says("wiki.read")).toBe(true);
-    expect(says("contents: write, pull_requests: write, checks: read")).toBe(true);
+    await sees("glm-5.2: 0.5 in, 1.5 out");
+    await sees("credentialMode: profile");
+    await sees('secretRef: {"name":"jira-mcp","key":"token"}');
+    await sees("troupe-dev");
+    await sees("wiki.read");
+    await sees("contents: write, pull_requests: write, checks: read");
     // One no section reads, as it is; and what the plane writes, apart.
-    expect(says("Everything else in its spec")).toBe(true);
-    expect(says("sandboxHints.tmpfs")).toBe(true);
-    expect(says("Written by the plane")).toBe(true);
-    expect(says("sessionsPerPod")).toBe(true);
-    expect(says("granted to core")).toBe(true);
-    expect(says("troupe-w-dev-1")).toBe(true);
-    expect(says("v2, on every pod")).toBe(true);
+    await sees("Everything else in its spec");
+    await sees("sandboxHints.tmpfs");
+    await sees("Written by the plane");
+    await sees("sessionsPerPod");
+    await sees("granted to core");
+    await sees("troupe-w-dev-1");
+    await sees("v2, on every pod");
   });
 
   it("says which server the bundle calls as the profile that it names no identity for", async () => {
     await open("#/profiles/ux");
     await waitFor(() => heading() === "ux" && says("Who it is at MCP servers"), "ux");
-    expect(says("mcp server wiki is called with client credentials, and the profile gives it no identity in mcpIdentities")).toBe(true);
-    expect(says("kept off these pods")).toBe(true);
+    await sees("mcp server wiki is called with client credentials, and the profile gives it no identity in mcpIdentities");
+    await sees("kept off these pods");
   });
 
   it("says what the cluster says of it, a CA its namespace does not have yet included", async () => {
     await open("#/profiles/ux");
     await waitFor(() => heading() === "ux" && says("What the cluster says"), "ux");
-    expect(says("PlaneCAMissing")).toBe(true);
-    expect(says("the namespace has no troupe-plane-ca yet")).toBe(true);
-    expect(says("14 resources reconciled")).toBe(true);
+    await sees("PlaneCAMissing");
+    await sees("the namespace has no troupe-plane-ca yet");
+    await sees("14 resources reconciled");
   });
 });
 
@@ -114,20 +114,20 @@ describe("the editor", () => {
     const hosts = await waitFor(() => field("Allowed hosts"), "the editor");
     type(hosts, "llm-gw.example.com\nmcp.example.com\nwiki.example.com");
     type(field("URL")!, "https://mcp.example.com/jira/v2");
-    expect(says("Kept as it is: secretRef, credentialMode.")).toBe(true);
-    expect(says("Carried through unchanged, with no field here:")).toBe(true);
+    await sees("Kept as it is: secretRef, credentialMode.");
+    await sees("Carried through unchanged, with no field here:");
 
     button("Can a pod reach it?")!.click();
     await waitFor(() => says("The egress policy allows mcp.example.com."), "the reachability check");
 
     button("Preview")!.click();
     await waitFor(() => says("What will happen"), "the preview");
-    expect(says("spec.egress.fqdns")).toBe(true);
+    await sees("spec.egress.fqdns");
     // The plane's diff, of the stored profile with the write laid over it: not its
     // replicas, which no write sends, nor the name, which says which profile.
     expect(says("replicas:")).toBe(false);
-    expect(says("Applying changes the cluster now.")).toBe(true);
-    expect(says("spec.sessionsPerPod is the plane's to write")).toBe(true);
+    await sees("Applying changes the cluster now.");
+    await sees("spec.sessionsPerPod is the plane's to write");
 
     button("Apply")!.click();
     await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
@@ -253,7 +253,7 @@ describe("the editor", () => {
     visit("#/profiles/batch");
     (await waitFor(() => button("Delete batch"), "batch's page")).click();
     await waitFor(() => says("Type batch to confirm"), "the typed confirmation");
-    expect(says("No team is granted it.")).toBe(true);
+    await sees("No team is granted it.");
     const confirm = button("Delete batch")!;
     expect(confirm.disabled).toBe(true);
     type(field("Type batch to confirm")!, "batch");
@@ -267,7 +267,7 @@ describe("the editor", () => {
     await open("#/profiles/ux");
     (await waitFor(() => button("Delete ux"), "ux")).click();
     await waitFor(() => says("Every grant goes: core, design lose ux."), "the warning");
-    expect(says("turn read-only rather than being erased")).toBe(true);
+    await sees("turn read-only rather than being erased");
   });
 });
 
@@ -287,7 +287,7 @@ describe("a profile that extends another", () => {
     await open("#/profiles/data-team");
     await waitFor(() => heading() === "data-team" && says("Where each field comes from"), "data-team");
     expect(link("dev")!.getAttribute("href")).toBe("#/profiles/dev");
-    expect(says("dev → data-team.")).toBe(true);
+    await sees("dev → data-team.");
     // Added: dev's hosts, then data-team's.
     expect(cell("llm-gw.example.com")!.cells[2]!.textContent).toBe("dev");
     expect(cell("wiki.example.com")!.cells[2]!.textContent).toBe("data-team");
@@ -296,14 +296,14 @@ describe("a profile that extends another", () => {
     expect(cell("https://llm-gw.example.com/v1")!.cells[2]!.textContent).toBe("dev");
     expect(cell("12")!.cells[0]!.textContent).toBe("max_sessions");
     // dev's key is dev's own, which is said rather than left silent.
-    expect(says("set llm.secretRef to a Secret of data-team's")).toBe(true);
+    await sees("set llm.secretRef to a Secret of data-team's");
     // The sections read what its pods run.
-    expect(says("llm-gw.example.com, mcp.example.com, wiki.example.com")).toBe(true);
+    await sees("llm-gw.example.com, mcp.example.com, wiki.example.com");
 
     visit("#/profiles/dev");
     await waitFor(() => heading() === "dev" && says("Extended by"), "dev");
     expect(link("data-team")!.getAttribute("href")).toBe("#/profiles/data-team");
-    expect(says("A change here reaches it after a preview.")).toBe(true);
+    await sees("A change here reaches it after a preview.");
   });
 
   it("is made in the editor by naming what it extends, and leaves the rest to it", async () => {
@@ -338,7 +338,7 @@ describe("a profile that extends another", () => {
     type(await waitFor(() => field("Allowed hosts"), "the editor"), "llm-gw.example.com\nmcp.example.com\nhooks.example.com");
     button("Preview")!.click();
     await waitFor(() => says("What will happen") && says("data-team: spec.egress.fqdns"), "data-team in the preview");
-    expect(says("data-team extends dev: applying writes it again with spec.egress.fqdns as above")).toBe(true);
+    await sees("data-team extends dev: applying writes it again with spec.egress.fqdns as above");
     expect((fake.admin.profiles.find((p) => p.name === "data-team")!.spec!["egress"] as Record<string, unknown>)["fqdns"]).toEqual(["llm-gw.example.com", "mcp.example.com", "wiki.example.com"]);
 
     button("Apply")!.click();
@@ -355,14 +355,14 @@ describe("a profile that extends another", () => {
     await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", { profile: { ...dataTeam, spec: { ...dataTeam.spec, configBundleChannel: "data" } } });
     await open("#/profiles/data-team");
     await waitFor(() => heading() === "data-team" && says("The bundle its pods load"), "data-team's bundle");
-    expect(says("One bundle, composed by the plane from stable (dev's) and data (data-team's)")).toBe(true);
+    await sees("One bundle, composed by the plane from stable (dev's) and data (data-team's)");
     const from = (name: string) => [...document.querySelectorAll<HTMLTableRowElement>("table.bundle-in-effect tbody tr")].find((r) => (r.cells[1]?.textContent ?? "") === name)?.cells[2]?.textContent;
     expect(from("pr-reviewer")).toBe("dev on stable");
     expect(from("analyst")).toBe("data-team on data");
     expect(from("warehouse")).toBe("data-team on data");
     // data's jira has dev's name and does not say override: dev's is kept, and that is said.
     expect(from("jira")).toBe("dev on stable");
-    expect(says("say override: true on it in data's bundle to replace it")).toBe(true);
+    await sees("say override: true on it in data's bundle to replace it");
     // Its pods' channel is not one anybody publishes to.
     expect("error" in (await fake.admin.call(PEOPLE.alice.subject, "admin.bundle.publish", { channel: "profile:data-team", content: { schema: 1 } }))).toBe(true);
   });
@@ -371,15 +371,15 @@ describe("a profile that extends another", () => {
     await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", { profile: dataTeam });
     await open("#/profiles/dev");
     await waitFor(() => heading() === "dev" && says("Monthly budget"), "dev");
-    expect(says("no ceiling: its sessions spend what their people and teams have")).toBe(true);
+    await sees("no ceiling: its sessions spend what their people and teams have");
 
     button("Change dev")!.click();
     type(await waitFor(() => field("Monthly budget, in dollars"), "the editor"), "500");
     button("Preview")!.click();
     await waitFor(() => says("What will happen") && says("budget_micros"), "the preview");
-    expect(says("Its sessions may spend $500.00 a month from now")).toBe(true);
+    await sees("Its sessions may spend $500.00 a month from now");
     // data-team has it from dev, and is told so in the preview.
-    expect(says("data-team: budget_micros")).toBe(true);
+    await sees("data-team: budget_micros");
     button("Apply")!.click();
     await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
     expect(fake.admin.profiles.find((p) => p.name === "dev")!.budget_micros).toBe(500_000_000);
@@ -417,19 +417,19 @@ describe("a plane in gitops mode", () => {
     fake.admin.profiles.find((p) => p.name === "dev")!.gitops = { generation: 7, problem: null, reasons: [] };
     await open("#/profiles");
     await waitFor(() => row("dev") && says("Held in a repository"), "the locked list");
-    expect(says("https://git.example.com/platform/troupe.git")).toBe(true);
-    expect(says("refused", row("heavy")!)).toBe(true);
+    await sees("https://git.example.com/platform/troupe.git");
+    await sees("refused", row("heavy")!);
     expect(button("New profile")).toBeNull();
 
     visit("#/profiles/dev");
     await waitFor(() => heading() === "dev" && says("What is below is what the plane read, at generation 7."), "dev, locked");
-    expect(says("Held in a repository")).toBe(true);
+    await sees("Held in a repository");
     expect(button("Change dev")).toBeNull();
     expect(button("Delete dev")).toBeNull();
 
     visit("#/profiles/heavy");
     await waitFor(() => heading() === "heavy" && says("The plane refused the resource"), "heavy, refused");
-    expect(says("is not from a repository the cluster policy allows")).toBe(true);
+    await sees("is not from a repository the cluster policy allows");
   });
 
   it("offers deleting only a row the cluster has no resource for", async () => {
