@@ -28,7 +28,7 @@ paths:
   - clients/gui/apps/desktop/src/views/Onboarding/Key.tsx
   - apps/troupe_plane/lib/troupe/plane/settings.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/profile_editor.ex
+  - clients/gui/apps/console/src/views/Profiles.tsx
   - charts/troupe/crds/workerprofile.yaml
   - apps/troupe_operator/lib/troupe/operator/resources.ex
   - .github/workflows/cluster.yml

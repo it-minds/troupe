@@ -302,7 +302,7 @@ function Servers({ answer }: { answer: IntegrationsAnswer }): JSX.Element {
     <>
       <Region>MCP servers · more than one profile</Region>
       <p className="note">An organisation's integration rather than one profile's: the profiles are the blast radius of retiring it.</p>
-      {answer.servers.length === 0 ? <Empty title="No server is carried by two profiles">Everything below belongs to one.</Empty> : <ServerTable servers={answer.servers} />}
+      {answer.servers.length === 0 ? <Empty title="No shared server">No server is carried by two profiles: everything below belongs to one.</Empty> : <ServerTable servers={answer.servers} />}
       {answer.profile_servers.length > 0 && (
         <>
           <Region>MCP servers · one profile each</Region>
@@ -395,7 +395,7 @@ function Notify({ answer }: { answer: IntegrationsAnswer }): JSX.Element {
         passed when it was saved and does not now is what somebody needs told.
       </p>
       {answer.notify.length === 0 ? (
-        <Empty title="No trigger sends its outcome anywhere" />
+        <Empty title="No notification target">No trigger sends its outcome anywhere.</Empty>
       ) : (
         <ul className="plain">
           {answer.notify.map((n) => (

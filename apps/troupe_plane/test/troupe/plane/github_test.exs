@@ -220,7 +220,14 @@ defmodule Troupe.Plane.GitHubTest do
 
       assert {:ok, check} = API.call("admin.github.check", %{}, @root)
       assert check.ok
-      assert Enum.map(check.checks, & &1.name) == ["App", "Private key", "GitHub", "Installations"]
+
+      assert Enum.map(check.checks, & &1.name) == [
+               "App",
+               "Private key",
+               "GitHub",
+               "Installations"
+             ]
+
       assert Enum.all?(check.checks, & &1.ok)
       assert check.app == %{slug: "troupe-test", name: "troupe-test"}
       assert Audit.list(kind: "github") |> Enum.map(& &1.action) == ["github.put"]

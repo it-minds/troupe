@@ -68,7 +68,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_HOST` | `localhost` | endpoint host; issuer fallback | `plane.host` |
 | `TROUPE_BASE_URL` | unset | public URL: console redirect URI, MCP resource and scope, token issuer. Effectively required; the chart always renders it | `plane.baseUrl`, default `https://<plane.host>` |
 | `TROUPE_APP_URL` | `/app` | where `/` links to the GUI, and the `plane.app` address `/.well-known/troupe` gives `troupe-daemon open`; empty says no GUI is mounted | `plane.appUrl`, default `gui.basePath` when `gui.enabled` |
-| `TROUPE_CONSOLE_URL` | `/console` | where `/`'s console door and the LiveView console's Overview point; empty says no console is mounted, and both keep `/admin` | `console.basePath` when `console.enabled`, else empty |
+| `TROUPE_CONSOLE_URL` | `/console` | where `/`'s console door and the `/admin` page point; empty says no console is mounted, and both say the plane is administered over the admin API | `console.basePath` when `console.enabled`, else empty |
 | `TROUPE_CLI_URL` | empty | where `/` links to the TUI; empty says to ask an administrator | `plane.cliUrl` |
 | `TROUPE_CORS_ORIGINS` | CORS off | exact origins answered on `/rpc`, `/auth/exchange`, `/.well-known/*` | `plane.corsOrigins` |
 | `TROUPE_LOG_FORMAT` | text | `"json"`: one object per line with `request_id`, `session_id` | none |
@@ -296,7 +296,7 @@ Troupe creates no Secrets. Each must exist before the pod that references it sta
 |---|---|---|---|
 | `troupe-plane-database` | `troupe-system` | `url` | always |
 | `troupe-plane-secret-key-base` | `troupe-system` | `value` (≥ 64 bytes) | always |
-| `troupe-plane-oidc` | `troupe-system` | `client-secret` | console sign-in, unless the client secret is saved on the console's **Identity provider** card instead (both copyable overlays leave `plane.oidc.secretName` empty) |
+| `troupe-plane-oidc` | `troupe-system` | `client-secret` | console sign-in, unless the client secret is saved on the console's **Sign-in** screen instead (both copyable overlays leave `plane.oidc.secretName` empty) |
 | `troupe-object-store` | `troupe-system` **and every** `troupe-w-<profile>` | `access-key-id`, `secret-access-key` | the plane's index rebuild and private sessions; every session on a worker |
 | break-glass (your name) | `troupe-system` | `token` | only when the door is wanted |
 | `troupe-plane-scim` | `troupe-system` | `token` | the deployment's SCIM token, with `plane.scim.enabled` |
@@ -401,7 +401,7 @@ machine in one of two ways.
 **From a plane.** The *client defaults* settings (Part C) are the defaults: provider, URL,
 how the key is sent, and the three models; never a key. `client_enforced` is the enforced
 set, a JSON object such as `{"approvals": "deny", "max_turns": 100}`, set on the console's
-Policy page or with `admin.setting.put`, audited like every setting. The plane answers both
+**Organisation** screen or with `admin.setting.put`, audited like every setting. The plane answers both
 in `me.client_defaults` (as `defaults` and `enforced`, beside the fields older clients
 read). A signed-in machine's daemon fetches it whenever a client connects with a plane
 token, keeps a copy in its state directory (`organisation.json`, with which plane and

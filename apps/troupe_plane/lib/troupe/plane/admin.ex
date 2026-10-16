@@ -1911,8 +1911,11 @@ defmodule Troupe.Plane.Admin do
 
   defp forget_github do
     case GitHub.delete() do
-      {:ok, before} -> {:ok, before}
-      {:error, :not_configured} -> {:error, Error.new(:not_found, %{reason: "this plane has no GitHub App"})}
+      {:ok, before} ->
+        {:ok, before}
+
+      {:error, :not_configured} ->
+        {:error, Error.new(:not_found, %{reason: "this plane has no GitHub App"})}
     end
   end
 

@@ -96,7 +96,7 @@ function LooksTwice(): JSX.Element {
       <Loaded load={load} what="the people and groups that look held twice" retry={reload}>
         {(d: IdentityDuplicates) =>
           d.people.length === 0 && d.groups.length === 0 ? (
-            <Empty title="Nobody and no group looks held twice">No two people share an email or a name, and no two groups a name, under different keys.</Empty>
+            <Empty title="Nothing looks held twice">No two people share an email or a name, and no two groups a name, under different keys.</Empty>
           ) : (
             <>
               <p className="note">
@@ -335,7 +335,7 @@ function TeamPrincipals({ team }: { team: AdminTeam }): JSX.Element {
       <Loaded load={load} what={`${team.name}'s service principals`} retry={reload}>
         {(principals) =>
           principals.length === 0 ? (
-            <Empty title={`${team.name} has no service principal`}>A trigger that fires unattended runs as one.</Empty>
+            <Empty title="No service principal">{team.name} has none yet. A trigger that fires unattended runs as one.</Empty>
           ) : (
             <div className="scroll">
               <table>

@@ -23,7 +23,7 @@ export function Connections(): JSX.Element {
         {(answer: ConnectionsAnswer) => (
           <>
             {answer.servers.length === 0 ? (
-              <Empty title="No server here asks for a person's own credential">A person-mode server is one a bundle names with credential_mode person.</Empty>
+              <Empty title="No person-mode server">No server here asks for a person's own credential: a person-mode server is one a bundle names with credential_mode person.</Empty>
             ) : (
               answer.servers.map((s) => {
                 const connected = s.people.filter((p) => p.connected).length;

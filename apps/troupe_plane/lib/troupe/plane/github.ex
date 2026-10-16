@@ -268,7 +268,9 @@ defmodule Troupe.Plane.GitHub do
 
   defp check_steps(%App{} = row, opts) do
     app_check = result("App", true, "App #{row.app_id}, at #{api_url(row)}.", 0)
-    {signed, took} = timed(fn -> if row.key_version, do: jwt(row, opts), else: {:error, :no_key} end)
+
+    {signed, took} =
+      timed(fn -> if row.key_version, do: jwt(row, opts), else: {:error, :no_key} end)
 
     case signed do
       {:ok, jwt} ->
@@ -337,7 +339,12 @@ defmodule Troupe.Plane.GitHub do
 
         cond do
           given == [] ->
-            result("Installations", false, "No installation is set, so nothing can be cloned.", took)
+            result(
+              "Installations",
+              false,
+              "No installation is set, so nothing can be cloned.",
+              took
+            )
 
           missing == [] ->
             result(

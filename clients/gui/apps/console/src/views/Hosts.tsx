@@ -161,7 +161,7 @@ function Unenforced({ teams }: { teams: AdminTeam[] }): JSX.Element {
         around the policy: the profile's workers still run what it says.
       </p>
       {allowed.length === 0 ? (
-        <Empty title="No team may be granted a profile nothing is enforced on" />
+        <Empty title="No team allowed">No team may be granted a profile nothing is enforced on.</Empty>
       ) : (
         <ul className="plain">
           {allowed.map((t) => (
@@ -217,7 +217,7 @@ function Machines({ profile }: { profile: AdminProfile }): JSX.Element {
       <Loaded load={load} what={`${profile.name}'s machines`} retry={reload}>
         {(hosts) =>
           hosts.length === 0 ? (
-            <Empty title={`No machine is registered to ${profile.name}`}>Register one, then install the worker on it with the secret it is given.</Empty>
+            <Empty title="No machine registered">None is registered to {profile.name}. Register one, then install the worker on it with the secret it is given.</Empty>
           ) : (
             <div className="scroll">
               <table>

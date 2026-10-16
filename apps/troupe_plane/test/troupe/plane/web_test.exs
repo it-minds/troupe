@@ -118,7 +118,7 @@ defmodule Troupe.Plane.WebTest do
     end
 
     # The console is an app of its own beside the plane: the console door goes to it, and
-    # the LiveView console stays linked as the way in when the console cannot be used.
+    # the plane's own read-only page stays linked as the way in when it cannot be used.
     test "points the console door at the console, and keeps /admin as the way in when it cannot be used",
          context do
       assert {:ok, %{status: 200, body: body}} = get(context, "/")
@@ -126,8 +126,8 @@ defmodule Troupe.Plane.WebTest do
       assert body =~
                ~r{<a class="door" href="/console">\s*<span class="door-title">Admin console</span>}
 
-      assert body =~ ~s(The previous console is at <a href="/admin">/admin</a>)
-      assert body =~ "break-glass included"
+      assert body =~ ~s(<a href="/admin">/admin</a> is a read-only overview)
+      assert body =~ "the way in through the" and body =~ "break-glass door"
     end
 
     test "follows the console to wherever the deployment mounts it", context do
@@ -140,17 +140,18 @@ defmodule Troupe.Plane.WebTest do
       refute body =~ ~s(href="/console")
     end
 
-    test "keeps the console door at /admin on a plane without the console", context do
+    test "sends the console door to the read-only page on a plane without the console", context do
       Application.put_env(:troupe_plane, :console_url, "")
       on_exit(fn -> Application.delete_env(:troupe_plane, :console_url) end)
 
       assert {:ok, %{body: body}} = get(context, "/")
 
       assert body =~
-               ~r{<a class="door" href="/admin">\s*<span class="door-title">Admin console</span>}
+               ~r{<a class="door" href="/admin">\s*<span class="door-title">Admin overview</span>}
 
       refute body =~ ~s(href="/console")
-      refute body =~ "The previous console"
+      refute body =~ "is a read-only overview, and the way in"
+      assert body =~ "administered with troupe admin"
     end
 
     # Neither client is built here, so neither can be discovered: the terminal client is

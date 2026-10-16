@@ -32,9 +32,11 @@ deployed, the rollout has not finished or the image tag did not move.
 
 ## 3. The console
 
-`/admin` is the overview: per profile its pods, conditions, load and bundle state; per team
-budget, spend and reservations; session counts. It refreshes every two seconds, the Workers page every second. Sessions, bundles (with
-adoption per pod), triggers and runs, audit and settings each have a page. Every page is a
+The console at `/console` ([console.md](console.md)) opens on the overview: what needs attention,
+per profile its pods and load, per team its spend against its budget, and session counts,
+read again every ten seconds. Workers and pods, sessions, bundles (with adoption per pod),
+triggers, audit and settings each have a screen. `/admin` is a read-only overview of the same,
+refreshed every two seconds, and the break-glass door. Every page is a
 call into `Troupe.Plane.Admin`, and `admin.overview` returns the same map to `/rpc` and
 `/mcp`.
 

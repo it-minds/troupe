@@ -1050,6 +1050,13 @@ ol.revisions pre {
 
 /* -- narrow: the map goes above the screen, folded ------------------------------ */
 
+/* An address or an image name in running text breaks rather than widening a narrow screen. */
+.note code,
+.note .mono,
+.fields dd code {
+  overflow-wrap: anywhere;
+}
+
 /* A secret the plane answers once: set apart, wrapped rather than scrolled, with its copy button. */
 .banner.shown-once {
   margin: var(--space-3) 0 var(--space-4);
@@ -1058,6 +1065,9 @@ ol.revisions pre {
   border-left-width: var(--bw-marker);
   background: var(--waiting-bg);
   color: var(--text-body);
+}
+.banner.shown-once .status {
+  white-space: normal;
 }
 .banner.shown-once pre.secret {
   margin: var(--space-2) 0;
@@ -1069,6 +1079,10 @@ ul.checks li {
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: baseline;
+  overflow-wrap: anywhere;
+}
+ul.checks li > * {
+  min-width: 0;
 }
 pre.manifest {
   max-height: 24rem;

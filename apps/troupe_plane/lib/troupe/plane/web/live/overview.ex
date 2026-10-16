@@ -85,7 +85,11 @@ defmodule Troupe.Plane.Web.Live.Overview do
   defp load(socket) do
     case Admin.overview(socket.assigns.actor) do
       {:ok, overview} ->
-        assign(socket, overview: overview, attention: attention(overview, socket.assigns), error: nil)
+        assign(socket,
+          overview: overview,
+          attention: attention(overview, socket.assigns),
+          error: nil
+        )
 
       {:error, error} ->
         assign(socket, overview: nil, attention: [], error: error.message)

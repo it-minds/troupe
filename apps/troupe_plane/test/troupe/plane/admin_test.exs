@@ -467,7 +467,13 @@ defmodule Troupe.Plane.AdminTest do
         )
 
       assert {:ok, %{notify: [target]}} = Admin.integrations(context.lead)
-      assert target == %{team: "engineering", trigger: "nightly", url: "https://hooks.example/troupe", refusal: nil}
+
+      assert target == %{
+               team: "engineering",
+               trigger: "nightly",
+               url: "https://hooks.example/troupe",
+               refusal: nil
+             }
 
       # A team admin sees their own teams' targets and no other's.
       assert {:ok, %{notify: []}} =

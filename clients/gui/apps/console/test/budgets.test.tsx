@@ -37,7 +37,7 @@ describe("budgets", () => {
     type(field("In team")!, "core");
     button("Explain")!.click();
     // Dan's own cap is 150 and he has spent 120: tighter than core's ceiling.
-    await waitFor(() => says("this person's own cap is what refuses first: 30.00 left."), "the answer");
+    await waitFor(() => says("This person's own cap is what refuses first: 30.00 left."), "the answer");
     expect(says("the team's ceiling")).toBe(true);
     expect(says("the platform's, or the deployment's")).toBe(true);
   });

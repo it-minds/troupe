@@ -198,8 +198,11 @@ defmodule Troupe.Plane.PanelTest do
 
       # Nor does the metric that adds them up: "Spent unlimited" read off a plane where
       # nothing had been spent.
-      assert html =~ ~r{<span class="metric__label">Spent</span><span class="metric__value"[^>]*>0\.00</span>}
-      refute "unlimited" in spends, "a spend is rendered as a ceiling: #{inspect(Enum.uniq(spends))}"
+      assert html =~
+               ~r{<span class="metric__label">Spent</span><span class="metric__value"[^>]*>0\.00</span>}
+
+      refute "unlimited" in spends,
+             "a spend is rendered as a ceiling: #{inspect(Enum.uniq(spends))}"
     end
 
     test "a bar's fill is a box, so the width it is given is the width it draws", context do
@@ -329,6 +332,7 @@ defmodule Troupe.Plane.PanelTest do
     test "puts back a group that locked every administrator out, and records it", context do
       # Saved in error: nobody carries it, so the platform admin is one no longer.
       {:ok, _} = Settings.put("platform_admin_group", "nobody-carries-this", "root")
+
       assert {:error, {:redirect, %{to: "/admin/denied"}}} =
                context.conn |> sign_in(context.root.subject) |> live("/admin")
 
@@ -399,6 +403,7 @@ defmodule Troupe.Plane.PanelTest do
       assert redirected_to(get(context.conn, "/admin/teams")) == "/admin"
     end
   end
+
   # -- helpers ----------------------------------------------------------------
 
   # What the break-glass door leaves in a session: a subject that is the door's, and its

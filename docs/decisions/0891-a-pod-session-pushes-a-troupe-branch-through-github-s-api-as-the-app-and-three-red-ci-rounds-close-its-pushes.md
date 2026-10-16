@@ -15,9 +15,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/github.ex
   - apps/troupe_plane/lib/troupe/plane/control/connection.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/profile_editor.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/review.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/sessions.ex
+  - clients/gui/apps/console/src/views/Profiles.tsx
   - clients/gui/apps/console/src/views/Sessions.tsx
   - apps/troupe_plane/priv/repo/migrations/20261013000891_github_run.exs
   - apps/troupe_plane/test/support/fake_github.ex

@@ -12,7 +12,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/index.ex
   - apps/troupe_plane/lib/troupe/plane/identity.ex
   - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/profile_editor.ex
   - apps/troupe_worker/lib/troupe/worker/github.ex
   - apps/troupe_worker/lib/troupe/worker/github/tree.ex
   - clients/gui/apps/console/src/views/Profiles.tsx

@@ -5,7 +5,7 @@ date: 2026-09-16
 status: accepted
 paths:
   - apps/troupe_plane/lib/troupe/plane/*budget.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/teams.ex
+  - clients/gui/apps/console/src/views/Team.tsx
 gist: Setting a person's cap is a platform admin's, and it is done from the team page
 ---
 

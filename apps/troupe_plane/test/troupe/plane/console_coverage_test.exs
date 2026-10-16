@@ -103,6 +103,7 @@ defmodule Troupe.Plane.ConsoleCoverageTest do
       assert odd == [], Enum.join(odd, "\n")
     end
   end
+
   describe "what no surface offers" do
     # Done item 9's second half. The mechanism is already proven against a real OpenBao in
     # `Troupe.Plane.PersonCredentialsTest` — the plane's own credential cannot read a slot

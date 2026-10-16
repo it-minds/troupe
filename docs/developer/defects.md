@@ -1411,7 +1411,6 @@ Found by the chunk 34 fixers, 2026-10-13.
   - On a 6.17 kernel, containerd's default profile as Debian 12's parser compiles it refuses every unix socket; kind's nodes now take the host's compile. A node whose runtime compiles its default with an old parser would meet the same.
 - **Identity** (Decision 899).
   - There is no admin action to fold a claim-named group into SCIM's UUID group, so the stale one stays, empty.
-  - The console flags look-alike groups only where a group is enabled as a team, not on a team's "Link a group" picker, and the people half is API-only (`admin.identity.duplicates`).
   - Session lists show a removed owner as `removed:<uuid>`, not the tombstone's display name.
   - Triggers' `notify` lists and usage records still name a removed subject, so a person later provisioned under it gets those notifications and that month's spend.
   - SCIM `PUT /Users/<id>` keys on the body for an id that exists, so a body naming another subject updates that one; and a SCIM push can still make a `removed:` or `svc:` subject (inert, since sign-in refuses them).
@@ -1423,10 +1422,7 @@ Found by the chunk 34 fixers, 2026-10-13.
   - `scripts/verify-local.ps1` can't pass on scratch homes: it compares the listening process's path with `$env:LOCALAPPDATA\Programs`.
   - OTP 28.5's `:inet.getfd/1` raises on an `inet_backend: socket` socket (upstream).
 - **The console** (Decision 901).
-  - The admin API serves neither the provider types nor the size classes, so the console takes the provider as free text and offers two sizes it knows, short of Decision 894's one list.
   - A webhook trigger has no key until one is made on its row; whether `trigger.put` should mint one at create is open.
-  - Overview's profile links still go to the previous console's Workers page.
-  - `Team.tsx` keeps its own copy of `useChange`, which now lives in `bits.tsx`.
 - **The audit** replaces `secretRef.key`, `tokenUrl` and `transitKey` values with `[redacted]` in profile diffs, so changes to those names don't show.
 - **The desktop app.**
   - `daemon_start` is a synchronous Tauri command, so the window doesn't repaint for up to 30 s while it starts a daemon after a crash.
@@ -1435,7 +1431,6 @@ Found by the chunk 34 fixers, 2026-10-13.
 - **Tests.**
   - The worker's `IndexRebuildTest` logs dozens of errors from earlier runs' session prefixes left in MinIO's test bucket.
   - The fake GitHub asks `contents: write` for every `git/*` call, GET included.
-  - PanelTest's provisioners-page test failed once and passed on the next run.
 
 Found by the chunk 35 fixers, 2026-10-14.
 

@@ -16,7 +16,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/sessions.ex
   - apps/troupe_plane/lib/troupe/plane/sessions/session.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/sessions.ex
+  - clients/gui/apps/console/src/views/Sessions.tsx
   - apps/troupe_plane/test/troupe/plane/private_erasure_test.exs
   - apps/troupe_protocol/lib/troupe/object_store/signed.ex
   - clients/gui/packages/client/src/fleet.ts

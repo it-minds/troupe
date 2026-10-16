@@ -112,34 +112,36 @@ function Members({ team, onApplied }: { team: AdminTeam; onApplied: () => void }
       {team.groups.length === 0 ? (
         <Empty title="No group linked">Nobody can be in this team until a group is linked to it.</Empty>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Group</th>
-              <th>Id at the provider</th>
-              <th>Linked by</th>
-              {platform && <th aria-label="Actions" />}
-            </tr>
-          </thead>
-          <tbody>
-            {team.groups.map((g) => (
-              <tr key={g.external_id}>
-                <td>{g.display_name ?? g.external_id}</td>
-                <td className="mono">{g.external_id}</td>
-                <td>{g.linked_by ?? "—"}</td>
-                {platform && (
-                  <td className="row-actions">
-                    {!busy && (
-                      <button type="button" onClick={() => setUnlinking(g.external_id)}>
-                        Unlink
-                      </button>
-                    )}
-                  </td>
-                )}
+        <div className="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Group</th>
+                <th>Id at the provider</th>
+                <th>Linked by</th>
+                {platform && <th aria-label="Actions" />}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {team.groups.map((g) => (
+                <tr key={g.external_id}>
+                  <td>{g.display_name ?? g.external_id}</td>
+                  <td className="mono">{g.external_id}</td>
+                  <td>{g.linked_by ?? "—"}</td>
+                  {platform && (
+                    <td className="row-actions">
+                      {!busy && (
+                        <button type="button" onClick={() => setUnlinking(g.external_id)}>
+                          Unlink
+                        </button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {unlinking !== null && (
         <Unlink
@@ -218,26 +220,28 @@ function Members({ team, onApplied }: { team: AdminTeam; onApplied: () => void }
       {team.members.length === 0 ? (
         <Empty title="Nobody yet">A person appears here once they are in a linked group, at their next sign-in or the provider's next push.</Empty>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Person</th>
-              <th>Subject</th>
-              <th className="num">Spent</th>
-              <th className="num">Own cap</th>
-            </tr>
-          </thead>
-          <tbody>
-            {team.members.map((m) => (
-              <tr key={m.subject}>
-                <td>{m.display_name ?? m.subject}</td>
-                <td className="mono">{m.subject}</td>
-                <td className="num">{money(m.spent_micros ?? 0)}</td>
-                <td className="num">{m.budget_micros ? money(m.budget_micros) : <span className="muted">none</span>}</td>
+        <div className="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Person</th>
+                <th>Subject</th>
+                <th className="num">Spent</th>
+                <th className="num">Own cap</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {team.members.map((m) => (
+                <tr key={m.subject}>
+                  <td>{m.display_name ?? m.subject}</td>
+                  <td className="mono">{m.subject}</td>
+                  <td className="num">{money(m.spent_micros ?? 0)}</td>
+                  <td className="num">{m.budget_micros ? money(m.budget_micros) : <span className="muted">none</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       <OwnCaps />
     </section>

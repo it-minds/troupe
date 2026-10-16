@@ -96,9 +96,9 @@ To add or remove a repository later, change it there; nothing on the plane chang
 
 ## 4. Give the plane the App
 
-As a platform admin, call `admin.github.put` (the console's page for it comes with the new
-console; until then use `/rpc` with a plane token, or the `admin_github_put` tool on
-`/mcp`):
+As a platform admin, set it on the console's **Integrations** screen, which tests it against
+GitHub too (`admin.github.check`) and removes it (`admin.github.delete`); or call
+`admin.github.put` over `/rpc` with a plane token, or the `admin_github_put` tool on `/mcp`:
 
 ```json
 {
@@ -265,7 +265,7 @@ Then the App can push only `troupe/*` branches, and nothing it opens reaches the
 branch without a person.
 
 **What the run records.** The session's row keeps what it did there; the console's Sessions
-screen and the plane's Sessions and Review pages show its pull request as a link, and `session.get`, `sessions.list`,
+screen shows its pull request as a link, and `session.get`, `sessions.list`,
 `admin.sessions.list` and `admin.runs.list` carry it as `github`: the commit its clone started
 from (`base`), its `branch`, its last `commit`, how many `pushes`, its `pull_request`
 (`number` and `url`), each CI `round` (`commit`, `state` red or green, the checks that

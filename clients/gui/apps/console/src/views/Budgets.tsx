@@ -95,6 +95,10 @@ const SCOPES: Record<string, string> = {
   platform: "the platform's, or the deployment's",
 };
 
+function capital(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /** The rung that refuses first: the one with the least left, of those that have a ceiling. */
 function binding(ceilings: Ceiling[]): Ceiling | null {
   const capped = ceilings.filter((c) => typeof c.remaining_micros === "number");
@@ -158,38 +162,40 @@ function Explain({ teams }: { teams: AdminTeam[] }): JSX.Element {
               <div className="ceilings" role="status" aria-label="The ceilings">
                 {binds ? (
                   <p>
-                    {SCOPES[binds.scope] ?? binds.scope} is what refuses first: {money(binds.remaining_micros as number)} left.
+                    {capital(SCOPES[binds.scope] ?? binds.scope)} is what refuses first: {money(binds.remaining_micros as number)} left.
                   </p>
                 ) : (
                   <p>No rung here has a ceiling at all: nothing refuses on spend.</p>
                 )}
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Rung</th>
-                      <th className="num">Spent</th>
-                      <th className="num">Reserved</th>
-                      <th className="num">Ceiling</th>
-                      <th className="num">Left</th>
-                      <th>Counted</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ceilings.map((c) => (
-                      <tr key={c.scope}>
-                        <td>
-                          {SCOPES[c.scope] ?? c.scope}
-                          {c === binds ? " · binds first" : ""}
-                        </td>
-                        <td className="num">{money(c.spent_micros)}</td>
-                        <td className="num">{money(c.reserved_micros)}</td>
-                        <td className="num">{c.budget_micros ? money(c.budget_micros) : <span className="muted">none</span>}</td>
-                        <td className="num">{typeof c.remaining_micros === "number" ? money(c.remaining_micros) : <span className="muted">no ceiling</span>}</td>
-                        <td>{c.budget_micros ? per(c.budget_period) : "—"}</td>
+                <div className="scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Rung</th>
+                        <th className="num">Spent</th>
+                        <th className="num">Reserved</th>
+                        <th className="num">Ceiling</th>
+                        <th className="num">Left</th>
+                        <th>Counted</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {ceilings.map((c) => (
+                        <tr key={c.scope}>
+                          <td>
+                            {SCOPES[c.scope] ?? c.scope}
+                            {c === binds ? " · binds first" : ""}
+                          </td>
+                          <td className="num">{money(c.spent_micros)}</td>
+                          <td className="num">{money(c.reserved_micros)}</td>
+                          <td className="num">{c.budget_micros ? money(c.budget_micros) : <span className="muted">none</span>}</td>
+                          <td className="num">{typeof c.remaining_micros === "number" ? money(c.remaining_micros) : <span className="muted">no ceiling</span>}</td>
+                          <td>{c.budget_micros ? per(c.budget_period) : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             );
           }}
