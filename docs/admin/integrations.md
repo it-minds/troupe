@@ -37,7 +37,7 @@ carries `email` or `preferred_username`; a pair it would not merge is listed by
 has keys, the configured endpoints match discovery, and how many known people carry the
 admin group (and whether you do) — and prints the redirect URI to compare with the
 registration by eye. With a group argument it tests a candidate before you save it. The
-console's **Identity provider** card configures all of this at runtime, behind the same
+console's **Sign-in** screen configures all of this at runtime, behind the same
 check. Authentik specifically: [authentik.md](authentik.md).
 
 ## 2. OpenBao
@@ -104,8 +104,8 @@ endpoint, and, for models that endpoint does not price, `llm.prices`.
   refuse any other name. Every `llm` field needs `llm.endpoint` (for `azure_openai`, the
   resource's own address): without one the pods are given none of them, so a profile that
   sets one without an endpoint is refused. `ollama` takes no key, so its profile has no
-  `llm.secretRef`. The profile editor under
-  `/admin` offers them all and asks each only for what it needs, and the provider offered
+  `llm.secretRef`. The console's profile editor
+  offers them all (`admin.profile.choices`) and asks each only for what it needs, and the provider offered
   to people's own machines (`client_provider`) takes the same names.
 - `openai` posts to `<endpoint>/v1/chat/completions` with a bearer token and
   `stream_options.include_usage`; `anthropic` to `/v1/messages` with `x-api-key`. `/v1` is
@@ -162,7 +162,7 @@ plane token.
 | Item | Detail |
 |---|---|
 | Endpoints | `/scim/v2/Users[/:id]` and `/scim/v2/Groups[/:id]`: create, list with a filter, replace, patch, delete |
-| Token | minted on the console's Identity provider card (`admin.scim.rotate`, shown once, kept as a salted hash), or the deployment's `TROUPE_SCIM_TOKEN`. Either opens the door; neither, and every request is 401 |
+| Token | minted on the console's Sign-in screen (`admin.scim.rotate`, shown once, kept as a salted hash), or the deployment's `TROUPE_SCIM_TOKEN`. Either opens the door; neither, and every request is 401 |
 | Status | `admin.scim.get`: the last authorised request; `teams_from_groups` (off by default) makes a pushed group a team |
 | Semantics | the subject is `externalId`, else `userName`, and must match the claim `subject_claim` names (`oid` for Entra, [§1](#1-identity-provider-oidc)); a resource is addressed by the `id` the plane answered with; a push replaces a group's members, a PATCH adds and removes them; a push or a PATCH setting `active` to false deactivates the person, keeps the row and stops the principals they sponsor; a push that finds nobody under its subject but somebody under its `externalId` updates that person when their email or `userName` agrees with the push's, so a plane holds one row per `externalId`, and is refused `409` (`uniqueness`) when neither does, audited as `person.adopt_refused` and listed by `admin.identity.duplicates` ([Decision 906](../decisions/0906-adoption-needs-an-email-or-username-that-agrees-and-the-control-port-takes-tls-only-by-default.md)); a replace (`PUT`) changes the person at its id, and one naming another subject is refused (`mutability`); a subject starting `removed:` or `svc:` is refused (`invalidValue`); deleting a user removes the row and leaves a tombstone: their sessions turn read-only under a "removed person" owner, they administer nothing, the principals they sponsor stop, no trigger's `notify` names them, their spend is counted under the tombstone, and the audit trail keeps their name; somebody pushed later under the same subject is new. Deleting a group removes it and disables a team drawn from it alone ([Decision 899](../decisions/0899-one-row-per-person-and-scim-delete-removes.md)) |
 | Answers | as RFC 7644 has them: a create `201` with the resource and its `Location`, a replace or a user's PATCH `200` with the resource, a group's PATCH and a delete `204`, and an `id` the plane does not have `404`. A `POST` of somebody the plane already knows, such as a person who signed in before their first push, updates them and is still `201` |

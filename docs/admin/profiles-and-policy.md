@@ -471,8 +471,8 @@ pod is `session:/` and `skills:/`, so `publish` and `import` have nowhere to go 
 ## 6. Provisioning: direct, or from a repository
 
 `plane.provisioningMode` (`TROUPE_PROVISIONING_MODE`) decides who writes a profile's
-`WorkerProfile`. It is the deployment's: the console's Policy page shows it and cannot
-change it, and a value stored there before 0.7.0 is not read. The same page holds the
+`WorkerProfile`. It is the deployment's: the console's **Policy and settings** shows it and cannot
+change it, and a value stored there before 0.7.0 is not read. The console's **Client versions** holds the
 versions people's clients may run ([routine-tasks.md](routine-tasks.md#client-versions))
 and the settings their machines start from and cannot go past
 ([configuration.md](configuration.md#defaults-and-limits-for-peoples-machines)).
@@ -507,7 +507,7 @@ not take down a profile that was running. The reasons are in the log once, in
 `admin.profiles.list` (each profile carries `gitops`: the source, the generation it was
 read at, and a `problem` of `refused`, `missing`, `plane_only` or `unwritten` with
 `reasons`; a refused resource with no profile is listed with nothing running), and on the
-console's Workers page and the profile's own.
+console's **Workers and pods** and the profile's own page.
 
 In this mode the console shows every profile read-only, marked **Locked to gitops** with
 `plane.gitops.source`, and `admin.profile.put` and `admin.profile.delete` are refused as
@@ -539,7 +539,7 @@ places and scales by is read off `sessionsPerPod`.
 
 ### A profile in a repository
 
-`admin.profiles.export` (the console's Workers page, **Manifests for a repository**) gives
+`admin.profiles.export` (the console's **Workers and pods**, **Manifests for a repository**) gives
 every profile in this shape, the policy and every trigger. This one is written by hand:
 
 ```yaml
@@ -625,7 +625,7 @@ server-side apply's field ownership.
 
 **Direct to gitops.** Export the manifests, commit them, and let the applier apply them
 while the plane is still in direct mode: it takes the fields over, and the workers do not
-notice. Export them with `admin.profiles.export` or the Workers page, not
+notice. Export them with `admin.profiles.export` or the console's **Workers and pods**, not
 `kubectl get workerprofiles`: a resource the plane wrote in direct mode has no field for a
 profile's ceiling, its warm count or its provisioner, which the export gives as the
 `troupe.dev/max-sessions`, `troupe.dev/warm-workers` and `troupe.dev/provisioner`

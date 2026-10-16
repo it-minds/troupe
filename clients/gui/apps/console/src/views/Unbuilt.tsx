@@ -1,30 +1,24 @@
-// An area this console does not draw yet: what it will be for, and where it is today.
-// The plane's current console stays until this one covers what it does, so every such
-// area links to its page there rather than leaving a person with nowhere to go.
+// An area this console does not draw yet: what it will be for, and how it is done meanwhile.
+// The plane's pages under `/admin` are its break-glass page and nothing else, so there is
+// no other console to send a person to; what an area will do is done over the plane's
+// admin API until it is drawn, and the page says so rather than leaving nowhere to go.
 
 import type { JSX } from "react";
 import type { Area } from "../nav";
-import { currentConsole } from "../plane";
-import { useConsole } from "../console";
 import { href } from "../route";
 
 export function Unbuilt({ area }: { area: Area }): JSX.Element {
-  const { plane } = useConsole();
   return (
     <div className="page">
       <div className="card unbuilt">
         <span className="status muted">○ Not in this console yet</span>
         <p className="lead">{area.lead}</p>
-        {area.current ? (
-          <p>
-            It is in the plane's current console, which stays until this one covers it:{" "}
-            <a href={currentConsole(plane.url, area.current)}>{area.label} in the current console</a>.
-          </p>
-        ) : (
-          <p>It is new, and not in the plane's current console either.</p>
-        )}
         <p>
-          <a href={href({ page: "teams" })}>Back to Teams</a>
+          Until it is, it is done over the plane's admin API: with <code>troupe admin</code>, at <code>/rpc</code>, or with the admin MCP tools at{" "}
+          <code>/mcp</code>, which answer the same methods to the same roles.
+        </p>
+        <p>
+          <a href={href({ page: "overview" })}>Back to the overview</a>
         </p>
       </div>
     </div>

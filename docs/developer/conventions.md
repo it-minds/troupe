@@ -36,7 +36,7 @@ Credo's line-ending check and `dash` both break on CRLF.
 
 The rules are in [architecture.md §2](architecture.md#2-boundaries). When a client
 needs a server module, the protocol is missing a method — add it to `PROTOCOL.md` and the
-apps in the same pull request as the client change that needs it. A LiveView calls
+apps in the same pull request as the client change that needs it. A LiveView (the page at `/admin`) calls
 `Troupe.Plane.Admin` and nothing else in the plane.
 
 ## 3. Rules the code states and tests check
@@ -105,8 +105,11 @@ apps in the same pull request as the client change that needs it. A LiveView cal
 **An admin method.** The function in `Troupe.Plane.Admin` (actor first, `{:ok, result}` or
 `{:error, %Error{}}`, authorisation and `Audit.record/5` inside); a `%Method{}` in
 `Troupe.Plane.Admin.API` with a summary ending in a full stop, typed and described
-`%Argument{}`s, a `risk`, and `confirm` when destructive; a LiveView that calls it. The MCP
-tool appears by itself. Run `admin_parity_test.exs`.
+`%Argument{}`s, a `risk`, and `confirm` when destructive; its place on an area of the console's
+map in `Troupe.Plane.Admin.Console`; and in the console (`clients/gui/apps/console`), the
+client's call and a screen that makes it, or an entry in `src/owed.ts`. The MCP tool appears by
+itself. Run `admin_parity_test.exs`, `console_coverage_test.exs` and the console's
+`test/coverage.test.ts`.
 
 **A protocol event.** Add the type and its data to `Troupe.Protocol.Schema.events/0` (or
 `ephemeral_events/0`), only ever adding fields; emit it through `Session.Log.append/5`; if

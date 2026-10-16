@@ -32,14 +32,6 @@ defmodule Troupe.Plane.Web.Live.Auth do
     end
   end
 
-  def on_mount(:platform_admin, params, session, socket) do
-    case on_mount(:admin, params, session, socket) do
-      {:cont, socket} when socket.assigns.actor.role == :platform_admin -> {:cont, socket}
-      {:cont, socket} -> {:halt, redirect(socket, to: "/admin")}
-      halted -> halted
-    end
-  end
-
   # One call, because the console reaches the plane through `Admin` and nowhere else —
   # `mix troupe.boundaries` enforces it, and the reason is that a LiveView with a private
   # path into the plane is a path no other client has. Whether the session is a

@@ -77,9 +77,10 @@ defmodule Troupe.Plane.Web.Index do
 
   The console is an app of its own, served beside the plane rather than by it, so the
   plane cannot tell whether one is there: the deployment says, with `TROUPE_CONSOLE_URL`,
-  and an empty value is a plane without one. The index's console door and the LiveView
-  console's landing page point at it; without one, both keep the LiveView console at
-  `/admin`, which stays either way as the way in when the console cannot be used.
+  and an empty value is a plane without one. The index's console door and the page at
+  `/admin` point at it; without one, both say the plane is administered over the admin API.
+  `/admin` stays either way: a read-only overview, and the way in through the break-glass
+  door when the console cannot be used.
   """
   @spec console_url() :: String.t() | nil
   def console_url do
@@ -90,7 +91,7 @@ defmodule Troupe.Plane.Web.Index do
   end
 
   @doc """
-  What the LiveView console's pages are given at each request: where the console is.
+  What the page at `/admin` is given at each request: where the console is.
 
   Handed over by the router rather than read by a page, because a LiveView is an admin API
   client and reaches nothing else in the plane.
@@ -206,13 +207,13 @@ defmodule Troupe.Plane.Web.Index do
     )
   end
 
-  # The console door goes to the console, where there is one; the LiveView console at
-  # `/admin` is the door only on a plane without it.
+  # The console door goes to the console, where there is one. On a plane without it the
+  # door is the read-only page at `/admin`, which says how such a plane is administered.
   defp admin_door(nil) do
     Page.door(
       "/admin",
-      "Admin console",
-      "Fleet, teams, budgets, profiles, audit. Sign in with the identity provider; a platform or team admin gets in."
+      "Admin overview",
+      "The fleet, sessions and spend, read-only. This plane has no console: it is administered with troupe admin, over /rpc or with the admin MCP tools."
     )
   end
 
@@ -220,19 +221,19 @@ defmodule Troupe.Plane.Web.Index do
     Page.door(
       console_url,
       "Admin console",
-      "Teams, sessions, spend and the audit, and every change previewed before it is made. Sign in with the identity provider; a platform or team admin gets in."
+      "Teams, profiles, identity, sign-in, policy, the fleet, spend and the audit, and every change previewed before it is made. Sign in with the identity provider; a platform or team admin gets in."
     )
   end
 
-  # The LiveView console stays, for what the console does not do yet and as the way in when
-  # it cannot be used: break-glass is a sign-in of its own there.
+  # The plane's own page stays as the way in when the console cannot be used: break-glass
+  # is a sign-in of its own there.
   defp previous_console(nil), do: ""
 
   defp previous_console(_console_url) do
     """
     <p class="note">
-        The previous console is at <a href="/admin">/admin</a>, for what the console does not
-        do yet and as the way in when it cannot be used: break-glass included.
+        <a href="/admin">/admin</a> is a read-only overview, and the way in through the
+        break-glass door on the day the console cannot be used.
       </p>
     """
   end

@@ -17,7 +17,7 @@ paths:
   - apps/troupe_worker/test/troupe/worker/bundle_wins_test.exs
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/profile_editor.ex
+  - clients/gui/apps/console/src/views/Profiles.tsx
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - charts/troupe/crds/workerprofile.yaml
   - docs/admin/profiles-and-policy.md

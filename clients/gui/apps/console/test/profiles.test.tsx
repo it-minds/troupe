@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { draftOf, keptOf, llmWithoutEndpoint } from "../src/views/Profiles";
 import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PROVIDER_TYPES } from "../../../packages/client/test/support/provider-types.js";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -210,6 +211,22 @@ describe("the editor", () => {
     } finally {
       restore();
     }
+  });
+
+  it("offers the plane's provider types and size classes, and says what the chosen type asks of the form", async () => {
+    await open("#/profiles/dev");
+    (await waitFor(() => button("Change dev"), "dev")).click();
+    const provider = await waitFor(() => { const f = field("Provider"); return f instanceof HTMLSelectElement ? f : null; }, "the provider's choice");
+    const offered = [...provider.options].map((o) => o.value).filter(Boolean);
+    // The protocol's one list, as the plane answers it, and nothing typed by hand.
+    expect(offered).toEqual(PROVIDER_TYPES.map((t) => t["name"]));
+    expect(provider.value).toBe("openai");
+    type(provider, "azure_openai");
+    await waitFor(() => says("azure_openai has no address of its own: the endpoint is required"), "what azure asks");
+    type(provider, "ollama");
+    await waitFor(() => says("ollama takes no key"), "what ollama asks");
+    const size = field("How demanding") as HTMLSelectElement;
+    expect([...size.options].map((o) => o.textContent)).toEqual(["standard · 4 sessions a worker", "heavy · 2 sessions a worker"]);
   });
 
   it("makes a profile and deletes one, each previewed, confirmed and shown as the audit recorded it", async () => {

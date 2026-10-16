@@ -243,6 +243,204 @@ defmodule Troupe.Plane.GitHub do
   @spec keys() :: [String.t()]
   def keys, do: @fields
 
+  @doc """
+  The deliveries the App's webhook took, newest first, at most `limit`: GitHub's id for
+  each, its event and action, when it came, and what the plane did with it. Never a body.
+  """
+  @spec deliveries(pos_integer()) :: [map()]
+  def deliveries(limit) do
+    from(d in Troupe.Plane.GitHub.Delivery, order_by: [desc: d.received_at], limit: ^limit)
+    |> Repo.all()
+    |> Enum.map(&Map.take(&1, [:id, :event, :action, :received_at, :outcome]))
+  end
+
+  @doc """
+  Forget the App: its id, API URL and installations, and which transit key version is its
+  own. Answers the App as it was, or `:not_configured` where there was none.
+
+  The key itself stays in transit, where nothing can take a copy and nothing signs with
+  it once the row is gone; an App set again with a key of the same type imports it as the
+  next version. A session that names a repository is refused from now on, and one that
+  has a pod asks for a token it is not given.
+  """
+  @spec delete() :: {:ok, map()} | {:error, :not_configured}
+  def delete do
+    case stored() do
+      nil ->
+        {:error, :not_configured}
+
+      row ->
+        Repo.delete!(row)
+        {:ok, describe(row)}
+    end
+  end
+
+  @doc """
+  Whether the App works, asked of GitHub with the App's own JWT and writing nothing: an
+  App id is set, transit signs with its key, GitHub knows the App by that JWT, and every
+  installation the plane was given is one GitHub lists for it. A check that cannot be
+  tried because one before it failed says so. Answers `%{ok, checks, app}`, where `app`
+  is GitHub's slug and name for it once GitHub has answered.
+  """
+  @spec check(keyword()) :: %{ok: boolean(), checks: [map()], app: map() | nil}
+  def check(opts \\ []) do
+    row = stored() || %App{id: App.id()}
+    {checks, app} = check_steps(row, opts)
+    %{ok: Enum.all?(checks, & &1.ok), checks: checks, app: app}
+  end
+
+  defp check_steps(%App{app_id: nil}, _opts) do
+    {[
+       result("App", false, "No App ID is set.", 0),
+       not_tried("Private key", "App"),
+       not_tried("GitHub", "App"),
+       not_tried("Installations", "App")
+     ], nil}
+  end
+
+  defp check_steps(%App{} = row, opts) do
+    app_check = result("App", true, "App #{row.app_id}, at #{api_url(row)}.", 0)
+
+    {signed, took} =
+      timed(fn -> if row.key_version, do: jwt(row, opts), else: {:error, :no_key} end)
+
+    case signed do
+      {:ok, jwt} ->
+        key_check =
+          result(
+            "Private key",
+            true,
+            "Transit signs with version #{row.key_version} (#{row.key_fingerprint}).",
+            took
+          )
+
+        steps = ask_github(row, jwt)
+        {[app_check, key_check | Enum.reject(steps, &Map.has_key?(&1, :app))], found_app(steps)}
+
+      {:error, reason} ->
+        {[
+           app_check,
+           result("Private key", false, explain(reason), took),
+           not_tried("GitHub", "Private key"),
+           not_tried("Installations", "Private key")
+         ], nil}
+    end
+  end
+
+  # GitHub's answer for the App and for its installations, each as a check, with the App's
+  # slug and name carried beside them for the answer.
+  defp ask_github(row, jwt) do
+    {app, took} = timed(fn -> github_get(row, "/app", jwt) end)
+
+    case app do
+      {:ok, %{"id" => id} = body} when id == row.app_id ->
+        named = %{slug: body["slug"], name: body["name"]}
+        github = result("GitHub", true, "GitHub knows the App as #{body["slug"] || id}.", took)
+        [github, installations_check(row, jwt), %{app: named}]
+
+      {:ok, %{"id" => id}} ->
+        [
+          result("GitHub", false, "GitHub answered for App #{id}, not #{row.app_id}.", took),
+          not_tried("Installations", "GitHub")
+        ]
+
+      {:error, {:github_api, _path, 401, _message}} ->
+        [
+          result(
+            "GitHub",
+            false,
+            "GitHub refused the App's JWT: the key is not App #{row.app_id}'s, or the App ID is wrong.",
+            took
+          ),
+          not_tried("Installations", "GitHub")
+        ]
+
+      {:error, reason} ->
+        [result("GitHub", false, explain(reason), took), not_tried("Installations", "GitHub")]
+    end
+  end
+
+  defp installations_check(%App{installations: given} = row, jwt) do
+    given = given || []
+    {listed, took} = timed(fn -> github_get(row, "/app/installations", jwt) end)
+
+    case listed do
+      {:ok, list} when is_list(list) ->
+        known = MapSet.new(list, &{to_string(get_in(&1, ["account", "login"])), &1["id"]})
+        missing = Enum.reject(given, &MapSet.member?(known, {&1["owner"], &1["installation_id"]}))
+
+        cond do
+          given == [] ->
+            result(
+              "Installations",
+              false,
+              "No installation is set, so nothing can be cloned.",
+              took
+            )
+
+          missing == [] ->
+            result(
+              "Installations",
+              true,
+              "GitHub lists every installation set here: #{Enum.map_join(given, ", ", & &1["owner"])}.",
+              took
+            )
+
+          true ->
+            result(
+              "Installations",
+              false,
+              "GitHub lists no installation of the App for " <>
+                Enum.map_join(missing, ", ", &"#{&1["owner"]} (#{&1["installation_id"]})") <> ".",
+              took
+            )
+        end
+
+      {:ok, _other} ->
+        result("Installations", false, "GitHub's answer was not a list of installations.", took)
+
+      {:error, reason} ->
+        result("Installations", false, explain(reason), took)
+    end
+  end
+
+  defp found_app(steps), do: Enum.find_value(steps, &Map.get(&1, :app))
+
+  defp not_tried(name, after_check),
+    do: result(name, false, "Not tried: #{after_check} did not pass.", 0)
+
+  defp result(name, ok, detail, took), do: %{name: name, ok: ok, detail: detail, took_ms: took}
+
+  defp timed(fun) do
+    started = System.monotonic_time(:millisecond)
+    answer = fun.()
+    {answer, System.monotonic_time(:millisecond) - started}
+  end
+
+  # A read of GitHub's App API as the App: the JWT in the header and nowhere else.
+  defp github_get(row, path, jwt) do
+    url = api_url(row) <> path
+
+    case Req.request(
+           method: :get,
+           url: url,
+           headers: [
+             {"authorization", "Bearer " <> jwt},
+             {"accept", "application/vnd.github+json"},
+             {"x-github-api-version", "2022-11-28"},
+             {"user-agent", "troupe-plane"}
+           ],
+           redirect: false,
+           retry: false,
+           receive_timeout: 15_000
+         ) do
+      {:ok, %{status: 200, body: body}} -> {:ok, body}
+      {:ok, %{status: status, body: body}} -> {:error, {:github_api, path, status, message(body)}}
+      {:error, %{reason: reason}} -> {:error, {:github_unreachable, URI.parse(url).host, reason}}
+      {:error, reason} -> {:error, {:github_unreachable, URI.parse(url).host, reason}}
+    end
+  end
+
   defp only(attrs) do
     case Map.keys(attrs) -- @fields do
       [] ->
@@ -1071,6 +1269,12 @@ defmodule Troupe.Plane.GitHub do
 
   def explain({:github, status, message, _owner, _name}),
     do: "GitHub answered #{status}#{if message, do: " (#{message})"}"
+
+  def explain({:github_api, path, 404, _message}),
+    do: "GitHub has no #{path} here: the API URL is not a GitHub API's"
+
+  def explain({:github_api, path, status, message}),
+    do: "GitHub answered #{status} for #{path}#{if message, do: " (#{message})"}"
 
   def explain({:github_unreachable, host, reason}),
     do: "GitHub at #{host} could not be reached: #{inspect(reason)}"
