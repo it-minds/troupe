@@ -84,6 +84,12 @@ describe("the console covers the plane's administrative surface", () => {
     expect(missing, "reached from no screen and owed nowhere: build the screen, or add it to src/owed.ts with its area and why").toEqual([]);
   });
 
+  it("owes nothing: every method the plane serves is called from a screen", () => {
+    expect(OWED, "src/owed.ts lists methods again; this console had none left to draw").toEqual([]);
+    const here = reached();
+    expect([...served().keys()].filter((m) => !here.has(m))).toEqual([]);
+  });
+
   it("owes nothing a screen already reaches, so the list only shrinks", () => {
     const here = reached();
     const settled = [...owed.keys()].filter((m) => here.has(m)).map((m) => `${m} is reached from ${here.get(m)!.join(", ")}; delete it from src/owed.ts`);

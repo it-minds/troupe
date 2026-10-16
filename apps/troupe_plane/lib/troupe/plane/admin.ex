@@ -340,6 +340,7 @@ defmodule Troupe.Plane.Admin do
          :ok <- extends_held_by_repository(actor, attrs, name),
          :ok <- not_held_by_repository(actor, "profile.put", name),
          {:ok, attrs} <- without_derived(attrs),
+         attrs = with_channel_servers(attrs),
          {:ok, attrs} <- in_effect(attrs),
          :ok <- release_named(attrs),
          :ok <- Provision.check(attrs),
@@ -602,6 +603,26 @@ defmodule Troupe.Plane.Admin do
   end
 
   defp with_channel(attrs), do: attrs
+
+  # A profile created on a channel, or moved onto one, carries that channel's servers from
+  # this write, as a publish writes them, rather than from the channel's next publish: the
+  # reach and identity checks read the channel's bundle, and the resource the operator reads
+  # has to say the same. A put that stays on its channel keeps what it sends; a new profile
+  # on a channel with nothing published keeps the servers it was written with, as it did
+  # before any publish; and one that extends another and names no channel of its own has
+  # its servers from its parent.
+  defp with_channel_servers(%{"spec" => %{} = spec, "config_bundle_channel" => channel} = attrs) do
+    row = Fleet.get_profile(attrs["name"])
+
+    cond do
+      presence(attrs["extends"]) && is_nil(presence(spec["configBundleChannel"])) -> attrs
+      row && row.config_bundle_channel == channel -> attrs
+      is_nil(row) and is_nil(Bundles.current(channel)) -> attrs
+      true -> put_in(attrs, ["spec", "mcpServers"], Bundles.mcp_servers(channel))
+    end
+  end
+
+  defp with_channel_servers(attrs), do: attrs
 
   # `release` stands for the worker image this plane's release names, and a plane deployed
   # without one has nothing for it to stand for. Refused rather than saved: saved, it would

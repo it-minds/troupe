@@ -998,6 +998,61 @@ fieldset.server .actions,
 fieldset.server .note {
   grid-column: 1 / -1;
 }
+
+/* An enforced key's name is one long word (managed_permission_rules_only) that would hold
+ * the table wider than a phone; it breaks where it must. */
+.enforced td code {
+  overflow-wrap: anywhere;
+}
+
+/* The organisation's permission rules: a list per action to read, and in the editor a
+ * fieldset per action whose rows are a tool, a pattern and a way to take the rule away. */
+.rules-editor {
+  margin-top: var(--space-6);
+}
+.rules-editor .rules {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4);
+}
+.rules-editor .rule-list h3 {
+  margin: 0 0 var(--space-1);
+}
+.rules-editor .rule-list li,
+.rules-editor .rule-list code {
+  overflow-wrap: anywhere;
+}
+.rules-editor .edit {
+  max-width: none;
+}
+fieldset.rule-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-panel);
+}
+fieldset.rule-action legend {
+  padding: 0 var(--space-2);
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+.rule-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(160px, 2fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+  width: 100%;
+}
+.rule-row .remove {
+  margin-top: var(--space-5);
+}
 pre.prompt,
 ol.revisions pre {
   margin: 0 0 var(--space-4);
@@ -1129,8 +1184,13 @@ pre.manifest {
     padding-right: var(--space-4);
   }
   .row,
-  .limit {
+  .limit,
+  .rule-row {
     grid-template-columns: 1fr;
     gap: var(--space-2);
+  }
+  .rule-row .remove {
+    margin-top: 0;
+    justify-self: start;
   }
 }

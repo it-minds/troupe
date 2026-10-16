@@ -88,6 +88,8 @@ client, the certificate and the key, and rotating them, is in
 **Publish, adopt, retire.** `admin.bundle.publish {channel, content}` validates, assigns
 the channel's next version, stores the document under `sha256:<canonical JSON>`, pushes
 `config.updated` to every pod on the channel and rewrites `mcpServers` on those profiles.
+A profile created on a channel, or moved onto one, gets the channel's current servers on its
+resource with that write, not at the channel's next publish.
 History is append-only; a rollback is a new version with the old content. Pods fetch the
 version over the control channel, verify the hash and materialise
 `bundles/<hash>/{agents, skills, bundle.json}`; one that missed the push catches up at its
@@ -157,14 +159,15 @@ minute is within the last 120 s.
 `/rpc`, by the trigger's principal or an admin of its team, writes the run row first, so
 two callers racing on one key get the same run: skipped stays skipped, failed is retried, a
 run with a session is handed it and a fresh token. `event` is capped at 16 KiB.
-`admin.trigger.run` fires one by hand.
+`admin.trigger.run` fires one by hand, as the console's **Run now** on a trigger's page does.
 
 **A trigger's own URL.** A trigger with a key is fired by `POST /trigger/<id>` with
 `Authorization: Bearer <key>` and a JSON object as the body, which becomes the run's
 `event`. A webhook trigger is made with its key: the `admin.trigger.put` that creates it
 answers `key` and `url` once, and the console shows them once with a button that copies
-the key; nothing shows it again. `admin.trigger.key.rotate` mints a new one, shows it once
-with the URL and keeps a salted hash; rotating replaces it at once, and is how a trigger
+the key; nothing shows it again. `admin.trigger.key.rotate` (the console's **Rotate**, typed
+by the trigger's name) mints a new one, shows it once with the URL and keeps a salted hash;
+rotating replaces it at once, and is how a trigger
 made another way (another kind, a resource in `gitops` mode) gets one. A trigger on a
 GitHub repository is fired by the App's signed deliveries and is made with none. The key
 fires that one trigger and does

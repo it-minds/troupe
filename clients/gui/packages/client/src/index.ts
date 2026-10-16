@@ -169,6 +169,8 @@ export type {
   ServicePrincipal,
   TeamSpend,
   Trigger,
+  TriggerFired,
+  TriggerKey,
   TriggerRun,
   Ceiling,
   Connections,
@@ -283,6 +285,8 @@ export type {
   PermissionRule,
   ProviderTypeInfo,
 } from "./config.js";
+export { PATH_TOOLS, RULE_ACTIONS, checkRuleSet, parseRule, ruleKind, ruleParts } from "./rules.js";
+export type { ReadRule, RuleAction, RuleKind, RuleSet } from "./rules.js";
 export {
   APPROVAL_CHOICES,
   OLDER_DAEMON_KINDS,
