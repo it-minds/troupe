@@ -106,9 +106,7 @@ function LooksTwice(): JSX.Element {
               {d.people.map((set, i) => (
                 <div className="card" key={`p${i}`} aria-label={`People sharing ${set.by.replace("_", " ")}`}>
                   <header>
-                    <h3>
-                      {set.people.length} people share {set.by === "email" ? "an email" : "a name"}: {sharedValue(set.by, set.people)}
-                    </h3>
+                    <h3>{peopleTitle(set.by, set.people)}</h3>
                   </header>
                   <PeopleTable people={set.people} />
                   <p>Most likely {set.likely}.</p>
@@ -144,6 +142,17 @@ function LooksTwice(): JSX.Element {
 function sharedValue(by: string, people: LookalikePerson[]): string {
   const v = people[0]?.[by];
   return typeof v === "string" ? v : "—";
+}
+
+/**
+ * What a set of people has in common, as its heading: an email or a name two rows share,
+ * or an externalId a sign-in or a push was refused adoption on, which may be one row.
+ */
+function peopleTitle(by: string, people: LookalikePerson[]): string {
+  const value = sharedValue(by, people);
+  if (by === "external_id") return `Not merged on externalId ${value}`;
+  const what = by === "email" ? "an email" : by === "display_name" ? "a name" : by.replace(/_/g, " ");
+  return `${people.length} people share ${what}: ${value}`;
 }
 
 function PeopleTable({ people }: { people: LookalikePerson[] }): JSX.Element {

@@ -338,7 +338,7 @@ points. The apps carry no Apple or Microsoft signature yet (#656), so the first 
 Why that is safe, and how to check a first download against the release key:
 [security.md §6](security.md#6-the-apps-are-not-os-code-signed). From then on `troupe
 update` and the desktop app check every update against that key themselves, and follow the
-versions the Policy page sets ([routine-tasks.md](routine-tasks.md#client-versions)).
+versions the console's **Client versions** sets ([routine-tasks.md](routine-tasks.md#client-versions)).
 
 ## 6. A worked example on managed services
 

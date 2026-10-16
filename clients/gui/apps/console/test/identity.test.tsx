@@ -53,6 +53,20 @@ describe("what looks held twice", () => {
     expect(says("make them the same at the provider", twice)).toBe(true);
   });
 
+  it("lists an adoption the plane refused, by the externalId it was refused on", async () => {
+    // What the plane answers since a push or a sign-in is adopted only when an email or a
+    // userName agrees: the row that holds the externalId, and why nothing was merged.
+    fake.admin.peopleAlike.push({
+      by: "external_id",
+      people: [{ id: "u-gus", subject: "gus@example.com", external_id: "4d3c2b1a", user_name: "gus@example.com", email: "gus@example.com", display_name: "Gus", origin: "scim" }],
+      likely: "SCIM pushed externalId 4d3c2b1a, which this row holds, but neither the email nor the userName it sent agrees with the row's",
+    });
+    await open();
+    const twice = await waitFor(() => section("People and groups that look held twice"), "the section");
+    await waitFor(() => says("Not merged on externalId 4d3c2b1a", twice), "the refused adoption");
+    expect(says("neither the email nor the userName it sent agrees", twice)).toBe(true);
+  });
+
   it("flags a group held twice where it is listed, and says what else the plane says of a set", async () => {
     const likely = "the groups claim names this group by its name and SCIM by its id";
     fake.admin.groups.push({ external_id: "Platform owners", display_name: "Platform owners", looks_duplicated: { others: ["grp-platform"], likely } });
