@@ -54,7 +54,8 @@ Other `spec` fields:
 | `personalTools` | `allow` (the default, and what absent means) lets a person offer a session on these pods the tools of MCP servers they signed in to on their own machine; `forbid` has the pods refuse ([below](#a-persons-own-tools-on-a-pod)) |
 | `github.permissions` | what a session's token may do on GitHub beyond cloning its repository, in GitHub's names: `contents` (`read` or `write`, which pushes its `troupe/*` branch), `pull_requests` (`read` or `write`, which opens its draft pull request and comments on it), `checks` and `statuses` (`read`, its CI). Absent, sessions clone and do no more; a profile that pushes also declares the API's host in `egress.gitHosts` ([github.md](github.md#5-let-a-profile-reach-github)) |
 | `mcpIdentities` | who the profile is at each MCP server its bundle calls with client credentials ([below](#calling-an-mcp-server-as-the-profile)). Yours to write, in direct and gitops mode alike; nothing in it is secret |
-| `mcpServers`, `teams` | **written by the plane** from the bundle its pods load and from grants; do not set them |
+| `mcpServers` | the MCP servers the profile adds to its bundle's, its own (Decision 910). The resource's list, which its pods load, is its channel's bundle's with these added by name: one with a bundle server's name replaces it only with `"override": true`. A publish to the channel composes the two again and keeps the profile's own; `admin.profile.get` answers the own ones in `spec`, and a put that sends the resource's whole list back has the bundle's dropped as the bundle's |
+| `teams` | **written by the plane** from grants; do not set it |
 
 A profile's `provisioner` decides who makes its workers exist: `kubernetes` (the default,
 the operator) or `ssh`, machines that register themselves ([single-machine.md](single-machine.md)).
@@ -113,7 +114,10 @@ refused with a sentence.
   servers and ACP agents, with its own channel's added by name. An entry with a name the
   parent's bundle already has replaces it only where the child's channel's document says
   `"override": true` on it (an agent may say it in its frontmatter instead); otherwise the
-  parent's is kept, and `effective.bundle.problems` says so. The plane publishes the
+  parent's is kept, and `effective.bundle.problems` says so. The MCP servers each profile
+  in the chain wrote itself are a layer of their own, after its channel's, by the same
+  rule; a profile that extends nothing and wrote servers of its own has a composed bundle
+  too, so its pods load them. The plane publishes the
   composed bundle as a version of a channel of the child's own, `profile:<name>`, only when
   it differs, so its pods fetch and check one document by one hash as on any channel, and
   a session pins its version as it would any other. A publish or retire on any channel in

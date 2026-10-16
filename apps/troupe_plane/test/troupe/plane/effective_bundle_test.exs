@@ -185,6 +185,95 @@ defmodule Troupe.Plane.EffectiveBundleTest do
     end
   end
 
+  describe "a profile's own servers" do
+    defp tools(names),
+      do: %{
+        "schema" => 1,
+        "mcp_servers" =>
+          for(name <- names, do: %{"name" => name, "url" => "https://#{name}.example.test/mcp"})
+      }
+
+    defp spec_names(name), do: Enum.map(Fleet.get_profile(name).spec["mcpServers"], & &1["name"])
+
+    test "compose with its channel's, and a publish composes them again rather than overwriting them",
+         context do
+      own = %{"name" => "notes", "url" => "https://notes.example.test/mcp"}
+
+      {:ok, _} =
+        Admin.profile_put(context.actor, %{
+          "name" => "solo",
+          "image" => @image,
+          "spec" => %{"configBundleChannel" => "tools", "mcpServers" => [own]}
+        })
+
+      {:ok, _} = Bundles.publish("tools", tools(["jira"]), announce: false)
+      assert spec_names("solo") == ["jira", "notes"]
+
+      # The next publish to its channel recomputes the list: the channel's new servers, and
+      # the profile's own still there.
+      {:ok, _} = Bundles.publish("tools", tools(["jira", "docs"]), announce: false)
+      assert spec_names("solo") == ["jira", "docs", "notes"]
+
+      # Its pods load the same list, in one document.
+      row = Fleet.get_profile("solo")
+
+      assert names(Bundles.current(row.config_bundle_channel).content, "mcp_servers") ==
+               ["jira", "docs", "notes"]
+
+      # What it wrote is what an editor loads, and a caller that sends back the resource's
+      # list does not make the channel's servers its own.
+      assert {:ok, got} = Admin.profile_get(context.actor, "solo")
+      assert got.spec["mcpServers"] == [own]
+
+      {:ok, _} =
+        Admin.profile_put(context.actor, %{
+          "name" => "solo",
+          "image" => @image,
+          "spec" => %{"configBundleChannel" => "tools", "mcpServers" => row.spec["mcpServers"]}
+        })
+
+      assert Fleet.get_profile("solo").own_servers == [own]
+      {:ok, _} = Bundles.publish("tools", tools(["docs"]), announce: false)
+      assert spec_names("solo") == ["docs", "notes"]
+    end
+
+    test "replace a channel's server of the same name only with override: true", context do
+      {:ok, _} = Bundles.publish("tools", tools(["jira"]), announce: false)
+      mine = %{"name" => "jira", "url" => "https://jira.internal.example.test/mcp"}
+
+      put = fn server ->
+        Admin.profile_put(context.actor, %{
+          "name" => "solo",
+          "image" => @image,
+          "spec" => %{"configBundleChannel" => "tools", "mcpServers" => [server]}
+        })
+      end
+
+      {:ok, _} = put.(mine)
+
+      assert [%{"url" => "https://jira.example.test/mcp"}] =
+               Fleet.get_profile("solo").spec["mcpServers"]
+
+      assert {:ok, got} = Admin.profile_get(context.actor, "solo", true)
+
+      assert Enum.any?(
+               got.effective.problems,
+               &(&1 =~ "say override: true on solo's to replace it")
+             )
+
+      {:ok, _} = put.(Map.put(mine, "override", true))
+      {:ok, _} = Bundles.publish("tools", tools(["jira", "docs"]), announce: false)
+
+      assert [
+               %{"name" => "jira", "url" => "https://jira.internal.example.test/mcp"} = jira,
+               _docs
+             ] =
+               Fleet.get_profile("solo").spec["mcpServers"]
+
+      refute Map.has_key?(jira, "override")
+    end
+  end
+
   describe "a publish anywhere in the chain" do
     test "reaches the child's pods with its new bundle in effect", context do
       {:ok, _} = Admin.profile_put(context.actor, standard())

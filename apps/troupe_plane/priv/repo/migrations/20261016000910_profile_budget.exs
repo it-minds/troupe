@@ -8,6 +8,13 @@ defmodule Troupe.Plane.Repo.Migrations.ProfileBudget do
 
   No column on the ledger: what a profile spent is its sessions' charges, found through
   the session each charge names, which both tables already index.
+
+  `own_servers` is the MCP servers a profile that extends nothing was written with itself,
+  apart from the ones its bundle gives it: the spec's `mcpServers` is both together, as
+  its pods load them, and a publish composes the two again rather than overwriting the
+  profile's own. `nil` for a row written before there was the column, whose own servers
+  are the spec's that its channel's bundle does not name. A profile that extends another
+  keeps its own in `own`.
   """
 
   use Ecto.Migration
@@ -15,6 +22,7 @@ defmodule Troupe.Plane.Repo.Migrations.ProfileBudget do
   def change do
     alter table(:profiles) do
       add(:budget_micros, :bigint)
+      add(:own_servers, {:array, :map})
     end
   end
 end

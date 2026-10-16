@@ -96,9 +96,11 @@ client, the certificate and the key, and rotating them, is in
 
 **Publish, adopt, retire.** `admin.bundle.publish {channel, content}` validates, assigns
 the channel's next version, stores the document under `sha256:<canonical JSON>`, pushes
-`config.updated` to every pod on the channel and rewrites `mcpServers` on those profiles.
-A profile created on a channel, or moved onto one, gets the channel's current servers on its
-resource with that write, not at the channel's next publish.
+`config.updated` to every pod on the channel and rewrites `mcpServers` on those profiles:
+the channel's servers composed again with the ones each profile wrote itself, which a
+publish keeps (Decision 910). A profile created on a channel, or moved onto one, gets the
+channel's current servers on its resource with that write, not at the channel's next
+publish.
 History is append-only; a rollback is a new version with the old content. Pods fetch the
 version over the control channel, verify the hash and materialise
 `bundles/<hash>/{agents, skills, bundle.json}`; one that missed the push catches up at its

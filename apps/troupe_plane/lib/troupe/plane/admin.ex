@@ -46,7 +46,8 @@ defmodule Troupe.Plane.Admin do
     GitHub,
     Gitops,
     Identity,
-    Ledger
+    Ledger,
+    ProfileBudget
   }
 
   alias Troupe.Plane.Control.TLS
@@ -54,8 +55,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.GitHub.Issue, as: GitHubIssue
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
-  alias Troupe.Plane.{OIDC, Principals, ProfileBudget, Provision, Reach, Sessions, Settings}
-  alias Troupe.Plane.Triggers
+  alias Troupe.Plane.{OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision, Trigger}
@@ -343,7 +343,13 @@ defmodule Troupe.Plane.Admin do
       channel: bundle.channel,
       hash: bundle.hash,
       composed: Bundles.Effective.composed?(bundle.layers),
-      layers: bundle.layers,
+      # A channel, or a profile's own servers, by name.
+      layers:
+        Enum.map(bundle.layers, fn
+          %{channel: channel, profile: profile} -> %{profile: profile, channel: channel}
+          %{servers: servers, profile: profile} ->
+            %{profile: profile, servers: Enum.map(servers, & &1["name"])}
+        end),
       entries: bundle.entries,
       problems: bundle.problems
     }
@@ -364,7 +370,6 @@ defmodule Troupe.Plane.Admin do
          :ok <- extends_held_by_repository(actor, attrs, name),
          :ok <- not_held_by_repository(actor, "profile.put", name),
          {:ok, attrs} <- without_derived(attrs),
-         attrs = with_channel_servers(attrs),
          {:ok, attrs} <- in_effect(attrs),
          :ok <- release_named(attrs),
          :ok <- Provision.check(attrs),
@@ -422,6 +427,7 @@ defmodule Troupe.Plane.Admin do
   defp in_effect(attrs) do
     name = attrs["name"]
     row = Fleet.get_profile(name)
+    attrs = own_servers_only(attrs, row)
     kept = if row && row.extends, do: row.own || %{}, else: %{}
     own = Map.merge(kept, Map.take(attrs, Extends.written_keys()))
 
@@ -437,8 +443,15 @@ defmodule Troupe.Plane.Admin do
              "name" => name,
              "extends" => nil,
              "own" => nil,
-             "config_bundle_channel" => channel
+             "config_bundle_channel" => channel,
+             "own_servers" => servers_of(own["spec"])
            })}
+        end
+
+      {nil, _row} when is_map_key(attrs, "spec") ->
+        with {:ok, resolved} <-
+               resolve_put(name, %{name => %{extends: nil, written: written_of(name, attrs)}}) do
+          {:ok, servers_in_effect(attrs, resolved)}
         end
 
       {nil, _row} ->
@@ -454,6 +467,46 @@ defmodule Troupe.Plane.Admin do
            |> Map.merge(%{"name" => name, "extends" => parent, "own" => own})}
         end
     end
+  end
+
+  # A profile's MCP servers are its own and its bundle's, composed (`Bundles.Effective`), so
+  # what a put sends is its own: the servers it wrote, without any that came from a bundle.
+  # A caller that read the resource and sends its servers back sends the bundle's too, and
+  # those are dropped here as the bundle's, whose next publish would otherwise find them
+  # copied into the profile. A put that names no parent has its servers in effect as the
+  # chain of one resolves them, with the channel its pods load.
+  defp own_servers_only(
+         %{"spec" => %{"mcpServers" => sent} = spec} = attrs,
+         %Fleet.Profile{} = row
+       )
+       when is_list(sent) do
+    mine =
+      if row.extends,
+        do: servers_of(row.own["spec"]),
+        else: Extends.own_servers(row)
+
+    names = MapSet.new(mine, & &1["name"])
+    bundles = for s <- servers_of(row.spec), not MapSet.member?(names, s["name"]), do: s
+    own = Enum.reject(sent, &(Map.delete(&1, "override") in bundles))
+    Map.put(attrs, "spec", Map.put(spec, "mcpServers", own))
+  end
+
+  defp own_servers_only(attrs, _row), do: attrs
+
+  defp servers_of(%{"mcpServers" => servers}) when is_list(servers), do: servers
+  defp servers_of(_spec), do: []
+
+  defp servers_in_effect(attrs, %{attrs: resolved, bundle: bundle}) do
+    servers = resolved["spec"]["mcpServers"]
+    spec = Map.delete(attrs["spec"], "mcpServers")
+
+    Map.merge(attrs, %{
+      "spec" => if(servers, do: Map.put(spec, "mcpServers", servers), else: spec),
+      "config_bundle_channel" => bundle.channel,
+      "own_servers" => servers_of(attrs["spec"]),
+      "extends" => nil,
+      "own" => nil
+    })
   end
 
   # A profile's budget may only be lowered by one that extends it. One set above what it
@@ -564,9 +617,19 @@ defmodule Troupe.Plane.Admin do
             row -> Extends.written(%{row | extends: nil})
           end
 
-        Map.merge(base, Map.take(attrs, Extends.written_keys()))
+        base
+        |> Map.merge(Map.take(attrs, Extends.written_keys()))
+        |> with_own_servers(attrs["own_servers"])
     end
   end
+
+  # A write that resolved its servers in effect still wrote only its own.
+  defp with_own_servers(%{"spec" => %{} = spec} = written, own) when is_list(own) do
+    spec = Map.delete(spec, "mcpServers")
+    Map.put(written, "spec", if(own == [], do: spec, else: Map.put(spec, "mcpServers", own)))
+  end
+
+  defp with_own_servers(written, _own), do: written
 
   defp changeset_sentence(errors) do
     Enum.map_join(errors, "; ", fn {field, {message, _details}} -> "#{field} #{message}" end)
@@ -685,26 +748,6 @@ defmodule Troupe.Plane.Admin do
   end
 
   defp with_channel(attrs), do: attrs
-
-  # A profile created on a channel, or moved onto one, carries that channel's servers from
-  # this write, as a publish writes them, rather than from the channel's next publish: the
-  # reach and identity checks read the channel's bundle, and the resource the operator reads
-  # has to say the same. A put that stays on its channel keeps what it sends; a new profile
-  # on a channel with nothing published keeps the servers it was written with, as it did
-  # before any publish; and one that extends another and names no channel of its own has
-  # its servers from its parent.
-  defp with_channel_servers(%{"spec" => %{} = spec, "config_bundle_channel" => channel} = attrs) do
-    row = Fleet.get_profile(attrs["name"])
-
-    cond do
-      presence(attrs["extends"]) && is_nil(presence(spec["configBundleChannel"])) -> attrs
-      row && row.config_bundle_channel == channel -> attrs
-      is_nil(row) and is_nil(Bundles.current(channel)) -> attrs
-      true -> put_in(attrs, ["spec", "mcpServers"], Bundles.mcp_servers(channel))
-    end
-  end
-
-  defp with_channel_servers(attrs), do: attrs
 
   # `release` stands for the worker image this plane's release names, and a plane deployed
   # without one has nothing for it to stand for. Refused rather than saved: saved, it would

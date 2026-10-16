@@ -21,6 +21,7 @@ paths:
   - apps/troupe_plane/priv/repo/migrations/20261016000910_profile_budget.exs
   - apps/troupe_plane/test/troupe/plane/effective_bundle_test.exs
   - apps/troupe_plane/test/troupe/plane/profile_budget_test.exs
+  - apps/troupe_plane/test/troupe/plane/channel_servers_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/bundle.ex
   - apps/troupe_worker/test/troupe/worker/bundles_test.exs
   - clients/gui/apps/console/src/views/Profiles.tsx
@@ -35,6 +36,8 @@ symbols:
   - Troupe.Plane.Bundles.Effective
   - Troupe.Plane.Bundles.publish_effective/2
   - Troupe.Plane.Bundles.project_mcp_servers/3
+  - Troupe.Plane.Fleet.Extends.refresh/2
+  - Troupe.Plane.Fleet.Extends.own_servers/1
   - Troupe.Plane.ProfileBudget
   - Troupe.Plane.Budget.reserve/5
 gist: "child's bundle = chain's channels composed, override in the document; one hash on profile:<name>; profile budget monthly, child only lowers"
@@ -104,6 +107,35 @@ the worker to fetch from, and a second notion of version beside the channel's), 
 composing on the worker (two fetches and two hashes per pod, and the worker would need the
 chain, which Decision 908 keeps on the plane).
 
+### A profile's own servers are a layer, and a publish keeps them
+
+C37's review of #722 found that a publish replaced a profile's whole `spec.mcpServers` with
+its channel's, so the servers an administrator wrote in the editor went at the next
+publish. The servers a profile wrote itself are therefore a layer of their own, after its
+channel's, composed by the same rule (added by name, replacing a bundle server only with
+`override: true` on the profile's entry, the clash otherwise reported, as Decision 908 said
+it for a child's servers):
+
+- They are kept apart: in `own.spec.mcpServers` for a profile that extends another, as
+  before, and in a new column, `own_servers`, for one that extends nothing. A row from
+  before the column has as its own the spec's servers its channel's bundle does not name,
+  and its first refresh keeps them in the column.
+- **A publish composes again rather than overwriting.** `Bundles.project_mcp_servers/3`
+  refreshes each profile (`Extends.refresh/2`): a root's servers and channel only, the rest
+  of its row as it is; a child's whole resolution.
+- A profile with servers of its own has a composed bundle and a `profile:<name>` channel
+  even with one channel in its chain, so its pods load its own servers with the bundle's and
+  the resource and the bundle still agree. One that wrote none stays on its channel as it is.
+- `admin.profile.get` answers a root's own servers in `spec`, as it answers a child's
+  written ones, so an editor loads and sends back only those. A caller that sends the
+  resource's whole list back sends the bundle's too: a put drops sent entries that equal a
+  server the profile has from a bundle, which keeps Decision 912's tests (a profile moved
+  onto a channel has that channel's servers, not the old one's) true by composition.
+- This replaces Decision 912's `with_channel_servers/1`, which wrote the channel's servers
+  into a put that created a profile or moved it: every put of a spec now resolves the
+  profile's servers in effect, so a profile has its channel's servers from the write that
+  puts it there, as 912 promised, and keeps its own.
+
 A known edge, not new: a session pins a version number, not a channel, so a profile that
 moves from its parent's channel to one of its own resolves its sessions' pins against the
 new channel at their next activation, as a change of `configBundleChannel` already does.
@@ -156,7 +188,10 @@ skills and servers and is what the resource's `mcpServers` names; a clash keeps 
 until the child's channel says override, which survives that channel's next publish; a
 publish to the parent's channel pushes the parent's bundle to its pods and the composed one
 to the child's, and one to the child's channel pushes only to the child's; a republish that
-changes nothing makes no version. The profile's rung refuses naming the profile with the
+changes nothing makes no version. A root profile's own server stays beside its channel's
+through two publishes, its pods' bundle names both, a resent resource list does not make the
+channel's servers its own, and its own `jira` replaces the channel's only with
+`override: true`; Decision 912's `channel_servers_test.exs` passes as it was. The profile's rung refuses naming the profile with the
 team under its ceiling, unwinds the team's slice, is released, counts the month's charges
 through sessions, is absent at zero, refuses `session.create` with `scope: profile`, and is
 named by `admin.budget.explain`; a child's budget is the parent's or its own lower one, a

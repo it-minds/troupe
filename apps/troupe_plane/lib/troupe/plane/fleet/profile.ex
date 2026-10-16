@@ -60,6 +60,10 @@ defmodule Troupe.Plane.Fleet.Profile do
     # reader of the row and the resource gets. Both `nil` for a profile that extends none.
     field :extends, :string
     field :own, :map
+    # The MCP servers a profile that extends nothing was written with itself, apart from
+    # its bundle's: `spec.mcpServers` is the two composed, as its pods load them. `nil` for
+    # a row from before there was the column (`Troupe.Plane.Fleet.Extends.written/1`).
+    field :own_servers, {:array, :map}
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -83,7 +87,8 @@ defmodule Troupe.Plane.Fleet.Profile do
     :workers_domain,
     :spec,
     :extends,
-    :own
+    :own,
+    :own_servers
   ]
 
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()
@@ -110,6 +115,7 @@ defmodule Troupe.Plane.Fleet.Profile do
     # yet: a row read from one has no parent, whatever it had in direct mode.
     |> put_change(:extends, nil)
     |> put_change(:own, nil)
+    |> put_change(:own_servers, nil)
     |> validate()
     |> derive_from_class()
   end

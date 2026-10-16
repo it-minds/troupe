@@ -224,7 +224,8 @@ export interface BundleEntry {
   kind: "agents" | "skills" | "mcp_servers" | "acp_agents" | string;
   name: string;
   from: string;
-  channel: string;
+  /** The channel whose bundle gave it; null for a server the profile wrote itself. */
+  channel: string | null;
 }
 
 /** The bundle a profile's pods load: one channel's, or the one the plane composes from the channels of its chain. */
@@ -232,7 +233,8 @@ export interface EffectiveBundle {
   channel: string;
   hash: string | null;
   composed: boolean;
-  layers: Array<{ profile: string; channel: string }>;
+  /** What it is made from, in order: a channel's bundle, or the MCP servers a profile wrote itself, each under its profile. */
+  layers: Array<{ profile: string; channel?: string; servers?: string[] }>;
   entries: BundleEntry[];
   /** A child's entry with a parent's name that does not say override: true, and so is not in effect. */
   problems: string[];

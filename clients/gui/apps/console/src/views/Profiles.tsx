@@ -631,7 +631,7 @@ function BundleInEffect({ name, bundle }: { name: string; bundle: EffectiveBundl
       <Region>The bundle its pods load</Region>
       <p className="note">
         {bundle.composed
-          ? `One bundle, composed by the plane from ${bundle.layers.map((l) => `${l.channel} (${l.profile}'s)`).join(" and ")}: each agent, skill and server is added to the ones above it, and replaces one of the same name only where its channel's document says override: true. A publish to any of these channels reaches ${name}'s pods.`
+          ? `One bundle, composed by the plane from ${bundle.layers.map((l) => (l.channel ? `${l.channel} (${l.profile}'s)` : `${l.profile}'s own servers`)).join(" and ")}: each agent, skill and server is added to the ones above it, and replaces one of the same name only where it says override: true. A publish to any of these channels reaches ${name}'s pods, and keeps the servers a profile wrote itself.`
           : `${bundle.channel}'s, as it is published.`}
         {bundle.hash && <span className="mono"> {bundle.hash}</span>}
       </p>
@@ -654,7 +654,7 @@ function BundleInEffect({ name, bundle }: { name: string; bundle: EffectiveBundl
                   <td className="mono">{e.name}</td>
                   <td>
                     {e.from === name ? <span>{e.from}</span> : <a href={href({ page: "profiles", path: [e.from] })}>{e.from}</a>}
-                    <span className="hint"> on {e.channel}</span>
+                    <span className="hint">{e.channel ? ` on ${e.channel}` : ", its own"}</span>
                   </td>
                 </tr>
               ))}
