@@ -104,9 +104,10 @@ defmodule Mix.Tasks.Troupe.Admin.Assets do
     end
   end
 
-  # The whole of the console's own JavaScript. It connects the socket and nothing else:
-  # every behaviour on every page is server-rendered and patched, which is what lets the
-  # design say the layout must not depend on measured width or client state.
+  # The whole of the console's own JavaScript. It connects the socket, and copies a key
+  # shown once to the clipboard, and nothing else: every behaviour on every page is
+  # server-rendered and patched, which is what lets the design say the layout must not
+  # depend on measured width or client state.
   defp boot do
     """
     ;/* troupe console */
@@ -132,6 +133,13 @@ defmodule Mix.Tasks.Troupe.Admin.Assets do
       });
       socket.socket.onOpen(function () {
         root.removeAttribute("data-console-offline");
+      });
+
+      // A key shown once, copied by its button: the element the button names holds the
+      // text, and the clipboard is the browser's to write, so this is the one place it can.
+      window.addEventListener("troupe:copy", function (event) {
+        var text = event.target && event.target.textContent;
+        if (text && navigator.clipboard) navigator.clipboard.writeText(text.trim());
       });
 
       socket.connect();

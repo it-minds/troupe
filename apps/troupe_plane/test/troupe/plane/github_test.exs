@@ -271,6 +271,32 @@ defmodule Troupe.Plane.GitHubTest do
     end
   end
 
+  describe "the webhook's deliveries" do
+    test "are listed newest first, without a body, to a platform admin", context do
+      for {id, minutes} <- [{"d-old", 10}, {"d-new", 1}] do
+        Repo.insert!(%Troupe.Plane.GitHub.Delivery{
+          id: id,
+          event: "issues",
+          action: "opened",
+          received_at: DateTime.add(DateTime.utc_now(), -minutes * 60, :second),
+          outcome: %{"runs" => [], "reason" => "no trigger names the repository"}
+        })
+      end
+
+      assert {:ok, [newest, oldest]} = API.call("admin.github.deliveries", %{}, @root)
+      assert newest.id == "d-new" and oldest.id == "d-old"
+      assert newest.event == "issues" and newest.action == "opened"
+      assert newest.outcome["reason"] =~ "no trigger"
+      refute Map.has_key?(newest, :body)
+
+      assert {:ok, [_one]} = API.call("admin.github.deliveries", %{"limit" => 1}, @root)
+
+      assert {:error, refused} = API.call("admin.github.deliveries", %{}, @lead)
+      assert refused.data.required_role == "platform_admin"
+      _ = context
+    end
+  end
+
   describe "removing the App" do
     test "is confirmed by its id, forgets it, and is audited by the key's fingerprint", context do
       configure(context)

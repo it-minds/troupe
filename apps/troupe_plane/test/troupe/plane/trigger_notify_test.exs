@@ -17,7 +17,7 @@ defmodule Troupe.Plane.TriggerNotifyTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.Triggers
+  alias Troupe.Plane.{Sessions, Triggers}
   alias Troupe.Plane.Triggers.Notify
 
   defmodule Listener do
@@ -30,6 +30,8 @@ defmodule Troupe.Plane.TriggerNotifyTest do
     @impl Plug
     def call(conn, test) do
       send(test, {:notified, conn.request_path, Plug.Conn.get_req_header(conn, "host")})
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(test, {:notified_with, body})
       Plug.Conn.send_resp(conn, 200, "")
     end
   end
@@ -327,6 +329,53 @@ defmodule Troupe.Plane.TriggerNotifyTest do
       assert_receive {:notified, "/runs", ["rebind.example.test:" <> port]}, 5_000
       assert port == to_string(context.port)
       assert :counters.get(lookups, 1) == 1
+    end
+
+    # A run that opened a draft pull request says where it is when it ends, which is where
+    # a person goes next; a run that opened none says so with a null.
+    test "carries the run's pull request, as a link", context do
+      Application.put_env(:troupe_plane, :notify_resolver, fn
+        "hooks.example.test" -> [context.address]
+        _other -> []
+      end)
+
+      {:ok, trigger} =
+        put(context, %{"notify_url" => "http://hooks.example.test:#{context.port}/runs"})
+
+      {:ok, revision} = Triggers.revise(trigger)
+      url = "https://github.com/example-org/widgets/pull/12"
+
+      for {id, github} <- [
+            {"s-notify-pr-#{System.unique_integer([:positive])}",
+             %{"branch" => "troupe/fix-12", "pull_request" => %{"number" => 12, "url" => url}}},
+            {"s-notify-none-#{System.unique_integer([:positive])}", nil}
+          ] do
+        {:ok, session} =
+          Sessions.create(%{id: id, owner_subject: "svc:engineering/nightly", profile: "dev"})
+
+        {:ok, _} =
+          session |> Ecto.Changeset.change(github: github, status: "done") |> Repo.update()
+
+        {:ok, _run} =
+          %Triggers.Run{}
+          |> Triggers.Run.changeset(%{
+            trigger_id: trigger.id,
+            revision_id: revision.id,
+            idempotency_key: "k-#{id}",
+            session_id: id,
+            fired_at: DateTime.utc_now(),
+            source: "webhook",
+            state: "created"
+          })
+          |> Repo.insert()
+
+        assert Triggers.announce(id) == :ok
+        assert_receive {:notified_with, body}, 5_000
+        sent = Jason.decode!(body)
+        assert sent["session_id"] == id
+        assert sent["pull_request"] == if(github, do: url)
+        assert Map.has_key?(sent, "pull_request")
+      end
     end
   end
 

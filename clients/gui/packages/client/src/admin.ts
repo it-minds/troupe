@@ -491,28 +491,47 @@ export interface TriggerRevision {
   document?: Record<string, unknown>;
 }
 
-/** What `admin.trigger.put` answers: the trigger as it now is, what moved, and its revision. */
+/**
+ * What `admin.trigger.put` answers: the trigger as it now is, what moved, and its revision.
+ * A new webhook trigger is made with its key: `key` and `url` are in this answer once, and
+ * in nothing after it.
+ */
 export interface TriggerPut {
   trigger: Trigger;
   changes: AuditChanges;
   revision: TriggerRevision;
+  key?: string;
+  url?: string;
 }
 
 export interface TriggerRun {
   id: string;
   trigger: string;
+  /** The team whose trigger it is. */
+  team?: string;
   trigger_id: string;
   idempotency_key: string;
   session_id: string | null;
   fired_at: string;
   fired_by: string | null;
+  /** How the firing arrived: schedule, webhook, manual and the rest. */
+  source?: string | null;
+  revision?: number | null;
+  revision_hash?: string | null;
   event: Record<string, unknown> | null;
   state: "created" | "running" | "waiting" | "done" | "failed" | "skipped" | string;
   status: string | null;
   done_reason: string | null;
+  failed_reason?: string | null;
   pending_approvals: number | null;
   pending_questions?: number | null;
   cost_micros: number | null;
+  /** The GitHub repository a run on one worked in, `owner/name`; null for none. */
+  repository?: string | null;
+  /** The issue that started it, where GitHub did. */
+  issue?: { number: number; url: string | null; title: string | null } | null;
+  /** What its session did on GitHub: its branch, its draft pull request and the CI rounds on it. */
+  github?: SessionGitHub | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
 }
@@ -634,6 +653,8 @@ export interface GitHubApp {
   git_url: string | null;
   installations: Array<{ owner: string; installation_id: number }>;
   private_key: { set: boolean; type: string | null; fingerprint: string | null; transit_key: string; version: number | null };
+  /** Where GitHub sends the App's events, and whether the secret it signs them with is set: its version, never it. */
+  webhook?: { path: string; secret: { set: boolean; transit_key: string; version: number | null } };
   permissions: Record<string, string>;
   updated_by: string | null;
   updated_at: string | null;
@@ -647,6 +668,17 @@ export interface GitHubAppChange {
   api_url?: string | null;
   installations?: Array<{ owner: string; installation_id: number }>;
   private_key?: string;
+  /** As typed into the App's webhook settings at GitHub; imported into OpenBao, never shown back. */
+  webhook_secret?: string;
+}
+
+/** One delivery the App's webhook took: GitHub's id, what it was, and what the plane did with it. Never its body. */
+export interface GitHubDelivery {
+  id: string;
+  event: string;
+  action: string | null;
+  received_at: string;
+  outcome: Record<string, unknown> | null;
 }
 
 /** What `admin.github.check` answers: four named checks, and GitHub's name for the App once it answered. */
@@ -889,6 +921,11 @@ export class AdminApi {
   /** Ask GitHub whether the App works, writing nothing. */
   checkGithub(): Promise<GitHubCheck> {
     return this.rpc<GitHubCheck>("admin.github.check", {});
+  }
+
+  /** The deliveries the App's webhook took, newest first. A platform admin's. */
+  githubDeliveries(limit?: number): Promise<GitHubDelivery[]> {
+    return this.rpc<GitHubDelivery[]>("admin.github.deliveries", limit ? { limit } : {});
   }
 
   /** Forget the App. Destructive: confirmed by its App ID. */
@@ -1137,8 +1174,14 @@ export class AdminApi {
     return this.rpc<TriggerRun>("admin.trigger.run", { team, name });
   }
 
-  runs(filter: AdminFilter & { team: string }): Promise<TriggerRun[]> {
+  /** One team's runs where `team` is named, every team the caller administers where it is not. */
+  runs(filter: AdminFilter & { team?: string } = {}): Promise<TriggerRun[]> {
     return this.rpc<TriggerRun[]>("admin.runs.list", { filter });
+  }
+
+  /** Mark the run behind a session as read, by whoever is asking. */
+  reviewRun(sessionId: string): Promise<{ session_id: string; reviewed_by: string }> {
+    return this.rpc("admin.run.review", { session_id: sessionId });
   }
 }
 

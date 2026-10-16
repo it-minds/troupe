@@ -98,6 +98,7 @@ defmodule Troupe.Plane.Admin.Console do
     github_get: {:area, :integrations},
     github_put: {:area, :integrations},
     github_check: {:area, :integrations},
+    github_deliveries: {:area, :integrations},
     github_delete: {:area, :integrations},
 
     # -- Operate -------------------------------------------------------------

@@ -69,9 +69,13 @@ plane answers once is shown once, with a copy button, and the plane keeps only i
 - **`admin.profile.choices`** answers the provider types (the protocol's `wire/0`, Decision
   894's one list) and the size classes, so the profile editor offers them rather than free
   text and says what the chosen type asks for.
-- **`owed.ts` keeps `runs` and a trigger's run and key** only. Those are slot B36's, in this
-  chunk (Decision 905); until they land they are done over the admin API, which the
-  Unbuilt page and the trigger page say. **Company memory** is unbuilt and has no method.
+- **`owed.ts` keeps a trigger's run and key rotation** only: Runs and review and the key a
+  new webhook trigger is made with are Decision 905's, in this chunk, and the two left are
+  done over the admin API, which a trigger's page says. **Company memory** is unbuilt and
+  has no method.
+- **`admin.github.deliveries`** lists what the App's webhook took (Decision 905's
+  `github_deliveries`) with what the plane did with each, a platform admin's, on
+  Integrations beside the webhook secret, which `admin.github.put` takes and never answers.
 
 ## What `/admin` keeps
 

@@ -38,7 +38,7 @@ export const NAV: Group[] = [
       { id: "overview", label: "Overview", built: true, teamAdmin: true, lead: "What needs attention, how each profile's fleet is doing, and what every team has spent against its budget." },
       { id: "sessions", label: "Sessions", built: true, teamAdmin: true, lead: "Every session's owner, team, profile, state, size and cost, and never what was said in it." },
       { id: "connections", label: "Connections", built: true, teamAdmin: false, lead: "Which MCP servers each session is talking to, and which identity its calls go out as." },
-      { id: "runs", label: "Runs and review", built: false, teamAdmin: true, lead: "Trigger runs, what fired them, how they ended and what they cost, and who has read them." },
+      { id: "runs", label: "Runs and review", built: true, teamAdmin: true, lead: "Trigger runs, what fired them, how they ended and what they cost, and who has read them." },
     ],
   },
   {

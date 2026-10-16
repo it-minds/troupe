@@ -24,7 +24,13 @@ defmodule Troupe.Plane.FakeGitHub do
     GitHub makes an App's); draft and ready pull requests; comments on them; and the
     commit's check runs and combined status, which the test scripts (`ci/3`). A ruleset
     (`ruleset/3`) refuses a branch write outside a prefix, as one keyed on the App would;
+  - **a review's comments** (`GET .../pulls/<n>/reviews/<id>/comments`), as the test
+    scripts them (`review/4`), for a token holding `pull_requests: read`;
   - nothing else: any other path is `404`.
+
+  And the other way, what GitHub sends the App's webhook: `deliver/5` posts an event to a
+  plane, signed with the webhook secret as GitHub signs it (`X-Hub-Signature-256`), with
+  its event name and delivery id in the headers GitHub uses.
 
   Every token request is kept (`requests/1`), every token issued (`tokens/1`) and every
   write the API was asked for (`writes/1`), merges and reviews included, which nothing is
@@ -58,7 +64,10 @@ defmodule Troupe.Plane.FakeGitHub do
                writes: [],
                ci: %{},
                checks: %{},
-               rulesets: %{}
+               rulesets: %{},
+               # A review's comments on lines, by repository and review id, which the
+               # plane reads when a review resumes a session.
+               reviews: %{}
              }
            end},
           id: {__MODULE__, :agent}
@@ -127,6 +136,50 @@ defmodule Troupe.Plane.FakeGitHub do
   @doc "Serve the repository at `path` as `owner/name`."
   def repo(fake, full_name, path) do
     Agent.update(fake.agent, &put_in(&1.repos[String.downcase(full_name)], path))
+  end
+
+  @doc "The comments on lines of review `review_id` on `full_name`: `[%{path, line, body, user}]`."
+  def review(fake, full_name, review_id, comments) do
+    Agent.update(
+      fake.agent,
+      &put_in(&1.reviews[{String.downcase(full_name), to_string(review_id)}], comments)
+    )
+  end
+
+  @doc """
+  Post `payload` to `url` as GitHub delivers an event to an App's webhook: JSON, signed
+  with `secret` (`signature:` sends that header instead, `nil` none), the event in
+  `X-GitHub-Event` and `delivery:` (a fresh id unless given) in `X-GitHub-Delivery`.
+  Answers the plane's response and the delivery id.
+  """
+  def deliver(url, secret, event, payload, opts \\ []) do
+    body = Jason.encode!(payload)
+    delivery = Keyword.get_lazy(opts, :delivery, fn -> Ecto.UUID.generate() end)
+
+    signature =
+      Keyword.get_lazy(opts, :signature, fn ->
+        "sha256=" <> Base.encode16(:crypto.mac(:hmac, :sha256, secret, body), case: :lower)
+      end)
+
+    headers =
+      [
+        {"content-type", "application/json"},
+        {"user-agent", "GitHub-Hookshot/test"},
+        {"x-github-event", event},
+        {"x-github-delivery", delivery}
+      ] ++ if(signature, do: [{"x-hub-signature-256", signature}], else: [])
+
+    {:ok, response} =
+      Req.request(
+        method: :post,
+        url: url <> "/webhook/github",
+        body: Keyword.get(opts, :body, body),
+        headers: headers,
+        decode_body: true,
+        retry: false
+      )
+
+    {response, delivery}
   end
 
   @doc "How long a token issued from now lives, in seconds."
@@ -553,6 +606,11 @@ defmodule Troupe.Plane.FakeGitHub do
       "total_count" => length(statuses),
       "statuses" => statuses
     })
+  end
+
+  defp api("GET", ["pulls", _number, "reviews", review_id, "comments"], _asked, ctx) do
+    comments = Agent.get(ctx.agent, &Map.get(&1.reviews, {ctx.full, review_id}, []))
+    answer(ctx.conn, 200, comments)
   end
 
   # Merging, approving, deleting a branch: nothing in the fix loop asks for them, and

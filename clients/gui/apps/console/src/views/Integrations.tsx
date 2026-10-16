@@ -4,8 +4,9 @@
 // (never the key: its fingerprint and which transit version it is), a test against GitHub
 // that writes nothing, and, for a platform admin, setting it and removing it. A change is
 // previewed with the audit's own fields and confirmed; removing it is typed by its App ID.
-// The private key is pasted once and imported into OpenBao by the plane; nothing here keeps
-// it, and no answer ever carries it back.
+// The private key and the webhook secret are pasted once and imported into OpenBao by the
+// plane; nothing here keeps them, and no answer ever carries them back. A platform admin
+// also sees what the App's webhook took lately and what the plane did with each delivery.
 //
 // Then three lists `admin.integrations.list` answers, read-only on purpose: the MCP servers
 // more than one profile carries (the organisation's, and the blast radius of retiring one),
@@ -15,9 +16,9 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { GitHubApp, GitHubAppChange, GitHubCheck, IntegrationServer, Integrations as IntegrationsAnswer } from "@troupe/client";
+import type { GitHubApp, GitHubAppChange, GitHubCheck, GitHubDelivery, IntegrationServer, Integrations as IntegrationsAnswer } from "@troupe/client";
 import { describeError, show, useConsole, useLoad } from "../console";
-import { AuditNote, Checks, Empty, Field, Fields, Loaded, Preview, Region, Status, changed, useChange, when } from "./bits";
+import { AuditNote, Checks, DetailList, Empty, Field, Fields, Loaded, Preview, Region, Status, changed, useChange, when } from "./bits";
 import type { DiffLine } from "./bits";
 
 export function Integrations(): JSX.Element {
@@ -30,6 +31,7 @@ export function Integrations(): JSX.Element {
         {([app, answer]) => (
           <>
             <GitHubCard app={app} onApplied={reload} />
+            <Deliveries />
             <Servers answer={answer} />
             <Egress answer={answer} />
             <Notify answer={answer} />
@@ -47,6 +49,7 @@ interface AppForm {
   apiUrl: string;
   installations: string;
   privateKey: string;
+  webhookSecret: string;
 }
 
 function formOf(app: GitHubApp): AppForm {
@@ -55,6 +58,7 @@ function formOf(app: GitHubApp): AppForm {
     apiUrl: app.api_url === "https://api.github.com" ? "" : app.api_url,
     installations: app.installations.map((i) => `${i.owner} ${i.installation_id}`).join("\n"),
     privateKey: "",
+    webhookSecret: "",
   };
 }
 
@@ -80,6 +84,7 @@ function changeOf(app: GitHubApp, form: AppForm): GitHubAppChange | null {
   if ((api ?? "https://api.github.com") !== app.api_url) change.api_url = api;
   if (JSON.stringify(installations) !== JSON.stringify(app.installations)) change.installations = installations;
   if (form.privateKey.trim() !== "") change.private_key = form.privateKey.trim();
+  if (form.webhookSecret.trim() !== "") change.webhook_secret = form.webhookSecret.trim();
   return change;
 }
 
@@ -100,6 +105,7 @@ function GitHubCard({ app, onApplied }: { app: GitHubApp; onApplied: () => void 
           installations: change.installations ?? app.installations,
         }),
         ...(change.private_key ? [{ field: "private_key", from: app.private_key.fingerprint ?? null, to: "the key pasted, by its fingerprint once imported" }] : []),
+        ...(change.webhook_secret ? [{ field: "webhook_secret", from: app.webhook?.secret.set ? `version ${String(app.webhook.secret.version)}` : null, to: "the secret typed, never shown" }] : []),
       ]
     : [];
   const busy = form !== null || removing;
@@ -148,6 +154,20 @@ function GitHubCard({ app, onApplied }: { app: GitHubApp; onApplied: () => void 
               </>
             ) : (
               "not set"
+            ),
+          ],
+          [
+            "Webhook",
+            app.webhook ? (
+              <>
+                <span className="mono">{app.webhook.path}</span>
+                <span className="hint">
+                  {" "}
+                  {app.webhook.secret.set ? `signed with a secret at version ${String(app.webhook.secret.version)}; never shown` : "no secret set, so every delivery is refused"}
+                </span>
+              </>
+            ) : (
+              "—"
             ),
           ],
           ["A session's clone token", Object.entries(app.permissions).map(([k, v]) => `${k}: ${v}`).join(", ") || "—"],
@@ -223,6 +243,16 @@ function GitHubCard({ app, onApplied }: { app: GitHubApp; onApplied: () => void 
               />
             )}
           </Field>
+          <Field
+            label="Webhook secret"
+            hint={
+              app.webhook?.secret.set
+                ? "Empty keeps the secret there is. A new one must be typed into the App's webhook settings at GitHub too."
+                : "As typed into the App's webhook settings at GitHub, at least 32 characters (openssl rand -hex 32 makes one). Kept in OpenBao, never shown back."
+            }
+          >
+            {(p) => <input {...p} type="password" value={form.webhookSecret} onChange={(e) => setForm({ ...form, webhookSecret: e.target.value })} autoComplete="off" spellCheck={false} />}
+          </Field>
           <div className="actions">
             <button type="submit" className="primary" disabled={!change || lines.length === 0}>
               Preview
@@ -283,6 +313,7 @@ function appWords(app: GitHubApp, change: GitHubAppChange): string[] {
     if (gone.length) out.push(`A session can no longer name a repository of ${gone.join(", ")}.`);
     out.push(owners.length ? `Sessions may name repositories of ${owners.join(", ")}.` : "No installation is left: no session can name a repository.");
   }
+  if (change.webhook_secret) out.push("Every delivery is checked against the new secret from now on: GitHub's webhook settings must have the same one, or its deliveries are refused.");
   if ("api_url" in change) out.push(`Clones come from where ${change.api_url ?? "https://api.github.com"} says, and each profile must declare that host in egress.gitHosts.`);
   out.push("Test it afterwards: the test asks GitHub with the App's own key.");
   return out;
@@ -419,5 +450,54 @@ function Notify({ answer }: { answer: IntegrationsAnswer }): JSX.Element {
         </ul>
       )}
     </>
+  );
+}
+
+/** What the App's webhook took lately, and what the plane made of each: a platform admin's. */
+function Deliveries(): JSX.Element | null {
+  const { admin, role } = useConsole();
+  const [load, reload] = useLoad(() => (role === "platform_admin" ? admin.githubDeliveries(20) : Promise.resolve(null)), [admin, role]);
+  if (role !== "platform_admin") return null;
+  return (
+    <section aria-label="What GitHub has sent">
+      <Region>What GitHub has sent</Region>
+      <p className="note">
+        The newest deliveries the App's webhook took, by GitHub's own id, and what the plane did with each: the runs it fired, the session it sent back to work, or
+        why neither. Never what an issue or a review said.
+      </p>
+      <Loaded load={load} what="the deliveries" retry={reload}>
+        {(deliveries: GitHubDelivery[] | null) =>
+          !deliveries || deliveries.length === 0 ? (
+            <Empty title="Nothing received yet">GitHub has sent this plane no delivery it took.</Empty>
+          ) : (
+            <div className="scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Received</th>
+                    <th>Event</th>
+                    <th>What the plane did</th>
+                    <th>Delivery</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deliveries.map((d) => (
+                    <tr key={d.id}>
+                      <td>{when(d.received_at)}</td>
+                      <td className="mono">
+                        {d.event}
+                        {d.action ? `.${d.action}` : ""}
+                      </td>
+                      <td>{d.outcome ? <DetailList detail={d.outcome} /> : "—"}</td>
+                      <td className="mono">{d.id}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        }
+      </Loaded>
+    </section>
   );
 }

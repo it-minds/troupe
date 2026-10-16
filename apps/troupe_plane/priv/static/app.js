@@ -142,6 +142,13 @@ removing illegal node: "${("outerHTML"in n&&n.outerHTML||n.nodeValue||"").trim()
     root.removeAttribute("data-console-offline");
   });
 
+  // A key shown once, copied by its button: the element the button names holds the
+  // text, and the clipboard is the browser's to write, so this is the one place it can.
+  window.addEventListener("troupe:copy", function (event) {
+    var text = event.target && event.target.textContent;
+    if (text && navigator.clipboard) navigator.clipboard.writeText(text.trim());
+  });
+
   socket.connect();
   window.liveSocket = socket;
 })();

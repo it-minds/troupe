@@ -83,10 +83,10 @@ describe("the shell", () => {
     expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);
   });
 
-  it("draws every area the plane places a method on but runs and company memory", async () => {
+  it("draws every area the plane places a method on, leaving only company memory", async () => {
     await open();
     const later = [...rail().querySelectorAll("a.later")].map((a) => (a.textContent ?? "").replace(/\s*○.*$/, "").trim());
-    expect(later).toEqual(["Runs and review", "Company memory"]);
+    expect(later).toEqual(["Company memory"]);
   });
 
   it("opens straight at a deep link, a team's tab included, and keeps it across a reload", async () => {

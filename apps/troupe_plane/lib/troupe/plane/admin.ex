@@ -51,12 +51,13 @@ defmodule Troupe.Plane.Admin do
 
   alias Troupe.Plane.Control.TLS
   alias Troupe.Plane.Fleet.{Bundle, Provisioner, SizeClass, Worker}
+  alias Troupe.Plane.GitHub.Issue, as: GitHubIssue
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
-  alias Troupe.Plane.Triggers.{Notify, Revision}
+  alias Troupe.Plane.Triggers.{Notify, Revision, Trigger}
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.ProviderTypes
@@ -1858,8 +1859,9 @@ defmodule Troupe.Plane.Admin do
 
   @doc """
   Change the plane's GitHub App. Only the keys sent change; `installations` is the whole
-  list; `private_key`, the PEM GitHub downloads, is imported into OpenBao's transit engine
-  and is in no answer, row, log or audit entry afterwards. Refused with the field and the
+  list; `private_key`, the PEM GitHub downloads, and `webhook_secret`, what the App's
+  webhook signs deliveries with, are imported into OpenBao's transit engine and are in no
+  answer, row, log or audit entry afterwards. Refused with the field and the
   reason, and nothing written, for anything that does not read. Audited with the diff,
   in which the key is its fingerprint.
   """
@@ -1889,6 +1891,20 @@ defmodule Troupe.Plane.Admin do
   @spec github_check(actor()) :: result()
   def github_check(actor) do
     with :ok <- require_platform_admin(actor), do: {:ok, GitHub.check()}
+  end
+
+  @doc """
+  What the App's webhook has taken lately: each delivery's id, event and action, when it
+  came and what the plane did with it (the runs it fired, the session it resumed, or why
+  neither), newest first. Never a body. A platform admin's, as the App is: the deliveries
+  name every team's repositories.
+  """
+  @spec github_deliveries(actor(), integer() | nil) :: result()
+  def github_deliveries(actor, limit) do
+    with :ok <- require_platform_admin(actor) do
+      limit = if is_integer(limit) and limit > 0, do: min(limit, 200), else: 50
+      {:ok, GitHub.deliveries(limit)}
+    end
   end
 
   @doc """
@@ -1946,7 +1962,8 @@ defmodule Troupe.Plane.Admin do
       api_url: app.api_url,
       installations: app.installations,
       fingerprint: app.private_key.fingerprint,
-      transit_version: app.private_key.version
+      transit_version: app.private_key.version,
+      webhook_secret_version: app.webhook.secret.version
     }
   end
 
@@ -2734,6 +2751,10 @@ defmodule Troupe.Plane.Admin do
   Refused in GitOps mode as `managed_by_gitops` (Decision 737), switching one on or off
   included: the trigger is a `Trigger` resource a repository holds, and a change to it is
   a commit there. The attempt is in the audit trail, as a refused profile write is.
+
+  A new webhook trigger is made with its key: the answer carries `key` and `url` this once,
+  and the audit row says only that one was minted. A trigger on a GitHub repository is
+  checked against the App as a session naming it is, and is made with none.
   """
   @spec trigger_put(actor(), map()) :: result()
   def trigger_put(actor, attrs) do
@@ -2748,19 +2769,23 @@ defmodule Troupe.Plane.Admin do
              "#{team.name}/#{name}",
              GitopsTriggers.kind()
            ),
-         :ok <- known_profile(attrs) do
+         :ok <- known_profile(attrs),
+         :ok <- reachable_repository(team, name, attrs) do
       before = Triggers.get(team, name)
 
       case Triggers.put(team, attrs, actor.subject) do
         {:ok, trigger} ->
           changes = Audit.diff(comparable(before), comparable(trigger))
           {:ok, revision} = Triggers.revise(trigger)
+          {trigger, key} = minted_at_create(before, trigger, actor)
 
           detail =
-            Map.merge(changes, %{
+            changes
+            |> Map.merge(%{
               "__revision__" => revision.revision,
               "__revision_hash__" => revision.hash
             })
+            |> Map.merge(key_minted(key))
 
           {:ok, _} = Audit.record(actor.subject, "trigger.put", "#{team.name}/#{name}", detail)
 
@@ -2769,11 +2794,53 @@ defmodule Troupe.Plane.Admin do
              trigger: Triggers.trigger_json(trigger),
              changes: changes,
              revision: Revision.json(revision)
-           }}
+           }
+           |> Map.merge(key_answer(key, trigger))}
 
         {:error, %Error{} = error} ->
           {:error, error}
       end
+    end
+  end
+
+  # A webhook trigger is made with its key, which this answer carries once and nothing
+  # carries again: a trigger that cannot be fired until somebody finds a second button was
+  # half made. A trigger on a GitHub repository is fired by the App's signed deliveries and
+  # needs none; nor does a trigger that existed already, whose key is rotated as before.
+  defp minted_at_create(nil, %Trigger{source: %{"kind" => "webhook"} = source} = trigger, actor) do
+    if GitHubIssue.repository?(source) do
+      {trigger, nil}
+    else
+      {:ok, trigger, key} = Triggers.rotate_key(trigger, actor.subject)
+      {trigger, key}
+    end
+  end
+
+  defp minted_at_create(_before, trigger, _actor), do: {trigger, nil}
+
+  # The audit row says a key was minted, never which.
+  defp key_minted(nil), do: %{}
+  defp key_minted(_key), do: %{"__key_minted__" => true}
+
+  defp key_answer(nil, _trigger), do: %{}
+  defp key_answer(key, trigger), do: %{key: key, url: "/trigger/#{trigger.id}"}
+
+  # A trigger on a GitHub repository is checked as a session naming it will be: the App is
+  # here, installed for its owner, and the trigger's profile declares the Git host. Asked of
+  # a put that sends a source or a profile, against the trigger as it would then be.
+  defp reachable_repository(team, name, attrs) do
+    existing = Triggers.get(team, name)
+    source = attrs["source"] || (existing && existing.source)
+    profile = attrs["profile"] || (existing && existing.profile)
+
+    with true <- Map.has_key?(attrs, "source") or Map.has_key?(attrs, "profile"),
+         {owner, repository} <- GitHubIssue.repository(source),
+         {:error, reason} <-
+           GitHub.repository(%{"owner" => owner, "name" => repository}, profile) do
+      {:error,
+       Error.new(:invalid_params, %{field: "source", reason: "source.repository: " <> reason})}
+    else
+      _ -> :ok
     end
   end
 
@@ -3020,7 +3087,9 @@ defmodule Troupe.Plane.Admin do
     team
     |> Triggers.runs(Keyword.take(opts, [:trigger, :limit]))
     |> Enum.map(fn {run, trigger, session} ->
-      run |> Triggers.run_json(session) |> Map.put("trigger", trigger.name)
+      run
+      |> Triggers.run_json(session)
+      |> Map.merge(%{"trigger" => trigger.name, "team" => team.name})
     end)
   end
 

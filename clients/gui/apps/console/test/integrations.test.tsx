@@ -77,6 +77,22 @@ describe("the GitHub App", () => {
     expect(JSON.stringify(fake.admin.audit)).not.toContain("BEGIN RSA PRIVATE KEY");
   });
 
+  it("takes a webhook secret once, never shows it back, and lists what GitHub has sent", async () => {
+    await open();
+    await waitFor(() => says("signed with a secret at version 1"), "the webhook");
+    await waitFor(() => says("pull_request_review.submitted") && says("s-7f3a9c24"), "the deliveries");
+    expect(says("nothing here acts on a push")).toBe(true);
+
+    button("Change the App")!.click();
+    type(await waitFor(() => field("Webhook secret"), "the form"), "0123456789abcdef0123456789abcdef");
+    button("Preview")!.click();
+    await waitFor(() => says("GitHub's webhook settings must have the same one"), "the preview");
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as github.put on app") && says("signed with a secret at version 2"), "the audit's note");
+    expect(says("0123456789abcdef0123456789abcdef")).toBe(false);
+    expect(JSON.stringify(fake.admin.audit)).not.toContain("0123456789abcdef0123456789abcdef");
+  });
+
   it("shows the plane's refusal where the change was asked for", async () => {
     await open();
     (await waitFor(() => button("Change the App"), "the App")).click();
@@ -109,6 +125,7 @@ describe("the GitHub App", () => {
     expect(button("Change the App")).toBeNull();
     expect(button("Remove the App")).toBeNull();
     expect(says("Only a platform admin changes or tests the App")).toBe(true);
+    expect(says("What GitHub has sent")).toBe(false);
   });
 });
 

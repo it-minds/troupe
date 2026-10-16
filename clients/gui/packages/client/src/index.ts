@@ -172,6 +172,7 @@ export type {
   GitHubApp,
   GitHubAppChange,
   GitHubCheck,
+  GitHubDelivery,
   Host,
   IdentityDuplicates,
   IntegrationServer,

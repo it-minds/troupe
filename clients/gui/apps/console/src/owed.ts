@@ -27,13 +27,8 @@ export interface Owed {
 
 export const OWED: Owed[] = [
   {
-    area: "runs",
-    why: "Trigger runs and marking one reviewed, which Overview counts and links to; read and marked over the admin API until the Runs screen is drawn.",
-    methods: ["admin.runs.list", "admin.run.review"],
-  },
-  {
     area: "triggers",
-    why: "Running a trigger by hand, and minting its webhook key behind a typed confirm; a trigger's page names the two methods, done over the admin API until it offers them.",
+    why: "Running a trigger by hand, and rotating its webhook key behind a typed confirm (a new one is minted when the trigger is made); a trigger's page names the two methods, done over the admin API until it offers them.",
     methods: ["admin.trigger.run", "admin.trigger.key.rotate"],
   },
 ];

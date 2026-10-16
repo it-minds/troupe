@@ -1416,8 +1416,6 @@ Found by the chunk 34 fixers, 2026-10-13.
 - **Control TLS** (Decision 902).
   - `scripts/verify-local.ps1` can't pass on scratch homes: it compares the listening process's path with `$env:LOCALAPPDATA\Programs`.
   - OTP 28.5's `:inet.getfd/1` raises on an `inet_backend: socket` socket (upstream).
-- **The console** (Decision 901).
-  - A webhook trigger has no key until one is made on its row; whether `trigger.put` should mint one at create is open.
 - **The audit** replaces `secretRef.key`, `tokenUrl` and `transitKey` values with `[redacted]` in profile diffs, so changes to those names don't show.
 - **The desktop app.**
   - `daemon_start` is a synchronous Tauri command, so the window doesn't repaint for up to 30 s while it starts a daemon after a crash.
