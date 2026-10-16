@@ -16,10 +16,11 @@
 // Nothing here is a second implementation of the protocol. What comes back is a port and
 // a token, and the web bundle speaks to it with the same client it uses for a worker.
 
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
@@ -64,12 +65,145 @@ fn read_endpoint_at(path: &Path) -> Option<DaemonEndpoint> {
     })
 }
 
-/// Whether something is listening where the file says. A `daemon.json` left behind by a
-/// daemon that died names a port nothing answers on, and starting a daemon over a stale
-/// file is the whole point of `daemon_start`.
-pub(crate) fn alive(endpoint: &DaemonEndpoint) -> bool {
+/// Whether anything accepts a connection where the file says: what a daemon that said it
+/// stops is waited out by, since one still closing its files may already have stopped
+/// answering.
+pub(crate) fn listening(endpoint: &DaemonEndpoint) -> bool {
     let addr = SocketAddr::from(([127, 0, 0, 1], endpoint.port));
     TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
+}
+
+/// Whether a Troupe daemon that takes the file's token answers where the file says: the
+/// WebSocket upgrade, and `initialize` with the token answered with a result. A
+/// `daemon.json` left behind by a daemon that died names a port that nothing answers on,
+/// or that another program has taken since, and starting a daemon over a stale file is
+/// the whole point of `daemon_start`; a port that merely accepts proves neither.
+pub(crate) fn alive(endpoint: &DaemonEndpoint) -> bool {
+    probe(endpoint, Duration::from_millis(1500)).unwrap_or(false)
+}
+
+/// The probe behind `alive`, each read and write given `wait`. `Ok(false)` for something
+/// that answered as no Troupe daemon with this token would.
+fn probe(endpoint: &DaemonEndpoint, wait: Duration) -> std::io::Result<bool> {
+    let addr = SocketAddr::from(([127, 0, 0, 1], endpoint.port));
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(300))?;
+    stream.set_read_timeout(Some(wait))?;
+    stream.set_write_timeout(Some(wait))?;
+
+    // RFC 6455's own sample key: the accept it proves is not what is checked here, the
+    // answer to `initialize` is.
+    write!(
+        stream,
+        "GET /v1/socket HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\
+         Authorization: Bearer {}\r\n\r\n",
+        endpoint.port, endpoint.token
+    )?;
+
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut status = String::new();
+    reader.read_line(&mut status)?;
+    if !status.starts_with("HTTP/1.1 101") {
+        return Ok(false);
+    }
+    loop {
+        let mut header = String::new();
+        if reader.read_line(&mut header)? == 0 {
+            return Ok(false);
+        }
+        if header == "\r\n" {
+            break;
+        }
+    }
+
+    let initialize = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocol_version": "1",
+            "client_info": { "name": "troupe-desktop", "version": env!("CARGO_PKG_VERSION") },
+            "capabilities": {},
+            "auth": { "token": endpoint.token },
+        },
+    });
+    stream.write_all(&frame(0x1, initialize.to_string().as_bytes()))?;
+
+    // What the daemon says before its answer is not the answer; a few frames at most.
+    let mut answered = false;
+    for _ in 0..16 {
+        let (opcode, payload) = read_frame(&mut reader)?;
+        if opcode == 0x8 {
+            break;
+        }
+        let Ok(message) = serde_json::from_slice::<serde_json::Value>(&payload) else { continue };
+        if message.get("id") == Some(&serde_json::json!(1)) {
+            answered = message.get("result").and_then(|r| r.get("protocol_version")).is_some();
+            break;
+        }
+    }
+
+    let _ = stream.write_all(&frame(0x8, &[]));
+    Ok(answered)
+}
+
+/// One frame from a client: final, masked, as RFC 6455 has a client send every frame.
+fn frame(opcode: u8, payload: &[u8]) -> Vec<u8> {
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+    let mask = (nanos ^ std::process::id().rotate_left(16)).to_be_bytes();
+
+    let mut out = vec![0x80 | opcode];
+    match payload.len() {
+        n if n < 126 => out.push(0x80 | n as u8),
+        n if n <= 0xFFFF => {
+            out.push(0x80 | 126);
+            out.extend_from_slice(&(n as u16).to_be_bytes());
+        }
+        n => {
+            out.push(0x80 | 127);
+            out.extend_from_slice(&(n as u64).to_be_bytes());
+        }
+    }
+    out.extend_from_slice(&mask);
+    out.extend(payload.iter().enumerate().map(|(i, b)| b ^ mask[i % 4]));
+    out
+}
+
+/// One frame from the server: its opcode and payload, unmasked. Anything over a mebibyte
+/// is no answer to `initialize`, and is refused rather than read.
+fn read_frame(reader: &mut impl Read) -> std::io::Result<(u8, Vec<u8>)> {
+    let mut head = [0u8; 2];
+    reader.read_exact(&mut head)?;
+    let opcode = head[0] & 0x0F;
+    let masked = head[1] & 0x80 != 0;
+    let length = match head[1] & 0x7F {
+        126 => {
+            let mut n = [0u8; 2];
+            reader.read_exact(&mut n)?;
+            u64::from(u16::from_be_bytes(n))
+        }
+        127 => {
+            let mut n = [0u8; 8];
+            reader.read_exact(&mut n)?;
+            u64::from_be_bytes(n)
+        }
+        n => u64::from(n),
+    };
+    if length > 1 << 20 {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "a frame too large to be an answer"));
+    }
+    let mut mask = [0u8; 4];
+    if masked {
+        reader.read_exact(&mut mask)?;
+    }
+    let mut payload = vec![0u8; length as usize];
+    reader.read_exact(&mut payload)?;
+    if masked {
+        for (i, b) in payload.iter_mut().enumerate() {
+            *b ^= mask[i % 4];
+        }
+    }
+    Ok((opcode, payload))
 }
 
 /// The daemon's WebSocket, or `null` if none is published.
@@ -162,9 +296,14 @@ fn spawn_any(binary: Option<String>) -> Result<String, String> {
 ///
 /// This is what the app calls first, at launch and at Find, and not `daemon_endpoint`: a
 /// read returns the dead port of a daemon that was killed, which only this replaces.
+///
+/// Async, and the wait on a thread of its own: a command that is not runs on the window's
+/// thread, and the window drew nothing for as long as a daemon took to start.
 #[tauri::command]
-pub fn daemon_start(binary: Option<String>) -> Result<Option<DaemonEndpoint>, String> {
-    start_with(read_endpoint, || spawn_any(binary), Duration::from_secs(30))
+pub async fn daemon_start(binary: Option<String>) -> Result<Option<DaemonEndpoint>, String> {
+    tauri::async_runtime::spawn_blocking(move || start_with(read_endpoint, || spawn_any(binary), Duration::from_secs(30)))
+        .await
+        .map_err(|e| format!("starting the daemon stopped short: {e}"))?
 }
 
 /// `daemon_start` with where the file is read from and how a daemon is started given to
@@ -222,6 +361,73 @@ mod tests {
         listener.local_addr().unwrap().port()
     }
 
+    /// A daemon as far as `alive` can tell: the WebSocket upgrade on `/v1/socket`, then
+    /// `initialize` answered with a result for its token and refused for any other. On a
+    /// thread of its own for as long as the test runs; its port is where it listens.
+    fn fake_daemon(token: &str) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let token = token.to_string();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { continue };
+                let _ = answer_as_daemon(stream, &token);
+            }
+        });
+        port
+    }
+
+    fn answer_as_daemon(mut stream: TcpStream, token: &str) -> std::io::Result<()> {
+        let mut reader = BufReader::new(stream.try_clone()?);
+        let mut request = String::new();
+        reader.read_line(&mut request)?;
+        loop {
+            let mut header = String::new();
+            if reader.read_line(&mut header)? == 0 || header == "\r\n" {
+                break;
+            }
+        }
+        if !request.starts_with("GET /v1/socket ") {
+            return stream.write_all(b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n");
+        }
+        stream.write_all(b"HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: Upgrade\r\n\r\n")?;
+
+        let (_opcode, payload) = read_frame(&mut reader)?;
+        let asked: serde_json::Value = serde_json::from_slice(&payload)?;
+        let answer = if asked["params"]["auth"]["token"] == token {
+            serde_json::json!({ "jsonrpc": "2.0", "id": asked["id"], "result": { "protocol_version": "1", "server_info": { "name": "troupe" } } })
+        } else {
+            serde_json::json!({ "jsonrpc": "2.0", "id": asked["id"], "error": { "code": -32001, "message": "unauthenticated" } })
+        };
+        // A notification first, as a daemon may send one before it answers.
+        for text in [serde_json::json!({ "jsonrpc": "2.0", "method": "hello" }), answer] {
+            let bytes = text.to_string().into_bytes();
+            let mut frame = vec![0x81, bytes.len() as u8];
+            if bytes.len() >= 126 {
+                frame = vec![0x81, 126];
+                frame.extend_from_slice(&(bytes.len() as u16).to_be_bytes());
+            }
+            frame.extend_from_slice(&bytes);
+            stream.write_all(&frame)?;
+        }
+        Ok(())
+    }
+
+    /// Something else on the port: a web server, which accepts and answers, but not as a daemon.
+    fn stranger() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok");
+            }
+        });
+        port
+    }
+
     // Issue #706: a daemon that was killed leaves its file behind, naming its port.
     #[test]
     fn a_daemon_json_naming_a_closed_port_has_a_daemon_started_over_it() {
@@ -234,9 +440,9 @@ mod tests {
         let found = start_with(
             || read_endpoint_at(&file),
             || {
-                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-                publish(&file, listener.local_addr().unwrap().port(), "the-new-token");
-                *daemon.borrow_mut() = Some(listener);
+                let port = fake_daemon("the-new-token");
+                publish(&file, port, "the-new-token");
+                *daemon.borrow_mut() = Some(port);
                 Ok("troupe-daemon run".into())
             },
             Duration::from_secs(5),
@@ -244,17 +450,64 @@ mod tests {
         .unwrap()
         .expect("an endpoint");
 
-        let started = daemon.borrow().as_ref().expect("a daemon was started").local_addr().unwrap().port();
+        let started = daemon.borrow().expect("a daemon was started");
         assert_ne!(found.port, dead);
         assert_eq!(found.port, started);
         assert_eq!(found.token, "the-new-token");
     }
 
+    // A port the dead daemon's file names, taken since by another program: it accepts, and
+    // read as a running daemon, nothing was started and the app dialled a stranger.
+    #[test]
+    fn a_daemon_json_naming_a_port_another_program_took_has_a_daemon_started_over_it() {
+        let file = scratch("taken");
+        let taken = stranger();
+        publish(&file, taken, "the-old-token");
+
+        let daemon = RefCell::new(None);
+        let found = start_with(
+            || read_endpoint_at(&file),
+            || {
+                let port = fake_daemon("the-new-token");
+                publish(&file, port, "the-new-token");
+                *daemon.borrow_mut() = Some(port);
+                Ok("troupe-daemon run".into())
+            },
+            Duration::from_secs(5),
+        )
+        .unwrap()
+        .expect("an endpoint");
+
+        assert_eq!(Some(found.port), *daemon.borrow());
+        assert_ne!(found.port, taken);
+        assert_eq!(found.token, "the-new-token");
+    }
+
+    #[test]
+    fn alive_is_a_troupe_daemon_that_takes_the_files_token() {
+        let port = fake_daemon("the-token");
+        let at = |token: &str| DaemonEndpoint { transport: "ws".into(), port, token: token.into() };
+        assert!(alive(&at("the-token")));
+        assert!(!alive(&at("another-token")), "a daemon that refuses the file's token is not the file's daemon");
+
+        let elsewhere = DaemonEndpoint { transport: "ws".into(), port: stranger(), token: "the-token".into() };
+        assert!(!alive(&elsewhere), "a port that accepts is not a daemon");
+        assert!(listening(&elsewhere));
+    }
+
+    // A command that is not async runs on the window's thread, which then draws nothing
+    // until it returns: up to thirty seconds while a daemon starts.
+    #[test]
+    fn daemon_start_is_async_so_the_window_keeps_drawing() {
+        fn a_future<F: std::future::Future>(_: &F) {}
+        let starting = daemon_start(Some("no-such-troupe-daemon".into()));
+        a_future(&starting);
+    }
+
     #[test]
     fn a_daemon_that_answers_is_returned_and_nothing_is_started() {
         let file = scratch("alive");
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let port = fake_daemon("the-token");
         publish(&file, port, "the-token");
 
         let found = start_with(|| read_endpoint_at(&file), || panic!("started a second daemon"), Duration::from_secs(5))
@@ -309,13 +562,10 @@ mod tests {
     #[test]
     fn no_file_has_a_daemon_started() {
         let file = scratch("absent");
-        let daemon = RefCell::new(None);
         let found = start_with(
             || read_endpoint_at(&file),
             || {
-                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-                publish(&file, listener.local_addr().unwrap().port(), "the-token");
-                *daemon.borrow_mut() = Some(listener);
+                publish(&file, fake_daemon("the-token"), "the-token");
                 Ok("troupe-daemon run".into())
             },
             Duration::from_secs(5),

@@ -419,15 +419,6 @@ defmodule Troupe.Plane.Admin do
   defp derived_in?(spec, key), do: Map.has_key?(spec, key)
 
   @doc """
-  The image a profile whose image is `release` runs on this plane, or `nil` if it names none.
-
-  Here for the reason `size_classes/0` is: the console says what the word means right now,
-  and a LiveView is an admin API client with no private way to find out.
-  """
-  @spec release_image() :: String.t() | nil
-  def release_image, do: Provision.release_image()
-
-  @doc """
   The size classes a profile may be, in the order a console offers them.
 
   Here rather than read from `Fleet.SizeClass` by whoever is rendering: a LiveView is an
@@ -838,26 +829,6 @@ defmodule Troupe.Plane.Admin do
        })}
     end
   end
-
-  @doc """
-  What a team name must be, in words, for a form to show beside the field.
-
-  Here rather than read off `Identity.Team` by the screen, because a LiveView reaches the
-  plane through this module and nowhere else. Zero arity, so it is a fact rather than an
-  action and needs no API method of its own: every rendering that wants it already has the
-  refusal, which carries the same sentence.
-  """
-  @spec team_name_rule() :: String.t()
-  def team_name_rule, do: Identity.Team.name_rule()
-
-  @doc """
-  The periods a team's budget may be measured over, for a form to offer.
-
-  The list the team's own changeset accepts, so a screen cannot offer a period that saving
-  then refuses. Zero arity for the same reason as `team_name_rule/0`.
-  """
-  @spec budget_periods() :: [String.t()]
-  def budget_periods, do: Identity.Team.budget_periods()
 
   # A refused changeset as a sentence per field rather than an inspected keyword list. A
   # console shows `reason` beside the form, and `[name: {"must be…", [validation:
@@ -1908,11 +1879,12 @@ defmodule Troupe.Plane.Admin do
   end
 
   @doc """
-  Forget the plane's GitHub App: its id, API URL, installations and which transit key
-  version is its own. Confirmed by the App id, which is the one thing about it somebody
-  has in front of them. A session that names a repository is refused from then on, and a
-  pod asking for a session's token is not given one. Audited with the diff, the key by its
-  fingerprint. The key stays in transit, where nothing signs with it.
+  Forget the plane's GitHub App: its id, API URL and installations, and its key and
+  webhook secret, which are taken out of transit, so the next App may have a key of
+  another size. Confirmed by the App id, which is the one thing about it somebody has in
+  front of them. A session that names a repository is refused from then on, and a pod
+  asking for a session's token is not given one. Audited with the diff, the key by its
+  fingerprint.
   """
   @spec github_delete(actor(), integer() | String.t() | nil) :: result()
   def github_delete(actor, app_id) do

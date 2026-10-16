@@ -353,6 +353,7 @@ defmodule Troupe.Plane.FakeGitHub do
 
   # What each call needs of the token, as GitHub's fine-grained permissions table has it.
   defp needs("GET", []), do: %{}
+  defp needs("GET", ["git" | _]), do: %{"contents" => "read"}
   defp needs(_method, ["git" | _]), do: %{"contents" => "write"}
   defp needs("GET", ["pulls" | _]), do: %{"pull_requests" => "read"}
   defp needs(_method, ["pulls" | _]), do: %{"pull_requests" => "write"}

@@ -33,13 +33,21 @@ defmodule Troupe.Plane.GitHubTest do
 
     # A transit key of this test's own: the development OpenBao is not rolled back as the
     # database is, and two runs must not rotate each other's key.
-    name = "troupe-github-app-test-#{System.unique_integer([:positive])}"
+    unique = System.unique_integer([:positive])
+    name = "troupe-github-app-test-#{unique}"
+    webhook_name = "troupe-github-webhook-test-#{unique}"
     transit = Application.get_env(:troupe_plane, :transit, [])
-    Application.put_env(:troupe_plane, :transit, Keyword.put(transit, :github_key, name))
+
+    Application.put_env(
+      :troupe_plane,
+      :transit,
+      transit |> Keyword.put(:github_key, name) |> Keyword.put(:github_webhook_key, webhook_name)
+    )
 
     on_exit(fn ->
       Application.put_env(:troupe_plane, :transit, transit)
       delete_transit_key(transit, name)
+      delete_transit_key(transit, webhook_name)
     end)
 
     fake = FakeGitHub.start()
@@ -49,7 +57,7 @@ defmodule Troupe.Plane.GitHubTest do
     {:ok, _} =
       Fleet.put_profile(%{name: "dev", spec: %{"egress" => %{"gitHosts" => [fake.host]}}})
 
-    %{fake: fake, key: key, transit: transit, key_name: name}
+    %{fake: fake, key: key, transit: transit, key_name: name, webhook_name: webhook_name}
   end
 
   describe "the App's settings" do
@@ -324,6 +332,63 @@ defmodule Troupe.Plane.GitHubTest do
       assert missing.message == "not_found"
     end
 
+    # Transit imports a new version of a key only of the type it already has, so a key left
+    # behind refused the next App's key when it was a different size.
+    test "takes its key and webhook secret out of transit, so the next App's key may be another size",
+         context do
+      configure(context)
+      {:ok, _} = Admin.github_put(@root, %{"webhook_secret" => String.duplicate("s", 40)})
+      assert {:ok, _} = bao(context.transit, :get, "keys/#{context.key_name}")
+      assert {:ok, _} = bao(context.transit, :get, "keys/#{context.webhook_name}")
+
+      assert {:ok, _now} = API.call("admin.github.delete", %{"app_id" => @app_id}, @root)
+
+      assert {:error, {404, _}} = bao(context.transit, :get, "keys/#{context.key_name}")
+      assert {:error, {404, _}} = bao(context.transit, :get, "keys/#{context.webhook_name}")
+
+      larger = :public_key.generate_key({:rsa, 3072, 65_537})
+
+      assert {:ok, now} =
+               Admin.github_put(@root, %{"app_id" => @app_id, "private_key" => pem(larger)})
+
+      assert now.private_key.type == "rsa-3072"
+      assert now.private_key.version == 1
+    end
+
+    test "with the policy the plane's role needs, takes the key out as well", context do
+      policy = "troupe-github-app-test-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        bao(
+          context.transit,
+          :put_policy,
+          policy,
+          Policy.github_app("transit", context.key_name, context.webhook_name)
+        )
+
+      {:ok, %{"auth" => %{"client_token" => token}}} =
+        bao(context.transit, :post, "/v1/auth/token/create", %{
+          "policies" => [policy],
+          "ttl" => "5m"
+        })
+
+      narrow =
+        Keyword.merge(context.transit,
+          token: token,
+          github_key: context.key_name,
+          github_webhook_key: context.webhook_name
+        )
+
+      Application.put_env(:troupe_plane, :transit, narrow)
+
+      configure(context)
+      {:ok, _} = Admin.github_put(@root, %{"webhook_secret" => String.duplicate("s", 40)})
+      assert {:ok, _now} = API.call("admin.github.delete", %{"app_id" => @app_id}, @root)
+
+      assert {:error, {404, _}} = bao(context.transit, :get, "keys/#{context.key_name}")
+      assert {:error, {404, _}} = bao(context.transit, :get, "keys/#{context.webhook_name}")
+    end
+
     test "is a platform admin's", context do
       configure(context)
       assert {:error, refused} = API.call("admin.github.delete", %{"app_id" => @app_id}, @lead)
@@ -384,6 +449,34 @@ defmodule Troupe.Plane.GitHubTest do
       Process.sleep(2_100)
       assert {_, status} = clone(context.fake, short, "widgets", repos.into <> "-late")
       assert status != 0
+    end
+
+    # As GitHub's fine-grained permissions have it: `contents: read` reads the git
+    # database, and only writing to it needs `write`. The fake asked `write` of a GET too.
+    test "reads the git database through the API, and writes nothing to it", context do
+      configure(context)
+      repositories(context.fake, ["widgets"])
+      session = session_with("s-gh-read", %{"owner" => "example-org", "name" => "widgets"})
+      {:ok, %{"token" => token}} = GitHub.credential(session)
+
+      api = "#{context.fake.api_url}/repos/example-org/widgets"
+      auth = [{"authorization", "Bearer " <> token}]
+
+      assert {:ok, %{status: 200, body: %{"default_branch" => branch}}} =
+               Req.get(api, headers: auth, retry: false)
+
+      assert {:ok, %{status: 200, body: %{"object" => %{"sha" => sha}}}} =
+               Req.get("#{api}/git/ref/heads/#{branch}", headers: auth, retry: false)
+
+      assert {:ok, %{status: 200}} =
+               Req.get("#{api}/git/commits/#{sha}", headers: auth, retry: false)
+
+      assert {:ok, %{status: 403}} =
+               Req.post("#{api}/git/blobs",
+                 headers: auth,
+                 json: %{"content" => Base.encode64("x"), "encoding" => "base64"},
+                 retry: false
+               )
     end
 
     test "is refused by GitHub when the key is not the App's, and says so", context do

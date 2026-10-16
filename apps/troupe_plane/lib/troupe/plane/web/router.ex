@@ -43,7 +43,7 @@ defmodule Troupe.Plane.Web.Router do
   alias Troupe.Plane.Admin.API, as: AdminAPI
   alias Troupe.Plane.GitHub.Webhook, as: GitHubWebhook
   alias Troupe.Plane.SCIM.Connector
-  alias Troupe.Plane.Web.{Docs, Index, RawBody}
+  alias Troupe.Plane.Web.{BodyLimit, Docs, Index, RawBody}
   alias Troupe.Protocol.{Error, JSONRPC, Token}
 
   require Logger
@@ -54,20 +54,18 @@ defmodule Troupe.Plane.Web.Router do
   plug(Troupe.Plane.Web.CORS)
   plug(:match)
 
-  # Four mebibytes. The largest legitimate body here is not a `session.create` with a
-  # long prompt, which is kilobytes, but `admin.bundle.publish`: a config bundle carries
-  # its agent definitions and skills inline, and one with a few skills' worth of text
-  # runs well past 256 KiB. Anything larger than this is not a request the plane has a
-  # method for, and reading it before finding that out would be the plane buffering a
-  # stranger's upload.
+  # Behind the endpoint the body is read already, under the plane's one limit
+  # (`BodyLimit`); this is for the router mounted alone, under the same one.
   #
   # Read through `RawBody`, which keeps the bytes as they came for the GitHub App's
   # webhook, whose signature is over them.
+  plug(BodyLimit)
+
   plug(Plug.Parsers,
     parsers: [:json],
     pass: ["*/*"],
     json_decoder: Jason,
-    length: 4_194_304,
+    length: BodyLimit.bytes(),
     body_reader: {Troupe.Plane.Web.RawBody, :read_body, []}
   )
 
@@ -728,7 +726,7 @@ defmodule Troupe.Plane.Web.Router do
   defp raw_body(conn) do
     case RawBody.of(conn) do
       nil ->
-        case Plug.Conn.read_body(conn, length: 4_194_304) do
+        case Plug.Conn.read_body(conn, length: BodyLimit.bytes()) do
           {:ok, body, conn} -> {body, conn}
           {_more_or_error, _partial, conn} -> {"", conn}
           {:error, _reason} -> {"", conn}

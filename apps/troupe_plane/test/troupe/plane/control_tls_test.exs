@@ -215,6 +215,76 @@ defmodule Troupe.Plane.ControlTLSTest do
     end
   end
 
+  # The chart turns `requireTls` on by default, and a plane deployed without the chart
+  # should not be the one place plaintext is still taken: where the port has a
+  # certificate, TLS only, unless the deployment says otherwise.
+  describe "whether TLS is required, left unsaid" do
+    setup do
+      before =
+        for key <- [:control_tls, :control_require_tls],
+            do: {key, Application.fetch_env(:troupe_plane, key)}
+
+      on_exit(fn ->
+        for {key, value} <- before do
+          case value do
+            {:ok, value} -> Application.put_env(:troupe_plane, key, value)
+            :error -> Application.delete_env(:troupe_plane, key)
+          end
+        end
+      end)
+    end
+
+    test "is yes where the port has a certificate, and what the deployment says otherwise",
+         context do
+      Application.put_env(:troupe_plane, :control_tls, context.dir)
+      Application.delete_env(:troupe_plane, :control_require_tls)
+      assert TLS.required?()
+
+      Application.put_env(:troupe_plane, :control_require_tls, false)
+      refute TLS.required?()
+
+      Application.put_env(:troupe_plane, :control_require_tls, true)
+      assert TLS.required?()
+
+      # No certificate: plaintext is all the port can speak.
+      Application.delete_env(:troupe_plane, :control_tls)
+      Application.delete_env(:troupe_plane, :control_require_tls)
+      refute TLS.required?()
+    end
+
+    test "a port that takes plaintext says so as a warning when it starts", context do
+      for {tls, required, said} <- [
+            {context.dir, false, "plaintext for pods"},
+            {Path.join(context.dir, "nothing-mounted"), false, "plaintext only"}
+          ] do
+        stop_supervised!(Listener)
+
+        log =
+          ExUnit.CaptureLog.capture_log([level: :warning], fn ->
+            start_supervised!(
+              {Listener,
+               port: 0, verify: fn _ -> {:error, :no} end, tls: tls, require_tls: required}
+            )
+          end)
+
+        assert log =~ "[warning]"
+        assert log =~ said
+      end
+
+      stop_supervised!(Listener)
+
+      log =
+        ExUnit.CaptureLog.capture_log([level: :warning], fn ->
+          start_supervised!(
+            {Listener,
+             port: 0, verify: fn _ -> {:error, :no} end, tls: context.dir, require_tls: true}
+          )
+        end)
+
+      refute log =~ "control listener"
+    end
+  end
+
   describe "the CA a machine is given" do
     test "is ca.crt as cert-manager wrote it, and no certificate is a sentence", context do
       assert TLS.ca(context.dir) == {:ok, File.read!(context.ca)}

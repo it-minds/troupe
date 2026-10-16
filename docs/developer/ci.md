@@ -42,7 +42,7 @@ Arrows point at what an app depends on; a change flows back along them. So:
 
 | the change touches | umbrella suites | also |
 |---|---|---|
-| `clients/gui/**` | — | GUI (tokens, typecheck, build, test); GUI-e2e if the client package; native builds (PR) if the desktop app or the client package |
+| `clients/gui/**` | — | GUI (tokens, typecheck, build, test); GUI-e2e if the client package; the desktop crate's `cargo test` if `apps/desktop/src-tauri`; native builds (PR) if the desktop app or the client package |
 | `clients/tui/**` | — | TUI `mix check`; native builds (PR) |
 | `clients/vscode/**` | — | the VS Code extension: typecheck, unit tests, its suite inside a real VS Code on Linux and Windows (and macOS in a full run), and the `.vsix` as the run's artifact |
 | `docs/user/cli-reference.md` | — | TUI `mix check`, which holds it to the command tables |
@@ -72,10 +72,10 @@ Each umbrella app is its own parallel leg (`test <app>`), and one `lint` job com
 flowchart LR
   changes[what changed] --> lint[compile, format, credo, boundaries]
   changes --> test["test &lt;app&gt; × N"]
-  changes --> chart & protocol[schema + Python client] & tui[TUI] & gui[GUI] & e2e[GUI vs a plane] & vscode[VS Code extension] & native[native builds · PR only]
+  changes --> chart & protocol[schema + Python client] & tui[TUI] & gui[GUI] & e2e[GUI vs a plane] & desktop[desktop crate · cargo test] & vscode[VS Code extension] & native[native builds · PR only]
   lint & test & chart --> cluster[cluster suite · PR, if it deploys what changed]
   versions[versions agree] --> ok
-  lint & test & chart & protocol & tui & gui & e2e & vscode & native & cluster --> ok{{ci-ok}}
+  lint & test & chart & protocol & tui & gui & e2e & desktop & vscode & native & cluster --> ok{{ci-ok}}
   ok -->|push to main, changed an image| images[images · sha-&lt;short&gt;]
 ```
 

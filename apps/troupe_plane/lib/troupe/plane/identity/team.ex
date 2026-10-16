@@ -36,10 +36,6 @@ defmodule Troupe.Plane.Identity.Team do
   @name_format ~r/^[a-z0-9]([a-z0-9-]{0,56}[a-z0-9])?$/
   @name_rule "lowercase letters, digits and dashes, starting and ending with a letter or digit, at most 58 characters — it becomes part of a Kubernetes name and an OpenBao path"
 
-  @doc "What a team name must be, in words, for a form to show beside the field."
-  @spec name_rule() :: String.t()
-  def name_rule, do: @name_rule
-
   # What a budget is measured over: the calendar month in UTC, or nothing — a ceiling that
   # never turns over. `Troupe.Plane.Ledger.period_start/1` is where that is read.
   # The one list: the Teams page and the admin API offer it, and the platform's default

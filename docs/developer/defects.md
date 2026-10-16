@@ -1417,13 +1417,7 @@ Found by the chunk 34 fixers, 2026-10-13.
   - `scripts/verify-local.ps1` can't pass on scratch homes: it compares the listening process's path with `$env:LOCALAPPDATA\Programs`.
   - OTP 28.5's `:inet.getfd/1` raises on an `inet_backend: socket` socket (upstream).
 - **The audit** replaces `secretRef.key`, `tokenUrl` and `transitKey` values with `[redacted]` in profile diffs, so changes to those names don't show.
-- **The desktop app.**
-  - `daemon_start` is a synchronous Tauri command, so the window doesn't repaint for up to 30 s while it starts a daemon after a crash.
-  - `alive` checks only that something accepts on the port; a stale port another program took reads as a running daemon.
-  - CI runs no `cargo test` for the desktop crate, and nothing checks Rust formatting.
-- **Tests.**
-  - The worker's `IndexRebuildTest` logs dozens of errors from earlier runs' session prefixes left in MinIO's test bucket.
-  - The fake GitHub asks `contents: write` for every `git/*` call, GET included.
+- **The desktop app.** Nothing checks the desktop crate's Rust formatting.
 
 Found by the chunk 35 fixers, 2026-10-14.
 

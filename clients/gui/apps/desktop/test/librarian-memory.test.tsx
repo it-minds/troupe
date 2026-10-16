@@ -98,9 +98,12 @@ describe("a session's start and the librarian", () => {
     await waitFor(() => daemon.librarians.length > 0, "the librarian");
     const parent = [...daemon.sessions.values()].find((s) => s.workspace === REPO && s.profile === "build")!;
     expect(daemon.librarians).toEqual([{ sessionId: expect.any(String), workspace: REPO, parent: parent.id, prompt: FIRST, worktree: "never" }]);
-    const line = await waitFor(() => [...document.querySelectorAll(".stream .note")].find((p) => p.textContent === WRITING), "the line in the transcript");
-    // After the session's own first line, where the start said it.
-    expect(line.previousElementSibling?.textContent).toBe("session created on build");
+    // After the session's own first line, where the start said it; looked for afresh each
+    // time, since the line moves while the session's entries arrive.
+    await waitFor(
+      () => [...document.querySelectorAll(".stream .note")].find((p) => p.textContent === WRITING && p.previousElementSibling?.textContent === "session created on build"),
+      "the line in the transcript, after the session's first",
+    );
   });
 
   it("starts it on a stale brief with the terminal client's refresh prompt", async () => {
@@ -136,9 +139,15 @@ describe("a session's start and the librarian", () => {
     daemon.memory[REPO] = { status: "absent" };
 
     button("← Sessions")!.click();
+    // As on a busy machine, where the screen is up before the session's entries are: the
+    // line is drawn first, and drawn again where it belongs once they arrive, a new
+    // element. So it is found afresh on each look; one held from the first look was off
+    // the page by the time its neighbour was asked, which is how the nightly timed out.
+    daemon.subscribeDelayMs = 300;
     await openFromList(REPO);
-    const line = await waitFor(() => [...document.querySelectorAll(".stream .start-note")].find((p) => p.textContent === WRITING), "the start's line, still there");
-    await waitFor(() => line.previousElementSibling?.textContent === "session created on build", "the line where it was said");
+    const startLine = (): Element | undefined => [...document.querySelectorAll(".stream .start-note")].find((p) => p.textContent === WRITING);
+    await waitFor(startLine, "the start's line, still there");
+    await waitFor(() => startLine()?.previousElementSibling?.textContent === "session created on build", "the line where it was said");
     await sleep(300);
     expect(daemon.librarians.length).toBe(1);
 

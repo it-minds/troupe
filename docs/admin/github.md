@@ -139,15 +139,23 @@ the plane and signing policies
 
 ```hcl
 path "transit/wrapping_key"                          { capabilities = ["read"] }
-path "transit/keys/troupe-github-app"                { capabilities = ["read"] }
+path "transit/keys/troupe-github-app"                { capabilities = ["read", "delete"] }
+path "transit/keys/troupe-github-app/config"         { capabilities = ["update"] }
 path "transit/keys/troupe-github-app/import"         { capabilities = ["create", "update"] }
 path "transit/keys/troupe-github-app/import_version" { capabilities = ["create", "update"] }
 path "transit/sign/troupe-github-app"                { capabilities = ["create", "update"] }
-path "transit/keys/troupe-github-webhook"                { capabilities = ["read"] }
+path "transit/keys/troupe-github-webhook"                { capabilities = ["read", "delete"] }
+path "transit/keys/troupe-github-webhook/config"         { capabilities = ["update"] }
 path "transit/keys/troupe-github-webhook/import"         { capabilities = ["create", "update"] }
 path "transit/keys/troupe-github-webhook/import_version" { capabilities = ["create", "update"] }
 path "transit/hmac/troupe-github-webhook/sha2-256"       { capabilities = ["create", "update"] }
 ```
+
+`delete` and the `config` paths are for `admin.github.delete`, which takes the key and the
+secret out of transit with the App: transit adds a version to a key only of the type it
+already has, so an App set again with a key of another size needs the old one gone. A
+role without them still removes the App, keeps the two keys and says so in the plane's
+log.
 
 `admin.github.get` answers what is set: the App ID, the API URL and where clones come
 from, the installations, the key's type, fingerprint and transit version (compare the

@@ -408,7 +408,7 @@ fn daemon_gone() -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline {
         match daemon::read_endpoint() {
-            Some(endpoint) if daemon::alive(&endpoint) => std::thread::sleep(Duration::from_millis(250)),
+            Some(endpoint) if daemon::listening(&endpoint) => std::thread::sleep(Duration::from_millis(250)),
             _ => return Ok(()),
         }
     }

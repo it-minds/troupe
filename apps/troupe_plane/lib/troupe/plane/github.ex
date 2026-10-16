@@ -255,23 +255,42 @@ defmodule Troupe.Plane.GitHub do
   end
 
   @doc """
-  Forget the App: its id, API URL and installations, and which transit key version is its
-  own. Answers the App as it was, or `:not_configured` where there was none.
+  Forget the App: its id, API URL and installations, and its key and webhook secret, which
+  are taken out of transit. Answers the App as it was, or `:not_configured` where there
+  was none.
 
-  The key itself stays in transit, where nothing can take a copy and nothing signs with
-  it once the row is gone; an App set again with a key of the same type imports it as the
-  next version. A session that names a repository is refused from now on, and one that
-  has a pod asks for a token it is not given.
+  The key goes because transit imports a new version only of the type a key already has:
+  left there, it refused the next App's key wherever that was another size. The secret
+  goes so that no delivery signed with it is taken again. A transit that refuses the
+  deletion, a role without the policy's `delete`, leaves them where they were and says so
+  in the log; the App is forgotten either way. A session that names a repository is
+  refused from now on, and one that has a pod asks for a token it is not given.
   """
-  @spec delete() :: {:ok, map()} | {:error, :not_configured}
-  def delete do
+  @spec delete(keyword()) :: {:ok, map()} | {:error, :not_configured}
+  def delete(opts \\ []) do
     case stored() do
       nil ->
         {:error, :not_configured}
 
       row ->
         Repo.delete!(row)
+        destroy(Key, Key.name(opts), opts)
+        destroy(WebhookSecret, WebhookSecret.name(opts), opts)
         {:ok, describe(row)}
+    end
+  end
+
+  defp destroy(module, name, opts) do
+    case module.destroy(opts) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "troupe plane: the GitHub App is removed, and transit kept its key #{name}: " <>
+            "#{inspect(reason)}; the plane's policy needs update on #{name}/config and " <>
+            "delete on the key (Troupe.KMS.Policy.github_app/3)"
+        )
     end
   end
 

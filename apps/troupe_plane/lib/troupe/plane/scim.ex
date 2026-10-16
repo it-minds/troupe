@@ -53,7 +53,8 @@ defmodule Troupe.Plane.SCIM do
   def put_user(resource) do
     attrs = user_attrs(resource)
 
-    with {:ok, subject} <- unreserved(subject_of(resource)),
+    with {:ok, subject} <- subject_of(resource),
+         {:ok, subject} <- unreserved(subject),
          {:ok, subject} <- subject_for(subject, attrs) do
       save_user(Map.put(attrs, :subject, subject))
     end
@@ -72,7 +73,8 @@ defmodule Troupe.Plane.SCIM do
     changes = user_attrs(resource)
 
     with {:ok, user} <- fetch_user(id),
-         {:ok, _subject} <- unreserved(subject_of(resource)),
+         {:ok, subject} <- subject_of(resource),
+         {:ok, _subject} <- unreserved(subject),
          :ok <- same_person(user, changes) do
       update_user(user, changes)
     end
@@ -673,10 +675,22 @@ defmodule Troupe.Plane.SCIM do
 
   # `externalId` is the identity provider's own id for the person and is what shows up in
   # a token as the claim `subject_claim` names — `sub`, or for Entra ID `oid`, once its
-  # mapping sends `objectId` (Decision 751); `userName` is the fallback for providers that
-  # do not send one.
+  # mapping sends `objectId`; `userName` is the fallback for providers that
+  # do not send one. A body with neither, or with one that is not a string of something,
+  # names nobody, and is the provider's to fix rather than a crash.
   defp subject_of(resource) do
-    Map.get(resource, "externalId") || Map.fetch!(resource, "userName")
+    case {Map.get(resource, "externalId"), Map.get(resource, "userName")} do
+      {external_id, _user_name} when is_binary(external_id) and external_id != "" ->
+        {:ok, external_id}
+
+      {nil, user_name} when is_binary(user_name) and user_name != "" ->
+        {:ok, user_name}
+
+      _neither ->
+        {:error,
+         {"invalidValue",
+          "a user names who they are by a non-empty externalId, or without one a non-empty userName"}}
+    end
   end
 
   defp primary_email(resource) do

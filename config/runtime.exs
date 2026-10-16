@@ -427,9 +427,15 @@ if config_env() == :prod do
       # no machine can be registered, since a machine enrols over TLS only.
       control_tls: presence.(System.get_env("TROUPE_PLANE_CONTROL_TLS_DIR")),
       # Whether the port takes TLS only, pods included: a plaintext connection is closed
-      # before any of it is read. Unset is off, so pods made before the operator handed
-      # them the CA still enrol.
-      control_require_tls: System.get_env("TROUPE_PLANE_CONTROL_REQUIRE_TLS") == "true",
+      # before any of it is read. Unset is on wherever the port has a certificate, as the
+      # chart's default is; `"false"` takes plaintext from pods beside TLS, and says so in
+      # the log when the port starts.
+      control_require_tls:
+        (case System.get_env("TROUPE_PLANE_CONTROL_REQUIRE_TLS") do
+           "true" -> true
+           "false" -> false
+           _unset -> nil
+         end),
       groups_claim: System.get_env("TROUPE_GROUPS_CLAIM", "groups"),
       scim_token: presence.(System.get_env("TROUPE_SCIM_TOKEN")),
       platform_admin_group: System.get_env("TROUPE_PLATFORM_ADMIN_GROUP"),

@@ -69,6 +69,13 @@ defmodule Troupe.Plane.GitHub.WebhookSecret do
   end
 
   @doc """
+  Take the secret out of transit, every version, when the App is removed, so no delivery
+  signed with it is taken again. `:ok` where there was none.
+  """
+  @spec destroy(keyword()) :: :ok | {:error, term()}
+  def destroy(opts \\ []), do: Key.destroy_key(name(opts), opts)
+
+  @doc """
   Whether `signature`, the `X-Hub-Signature-256` header as GitHub sends it, is the HMAC of
   `body` under the secret in transit. `:unsigned` for no header or one that is not
   `sha256=` and 64 hex digits; `:mismatch` for one that does not match; an error for a

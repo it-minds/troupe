@@ -243,11 +243,11 @@ spec:
             # in place and the kubelet swaps the files under the running pod.
             - name: TROUPE_PLANE_CONTROL_TLS_DIR
               value: /etc/troupe/control-tls
-            {{- if .Values.plane.controlTls.requireTls }}
             # TLS only: a plaintext connection, a pod's included, is closed before it is read.
+            # Said either way, since the plane with a certificate and nothing said takes TLS
+            # only; "false" takes plaintext from pods beside it.
             - name: TROUPE_PLANE_CONTROL_REQUIRE_TLS
-              value: "true"
-            {{- end }}
+              value: {{ ternary "true" "false" .Values.plane.controlTls.requireTls | quote }}
             {{- end }}
             - name: TROUPE_HOST
               value: {{ .Values.plane.host | quote }}
@@ -258,9 +258,9 @@ spec:
             # this host (`gui:`), else nothing — and the index offers no door.
             - name: TROUPE_APP_URL
               value: {{ .Values.plane.appUrl | default (ternary (include "troupe.gui.base" .) "" .Values.gui.enabled) | quote }}
-            # Where the index's console door and the LiveView console's landing page
-            # point: the console this chart serves on this host (`console:`), or nothing,
-            # and both keep the LiveView console at `/admin`.
+            # Where the index's console door and the read-only page at `/admin` point:
+            # the console this chart serves on this host (`console:`), or nothing, and
+            # both then say the plane is administered over the admin API.
             - name: TROUPE_CONSOLE_URL
               value: {{ ternary (include "troupe.console.base" .) "" .Values.console.enabled | quote }}
             # And where the terminal client is published. This cluster does not host it;
@@ -503,8 +503,8 @@ metadata:
     # this is the plane's own.
     cert-manager.io/cluster-issuer: {{ .Values.plane.certIssuer | quote }}
     {{- end }}
-    # The admin console is LiveView, so its socket is a long-lived WebSocket rather than
-    # a request.
+    # The read-only page at `/admin` and its break-glass sign-in are LiveView, so their
+    # socket is a long-lived WebSocket rather than a request.
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     # Nothing a client sends the plane is large: a JSON-RPC call, a profile, a login

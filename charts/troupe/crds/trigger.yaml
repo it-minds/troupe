@@ -55,7 +55,9 @@ spec:
                   x-kubernetes-preserve-unknown-fields: true
                   description: >-
                     What is expected to fire it. A schedule has a five-field cron in UTC; a
-                    webhook names its provider and is otherwise its executor's business.
+                    webhook names its provider and is otherwise its executor's business,
+                    unless it names a GitHub repository: then its provider is github, and
+                    a label, a command or both say what on an issue starts a run.
                   properties:
                     kind:
                       type: string
@@ -65,6 +67,30 @@ spec:
                       type: string
                       description: UTC is the only one this release keeps.
                     provider: {type: string}
+                    repository:
+                      type: string
+                      maxLength: 140
+                      pattern: '^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$'
+                      description: >-
+                        The GitHub repository, owner/name, whose issues start runs through
+                        the plane's GitHub App. Its sessions work on that repository.
+                    label:
+                      type: string
+                      minLength: 1
+                      maxLength: 50
+                      description: The label that, put on an issue, starts a run.
+                    command:
+                      type: string
+                      minLength: 1
+                      maxLength: 100
+                      description: >-
+                        The line that, commented on an issue by a member, starts a run,
+                        such as /troupe fix.
+                    ref:
+                      type: string
+                      minLength: 1
+                      maxLength: 200
+                      description: The branch a run starts from. Absent means the default.
                 promptTemplate:
                   type: string
                   maxLength: 65536
