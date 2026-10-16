@@ -162,6 +162,7 @@ describe("the editor", () => {
     const draft = draftOf(
       {
         name: "p",
+        extends: "",
         image: "registry.example.com/troupe/worker:1",
         sizeClass: "standard",
         maxSessions: "",
@@ -262,6 +263,94 @@ describe("the editor", () => {
     (await waitFor(() => button("Delete ux"), "ux")).click();
     await waitFor(() => says("Every grant goes: core, design lose ux."), "the warning");
     expect(says("turn read-only rather than being erased")).toBe(true);
+  });
+});
+
+describe("a profile that extends another", () => {
+  // data-team extends dev: it sets a ceiling, a model and one more host, and has the rest from dev.
+  const dataTeam = {
+    name: "data-team",
+    extends: "dev",
+    max_sessions: 40,
+    spec: { llm: { model: "small" }, egress: { fqdns: ["wiki.example.com"] } },
+  };
+
+  const cell = (text: string): HTMLTableRowElement | undefined => [...document.querySelectorAll<HTMLTableRowElement>("table.where-from tbody tr")].find((r) => (r.cells[1]?.textContent ?? "") === text);
+
+  it("is read as it is in effect, each field with the profile it came from", async () => {
+    await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", { profile: dataTeam });
+    await open("#/profiles/data-team");
+    await waitFor(() => heading() === "data-team" && says("Where each field comes from"), "data-team");
+    expect(link("dev")!.getAttribute("href")).toBe("#/profiles/dev");
+    expect(says("dev → data-team.")).toBe(true);
+    // Added: dev's hosts, then data-team's.
+    expect(cell("llm-gw.example.com")!.cells[2]!.textContent).toBe("dev");
+    expect(cell("wiki.example.com")!.cells[2]!.textContent).toBe("data-team");
+    // Replaced where data-team sets it; narrowed where it asks for more than dev allows.
+    expect(cell("small")!.cells[0]!.textContent).toBe("spec.llm.model");
+    expect(cell("https://llm-gw.example.com/v1")!.cells[2]!.textContent).toBe("dev");
+    expect(cell("12")!.cells[0]!.textContent).toBe("max_sessions");
+    // dev's key is dev's own, which is said rather than left silent.
+    expect(says("set llm.secretRef to a Secret of data-team's")).toBe(true);
+    // The sections read what its pods run.
+    expect(says("llm-gw.example.com, mcp.example.com, wiki.example.com")).toBe(true);
+
+    visit("#/profiles/dev");
+    await waitFor(() => heading() === "dev" && says("Extended by"), "dev");
+    expect(link("data-team")!.getAttribute("href")).toBe("#/profiles/data-team");
+    expect(says("A change here reaches it after a preview.")).toBe(true);
+  });
+
+  it("is made in the editor by naming what it extends, and leaves the rest to it", async () => {
+    await open("#/profiles");
+    (await waitFor(() => button("New profile"), "the list")).click();
+    type(await waitFor(() => field("Name"), "the new profile's form"), "data-team");
+    const parent = await waitFor(() => { const f = field("Extends"); return f instanceof HTMLSelectElement && f.options.length > 1 ? f : null; }, "the profiles it may extend");
+    type(parent, "dev");
+    await waitFor(() => says("What data-team leaves empty is dev's"), "what extending means");
+    expect((field("How demanding") as HTMLSelectElement).value).toBe("");
+    type(field("Allowed hosts")!, "wiki.example.com");
+    // No image of its own: it is dev's.
+    expect(button("Preview")!.disabled).toBe(false);
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen") && says("extends"), "the preview");
+    button("Create data-team")!.click();
+    await waitFor(() => says("Recorded in the audit as profile.put on data-team"), "the audit's note");
+
+    const made = fake.admin.profiles.find((p) => p.name === "data-team")!;
+    expect(made.extends).toBe("dev");
+    expect(made.image).toBe("registry.example.com/troupe/worker:0.17.0-beta");
+    expect((made.spec!["egress"] as Record<string, unknown>)["fqdns"]).toEqual(["llm-gw.example.com", "mcp.example.com", "wiki.example.com"]);
+    // What it wrote is what it sets, and no more: the switches are dev's.
+    expect(made.own!["image"]).toBe("");
+    expect("orgMount" in (made.own!["spec"] as Record<string, unknown>)).toBe(false);
+  });
+
+  it("sees a change to its parent in the preview, and has it once it is applied", async () => {
+    await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", { profile: dataTeam });
+    await open("#/profiles/dev");
+    (await waitFor(() => button("Change dev"), "dev")).click();
+    type(await waitFor(() => field("Allowed hosts"), "the editor"), "llm-gw.example.com\nmcp.example.com\nhooks.example.com");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen") && says("data-team: spec.egress.fqdns"), "data-team in the preview");
+    expect(says("data-team extends dev: applying writes it again with spec.egress.fqdns as above")).toBe(true);
+    expect((fake.admin.profiles.find((p) => p.name === "data-team")!.spec!["egress"] as Record<string, unknown>)["fqdns"]).toEqual(["llm-gw.example.com", "mcp.example.com", "wiki.example.com"]);
+
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
+    expect((fake.admin.profiles.find((p) => p.name === "data-team")!.spec!["egress"] as Record<string, unknown>)["fqdns"]).toEqual(["llm-gw.example.com", "mcp.example.com", "hooks.example.com", "wiki.example.com"]);
+  });
+
+  it("keeps its parent from being deleted while it extends it", async () => {
+    await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", { profile: dataTeam });
+    await open("#/profiles/dev");
+    (await waitFor(() => button("Delete dev"), "dev")).click();
+    await waitFor(() => says("data-team extends dev, so the plane refuses this"), "the warning");
+    type(field("Type dev to confirm")!, "dev");
+    await waitFor(() => !button("Delete dev")!.disabled, "the name typed");
+    button("Delete dev")!.click();
+    await waitFor(() => says("make it extend another profile, or none, before deleting dev"), "the refusal");
+    expect(fake.admin.profiles.some((p) => p.name === "dev")).toBe(true);
   });
 });
 

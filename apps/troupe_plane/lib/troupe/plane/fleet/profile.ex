@@ -51,6 +51,12 @@ defmodule Troupe.Plane.Fleet.Profile do
     # and `nil` for a row no resource has been read into (Decision 736). A row with one
     # goes when its resource does; a row without one is reported and kept.
     field :resource_generation, :integer
+    # The one profile this one extends, and what this one's administrator wrote, as they
+    # wrote it. With a parent, the columns above and `spec` are the profile in effect: the
+    # parent's with `own` laid over it (`Troupe.Plane.Fleet.Extends`), which is what every
+    # reader of the row and the resource gets. Both `nil` for a profile that extends none.
+    field :extends, :string
+    field :own, :map
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -71,7 +77,9 @@ defmodule Troupe.Plane.Fleet.Profile do
     :config_bundle_channel,
     :image,
     :workers_domain,
-    :spec
+    :spec,
+    :extends,
+    :own
   ]
 
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()
@@ -94,6 +102,10 @@ defmodule Troupe.Plane.Fleet.Profile do
   def cluster_changeset(profile, attrs) do
     profile
     |> cast(attrs, [:resource_generation | @fields])
+    # A resource is a whole, flat profile, and a repository's manifest extends nothing
+    # yet: a row read from one has no parent, whatever it had in direct mode.
+    |> put_change(:extends, nil)
+    |> put_change(:own, nil)
     |> validate()
     |> derive_from_class()
   end

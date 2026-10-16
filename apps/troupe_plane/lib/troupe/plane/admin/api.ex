@@ -56,9 +56,14 @@ defmodule Troupe.Plane.Admin.API do
     %Argument{
       name: "image",
       type: :string,
-      required: true,
       description:
-        "The worker image, as repository:tag or repository@sha256:digest. A digest pins it; a tag does not. Or the word release: the worker image of the release this plane is running, which the plane writes again after every upgrade so the profile moves with the platform. release is refused on a plane deployed without a worker image."
+        "The worker image, as repository:tag or repository@sha256:digest. A digest pins it; a tag does not. Or the word release: the worker image of the release this plane is running, which the plane writes again after every upgrade so the profile moves with the platform. release is refused on a plane deployed without a worker image. Needed unless extends names a profile, whose image is then this one's where it sets none."
+    },
+    %Argument{
+      name: "extends",
+      type: :string,
+      description:
+        "The one profile this one extends, or null for none. The plane resolves the two into the profile in effect, which is all the cluster sees: egress.fqdns, egress.gitHosts and MCP servers are added to the parent's (a server with a parent's name replaces it only with override: true); max_sessions is the lower of the two; a parent's personalTools forbid and repositoryOverridesBundle false hold whatever this one says; image, size_class, provisioner, the llm fields, the channel and every other spec field are the parent's where this one sets none; llm.secretRef, mcpIdentities, warm_workers and grants are never inherited. Send only what differs from the parent: what this profile sets stops following the parent. A chain is at most four profiles; a missing parent or a cycle is refused. Refused on a gitops plane."
     },
     %Argument{
       name: "size_class",
@@ -551,7 +556,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.get",
       function: :profile_get,
       summary:
-        "One profile in full: the spec that was asked for, what policy makes of it, and what is actually running. Read this before changing one.",
+        "One profile in full: the spec that was asked for, what policy makes of it, and what is actually running. Read this before changing one. For a profile that extends another, spec and written are what it sets itself, which is what to send back, and profile is the profile in effect; extended_by names the profiles that extend this one.",
       risk: :read,
       arguments: [
         %Argument{
@@ -559,6 +564,12 @@ defmodule Troupe.Plane.Admin.API do
           type: :string,
           required: true,
           description: "The profile's name."
+        },
+        %Argument{
+          name: "effective",
+          type: :boolean,
+          description:
+            "With true, the answer's effective is the profile in effect, resolved through what it extends: the chain, the profile, and fields, each path and value with the profile it came from, and problems the resolution reports (a parent's key or server this one has no credential of its own for)."
         }
       ]
     },
@@ -566,7 +577,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.put",
       function: :profile_put,
       summary:
-        "Create or update a profile, returning the diff that was applied. Refused on a gitops plane as managed_by_gitops: there a repository holds the profiles, and a change is a commit to it. Refused as invalid_params, with Cilium or without, for a profile whose workers are pods and whose LLM endpoint, MCP servers (its own or its channel's) or egress.fqdns name a loopback or link-local address, which those pods do not reach: `unreachable` names each, `reason` says what to do. Without Cilium, one on another port, or at another address, gets a rule of its own in the pods' NetworkPolicy.",
+        "Create or update a profile, returning the diff that was applied. Refused on a gitops plane as managed_by_gitops: there a repository holds the profiles, and a change is a commit to it. Refused as invalid_params, with Cilium or without, for a profile whose workers are pods and whose LLM endpoint, MCP servers (its own or its channel's) or egress.fqdns name a loopback or link-local address, which those pods do not reach: `unreachable` names each, `reason` says what to do. Without Cilium, one on another port, or at another address, gets a rule of its own in the pods' NetworkPolicy. A change to a profile others extend rewrites each of them as it now resolves, after checking each as a put of it would be, and is audited once with extended_by naming them; the answer's extended_by has each one's changes and provisioning.",
       risk: :write,
       arguments: [
         %Argument{
@@ -583,7 +594,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.preview",
       function: :preview,
       summary:
-        "What policy makes of a profile and what would change, without writing anything. The same check admission makes.",
+        "What policy makes of a profile and what would change, without writing anything. The same check admission makes. A profile that extends another is judged as it would be in effect; extended_by lists every profile below this one as the write would leave it, each with its changes, the policy's verdict and a problem that would refuse the write.",
       risk: :read,
       arguments: [
         %Argument{
@@ -599,7 +610,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.delete",
       function: :profile_delete,
       summary:
-        "Remove a profile. Sessions on it become read-only rather than being erased, and its pods go away. Refused on a gitops plane as managed_by_gitops, except for a row the cluster has no resource for (reported missing), which it deletes and nothing else.",
+        "Remove a profile. Sessions on it become read-only rather than being erased, and its pods go away. Refused on a gitops plane as managed_by_gitops, except for a row the cluster has no resource for (reported missing), which it deletes and nothing else. Refused as conflict while other profiles extend it, naming them in extended_by.",
       risk: :destructive,
       confirm: "name",
       arguments: [

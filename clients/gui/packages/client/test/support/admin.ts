@@ -11,6 +11,8 @@
 
 import { older } from "./plane.js";
 import { PROVIDER_TYPES } from "./provider-types.js";
+import { MAX_DEPTH, WRITTEN_KEYS, empty as emptyResolved, fieldsOf, merge as mergeExtends, rowOf } from "./extends.js";
+import type { Resolved } from "./extends.js";
 
 type Refusal = { error: { code: number; message: string; data?: unknown } };
 type IdentityCheckRow = { name: string; ok: boolean; detail: string; took_ms: number };
@@ -23,6 +25,7 @@ const NOT_FOUND = -32005;
 const INVALID_PARAMS = -32602;
 const METHOD_NOT_FOUND = -32601;
 const MANAGED_BY_GITOPS = -32015;
+const CONFLICT = -32006;
 
 /** The size classes, with what each is for, as `Fleet.SizeClass` says. */
 const SIZE_CLASSES: Record<string, string> = {
@@ -275,6 +278,9 @@ export interface FakeProfile {
   warm_workers?: number;
   /** The rest of the WorkerProfile spec, in the resource's camelCase, as `admin.profile.put` was sent it. */
   spec?: Record<string, unknown>;
+  /** The one profile this one extends; with one, the fields above are the profile in effect and `own` what it wrote. */
+  extends?: string | null;
+  own?: Record<string, unknown> | null;
   /** On a gitops plane: the resource generation it was read at, and what the last pass said of it. */
   gitops?: { generation: number | null; problem: string | null; reasons: string[] };
   /** The WorkerProfile's status conditions, as the operator wrote them. */
@@ -961,36 +967,63 @@ export class FakeAdmin {
         if (role !== "platform_admin") return notPlatform;
         const p = this.profiles.find((x) => x.name === params["name"]);
         if (!p) return refuse(NOT_FOUND, "not_found", { profile: params["name"] });
-        return {
-          result: {
-            profile: this.profileJson(p),
-            spec: p.spec ?? {},
-            policy: this.verdict({ name: p.name, image: p.image, spec: p.spec ?? {} }),
-            bundle: this.bundleState(p),
-            identity_problems: this.identityProblems(p.spec ?? {}),
-            gitops: this.gitopsOf(p.gitops),
-          },
+        // As written, for an editor to send back; the summary is the profile in effect.
+        const written = this.writtenOf(p);
+        const result: Record<string, unknown> = {
+          profile: this.profileJson(p),
+          spec: written["spec"] ?? {},
+          written: { ...written, extends: p.extends ?? null },
+          extended_by: this.childrenOf(p.name),
+          policy: this.verdict({ name: p.name, image: p.image, spec: p.spec ?? {} }),
+          bundle: this.bundleState(p),
+          identity_problems: this.identityProblems(p.spec ?? {}),
+          gitops: this.gitopsOf(p.gitops),
         };
+        if (params["effective"] === true) {
+          const resolved = this.resolveProfile(p.name, {});
+          result["effective"] =
+            typeof resolved === "string"
+              ? { extends: p.extends ?? null, chain: [], profile: null, fields: [], problems: [resolved] }
+              : { extends: p.extends ?? null, chain: resolved.chain, profile: rowOf(resolved), fields: fieldsOf(resolved), problems: resolved.problems };
+        }
+        return { result };
       }
 
       case "admin.profile.preview":
       case "admin.profile.put": {
         if (role !== "platform_admin") return notPlatform;
-        const attrs = ((typeof params["profile"] === "object" && params["profile"] !== null ? params["profile"] : params) ?? {}) as Record<string, unknown>;
-        const name = attrs["name"];
+        const sentAttrs = ((typeof params["profile"] === "object" && params["profile"] !== null ? params["profile"] : params) ?? {}) as Record<string, unknown>;
+        const name = sentAttrs["name"];
         if (typeof name !== "string" || name === "") return refuse(INVALID_PARAMS, "invalid_params", { reason: "a profile has a name", missing: ["name"] });
         const before = this.profiles.find((p) => p.name === name) ?? null;
+        const parent = typeof sentAttrs["extends"] === "string" && sentAttrs["extends"] !== "" ? sentAttrs["extends"] : null;
+        if (parent && method === "admin.profile.put" && this.mode === "gitops") {
+          this.record(subject, "profile.put", name, { outcome: "refused", reason: "managed_by_gitops", extends: parent });
+          return refuse(MANAGED_BY_GITOPS, "managed_by_gitops", {
+            kind: "WorkerProfile",
+            name,
+            extends: parent,
+            reason: `this plane is in gitops mode, and a profile extends another only on a plane that writes its profiles itself: a repository's manifest holds the whole profile, ${parent}'s fields included, until a plane resolves extends from a repository`,
+          });
+        }
+        // A write that names a parent, or stops naming one, is the profile in effect.
+        const effect = this.inEffect(name, sentAttrs, parent, before);
+        if (typeof effect === "string") return refuse(INVALID_PARAMS, "invalid_params", { ...(parent ? { extends: parent } : {}), reason: effect });
+        const { attrs, own } = effect;
+        const below = this.effectsBelow(name, { extends: parent, written: own ?? this.rootWritten(before, attrs) });
         if (method === "admin.profile.preview") {
           // The stored profile with the write laid over it, as the plane compares them: what
           // the write does not send stays as it is, and the name says which profile.
           const was = this.comparable_profile(before);
-          const { name: _name, ...sent } = this.comparable_attrs(attrs);
-          return { result: { policy: this.verdict(attrs), changes: diff(was, { ...was, ...sent }), mode: this.mode } };
+          const { name: _name, ...sent } = this.comparable_attrs({ ...attrs, extends: parent });
+          return { result: { policy: this.verdict(attrs), changes: diff(was, { ...was, ...sent }), mode: this.mode, extended_by: below } };
         }
         const held = this.heldByRepository(subject, "profile.put", name, "WorkerProfile");
         if (held) return held;
         const refused = this.profileRefusal(attrs);
         if (refused) return refused;
+        const stuck = below.find((b) => b.problem);
+        if (stuck) return refuse(INVALID_PARAMS, "invalid_params", { extended_by: stuck.name, reason: `${stuck.name} extends ${name}, and with this change it would not be saved: ${stuck.problem}` });
         const spec = (attrs["spec"] ?? {}) as Record<string, unknown>;
         const sizeClass = typeof attrs["size_class"] === "string" ? attrs["size_class"] : (before?.size_class ?? "standard");
         const after: FakeProfile = before ?? {
@@ -1018,16 +1051,38 @@ export class FakeAdmin {
           after.spec = spec;
           after.channel = typeof spec["configBundleChannel"] === "string" && spec["configBundleChannel"] !== "" ? spec["configBundleChannel"] : "stable";
         }
+        after.extends = parent;
+        after.own = own;
         if (!before) this.profiles.push(after);
         const changes = diff(was, this.comparable_profile(after));
-        this.record(subject, "profile.put", name, changes);
-        return { result: { profile: this.profileJson(after), changes, provisioning: { mode: this.mode, state: "applied" }, identity_problems: this.identityProblems(spec) } };
+        // Every profile below, written again as it now resolves, and named in the one record.
+        const rewritten: Record<string, { changes: Changes; provisioning: unknown }> = {};
+        for (const b of below) {
+          const child = this.profiles.find((x) => x.name === b.name);
+          const resolved = this.resolveProfile(b.name, {});
+          if (!child || typeof resolved === "string") continue;
+          const childWas = this.comparable_profile(child);
+          Object.assign(child, rowOf(resolved));
+          child.sessions_per_pod = child.size_class === "heavy" ? 2 : 4;
+          rewritten[b.name] = { changes: diff(childWas, this.comparable_profile(child)), provisioning: { mode: this.mode, state: "applied" } };
+        }
+        const detail = Object.keys(rewritten).length ? { ...changes, extended_by: Object.fromEntries(Object.entries(rewritten).map(([k, v]) => [k, v.changes])) } : changes;
+        this.record(subject, "profile.put", name, detail);
+        return { result: { profile: this.profileJson(after), changes, provisioning: { mode: this.mode, state: "applied" }, identity_problems: this.identityProblems(spec), extended_by: rewritten } };
       }
 
       case "admin.profile.delete": {
         if (role !== "platform_admin") return notPlatform;
         const p = this.profiles.find((x) => x.name === params["name"]);
         if (!p) return refuse(NOT_FOUND, "not_found", { profile: params["name"] });
+        const children = this.childrenOf(p.name);
+        if (children.length) {
+          return refuse(CONFLICT, "conflict", {
+            profile: p.name,
+            extended_by: children,
+            reason: `${children.join(", ")} ${children.length === 1 ? "extends" : "extend"} ${p.name}: make ${children.length === 1 ? "it" : "each"} extend another profile, or none, before deleting ${p.name}`,
+          });
+        }
         if (p.gitops?.problem !== "missing") {
           const held = this.heldByRepository(subject, "profile.delete", p.name, "WorkerProfile");
           if (held) return held;
@@ -1763,9 +1818,121 @@ export class FakeAdmin {
     return this.sessions.filter((s) => s.state !== "erased" && (all || (s.team !== null && teams.has(s.team))));
   }
 
+  // -- a profile that extends another, as `Troupe.Plane.Fleet.Extends` resolves it -------
+
+  /** What a profile wrote: `own` for one that extends another, its own fields otherwise. */
+  private writtenOf(p: FakeProfile): Record<string, unknown> {
+    if (p.extends) return { ...(p.own ?? {}) };
+    return { image: p.image, size_class: p.size_class, max_sessions: p.max_sessions ?? null, warm_workers: p.warm_workers ?? 0, provisioner: p.provisioner, spec: p.spec ?? {} };
+  }
+
+  /** What a write that names no parent leaves a profile having written: its fields, the write's over them. */
+  private rootWritten(before: FakeProfile | null, attrs: Record<string, unknown>): Record<string, unknown> {
+    const base = before ? this.writtenOf({ ...before, extends: null }) : {};
+    return { ...base, ...Object.fromEntries(WRITTEN_KEYS.filter((k) => k in attrs).map((k) => [k, attrs[k]])) };
+  }
+
+  private childrenOf(name: string): string[] {
+    return this.profiles
+      .filter((p) => p.extends === name)
+      .map((p) => p.name)
+      .sort();
+  }
+
+  /** Every profile below `name`, each after the one it extends. */
+  private descendantsOf(name: string): string[] {
+    const out: string[] = [];
+    const queue = [name];
+    while (queue.length) {
+      for (const child of this.childrenOf(queue.shift() as string)) {
+        if (out.includes(child)) continue;
+        out.push(child);
+        queue.push(child);
+      }
+    }
+    return out;
+  }
+
+  /** From the profile that extends nothing down to `name`, with what each wrote, or why there is no such chain. */
+  private chainOf(name: string, overrides: Record<string, { extends: string | null; written: Record<string, unknown> }>): Array<[string, Record<string, unknown>]> | { missing: string } | { cycle: string[] } {
+    const below: Array<[string, Record<string, unknown>]> = [];
+    let at: string | null = name;
+    while (at) {
+      if (below.some(([n]) => n === at) || below.length >= MAX_DEPTH) return { cycle: below.map(([n]) => n) };
+      const step: string = at;
+      const override: { extends: string | null; written: Record<string, unknown> } | undefined = overrides[step];
+      const row = this.profiles.find((p) => p.name === step);
+      if (!override && !row) return { missing: step };
+      below.unshift([step, override ? override.written : this.writtenOf(row as FakeProfile)]);
+      at = override ? override.extends : (row?.extends ?? null);
+    }
+    return below;
+  }
+
+  private resolveProfile(name: string, overrides: Record<string, { extends: string | null; written: Record<string, unknown> }>): (Resolved & { chain: string[] }) | string {
+    const chain = this.chainOf(name, overrides);
+    if ("missing" in chain) return `${chain.missing} is extended in this chain and is not a profile on this plane any more`;
+    if ("cycle" in chain) return `${chain.cycle.join(" → ")} extend each other in a circle`;
+    const resolved = chain.reduce<Resolved>((parent, [profile, written]) => mergeExtends(parent, written, profile), emptyResolved());
+    return { ...resolved, chain: chain.map(([n]) => n) };
+  }
+
+  /** Whether `name` may extend `parent`, in the plane's sentences where it may not. */
+  private extendsProblem(name: string, parent: string): string | null {
+    if (name === parent) return `${name} cannot extend itself`;
+    const above = this.chainOf(parent, {});
+    if ("missing" in above) return `${name} extends ${parent}, which is not a profile on this plane: create ${parent} first, or extend another`;
+    if ("cycle" in above) return `${above.cycle.join(" → ")} extend each other in a circle`;
+    const names = above.map(([n]) => n);
+    if (names.includes(name)) return `${name} cannot extend ${parent}, because ${parent} already extends ${name} (${names.join(" → ")}): a profile cannot be its own ancestor`;
+    const height = (n: string): number => Math.max(0, ...this.childrenOf(n).map((c) => 1 + height(c)));
+    const length = names.length + 1 + height(name);
+    if (length > MAX_DEPTH) return `${name} extending ${parent} would make a chain of ${length} profiles (${[...names, name].join(" → ")}), and a chain is at most ${MAX_DEPTH}: extend a profile nearer the one that extends nothing`;
+    return null;
+  }
+
+  /**
+   * The write as the plane reads it: resolved where it names a parent, and for a profile
+   * that stops naming one, what it had in effect with the write laid over it.
+   */
+  private inEffect(name: string, sent: Record<string, unknown>, parent: string | null, before: FakeProfile | null): { attrs: Record<string, unknown>; own: Record<string, unknown> | null } | string {
+    const own = { ...(before?.extends ? (before.own ?? {}) : {}), ...Object.fromEntries(WRITTEN_KEYS.filter((k) => k in sent).map((k) => [k, sent[k]])) };
+    const via = parent ?? before?.extends ?? null;
+    if (!via) return { attrs: sent, own: null };
+    if (parent) {
+      const problem = this.extendsProblem(name, parent);
+      if (problem) return problem;
+    }
+    const resolved = this.resolveProfile(name, { [name]: { extends: via, written: own } });
+    if (typeof resolved === "string") return resolved;
+    const { channel: _channel, ...row } = rowOf(resolved);
+    return { attrs: { ...row, name }, own: parent ? own : null };
+  }
+
+  /** Each profile below `name` as this write would leave it: its diff, the policy's verdict, and what would refuse the write. */
+  private effectsBelow(name: string, write: { extends: string | null; written: Record<string, unknown> }): Array<{ name: string; changes: Changes; policy: unknown; problem: string | null }> {
+    return this.descendantsOf(name).map((child) => {
+      const current = this.profiles.find((p) => p.name === child) ?? null;
+      const resolved = this.resolveProfile(child, { [name]: write });
+      if (typeof resolved === "string") return { name: child, changes: {}, policy: null, problem: resolved };
+      const { channel, ...row } = rowOf(resolved);
+      const was = this.comparable_profile(current);
+      const llm = ((row["spec"] ?? {}) as Record<string, unknown>)["llm"];
+      const llmWrong = typeof llm === "object" && llm !== null ? llmProblem(llm as Record<string, unknown>) : null;
+      const policy = this.verdict({ ...row, name: child });
+      return {
+        name: child,
+        changes: diff(was, { ...was, ...row, config_bundle_channel: channel, sessions_per_pod: row["size_class"] === "heavy" ? 2 : 4 }),
+        policy,
+        problem: llmWrong ? `spec: ${llmWrong}` : policy["allowed?"] ? null : policy.violations.join("; "),
+      };
+    });
+  }
+
   private profileJson(p: FakeProfile): Record<string, unknown> {
     return {
       name: p.name,
+      extends: p.extends ?? null,
       size_class: p.size_class,
       size_class_summary: SIZE_CLASSES[p.size_class] ?? null,
       max_sessions: p.max_sessions ?? null,
@@ -1819,6 +1986,7 @@ export class FakeAdmin {
       config_bundle_channel: p.channel,
       image: p.image,
       spec: p.spec ?? {},
+      extends: p.extends ?? null,
     };
   }
 
