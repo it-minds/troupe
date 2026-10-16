@@ -54,7 +54,8 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.GitHub.Issue, as: GitHubIssue
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
-  alias Troupe.Plane.{OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
+  alias Troupe.Plane.{OIDC, Principals, ProfileBudget, Provision, Reach, Sessions, Settings}
+  alias Troupe.Plane.Triggers
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision, Trigger}
@@ -295,6 +296,7 @@ defmodule Troupe.Plane.Admin do
          extended_by: Extends.children(profile.name),
          policy: Provision.verdict(profile),
          bundle: bundle_state(profile),
+         budget: budget_state(profile),
          # A server the bundle calls as the profile's own identity that the profile gives
          # none, or an incomplete one: reported, like a missing Secret, since the bundle and
          # the profile are written by different people and either may come first.
@@ -317,12 +319,34 @@ defmodule Troupe.Plane.Admin do
           chain: resolved.chain,
           profile: Extends.row_attrs(resolved),
           fields: Extends.fields(resolved),
-          problems: resolved.problems
+          problems: resolved.problems,
+          bundle: bundle_view(resolved.bundle)
         }
 
       {:error, reason} ->
-        %{extends: profile.extends, chain: [], profile: nil, fields: [], problems: [reason]}
+        %{
+          extends: profile.extends,
+          chain: [],
+          profile: nil,
+          fields: [],
+          problems: [reason],
+          bundle: nil
+        }
     end
+  end
+
+  # The bundle the profile's pods load: the channel it is on, its hash, the channels of the
+  # chain it is made from, and each agent, skill and server with the profile whose channel
+  # gave it. `composed` where the plane makes it from more than one channel.
+  defp bundle_view(bundle) do
+    %{
+      channel: bundle.channel,
+      hash: bundle.hash,
+      composed: Bundles.Effective.composed?(bundle.layers),
+      layers: bundle.layers,
+      entries: bundle.entries,
+      problems: bundle.problems
+    }
   end
 
   @doc """
@@ -350,6 +374,9 @@ defmodule Troupe.Plane.Admin do
       case Fleet.put_profile(attrs) do
         {:ok, profile} ->
           changes = Audit.diff(comparable(before), comparable(profile))
+          # Its bundle in effect, where the plane composes one for it; each profile below
+          # it has its own composed again as it is written.
+          Bundles.publish_effective(profile)
           children = rewrite_below(below, actor)
 
           {:ok, _} =
@@ -382,7 +409,7 @@ defmodule Troupe.Plane.Admin do
   # What `profile_put/2` reads of a profile: an administrator's answers and the rest of
   # the resource's spec. `admin.profile.put`'s schema declares exactly these, and a test
   # holds the two together.
-  @profile_keys ~w(name image size_class max_sessions warm_workers provisioner spec extends)
+  @profile_keys ~w(name image size_class max_sessions budget_micros warm_workers provisioner spec extends)
 
   # A put that names a parent is resolved before anything checks it: the policy, the
   # reach check and the row's own validation judge the profile in effect, which is what
@@ -400,10 +427,17 @@ defmodule Troupe.Plane.Admin do
     case {presence(attrs["extends"]), row} do
       {nil, %{extends: parent}} when is_binary(parent) ->
         with {:ok, resolved} <- resolve_put(name, %{name => %{extends: parent, written: own}}) do
+          attrs = Extends.row_attrs(resolved)
+          # Extending nothing, it has one channel, and follows it.
+          channel = presence(attrs["spec"]["configBundleChannel"]) || "stable"
+
           {:ok,
-           resolved
-           |> Extends.row_attrs()
-           |> Map.merge(%{"name" => name, "extends" => nil, "own" => nil})}
+           Map.merge(attrs, %{
+             "name" => name,
+             "extends" => nil,
+             "own" => nil,
+             "config_bundle_channel" => channel
+           })}
         end
 
       {nil, _row} ->
@@ -411,13 +445,44 @@ defmodule Troupe.Plane.Admin do
 
       {parent, _row} ->
         with :ok <- extends_check(name, parent),
-             {:ok, resolved} <- resolve_put(name, %{name => %{extends: parent, written: own}}) do
+             {:ok, resolved} <- resolve_put(name, %{name => %{extends: parent, written: own}}),
+             :ok <- budget_lowers(name, own, resolved) do
           {:ok,
            resolved
            |> Extends.row_attrs()
            |> Map.merge(%{"name" => name, "extends" => parent, "own" => own})}
         end
     end
+  end
+
+  # A profile's budget may only be lowered by one that extends it. One set above what it
+  # has from above is refused rather than quietly lowered: whoever typed it believes the
+  # profile's sessions may spend that much, and they may not. A parent lowered below a
+  # budget a child already has is not refused; the lower is in effect, and the view says
+  # whose it is.
+  defp budget_lowers(name, own, %{attrs: attrs, from: from}) do
+    wrote = own["budget_micros"]
+    ceiling = attrs["budget_micros"]
+    source = from["budget_micros"]
+
+    if is_integer(wrote) and is_integer(ceiling) and source != name and ceiling < wrote do
+      {:error,
+       Error.new(:invalid_params, %{
+         budget_micros: wrote,
+         reason:
+           "#{name} has a monthly budget of #{dollars(ceiling)} from #{source}, and a " <>
+             "profile that extends another can only lower its budget: set #{name}'s at or " <>
+             "below #{dollars(ceiling)}, or raise #{source}'s"
+       })}
+    else
+      :ok
+    end
+  end
+
+  defp dollars(micros) do
+    cents = div(micros + 5_000, 10_000)
+
+    "$#{div(cents, 100)}.#{cents |> rem(100) |> Integer.to_string() |> String.pad_leading(2, "0")}"
   end
 
   defp extends_check(name, parent) do
@@ -588,10 +653,27 @@ defmodule Troupe.Plane.Admin do
            not_yours: ["config_bundle_channel"]
          })}
 
+      Bundles.Effective.reserved?(spec["configBundleChannel"]) ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason:
+             "#{spec["configBundleChannel"]} is the bundle the plane composes for a profile; " <>
+               "name a channel bundles are published to, or extend that profile",
+           not_yours: ["spec.configBundleChannel"]
+         })}
+
       true ->
-        {:ok, attrs |> Map.take(@profile_keys) |> with_channel()}
+        {:ok, attrs |> Map.take(@profile_keys) |> with_channel() |> no_budget_as_nil()}
     end
   end
+
+  # A budget of zero is no ceiling, as a person's and a team's is, and is kept as none: a
+  # zero in the column would be the lower of two ceilings to a profile that extends this one.
+  defp no_budget_as_nil(%{"budget_micros" => budget} = attrs)
+       when is_integer(budget) and budget <= 0,
+       do: Map.put(attrs, "budget_micros", nil)
+
+  defp no_budget_as_nil(attrs), do: attrs
 
   # The channel has one home, `spec.configBundleChannel`, which the operator gives the
   # pods, and the row's column, which bundles, adoption and a profile's servers follow, is
@@ -2664,7 +2746,7 @@ defmodule Troupe.Plane.Admin do
   defp losers(channel, removed) do
     gone = MapSet.new(removed, &{&1.kind, &1.name})
 
-    for profile <- Bundles.profiles_on(channel),
+    for profile <- Bundles.followers(channel),
         grant <- Identity.grants_for_profile(profile),
         team = grant.team,
         row <- Identity.entitlements_for(team, profile),
@@ -2676,7 +2758,8 @@ defmodule Troupe.Plane.Admin do
   @doc "Publish a new version, which pushes `config.updated` to every pod on the channel."
   @spec bundle_publish(actor(), String.t(), map()) :: result()
   def bundle_publish(actor, channel, content) do
-    with :ok <- require_platform_admin(actor) do
+    with :ok <- require_platform_admin(actor),
+         :ok <- not_composed(channel) do
       case Bundles.publish(channel, content, by: actor.subject) do
         {:ok, bundle} ->
           {:ok, _} =
@@ -2700,7 +2783,8 @@ defmodule Troupe.Plane.Admin do
   @doc "Retire a version, so nothing new starts on it. Running sessions are untouched."
   @spec bundle_retire(actor(), String.t(), integer()) :: result()
   def bundle_retire(actor, channel, version) do
-    with :ok <- require_platform_admin(actor) do
+    with :ok <- require_platform_admin(actor),
+         :ok <- not_composed(channel) do
       case Bundles.retire(channel, version, by: actor.subject) do
         {:ok, bundle} ->
           {:ok, _} =
@@ -2711,6 +2795,23 @@ defmodule Troupe.Plane.Admin do
         {:error, reason} ->
           {:error, Error.new(:not_found, %{reason: inspect(reason)})}
       end
+    end
+  end
+
+  # A profile's composed bundle is the plane's to write, from the channels of its chain: a
+  # version published or retired there by hand would be undone by the next publish to any
+  # of them, and would say something none of them does meanwhile.
+  defp not_composed(channel) do
+    if Bundles.Effective.reserved?(channel) do
+      {:error,
+       Error.new(:invalid_params, %{
+         channel: channel,
+         reason:
+           "#{channel} is the bundle the plane composes for a profile from the channels of " <>
+             "the profiles it extends; publish to those channels instead"
+       })}
+    else
+      :ok
     end
   end
 
@@ -3161,12 +3262,28 @@ defmodule Troupe.Plane.Admin do
   with the one that would bind first at the top. A person told they are over budget
   should be able to see which of the four without asking anybody.
   """
-  @spec budget_explain(actor(), String.t(), String.t() | nil) :: result()
-  def budget_explain(actor, subject, team_name) do
+  #
+  # With a profile, that profile's own monthly ceiling too, where it has one: which profile
+  # set the ceiling in effect (`set_by`, itself or one it extends) and what its sessions
+  # have left.
+  @spec budget_explain(actor(), String.t(), String.t() | nil, String.t() | nil) :: result()
+  def budget_explain(actor, subject, team_name, profile_name \\ nil) do
+    # A name or nothing. The admin API hands over an absent `profile` argument as the call's
+    # whole params, which is how `admin.profile.put` reads its profile, so anything but a
+    # name is no profile here.
+    profile_name = if is_binary(profile_name), do: profile_name
+
     with :ok <- require_platform_admin(actor),
-         {:ok, team} <- optional_team(actor, team_name) do
-      {:ok, Budget.ceilings(team, subject)}
+         {:ok, team} <- optional_team(actor, team_name),
+         :ok <- optional_profile(profile_name) do
+      {:ok, Budget.ceilings(team, subject, profile_name)}
     end
+  end
+
+  defp optional_profile(nil), do: :ok
+
+  defp optional_profile(name) do
+    with {:ok, _profile} <- fetch_profile(name), do: :ok
   end
 
   defp optional_team(_actor, nil), do: {:ok, nil}
@@ -3700,6 +3817,8 @@ defmodule Troupe.Plane.Admin do
       size_class: profile.size_class,
       size_class_summary: SizeClass.get(profile.size_class).summary,
       max_sessions: profile.max_sessions,
+      # What the profile's sessions may spend in a calendar month, in effect; `nil` is none.
+      budget_micros: profile.budget_micros,
       warm_workers: profile.warm_workers,
       # What the plane decided from it. Shown, not offered: a console should be able to
       # say how many workers are up and why, and an administrator who wants to know what
@@ -3707,7 +3826,12 @@ defmodule Troupe.Plane.Admin do
       replicas: profile.replicas,
       sessions_per_pod: profile.sessions_per_pod,
       capacity_sessions: profile.replicas * profile.sessions_per_pod,
-      channel: profile.config_bundle_channel,
+      # The channel the profile names, or has from the profile it extends; and the one its
+      # pods load, which for a profile on a channel of its own below a parent on another is
+      # the bundle the plane composes from both.
+      channel:
+        presence((profile.spec || %{})["configBundleChannel"]) || profile.config_bundle_channel,
+      bundle_channel: profile.config_bundle_channel,
       image: profile.image,
       # What makes these workers exist, and what that substrate does *not* guarantee.
       # Named individually rather than summed into a flag: "unenforced" is not a useful
@@ -3749,6 +3873,19 @@ defmodule Troupe.Plane.Admin do
   # `%{"fqdn_egress" => "egress_checked_at_admission"}` for Kubernetes without Cilium.
   defp guarantees_instead(account) do
     Map.new(account.instead, fn {missing, weaker} -> {to_string(missing), to_string(weaker)} end)
+  end
+
+  # The profile's monthly ceiling in effect, whose it is, and what its sessions have spent
+  # and hold this month: read from the ledger, so a page asking for it starts no actor.
+  defp budget_state(profile) do
+    %{
+      budget_micros: profile.budget_micros,
+      budget_period: "monthly",
+      set_by: ProfileBudget.set_by(profile.name),
+      spent_micros: Ledger.profile_spent_micros(profile.name),
+      reserved_micros:
+        profile.name |> Ledger.open_reservations_for_profile() |> Map.values() |> Enum.sum()
+    }
   end
 
   defp bundle_state(profile) do
@@ -3912,6 +4049,7 @@ defmodule Troupe.Plane.Admin do
     Map.take(profile, [
       :size_class,
       :max_sessions,
+      :budget_micros,
       :warm_workers,
       :provisioner,
       :replicas,

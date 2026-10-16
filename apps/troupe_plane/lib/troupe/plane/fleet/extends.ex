@@ -15,7 +15,7 @@ defmodule Troupe.Plane.Fleet.Extends do
   | --- | --- |
   | `egress.fqdns`, `egress.gitHosts` | **added**: the parent's, then the child's that the parent lacks |
   | `mcpServers` | **added** by name. A child's server with a parent's name replaces it only with `override: true`; otherwise the parent's is kept, and the clash is reported |
-  | `max_sessions` | **narrow only**: the lower of the two, where either sets one |
+  | `max_sessions`, `budget_micros` | **narrow only**: the lower of the two, where either sets one; a child's budget above its parent's is refused where it is written |
   | `personalTools`, `repositoryOverridesBundle` | **restrict only**: a parent's `forbid` or `false` holds whatever the child says; otherwise the child's, or the parent's |
   | `image`, `size_class`, `provisioner`, every `llm` field but `secretRef`, `storage.storageClassName`, `configBundleChannel`, and any other spec field | **replaced** where the child sets it, the parent's where it does not |
   | `llm.secretRef`, `mcpIdentities` | **never inherited**: credentials are each profile's own, in its own namespace |
@@ -30,13 +30,14 @@ defmodule Troupe.Plane.Fleet.Extends do
 
   import Ecto.Query
 
-  alias Troupe.Plane.{Fleet, Repo}
+  alias Troupe.Plane.{Bundles, Fleet, Repo}
+  alias Troupe.Plane.Bundles.Effective
   alias Troupe.Plane.Fleet.Profile
 
   @max_depth 4
 
   # What `own` keeps: what a parent can give, as `admin.profile.put` takes it.
-  @written ~w(image size_class max_sessions warm_workers provisioner spec)
+  @written ~w(image size_class max_sessions budget_micros warm_workers provisioner spec)
 
   # What the plane writes into a resource itself, which neither a parent nor a child gives.
   @plane_written ~w(replicas sessionsPerPod resources teams image)
@@ -46,6 +47,7 @@ defmodule Troupe.Plane.Fleet.Extends do
     {"size_class", :replaced},
     {"provisioner", :replaced},
     {"max_sessions", :narrow},
+    {"budget_micros", :narrow},
     {"warm_workers", :own}
   ]
 
@@ -82,6 +84,7 @@ defmodule Troupe.Plane.Fleet.Extends do
       "image" => profile.image,
       "size_class" => profile.size_class,
       "max_sessions" => profile.max_sessions,
+      "budget_micros" => profile.budget_micros,
       "warm_workers" => profile.warm_workers,
       "provisioner" => profile.provisioner,
       "spec" => profile.spec || %{}
@@ -230,26 +233,70 @@ defmodule Troupe.Plane.Fleet.Extends do
   def resolve(name, overrides \\ %{}) do
     case chain(name, overrides) do
       {:ok, chain} ->
-        resolved =
-          Enum.reduce(chain, empty(), fn {profile, written}, parent ->
-            merge(parent, written, profile)
+        {resolved, channels} =
+          Enum.reduce(chain, {empty(), []}, fn {profile, written}, {parent, channels} ->
+            merged = merge(parent, written, profile)
+            {merged, channels ++ [{profile, channel_in(merged)}]}
           end)
 
-        {:ok, Map.put(resolved, :chain, Enum.map(chain, &elem(&1, 0)))}
+        names = Enum.map(chain, &elem(&1, 0))
+        {:ok, resolved |> Map.put(:chain, names) |> with_bundle(name, channels)}
 
       {:error, reason} ->
         {:error, sentence(reason)}
     end
   end
 
+  defp channel_in(%{attrs: attrs}), do: presence(attrs["spec"]["configBundleChannel"]) || "stable"
+
+  # The bundle in effect. A chain on one channel has that channel's bundle as it is; one on
+  # several has the bundle composed from them, on a channel of the profile's own, and the
+  # resource's servers are that bundle's, each from the profile whose channel gave it, so
+  # the resource and the pods' bundle say the same servers. Where nothing in the chain is
+  # published yet, the servers are what the profiles wrote, as a profile's are before its
+  # channel's first publish.
+  defp with_bundle(resolved, name, channels) do
+    layers = Effective.layers(channels)
+    composed = Effective.compose(layers)
+
+    if Effective.composed?(layers) do
+      bundle = Map.put(composed, :channel, Effective.channel(name))
+      resolved |> Map.put(:bundle, bundle) |> servers_from(composed)
+    else
+      [%{channel: channel}] = layers
+      current = Bundles.current(channel)
+      hash = current && current.hash
+      Map.put(resolved, :bundle, Map.merge(composed, %{channel: channel, content: nil, hash: hash}))
+    end
+  end
+
+  defp servers_from(resolved, %{content: nil}), do: resolved
+
+  defp servers_from(%{attrs: attrs, from: from} = resolved, %{content: content, entries: entries}) do
+    servers = Bundles.mcp_servers_of(content)
+
+    sources =
+      for %{kind: "mcp_servers", name: server, from: profile} <- entries,
+          into: %{},
+          do: {server, profile}
+
+    spec = put_set(Map.delete(attrs["spec"], "mcpServers"), "mcpServers", blank_to_nil(servers))
+    from = put_set(Map.delete(from, "spec.mcpServers"), "spec.mcpServers", blank_to_nil(sources))
+
+    %{resolved | attrs: Map.put(attrs, "spec", spec), from: from}
+  end
+
   @doc """
   Write a profile's row again as it now resolves, after something above it changed. Its
-  `own` is untouched; only what it has in effect moves.
+  `own` is untouched; only what it has in effect moves, its bundle in effect with it, which
+  its pods are told of unless `announce: false`.
   """
-  @spec rewrite(String.t()) :: {:ok, Profile.t()} | {:error, term()}
-  def rewrite(name) do
-    with {:ok, resolved} <- resolve(name) do
-      Fleet.put_profile(resolved |> row_attrs() |> Map.put("name", name))
+  @spec rewrite(String.t(), keyword()) :: {:ok, Profile.t()} | {:error, term()}
+  def rewrite(name, opts \\ []) do
+    with {:ok, resolved} <- resolve(name),
+         {:ok, profile} <- Fleet.put_profile(resolved |> row_attrs() |> Map.put("name", name)) do
+      Bundles.publish_effective(profile, opts)
+      {:ok, profile}
     end
   end
 
@@ -259,14 +306,20 @@ defmodule Troupe.Plane.Fleet.Extends do
   column from the spec it resolved to.
   """
   @spec row_attrs(resolved()) :: map()
-  def row_attrs(%{attrs: attrs}) do
+  def row_attrs(%{attrs: attrs} = resolved) do
     spec = attrs["spec"] || %{}
+
+    channel =
+      case resolved do
+        %{bundle: %{channel: channel}} -> channel
+        _unresolved -> presence(spec["configBundleChannel"]) || "stable"
+      end
 
     @written
     |> Map.new(&{&1, attrs[&1]})
     |> Map.put("spec", spec)
     |> Map.put("warm_workers", attrs["warm_workers"] || 0)
-    |> Map.put("config_bundle_channel", presence(spec["configBundleChannel"]) || "stable")
+    |> Map.put("config_bundle_channel", channel)
   end
 
   @doc """

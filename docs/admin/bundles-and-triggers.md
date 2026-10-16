@@ -53,6 +53,15 @@ or at another address, gets a rule of its own in those workers' NetworkPolicy
 ([profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy)). `admin.bundle.validate`
 is not given a channel and does not make this check.
 
+**A profile that extends another.** Any entry, of any kind, may say `"override": true`
+(`true` or `false`, nothing else). It matters where a profile on this channel extends a
+profile on another: the plane composes the two channels' bundles into the one its pods
+load, and an entry with a name the parent's bundle already has replaces the parent's only
+with the flag; without it the parent's is kept and the clash is reported
+([profiles-and-policy.md](profiles-and-policy.md#a-profile-that-extends-another),
+Decision 910). The composed bundle is published on the channel `profile:<name>`, which is
+the plane's: a publish to it by hand is refused.
+
 **MCP entries.**
 
 | Field | Meaning | Default |
@@ -339,6 +348,17 @@ review queue (`needs_review` on `sessions.list` and `admin.sessions.list`);
   `admin.team.update`. There is also a platform budget and a per-person budget;
   `admin.budget.explain` says which ceiling binds and why, `admin.person.budget` one
   person's.
+- **A profile's budget** (Decision 910). A worker profile may carry `budget_micros`, a
+  ceiling on what the sessions on it spend in a calendar month (UTC), whoever starts them
+  and in whichever team. It is asked after the person's and before the team's, as their
+  rung is, with the same reservations; a session it refuses is `budget_exhausted` with
+  `scope: profile`, the profile's name and a sentence saying it is that profile's. A
+  profile that extends another has the lower of its own and its parent's, and one set
+  higher than its parent's is refused; each profile's sessions count against its own
+  ceiling, not its parent's. `admin.budget.explain` with `profile` lists it, with
+  `set_by`, the profile whose budget is in effect; `admin.profile.get` answers `budget`,
+  what is spent and held this month. The console sets it on the profile's editor, in
+  dollars, through the usual preview and audit.
 - **Reservation, then spend.** A session reserves a slice at activation (`terms.budget_micros`
   or the default); the ledger records what model calls actually cost, one row per gateway
   request id. A reservation is granted when spend plus reservations stays within the

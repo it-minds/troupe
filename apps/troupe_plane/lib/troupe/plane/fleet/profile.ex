@@ -35,6 +35,9 @@ defmodule Troupe.Plane.Fleet.Profile do
     # `nil` is no ceiling, bounded by the team's money. A ceiling is a decision somebody
     # makes, and a default would be a refusal nobody chose.
     field :max_sessions, :integer
+    # What the profile's sessions may spend in a calendar month in UTC, in millionths,
+    # beside the person's, the team's and the platform's ceilings. `nil` is none.
+    field :budget_micros, :integer
     field :warm_workers, :integer, default: 0
     # When the last session here stopped being active, so scale-to-zero waits rather
     # than removing a worker the instant somebody's session goes dormant.
@@ -71,6 +74,7 @@ defmodule Troupe.Plane.Fleet.Profile do
     :sessions_per_pod,
     :size_class,
     :max_sessions,
+    :budget_micros,
     :warm_workers,
     :idle_since,
     :provisioner,
@@ -117,6 +121,7 @@ defmodule Troupe.Plane.Fleet.Profile do
     |> validate_inclusion(:size_class, SizeClass.names())
     |> validate_inclusion(:provisioner, Provisioner.names())
     |> validate_number(:max_sessions, greater_than: 0)
+    |> validate_number(:budget_micros, greater_than: 0)
     |> validate_number(:warm_workers, greater_than_or_equal_to: 0, less_than_or_equal_to: 10)
     |> validate_change(:spec, &spec_switches/2)
     |> check_constraint(:provisioner, name: :profiles_provisioner)

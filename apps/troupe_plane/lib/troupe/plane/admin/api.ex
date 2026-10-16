@@ -63,7 +63,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "extends",
       type: :string,
       description:
-        "The one profile this one extends, or null for none. The plane resolves the two into the profile in effect, which is all the cluster sees: egress.fqdns, egress.gitHosts and MCP servers are added to the parent's (a server with a parent's name replaces it only with override: true); max_sessions is the lower of the two; a parent's personalTools forbid and repositoryOverridesBundle false hold whatever this one says; image, size_class, provisioner, the llm fields, the channel and every other spec field are the parent's where this one sets none; llm.secretRef, mcpIdentities, warm_workers and grants are never inherited. Send only what differs from the parent: what this profile sets stops following the parent. A chain is at most four profiles; a missing parent or a cycle is refused. Refused on a gitops plane."
+        "The one profile this one extends, or null for none. The plane resolves the two into the profile in effect, which is all the cluster sees: egress.fqdns, egress.gitHosts and MCP servers are added to the parent's (a server with a parent's name replaces it only with override: true); on a channel of its own, its pods load one bundle, the parent's with its channel's agents, skills, MCP servers and ACP agents added, an entry with a parent's name replacing it only where that channel's document says override: true; max_sessions and budget_micros are the lower of the two, and a budget_micros above the parent's is refused; a parent's personalTools forbid and repositoryOverridesBundle false hold whatever this one says; image, size_class, provisioner, the llm fields, the channel and every other spec field are the parent's where this one sets none; llm.secretRef, mcpIdentities, warm_workers and grants are never inherited. Send only what differs from the parent: what this profile sets stops following the parent. A chain is at most four profiles; a missing parent or a cycle is refused. Refused on a gitops plane."
     },
     %Argument{
       name: "size_class",
@@ -76,6 +76,12 @@ defmodule Troupe.Plane.Admin.API do
       type: :integer,
       description:
         "How far this may grow, in sessions at once rather than workers. Absent is no ceiling, bounded by the team's budget. A session refused here is told this number."
+    },
+    %Argument{
+      name: "budget_micros",
+      type: :integer,
+      description:
+        "What this profile's sessions may spend in a calendar month (UTC, turning over on the 1st), in millionths of a dollar, whoever starts them and in whichever team: a ceiling beside the person's, the team's and the platform's, and a session it refuses is told it is the profile's. Absent, null or 0 is no ceiling. A profile that extends another can only lower its parent's: the lower of the two is in effect, and one higher than the parent's is refused."
     },
     %Argument{
       name: "warm_workers",
@@ -1418,7 +1424,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.budget.explain",
       function: :budget_explain,
       summary:
-        "Every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, the period its spend is counted over, and which rung set it.",
+        "Every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, the period its spend is counted over, and which rung set it. With a profile that has a monthly budget, that ceiling too (scope profile), after the person's: what the profile's sessions have spent this month, and set_by, the profile whose budget is in effect, itself or one it extends.",
       risk: :read,
       arguments: [
         %Argument{
@@ -1431,6 +1437,12 @@ defmodule Troupe.Plane.Admin.API do
           name: "team",
           type: :string,
           description: "The team whose ceiling to include. Absent leaves that rung out."
+        },
+        %Argument{
+          name: "profile",
+          type: :string,
+          description:
+            "The worker profile whose monthly budget to include. Absent, or a profile with none, leaves that rung out."
         }
       ]
     },

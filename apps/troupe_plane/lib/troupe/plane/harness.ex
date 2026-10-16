@@ -449,7 +449,7 @@ defmodule Troupe.Plane.Harness do
          # the run is answerable to, and that is what the origin says.
          {:ok, origin} <- origin_for(params["origin"]),
          answerable = answerable_for(%{origin: origin, owner_subject: user.subject}),
-         {:ok, terms} <- terms_for(params["terms"], team, answerable),
+         {:ok, terms} <- terms_for(params["terms"], team, answerable, profile),
          {:ok, repository} <- repository_for(params["repository"], profile),
          {:ok, session_id} <- session_id_for(params["session_id"]),
          params = Map.put(params, "repository", repository),
@@ -1020,19 +1020,19 @@ defmodule Troupe.Plane.Harness do
   # that silently did not apply. `approvals` defaults to `wait`; there is no `auto`, since
   # an unattended session that approves its own shell commands is the thing this design
   # refuses — a trigger that needs none gets a profile whose definition says so.
-  defp terms_for(nil, _team, _subject), do: {:ok, %{"approvals" => "wait"}}
+  defp terms_for(nil, _team, _subject, _profile), do: {:ok, %{"approvals" => "wait"}}
 
-  defp terms_for(%{} = terms, team, subject) do
+  defp terms_for(%{} = terms, team, subject, profile) do
     with :ok <- only_keys(terms, @term_keys, "terms"),
          :ok <- in_range(terms, "budget_micros", 1, nil),
          :ok <- in_range(terms, "max_turns", 1, 500),
          :ok <- in_range(terms, "wall_clock_seconds", 60, 86_400),
          :ok <- one_of(terms, "approvals", ~w(wait deny)) do
-      cap_budget(Map.put_new(terms, "approvals", "wait"), team, subject)
+      cap_budget(Map.put_new(terms, "approvals", "wait"), team, subject, profile)
     end
   end
 
-  defp terms_for(_other, _team, _subject), do: invalid("terms is an object")
+  defp terms_for(_other, _team, _subject, _profile), do: invalid("terms is an object")
 
   # The bottom rung of the ladder: a session's slice is trimmed to the least any ceiling
   # above it has left, rather than refused — a nightly trigger near the end of a budget
@@ -1041,21 +1041,21 @@ defmodule Troupe.Plane.Harness do
   # Every ceiling, not only the team's. A slice trimmed to what the team has left and
   # then refused by the person's cap a line later would be a refusal the caller could
   # have been spared, and one that said the wrong thing about why.
-  defp cap_budget(%{"budget_micros" => asked} = terms, team, subject) do
-    case tightest_remaining(team, subject) do
+  defp cap_budget(%{"budget_micros" => asked} = terms, team, subject, profile) do
+    case tightest_remaining(team, subject, profile) do
       :unlimited -> {:ok, terms}
       {_scope, remaining} when remaining > 0 -> {:ok, Map.put(terms, "budget_micros", min(asked, remaining))}
-      {scope, _none} -> {:error, nothing_left(team, scope)}
+      {scope, _none} -> {:error, nothing_left(team, scope, profile)}
     end
   end
 
-  defp cap_budget(terms, _team, _subject), do: {:ok, terms}
+  defp cap_budget(terms, _team, _subject, _profile), do: {:ok, terms}
 
   # Narrowest first, so a tie between two ceilings with the same remainder is reported
   # as the closer of the two — which is the one the caller can act on.
-  defp tightest_remaining(team, subject) do
+  defp tightest_remaining(team, subject, profile) do
     team
-    |> Budget.ceilings(subject)
+    |> Budget.ceilings(subject, profile)
     |> Enum.reject(&(&1.remaining_micros == :unlimited))
     |> Enum.min_by(& &1.remaining_micros, fn -> nil end)
     |> case do
@@ -1064,13 +1064,25 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  defp nothing_left(team, scope) do
-    Error.new(:budget_exhausted, %{
-      scope: scope,
-      team: team && team.name,
-      reason: "nothing left to reserve"
+  defp nothing_left(team, scope, profile) do
+    Error.new(
+      :budget_exhausted,
+      %{scope: scope, team: team && team.name, reason: "nothing left to reserve"}
+      |> naming_profile(scope, profile)
+    )
+  end
+
+  # A refusal by a profile's own ceiling names the profile and says so in words: the person
+  # refused can start the session on another profile, which a team's refusal would not
+  # have told them.
+  defp naming_profile(data, :profile, profile) do
+    Map.merge(data, %{
+      profile: profile,
+      reason: "#{profile}'s monthly budget has nothing left this month"
     })
   end
+
+  defp naming_profile(data, _scope, _profile), do: data
 
   # What started this session: a person by default, a trigger or an A2A caller when they
   # say so. Recorded on the row and passed to the pod for `session_created`, so the
@@ -1413,7 +1425,7 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp unwind(session) do
-    Budget.release(session.team_id, session.id, answerable_for(session))
+    Budget.release(session.team_id, session.id, answerable_for(session), session.profile)
     Sessions.delete(session.id)
   end
 
@@ -1464,7 +1476,9 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp reserve_budget(team, session) do
-    case Budget.reserve(team, session.id, answerable_for(session), slice_of(session)) do
+    slice = slice_of(session)
+
+    case Budget.reserve(team, session.id, answerable_for(session), slice, session.profile) do
       {:ok, ceilings} ->
         {:ok, ceilings}
 
@@ -1479,14 +1493,18 @@ defmodule Troupe.Plane.Harness do
   # support ticket: a person at their own cap inside a team with room to spare needs to
   # be told it is *theirs*, because that is the one they can do something about.
   defp over_budget(team, scope, summary) do
-    Error.new(:budget_exhausted, %{
-      scope: scope,
-      team: team && team.name,
-      budget_micros: summary[:budget_micros],
-      spent_micros: summary[:spent_micros],
-      reserved_micros: summary[:reserved_micros],
-      subject: summary[:subject]
-    })
+    Error.new(
+      :budget_exhausted,
+      %{
+        scope: scope,
+        team: team && team.name,
+        budget_micros: summary[:budget_micros],
+        spent_micros: summary[:spent_micros],
+        reserved_micros: summary[:reserved_micros],
+        subject: summary[:subject]
+      }
+      |> naming_profile(scope, summary[:profile])
+    )
   end
 
   # Whose cap a session's spend counts against. For a person, themselves. For a session
@@ -1612,7 +1630,7 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp unplaced(session, team, :delete) do
-    Budget.release(team, session.id, answerable_for(session))
+    Budget.release(team, session.id, answerable_for(session), session.profile)
     Sessions.delete(session.id)
   end
 
@@ -1762,7 +1780,13 @@ defmodule Troupe.Plane.Harness do
   defp reserve_budget_again(%{team_id: nil}), do: :ok
 
   defp reserve_budget_again(session) do
-    case Budget.reserve(session.team_id, session.id, answerable_for(session), slice_of(session)) do
+    case Budget.reserve(
+           session.team_id,
+           session.id,
+           answerable_for(session),
+           slice_of(session),
+           session.profile
+         ) do
       {:ok, _ceilings} ->
         :ok
 
@@ -1775,6 +1799,7 @@ defmodule Troupe.Plane.Harness do
            :budget_exhausted,
            %{scope: scope, team: team_name(session)}
            |> Map.merge(Map.take(summary, [:budget_micros, :spent_micros, :subject]))
+           |> naming_profile(scope, summary[:profile])
          )}
     end
   end
