@@ -77,6 +77,49 @@ defmodule Troupe.Worker.BundlesTest do
     refute_received {:fetched, _}
   end
 
+  # A profile that extends another, on a channel of its own, has the bundle the plane
+  # composes from both channels, published on a channel of the profile's: to the pod it is
+  # one more document, fetched by one hash, with the parent's entries and its own.
+  test "a profile's composed bundle is one document, loaded as any other", context do
+    analyst = %{"name" => "analyst", "definition" => "---\nmode: primary\n---\nYou analyse."}
+    warehouse = %{"name" => "warehouse", "url" => "https://warehouse.example/mcp"}
+
+    composed =
+      @document
+      |> Map.update!("agents", &(&1 ++ [analyst]))
+      |> Map.update!("mcp_servers", &(&1 ++ [warehouse]))
+      |> Map.put("acp_agents", [])
+
+    hash = Bundle.hash(composed)
+    channel = "profile:data-team"
+
+    bundles =
+      start(context,
+        fetch: fn %{"hash" => ^hash} ->
+          {:ok, %{"content" => composed, "hash" => hash, "channel" => channel, "version" => 1}}
+        end
+      )
+
+    announced = %{"channel" => channel, "version" => 1, "bundle_hash" => hash}
+    assert {:ok, applied} = Bundles.announce(bundles, announced)
+
+    assert File.read!(Path.join(applied.dir, "agents/reviewer.md")) =~ "You review."
+    assert File.read!(Path.join(applied.dir, "agents/analyst.md")) =~ "You analyse."
+    assert %{hash: ^hash, channel: ^channel} = Bundles.current(bundles)
+
+    # A channel's own document may mark an entry as replacing its parent's; the flag is
+    # the plane's to read, and a pod on that channel loads the document as it is.
+    flagged =
+      put_in(@document, ["mcp_servers"], [
+        %{"name" => "jira", "url" => "https://other-jira.example/mcp", "override" => true}
+      ])
+
+    assert {:ok, _parsed} = Bundle.validate(flagged)
+    unsure = put_in(flagged, ["mcp_servers", Access.at(0), "override"], "yes")
+    assert {:error, [message]} = Bundle.validate(unsure)
+    assert message =~ "override is true or false"
+  end
+
   test "a document whose hash is not the announced hash never reaches disk", context do
     tampered = put_in(@document, ["agents"], [])
     bundles = start(context, fetch: fn _ -> {:ok, fetched(tampered, context.hash, 3)} end)
