@@ -7,7 +7,8 @@
 // the plane lists on it, each with what enforcing it means: a ceiling a machine may lower,
 // an order it may tighten, or a value that is fixed. Those keys are the plane's answer,
 // not a list of this screen's, so a key the plane learns to enforce appears here with
-// nothing else changed, and no key is offered that the plane would refuse.
+// nothing else changed, and no key is offered that the plane would refuse. A key of rules
+// (`permissions`) is not a value but three lists, and has its own editor below the set.
 
 import { useState } from "react";
 import type { JSX } from "react";
@@ -15,6 +16,7 @@ import type { EnforceableKey, PlatformSetting, SettingChanged } from "@troupe/cl
 import { show, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Loaded, Preview, Region, Status, changed } from "./bits";
 import type { DiffLine, FieldProps } from "./bits";
+import { PermissionRules } from "./PermissionRules";
 
 const GROUP = "client_defaults";
 const ENFORCED = "client_enforced";
@@ -53,6 +55,9 @@ export function Organisation(): JSX.Element {
               </div>
               <Region tone="waiting">Enforced · above everything a person sets</Region>
               {enforced ? <EnforcedSet setting={enforced} editable={editable} onPut={applied("setting.put")} /> : <Empty title="This plane enforces nothing on people's machines" />}
+              {enforced?.enforceable?.filter(isRules).map((k) => (
+                <PermissionRules key={k.key} spec={k} set={parseSet(enforced.value)} editable={editable} onPut={applied("setting.put")} />
+              ))}
               {!editable && <p className="note">Only a platform admin changes the organisation's document.</p>}
             </>
           );
@@ -181,33 +186,34 @@ function parseSet(value: unknown): Record<string, unknown> {
 /** A field's text, as the form holds it, and back. */
 function asText(value: unknown): string {
   if (value === undefined || value === null) return "";
-  // The per-tool rules (troupe #658) are an object, written as JSON.
-  return typeof value === "object" ? JSON.stringify(value) : String(value);
+  return String(value);
 }
 
 function fromText(key: EnforceableKey, text: string): unknown {
   if (text === "") return null;
   if (key.type === "integer") return /^\d+$/.test(text.trim()) ? Number(text.trim()) : text;
   if (key.type === "boolean") return text === "true";
-  // Sent as written when it is not JSON, so the plane's refusal says what is wrong with it.
-  if (key.type === "rules") {
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      return text;
-    }
-  }
   return text;
+}
+
+/** Whether a key holds rules, which have an editor of their own rather than a field. */
+const isRules = (k: EnforceableKey): boolean => k.type === "rules";
+
+/** A key of rules in the table: how many of each, or that none is enforced. */
+function ruleCount(value: unknown): string {
+  const set = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  const counts = ["deny", "ask", "allow"].map((a) => [a, Array.isArray(set[a]) ? (set[a] as unknown[]).length : 0] as const).filter(([, n]) => n > 0);
+  return counts.length ? counts.map(([a, n]) => `${n} ${a}`).join(", ") : "none";
 }
 
 function EnforcedSet({ setting, editable, onPut }: { setting: PlatformSetting; editable: boolean; onPut: (answer: SettingChanged) => void }): JSX.Element {
   const { admin } = useConsole();
   const set = parseSet(setting.value);
-  const keys = setting.enforceable;
+  const all = setting.enforceable;
   const [draft, setDraft] = useState<Record<string, string> | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
-  if (!keys) {
+  if (!all) {
     return (
       <div className="card">
         <pre className="mono">{Object.keys(set).length ? JSON.stringify(set, null, 2) : "Nothing is enforced."}</pre>
@@ -216,6 +222,10 @@ function EnforcedSet({ setting, editable, onPut }: { setting: PlatformSetting; e
     );
   }
 
+  // The form edits the keys that hold a value; the rules keep what they are, and are
+  // changed in their own editor.
+  const keys = all.filter((k) => !isRules(k));
+  const rules = all.filter(isRules);
   const asked: Record<string, unknown> = {};
   if (draft) for (const k of keys) asked[k.key] = fromText(k, draft[k.key] ?? "");
   const before = Object.fromEntries(keys.map((k) => [k.key, set[k.key] ?? null]));
@@ -234,12 +244,12 @@ function EnforcedSet({ setting, editable, onPut }: { setting: PlatformSetting; e
             </tr>
           </thead>
           <tbody>
-            {keys.map((k) => (
+            {all.map((k) => (
               <tr key={k.key}>
                 <td>
                   <code>{k.key}</code>
                 </td>
-                <td className="mono">{k.key in set ? show(set[k.key]) : <span className="muted">not enforced</span>}</td>
+                <td className="mono">{isRules(k) ? `${ruleCount(set[k.key])} (below)` : k.key in set ? show(set[k.key]) : <span className="muted">not enforced</span>}</td>
                 <td>{k.meaning}</td>
               </tr>
             ))}
@@ -282,7 +292,8 @@ function EnforcedSet({ setting, editable, onPut }: { setting: PlatformSetting; e
           verb="Apply"
           onCancel={() => setPreviewing(false)}
           onConfirm={async () => {
-            const next = Object.fromEntries(Object.entries(asked).filter(([, v]) => v !== null));
+            const kept = Object.entries(set).filter(([key]) => rules.some((r) => r.key === key));
+            const next = Object.fromEntries([...kept, ...Object.entries(asked).filter(([, v]) => v !== null)]);
             const answer = await admin.putSetting(ENFORCED, JSON.stringify(next));
             setDraft(null);
             setPreviewing(false);
@@ -327,6 +338,5 @@ function enforcing(spec: EnforceableKey, to: unknown): string {
   if (to === null) return `${spec.key} is no longer enforced: machines go back to their own value.`;
   if (spec.kind === "ceiling") return `No machine may set ${spec.key} above ${show(to)}; a lower value stays.`;
   if (spec.kind === "order") return `No machine may loosen ${spec.key} past ${show(to)}; a tighter value stays.`;
-  if (spec.kind === "rules") return `Every machine adds these rules to its own, the strictest holding: ${show(to)}.`;
   return `Every machine uses ${show(to)} for ${spec.key}, whatever its own files say.`;
 }

@@ -64,4 +64,26 @@ defmodule Troupe.Protocol.PermissionRuleTest do
     assert {:error, [_, _]} = PermissionRule.check_set(%{"deny" => ["Bash", "shell()"]})
     assert {:error, [_]} = PermissionRule.check_set(["shell"])
   end
+
+  # The console's rules editor checks a rule with its own reading of this module, held to
+  # the same cases, so a rule it accepts is one the plane accepts, refused in the same words.
+  @cases_file Path.expand("../../support/permission_rules.json", __DIR__)
+  @external_resource @cases_file
+  @cases @cases_file |> File.read!() |> Jason.decode!()
+
+  test "every rule and set the console's editor is held to reads as it says" do
+    for %{"text" => text} = case <- @cases["rules"] do
+      case case do
+        %{"reads" => reads} -> assert {:ok, %{text: ^reads}} = PermissionRule.parse(text), text
+        %{"refused" => why} -> assert {:error, ^why} = PermissionRule.parse(text), text
+      end
+    end
+
+    for %{"set" => set, "refused" => reasons} <- @cases["sets"] do
+      case reasons do
+        [] -> assert {:ok, _set} = PermissionRule.check_set(set)
+        reasons -> assert {:error, ^reasons} = PermissionRule.check_set(set)
+      end
+    end
+  end
 end
