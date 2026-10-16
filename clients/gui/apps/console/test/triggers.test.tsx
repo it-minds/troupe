@@ -69,9 +69,12 @@ describe("a trigger", () => {
     expect(says("pr-reviewer")).toBe(true);
     expect(says("2026-10-13 03:00 UTC")).toBe(true);
     expect(says("Revision 1")).toBe(true);
-    // Running it and minting its key are named as the plane's methods, and no page under /admin is.
-    expect(says("admin.trigger.run")).toBe(true);
+    // Running it is offered here, and nothing sends a person to the admin API or a page under /admin for it.
+    expect(button("Run nightly-deps now")).not.toBeNull();
+    expect(says("admin.trigger.run")).toBe(false);
     expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);
+    // A schedule is fired by the plane, so it has no key to rotate.
+    expect(button("Rotate nightly-deps's key")).toBeNull();
   });
 
   it("is made from a form, previewed, and shown as the audit recorded it", async () => {
@@ -140,7 +143,75 @@ describe("a trigger", () => {
   });
 });
 
+describe("running a trigger now", () => {
+  it("is confirmed after saying what it starts, and the run it makes is on Runs", async () => {
+    const before = fake.admin.runRows.length;
+    await open("#/triggers/core/nightly-deps");
+    (await waitFor(() => button("Run nightly-deps now"), "nightly-deps")).click();
+    await waitFor(() => says("nightly-deps fires now, by hand: a session on dev, run as svc:core/nightly, which spends core's budget."), "the preview");
+    expect(says("is listed on Runs and review as fired by hand, by you")).toBe(true);
+    expect(says("If a run of it is going already, this one is recorded as skipped")).toBe(true);
+    // Nothing fires by looking.
+    expect(fake.admin.runRows.length).toBe(before);
+
+    button("Run nightly-deps now")!.click();
+    await waitFor(() => says("Recorded in the audit as trigger.run on core/nightly-deps"), "the audit's note");
+    const made = fake.admin.runRows.at(-1)!;
+    expect(fake.admin.runRows.length).toBe(before + 1);
+    expect(made).toMatchObject({ team: "core", trigger: "nightly-deps", source: "manual", fired_by: PEOPLE.alice.subject, state: "created" });
+    expect(says(made.idempotency_key)).toBe(true);
+
+    (await waitFor(() => link("Its run, on Runs and review"), "the run's link")).click();
+    await waitFor(() => location.hash === `#/runs/${made.id}` && says(made.session_id!), "the run's page");
+
+    visit("#/runs");
+    await waitFor(() => document.querySelector(`a[href="#/runs/${made.id}"]`), "the run on Runs");
+  });
+
+  it("is not offered on a paused trigger, which says why", async () => {
+    await open("#/triggers/design/weekly-digest", PEOPLE.bob);
+    await waitFor(() => button("Resume weekly-digest"), "weekly-digest");
+    expect(button("Run weekly-digest now")).toBeNull();
+    expect(says("A paused trigger is not run, by hand or otherwise; resume it first.")).toBe(true);
+  });
+});
+
 describe("a webhook's key and a trigger on a GitHub repository", () => {
+  it("rotates a webhook trigger's key, typed, saying first that the old one stops working at once", async () => {
+    let copied: string | null = null;
+    Object.defineProperty(globalThis.navigator, "clipboard", { value: { writeText: async (text: string) => void (copied = text) }, configurable: true });
+    trigger("design", "weekly-digest")!.key = "twk_theoldone";
+
+    await open("#/triggers/design/weekly-digest", PEOPLE.bob);
+    (await waitFor(() => button("Rotate weekly-digest's key"), "weekly-digest")).click();
+    await waitFor(() => says("stops working the moment you rotate it"), "the preview");
+    expect(says("There is no overlap.")).toBe(true);
+    expect(says("The new key is shown once")).toBe(true);
+    expect(button("Rotate weekly-digest's key")!.disabled).toBe(true);
+    expect(trigger("design", "weekly-digest")!.key).toBe("twk_theoldone");
+
+    type(field("Type weekly-digest to confirm")!, "weekly-digest");
+    await waitFor(() => !button("Rotate weekly-digest's key")!.disabled, "the name typed");
+    button("Rotate weekly-digest's key")!.click();
+
+    const panel = await waitFor(() => document.querySelector<HTMLElement>("section.key-once"), "the new key");
+    const key = panel.querySelector("code.secret")!.textContent!;
+    expect(key).toMatch(/^twk_/);
+    // The plane's key is now the new one: the old one fires nothing.
+    expect(trigger("design", "weekly-digest")!.key).toBe(key);
+    expect(key).not.toBe("twk_theoldone");
+    expect(says(`${fake.plane.baseUrl}/trigger/trg-design-weekly-digest`, panel)).toBe(true);
+    await waitFor(() => says("Recorded in the audit as trigger.key.rotate on design/weekly-digest"), "the audit's note");
+    expect(fake.admin.audit.at(-1)!.detail).toEqual({ had_key: true });
+
+    button("Copy the key", panel)!.click();
+    await waitFor(() => says("Copied.", panel), "copied");
+    expect(copied).toBe(key);
+    button("I have copied it", panel)!.click();
+    await waitFor(() => !document.querySelector("section.key-once"), "the key, gone");
+    expect(says(key)).toBe(false);
+  });
+
   async function newTrigger(name: string): Promise<void> {
     await open("#/triggers/core");
     (await waitFor(() => button("New trigger"), "core's triggers")).click();
@@ -211,6 +282,7 @@ describe("a plane in gitops mode", () => {
     await open("#/triggers/core");
     await waitFor(() => row("nightly-deps") && says("Held in a repository"), "the locked list");
     expect(button("New trigger")).toBeNull();
+    expect(says("Running one by hand and rotating its webhook key still work, from its page")).toBe(true);
 
     visit("#/triggers/core/nightly-deps");
     await waitFor(() => heading() === "nightly-deps" && says("It comes from the resource core.nightly-deps"), "the locked trigger");
@@ -218,5 +290,7 @@ describe("a plane in gitops mode", () => {
     expect(button("Change nightly-deps")).toBeNull();
     expect(button("Pause nightly-deps")).toBeNull();
     expect(button("Delete nightly-deps")).toBeNull();
+    // Running it is something done with it, not a change to what the repository holds.
+    expect(button("Run nightly-deps now")).not.toBeNull();
   });
 });
