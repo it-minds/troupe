@@ -423,6 +423,40 @@ defmodule Troupe.FramesTest do
     end
   end
 
+  # Root #658: a call a per-tool rule asks about says which rule, and whose.
+  test "an approval a rule asked for names the rule and where it came from" do
+    model =
+      fold(
+        opened() ++
+          [
+            event(
+              :tool_started,
+              %{call_id: "c1", name: "shell", input: %{"command" => "git push"}},
+              1
+            ),
+            event(
+              :approval_requested,
+              %{
+                call_id: "c1",
+                name: "shell",
+                preview: nil,
+                rule: %{
+                  "action" => "ask",
+                  "rule" => "shell(git push)",
+                  "scope" => "enforced",
+                  "source" => "/etc/troupe/managed.yaml"
+                }
+              },
+              2
+            )
+          ]
+      )
+
+    screen = model |> draw() |> text()
+    assert screen =~ "APPROVAL: shell"
+    assert screen =~ "asked by the rule ask shell(git push), from your organisation"
+  end
+
   test "a scratchpad document stays a card at every level" do
     model =
       fold(

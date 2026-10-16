@@ -528,6 +528,8 @@ export class FakeDaemon {
   transcript: Record<string, unknown> = {};
   /** What a workspace's `.troupe/config.yaml` sets, by workspace and key: `config.get` with that workspace answers it over the user's. */
   projects: Record<string, Record<string, unknown>> = {};
+  /** Every file's per-tool rules (troupe #658), as `config.get` answers them. */
+  permissions: Array<Record<string, unknown>> = [];
   /** The two layers of `mcp.json` and `skills/`, as the seven `mcp.*`/`skills.*` methods keep them. */
   servers: FakeServer[] = [];
   /** Sign-ins by server name (troupe-remote Decision 741); a server with `oauth` and no entry is signed out. */
@@ -2181,6 +2183,7 @@ export class FakeDaemon {
         key("memory_auto_refresh", this.memoryAutoRefresh ? undefined : false, true, "refresh the brief"),
         key("transcript.detail", this.transcript["transcript.detail"], "quiet", "transcript detail"),
       ].map(layered),
+      permissions: this.permissions,
       warnings: [],
       errors: [],
     };

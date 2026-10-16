@@ -233,6 +233,20 @@ describe("the transcript fold", () => {
     assert.deepEqual(dropPending(state, "c-b").pending, []);
   });
 
+  // troupe #658: a per-tool rule that asked rides on its request, and a plain one has none.
+  it("keeps the rule that asked on its approval", () => {
+    seq = 0;
+    const rule = { action: "ask", rule: "shell(git push)", tool: "shell", pattern: "git push", scope: "enforced", source: "/etc/troupe/managed.yaml" };
+    const asked = foldAll([
+      durable("approval_requested", { call_id: "r", tool: "shell", args: { command: "git push" }, agent_path: ["root"], rule }),
+      durable("approval_requested", { call_id: "p", tool: "shell", args: { command: "ls" }, agent_path: ["root"] }),
+    ]);
+
+    const [ruled, plain] = openApprovals(asked);
+    assert.deepEqual(ruled!.rule, { rule: "shell(git push)", scope: "enforced", source: "/etc/troupe/managed.yaml" });
+    assert.equal(plain!.rule, undefined);
+  });
+
   it("lets the first approval decision stand and names who resolved a later one", () => {
     seq = 0;
     let state = foldAll([durable("approval_requested", { call_id: "k", tool: "shell", args: { command: "rm" } })]);

@@ -396,12 +396,15 @@ defmodule Troupe.Protocol.Schema do
       # `path`, `description`), which `agents.get` opens; `brief`, the five parts; `tools`,
       # each `{name, permission}` the child will hold; `budget_share`; `depth` and
       # `max_depth`; and `agents`, each `{name, description}` it could go to instead.
+      # A call a per-tool rule of the configuration asks about (#658) carries that `rule`:
+      # `action`, `rule` as written, `tool`, `pattern`, `scope` (the layer), `source`.
       "approval_requested" => %{
         "call_id" => required(:string),
         "tool" => required(:string),
         "args" => required(:object),
         "agent_path" => required({:array, :string}),
-        "delegation" => optional(:object)
+        "delegation" => optional(:object),
+        "rule" => optional(:object)
       },
       # A delegation's decision names the `agent` it went to when it was allowed, the
       # `brief` as the person edited it and which parts (`edited`), and the person's word

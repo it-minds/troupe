@@ -10,12 +10,13 @@ defmodule Troupe.Protocol.OrganisationTest do
 
   test "the list is the maintainer's, and nothing else" do
     assert Organisation.keys() ==
-             ~w(approvals provider base_url managed_mcp_servers_only managed_permission_rules_only max_tokens max_turns wall_clock_ms max_depth)
+             ~w(approvals provider base_url managed_mcp_servers_only managed_permission_rules_only permissions max_tokens max_turns wall_clock_ms max_depth)
 
     assert Organisation.kind("auto_approve") == nil
     assert Organisation.kind("max_turns") == :ceiling
     assert Organisation.kind("base_url") == :fixed
     assert Organisation.kind("approvals") == {:order, ["wait", "deny"]}
+    assert Organisation.kind("permissions") == :rules
   end
 
   describe "check, as the plane puts an administrator's set" do
@@ -36,7 +37,7 @@ defmodule Troupe.Protocol.OrganisationTest do
 
       assert unmarked ==
                "auto_approve is not a key an organisation may enforce; the ones it may are approvals, provider, " <>
-                 "base_url, managed_mcp_servers_only, managed_permission_rules_only, max_tokens, max_turns, " <>
+                 "base_url, managed_mcp_servers_only, managed_permission_rules_only, permissions, max_tokens, max_turns, " <>
                  "wall_clock_ms and max_depth"
 
       assert typed == ~s|max_turns must be a whole number, at least 1, not "lots"|
@@ -72,6 +73,26 @@ defmodule Troupe.Protocol.OrganisationTest do
 
       assert Organisation.hold(:fixed, nil, "https://llm.example.test") ==
                "https://llm.example.test"
+    end
+  end
+
+  describe "the per-tool rules (#658)" do
+    test "are checked rule by rule, each refused with what to write instead" do
+      assert {:ok, %{"permissions" => %{"deny" => ["shell(git push)"], "ask" => ["mcp(github)"]}}} =
+               Organisation.check(%{"permissions" => %{"deny" => ["shell(git push)"], "ask" => ["mcp(github)"]}})
+
+      assert {:error, [why]} = Organisation.check(%{"permissions" => %{"deny" => ["Bash(git push)"]}})
+      assert why =~ "permissions.deny: Bash is another tool's name for it; Troupe's is shell"
+
+      assert {:error, [why]} = Organisation.check(%{"permissions" => %{"block" => ["shell"]}})
+      assert why =~ "allow, ask and deny"
+
+      assert {:error, [_]} = Organisation.check(%{"permissions" => "shell"})
+    end
+
+    test "are added to a machine's own, never held to a limit" do
+      refute Organisation.exceeds?(:rules, %{"allow" => ["shell"]}, %{"deny" => ["shell"]})
+      assert Organisation.meaning(:rules) =~ "strictest"
     end
   end
 end

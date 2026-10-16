@@ -219,6 +219,14 @@ defmodule Troupe.Session do
             Enum.uniq(config.read_roots ++ Skills.roots(workspace.root_real, trusted: trusted?))
       }
 
+      # A branch a saved comment started lets nothing run unasked that would ask, since any
+      # process that writes a file can write a comment: a per-tool `allow` is held there as
+      # an agent's own `auto` is.
+      config =
+        if Keyword.get(opts, :hold_auto, false),
+          do: %{config | permissions: Config.Permissions.without_allow(config.permissions)},
+          else: config
+
       # A local session has only `session:/` and this is exactly what `Workspace.new/1`
       # already gave it. A session on a pod arrives with its team volume and possibly
       # the org volume, resolved by the plane from the team's grant — and, when its

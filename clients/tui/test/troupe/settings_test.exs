@@ -154,6 +154,44 @@ defmodule Troupe.SettingsTest do
       assert "Keys" in Settings.help_lines([])
     end
 
+    # Root #658: every file's per-tool rules, shown and never edited, each with its file.
+    test "the help lists the permission rules, where each came from, and why one does not apply" do
+      view =
+        Settings.view(%{
+          "keys" => [],
+          "permissions" => [
+            %{
+              "action" => "deny",
+              "rule" => "shell(git push)",
+              "scope" => "enforced",
+              "source" => "/etc/troupe/managed.yaml",
+              "ignored" => nil
+            },
+            %{
+              "action" => "allow",
+              "rule" => "shell",
+              "scope" => "project",
+              "source" => "/w/.troupe/config.yaml",
+              "ignored" => "a project's file sets it only in a trusted workspace"
+            }
+          ]
+        })
+
+      lines = Settings.help_lines([], view.rules)
+      assert "Permission rules" in lines
+
+      assert "  deny   shell(git push)  · set by your organisation (/etc/troupe/managed.yaml)" in lines
+
+      assert "  allow  shell  · project (/w/.troupe/config.yaml)" in lines
+
+      assert Enum.any?(
+               lines,
+               &(&1 =~ "not applied: a project's file sets it only in a trusted workspace")
+             )
+
+      refute "Permission rules" in Settings.help_lines([], Settings.view(%{}).rules)
+    end
+
     test "unknown keys are reported, not raised" do
       assert :error = Settings.fetch("nope")
     end
@@ -177,6 +215,22 @@ defmodule Troupe.SettingsTest do
 
       press(pid, "esc")
       assert user_state(pid).focus == :command
+    end
+
+    test "/settings shows the permission rules the daemon reads, with their files" do
+      rules = %{"deny" => ["shell(git push)"], "allow" => ["shell(mix test)"]}
+      {sid, _fake, ws} = start_session!(config: Map.put(@own, "permissions", rules))
+      {pid, session} = start_tui(sid)
+
+      type(pid, "/settings")
+      press(pid, "enter")
+
+      text = screen_text(pid, session)
+      assert text =~ "Permission rules"
+      assert text =~ "deny   shell(git push)  · project (#{Path.join(ws, ".troupe/config.yaml")})"
+      # This suite's workspace is a trusted one, whose allow applies.
+      assert text =~ "allow  shell(mix test)  · project"
+      refute text =~ "not applied"
     end
 
     # Picking one writes it as any menu's pick does; a provider is a trusted key, which in

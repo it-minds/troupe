@@ -75,6 +75,8 @@ end
 defmodule Troupe.Tool.Result do
   @moduledoc "What the agent records and hands back to the model for one tool call."
 
+  alias Troupe.Config.Permissions
+
   @enforce_keys [:call_id, :name, :ok?, :content]
   defstruct [:call_id, :name, :ok?, :content, meta: %{}]
 
@@ -156,6 +158,13 @@ defmodule Troupe.Tool.Result do
 
   def describe({:denied_by_policy, tool}),
     do: "The tool #{tool} is denied by the current profile's permissions."
+
+  # A per-tool rule of the configuration's (#658), named with where it came from, so the
+  # model and the person reading the transcript both know which rule and whose.
+  def describe({:denied_by_rule, tool, rule}),
+    do:
+      "This call to #{tool} was refused by the rule #{Permissions.describe(rule)}. " <>
+        "It did not run. Do the work another way, or say what is left undone; do not try to get around the rule."
 
   def describe({:enoent, path}), do: "No such file: #{path}"
 

@@ -435,6 +435,9 @@ enforced:
   base_url: https://llm-gw.example.com/v1
   max_turns: 100
   wall_clock_ms: 3600000
+  permissions:
+    deny: ["shell(git push --force)", "read_file(~/.ssh/**)"]
+    ask: ["mcp(tracker)"]
 ```
 
 `defaults:` takes any key a user's `config.yaml` takes except `trusted_workspaces`, and is
@@ -447,6 +450,13 @@ file and the line, and an unknown key warns. `enforced:` takes only these, each 
 | `approvals` | tighten `wait` to `deny`, not loosen `deny` |
 | `managed_mcp_servers_only`, `managed_permission_rules_only` | turn one on, not turn it off |
 | `provider`, `base_url` | nothing else: the session's provider is this one, and a named provider of another type or at another URL is refused |
+| `permissions` | add rules of its own, not loosen these: every file's per-tool rules are added together and the strictest that matches a call holds, so an enforced `ask` beats a person's `allow` ([per-tool rules](../user/configuration.md#per-tool-permission-rules)) |
+
+A rule under `defaults:` is added the same way and holds the same: no rule is a default a
+person's own file replaces, so `defaults:` and `enforced:` differ for rules only in what
+`managed_permission_rules_only` keeps (both) and how `--explain` names them (`org` and
+`enforced`). On a plane, `client_enforced` takes them as
+`{"permissions": {"deny": ["shell(git push --force)"]}}`, each rule checked when it is set.
 
 Any other key under `enforced:` is not enforced and warns, with the list; the plane refuses
 it outright when it is set. An enforced value is written out in full: `{env:VAR}` is

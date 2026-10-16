@@ -242,6 +242,7 @@ export {
   formFromConfig,
   modelConfigError,
   providerTypes,
+  ruleScope,
   servesKeys,
   tokenCount,
 } from "./config.js";
@@ -259,6 +260,7 @@ export type {
   ModelProvider,
   ModelRole,
   ModelsParams,
+  PermissionRule,
   ProviderTypeInfo,
 } from "./config.js";
 export {

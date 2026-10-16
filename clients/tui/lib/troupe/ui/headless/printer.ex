@@ -378,6 +378,21 @@ defmodule Troupe.UI.Headless.Printer do
     state
   end
 
+  # One a per-tool rule asks about (root #658) says so: `--auto-approve` does not answer it.
+  defp print(
+         %{type: :approval_requested, agent_path: p, data: %{rule: %{"rule" => rule}} = d},
+         state
+       ) do
+    line(
+      state,
+      p,
+      "approval needed for #{d.name}, asked by the rule ask #{rule}; headless mode denies it"
+    )
+
+    Client.approve(state.session_id, d.call_id, :deny)
+    state
+  end
+
   defp print(%{type: :approval_requested, agent_path: p, data: d}, state) do
     line(state, p, "approval needed for #{d.name}; headless mode denies it (use --auto-approve)")
     Client.approve(state.session_id, d.call_id, :deny)

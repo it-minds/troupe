@@ -48,12 +48,14 @@ defmodule Troupe.Settings do
   What the daemon says the settings are: each key's `value`, `layer`, `source` and
   `scopes`, by name, and each scope's file. `served?` is false for a daemon too old to
   answer every key, whose values the page then reads from the config struct, and which is
-  not asked to set one.
+  not asked to set one. `rules` is every file's per-tool permission rules as the daemon
+  answers them (root #658), which the page shows and never edits.
   """
   @type view :: %{
           served?: boolean(),
           keys: %{String.t() => %{String.t() => term()}},
-          files: %{String.t() => String.t()}
+          files: %{String.t() => String.t()},
+          rules: [map()]
         }
 
   # The one setting a running session takes at once, and the three the TUI takes itself.
@@ -103,11 +105,12 @@ defmodule Troupe.Settings do
     %{
       served?: true,
       keys: Map.new(keys, &{&1["key"], &1}),
-      files: Map.new(List.wrap(answer["files"]), &{&1["scope"], &1["path"]})
+      files: Map.new(List.wrap(answer["files"]), &{&1["scope"], &1["path"]}),
+      rules: Enum.filter(List.wrap(answer["permissions"]), &is_map/1)
     }
   end
 
-  def view(_answer), do: %{served?: false, keys: %{}, files: %{}}
+  def view(_answer), do: %{served?: false, keys: %{}, files: %{}, rules: []}
 
   @doc """
   The current value of a setting: the daemon's, or the config's for an old daemon, which
@@ -351,13 +354,14 @@ defmodule Troupe.Settings do
   among them for the rest, so they say what the palette says; a table not yet received
   leaves the section out.
   """
-  @spec help_sections([map()]) :: [{String.t(), [String.t()]}]
-  def help_sections(commands) do
+  @spec help_sections([map()], [map()]) :: [{String.t(), [String.t()]}]
+  def help_sections(commands, rules \\ []) do
     setup =
       for %{"section" => "setup", "name" => name, "summary" => summary} <- commands,
           do: String.pad_trailing("/" <> name, 16) <> " " <> summary
 
     [
+      {"Permission rules", rule_lines(rules)},
       {"Keys",
        [
          "Tab / Shift-Tab  next / previous window",
@@ -379,10 +383,38 @@ defmodule Troupe.Settings do
   end
 
   @doc "The help as flat lines, for a narrow screen."
-  @spec help_lines([map()]) :: [String.t()]
-  def help_lines(commands) do
-    Enum.flat_map(help_sections(commands), fn {heading, lines} ->
+  @spec help_lines([map()], [map()]) :: [String.t()]
+  def help_lines(commands, rules \\ []) do
+    Enum.flat_map(help_sections(commands, rules), fn {heading, lines} ->
       [heading | Enum.map(lines, &("  " <> &1))] ++ [""]
     end)
   end
+
+  # Every file's per-tool rules (root #658), shown, never edited here: each with what it
+  # does, where it came from, and why one does not apply. The order is the daemon's. None
+  # leaves the section out.
+  defp rule_lines([]), do: []
+
+  defp rule_lines(rules) do
+    lines =
+      Enum.flat_map(rules, fn rule ->
+        line =
+          String.pad_trailing(to_string(rule["action"]), 6) <>
+            " " <> to_string(rule["rule"]) <> "  · " <> rule_scope(rule)
+
+        case rule["ignored"] do
+          why when is_binary(why) -> [line, "         not applied: " <> why]
+          _applies -> [line]
+        end
+      end)
+
+    lines ++ ["deny beats ask beats allow; `troupe config --explain permissions` says more"]
+  end
+
+  defp rule_scope(%{"scope" => "enforced"} = rule), do: "set by your organisation" <> from(rule)
+  defp rule_scope(%{"scope" => "org"} = rule), do: "organisation" <> from(rule)
+  defp rule_scope(rule), do: to_string(rule["scope"]) <> from(rule)
+
+  defp from(%{"source" => source}) when is_binary(source), do: " (#{source})"
+  defp from(_rule), do: ""
 end

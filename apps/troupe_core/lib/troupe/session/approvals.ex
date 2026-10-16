@@ -22,7 +22,8 @@ defmodule Troupe.Session.Approvals do
   The default, `:wait`, is what a session with people attached has always done.
 
   A request made with `always: true` is one its tool says a person must answer
-  (Decision 823: `onboard_write` into the config directory): `auto_approve` and a
+  (Decision 823: `onboard_write` into the config directory), or one a per-tool rule of the
+  configuration says asks (#658), which it carries as `rule`: `auto_approve` and a
   standing `allow_session` let it through no more than they would let a refusal through.
 
   A delegation a person asked to see first (Decision 850) is a request of its own kind,
@@ -186,6 +187,7 @@ defmodule Troupe.Session.Approvals do
         agent_path: data["agent_path"] || event.agent
       }
       |> put_delegation(data["delegation"])
+      |> put_rule(data["rule"])
 
     %{state | awaiting: Map.put(state.awaiting, req.call_id, req)}
   end
@@ -241,6 +243,9 @@ defmodule Troupe.Session.Approvals do
     do: Map.put(req, :delegation, delegation)
 
   defp put_delegation(req, _none), do: req
+
+  defp put_rule(req, rule) when is_map(rule), do: Map.put(req, :rule, rule)
+  defp put_rule(req, _none), do: req
 
   defp managed(:allow_session), do: :allow
   defp managed(decision), do: decision
@@ -526,10 +531,12 @@ defmodule Troupe.Session.Approvals do
     }
   end
 
-  # The request as it is asked: a delegation's with what the gate shows (Decision 850).
+  # The request as it is asked: a delegation's with what the gate shows (Decision 850), and
+  # one a per-tool rule asks with that rule (#658), so the person sees why it asks.
   defp requested(%{delegation: delegation} = req),
     do: Map.put(describe(req), "delegation", delegation)
 
+  defp requested(%{rule: rule} = req) when is_map(rule), do: Map.put(describe(req), "rule", rule)
   defp requested(req), do: describe(req)
 
   # A request that must be asked (`always: true`), and a delegation a person asked to see,

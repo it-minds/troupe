@@ -2442,7 +2442,7 @@ defmodule Troupe.Agent.Server do
       |> put_identity(Tools.identity_of(call.name, ctx))
     )
 
-    case Tools.authorize(call.name, definition, ctx) do
+    case Tools.authorize(call.name, definition, ctx, call.args) do
       {:reject, result} ->
         send(self(), {:tool_result, call.id, result})
         state

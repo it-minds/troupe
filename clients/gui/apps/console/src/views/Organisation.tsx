@@ -180,13 +180,23 @@ function parseSet(value: unknown): Record<string, unknown> {
 
 /** A field's text, as the form holds it, and back. */
 function asText(value: unknown): string {
-  return value === undefined || value === null ? "" : String(value);
+  if (value === undefined || value === null) return "";
+  // The per-tool rules (troupe #658) are an object, written as JSON.
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
 function fromText(key: EnforceableKey, text: string): unknown {
   if (text === "") return null;
   if (key.type === "integer") return /^\d+$/.test(text.trim()) ? Number(text.trim()) : text;
   if (key.type === "boolean") return text === "true";
+  // Sent as written when it is not JSON, so the plane's refusal says what is wrong with it.
+  if (key.type === "rules") {
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return text;
+    }
+  }
   return text;
 }
 
@@ -317,5 +327,6 @@ function enforcing(spec: EnforceableKey, to: unknown): string {
   if (to === null) return `${spec.key} is no longer enforced: machines go back to their own value.`;
   if (spec.kind === "ceiling") return `No machine may set ${spec.key} above ${show(to)}; a lower value stays.`;
   if (spec.kind === "order") return `No machine may loosen ${spec.key} past ${show(to)}; a tighter value stays.`;
+  if (spec.kind === "rules") return `Every machine adds these rules to its own, the strictest holding: ${show(to)}.`;
   return `Every machine uses ${show(to)} for ${spec.key}, whatever its own files say.`;
 }
