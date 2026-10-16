@@ -462,6 +462,15 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
         </ul>
       )}
 
+      <Region>What the cluster says</Region>
+      {p.conditions === null ? (
+        <p className="hint">Unknown: the plane could not ask the cluster.</p>
+      ) : p.conditions.length === 0 ? (
+        <p className="hint">No conditions reported.</p>
+      ) : (
+        <Fields rows={p.conditions.map((c): [string, JSX.Element] => [show(c.type), <>{c.status === "True" ? "yes" : c.status === "False" ? "no" : show(c.status)}{c.message && <span className="hint"> {c.message}</span>}</>])} />
+      )}
+
       <Region>Pods</Region>
       {p.pods.length === 0 ? (
         <Empty title="No pod">{p["warm_workers"] ? "One starts as the plane brings the profile up." : "None kept warm: the next session starts one."}</Empty>

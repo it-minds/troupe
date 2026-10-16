@@ -73,6 +73,15 @@ every `sub` changes, and nothing links a person's old one to their new one.
 > push into a plane that has people on it, with the wrong answer here, is how a directory
 > of duplicates is made.
 
+**Check the email and the username too.** A sign-in or a push that finds nobody under its
+subject but finds the row SCIM gave that value as `externalId` takes that row over only
+when the row's email or `userName` agrees with what it carries: a sign-in's `email` or
+`preferred_username` claim, a push's primary email or `userName`. Map SCIM's `userName`
+from the same attribute the token's `preferred_username` comes from (the username, by
+default), and keep `email` in the token's scopes. When neither agrees, nothing is merged:
+a sign-in gets a row of its own, a push is refused, and `admin.identity.duplicates` lists
+the pair, which is the place to look after changing a mapping.
+
 ### Groups are the same problem again
 
 A team draws its members from groups, and `Group.external_id` is the key. It is set by

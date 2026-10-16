@@ -286,10 +286,11 @@ This is a summary; the detail is where each part is set.
 | `MCPIdentityMissing` | a server the bundle calls with client credentials has no identity in `mcpIdentities`, or its identity is incomplete; the message says which ([above](#calling-an-mcp-server-as-the-profile)) |
 | `UpgradePending` | the StatefulSet has a newer revision than the named pods run; each keeps its revision until the plane has drained it and the operator replaced it, and the message says how far each has got ([§3](#3-upgrades-and-drains)) |
 | `EgressByHostname` | the `CiliumNetworkPolicy` was written and applied, so a worker reaches its allowlist and the installation's own OpenBao and object store by name, and nothing else outside the cluster; `False` with `NoCilium` or `CiliumPolicyNotApplied` ([egress](#4-troupepolicy)) |
+| `PlaneCAMissing` | the installation gives pods the plane's CA (`plane.controlTls.enabled`) and the worker namespace has no `troupe-plane-ca` ConfigMap yet: the operator has read no certificate from the CA file the chart mounts, and the pods wait for it before they dial the plane (`NotWritten`); `False` with `Present`, or `NotGiven` where pods are given no CA |
 | `EndpointUnreachable` | an endpoint the profile names is at a loopback, unspecified, link-local or cloud metadata address, which its workers do not reach with Cilium or without (`LoopbackOrLinkLocal`): the message names each and says what to do; `False` with `Reachable`, or `Cilium` where there is Cilium ([egress](#4-troupepolicy)) |
 
-`SecretMissing`, `MCPIdentityMissing`, `UpgradePending`, `EgressByHostname` and
-`EndpointUnreachable` do not affect `Ready`. `kubectl -n troupe-system get wp` shows
+`SecretMissing`, `MCPIdentityMissing`, `UpgradePending`, `EgressByHostname`,
+`PlaneCAMissing` and `EndpointUnreachable` do not affect `Ready`. `kubectl -n troupe-system get wp` shows
 `Replicas`, `Ready`, `Violation`, `Age`.
 
 ## 3. Upgrades and drains

@@ -10,7 +10,7 @@ defmodule Troupe.Plane.ControlTLSTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.Control.{Connection, Connections, Listener, TLS}
+  alias Troupe.Plane.Control.{Connection, Connections, Listener, Refusals, TLS}
   alias Troupe.Plane.ControlTLSFixture
   alias Troupe.Plane.Fleet
 
@@ -138,6 +138,40 @@ defmodule Troupe.Plane.ControlTLSTest do
         assert %{tls?: true} =
                  Connection.info(Connections.for_pod("troupe-w-dev", "troupe-w-dev-0"))
       end
+    end
+  end
+
+  # A pod an old operator made reconnects every second or two until it is replaced, and a
+  # line for each would bury everything else in the plane's log.
+  describe "the plaintext refusal's log line" do
+    @tag :require_tls
+    test "is said once a minute per address, however often it dials", context do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          for _ <- 1..3 do
+            {:ok, socket} =
+              :gen_tcp.connect(~c"127.0.0.1", context.port, [:binary, active: false])
+
+            :ok = :gen_tcp.send(socket, "{")
+            assert {:error, :closed} = :gen_tcp.recv(socket, 0, 5_000)
+          end
+        end)
+
+      assert [_one] = Regex.scan(~r/refused a plaintext control connection/, log)
+      assert log =~ "from 127.0.0.1"
+    end
+
+    test "says how many it did not, when it is said again" do
+      address = {192, 0, 2, System.unique_integer([:positive]) |> rem(250)}
+
+      assert {:log, 0} = Refusals.note(address, 60_000, 0)
+      assert :quiet = Refusals.note(address, 60_000, 10)
+      assert :quiet = Refusals.note(address, 60_000, 59_999)
+      assert {:log, 2} = Refusals.note(address, 60_000, 60_000)
+      assert :quiet = Refusals.note(address, 60_000, 60_001)
+
+      # Another address is its own.
+      assert {:log, 0} = Refusals.note({198, 51, 100, 7}, 60_000, 60_001)
     end
   end
 

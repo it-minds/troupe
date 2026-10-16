@@ -53,7 +53,7 @@ defmodule Troupe.Plane.Control.Connection do
     Triggers
   }
 
-  alias Troupe.Plane.Control.{Connections, Replay, Router, TLS}
+  alias Troupe.Plane.Control.{Connections, Refusals, Replay, Router, TLS}
   alias Troupe.Plane.Fleet.Bundle
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.Session
@@ -71,6 +71,9 @@ defmodule Troupe.Plane.Control.Connection do
 
   # The first byte of a TLS record that opens a handshake.
   @tls_handshake 22
+
+  # How often a plaintext connection refused from one address is said in the log.
+  @refusal_said_every_ms 60_000
 
   @enforce_keys [:socket]
   defstruct [
@@ -199,17 +202,35 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
-  # Said for each one, with where it came from: a pod still dialling in plaintext after
-  # TLS was required is one made before the operator gave its namespace the CA, and its
-  # address is how somebody finds it.
+  # Said with where it came from: a pod still dialling in plaintext after TLS was required
+  # is one made before the operator gave its namespace the CA, and its address is how
+  # somebody finds it. Once a minute per address, with the count of those not said, since
+  # such a pod dials again every second or two until it is replaced (`Refusals`).
   defp refuse_plaintext(state) do
-    Logger.warning(
-      "troupe plane: refused a plaintext control connection from #{peer(state)}: this plane " <>
-        "takes TLS only (the chart's plane.controlTls.requireTls), and a worker dials with " <>
-        "TLS when it is given the plane's CA (TROUPE_PLANE_CA_PATH)"
-    )
+    case Refusals.note(address(state), @refusal_said_every_ms) do
+      {:log, untold} ->
+        Logger.warning(
+          "troupe plane: refused a plaintext control connection from #{peer(state)}" <>
+            "#{untold_note(untold)}: this plane takes TLS only (the chart's " <>
+            "plane.controlTls.requireTls), and a worker dials with TLS when it is given " <>
+            "the plane's CA (TROUPE_PLANE_CA_PATH)"
+        )
+
+      :quiet ->
+        :ok
+    end
 
     :gen_tcp.close(state.socket)
+  end
+
+  defp untold_note(0), do: ""
+  defp untold_note(untold), do: ", and #{untold} more from that address since the last line"
+
+  defp address(state) do
+    case :inet.peername(state.socket) do
+      {:ok, {address, _port}} -> address
+      {:error, _} -> :unknown
+    end
   end
 
   defp describe_tls(reason) when is_binary(reason), do: reason

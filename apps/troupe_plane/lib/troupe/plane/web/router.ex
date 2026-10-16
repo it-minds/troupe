@@ -590,6 +590,10 @@ defmodule Troupe.Plane.Web.Router do
   defp scim_error(conn, :not_found),
     do: send_json(conn, 404, SCIM.render_error(404, nil, "no such resource"))
 
+  # A value another resource holds is a conflict (§3.12).
+  defp scim_error(conn, {"uniqueness", detail}),
+    do: send_json(conn, 409, SCIM.render_error(409, "uniqueness", detail))
+
   defp scim_error(conn, {scim_type, detail}),
     do: send_json(conn, 400, SCIM.render_error(400, scim_type, detail))
 
@@ -602,17 +606,18 @@ defmodule Troupe.Plane.Web.Router do
   defp scim_put_user(conn, status) do
     case SCIM.put_user(conn.body_params) do
       {:ok, user} -> scim_resource(conn, status, SCIM.render_user(user))
-      {:error, reason} -> send_json(conn, 400, %{"status" => "400", "detail" => inspect(reason)})
+      {:error, reason} -> scim_error(conn, reason)
     end
   end
 
-  # A replace of somebody the plane has (RFC 7644 §3.5.1), so an id that names nobody is a
-  # 404, as a GET of it is. A push is keyed on its subject, and without this a provider
-  # replacing a person it had deleted made them again.
+  # A replace of the person at this id (RFC 7644 §3.5.1), so an id that names nobody is a
+  # 404, as a GET of it is, and a body naming somebody else is refused rather than applied
+  # to them. Without the first a provider replacing a person it had deleted made them
+  # again; without the second its body chose whom it changed.
   defp scim_replace_user(conn, id) do
-    case Identity.get_user_by_id(id) do
-      nil -> scim_error(conn, :not_found)
-      _user -> scim_put_user(conn, 200)
+    case SCIM.replace_user(id, conn.body_params) do
+      {:ok, user} -> send_json(conn, 200, SCIM.render_user(user))
+      {:error, reason} -> scim_error(conn, reason)
     end
   end
 

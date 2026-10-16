@@ -226,6 +226,8 @@ export interface FakeProfile {
   spec?: Record<string, unknown>;
   /** On a gitops plane: the resource generation it was read at, and what the last pass said of it. */
   gitops?: { generation: number | null; problem: string | null; reasons: string[] };
+  /** The WorkerProfile's status conditions, as the operator wrote them. */
+  conditions?: Array<{ type: string; status: string; reason?: string; message?: string }>;
 }
 
 /** One published version of a configuration channel. */
@@ -1218,7 +1220,7 @@ export class FakeAdmin {
       provisioner: p.provisioner,
       missing_guarantees: p.missing_guarantees,
       unenforced: p.unenforced,
-      conditions: [],
+      conditions: p.conditions ?? [],
       pods: p.pods,
       capacity: p.pods.reduce((n, pod) => n + pod.capacity, 0),
       active_sessions: p.pods.reduce((n, pod) => n + pod.active_sessions, 0),
@@ -1795,6 +1797,15 @@ export function exampleAdmin(): FakeAdmin {
         unenforced: false,
         pods: [pod("troupe-w-ux-0", 0, { active_sessions: 2 })],
         warm_workers: 1,
+        conditions: [
+          { type: "Ready", status: "True", reason: "Reconciled", message: "14 resources reconciled" },
+          {
+            type: "PlaneCAMissing",
+            status: "True",
+            reason: "NotWritten",
+            message: "the namespace has no troupe-plane-ca yet: the operator has read no CA from /etc/troupe/plane-control-ca/ca.crt",
+          },
+        ],
         spec: { egress: { fqdns: ["mcp.example.com"] }, configBundleChannel: "stable", personalTools: "forbid" },
       },
       {
