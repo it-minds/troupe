@@ -79,6 +79,35 @@ The setting changes every profile's pod template: each reports `UpgradePending` 
 pods are replaced as they empty, under the profile. `kubectl -n troupe-system rollout status
 daemonset/troupe-worker-profiles` says every node has it.
 
+**Upgrading to 0.20.0 from earlier.** The control port now takes TLS only by default
+(`plane.controlTls.requireTls: true`): a worker that dials it in plaintext is closed
+before it is read, and cannot reach the plane until it is replaced. Every pod a 0.19
+operator made dials with TLS, so check first that none older is left:
+
+1. `kubectl -n troupe-system logs <plane pod> | grep 'enrolled as'` on every plane
+   replica: each pod says once, when it enrols, whether it came "over TLS" or "in
+   plaintext", and every pod enrols again when the plane restarts. A pod whose last line
+   says "in plaintext" and that still runs is one an operator before 0.19 made;
+   `admin.pod.drain` it, or wait for it to empty and be replaced, until none is left.
+2. Or upgrade with `plane.controlTls.requireTls: false`, and turn it on once the log is
+   clear. An installation without TLS on the control port
+   (`plane.controlTls.enabled: false`) sets `requireTls: false` too, or the chart refuses
+   to render.
+
+After the upgrade, a pod still dialling in plaintext shows as a warning, "refused a
+plaintext control connection", once a minute per address with the count of the rest. A
+profile whose namespace has no `troupe-plane-ca` yet says so in its `PlaneCAMissing`
+condition.
+
+**Identity, from 0.20.0.** A sign-in or a SCIM push that finds nobody under its subject
+adopts the row SCIM gave that `externalId` only when the row's email or `userName` agrees
+with the token's or the push's. Otherwise the sign-in gets a row of its own, a push is
+refused (`409`, `uniqueness`), the refusal is audited as `person.adopt_refused`, and
+`admin.identity.duplicates` lists the pair ([§SCIM](#scim)). A SCIM `PUT` to
+`/Users/<id>` changes the person at that id, and a push under a `removed:` or `svc:`
+subject is refused. A person SCIM deletes comes off every trigger's `notify` list, and
+their spend stays with their tombstone.
+
 A release publishes the chart and the images and deploys nothing; every deployment rolls
 it this way, from wherever it keeps its own values.
 
@@ -197,6 +226,12 @@ once. Give the provider the token and the base URL `https://<plane>/scim/v2`, ke
 {attrs: {teams_from_groups: true}}` makes pushed groups teams; `admin.scim.delete` removes the
 token. The deployment's `troupe-plane-scim` Secret (`plane.scim.enabled`) opens the door
 too. Authentik, step by step: [authentik.md §4](authentik.md#4-scim-dry-run-first).
+
+`admin.identity.duplicates` lists people held twice. A set `by: "external_id"` is an
+adoption the plane refused: a sign-in or a push under a value SCIM gave another row as its
+`externalId`, whose email and `userName` both differ from that row's. If they are one
+person, make the email or `userName` agree at the provider; if they are two, the
+provider's `externalId` mapping gives two people one value, and is what to fix.
 
 ## The identity provider
 

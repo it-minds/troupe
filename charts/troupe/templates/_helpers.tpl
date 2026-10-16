@@ -54,7 +54,7 @@ the worker admits by itself. A page whose origin is not here gets no socket.
 {{- end }}
 {{- end }}
 {{- if and $tls.requireTls (not $tls.enabled) }}
-{{- fail "plane.controlTls.requireTls is true and plane.controlTls.enabled is false: a control port that takes TLS only needs a certificate, or no worker can enrol." }}
+{{- fail "plane.controlTls.requireTls is true and plane.controlTls.enabled is false: a control port that takes TLS only needs a certificate, or no worker can enrol. requireTls is on by default; set it to false as well." }}
 {{- end }}
 {{- if and $tls.enabled (not $tls.secretName) }}
 {{- fail "plane.controlTls.secretName is empty: it names the Secret the control port's certificate is in, which the plane mounts." }}

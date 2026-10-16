@@ -142,11 +142,13 @@ plane:
   controlTls:
     enabled: true
     # Refuse plaintext on the control port, a pod's included: a plaintext connection is
-    # closed once its first byte says what it is, with a line in the plane's log. Off by
-    # default in 0.19, so pods made before the operator handed them the CA still enrol
-    # while they roll; turn it on once the plane's log says every pod enrolled "over
-    # TLS". Needs `enabled`.
-    requireTls: false
+    # closed once its first byte says what it is, with a line in the plane's log (once a
+    # minute per address). On by default from 0.20; every pod a 0.19 operator made dials
+    # with TLS. Before upgrading from 0.19, check that the plane's log has no enrolment
+    # "in plaintext"; one that does is a pod still to be replaced, and `false` keeps it
+    # enrolling meanwhile. Needs `enabled`: an installation that turns that off sets this
+    # to `false` too, or the chart refuses to render.
+    requireTls: true
     # cert-manager issues the control Service's certificate, as a `Certificate` this chart
     # renders. Needs cert-manager's CRDs. `false`: the Secret below must hold `tls.crt`,
     # `tls.key` and `ca.crt` already, put there by somebody else.

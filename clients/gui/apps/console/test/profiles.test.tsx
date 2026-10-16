@@ -96,6 +96,14 @@ describe("a profile", () => {
     expect(says("mcp server wiki is called with client credentials, and the profile gives it no identity in mcpIdentities")).toBe(true);
     expect(says("kept off these pods")).toBe(true);
   });
+
+  it("says what the cluster says of it, a CA its namespace does not have yet included", async () => {
+    await open("#/profiles/ux");
+    await waitFor(() => heading() === "ux" && says("What the cluster says"), "ux");
+    expect(says("PlaneCAMissing")).toBe(true);
+    expect(says("the namespace has no troupe-plane-ca yet")).toBe(true);
+    expect(says("14 resources reconciled")).toBe(true);
+  });
 });
 
 describe("the editor", () => {
