@@ -89,7 +89,8 @@ cluster (Decision 889). It runs:
 - on a **pull request** that changes what the cluster runs: `charts/` (the CRDs and the
   admission policy among it), `docker/`, `dev/kind/`, `scripts/kind-up`,
   `scripts/remote-up`, `scripts/build-images`, `apps/troupe_operator/` (the operator and
-  the suite itself) or `cluster.yml`. Into `main` through `ci.yml`, after `lint`, the
+  the suite itself), `cluster.yml`, or what the images are built from that lives elsewhere:
+  the GUI's `clients/gui/Dockerfile` and the repository's `.dockerignore`. Into `main` through `ci.yml`, after `lint`, the
   test legs and `chart` have passed or been skipped; into a `development-*` chunk through
   `dev-check.yml`, after its compile, because a fixer's machine may have no cluster and
   the chunk's own pull request into `main` comes only once every fix is in;
