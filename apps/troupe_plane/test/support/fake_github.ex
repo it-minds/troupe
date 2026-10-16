@@ -261,18 +261,7 @@ defmodule Troupe.Plane.FakeGitHub do
       when rest in [[], ["installations"]] do
     with {:ok, app_id} <- issuer(conn),
          {:ok, _claims} <- verify(conn, agent, app_id) do
-      case rest do
-        [] ->
-          slug = Agent.get(agent, &Map.get(&1.slugs, app_id))
-          answer(conn, 200, %{"id" => app_id, "slug" => slug, "name" => slug})
-
-        ["installations"] ->
-          listed =
-            for {id, %{app_id: ^app_id, owner: owner}} <- Agent.get(agent, & &1.installations),
-                do: %{"id" => id, "app_id" => app_id, "account" => %{"login" => owner}}
-
-          answer(conn, 200, listed)
-      end
+      answer(conn, 200, app_answer(rest, agent, app_id))
     else
       {:error, status, message} -> answer(conn, status, %{"message" => message})
     end
@@ -807,6 +796,16 @@ defmodule Troupe.Plane.FakeGitHub do
   end
 
   # -- small things -------------------------------------------------------------
+
+  defp app_answer([], agent, app_id) do
+    slug = Agent.get(agent, &Map.get(&1.slugs, app_id))
+    %{"id" => app_id, "slug" => slug, "name" => slug}
+  end
+
+  defp app_answer(["installations"], agent, app_id) do
+    for {id, %{app_id: ^app_id, owner: owner}} <- Agent.get(agent, & &1.installations),
+        do: %{"id" => id, "app_id" => app_id, "account" => %{"login" => owner}}
+  end
 
   # The App a JWT says it is, read before it is verified against that App's key.
   defp issuer(conn) do
