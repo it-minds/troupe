@@ -21,7 +21,8 @@
 # this directory: LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt, which go into the image
 # because Apache-2.0 and the licences of the packages in the bundle ask that they go with
 # every copy; and PROTOCOL.md, whose error table the client's tests hold the client's own
-# to (`packages/client/test/errors.test.ts`). Only those four are sent. Without it the
+# to (`packages/client/test/errors.test.ts`), and the per-tool rule cases its rule
+# reading is held to (`packages/client/test/rules.test.ts`). Only those five are sent. Without it the
 # stages below stop at the first COPY that reads it: `lstat /PROTOCOL.md: no such file or
 # directory`.
 
