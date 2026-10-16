@@ -216,6 +216,37 @@ spec:
                         pull_requests: {type: string, enum: [read, write]}
                         checks: {type: string, enum: [read]}
                         statuses: {type: string, enum: [read]}
+                    allowPublic:
+                      type: boolean
+                      description: >-
+                        Whether a session may push to, and open a pull request on, a
+                        repository GitHub reports as public. Absent or false, private and
+                        internal repositories only; the pod asks GitHub at every push.
+                    denyPaths:
+                      type: array
+                      maxItems: 100
+                      items: {type: string, minLength: 1, maxLength: 200}
+                      description: >-
+                        Paths a push never carries, as .gitignore patterns, added to the
+                        defaults (.env, .env.*, *.pem, *.key, *.p12, *.pfx and SSH private
+                        keys), which cannot be taken away. A push whose tree adds or changes
+                        one is refused, naming it, and nothing reaches GitHub.
+                    maxPushes:
+                      type: integer
+                      minimum: 1
+                      maximum: 1000
+                      description: >-
+                        Pushes a run may make. A run that asks for one more stops, as three
+                        red CI rounds stop it, with a comment on its pull request. The lower
+                        of this and its team's cap holds.
+                    maxRuns:
+                      type: integer
+                      minimum: 1
+                      maximum: 1000
+                      description: >-
+                        Runs on a GitHub repository that triggers may have going at once on
+                        this profile; a firing over it is skipped. The team may set a lower
+                        one of its own.
                 configBundleChannel: {type: string, default: stable}
                 storage:
                   type: object

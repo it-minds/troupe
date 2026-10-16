@@ -62,7 +62,7 @@ describe("a team", () => {
     visit("#/teams/core");
     unmount = render(<App />).unmount;
     await waitFor(() => heading() === "core" && says("Membership is the identity provider's"), "the members tab");
-    expect(tabs()).toEqual(["Members and groups", "Access", "Admins", "Limits", "Danger zone"]);
+    expect(tabs()).toEqual(["Members and groups", "Access", "Admins", "Limits", "GitHub", "Danger zone"]);
     expect(says("grp-core")).toBe(true);
     expect(says("erin@example.com")).toBe(true);
     expect(says("150.00")).toBe(true);
@@ -167,6 +167,43 @@ describe("a team", () => {
     button("Apply")!.click();
     await waitFor(() => says("Recorded in the audit as team.update on core"), "the audit's note");
     expect(fake.admin.teams.get("core")!.erase_after_days).toBe(30);
+  });
+
+  // #147 slice 4, #653: a team's own administrators list the repositories its sessions may name.
+  it("shows the GitHub repositories a team's sessions may name, and its caps", async () => {
+    await signedInAs(fake, PEOPLE.alice);
+    visit("#/teams/core/github");
+    unmount = render(<App />).unmount;
+    await waitFor(() => says("example-org/widgets") && says("The App's installations bound every list"), "core's repositories");
+    expect(says("5 pushes")).toBe(true);
+    expect(says("no cap of the team's")).toBe(true);
+  });
+
+  it("lets a team's own admin list its repositories, behind a preview, with the plane's refusal shown", async () => {
+    await signedInAs(fake, PEOPLE.bob);
+    visit("#/teams/design/github");
+    unmount = render(<App />).unmount;
+    await waitFor(() => says("None listed") && says("design's sessions name no repository until one is listed here"), "design's empty list");
+    button("Change design's repositories")!.click();
+
+    // A line that is not a repository: the plane's refusal, shown, and nothing written.
+    type(await waitFor(() => field("Repositories"), "the form"), "example-org/site\nnot-a-repository");
+    type(field("Runs on a repository at once")!, "2");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    expect(says("github.max_runs becomes 2.")).toBe(true);
+    button("Apply")!.click();
+    await waitFor(() => says('"not-a-repository" is not a repository'), "the plane's refusal");
+    expect(fake.admin.teams.get("design")!.github.repositories).toEqual([]);
+
+    button("Back to editing")!.click();
+    type(await waitFor(() => field("Repositories"), "the form again"), "example-org/site\nexample-org/*");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview again");
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as team.update on design"), "the audit's note");
+    expect(fake.admin.teams.get("design")!.github).toEqual({ repositories: ["example-org/site", "example-org/*"], max_pushes: null, max_runs: 2 });
+    await waitFor(() => says("every repository of example-org the App reaches"), "the list as it now is");
   });
 
   it("lets a team admin change their team's limits but not whether it may use unenforced workers", async () => {

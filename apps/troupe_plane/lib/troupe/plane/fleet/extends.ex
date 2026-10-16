@@ -16,7 +16,9 @@ defmodule Troupe.Plane.Fleet.Extends do
   | `egress.fqdns`, `egress.gitHosts` | **added**: the parent's, then the child's that the parent lacks |
   | `mcpServers`, and the bundle its pods load | **added** by name, composed with the chain's channels' bundles (`Troupe.Plane.Bundles.Effective`). An entry with a name above it replaces that one only with `override: true`; otherwise the one above is kept, and the clash is reported |
   | `max_sessions`, `budget_micros` | **narrow only**: the lower of the two, where either sets one; a child's budget above its parent's is refused where it is written |
-  | `personalTools`, `repositoryOverridesBundle` | **restrict only**: a parent's `forbid` or `false` holds whatever the child says; otherwise the child's, or the parent's |
+  | `personalTools`, `repositoryOverridesBundle`, `github.allowPublic` | **restrict only**: a parent's `forbid` or `false` holds whatever the child says; otherwise the child's, or the parent's |
+  | `github.denyPaths` | **added**, as the egress lists are |
+  | `github.maxPushes`, `github.maxRuns` | **narrow only**, as `max_sessions` is |
   | `image`, `size_class`, `provisioner`, every `llm` field but `secretRef`, `storage.storageClassName`, `configBundleChannel`, and any other spec field | **replaced** where the child sets it, the parent's where it does not |
   | `llm.secretRef`, `mcpIdentities` | **never inherited**: credentials are each profile's own, in its own namespace |
   | `warm_workers` | **never inherited**: how many of the child's own workers stay up |
@@ -60,7 +62,17 @@ defmodule Troupe.Plane.Fleet.Extends do
     "mcpServers" => :dropped,
     "mcpIdentities" => :own,
     "personalTools" => {:restrict, "forbid"},
-    "repositoryOverridesBundle" => {:restrict, false}
+    "repositoryOverridesBundle" => {:restrict, false},
+    # The fix loop's policy on GitHub: a parent's denied paths stay denied, its "no public
+    # repositories" holds, and its caps can only be lowered.
+    "github" =>
+      {:each,
+       %{
+         "allowPublic" => {:restrict, false},
+         "denyPaths" => :added,
+         "maxPushes" => :narrow,
+         "maxRuns" => :narrow
+       }}
   }
 
   @type resolved :: %{attrs: map(), from: map(), problems: [String.t()], chain: [String.t()]}

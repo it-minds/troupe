@@ -57,7 +57,13 @@ defmodule Troupe.Plane.GitHubLineageTest do
     start_supervised!(Troupe.Plane.Singleton)
     start_supervised!({Listener, port: 0, verify: &FakePod.verify/1})
 
-    team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+    team =
+      team_with_grant("engineering", "dev",
+        name: "engineering",
+        budget_micros: 0,
+        github: %{"repositories" => ["example-org/widgets"]}
+      )
+
     ada = person("ada@example.test", ["engineering"])
     _pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0")
 

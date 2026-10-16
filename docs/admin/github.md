@@ -10,8 +10,8 @@ This page sets it up. It uses `example-org` for the organisation and
 
 ## What it does today
 
-The first three slices of [#147](https://github.com/it-minds/troupe/issues/147) (Decisions
-885, 891 and 905):
+The four slices of [#147](https://github.com/it-minds/troupe/issues/147) (Decisions 885,
+891, 905 and 911):
 
 - **A session can name a GitHub repository** when it is created, and its pod starts with a
   clone of it: shallow, one branch (the one asked for, or the default), no tags.
@@ -43,11 +43,17 @@ The first three slices of [#147](https://github.com/it-minds/troupe/issues/147) 
   request's link. The console's **Runs and review** screen lists every run with its
   repository, issue, state, pull request, CI rounds and spend.
 
-What it does **not** do yet: follow an autonomy policy (a draft only, caps on open pull
-requests or attempts per issue), give each team its own repositories, revoke a token when
-its session goes dormant, or take the App's configuration from a repository in `gitops`
-mode. Those are the last slice of #147 and #653. Every team on the plane may name any
-repository the App's installations cover.
+- **How far an unattended run goes is policy** ([§9](#9-how-far-a-run-may-go)). Each team
+  lists the repositories its sessions may name; a push or a pull request to a repository
+  GitHub reports as public is refused unless the profile allows public ones; a push that
+  would carry a credential file (`.env`, `*.pem`, a private key, a path the profile denies,
+  or what is mounted on the pod from a secret) is refused, naming it; a run has caps on its
+  pushes and on how many run at once; and a session's tokens are revoked at GitHub when it
+  goes dormant or stops.
+
+What it does **not** do yet: take the App's configuration from a repository in `gitops`
+mode, start a run from a schedule that sweeps issues, or scan what a push carries for
+secrets by their content.
 
 ## 1. Register the App
 
@@ -202,12 +208,19 @@ no restart.
 
 ## 6. Name a repository
 
+First the team lists it. On the console's team page, **GitHub** tab, a team's own
+administrators list the repositories its sessions and triggers may name, one per line, as
+`example-org/widgets` or `example-org/*` for every repository of the owner; or
+`admin.team.update` with `{"github": {"repositories": [...]}}`. A team that lists none names
+none ([§9](#9-how-far-a-run-may-go)).
+
 `session.create` on the plane takes `repository`, as `"example-org/widgets"` or as
 `{"owner": "example-org", "name": "widgets", "ref": "main"}`. It is refused, with
 `invalid_params` and `field: "repository"`, when the plane has no App, the App is not
-installed for that owner here, or the profile does not declare the Git host. The session's
-row and its listing carry it. A clone that fails (the installation does not include the
-repository, GitHub refuses the App) fails the session's start with GitHub's reason.
+installed for that owner here, the session's team does not list it, or the profile does not
+declare the Git host. The session's row and its listing carry it. A clone that fails (the
+installation does not include the repository, GitHub refuses the App) fails the session's
+start with GitHub's reason.
 
 ## 7. The fix loop
 
@@ -414,6 +427,71 @@ spec:
   concurrency: 2
 ```
 
+## 9. How far a run may go
+
+Two people decide it, each for what is theirs, and the stricter of the two holds. The
+plane keeps what it can see itself (which repositories, how many pushes); the pod keeps
+what only it can see (the repository's visibility at the moment of a push, the paths in the
+tree), against what the plane hands it with the fix loop's token. A refusal is a sentence
+the agent and the run's transcript read.
+
+**A worker profile** (a platform admin's), in `spec.github` beside `permissions`:
+
+```yaml
+spec:
+  github:
+    permissions: {contents: write, pull_requests: write, checks: read}
+    allowPublic: false            # the default: private and internal repositories only
+    denyPaths: [secrets/, "*.tfstate", "deploy/**/*.json"]
+    maxPushes: 10                 # pushes a run may make
+    maxRuns: 3                    # runs on a repository at once, across its triggers
+```
+
+**A team** (its own administrators'), on its console page's **GitHub** tab, or
+`admin.team.update`:
+
+```json
+{"github": {"repositories": ["example-org/widgets", "example-org/docs"], "max_pushes": 5, "max_runs": 2}}
+```
+
+What each does:
+
+- **Repositories, per team.** A session, a trigger and every token are for a repository its
+  team lists, checked when the session or the trigger is made and again at each token, so a
+  repository taken off the list gets no new clone, push or pull request from the next
+  minute. A team that lists none names none. The App's installations bound every list: a
+  team cannot list its way to an owner the App is not installed for.
+- **Private by default.** `git_push` and `pr_open` ask GitHub, there and then, whether the
+  repository is public, and refuse if it is and the profile's `allowPublic` is not true.
+  Private and internal repositories are fine; an answer that says neither is taken as
+  public.
+- **Paths a push never carries.** Every path a push adds or changes is matched against
+  `.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx` and SSH private keys (`id_rsa*`,
+  `id_dsa*`, `id_ecdsa*`, `id_ed25519*`), which no profile can take away, and the profile's
+  `denyPaths`, written as `.gitignore` writes patterns (a name alone matches at any depth, a
+  path with a `/` from the repository's root, `**` any number of directories, either case).
+  A path under what the pod mounts from a secret, a link into it, or a file whose bytes are
+  a mounted file's is refused too. The refusal names every path, and nothing of the tree
+  reaches GitHub. The tree is what `git add -A` stages, so leave such files out with
+  `.gitignore`, and take one a refused push staged out of git's index with
+  `git rm --cached`. A file already on GitHub that the push does not change is not asked
+  about. The content of what is pushed is not scanned for secrets; GitHub's secret scanning
+  and push protection are the place for that.
+- **A cap of pushes.** The lower of the profile's `maxPushes` and the team's `max_pushes`.
+  A run that asks for one more stops as three red CI rounds stop it: the plane records why,
+  every token it mints after cannot push, the bot says so on the draft, and the agent is
+  told to comment what it tried and stop.
+- **A cap of runs at once.** The profile's `maxRuns` and the team's `max_runs`, each across
+  all the triggers on a repository that are theirs; a firing over either is recorded as
+  skipped, as a trigger's own `concurrency` is. The run's budget still comes first.
+- **Tokens revoked at dormancy.** When a session goes dormant or stops, its pod revokes
+  its installation tokens at GitHub (`DELETE /installation/token`) rather than leaving
+  them their hour. A profile that clones and does no more need not declare the API's host;
+  its clone token then cannot be revoked from the pod, and runs out on its own.
+
+A profile that extends another gets its parent's denied paths with its own added, keeps a
+parent's `allowPublic: false` whatever it says, and can only lower a parent's caps.
+
 ## Rotating the key, and taking the App away
 
 - **Rotate**: generate a second key on the App's page, send it as `private_key`, then
@@ -423,7 +501,8 @@ spec:
   App's page straight after; deliveries signed with the old one are refused from the moment
   the plane has the new one, and GitHub's **Redeliver** sends them again.
 - **Stop runs from GitHub**: pause the trigger, or turn the App's webhook off on GitHub.
-- **Stop one repository**: take it out of the installation on GitHub. Tokens already
-  minted for it end within the hour.
+- **Stop one repository**: take it off the team's list, or out of the installation on
+  GitHub. Tokens already minted for it end within the hour, or when their session goes
+  dormant.
 - **Stop everything**: uninstall the App on GitHub, or suspend it. Sending
   `"installations": []` stops the plane minting tokens.

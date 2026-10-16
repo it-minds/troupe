@@ -17,7 +17,17 @@ defmodule Troupe.Plane.GitHubWebhookTest do
 
   import ExUnit.CaptureLog
 
-  alias Troupe.Plane.{Admin, Audit, FakeGitHub, FakePod, Fleet, GitHub, Sessions, Triggers}
+  alias Troupe.Plane.{
+    Admin,
+    Audit,
+    FakeGitHub,
+    FakePod,
+    Fleet,
+    GitHub,
+    Identity,
+    Sessions,
+    Triggers
+  }
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.GitHub.Delivery
   alias Troupe.Plane.Web.Router
@@ -86,7 +96,13 @@ defmodule Troupe.Plane.GitHubWebhookTest do
         "webhook_secret" => @secret
       })
 
-    team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+    team =
+      team_with_grant("engineering", "dev",
+        name: "engineering",
+        budget_micros: 0,
+        github: %{"repositories" => ["example-org/widgets"]}
+      )
+
     ada = person("ada@example.test", ["engineering"])
 
     {:ok, principal, _secret} =
@@ -362,6 +378,65 @@ defmodule Troupe.Plane.GitHubWebhookTest do
       refute_receive {:pushed, "session.activate", _}, 300
     end
 
+    # #147 slice 4: on the tip a trigger's own concurrency was the only bound, so two
+    # triggers on one profile or team could each run as many as they allowed.
+    test "a run over its profile's or its team's cap of runs on a repository at once is " <>
+           "skipped, across the team's triggers",
+         context do
+      pod(context)
+      trigger!(context, %{"label" => "troupe-fix"}, %{"concurrency" => 5})
+
+      trigger!(context, %{"label" => "troupe-docs"}, %{
+        "name" => "fix-docs",
+        "concurrency" => 5
+      })
+
+      {:ok, _} =
+        Identity.update_team(context.team, %{
+          github: %{"repositories" => ["example-org/widgets"], "max_runs" => 1}
+        })
+
+      fire = fn number, label ->
+        {_response, delivery} =
+          FakeGitHub.deliver(context.url, @secret, "issues", labeled(context, number, label))
+
+        [fired] = outcome!(delivery)["fired"]
+        fired
+      end
+
+      # The first starts; the second, from the other trigger, is over the team's cap of one.
+      assert %{"session_id" => first} = fire.(7, "troupe-fix")
+      assert is_binary(first)
+      assert_receive {:pushed, "session.activate", _}, 5_000
+      assert %{"session_id" => nil, "run" => skipped} = fire.(8, "troupe-docs")
+      assert Repo.get(Triggers.Run, skipped).state == "skipped"
+
+      # The team lifts its cap; the profile's own, of one, holds the same way.
+      {:ok, _} =
+        Identity.update_team(Identity.get_team("engineering"), %{
+          github: %{"repositories" => ["example-org/widgets"]}
+        })
+
+      profile = Fleet.get_profile("dev")
+
+      {:ok, _} =
+        Fleet.put_profile(%{
+          name: "dev",
+          spec: put_in(profile.spec, ["github", "maxRuns"], 1)
+        })
+
+      assert %{"session_id" => nil} = fire.(9, "troupe-fix")
+
+      {:ok, _} =
+        Fleet.put_profile(%{
+          name: "dev",
+          spec: put_in(profile.spec, ["github", "maxRuns"], 2)
+        })
+
+      assert %{"session_id" => second} = fire.(10, "troupe-fix")
+      assert is_binary(second)
+    end
+
     test "is checked when it is put: its shape, and that the App reaches the repository",
          context do
       base = %{
@@ -377,7 +452,10 @@ defmodule Troupe.Plane.GitHubWebhookTest do
         {%{"repository" => "example-org/widgets", "command" => "/troupe\nfix"}, "one line"},
         {%{"repository" => "example-org/widgets", "label" => "x", "schedule" => "*"},
          "not schedule"},
-        {%{"repository" => "elsewhere/widgets", "label" => "x"}, "not installed for elsewhere"}
+        {%{"repository" => "elsewhere/widgets", "label" => "x"}, "not installed for elsewhere"},
+        # The App's owner, and a repository the team does not list (#653).
+        {%{"repository" => "example-org/gadgets", "label" => "x"},
+         "does not list example-org/gadgets"}
       ]
 
       for {source, said} <- refused do

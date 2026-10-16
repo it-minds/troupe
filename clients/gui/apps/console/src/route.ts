@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from "react";
 
-export const TEAM_TABS = ["members", "access", "admins", "limits", "danger"] as const;
+export const TEAM_TABS = ["members", "access", "admins", "limits", "github", "danger"] as const;
 export type TeamTab = (typeof TEAM_TABS)[number];
 
 export interface Route {

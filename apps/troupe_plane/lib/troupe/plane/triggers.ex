@@ -25,6 +25,7 @@ defmodule Troupe.Plane.Triggers do
   import Ecto.Query
 
   alias Troupe.Plane.GitHub.Issue
+  alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
   alias Troupe.Plane.{Harness, Identity, Principals, Repo, Sessions}
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
@@ -508,9 +509,16 @@ defmodule Troupe.Plane.Triggers do
 
     case %Run{} |> Run.changeset(attrs) |> Repo.insert() do
       {:ok, run} ->
-        if live_runs(trigger, run) >= revision.concurrency,
-          do: skip(trigger, revision, run),
-          else: create(trigger, revision, run)
+        cond do
+          live_runs(trigger, run) >= revision.concurrency ->
+            skip(trigger, revision, run)
+
+          over = over_repository_cap(trigger, revision, run) ->
+            skip(trigger, revision, run, over)
+
+          true ->
+            create(trigger, revision, run)
+        end
 
       {:error, changeset} ->
         # The unique key said somebody else fired first, between our lookup and our
@@ -540,9 +548,47 @@ defmodule Troupe.Plane.Triggers do
     ) || 0
   end
 
-  defp skip(trigger, revision, run) do
+  # A run on a GitHub repository counts against the fix loop's caps as well as its
+  # trigger's own: the runs on a repository its profile (`spec.github.maxRuns`) and its
+  # team (`github.max_runs`) allow at once, across every trigger of theirs. Live as above.
+  defp over_repository_cap(trigger, revision, run) do
+    if Issue.repository?(trigger.source) do
+      GitHubPolicy.over_runs_cap(revision.profile, trigger.team_id, fn narrow ->
+        live_repository_runs(run, narrow)
+      end)
+    end
+  end
+
+  defp live_repository_runs(%Run{id: except}, narrow) do
+    query =
+      from(r in Run,
+        join: t in Trigger,
+        on: t.id == r.trigger_id,
+        join: v in Revision,
+        on: v.id == r.revision_id,
+        left_join: s in Session,
+        on: s.id == r.session_id,
+        where:
+          r.id != ^except and r.state == "created" and
+            fragment("(?->>'repository') IS NOT NULL", t.source) and
+            (is_nil(r.session_id) or s.status == "waiting" or
+               (s.state == "active" and s.status not in ["done", "interrupted"] and
+                  is_nil(s.failed_reason))),
+        select: count(r.id)
+      )
+
+    Repo.one(narrow_runs(query, narrow)) || 0
+  end
+
+  defp narrow_runs(query, profile: profile),
+    do: from([_r, _t, v, _s] in query, where: v.profile == ^profile)
+
+  defp narrow_runs(query, team_id: team_id),
+    do: from([_r, t, _v, _s] in query, where: t.team_id == ^team_id)
+
+  defp skip(trigger, revision, run, why \\ "over its concurrency cap") do
     {:ok, run} = run |> Run.changeset(%{state: "skipped"}) |> Repo.update()
-    Logger.info("troupe plane: trigger #{trigger.name} fired over its concurrency cap; skipped")
+    Logger.info("troupe plane: trigger #{trigger.name} fired #{why}; skipped")
     {:ok, fired(trigger, revision, run, nil, nil)}
   end
 
