@@ -30,8 +30,6 @@ scripts
 # Bar PROTOCOL.md, whose error table the GUI's image build tests its client against; it
 # reads this directory as its `licences` context, and no server image copies it.
 !PROTOCOL.md
-# And the per-tool rule cases the client's rule reading is held to, for the same reason.
-!apps/troupe_protocol/test/support/permission_rules.json
 
 # The clients are built on their own: the TUI and the desktop app natively for each
 # platform, the GUI's image with `clients/gui` as its own context. No server image needs
