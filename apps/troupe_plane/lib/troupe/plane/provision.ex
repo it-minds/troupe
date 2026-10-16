@@ -467,17 +467,44 @@ defmodule Troupe.Plane.Provision do
   because a repository pins what it runs and moves it by a commit.
   """
   @spec repository_manifest(Profile.t()) :: map()
+  def repository_manifest(%Profile{extends: parent} = profile) when is_binary(parent) do
+    # What the profile wrote and the one it extends, as a repository holds a profile that
+    # extends another: the plane resolves the rest from the parent's manifest, as it does here.
+    own = profile.own || %{}
+    image = image_spec(own["image"])
+    class = own["size_class"]
+
+    spec =
+      (own["spec"] || %{})
+      |> Map.drop(@projected)
+      |> Map.put("extends", parent)
+      |> put_given("image", image)
+      |> put_given("sessionsPerPod", class && SizeClass.sessions_per_pod(class))
+      |> put_given("budgetMicros", own["budget_micros"])
+
+    repository_resource(profile.name, spec, %{
+      max_sessions: own["max_sessions"],
+      warm_workers: own["warm_workers"],
+      provisioner: own["provisioner"]
+    })
+  end
+
   def repository_manifest(%Profile{} = profile) do
     spec =
       profile
       |> spec_of()
       |> Map.drop(@projected)
       |> Map.put_new("configBundleChannel", profile.config_bundle_channel)
+      |> put_given("budgetMicros", profile.budget_micros)
 
+    repository_resource(profile.name, spec, profile)
+  end
+
+  defp repository_resource(name, spec, answered) do
     metadata =
-      %{"name" => profile.name, "namespace" => namespace()}
+      %{"name" => name, "namespace" => namespace()}
       |> then(fn metadata ->
-        case answers(profile) do
+        case answers(answered) do
           empty when empty == %{} -> metadata
           annotations -> Map.put(metadata, "annotations", annotations)
         end
@@ -490,6 +517,9 @@ defmodule Troupe.Plane.Provision do
       "spec" => spec
     }
   end
+
+  defp put_given(map, _key, nil), do: map
+  defp put_given(map, key, value), do: Map.put(map, key, value)
 
   # Only the ones that say something: no ceiling, none kept warm and the Kubernetes
   # provisioner are what a profile with no annotation already is.
@@ -659,9 +689,74 @@ defmodule Troupe.Plane.Provision do
     cond do
       foreign != [] -> {:foreign, foreign}
       not Gitops.tracked?(resource) -> :held
-      Enum.any?(Gitops.managers(resource, ["spec", "image"]), &(not Gitops.plane?(&1))) -> :held
+      held_by_another?(resource, ["spec", "image"]) -> :held
+      # A manifest that extends another may leave the image to its parent.
+      held_by_another?(resource, ["spec", "extends"]) -> :held
       true -> :plane_only
     end
+  end
+
+  defp held_by_another?(resource, path),
+    do: Enum.any?(Gitops.managers(resource, path), &(not Gitops.plane?(&1)))
+
+  # -- the profile in effect of one that extends another --------------------------
+
+  @doc """
+  The spec a profile runs, as the plane writes it into `status.effective` for one whose
+  resource extends another: the row's spec in effect with its image, less the fields the
+  plane writes onto every resource's spec (replicas, teams, MCP servers), which the
+  operator takes from there.
+  """
+  @spec effective_spec(Profile.t() | map()) :: map()
+  def effective_spec(profile) do
+    image = image_spec(get(profile, :image))
+
+    spec_map(profile)
+    |> Map.drop(["extends", "budgetMicros"])
+    |> then(&if(image, do: Map.put(&1, "image", image), else: &1))
+    |> Map.drop(WorkerProfile.projected_fields())
+  end
+
+  @doc """
+  Write the profile in effect into a resource's status, `status.effective`, which is the
+  plane's alone there: the operator writes the rest of the status and never this. A
+  server-side apply of the one field, so nothing else in the status is touched.
+  """
+  @spec record_effective(Profile.t(), map()) :: :ok | {:error, term()}
+  def record_effective(%Profile{} = profile, effective),
+    do: apply_status(profile, %{"effective" => effective})
+
+  @doc """
+  Take the profile in effect out of the status of a resource that no longer extends
+  another: an apply that names none of the plane's fields there gives them up.
+  """
+  @spec forget_effective(Profile.t()) :: :ok | {:error, term()}
+  def forget_effective(%Profile{} = profile), do: apply_status(profile, %{})
+
+  defp apply_status(profile, status) do
+    patch = %{
+      "apiVersion" => "troupe.dev/v1alpha1",
+      "kind" => "WorkerProfile",
+      "metadata" => %{"name" => profile.name, "namespace" => namespace()},
+      "status" => status
+    }
+
+    operation =
+      K8s.Client.apply(
+        "troupe.dev/v1alpha1",
+        {"WorkerProfile", "Status"},
+        [namespace: namespace(), name: profile.name],
+        patch,
+        field_manager: @manager,
+        force: true
+      )
+
+    with {:ok, conn} <- connection(),
+         {:ok, _applied} <- K8s.Client.run(conn, operation) do
+      :ok
+    end
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
   end
 
   @doc """

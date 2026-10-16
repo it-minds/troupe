@@ -1068,8 +1068,16 @@ export class FakeAdmin {
             reason: `this plane is in gitops mode, and a profile extends another only on a plane that writes its profiles itself: a repository's manifest holds the whole profile, ${parent}'s fields included, until a plane resolves extends from a repository`,
           });
         }
+        // The profile's own permission rules, each read as `PermissionRule` reads it and
+        // refused in its words, as the enforced set's are.
+        const sentSpec = sentAttrs["spec"];
+        const rules = typeof sentSpec === "object" && sentSpec !== null ? (sentSpec as Record<string, unknown>)["permissions"] : undefined;
+        if (rules !== undefined && rules !== null) {
+          const why = checkRuleSet(rules);
+          if (why.length) return refuse(INVALID_PARAMS, "invalid_params", { field: "spec.permissions", reason: why.join("; ") });
+        }
         // A write that names a parent, or stops naming one, is the profile in effect.
-        const effect = this.inEffect(name, sentAttrs, parent, before);
+        const effect =this.inEffect(name, sentAttrs, parent, before);
         if (typeof effect === "string") return refuse(INVALID_PARAMS, "invalid_params", { ...(parent ? { extends: parent } : {}), reason: effect });
         const { attrs, own } = effect;
         const below = this.effectsBelow(name, { extends: parent, written: own ?? this.rootWritten(before, attrs) });

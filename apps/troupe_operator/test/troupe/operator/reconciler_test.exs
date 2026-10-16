@@ -16,7 +16,7 @@ defmodule Troupe.Operator.ReconcilerTest do
 
   import Troupe.Operator.Fixtures
 
-  alias Troupe.Operator.{FakeCluster, Names, Reconciler, Reconcilers, Resources, Settings}
+  alias Troupe.Operator.{FakeCluster, Names, Reconciler, Reconcilers, Resources, Settings, SkipObserved}
   alias Troupe.Policy
   alias Troupe.WorkerProfile, as: Profile
 
@@ -564,6 +564,80 @@ defmodule Troupe.Operator.ReconcilerTest do
       assert {:error, {:policy_violation, _}} = reconcile(conn, cilium: false)
       assert FakeCluster.deleted() == []
     end
+  end
+
+  # #655 slice 4: a profile that extends another is run as the plane resolved it into its
+  # status, never from what differs from its parent, and waits until the plane has.
+  describe "a profile that extends another" do
+    @set {"apps/v1", "StatefulSet", "troupe-w-dev", "troupe-w-dev"}
+
+    test "waits, creating nothing, until the plane has written the profile in effect" do
+      conn = FakeCluster.start([policy(), child(nil)])
+
+      assert {:ok, :awaiting_plane} = reconcile(conn, cilium: false)
+      refute get(@set)
+      refute get({"v1", "Namespace", nil, "troupe-w-dev"})
+
+      assert %{"status" => "False", "reason" => "AwaitingPlane", "message" => message} =
+               condition("Resolved")
+
+      assert message =~ "dev extends standard"
+      assert %{"status" => "False", "reason" => "AwaitingPlane"} = condition("Ready")
+    end
+
+    test "runs the profile in effect from its status, and records which" do
+      conn = FakeCluster.start([policy(), child(effective())])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+
+      [container | _] = get(@set)["spec"]["template"]["spec"]["containers"]
+      assert container["image"] == "ghcr.io/objective-mj/troupe-worker:0.2.0"
+      assert %{"status" => "True", "message" => message} = condition("Resolved")
+      assert message =~ "standard → dev"
+      assert status()["effectiveRevision"] == "rev-1"
+      # The block is the plane's, and the pass left it as it was.
+      assert status()["effective"]["revision"] == "rev-1"
+      assert SkipObserved.observed?(get({"troupe.dev/v1alpha1", "WorkerProfile", "troupe-system", "dev"}))
+    end
+
+    test "is refused as any profile is when what is in effect is outside the policy" do
+      conn = FakeCluster.start([policy(maxSessionsPerPod: 2), child(effective())])
+
+      assert {:error, {:policy_violation, _}} = reconcile(conn, cilium: false)
+      refute get(@set)
+    end
+
+    test "a new resolution is acted on at once, though the generation has not moved" do
+      resource =
+        child(effective())
+        |> put_in(["status", "observedGeneration"], 1)
+        |> put_in(["status", "effectiveRevision"], "rev-0")
+
+      refute SkipObserved.observed?(resource)
+      assert SkipObserved.observed?(put_in(resource, ["status", "effectiveRevision"], "rev-1"))
+
+      # A profile that extends none is judged by its generation alone, as before.
+      assert SkipObserved.observed?(put_in(profile(), ["status"], %{"observedGeneration" => 1}))
+    end
+  end
+
+  # What a repository holds for a child: the parent named and the plane's three fields, with
+  # the profile in effect the plane wrote into the status, or none yet.
+  defp child(effective) do
+    resource = %{
+      profile()
+      | "spec" => %{"extends" => "standard", "replicas" => 2, "teams" => []}
+    }
+
+    if effective, do: Map.put(resource, "status", %{"effective" => effective}), else: resource
+  end
+
+  defp effective do
+    %{
+      "spec" => Map.drop(profile()["spec"], ["replicas", "teams", "mcpServers"]),
+      "chain" => ["standard", "dev"],
+      "revision" => "rev-1"
+    }
   end
 
   # One pass, with the installation's settings as Helm would have rendered them, over the

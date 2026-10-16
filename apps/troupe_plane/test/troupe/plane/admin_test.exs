@@ -872,15 +872,21 @@ defmodule Troupe.Plane.AdminTest do
         |> YamlElixir.read_from_file!()
 
       [%{"schema" => %{"openAPIV3Schema" => schema}}] = crd["spec"]["versions"]
-      llm = schema["properties"]["spec"]["properties"]["llm"]
-      assert [%{"rule" => rule, "message" => message}] = llm["x-kubernetes-validations"]
+      spec = schema["properties"]["spec"]
+      llm = spec["properties"]["llm"]
+
+      # On the spec, since #655 slice 4: a profile that extends another may leave the
+      # endpoint to its parent, and the plane checks the profile the two come to.
+      assert [%{"rule" => rule, "message" => message}] =
+               Enum.filter(spec["x-kubernetes-validations"], &(&1["rule"] =~ "self.llm"))
 
       refute rule =~ "\n"
-      assert rule =~ "(has(self.endpoint) && self.endpoint != '') || !("
+      assert rule =~ "(has(self.extends) && self.extends != '') || !has(self.llm) || "
+      assert rule =~ "(has(self.llm.endpoint) && self.llm.endpoint != '') || !("
 
-      named = ~r/has\(self\.(\w+)\)/ |> Regex.scan(rule) |> Enum.map(&List.last/1)
+      named = ~r/has\(self\.llm\.(\w+)\)/ |> Regex.scan(rule) |> Enum.map(&List.last/1)
       fields = Enum.sort(Profile.llm_fields())
-      assert Enum.sort(named -- ["endpoint"]) == fields
+      assert Enum.sort(Enum.uniq(named) -- ["endpoint"]) == fields
       assert Enum.sort(Map.keys(llm["properties"]) -- ["endpoint"]) == fields
 
       assert message =~ "llm settings need llm.endpoint"

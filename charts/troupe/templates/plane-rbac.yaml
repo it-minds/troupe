@@ -4,7 +4,8 @@
 #
 # In gitops mode a repository holds the WorkerProfiles and something else applies them:
 # the plane lists and watches them, and patches only the fields it still writes
-# (replicas, teams, mcpServers and its record of finished drains). It cannot create or
+# (replicas, teams, mcpServers and its record of finished drains), and the profile in
+# effect it resolves for one that extends another, in the status. It cannot create or
 # delete one, so a plane that tried would be refused by the cluster and not only by its
 # own code (Decision 736). It reads the Triggers the repository holds and writes nothing
 # of them (Decision 737); in direct mode its triggers are rows and it has no grant on them.
@@ -26,6 +27,11 @@ rules:
   - apiGroups: ["troupe.dev"]
     resources: ["workerprofiles"]
     verbs: ["get", "list", "watch", "patch"]
+  # The profile in effect of one that extends another, which the plane resolves and writes
+  # into its status (status.effective) and nothing else there: the rest is the operator's.
+  - apiGroups: ["troupe.dev"]
+    resources: ["workerprofiles/status"]
+    verbs: ["patch"]
   - apiGroups: ["troupe.dev"]
     resources: ["triggers"]
     verbs: ["get", "list", "watch"]

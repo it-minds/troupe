@@ -102,8 +102,9 @@ export interface ConfigKey {
 
 /**
  * One per-tool permission rule as `config.get` answers it (troupe #658): what it does, the
- * rule as written, the layer it came from (`org`, `enforced`, `user`, `project`, `local`)
- * and that file, and why it does not apply, or null. Shown, never set by a client.
+ * rule as written, the layer it came from (`org`, `enforced`, `user`, `project`, `local`,
+ * or `profile` for a session on a worker profile, whose name is then the source) and that
+ * file, and why it does not apply, or null. Shown, never set by a client.
  */
 export interface PermissionRule {
   action: "deny" | "ask" | "allow";
@@ -123,6 +124,7 @@ export function ruleScope(rule: Pick<PermissionRule, "scope" | "source">): strin
     user: "your config.yaml",
     project: "this project's .troupe/config.yaml",
     local: "this project's config.local.yaml",
+    profile: "the worker profile",
   };
   return whose[rule.scope] ?? rule.scope;
 }

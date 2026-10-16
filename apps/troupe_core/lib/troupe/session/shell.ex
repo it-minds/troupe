@@ -17,11 +17,12 @@ defmodule Troupe.Session.Shell do
 
   There is no approval prompt: the person typed it, and `control` plus being the session's
   owner is the authority, which the method checks. What forbids the agent's shell forbids
-  this too (`refusal/2`).
+  this too (`refusal/2`), and on a pod a `deny` rule of the worker profile's (`denied/3`).
   """
 
   alias Troupe.Agent.{Definition, Definitions}
   alias Troupe.Agent.Server, as: Agent
+  alias Troupe.Config.Permissions
   alias Troupe.{Events, Registry, Session}
   alias Troupe.Session.Log
   alias Troupe.Tool.Ctx
@@ -54,7 +55,8 @@ defmodule Troupe.Session.Shell do
   def run(session_id, command, opts \\ []) do
     with {:ok, agent} <- root(session_id),
          {:ok, setup} <- setup(agent),
-         nil <- refusal(setup.config, setup.definitions) do
+         nil <- refusal(setup.config, setup.definitions),
+         nil <- denied(setup.config, command, setup.workspace) do
       start(session_id, command, setup, opts)
     else
       {setting, sentence} when is_binary(setting) -> {:error, {:forbidden, setting, sentence}}
@@ -98,6 +100,29 @@ defmodule Troupe.Session.Shell do
       do:
         {"permissions",
          "no profile in this session may run shell commands, so commands typed with ! are refused too"}
+  end
+
+  @doc """
+  Why the worker profile a session runs on refuses this command, as `{setting, sentence}`,
+  or `nil`: a `deny` rule of the profile's for `shell` that matches it, read as the agent's
+  own call would be. A person's command is not a tool call, and no other scope's rule
+  applies to it, since the person could change their own files; the profile's are the
+  platform's, and on its pods a command typed with `!` obeys them as the agent does. An
+  `ask` is not asked: the person who typed it is who it would ask.
+  """
+  @spec denied(Troupe.Config.t(), String.t(), Path.t() | nil) :: {String.t(), String.t()} | nil
+  def denied(config, command, workspace) do
+    profile = Enum.filter(config.permissions, &(&1.layer == :profile))
+
+    case Permissions.decide(profile, "shell", %{"command" => command}, workspace) do
+      {:deny, rule} ->
+        {"permissions",
+         "this command was refused by the rule #{Permissions.describe(rule)}: on its pods a " <>
+           "command typed with ! obeys the worker profile's deny rules as the agent's do"}
+
+      _other ->
+        nil
+    end
   end
 
   @doc """

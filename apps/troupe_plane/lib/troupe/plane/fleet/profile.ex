@@ -21,7 +21,7 @@ defmodule Troupe.Plane.Fleet.Profile do
 
   alias Troupe.Plane.Fleet.{Provisioner, SizeClass}
   alias Troupe.Plane.GitHub
-  alias Troupe.Protocol.ProviderTypes
+  alias Troupe.Protocol.{PermissionRule, ProviderTypes}
 
   @primary_key {:name, :string, autogenerate: false}
   @derive {Phoenix.Param, key: :name}
@@ -111,10 +111,11 @@ defmodule Troupe.Plane.Fleet.Profile do
   def cluster_changeset(profile, attrs) do
     profile
     |> cast(attrs, [:resource_generation | @fields])
-    # A resource is a whole, flat profile, and a repository's manifest extends nothing
-    # yet: a row read from one has no parent, whatever it had in direct mode.
-    |> put_change(:extends, nil)
-    |> put_change(:own, nil)
+    # The parent and what the manifest wrote are the resource's to say, as `spec.extends`
+    # and its spec: a row read from one that names none has no parent, whatever it had in
+    # direct mode.
+    |> put_change(:extends, attrs[:extends])
+    |> put_change(:own, attrs[:own])
     |> put_change(:own_servers, nil)
     |> validate()
     |> derive_from_class()
@@ -171,10 +172,24 @@ defmodule Troupe.Plane.Fleet.Profile do
     # `administration: write` would be asking for what no session is given.
     github = Enum.map(GitHub.spec_problems(Map.get(spec, "github")), &{:spec, &1})
 
-    overrides ++ personal ++ github ++ llm_problems(Map.get(spec, "llm"))
+    overrides ++
+      personal ++
+      github ++ llm_problems(Map.get(spec, "llm")) ++ rule_problems(Map.get(spec, "permissions"))
   end
 
   defp spec_switches(:spec, _spec), do: []
+
+  # `permissions` are per-tool rules every session on the profile's pods obeys, read as a
+  # person's config reads them: one the pods could not read would be a rule an
+  # administrator believes holds and does not, so it is refused with the reader's sentence.
+  defp rule_problems(nil), do: []
+
+  defp rule_problems(rules) do
+    case PermissionRule.check_set(rules) do
+      {:ok, _set} -> []
+      {:error, reasons} -> Enum.map(reasons, &{:spec, &1})
+    end
+  end
 
   # `llm.provider` is one of the provider types, the list the clients offer, which the
   # resource's schema declares in the same words, so a profile that is never a resource,
