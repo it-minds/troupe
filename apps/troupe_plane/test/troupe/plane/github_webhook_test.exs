@@ -17,8 +17,17 @@ defmodule Troupe.Plane.GitHubWebhookTest do
 
   import ExUnit.CaptureLog
 
-  alias Troupe.Plane.{Admin, Audit, FakeGitHub, FakePod, Fleet, GitHub, Identity, Sessions}
-  alias Troupe.Plane.Triggers
+  alias Troupe.Plane.{
+    Admin,
+    Audit,
+    FakeGitHub,
+    FakePod,
+    Fleet,
+    GitHub,
+    Identity,
+    Sessions,
+    Triggers
+  }
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.GitHub.Delivery
   alias Troupe.Plane.Web.Router

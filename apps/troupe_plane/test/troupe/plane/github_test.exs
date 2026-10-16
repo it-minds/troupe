@@ -15,8 +15,17 @@ defmodule Troupe.Plane.GitHubTest do
   import ExUnit.CaptureLog
 
   alias Troupe.KMS.Policy
-  alias Troupe.Plane.{Admin, Audit, FakeGitHub, FakePod, Fleet, GitHub, Harness, Identity}
-  alias Troupe.Plane.Sessions
+  alias Troupe.Plane.{
+    Admin,
+    Audit,
+    FakeGitHub,
+    FakePod,
+    Fleet,
+    GitHub,
+    Harness,
+    Identity,
+    Sessions
+  }
   alias Troupe.Plane.Admin.API
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.GitHub.Key

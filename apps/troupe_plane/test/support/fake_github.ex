@@ -190,7 +190,7 @@ defmodule Troupe.Plane.FakeGitHub do
     {response, delivery}
   end
 
-  @doc "Make `full_name` `\"public\"`, `\"private\"` or `\"internal\"`, as GitHub reports it."
+  @doc "Make `full_name` public, private or internal, as GitHub reports its visibility."
   def visibility(fake, full_name, visibility),
     do: Agent.update(fake.agent, &put_in(&1.visibility[String.downcase(full_name)], visibility))
 
