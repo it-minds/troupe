@@ -13,7 +13,6 @@
 import { useEffect } from "react";
 import type { JSX, ReactNode } from "react";
 import type { AdminPod, AdminProfile, FleetOverview, TeamSpend } from "@troupe/client";
-import { currentConsole } from "../plane";
 import { href } from "../route";
 import { useConsole, useLoad } from "../console";
 import { Empty, Loaded, Region, Status, count, money } from "./bits";
@@ -43,12 +42,10 @@ interface Item {
   what: string;
   where: string;
   action: string;
-  /** Somewhere in the plane's current console rather than this one. */
-  elsewhere: boolean;
 }
 
 export function Overview(): JSX.Element {
-  const { admin, plane } = useConsole();
+  const { admin, role } = useConsole();
   const [load, reload] = useLoad(
     () =>
       Promise.all([
@@ -68,7 +65,7 @@ export function Overview(): JSX.Element {
     <div className="page">
       <Loaded load={load} what="the overview" retry={reload}>
         {([overview, unread]) => {
-          const items = attention(overview, unread?.length ?? 0, (path) => currentConsole(plane.url, path));
+          const items = attention(overview, unread?.length ?? 0, role === "platform_admin");
           const pods = overview.profiles.flatMap((p) => p.pods);
           const healthy = pods.filter((p) => podState(p) === "healthy").length;
           const spent = overview.teams.reduce((n, t) => n + t.spent_micros, 0);
@@ -101,15 +98,7 @@ export function Overview(): JSX.Element {
                         {STATES[item.state].word}
                       </Status>
                       <span className="what">{item.what}</span>
-                      <a href={item.where}>
-                        {item.action}
-                        {item.elsewhere && (
-                          <>
-                            <span aria-hidden="true"> ↗</span>
-                            <span className="visually-hidden"> (in the current console)</span>
-                          </>
-                        )}
-                      </a>
+                      <a href={item.where}>{item.action}</a>
                     </li>
                   ))}
                 </ul>
@@ -136,7 +125,7 @@ export function Overview(): JSX.Element {
                         return (
                           <tr key={p.name}>
                             <td>
-                              <a href={currentConsole(plane.url, `/workers/${encodeURIComponent(p.name)}`)}>{p.name}</a>
+                              <a href={href({ page: "profiles", path: [p.name] })}>{p.name}</a>
                             </td>
                             <td>
                               <Status kind={s.kind} glyph={s.glyph}>
@@ -220,10 +209,12 @@ export function profileState(profile: AdminProfile): State {
   return profile.pods.map(podState).sort((a, b) => STATES[a].rank - STATES[b].rank)[0] ?? "healthy";
 }
 
-function attention(overview: FleetOverview, unread: number, current: (path: string) => string): Item[] {
+// A pod is looked at where its pods are, which is a platform admin's area; a team admin is
+// sent to the profile instead.
+function attention(overview: FleetOverview, unread: number, platform: boolean): Item[] {
   const items: Item[] = [];
   for (const profile of overview.profiles) {
-    const workers = current(`/workers/${encodeURIComponent(profile.name)}`);
+    const workers = platform ? href({ page: "pods" }) : href({ page: "profiles", path: [profile.name] });
     for (const pod of profile.pods) {
       const state = podState(pod);
       if (state === "healthy") continue;
@@ -233,7 +224,7 @@ function attention(overview: FleetOverview, unread: number, current: (path: stri
           : state === "broken"
             ? `${pod.pod} on ${profile.name} reported that it is not healthy.`
             : `${pod.pod} on ${profile.name} is draining: ${count(pod.active_sessions, "session")} still on it.`;
-      items.push({ state, what, where: workers, action: `Look at ${profile.name}`, elsewhere: true });
+      items.push({ state, what, where: workers, action: `Look at ${profile.name}` });
     }
     if (profile.replicas !== null && profile.pods.length < profile.replicas) {
       items.push({
@@ -241,22 +232,20 @@ function attention(overview: FleetOverview, unread: number, current: (path: stri
         what: `${profile.name} asked for ${count(profile.replicas, "pod")} and has ${profile.pods.length}.`,
         where: workers,
         action: `Look at ${profile.name}`,
-        elsewhere: true,
       });
     }
   }
   for (const team of overview.teams) {
     const state = budgetState(team);
     if (state === "healthy") continue;
-    items.push({ state, what: budgetWords(state, team), where: href({ page: "teams", team: team.name, tab: "limits" }), action: `${team.name}'s limits`, elsewhere: false });
+    items.push({ state, what: budgetWords(state, team), where: href({ page: "teams", team: team.name, tab: "limits" }), action: `${team.name}'s limits` });
   }
   if (unread > 0) {
     items.push({
       state: "waiting",
       what: `${count(unread, "session")} an unattended run started ${unread === 1 ? "is" : "are"} waiting for a person to look at ${unread === 1 ? "it" : "them"}.`,
-      where: current("/review"),
+      where: href({ page: "runs" }),
       action: "Runs and review",
-      elsewhere: true,
     });
   }
   return items.sort((a, b) => STATES[a.state].rank - STATES[b.state].rank);

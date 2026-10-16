@@ -24,6 +24,7 @@ defmodule Troupe.Plane.Triggers do
 
   import Ecto.Query
 
+  alias Troupe.Plane.GitHub.Issue
   alias Troupe.Plane.{Harness, Identity, Principals, Repo, Sessions}
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
@@ -615,8 +616,8 @@ defmodule Troupe.Plane.Triggers do
     %{
       "profile" => revision.profile,
       "team" => team_name(trigger),
-      "title" => "#{trigger.name} #{Calendar.strftime(run.fired_at, "%Y-%m-%d %H:%M")}",
-      "prompt" => Template.render(revision.prompt_template, values),
+      "title" => title(trigger, run),
+      "prompt" => prompt(revision, run, values),
       "visibility" => revision.visibility,
       "terms" => revision.terms,
       "origin" =>
@@ -635,6 +636,43 @@ defmodule Troupe.Plane.Triggers do
     |> then(fn params ->
       if revision.agent, do: Map.put(params, "agent", revision.agent), else: params
     end)
+    |> then(fn params ->
+      case repository_of(revision.source) do
+        nil -> params
+        repository -> Map.put(params, "repository", repository)
+      end
+    end)
+  end
+
+  # The trigger and when it fired; a run GitHub started names its issue instead, which is
+  # what somebody scanning a list of sessions is looking for.
+  defp title(trigger, %Run{event: %{"github" => %{}, "repository" => repo, "issue" => issue}})
+       when is_binary(repo) and is_map(issue),
+       do: "#{trigger.name} #{repo}##{issue["number"]}"
+
+  defp title(trigger, run),
+    do: "#{trigger.name} #{Calendar.strftime(run.fired_at, "%Y-%m-%d %H:%M")}"
+
+  # A run that GitHub's webhook started is given its issue fenced as data, after the
+  # template rendered without the issue's text (`GitHub.Issue.prompt/2`). Any other run,
+  # a repository trigger's run by hand included, renders the template as it always has.
+  defp prompt(revision, run, values) do
+    if Issue.repository?(revision.source) and is_map(run.event["github"]),
+      do: Issue.prompt(revision.prompt_template, values),
+      else: Template.render(revision.prompt_template, values)
+  end
+
+  # The repository a trigger's source names is the one its sessions are created with, so
+  # `session.create` checks it as it checks anybody's, and the session's pod clones it.
+  defp repository_of(source) do
+    case Issue.repository(source) do
+      {owner, name} ->
+        %{"owner" => owner, "name" => name}
+        |> then(&if(source["ref"], do: Map.put(&1, "ref", source["ref"]), else: &1))
+
+      nil ->
+        nil
+    end
   end
 
   # Through the public method, as the owner: the same path a person sharing a session
@@ -768,11 +806,63 @@ defmodule Troupe.Plane.Triggers do
       Notify.deliver(trigger, run, %{
         "state" => state_of(run, session),
         "done_reason" => session && session.done_reason,
-        "failed_reason" => session && session.failed_reason
+        "failed_reason" => session && session.failed_reason,
+        "pull_request" => pull_request_url(session)
       })
     else
       nil -> :ok
     end
+  end
+
+  # The draft pull request the run's session opened, which is where a person reviews what
+  # it did. A link, as the session's record keeps it: metadata, never its text.
+  defp pull_request_url(%Session{github: %{"pull_request" => %{"url" => url}}})
+       when is_binary(url),
+       do: url
+
+  defp pull_request_url(_session), do: nil
+
+  @doc """
+  Every enabled trigger on a GitHub repository, named `owner/name` as GitHub does, in any
+  case: the ones a delivery from that repository may start.
+  """
+  @spec on_repository(String.t()) :: [Trigger.t()]
+  def on_repository(full_name) when is_binary(full_name) do
+    Repo.all(
+      from(t in Trigger,
+        where:
+          t.enabled and fragment("?->>'kind'", t.source) == "webhook" and
+            fragment("lower(?->>'repository')", t.source) == ^String.downcase(full_name),
+        order_by: [t.team_id, t.name]
+      )
+    )
+  end
+
+  @doc """
+  The run whose session this is, with its trigger, or `nil` for a session no trigger
+  started.
+  """
+  @spec run_of(String.t()) :: {Run.t(), Trigger.t()} | nil
+  def run_of(session_id) do
+    Repo.one(
+      from(r in Run,
+        join: t in Trigger,
+        on: t.id == r.trigger_id,
+        where: r.session_id == ^session_id,
+        preload: [:revision],
+        limit: 1,
+        select: {r, t}
+      )
+    )
+  end
+
+  @doc """
+  The user a run acts as: its revision's principal, or why it cannot act. What a review
+  that resumes a run's session acts as, as its first firing did.
+  """
+  @spec acting_user(Run.t()) :: {:ok, User.t()} | {:error, Error.t()}
+  def acting_user(%Run{} = run) do
+    with {:ok, user, _principal} <- principal_user(revision_of(run)), do: {:ok, user}
   end
 
   @doc "Mark the run behind a session reviewed, if there is one."
@@ -826,12 +916,34 @@ defmodule Troupe.Plane.Triggers do
       "pending_approvals" => session && session.pending_approvals,
       "pending_questions" => session && session.pending_questions,
       "cost_micros" => session && session.cost_micros,
+      # The repository a run on one worked in, and the issue that started it, where GitHub
+      # did: what the Runs screen lists a run by.
+      "repository" => run_repository(run),
+      "issue" => run_issue(run.event),
       # The branch, last commit and draft pull request the run's session left on GitHub.
       "github" => session && session.github,
       "reviewed_by" => run.reviewed_by,
       "reviewed_at" => run.reviewed_at && DateTime.to_iso8601(run.reviewed_at)
     }
   end
+
+  defp run_repository(%Run{event: %{"github" => %{}, "repository" => repository}})
+       when is_binary(repository),
+       do: repository
+
+  defp run_repository(%Run{revision: %Revision{source: source}}) do
+    case Issue.repository(source) do
+      {owner, name} -> "#{owner}/#{name}"
+      nil -> nil
+    end
+  end
+
+  defp run_repository(%Run{}), do: nil
+
+  defp run_issue(%{"github" => %{}, "issue" => %{} = issue}),
+    do: Map.take(issue, ["number", "url", "title"])
+
+  defp run_issue(_event), do: nil
 
   defp revision_number(%Run{revision: %Revision{revision: number}}), do: number
   defp revision_number(%Run{}), do: nil

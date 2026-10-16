@@ -133,6 +133,17 @@ export interface AdminPod {
 
 export interface AdminProfile {
   name: string;
+  size_class?: string | null;
+  max_sessions?: number | null;
+  warm_workers?: number | null;
+  /** What makes these workers exist: `kubernetes`, or `ssh` for machines registered to it. */
+  provisioner?: string | null;
+  /** Each guarantee its substrate does not give for this profile, by name. */
+  missing_guarantees?: string[];
+  /** What stands in for a missing guarantee, which is weaker and not nothing. */
+  guarantees_instead?: Record<string, string>;
+  /** Whether a grant to a team needs a platform admin's say-so first. */
+  unenforced?: boolean;
   replicas: number | null;
   sessions_per_pod: number | null;
   channel: string | null;
@@ -423,6 +434,11 @@ export interface ServicePrincipal {
   name: string | null;
   description: string | null;
   profiles: string[];
+  /** The person answerable for what it does, a member of its team. */
+  sponsor?: string | null;
+  /** `active`, `disabled` (somebody did), or `needs_sponsor` (its sponsor left): three states, not two. */
+  state?: "active" | "disabled" | "needs_sponsor" | string;
+  disabled_reason?: string | null;
   created_by: string | null;
   created_at: string | null;
   disabled_at: string | null;
@@ -475,28 +491,47 @@ export interface TriggerRevision {
   document?: Record<string, unknown>;
 }
 
-/** What `admin.trigger.put` answers: the trigger as it now is, what moved, and its revision. */
+/**
+ * What `admin.trigger.put` answers: the trigger as it now is, what moved, and its revision.
+ * A new webhook trigger is made with its key: `key` and `url` are in this answer once, and
+ * in nothing after it.
+ */
 export interface TriggerPut {
   trigger: Trigger;
   changes: AuditChanges;
   revision: TriggerRevision;
+  key?: string;
+  url?: string;
 }
 
 export interface TriggerRun {
   id: string;
   trigger: string;
+  /** The team whose trigger it is. */
+  team?: string;
   trigger_id: string;
   idempotency_key: string;
   session_id: string | null;
   fired_at: string;
   fired_by: string | null;
+  /** How the firing arrived: schedule, webhook, manual and the rest. */
+  source?: string | null;
+  revision?: number | null;
+  revision_hash?: string | null;
   event: Record<string, unknown> | null;
   state: "created" | "running" | "waiting" | "done" | "failed" | "skipped" | string;
   status: string | null;
   done_reason: string | null;
+  failed_reason?: string | null;
   pending_approvals: number | null;
   pending_questions?: number | null;
   cost_micros: number | null;
+  /** The GitHub repository a run on one worked in, `owner/name`; null for none. */
+  repository?: string | null;
+  /** The issue that started it, where GitHub did. */
+  issue?: { number: number; url: string | null; title: string | null } | null;
+  /** What its session did on GitHub: its branch, its draft pull request and the CI rounds on it. */
+  github?: SessionGitHub | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
 }
@@ -589,6 +624,185 @@ export interface ScimConnector {
   changes?: Record<string, unknown>;
 }
 
+/** One MCP server, and the profiles whose channel's bundle carries it. */
+export interface IntegrationServer {
+  name: string;
+  url: string;
+  credential_mode: "person" | "client_credentials" | string | null;
+  credential_ref: string | null;
+  profiles: string[];
+}
+
+/**
+ * What `admin.integrations.list` answers: servers more than one profile carries and those
+ * one profile does, every host anything dials with whether the cluster's policy allows it
+ * and where it was declared, and each trigger's notification target checked again.
+ */
+export interface Integrations {
+  servers: IntegrationServer[];
+  profile_servers: IntegrationServer[];
+  egress: Array<{ host: string; from: string; allowed: boolean }>;
+  notify: Array<{ team: string; trigger: string; url: string; refusal: string | null }>;
+}
+
+/** The plane's GitHub App as `admin.github.get` answers it: never the key, only whether one is set and which. */
+export interface GitHubApp {
+  configured: boolean;
+  app_id: number | null;
+  api_url: string;
+  git_url: string | null;
+  installations: Array<{ owner: string; installation_id: number }>;
+  private_key: { set: boolean; type: string | null; fingerprint: string | null; transit_key: string; version: number | null };
+  /** Where GitHub sends the App's events, and whether the secret it signs them with is set: its version, never it. */
+  webhook?: { path: string; secret: { set: boolean; transit_key: string; version: number | null } };
+  permissions: Record<string, string>;
+  updated_by: string | null;
+  updated_at: string | null;
+  /** On a put or a delete: the audit's diff, the key as its fingerprint. */
+  changes?: AuditChanges;
+}
+
+/** What `admin.github.put` takes: only the keys sent change, `installations` whole, `private_key` the PEM. */
+export interface GitHubAppChange {
+  app_id?: number | null;
+  api_url?: string | null;
+  installations?: Array<{ owner: string; installation_id: number }>;
+  private_key?: string;
+  /** As typed into the App's webhook settings at GitHub; imported into OpenBao, never shown back. */
+  webhook_secret?: string;
+}
+
+/** One delivery the App's webhook took: GitHub's id, what it was, and what the plane did with it. Never its body. */
+export interface GitHubDelivery {
+  id: string;
+  event: string;
+  action: string | null;
+  received_at: string;
+  outcome: Record<string, unknown> | null;
+}
+
+/** What `admin.github.check` answers: four named checks, and GitHub's name for the App once it answered. */
+export interface GitHubCheck {
+  ok: boolean;
+  checks: IdentityCheck[];
+  app: { slug: string | null; name: string | null } | null;
+}
+
+/** A person in a set that looks like one held twice, with where the row came from. */
+export interface LookalikePerson {
+  id?: string;
+  subject: string;
+  external_id: string | null;
+  user_name: string | null;
+  email: string | null;
+  display_name: string | null;
+  origin: "sign-in" | "scim" | string;
+  [k: string]: unknown;
+}
+
+/**
+ * What `admin.identity.duplicates` answers: people and groups that look like one held
+ * twice, each set with what they share (`by`) and the mismatch it most likely comes from.
+ * Nothing is merged on this; a set may carry more the plane says about it.
+ */
+export interface IdentityDuplicates {
+  people: Array<{ by: string; people: LookalikePerson[]; likely: string; [k: string]: unknown }>;
+  groups: Array<{ by: string; groups: Array<{ external_id: string; display_name: string | null }>; likely: string; [k: string]: unknown }>;
+}
+
+/** What a substrate gives a profile's workers, and what it does not, by name. */
+export interface Provisioner {
+  name: string;
+  guarantees: string[];
+  missing: string[];
+  /** A missing guarantee to what stands in for it. */
+  instead: Record<string, string>;
+}
+
+/** A machine registered to a profile. `secret` and `ca` are in the answer to register and rotate, once. */
+export interface Host {
+  name: string;
+  profile: string;
+  address: string | null;
+  enabled: boolean;
+  registered_at: string | null;
+  last_enrolled_at: string | null;
+  /** `enrolled`, `never_seen` (nobody has installed it yet) or `disabled`. */
+  state: "enrolled" | "never_seen" | "disabled" | string;
+  secret?: string;
+  /** The PEM of the CA the machine pins for the control port. */
+  ca?: string;
+}
+
+/** What draining a pod did: how many sessions it held and moved, and what it cancelled. */
+export interface PodDrained {
+  pod: string;
+  worker_id: string;
+  sessions: number;
+  drained: number | null;
+  cancelled: unknown[];
+  took_ms?: number | null;
+  unreachable?: boolean;
+}
+
+/** One file a repository would hold: its path, its YAML, and anything to decide first. */
+export interface Manifest {
+  name: string;
+  path: string;
+  notes: string[];
+  yaml: string;
+}
+
+/** What `admin.profiles.export` answers: every profile, the cluster policy and every trigger as a repository would hold them. */
+export interface ProfilesExport {
+  profiles: Manifest[];
+  policy: Manifest | null;
+  triggers: Manifest[];
+  /** What no profile's manifest holds, because the plane or the cluster writes it. */
+  left_out: string[];
+}
+
+/**
+ * What `admin.connections.list` answers: each person-mode server with who has connected
+ * a credential to it (whether, never what), and whose identity each session carries.
+ */
+export interface Connections {
+  servers: Array<{ name: string; slot: string | null; profiles: string[]; people: Array<{ subject: string; display_name: string | null; connected: boolean }> }>;
+  sessions: Array<{ id: string; profile: string; team: string; owner: string; state: string }>;
+  credentials_readable: false;
+}
+
+/** One ceiling over a person's spending, as `admin.budget.explain` lists them, narrowest first. */
+export interface Ceiling {
+  scope: "person" | "team" | "platform" | string;
+  budget_micros: number | null;
+  budget_period: string | null;
+  spent_micros: number;
+  reserved_micros: number;
+  remaining_micros: number | "unlimited";
+  /** On the platform's: whether the deployment's cap or the platform's bound. */
+  bound_by?: string | null;
+  [k: string]: unknown;
+}
+
+/** A provider type a profile's `llm.provider` may name, as the protocol's one list has it. */
+export interface ProviderTypeChoice {
+  name: string;
+  label: string;
+  summary: string;
+  url: "own" | "server" | "required" | "none" | string;
+  default_url: string | null;
+  url_example: string | null;
+  key: "required" | "none" | string;
+  key_var: string | null;
+}
+
+/** What `admin.profile.choices` answers: the provider types and the size classes a profile may be. */
+export interface ProfileChoices {
+  provider_types: ProviderTypeChoice[];
+  size_classes: Array<{ name: string; sessions_per_worker: number; summary: string }>;
+}
+
 export interface AdminFilter {
   limit?: number;
   team?: string;
@@ -649,8 +863,74 @@ export class AdminApi {
     return this.rpc("admin.mcp.check", { url });
   }
 
-  drainPod(workerId: string): Promise<unknown> {
-    return this.rpc("admin.pod.drain", { worker_id: workerId });
+  /** The provider types and size classes a profile may be: what its editor offers. */
+  profileChoices(): Promise<ProfileChoices> {
+    return this.rpc<ProfileChoices>("admin.profile.choices", {});
+  }
+
+  /** Every profile, the cluster policy and every trigger as a repository would hold them. A platform admin's. */
+  exportProfiles(): Promise<ProfilesExport> {
+    return this.rpc<ProfilesExport>("admin.profiles.export", {});
+  }
+
+  /** Drain a pod: no new sessions, and what it holds moves. Destructive: confirmed by its worker id. */
+  drainPod(workerId: string): Promise<PodDrained> {
+    return this.rpc<PodDrained>("admin.pod.drain", { worker_id: workerId });
+  }
+
+  /** What each substrate guarantees, and what it does not. */
+  provisioners(): Promise<Provisioner[]> {
+    return this.rpc<Provisioner[]>("admin.provisioners.list", {});
+  }
+
+  /** The machines registered to a profile. A platform admin's. */
+  hosts(profile: string): Promise<Host[]> {
+    return this.rpc<Host[]>("admin.hosts.list", { profile });
+  }
+
+  /** Register a machine. The answer carries its secret and the CA, once. */
+  registerHost(profile: string, host: { name: string; address?: string }): Promise<Host> {
+    return this.rpc<Host>("admin.host.register", { profile, host });
+  }
+
+  /** A new secret for a machine, the old one refused at once. The answer carries it and the CA, once. */
+  rotateHost(profile: string, name: string): Promise<Host> {
+    return this.rpc<Host>("admin.host.rotate", { profile, name });
+  }
+
+  /** Stop a machine enrolling, or let it again. */
+  setHostEnabled(profile: string, name: string, enabled: boolean): Promise<Host> {
+    return this.rpc<Host>("admin.host.enabled", { profile, name, enabled });
+  }
+
+  /** Every MCP server, every host anything dials against the policy, and every notification target. */
+  integrations(): Promise<Integrations> {
+    return this.rpc<Integrations>("admin.integrations.list", {});
+  }
+
+  /** The plane's GitHub App. Never the key. */
+  github(): Promise<GitHubApp> {
+    return this.rpc<GitHubApp>("admin.github.get", {});
+  }
+
+  /** Change the App: only the keys sent. A platform admin's; refused with `data.field` and `data.reason`. */
+  putGithub(app: GitHubAppChange): Promise<GitHubApp> {
+    return this.rpc<GitHubApp>("admin.github.put", { app });
+  }
+
+  /** Ask GitHub whether the App works, writing nothing. */
+  checkGithub(): Promise<GitHubCheck> {
+    return this.rpc<GitHubCheck>("admin.github.check", {});
+  }
+
+  /** The deliveries the App's webhook took, newest first. A platform admin's. */
+  githubDeliveries(limit?: number): Promise<GitHubDelivery[]> {
+    return this.rpc<GitHubDelivery[]>("admin.github.deliveries", limit ? { limit } : {});
+  }
+
+  /** Forget the App. Destructive: confirmed by its App ID. */
+  deleteGithub(appId: number): Promise<GitHubApp> {
+    return this.rpc<GitHubApp>("admin.github.delete", { app_id: appId });
   }
 
   teams(): Promise<AdminTeam[]> {
@@ -661,9 +941,24 @@ export class AdminApi {
     return this.rpc<TeamUpdated>("admin.team.update", { name, attrs: changes });
   }
 
+  /** Set or clear a person's own monthly ceiling, across every team they are in. `null` or 0 clears it. A platform admin's. */
+  personBudget(subject: string, budgetMicros: number | null): Promise<{ subject: string; budget_micros: number | null; changes: AuditChanges }> {
+    return this.rpc("admin.person.budget", { subject, budget_micros: budgetMicros });
+  }
+
+  /** Every ceiling over a person's spending, narrowest first, and which binds. A platform admin's. */
+  budgetExplain(subject: string, team?: string): Promise<Ceiling[]> {
+    return this.rpc<Ceiling[]>("admin.budget.explain", team ? { subject, team } : { subject });
+  }
+
   /** Every group the identity provider has told the plane about: what a team links to. */
   groups(): Promise<AdminGroup[]> {
     return this.rpc("admin.groups.list", {});
+  }
+
+  /** People and groups that look like one held twice, and what most likely makes them so. A platform admin's. */
+  identityDuplicates(): Promise<IdentityDuplicates> {
+    return this.rpc<IdentityDuplicates>("admin.identity.duplicates", {});
   }
 
   /** Make a group a team. A platform admin's; `attrs.name` is the team's name, made from the group's where absent. */
@@ -725,6 +1020,11 @@ export class AdminApi {
   /** Erase a session. Irreversible: confirmed by typing its id. */
   eraseSession(sessionId: string): Promise<SessionErased> {
     return this.rpc<SessionErased>("admin.session.erase", { session_id: sessionId });
+  }
+
+  /** Who has connected a personal credential to which server, and whose identity each session carries. Never a credential. */
+  connections(team?: string): Promise<Connections> {
+    return this.rpc<Connections>("admin.connections.list", team ? { team } : {});
   }
 
   bundles(channel: string): Promise<BundleSummary[]> {
@@ -840,7 +1140,7 @@ export class AdminApi {
   }
 
   /** The only answer that ever carries `secret`. Show it once and store it nowhere. */
-  createPrincipal(team: string, principal: { name: string; description?: string; profiles: string[] }): Promise<ServicePrincipal> {
+  createPrincipal(team: string, principal: { name: string; description?: string; profiles: string[]; sponsor?: string }): Promise<ServicePrincipal> {
     return this.rpc<ServicePrincipal>("admin.principal.create", { team, principal });
   }
 
@@ -874,8 +1174,14 @@ export class AdminApi {
     return this.rpc<TriggerRun>("admin.trigger.run", { team, name });
   }
 
-  runs(filter: AdminFilter & { team: string }): Promise<TriggerRun[]> {
+  /** One team's runs where `team` is named, every team the caller administers where it is not. */
+  runs(filter: AdminFilter & { team?: string } = {}): Promise<TriggerRun[]> {
     return this.rpc<TriggerRun[]>("admin.runs.list", { filter });
+  }
+
+  /** Mark the run behind a session as read, by whoever is asking. */
+  reviewRun(sessionId: string): Promise<{ session_id: string; reviewed_by: string }> {
+    return this.rpc("admin.run.review", { session_id: sessionId });
   }
 }
 

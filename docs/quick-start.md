@@ -221,7 +221,7 @@ runs on its Kubernetes cluster, and it adds:
   that starts on a schedule.
 - **An audit trail** of every administrative change, with its diff, which can say whether it
   has been altered.
-- **A [console](glossary.md#console)** at `/admin` for all of it.
+- **A [console](glossary.md#console)** at `/console` for all of it.
 
 ![The admin console's teams page: example teams, the identity-provider groups they draw their members from, and the profiles each may run](assets/admin-console.png)
 

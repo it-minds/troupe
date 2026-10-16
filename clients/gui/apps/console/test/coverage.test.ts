@@ -1,8 +1,8 @@
 // Every administrative method the plane serves is reached from a screen of this console,
-// or owed with the area it belongs on and a reason (`src/owed.ts`). The plane's own
-// `console_coverage_test` holds the LiveView console to the same rule; this one holds the
-// new console, so that a method added to the plane is a question somebody answers here
-// rather than a capability nobody can click.
+// or owed with the area it belongs on and a reason (`src/owed.ts`), and the plane's own
+// placement of each (`Troupe.Plane.Admin.Console`, which its `console_coverage_test` holds
+// to every method) is kept here on the same area. A method added to the plane is a
+// question somebody answers here rather than a capability nobody can click.
 //
 // Read from the files rather than trusted: the plane's method table, the client's one
 // call per method, and the console's own sources. A screen reaches a method when it calls
@@ -12,7 +12,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { AREAS } from "../src/nav";
+import { AREAS, NAV } from "../src/nav";
 import { OWED } from "../src/owed";
 
 const gui = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -57,33 +57,17 @@ function reached(): Map<string, string[]> {
   return found;
 }
 
-/** What `Troupe.Plane.Admin.Console.owed/0` says the LiveView console owes, by function and screen. */
-function liveViewOwes(): Array<{ fn: string; screen: string }> {
+/** Where the plane places each context function: an area of this console's map, by its id. */
+function placements(): Array<{ fn: string; area: string }> {
   const text = readFileSync(join(plane, "console.ex"), "utf8");
-  const body = /def owed do([\s\S]*?)\n {2}end/.exec(text)?.[1] ?? "";
-  const map = /%\{([^}]*)\}/.exec(body)?.[1] ?? "";
-  return [...map.matchAll(/([a-z_]+):\s*:([a-z_]+)/g)].map((m) => ({ fn: m[1]!, screen: m[2]! }));
+  return [...text.matchAll(/^\s+([a-z_]+):\s*\{:area,\s*:([a-z_]+)\}/gm)].map((m) => ({ fn: m[1]!, area: m[2]! }));
 }
 
-// The LiveView console's screens, as this console's map names the same places.
-const AREA_OF_SCREEN: Record<string, string> = {
-  overview: "overview",
-  sessions: "sessions",
-  review: "runs",
-  audit: "audit",
-  policy: "policy",
-  bundles: "bundles",
-  profiles: "profiles",
-  triggers: "triggers",
-  teams: "teams",
-  identity: "identity",
-  provider: "signin",
-  integrations: "integrations",
-  fleet: "pods",
-  provisioners: "hosts",
-  budgets: "budgets",
-  connections: "connections",
-};
+/** The plane's copy of this console's map: its four groups and their areas, in order. */
+function planeAreas(): Array<{ group: string; areas: string[] }> {
+  const text = readFileSync(join(plane, "console.ex"), "utf8");
+  return [...text.matchAll(/@(watch|configure|operate|govern)\s+~w\(([^)]*)\)a/g)].map((m) => ({ group: m[1]!, areas: m[2]!.trim().split(/\s+/) }));
+}
 
 const owed = new Map(OWED.flatMap((o) => o.methods.map((m) => [m, o] as const)));
 
@@ -122,15 +106,26 @@ describe("the console covers the plane's administrative surface", () => {
     }
   });
 
-  it("honours what the LiveView console owes this one: done here, or owed on the same area", () => {
+  it("draws the same map the plane places its methods on", () => {
+    const groups = planeAreas();
+    expect(groups.map((g) => g.group), "Admin.Console's groups could not be read").toEqual(["watch", "configure", "operate", "govern"]);
+    expect(groups.map((g) => ({ group: g.group, areas: g.areas }))).toEqual(NAV.map((g) => ({ group: g.label.toLowerCase(), areas: g.areas.map((a) => a.id) })));
+  });
+
+  it("keeps every placement the plane makes: called from a screen here, or owed on that area", () => {
     const byFunction = new Map([...served()].map(([method, fn]) => [fn, method]));
     const here = reached();
-    const owes = liveViewOwes();
-    expect(owes.length, "Admin.Console.owed/0 could not be read").toBeGreaterThan(0);
-    const dropped = owes
-      .map(({ fn, screen }) => ({ method: byFunction.get(fn) ?? fn, area: AREA_OF_SCREEN[screen] ?? screen }))
+    const placed = placements();
+    expect(placed.length, "Admin.Console's placements could not be read").toBeGreaterThan(60);
+    const broken = placed
+      .map(({ fn, area }) => ({ method: byFunction.get(fn) ?? fn, area }))
       .filter(({ method, area }) => !here.has(method) && owed.get(method)?.area !== area)
-      .map(({ method, area }) => `${method} is owed on ${area} by the LiveView console, and neither reached nor owed there here`);
-    expect(dropped).toEqual([]);
+      .map(({ method, area }) => `${method} is placed on ${area} by the plane, and neither reached nor owed there here`);
+    expect(broken).toEqual([]);
+    const elsewhere = [...owed]
+      .map(([method, o]) => ({ method, o, at: placed.find((p) => byFunction.get(p.fn) === method)?.area }))
+      .filter(({ o, at }) => at !== undefined && at !== o.area)
+      .map(({ method, o, at }) => `${method} is owed on ${o.area} here and placed on ${at} by the plane`);
+    expect(elsewhere).toEqual([]);
   });
 });

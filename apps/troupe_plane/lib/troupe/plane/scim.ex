@@ -49,18 +49,57 @@ defmodule Troupe.Plane.SCIM do
   `active: false` deactivates the person as `deactivate_user/1` does, whether the resource
   came as a `POST` or a `PUT`.
   """
-  @spec put_user(map()) :: {:ok, User.t()} | {:error, term()}
+  @spec put_user(map()) :: {:ok, User.t()} | {:error, error()}
   def put_user(resource) do
-    external_id = Map.get(resource, "externalId")
+    attrs = user_attrs(resource)
 
-    save_user(%{
-      subject: subject_for(subject_of(resource), external_id),
-      external_id: external_id,
+    with {:ok, subject} <- unreserved(subject_of(resource)),
+         {:ok, subject} <- subject_for(subject, attrs) do
+      save_user(Map.put(attrs, :subject, subject))
+    end
+  end
+
+  @doc """
+  Replace the user the plane gave this id with a SCIM User resource, which is what a `PUT`
+  to `/Users/<id>` does (RFC 7644 §3.5.1).
+
+  The resource at that id, and nobody else: a body that would key the person on another
+  subject, a different `externalId` or, without one, a different `userName`, is refused as
+  a `PATCH` that would is, rather than applied to whoever that subject names.
+  """
+  @spec replace_user(String.t(), map()) :: {:ok, User.t()} | {:error, error()}
+  def replace_user(id, resource) do
+    changes = user_attrs(resource)
+
+    with {:ok, user} <- fetch_user(id),
+         {:ok, _subject} <- unreserved(subject_of(resource)),
+         :ok <- same_person(user, changes) do
+      update_user(user, changes)
+    end
+  end
+
+  defp user_attrs(resource) do
+    %{
+      external_id: Map.get(resource, "externalId"),
       user_name: Map.get(resource, "userName"),
       email: primary_email(resource),
       display_name: display_name(resource),
       active: Map.get(resource, "active", true)
-    })
+    }
+  end
+
+  # The plane's own subjects: a removed person's sessions are owned by `removed:<id>` and a
+  # service principal is `svc:<team>/<name>`, and a sign-in under either is refused. A
+  # person pushed under one could never sign in, and would be named where those are.
+  @reserved ["removed:", "svc:"]
+
+  defp unreserved(subject) do
+    if String.starts_with?(subject, @reserved) do
+      detail = "#{inspect(subject)} is in a namespace the plane keeps for itself"
+      {:error, {"invalidValue", detail <> " (removed: and svc:), and no person's subject"}}
+    else
+      {:ok, subject}
+    end
   end
 
   @doc """
@@ -121,14 +160,38 @@ defmodule Troupe.Plane.SCIM do
   # The subject a push keys the person on. Somebody nobody is under, who carries an
   # `externalId` a row already has, is that row's person: one a sign-in moved to another
   # claim's value keeps the `externalId` SCIM gave them, and a push that made them again
-  # under it was a second row for one person.
-  defp subject_for(subject, external_id) do
-    with nil <- Identity.get_user(subject),
-         %User{subject: moved} <- Identity.get_user_by_external_id(external_id) do
-      moved
-    else
-      _found_or_nobody -> subject
+  # under it was a second row for one person. Only when the row's email or `userName`
+  # agrees with the push's, as a sign-in's must (`Identity.adoption/3`); otherwise the
+  # push is refused, since a second row cannot hold the same `externalId`, and the pair
+  # waits for an administrator.
+  defp subject_for(subject, %{external_id: external_id} = attrs) do
+    case Identity.adoption(subject, external_id, attrs) do
+      :none -> {:ok, subject}
+      {:adopt, %User{subject: moved}} -> {:ok, moved}
+      {:refused, held} -> refuse_adoption(held, subject)
     end
+  end
+
+  defp refuse_adoption(held, subject) do
+    Logger.warning(
+      "troupe plane: SCIM pushed externalId #{subject}, which the row #{held.id} " <>
+        "(under #{held.subject}) holds, and neither the email nor the userName it sent " <>
+        "agrees with the row's; refused, and admin.identity.duplicates lists it"
+    )
+
+    {:ok, _} =
+      Audit.record("scim", "person.adopt_refused", subject, %{
+        "subject" => subject,
+        "row" => held.id,
+        "row_subject" => held.subject,
+        "via" => "scim"
+      })
+
+    {:error,
+     {"uniqueness",
+      "externalId #{subject} is held by user #{held.id}, whose email and userName both " <>
+        "differ from this push's, so nothing was merged: make one of them agree, or fix " <>
+        "the externalId mapping (the pair is in the plane's admin.identity.duplicates)"}}
   end
 
   @doc """

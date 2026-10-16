@@ -539,7 +539,14 @@ jobs:
             echo "the operator is not given ca.crt alone from the control certificate's Secret"
             exit 1
           fi
+          # TLS only by default, and so TLS off alone is TLS-only without TLS.
+          if ! helm template troupe charts/troupe --show-only templates/plane-deployment.yaml \
+              | grep -q 'name: TROUPE_PLANE_CONTROL_REQUIRE_TLS'; then
+            echo "the plane does not take TLS only by default"
+            exit 1
+          fi
           for bad in "--set plane.controlTls.requireTls=true --set plane.controlTls.enabled=false" \
+              "--set plane.controlTls.enabled=false" \
               "--set-string plane.controlTls.requireTls=false"; do
             # shellcheck disable=SC2086
             if helm template troupe charts/troupe $bad >/dev/null 2>&1; then

@@ -32,7 +32,7 @@ defmodule Troupe.Plane.Login do
 
     with {:ok, subject} <- fetch_subject(claims, claim),
          :ok <- rekey(claims, claim, subject),
-         :ok <- adopt(subject, claim),
+         :ok <- adopt(subject, claim, claims),
          {:ok, user} <- upsert(subject, claims),
          :ok <- sync_groups(user, groups_in(claims)) do
       {:ok, user, Identity.teams_for(user)}
@@ -88,17 +88,52 @@ defmodule Troupe.Plane.Login do
   # row's person: SCIM names a person by the value the subject claim carries, and their row
   # is under another value only because a sign-in under another claim moved it there. They
   # are moved back once, here, as a re-key moves anybody, rather than made a second time.
-  defp adopt(subject, claim) do
-    with nil <- Identity.get_user(subject),
-         %User{subject: old} <- Identity.get_user_by_external_id(subject) do
-      case Identity.rekey(old, subject) do
-        {:ok, :none} -> :ok
-        {:ok, outcome} -> announce(outcome, old, subject, claim)
-        {:error, reason} -> {:error, {:rekey_failed, reason}}
-      end
-    else
-      _known_or_nobody -> :ok
+  #
+  # Only when the row's email or `userName` agrees with the token's too. The `externalId`
+  # alone is one provisioning attribute, and mapped wrongly it would hand somebody else's
+  # row, sessions and administration to this token. Refused, the token signs in as a row
+  # of its own, and the pair is left for an administrator (`admin.identity.duplicates`).
+  defp adopt(subject, claim, claims) do
+    carried = %{
+      email: Map.get(claims, "email"),
+      user_name: Map.get(claims, "preferred_username") || Map.get(claims, "upn")
+    }
+
+    case Identity.adoption(subject, subject, carried) do
+      :none ->
+        :ok
+
+      {:adopt, %User{subject: old}} ->
+        case Identity.rekey(old, subject) do
+          {:ok, :none} -> :ok
+          {:ok, outcome} -> announce(outcome, old, subject, claim)
+          {:error, reason} -> {:error, {:rekey_failed, reason}}
+        end
+
+      {:refused, held} ->
+        refuse_adoption(held, subject, claim)
     end
+  end
+
+  # The identifiers and nothing the token said about the person, as for a move.
+  defp refuse_adoption(held, subject, claim) do
+    Logger.warning(
+      "troupe plane: a sign-in under #{subject}, the #{claim} claim, found the row SCIM " <>
+        "gave that externalId (#{held.id}, under #{held.subject}), and neither its email " <>
+        "nor its userName agrees with the token's; it signs in as a row of its own, and " <>
+        "admin.identity.duplicates lists the pair"
+    )
+
+    {:ok, _} =
+      Audit.record(subject, "person.adopt_refused", subject, %{
+        "subject" => subject,
+        "row" => held.id,
+        "row_subject" => held.subject,
+        "via" => "sign-in",
+        "claim" => claim
+      })
+
+    :ok
   end
 
   # The two identifiers and the claim's name, and nothing else the token said: this is a

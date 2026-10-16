@@ -139,6 +139,12 @@ defmodule Troupe.Plane.Admin.API do
       type: :string,
       description:
         "The App's private key, the PEM file GitHub downloads, as text. Imported into OpenBao's transit engine as a key that cannot be exported; a key already there gets this one as its next version, and the plane signs with the newest. Blank or absent leaves the key as it is."
+    },
+    %Argument{
+      name: "webhook_secret",
+      type: :string,
+      description:
+        "The secret typed into the App's webhook settings, at least 32 characters (openssl rand -hex 32 makes one). Imported into OpenBao's transit engine as an HMAC key that cannot be exported, and checked against every delivery's X-Hub-Signature-256 at POST /webhook/github. A secret already there gets this one as its next version. Blank or absent leaves it as it is."
     }
   ]
 
@@ -309,7 +315,7 @@ defmodule Troupe.Plane.Admin.API do
           values: Trigger.source_kinds(),
           required: true,
           description:
-            "schedule (fired by cron), webhook (fired at POST /trigger/<id> with its own key, or by an executor outside the plane) or manual (fired only by hand)."
+            "schedule (fired by cron), webhook (fired at POST /trigger/<id> with its own key, minted when the trigger is created and answered once; or, naming a repository, by the GitHub App's signed deliveries) or manual (fired only by hand)."
         },
         %Argument{
           name: "cron",
@@ -326,7 +332,32 @@ defmodule Troupe.Plane.Admin.API do
         %Argument{
           name: "provider",
           type: :string,
-          description: "For a webhook: who sends it, for the executor that receives it."
+          description:
+            "For a webhook: who sends it, for the executor that receives it; github for a trigger on a repository."
+        },
+        %Argument{
+          name: "repository",
+          type: :string,
+          description:
+            "For a webhook from GitHub: the repository, owner/name, one the plane's GitHub App is installed on and the profile declares the Git host for. Its sessions are created with it, and the trigger is fired by the App's deliveries, with no key."
+        },
+        %Argument{
+          name: "label",
+          type: :string,
+          description:
+            "For a trigger on a repository: an issue given this label starts a run (issues.labeled)."
+        },
+        %Argument{
+          name: "command",
+          type: :string,
+          description:
+            "For a trigger on a repository: a comment on an issue whose first line is this, such as /troupe fix, by the repository's owner, a member or a collaborator, starts a run (issue_comment.created)."
+        },
+        %Argument{
+          name: "ref",
+          type: :string,
+          description:
+            "For a trigger on a repository: the branch its sessions clone. The default branch where absent."
         }
       ]
     },
@@ -403,6 +434,13 @@ defmodule Troupe.Plane.Admin.API do
       function: :profiles_list,
       summary:
         "Every profile, with its pods, conditions and load. On a gitops plane each carries `gitops`: the repository it comes from, the resource generation it was read at, and any problem the last pass reported — `refused` (the resource fails the plane's checks and is not used, with the reasons), `missing` (a row the cluster has no resource for), `plane_only` (nothing applies it from a repository yet) or `unwritten`. A refused resource with no row is listed too.",
+      risk: :read
+    },
+    %Method{
+      name: "admin.profile.choices",
+      function: :profile_choices,
+      summary:
+        "What a profile's fields may be: every provider type llm.provider may name, with what each asks for (where it is, whether it needs a key), and every size class with how many sessions share a worker and what it is for. The lists the plane checks a profile against, so a form offers no choice it would refuse.",
       risk: :read
     },
     %Method{
@@ -1233,6 +1271,45 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.github.check",
+      function: :github_check,
+      summary:
+        "Test the plane's GitHub App without changing it: an App ID is set, OpenBao transit signs with its key, GitHub knows the App by the JWT that key signs, and every installation set here is one GitHub lists for it. Four named checks, each with what it found, and GitHub's slug and name for the App once GitHub has answered.",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
+      name: "admin.github.deliveries",
+      function: :github_deliveries,
+      summary:
+        "The deliveries the App's webhook took, newest first: GitHub's id for each (X-GitHub-Delivery), its event and action, when it came, and what the plane did with it (the runs it fired, the session it resumed, or why neither). Never a body.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "limit",
+          type: :integer,
+          required: false,
+          description: "How many, newest first: 50 when absent, 200 at most."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.github.delete",
+      function: :github_delete,
+      summary:
+        "Forget the plane's GitHub App: its App ID, API URL, installations, and which key version and webhook secret version are its own. A session naming a repository is refused from then on, a pod is given no token for one, and a delivery to /webhook/github is refused. The key and the secret stay in OpenBao transit, unused. Confirmed by the App ID.",
+      risk: :destructive,
+      confirm: "app_id",
+      arguments: [
+        %Argument{
+          name: "app_id",
+          type: :integer,
+          required: true,
+          description: "The App ID, typed back to confirm."
+        }
+      ]
+    },
+    %Method{
       name: "admin.identity.check",
       function: :identity_check,
       summary:
@@ -1360,7 +1437,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.trigger.put",
       function: :trigger_put,
       summary:
-        "Create or update a trigger. Refused on a gitops plane as managed_by_gitops, switching one on or off included: there a repository holds the triggers, and a change is a commit to it.",
+        "Create or update a trigger. A new webhook trigger is made with its key: the answer carries key and url once, and nothing shows the key again (a trigger on a GitHub repository needs none). Refused on a gitops plane as managed_by_gitops, switching one on or off included: there a repository holds the triggers, and a change is a commit to it.",
       risk: :write,
       arguments: [
         %Argument{

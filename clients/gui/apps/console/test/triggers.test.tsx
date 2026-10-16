@@ -69,7 +69,9 @@ describe("a trigger", () => {
     expect(says("pr-reviewer")).toBe(true);
     expect(says("2026-10-13 03:00 UTC")).toBe(true);
     expect(says("Revision 1")).toBe(true);
-    expect(link("current console's Triggers page")!.href).toBe(`${fake.plane.baseUrl}/admin/triggers/core`);
+    // Running it and minting its key are named as the plane's methods, and no page under /admin is.
+    expect(says("admin.trigger.run")).toBe(true);
+    expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);
   });
 
   it("is made from a form, previewed, and shown as the audit recorded it", async () => {
@@ -135,6 +137,70 @@ describe("a trigger", () => {
     button("Resume weekly-digest")!.click();
     await waitFor(() => says("Recorded in the audit as trigger.put on design/weekly-digest"), "the audit's note");
     expect(trigger("design", "weekly-digest")!.enabled).toBe(true);
+  });
+});
+
+describe("a webhook's key and a trigger on a GitHub repository", () => {
+  async function newTrigger(name: string): Promise<void> {
+    await open("#/triggers/core");
+    (await waitFor(() => button("New trigger"), "core's triggers")).click();
+    type(await waitFor(() => field("Name"), "the form"), name);
+    const principal = await waitFor(() => (field("Runs as") as HTMLSelectElement | null)?.querySelector('option[value="svc:core/nightly"]') && field("Runs as"), "the principals");
+    type(principal, "svc:core/nightly");
+    type(field("Profile")!, "dev");
+  }
+
+  it("makes a webhook trigger with its key, shown once with a button that copies it", async () => {
+    let copied: string | null = null;
+    Object.defineProperty(globalThis.navigator, "clipboard", { value: { writeText: async (text: string) => void (copied = text) }, configurable: true });
+
+    await newTrigger("deploys");
+    type(field("Fired by")!, "webhook");
+    button("Preview")!.click();
+    await waitFor(() => says("It is made with its webhook key, which is shown once"), "the preview");
+    button("Create deploys")!.click();
+
+    const panel = await waitFor(() => document.querySelector<HTMLElement>("section.key-once"), "the key");
+    const key = panel.querySelector("code.secret")!.textContent!;
+    expect(key).toMatch(/^twk_/);
+    expect(says("it is not shown again", panel)).toBe(true);
+    expect(says(`${fake.plane.baseUrl}/trigger/trg-core-deploys`, panel)).toBe(true);
+    expect(trigger("core", "deploys")!.has_key).toBe(true);
+    expect(fake.admin.audit.find((a) => a.action === "trigger.put" && a.subject_id === "core/deploys")?.detail?.["__key_minted__"]).toBe(true);
+
+    button("Copy the key", panel)!.click();
+    await waitFor(() => says("Copied.", panel), "copied");
+    expect(copied).toBe(key);
+
+    button("I have copied it", panel)!.click();
+    await waitFor(() => !document.querySelector("section.key-once"), "the key, gone");
+    expect(says(key)).toBe(false);
+
+    // Its page says only that it has one.
+    visit("#/triggers/core/deploys");
+    await waitFor(() => heading() === "deploys" && says("Webhook key"), "deploys");
+    expect(says(key)).toBe(false);
+  });
+
+  it("makes a trigger on a GitHub repository, fired by a label or a command, with no key", async () => {
+    await newTrigger("fix-issues");
+    type(field("Fired by")!, "github");
+    type(await waitFor(() => field("Repository"), "the GitHub fields"), "not a repository");
+    await waitFor(() => says("owner/name, as GitHub writes it."), "the repository refused");
+    expect(button("Preview")!.disabled).toBe(true);
+    type(field("Repository")!, "example-org/widgets");
+    await waitFor(() => button("Preview")!.disabled, "a label or a command still wanted");
+    type(field("Label")!, "troupe-fix");
+    type(field("Command")!, "/troupe fix");
+    await waitFor(() => !button("Preview")!.disabled, "the form complete");
+    button("Preview")!.click();
+    await waitFor(() => says("by GitHub on example-org/widgets: an issue labelled troupe-fix, or a comment saying /troupe fix"), "the preview");
+    expect(says("it has no key")).toBe(true);
+    button("Create fix-issues")!.click();
+    await waitFor(() => says("Recorded in the audit as trigger.put on core/fix-issues"), "the audit's note");
+    expect(document.querySelector("section.key-once")).toBeNull();
+    expect(trigger("core", "fix-issues")!.source).toEqual({ kind: "webhook", provider: "github", repository: "example-org/widgets", label: "troupe-fix", command: "/troupe fix" });
+    expect(trigger("core", "fix-issues")!.has_key).toBe(false);
   });
 });
 

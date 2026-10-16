@@ -41,13 +41,21 @@ defmodule Troupe.Plane.GitHub do
   round the session's pushes are closed: the record says it stopped, and a write token is
   minted from then on with `contents: read`, so a pod could not push if it tried. The
   pull request stays a draft for a person.
+
+  ## GitHub as the trigger
+
+  The App's webhook secret is in transit beside its key (`GitHub.WebhookSecret`), and the
+  deliveries it signs reach `POST /webhook/github` (`GitHub.Webhook`): an issue starts a run
+  of a trigger on its repository (`GitHub.Issue`), and a review on a run's draft resumes
+  its session (`GitHub.Review`), whose comments the plane reads here
+  (`review_comments/3`).
   """
 
   import Ecto.Changeset
   import Ecto.Query, only: [from: 2]
 
   alias Troupe.Plane.{Audit, Fleet, Repo}
-  alias Troupe.Plane.GitHub.{App, Key}
+  alias Troupe.Plane.GitHub.{App, Key, WebhookSecret}
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Policy
 
@@ -177,6 +185,16 @@ defmodule Troupe.Plane.GitHub do
         transit_key: Key.name(),
         version: row.key_version
       },
+      # Where GitHub sends the App's events, and whether the secret it signs them with is
+      # in transit: its version there, never the secret.
+      webhook: %{
+        path: "/webhook/github",
+        secret: %{
+          set: not is_nil(row.webhook_secret_version),
+          transit_key: WebhookSecret.name(),
+          version: row.webhook_secret_version
+        }
+      },
       permissions: @permissions,
       updated_by: row.updated_by,
       updated_at: row.updated_at
@@ -185,8 +203,9 @@ defmodule Troupe.Plane.GitHub do
 
   @doc """
   Change the App. Only the keys sent change: `app_id` and `api_url` (`null` puts the API
-  back to GitHub's own), `installations` as the whole list, and `private_key` as the PEM
-  GitHub downloads, which is imported into transit and not kept anywhere else.
+  back to GitHub's own), `installations` as the whole list, `private_key` as the PEM
+  GitHub downloads, and `webhook_secret` as typed into the App's webhook settings; the key
+  and the secret are imported into transit and not kept anywhere else.
 
   Everything is checked before anything is written, the key last of all: a refusal names
   the field and says why, and leaves the App as it was. Answers the App as it was and as
@@ -203,10 +222,12 @@ defmodule Troupe.Plane.GitHub do
     with :ok <- only(attrs),
          {:ok, changes} <- read_fields(attrs),
          {:ok, pem} <- read_key(attrs),
-         {:ok, key} <- import_key(pem, opts) do
+         {:ok, secret} <- read_webhook_secret(attrs),
+         {:ok, key} <- import_key(pem, opts),
+         {:ok, webhook} <- import_webhook_secret(secret, opts) do
       stored =
         row
-        |> change(Map.merge(changes, key))
+        |> change(changes |> Map.merge(key) |> Map.merge(webhook))
         |> put_change(:updated_by, actor)
         |> Repo.insert_or_update!()
 
@@ -216,11 +237,209 @@ defmodule Troupe.Plane.GitHub do
 
   def put(_attrs, _actor, _opts), do: {:error, %{field: "app", reason: "the App is an object"}}
 
-  @fields ~w(app_id api_url installations private_key)
+  @fields ~w(app_id api_url installations private_key webhook_secret)
 
   @doc "The keys `put/3` reads, as `admin.github.put` declares them."
   @spec keys() :: [String.t()]
   def keys, do: @fields
+
+  @doc """
+  The deliveries the App's webhook took, newest first, at most `limit`: GitHub's id for
+  each, its event and action, when it came, and what the plane did with it. Never a body.
+  """
+  @spec deliveries(pos_integer()) :: [map()]
+  def deliveries(limit) do
+    from(d in Troupe.Plane.GitHub.Delivery, order_by: [desc: d.received_at], limit: ^limit)
+    |> Repo.all()
+    |> Enum.map(&Map.take(&1, [:id, :event, :action, :received_at, :outcome]))
+  end
+
+  @doc """
+  Forget the App: its id, API URL and installations, and which transit key version is its
+  own. Answers the App as it was, or `:not_configured` where there was none.
+
+  The key itself stays in transit, where nothing can take a copy and nothing signs with
+  it once the row is gone; an App set again with a key of the same type imports it as the
+  next version. A session that names a repository is refused from now on, and one that
+  has a pod asks for a token it is not given.
+  """
+  @spec delete() :: {:ok, map()} | {:error, :not_configured}
+  def delete do
+    case stored() do
+      nil ->
+        {:error, :not_configured}
+
+      row ->
+        Repo.delete!(row)
+        {:ok, describe(row)}
+    end
+  end
+
+  @doc """
+  Whether the App works, asked of GitHub with the App's own JWT and writing nothing: an
+  App id is set, transit signs with its key, GitHub knows the App by that JWT, and every
+  installation the plane was given is one GitHub lists for it. A check that cannot be
+  tried because one before it failed says so. Answers `%{ok, checks, app}`, where `app`
+  is GitHub's slug and name for it once GitHub has answered.
+  """
+  @spec check(keyword()) :: %{ok: boolean(), checks: [map()], app: map() | nil}
+  def check(opts \\ []) do
+    row = stored() || %App{id: App.id()}
+    {checks, app} = check_steps(row, opts)
+    %{ok: Enum.all?(checks, & &1.ok), checks: checks, app: app}
+  end
+
+  defp check_steps(%App{app_id: nil}, _opts) do
+    {[
+       result("App", false, "No App ID is set.", 0),
+       not_tried("Private key", "App"),
+       not_tried("GitHub", "App"),
+       not_tried("Installations", "App")
+     ], nil}
+  end
+
+  defp check_steps(%App{} = row, opts) do
+    app_check = result("App", true, "App #{row.app_id}, at #{api_url(row)}.", 0)
+
+    {signed, took} =
+      timed(fn -> if row.key_version, do: jwt(row, opts), else: {:error, :no_key} end)
+
+    case signed do
+      {:ok, jwt} ->
+        key_check =
+          result(
+            "Private key",
+            true,
+            "Transit signs with version #{row.key_version} (#{row.key_fingerprint}).",
+            took
+          )
+
+        steps = ask_github(row, jwt)
+        {[app_check, key_check | Enum.reject(steps, &Map.has_key?(&1, :app))], found_app(steps)}
+
+      {:error, reason} ->
+        {[
+           app_check,
+           result("Private key", false, explain(reason), took),
+           not_tried("GitHub", "Private key"),
+           not_tried("Installations", "Private key")
+         ], nil}
+    end
+  end
+
+  # GitHub's answer for the App and for its installations, each as a check, with the App's
+  # slug and name carried beside them for the answer.
+  defp ask_github(row, jwt) do
+    {app, took} = timed(fn -> github_get(row, "/app", jwt) end)
+
+    case app do
+      {:ok, %{"id" => id} = body} when id == row.app_id ->
+        named = %{slug: body["slug"], name: body["name"]}
+        github = result("GitHub", true, "GitHub knows the App as #{body["slug"] || id}.", took)
+        [github, installations_check(row, jwt), %{app: named}]
+
+      {:ok, %{"id" => id}} ->
+        [
+          result("GitHub", false, "GitHub answered for App #{id}, not #{row.app_id}.", took),
+          not_tried("Installations", "GitHub")
+        ]
+
+      {:error, {:github_api, _path, 401, _message}} ->
+        [
+          result(
+            "GitHub",
+            false,
+            "GitHub refused the App's JWT: the key is not App #{row.app_id}'s, or the App ID is wrong.",
+            took
+          ),
+          not_tried("Installations", "GitHub")
+        ]
+
+      {:error, reason} ->
+        [result("GitHub", false, explain(reason), took), not_tried("Installations", "GitHub")]
+    end
+  end
+
+  defp installations_check(%App{installations: given} = row, jwt) do
+    given = given || []
+    {listed, took} = timed(fn -> github_get(row, "/app/installations", jwt) end)
+
+    case listed do
+      {:ok, list} when is_list(list) ->
+        known = MapSet.new(list, &{to_string(get_in(&1, ["account", "login"])), &1["id"]})
+        missing = Enum.reject(given, &MapSet.member?(known, {&1["owner"], &1["installation_id"]}))
+
+        cond do
+          given == [] ->
+            result(
+              "Installations",
+              false,
+              "No installation is set, so nothing can be cloned.",
+              took
+            )
+
+          missing == [] ->
+            result(
+              "Installations",
+              true,
+              "GitHub lists every installation set here: #{Enum.map_join(given, ", ", & &1["owner"])}.",
+              took
+            )
+
+          true ->
+            result(
+              "Installations",
+              false,
+              "GitHub lists no installation of the App for " <>
+                Enum.map_join(missing, ", ", &"#{&1["owner"]} (#{&1["installation_id"]})") <> ".",
+              took
+            )
+        end
+
+      {:ok, _other} ->
+        result("Installations", false, "GitHub's answer was not a list of installations.", took)
+
+      {:error, reason} ->
+        result("Installations", false, explain(reason), took)
+    end
+  end
+
+  defp found_app(steps), do: Enum.find_value(steps, &Map.get(&1, :app))
+
+  defp not_tried(name, after_check),
+    do: result(name, false, "Not tried: #{after_check} did not pass.", 0)
+
+  defp result(name, ok, detail, took), do: %{name: name, ok: ok, detail: detail, took_ms: took}
+
+  defp timed(fun) do
+    started = System.monotonic_time(:millisecond)
+    answer = fun.()
+    {answer, System.monotonic_time(:millisecond) - started}
+  end
+
+  # A read of GitHub's App API as the App: the JWT in the header and nowhere else.
+  defp github_get(row, path, jwt) do
+    url = api_url(row) <> path
+
+    case Req.request(
+           method: :get,
+           url: url,
+           headers: [
+             {"authorization", "Bearer " <> jwt},
+             {"accept", "application/vnd.github+json"},
+             {"x-github-api-version", "2022-11-28"},
+             {"user-agent", "troupe-plane"}
+           ],
+           redirect: false,
+           retry: false,
+           receive_timeout: 15_000
+         ) do
+      {:ok, %{status: 200, body: body}} -> {:ok, body}
+      {:ok, %{status: status, body: body}} -> {:error, {:github_api, path, status, message(body)}}
+      {:error, %{reason: reason}} -> {:error, {:github_unreachable, URI.parse(url).host, reason}}
+      {:error, reason} -> {:error, {:github_unreachable, URI.parse(url).host, reason}}
+    end
+  end
 
   defp only(attrs) do
     case Map.keys(attrs) -- @fields do
@@ -365,6 +584,37 @@ defmodule Troupe.Plane.GitHub do
     end
   end
 
+  # The webhook secret as the App's settings on GitHub have it. Blank leaves it as it is,
+  # as a blank key does; the webhook is turned off on GitHub.
+  defp read_webhook_secret(%{"webhook_secret" => secret}) when secret in [nil, ""],
+    do: {:ok, nil}
+
+  defp read_webhook_secret(%{"webhook_secret" => secret}) do
+    case WebhookSecret.read(secret) do
+      :ok -> {:ok, secret}
+      {:error, reason} -> {:error, %{field: "webhook_secret", reason: reason}}
+    end
+  end
+
+  defp read_webhook_secret(_attrs), do: {:ok, nil}
+
+  defp import_webhook_secret(nil, _opts), do: {:ok, %{}}
+
+  defp import_webhook_secret(secret, opts) do
+    case WebhookSecret.import(secret, opts) do
+      {:ok, version} ->
+        {:ok, %{webhook_secret_version: version}}
+
+      {:error, reason} ->
+        {:error,
+         %{field: "webhook_secret", reason: "OpenBao did not take the secret: #{explain(reason)}"}}
+    end
+  end
+
+  @doc "The App's row, or `nil` where there is none or it could not be read."
+  @spec app() :: App.t() | nil
+  def app, do: stored()
+
   defp stored do
     Repo.get(App, App.id())
   rescue
@@ -501,6 +751,23 @@ defmodule Troupe.Plane.GitHub do
       installation -> {:ok, installation}
     end
   end
+
+  @doc """
+  Whether a delivery that names this owner and installation is about one of this plane's
+  installations: the App is configured here, and the installation it lists for the owner
+  is the one the delivery names.
+  """
+  @spec installed?(term(), term()) :: boolean()
+  def installed?(owner, installation_id) when is_binary(owner) and is_integer(installation_id) do
+    with {:ok, app} <- configured(),
+         {:ok, installation} <- installation_for(app, owner) do
+      installation["installation_id"] == installation_id
+    else
+      _ -> false
+    end
+  end
+
+  def installed?(_owner, _installation_id), do: false
 
   # A pod reaches the hosts its profile declares and no others, so a repository on a host
   # the profile does not name is refused here rather than left to time out on the pod.
@@ -652,6 +919,89 @@ defmodule Troupe.Plane.GitHub do
 
   defp message(%{"message" => message}) when is_binary(message), do: message
   defp message(_body), do: nil
+
+  # -- a review on a session's pull request -------------------------------------
+
+  # The most of a review's comments the plane reads: one page, which is more than a review
+  # that a session could take in one turn.
+  @review_comments 50
+
+  @doc """
+  The comments of one review on a session's pull request, oldest first, each
+  `{path, line, body, author}`: what a review that resumes the session says beside its
+  body. Read by the plane with a token of its own, narrowed to the session's repository and
+  `pull_requests: read`, an hour long and audited as `github.token` for the session's
+  owner; the token is used for this one request and kept nowhere.
+  """
+  @spec review_comments(Session.t(), pos_integer(), pos_integer()) ::
+          {:ok, [map()]} | {:error, term()}
+  def review_comments(
+        %Session{repository: %{"owner" => owner, "name" => name}} = session,
+        number,
+        review_id
+      )
+      when is_integer(number) and is_integer(review_id) do
+    permissions = %{"pull_requests" => "read"}
+
+    with {:ok, app} <- configured(),
+         {:ok, installation} <- installation_for(app, owner),
+         {:ok, jwt} <- jwt(app),
+         {:ok, token, expires_at} <- exchange(app, installation, name, permissions, jwt) do
+      {:ok, _} =
+        Audit.record(
+          "github",
+          "github.token",
+          "#{owner}/#{name}",
+          %{
+            "session_id" => session.id,
+            "permissions" => permissions,
+            "expires_at" => expires_at,
+            "for" => "review #{review_id} on pull request #{number}"
+          },
+          on_behalf_of: session.owner_subject
+        )
+
+      url =
+        "#{api_url(app)}/repos/#{owner}/#{name}/pulls/#{number}/reviews/#{review_id}/comments"
+
+      case Req.request(
+             method: :get,
+             url: url,
+             params: [per_page: @review_comments],
+             headers: [
+               {"authorization", "Bearer " <> token},
+               {"accept", "application/vnd.github+json"},
+               {"x-github-api-version", "2022-11-28"},
+               {"user-agent", "troupe-plane"}
+             ],
+             redirect: false,
+             retry: false,
+             receive_timeout: 15_000
+           ) do
+        {:ok, %{status: 200, body: comments}} when is_list(comments) ->
+          {:ok, Enum.map(comments, &review_comment/1)}
+
+        {:ok, %{status: status, body: body}} ->
+          {:error, {:github, status, message(body), owner, name}}
+
+        {:error, reason} ->
+          {:error, {:github_unreachable, URI.parse(url).host, reason}}
+      end
+    end
+  end
+
+  def review_comments(%Session{}, _number, _review_id), do: {:error, :no_repository}
+
+  defp review_comment(comment) when is_map(comment) do
+    %{
+      "path" => comment["path"],
+      "line" => comment["line"] || comment["original_line"],
+      "body" => comment["body"],
+      "author" => get_in(comment, ["user", "login"])
+    }
+  end
+
+  defp review_comment(_other), do: %{"body" => nil}
 
   # -- what a session did there -----------------------------------------------
 
@@ -900,6 +1250,7 @@ defmodule Troupe.Plane.GitHub do
 
   def explain(:no_repository), do: "the session names no repository"
   def explain(:no_key), do: "the App's private key is not in OpenBao"
+  def explain(:no_secret), do: "the App's webhook secret is not in OpenBao"
 
   def explain({:github, 401, message, _owner, _name}),
     do:
@@ -918,6 +1269,12 @@ defmodule Troupe.Plane.GitHub do
 
   def explain({:github, status, message, _owner, _name}),
     do: "GitHub answered #{status}#{if message, do: " (#{message})"}"
+
+  def explain({:github_api, path, 404, _message}),
+    do: "GitHub has no #{path} here: the API URL is not a GitHub API's"
+
+  def explain({:github_api, path, status, message}),
+    do: "GitHub answered #{status} for #{path}#{if message, do: " (#{message})"}"
 
   def explain({:github_unreachable, host, reason}),
     do: "GitHub at #{host} could not be reached: #{inspect(reason)}"

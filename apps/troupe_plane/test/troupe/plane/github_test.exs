@@ -214,6 +214,124 @@ defmodule Troupe.Plane.GitHubTest do
     end
   end
 
+  describe "checking the App" do
+    test "passes each check against GitHub, with the App's name, and writes nothing", context do
+      configure(context)
+
+      assert {:ok, check} = API.call("admin.github.check", %{}, @root)
+      assert check.ok
+
+      assert Enum.map(check.checks, & &1.name) == [
+               "App",
+               "Private key",
+               "GitHub",
+               "Installations"
+             ]
+
+      assert Enum.all?(check.checks, & &1.ok)
+      assert check.app == %{slug: "troupe-test", name: "troupe-test"}
+      assert Audit.list(kind: "github") |> Enum.map(& &1.action) == ["github.put"]
+    end
+
+    test "says which check failed and does not try the ones after it", context do
+      assert {:ok, %{ok: false, checks: [app | rest]}} = Admin.github_check(@root)
+      refute app.ok
+      assert Enum.all?(rest, &(not &1.ok and &1.detail =~ "Not tried"))
+
+      # A key GitHub does not hold for the App: the plane signs, and GitHub refuses it.
+      configure(context)
+      FakeGitHub.app(context.fake, @app_id, rsa_key())
+
+      assert {:ok, %{ok: false, checks: checks}} = Admin.github_check(@root)
+      assert [true, true, false, false] == Enum.map(checks, & &1.ok)
+      assert Enum.at(checks, 2).detail =~ "refused the App's JWT"
+    end
+
+    test "names an installation GitHub does not list for the App", context do
+      configure(context)
+
+      {:ok, _} =
+        Admin.github_put(@root, %{
+          "installations" => [
+            %{"owner" => "example-org", "installation_id" => @installation},
+            %{"owner" => "other-org", "installation_id" => 9}
+          ]
+        })
+
+      assert {:ok, %{ok: false, checks: checks}} = Admin.github_check(@root)
+      installations = List.last(checks)
+      refute installations.ok
+      assert installations.detail =~ "other-org (9)"
+    end
+
+    test "is a platform admin's", context do
+      assert {:error, refused} = API.call("admin.github.check", %{}, @lead)
+      assert refused.data.required_role == "platform_admin"
+      _ = context
+    end
+  end
+
+  describe "the webhook's deliveries" do
+    test "are listed newest first, without a body, to a platform admin", context do
+      for {id, minutes} <- [{"d-old", 10}, {"d-new", 1}] do
+        Repo.insert!(%Troupe.Plane.GitHub.Delivery{
+          id: id,
+          event: "issues",
+          action: "opened",
+          received_at: DateTime.add(DateTime.utc_now(), -minutes * 60, :second),
+          outcome: %{"runs" => [], "reason" => "no trigger names the repository"}
+        })
+      end
+
+      assert {:ok, [newest, oldest]} = API.call("admin.github.deliveries", %{}, @root)
+      assert newest.id == "d-new" and oldest.id == "d-old"
+      assert newest.event == "issues" and newest.action == "opened"
+      assert newest.outcome["reason"] =~ "no trigger"
+      refute Map.has_key?(newest, :body)
+
+      assert {:ok, [_one]} = API.call("admin.github.deliveries", %{"limit" => 1}, @root)
+
+      assert {:error, refused} = API.call("admin.github.deliveries", %{}, @lead)
+      assert refused.data.required_role == "platform_admin"
+      _ = context
+    end
+  end
+
+  describe "removing the App" do
+    test "is confirmed by its id, forgets it, and is audited by the key's fingerprint", context do
+      configure(context)
+
+      assert {:error, refused} = API.call("admin.github.delete", %{"app_id" => 1}, @root)
+      assert refused.data.app_id == @app_id
+      assert GitHub.describe().configured
+
+      assert {:ok, now} = API.call("admin.github.delete", %{"app_id" => @app_id}, @root)
+      refute now.configured
+      assert now.app_id == nil
+      assert now.installations == []
+      refute now.private_key.set
+      assert now.changes["fingerprint"] == %{"from" => fingerprint(context.key), "to" => nil}
+
+      [audit | _] = Audit.list(kind: "github")
+      assert audit.action == "github.delete"
+      refute_key(audit.detail, pem(context.key))
+
+      # A session that names a repository is refused now, and saying so names the fix.
+      assert {:error, reason} = GitHub.repository("example-org/widgets", "dev")
+      assert GitHub.explain(reason) =~ "no GitHub App"
+
+      assert {:error, missing} = API.call("admin.github.delete", %{"app_id" => @app_id}, @root)
+      assert missing.message == "not_found"
+    end
+
+    test "is a platform admin's", context do
+      configure(context)
+      assert {:error, refused} = API.call("admin.github.delete", %{"app_id" => @app_id}, @lead)
+      assert refused.data.required_role == "platform_admin"
+      assert GitHub.describe().configured
+    end
+  end
+
   describe "an installation token" do
     test "is for the session's one repository, read-only, an hour long, and logged nowhere",
          context do

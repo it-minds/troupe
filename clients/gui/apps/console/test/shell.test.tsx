@@ -73,12 +73,20 @@ describe("the shell", () => {
     expect(css.slice(0, css.indexOf("@media (max-width: 760px)"))).toMatch(/\.rail \.menu\s*\{[^}]*display:\s*none/);
   });
 
-  it("links an area it does not draw yet to the same area in the plane's current console", async () => {
+  it("says how an area it does not draw yet is done meanwhile, and points at no other console", async () => {
     await open();
-    link("Integrations", rail())!.click();
-    await waitFor(() => heading() === "Integrations", "the area");
+    link("Company memory", rail())!.click();
+    await waitFor(() => heading() === "Company memory", "the area");
     expect(says("Not in this console yet")).toBe(true);
-    expect(link("Integrations in the current console")!.href).toBe(`${fake!.plane.baseUrl}/admin/integrations`);
+    expect(says("troupe admin")).toBe(true);
+    // The plane's pages under /admin are its break-glass page: nothing here leads there.
+    expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);
+  });
+
+  it("draws every area the plane places a method on, leaving only company memory", async () => {
+    await open();
+    const later = [...rail().querySelectorAll("a.later")].map((a) => (a.textContent ?? "").replace(/\s*○.*$/, "").trim());
+    expect(later).toEqual(["Company memory"]);
   });
 
   it("opens straight at a deep link, a team's tab included, and keeps it across a reload", async () => {
@@ -91,7 +99,7 @@ describe("the shell", () => {
   });
 
   it("does not open an area by its address for a role it is hidden from", async () => {
-    visit("#/integrations");
+    visit("#/hosts");
     await open(PEOPLE.bob);
     await waitFor(() => heading() === "Overview", "the Overview instead");
   });

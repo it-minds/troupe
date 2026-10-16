@@ -133,6 +133,17 @@ defmodule Troupe.Worker.Sessions do
     with_manager(session_id, &Manager.go_dormant/1)
   end
 
+  @doc "The epoch a session is up at on this pod, or `nil` where it is not up here."
+  @spec epoch(String.t()) :: pos_integer() | nil
+  def epoch(session_id) do
+    case whereis(session_id) do
+      nil -> nil
+      pid -> Manager.status(pid).epoch
+    end
+  catch
+    :exit, _gone -> nil
+  end
+
   @doc "Tell a session it has been fenced, if this pod has it."
   @spec fence(String.t(), pos_integer()) :: :ok
   def fence(session_id, epoch) do

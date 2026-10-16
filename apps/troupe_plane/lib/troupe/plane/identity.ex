@@ -15,7 +15,8 @@ defmodule Troupe.Plane.Identity do
   import Ecto.Query
 
   alias Ecto.Multi
-  alias Troupe.Plane.{Drain, Principals, Repo, Sessions, Settings}
+  alias Troupe.Plane.{Drain, Ledger, Principals, Repo, Sessions, Settings}
+  alias Troupe.Plane.Ledger.UsageRecord
 
   alias Troupe.Plane.Identity.{
     Entitlement,
@@ -293,6 +294,38 @@ defmodule Troupe.Plane.Identity do
   def get_user_by_external_id(value), do: Repo.get_by(User, external_id: value)
 
   @doc """
+  Whether a sign-in or a push under `subject` may take over the row SCIM gave `external_id`.
+
+  `:none` when somebody is under the subject already or no row carries the `externalId`;
+  then there is nothing to adopt. Otherwise the row is adopted only when its email or its
+  `userName` agrees, ignoring case, with what the sign-in or push carries: an `externalId`
+  is one provisioning attribute, and a wrong mapping of it alone would hand one person's
+  row, with their sessions, shares and administration, to whoever signs in under that
+  value. Nothing carried, nothing agrees.
+  """
+  @spec adoption(String.t(), String.t() | nil, map()) ::
+          :none | {:adopt, User.t()} | {:refused, User.t()}
+  def adoption(subject, external_id, carried) do
+    with nil <- get_user(subject),
+         %User{} = held <- get_user_by_external_id(external_id) do
+      agrees? =
+        same_text?(held.email, carried[:email]) or
+          same_text?(held.user_name, carried[:user_name])
+
+      if agrees?, do: {:adopt, held}, else: {:refused, held}
+    else
+      _known_or_nobody -> :none
+    end
+  end
+
+  defp same_text?(a, b) when is_binary(a) and is_binary(b) do
+    a = a |> String.trim() |> String.downcase()
+    a != "" and a == b |> String.trim() |> String.downcase()
+  end
+
+  defp same_text?(_a, _b), do: false
+
+  @doc """
   Remove a person the identity provider removed, leaving a tombstone.
 
   Their row goes, so a lookup by the id the provider holds answers nobody and nobody signs
@@ -343,7 +376,10 @@ defmodule Troupe.Plane.Identity do
 
     :ok = Sessions.drop_access(user.subject, by)
     {:ok, stopped} = Principals.sponsor_left(user.subject)
-    sessions = Sessions.hand_to_removed(user.subject, Tombstone.marker(tombstone))
+    marker = Tombstone.marker(tombstone)
+    sessions = Sessions.hand_to_removed(user.subject, marker)
+    notified_by = drop_from_notify(user.subject)
+    :ok = hand_spend_to(user.subject, marker)
 
     Repo.delete!(user)
 
@@ -354,8 +390,56 @@ defmodule Troupe.Plane.Identity do
        "sessions" => sessions,
        "parked" => length(parked),
        "team_admin_of" => administered,
-       "principals_stopped" => Enum.map(stopped, & &1.subject)
+       "principals_stopped" => Enum.map(stopped, & &1.subject),
+       "notified_by" => notified_by
      }}
+  end
+
+  # A trigger's `notify` names whom each run lets in. Left there, somebody provisioned
+  # later under the same subject would be let into the next run as the removed person
+  # was, so they come off every list; the run already fired stays as it was.
+  defp drop_from_notify(subject) do
+    names =
+      Repo.all(
+        from(t in "triggers",
+          where: fragment("? = ANY(?)", ^subject, t.notify),
+          order_by: t.name,
+          select: t.name
+        )
+      )
+
+    Repo.update_all(
+      from(t in "triggers",
+        where: fragment("? = ANY(?)", ^subject, t.notify),
+        update: [set: [notify: fragment("array_remove(?, ?)", t.notify, ^subject)]]
+      ),
+      []
+    )
+
+    names
+  end
+
+  # What they spent and still hold is theirs, and counts toward their teams' totals as it
+  # did, but no longer under the subject: a person's cap reads this month's spend by
+  # subject, and somebody arriving under it later starts with none.
+  defp hand_spend_to(subject, marker) do
+    teams =
+      Repo.all(
+        from(u in UsageRecord,
+          where: u.owner_subject == ^subject,
+          distinct: true,
+          select: u.team_id
+        )
+      )
+
+    for table <- ["usage_records", "budget_reservations"] do
+      Repo.update_all(from(r in table, where: r.owner_subject == ^subject),
+        set: [owner_subject: marker]
+      )
+    end
+
+    # A team's spend by person is remembered for a minute, and it now says the marker.
+    Enum.each(teams, &Ledger.Cache.invalidate/1)
   end
 
   @doc """
@@ -505,17 +589,63 @@ defmodule Troupe.Plane.Identity do
 
   defp people_alike do
     users = list_users()
-    by_email = alike(users, & &1.email)
+    refused = refused_adoptions()
+    held = Enum.map(refused, & &1.rows)
+    by_email = users |> alike(& &1.email) |> Enum.reject(&within?(&1, held))
 
     by_name =
       users
       |> alike(& &1.display_name)
-      |> Enum.reject(fn rows -> Enum.any?(by_email, &subset?(rows, &1)) end)
+      |> Enum.reject(&within?(&1, by_email ++ held))
 
     claim = Settings.get("subject_claim")
 
-    Enum.map(by_email, &person_set(&1, "email", claim)) ++
+    Enum.map(refused, &refused_set/1) ++
+      Enum.map(by_email, &person_set(&1, "email", claim)) ++
       Enum.map(by_name, &person_set(&1, "display_name", claim))
+  end
+
+  defp within?(rows, sets), do: Enum.any?(sets, &subset?(rows, &1))
+
+  # The adoptions `adoption/3` refused that still stand: the row SCIM gave the `externalId`
+  # is still under another subject, so nothing has settled the pair since. Read from the
+  # audit trail, where each refusal is, because a refused push leaves no second row behind
+  # to find; a sign-in leaves its own, under the subject, and it is listed beside the row.
+  defp refused_adoptions do
+    from(e in "audit_events",
+      where: e.action == "person.adopt_refused",
+      order_by: [desc: e.occurred_at],
+      limit: 500,
+      select: e.detail
+    )
+    |> Repo.all()
+    |> Enum.uniq_by(&{&1["subject"], &1["row"]})
+    |> Enum.flat_map(fn detail ->
+      subject = detail["subject"]
+
+      case get_user_by_id(detail["row"]) do
+        %User{external_id: ^subject, subject: other} = row when other != subject ->
+          rows = Enum.reject([row, get_user(subject)], &is_nil/1)
+          [%{rows: rows, via: detail["via"], subject: subject}]
+
+        _settled ->
+          []
+      end
+    end)
+    |> Enum.uniq_by(&Enum.map(&1.rows, fn row -> row.id end))
+  end
+
+  defp refused_set(%{rows: rows, via: via, subject: subject}) do
+    likely =
+      case via do
+        "scim" ->
+          "SCIM pushed externalId #{subject}, which this row holds, but neither the email nor the userName it sent agrees with the row's, so the push was refused and nothing merged: if they are one person, make the email or userName agree at the provider; if not, the provider's externalId mapping gives two people one value"
+
+        _sign_in ->
+          "a sign-in under #{subject} found this row by its SCIM externalId, but neither the email nor the userName its token carried agrees with the row's, so it was given a row of its own: if they are one person, make the email or userName agree at the provider; if not, the provider's externalId mapping gives two people one value"
+      end
+
+    %{by: "external_id", people: Enum.map(rows, &person_entry/1), likely: likely}
   end
 
   @doc "The groups half of `lookalikes/0`: groups sharing a display name under different ids."
@@ -569,16 +699,13 @@ defmodule Troupe.Plane.Identity do
           "they signed in under two subjects: the #{claim} claim changed for them, or two accounts share the #{String.replace(by, "_", " ")}"
       end
 
-    %{
-      by: by,
-      people:
-        Enum.map(users, fn user ->
-          user
-          |> Map.take([:id, :subject, :external_id, :user_name, :email, :display_name])
-          |> Map.put(:origin, origin(user))
-        end),
-      likely: likely
-    }
+    %{by: by, people: Enum.map(users, &person_entry/1), likely: likely}
+  end
+
+  defp person_entry(user) do
+    user
+    |> Map.take([:id, :subject, :external_id, :user_name, :email, :display_name])
+    |> Map.put(:origin, origin(user))
   end
 
   # A push writes `userName` whatever else it sends, and a sign-in writes neither.

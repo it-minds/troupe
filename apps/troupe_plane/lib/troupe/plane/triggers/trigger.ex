@@ -13,8 +13,12 @@ defmodule Troupe.Plane.Triggers.Trigger do
   the other half of that: somebody else's system, told when a run ends. What may go in it
   is narrow on purpose — see `Troupe.Plane.Triggers.Notify`.
 
+  A webhook trigger whose source names a **GitHub repository** is the App's: GitHub's
+  signed deliveries fire it (`Troupe.Plane.GitHub.Webhook`), on an issue's label or a
+  member's command, and its sessions are created with that repository.
+
   A trigger may hold a **key of its own**, hashed as a principal's secret is, which is
-  the whole of what `POST /trigger/<id>` accepts. It is narrower than any other
+  the whole of what `POST /trigger/<id>` accepts. A webhook trigger is made with one. It is narrower than any other
   credential the plane has: it fires this one trigger and does nothing else, which is
   what makes it the thing to give a CI job. The key is never readable after the rotation
   that minted it — the columns hold a hash and a salt, and neither reconstructs it.
@@ -24,6 +28,7 @@ defmodule Troupe.Plane.Triggers.Trigger do
 
   import Ecto.Changeset
 
+  alias Troupe.Plane.GitHub.Issue
   alias Troupe.Plane.Triggers.{Cron, Notify, Source}
 
   @primary_key {:id, :binary_id, autogenerate: true}
@@ -140,13 +145,19 @@ defmodule Troupe.Plane.Triggers.Trigger do
 
   # A schedule needs a cron the scheduler can read, in UTC because there is no time zone
   # database in this release; a webhook names its provider and is otherwise the
-  # executor's business.
+  # executor's business, unless it names a GitHub repository, which makes it the App's and
+  # its shape the plane's (`GitHub.Issue`).
   defp validate_source(changeset) do
     case get_field(changeset, :source) do
       %{"kind" => "schedule"} = source ->
         changeset
         |> validate_cron(source["cron"])
         |> validate_tz(source["tz"])
+
+      %{"kind" => "webhook", "repository" => _} = source ->
+        source
+        |> Issue.source_problems()
+        |> Enum.reduce(changeset, &add_error(&2, :source, &1))
 
       %{"kind" => kind} when kind in @source_kinds ->
         changeset

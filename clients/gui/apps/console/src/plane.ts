@@ -127,7 +127,3 @@ export function restorePlace(): void {
   }
 }
 
-/** Where the plane's current console is, for the areas this one does not cover yet. */
-export function currentConsole(planeUrl: string, path: string): string {
-  return `${planeUrl.replace(/\/+$/, "")}/admin${path}`;
-}

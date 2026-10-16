@@ -27,11 +27,12 @@ const STATE: Record<string, { kind: StatusKind; glyph: string; word: string }> =
   erasure_pending: { kind: "denied", glyph: "✕", word: "erasure pending" },
 };
 
-export function Sessions(): JSX.Element {
+/** `query` is what the search starts with: a run's page links to its session by id. */
+export function Sessions({ query: initial = "" }: { query?: string } = {}): JSX.Element {
   const { admin, me, notify } = useConsole();
   const [state, setState] = useState("");
   const [profile, setProfile] = useState("");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initial);
   const [page, setPage] = useState(0);
   const [erasing, setErasing] = useState<AdminSessionRow | null>(null);
   const [done, setDone] = useState<{ id: string; answer: SessionErased; detail: Record<string, unknown> | null } | null>(null);

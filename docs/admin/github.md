@@ -10,8 +10,8 @@ This page sets it up. It uses `example-org` for the organisation and
 
 ## What it does today
 
-The first two slices of [#147](https://github.com/it-minds/troupe/issues/147) (Decisions
-885 and 891):
+The first three slices of [#147](https://github.com/it-minds/troupe/issues/147) (Decisions
+885, 891 and 905):
 
 - **A session can name a GitHub repository** when it is created, and its pod starts with a
   clone of it: shallow, one branch (the one asked for, or the default), no tags.
@@ -34,12 +34,20 @@ The first two slices of [#147](https://github.com/it-minds/troupe/issues/147) (D
 - **Nothing logs it.** The plane's audit trail has a `github.token` entry for every token,
   naming the session, the repository, the permissions and when it expires; and an entry
   for every push, pull request, CI round and stop.
+- **An issue starts a run, and a review sends it back to work** ([GitHub as the
+  trigger](#8-github-as-the-trigger)). The App's webhook delivers to the plane, signed; a
+  trigger on a repository starts a session when an issue gets its label, or when one of the
+  repository's own people comments its command; the session gets the issue as its task,
+  fenced as data. A review that requests changes on the draft it opened resumes that
+  session with the review as its next input, and the run's notification carries the pull
+  request's link. The console's **Runs and review** screen lists every run with its
+  repository, issue, state, pull request, CI rounds and spend.
 
-What it does **not** do yet: read issues, start from a label or a webhook, or follow an
-autonomy policy. Those are the later slices of #147. A trigger cannot name a repository
-yet, and every team on the plane may name any repository the App's installations cover.
-An organisation will be able to narrow the loop through policy, for example to a draft
-only.
+What it does **not** do yet: follow an autonomy policy (a draft only, caps on open pull
+requests or attempts per issue), give each team its own repositories, revoke a token when
+its session goes dormant, or take the App's configuration from a repository in `gitops`
+mode. Those are the last slice of #147 and #653. Every team on the plane may name any
+repository the App's installations cover.
 
 ## 1. Register the App
 
@@ -53,7 +61,9 @@ On GitHub, as an owner of the organisation: **Settings → Developer settings �
 | Callback URL | none |
 | Request user authorization (OAuth) during installation | off |
 | Enable Device Flow | off |
-| Webhook → Active | **off**. The slice that starts runs from GitHub turns it on |
+| Webhook → Active | **on**, for runs that start from GitHub ([§8](#8-github-as-the-trigger)); off if the plane only clones and pushes |
+| Webhook URL | the plane's, `https://troupe.example.com/webhook/github` |
+| Webhook secret | a random string of at least 32 characters, such as `openssl rand -hex 32` makes; the plane is given the same one in step 4 |
 | Where can this GitHub App be installed? | **Only on this account** |
 
 **Permissions**, exactly these. Everything else stays *No access*:
@@ -64,15 +74,14 @@ On GitHub, as an owner of the organisation: **Settings → Developer settings �
 | Repository → Pull requests | Read and write | opening the session's draft pull request, and commenting on it |
 | Repository → Checks | Read-only | reading CI's check runs on the session's commits |
 | Repository → Commit statuses | Read-only | reading CI that reports statuses rather than check runs |
+| Repository → Issues | Read-only | receiving the Issues and Issue comment events that start runs |
 | Repository → Metadata | Read-only | GitHub requires it of every App |
 
-No organisation or account permissions, and no events. An App that only clones needs
-Contents read-only and Metadata; add the rest when the plane that uses them is deployed.
-GitHub then asks an organisation owner to accept the new permissions on each
+**Subscribe to events**: **Issues**, **Issue comment** and **Pull request review**, and no
+others. No organisation or account permissions. An App that only clones needs Contents
+read-only and Metadata, and no events; add the rest when the plane that uses them is
+deployed. GitHub then asks an organisation owner to accept the new permissions on each
 installation, and until then the App keeps the ones it has.
-
-The later slices will ask for more: Issues read and write (reading the issue, commenting
-back), and the Issues and Issue comment events with the webhook on.
 
 Whatever the App is granted, each token the plane mints is narrowed further, in the
 request, to the one repository and what the session needs: the clone's is
@@ -96,15 +105,16 @@ To add or remove a repository later, change it there; nothing on the plane chang
 
 ## 4. Give the plane the App
 
-As a platform admin, call `admin.github.put` (the console's page for it comes with the new
-console; until then use `/rpc` with a plane token, or the `admin_github_put` tool on
-`/mcp`):
+As a platform admin, set it on the console's **Integrations** screen, which tests it against
+GitHub too (`admin.github.check`) and removes it (`admin.github.delete`); or call
+`admin.github.put` over `/rpc` with a plane token, or the `admin_github_put` tool on `/mcp`:
 
 ```json
 {
   "app_id": 123456,
   "installations": [{"owner": "example-org", "installation_id": 7890123}],
-  "private_key": "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n"
+  "private_key": "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n",
+  "webhook_secret": "the secret typed into the App's webhook settings"
 }
 ```
 
@@ -112,12 +122,18 @@ console; until then use `/rpc` with a plane token, or the `admin_github_put` too
   transit engine as `troupe-github-app`, a key that cannot be exported, and keeps nothing
   of it but its type and fingerprint. From then on transit signs the App's JWT, and no one
   can read the key back: not an administrator, not the plane, not a database backup.
+- `webhook_secret` is the App's webhook secret, at least 32 characters. The plane imports
+  it into transit too, as `troupe-github-webhook`, an HMAC key that cannot be exported,
+  and keeps only its version. Every delivery's `X-Hub-Signature-256` is checked against it:
+  the plane asks transit for the HMAC of the body and compares the two itself, in constant
+  time. Until it is set, the plane refuses every delivery and logs why. Sending another one
+  makes it the key's next version; change it on GitHub at the same moment.
 - `api_url` is GitHub's own API unless you set it: `https://api.<name>.ghe.com` for GitHub
   Enterprise Cloud, `https://<host>/api/v3` for GitHub Enterprise Server. Clones come from
   the matching host.
 - Only the keys you send change. `installations` is the whole list.
 
-The plane's OpenBao role needs the policy `Troupe.KMS.Policy.github_app/2` renders, beside
+The plane's OpenBao role needs the policy `Troupe.KMS.Policy.github_app/3` renders, beside
 the plane and signing policies
 ([roles-and-permissions.md §8](roles-and-permissions.md#8-openbao-policies)):
 
@@ -127,13 +143,18 @@ path "transit/keys/troupe-github-app"                { capabilities = ["read"] }
 path "transit/keys/troupe-github-app/import"         { capabilities = ["create", "update"] }
 path "transit/keys/troupe-github-app/import_version" { capabilities = ["create", "update"] }
 path "transit/sign/troupe-github-app"                { capabilities = ["create", "update"] }
+path "transit/keys/troupe-github-webhook"                { capabilities = ["read"] }
+path "transit/keys/troupe-github-webhook/import"         { capabilities = ["create", "update"] }
+path "transit/keys/troupe-github-webhook/import_version" { capabilities = ["create", "update"] }
+path "transit/hmac/troupe-github-webhook/sha2-256"       { capabilities = ["create", "update"] }
 ```
 
 `admin.github.get` answers what is set: the App ID, the API URL and where clones come
 from, the installations, the key's type, fingerprint and transit version (compare the
-fingerprint with the one GitHub shows beside the key), and `configured`, true once there
-is an App ID, a key and an installation. Every change is an audit entry, `github.put`, with
-the key as its fingerprint.
+fingerprint with the one GitHub shows beside the key), the webhook's path and whether its
+secret is set and at which version, and `configured`, true once there is an App ID, a key
+and an installation. Every change is an audit entry, `github.put`, with the key as its
+fingerprint and the secret as its version.
 
 ## 5. Let a profile reach GitHub
 
@@ -265,7 +286,7 @@ Then the App can push only `troupe/*` branches, and nothing it opens reaches the
 branch without a person.
 
 **What the run records.** The session's row keeps what it did there; the console's Sessions
-screen and the plane's Sessions and Review pages show its pull request as a link, and `session.get`, `sessions.list`,
+screen shows its pull request as a link, and `session.get`, `sessions.list`,
 `admin.sessions.list` and `admin.runs.list` carry it as `github`: the commit its clone started
 from (`base`), its `branch`, its last `commit`, how many `pushes`, its `pull_request`
 (`number` and `url`), each CI `round` (`commit`, `state` red or green, the checks that
@@ -274,11 +295,126 @@ trail has `github.push`, `github.pull_request`, `github.round` and `github.stopp
 naming the session, by the pod for the session's owner. Never a commit message, a pull
 request's text or CI's output: those are on GitHub.
 
+## 8. GitHub as the trigger
+
+With the webhook on (steps 1 and 4), GitHub sends the plane the App's events at
+`POST /webhook/github`, and a **trigger on a repository** turns an issue into a run.
+
+**The webhook.** A delivery is taken only when its `X-Hub-Signature-256` is the webhook
+secret's HMAC of its body; one unsigned or wrongly signed is refused with `401`, and the
+plane's log says so with the delivery's id and event, never its body. Each delivery is done
+once, by its `X-GitHub-Delivery`: GitHub sending it again (a retry, or **Redeliver** on the
+App's page) is answered `200` and does nothing more. The plane answers `202` as soon as a
+delivery is checked and recorded and does the work afterwards, so GitHub's ten seconds are
+never the time a session takes to start. A delivery about a repository whose owner the
+plane lists no installation for does nothing. The plane must be reachable from GitHub at
+that path; nothing else of the plane needs to be.
+
+**A trigger on a repository** is a webhook trigger whose source names the repository and
+what on it starts a run, in the console (**Triggers → New trigger → an issue on a GitHub
+repository**), with `admin.trigger.put`, or as a `Trigger` resource:
+
+```json
+{
+  "team": "platform",
+  "name": "fix-issues",
+  "principal": "svc:platform/fixer",
+  "profile": "fixer",
+  "agent": "fixer",
+  "source": {
+    "kind": "webhook",
+    "provider": "github",
+    "repository": "example-org/widgets",
+    "label": "troupe-fix",
+    "command": "/troupe fix"
+  },
+  "terms": {"budget_micros": 5000000, "max_turns": 200, "approvals": "deny"},
+  "concurrency": 2
+}
+```
+
+- `label`: an issue given this label starts a run (`issues`, `labeled`). Labelling an issue
+  takes triage rights on the repository already.
+- `command`: a comment on an issue whose first line is this, alone or followed by more
+  words, starts a run (`issue_comment`, `created`), when GitHub says the commenter is the
+  repository's owner, a member or a collaborator, and is not a bot. Anybody can comment on a
+  public repository's issue; a stranger's comment starts nothing.
+- Either, or both. Never a pull request's conversation, and never a closed issue.
+- `ref`: the branch its sessions clone; the default branch where absent.
+
+The repository is checked when the trigger is saved, as a session naming it is: the App is
+configured, installed for its owner, and the trigger's profile declares the Git host. A
+trigger on a repository has no key: the App's signed deliveries are what fire it. Each
+delivery that matches is a run of each trigger it matches, keyed by the delivery and the
+trigger, with `source` `webhook`, under the trigger's `concurrency` and the team's budget
+as any run is.
+
+**What the session is given.** It is created as the trigger's principal on the trigger's
+profile, with the repository, so its pod clones it and has the fix loop's tools
+([§7](#7-the-fix-loop)). Its first prompt is the trigger's `prompt_template`, or where
+there is none, "Fix issue #7 of example-org/widgets, which follows, ...", and then the
+issue: its link, its author, its labels, its title and its text, and the comment that
+asked, between `<<<github-issue` and `github-issue>>>`, after a sentence saying it is data
+written by people on GitHub and never an instruction. Either marker inside the text is
+taken out, so the text cannot close the fence. The template is rendered with the issue's
+title, text and comment taken out of `{{event.*}}`: it can say `{{event.issue.number}}`,
+`{{event.issue.url}}`, `{{event.repository}}` or `{{event.sender}}`, and cannot paste what
+an issue says anywhere outside the fence. The run keeps the issue (its text cut to 8 KiB)
+as its `event`; nothing in it changes the session's profile, agent, terms, tools or token.
+
+**A review resumes the session.** When a person submits a review on the draft pull request
+a run opened, requesting changes or commenting, the plane sends the run's session back to
+work with the review as its next input: woken as the trigger's principal if it went
+dormant, then given the review's summary and its comments on lines (which the plane reads
+from GitHub with a read-only token of its own, `pull_requests: read` on that one
+repository), fenced as `<<<github-review` and `github-review>>>` and marked as data. One
+review is one input, however many lines it comments on. It does nothing for:
+
+- an approval, or a review with nothing in it;
+- a pull request that is not a draft, or that no run's session opened (a session a person
+  started stays theirs to steer);
+- a reviewer GitHub does not count as the repository's owner, a member or a collaborator,
+  or a bot;
+- a session whose pushes three red CI rounds have closed: that draft is a person's now.
+
+Each resume is an audit entry, `github.review`, naming the session, the pull request, the
+reviewer and the delivery.
+
+**Runs and review.** The console's **Runs and review** screen lists every run of the teams
+you administer, platform admin and team admin alike: its trigger, repository, issue, state,
+draft pull request with its CI rounds, spend, and who has read it; a run's page shows its
+session's record on GitHub and links to the session, and marks the run read. A trigger's
+`notify_url` is told when a run ends, with `pull_request` the link to its draft.
+
+**In a repository** (`gitops` mode), a `Trigger` resource says the same:
+
+```yaml
+apiVersion: troupe.dev/v1alpha1
+kind: Trigger
+metadata:
+  name: platform.fix-issues
+  namespace: troupe-system
+spec:
+  principal: svc:platform/fixer
+  profile: fixer
+  agent: fixer
+  source:
+    kind: webhook
+    provider: github
+    repository: example-org/widgets
+    label: troupe-fix
+  concurrency: 2
+```
+
 ## Rotating the key, and taking the App away
 
 - **Rotate**: generate a second key on the App's page, send it as `private_key`, then
   delete the old key on GitHub. The plane imports it as the key's next version and signs
   with it at once; `admin.github.get` shows the new fingerprint and version.
+- **Rotate the webhook secret**: send the new one as `webhook_secret` and change it on the
+  App's page straight after; deliveries signed with the old one are refused from the moment
+  the plane has the new one, and GitHub's **Redeliver** sends them again.
+- **Stop runs from GitHub**: pause the trigger, or turn the App's webhook off on GitHub.
 - **Stop one repository**: take it out of the installation on GitHub. Tokens already
   minted for it end within the hour.
 - **Stop everything**: uninstall the App on GitHub, or suspend it. Sending

@@ -286,10 +286,11 @@ This is a summary; the detail is where each part is set.
 | `MCPIdentityMissing` | a server the bundle calls with client credentials has no identity in `mcpIdentities`, or its identity is incomplete; the message says which ([above](#calling-an-mcp-server-as-the-profile)) |
 | `UpgradePending` | the StatefulSet has a newer revision than the named pods run; each keeps its revision until the plane has drained it and the operator replaced it, and the message says how far each has got ([§3](#3-upgrades-and-drains)) |
 | `EgressByHostname` | the `CiliumNetworkPolicy` was written and applied, so a worker reaches its allowlist and the installation's own OpenBao and object store by name, and nothing else outside the cluster; `False` with `NoCilium` or `CiliumPolicyNotApplied` ([egress](#4-troupepolicy)) |
+| `PlaneCAMissing` | the installation gives pods the plane's CA (`plane.controlTls.enabled`) and the worker namespace has no `troupe-plane-ca` ConfigMap yet: the operator has read no certificate from the CA file the chart mounts, and the pods wait for it before they dial the plane (`NotWritten`); `False` with `Present`, or `NotGiven` where pods are given no CA |
 | `EndpointUnreachable` | an endpoint the profile names is at a loopback, unspecified, link-local or cloud metadata address, which its workers do not reach with Cilium or without (`LoopbackOrLinkLocal`): the message names each and says what to do; `False` with `Reachable`, or `Cilium` where there is Cilium ([egress](#4-troupepolicy)) |
 
-`SecretMissing`, `MCPIdentityMissing`, `UpgradePending`, `EgressByHostname` and
-`EndpointUnreachable` do not affect `Ready`. `kubectl -n troupe-system get wp` shows
+`SecretMissing`, `MCPIdentityMissing`, `UpgradePending`, `EgressByHostname`,
+`PlaneCAMissing` and `EndpointUnreachable` do not affect `Ready`. `kubectl -n troupe-system get wp` shows
 `Replicas`, `Ready`, `Violation`, `Age`.
 
 ## 3. Upgrades and drains
@@ -470,8 +471,8 @@ pod is `session:/` and `skills:/`, so `publish` and `import` have nowhere to go 
 ## 6. Provisioning: direct, or from a repository
 
 `plane.provisioningMode` (`TROUPE_PROVISIONING_MODE`) decides who writes a profile's
-`WorkerProfile`. It is the deployment's: the console's Policy page shows it and cannot
-change it, and a value stored there before 0.7.0 is not read. The same page holds the
+`WorkerProfile`. It is the deployment's: the console's **Policy and settings** shows it and cannot
+change it, and a value stored there before 0.7.0 is not read. The console's **Client versions** holds the
 versions people's clients may run ([routine-tasks.md](routine-tasks.md#client-versions))
 and the settings their machines start from and cannot go past
 ([configuration.md](configuration.md#defaults-and-limits-for-peoples-machines)).
@@ -506,7 +507,7 @@ not take down a profile that was running. The reasons are in the log once, in
 `admin.profiles.list` (each profile carries `gitops`: the source, the generation it was
 read at, and a `problem` of `refused`, `missing`, `plane_only` or `unwritten` with
 `reasons`; a refused resource with no profile is listed with nothing running), and on the
-console's Workers page and the profile's own.
+console's **Workers and pods** and the profile's own page.
 
 In this mode the console shows every profile read-only, marked **Locked to gitops** with
 `plane.gitops.source`, and `admin.profile.put` and `admin.profile.delete` are refused as
@@ -538,7 +539,7 @@ places and scales by is read off `sessionsPerPod`.
 
 ### A profile in a repository
 
-`admin.profiles.export` (the console's Workers page, **Manifests for a repository**) gives
+`admin.profiles.export` (the console's **Workers and pods**, **Manifests for a repository**) gives
 every profile in this shape, the policy and every trigger. This one is written by hand:
 
 ```yaml
@@ -624,7 +625,7 @@ server-side apply's field ownership.
 
 **Direct to gitops.** Export the manifests, commit them, and let the applier apply them
 while the plane is still in direct mode: it takes the fields over, and the workers do not
-notice. Export them with `admin.profiles.export` or the Workers page, not
+notice. Export them with `admin.profiles.export` or the console's **Workers and pods**, not
 `kubectl get workerprofiles`: a resource the plane wrote in direct mode has no field for a
 profile's ceiling, its warm count or its provisioner, which the export gives as the
 `troupe.dev/max-sessions`, `troupe.dev/warm-workers` and `troupe.dev/provisioner`

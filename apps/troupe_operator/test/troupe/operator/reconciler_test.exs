@@ -104,6 +104,39 @@ defmodule Troupe.Operator.ReconcilerTest do
       refute get(@plane_ca)
       assert FakeCluster.deleted() == [@plane_ca]
     end
+
+    # Beside `SecretMissing`: the profile reconciled, and its pods wait for a file the
+    # namespace does not have yet, which only the operator's log said.
+    @tag :tmp_dir
+    test "missing from the namespace is PlaneCAMissing, until a pass writes it", %{tmp_dir: dir} do
+      path = Path.join(dir, "ca.crt")
+      conn = FakeCluster.start([policy(), profile()])
+
+      assert {:ok, _result} = reconcile(conn, plane_ca_path: path)
+      refute get(@plane_ca)
+
+      assert %{"status" => "True", "reason" => "NotWritten", "message" => message} =
+               condition("PlaneCAMissing")
+
+      assert message =~ "troupe-plane-ca"
+      assert message =~ path
+
+      File.write!(path, ca_pem())
+      assert {:ok, _result} = reconcile(conn, plane_ca_path: path)
+      assert %{"status" => "False", "reason" => "Present"} = condition("PlaneCAMissing")
+
+      # A pass that cannot read the file leaves the CA there, and the namespace has one.
+      File.rm!(path)
+      assert {:ok, _result} = reconcile(conn, plane_ca_path: path)
+      assert %{"status" => "False", "reason" => "Present"} = condition("PlaneCAMissing")
+    end
+
+    test "is not missing where the installation gives pods none" do
+      conn = FakeCluster.start([policy(), profile()])
+
+      assert {:ok, _result} = reconcile(conn, plane_ca_path: nil)
+      assert %{"status" => "False", "reason" => "NotGiven"} = condition("PlaneCAMissing")
+    end
   end
 
   describe "an egress entry that is not a pattern" do

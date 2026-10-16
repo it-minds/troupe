@@ -139,7 +139,11 @@ defmodule Troupe.Plane.GitHub.Key do
 
   # -- transit's import -------------------------------------------------------
 
-  defp wrapping_key(opts) do
+  @doc false
+  # Transit's RSA wrapping key, which every bring-your-own-key import wraps under; the
+  # webhook secret's import uses it too.
+  @spec wrapping_key(keyword()) :: {:ok, term()} | {:error, term()}
+  def wrapping_key(opts) do
     case Tokens.request(:get, "/v1/#{Tokens.mount(opts)}/wrapping_key", nil, opts) do
       {:ok, %{"data" => %{"public_key" => pem}}} ->
         [entry] = :public_key.pem_decode(pem)
