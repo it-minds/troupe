@@ -1050,6 +1050,33 @@ ol.revisions pre {
 
 /* -- narrow: the map goes above the screen, folded ------------------------------ */
 
+/* A secret the plane answers once: set apart, wrapped rather than scrolled, with its copy button. */
+.banner.shown-once {
+  margin: var(--space-3) 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--waiting-bd);
+  border-left-width: var(--bw-marker);
+  background: var(--waiting-bg);
+  color: var(--text-body);
+}
+.banner.shown-once pre.secret {
+  margin: var(--space-2) 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+ul.checks li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+pre.manifest {
+  max-height: 24rem;
+  overflow: auto;
+  padding: var(--space-3);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-panel);
+}
 @media (max-width: 760px) {
   .console {
     flex-direction: column;

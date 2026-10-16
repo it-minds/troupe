@@ -6,6 +6,9 @@
 // model prices, a server's credential settings) and anything the resource gains that this
 // console has never heard of, which is listed as it is rather than left out.
 //
+// The editor offers the provider types and size classes the plane lists
+// (`admin.profile.choices`), the protocol's one list, rather than free text.
+//
 // The editor writes the paths it has fields for and nothing else. `admin.profile.put`
 // replaces the spec with what it is sent, so on load the editor keeps the spec without its
 // own paths and without what the plane writes, and a save sends that back with the form
@@ -24,7 +27,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { AdminProfile, AdminTeam, ProfileDetail, ProfileWrite } from "@troupe/client";
+import type { AdminProfile, AdminTeam, ProfileDetail, ProfileWrite, ProviderTypeChoice } from "@troupe/client";
 import { href } from "../route";
 import { describeError, recorded, show, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, count, linesOf, modeOf, useChange } from "./bits";
@@ -669,6 +672,26 @@ export function draftOf(form: Form, servers: Plain[], kept: Plain): ProfileWrite
 /** A profile's name, as a Kubernetes resource is named. */
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
+/** The two size classes, for a plane that does not list them. */
+const FALLBACK_SIZES = [
+  { name: "standard", sessions_per_worker: 4, summary: "Several sessions share a worker." },
+  { name: "heavy", sessions_per_worker: 2, summary: "Fewer sessions to a worker, each with more CPU, memory and disk." },
+];
+
+/** What the chosen provider type asks of the rest of the form, in the plane's own words for it. */
+function providerHint(listed: boolean, type: ProviderTypeChoice | null): string {
+  if (!listed) return "The API the endpoint speaks, as the plane names its provider types: openai for Chat Completions, which a gateway serves, anthropic for the Messages API.";
+  if (!type) return "The API the endpoint speaks. The plane's list: a model setting with no provider is Troupe's own.";
+  const where =
+    type.url === "required"
+      ? ` ${type.name} has no address of its own: the endpoint is required${type.url_example ? `, like ${type.url_example}` : ""}.`
+      : type.url === "server" && type.default_url
+        ? ` Usually at ${type.default_url}.`
+        : "";
+  const key = type.key === "none" ? ` ${type.name} takes no key, so the credential is left empty.` : "";
+  return `${type.summary}${where}${key}`;
+}
+
 export function ProfileEditor({
   detail,
   names,
@@ -690,6 +713,13 @@ export function ProfileEditor({
   const [preview, setPreview] = useState<{ lines: DiffLine[]; effects: string[] } | null>(null);
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // The provider types and size classes the plane checks a profile against, so the form
+  // offers those rather than free text. A plane older than the method answers neither,
+  // and the fields fall back to what this console knows.
+  const [choicesLoad] = useLoad(() => admin.profileChoices().catch(() => null), [admin]);
+  const choices = choicesLoad.state === "ready" ? choicesLoad.data : null;
+  const sizes = choices?.size_classes ?? FALLBACK_SIZES;
+  const providerType = choices?.provider_types.find((t) => t.name === form.provider.trim()) ?? null;
 
   const draft = draftOf(form, servers, kept);
   const llm = (draft.spec?.["llm"] ?? {}) as Plain;
@@ -750,12 +780,18 @@ export function ProfileEditor({
       <Field label="Image" hint="repository:tag, or repository@sha256:… A digest pins it; a tag does not. Or release, for the worker image of the release this plane runs.">
         {(p) => <input {...p} value={form.image} onChange={(e) => set({ image: e.target.value })} autoComplete="off" spellCheck={false} />}
       </Field>
-      <Field label="How demanding" hint="Standard puts several sessions on a worker; heavy gives each more CPU, memory and disk. A question about resources, not safety.">
+      <Field
+        label="How demanding"
+        hint={`${sizes.find((s) => s.name === form.sizeClass)?.summary ?? "How many sessions share a worker."} A question about resources, not safety.`}
+      >
         {(p) => (
           <select {...p} value={form.sizeClass} onChange={(e) => set({ sizeClass: e.target.value })}>
-            {!["standard", "heavy"].includes(form.sizeClass) && <option value={form.sizeClass}>{form.sizeClass}</option>}
-            <option value="standard">standard</option>
-            <option value="heavy">heavy</option>
+            {!sizes.some((s) => s.name === form.sizeClass) && <option value={form.sizeClass}>{form.sizeClass}</option>}
+            {sizes.map((s) => (
+              <option key={s.name} value={s.name}>
+                {s.name} · {count(s.sessions_per_worker, "session")} a worker
+              </option>
+            ))}
           </select>
         )}
       </Field>
@@ -770,8 +806,22 @@ export function ProfileEditor({
       <Field label="Endpoint" hint="The base URL a session's model calls go to, usually a gateway. Egress must allow its host." error={llmProblem}>
         {(p) => <input {...p} value={form.endpoint} onChange={(e) => set({ endpoint: e.target.value })} autoComplete="off" spellCheck={false} />}
       </Field>
-      <Field label="Provider" hint="The API the endpoint speaks, as the plane names its provider types: openai for Chat Completions, which a gateway serves, anthropic for the Messages API.">
-        {(p) => <input {...p} value={form.provider} onChange={(e) => set({ provider: e.target.value })} autoComplete="off" spellCheck={false} />}
+      <Field label="Provider" hint={providerHint(choices !== null, providerType)}>
+        {(p) =>
+          choices ? (
+            <select {...p} value={form.provider.trim()} onChange={(e) => set({ provider: e.target.value })}>
+              <option value="">none: Troupe's own model settings</option>
+              {form.provider.trim() !== "" && !providerType && <option value={form.provider.trim()}>{form.provider.trim()}</option>}
+              {choices.provider_types.map((t) => (
+                <option key={t.name} value={t.name}>
+                  {t.label} ({t.name})
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input {...p} value={form.provider} onChange={(e) => set({ provider: e.target.value })} autoComplete="off" spellCheck={false} />
+          )
+        }
       </Field>
       <Field label="Model" hint="What a session uses for its work.">
         {(p) => <input {...p} value={form.model} onChange={(e) => set({ model: e.target.value })} autoComplete="off" spellCheck={false} />}

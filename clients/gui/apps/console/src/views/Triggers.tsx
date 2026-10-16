@@ -13,12 +13,11 @@
 // who is told) is left as it is. Each is shown as the audit recorded it. On a plane in
 // `gitops` mode the triggers are resources a repository holds: shown locked, with where
 // they come from, and nothing offers a write. Running one by hand and minting its webhook
-// key are in the current console for now.
+// key are done over the plane's admin API for now.
 
 import { useState } from "react";
 import type { JSX } from "react";
 import type { AdminTeam, Trigger } from "@troupe/client";
-import { currentConsole } from "../plane";
 import { go, href } from "../route";
 import { recorded, show, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, modeOf, useChange, when } from "./bits";
@@ -121,7 +120,7 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
           <>
             {locked && (
               <Locked things="triggers" source={source}>
-                <p className="note">Running one by hand and minting its key still work, in the current console: they are things done with a trigger, not what it is.</p>
+                <p className="note">Running one by hand and minting its key still work, over the admin API: they are things done with a trigger, not what it is.</p>
               </Locked>
             )}
             {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
@@ -197,7 +196,7 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
 // -- a trigger ---------------------------------------------------------------------------
 
 export function TriggerPage({ team, name }: { team: string; name: string }): JSX.Element {
-  const { admin, me, plane, notify } = useConsole();
+  const { admin, me, notify } = useConsole();
   const [load, reload] = useLoad(
     () => Promise.all([admin.triggers(team), admin.triggerRevisions(team, name).catch(() => null), admin.provisioningMode().catch(() => null), admin.teams()]),
     [admin, team, name],
@@ -297,8 +296,8 @@ export function TriggerPage({ team, name }: { team: string; name: string }): JSX
                 </div>
               )}
               <p className="note">
-                Running it now by hand, and minting its webhook key, come to this console next; for now they are on the{" "}
-                <a href={currentConsole(plane.url, `/triggers/${encodeURIComponent(team)}`)}>current console's Triggers page</a>.
+                Running it now by hand, and minting its webhook key, come to this console next; for now they are <code>admin.trigger.run</code> and{" "}
+                <code>admin.trigger.key.rotate</code>, with <code>troupe admin</code> or over <code>/rpc</code>.
               </p>
               {editing && (
                 <TriggerForm
@@ -491,7 +490,7 @@ function TriggerForm({
             ? "Reading the team's service principals…"
             : principals.length
               ? "A service principal of the team: a credential somebody is answerable for, since it fires with nobody watching."
-              : `${team.name} has no service principal that works: one is made on Identity, in the current console for now.`
+              : `${team.name} has no service principal that works: one is made on Identity.`
         }
       >
         {(p) => (
@@ -581,7 +580,7 @@ function triggerWords(team: string, name: string, creating: boolean, changes: Re
   const out: string[] = [];
   if (creating) {
     out.push(`${name} fires ${firedBy(changes["source"] as Record<string, unknown>)}, and each firing starts a ${team} session that spends ${team}'s budget.`);
-    if ((changes["source"] as Record<string, unknown>)["kind"] === "webhook") out.push("Its webhook key is minted in the current console, and shown once there.");
+    if ((changes["source"] as Record<string, unknown>)["kind"] === "webhook") out.push("Its webhook key is minted with admin.trigger.key.rotate, and shown once.");
   } else {
     if ("source" in changes) out.push(`From now it fires ${firedBy(changes["source"] as Record<string, unknown>)}.`);
     if ("profile" in changes || "principal" in changes) out.push("Runs already going carry on as they started; the next one uses the new setting.");
