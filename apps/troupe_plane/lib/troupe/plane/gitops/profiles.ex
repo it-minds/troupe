@@ -55,6 +55,9 @@ defmodule Troupe.Plane.Gitops.Profiles do
   # Flux applied, and this is the plane recording that it saw it.
   @actor "system:gitops"
 
+  # Where a manifest would say which profile it extends, which this mode refuses.
+  @extends "troupe.dev/extends"
+
   # What an audit diff is taken over, as for an administrator's edit, with the plane's own
   # projection taken out: a repository never sets `mcpServers`, so a change in them is the
   # plane's and not the repository's.
@@ -107,6 +110,7 @@ defmodule Troupe.Plane.Gitops.Profiles do
 
     reasons =
       unreadable ++
+        extends(resource) ++
         no_image(attrs) ++
         not_a_class(per_pod) ++
         written_elsewhere(resource) ++ violations(resource, policy) ++ invalid(attrs)
@@ -156,6 +160,26 @@ defmodule Troupe.Plane.Gitops.Profiles do
     case WorkerProfile.from_resource(resource).image do
       "" -> nil
       image -> image
+    end
+  end
+
+  # A profile extends another only where the plane writes its profiles itself: a manifest
+  # here is read as the whole profile, and one that named a parent would run without
+  # everything it meant to have from it. Refused rather than read as flat.
+  defp extends(resource) do
+    annotation = get_in(resource, ["metadata", "annotations", @extends])
+    field = get_in(resource, ["spec", "extends"])
+
+    case annotation || field do
+      parent when is_binary(parent) and parent != "" ->
+        [
+          "extends #{parent}: in gitops mode a manifest holds the whole profile, and the plane " <>
+            "resolves extends only for the profiles it writes itself; put #{parent}'s fields into " <>
+            "this manifest (admin.profiles.export writes a profile that extends another so)"
+        ]
+
+      _none ->
+        []
     end
   end
 
@@ -360,7 +384,20 @@ defmodule Troupe.Plane.Gitops.Profiles do
       ["metadata.annotations[#{WorkerProfile.drained_annotation()}]", "status"]
   end
 
-  defp notes(profile) do
+  defp notes(profile), do: extends_notes(profile) ++ release_notes(profile)
+
+  # The row of a profile that extends another holds it in effect, so its manifest is
+  # already whole; it no longer follows the parent once a repository holds it.
+  defp extends_notes(%Profile{extends: parent} = profile) when is_binary(parent) do
+    [
+      "#{profile.name} extends #{parent} on the plane: this is the profile in effect, whole.",
+      "A repository's manifest extends nothing, so a change to #{parent} is one here too."
+    ]
+  end
+
+  defp extends_notes(_profile), do: []
+
+  defp release_notes(profile) do
     cond do
       not Provision.follows_release?(profile) ->
         []
