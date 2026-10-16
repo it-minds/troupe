@@ -552,7 +552,17 @@ defmodule Troupe.Config.OrgTest do
         end
 
       assert kind == expected, key
-      assert Schema.at([key]).type == Organisation.type(key), key
+
+      case Organisation.type(key) do
+        # The per-tool rules (#658): the three lists of rules.
+        :rules ->
+          assert {:object, children} = Schema.at([key]).type
+          assert Enum.map(children, &{&1.key, &1.type}) ==
+                   [{"deny", {:list, :rule}}, {"ask", {:list, :rule}}, {"allow", {:list, :rule}}]
+
+        type ->
+          assert Schema.at([key]).type == type, key
+      end
     end
   end
 end

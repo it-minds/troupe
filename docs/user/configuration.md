@@ -39,7 +39,7 @@ file: they are what a machine starts with, and anything you set wins over them. 
 lock: a plane's copy is a file in your own state directory, and only the managed file is
 out of your reach ([security](../admin/security.md#7-an-organisations-limits-are-a-guardrail-not-a-lock)).
 
-Only these keys can be enforced, and each one is a ceiling:
+Only these keys can be enforced, and each but the rules is a ceiling:
 
 | Key | Enforced, it means |
 |---|---|
@@ -47,6 +47,7 @@ Only these keys can be enforced, and each one is a ceiling:
 | `approvals` | `deny` may not be loosened to `wait` |
 | `managed_mcp_servers_only`, `managed_permission_rules_only` | on may not be turned off |
 | `provider`, `base_url` | what it is; a named provider at another URL, or of another type, is refused too |
+| `permissions` | its [per-tool rules](#per-tool-permission-rules) are added to yours, and none of yours loosens one of them |
 
 A file, a variable or a flag that tries to go past an enforced value is held to it, with
 one warning that names the file, the key and the organisation's value. The terminal UI's
@@ -92,7 +93,8 @@ in the administrator's [configuration page](../admin/configuration.md#defaults-a
 Maps merge by key, as [RFC 7396](https://www.rfc-editor.org/rfc/rfc7396) says: a
 project file that adds one provider keeps the user file's others, and one that sets
 `models.cheap` keeps the user's `models.default`. `null` removes what a lower layer set.
-A list replaces the list below it.
+A list replaces the list below it. The one exception is `permissions`: every file's rules are
+kept together rather than replaced ([per-tool permission rules](#per-tool-permission-rules)).
 
 ```yaml
 # ~/.config/troupe/config.yaml
@@ -735,6 +737,47 @@ its own instruction files; `--json` prints the same as one object, with `files`,
 `onboarded` and `findings`. Your own `<config>/AGENTS.md` is checked with the rest, except for paths,
 which it names for every repository.
 
+## Per-tool permission rules
+
+`permissions:` answers a tool's question before it is asked: each rule names a tool, alone
+or with a pattern, under `deny`, `ask` or `allow`.
+
+```yaml
+permissions:
+  deny: ["shell(git push)", "read_file(secrets/**)"]
+  ask: ["mcp(github.create_*)"]
+  allow: ["shell(mix test)", "write_file(lib/**)"]
+```
+
+- **The pattern** is a command prefix for `shell`, a path glob for the file tools
+  (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `glob`, `git_read`),
+  relative to the workspace unless written in full, and `server.tool` for `mcp`, which
+  covers a server's tools whoever hosts it. Other tools take none. A malformed rule refuses
+  the load with what to write instead: `Bash(npm test)` is `shell(npm test)` here.
+- **Every file's rules count.** Your organisation's, your own `config.yaml`, a project's
+  `.troupe/config.yaml` and its `config.local.yaml` are added together, and of the rules
+  that match a call `deny` beats `ask` beats `allow`, whatever the file. Inside one file
+  the more specific rule decides, so `deny: [shell]` with `allow: ["shell(git status)"]`
+  allows `git status` and nothing else.
+- **What each does.** A `deny` refuses the call before it runs, telling the model the rule
+  and the file it came from. An `ask` asks you, even under `auto_approve` and after an
+  "allow for the session", and the question says which rule asked. An `allow` runs a call
+  that would have asked; a call that must always be asked (writing into your config
+  directory) still asks, and so does every call in a branch an `AI!` comment started,
+  unless `watch_auto_approve` is on. With `approvals: deny` an allowed call runs, as one
+  an agent marks `auto` does, and every other call that asks is refused.
+- **A project's `allow`** applies only in a trusted workspace and never on a pod; its
+  `deny` and `ask` apply everywhere. With `managed_permission_rules_only` on, only your
+  organisation's `allow` rules apply.
+- **A shell line** is the commands it runs: a `deny` or `ask` matching any of them holds,
+  and an `allow` covers the line only if it covers every command and nothing runs inside
+  `$(...)` or backticks. A rule is not a sandbox: a script or `sh -c` runs what no rule
+  sees.
+
+`troupe config --explain permissions` lists them with their files, the terminal UI's
+`/settings` and the desktop app's **This computer** page show them, and the
+[recipe](configuration/permissions.md) is a complete file with each kind.
+
 ## Seeing a delegation before it runs
 
 An agent hands work to a subagent with a brief, and by default the subagent starts at
@@ -833,6 +876,7 @@ file before the save is kept as `config.yaml.previous` all the same.
 troupe config                       # the providers and models, and any warnings
 troupe config --explain             # every key, its value and the layer that set it
 troupe config --explain max_turns   # one key's ladder: each layer's value, and the one in effect
+troupe config --explain permissions # every per-tool rule, with its file, and those held back with why
 troupe config --explain --json      # the same for a program
 troupe config validate              # every file a session here would read; exits 1 on any problem
 troupe config validate .troupe/config.yaml
@@ -1268,6 +1312,10 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `delegation.ask` | list of strings |  | user; project if trusted |  | The subagents a `delegate` to asks you first, by name: you see the brief, the tools and the budget the child would get, and run it, edit the brief, send it to another agent, deny it with a word back, or let that agent run unasked for the session. `auto_approve` does not answer it. An agent's own definition asks too with `delegation: ask`. Unset: every delegation runs at once. |
 | `managed_permission_rules_only` | boolean | `false` | user; project if trusted; an organisation may enforce |  | A session may not allow a tool for itself. |
 | `managed_mcp_servers_only` | boolean | `false` | user; project if trusted; an organisation may enforce |  | A client may not offer a session its own tools. |
+| `permissions` | settings |  | any; an organisation may add to |  | Per-tool rules: a tool, or a tool with a pattern in brackets: a command prefix for `shell`, a path glob for the file tools, `server.tool` for `mcp`. Every scope's rules are added together, not replaced, and of those that match a call `deny` beats `ask` beats `allow`; inside one file the more specific pattern decides. `troupe config --explain` lists them with where each came from. |
+| `permissions.deny` | list of rules |  | any |  | Calls refused, with a sentence naming the rule: `shell(git push)`, `read_file(secrets/**)`. |
+| `permissions.ask` | list of rules |  | any |  | Calls that ask a person first, even under `auto_approve` or an earlier "allow for the session". |
+| `permissions.allow` | list of rules |  | user; project if trusted |  | Calls that run without asking. From a project's file only in a trusted workspace; with `managed_permission_rules_only` on, only the organisation's. |
 
 ### Tools
 

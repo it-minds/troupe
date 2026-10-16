@@ -26,7 +26,8 @@ Where each file goes is on one page, [Where your files are](files.md); every key
 | [A custom agent](mcp-agents-skills.md#a-custom-agent) | `agents/<name>.md` |
 | [A skill](mcp-agents-skills.md#a-skill) | `skills/<name>/SKILL.md` |
 | [An unattended session](unattended.md), its budgets and approvals | `config.yaml` |
+| [Per-tool permission rules](permissions.md) | `config.yaml` |
 
 Not here: Bedrock and Vertex, which are not provider types (each signs its requests with
 its own cloud's credentials; a gateway in front of either is the type of the API the
-gateway speaks), and per-tool permission rules, which are not configuration yet.
+gateway speaks).

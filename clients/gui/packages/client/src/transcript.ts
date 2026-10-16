@@ -105,6 +105,11 @@ export type Entry =
       delegation?: DelegationGate;
       /** For a delegation, what its answer carried: the agent it went to, the parts edited, the word back. */
       answered?: { agent?: string; edited?: string[]; reason?: string };
+      /**
+       * The per-tool rule of the configuration that asked (troupe #658): an "allow for the
+       * session" does not stop the next such call asking. Absent where no rule asked.
+       */
+      rule?: { rule: string; scope: string; source: string | null };
     }
   /**
    * A subagent handed a brief: `task` is its first message, the parts under their names,
@@ -422,6 +427,14 @@ function gateOf(raw: unknown): DelegationGate | undefined {
     maxDepth: num(g["max_depth"]),
     agents: list(g["agents"]).map((a) => ({ name: str(a["name"]), description: str(a["description"]) })),
   };
+}
+
+// The per-tool rule that asked (troupe #658), as the daemon wrote it on the request.
+function ruleOf(raw: unknown): { rule: string; scope: string; source: string | null } | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const r = raw as Record<string, unknown>;
+  if (typeof r["rule"] !== "string") return undefined;
+  return { rule: r["rule"], scope: str(r["scope"]), source: typeof r["source"] === "string" ? r["source"] : null };
 }
 
 function answeredOf(data: Record<string, unknown>): { agent?: string; edited?: string[]; reason?: string } | undefined {
@@ -1104,6 +1117,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
 
     case "approval_requested": {
       const gate = gateOf(d.data["delegation"]);
+      const rule = ruleOf(d.data["rule"]);
       return {
         ...next,
         entries: [
@@ -1118,6 +1132,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
             resolvedBy: undefined,
             closed: false,
             ...(gate ? { delegation: gate } : {}),
+            ...(rule ? { rule } : {}),
           },
         ],
       };

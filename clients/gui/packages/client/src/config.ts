@@ -100,6 +100,33 @@ export interface ConfigKey {
   doc: string | null;
 }
 
+/**
+ * One per-tool permission rule as `config.get` answers it (troupe #658): what it does, the
+ * rule as written, the layer it came from (`org`, `enforced`, `user`, `project`, `local`)
+ * and that file, and why it does not apply, or null. Shown, never set by a client.
+ */
+export interface PermissionRule {
+  action: "deny" | "ask" | "allow";
+  rule: string;
+  tool: string;
+  pattern: string | null;
+  scope: string;
+  source: string | null;
+  ignored: string | null;
+}
+
+/** Where a rule came from, in words a settings page shows. */
+export function ruleScope(rule: Pick<PermissionRule, "scope" | "source">): string {
+  const whose: Record<string, string> = {
+    enforced: "set by your organisation",
+    org: "your organisation's defaults",
+    user: "your config.yaml",
+    project: "this project's .troupe/config.yaml",
+    local: "this project's config.local.yaml",
+  };
+  return whose[rule.scope] ?? rule.scope;
+}
+
 /** `config.get`, and what `config.set` answers with. */
 export interface ModelConfig {
   config_dir: string;
@@ -118,6 +145,8 @@ export interface ModelConfig {
   /** Every key with where it came from; absent from a daemon older than troupe #57. */
   keys?: ConfigKey[];
   files?: Array<{ scope: ConfigScope; path: string; exists: boolean }>;
+  /** Every file's per-tool rules; absent from a daemon older than troupe #658. */
+  permissions?: PermissionRule[];
   workspace?: string | null;
   trusted?: boolean;
   warnings?: string[];

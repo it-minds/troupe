@@ -20,13 +20,13 @@ defmodule Troupe.Config.CookbookTest do
 
   alias Troupe.Agent.{Definition, Validate}
   alias Troupe.Config
-  alias Troupe.Config.Layers
+  alias Troupe.Config.{Layers, Permissions}
   alias Troupe.MCP.Local, as: MCP
 
   @dir Path.expand("../../../../../docs/user/configuration", __DIR__)
 
   # What #658 lists, in its order.
-  @recipes ~w(anthropic openai gateway ollama azure openrouter gemini team personal mcp agent skill unattended)
+  @recipes ~w(anthropic openai gateway ollama azure openrouter gemini team personal mcp agent skill unattended permissions)
 
   @pattern ~r/<!-- recipe: ([a-z-]+) -->\n```(\w+) title="([^"]+)"\n(.*?)\n```\n/s
 
@@ -269,5 +269,33 @@ defmodule Troupe.Config.CookbookTest do
     assert {config.approvals, config.auto_approve} == {:deny, false}
     assert {config.max_turns, config.wall_clock_ms, config.max_depth} == {30, 900_000, 1}
     assert {config.budget_asks, config.full_send} == {false, true}
+  end
+
+  test "per-tool rules: denied, asked and allowed as the page says", ctx do
+    config = load_user_file!(ctx, "permissions")
+    root = Path.join(ctx.base, "service")
+
+    said =
+      fn tool, args ->
+        case Permissions.decide(config.permissions, tool, args, root) do
+          {action, _rule} -> action
+          nil -> nil
+        end
+      end
+
+    assert said.("shell", %{"command" => "git push origin main"}) == :deny
+    assert said.("shell", %{"command" => "git pushx"}) == nil
+    assert said.("shell", %{"command" => "mix test && git push"}) == :deny
+    assert said.("shell", %{"command" => "mix test --failed"}) == :allow
+    assert said.("shell", %{"command" => "mix testing"}) == nil
+    assert said.("shell", %{"command" => "git status | git diff"}) == :allow
+    assert said.("shell", %{"command" => "mix test $(cat args)"}) == nil
+    assert said.("read_file", %{"path" => "secrets/prod.env"}) == :deny
+    assert said.("read_file", %{"path" => Path.join(System.user_home!(), ".ssh/id_ed25519")}) == :deny
+    assert said.("mcp.github.delete_repo", %{}) == :deny
+    assert said.("mcp.tracker.create", %{}) == :ask
+    assert said.("edit_file", %{"path" => "deps/x/mix.lock"}) == :ask
+    assert said.("write_file", %{"path" => "lib/a.ex"}) == :allow
+    assert said.("write_file", %{"path" => "test/a.exs"}) == nil
   end
 end

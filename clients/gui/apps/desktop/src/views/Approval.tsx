@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { BRIEF_PARTS } from "@troupe/client";
+import { BRIEF_PARTS, ruleScope } from "@troupe/client";
 import type { DelegationGate, Entry, GateAnswer } from "@troupe/client";
 import { Pill } from "./bits";
 import { Mask } from "./brand";
@@ -178,6 +178,13 @@ function ToolApproval({
         <h2>{headline(entry.tool)}</h2>
       </header>
       <p className="consequence">{consequence(entry.tool)}</p>
+      {/* A per-tool rule of the configuration asked (troupe #658): which, and whose. */}
+      {entry.rule && (
+        <p className="also asked-by">
+          Asked by the rule <code>ask {entry.rule.rule}</code>, from {ruleScope(entry.rule)}
+          {entry.rule.source ? ` (${entry.rule.source})` : ""}. Every call it matches asks, whatever was allowed for this session.
+        </p>
+      )}
       <Evidence entry={entry} />
       {others.length > 0 && (
         <p className="also">

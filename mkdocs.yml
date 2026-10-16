@@ -104,6 +104,7 @@ nav:
           - A team's file and your own: user/configuration/team-and-personal.md
           - MCP servers, an agent, a skill: user/configuration/mcp-agents-skills.md
           - An unattended session: user/configuration/unattended.md
+          - Per-tool permission rules: user/configuration/permissions.md
       - The desktop app, unsigned: clients/gui/docs/install.md
       - Glossary: glossary.md
   - Running a deployment:
