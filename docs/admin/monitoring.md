@@ -22,7 +22,8 @@ deployed, the rollout has not finished or the image tag did not move.
 ## 2. Kubernetes signals
 
 - **`WorkerProfile` conditions** `Ready`, `PolicyViolation`, `SecretMissing`,
-  `MCPIdentityMissing`, `UpgradePending`, `EgressByHostname`, `EndpointUnreachable`
+  `MCPIdentityMissing`, `UpgradePending`, `EgressByHostname`, `PlaneCAMissing`,
+  `EndpointUnreachable`
   ([profiles-and-policy.md §2](profiles-and-policy.md#status-conditions));
   `kubectl -n troupe-system get wp`.
 - **Events**: the operator may write them (through Bonny); Troupe's own code writes none.
@@ -107,6 +108,7 @@ Phoenix's own; nothing in a deployment attaches to them.
 | `429` from the plane behind one office address | `plane.ingress.rateLimit` is per client IP; raise `connections` first |
 | `unauthorized` pulling an image in a worker namespace | the pull secret exists in `troupe-system` only |
 | Worker pod `CreateContainerConfigError` | the `llm.secretRef` Secret is missing in `troupe-w-<profile>` |
+| `PlaneCAMissing: True` | the operator reads no certificate from `TROUPE_PLANE_CONTROL_CA` yet: the `plane.controlTls` Secret has no `ca.crt` (cert-manager has not issued it, or a Secret of your own lacks it); the operator's log says the same once a pass |
 | `SecretMissing: True` with the Secrets present | the operator has no RBAC on Secrets; ignore the condition |
 | A profile is saved but no `WorkerProfile` appears; `not_applied`, `no_cluster` | the plane has no Kubernetes connection (`TROUPE_KUBECONFIG`, or the in-pod ServiceAccount) |
 | `PolicyViolation: NoPolicy` on every profile | `policy.name` is not `default`, and nothing sets `TROUPE_POLICY_NAME` |

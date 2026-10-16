@@ -18,7 +18,7 @@ defmodule Troupe.Plane.Control.Listener do
 
   use GenServer
 
-  alias Troupe.Plane.Control.{Connections, Replay, TLS}
+  alias Troupe.Plane.Control.{Connections, Refusals, Replay, TLS}
 
   require Logger
 
@@ -45,6 +45,7 @@ defmodule Troupe.Plane.Control.Listener do
     Process.flag(:trap_exit, true)
     Process.set_label("troupe control listener")
     :ok = Replay.start()
+    :ok = Refusals.start()
 
     port = Keyword.get(opts, :port, Application.get_env(:troupe_plane, :control_port, 4001))
 

@@ -188,7 +188,9 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
 - **The control channel.** A worker dials the plane's control port, never the other way
   round. A pod enrols with its projected token, bound to the plane's audience and good for
   an hour, on the pod network, where the plane's NetworkPolicy admits the port from worker
-  namespaces alone; it may do so in plaintext. A machine registered outside the cluster
+  namespaces alone, over TLS against the CA the operator gives its namespace; the plane
+  closes a plaintext connection unless `plane.controlTls.requireTls` is turned off
+  (Decision 906). A machine registered outside the cluster
   ([single-machine.md](single-machine.md)) enrols with a secret that lasts until it is
   rotated, so it does so over TLS only: the port serves a certificate cert-manager issues
   for the control Service, the machine is given that certificate's CA when it is registered
