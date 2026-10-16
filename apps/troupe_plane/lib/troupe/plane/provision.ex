@@ -77,7 +77,7 @@ defmodule Troupe.Plane.Provision do
 
   @doc """
   What keeps a profile from calling the servers its bundle marks `client_credentials` as
-  itself (Decision 747), one sentence each: such a server with no identity in the
+  itself, with an identity of its own that no other profile shares, one sentence each: such a server with no identity in the
   profile's `mcpIdentities`, and an identity missing its client or key or otherwise broken.
 
   Reported, as the operator's `MCPIdentityMissing` says it, and not refused: the bundle
@@ -88,9 +88,20 @@ defmodule Troupe.Plane.Provision do
   """
   @spec identity_problems(Profile.t() | map()) :: [String.t()]
   def identity_problems(profile) do
-    spec = Map.put(spec_map(profile), "mcpServers", Bundles.mcp_servers(channel_of(profile)))
+    bundle = Bundles.mcp_servers(channel_of(profile))
+    spec = Map.put(spec_map(profile), "mcpServers", bundle ++ inherited_servers(profile, bundle))
     WorkerProfile.identity_problems(WorkerProfile.from_resource(%{"spec" => spec}))
   end
+
+  # A profile that extends another has its parent's servers as well as its channel's, and
+  # its identities are its own: a server it has from its parent that it names no identity
+  # for is reported as one from its own bundle would be.
+  defp inherited_servers(%Profile{extends: parent} = profile, bundle) when is_binary(parent) do
+    named = MapSet.new(bundle, & &1["name"])
+    Enum.reject(spec_map(profile)["mcpServers"] || [], &MapSet.member?(named, &1["name"]))
+  end
+
+  defp inherited_servers(_profile, _bundle), do: []
 
   defp channel_of(%Profile{config_bundle_channel: channel}), do: channel
 
