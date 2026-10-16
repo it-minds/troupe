@@ -12,7 +12,7 @@
 import { checkRuleSet } from "../../src/rules.js";
 import { older } from "./plane.js";
 import { PROVIDER_TYPES } from "./provider-types.js";
-import { MAX_DEPTH, WRITTEN_KEYS, empty as emptyResolved, fieldsOf, merge as mergeExtends, rowOf } from "./extends.js";
+import { MAX_DEPTH, WRITTEN_KEYS, composeBundle, empty as emptyResolved, fieldsOf, merge as mergeExtends, rowOf } from "./extends.js";
 import type { Resolved } from "./extends.js";
 
 type Refusal = { error: { code: number; message: string; data?: unknown } };
@@ -283,6 +283,10 @@ export interface FakeProfile {
   unenforced: boolean;
   pods: FakePod[];
   max_sessions?: number | null;
+  /** What its sessions may spend in a calendar month, in effect; null is none. */
+  budget_micros?: number | null;
+  /** What its sessions spent this month, for the fake's budget answers. */
+  spent_micros?: number;
   warm_workers?: number;
   /** The rest of the WorkerProfile spec, in the resource's camelCase, as `admin.profile.put` was sent it. */
   spec?: Record<string, unknown>;
@@ -1026,6 +1030,7 @@ export class FakeAdmin {
           extended_by: this.childrenOf(p.name),
           policy: this.verdict({ name: p.name, image: p.image, spec: p.spec ?? {} }),
           bundle: this.bundleState(p),
+          budget: this.budgetOf(p),
           identity_problems: this.identityProblems(p.spec ?? {}),
           gitops: this.gitopsOf(p.gitops),
         };
@@ -1033,8 +1038,15 @@ export class FakeAdmin {
           const resolved = this.resolveProfile(p.name, {});
           result["effective"] =
             typeof resolved === "string"
-              ? { extends: p.extends ?? null, chain: [], profile: null, fields: [], problems: [resolved] }
-              : { extends: p.extends ?? null, chain: resolved.chain, profile: rowOf(resolved), fields: fieldsOf(resolved), problems: resolved.problems };
+              ? { extends: p.extends ?? null, chain: [], profile: null, fields: [], problems: [resolved], bundle: null }
+              : {
+                  extends: p.extends ?? null,
+                  chain: resolved.chain,
+                  profile: rowOf(resolved),
+                  fields: fieldsOf(resolved),
+                  problems: resolved.problems,
+                  bundle: this.effectiveBundle(resolved.channels),
+                };
         }
         return { result };
       }
@@ -1095,6 +1107,8 @@ export class FakeAdmin {
         after.size_class = sizeClass;
         after.sessions_per_pod = sizeClass === "heavy" ? 2 : 4;
         if ("max_sessions" in attrs) after.max_sessions = typeof attrs["max_sessions"] === "number" ? attrs["max_sessions"] : null;
+        // Zero is no ceiling, and is kept as none.
+        if ("budget_micros" in attrs) after.budget_micros = typeof attrs["budget_micros"] === "number" && attrs["budget_micros"] > 0 ? attrs["budget_micros"] : null;
         if ("warm_workers" in attrs) after.warm_workers = typeof attrs["warm_workers"] === "number" ? attrs["warm_workers"] : 0;
         if (typeof attrs["provisioner"] === "string") after.provisioner = attrs["provisioner"];
         if ("spec" in attrs) {
@@ -1201,6 +1215,8 @@ export class FakeAdmin {
         if (role !== "platform_admin") return notPlatform;
         const channel = params["channel"];
         if (typeof channel !== "string" || channel === "") return refuse(INVALID_PARAMS, "invalid_params", { method, missing: ["channel"] });
+        if (channel.startsWith("profile:"))
+          return refuse(INVALID_PARAMS, "invalid_params", { channel, reason: `${channel} is the bundle the plane composes for a profile from the channels of the profiles it extends; publish to those channels instead` });
         const errors = bundleProblems(params["content"], this.policy.egress);
         if (errors.length) return refuse(INVALID_PARAMS, "invalid_params", { errors });
         const versions = this.bundles.get(channel) ?? [];
@@ -1542,7 +1558,12 @@ export class FakeAdmin {
           if ("error" in found) return found;
           t = found.team;
         }
-        return { result: this.ceilings(who, t) };
+        let profile: FakeProfile | null = null;
+        if (params["profile"] !== undefined) {
+          profile = this.profiles.find((p) => p.name === params["profile"]) ?? null;
+          if (!profile) return refuse(NOT_FOUND, "not_found", { profile: params["profile"] });
+        }
+        return { result: this.ceilings(who, t, profile) };
       }
 
 
@@ -1934,7 +1955,7 @@ export class FakeAdmin {
   /** What a profile wrote: `own` for one that extends another, its own fields otherwise. */
   private writtenOf(p: FakeProfile): Record<string, unknown> {
     if (p.extends) return { ...(p.own ?? {}) };
-    return { image: p.image, size_class: p.size_class, max_sessions: p.max_sessions ?? null, warm_workers: p.warm_workers ?? 0, provisioner: p.provisioner, spec: p.spec ?? {} };
+    return { image: p.image, size_class: p.size_class, max_sessions: p.max_sessions ?? null, budget_micros: p.budget_micros ?? null, warm_workers: p.warm_workers ?? 0, provisioner: p.provisioner, spec: p.spec ?? {} };
   }
 
   /** What a write that names no parent leaves a profile having written: its fields, the write's over them. */
@@ -1980,12 +2001,35 @@ export class FakeAdmin {
     return below;
   }
 
-  private resolveProfile(name: string, overrides: Record<string, { extends: string | null; written: Record<string, unknown> }>): (Resolved & { chain: string[] }) | string {
+  private resolveProfile(name: string, overrides: Record<string, { extends: string | null; written: Record<string, unknown> }>): (Resolved & { chain: string[]; channels: Array<[string, string]> }) | string {
     const chain = this.chainOf(name, overrides);
     if ("missing" in chain) return `${chain.missing} is extended in this chain and is not a profile on this plane any more`;
     if ("cycle" in chain) return `${chain.cycle.join(" → ")} extend each other in a circle`;
-    const resolved = chain.reduce<Resolved>((parent, [profile, written]) => mergeExtends(parent, written, profile), emptyResolved());
-    return { ...resolved, chain: chain.map(([n]) => n) };
+    // Each profile with the channel it follows in effect, for the bundle its pods load.
+    const channels: Array<[string, string]> = [];
+    const resolved = chain.reduce<Resolved>((parent, [profile, written]) => {
+      const merged = mergeExtends(parent, written, profile);
+      channels.push([profile, String(rowOf(merged)["channel"])]);
+      return merged;
+    }, emptyResolved());
+    return { ...resolved, chain: chain.map(([n]) => n), channels };
+  }
+
+  /** The bundle a profile's pods load, each entry with the profile whose channel gave it, as `effective.bundle` answers. */
+  private effectiveBundle(channels: Array<[string, string]>): Record<string, unknown> {
+    const composed = composeBundle(channels, (channel) => this.current(channel)?.content ?? null);
+    const single = composed.composed ? null : this.current(composed.channel);
+    return { ...composed, hash: single ? single.hash : null };
+  }
+
+  /** A profile's own monthly ceiling as `admin.profile.get` answers `budget`. */
+  private budgetOf(p: FakeProfile): Record<string, unknown> {
+    let setBy: string | null = p.budget_micros ? p.name : null;
+    if (p.budget_micros && p.extends) {
+      const resolved = this.resolveProfile(p.name, {});
+      if (typeof resolved !== "string") setBy = String(resolved.from["budget_micros"] ?? p.name);
+    }
+    return { budget_micros: p.budget_micros ?? null, budget_period: "monthly", set_by: setBy, spent_micros: p.spent_micros ?? 0, reserved_micros: 0 };
   }
 
   /** Whether `name` may extend `parent`, in the plane's sentences where it may not. */
@@ -2016,6 +2060,14 @@ export class FakeAdmin {
     }
     const resolved = this.resolveProfile(name, { [name]: { extends: via, written: own } });
     if (typeof resolved === "string") return resolved;
+    // A budget above the one it has from above is refused, as the plane refuses it.
+    const wrote = own["budget_micros"];
+    const ceiling = resolved.attrs["budget_micros"];
+    const source = resolved.from["budget_micros"];
+    if (parent && typeof wrote === "number" && wrote > 0 && typeof ceiling === "number" && source !== name && ceiling < wrote) {
+      const dollars = `$${(ceiling / 1_000_000).toFixed(2)}`;
+      return `${name} has a monthly budget of ${dollars} from ${String(source)}, and a profile that extends another can only lower its budget: set ${name}'s at or below ${dollars}, or raise ${String(source)}'s`;
+    }
     const { channel: _channel, ...row } = rowOf(resolved);
     return { attrs: { ...row, name }, own: parent ? own : null };
   }
@@ -2047,6 +2099,7 @@ export class FakeAdmin {
       size_class: p.size_class,
       size_class_summary: SIZE_CLASSES[p.size_class] ?? null,
       max_sessions: p.max_sessions ?? null,
+      budget_micros: p.budget_micros ?? null,
       warm_workers: p.warm_workers ?? 0,
       gitops: this.gitopsOf(p.gitops),
       replicas: p.replicas,
@@ -2090,6 +2143,7 @@ export class FakeAdmin {
     return {
       size_class: p.size_class,
       max_sessions: p.max_sessions ?? null,
+      budget_micros: p.budget_micros ?? null,
       warm_workers: p.warm_workers ?? 0,
       provisioner: p.provisioner,
       replicas: p.replicas,
@@ -2722,8 +2776,8 @@ export class FakeAdmin {
     };
   }
 
-  /** `Budget.ceilings/2`: the person's own, the team's and the platform's, narrowest first. */
-  private ceilings(subject: string, team: FakeTeam | null): Array<Record<string, unknown>> {
+  /** `Budget.ceilings/3`: the person's own, the profile's where it has one, the team's and the platform's, narrowest first. */
+  private ceilings(subject: string, team: FakeTeam | null, profile: FakeProfile | null = null): Array<Record<string, unknown>> {
     const rows = [...this.teams.values()].flatMap((t) => t.members.filter((m) => m.subject === subject));
     const cap = rows[0]?.budget_micros ?? null;
     const spent = rows.reduce((n, m) => n + m.spent_micros, 0);
@@ -2743,7 +2797,10 @@ export class FakeAdmin {
       budget_micros: platformCap ?? 0,
       remaining_micros: remaining(platformCap, all),
     };
-    return [person, ...teamRung, platform];
+    const profileRung = profile?.budget_micros
+      ? [{ scope: "profile", profile: profile.name, ...this.budgetOf(profile), remaining_micros: remaining(profile.budget_micros, profile.spent_micros ?? 0) }]
+      : [];
+    return [person, ...profileRung, ...teamRung, platform];
   }
 
   private record(actor: string, action: string, subject: string, detail: Record<string, unknown>): void {

@@ -8,6 +8,15 @@ defmodule Troupe.Plane.Budget do
   actually ask for unsayable: "this contractor may spend a hundred a month, whatever
   team they are in" and "nobody at all may take this deployment past a number".
 
+  ## A profile's ceiling
+
+  A worker profile may carry a ceiling of its own (`Troupe.Plane.ProfileBudget`): what the
+  sessions on it may spend in a month, whoever starts them and in whichever team. It is
+  not above or below the team's, since a profile serves several teams and a team uses
+  several profiles, so it is asked beside them, after the person's and before the team's:
+  a person refused by the profile they chose can choose another. A profile with no
+  ceiling has no rung, and is not listed.
+
   ## A month is the calendar month in UTC
 
   The person's and the platform's rungs count what was spent since midnight UTC on the
@@ -45,7 +54,7 @@ defmodule Troupe.Plane.Budget do
   """
 
   alias Troupe.Plane.Identity.Team
-  alias Troupe.Plane.{Ledger, PersonBudget, PlatformBudget, TeamBudget}
+  alias Troupe.Plane.{Ledger, PersonBudget, PlatformBudget, ProfileBudget, TeamBudget}
 
   @type scope :: :person | :team | :platform | :deployment
   @type rung :: %{
@@ -63,10 +72,16 @@ defmodule Troupe.Plane.Budget do
   left, so a caller can say which cap and by how much rather than only that there is no
   money.
   """
-  @spec reserve(Team.t() | Ecto.UUID.t() | nil, String.t(), String.t() | nil, non_neg_integer()) ::
+  @spec reserve(
+          Team.t() | Ecto.UUID.t() | nil,
+          String.t(),
+          String.t() | nil,
+          non_neg_integer(),
+          String.t() | nil
+        ) ::
           {:ok, [map()]} | {:error, {:over_budget, scope(), map()}}
-  def reserve(team, session_id, owner_subject, amount_micros) do
-    case walk(rungs(team, owner_subject), session_id, amount_micros, []) do
+  def reserve(team, session_id, owner_subject, amount_micros, profile \\ nil) do
+    case walk(rungs(team, owner_subject, profile), session_id, amount_micros, []) do
       {:ok, summaries} ->
         # Every rung said yes, so the promise becomes a row every replica can see.
         {:ok, _} = Ledger.reserve(team_id(team), session_id, owner_subject, amount_micros)
@@ -78,11 +93,12 @@ defmodule Troupe.Plane.Budget do
   end
 
   @doc "Give a session's promise back at every rung, and drop the row."
-  @spec release(Team.t() | Ecto.UUID.t() | nil, String.t(), String.t() | nil) :: :ok
-  def release(team, session_id, owner_subject) do
+  @spec release(Team.t() | Ecto.UUID.t() | nil, String.t(), String.t() | nil, String.t() | nil) ::
+          :ok
+  def release(team, session_id, owner_subject, profile \\ nil) do
     Ledger.release(team_id(team), session_id)
-    Enum.each(rungs(team, owner_subject), & &1.release.(session_id))
-    :ok
+    Enum.each(rungs(team, owner_subject, profile), & &1.release.(session_id))
+    release_uncapped(profile, session_id)
   end
 
   @doc """
@@ -91,10 +107,10 @@ defmodule Troupe.Plane.Budget do
   What the console shows beside a refusal: somebody told they are over budget should be
   able to see which of four numbers they are over without asking anybody.
   """
-  @spec ceilings(Team.t() | Ecto.UUID.t() | nil, String.t() | nil) :: [map()]
-  def ceilings(team, owner_subject) do
+  @spec ceilings(Team.t() | Ecto.UUID.t() | nil, String.t() | nil, String.t() | nil) :: [map()]
+  def ceilings(team, owner_subject, profile \\ nil) do
     team
-    |> rungs(owner_subject)
+    |> rungs(owner_subject, profile)
     |> Enum.map(fn rung -> Map.put(rung.inspect.(), :scope, rung.scope) end)
   end
 
@@ -103,10 +119,43 @@ defmodule Troupe.Plane.Budget do
   # Narrowest first. A session with no team and a caller with no subject each drop their
   # rung rather than being given a ceiling of nothing: a private session on somebody's
   # laptop has no team and spends no team's money.
-  @spec rungs(Team.t() | Ecto.UUID.t() | nil, String.t() | nil) :: [rung()]
-  defp rungs(team, owner_subject) do
-    person_rung(owner_subject) ++ team_rung(team) ++ [platform_rung()]
+  @spec rungs(Team.t() | Ecto.UUID.t() | nil, String.t() | nil, String.t() | nil) :: [rung()]
+  defp rungs(team, owner_subject, profile) do
+    person_rung(owner_subject) ++ profile_rung(profile) ++ team_rung(team) ++ [platform_rung()]
   end
+
+  # Only for a profile with a ceiling.
+  defp profile_rung(profile) when is_binary(profile) do
+    if ProfileBudget.capped?(profile) do
+      [
+        %{
+          scope: :profile,
+          capped?: fn -> ProfileBudget.capped?(profile) end,
+          reserve: &ProfileBudget.reserve(profile, &1, &2),
+          release: &ProfileBudget.release(profile, &1),
+          inspect: fn -> ProfileBudget.inspect_state(profile) end
+        }
+      ]
+    else
+      []
+    end
+  end
+
+  defp profile_rung(_none), do: []
+
+  # A profile whose ceiling was cleared while one of its sessions held a slice has no rung
+  # any more, and its actor, if one is running, still holds the slice: given back there
+  # too, or a ceiling set again later would count it.
+  defp release_uncapped(profile, session_id) when is_binary(profile) do
+    if not ProfileBudget.capped?(profile) and
+         :global.whereis_name({ProfileBudget, profile}) != :undefined do
+      ProfileBudget.release(profile, session_id)
+    end
+
+    :ok
+  end
+
+  defp release_uncapped(_none, _session_id), do: :ok
 
   defp person_rung(subject) when is_binary(subject) do
     [

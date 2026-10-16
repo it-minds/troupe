@@ -191,7 +191,7 @@ defmodule Troupe.Plane.Drain do
   def park(%Session{} = session) do
     Placement.release(session.profile, session.id)
     Sessions.read_only(session.id)
-    Budget.release(session.team_id, session.id, answerable_for(session))
+    Budget.release(session.team_id, session.id, answerable_for(session), session.profile)
     session.id
   end
 
@@ -230,8 +230,11 @@ defmodule Troupe.Plane.Drain do
 
   defp release_budget(session_id) do
     case Sessions.get(session_id) do
-      %{} = session -> Budget.release(session.team_id, session_id, answerable_for(session))
-      _none -> :ok
+      %{} = session ->
+        Budget.release(session.team_id, session_id, answerable_for(session), session.profile)
+
+      _none ->
+        :ok
     end
   end
 

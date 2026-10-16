@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { draftOf, keptOf, llmWithoutEndpoint } from "../src/views/Profiles";
+import { budgetMicros, draftOf, keptOf, llmWithoutEndpoint } from "../src/views/Profiles";
 import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
 import { PROVIDER_TYPES } from "../../../packages/client/test/support/provider-types.js";
 import type { FakeDeployment } from "./support";
@@ -166,6 +166,7 @@ describe("the editor", () => {
         image: "registry.example.com/troupe/worker:1",
         sizeClass: "standard",
         maxSessions: "",
+        budget: "",
         warmWorkers: "0",
         endpoint: "",
         provider: "",
@@ -189,6 +190,10 @@ describe("the editor", () => {
       kept,
     );
     expect(draft.max_sessions).toBeNull();
+    // Blank is no budget, sent as such; dollars are sent as the plane's millionths.
+    expect(draft.budget_micros).toBeNull();
+    expect(budgetMicros("120.50")).toBe(120_500_000);
+    expect(budgetMicros("a lot")).toBeNaN();
     expect(draft.spec).toEqual({
       llm: { prices: { m: { input: 1 } }, extra: 1 },
       egress: { other: true, fqdns: ["b.example.com"] },
@@ -399,6 +404,56 @@ describe("a profile that extends another", () => {
     button("Apply")!.click();
     await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
     expect((fake.admin.profiles.find((p) => p.name === "data-team")!.spec!["egress"] as Record<string, unknown>)["fqdns"]).toEqual(["llm-gw.example.com", "mcp.example.com", "hooks.example.com", "wiki.example.com"]);
+  });
+
+  it("lists the bundle its pods load, each entry with the profile whose channel gave it", async () => {
+    const analyst = { name: "analyst", definition: "---\nmode: primary\ndescription: Analyses.\n---\nYou analyse." };
+    const clash = { name: "jira", url: "https://mcp.example.com/other-jira" };
+    const warehouse = { name: "warehouse", url: "https://mcp.example.com/warehouse" };
+    const published = await fake.admin.call(PEOPLE.alice.subject, "admin.bundle.publish", { channel: "data", content: { schema: 1, agents: [analyst], skills: [], mcp_servers: [clash, warehouse] } });
+    expect("result" in published).toBe(true);
+    await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", { profile: { ...dataTeam, spec: { ...dataTeam.spec, configBundleChannel: "data" } } });
+    await open("#/profiles/data-team");
+    await waitFor(() => heading() === "data-team" && says("The bundle its pods load"), "data-team's bundle");
+    expect(says("One bundle, composed by the plane from stable (dev's) and data (data-team's)")).toBe(true);
+    const from = (name: string) => [...document.querySelectorAll<HTMLTableRowElement>("table.bundle-in-effect tbody tr")].find((r) => (r.cells[1]?.textContent ?? "") === name)?.cells[2]?.textContent;
+    expect(from("pr-reviewer")).toBe("dev on stable");
+    expect(from("analyst")).toBe("data-team on data");
+    expect(from("warehouse")).toBe("data-team on data");
+    // data's jira has dev's name and does not say override: dev's is kept, and that is said.
+    expect(from("jira")).toBe("dev on stable");
+    expect(says("say override: true on it in data's bundle to replace it")).toBe(true);
+    // Its pods' channel is not one anybody publishes to.
+    expect("error" in (await fake.admin.call(PEOPLE.alice.subject, "admin.bundle.publish", { channel: "profile:data-team", content: { schema: 1 } }))).toBe(true);
+  });
+
+  it("has a monthly budget set, previewed and audited, and below its parent's only", async () => {
+    await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", { profile: dataTeam });
+    await open("#/profiles/dev");
+    await waitFor(() => heading() === "dev" && says("Monthly budget"), "dev");
+    expect(says("no ceiling: its sessions spend what their people and teams have")).toBe(true);
+
+    button("Change dev")!.click();
+    type(await waitFor(() => field("Monthly budget, in dollars"), "the editor"), "500");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen") && says("budget_micros"), "the preview");
+    expect(says("Its sessions may spend $500.00 a month from now")).toBe(true);
+    // data-team has it from dev, and is told so in the preview.
+    expect(says("data-team: budget_micros")).toBe(true);
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
+    expect(fake.admin.profiles.find((p) => p.name === "dev")!.budget_micros).toBe(500_000_000);
+    expect(fake.admin.profiles.find((p) => p.name === "data-team")!.budget_micros).toBe(500_000_000);
+
+    visit("#/profiles/data-team");
+    await waitFor(() => heading() === "data-team" && says("$500.00 a month, from dev"), "data-team's budget, from dev");
+
+    // Higher than dev's: refused, in the plane's words, before anything is written.
+    (await waitFor(() => button("Change data-team"), "data-team")).click();
+    type(await waitFor(() => field("Monthly budget, in dollars"), "the editor"), "800");
+    button("Preview")!.click();
+    await waitFor(() => says("a profile that extends another can only lower its budget"), "the refusal");
+    expect(fake.admin.profiles.find((p) => p.name === "data-team")!.budget_micros).toBe(500_000_000);
   });
 
   it("keeps its parent from being deleted while it extends it", async () => {

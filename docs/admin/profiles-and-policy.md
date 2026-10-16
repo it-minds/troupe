@@ -21,6 +21,7 @@ manifest's ([§6](#6-provisioning-direct-or-from-a-repository)).
 | `image` | `repository:tag` or `repository@sha256:…`, or `release` (below) |
 | `size_class` | `standard` (several sessions share a worker) or `heavy` (fewer, with more CPU, memory and disk each). A resource question, not a safety one: sessions cannot see each other's files either way |
 | `max_sessions` | how far it may grow, in sessions at once. Absent is no ceiling, bounded by the team's budget |
+| `budget_micros` | what its sessions may spend in a calendar month (UTC), in millionths of a dollar, whoever starts them and in whichever team: a ceiling beside each person's, team's and the platform's ([bundles-and-triggers.md §4](bundles-and-triggers.md#4-budgets)). Absent or `0` is none. Direct mode only for now: a repository's manifest has no field for it |
 | `warm_workers` | workers kept up when nothing runs. `0` scales to zero, and the next session waits about half a minute |
 | `spec` | the rest of the resource in its own camelCase: `llm`, `egress`, `configBundleChannel`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, `github`, and `storage.storageClassName`, the class a worker's disk comes from (one `allowedStorageClasses` names; absent is the cluster's default) |
 
@@ -54,7 +55,8 @@ Other `spec` fields:
 | `github.permissions` | what a session's token may do on GitHub beyond cloning its repository, in GitHub's names: `contents` (`read` or `write`, which pushes its `troupe/*` branch), `pull_requests` (`read` or `write`, which opens its draft pull request and comments on it), `checks` and `statuses` (`read`, its CI). Absent, sessions clone and do no more; a profile that pushes also declares the API's host in `egress.gitHosts` ([github.md](github.md#5-let-a-profile-reach-github)) |
 | `github.allowPublic`, `github.denyPaths`, `github.maxPushes`, `github.maxRuns` | how far the fix loop goes: `allowPublic` (absent, `false`: pushes and pull requests to private and internal repositories only), `denyPaths` (patterns a push never carries, added to `.env`, `*.pem`, private keys and the rest of the defaults), `maxPushes` (pushes a run may make) and `maxRuns` (runs on a repository at once). A team's own caps hold where lower ([github.md](github.md#9-how-far-a-run-may-go)) |
 | `mcpIdentities` | who the profile is at each MCP server its bundle calls with client credentials ([below](#calling-an-mcp-server-as-the-profile)). Yours to write, in direct and gitops mode alike; nothing in it is secret |
-| `mcpServers`, `teams` | **written by the plane** from the channel's bundle and from grants; do not set them |
+| `mcpServers` | the MCP servers the profile adds to its bundle's, its own (Decision 910). The resource's list, which its pods load, is its channel's bundle's with these added by name: one with a bundle server's name replaces it only with `"override": true`. A publish to the channel composes the two again and keeps the profile's own; `admin.profile.get` answers the own ones in `spec`, and a put that sends the resource's whole list back has the bundle's dropped as the bundle's |
+| `teams` | **written by the plane** from grants; do not set it |
 
 A profile's `provisioner` decides who makes its workers exist: `kubernetes` (the default,
 the operator) or `ssh`, machines that register themselves ([single-machine.md](single-machine.md)).
@@ -80,7 +82,9 @@ flat `WorkerProfile` as for any other profile.
 |---|---|
 | `egress.fqdns`, `egress.gitHosts` | the parent's, and its own **added**; each still checked against the policy |
 | `mcpServers` | the parent's, and its own **added** by name. One with a parent's name replaces the parent's only with `"override": true`; otherwise the parent's is kept and the clash is reported |
+| agents, skills, MCP servers and ACP agents in the bundle its pods load | the parent's channel's, and its own channel's **added** by name, composed by the plane into one bundle (below) |
 | `max_sessions` | the **lower** of the two: a child can narrow a ceiling, never raise it |
+| `budget_micros` | the **lower** of the two, and one set above the parent's is **refused** with a sentence |
 | `personalTools`, `repositoryOverridesBundle` | a parent's `forbid` or `false` **holds** whatever the child says; otherwise the child's, or the parent's |
 | `image`, `size_class`, `provisioner`, the `llm` fields, `storage.storageClassName`, `configBundleChannel`, `github`, `orgMount` and any other field | the child's where it sets one, the parent's where it does not |
 | `llm.secretRef`, `mcpIdentities`, grants, `warm_workers` | **never inherited**: a key and an identity are each profile's own, in its own namespace, and a grant of the standard does not make a team a user of its extensions |
@@ -105,8 +109,26 @@ refused with a sentence.
   policy refuses, naming it; otherwise it rewrites each child's resource, and its pods roll
   as for any change. The audit has one `profile.put`, the parent's, with `extended_by`
   naming each child and what changed in it.
-- **Bundles** are not merged yet: a child follows its own `configBundleChannel`, or its
-  parent's where it names none, and its pods load that channel's bundle.
+- **Bundles** are composed (Decision 910). A child that names no `configBundleChannel`, or
+  its parent's, loads its parent's channel's bundle as it is. A child on a channel of its
+  own loads one bundle the plane composes: the parent's channel's agents, skills, MCP
+  servers and ACP agents, with its own channel's added by name. An entry with a name the
+  parent's bundle already has replaces it only where the child's channel's document says
+  `"override": true` on it (an agent may say it in its frontmatter instead); otherwise the
+  parent's is kept, and `effective.bundle.problems` says so. The MCP servers each profile
+  in the chain wrote itself are a layer of their own, after its channel's, by the same
+  rule; a profile that extends nothing and wrote servers of its own has a composed bundle
+  too, so its pods load them. The plane publishes the
+  composed bundle as a version of a channel of the child's own, `profile:<name>`, only when
+  it differs, so its pods fetch and check one document by one hash as on any channel, and
+  a session pins its version as it would any other. A publish or retire on any channel in
+  the chain composes it again and reaches the child's pods as a publish reaches pods
+  today. The resource's `mcpServers` are the composed bundle's, so the reach and identity
+  checks read what the pods load. `profile:` channels are the plane's: publishing or
+  retiring one by hand, or naming one as a profile's channel, is refused.
+  `admin.profile.get` with `effective` lists the bundle in `effective.bundle`: its channel,
+  hash, the channels it is made from, and each entry with the profile whose channel gave
+  it. The console shows it as "The bundle its pods load".
 - **Deleting the parent** is refused (`conflict`, `extended_by`) while a profile extends it.
   Make each extend another profile, or none: a put without `extends` keeps the profile as
   it was in effect, and from then on it follows nothing.

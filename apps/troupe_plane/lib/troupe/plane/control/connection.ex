@@ -814,8 +814,11 @@ defmodule Troupe.Plane.Control.Connection do
   # ever put to sleep, and nothing would say so until they could not start one.
   defp release_budget(session_id) do
     case Sessions.get(session_id) do
-      %{} = session -> Budget.release(session.team_id, session_id, answerable_for(session))
-      _none -> :ok
+      %{} = session ->
+        Budget.release(session.team_id, session_id, answerable_for(session), session.profile)
+
+      _none ->
+        :ok
     end
   end
 

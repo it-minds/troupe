@@ -3,7 +3,7 @@
 // what the child wrote laid over it, field by field, and where each field came from.
 //
 // Egress hosts and MCP servers are added (a server with a parent's name replaces it only
-// with `override: true`); `max_sessions` narrows; a parent's `personalTools: forbid` and
+// with `override: true`); `max_sessions` and `budget_micros` narrow; a parent's `personalTools: forbid` and
 // `repositoryOverridesBundle: false` hold; `llm.secretRef`, `mcpIdentities` and
 // `warm_workers` are never inherited; everything else is the child's where it sets it.
 
@@ -20,7 +20,7 @@ export interface Resolved {
 export const MAX_DEPTH = 4;
 
 /** What a profile that extends another keeps as it wrote it. */
-export const WRITTEN_KEYS = ["image", "size_class", "max_sessions", "warm_workers", "provisioner", "spec"];
+export const WRITTEN_KEYS = ["image", "size_class", "max_sessions", "budget_micros", "warm_workers", "provisioner", "spec"];
 
 const PLANE_WRITTEN = ["replicas", "sessionsPerPod", "resources", "teams", "image"];
 
@@ -31,6 +31,7 @@ const TOP: Array<[string, Rule]> = [
   ["size_class", "replaced"],
   ["provisioner", "replaced"],
   ["max_sessions", "narrow"],
+  ["budget_micros", "narrow"],
   ["warm_workers", "own"],
 ];
 
@@ -169,9 +170,68 @@ export function rowOf(resolved: Resolved): Plain {
     image: resolved.attrs["image"] ?? null,
     size_class: resolved.attrs["size_class"] ?? "standard",
     max_sessions: resolved.attrs["max_sessions"] ?? null,
+    budget_micros: resolved.attrs["budget_micros"] ?? null,
     warm_workers: resolved.attrs["warm_workers"] ?? 0,
     provisioner: resolved.attrs["provisioner"] ?? "kubernetes",
     spec,
     channel: typeof channel === "string" && channel !== "" ? channel : "stable",
   };
+}
+
+/** One entry of the bundle a profile's pods load, with the profile whose channel gave it. */
+export interface BundleEntry {
+  kind: string;
+  name: string;
+  from: string;
+  channel: string;
+}
+
+const KINDS = ["agents", "skills", "mcp_servers", "acp_agents"];
+const WORDS: Record<string, string> = { agents: "agent", skills: "skill", mcp_servers: "MCP server", acp_agents: "ACP agent" };
+
+/** The channel the plane publishes a profile's composed bundle on. */
+export const composedChannel = (profile: string): string => `profile:${profile}`;
+
+/**
+ * The bundle in effect, as `Troupe.Plane.Bundles.Effective` composes it: each channel of
+ * the chain once, under the first profile that follows it, its current document laid over
+ * the ones above it. An entry with a name already there replaces it only where it says
+ * `override: true` (an agent may say so in its frontmatter), and the clash is reported.
+ */
+export function composeBundle(
+  chain: Array<[string, string]>,
+  current: (channel: string) => Plain | null,
+): { channel: string; layers: Array<{ profile: string; channel: string }>; composed: boolean; entries: BundleEntry[]; problems: string[] } {
+  const layers = chain.filter(([, channel], i) => chain.findIndex(([, c]) => c === channel) === i).map(([profile, channel]) => ({ profile, channel }));
+  const lists: Record<string, Plain[]> = Object.fromEntries(KINDS.map((k) => [k, []]));
+  const from: Record<string, BundleEntry> = {};
+  const problems: string[] = [];
+  const overrides = (kind: string, entry: Plain) =>
+    entry["override"] === true || (kind === "agents" && typeof entry["definition"] === "string" && /^---[\s\S]*?\noverride:\s*true\s*\n[\s\S]*?---/.test(entry["definition"]));
+  const strip = ({ override: _o, ...rest }: Plain): Plain => rest;
+  for (const layer of layers) {
+    const content = current(layer.channel);
+    if (!content) continue;
+    for (const kind of KINDS) {
+      for (const entry of list(content[kind]) as Plain[]) {
+        const name = String(entry["name"]);
+        const at = `${kind}/${name}`;
+        const below = (lists[kind] ?? []).find((e) => e["name"] === name);
+        const source = { kind, name, from: layer.profile, channel: layer.channel };
+        if (!below) {
+          lists[kind] = [...(lists[kind] ?? []), entry];
+          from[at] = source;
+        } else if (overrides(kind, entry)) {
+          lists[kind] = (lists[kind] ?? []).map((e) => (e["name"] === name ? entry : e));
+          from[at] = source;
+        } else if (JSON.stringify(strip(below)) !== JSON.stringify(strip(entry))) {
+          const theirs = from[at]?.from ?? "";
+          problems.push(`${layer.profile}'s ${WORDS[kind]} ${name} (on ${layer.channel}) has the name of one ${theirs} gives it, and ${theirs}'s is kept: say override: true on it in ${layer.channel}'s bundle to replace it`);
+        }
+      }
+    }
+  }
+  const last = chain.at(-1)?.[0] ?? "";
+  const entries = KINDS.flatMap((kind) => (lists[kind] ?? []).map((e) => from[`${kind}/${String(e["name"])}`] as BundleEntry));
+  return { channel: layers.length > 1 ? composedChannel(last) : (layers[0]?.channel ?? "stable"), layers, composed: layers.length > 1, entries, problems };
 }
