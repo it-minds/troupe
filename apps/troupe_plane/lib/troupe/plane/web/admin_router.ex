@@ -1,6 +1,7 @@
 defmodule Troupe.Plane.Web.AdminRouter do
   @moduledoc """
-  The panel's routes, and the login that stands in front of them.
+  The routes under `/admin`: the read-only page, the sign-in and the break-glass door in
+  front of it, and where each page that is the console's now went.
 
   Behind OIDC: `/admin` with no session sends you to the provider, and the callback puts
   the subject in a signed cookie. The role is *not* in the cookie — it is worked out on
@@ -43,35 +44,12 @@ defmodule Troupe.Plane.Web.AdminRouter do
       on_mount: {Live.Auth, :admin},
       session: {Troupe.Plane.Web.Index, :live_session, []} do
       live("/", Live.Overview)
-      live("/workers", Live.Workers)
-      live("/workers/:profile", Live.Workers)
-      live("/provisioners", Live.Provisioners)
-      live("/teams", Live.Teams)
-      live("/identity", Live.Identity)
-      live("/provider", Live.Provider)
-      live("/sessions", Live.Sessions)
-      live("/budgets", Live.Budgets)
-      live("/connections", Live.Connections)
-      live("/bundles", Live.Bundles)
-      live("/integrations", Live.Integrations)
-      live("/triggers", Live.Triggers)
-      live("/triggers/:team", Live.Triggers)
-      live("/review", Live.Review)
-      live("/audit", Live.Audit)
-      # Readable by a team admin and writable only by a platform admin, which the page
-      # enforces per field rather than by not being routed: a team admin who cannot see
-      # what the platform is configured with cannot tell whether their problem is theirs.
-      live("/policy", Live.Policy)
-
-      # The address it had when it was only one rung of the ladder. Kept because it is in
-      # the deployment notes, in the runbook and in at least one bookmark, and a 404 on
-      # the page somebody was told to open is a worse answer than the page.
-      live("/settings", Live.Policy)
     end
 
-    live_session :platform, on_mount: {Live.Auth, :platform_admin} do
-      live("/profile/new", Live.ProfileEditor)
-      live("/profile/:profile", Live.ProfileEditor)
-    end
+    # Where the LiveView console's editors were. They are the console's now, at
+    # `/console`, and a bookmark, a runbook or the deployment notes that name one of these
+    # is sent to the same place there rather than to a 404.
+    get("/:page", Troupe.Plane.Web.AdminMoved, :moved)
+    get("/:page/:within", Troupe.Plane.Web.AdminMoved, :moved)
   end
 end

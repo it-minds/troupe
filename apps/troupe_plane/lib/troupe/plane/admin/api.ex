@@ -406,6 +406,13 @@ defmodule Troupe.Plane.Admin.API do
       risk: :read
     },
     %Method{
+      name: "admin.profile.choices",
+      function: :profile_choices,
+      summary:
+        "What a profile's fields may be: every provider type llm.provider may name, with what each asks for (where it is, whether it needs a key), and every size class with how many sessions share a worker and what it is for. The lists the plane checks a profile against, so a form offers no choice it would refuse.",
+      risk: :read
+    },
+    %Method{
       name: "admin.profiles.export",
       function: :profiles_export,
       summary:
@@ -1229,6 +1236,30 @@ defmodule Troupe.Plane.Admin.API do
           required: true,
           description: "The keys to change.",
           properties: @github_properties
+        }
+      ]
+    },
+    %Method{
+      name: "admin.github.check",
+      function: :github_check,
+      summary:
+        "Test the plane's GitHub App without changing it: an App ID is set, OpenBao transit signs with its key, GitHub knows the App by the JWT that key signs, and every installation set here is one GitHub lists for it. Four named checks, each with what it found, and GitHub's slug and name for the App once GitHub has answered.",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
+      name: "admin.github.delete",
+      function: :github_delete,
+      summary:
+        "Forget the plane's GitHub App: its App ID, API URL, installations and which key version is its own. A session naming a repository is refused from then on, and a pod is given no token for one. The key stays in OpenBao transit, where nothing signs with it. Confirmed by the App ID.",
+      risk: :destructive,
+      confirm: "app_id",
+      arguments: [
+        %Argument{
+          name: "app_id",
+          type: :integer,
+          required: true,
+          description: "The App ID, typed back to confirm."
         }
       ]
     },

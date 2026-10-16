@@ -1,6 +1,6 @@
 defmodule Troupe.Plane.ConsoleCoverageTest do
   @moduledoc """
-  Every administrative method is reachable from a named screen, or says why not.
+  Every administrative method is reachable from an area of the console, or says why not.
 
   `AdminParityTest` proves the context, the JSON-RPC surface and the MCP tools agree. Nothing
   proved the *console* did, and that is not a hypothetical: `admin.profile.put` was in the
@@ -10,8 +10,9 @@ defmodule Troupe.Plane.ConsoleCoverageTest do
   not happen.
 
   This is the test that makes the separate job impossible to skip. It fails on a new method,
-  it fails on a screen that stops calling something it claims, and the only way to satisfy it
-  without building a screen is to write down a reason somebody will read.
+  and the only way to satisfy it without placing the method on an area of the console is to
+  write down a reason somebody will read. The console's own `test/coverage.test.ts` holds the
+  console to each placement: it calls the method, or owes it on that area.
   """
 
   use ExUnit.Case, async: true
@@ -23,13 +24,6 @@ defmodule Troupe.Plane.ConsoleCoverageTest do
   # The same exemption `AdminParityTest` makes, for the same reason: these work out *who is
   # asking* rather than doing anything on their behalf.
   @not_actions [actor_for: 1, actor_for_session: 1, actor_for_subject: 1, admin?: 1]
-
-  # Screens whose module is not `Live.<Name>`, because the navigation's name and the
-  # module's are allowed to differ where the module predates the grouping.
-  @modules %{
-    fleet: Troupe.Plane.Web.Live.Workers,
-    profiles: Troupe.Plane.Web.Live.ProfileEditor
-  }
 
   # The same filter `AdminParityTest` applies, because the two tests are about one list and
   # a stricter copy here would fail about functions that test has already accounted for.
@@ -49,41 +43,18 @@ defmodule Troupe.Plane.ConsoleCoverageTest do
     API.list() |> Enum.map(& &1.function) |> Enum.uniq()
   end
 
-  defp screen_module(screen) do
-    Map.get_lazy(@modules, screen, fn ->
-      Module.concat(Troupe.Plane.Web.Live, screen |> Atom.to_string() |> Macro.camelize())
-    end)
-  end
-
-  # Read from the tree rather than from `module_info(:compile)`, whose path is the machine
-  # the release was built on. `File.cwd!` is the app's own directory under `mix cmd`, and
-  # the umbrella root otherwise, so both are tried.
-  defp source(module) do
-    # The whole underscored module path, not its last segment: `Live.Sessions` and the
-    # `Plane.Sessions` context share a basename, and matching on that read the context and
-    # then reported that the screen never called something it calls on line 40.
-    path = Macro.underscore(module) <> ".ex"
-
-    ["lib/#{path}", "apps/troupe_plane/lib/#{path}"]
-    |> Enum.filter(&File.regular?/1)
-    |> case do
-      [found | _] -> File.read!(found)
-      [] -> nil
-    end
-  end
-
   describe "coverage" do
-    test "every method the API exposes is placed on a screen or given a reason" do
+    test "every method the API exposes is placed on an area or given a reason" do
       unplaced = Enum.reject(exposed(), &Console.placement(&1))
 
       assert unplaced == [],
              """
-             These administrative methods are reachable from no console screen and have no
+             These administrative methods are reachable from no console area and have no
              reason recorded:
 
                  #{Enum.map_join(unplaced, "\n    ", &inspect/1)}
 
-             Add each to `Troupe.Plane.Admin.Console`: `{:screen, :name}` where somebody
+             Add each to `Troupe.Plane.Admin.Console`: `{:area, :name}` where somebody
              does it, or `{:api_only, "why a person would not click it"}`. A reason is a
              sentence about the operation, not a note that the screen is not built.
              """
@@ -106,123 +77,32 @@ defmodule Troupe.Plane.ConsoleCoverageTest do
     end
   end
 
-  describe "the screens named" do
-    test "all exist, and all are LiveViews" do
-      # Every one, collected. A test that stopped at the first missing screen would hand
-      # somebody one name at a time across as many runs as there are screens to build.
-      missing =
-        for screen <- Console.screens(),
-            module = screen_module(screen),
-            not (Code.ensure_loaded?(module) and function_exported?(module, :mount, 3)),
-            not Map.has_key?(Console.unbuilt(), screen),
-            do: "#{screen} (#{inspect(module)})"
+  describe "the areas named" do
+    test "are the console's map, and every placement is on one of them" do
+      # Whether the console keeps each placement is the console's own coverage test's to
+      # say: it reads this table, calls what it reaches, and owes the rest on the same area.
+      # What is checked here is that a placement names a place the map has at all.
+      off_map =
+        for {function, {:area, area}} <- Console.placements(),
+            area not in Console.areas(),
+            do: "#{function} is placed on #{area}, which is not an area of the console's map"
 
-      assert missing == [],
-             """
-             The console names these screens, they do not exist as LiveViews, and nothing in
-             `Console.owed/0` accounts for them:
+      assert off_map == [], Enum.join(off_map, "\n")
 
-                 #{Enum.join(missing, "\n    ")}
-             """
+      assert Console.areas() == Enum.flat_map(Console.groups(), &elem(&1, 1))
+      assert Console.areas() == Enum.uniq(Console.areas())
     end
 
-    test "and a screen that does not exist yet has nothing placed on it but its own debt" do
-      # A screen named in the navigation with placements it cannot possibly keep would pass
-      # the check above and fail nobody. Everything placed on an unbuilt screen must be
-      # something `owed/0` says is owed *there*.
-      premature =
-        for screen <- Console.screens(),
-            module = screen_module(screen),
-            not Code.ensure_loaded?(module),
-            function <- Console.reached_by(screen),
-            {function, screen} not in Console.owed(),
-            do: "#{function} is placed on #{screen}, which does not exist"
+    test "and a placement is an area or a reason, nothing else" do
+      odd =
+        for {function, placement} <- Console.placements(),
+            not match?({:area, area} when is_atom(area), placement),
+            not match?({:api_only, reason} when is_binary(reason), placement),
+            do: "#{function}: #{inspect(placement)}"
 
-      assert premature == [], Enum.join(premature, "\n")
-    end
-
-    test "and a screen recorded as unbuilt is in fact not built" do
-      # The list can only shrink. Build one and this fails until the entry goes, which is
-      # what stops `unbuilt` becoming a place names are left after the work is done.
-      built =
-        for {screen, _what} <- Console.unbuilt(),
-            module = screen_module(screen),
-            Code.ensure_loaded?(module),
-            function_exported?(module, :mount, 3),
-            do: "#{screen} exists now; delete it from Console.unbuilt/0"
-
-      assert built == [], Enum.join(built, "\n")
-    end
-
-    test "and every unbuilt screen is one the console actually names" do
-      stray = Map.keys(Console.unbuilt()) -- Console.screens()
-      assert stray == [], "unbuilt names screens the console does not have: #{inspect(stray)}"
-    end
-
-    test "actually call what they are said to reach" do
-      # The strong half. A map that said `:teams` for something Teams does not call would be
-      # a worse lie than no map at all — it would pass a coverage test while the button did
-      # not exist.
-      unreached =
-        for screen <- Console.screens(),
-            module = screen_module(screen),
-            text = source(module),
-            not is_nil(text),
-            function <- Console.reached_by(screen),
-            not String.contains?(text, "Admin.#{function}("),
-            not Map.has_key?(Console.owed(), function),
-            do: "#{function} is placed on #{screen}, which never calls it"
-
-      assert unreached == [],
-             """
-             These placements are claims the screens do not keep:
-
-                 #{Enum.join(unreached, "\n    ")}
-
-             Either the screen lost the call, or the placement is aspirational — and if it
-             is aspirational, it belongs in `Console.owed/0` where it is visible.
-             """
-    end
-
-    test "and the debt shrinks: nothing owed is already done" do
-      # The rule that makes `owed` bookkeeping rather than an excuse. Close a gap and this
-      # fails until the entry is deleted, which is the opposite of a list that only grows.
-      settled =
-        for {function, screen} <- Console.owed(),
-            module = screen_module(screen),
-            text = source(module),
-            not is_nil(text),
-            String.contains?(text, "Admin.#{function}("),
-            do: "#{function} works on #{screen} now; delete it from Console.owed/0"
-
-      assert settled == [], Enum.join(settled, "\n")
-    end
-
-    test "and nothing is owed that the console never claimed" do
-      # An entry for something no screen is placed on would be debt against a plan nobody
-      # wrote down, which is where a backlog stops meaning anything.
-      stray =
-        for {function, screen} <- Console.owed(),
-            Console.placement(function) != {:screen, screen},
-            do: "#{function} is owed on #{screen} but placed elsewhere"
-
-      assert stray == [], Enum.join(stray, "\n")
-    end
-
-    test "and every screen that exists can be read, so the check above means something" do
-      # A source file this test cannot find would make the check above pass by vacuity,
-      # which is the one way a coverage test fails silently.
-      unreadable =
-        for screen <- Console.screens(),
-            module = screen_module(screen),
-            Code.ensure_loaded?(module),
-            is_nil(source(module)),
-            do: "#{screen} (#{inspect(module)})"
-
-      assert unreadable == [], "could not read the source of: #{Enum.join(unreadable, ", ")}"
+      assert odd == [], Enum.join(odd, "\n")
     end
   end
-
   describe "what no surface offers" do
     # Done item 9's second half. The mechanism is already proven against a real OpenBao in
     # `Troupe.Plane.PersonCredentialsTest` — the plane's own credential cannot read a slot

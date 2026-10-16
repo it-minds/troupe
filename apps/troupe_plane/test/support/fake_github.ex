@@ -202,6 +202,29 @@ defmodule Troupe.Plane.FakeGitHub do
     end
   end
 
+  # The App as GitHub describes it to the App itself, and its installations: what
+  # `admin.github.check` asks, with the JWT it signs.
+  def call(%Plug.Conn{method: "GET", path_info: ["api", "v3", "app" | rest]} = conn, agent)
+      when rest in [[], ["installations"]] do
+    with {:ok, app_id} <- issuer(conn),
+         {:ok, _claims} <- verify(conn, agent, app_id) do
+      case rest do
+        [] ->
+          slug = Agent.get(agent, &Map.get(&1.slugs, app_id))
+          answer(conn, 200, %{"id" => app_id, "slug" => slug, "name" => slug})
+
+        ["installations"] ->
+          listed =
+            for {id, %{app_id: ^app_id, owner: owner}} <- Agent.get(agent, & &1.installations),
+                do: %{"id" => id, "app_id" => app_id, "account" => %{"login" => owner}}
+
+          answer(conn, 200, listed)
+      end
+    else
+      {:error, status, message} -> answer(conn, status, %{"message" => message})
+    end
+  end
+
   def call(%Plug.Conn{method: "GET", path_info: [owner, repo, "info", "refs"]} = conn, agent) do
     conn = fetch_query_params(conn)
 
@@ -726,6 +749,19 @@ defmodule Troupe.Plane.FakeGitHub do
   end
 
   # -- small things -------------------------------------------------------------
+
+  # The App a JWT says it is, read before it is verified against that App's key.
+  defp issuer(conn) do
+    with ["Bearer " <> jwt] <- get_req_header(conn, "authorization"),
+         %JOSE.JWT{fields: %{"iss" => iss}} <- JOSE.JWT.peek_payload(jwt),
+         {app_id, ""} <- Integer.parse(to_string(iss)) do
+      {:ok, app_id}
+    else
+      _ -> {:error, 401, "A JSON web token could not be decoded"}
+    end
+  rescue
+    _ -> {:error, 401, "A JSON web token could not be decoded"}
+  end
 
   defp integer(text) do
     case Integer.parse(text) do

@@ -424,6 +424,79 @@ defmodule Troupe.Plane.AdminTest do
     end
   end
 
+  # What the LiveView pages for these proved, kept as answers now that the console draws
+  # them: the console is an API client, so the claims are about what the plane answers.
+  describe "what the console's areas read" do
+    test "every host anything dials, against the policy that decides, with where it was declared",
+         context do
+      Application.put_env(:troupe_plane, :egress_allowed, fn host -> host == "ok.example" end)
+      on_exit(fn -> Application.delete_env(:troupe_plane, :egress_allowed) end)
+
+      {:ok, _} =
+        Fleet.put_profile(%{
+          name: "dev",
+          spec: %{"egress" => %{"fqdns" => ["ok.example", "refused.example"]}}
+        })
+
+      assert {:ok, answer} = Admin.integrations(context.lead)
+
+      assert %{host: "ok.example", from: "dev", allowed: true} in answer.egress
+      assert %{host: "refused.example", from: "dev", allowed: false} in answer.egress
+    end
+
+    test "a notification target is checked again rather than trusted", context do
+      {:ok, principal} =
+        Admin.principal_create(context.lead, "engineering", %{
+          "name" => "nightly-bot",
+          "profiles" => ["dev"],
+          "sponsor" => "lead@example.test"
+        })
+
+      {:ok, _} =
+        Triggers.put(
+          context.engineering,
+          %{
+            "name" => "nightly",
+            "principal" => principal.subject,
+            "profile" => "dev",
+            "source" => %{"kind" => "schedule", "cron" => "0 3 * * *"},
+            "prompt_template" => "Update every dependency.",
+            "notify_url" => "https://hooks.example/troupe"
+          },
+          "root"
+        )
+
+      assert {:ok, %{notify: [target]}} = Admin.integrations(context.lead)
+      assert target == %{team: "engineering", trigger: "nightly", url: "https://hooks.example/troupe", refusal: nil}
+
+      # A team admin sees their own teams' targets and no other's.
+      assert {:ok, %{notify: []}} =
+               Admin.integrations(%{context.lead | teams: ["design"]})
+    end
+
+    test "the identity check asks about the group given, not the one stored", context do
+      assert {:ok, nobody} = Admin.identity_check(context.root, "nobody-carries-this")
+      assert nobody.group == "nobody-carries-this"
+      refute nobody.ok
+      assert List.last(nobody.checks).detail =~ "never arrived in the"
+
+      assert {:ok, platform} = Admin.identity_check(context.root, "platform")
+      assert List.last(platform.checks).ok
+      assert List.last(platform.checks).detail =~ "including you."
+    end
+
+    test "a profile's choices are the protocol's provider types and the plane's size classes",
+         context do
+      assert {:ok, choices} = Admin.profile_choices(context.lead)
+
+      assert Enum.map(choices.provider_types, & &1["name"]) == ProviderTypes.named()
+      assert Enum.map(choices.size_classes, & &1.name) == Admin.size_classes()
+      assert Enum.all?(choices.size_classes, &(&1.summary != "" and &1.sessions_per_worker > 0))
+
+      assert {:error, %{message: "forbidden"}} = Admin.profile_choices(context.member)
+    end
+  end
+
   describe "what no administrator can do" do
     test "read what a session said", context do
       session = session!("s-private", context.engineering, "dev")

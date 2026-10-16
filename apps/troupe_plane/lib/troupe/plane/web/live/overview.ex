@@ -1,12 +1,21 @@
 defmodule Troupe.Plane.Web.Live.Overview do
   @moduledoc """
-  Fleet health, sessions and spend, on one page — and what needs doing, first.
+  The page at `/admin`: fleet health, sessions and spend, read-only, and the way to the
+  console.
 
-  The first page an operator opens when something is wrong, so it answers the question
-  they actually have, which is not "what are the numbers" but "what should I look at".
-  Four metrics, then a list of everything that is not healthy, worst first. When that list
-  is empty it says so in a sentence rather than disappearing, because an empty region and
-  a region that has not loaded look identical.
+  Everything an administrator does is done in the console at `/console`, an app of its
+  own. This page is what is left of the LiveView console that came before it, and it is
+  kept for one day: the day the console cannot be used, because the identity provider it
+  signs in through cannot let anybody in. The break-glass door (`/admin/breakglass`) opens
+  this page without the provider, and what somebody needs there is to see what the plane
+  is doing and to undo the setting that locked everybody out.
+
+  So it reads, and it repairs nothing but sign-in. Four metrics, then everything that is
+  not healthy, worst first, then each profile and each team's spend; and, in a break-glass
+  session, sign-in as the plane holds it, the identity check, and a way to put the sign-in
+  settings and the two settings that decide who administers back to what the deployment
+  says. Each of those is a reset, never a value typed here: the deployment is the floor
+  every setting is laddered on, and the worst a reset can do is go back to it.
 
   Refreshed on a timer rather than on a push: every number here is a summary, and a
   summary that moved the instant any one session did would flicker. The list is sorted
@@ -27,39 +36,92 @@ defmodule Troupe.Plane.Web.Live.Overview do
   # it decides what a list says, not what the platform does.
   @near_budget 0.8
 
+  # The settings that decide who administers this platform: the two that, wrong, lock
+  # every administrator out of the console.
+  @administration ~w(platform_admin_group groups_claim)
+
   @impl Phoenix.LiveView
   def mount(_params, session, socket) do
     if connected?(socket), do: :timer.send_interval(@refresh_ms, :refresh)
-    # The landing page of this console points at the new one, where there is one; this one
-    # stays for what that does not do yet, and as the way in when it cannot be used. The
-    # router says where it is.
-    {:ok, socket |> assign(console_url: session["console_url"]) |> load()}
+    # The router says where the console is; without one this plane is administered with
+    # `troupe admin`, over `/rpc` or the admin MCP tools.
+    {:ok,
+     socket
+     |> assign(console_url: session["console_url"], resetting: nil, repaired: nil)
+     |> load()
+     |> load_sign_in()}
   end
 
   @impl Phoenix.LiveView
   def handle_info(:refresh, socket), do: {:noreply, load(socket)}
 
+  @impl Phoenix.LiveView
+  def handle_event("confirm-reset", %{"what" => what}, socket) do
+    {:noreply, assign(socket, resetting: what)}
+  end
+
+  def handle_event("cancel", _params, socket), do: {:noreply, assign(socket, resetting: nil)}
+
+  def handle_event("reset", %{"what" => "sign-in"}, socket) do
+    socket.assigns.actor
+    |> Admin.provider_reset()
+    |> repaired(socket, "Sign-in is back to what the deployment says.")
+  end
+
+  def handle_event("reset", %{"what" => key}, socket) when key in @administration do
+    socket.assigns.actor
+    |> Admin.setting_reset(key)
+    |> repaired(socket, "#{key} is back to what the deployment says.")
+  end
+
+  defp repaired({:ok, _answer}, socket, said) do
+    {:noreply, socket |> assign(resetting: nil, repaired: said) |> load_sign_in()}
+  end
+
+  defp repaired({:error, error}, socket, _said) do
+    {:noreply, assign(socket, resetting: nil, repaired: describe(error))}
+  end
+
   defp load(socket) do
     case Admin.overview(socket.assigns.actor) do
       {:ok, overview} ->
-        assign(socket, overview: overview, attention: attention(overview), error: nil)
+        assign(socket, overview: overview, attention: attention(overview, socket.assigns), error: nil)
 
       {:error, error} ->
         assign(socket, overview: nil, attention: [], error: error.message)
     end
   end
 
+  # Only in a break-glass session: what sign-in is, and whether it works, read through the
+  # same functions the console reads it with.
+  defp load_sign_in(%{assigns: %{breakglass: true, actor: actor}} = socket) do
+    with {:ok, provider} <- Admin.provider_get(actor),
+         {:ok, settings} <- Admin.settings_list(actor),
+         {:ok, check} <- Admin.identity_check(actor) do
+      administration = Enum.filter(settings.settings, &(&1.key in @administration))
+      assign(socket, provider: provider, administration: administration, check: check)
+    else
+      {:error, error} ->
+        assign(socket, provider: nil, administration: [], check: nil, repaired: describe(error))
+    end
+  end
+
+  defp load_sign_in(socket), do: assign(socket, provider: nil, administration: [], check: nil)
+
+  defp describe(%{message: message, data: %{reason: reason}}), do: "#{message}: #{reason}"
+  defp describe(%{message: message}), do: message
+
   # -- what needs doing --------------------------------------------------------
 
   # Everything that is not healthy, as one list. Built here rather than by each panel
   # because the point of the page is that an operator does not have to visit four screens
   # to find out whether anything is wrong.
-  defp attention(overview) do
-    (pods(overview) ++ profiles(overview) ++ budgets(overview))
+  defp attention(overview, assigns) do
+    (pods(overview, assigns) ++ profiles(overview, assigns) ++ budgets(overview, assigns))
     |> Enum.sort_by(&Status.severity(&1.state))
   end
 
-  defp pods(overview) do
+  defp pods(overview, assigns) do
     for profile <- overview.profiles,
         pod <- profile.pods,
         state = Status.from_worker(pod),
@@ -67,7 +129,7 @@ defmodule Troupe.Plane.Web.Live.Overview do
       %{
         state: state,
         what: pod_sentence(state, pod, profile),
-        where: "/admin/workers/#{profile.name}",
+        where: in_console(assigns, "pods"),
         action: "look at #{profile.name}"
       }
     end
@@ -91,14 +153,14 @@ defmodule Troupe.Plane.Web.Live.Overview do
 
   # A profile with fewer pods than it asked for is degraded whatever each pod says about
   # itself: the ones that are missing cannot report.
-  defp profiles(overview) do
+  defp profiles(overview, assigns) do
     for profile <- overview.profiles,
         length(profile.pods) < profile.replicas do
       %{
         state: :degraded,
         what:
           "#{profile.name} asked for #{profile.replicas} pod(s) and has #{length(profile.pods)}.",
-        where: "/admin/workers/#{profile.name}",
+        where: in_console(assigns, "pods"),
         action: "look at #{profile.name}"
       }
     end
@@ -108,7 +170,7 @@ defmodule Troupe.Plane.Web.Live.Overview do
   # the design forbids. It is reported as what it does: a team over its ceiling cannot
   # start a session, which is broken from that team's side, and one approaching it is
   # degraded.
-  defp budgets(overview) do
+  defp budgets(overview, assigns) do
     for team <- overview.teams,
         team.budget_micros > 0,
         state = budget_state(team),
@@ -116,11 +178,16 @@ defmodule Troupe.Plane.Web.Live.Overview do
       %{
         state: state,
         what: budget_sentence(state, team),
-        where: "/admin/teams",
+        where: in_console(assigns, "teams/#{team.name}/limits"),
         action: "look at #{team.name}"
       }
     end
   end
+
+  # Where the console shows a thing, or nothing on a plane without one: this page links
+  # out and does not do it here.
+  defp in_console(%{console_url: nil}, _place), do: nil
+  defp in_console(%{console_url: url}, place), do: "#{url}#/#{place}"
 
   defp budget_state(team) do
     cond do
@@ -167,19 +234,82 @@ defmodule Troupe.Plane.Web.Live.Overview do
   defp spent(overview), do: Enum.sum(Enum.map(overview.teams, & &1.spent_micros))
   defp committed(overview), do: Enum.sum(Enum.map(overview.teams, & &1.budget_micros))
 
+  # -- sign-in, in a break-glass session ----------------------------------------
+
+  defp stored?(provider), do: Enum.any?(provider.settings, &(&1.source == :stored))
+
+  defp shown(%{secret: true, set: true}), do: "set · never shown"
+  defp shown(%{secret: true}), do: "not set"
+  defp shown(%{value: nil}), do: "not set"
+  defp shown(%{value: list}) when is_list(list), do: Enum.join(list, " ")
+  defp shown(%{value: value}), do: to_string(value)
+
+  defp source_note(%{source: :stored}), do: "changed in the console"
+  defp source_note(%{source: :deployed}), do: "from the deployment"
+  defp source_note(%{source: :unset}), do: "not set"
+
   @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
-    <.shell actor={@actor} breakglass={@breakglass} page={:overview}>
+    <.shell actor={@actor} breakglass={@breakglass} page={:overview} console_url={@console_url}>
       <h1>Overview</h1>
 
       <p :if={@console_url} class="notice" id="new-console">
-        The console is at <a href={@console_url}>{@console_url}</a>: the overview, sessions,
-        teams and the audit, with every change previewed before it is made. This one stays
-        for what that does not do yet, and as the way in when it cannot be used.
+        Administering this platform is done in the console, at
+        <a href={@console_url}>{@console_url}</a>. This page only reads: it is the way in on
+        the day the console cannot be used, through the break-glass door, and what it can
+        change is sign-in, back to what the deployment says.
+      </p>
+
+      <p :if={is_nil(@console_url)} class="notice" id="no-console">
+        This plane is deployed without the console, so it is administered with
+        <code>troupe admin</code>, over <code>/rpc</code> or with the admin MCP tools at
+        <code>/mcp</code>. This page only reads.
       </p>
 
       <p :if={@error} class="banner banner--breakglass" role="alert">{@error}</p>
+
+      <section :if={@breakglass} class="panel" id="repair">
+        <h2>Sign-in, from behind the glass</h2>
+        <p class="hint">
+          What the console signs in through, as this plane holds it, and whether it works.
+          Each setting can go back to what the deployment says, which is the floor every
+          setting stands on: nothing is typed here, so nothing new can be saved wrong here.
+          A value the deployment itself has wrong is changed in the deployment and rolled.
+        </p>
+
+        <p :if={@repaired} class="banner" role="status" id="repaired">{@repaired}</p>
+
+        <ul :if={@check} class="checks" id="identity-checks">
+          <li :for={check <- @check.checks} class={if check.ok, do: "checks__ok", else: "checks__bad"}>
+            <span class="checks__name">{check.name}</span>
+            <span class="checks__detail">{check.detail}</span>
+          </li>
+        </ul>
+
+        <div :if={@provider} class="setting" id="sign-in-settings">
+          <h3>Where people sign in</h3>
+          <.title_block>
+            <:field :for={setting <- @provider.settings} label={setting.key}>
+              <code>{shown(setting)}</code> <span class="micro">{source_note(setting)}</span>
+            </:field>
+          </.title_block>
+          <.reset :if={stored?(@provider)} what="sign-in" resetting={@resetting}>
+            Every sign-in value changed in the console goes, and the deployment's are read again.
+          </.reset>
+        </div>
+
+        <div :for={setting <- @administration} class="setting" id={"setting-#{setting.key}"}>
+          <h3><code>{setting.key}</code></h3>
+          <p>
+            <code>{shown(setting)}</code> <span class="micro">{source_note(setting)}</span>
+          </p>
+          <p class="field-help">{setting.consequence}</p>
+          <.reset :if={setting.source == :stored} what={setting.key} resetting={@resetting}>
+            {setting.key} goes back to {shown(%{setting | value: setting.deployed})}, the deployment's.
+          </.reset>
+        </div>
+      </section>
 
       <div :if={@overview}>
         <div class="metrics">
@@ -193,7 +323,7 @@ defmodule Troupe.Plane.Web.Live.Overview do
             <:context>healthy, across {length(@overview.profiles)} profile(s)</:context>
           </.metric>
 
-          <.metric label="Spent" value={money(spent(@overview))}>
+          <.metric label="Spent" value={figure(spent(@overview))}>
             <:context>
               against {money(committed(@overview))} committed across {length(@overview.teams)} team(s)
             </:context>
@@ -216,7 +346,7 @@ defmodule Troupe.Plane.Web.Live.Overview do
           <li :for={item <- @attention} class={"attention__item attention__item--#{item.state}"}>
             <Status.cell state={item.state} />
             <span class="attention__what">{item.what}</span>
-            <a href={item.where} class="button">{item.action}</a>
+            <a :if={item.where} href={item.where} class="button">{item.action}</a>
           </li>
         </ul>
 
@@ -236,7 +366,8 @@ defmodule Troupe.Plane.Web.Live.Overview do
             <tbody>
               <tr :for={profile <- @overview.profiles} class={row_class(profile)}>
                 <th scope="row">
-                  <.link navigate={"/admin/workers/#{profile.name}"}>{profile.name}</.link>
+                  <a :if={@console_url} href={"#{@console_url}#/profiles/#{profile.name}"}>{profile.name}</a>
+                  <span :if={is_nil(@console_url)}>{profile.name}</span>
                 </th>
                 <td><Status.cell state={profile_state(profile)} /></td>
                 <td class="num">{length(profile.pods)} / {profile.replicas}</td>
@@ -277,6 +408,27 @@ defmodule Troupe.Plane.Web.Live.Overview do
         </div>
       </div>
     </.shell>
+    """
+  end
+
+  attr(:what, :string, required: true)
+  attr(:resetting, :string, default: nil)
+  slot(:inner_block, required: true)
+
+  # Two clicks, the second beside what it will do: a reset is undone only by setting the
+  # value again, in the console, once somebody can sign in to it.
+  defp reset(assigns) do
+    ~H"""
+    <div class="setting__actions">
+      <button :if={@resetting != @what} phx-click="confirm-reset" phx-value-what={@what}>
+        back to the deployment
+      </button>
+      <span :if={@resetting == @what} class="confirm">
+        {render_slot(@inner_block)}
+        <button phx-click="reset" phx-value-what={@what}>put it back</button>
+        <button phx-click="cancel">no</button>
+      </span>
+    </div>
     """
   end
 

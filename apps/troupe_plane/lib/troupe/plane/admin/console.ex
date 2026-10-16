@@ -1,6 +1,6 @@
 defmodule Troupe.Plane.Admin.Console do
   @moduledoc """
-  Which console screen reaches each administrative method, and which deliberately do not.
+  Where in the console each administrative method is done, and which deliberately are not.
 
   `Troupe.Plane.AdminParityTest` proves the context, the JSON-RPC surface and the MCP tools
   agree. Nothing proved the *console* did — which is exactly how `admin.profile.put` came to
@@ -13,187 +13,146 @@ defmodule Troupe.Plane.Admin.Console do
   a new method. Adding a method now means answering one question — *where does somebody do
   this* — and `:api_only` is an allowed answer as long as it comes with a reason.
 
+  ## The console is the one at `/console`
+
+  The areas are the console's map (`clients/gui/apps/console/src/nav.ts`), in its four
+  groups. The LiveView pages under `/admin` are the break-glass page and nothing else, and
+  place nothing: what a break-glass session can do there is read, and put back what the
+  deployment says about signing in.
+
+  Two tests hold this to the console. `Troupe.Plane.ConsoleCoverageTest` fails on a method
+  with no placement, and on a placement on an area the map does not have. The console's own
+  `test/coverage.test.ts` reads this file and fails on a placement the console does not
+  keep: a method it neither calls nor owes on that same area in its `owed.ts`, which is the
+  console's account of what it has still to draw.
+
   ## What a reason has to be
 
   A sentence about why a person would not click it, not a note that the screen is not built
   yet. `admin.index.rebuild` is a recovery operation somebody runs from a shell during an
   incident; that is a reason. "No screen for this yet" is a backlog item wearing a reason's
-  clothes, and the test cannot tell the difference — so the reasons are few, and each one
-  should look wrong if it ever stops being true.
-
-  ## Debt is named, not disguised
-
-  `@owed` is the third answer, and it exists because the first two would have been lies on
-  the day this was written. The console is eleven screens and the design is fifteen; a
-  placement for a screen that does not exist is aspirational, and an `:api_only` reason for
-  one that is merely unbuilt is the backlog item this module is supposed to make visible.
-
-  So the debt is enumerated, each entry naming the screen it belongs on, and the test holds
-  it to two rules: nothing may be owed that is not on this list, and nothing on this list
-  may already be satisfied. The first stops a new method being quietly added to the debt.
-  The second is what makes the list shrink — close a gap and the test fails until the entry
-  is deleted, which is the opposite of a backlog that only grows.
+  clothes, and belongs in the console's `owed.ts` with the area it will be drawn on.
   """
 
   @typedoc """
-  Where an administrator does this.
-
-  A screen name is one of `screens/0`, which are the names the navigation uses rather than
-  module names: a screen that is split or renamed should not silently satisfy this.
+  Where an administrator does this: an area of the console's map, by the id the map gives
+  it, or nowhere, with the reason.
   """
-  @type placement :: {:screen, atom()} | {:api_only, String.t()}
+  @type placement :: {:area, atom()} | {:api_only, String.t()}
 
-  # The names in the navigation, grouped as the console groups them: what is happening, what
-  # the product is, what it runs on.
-  @watch ~w(overview sessions review audit)a
-  @configure ~w(policy bundles profiles triggers teams identity provider integrations)a
-  @operate ~w(fleet provisioners budgets connections)a
+  # The console's map, as `nav.ts` has it: what is happening, what the product is, what it
+  # runs on, and who may do what.
+  @watch ~w(overview sessions connections runs)a
+  @configure ~w(profiles bundles triggers integrations)a
+  @operate ~w(pods hosts budgets)a
+  @govern ~w(teams identity signin policy clients organisation audit memory)a
 
-  @doc "Every screen name the console has, in the order the navigation shows them."
-  @spec screens() :: [atom()]
-  def screens, do: @watch ++ @configure ++ @operate
+  @doc "Every area of the console's map, in the order the map shows them."
+  @spec areas() :: [atom()]
+  def areas, do: @watch ++ @configure ++ @operate ++ @govern
 
-  @doc "The three groups, for a navigation that renders them as headings."
+  @doc "The four groups, as the map heads them."
   @spec groups() :: [{String.t(), [atom()]}]
   def groups do
-    [{"Watch", @watch}, {"Configure", @configure}, {"Operate", @operate}]
+    [{"Watch", @watch}, {"Configure", @configure}, {"Operate", @operate}, {"Govern", @govern}]
   end
 
   # Keyed by the context function rather than the method name, because the context is the
-  # thing every surface renders and the method name is one surface's spelling of it.
-  #
-  # A screen here is a claim that somebody can do this thing there, and the test checks the
-  # claim against what that screen's module actually calls. A map that said `:teams` for
-  # something Teams does not call would be a worse lie than no map at all.
-  #
-  # **This records where somebody does each thing today, not where the design says it
-  # belongs.** A map of the plan would pass a coverage test while the button did not exist,
-  # which is the failure it was written to catch. Where the two differ, `owed/0` names the
-  # move — so the plan is visible without being mistaken for the product.
+  # thing every surface renders and the method name is one surface's spelling of it. A
+  # function a screen reaches as well as its own area's (Teams lists groups to link) is
+  # placed once, where an administrator would look for it first.
   @placements %{
     # -- Watch ---------------------------------------------------------------
-    overview: {:screen, :overview},
-    sessions_list: {:screen, :sessions},
-    session_erase: {:screen, :sessions},
-    session_erase_preview: {:screen, :sessions},
-    runs_list: {:screen, :triggers},
-    run_review: {:screen, :review},
-    audit_list: {:screen, :audit},
-    audit_verify: {:screen, :audit},
-    connections: {:screen, :connections},
+    overview: {:area, :overview},
+    sessions_list: {:area, :sessions},
+    session_erase: {:area, :sessions},
+    session_erase_preview: {:area, :sessions},
+    connections: {:area, :connections},
+    runs_list: {:area, :runs},
+    run_review: {:area, :runs},
 
     # -- Configure -----------------------------------------------------------
-    settings_list: {:screen, :policy},
-    setting_put: {:screen, :policy},
-    setting_reset: {:screen, :policy},
-    setting_effective: {:screen, :policy},
-    # A small panel on Policy until the console's redo (#56) gives client versions a screen
-    # of their own, with who runs what beside them (Decision 868).
-    clients_get: {:screen, :policy},
-    clients_put: {:screen, :policy},
-    bundles_list: {:screen, :bundles},
-    bundle_get: {:screen, :bundles},
-    bundle_validate: {:screen, :bundles},
-    bundle_preview: {:screen, :bundles},
-    bundle_publish: {:screen, :bundles},
-    bundle_retire: {:screen, :bundles},
-    profile_get: {:screen, :profiles},
-    profile_put: {:screen, :profiles},
-    preview: {:screen, :profiles},
-    profile_delete: {:screen, :profiles},
-    triggers_list: {:screen, :triggers},
-    trigger_put: {:screen, :triggers},
-    trigger_delete: {:screen, :triggers},
-    trigger_run: {:screen, :triggers},
-    trigger_revisions: {:screen, :triggers},
-    trigger_key_rotate: {:screen, :triggers},
-    teams_list: {:screen, :teams},
-    team_enable: {:screen, :teams},
-    team_update: {:screen, :teams},
-    team_link: {:screen, :teams},
-    team_unlink: {:screen, :teams},
-    team_unlink_preview: {:screen, :teams},
-    team_disable: {:screen, :teams},
-    team_disable_preview: {:screen, :teams},
-    team_grant: {:screen, :teams},
-    team_revoke: {:screen, :teams},
-    team_admin_add: {:screen, :teams},
-    team_admin_remove: {:screen, :teams},
-    provider_get: {:screen, :provider},
-    provider_check: {:screen, :provider},
-    provider_put: {:screen, :provider},
-    provider_reset: {:screen, :provider},
-    scim_get: {:screen, :provider},
-    scim_rotate: {:screen, :provider},
-    scim_delete: {:screen, :provider},
-    scim_update: {:screen, :provider},
-
-    # `identity_check` is placed on Policy because that is where the value it gates is
-    # saved, and a save gated on a check somewhere else is a gate somebody walks around.
-    # Identity runs the same check; a function is placed once and neither caller is a lie.
-    identity_check: {:screen, :policy},
-    groups_list: {:screen, :identity},
-    identity_duplicates: {:screen, :identity},
-    principals_list: {:screen, :identity},
-    principal_create: {:screen, :identity},
-    principal_rotate: {:screen, :identity},
-    principal_disable: {:screen, :identity},
-
+    profiles_list: {:area, :profiles},
+    profile_get: {:area, :profiles},
+    profile_put: {:area, :profiles},
+    preview: {:area, :profiles},
+    profile_delete: {:area, :profiles},
+    profile_choices: {:area, :profiles},
+    provisioning_mode: {:area, :profiles},
     # Checking one host is a question the profile editor asks while somebody is editing a
     # profile; Integrations answers it for every host at once, which is a different question.
-    mcp_check: {:screen, :profiles},
-    integrations: {:screen, :integrations},
-    github_get: {:screen, :integrations},
-    github_put: {:screen, :integrations},
+    mcp_check: {:area, :profiles},
+    bundles_list: {:area, :bundles},
+    bundle_get: {:area, :bundles},
+    bundle_validate: {:area, :bundles},
+    bundle_preview: {:area, :bundles},
+    bundle_publish: {:area, :bundles},
+    bundle_retire: {:area, :bundles},
+    triggers_list: {:area, :triggers},
+    trigger_put: {:area, :triggers},
+    trigger_delete: {:area, :triggers},
+    trigger_run: {:area, :triggers},
+    trigger_revisions: {:area, :triggers},
+    trigger_key_rotate: {:area, :triggers},
+    integrations: {:area, :integrations},
+    github_get: {:area, :integrations},
+    github_put: {:area, :integrations},
+    github_check: {:area, :integrations},
+    github_delete: {:area, :integrations},
 
     # -- Operate -------------------------------------------------------------
-    pod_drain: {:screen, :fleet},
-    provisioners: {:screen, :provisioners},
-    hosts_list: {:screen, :provisioners},
-    host_register: {:screen, :provisioners},
-    host_rotate: {:screen, :provisioners},
-    host_set_enabled: {:screen, :provisioners},
-    profiles_list: {:screen, :fleet},
-    # On Workers rather than in the editor: bootstrapping a repository is every profile at
-    # once, and the page that lists every profile is where somebody about to do it is.
-    profiles_export: {:screen, :fleet},
-    provisioning_mode: {:screen, :profiles},
-    person_budget: {:screen, :teams},
-    budget_explain: {:screen, :budgets}
+    pod_drain: {:area, :pods},
+    # Beside the pods rather than in the editor: bootstrapping a repository is every
+    # profile at once, and the page that lists every profile's workers is where somebody
+    # about to do it is.
+    profiles_export: {:area, :pods},
+    provisioners: {:area, :hosts},
+    hosts_list: {:area, :hosts},
+    host_register: {:area, :hosts},
+    host_rotate: {:area, :hosts},
+    host_set_enabled: {:area, :hosts},
+    person_budget: {:area, :budgets},
+    budget_explain: {:area, :budgets},
+
+    # -- Govern --------------------------------------------------------------
+    teams_list: {:area, :teams},
+    team_enable: {:area, :teams},
+    team_update: {:area, :teams},
+    team_link: {:area, :teams},
+    team_unlink: {:area, :teams},
+    team_unlink_preview: {:area, :teams},
+    team_disable: {:area, :teams},
+    team_disable_preview: {:area, :teams},
+    team_grant: {:area, :teams},
+    team_revoke: {:area, :teams},
+    team_admin_add: {:area, :teams},
+    team_admin_remove: {:area, :teams},
+    groups_list: {:area, :identity},
+    identity_duplicates: {:area, :identity},
+    principals_list: {:area, :identity},
+    principal_create: {:area, :identity},
+    principal_rotate: {:area, :identity},
+    principal_disable: {:area, :identity},
+    provider_get: {:area, :signin},
+    provider_check: {:area, :signin},
+    provider_put: {:area, :signin},
+    provider_reset: {:area, :signin},
+    scim_get: {:area, :signin},
+    scim_rotate: {:area, :signin},
+    scim_delete: {:area, :signin},
+    scim_update: {:area, :signin},
+    settings_list: {:area, :policy},
+    setting_put: {:area, :policy},
+    setting_reset: {:area, :policy},
+    setting_effective: {:area, :policy},
+    # Placed on Policy because that is where the value it gates is saved, and a save gated
+    # on a check somewhere else is a gate somebody walks around.
+    identity_check: {:area, :policy},
+    clients_get: {:area, :clients},
+    clients_put: {:area, :clients},
+    audit_list: {:area, :audit},
+    audit_verify: {:area, :audit}
   }
-
-  @doc """
-  What the console owes, and the screen each thing belongs on.
-
-  Every entry is a claim about where somebody *will* do this, made when the design named
-  fifteen screens and eleven existed. The test checks both directions: an unplaced method
-  must be here, and something here must not already work — so the list can only shrink.
-
-  Deleting an entry is how a screen lands. Adding one to make a test pass is the thing this
-  is meant to prevent, and is the one edit here that should be argued about.
-  """
-  @spec owed() :: %{atom() => atom()}
-  def owed do
-    # The GitHub App arrived as the console's redo (#56) began: its page belongs to the new
-    # console, beside the other integrations, and this one is not being extended. Until
-    # then it is set with `admin.github.put` over `/rpc` or the admin MCP tools. The people
-    # and groups that look held twice belong on the new console's Identity area, which is
-    # where it lists them; until then they are read over `/rpc` or the MCP tools.
-    %{github_get: :integrations, github_put: :integrations, identity_duplicates: :identity}
-  end
-
-  @doc """
-  Screens the design names that do not exist, and what each would gather.
-
-  Separate from `owed/0` because they are a different kind of debt: `owed/0` is a method
-  with nowhere to be, and this is a screen with nothing of its own yet. Every method these
-  would gather is reachable *somewhere* today — the console is not missing the capability,
-  it is missing the place an administrator would look for it.
-  """
-  @spec unbuilt() :: %{atom() => String.t()}
-  def unbuilt do
-    %{}
-  end
 
   @doc """
   Where each context function is reached from.
@@ -208,14 +167,14 @@ defmodule Troupe.Plane.Admin.Console do
   @spec placement(atom()) :: placement() | nil
   def placement(function), do: Map.get(@placements, function)
 
-  @doc "The functions a given screen claims to reach."
+  @doc "The functions an area claims to reach."
   @spec reached_by(atom()) :: [atom()]
-  def reached_by(screen) do
-    for {function, {:screen, ^screen}} <- @placements, do: function
+  def reached_by(area) do
+    for {function, {:area, ^area}} <- @placements, do: function
   end
 
   @doc """
-  Everything reachable from no screen, with the reason it is not.
+  Everything reachable from no area, with the reason it is not.
 
   Short on purpose, and each entry should look wrong the moment it stops being true.
   """

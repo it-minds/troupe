@@ -59,6 +59,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Triggers.{Notify, Revision}
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
+  alias Troupe.Protocol.ProviderTypes
 
   require Logger
 
@@ -434,6 +435,21 @@ defmodule Troupe.Plane.Admin do
   """
   @spec size_classes() :: [String.t()]
   def size_classes, do: SizeClass.names()
+
+  @doc """
+  What a profile's fields may be, from the lists the plane checks against: each provider
+  type `llm.provider` may name, with what it asks for (the protocol's one list, as every
+  other place a person picks a provider reads it), and each size class with what it is for.
+
+  So a console offers the choices rather than a text field, and offers none the plane
+  would refuse.
+  """
+  @spec profile_choices(actor()) :: result()
+  def profile_choices(actor) do
+    with :ok <- require_admin(actor) do
+      {:ok, %{provider_types: ProviderTypes.wire(), size_classes: size_class_summaries()}}
+    end
+  end
 
   @doc "Each size class with what it is for, as the console and a model both read it."
   @spec size_class_summaries() :: [map()]
@@ -1859,6 +1875,63 @@ defmodule Troupe.Plane.Admin do
         {:error, why} ->
           {:error, Error.new(:invalid_params, why)}
       end
+    end
+  end
+
+  @doc """
+  Whether the App works: an App id is set, transit signs with its key, GitHub knows the
+  App by the JWT that key signs, and every installation the plane was given is one GitHub
+  lists for it. Each a named check with what it found; writes nothing.
+
+  A platform admin's, like changing the App: it is the question somebody asks before and
+  after they do, and it signs with the App's key to ask it.
+  """
+  @spec github_check(actor()) :: result()
+  def github_check(actor) do
+    with :ok <- require_platform_admin(actor), do: {:ok, GitHub.check()}
+  end
+
+  @doc """
+  Forget the plane's GitHub App: its id, API URL, installations and which transit key
+  version is its own. Confirmed by the App id, which is the one thing about it somebody
+  has in front of them. A session that names a repository is refused from then on, and a
+  pod asking for a session's token is not given one. Audited with the diff, the key by its
+  fingerprint. The key stays in transit, where nothing signs with it.
+  """
+  @spec github_delete(actor(), integer() | String.t() | nil) :: result()
+  def github_delete(actor, app_id) do
+    with :ok <- require_platform_admin(actor),
+         :ok <- confirm_app_id(app_id),
+         {:ok, before} <- forget_github() do
+      changes = Audit.diff(github_fields(before), github_fields(GitHub.describe()))
+      {:ok, _} = Audit.record(actor.subject, "github.delete", "app", changes)
+      {:ok, Map.put(GitHub.describe(), :changes, changes)}
+    end
+  end
+
+  defp forget_github do
+    case GitHub.delete() do
+      {:ok, before} -> {:ok, before}
+      {:error, :not_configured} -> {:error, Error.new(:not_found, %{reason: "this plane has no GitHub App"})}
+    end
+  end
+
+  defp confirm_app_id(app_id) do
+    expected = GitHub.describe().app_id
+
+    cond do
+      is_nil(expected) ->
+        :ok
+
+      to_string(app_id) == to_string(expected) ->
+        :ok
+
+      true ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason: "the App ID to confirm with is #{expected}",
+           app_id: expected
+         })}
     end
   end
 
