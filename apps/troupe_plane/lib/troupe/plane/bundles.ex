@@ -33,9 +33,9 @@ defmodule Troupe.Plane.Bundles do
 
   import Ecto.Query
 
+  alias Troupe.Plane.Bundles.Effective
   alias Troupe.Plane.{ClusterPolicy, Fleet, Provision, Reach, Repo}
   alias Troupe.Plane.Control.Router
-  alias Troupe.Plane.Bundles.Effective
   alias Troupe.Plane.Fleet.{Bundle, Extends}
   alias Troupe.Plane.Identity.Entitlement
   alias Troupe.Protocol.Bundle, as: Document
