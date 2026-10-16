@@ -48,6 +48,9 @@ COPY . .
 # Where that test looks for it from `packages/client/test`: the repository's root, which
 # is `/` here.
 COPY --from=licences PROTOCOL.md /PROTOCOL.md
+# And the per-tool rule cases the plane's own test reads, which `test/rules.test.ts` holds
+# the client's reading of a rule to, from the same root.
+COPY --from=licences apps/troupe_protocol/test/support/permission_rules.json /apps/troupe_protocol/test/support/permission_rules.json
 
 ARG TROUPE_GUI_BASE=/
 ENV TROUPE_GUI_BASE=${TROUPE_GUI_BASE}
