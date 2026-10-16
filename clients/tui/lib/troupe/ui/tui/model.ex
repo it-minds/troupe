@@ -608,7 +608,8 @@ defmodule Troupe.UI.TUI.Model do
           agent_path: path,
           name: d.name,
           preview: d.preview,
-          delegation: d[:delegation]
+          delegation: d[:delegation],
+          rule: d[:rule]
         })
         |> update_agent(path, fn a ->
           %{a | transcript: Enum.map(a.transcript, &attach_preview(&1, d))}
@@ -2851,11 +2852,12 @@ defmodule Troupe.UI.TUI.Model do
           %{kind: :approval, delegation: %{} = _delegation} ->
             gate_lines(item, who, gate)
 
-          %{kind: :approval, name: name, preview: preview} ->
+          %{kind: :approval, name: name, preview: preview} = item ->
             [
               {:blank, ""},
               {:pending, "#{who}APPROVAL: #{name} (y allow / n deny / a allow for session)"}
-              | (preview || "") |> sanitize() |> String.split("\n") |> Enum.map(&diff_line/1)
+              | asked_by(item) ++
+                  ((preview || "") |> sanitize() |> String.split("\n") |> Enum.map(&diff_line/1))
             ]
 
           # A question about a text — the prompt a workspace's command would send (troupe
@@ -2881,6 +2883,27 @@ defmodule Troupe.UI.TUI.Model do
       end)
     ]
   end
+
+  # A call a per-tool rule of the configuration asks about (root #658) says which rule and
+  # whose; allowing it for the session does not stop the next such call asking.
+  defp asked_by(%{rule: %{"rule" => rule} = said}) when is_binary(rule) do
+    whose =
+      case said do
+        %{"scope" => "enforced"} -> "your organisation"
+        %{"scope" => "org"} -> "your organisation's defaults"
+        %{"scope" => scope} when is_binary(scope) -> scope
+        _unsaid -> "the configuration"
+      end
+
+    where = if is_binary(said["source"]), do: " (#{said["source"]})", else: ""
+
+    [
+      {:system,
+       "  asked by the rule ask #{sanitize(rule)}, from #{whose}#{where}: every such call asks"}
+    ]
+  end
+
+  defp asked_by(_item), do: []
 
   @doc """
   A question the start asks (TUI Decision 154): what it is about first (the files, or one

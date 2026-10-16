@@ -15,14 +15,19 @@ defmodule Troupe.Protocol.Organisation do
     * `{:order, values}`, a value with a stricter end (`approvals`: `wait`, then `deny`;
       a switch: off, then on): a lower layer may tighten it and not loosen it;
     * `:fixed`, `provider` and `base_url`, which have no stricter end: the value is what
-      the organisation says.
+      the organisation says;
+    * `:rules`, `permissions`, the per-tool rules (`Troupe.Protocol.PermissionRule`): the
+      organisation's are added to every other scope's, and the strictest rule that
+      matches a call holds, so no lower scope loosens one.
 
   Nothing else can be enforced. A key that is not on the list is refused with
   `refusal/1`, on the plane when an administrator sets it and on the machine when it
   reads it.
   """
 
-  @type kind :: :ceiling | :fixed | {:order, [term()]}
+  alias Troupe.Protocol.PermissionRule
+
+  @type kind :: :ceiling | :fixed | :rules | {:order, [term()]}
 
   # In the order `troupe config --explain` and the docs list them: what may run unasked
   # first, then where the requests go, then the switches, then the budget.
@@ -33,6 +38,7 @@ defmodule Troupe.Protocol.Organisation do
     {"base_url", :fixed, :string},
     {"managed_mcp_servers_only", {:order, [false, true]}, :boolean},
     {"managed_permission_rules_only", {:order, [false, true]}, :boolean},
+    {"permissions", :rules, :rules},
     {"max_tokens", :ceiling, {:integer, 1}},
     {"max_turns", :ceiling, {:integer, 1}},
     {"wall_clock_ms", :ceiling, {:integer, 1}},
@@ -54,7 +60,7 @@ defmodule Troupe.Protocol.Organisation do
 
   @doc """
   The value type of an enforceable key, as `Troupe.Config.Schema` writes types:
-  `{:enum, values}`, `:string`, `:boolean` or `{:integer, min}`.
+  `{:enum, values}`, `:string`, `:boolean` or `{:integer, min}`; `:rules` for `permissions`.
   """
   @spec type(String.t()) :: term()
   def type(key) do
@@ -90,15 +96,9 @@ defmodule Troupe.Protocol.Organisation do
         {key, value}, {kept, reasons} ->
           key = to_string(key)
 
-          cond do
-            kind(key) == nil ->
-              {kept, reasons ++ [refusal(key)]}
-
-            valid?(value, type(key)) ->
-              {Map.put(kept, key, value), reasons}
-
-            true ->
-              {kept, reasons ++ ["#{key} must be #{describe(type(key))}, not #{inspect(value)}"]}
+          case checked(key, value) do
+            {:ok, value} -> {Map.put(kept, key, value), reasons}
+            {:error, why} -> {kept, reasons ++ why}
           end
       end)
 
@@ -106,6 +106,16 @@ defmodule Troupe.Protocol.Organisation do
   end
 
   def check(_set), do: {:error, ["the enforced set must be an object of keys and values"]}
+
+  defp checked(key, value) do
+    cond do
+      kind(key) == nil -> {:error, [refusal(key)]}
+      # Each rule's own reason, which says what to write instead.
+      kind(key) == :rules -> PermissionRule.check_set(value)
+      valid?(value, type(key)) -> {:ok, value}
+      true -> {:error, ["#{key} must be #{describe(type(key))}, not #{inspect(value)}"]}
+    end
+  end
 
   defp valid?(value, {:enum, values}), do: is_binary(value) and value in values
   defp valid?(value, :string), do: is_binary(value) and value != ""
@@ -117,6 +127,7 @@ defmodule Troupe.Protocol.Organisation do
   defp describe(:boolean), do: "true or false"
   defp describe({:integer, 0}), do: "a whole number, 0 or more"
   defp describe({:integer, min}), do: "a whole number, at least #{min}"
+  defp describe(:rules), do: "allow, ask and deny, each a list of rules such as shell(git push)"
 
   @doc """
   Whether `value` goes past `limit`: above a ceiling, looser than an order's limit, or
@@ -129,6 +140,8 @@ defmodule Troupe.Protocol.Organisation do
   defp past?(:ceiling, value, limit) when is_number(value) and is_number(limit), do: value > limit
   defp past?(:ceiling, _value, _limit), do: false
   defp past?(:fixed, value, limit), do: value != limit
+  # Rules are added to the others, never held: what is strictest is decided per call.
+  defp past?(:rules, _value, _limit), do: false
 
   defp past?({:order, values}, value, limit) do
     case {index(values, value), index(values, limit)} do
@@ -149,6 +162,7 @@ defmodule Troupe.Protocol.Organisation do
   def meaning(:ceiling), do: "the most it may be"
   def meaning(:fixed), do: "what it is"
   def meaning({:order, _values}), do: "the loosest it may be"
+  def meaning(:rules), do: "added to its own rules, the strictest holding"
 
   defp index(values, value), do: Enum.find_index(values, &(&1 == value))
 

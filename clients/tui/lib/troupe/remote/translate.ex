@@ -329,7 +329,9 @@ defmodule Troupe.Remote.Translate do
              call_id: call_id(data),
              name: data["name"] || data["tool"] || "tool",
              preview: preview(data),
-             delegation: if(is_map(data["delegation"]), do: data["delegation"])
+             delegation: if(is_map(data["delegation"]), do: data["delegation"]),
+             # The per-tool rule of the configuration that asked, when one did (root #658).
+             rule: if(is_map(data["rule"]), do: data["rule"])
            })
          ], memory}
 

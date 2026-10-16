@@ -35,7 +35,7 @@ defmodule Troupe.Plane.Bundles do
 
   alias Troupe.Plane.{ClusterPolicy, Fleet, Provision, Reach, Repo}
   alias Troupe.Plane.Control.Router
-  alias Troupe.Plane.Fleet.Bundle
+  alias Troupe.Plane.Fleet.{Bundle, Extends}
   alias Troupe.Plane.Identity.Entitlement
   alias Troupe.Protocol.Bundle, as: Document
 
@@ -486,24 +486,64 @@ defmodule Troupe.Plane.Bundles do
   `profile.put` uses; a cluster that cannot be reached leaves the resource stale until
   the next write, which is reported rather than failing the publish.
   """
+  #
+  # A profile that extends another and names no channel of its own follows its parent's,
+  # and has its servers from its parent: it is written again with the profile it extends,
+  # as is every profile below one whose servers changed, since what they have in effect
+  # includes them.
   @spec project_mcp_servers(String.t(), map()) :: projection()
   def project_mcp_servers(channel, actor) do
     servers = mcp_servers(channel)
 
-    for name <- profiles_on(channel), profile = Fleet.get_profile(name), into: %{} do
-      {name, project_profile(profile, servers, actor)}
+    for name <- profiles_on(channel),
+        profile = Fleet.get_profile(name),
+        own_channel?(profile),
+        reduce: %{} do
+      projected ->
+        projected
+        |> Map.put(name, project_profile(profile, servers, actor))
+        |> Map.merge(project_below(name, actor))
     end
   end
 
-  defp project_profile(profile, servers, actor) do
-    spec = Map.put(profile.spec || %{}, "mcpServers", servers)
+  defp own_channel?(%{extends: nil}), do: true
 
-    with {:ok, updated} <- Fleet.put_profile(%{name: profile.name, spec: spec}),
+  defp own_channel?(%{own: own}),
+    do: get_in(own || %{}, ["spec", "configBundleChannel"]) not in [nil, ""]
+
+  defp project_profile(%{extends: nil} = profile, servers, actor) do
+    spec = Map.put(profile.spec || %{}, "mcpServers", servers)
+    projected(profile.name, Fleet.put_profile(%{name: profile.name, spec: spec}), actor)
+  end
+
+  # The servers of its own channel are its own: written into what it wrote, and resolved
+  # over its parent's again.
+  defp project_profile(profile, servers, actor) do
+    own =
+      Map.update(
+        profile.own || %{},
+        "spec",
+        %{"mcpServers" => servers},
+        &Map.put(&1, "mcpServers", servers)
+      )
+
+    {:ok, _} = Fleet.put_profile(%{name: profile.name, own: own})
+    projected(profile.name, Extends.rewrite(profile.name), actor)
+  end
+
+  defp project_below(name, actor) do
+    for child <- Extends.descendants(name), into: %{} do
+      {child, projected(child, Extends.rewrite(child), actor)}
+    end
+  end
+
+  defp projected(name, written, actor) do
+    with {:ok, updated} <- written,
          {:ok, state} <- Provision.apply(updated, actor) do
       state
     else
       {:error, reason} ->
-        Logger.warning("troupe plane: #{profile.name}'s mcpServers are stale: #{inspect(reason)}")
+        Logger.warning("troupe plane: #{name}'s mcpServers are stale: #{inspect(reason)}")
         %{state: :not_applied, reason: inspect(reason)}
     end
   end

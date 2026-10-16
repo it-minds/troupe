@@ -149,10 +149,13 @@ export type {
   BundleSummary,
   GitopsState,
   PolicyVerdict,
+  EffectiveProfile,
+  ProfileBelow,
   ProfileDetail,
   ProfilePreview,
   ProfilePut,
   ProfileWrite,
+  ProfileWritten,
   TriggerPut,
   TriggerRevision,
   FleetOverview,
@@ -259,6 +262,7 @@ export {
   formFromConfig,
   modelConfigError,
   providerTypes,
+  ruleScope,
   servesKeys,
   tokenCount,
 } from "./config.js";
@@ -276,6 +280,7 @@ export type {
   ModelProvider,
   ModelRole,
   ModelsParams,
+  PermissionRule,
   ProviderTypeInfo,
 } from "./config.js";
 export {

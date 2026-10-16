@@ -22,7 +22,8 @@ defmodule Troupe.Config.Schema do
   A key with `enforce` is one an organisation may hold people's machines to (#122,
   Decision 869): `:ceiling`, a number a lower layer may not raise; `:order`, a value a
   lower layer may not loosen (`approvals`, the two `managed_*` switches); `:fixed`, the
-  provider and its URL. Nothing else can be enforced, and the list is
+  provider and its URL; `:rules`, the per-tool rules under `permissions`, which are added
+  to every other scope's rather than held. Nothing else can be enforced, and the list is
   `Troupe.Protocol.Organisation`'s, which the plane checks an administrator's set by.
 
   ## Old spellings
@@ -53,6 +54,7 @@ defmodule Troupe.Config.Schema do
           | :effort
           | :fraction
           | :price
+          | :rule
           | {:integer, non_neg_integer()}
           | {:enum, [String.t()]}
           | {:list, type()}
@@ -70,7 +72,7 @@ defmodule Troupe.Config.Schema do
           field: atom() | nil,
           group: String.t() | nil,
           label: String.t() | nil,
-          enforce: :ceiling | :order | :fixed | nil,
+          enforce: :ceiling | :order | :fixed | :rules | nil,
           doc: String.t()
         }
 
@@ -399,6 +401,38 @@ defmodule Troupe.Config.Schema do
           scope: :trusted,
           field: :managed_mcp_servers_only,
           enforce: :order
+        ),
+        # #658's per-tool rules: every scope's are added together, and the strictest that
+        # matches a call holds (`Troupe.Config.Permissions`).
+        spec(
+          "permissions",
+          {:object,
+           [
+             spec(
+               "deny",
+               {:list, :rule},
+               "Calls refused, with a sentence naming the rule: `shell(git push)`, `read_file(secrets/**)`."
+             ),
+             spec(
+               "ask",
+               {:list, :rule},
+               "Calls that ask a person first, even under `auto_approve` or an earlier \"allow for the session\"."
+             ),
+             spec(
+               "allow",
+               {:list, :rule},
+               "Calls that run without asking. From a project's file only in a trusted workspace; with " <>
+                 "`managed_permission_rules_only` on, only the organisation's.",
+               # Held where a rule is read (`Troupe.Config.Layers`), not by the key's gate:
+               # the file's `ask` and `deny` beside it apply wherever it is.
+               scope: :trusted
+             )
+           ]},
+          "Per-tool rules: a tool, or a tool with a pattern in brackets: a command prefix for `shell`, a path " <>
+            "glob for the file tools, `server.tool` for `mcp`. Every scope's rules are added together, not " <>
+            "replaced, and of those that match a call `deny` beats `ask` beats `allow`; inside one file the " <>
+            "more specific pattern decides. `troupe config --explain` lists them with where each came from.",
+          enforce: :rules
         )
       ]),
       group("Tools", [
@@ -702,7 +736,7 @@ defmodule Troupe.Config.Schema do
   end
 
   @doc "The keys an organisation may enforce, each with what enforcing it means (Decision 869)."
-  @spec enforceable() :: [{String.t(), :ceiling | :order | :fixed}]
+  @spec enforceable() :: [{String.t(), :ceiling | :order | :fixed | :rules}]
   def enforceable, do: for(%{enforce: kind} = spec <- table(), kind != nil, do: {spec.key, kind})
 
   @doc """
@@ -793,6 +827,7 @@ defmodule Troupe.Config.Schema do
   def describe_type(:effort), do: "an effort level such as medium, or a number of tokens"
   def describe_type(:fraction), do: "a number above 0 and at most 1"
   def describe_type(:price), do: "a number, 0 or more"
+  def describe_type(:rule), do: "a rule such as shell(git push)"
   def describe_type({:integer, 0}), do: "a whole number, 0 or more"
   def describe_type({:integer, min}), do: "a whole number, at least #{min}"
   def describe_type({:enum, values}), do: "one of #{Enum.join(values, ", ")}"
@@ -801,6 +836,7 @@ defmodule Troupe.Config.Schema do
   def describe_type({:object, _children}), do: "a map of settings"
 
   defp plural(:string), do: "strings"
+  defp plural(:rule), do: "rules, such as shell(git push)"
   defp plural(other), do: describe_type(other)
 
   # -- the JSON Schema ------------------------------------------------------------
@@ -865,6 +901,9 @@ defmodule Troupe.Config.Schema do
   defp scoped(spec), do: spec.doc
 
   defp enforced(%{enforce: nil}), do: ""
+
+  defp enforced(%{enforce: :rules}),
+    do: " An organisation may add rules of its own, and none of its rules is loosened by one here."
   defp enforced(%{enforce: _kind}), do: " An organisation may enforce it, and nothing on this machine then goes past it."
 
   defp json_type(:string, _spec), do: [{"type", ["string", "null"]}]
@@ -876,6 +915,7 @@ defmodule Troupe.Config.Schema do
     do: [{"type", ["number", "null"]}, {"exclusiveMinimum", 0}, {"maximum", 1}]
 
   defp json_type(:price, _spec), do: [{"type", ["number", "null"]}, {"minimum", 0}]
+  defp json_type(:rule, _spec), do: [{"type", "string"}, {"pattern", "^\\s*[^()\\s]+(\\(.*\\))?\\s*$"}]
 
   defp json_type({:integer, min}, _spec), do: [{"type", ["integer", "null"]}, {"minimum", min}]
   defp json_type({:enum, values}, _spec), do: [{"enum", values ++ [nil]}]
@@ -975,6 +1015,7 @@ defmodule Troupe.Config.Schema do
   defp short_type({:integer, min}), do: "integer ≥ #{min}"
   defp short_type({:enum, values}), do: Enum.map_join(values, " \\| ", &"`#{&1}`")
   defp short_type({:list, :string}), do: "list of strings"
+  defp short_type({:list, :rule}), do: "list of rules"
   defp short_type({:map, {:object, _}}), do: "map of name to settings"
   defp short_type({:map, value}), do: "map of name to #{short_type(value)}"
   defp short_type({:object, _}), do: "settings"
@@ -991,5 +1032,6 @@ defmodule Troupe.Config.Schema do
   defp who_scope(_spec), do: "any"
 
   defp who_enforce(%{enforce: nil}), do: ""
+  defp who_enforce(%{enforce: :rules}), do: "; an organisation may add to"
   defp who_enforce(%{enforce: _kind}), do: "; an organisation may enforce"
 end

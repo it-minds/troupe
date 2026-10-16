@@ -31,9 +31,9 @@ defmodule Troupe.Config.Layers do
   the provider or MCP server it belongs to, or, anywhere else, the load.
   """
 
-  alias Troupe.Config.{Issue, Migrate, Org, Schema, Trust}
+  alias Troupe.Config.{Issue, Migrate, Org, Permissions, Schema, Trust}
   alias Troupe.LLM.ProviderType
-  alias Troupe.Protocol.Organisation
+  alias Troupe.Protocol.{Organisation, PermissionRule}
 
   @type layer :: :default | :org | :user | :project | :local | :env | :cli | :enforced
 
@@ -57,6 +57,9 @@ defmodule Troupe.Config.Layers do
               refused: %{session: nil, providers: %{}, mcp: %{}},
               # What the organisation enforces, by key path: `%{value, source}`.
               enforced: %{},
+              # Every file's per-tool rules, each with its layer and file
+              # (`Troupe.Config.Permissions`): kept from every scope, not merged.
+              rules: [],
               warnings: [],
               refusals: [],
               errors: []
@@ -136,8 +139,33 @@ defmodule Troupe.Config.Layers do
         }
       end)
 
-    result |> unresolved() |> servers() |> endpoints() |> prices()
+    rules =
+      Enum.flat_map(org.layers ++ [user | workspace_layers], &rules(&1, ctx)) ++
+        Enum.flat_map(org.layers, &enforced_rules/1)
+
+    %{result | rules: rules} |> unresolved() |> servers() |> endpoints() |> prices()
   end
+
+  # A file's rules, an `allow` from a workspace's file marked as a key it may not set is:
+  # only in a trusted workspace, and never on a pod.
+  defp rules(%{file: %{layer: layer, path: path}, values: values}, ctx) do
+    ignored =
+      cond do
+        layer not in [:project, :local] -> nil
+        ctx.pod? -> reason(:pod, "it", ctx)
+        not ctx.trusted? -> reason(:untrusted, "it", ctx)
+        true -> nil
+      end
+
+    Permissions.from(values["permissions"], layer, path, ignored)
+  end
+
+  defp rules(_layer, _ctx), do: []
+
+  defp enforced_rules(%{file: %{path: path}, enforced_rules: permissions}),
+    do: Permissions.from(permissions, :enforced, path)
+
+  defp enforced_rules(_layer), do: []
 
   @doc "The user file's trust list, as written."
   @spec trust_list(map()) :: [String.t()]
@@ -254,13 +282,16 @@ defmodule Troupe.Config.Layers do
 
         defaults = defaults_section(map["defaults"], source, text, ctx)
         enforced = enforced_section(map["enforced"], source, text)
+        # The rules it enforces are added to every other file's, not held as a limit.
+        {rules, set} = Map.pop(enforced.set, ["permissions"])
 
         %{
           defaults
           | warnings: unknown ++ defaults.warnings ++ enforced.warnings,
             errors: defaults.errors ++ enforced.errors
         }
-        |> Map.put(:enforced, enforced.set)
+        |> Map.put(:enforced, set)
+        |> Map.put(:enforced_rules, rules && rules.value)
     end
   end
 
@@ -636,6 +667,26 @@ defmodule Troupe.Config.Layers do
     end)
   end
 
+  # Per-tool rules (#658), each read as `Troupe.Protocol.PermissionRule` reads it and
+  # refused with what to write instead. Written out, never read from the environment.
+  defp check_value(value, %{type: {:list, :rule}}, key_path, path, text) when is_list(value) do
+    shown = Enum.join(key_path, ".")
+    line = line_of(text, key_path)
+
+    {errors, warnings} =
+      Enum.reduce(value, {[], []}, fn item, {errors, warnings} ->
+        case PermissionRule.parse(item) do
+          {:ok, rule} ->
+            {errors, warnings ++ rule_notes(rule, List.last(key_path), shown, line, path)}
+
+          {:error, why} ->
+            {errors ++ [issue(:error, path, line, shown, "#{shown}: #{why}")], warnings}
+        end
+      end)
+
+    {value, %{entries: [leaf(key_path, value, nil)], warnings: warnings, errors: errors}}
+  end
+
   defp check_value(value, %{type: {:list, item}} = spec, key_path, path, text) when is_list(value) do
     checked = Enum.map(value, &interpolate/1)
 
@@ -682,6 +733,31 @@ defmodule Troupe.Config.Layers do
 
       true ->
         {value, %{found() | errors: [type_error(value, spec, shown, line_of(text, key_path), path)]}}
+    end
+  end
+
+  # A rule for a name near a built-in tool's and not one is a typo, kept since a host may
+  # add a tool of that name; and an `ask` or `allow` for a tool that runs inside the agent,
+  # which never asks, does nothing. Both are said.
+  defp rule_notes(rule, action, shown, line, path) do
+    builtins = Troupe.Tools.builtins()
+    # With the two a session adds where it has them: its skills' tool and a loop's verdict.
+    names = Enum.map(builtins, &elem(&1, 0)) ++ ["skill", "goal_complete"]
+
+    cond do
+      action in ["ask", "allow"] and {rule.tool, :inline} in builtins ->
+        [
+          issue(:warning, path, line, shown, "#{shown}: #{rule.tool} runs inside the agent and never asks, so only a deny rule applies to it")
+        ]
+
+      rule.tool == "mcp" or rule.tool in names ->
+        []
+
+      near = Schema.suggest(rule.tool, names) ->
+        [issue(:warning, path, line, shown, "#{shown}: #{rule.tool} is not a tool Troupe has; did you mean #{near}?")]
+
+      true ->
+        []
     end
   end
 
@@ -733,6 +809,7 @@ defmodule Troupe.Config.Layers do
   defp ok_type?(value, :effort), do: (is_binary(value) and value != "") or (is_integer(value) and value > 0)
   defp ok_type?(value, :fraction), do: is_number(value) and value > 0 and value <= 1
   defp ok_type?(value, :price), do: is_number(value) and value >= 0
+  defp ok_type?(value, :rule), do: match?({:ok, _rule}, PermissionRule.parse(value))
   defp ok_type?(value, {:integer, min}), do: is_integer(value) and value >= min
   defp ok_type?(value, {:enum, values}), do: is_binary(value) and value in values
   defp ok_type?(value, {:list, item}), do: is_list(value) and Enum.all?(value, &ok_type?(&1, item))

@@ -84,6 +84,9 @@ defmodule Troupe.UI.Headless.Printer do
       # The refused that were delegations a person asked to see first (root Decision 850),
       # which `--auto-approve` does not answer, so the last line does not suggest it.
       gated: MapSet.new(),
+      # The refused that a per-tool permission rule asked about (root #658), which
+      # `--auto-approve` does not answer either.
+      ruled: MapSet.new(),
       # Budget questions by id, `:said` once the line is printed and `:stopped` once
       # answered no: the item is drawn again once the question that rides beside it
       # arrives with its options (Decision 120), and it is that question which is
@@ -216,6 +219,9 @@ defmodule Troupe.UI.Headless.Printer do
           is_map(data[:delegation]) ->
             %{state | refused: MapSet.put(state.refused, id), gated: MapSet.put(state.gated, id)}
 
+          is_map(data[:rule]) ->
+            %{state | refused: MapSet.put(state.refused, id), ruled: MapSet.put(state.ruled, id)}
+
           true ->
             %{state | refused: MapSet.put(state.refused, id)}
         end
@@ -259,6 +265,12 @@ defmodule Troupe.UI.Headless.Printer do
         {3,
          refusals(MapSet.size(state.refused)) <>
            ", with nobody to ask: delegations that ask first (delegation.ask)"}
+
+      MapSet.size(state.ruled) > 0 and
+          MapSet.subset?(state.refused, MapSet.union(state.gated, state.ruled)) ->
+        {3,
+         refusals(MapSet.size(state.refused)) <>
+           ", with nobody to ask: calls a permission rule asks about, which --auto-approve does not answer"}
 
       MapSet.size(state.refused) > 0 ->
         {3, refusals(MapSet.size(state.refused)) <> ", with nobody to ask (use --auto-approve)"}
@@ -372,6 +384,21 @@ defmodule Troupe.UI.Headless.Printer do
       p,
       "delegation to #{gate["agent"]} asks first (delegation.ask, or its definition's " <>
         "delegation: ask); headless mode denies it, and --auto-approve does not answer it"
+    )
+
+    Client.approve(state.session_id, d.call_id, :deny)
+    state
+  end
+
+  # One a per-tool rule asks about (root #658) says so: `--auto-approve` does not answer it.
+  defp print(
+         %{type: :approval_requested, agent_path: p, data: %{rule: %{"rule" => rule}} = d},
+         state
+       ) do
+    line(
+      state,
+      p,
+      "approval needed for #{d.name}, asked by the rule ask #{rule}; headless mode denies it"
     )
 
     Client.approve(state.session_id, d.call_id, :deny)

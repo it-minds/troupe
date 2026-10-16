@@ -21,7 +21,7 @@ defmodule Troupe.Config.Settings do
   """
 
   alias Troupe.Config
-  alias Troupe.Config.{Explain, Issue, Layers, Migrate, Schema, Trust}
+  alias Troupe.Config.{Explain, Issue, Layers, Migrate, Permissions, Schema, Trust}
 
   @scopes ~w(user project local)
   # The writer's own, which no client sets and no change is about.
@@ -41,6 +41,10 @@ defmodule Troupe.Config.Settings do
   organisation enforces), `enforced` (`{value, source}` where the organisation enforces
   the key, else null), `secret`, `label` (the name a settings page shows it by, or null)
   and `doc`.
+
+  `permissions` is every file's per-tool rules (#658), each `action`, `rule`, `tool`,
+  `pattern`, `scope` (the layer), `source` and `ignored` (why it does not apply, or
+  null), for a page to show; a rule is not a key, and no page sets one.
   """
   @spec describe(Path.t() | nil) :: %{String.t() => term()}
   def describe(workspace \\ nil) do
@@ -55,6 +59,8 @@ defmodule Troupe.Config.Settings do
           "organisation" => Enum.map(org, &file_json/1),
           "keys" =>
             layers |> Explain.rows() |> Enum.map(&key_json(&1, workspace, layers.trusted?)),
+          # Every file's per-tool rules, with where each came from: shown, not set here.
+          "permissions" => Enum.map(layers.rules, &Permissions.to_json/1),
           "warnings" => Enum.map(layers.warnings ++ layers.refusals, &Issue.format/1),
           "errors" => []
         }
@@ -66,6 +72,7 @@ defmodule Troupe.Config.Settings do
           "files" => files(workspace),
           "organisation" => [],
           "keys" => [],
+          "permissions" => [],
           "warnings" => [],
           "errors" => Enum.map(error.issues, &Issue.format/1)
         }

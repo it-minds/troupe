@@ -14,10 +14,14 @@ defmodule Troupe.Config.Explain do
   defaults are `org`, named by the managed file's path or the plane's URL, and what it
   enforces is `enforced`, last on the ladder: in effect where it held a value, and shown
   as the limit where the value in effect is within it (Decision 869).
+
+  The per-tool rules under `permissions` (#658) are not one value from the highest file
+  but every file's together, so they are listed after the keys, each with its action, layer
+  and file, and why one does not apply; `permissions` as the key lists only them.
   """
 
   alias Troupe.Config
-  alias Troupe.Config.{Issue, Layers, Migrate, Schema}
+  alias Troupe.Config.{Issue, Layers, Migrate, Permissions, Schema}
   alias Troupe.Protocol.Organisation
 
   @typedoc "One key as `--explain` shows it."
@@ -71,6 +75,9 @@ defmodule Troupe.Config.Explain do
 
     (schema_paths ++ set_paths)
     |> Enum.uniq()
+    # The per-tool rules are every file's together, not one value from the highest: they
+    # are listed as rules, each with its file (`rules/1`).
+    |> Enum.reject(&match?(["permissions" | _], &1))
     |> Enum.map(&row(&1, layers))
     |> Enum.reject(&is_nil/1)
     |> order(schema_paths)
@@ -157,6 +164,7 @@ defmodule Troupe.Config.Explain do
   defp plain(value), do: inspect(value)
 
   defp select(rows, nil), do: {:ok, rows, nil}
+  defp select(_rows, "permissions" <> _), do: {:ok, [], nil}
 
   defp select(rows, key) do
     {key, note} = canonical_key(key)
@@ -197,10 +205,41 @@ defmodule Troupe.Config.Explain do
         do: Enum.map_join(rows, "\n\n", &ladder_text/1),
         else: table(rows)
 
+    rules = rules_text(layers.rules, key)
+
     Enum.join(
-      header ++ [if(note, do: note), body, issues_text(layers)] |> Enum.reject(&(&1 in [nil, ""])),
+      header ++ [if(note, do: note), body, rules, issues_text(layers)] |> Enum.reject(&(&1 in [nil, ""])),
       "\n\n"
     ) <> "\n"
+  end
+
+  # Every file's rules, each with its layer and file, and why one is not applied. Listed
+  # with every key when there are some, and asked for by `permissions`.
+  defp rules_text(rules, key) do
+    cond do
+      not (is_nil(key) or String.starts_with?(key, "permissions")) -> nil
+      rules == [] and is_nil(key) -> nil
+      rules == [] -> "permission rules: none"
+      true -> rules_list(rules)
+    end
+  end
+
+  defp rules_list(rules) do
+    width = rules |> Enum.map(&String.length(&1.text)) |> Enum.max() |> min(40)
+
+    lines =
+      Enum.map(rules, fn rule ->
+        line =
+          "  #{String.pad_trailing(Atom.to_string(rule.action), 6)} #{String.pad_trailing(rule.text, width)}  " <>
+            "#{String.pad_trailing(Atom.to_string(rule.layer), 8)} #{shown(rule.source)}"
+
+        if rule.ignored, do: line <> "\n           ignored: #{rule.ignored}", else: line
+      end)
+
+    Enum.join(
+      ["permission rules (every file's together: deny beats ask beats allow, and inside one file the more specific rule decides)" | lines],
+      "\n"
+    )
   end
 
   # A plane's document is named by the plane, with when it was fetched and where it is
@@ -292,7 +331,8 @@ defmodule Troupe.Config.Explain do
           }
         end),
       "warnings" => Enum.map(layers.warnings, &Issue.to_json/1),
-      "refusals" => Enum.map(layers.refusals, &Issue.to_json/1)
+      "refusals" => Enum.map(layers.refusals, &Issue.to_json/1),
+      "permissions" => Enum.map(layers.rules, &Permissions.to_json/1)
     }
   end
 
