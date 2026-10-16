@@ -9,6 +9,7 @@
 // records it. A console that is right against this is right against the plane's rules,
 // which `apps/troupe_plane/test` holds the plane to.
 
+import { checkRuleSet } from "../../src/rules.js";
 import { older } from "./plane.js";
 import { PROVIDER_TYPES } from "./provider-types.js";
 import { MAX_DEPTH, WRITTEN_KEYS, empty as emptyResolved, fieldsOf, merge as mergeExtends, rowOf } from "./extends.js";
@@ -134,6 +135,11 @@ function yamlOf(value: unknown, notes: string[]): string {
 
 function revisionJson(r: { revision: number; hash: string; created_by: string; created_at: string }): Record<string, unknown> {
   return { id: `rev-${r.revision}-${r.hash.slice(7, 15)}`, revision: r.revision, hash: r.hash, reconstructed: false, created_by: r.created_by, created_at: r.created_at };
+}
+
+/** A trigger's webhook key, as `Triggers.rotate_key/2` mints one: answered once. */
+function mintKey(): string {
+  return `twk_fake${Math.random().toString(36).slice(2, 14)}`;
 }
 
 const SECTIONS = { agents: "agent", skills: "skill", mcp_servers: "mcp_server", acp_agents: "acp_agent" } as const;
@@ -324,6 +330,10 @@ export interface FakeTrigger {
   gitops?: { generation: number | null; problem: string | null; reasons: string[] };
   /** Whether it has a webhook key; where absent, a webhook that names no repository has one. */
   has_key?: boolean;
+  /** The key a sender presents now, and when it was minted: the plane keeps a hash; the fake keeps it to say an old one is dead. */
+  key?: string;
+  key_rotated_at?: string;
+  key_rotated_by?: string;
 }
 
 /** A trigger's run, as `admin.runs.list` answers it, with the team whose trigger it is. */
@@ -416,6 +426,7 @@ export const ENFORCEABLE = [
   { key: "base_url", kind: "fixed", meaning: "what it is", type: "string" },
   { key: "managed_mcp_servers_only", kind: "order", order: [false, true], meaning: "the loosest it may be", type: "boolean" },
   { key: "managed_permission_rules_only", kind: "order", order: [false, true], meaning: "the loosest it may be", type: "boolean" },
+  { key: "permissions", kind: "rules", meaning: "added to its own rules, the strictest holding", type: "rules" },
   { key: "max_tokens", kind: "ceiling", meaning: "the most it may be", type: "integer", min: 1 },
   { key: "max_turns", kind: "ceiling", meaning: "the most it may be", type: "integer", min: 1 },
   { key: "wall_clock_ms", kind: "ceiling", meaning: "the most it may be", type: "integer", min: 1 },
@@ -1584,8 +1595,9 @@ export class FakeAdmin {
         if (!existing) this.triggerRows.push(row);
         // A new webhook trigger is made with its key, answered this once; one on a GitHub
         // repository is fired by the App and has none.
-        const minted = !existing && row.source["kind"] === "webhook" && !row.source["repository"] ? `twk_fake${Math.random().toString(36).slice(2, 14)}` : null;
+        const minted = !existing && row.source["kind"] === "webhook" && !row.source["repository"] ? mintKey() : null;
         if (!existing) row.has_key = minted !== null;
+        if (minted) Object.assign(row, { key: minted, key_rotated_at: now, key_rotated_by: subject });
         const changes = diff(before, this.comparable_trigger(row));
         const revision = this.revise(row, subject);
         this.record(subject, "trigger.put", `${t.name}/${name}`, { ...changes, __revision__: revision.revision, __revision_hash__: revision.hash, ...(minted ? { __key_minted__: true } : {}) });
@@ -1606,6 +1618,66 @@ export class FakeAdmin {
         this.record(subject, "trigger.delete", `${row.team}/${row.name}`, this.comparable_trigger(row));
         this.triggerRows.splice(this.triggerRows.indexOf(row), 1);
         return { result: { team: row.team, name: row.name, deleted: true } };
+      }
+
+      // Both are things done with a trigger rather than changes to what it is, so a gitops
+      // plane takes them too, as `Admin.trigger_run/3` and `trigger_key_rotate/3` do.
+      case "admin.trigger.run":
+      case "admin.trigger.key.rotate": {
+        const found = this.fetchTeam(subject, params["team"]);
+        if ("error" in found) return found;
+        const row = this.triggerRows.find((r) => r.team === found.team.name && r.name === params["name"]);
+        if (!row) return refuse(NOT_FOUND, "not_found", { trigger: params["name"] });
+        const now = new Date().toISOString();
+        if (method === "admin.trigger.key.rotate") {
+          // Replaces whatever it had, at once: no window in which the old one still fires.
+          const had = this.triggerJson(row)["has_key"] === true;
+          const key = mintKey();
+          Object.assign(row, { has_key: true, key, key_rotated_at: now, key_rotated_by: subject });
+          this.record(subject, "trigger.key.rotate", `${row.team}/${row.name}`, { had_key: had });
+          return { result: { team: row.team, name: row.name, url: `/trigger/${row.id}`, key, rotated_at: now } };
+        }
+        // The caller and the second: a second click a moment later is the run already made.
+        const at = `${now.slice(0, 19)}Z`;
+        const key = `manual:${row.id}:${subject}:${at}`;
+        this.record(subject, "trigger.run", `${row.team}/${row.name}`, { run: key });
+        if (!row.enabled) return refuse(FORBIDDEN, "forbidden", { reason: "trigger is disabled", trigger: row.name });
+        const again = this.runRows.find((r) => r.idempotency_key === key);
+        const live = this.runRows.filter((r) => r.trigger_id === row.id && ["created", "running", "waiting"].includes(r.state)).length;
+        const last = row.revisions.at(-1);
+        const id = `run-${row.name}-manual-${this.runRows.length + 1}`;
+        const skipped = live >= row.concurrency;
+        const made: FakeRun = again ?? {
+          id,
+          team: row.team,
+          trigger: row.name,
+          trigger_id: row.id,
+          idempotency_key: key,
+          session_id: skipped ? null : `s-${id}`,
+          fired_at: now,
+          fired_by: subject,
+          source: "manual",
+          revision: last?.revision ?? null,
+          revision_hash: last?.hash ?? null,
+          event: { kind: "manual", by: subject, at },
+          state: skipped ? "skipped" : "created",
+          status: null,
+          done_reason: null,
+          failed_reason: null,
+          pending_approvals: null,
+          pending_questions: null,
+          cost_micros: null,
+          repository: null,
+          issue: null,
+          github: null,
+          reviewed_by: null,
+          reviewed_at: null,
+        };
+        if (!again) {
+          this.runRows.push(made);
+          row.last_fired_at = now;
+        }
+        return { result: { run: { ...made }, session_id: made.session_id, state: made.state } };
       }
 
       case "admin.runs.list": {
@@ -2227,8 +2299,8 @@ export class FakeAdmin {
       notify_url: row.notify_url,
       concurrency: row.concurrency,
       has_key: hasKey,
-      key_rotated_at: hasKey ? row.updated_at : null,
-      key_rotated_by: hasKey ? row.created_by : null,
+      key_rotated_at: hasKey ? (row.key_rotated_at ?? row.updated_at) : null,
+      key_rotated_by: hasKey ? (row.key_rotated_by ?? row.created_by) : null,
       last_fired_at: row.last_fired_at,
       created_by: row.created_by,
       updated_at: row.updated_at,
@@ -2334,6 +2406,13 @@ export class FakeAdmin {
           if (!spec) {
             const keys = listed.map((e) => e.key);
             reasons.push(`${key} is not a key an organisation may enforce; the ones it may are ${keys.slice(0, -1).join(", ")} and ${keys.at(-1)}`);
+            continue;
+          }
+          // Rules are checked one by one, each refused in its own words, as `PermissionRule.check_set/1` does.
+          if (spec.type === "rules") {
+            const why = checkRuleSet(value);
+            if (why.length) reasons.push(...why);
+            else kept[key] = value;
             continue;
           }
           const values = (spec.values ?? []) as string[];

@@ -456,7 +456,9 @@ A rule under `defaults:` is added the same way and holds the same: no rule is a 
 person's own file replaces, so `defaults:` and `enforced:` differ for rules only in what
 `managed_permission_rules_only` keeps (both) and how `--explain` names them (`org` and
 `enforced`). On a plane, `client_enforced` takes them as
-`{"permissions": {"deny": ["shell(git push --force)"]}}`, each rule checked when it is set.
+`{"permissions": {"deny": ["shell(git push --force)"]}}`, each rule checked when it is set;
+the console's **Organisation** page edits them as rules, each a tool and a pattern checked as
+it is typed, rather than as JSON.
 
 Any other key under `enforced:` is not enforced and warns, with the list; the plane refuses
 it outright when it is set. An enforced value is written out in full: `{env:VAR}` is

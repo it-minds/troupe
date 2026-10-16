@@ -566,6 +566,26 @@ export interface TriggerPut {
   url?: string;
 }
 
+/**
+ * What `admin.trigger.run` answers: the run it made (or the one a second click in the same
+ * minute already made), the session it started, if any, and how the run stands.
+ */
+export interface TriggerFired {
+  run: TriggerRun;
+  session_id: string | null;
+  state: TriggerRun["state"];
+}
+
+/** What `admin.trigger.key.rotate` answers: where to send, and the key, this once. */
+export interface TriggerKey {
+  team: string;
+  name: string;
+  /** The plane's path a sender POSTs to, from its base URL. */
+  url: string;
+  key: string;
+  rotated_at: string;
+}
+
 export interface TriggerRun {
   id: string;
   trigger: string;
@@ -1235,8 +1255,14 @@ export class AdminApi {
     return this.rpc<TriggerRevision[]>("admin.trigger.revisions", { team, name });
   }
 
-  runTrigger(team: string, name: string): Promise<TriggerRun> {
-    return this.rpc<TriggerRun>("admin.trigger.run", { team, name });
+  /** Fire a trigger now, by hand: a run whose source is `manual`, named after the caller and the minute. */
+  runTrigger(team: string, name: string): Promise<TriggerFired> {
+    return this.rpc<TriggerFired>("admin.trigger.run", { team, name });
+  }
+
+  /** Mint a trigger's webhook key, answered this once; the one it had stops working at once. */
+  rotateTriggerKey(team: string, name: string): Promise<TriggerKey> {
+    return this.rpc<TriggerKey>("admin.trigger.key.rotate", { team, name });
   }
 
   /** One team's runs where `team` is named, every team the caller administers where it is not. */
