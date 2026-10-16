@@ -30,13 +30,21 @@
 // `effective`). Its editor loads and sends what the profile wrote itself, so a save keeps
 // following the parent; a field left empty there is the parent's. A change to a parent is
 // previewed in every profile that extends it before it is applied.
+//
+// A profile may carry a monthly budget, what its sessions may spend in a calendar month
+// (UTC). Its page says the one in effect, whose it is and what is spent; the editor sets
+// it in dollars, through the same preview, confirmation and audit as any other field. A
+// profile that extends another can only lower its parent's, and the plane says so if not.
+// The page also lists the bundle its pods load, each agent, skill and server with the
+// profile whose channel gave it: for a profile on a channel of its own below a parent on
+// another, the one the plane composes from both.
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { AdminProfile, AdminTeam, EffectiveProfile, ProfileBelow, ProfileDetail, ProfileWrite, ProviderTypeChoice } from "@troupe/client";
+import type { AdminProfile, AdminTeam, EffectiveBundle, EffectiveProfile, ProfileBelow, ProfileDetail, ProfileWrite, ProviderTypeChoice } from "@troupe/client";
 import { href } from "../route";
 import { describeError, recorded, show, useConsole, useLoad } from "../console";
-import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, count, linesOf, modeOf, useChange } from "./bits";
+import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, count, linesOf, modeOf, money, useChange } from "./bits";
 import type { DiffLine, Done } from "./bits";
 import { STATES, profileState } from "./Overview";
 
@@ -345,6 +353,7 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
           ["Image", <span className="mono">{show(p.image)}</span>],
           ["How demanding", <>{show(p["size_class"])}{typeof p["size_class_summary"] === "string" && <span className="hint"> {p["size_class_summary"]}</span>}</>],
           ["Most sessions at once", p["max_sessions"] === null || p["max_sessions"] === undefined ? "no ceiling" : show(p["max_sessions"])],
+          ["Monthly budget", <BudgetLine name={p.name} budget={detail.budget} />],
           ["Workers kept warm", show(p["warm_workers"] ?? 0)],
           ["Pods, as the plane runs them", `${show(p.replicas)} × ${show(p.sessions_per_pod)} sessions`],
           ["Made by", <>{show(p["provisioner"])}{missing.length > 0 && <span className="hint"> without {missing.join(", ")}</span>}</>],
@@ -471,6 +480,7 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
           ["People's own signed-in tools", spec["personalTools"] === "forbid" ? "kept off these pods" : "allowed"],
         ]}
       />
+      {effective?.bundle && <BundleInEffect name={p.name} bundle={effective.bundle} />}
 
       {rest.length > 0 && (
         <>
@@ -589,6 +599,80 @@ function WhereFrom({ name, effective }: { name: string; effective: EffectiveProf
   );
 }
 
+/** A profile's monthly budget in effect, whose it is, and what its sessions have used of it this month. */
+function BudgetLine({ name, budget }: { name: string; budget: ProfileDetail["budget"] }): JSX.Element {
+  if (!budget?.budget_micros) return <>no ceiling: its sessions spend what their people and teams have</>;
+  const used = budget.spent_micros + budget.reserved_micros;
+  return (
+    <>
+      ${money(budget.budget_micros)} a month
+      {budget.set_by && budget.set_by !== name && (
+        <>
+          , from <a href={href({ page: "profiles", path: [budget.set_by] })}>{budget.set_by}</a>
+        </>
+      )}
+      <span className="hint">
+        {" "}
+        ${money(budget.spent_micros)} spent this month{budget.reserved_micros ? `, $${money(budget.reserved_micros)} held by running sessions` : ""}; ${money(Math.max(budget.budget_micros - used, 0))} left. It turns over on the 1st, in UTC.
+      </span>
+    </>
+  );
+}
+
+const KIND_WORDS: Record<string, string> = { agents: "agent", skills: "skill", mcp_servers: "MCP server", acp_agents: "ACP agent" };
+
+/**
+ * The bundle a profile's pods load, entry by entry, with the profile whose channel gave
+ * each: one channel's as it is, or the one the plane composes from the channels of its chain.
+ */
+function BundleInEffect({ name, bundle }: { name: string; bundle: EffectiveBundle }): JSX.Element {
+  return (
+    <>
+      <Region>The bundle its pods load</Region>
+      <p className="note">
+        {bundle.composed
+          ? `One bundle, composed by the plane from ${bundle.layers.map((l) => (l.channel ? `${l.channel} (${l.profile}'s)` : `${l.profile}'s own servers`)).join(" and ")}: each agent, skill and server is added to the ones above it, and replaces one of the same name only where it says override: true. A publish to any of these channels reaches ${name}'s pods, and keeps the servers a profile wrote itself.`
+          : `${bundle.channel}'s, as it is published.`}
+        {bundle.hash && <span className="mono"> {bundle.hash}</span>}
+      </p>
+      {bundle.entries.length === 0 ? (
+        <Empty title="Nothing published">Its pods have the built-in agents and nothing else until one of these channels publishes.</Empty>
+      ) : (
+        <div className="scroll">
+          <table className="bundle-in-effect">
+            <thead>
+              <tr>
+                <th>Kind</th>
+                <th>Name</th>
+                <th>From</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bundle.entries.map((e) => (
+                <tr key={`${e.kind}-${e.name}`}>
+                  <td>{KIND_WORDS[e.kind] ?? e.kind}</td>
+                  <td className="mono">{e.name}</td>
+                  <td>
+                    {e.from === name ? <span>{e.from}</span> : <a href={href({ page: "profiles", path: [e.from] })}>{e.from}</a>}
+                    <span className="hint">{e.channel ? ` on ${e.channel}` : ", its own"}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {bundle.problems.length > 0 && (
+        <ul className="effects">
+          {bundle.problems.map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
 /** A policy violation in words: the plane's sentence, or the parts of one it sent. */
 function violation(v: unknown): string {
   if (typeof v === "string") return v;
@@ -658,6 +742,18 @@ function whole(text: string): number | null {
   return /^\d+$/.test(t) ? Number(t) : null;
 }
 
+/** Dollars typed, as the plane's millionths: null for blank, NaN for what is not an amount. */
+export function budgetMicros(text: string): number | null {
+  const t = text.trim();
+  if (t === "") return null;
+  return /^\d+(\.\d{1,6})?$/.test(t) ? Math.round(Number(t) * 1_000_000) : NaN;
+}
+
+/** Millionths as dollars for a field to hold: empty for none. */
+function dollars(micros: unknown): string {
+  return typeof micros === "number" && micros > 0 ? String(micros / 1_000_000) : "";
+}
+
 /** The `llm` fields a profile may set only beside `llm.endpoint`, as the plane names them. */
 const LLM_FIELDS = ["provider", "model", "smallModel", "secretRef", "prices"];
 
@@ -680,6 +776,8 @@ interface Form {
   image: string;
   sizeClass: string;
   maxSessions: string;
+  /** The monthly budget, in dollars as typed; empty is none, or the parent's. */
+  budget: string;
   warmWorkers: string;
   endpoint: string;
   provider: string;
@@ -714,6 +812,7 @@ function formOf(detail: ProfileDetail | null): Form {
     image: text(written ? written.image : detail?.profile.image),
     sizeClass: text(written ? written.size_class : (detail?.profile["size_class"] ?? "standard")) || (parent ? "" : "standard"),
     maxSessions: text(written ? written.max_sessions : detail?.profile["max_sessions"]),
+    budget: dollars(written ? written.budget_micros : detail?.profile["budget_micros"]),
     warmWorkers: text((written ? written.warm_workers : detail?.profile["warm_workers"]) ?? (detail ? 0 : 1)),
     endpoint: text(at(spec, "llm.endpoint")),
     provider: text(at(spec, "llm.provider")),
@@ -766,6 +865,7 @@ export function draftOf(form: Form, servers: Plain[], kept: Plain): ProfileWrite
     size_class: form.sizeClass || null,
     // Sent when blank too, as null: a ceiling taken away is a change.
     max_sessions: whole(form.maxSessions),
+    budget_micros: budgetMicros(form.budget),
     warm_workers: whole(form.warmWorkers) ?? 0,
     spec: compact(deepMerge(kept, typed)),
   };
@@ -841,7 +941,8 @@ export function ProfileEditor({
           ? null
           : "Lowercase letters, digits and dashes, starting and ending with a letter or digit: it is the name of a resource in the cluster."
     : null;
-  const blocked = Boolean(llmProblem || nameProblem) || draft.name === "" || (draft.image === "" && !parent);
+  const budgetProblem = Number.isNaN(draft.budget_micros) ? "An amount in dollars, like 500 or 120.50." : null;
+  const blocked = Boolean(llmProblem || nameProblem || budgetProblem) || draft.name === "" || (draft.image === "" && !parent);
   const set = (patch: Partial<Form>) => {
     setForm({ ...form, ...patch });
     setError(null);
@@ -936,6 +1037,17 @@ export function ProfileEditor({
         hint={parent ? `How far it may grow, in sessions. Empty is ${parent}'s ceiling; a number above ${parent}'s has ${parent}'s in effect, since a ceiling only narrows.` : "How far it may grow, in sessions. Empty is no ceiling, bounded by the team's budget."}
       >
         {(p) => <input {...p} value={form.maxSessions} placeholder={theirs ?? undefined} onChange={(e) => set({ maxSessions: e.target.value })} inputMode="numeric" />}
+      </Field>
+      <Field
+        label="Monthly budget, in dollars"
+        hint={
+          parent
+            ? `What its sessions may spend in a calendar month, in UTC, whoever starts them. Empty is ${parent}'s; it can only be lower than ${parent}'s, and a higher one is refused.`
+            : "What its sessions may spend in a calendar month, in UTC, whoever starts them and in whichever team, beside each person's and team's. Empty is no ceiling."
+        }
+        error={budgetProblem}
+      >
+        {(p) => <input {...p} value={form.budget} placeholder={theirs ?? undefined} onChange={(e) => set({ budget: e.target.value })} inputMode="decimal" />}
       </Field>
       <Field label="Workers kept warm" hint="How many stay up when nothing runs. 0 costs the next session a cold start of about half a minute.">
         {(p) => <input {...p} value={form.warmWorkers} onChange={(e) => set({ warmWorkers: e.target.value })} inputMode="numeric" />}
@@ -1168,6 +1280,11 @@ function effectsOf(policy: { "allowed?": boolean; violations: unknown[] }, mode:
   if (theirs.length) out.push(`${theirs.join(", ")} ${theirs.length === 1 ? "is" : "are"} the plane's to write, from the size class and what runs: not sent back, and written again by the plane.`);
   out.push(mode === "direct" ? "Applying changes the cluster now. Running sessions keep the pods they are on." : "This plane did not say how it provisions; applying may not reach the cluster.");
   if (detail === null) out.push(`No team may use ${draft.name} until a platform admin grants it to one, on the team's Access tab.`);
+  const budget = draft.budget_micros ?? null;
+  // What it wrote itself, as the form loaded it: for one that extends another, not what it has in effect.
+  const had = detail ? ((detail.written ? (detail.written.budget_micros ?? null) : (detail.profile.budget_micros ?? null)) as number | null) : null;
+  if (budget !== had && !Number.isNaN(budget))
+    out.push(budget ? `Its sessions may spend $${money(budget)} a month from now; a session that would go past it is refused, and told it is ${draft.name}'s budget.` : draft.extends ? `It has ${draft.extends}'s monthly budget from now, if ${draft.extends} has one.` : "Its sessions have no monthly budget of their own from now.");
   const channel = String(draft.spec?.["configBundleChannel"] ?? "stable");
   if (detail && channel !== String(detail.spec?.["configBundleChannel"] ?? detail.bundle?.channel ?? "stable")) out.push(`Its pods follow ${channel} from now, and are told to update.`);
   return out;

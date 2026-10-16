@@ -293,6 +293,50 @@ defmodule Troupe.Plane.Ledger do
   end
 
   @doc """
+  What one profile's sessions have spent, in the calendar month in UTC (`month_start/0`).
+
+  Through the session each charge names, which is on the profile it ran on: a charge does
+  not carry the profile, and the session does, once, for every charge it makes. A session
+  erased takes its charges out of the sum, as its row takes them out of every per-session
+  view.
+  """
+  @spec profile_spent_micros(String.t()) :: non_neg_integer()
+  def profile_spent_micros(profile) when is_binary(profile) do
+    since = month_start()
+
+    Repo.one(
+      from(u in UsageRecord,
+        join: s in Troupe.Plane.Sessions.Session,
+        on: s.id == u.session_id,
+        where: s.profile == ^profile and u.occurred_at >= ^since,
+        select: type(coalesce(sum(u.cost_micros), 0), :integer)
+      )
+    ) || 0
+  end
+
+  @doc "Promises one profile's sessions have outstanding, by session."
+  @spec open_reservations_for_profile(String.t()) :: %{String.t() => non_neg_integer()}
+  def open_reservations_for_profile(profile) when is_binary(profile) do
+    Repo.all(
+      from(r in Reservation,
+        join: s in Troupe.Plane.Sessions.Session,
+        on: s.id == r.session_id,
+        where: s.profile == ^profile and is_nil(r.released_at),
+        select: {r.session_id, r.amount_micros}
+      )
+    )
+    |> Map.new()
+  end
+
+  @doc "A profile's monthly ceiling, in effect, or `nil` for none."
+  @spec profile_budget_micros(String.t()) :: pos_integer() | nil
+  def profile_budget_micros(profile) when is_binary(profile) do
+    Repo.one(
+      from(p in Troupe.Plane.Fleet.Profile, where: p.name == ^profile, select: p.budget_micros)
+    )
+  end
+
+  @doc """
   What the whole deployment has spent and promised, for the two ceilings above a team.
 
   Spent in the calendar month in UTC (`month_start/0`), as a person's is. What is promised

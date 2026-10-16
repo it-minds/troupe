@@ -56,6 +56,16 @@ defmodule Troupe.Protocol.Bundle do
   module — the worker is the only thing holding the binary — but a bundle entry without one
   would be a bundle that says *run whatever is on the path under this name*, and the whole
   point of a content-addressed bundle is that it does not say that.
+
+  ## `override`, for a bundle laid over another
+
+  A profile that extends another has one bundle in effect: its parent's, with its own
+  channel's added. An entry of any kind may say `"override": true`, which is what lets it
+  replace the parent's entry of the same name; without it the parent's is kept. An agent
+  may say it in its definition's frontmatter instead, as it does to replace a built-in.
+  The flag is the document's, so it is published with the entry and holds at every publish
+  after it. Anything but `true` or `false` is refused: an `"override": "yes"` read as no
+  would keep the entry its author meant to replace.
   """
 
   alias Troupe.Protocol.{AgentDefinition, Canonical, Glob}
@@ -395,6 +405,7 @@ defmodule Troupe.Protocol.Bundle do
            AgentDefinition.valid_name?(name) ||
              {:error, "acp_agent #{inspect(name)}: not a valid name"},
          :ok <- present(:acp_agent, name, "command", command),
+         :ok <- override_ok("acp_agent", name, entry),
          {:ok, args} <- acp_args(name, Map.get(entry, "args", [])),
          :ok <- acp_hash(name, Map.get(entry, "hash")) do
       {:ok,
@@ -496,13 +507,14 @@ defmodule Troupe.Protocol.Bundle do
     end
   end
 
-  defp agent(%{"name" => name, "definition" => text}, skills, builtins)
+  defp agent(%{"name" => name, "definition" => text} = raw, skills, builtins)
        when is_binary(name) and is_binary(text) do
     skill_names = Enum.map(skills, & &1.name)
 
     with true <-
            AgentDefinition.valid_name?(name) ||
              {:error, "agent #{inspect(name)}: not a valid name"},
+         :ok <- override_ok("agent", name, raw),
          {:ok, parsed} <- parse_agent(name, text),
          :ok <- known_skills(name, parsed.skills, skill_names),
          :ok <- may_shadow(name, parsed.override, builtins) do
@@ -533,6 +545,13 @@ defmodule Troupe.Protocol.Bundle do
     end
   end
 
+  defp override_ok(kind, name, raw) do
+    case Map.get(raw, "override") do
+      flag when is_boolean(flag) or is_nil(flag) -> :ok
+      other -> {:error, "#{kind} #{name}: override is true or false, not #{inspect(other)}"}
+    end
+  end
+
   defp may_shadow(name, override, builtins) do
     if name in builtins and not override,
       do: {:error, "agent #{name} replaces a built-in; say `override: true` if that is meant"},
@@ -543,6 +562,7 @@ defmodule Troupe.Protocol.Bundle do
     with true <-
            AgentDefinition.valid_name?(name) ||
              {:error, "skill #{inspect(name)}: not a valid name"},
+         :ok <- override_ok("skill", name, raw),
          :ok <- files_ok(name, files),
          {:ok, manifest} <- Map.fetch(files, "SKILL.md") |> manifest_present(name),
          :ok <- manifest_name(name, manifest),
@@ -608,6 +628,7 @@ defmodule Troupe.Protocol.Bundle do
     with true <-
            AgentDefinition.valid_name?(name) ||
              {:error, "mcp server #{inspect(name)}: not a valid name"},
+         :ok <- override_ok("mcp server", name, raw),
          {:ok, host} <- url_ok(name, url),
          :ok <- egress_ok(name, host, egress_allowed?),
          {:ok, mode} <- credential_mode(name, raw["credential_mode"]),

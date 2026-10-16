@@ -58,7 +58,7 @@ defmodule Troupe.Plane.Reach do
   def bundle(channel, parsed) do
     servers = for server <- Map.get(parsed, :mcp_servers, []), do: {:mcp, server.name, server.url}
 
-    with [_ | _] = pods <- Enum.filter(Bundles.profiles_on(channel), &pods?/1),
+    with [_ | _] = pods <- Enum.filter(Bundles.followers(channel), &pods?/1),
          [_ | _] = found <- Reach.unreachable(servers) do
       whose = "The pods of #{Enum.join(pods, ", ")} follow #{channel}, and "
       {:error, {:invalid_bundle, [whose <> Reach.explain(found)]}}
