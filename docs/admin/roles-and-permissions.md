@@ -76,8 +76,10 @@ A credential a team owns, subject `svc:<team>/<name>`, for work nobody starts by
 
 ## 4. Break-glass
 
-A way into the console when the identity provider cannot let you in: a misconfigured
-client, a tenant outage, a fresh installation with no admin group yet.
+A way into the plane's own page at `/admin` when the identity provider cannot let you in: a
+misconfigured client, a tenant outage, a fresh installation with no admin group yet. The page
+reads; what it can change is sign-in and the two settings that decide who administers, each
+back to what the deployment says ([console.md](console.md#when-the-console-cannot-be-used-admin)).
 
 - Grants a platform admin with no teams, marked on every page. It cannot read a session.
 - `GET`/`POST /admin/breakglass`; the token is compared in constant time. Unset, both routes

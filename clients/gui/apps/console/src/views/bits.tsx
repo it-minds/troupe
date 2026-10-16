@@ -381,6 +381,53 @@ function moved(value: unknown): value is { from: unknown; to: unknown } {
   return typeof value === "object" && value !== null && "from" in value && "to" in value;
 }
 
+/**
+ * A secret the plane minted and answers once: shown here, with a way to copy it, and in no
+ * later answer. Leaving the screen loses it, which is said beside it rather than found out.
+ */
+export function ShownOnce({ label, value, children }: { label: string; value: string; children?: ReactNode }): JSX.Element {
+  const [copied, setCopied] = useState(false);
+  return (
+    <section className="banner shown-once" role="status" aria-label={label}>
+      <Status kind="waiting" glyph="◆">
+        {label}, shown once
+      </Status>
+      <pre className="mono secret">{value}</pre>
+      <div className="actions">
+        <button
+          type="button"
+          onClick={() => {
+            void globalThis.navigator?.clipboard?.writeText(value).then(
+              () => setCopied(true),
+              () => setCopied(false),
+            );
+          }}
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+        <span className="hint">The plane keeps only a hash of it: no answer shows it again, and leaving this screen loses it.</span>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** A set of named checks, each passed or not with what it found: a provider's, an App's, a group's. */
+export function Checks({ checks }: { checks: Array<{ name: string; ok: boolean; detail?: string; took_ms?: number }> }): JSX.Element {
+  return (
+    <ul className="plain checks">
+      {checks.map((c) => (
+        <li key={c.name}>
+          <Status kind={c.ok ? "running" : "denied"} glyph={c.ok ? "●" : "✕"}>
+            {c.name}
+          </Status>{" "}
+          <span>{c.detail}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** The fields that differ between what is and what is asked, as a preview shows them. */
 export function changed(before: Record<string, unknown>, after: Record<string, unknown>): DiffLine[] {
   return Object.keys(after)

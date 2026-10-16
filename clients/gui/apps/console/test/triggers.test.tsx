@@ -69,7 +69,9 @@ describe("a trigger", () => {
     expect(says("pr-reviewer")).toBe(true);
     expect(says("2026-10-13 03:00 UTC")).toBe(true);
     expect(says("Revision 1")).toBe(true);
-    expect(link("current console's Triggers page")!.href).toBe(`${fake.plane.baseUrl}/admin/triggers/core`);
+    // Running it and minting its key are named as the plane's methods, and no page under /admin is.
+    expect(says("admin.trigger.run")).toBe(true);
+    expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);
   });
 
   it("is made from a form, previewed, and shown as the audit recorded it", async () => {

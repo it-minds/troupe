@@ -201,7 +201,7 @@ function EnforcedSet({ setting, editable, onPut }: { setting: PlatformSetting; e
     return (
       <div className="card">
         <pre className="mono">{Object.keys(set).length ? JSON.stringify(set, null, 2) : "Nothing is enforced."}</pre>
-        <p className="note">This plane does not list the keys it may enforce, so the set is shown as stored. Change it on the current console's Policy page.</p>
+        <p className="note">This plane does not list the keys it may enforce, so the set is shown as stored. It is changed over the admin API, as the client_enforced setting.</p>
       </div>
     );
   }

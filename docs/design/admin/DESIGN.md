@@ -10,7 +10,7 @@ Files:
 
 `mix troupe.admin.tokens` turns `tokens.json` into the console's `apps/troupe_plane/priv/static/tokens.css` and `priv/design/statuses.json`, which `Troupe.Plane.Web.Live.Status` reads, and CI checks both are current.
 
-What the sections below describe is the design and its mockup, `example.dc.html`; the console in `apps/troupe_plane/lib/troupe/plane/web/live/` is built to it, and where the two differ — an erase panel rather than a dialog, an audit page with its integrity check below the log rather than tabs, no changed-cell flash yet — the console is what ships and the admin track ([profiles and policy](../../admin/profiles-and-policy.md)) says how it works.
+What the sections below describe is the design and its mockup, `example.dc.html`; the console in `clients/gui/apps/console/` is built to it (the plane's read-only page at `/admin` keeps the earlier LiveView build of the status system), and where the two differ — an erase panel rather than a dialog, an audit page with its integrity check below the log rather than tabs, no changed-cell flash yet — the console is what ships and the admin track ([profiles and policy](../../admin/profiles-and-policy.md)) says how it works.
 
 It is a sibling of the user client ([`clients/gui/docs/design/`](../../../clients/gui/docs/design/DESIGN.md): its `DESIGN.md`, `example.dc.html` and the four `themes/*.tokens.json`), not a reskin of it. §1 says where they diverged when both were drawn; the client has since moved to Afterglow (Figtree and DM Mono, square corners, pink as its reserved colour), and the console has not.
 

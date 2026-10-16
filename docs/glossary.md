@@ -46,9 +46,10 @@ None of them can do anything the protocol does not offer every client.
 
 ### Console
 
-The plane's administration pages, at `/admin`: fleet, identity, teams, budgets, profiles,
-policy, bundles, triggers, principals and the audit trail. Each button calls a method that
-the admin API offers as well, over JSON-RPC and MCP.
+The administrative app, at `/console`: fleet, identity, teams, budgets, profiles, policy,
+bundles, triggers, principals and the audit trail. Each button calls a method that the admin
+API offers as well, over JSON-RPC and MCP. The plane's own page at `/admin` is a read-only
+overview and the break-glass door.
 
 ### Daemon
 

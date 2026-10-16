@@ -1,7 +1,7 @@
 # Routine tasks
 
 Step lists for the common changes. Each administrative step names the `admin.*` method it
-is; run it from its console page at `/admin`, as the MCP tool of the same name with
+is; run it from its page in the console at `/console` ([console.md](console.md)), as the MCP tool of the same name with
 underscores (`admin_team_enable`) on `/mcp`, or as JSON-RPC on `/rpc` with a plane token.
 Arguments and their meanings are in the method table
 ([roles-and-permissions.md §9](roles-and-permissions.md#9-the-admin-methods)). `kubectl` and
@@ -176,7 +176,7 @@ people may offer their own signed-in tools to a profile's pods is the profile's
 
 Which versions of troupe, troupe-daemon and the desktop app this plane serves, per
 component (`tui`, `daemon`, `desktop`): a **recommended** version, a **minimum** and a
-**blocked** list (Decision 868). The **Client versions** panel on the console's Policy page
+**blocked** list (Decision 868). The console's **Client versions** screen
 is `admin.clients.get` and `admin.clients.put {component, policy: {recommended, minimum,
 blocked}}`; a platform admin's to change, a team admin's to read, audited as `clients.put`.
 Nothing set serves every version.
@@ -213,14 +213,18 @@ Nobody is a platform admin because `platform_admin_group` or `groups_claim` is w
 1. Turn break-glass on if it is not: a Secret with key `token`
    (`openssl rand -base64 48`), `plane.breakglass.secretName` naming it, `helm upgrade`.
 2. Open `https://<plane>/admin/breakglass` and enter the token. You are a platform admin
-   for the lifetime, marked on every page and in the audit log.
-3. Check the right group and save it on the **Policy** page.
+   for the lifetime, marked on the page and in the audit log. The page shows the identity
+   check, and sign-in as the plane holds it.
+3. Where the wrong value was saved in the console, put it back to the deployment's there
+   (*back to the deployment*). Where the deployment's own value is wrong, set
+   `plane.platformAdminGroup` or `plane.groupsClaim` and roll; the page sets nothing
+   itself.
 4. Sign in normally to confirm; turn break-glass off (`secretName: ""`, upgrade, delete the
    Secret).
 
 ## SCIM
 
-On the console's **Identity provider** card, *create a token* (`admin.scim.rotate`): shown
+On the console's **Sign-in** screen, *make a token* (`admin.scim.rotate`): shown
 once. Give the provider the token and the base URL `https://<plane>/scim/v2`, keyed on
 `externalId` = the subject. `admin.scim.get` shows the last request; `admin.scim.update
 {attrs: {teams_from_groups: true}}` makes pushed groups teams; `admin.scim.delete` removes the
@@ -235,7 +239,7 @@ provider's `externalId` mapping gives two people one value, and is what to fix.
 
 ## The identity provider
 
-The **Identity provider** card (`admin.provider.get`, `admin.provider.check`,
+The console's **Sign-in** screen (`admin.provider.get`, `admin.provider.check`,
 `admin.provider.put`, `admin.provider.reset`) changes the issuer, client, secret,
 endpoints and scopes behind a check against what the provider publishes; it overrides the
 deployment until reset. To rotate the client secret in the deployment instead, update

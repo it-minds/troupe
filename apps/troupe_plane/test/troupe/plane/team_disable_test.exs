@@ -140,45 +140,4 @@ defmodule Troupe.Plane.TeamDisableTest do
       assert event.detail["sessions_kept"] == 1
     end
   end
-
-  describe "the console" do
-    test "lists every team in a table, and delete asks first", context do
-      conn = sign_in(context.conn, "root@example.test")
-      {:ok, view, html} = live(conn, "/admin/teams")
-
-      # The table: one row per team, with what somebody arriving here wants to know.
-      assert html =~ ~s(id="team-row-engineering")
-      row = view |> element("#team-row-engineering") |> render()
-      assert row =~ "backend, org-platform"
-      assert row =~ "dev, review"
-
-      # Asking first: the warning carries the preview's numbers, and nothing has happened.
-      warning =
-        view
-        |> element(~s(#team-row-engineering button[phx-click="confirm-disable"]))
-        |> render_click()
-
-      assert warning =~ "removes the team for 2 people"
-      assert warning =~ "revokes 2 profiles"
-      assert warning =~ "deletes 1 service principal"
-      assert warning =~ "deletes 1 trigger"
-      assert warning =~ "1 session(s) are kept"
-      assert Identity.get_team("engineering")
-
-      # Then the deed.
-      html = view |> element(~s(#team-row-engineering button[phx-click="disable"])) |> render_click()
-
-      assert html =~ "engineering is no longer a team"
-      refute Identity.get_team("engineering")
-      refute html =~ ~s(id="team-row-engineering")
-    end
-
-    test "a team admin sees the table without the buttons", context do
-      conn = sign_in(context.conn, "lead@example.test")
-      {:ok, _view, html} = live(conn, "/admin/teams")
-
-      assert html =~ ~s(id="team-row-engineering")
-      refute html =~ ~s(phx-click="confirm-disable")
-    end
-  end
 end

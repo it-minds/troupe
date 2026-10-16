@@ -17,14 +17,13 @@
 import { useState } from "react";
 import type { JSX } from "react";
 import type { AdminProfile, AdminTeam, LadderValue, TeamDisableEffect, TeamUnlinkEffect } from "@troupe/client";
-import { currentConsole } from "../plane";
 import { TEAM_TABS, href } from "../route";
 import type { TeamTab } from "../route";
 import { recorded, show, useConsole, useLoad } from "../console";
 import type { Load } from "../console";
-import { AuditNote, Empty, Field, Loaded, Preview, Region, Status, changed, count, money } from "./bits";
-import type { DiffLine, FieldProps } from "./bits";
-import { Spend } from "./Teams";
+import { AuditNote, Empty, Field, Loaded, Preview, Region, Status, changed, count, money, useChange } from "./bits";
+import type { DiffLine, Done, FieldProps } from "./bits";
+import { Spend, Twice } from "./Teams";
 
 const TAB_LABELS: Record<TeamTab, string> = {
   members: "Members and groups",
@@ -78,36 +77,13 @@ export function Team({ name, tab }: { name: string; tab: TeamTab }): JSX.Element
   );
 }
 
-/** A change once made: what the audit recorded, read back where the write did not say. */
-interface Done {
-  action: string;
-  subject: string;
-  detail: Record<string, unknown> | null;
-}
-
-/**
- * Make a change and show it as recorded: send it, read the audit's row for it back, tell
- * the person, and read the team again. A refusal throws, and the preview shows it where
- * the change was asked for.
- */
-function useChange(onApplied: () => void): { done: Done | null; apply: (action: string, subject: string, write: () => Promise<unknown>, said: string) => Promise<void> } {
-  const { admin, me, notify } = useConsole();
-  const [done, setDone] = useState<Done | null>(null);
-  const apply = async (action: string, subject: string, write: () => Promise<unknown>, said: string): Promise<void> => {
-    await write();
-    setDone({ action, subject, detail: await recorded(admin, me.subject, action, subject) });
-    notify(said);
-    onApplied();
-  };
-  return { done, apply };
-}
-
-/** Where a change this console does not offer yet is made for now. */
-function Elsewhere({ what }: { what: string }): JSX.Element {
-  const { plane } = useConsole();
+/** Where a person's own cap is set: on Budgets, since it follows them across every team. */
+function OwnCaps(): JSX.Element | null {
+  const { role } = useConsole();
+  if (role !== "platform_admin") return null;
   return (
     <p className="note">
-      {what} comes to this console next; for now it is on the <a href={currentConsole(plane.url, "/teams")}>current console's Teams page</a>.
+      A person's own spending cap follows them across every team, so it is set on <a href={href({ page: "budgets" })}>Budgets</a>.
     </p>
   );
 }
@@ -136,34 +112,36 @@ function Members({ team, onApplied }: { team: AdminTeam; onApplied: () => void }
       {team.groups.length === 0 ? (
         <Empty title="No group linked">Nobody can be in this team until a group is linked to it.</Empty>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Group</th>
-              <th>Id at the provider</th>
-              <th>Linked by</th>
-              {platform && <th aria-label="Actions" />}
-            </tr>
-          </thead>
-          <tbody>
-            {team.groups.map((g) => (
-              <tr key={g.external_id}>
-                <td>{g.display_name ?? g.external_id}</td>
-                <td className="mono">{g.external_id}</td>
-                <td>{g.linked_by ?? "—"}</td>
-                {platform && (
-                  <td className="row-actions">
-                    {!busy && (
-                      <button type="button" onClick={() => setUnlinking(g.external_id)}>
-                        Unlink
-                      </button>
-                    )}
-                  </td>
-                )}
+        <div className="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Group</th>
+                <th>Id at the provider</th>
+                <th>Linked by</th>
+                {platform && <th aria-label="Actions" />}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {team.groups.map((g) => (
+                <tr key={g.external_id}>
+                  <td>{g.display_name ?? g.external_id}</td>
+                  <td className="mono">{g.external_id}</td>
+                  <td>{g.linked_by ?? "—"}</td>
+                  {platform && (
+                    <td className="row-actions">
+                      {!busy && (
+                        <button type="button" onClick={() => setUnlinking(g.external_id)}>
+                          Unlink
+                        </button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {unlinking !== null && (
         <Unlink
@@ -200,11 +178,13 @@ function Members({ team, onApplied }: { team: AdminTeam; onApplied: () => void }
                       {offered.map((g) => (
                         <option key={g.external_id} value={g.external_id}>
                           {g.display_name ? `${g.display_name} (${g.external_id})` : g.external_id}
+                          {g.looks_duplicated ? " · looks held twice" : ""}
                         </option>
                       ))}
                     </select>
                   )}
                 </Field>
+                <Twice group={offered.find((g) => g.external_id === linking)} />
                 {offered.length === 0 && <p className="hint">This team draws on every group the plane knows of.</p>}
                 <div className="actions">
                   <button type="submit" className="primary" disabled={!linking}>
@@ -240,28 +220,30 @@ function Members({ team, onApplied }: { team: AdminTeam; onApplied: () => void }
       {team.members.length === 0 ? (
         <Empty title="Nobody yet">A person appears here once they are in a linked group, at their next sign-in or the provider's next push.</Empty>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Person</th>
-              <th>Subject</th>
-              <th className="num">Spent</th>
-              <th className="num">Own cap</th>
-            </tr>
-          </thead>
-          <tbody>
-            {team.members.map((m) => (
-              <tr key={m.subject}>
-                <td>{m.display_name ?? m.subject}</td>
-                <td className="mono">{m.subject}</td>
-                <td className="num">{money(m.spent_micros ?? 0)}</td>
-                <td className="num">{m.budget_micros ? money(m.budget_micros) : <span className="muted">none</span>}</td>
+        <div className="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Person</th>
+                <th>Subject</th>
+                <th className="num">Spent</th>
+                <th className="num">Own cap</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {team.members.map((m) => (
+                <tr key={m.subject}>
+                  <td>{m.display_name ?? m.subject}</td>
+                  <td className="mono">{m.subject}</td>
+                  <td className="num">{money(m.spent_micros ?? 0)}</td>
+                  <td className="num">{m.budget_micros ? money(m.budget_micros) : <span className="muted">none</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
-      <Elsewhere what="Setting a person's own spending cap" />
+      <OwnCaps />
     </section>
   );
 }

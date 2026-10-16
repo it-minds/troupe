@@ -101,9 +101,14 @@ describe("signing in to the console", () => {
     await waitFor(() => says("team admin · design"), "the console, as the design team's admin");
     await waitFor(() => link("design"), "the design team");
     expect(link("core")).toBeNull();
-    expect(link("Integrations")).toBeNull();
+    expect(link("Provisioners and hosts")).toBeNull();
+    expect(link("Workers and pods")).toBeNull();
+    expect(link("Sign-in")).toBeNull();
+    expect(link("Connections")).toBeNull();
     expect(link("Triggers")).not.toBeNull();
-    expect(link("Identity")).toBeNull();
+    // What the plane answers a team admin: the integrations to read, and their team's principals.
+    expect(link("Integrations")).not.toBeNull();
+    expect(link("Identity")).not.toBeNull();
     expect(link("Teams")).not.toBeNull();
     expect(link("Client versions")).not.toBeNull();
   });

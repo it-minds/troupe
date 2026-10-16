@@ -33,9 +33,11 @@ deployed, the rollout has not finished or the image tag did not move.
 
 ## 3. The console
 
-`/admin` is the overview: per profile its pods, conditions, load and bundle state; per team
-budget, spend and reservations; session counts. It refreshes every two seconds, the Workers page every second. Sessions, bundles (with
-adoption per pod), triggers and runs, audit and settings each have a page. Every page is a
+The console at `/console` ([console.md](console.md)) opens on the overview: what needs attention,
+per profile its pods and load, per team its spend against its budget, and session counts,
+read again every ten seconds. Workers and pods, sessions, bundles (with adoption per pod),
+triggers, audit and settings each have a screen. `/admin` is a read-only overview of the same,
+refreshed every two seconds, and the break-glass door. Every page is a
 call into `Troupe.Plane.Admin`, and `admin.overview` returns the same map to `/rpc` and
 `/mcp`.
 
@@ -131,4 +133,4 @@ Phoenix's own; nothing in a deployment attaches to them.
 | Worker pods stay in `CreateContainerError`, "cannot load seccomp profile" | the `Localhost` profile is not on that node: `kubectl -n troupe-system get daemonset troupe-worker-profiles`, or where something else installs it, its path against `worker.seccomp.localhostProfile` |
 | Worker pods stay in `CreateContainerError`, "apparmor profile not found" | the AppArmor profile is not loaded on that node: `kubectl -n troupe-system get daemonset troupe-worker-profiles` and the log of its `apparmor` container, or where something else loads it, its name against `worker.appArmor.profile` |
 | Worker pods fail at once, "Cannot enforce AppArmor: AppArmor is not enabled on the host" | the node runs no AppArmor and the worker asks for a profile: `worker.appArmor.enabled: false` ([installing.md](installing.md#the-workers-apparmor-profile)) |
-| A client is refused with `update_required` | it is below the minimum the Policy page's client versions set, or on a version blocked there ([routine-tasks.md](routine-tasks.md#client-versions)) |
+| A client is refused with `update_required` | it is below the minimum the console's **Client versions** sets, or on a version blocked there ([routine-tasks.md](routine-tasks.md#client-versions)) |

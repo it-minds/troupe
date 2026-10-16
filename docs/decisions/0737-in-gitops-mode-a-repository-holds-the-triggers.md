@@ -12,10 +12,9 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/triggers.ex
   - apps/troupe_plane/lib/troupe/plane/triggers/trigger.ex
   - apps/troupe_plane/lib/troupe/plane/web/live/layout.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/triggers.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/workers.ex
+  - clients/gui/apps/console/src/views/Triggers.tsx
+  - clients/gui/apps/console/src/views/Pods.tsx
   - apps/troupe_plane/priv/repo/migrations/20260930000036_gitops_triggers.exs
-  - apps/troupe_plane/test/troupe/plane/gitops_triggers_console_test.exs
   - apps/troupe_plane/test/troupe/plane/gitops_triggers_test.exs
   - charts/troupe/crds/trigger.yaml
   - charts/troupe/templates/plane-rbac.yaml

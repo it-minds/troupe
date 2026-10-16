@@ -17,7 +17,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/triggers/trigger.ex
   - apps/troupe_plane/lib/troupe/plane/triggers/notify.ex
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/triggers.ex
   - apps/troupe_plane/priv/repo/migrations/20261016000905_github_webhook.exs
   - apps/troupe_plane/test/troupe/plane/github_webhook_test.exs
   - apps/troupe_worker/lib/troupe/worker/plane/commands.ex

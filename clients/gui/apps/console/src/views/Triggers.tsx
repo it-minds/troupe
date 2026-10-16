@@ -15,12 +15,11 @@
 // they come from, and nothing offers a write. A new webhook trigger is made with its key,
 // which is shown once, with a button that copies it; a trigger on a GitHub repository is
 // fired by the App's signed deliveries and has none. Running one by hand and rotating a key
-// are in the current console for now.
+// are done over the plane's admin API for now.
 
 import { useState } from "react";
 import type { JSX } from "react";
 import type { AdminTeam, Trigger, TriggerPut } from "@troupe/client";
-import { currentConsole } from "../plane";
 import { go, href } from "../route";
 import { recorded, show, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, modeOf, useChange, when } from "./bits";
@@ -131,7 +130,7 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
           <>
             {locked && (
               <Locked things="triggers" source={source}>
-                <p className="note">Running one by hand and minting its key still work, in the current console: they are things done with a trigger, not what it is.</p>
+                <p className="note">Running one by hand and minting its key still work, over the admin API: they are things done with a trigger, not what it is.</p>
               </Locked>
             )}
             {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
@@ -257,7 +256,7 @@ function KeyOnce({ name, secret, url, onDone }: { name: string; secret: string; 
 // -- a trigger ---------------------------------------------------------------------------
 
 export function TriggerPage({ team, name }: { team: string; name: string }): JSX.Element {
-  const { admin, me, plane, notify } = useConsole();
+  const { admin, me, notify } = useConsole();
   const [load, reload] = useLoad(
     () => Promise.all([admin.triggers(team), admin.triggerRevisions(team, name).catch(() => null), admin.provisioningMode().catch(() => null), admin.teams()]),
     [admin, team, name],
@@ -357,8 +356,8 @@ export function TriggerPage({ team, name }: { team: string; name: string }): JSX
                 </div>
               )}
               <p className="note">
-                Running it now by hand, and rotating its webhook key, come to this console next; for now they are on the{" "}
-                <a href={currentConsole(plane.url, `/triggers/${encodeURIComponent(team)}`)}>current console's Triggers page</a>.
+                Running it now by hand, and rotating its webhook key, come to this console next; for now they are <code>admin.trigger.run</code> and{" "}
+                <code>admin.trigger.key.rotate</code>, with <code>troupe admin</code> or over <code>/rpc</code>.
               </p>
               {editing && (
                 <TriggerForm
@@ -569,7 +568,7 @@ function TriggerForm({
             ? "Reading the team's service principals…"
             : principals.length
               ? "A service principal of the team: a credential somebody is answerable for, since it fires with nobody watching."
-              : `${team.name} has no service principal that works: one is made on Identity, in the current console for now.`
+              : `${team.name} has no service principal that works: one is made on Identity.`
         }
       >
         {(p) => (
