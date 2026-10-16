@@ -312,6 +312,15 @@ export interface AdminTeamMember {
   reserved_micros?: number;
 }
 
+/** A team's GitHub policy, as `admin.teams.list` answers it and `admin.team.update` takes it. */
+export interface TeamGitHub {
+  repositories: string[];
+  /** Pushes a run may make; the lower of this and the profile's `github.maxPushes` holds. */
+  max_pushes: number | null;
+  /** Runs on a repository its triggers may have going at once. */
+  max_runs: number | null;
+}
+
 export interface AdminTeam extends TeamSpend {
   members_may_control: boolean | null;
   idle_timeout_seconds: number | null;
@@ -322,6 +331,12 @@ export interface AdminTeam extends TeamSpend {
   volume_size: string | null;
   /** A platform admin's to set; whether the team may be granted a profile nothing is enforced on. */
   allow_unenforced_workers?: boolean | null;
+  /**
+   * What the team's sessions may do on GitHub: the repositories they may name (`owner/name`,
+   * or `owner/*`; none listed names none) and the fix loop's caps. Its own administrators'.
+   * Absent from a plane older than the field.
+   */
+  github?: TeamGitHub;
   admins: string[];
   grants: Array<{ profile: string; volume_mode: string | null }>;
   groups: AdminTeamGroup[];

@@ -26,6 +26,10 @@ defmodule Troupe.Plane.FakeGitHub do
     (`ruleset/3`) refuses a branch write outside a prefix, as one keyed on the App would;
   - **a review's comments** (`GET .../pulls/<n>/reviews/<id>/comments`), as the test
     scripts them (`review/4`), for a token holding `pull_requests: read`;
+  - **a repository's visibility** in its own answer (`private` and `visibility`, private
+    unless the test says otherwise with `visibility/3`);
+  - **a token revoking itself** (`DELETE /api/v3/installation/token`), which is refused
+    everywhere from then on and kept (`revoked/1`);
   - nothing else: any other path is `404`.
 
   And the other way, what GitHub sends the App's webhook: `deliver/5` posts an event to a
@@ -67,7 +71,11 @@ defmodule Troupe.Plane.FakeGitHub do
                rulesets: %{},
                # A review's comments on lines, by repository and review id, which the
                # plane reads when a review resumes a session.
-               reviews: %{}
+               reviews: %{},
+               # Each repository's visibility as GitHub reports it (private unless set),
+               # and every token revoked with `DELETE /installation/token`.
+               visibility: %{},
+               revoked: []
              }
            end},
           id: {__MODULE__, :agent}
@@ -181,6 +189,13 @@ defmodule Troupe.Plane.FakeGitHub do
 
     {response, delivery}
   end
+
+  @doc "Make `full_name` `\"public\"`, `\"private\"` or `\"internal\"`, as GitHub reports it."
+  def visibility(fake, full_name, visibility),
+    do: Agent.update(fake.agent, &put_in(&1.visibility[String.downcase(full_name)], visibility))
+
+  @doc "Every token revoked, oldest first."
+  def revoked(fake), do: fake.agent |> Agent.get(& &1.revoked) |> Enum.reverse()
 
   @doc "How long a token issued from now lives, in seconds."
   def ttl(fake, seconds), do: Agent.update(fake.agent, &%{&1 | ttl: seconds})
@@ -347,6 +362,31 @@ defmodule Troupe.Plane.FakeGitHub do
     end
   end
 
+  # A token revoking itself, as GitHub's `DELETE /installation/token` does: `204`, and the
+  # token is refused from then on; one it does not take is `401`.
+  def call(
+        %Plug.Conn{method: "DELETE", path_info: ["api", "v3", "installation", "token"]} = conn,
+        agent
+      ) do
+    state = Agent.get(agent, & &1)
+
+    with [header] <- get_req_header(conn, "authorization"),
+         [_scheme, token] <- String.split(header, " ", parts: 2),
+         %{} = issued <- Map.get(state.tokens, token),
+         false <- Map.get(issued, :revoked, false),
+         true <- issued.expires_at > System.system_time(:second) do
+      Agent.update(agent, fn state ->
+        state
+        |> put_in([:tokens, token, :revoked], true)
+        |> Map.update!(:revoked, &[token | &1])
+      end)
+
+      send_resp(conn, 204, "")
+    else
+      _ -> answer(conn, 401, %{"message" => "Bad credentials"})
+    end
+  end
+
   def call(conn, _agent), do: send_resp(conn, 404, "Not Found")
 
   # -- the fix loop's REST calls ---------------------------------------------------
@@ -374,9 +414,12 @@ defmodule Troupe.Plane.FakeGitHub do
 
   defp api("GET", [], _asked, ctx) do
     {branch, 0} = git(ctx.path, ["symbolic-ref", "--short", "HEAD"])
+    visibility = Agent.get(ctx.agent, &Map.get(&1.visibility, ctx.full, "private"))
 
     answer(ctx.conn, 200, %{
       "full_name" => "#{ctx.owner}/#{ctx.name}",
+      "private" => visibility != "public",
+      "visibility" => visibility,
       "default_branch" => String.trim(branch),
       "html_url" => "#{base_url(ctx.conn)}/#{ctx.owner}/#{ctx.name}"
     })
@@ -690,6 +733,7 @@ defmodule Troupe.Plane.FakeGitHub do
     with [header] <- get_req_header(conn, "authorization"),
          [_scheme, token] <- String.split(header, " ", parts: 2),
          %{} = issued <- Map.get(state.tokens, token),
+         false <- Map.get(issued, :revoked, false),
          true <- issued.expires_at > System.system_time(:second),
          true <- String.downcase(issued.owner) == String.downcase(owner),
          true <- name in issued.repositories do
@@ -767,6 +811,7 @@ defmodule Troupe.Plane.FakeGitHub do
          {:ok, pair} <- Base.decode64(encoded),
          [_username, token] <- String.split(pair, ":", parts: 2),
          %{} = issued <- Map.get(state.tokens, token),
+         false <- Map.get(issued, :revoked, false),
          true <- issued.expires_at > System.system_time(:second),
          true <- String.downcase(issued.owner) == String.downcase(owner),
          true <- name in issued.repositories,

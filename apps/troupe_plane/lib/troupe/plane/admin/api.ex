@@ -231,6 +231,32 @@ defmodule Troupe.Plane.Admin.API do
       type: :boolean,
       description:
         "Whether this team may be granted a profile whose workers run where nothing is enforced (machines rather than a cluster). A platform admin's to set; refused from a team admin, and refused as false while the team holds such a grant."
+    },
+    %Argument{
+      name: "github",
+      type: :object,
+      description:
+        "What the team's sessions may do on GitHub through the plane's App. Only the keys sent change; null clears them all. A team that lists no repository names none, and the App's installations bound every list.",
+      properties: [
+        %Argument{
+          name: "repositories",
+          type: :array,
+          description:
+            "The repositories the team's sessions and triggers may name, each owner/name or owner/* for every repository of the owner. A session, a trigger or a token for one not listed is refused."
+        },
+        %Argument{
+          name: "max_pushes",
+          type: :integer,
+          description:
+            "Pushes a run may make, 1 to 1000; the lower of this and the profile's github.maxPushes holds. A run at its cap is stopped, with a comment on its pull request. Null for no cap of the team's."
+        },
+        %Argument{
+          name: "max_runs",
+          type: :integer,
+          description:
+            "Runs on a repository the team's triggers may have going at once, 1 to 1000; a firing over it is skipped. Null for no cap of the team's."
+        }
+      ]
     }
   ]
 
@@ -675,7 +701,8 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.team.update",
       function: :team_update,
-      summary: "Change a team's budget, retention, volume or default visibility.",
+      summary:
+        "Change a team's budget, retention, volume, default visibility, or the GitHub repositories its sessions may name and its fix loop's caps.",
       risk: :write,
       arguments: [
         %Argument{name: "name", type: :string, required: true, description: "The team's name."},

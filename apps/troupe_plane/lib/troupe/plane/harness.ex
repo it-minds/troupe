@@ -450,7 +450,7 @@ defmodule Troupe.Plane.Harness do
          {:ok, origin} <- origin_for(params["origin"]),
          answerable = answerable_for(%{origin: origin, owner_subject: user.subject}),
          {:ok, terms} <- terms_for(params["terms"], team, answerable),
-         {:ok, repository} <- repository_for(params["repository"], profile),
+         {:ok, repository} <- repository_for(params["repository"], profile, team),
          {:ok, session_id} <- session_id_for(params["session_id"]),
          params = Map.put(params, "repository", repository),
          {:ok, session} <- create_row(session_id, user, team, profile, params, terms, origin),
@@ -1504,11 +1504,12 @@ defmodule Troupe.Plane.Harness do
   defp slice_of(%{terms: %{"budget_micros" => slice}}) when is_integer(slice), do: slice
   defp slice_of(_session), do: @default_slice_micros
 
-  # The GitHub repository the session clones, checked against the plane's App now, before
-  # there is a row: an owner it has no installation for, or a Git host the profile does
-  # not declare, is a typo that would otherwise surface as a pod that could not clone.
-  defp repository_for(given, profile) do
-    case GitHub.repository(given, profile) do
+  # The GitHub repository the session clones, checked against the plane's App and the
+  # team's own list now, before there is a row: an owner it has no installation for, a
+  # repository the team does not list, or a Git host the profile does not declare, would
+  # otherwise surface as a pod that could not clone.
+  defp repository_for(given, profile, team) do
+    case GitHub.repository(given, profile, team) do
       {:ok, repository} -> {:ok, repository}
       {:error, reason} -> invalid(reason, field: "repository")
     end

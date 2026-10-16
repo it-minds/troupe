@@ -180,6 +180,10 @@ describe("the editor", () => {
         orgMount: false,
         repositoryOverridesBundle: false,
         forbidPersonalTools: false,
+        allowPublic: false,
+        denyPaths: "",
+        maxPushes: "",
+        maxRuns: "",
       },
       [],
       kept,
@@ -195,6 +199,62 @@ describe("the editor", () => {
     });
     // The prices it carries need an endpoint, as the plane holds them to.
     expect(llmWithoutEndpoint(draft.spec!["llm"] as Record<string, unknown>)).toContain("llm.prices is set without an endpoint");
+  });
+
+  // #147 slice 4: the fix loop's policy on GitHub has fields; the token's permissions, which
+  // have none, are carried through as they were loaded.
+  it("maps the fix loop's GitHub policy onto spec.github beside the permissions it carries", () => {
+    const loaded = { github: { permissions: { contents: "write" }, allowPublic: true, maxRuns: 4 } };
+    const kept = keptOf(loaded);
+    expect(kept).toEqual({ github: { permissions: { contents: "write" } } });
+    const form = {
+      name: "p",
+      extends: "",
+      image: "registry.example.com/troupe/worker:1",
+      sizeClass: "standard",
+      maxSessions: "",
+      warmWorkers: "0",
+      endpoint: "",
+      provider: "",
+      model: "",
+      smallModel: "",
+      secretName: "",
+      secretKey: "",
+      fqdns: "",
+      gitHosts: "",
+      storageClass: "",
+      channel: "",
+      orgMount: false,
+      repositoryOverridesBundle: false,
+      forbidPersonalTools: false,
+      allowPublic: false,
+      denyPaths: "secrets/\n *.tfstate \n",
+      maxPushes: "3",
+      maxRuns: "",
+    };
+    // Public repositories turned off: absent, which is off; the cap of runs taken away.
+    expect(draftOf(form, [], kept).spec!["github"]).toEqual({ permissions: { contents: "write" }, denyPaths: ["secrets/", "*.tfstate"], maxPushes: 3 });
+    // A profile that extends another says false, or its parent's true would hold.
+    expect(draftOf({ ...form, extends: "base", denyPaths: "", maxPushes: "" }, [], kept).spec!["github"]).toEqual({ permissions: { contents: "write" }, allowPublic: false });
+    expect(draftOf({ ...form, extends: "base", allowPublic: null, denyPaths: "", maxPushes: "" }, [], kept).spec!["github"]).toEqual({ permissions: { contents: "write" } });
+  });
+
+  it("reads a profile's GitHub policy, and edits it behind the plane's preview", async () => {
+    await open("#/profiles/dev");
+    (await waitFor(() => button("Change dev"), "dev")).click();
+    type(await waitFor(() => field("Paths a push never carries"), "the editor"), "secrets/");
+    type(field("Pushes a run may make")!, "4");
+    type(field("Public repositories")!, "true");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    expect(says("spec.github.maxPushes")).toBe(true);
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
+    const github = fake.admin.profiles.find((p) => p.name === "dev")!.spec!["github"] as Record<string, unknown>;
+    expect(github).toMatchObject({ allowPublic: true, denyPaths: ["secrets/"], maxPushes: 4 });
+    await waitFor(() => says("pushes and pull requests allowed"), "dev read again");
+    expect(says("secrets/, and")).toBe(true);
+    expect(says(".env, .env.*, *.pem")).toBe(true);
   });
 
   it("says at the endpoint, before anything is sent, that model settings need one", async () => {
