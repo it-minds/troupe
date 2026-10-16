@@ -1254,6 +1254,31 @@ export class FakeAdmin {
         return { result: { people: this.peopleAlike, groups: this.groupsAlike() } };
       }
 
+      // Settling a refused adoption, as `Identity.settle/2` does: the row a sign-in made
+      // under the subject is folded into SCIM's, which takes the subject; with none, the
+      // next push or sign-in adopts SCIM's row. Either way the pair is no longer listed.
+      case "admin.identity.adopt": {
+        if (role !== "platform_admin") return notPlatform;
+        const rowId = String(params["row"] ?? "");
+        const who = String(params["subject"] ?? "");
+        const at = this.peopleAlike.findIndex((s) => s.by === "external_id" && s["row"] === rowId && s["subject"] === who);
+        if (at < 0) return refuse(NOT_FOUND, "not_found", { reason: `no refused adoption of ${who} by row ${rowId} stands: it is settled, or the row is gone` });
+        const set = this.peopleAlike[at]!;
+        const kept = set.people.find((p) => p["id"] === rowId);
+        const signed = set.people.find((p) => p["id"] !== rowId && p["subject"] === who) ?? null;
+        this.peopleAlike.splice(at, 1);
+        const detail = {
+          subject: who,
+          row: rowId,
+          row_subject: kept?.["subject"] ?? null,
+          folded: signed ? { id: signed["id"], subject: who } : null,
+          kms_names_left: [],
+          via: "admin",
+        };
+        this.record(subject, "person.adopt", who, detail);
+        return { result: detail };
+      }
+
       case "admin.identity.check": {
         if (!admin) return notAdmin;
         const asked = typeof params["group"] === "string" && params["group"] !== "" ? params["group"] : null;
@@ -1591,6 +1616,11 @@ export class FakeAdmin {
         if (!row) return refuse(NOT_FOUND, "not_found", { trigger: params["name"] });
         const now = new Date().toISOString();
         if (method === "admin.trigger.key.rotate") {
+          // A webhook that names no repository is the only trigger a key fires.
+          if (row.source["kind"] !== "webhook" || row.source["repository"]) {
+            const by = row.source["kind"] === "schedule" ? "is fired by its schedule" : row.source["repository"] ? `is fired by the GitHub App's signed deliveries for ${String(row.source["repository"])}` : "is run by hand, or by a principal that signs in";
+            return refuse(INVALID_PARAMS, "invalid_params", { trigger: row.name, reason: `${row.name} ${by}, so it has no key: one would let whoever held it fire it with any event they liked` });
+          }
           // Replaces whatever it had, at once: no window in which the old one still fires.
           const had = this.triggerJson(row)["has_key"] === true;
           const key = mintKey();
@@ -1598,9 +1628,9 @@ export class FakeAdmin {
           this.record(subject, "trigger.key.rotate", `${row.team}/${row.name}`, { had_key: had });
           return { result: { team: row.team, name: row.name, url: `/trigger/${row.id}`, key, rotated_at: now } };
         }
-        // The caller and the second: a second click a moment later is the run already made.
+        // The caller and the minute: a second click within it is the run already made.
         const at = `${now.slice(0, 19)}Z`;
-        const key = `manual:${row.id}:${subject}:${at}`;
+        const key = `manual:${row.id}:${subject}:${now.slice(0, 16)}:00Z`;
         this.record(subject, "trigger.run", `${row.team}/${row.name}`, { run: key });
         if (!row.enabled) return refuse(FORBIDDEN, "forbidden", { reason: "trigger is disabled", trigger: row.name });
         const again = this.runRows.find((r) => r.idempotency_key === key);

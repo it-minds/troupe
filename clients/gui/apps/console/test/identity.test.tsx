@@ -67,6 +67,37 @@ describe("what looks held twice", () => {
     expect(says("neither the email nor the userName it sent agrees", twice)).toBe(true);
   });
 
+  it("settles a refused adoption, typed by the subject, folding the sign-in's row into SCIM's", async () => {
+    fake.admin.peopleAlike.push({
+      by: "external_id",
+      subject: "4d3c2b1a",
+      row: "u-gus",
+      people: [
+        { id: "u-gus", subject: "9a8b7c6d", external_id: "4d3c2b1a", user_name: "gus@example.com", email: "gus@example.com", display_name: "Gus", origin: "scim" },
+        { id: "u-gus-2", subject: "4d3c2b1a", external_id: null, user_name: null, email: null, display_name: null, origin: "sign-in" },
+      ],
+      likely: "a sign-in under 4d3c2b1a found this row by its SCIM externalId, but neither the email nor the userName its token carried agrees with the row's",
+    });
+    await open();
+    const twice = await waitFor(() => section("People and groups that look held twice"), "the section");
+    await waitFor(() => says("Not merged on externalId 4d3c2b1a", twice), "the refused adoption");
+    // Dan's set shares an email and is nothing to settle here.
+    expect(twice.querySelectorAll("button").length).toBe(1);
+    button("Settle", twice)!.click();
+    await waitFor(() => says("Type 4d3c2b1a to confirm"), "the typed confirmation");
+    expect(says("folded into SCIM's, and removed")).toBe(true);
+    expect(says("Settle only when they are one person.")).toBe(true);
+    const go = [...document.querySelectorAll<HTMLButtonElement>(".preview button")].find((b) => (b.textContent ?? "").startsWith("Settle"))!;
+    expect(go.disabled).toBe(true);
+    type(field("Type 4d3c2b1a to confirm")!, "4d3c2b1a");
+    await waitFor(() => !go.disabled, "the subject typed");
+    go.click();
+    await waitFor(() => says("Recorded in the audit as person.adopt on 4d3c2b1a"), "the audit's note");
+    await waitFor(() => !says("Not merged on externalId 4d3c2b1a", twice), "the pair settled");
+    const adopted = fake.admin.audit.find((a) => a.action === "person.adopt")!;
+    expect(adopted.detail?.["folded"]).toEqual({ id: "u-gus-2", subject: "4d3c2b1a" });
+  });
+
   it("flags a group held twice where it is listed, and says what else the plane says of a set", async () => {
     const likely = "the groups claim names this group by its name and SCIM by its id";
     fake.admin.groups.push({ external_id: "Platform owners", display_name: "Platform owners", looks_duplicated: { others: ["grp-platform"], likely } });

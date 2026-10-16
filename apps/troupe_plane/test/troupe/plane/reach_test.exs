@@ -17,7 +17,6 @@ defmodule Troupe.Plane.ReachTest do
   use Troupe.Plane.PanelCase, async: false
 
   alias Troupe.Plane.{Admin, Bundles, Fleet, Identity}
-  alias Troupe.WorkerProfile.Reach
 
   @moduletag timeout: 60_000
 

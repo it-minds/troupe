@@ -233,9 +233,16 @@ too. Authentik, step by step: [authentik.md §4](authentik.md#4-scim-dry-run-fir
 
 `admin.identity.duplicates` lists people held twice. A set `by: "external_id"` is an
 adoption the plane refused: a sign-in or a push under a value SCIM gave another row as its
-`externalId`, whose email and `userName` both differ from that row's. If they are one
-person, make the email or `userName` agree at the provider; if they are two, the
-provider's `externalId` mapping gives two people one value, and is what to fix.
+`externalId`, whose email and `userName` both differ from that row's, or a push the unique
+`externalId` refused because a sign-in had made a row under the value first. If they are
+one person, make the email or `userName` agree at the provider: the next sign-in under the
+value folds the row it made into SCIM's, and the next push adopts SCIM's row. Where the
+provider cannot say so (a token that carries neither, a person whose email and username
+both changed), `admin.identity.adopt {row, subject}`, the console's **Settle** on the
+Identity screen, typed by the subject, does it now: the sign-in's row is folded into SCIM's,
+which takes the subject, keeping SCIM's id; with no such row, the next push or sign-in
+adopts SCIM's row. If they are two people, the provider's `externalId` mapping gives two
+people one value, and is what to fix.
 
 ## The identity provider
 

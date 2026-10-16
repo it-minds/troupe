@@ -296,26 +296,173 @@ defmodule Troupe.Plane.Identity do
   @doc """
   Whether a sign-in or a push under `subject` may take over the row SCIM gave `external_id`.
 
-  `:none` when somebody is under the subject already or no row carries the `externalId`;
-  then there is nothing to adopt. Otherwise the row is adopted only when its email or its
-  `userName` agrees, ignoring case, with what the sign-in or push carries: an `externalId`
-  is one provisioning attribute, and a wrong mapping of it alone would hand one person's
-  row, with their sessions, shares and administration, to whoever signs in under that
-  value. Nothing carried, nothing agrees.
+  `:none` when no row carries the `externalId`, or when somebody SCIM named is under the
+  subject already; then there is nothing to adopt. With nobody under the subject, the row
+  is adopted only when its email or its `userName` agrees, ignoring case, with what the
+  sign-in or push carries, or an administrator settled the pair (`settle/3`): an
+  `externalId` is one provisioning attribute, and a wrong mapping of it alone would hand
+  one person's row, with their sessions, shares and administration, to whoever signs in
+  under that value. Nothing carried, nothing agrees.
+
+  `{:fold, row, held}` when the one under the subject is a row a sign-in made, no push has
+  named, and what is carried now agrees with SCIM's: a sign-in this answered `:refused`
+  before, for a token that carried neither an email nor a username, say, whose person's
+  next token carries one. The same rule as an adoption, met later. A push answers this too
+  and is not given it (`Troupe.Plane.SCIM`): what a push says agrees with SCIM's row by
+  being SCIM's, and is no evidence about who holds the token under the subject.
   """
   @spec adoption(String.t(), String.t() | nil, map()) ::
-          :none | {:adopt, User.t()} | {:refused, User.t()}
+          :none | {:adopt, User.t()} | {:refused, User.t()} | {:fold, User.t(), User.t()}
   def adoption(subject, external_id, carried) do
-    with nil <- get_user(subject),
-         %User{} = held <- get_user_by_external_id(external_id) do
-      agrees? =
-        same_text?(held.email, carried[:email]) or
-          same_text?(held.user_name, carried[:user_name])
-
-      if agrees?, do: {:adopt, held}, else: {:refused, held}
-    else
-      _known_or_nobody -> :none
+    case get_user(subject) do
+      nil -> adoption_of(subject, get_user_by_external_id(external_id), carried)
+      %User{} = signed -> fold_of(signed, external_id, carried)
     end
+  end
+
+  defp adoption_of(_subject, nil, _carried), do: :none
+
+  defp adoption_of(subject, held, carried) do
+    if agrees?(held, carried) or settled?(subject, held),
+      do: {:adopt, held},
+      else: {:refused, held}
+  end
+
+  defp fold_of(
+         %User{kind: "user", external_id: nil, user_name: nil} = signed,
+         external_id,
+         carried
+       )
+       when is_binary(external_id) do
+    case get_user_by_external_id(external_id) do
+      %User{id: id} = held when id != signed.id ->
+        if agrees?(held, carried), do: {:fold, signed, held}, else: :none
+
+      _nobody_else ->
+        :none
+    end
+  end
+
+  defp fold_of(_signed, _external_id, _carried), do: :none
+
+  defp agrees?(held, carried) do
+    same_text?(held.email, carried[:email]) or same_text?(held.user_name, carried[:user_name])
+  end
+
+  # An administrator said the row SCIM gave this value is the person under it, with nobody
+  # there to fold in: the next push or sign-in under it adopts the row whatever it carries.
+  defp settled?(subject, held) do
+    Repo.exists?(
+      from(e in "audit_events",
+        where:
+          e.action == "person.adopt" and fragment("?->>'subject' = ?", e.detail, ^subject) and
+            fragment("?->>'row' = ?", e.detail, ^held.id)
+      )
+    )
+  end
+
+  @doc """
+  Settle a pair `adoption/3` refused, as a platform administrator: the row SCIM gave
+  `subject` as its `externalId` is that person's.
+
+  Where a sign-in made a row of its own under the subject, it is folded into SCIM's row
+  (`fold/2`), which takes the subject, as the upgrade's merge folded duplicates: SCIM's row
+  is kept because its id is what the provider holds. Where nobody is under the subject (a
+  refused push leaves no second row), nothing moves now; the next push or sign-in under it
+  adopts the row whatever it carries, since this answer is on the audit trail where
+  `adoption/3` reads it. A row under the subject that SCIM named by another `externalId`
+  is somebody else's, and is refused.
+
+  `{:error, :settled}` when the row no longer holds the value under another subject.
+  """
+  @spec settle(Ecto.UUID.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def settle(row_id, subject) when is_binary(row_id) and is_binary(subject) do
+    Repo.transaction(fn ->
+      held = row_id |> get_user_by_id() |> lock_row()
+
+      case {held, lock_user(subject)} do
+        {%User{external_id: ^subject, subject: other} = held, signed} when other != subject ->
+          settle_pair(held, signed)
+
+        _gone_or_settled ->
+          Repo.rollback(:settled)
+      end
+    end)
+  end
+
+  defp lock_row(nil), do: nil
+
+  defp lock_row(%User{id: id}),
+    do: Repo.one(from(u in User, where: u.id == ^id, lock: "FOR UPDATE"))
+
+  defp settle_pair(held, nil) do
+    %{
+      "subject" => held.external_id,
+      "row" => held.id,
+      "row_subject" => held.subject,
+      "folded" => nil,
+      "kms_names_left" => []
+    }
+  end
+
+  defp settle_pair(_held, %User{external_id: other} = signed) when is_binary(other) do
+    Repo.rollback({:named_by_scim, signed})
+  end
+
+  defp settle_pair(held, signed), do: fold_locked(held, signed)
+
+  @doc """
+  Fold the row a sign-in made under a subject into the row SCIM gave that subject as its
+  `externalId`, which takes the subject.
+
+  What `rekey/2` moves when it merges, in the other direction: the row kept is SCIM's,
+  whose id the provider holds, and it moves to the subject the sign-in is under, as an
+  adoption would have moved it. Its references follow it there; the sign-in row's are
+  under that subject already, and its sessions are handed over by id. It keeps the
+  key-manager name of whichever row was known first, under which what the person stored
+  before there were two is; the other name is answered, since nothing is moved at the key
+  manager. A ceiling is the kept row's, else the folded one's. The audit trail and every
+  `*_by` keep the name they were written with.
+  """
+  @spec fold(User.t(), User.t()) :: {:ok, map()} | {:error, term()}
+  def fold(%User{} = held, %User{} = signed) do
+    Repo.transaction(fn ->
+      case {lock_row(held), lock_row(signed)} do
+        {%User{} = held, %User{} = signed} -> fold_locked(held, signed)
+        _gone -> Repo.rollback(:settled)
+      end
+    end)
+  end
+
+  defp fold_locked(held, signed) do
+    subject = signed.subject
+    move_references(held.subject, subject)
+
+    Repo.update_all(
+      from(s in "sessions", where: s.owner_id == ^Ecto.UUID.dump!(signed.id)),
+      set: [owner_id: Ecto.UUID.dump!(held.id)]
+    )
+
+    first = Enum.min_by([held, signed], & &1.inserted_at, DateTime)
+    name = User.kms_name(first)
+    left = [held, signed] |> Enum.map(&User.kms_name/1) |> Enum.reject(&(&1 == name))
+
+    Repo.delete!(signed)
+
+    {:ok, _} =
+      held
+      |> User.changeset(%{subject: subject})
+      |> Ecto.Changeset.put_change(:kms_name, name)
+      |> Ecto.Changeset.put_change(:budget_micros, held.budget_micros || signed.budget_micros)
+      |> Repo.update()
+
+    %{
+      "subject" => subject,
+      "row" => held.id,
+      "row_subject" => held.subject,
+      "folded" => %{"id" => signed.id, "subject" => subject},
+      "kms_names_left" => left
+    }
   end
 
   defp same_text?(a, b) when is_binary(a) and is_binary(b) do
@@ -443,29 +590,39 @@ defmodule Troupe.Plane.Identity do
   end
 
   @doc """
-  The marker of the person removed under `subject` at or after `at`, the first of them, or
-  `nil`: who owns a session whose manifest names `subject` and was last written at `at`.
+  The marker of the removed person who owns what names `subject` and was written at `at`,
+  or `nil` when that is whoever is under the subject now: who owns a session whose manifest
+  names `subject` and was last written at `at`, and who a trigger's revision written then
+  meant by it.
 
-  A removed person's sessions are handed to their tombstone's marker and frozen, so one
-  written no later than the removal was theirs; somebody who arrived under the subject
-  afterwards wrote theirs after it.
+  The first person removed under the subject at or after `at`, when there is one: a removed
+  person's sessions are handed to their tombstone's marker and frozen, so one written no
+  later than the removal was theirs. Written after every removal, it is still the last
+  removed person's unless somebody has arrived under the subject since and wrote it after
+  arriving: a session parked as its owner was removed can have its manifest written after
+  the removal, and nobody else was under the subject to write one. Only a write after
+  somebody new arrived is theirs.
   """
   @spec removed_owner(String.t() | nil, DateTime.t()) :: String.t() | nil
   def removed_owner(nil, _at), do: nil
 
   def removed_owner(subject, %DateTime{} = at) do
-    Repo.one(
-      from(t in Tombstone,
-        where: t.subject == ^subject and t.removed_at >= ^at,
-        order_by: [asc: t.removed_at],
-        limit: 1
-      )
-    )
-    |> case do
-      nil -> nil
+    tombstones =
+      Repo.all(from(t in Tombstone, where: t.subject == ^subject, order_by: [asc: t.removed_at]))
+
+    case Enum.find(tombstones, &(DateTime.compare(&1.removed_at, at) != :lt)) do
+      nil -> last_removed(List.last(tombstones), get_user(subject), at)
       tombstone -> Tombstone.marker(tombstone)
     end
   end
+
+  defp last_removed(nil, _holder, _at), do: nil
+
+  defp last_removed(tombstone, %User{inserted_at: arrived}, at) do
+    if DateTime.compare(at, arrived) == :lt, do: Tombstone.marker(tombstone)
+  end
+
+  defp last_removed(tombstone, _nobody, _at), do: Tombstone.marker(tombstone)
 
   @doc """
   The name at the key manager of whoever a session's `owner_subject` names: a person's,
@@ -608,10 +765,16 @@ defmodule Troupe.Plane.Identity do
   defp within?(rows, sets), do: Enum.any?(sets, &subset?(rows, &1))
 
   # The adoptions `adoption/3` refused that still stand: the row SCIM gave the `externalId`
-  # is still under another subject, so nothing has settled the pair since. Read from the
-  # audit trail, where each refusal is, because a refused push leaves no second row behind
-  # to find; a sign-in leaves its own, under the subject, and it is listed beside the row.
+  # is still under another subject, and no administrator has settled the pair since. Read
+  # from the audit trail, where each refusal is, because a refused push leaves no second row
+  # behind to find; a sign-in leaves its own, under the subject, and it is listed beside the
+  # row, as is the row a push keyed on when the unique `externalId` refused it (`other`).
   defp refused_adoptions do
+    settled =
+      from(e in "audit_events", where: e.action == "person.adopt", select: e.detail)
+      |> Repo.all()
+      |> MapSet.new(&{&1["subject"], &1["row"]})
+
     from(e in "audit_events",
       where: e.action == "person.adopt_refused",
       order_by: [desc: e.occurred_at],
@@ -620,13 +783,15 @@ defmodule Troupe.Plane.Identity do
     )
     |> Repo.all()
     |> Enum.uniq_by(&{&1["subject"], &1["row"]})
+    |> Enum.reject(&MapSet.member?(settled, {&1["subject"], &1["row"]}))
     |> Enum.flat_map(fn detail ->
       subject = detail["subject"]
 
       case get_user_by_id(detail["row"]) do
         %User{external_id: ^subject, subject: other} = row when other != subject ->
-          rows = Enum.reject([row, get_user(subject)], &is_nil/1)
-          [%{rows: rows, via: detail["via"], subject: subject}]
+          beside = get_user_by_id(detail["other"] || "") || get_user(subject)
+          rows = Enum.reject([row, beside], &is_nil/1)
+          [%{rows: rows, row: row, via: detail["via"], subject: subject}]
 
         _settled ->
           []
@@ -635,17 +800,28 @@ defmodule Troupe.Plane.Identity do
     |> Enum.uniq_by(&Enum.map(&1.rows, fn row -> row.id end))
   end
 
-  defp refused_set(%{rows: rows, via: via, subject: subject}) do
+  @settle "or, if they are one person, settle it here (admin.identity.adopt), which keeps SCIM's row"
+
+  defp refused_set(%{rows: rows, row: row, via: via, subject: subject}) do
     likely =
-      case via do
-        "scim" ->
-          "SCIM pushed externalId #{subject}, which this row holds, but neither the email nor the userName it sent agrees with the row's, so the push was refused and nothing merged: if they are one person, make the email or userName agree at the provider; if not, the provider's externalId mapping gives two people one value"
+      case {via, rows} do
+        {"scim", [_scim, _keyed]} ->
+          "SCIM pushed externalId #{subject} onto the row a sign-in made under it, and this other row already holds that externalId, so the push was refused and nothing merged: if they are one person, make the email or userName agree at the provider and the next sign-in folds the two, #{@settle}; if not, the provider's externalId mapping gives two people one value"
+
+        {"scim", _alone} ->
+          "SCIM pushed externalId #{subject}, which this row holds, but neither the email nor the userName it sent agrees with the row's, so the push was refused and nothing merged: if they are one person, make the email or userName agree at the provider, #{@settle}; if not, the provider's externalId mapping gives two people one value"
 
         _sign_in ->
-          "a sign-in under #{subject} found this row by its SCIM externalId, but neither the email nor the userName its token carried agrees with the row's, so it was given a row of its own: if they are one person, make the email or userName agree at the provider; if not, the provider's externalId mapping gives two people one value"
+          "a sign-in under #{subject} found this row by its SCIM externalId, but neither the email nor the userName its token carried agrees with the row's, so it was given a row of its own: if they are one person, make the email or userName agree at the provider and the next sign-in folds the two, #{@settle}; if not, the provider's externalId mapping gives two people one value"
       end
 
-    %{by: "external_id", people: Enum.map(rows, &person_entry/1), likely: likely}
+    %{
+      by: "external_id",
+      subject: subject,
+      row: row.id,
+      people: Enum.map(rows, &person_entry/1),
+      likely: likely
+    }
   end
 
   @doc "The groups half of `lookalikes/0`: groups sharing a display name under different ids."

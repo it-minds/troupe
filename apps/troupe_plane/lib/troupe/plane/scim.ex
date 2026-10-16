@@ -166,9 +166,15 @@ defmodule Troupe.Plane.SCIM do
   # agrees with the push's, as a sign-in's must (`Identity.adoption/3`); otherwise the
   # push is refused, since a second row cannot hold the same `externalId`, and the pair
   # waits for an administrator.
+  #
+  # A row a sign-in made under the subject is not folded into SCIM's on a push's word, as a
+  # later sign-in's may be: that the push agrees with SCIM's row says nothing about who
+  # holds the token under the subject. It is keyed on as it is, and the unique `externalId`
+  # refuses it (`save_user/1`).
   defp subject_for(subject, %{external_id: external_id} = attrs) do
     case Identity.adoption(subject, external_id, attrs) do
       :none -> {:ok, subject}
+      {:fold, _signed, _held} -> {:ok, subject}
       {:adopt, %User{subject: moved}} -> {:ok, moved}
       {:refused, held} -> refuse_adoption(held, subject)
     end
@@ -239,8 +245,52 @@ defmodule Troupe.Plane.SCIM do
       {:ok, _stopped} = Principals.sponsor_left(attrs.subject)
     end
 
-    Identity.upsert_user(attrs)
+    case Identity.upsert_user(attrs) do
+      {:error, %Ecto.Changeset{} = changeset} -> held_elsewhere(changeset, attrs)
+      saved -> saved
+    end
   end
+
+  # The unique `externalId` refused the write: another row holds the value. That is a pair,
+  # most often the row SCIM made, moved under another claim, and the row a refused sign-in
+  # made under the value itself, which this push keyed on. Refused as a conflict that names
+  # both, audited and listed with the refusals `adoption/3` makes, rather than answered as a
+  # changeset's error text.
+  defp held_elsewhere(changeset, %{external_id: external_id, subject: subject}) do
+    with true <- Keyword.has_key?(changeset.errors, :external_id),
+         %User{} = held <- Identity.get_user_by_external_id(external_id) do
+      keyed = Identity.get_user(subject)
+
+      Logger.warning(
+        "troupe plane: SCIM pushed externalId #{external_id} for #{described(keyed, subject)}, " <>
+          "and the row #{held.id} (under #{held.subject}) holds it; refused, and " <>
+          "admin.identity.duplicates lists the pair"
+      )
+
+      {:ok, _} =
+        Audit.record("scim", "person.adopt_refused", external_id, %{
+          "subject" => external_id,
+          "row" => held.id,
+          "row_subject" => held.subject,
+          "other" => keyed && keyed.id,
+          "via" => "scim"
+        })
+
+      {:error,
+       {"uniqueness",
+        "externalId #{external_id} is held by user #{held.id}, and this push would give it " <>
+          "to #{described(keyed, subject)} too, so nothing was merged: if they are one " <>
+          "person, admin.identity.adopt folds the second into the first; if not, fix the " <>
+          "externalId mapping (the pair is in the plane's admin.identity.duplicates)"}}
+    else
+      _other -> {:error, changeset}
+    end
+  end
+
+  defp held_elsewhere(changeset, _attrs), do: {:error, changeset}
+
+  defp described(%User{id: id}, subject), do: "user #{id} (under #{subject})"
+  defp described(nil, subject), do: "a new user under #{subject}"
 
   # -- filters and PATCH ------------------------------------------------------
 

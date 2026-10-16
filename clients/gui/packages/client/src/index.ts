@@ -179,6 +179,7 @@ export type {
   GitHubCheck,
   GitHubDelivery,
   Host,
+  IdentityAdopted,
   IdentityDuplicates,
   IntegrationServer,
   Integrations,
