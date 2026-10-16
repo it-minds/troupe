@@ -77,7 +77,7 @@ defmodule Troupe.Plane.Provision do
 
   @doc """
   What keeps a profile from calling the servers its bundle marks `client_credentials` as
-  itself (Decision 747), one sentence each: such a server with no identity in the
+  itself, with an identity of its own that no other profile shares, one sentence each: such a server with no identity in the
   profile's `mcpIdentities`, and an identity missing its client or key or otherwise broken.
 
   Reported, as the operator's `MCPIdentityMissing` says it, and not refused: the bundle

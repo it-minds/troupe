@@ -24,10 +24,16 @@
 //
 // A team admin is shown the profiles their teams are granted, as `admin.profiles.list`
 // answers them; a profile's spec is a platform admin's to read and change.
+//
+// A profile may extend one other. Its page reads the profile in effect, which is what its
+// pods run, and lists each field with the profile it came from (`admin.profile.get` with
+// `effective`). Its editor loads and sends what the profile wrote itself, so a save keeps
+// following the parent; a field left empty there is the parent's. A change to a parent is
+// previewed in every profile that extends it before it is applied.
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { AdminProfile, AdminTeam, ProfileDetail, ProfileWrite, ProviderTypeChoice } from "@troupe/client";
+import type { AdminProfile, AdminTeam, EffectiveProfile, ProfileBelow, ProfileDetail, ProfileWrite, ProviderTypeChoice } from "@troupe/client";
 import { href } from "../route";
 import { describeError, recorded, show, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, count, linesOf, modeOf, useChange } from "./bits";
@@ -94,7 +100,10 @@ export function Profiles(): JSX.Element {
                         const g = gitopsOf(p);
                         return (
                           <tr key={p.name}>
-                            <td>{platform ? <a href={href({ page: "profiles", path: [p.name] })}>{p.name}</a> : p.name}</td>
+                            <td>
+                              {platform ? <a href={href({ page: "profiles", path: [p.name] })}>{p.name}</a> : p.name}
+                              {typeof p.extends === "string" && <span className="hint"> extends {p.extends}</span>}
+                            </td>
                             <td>
                               <Status kind={s.kind} glyph={s.glyph}>
                                 {s.word}
@@ -150,7 +159,7 @@ export function Profiles(): JSX.Element {
 
 export function Profile({ name }: { name: string }): JSX.Element {
   const { admin, me, notify } = useConsole();
-  const [load, reload] = useLoad(() => Promise.all([admin.profile(name), admin.teams(), admin.provisioningMode().catch(() => null)]), [admin, name]);
+  const [load, reload] = useLoad(() => Promise.all([admin.profile(name, { effective: true }), admin.teams(), admin.provisioningMode().catch(() => null)]), [admin, name]);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [done, setDone] = useState<Done | null>(null);
@@ -217,9 +226,10 @@ export function Profile({ name }: { name: string }): JSX.Element {
                   onCancel={() => setEditing(false)}
                   onConfirm={async (draft) => {
                     const answer = await admin.putProfile(draft);
+                    const below = Object.keys(answer.extended_by ?? {});
                     setEditing(false);
                     setDone({ action: "profile.put", subject: name, detail: answer.changes });
-                    notify(`${name} is changed.`);
+                    notify(below.length ? `${name} is changed, and ${below.join(", ")} with it.` : `${name} is changed.`);
                     reload();
                   }}
                 />
@@ -229,6 +239,9 @@ export function Profile({ name }: { name: string }): JSX.Element {
                   title={`profile/${name}`}
                   lines={[{ field: "profile", from: name, to: null }]}
                   effects={[
+                    ...(detail.extended_by?.length
+                      ? [`${detail.extended_by.join(", ")} ${detail.extended_by.length === 1 ? "extends" : "extend"} ${name}, so the plane refuses this until ${detail.extended_by.length === 1 ? "it extends" : "each extends"} another profile or none.`]
+                      : []),
                     granted.length ? `Every grant goes: ${granted.join(", ")} ${granted.length === 1 ? "loses" : "lose"} ${name}. A team cannot be granted a profile that does not exist.` : "No team is granted it.",
                     `The sessions that ran on ${name} turn read-only rather than being erased: what was done on it stays readable.`,
                     locked ? "The cluster has no resource for it, so this deletes the plane's row and nothing else." : "Its pods go, as the cluster removes them.",
@@ -292,7 +305,12 @@ function at(spec: Record<string, unknown>, path: string): unknown {
 
 function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: string[] }): JSX.Element {
   const p = detail.profile;
-  const spec = detail.spec ?? {};
+  const parent = detail.written?.extends ?? (typeof p.extends === "string" ? p.extends : null);
+  const effective = detail.effective ?? null;
+  // What its pods run: for a profile that extends another, the spec in effect rather than
+  // the part of it the profile wrote itself.
+  const spec = (parent && effective?.profile ? (effective.profile["spec"] as Record<string, unknown> | undefined) : null) ?? detail.spec ?? {};
+  const below = detail.extended_by ?? [];
   const servers = (Array.isArray(spec["mcpServers"]) ? spec["mcpServers"] : []) as Array<Record<string, unknown>>;
   const identities = (Array.isArray(spec["mcpIdentities"]) ? spec["mcpIdentities"] : []) as Array<Record<string, unknown>>;
   const permissions = (at(spec, "github.permissions") ?? {}) as Record<string, unknown>;
@@ -307,6 +325,23 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
       <Region>What runs</Region>
       <Fields
         rows={[
+          ["Extends", parent ? <a href={href({ page: "profiles", path: [parent] })}>{parent}</a> : "nothing: every field is its own"],
+          ...(below.length
+            ? ([
+                [
+                  "Extended by",
+                  <>
+                    {below.map((b, i) => (
+                      <span key={b}>
+                        {i > 0 && ", "}
+                        <a href={href({ page: "profiles", path: [b] })}>{b}</a>
+                      </span>
+                    ))}
+                    <span className="hint"> A change here reaches {below.length === 1 ? "it" : "them"} after a preview.</span>
+                  </>,
+                ],
+              ] as Array<[string, JSX.Element]>)
+            : []),
           ["Image", <span className="mono">{show(p.image)}</span>],
           ["How demanding", <>{show(p["size_class"])}{typeof p["size_class_summary"] === "string" && <span className="hint"> {p["size_class_summary"]}</span>}</>],
           ["Most sessions at once", p["max_sessions"] === null || p["max_sessions"] === undefined ? "no ceiling" : show(p["max_sessions"])],
@@ -316,6 +351,8 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
           ["Teams granted", granted.length ? granted.join(", ") : "none"],
         ]}
       />
+
+      {parent && effective && <WhereFrom name={p.name} effective={effective} />}
 
       <Region>The model</Region>
       <Fields
@@ -509,6 +546,49 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
   );
 }
 
+/**
+ * The profile in effect, field by field, with the profile each came from: a list's hosts
+ * and the MCP servers each have their own row, since they can come from several.
+ */
+function WhereFrom({ name, effective }: { name: string; effective: EffectiveProfile }): JSX.Element {
+  return (
+    <>
+      <Region>Where each field comes from</Region>
+      <p className="note">
+        {effective.chain.length > 1 ? `${effective.chain.join(" → ")}. ` : ""}
+        What {name} sets is its own; the rest is the profile it extends, as it is now. Hosts and MCP servers are added to the parent's, a ceiling only narrows, and the parent's forbids hold. Its model key, its identities at MCP servers and its grants are never inherited.
+      </p>
+      <div className="scroll">
+        <table className="where-from">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>In effect</th>
+              <th>From</th>
+            </tr>
+          </thead>
+          <tbody>
+            {effective.fields.map((f, i) => (
+              <tr key={`${f.path}-${i}`}>
+                <td className="mono">{f.path}</td>
+                <td className="mono">{show(f.value)}</td>
+                <td>{f.from === name ? <span>{f.from}</span> : <a href={href({ page: "profiles", path: [f.from] })}>{f.from}</a>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {effective.problems.length > 0 && (
+        <ul className="effects">
+          {effective.problems.map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
 /** A policy violation in words: the plane's sentence, or the parts of one it sent. */
 function violation(v: unknown): string {
   if (typeof v === "string") return v;
@@ -595,6 +675,8 @@ export function llmWithoutEndpoint(llm: Plain): string | null {
 
 interface Form {
   name: string;
+  /** The profile this one extends, or empty for none. */
+  extends: string;
   image: string;
   sizeClass: string;
   maxSessions: string;
@@ -609,9 +691,10 @@ interface Form {
   gitHosts: string;
   storageClass: string;
   channel: string;
-  orgMount: boolean;
-  repositoryOverridesBundle: boolean;
-  forbidPersonalTools: boolean;
+  /** `null` is the parent's, offered only to a profile that extends one: a switch it does not set. */
+  orgMount: boolean | null;
+  repositoryOverridesBundle: boolean | null;
+  forbidPersonalTools: boolean | null;
 }
 
 const SERVER_FIELDS = ["name", "url", "credentialRef", "header", "timeoutMs"] as const;
@@ -620,12 +703,18 @@ function formOf(detail: ProfileDetail | null): Form {
   const spec = detail?.spec ?? {};
   const text = (v: unknown) => (v === undefined || v === null ? "" : String(v));
   const lines = (v: unknown) => (Array.isArray(v) ? v.join("\n") : text(v));
+  // What the profile wrote itself, which for one that extends another is not what is in
+  // effect: loaded from there, a save sends back only what it sets, and keeps following.
+  const written = detail?.written ?? null;
+  const parent = typeof written?.extends === "string" ? written.extends : "";
+  const own = (key: string, value: boolean): boolean | null => (parent && !(key in spec) ? null : value);
   return {
     name: detail?.profile.name ?? "",
-    image: text(detail?.profile.image),
-    sizeClass: text(detail?.profile["size_class"] ?? "standard"),
-    maxSessions: text(detail?.profile["max_sessions"]),
-    warmWorkers: text(detail?.profile["warm_workers"] ?? (detail ? 0 : 1)),
+    extends: parent,
+    image: text(written ? written.image : detail?.profile.image),
+    sizeClass: text(written ? written.size_class : (detail?.profile["size_class"] ?? "standard")) || (parent ? "" : "standard"),
+    maxSessions: text(written ? written.max_sessions : detail?.profile["max_sessions"]),
+    warmWorkers: text((written ? written.warm_workers : detail?.profile["warm_workers"]) ?? (detail ? 0 : 1)),
     endpoint: text(at(spec, "llm.endpoint")),
     provider: text(at(spec, "llm.provider")),
     model: text(at(spec, "llm.model")),
@@ -636,9 +725,9 @@ function formOf(detail: ProfileDetail | null): Form {
     gitHosts: lines(at(spec, "egress.gitHosts")),
     storageClass: text(at(spec, "storage.storageClassName")),
     channel: text(spec["configBundleChannel"]),
-    orgMount: spec["orgMount"] === true,
-    repositoryOverridesBundle: spec["repositoryOverridesBundle"] === true,
-    forbidPersonalTools: spec["personalTools"] === "forbid",
+    orgMount: own("orgMount", spec["orgMount"] === true),
+    repositoryOverridesBundle: own("repositoryOverridesBundle", spec["repositoryOverridesBundle"] === true),
+    forbidPersonalTools: own("personalTools", spec["personalTools"] === "forbid"),
   };
 }
 
@@ -663,14 +752,18 @@ export function draftOf(form: Form, servers: Plain[], kept: Plain): ProfileWrite
       .filter((s) => typeof s["url"] === "string" && s["url"] !== ""),
     configBundleChannel: form.channel.trim(),
     // Written whichever way they are: false is a value here, and an absent one could never be turned off from this form.
-    orgMount: form.orgMount,
-    repositoryOverridesBundle: form.repositoryOverridesBundle,
-    personalTools: form.forbidPersonalTools ? "forbid" : "allow",
+    // Left out only where a profile that extends another has them from its parent.
+    orgMount: form.orgMount ?? undefined,
+    repositoryOverridesBundle: form.repositoryOverridesBundle ?? undefined,
+    personalTools: form.forbidPersonalTools === null ? undefined : form.forbidPersonalTools ? "forbid" : "allow",
   });
   return {
     name: form.name.trim(),
+    // Always sent: a write without it extends nothing.
+    extends: form.extends.trim() || null,
     image: form.image.trim(),
-    size_class: form.sizeClass,
+    // Null where it is the parent's, so a class this profile set before is taken away.
+    size_class: form.sizeClass || null,
     // Sent when blank too, as null: a ceiling taken away is a change.
     max_sessions: whole(form.maxSessions),
     warm_workers: whole(form.warmWorkers) ?? 0,
@@ -729,10 +822,16 @@ export function ProfileEditor({
   const choices = choicesLoad.state === "ready" ? choicesLoad.data : null;
   const sizes = choices?.size_classes ?? FALLBACK_SIZES;
   const providerType = choices?.provider_types.find((t) => t.name === form.provider.trim()) ?? null;
+  // The profiles it may extend: every other one. A plane that cannot list them leaves a name to type.
+  const [othersLoad] = useLoad(() => admin.profiles().catch(() => null), [admin]);
+  const others = othersLoad.state === "ready" && othersLoad.data ? othersLoad.data.map((p) => p.name).filter((n) => n !== form.name.trim()) : null;
+  const parent = form.extends.trim();
+  const theirs = parent ? `empty: ${parent}'s` : null;
 
   const draft = draftOf(form, servers, kept);
   const llm = (draft.spec?.["llm"] ?? {}) as Plain;
-  const llmProblem = llmWithoutEndpoint(llm);
+  // A profile that extends another may have its endpoint from it; the plane judges the profile in effect.
+  const llmProblem = parent ? null : llmWithoutEndpoint(llm);
   const nameProblem = creating
     ? form.name.trim() === ""
       ? null
@@ -742,7 +841,7 @@ export function ProfileEditor({
           ? null
           : "Lowercase letters, digits and dashes, starting and ending with a letter or digit: it is the name of a resource in the cluster."
     : null;
-  const blocked = Boolean(llmProblem || nameProblem) || draft.name === "" || draft.image === "";
+  const blocked = Boolean(llmProblem || nameProblem) || draft.name === "" || (draft.image === "" && !parent);
   const set = (patch: Partial<Form>) => {
     setForm({ ...form, ...patch });
     setError(null);
@@ -773,7 +872,10 @@ export function ProfileEditor({
           (answer) => {
             setAsking(false);
             const lines = linesOf(answer.changes);
-            setPreview({ lines, effects: effectsOf(answer.policy, answer.mode, draft, detail, lines) });
+            const below = answer.extended_by ?? [];
+            // Each profile that extends this one, as the write would leave it, under its own name.
+            const theirLines = below.flatMap((b) => linesOf(b.changes).map((l) => ({ ...l, field: `${b.name}: ${l.field}` })));
+            setPreview({ lines: [...lines, ...theirLines], effects: [...effectsOf(answer.policy, answer.mode, draft, detail, lines), ...belowEffects(draft.name, below)] });
           },
           (e: unknown) => {
             setAsking(false);
@@ -786,16 +888,41 @@ export function ProfileEditor({
       <Field label="Name" hint={creating ? "The profile's name, and the name of its resource in the cluster." : "A different name is a different profile, not a rename."} error={nameProblem}>
         {(p) => <input {...p} value={form.name} onChange={(e) => set({ name: e.target.value })} readOnly={!creating} autoComplete="off" spellCheck={false} />}
       </Field>
-      <Field label="Image" hint="repository:tag, or repository@sha256:… A digest pins it; a tag does not. Or release, for the worker image of the release this plane runs.">
-        {(p) => <input {...p} value={form.image} onChange={(e) => set({ image: e.target.value })} autoComplete="off" spellCheck={false} />}
+      <Field
+        label="Extends"
+        hint={
+          parent
+            ? `What ${form.name.trim() || "this profile"} leaves empty is ${parent}'s, and follows it: hosts and MCP servers are added to ${parent}'s, a ceiling only narrows, and ${parent}'s forbids hold. Its model key, identities and grants stay its own. A change to ${parent} reaches it after a preview.`
+            : "Nothing: every field is this profile's own. Or one profile whose fields it has where it sets none, so a standard can be kept in one place."
+        }
+      >
+        {(p) =>
+          others ? (
+            <select {...p} value={parent} onChange={(e) => set(extendsChange(e.target.value, form, creating))}>
+              <option value="">nothing</option>
+              {parent !== "" && !others.includes(parent) && <option value={parent}>{parent}</option>}
+              {others.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input {...p} value={form.extends} onChange={(e) => set({ extends: e.target.value })} autoComplete="off" spellCheck={false} />
+          )
+        }
+      </Field>
+      <Field label="Image" hint={`repository:tag, or repository@sha256:… A digest pins it; a tag does not. Or release, for the worker image of the release this plane runs.${parent ? ` Empty is ${parent}'s.` : ""}`}>
+        {(p) => <input {...p} value={form.image} placeholder={theirs ?? undefined} onChange={(e) => set({ image: e.target.value })} autoComplete="off" spellCheck={false} />}
       </Field>
       <Field
         label="How demanding"
-        hint={`${sizes.find((s) => s.name === form.sizeClass)?.summary ?? "How many sessions share a worker."} A question about resources, not safety.`}
+        hint={`${sizes.find((s) => s.name === form.sizeClass)?.summary ?? (parent ? `${parent}'s size class.` : "How many sessions share a worker.")} A question about resources, not safety.`}
       >
         {(p) => (
           <select {...p} value={form.sizeClass} onChange={(e) => set({ sizeClass: e.target.value })}>
-            {!sizes.some((s) => s.name === form.sizeClass) && <option value={form.sizeClass}>{form.sizeClass}</option>}
+            {parent && <option value="">{parent}'s</option>}
+            {form.sizeClass !== "" && !sizes.some((s) => s.name === form.sizeClass) && <option value={form.sizeClass}>{form.sizeClass}</option>}
             {sizes.map((s) => (
               <option key={s.name} value={s.name}>
                 {s.name} · {count(s.sessions_per_worker, "session")} a worker
@@ -804,8 +931,11 @@ export function ProfileEditor({
           </select>
         )}
       </Field>
-      <Field label="Most sessions at once" hint="How far it may grow, in sessions. Empty is no ceiling, bounded by the team's budget.">
-        {(p) => <input {...p} value={form.maxSessions} onChange={(e) => set({ maxSessions: e.target.value })} inputMode="numeric" />}
+      <Field
+        label="Most sessions at once"
+        hint={parent ? `How far it may grow, in sessions. Empty is ${parent}'s ceiling; a number above ${parent}'s has ${parent}'s in effect, since a ceiling only narrows.` : "How far it may grow, in sessions. Empty is no ceiling, bounded by the team's budget."}
+      >
+        {(p) => <input {...p} value={form.maxSessions} placeholder={theirs ?? undefined} onChange={(e) => set({ maxSessions: e.target.value })} inputMode="numeric" />}
       </Field>
       <Field label="Workers kept warm" hint="How many stay up when nothing runs. 0 costs the next session a cold start of about half a minute.">
         {(p) => <input {...p} value={form.warmWorkers} onChange={(e) => set({ warmWorkers: e.target.value })} inputMode="numeric" />}
@@ -813,7 +943,7 @@ export function ProfileEditor({
 
       <Region>The model</Region>
       <Field label="Endpoint" hint="The base URL a session's model calls go to, usually a gateway. Egress must allow its host." error={llmProblem}>
-        {(p) => <input {...p} value={form.endpoint} onChange={(e) => set({ endpoint: e.target.value })} autoComplete="off" spellCheck={false} />}
+        {(p) => <input {...p} value={form.endpoint} placeholder={theirs ?? undefined} onChange={(e) => set({ endpoint: e.target.value })} autoComplete="off" spellCheck={false} />}
       </Field>
       <Field label="Provider" hint={providerHint(choices !== null, providerType)}>
         {(p) =>
@@ -833,12 +963,15 @@ export function ProfileEditor({
         }
       </Field>
       <Field label="Model" hint="What a session uses for its work.">
-        {(p) => <input {...p} value={form.model} onChange={(e) => set({ model: e.target.value })} autoComplete="off" spellCheck={false} />}
+        {(p) => <input {...p} value={form.model} placeholder={theirs ?? undefined} onChange={(e) => set({ model: e.target.value })} autoComplete="off" spellCheck={false} />}
       </Field>
       <Field label="Small model" hint="Used only to summarise a long conversation.">
         {(p) => <input {...p} value={form.smallModel} onChange={(e) => set({ smallModel: e.target.value })} autoComplete="off" spellCheck={false} />}
       </Field>
-      <Field label="Credential: secret name" hint="A Secret in the worker's namespace, read by the pod at call time. Nothing here holds its value.">
+      <Field
+        label="Credential: secret name"
+        hint={`A Secret in the worker's namespace, read by the pod at call time. Nothing here holds its value.${parent ? ` Never ${parent}'s: a key is each profile's own.` : ""}`}
+      >
         {(p) => <input {...p} value={form.secretName} onChange={(e) => set({ secretName: e.target.value })} autoComplete="off" spellCheck={false} />}
       </Field>
       <Field label="Credential: key" hint="The key inside that Secret. Empty means api-key.">
@@ -846,10 +979,10 @@ export function ProfileEditor({
       </Field>
 
       <Region>What the pods may reach</Region>
-      <Field label="Allowed hosts" hint="One per line: the model's endpoint, and anything a skill calls. The cluster's network policy enforces it.">
+      <Field label="Allowed hosts" hint={`One per line: the model's endpoint, and anything a skill calls. The cluster's network policy enforces it.${parent ? ` Added to ${parent}'s.` : ""}`}>
         {(p) => <textarea {...p} value={form.fqdns} onChange={(e) => set({ fqdns: e.target.value })} rows={3} spellCheck={false} />}
       </Field>
-      <Field label="Git hosts" hint="One per line: where a session may clone from and push to.">
+      <Field label="Git hosts" hint={`One per line: where a session may clone from and push to.${parent ? ` Added to ${parent}'s.` : ""}`}>
         {(p) => <textarea {...p} value={form.gitHosts} onChange={(e) => set({ gitHosts: e.target.value })} rows={3} spellCheck={false} />}
       </Field>
       <Field label="Storage class" hint="Where a worker's disk comes from: one the cluster policy allows. Empty is the cluster's default. Fixed once pods exist.">
@@ -922,28 +1055,37 @@ export function ProfileEditor({
       </div>
 
       <Region>Configuration</Region>
-      <Field label="Bundle channel" hint="Which channel's agents, skills and servers its pods follow. Empty is stable.">
-        {(p) => <input {...p} value={form.channel} onChange={(e) => set({ channel: e.target.value })} autoComplete="off" spellCheck={false} />}
+      <Field label="Bundle channel" hint={parent ? `Which channel's agents, skills and servers its pods follow. Empty is ${parent}'s.` : "Which channel's agents, skills and servers its pods follow. Empty is stable."}>
+        {(p) => <input {...p} value={form.channel} placeholder={theirs ?? undefined} onChange={(e) => set({ channel: e.target.value })} autoComplete="off" spellCheck={false} />}
       </Field>
       <Field label="Org volume" hint="Read-only, always: the volume the cluster policy names, for what every team may read.">
         {(p) => (
-          <select {...p} value={String(form.orgMount)} onChange={(e) => set({ orgMount: e.target.value === "true" })}>
+          <select {...p} value={tri(form.orgMount)} onChange={(e) => set({ orgMount: untri(e.target.value) })}>
+            {parent && <option value="">{parent}'s</option>}
             <option value="false">not mounted</option>
             <option value="true">mounted</option>
           </select>
         )}
       </Field>
-      <Field label="A repository's agents and skills" hint="Whether a working copy's .troupe/agents and .troupe/skills replace the bundle's of the same name.">
+      <Field
+        label="A repository's agents and skills"
+        hint={`Whether a working copy's .troupe/agents and .troupe/skills replace the bundle's of the same name.${parent ? ` If ${parent}'s lose, so do this one's, whatever it says.` : ""}`}
+      >
         {(p) => (
-          <select {...p} value={String(form.repositoryOverridesBundle)} onChange={(e) => set({ repositoryOverridesBundle: e.target.value === "true" })}>
+          <select {...p} value={tri(form.repositoryOverridesBundle)} onChange={(e) => set({ repositoryOverridesBundle: untri(e.target.value) })}>
+            {parent && <option value="">{parent}'s</option>}
             <option value="false">lose to the bundle's</option>
             <option value="true">replace the bundle's</option>
           </select>
         )}
       </Field>
-      <Field label="People's own signed-in tools" hint="Whether a person may offer a session here the MCP servers they signed in to on their own machine.">
+      <Field
+        label="People's own signed-in tools"
+        hint={`Whether a person may offer a session here the MCP servers they signed in to on their own machine.${parent ? ` If ${parent} keeps them off, so does this one, whatever it says.` : ""}`}
+      >
         {(p) => (
-          <select {...p} value={String(form.forbidPersonalTools)} onChange={(e) => set({ forbidPersonalTools: e.target.value === "true" })}>
+          <select {...p} value={tri(form.forbidPersonalTools)} onChange={(e) => set({ forbidPersonalTools: untri(e.target.value) })}>
+            {parent && <option value="">{parent}'s</option>}
             <option value="false">allowed</option>
             <option value="true">kept off these pods</option>
           </select>
@@ -991,6 +1133,33 @@ const SERVER_HINTS: Record<(typeof SERVER_FIELDS)[number], string> = {
   header: "Where the token goes. Empty is authorization.",
   timeoutMs: "Empty is 30000.",
 };
+
+/**
+ * The form once it extends `parent`, or nothing. A new profile that comes to extend one
+ * leaves its class and switches to it, since it has set none yet; one that stops extending
+ * has to say each of them itself, and starts from what it had.
+ */
+function extendsChange(parent: string, form: Form, creating: boolean): Partial<Form> {
+  if (parent === "") {
+    return { extends: "", sizeClass: form.sizeClass || "standard", orgMount: form.orgMount ?? false, repositoryOverridesBundle: form.repositoryOverridesBundle ?? false, forbidPersonalTools: form.forbidPersonalTools ?? false };
+  }
+  return creating && form.extends === "" ? { extends: parent, sizeClass: "", orgMount: null, repositoryOverridesBundle: null, forbidPersonalTools: null } : { extends: parent };
+}
+
+/** A switch as a select's value: empty is the parent's. */
+const tri = (v: boolean | null): string => (v === null ? "" : String(v));
+const untri = (v: string): boolean | null => (v === "" ? null : v === "true");
+
+/** What a write does to each profile that extends the one written, in words. */
+function belowEffects(name: string, below: ProfileBelow[]): string[] {
+  return below.map((b) => {
+    if (b.problem) return `The plane will refuse this: ${b.name} extends ${name}, and with this change it would not be saved: ${b.problem}.`;
+    const moved = Object.keys(b.changes ?? {});
+    return moved.length
+      ? `${b.name} extends ${name}: applying writes it again with ${moved.join(", ")} as above, and its pods roll as for any change to it.`
+      : `${b.name} extends ${name}, and nothing it has in effect changes.`;
+  });
+}
 
 function effectsOf(policy: { "allowed?": boolean; violations: unknown[] }, mode: string, draft: ProfileWrite, detail: ProfileDetail | null, lines: DiffLine[]): string[] {
   const out: string[] = [];

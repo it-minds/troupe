@@ -109,27 +109,33 @@ defmodule Troupe.Plane.Fleet.Extends do
         {:error, sentence(reason)}
 
       {:ok, above} ->
-        names = Enum.map(above, &elem(&1, 0))
-        below = height(name)
-        length = length(names) + 1 + below
+        fits(name, parent, Enum.map(above, &elem(&1, 0)))
+    end
+  end
 
-        cond do
-          name in names ->
-            {:error,
-             "#{name} cannot extend #{parent}, because #{parent} already extends #{name} " <>
-               "(#{Enum.join(names, " → ")}): a profile cannot be its own ancestor"}
+  # `names` is the chain from the top down to the parent: `name` must not be in it, and the
+  # chain with `name` and every generation below it must not be longer than allowed.
+  defp fits(name, parent, names) do
+    below = height(name)
+    length = length(names) + 1 + below
 
-          length > @max_depth ->
-            under = if below > 0, do: " with the #{below} below it", else: ""
+    cond do
+      name in names ->
+        {:error,
+         "#{name} cannot extend #{parent}, because #{parent} already extends #{name} " <>
+           "(#{Enum.join(names, " → ")}): a profile cannot be its own ancestor"}
 
-            {:error,
-             "#{name}#{under} extending #{parent} would make a chain of #{length} profiles " <>
-               "(#{Enum.join(names ++ [name], " → ")}#{if below > 0, do: " → …", else: ""}), and a " <>
-               "chain is at most #{@max_depth}: extend a profile nearer the one that extends nothing"}
+      length > @max_depth ->
+        under = if below > 0, do: " with the #{below} below it", else: ""
+        more = if below > 0, do: " → …", else: ""
 
-          true ->
-            :ok
-        end
+        {:error,
+         "#{name}#{under} extending #{parent} would make a chain of #{length} profiles " <>
+           "(#{Enum.join(names ++ [name], " → ")}#{more}), and a chain is at most " <>
+           "#{@max_depth}: extend a profile nearer the one that extends nothing"}
+
+      true ->
+        :ok
     end
   end
 
@@ -152,9 +158,14 @@ defmodule Troupe.Plane.Fleet.Extends do
 
       true ->
         case node(name, overrides) do
-          nil -> {:error, {:missing, name}}
-          %{extends: nil, written: written} -> {:ok, [{name, written} | below]}
-          %{extends: parent, written: written} -> walk(parent, overrides, [{name, written} | below])
+          nil ->
+            {:error, {:missing, name}}
+
+          %{extends: nil, written: written} ->
+            {:ok, [{name, written} | below]}
+
+          %{extends: parent, written: written} ->
+            walk(parent, overrides, [{name, written} | below])
         end
     end
   end
@@ -184,7 +195,7 @@ defmodule Troupe.Plane.Fleet.Extends do
   @doc "The profiles that name `name` as the one they extend."
   @spec children(String.t()) :: [String.t()]
   def children(name) do
-    Repo.all(from p in Profile, where: p.extends == ^name, select: p.name, order_by: p.name)
+    Repo.all(from(p in Profile, where: p.extends == ^name, select: p.name, order_by: p.name))
   end
 
   @doc """
@@ -219,7 +230,11 @@ defmodule Troupe.Plane.Fleet.Extends do
   def resolve(name, overrides \\ %{}) do
     case chain(name, overrides) do
       {:ok, chain} ->
-        resolved = Enum.reduce(chain, empty(), fn {profile, written}, parent -> merge(parent, written, profile) end)
+        resolved =
+          Enum.reduce(chain, empty(), fn {profile, written}, parent ->
+            merge(parent, written, profile)
+          end)
+
         {:ok, Map.put(resolved, :chain, Enum.map(chain, &elem(&1, 0)))}
 
       {:error, reason} ->
@@ -264,7 +279,8 @@ defmodule Troupe.Plane.Fleet.Extends do
     |> Enum.sort_by(&elem(&1, 0))
     |> Enum.flat_map(fn
       {path, %{} = items} ->
-        for value <- ordered(attrs, path, items), do: %{path: path, value: value, from: items[value]}
+        for value <- ordered(attrs, path, items),
+            do: %{path: path, value: value, from: items[value]}
 
       {path, source} ->
         [%{path: path, value: get_in(attrs, String.split(path, ".")), from: source}]
@@ -307,7 +323,15 @@ defmodule Troupe.Plane.Fleet.Extends do
         path = "spec." <> key
 
         {value, from, found} =
-          spec_field(Map.get(@spec_rules, key, :replaced), path, parent_spec[key], own_spec[key], parent.from, from, name)
+          spec_field(
+            Map.get(@spec_rules, key, :replaced),
+            path,
+            parent_spec[key],
+            own_spec[key],
+            parent.from,
+            from,
+            name
+          )
 
         {put_set(spec, key, value), from, problems ++ found}
       end)
@@ -326,9 +350,14 @@ defmodule Troupe.Plane.Fleet.Extends do
     parent = parent || %{}
     own = own || %{}
 
-    Enum.reduce(Enum.uniq(Map.keys(parent) ++ Map.keys(own)), {%{}, from, []}, fn key, {value, from, problems} ->
+    Enum.reduce(Enum.uniq(Map.keys(parent) ++ Map.keys(own)), {%{}, from, []}, fn key,
+                                                                                  {value, from,
+                                                                                   problems} ->
       sub = path <> "." <> key
-      {got, source} = field(Map.get(rules, key, :replaced), parent[key], parent_from[sub], own[key], name)
+
+      {got, source} =
+        field(Map.get(rules, key, :replaced), parent[key], parent_from[sub], own[key], name)
+
       {put_set(value, key, got), put_set(from, sub, source), problems}
     end)
     |> then(fn {value, from, problems} -> {blank_to_nil(value), from, problems} end)
@@ -338,7 +367,9 @@ defmodule Troupe.Plane.Fleet.Extends do
     do: spec_field(:replaced, path, parent, own, parent_from, from, name)
 
   defp spec_field(:servers, path, parent, own, parent_from, from, name) do
-    {servers, sources, problems} = servers(list(parent), parent_from[path] || %{}, list(own), name)
+    {servers, sources, problems} =
+      servers(list(parent), parent_from[path] || %{}, list(own), name)
+
     {blank_to_nil(servers), put_set(from, path, blank_to_nil(sources)), problems}
   end
 
@@ -386,38 +417,42 @@ defmodule Troupe.Plane.Fleet.Extends do
   # The parent's servers, then the child's: one with a parent's name takes its place only
   # when it says `override: true`, which the resource has no field for and does not get.
   defp servers(parent, parent_sources, own, name) do
-    known = MapSet.new(parent, & &1["name"])
+    names = Enum.map(parent, & &1["name"])
+    start = {Enum.map(parent, &strip/1), Map.take(parent_sources, names), []}
 
-    {kept, sources, problems} =
-      Enum.reduce(own, {Enum.map(parent, &strip/1), Map.take(parent_sources, Enum.map(parent, & &1["name"])), []}, fn
-        %{"name" => server} = entry, {kept, sources, problems} ->
-          cond do
-            not MapSet.member?(known, server) ->
-              {kept ++ [strip(entry)], Map.put(sources, server, name), problems}
-
-            entry["override"] == true ->
-              {Enum.map(kept, &if(&1["name"] == server, do: strip(entry), else: &1)),
-               Map.put(sources, server, name), problems}
-
-            strip(entry) == Enum.find(kept, &(&1["name"] == server)) ->
-              {kept, sources, problems}
-
-            true ->
-              {kept, sources,
-               problems ++
-                 [
-                   "#{name}'s MCP server #{server} has the name of one #{parent_sources[server]} " <>
-                     "gives it, and #{parent_sources[server]}'s is kept: say override: true on " <>
-                     "#{name}'s to replace it"
-                 ]}
-          end
-
-        _unnamed, acc ->
-          acc
-      end)
-
-    {kept, sources, problems}
+    Enum.reduce(own, start, &add_server(&1, &2, MapSet.new(names), parent_sources, name))
   end
+
+  defp add_server(
+         %{"name" => server} = entry,
+         {kept, sources, problems},
+         known,
+         parent_sources,
+         name
+       ) do
+    cond do
+      not MapSet.member?(known, server) ->
+        {kept ++ [strip(entry)], Map.put(sources, server, name), problems}
+
+      entry["override"] == true ->
+        {Enum.map(kept, &if(&1["name"] == server, do: strip(entry), else: &1)),
+         Map.put(sources, server, name), problems}
+
+      strip(entry) == Enum.find(kept, &(&1["name"] == server)) ->
+        {kept, sources, problems}
+
+      true ->
+        theirs = parent_sources[server]
+
+        clash =
+          "#{name}'s MCP server #{server} has the name of one #{theirs} gives it, and " <>
+            "#{theirs}'s is kept: say override: true on #{name}'s to replace it"
+
+        {kept, sources, problems ++ [clash]}
+    end
+  end
+
+  defp add_server(_unnamed, acc, _known, _parent_sources, _name), do: acc
 
   defp strip(entry), do: Map.delete(entry, "override")
 

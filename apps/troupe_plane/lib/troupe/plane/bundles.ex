@@ -507,7 +507,9 @@ defmodule Troupe.Plane.Bundles do
   end
 
   defp own_channel?(%{extends: nil}), do: true
-  defp own_channel?(%{own: own}), do: get_in(own || %{}, ["spec", "configBundleChannel"]) not in [nil, ""]
+
+  defp own_channel?(%{own: own}),
+    do: get_in(own || %{}, ["spec", "configBundleChannel"]) not in [nil, ""]
 
   defp project_profile(%{extends: nil} = profile, servers, actor) do
     spec = Map.put(profile.spec || %{}, "mcpServers", servers)
@@ -517,7 +519,14 @@ defmodule Troupe.Plane.Bundles do
   # The servers of its own channel are its own: written into what it wrote, and resolved
   # over its parent's again.
   defp project_profile(profile, servers, actor) do
-    own = Map.update(profile.own || %{}, "spec", %{"mcpServers" => servers}, &Map.put(&1, "mcpServers", servers))
+    own =
+      Map.update(
+        profile.own || %{},
+        "spec",
+        %{"mcpServers" => servers},
+        &Map.put(&1, "mcpServers", servers)
+      )
+
     {:ok, _} = Fleet.put_profile(%{name: profile.name, own: own})
     projected(profile.name, Extends.rewrite(profile.name), actor)
   end

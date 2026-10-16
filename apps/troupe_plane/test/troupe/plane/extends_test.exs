@@ -79,7 +79,9 @@ defmodule Troupe.Plane.ExtendsTest do
   describe "the effective profile" do
     test "is the merge #655's table gives, and is what the cluster gets", context do
       FakeWorkerProfiles.start(%{"standard" => %{}, "data-team" => %{}})
-      _ = team_with_grant("analysts", "standard", name: "analysts", volume_storage_class: "shared")
+
+      _ =
+        team_with_grant("analysts", "standard", name: "analysts", volume_storage_class: "shared")
 
       assert {:ok, _} = Admin.profile_put(context.actor, standard())
       assert_receive {FakeWorkerProfiles, :applied, "standard", _standard, _query}
@@ -119,7 +121,8 @@ defmodule Troupe.Plane.ExtendsTest do
       assert row.own["max_sessions"] == 50
     end
 
-    test "a child's server with a parent's name replaces it only when it says override", context do
+    test "a child's server with a parent's name replaces it only when it says override",
+         context do
       assert {:ok, _} = Admin.profile_put(context.actor, standard())
 
       clash = [%{"name" => "wiki", "url" => "https://other-wiki.example.test/mcp"}]
@@ -128,8 +131,14 @@ defmodule Troupe.Plane.ExtendsTest do
         Admin.profile_put(context.actor, put_in(data_team(), ["spec", "mcpServers"], clash))
 
       assert {:ok, %{effective: effective}} = Admin.profile_get(context.actor, "data-team", true)
-      assert [%{"url" => "https://wiki.example.test/mcp"} | _] = effective.profile["spec"]["mcpServers"]
-      assert Enum.any?(effective.problems, &(&1 =~ "say override: true on data-team's to replace it"))
+
+      assert [%{"url" => "https://wiki.example.test/mcp"} | _] =
+               effective.profile["spec"]["mcpServers"]
+
+      assert Enum.any?(
+               effective.problems,
+               &(&1 =~ "say override: true on data-team's to replace it")
+             )
 
       overriding = [Map.put(hd(clash), "override", true)]
 
@@ -138,7 +147,9 @@ defmodule Troupe.Plane.ExtendsTest do
 
       servers = Fleet.get_profile("data-team").spec["mcpServers"]
       # The resource has no field for the flag, and does not get it.
-      assert [%{"name" => "wiki", "url" => "https://other-wiki.example.test/mcp"} = wiki] = servers
+      assert [%{"name" => "wiki", "url" => "https://other-wiki.example.test/mcp"} = wiki] =
+               servers
+
       refute Map.has_key?(wiki, "override")
     end
 
@@ -167,13 +178,17 @@ defmodule Troupe.Plane.ExtendsTest do
       assert from[{"spec.personalTools", "forbid"}] == "standard"
 
       # And the parent's key, which is not the child's, is said rather than left silent.
-      assert Enum.any?(got.effective.problems, &(&1 =~ "set llm.secretRef to a Secret of data-team's"))
+      assert Enum.any?(
+               got.effective.problems,
+               &(&1 =~ "set llm.secretRef to a Secret of data-team's")
+             )
 
       # The parent knows who extends it.
       assert {:ok, %{extended_by: ["data-team"]}} = Admin.profile_get(context.actor, "standard")
     end
 
-    test "a server the child has from its parent that it has no identity for is reported", context do
+    test "a server the child has from its parent that it has no identity for is reported",
+         context do
       parent = put_in(standard(), ["spec", "configBundleChannel"], "standard-channel")
       {:ok, _} = Admin.profile_put(context.actor, parent)
 
@@ -211,7 +226,11 @@ defmodule Troupe.Plane.ExtendsTest do
       assert missing.data.reason =~ "nowhere, which is not a profile on this plane"
 
       assert {:error, itself} =
-               Admin.profile_put(context.actor, %{"name" => "standard", "image" => @image, "extends" => "standard"})
+               Admin.profile_put(context.actor, %{
+                 "name" => "standard",
+                 "image" => @image,
+                 "extends" => "standard"
+               })
 
       assert itself.data.reason =~ "cannot extend itself"
 
@@ -267,7 +286,10 @@ defmodule Troupe.Plane.ExtendsTest do
         |> Map.put("max_sessions", 10)
 
       assert {:ok, preview} = Admin.preview(context.actor, changed)
-      assert [%{name: "data-team", changes: changes, policy: %{allowed?: true}}] = preview.extended_by
+
+      assert [%{name: "data-team", changes: changes, policy: %{allowed?: true}}] =
+               preview.extended_by
+
       assert changes["max_sessions"] == %{"from" => 20, "to" => 10}
 
       assert changes["spec.egress.fqdns"]["to"] ==
@@ -292,7 +314,10 @@ defmodule Troupe.Plane.ExtendsTest do
 
       puts = Enum.filter(Audit.list(limit: 100), &(&1.action == "profile.put"))
       assert Enum.count(puts, &(&1.subject_id == "data-team")) == 1
-      naming = Enum.filter(puts, &(&1.subject_id == "standard" and is_map(&1.detail["extended_by"])))
+
+      naming =
+        Enum.filter(puts, &(&1.subject_id == "standard" and is_map(&1.detail["extended_by"])))
+
       assert [%{detail: %{"extended_by" => %{"data-team" => %{"max_sessions" => _}}}}] = naming
     end
 
@@ -319,16 +344,31 @@ defmodule Troupe.Plane.ExtendsTest do
       assert Enum.any?(error.data.policy_violations, &(&1 =~ "files.example.com"))
     end
 
-    test "a bundle published to the parent's channel reaches the child that follows it", context do
+    test "a bundle published to the parent's channel reaches the child that follows it",
+         context do
       FakeWorkerProfiles.start(%{"standard" => %{}, "data-team" => %{}})
-      {:ok, _} = Admin.profile_put(context.actor, Map.update!(standard(), "spec", &Map.delete(&1, "mcpServers")))
-      {:ok, _} = Admin.profile_put(context.actor, Map.update!(data_team(), "spec", &Map.delete(&1, "mcpServers")))
+
+      {:ok, _} =
+        Admin.profile_put(
+          context.actor,
+          Map.update!(standard(), "spec", &Map.delete(&1, "mcpServers"))
+        )
+
+      {:ok, _} =
+        Admin.profile_put(
+          context.actor,
+          Map.update!(data_team(), "spec", &Map.delete(&1, "mcpServers"))
+        )
+
       flush()
 
       {:ok, _} =
         Bundles.publish(
           "stable",
-          %{"schema" => 1, "mcp_servers" => [%{"name" => "tickets", "url" => "https://tickets.example.test/mcp"}]},
+          %{
+            "schema" => 1,
+            "mcp_servers" => [%{"name" => "tickets", "url" => "https://tickets.example.test/mcp"}]
+          },
           announce: false
         )
 

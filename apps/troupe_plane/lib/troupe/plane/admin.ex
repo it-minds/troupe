@@ -296,11 +296,14 @@ defmodule Troupe.Plane.Admin do
          policy: Provision.verdict(profile),
          bundle: bundle_state(profile),
          # A server the bundle calls as the profile's own identity that the profile gives
-         # none, or an incomplete one (Decision 747): reported, like a missing Secret.
+         # none, or an incomplete one: reported, like a missing Secret, since the bundle and
+         # the profile are written by different people and either may come first.
          identity_problems: Provision.identity_problems(profile),
          gitops: gitops_state(profile, gitops_reports())
        }
-       |> then(&if(effective == true, do: Map.put(&1, :effective, effective_view(profile)), else: &1))}
+       |> then(
+         &if(effective == true, do: Map.put(&1, :effective, effective_view(profile)), else: &1)
+       )}
     end
   end
 
@@ -349,14 +352,8 @@ defmodule Troupe.Plane.Admin do
           changes = Audit.diff(comparable(before), comparable(profile))
           children = rewrite_below(below, actor)
 
-          # Once, for the profile that was changed, naming every profile below it that
-          # changed with it: one change made, however many resources it rewrote.
-          detail =
-            if children == %{},
-              do: changes,
-              else: Map.put(changes, "extended_by", Map.new(children, fn {child, done} -> {child, done.changes} end))
-
-          {:ok, _} = Audit.record(actor.subject, "profile.put", name, detail)
+          {:ok, _} =
+            Audit.record(actor.subject, "profile.put", name, with_below(changes, children))
 
           {:ok,
            %{
@@ -371,6 +368,15 @@ defmodule Troupe.Plane.Admin do
           {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
       end
     end
+  end
+
+  # One audit record for the profile that was changed, naming every profile below it that
+  # changed with it: one change made, however many resources it rewrote.
+  defp with_below(changes, children) when children == %{}, do: changes
+
+  defp with_below(changes, children) do
+    below = Map.new(children, fn {child, done} -> {child, done.changes} end)
+    Map.put(changes, "extended_by", below)
   end
 
   # What `profile_put/2` reads of a profile: an administrator's answers and the rest of
@@ -442,7 +448,8 @@ defmodule Troupe.Plane.Admin do
         {:error,
          Error.new(:invalid_params, %{
            extended_by: child,
-           reason: "#{child} extends #{name}, and with this change it would not be saved: #{problem}"
+           reason:
+             "#{child} extends #{name}, and with this change it would not be saved: #{problem}"
          })}
     end
   end
@@ -509,7 +516,10 @@ defmodule Troupe.Plane.Admin do
       result =
         case Extends.rewrite(child) do
           {:ok, profile} ->
-            %{changes: Audit.diff(comparable(current), comparable(profile)), provisioning: provision(profile, actor)}
+            %{
+              changes: Audit.diff(comparable(current), comparable(profile)),
+              provisioning: provision(profile, actor)
+            }
 
           {:error, reason} ->
             %{changes: %{}, provisioning: %{state: :not_applied, reason: inspect(reason)}}

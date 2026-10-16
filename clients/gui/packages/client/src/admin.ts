@@ -133,6 +133,8 @@ export interface AdminPod {
 
 export interface AdminProfile {
   name: string;
+  /** The one profile this one extends, or null; everything else here is the profile in effect. */
+  extends?: string | null;
   size_class?: string | null;
   max_sessions?: number | null;
   warm_workers?: number | null;
@@ -186,11 +188,41 @@ export interface PolicyVerdict {
  */
 export interface ProfileDetail {
   profile: AdminProfile;
+  /** The spec as it was written: for a profile that extends another, only what it sets itself. */
   spec: Record<string, unknown> | null;
+  /** The profile as it was written, `extends` included: what an editor loads and sends back. */
+  written?: ProfileWritten;
+  /** The profiles that extend this one. */
+  extended_by?: string[];
   policy: PolicyVerdict | null;
   bundle: { channel: string | null; published: number | null; "adopted?"?: boolean | null; pods?: number; current?: string[]; stale?: unknown[]; [k: string]: unknown } | null;
   identity_problems: string[];
   gitops: GitopsState | null;
+  /** Asked for with `effective`: the profile in effect, each field with the profile it came from. */
+  effective?: EffectiveProfile;
+}
+
+/** What a profile's administrator wrote, before anything it extends is laid under it. */
+export interface ProfileWritten {
+  extends: string | null;
+  image?: string | null;
+  size_class?: string | null;
+  max_sessions?: number | null;
+  warm_workers?: number | null;
+  provisioner?: string | null;
+  spec?: Record<string, unknown> | null;
+  [k: string]: unknown;
+}
+
+/** A profile resolved through what it extends: one entry per value, with the profile it came from. */
+export interface EffectiveProfile {
+  extends: string | null;
+  /** From the profile that extends nothing down to this one. */
+  chain: string[];
+  profile: Record<string, unknown> | null;
+  fields: Array<{ path: string; value: unknown; from: string }>;
+  /** What the resolution reports: a parent's key or server this one has no credential of its own for, a server name that clashes. */
+  problems: string[];
 }
 
 /**
@@ -200,12 +232,23 @@ export interface ProfileDetail {
  */
 export interface ProfileWrite {
   name: string;
+  /** The one profile this one extends; null or absent for none. */
+  extends?: string | null;
   image?: string;
-  size_class?: string;
+  /** Null, for a profile that extends another, is its parent's. */
+  size_class?: string | null;
   max_sessions?: number | null;
   warm_workers?: number;
   provisioner?: string;
   spec?: Record<string, unknown>;
+}
+
+/** What a profile that extends the one written becomes with the write: its diff, the policy's verdict, and what would refuse the write. */
+export interface ProfileBelow {
+  name: string;
+  changes: AuditChanges;
+  policy: PolicyVerdict | null;
+  problem: string | null;
 }
 
 /** What a profile would become, unwritten: the policy's verdict and the diff the audit would record. */
@@ -213,6 +256,8 @@ export interface ProfilePreview {
   policy: PolicyVerdict;
   changes: AuditChanges;
   mode: string;
+  /** Every profile below the one previewed, as the write would leave it. */
+  extended_by?: ProfileBelow[];
 }
 
 /** What `admin.profile.put` answers: the profile, what moved, and how it reached the cluster. */
@@ -221,6 +266,8 @@ export interface ProfilePut {
   changes: AuditChanges;
   provisioning: unknown;
   identity_problems: string[];
+  /** Each profile below this one that was written again, with what changed in it. */
+  extended_by?: Record<string, { changes: AuditChanges; provisioning: unknown }>;
 }
 
 export interface TeamSpend {
@@ -838,9 +885,12 @@ export class AdminApi {
     return this.rpc<AdminProfile[]>("admin.profiles.list", {});
   }
 
-  /** One profile in full: its spec, what policy makes of it, its bundle. A platform admin's. */
-  profile(name: string): Promise<ProfileDetail> {
-    return this.rpc<ProfileDetail>("admin.profile.get", { name });
+  /**
+   * One profile in full: its spec, what policy makes of it, its bundle. A platform admin's.
+   * With `effective`, also the profile in effect through what it extends, field by field.
+   */
+  profile(name: string, options: { effective?: boolean } = {}): Promise<ProfileDetail> {
+    return this.rpc<ProfileDetail>("admin.profile.get", options.effective ? { name, effective: true } : { name });
   }
 
   /** Create or update one. The whole profile: the plane keeps nothing that is not sent. */
