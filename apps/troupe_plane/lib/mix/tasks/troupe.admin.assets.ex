@@ -104,9 +104,10 @@ defmodule Mix.Tasks.Troupe.Admin.Assets do
     end
   end
 
-  # The whole of the console's own JavaScript. It connects the socket and nothing else:
-  # every behaviour on every page is server-rendered and patched, which is what lets the
-  # design say the layout must not depend on measured width or client state.
+  # The whole of the console's own JavaScript. It connects the socket, and copies a key
+  # shown once to the clipboard, and nothing else: every behaviour on every page is
+  # server-rendered and patched, which is what lets the design say the layout must not
+  # depend on measured width or client state.
   defp boot do
     """
     ;/* troupe console */

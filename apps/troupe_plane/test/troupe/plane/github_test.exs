@@ -33,13 +33,21 @@ defmodule Troupe.Plane.GitHubTest do
 
     # A transit key of this test's own: the development OpenBao is not rolled back as the
     # database is, and two runs must not rotate each other's key.
-    name = "troupe-github-app-test-#{System.unique_integer([:positive])}"
+    unique = System.unique_integer([:positive])
+    name = "troupe-github-app-test-#{unique}"
+    webhook_name = "troupe-github-webhook-test-#{unique}"
     transit = Application.get_env(:troupe_plane, :transit, [])
-    Application.put_env(:troupe_plane, :transit, Keyword.put(transit, :github_key, name))
+
+    Application.put_env(
+      :troupe_plane,
+      :transit,
+      transit |> Keyword.put(:github_key, name) |> Keyword.put(:github_webhook_key, webhook_name)
+    )
 
     on_exit(fn ->
       Application.put_env(:troupe_plane, :transit, transit)
       delete_transit_key(transit, name)
+      delete_transit_key(transit, webhook_name)
     end)
 
     fake = FakeGitHub.start()
@@ -49,7 +57,7 @@ defmodule Troupe.Plane.GitHubTest do
     {:ok, _} =
       Fleet.put_profile(%{name: "dev", spec: %{"egress" => %{"gitHosts" => [fake.host]}}})
 
-    %{fake: fake, key: key, transit: transit, key_name: name}
+    %{fake: fake, key: key, transit: transit, key_name: name, webhook_name: webhook_name}
   end
 
   describe "the App's settings" do
@@ -214,6 +222,181 @@ defmodule Troupe.Plane.GitHubTest do
     end
   end
 
+  describe "checking the App" do
+    test "passes each check against GitHub, with the App's name, and writes nothing", context do
+      configure(context)
+
+      assert {:ok, check} = API.call("admin.github.check", %{}, @root)
+      assert check.ok
+
+      assert Enum.map(check.checks, & &1.name) == [
+               "App",
+               "Private key",
+               "GitHub",
+               "Installations"
+             ]
+
+      assert Enum.all?(check.checks, & &1.ok)
+      assert check.app == %{slug: "troupe-test", name: "troupe-test"}
+      assert Audit.list(kind: "github") |> Enum.map(& &1.action) == ["github.put"]
+    end
+
+    test "says which check failed and does not try the ones after it", context do
+      assert {:ok, %{ok: false, checks: [app | rest]}} = Admin.github_check(@root)
+      refute app.ok
+      assert Enum.all?(rest, &(not &1.ok and &1.detail =~ "Not tried"))
+
+      # A key GitHub does not hold for the App: the plane signs, and GitHub refuses it.
+      configure(context)
+      FakeGitHub.app(context.fake, @app_id, rsa_key())
+
+      assert {:ok, %{ok: false, checks: checks}} = Admin.github_check(@root)
+      assert [true, true, false, false] == Enum.map(checks, & &1.ok)
+      assert Enum.at(checks, 2).detail =~ "refused the App's JWT"
+    end
+
+    test "names an installation GitHub does not list for the App", context do
+      configure(context)
+
+      {:ok, _} =
+        Admin.github_put(@root, %{
+          "installations" => [
+            %{"owner" => "example-org", "installation_id" => @installation},
+            %{"owner" => "other-org", "installation_id" => 9}
+          ]
+        })
+
+      assert {:ok, %{ok: false, checks: checks}} = Admin.github_check(@root)
+      installations = List.last(checks)
+      refute installations.ok
+      assert installations.detail =~ "other-org (9)"
+    end
+
+    test "is a platform admin's", context do
+      assert {:error, refused} = API.call("admin.github.check", %{}, @lead)
+      assert refused.data.required_role == "platform_admin"
+      _ = context
+    end
+  end
+
+  describe "the webhook's deliveries" do
+    test "are listed newest first, without a body, to a platform admin", context do
+      for {id, minutes} <- [{"d-old", 10}, {"d-new", 1}] do
+        Repo.insert!(%Troupe.Plane.GitHub.Delivery{
+          id: id,
+          event: "issues",
+          action: "opened",
+          received_at: DateTime.add(DateTime.utc_now(), -minutes * 60, :second),
+          outcome: %{"runs" => [], "reason" => "no trigger names the repository"}
+        })
+      end
+
+      assert {:ok, [newest, oldest]} = API.call("admin.github.deliveries", %{}, @root)
+      assert newest.id == "d-new" and oldest.id == "d-old"
+      assert newest.event == "issues" and newest.action == "opened"
+      assert newest.outcome["reason"] =~ "no trigger"
+      refute Map.has_key?(newest, :body)
+
+      assert {:ok, [_one]} = API.call("admin.github.deliveries", %{"limit" => 1}, @root)
+
+      assert {:error, refused} = API.call("admin.github.deliveries", %{}, @lead)
+      assert refused.data.required_role == "platform_admin"
+      _ = context
+    end
+  end
+
+  describe "removing the App" do
+    test "is confirmed by its id, forgets it, and is audited by the key's fingerprint", context do
+      configure(context)
+
+      assert {:error, refused} = API.call("admin.github.delete", %{"app_id" => 1}, @root)
+      assert refused.data.app_id == @app_id
+      assert GitHub.describe().configured
+
+      assert {:ok, now} = API.call("admin.github.delete", %{"app_id" => @app_id}, @root)
+      refute now.configured
+      assert now.app_id == nil
+      assert now.installations == []
+      refute now.private_key.set
+      assert now.changes["fingerprint"] == %{"from" => fingerprint(context.key), "to" => nil}
+
+      [audit | _] = Audit.list(kind: "github")
+      assert audit.action == "github.delete"
+      refute_key(audit.detail, pem(context.key))
+
+      # A session that names a repository is refused now, and saying so names the fix.
+      assert {:error, reason} = GitHub.repository("example-org/widgets", "dev")
+      assert GitHub.explain(reason) =~ "no GitHub App"
+
+      assert {:error, missing} = API.call("admin.github.delete", %{"app_id" => @app_id}, @root)
+      assert missing.message == "not_found"
+    end
+
+    # Transit imports a new version of a key only of the type it already has, so a key left
+    # behind refused the next App's key when it was a different size.
+    test "takes its key and webhook secret out of transit, so the next App's key may be another size",
+         context do
+      configure(context)
+      {:ok, _} = Admin.github_put(@root, %{"webhook_secret" => String.duplicate("s", 40)})
+      assert {:ok, _} = bao(context.transit, :get, "keys/#{context.key_name}")
+      assert {:ok, _} = bao(context.transit, :get, "keys/#{context.webhook_name}")
+
+      assert {:ok, _now} = API.call("admin.github.delete", %{"app_id" => @app_id}, @root)
+
+      assert {:error, {404, _}} = bao(context.transit, :get, "keys/#{context.key_name}")
+      assert {:error, {404, _}} = bao(context.transit, :get, "keys/#{context.webhook_name}")
+
+      larger = :public_key.generate_key({:rsa, 3072, 65_537})
+
+      assert {:ok, now} =
+               Admin.github_put(@root, %{"app_id" => @app_id, "private_key" => pem(larger)})
+
+      assert now.private_key.type == "rsa-3072"
+      assert now.private_key.version == 1
+    end
+
+    test "with the policy the plane's role needs, takes the key out as well", context do
+      policy = "troupe-github-app-test-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        bao(
+          context.transit,
+          :put_policy,
+          policy,
+          Policy.github_app("transit", context.key_name, context.webhook_name)
+        )
+
+      {:ok, %{"auth" => %{"client_token" => token}}} =
+        bao(context.transit, :post, "/v1/auth/token/create", %{
+          "policies" => [policy],
+          "ttl" => "5m"
+        })
+
+      narrow =
+        Keyword.merge(context.transit,
+          token: token,
+          github_key: context.key_name,
+          github_webhook_key: context.webhook_name
+        )
+
+      Application.put_env(:troupe_plane, :transit, narrow)
+
+      configure(context)
+      {:ok, _} = Admin.github_put(@root, %{"webhook_secret" => String.duplicate("s", 40)})
+      assert {:ok, _now} = API.call("admin.github.delete", %{"app_id" => @app_id}, @root)
+
+      assert {:error, {404, _}} = bao(context.transit, :get, "keys/#{context.key_name}")
+      assert {:error, {404, _}} = bao(context.transit, :get, "keys/#{context.webhook_name}")
+    end
+
+    test "is a platform admin's", context do
+      configure(context)
+      assert {:error, refused} = API.call("admin.github.delete", %{"app_id" => @app_id}, @lead)
+      assert refused.data.required_role == "platform_admin"
+      assert GitHub.describe().configured
+    end
+  end
+
   describe "an installation token" do
     test "is for the session's one repository, read-only, an hour long, and logged nowhere",
          context do
@@ -266,6 +449,34 @@ defmodule Troupe.Plane.GitHubTest do
       Process.sleep(2_100)
       assert {_, status} = clone(context.fake, short, "widgets", repos.into <> "-late")
       assert status != 0
+    end
+
+    # As GitHub's fine-grained permissions have it: `contents: read` reads the git
+    # database, and only writing to it needs `write`. The fake asked `write` of a GET too.
+    test "reads the git database through the API, and writes nothing to it", context do
+      configure(context)
+      repositories(context.fake, ["widgets"])
+      session = session_with("s-gh-read", %{"owner" => "example-org", "name" => "widgets"})
+      {:ok, %{"token" => token}} = GitHub.credential(session)
+
+      api = "#{context.fake.api_url}/repos/example-org/widgets"
+      auth = [{"authorization", "Bearer " <> token}]
+
+      assert {:ok, %{status: 200, body: %{"default_branch" => branch}}} =
+               Req.get(api, headers: auth, retry: false)
+
+      assert {:ok, %{status: 200, body: %{"object" => %{"sha" => sha}}}} =
+               Req.get("#{api}/git/ref/heads/#{branch}", headers: auth, retry: false)
+
+      assert {:ok, %{status: 200}} =
+               Req.get("#{api}/git/commits/#{sha}", headers: auth, retry: false)
+
+      assert {:ok, %{status: 403}} =
+               Req.post("#{api}/git/blobs",
+                 headers: auth,
+                 json: %{"content" => Base.encode64("x"), "encoding" => "base64"},
+                 retry: false
+               )
     end
 
     test "is refused by GitHub when the key is not the App's, and says so", context do

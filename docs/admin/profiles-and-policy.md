@@ -17,6 +17,7 @@ manifest's ([§6](#6-provisioning-direct-or-from-a-repository)).
 | Field | Meaning |
 |---|---|
 | `name` | the profile, and the name of its `WorkerProfile` |
+| `extends` | the one profile this one extends, or none ([below](#a-profile-that-extends-another)) |
 | `image` | `repository:tag` or `repository@sha256:…`, or `release` (below) |
 | `size_class` | `standard` (several sessions share a worker) or `heavy` (fewer, with more CPU, memory and disk each). A resource question, not a safety one: sessions cannot see each other's files either way |
 | `max_sessions` | how far it may grow, in sessions at once. Absent is no ceiling, bounded by the team's budget |
@@ -59,6 +60,58 @@ the operator) or `ssh`, machines that register themselves ([single-machine.md](s
 An `ssh` profile has no pods: in `direct` mode the plane writes it no `WorkerProfile` and
 takes away one left from before, and in `gitops` mode, where the repository holds it as a
 `WorkerProfile` like any other, the plane writes `spec.replicas: 0` onto it.
+
+### A profile that extends another
+
+An organisation can keep one **standard** profile (the model, the egress, the MCP servers
+and the limits everybody gets) and give a team that needs more a profile that **extends**
+it and says only what differs (Decision 908). The plane resolves the two into the profile
+in effect, and that is all the cluster sees: the operator, admission and the workers get a
+flat `WorkerProfile` as for any other profile.
+
+```json
+{"name": "data-team", "extends": "standard", "max_sessions": 10,
+ "spec": {"egress": {"fqdns": ["warehouse.example.com"]},
+          "llm": {"secretRef": {"name": "data-team-llm"}}}}
+```
+
+| Field | What the child gets |
+|---|---|
+| `egress.fqdns`, `egress.gitHosts` | the parent's, and its own **added**; each still checked against the policy |
+| `mcpServers` | the parent's, and its own **added** by name. One with a parent's name replaces the parent's only with `"override": true`; otherwise the parent's is kept and the clash is reported |
+| `max_sessions` | the **lower** of the two: a child can narrow a ceiling, never raise it |
+| `personalTools`, `repositoryOverridesBundle` | a parent's `forbid` or `false` **holds** whatever the child says; otherwise the child's, or the parent's |
+| `image`, `size_class`, `provisioner`, the `llm` fields, `storage.storageClassName`, `configBundleChannel`, `github`, `orgMount` and any other field | the child's where it sets one, the parent's where it does not |
+| `llm.secretRef`, `mcpIdentities`, grants, `warm_workers` | **never inherited**: a key and an identity are each profile's own, in its own namespace, and a grant of the standard does not make a team a user of its extensions |
+
+An empty field is one the child does not set, so a child cannot take away what its parent
+has: if a team should have less, the standard is too wide. A chain is at most four profiles
+long, counting the one that extends nothing; a missing parent, a cycle and a longer chain are
+refused with a sentence.
+
+- **Reading one.** `admin.profile.get` answers `spec` and `written` as the profile wrote
+  them, which is what to change and send back, and `extended_by`, the profiles that extend
+  it. With `"effective": true` it adds `effective`: the chain, the profile in effect, and
+  `fields`, every path and value with the profile it came from. `problems` there says when
+  the child has its model endpoint from a parent whose key it does not have, and
+  `identity_problems` names an inherited server that calls with client credentials and has
+  no identity of the child's. The console's profile page shows "Extends" and a table of
+  where each field comes from; its editor has an Extends field, and leaves to the parent
+  whatever is left empty.
+- **Changing the parent.** `admin.profile.preview` of the parent lists every profile below
+  it in `extended_by`, each with its diff and the policy's verdict, before anything is
+  written. `admin.profile.put` refuses a change that would leave a child the plane or the
+  policy refuses, naming it; otherwise it rewrites each child's resource, and its pods roll
+  as for any change. The audit has one `profile.put`, the parent's, with `extended_by`
+  naming each child and what changed in it.
+- **Bundles** are not merged yet: a child follows its own `configBundleChannel`, or its
+  parent's where it names none, and its pods load that channel's bundle.
+- **Deleting the parent** is refused (`conflict`, `extended_by`) while a profile extends it.
+  Make each extend another profile, or none: a put without `extends` keeps the profile as
+  it was in effect, and from then on it follows nothing.
+- **In gitops mode** a profile extends nothing yet: `admin.profile.put` with `extends` is
+  refused, and so is a manifest that names a parent (`spec.extends` or the
+  `troupe.dev/extends` annotation). `admin.profiles.export` writes a child's manifest whole.
 
 ### Calling an MCP server as the profile
 
@@ -286,10 +339,11 @@ This is a summary; the detail is where each part is set.
 | `MCPIdentityMissing` | a server the bundle calls with client credentials has no identity in `mcpIdentities`, or its identity is incomplete; the message says which ([above](#calling-an-mcp-server-as-the-profile)) |
 | `UpgradePending` | the StatefulSet has a newer revision than the named pods run; each keeps its revision until the plane has drained it and the operator replaced it, and the message says how far each has got ([§3](#3-upgrades-and-drains)) |
 | `EgressByHostname` | the `CiliumNetworkPolicy` was written and applied, so a worker reaches its allowlist and the installation's own OpenBao and object store by name, and nothing else outside the cluster; `False` with `NoCilium` or `CiliumPolicyNotApplied` ([egress](#4-troupepolicy)) |
+| `PlaneCAMissing` | the installation gives pods the plane's CA (`plane.controlTls.enabled`) and the worker namespace has no `troupe-plane-ca` ConfigMap yet: the operator has read no certificate from the CA file the chart mounts, and the pods wait for it before they dial the plane (`NotWritten`); `False` with `Present`, or `NotGiven` where pods are given no CA |
 | `EndpointUnreachable` | an endpoint the profile names is at a loopback, unspecified, link-local or cloud metadata address, which its workers do not reach with Cilium or without (`LoopbackOrLinkLocal`): the message names each and says what to do; `False` with `Reachable`, or `Cilium` where there is Cilium ([egress](#4-troupepolicy)) |
 
-`SecretMissing`, `MCPIdentityMissing`, `UpgradePending`, `EgressByHostname` and
-`EndpointUnreachable` do not affect `Ready`. `kubectl -n troupe-system get wp` shows
+`SecretMissing`, `MCPIdentityMissing`, `UpgradePending`, `EgressByHostname`,
+`PlaneCAMissing` and `EndpointUnreachable` do not affect `Ready`. `kubectl -n troupe-system get wp` shows
 `Replicas`, `Ready`, `Violation`, `Age`.
 
 ## 3. Upgrades and drains
@@ -470,8 +524,8 @@ pod is `session:/` and `skills:/`, so `publish` and `import` have nowhere to go 
 ## 6. Provisioning: direct, or from a repository
 
 `plane.provisioningMode` (`TROUPE_PROVISIONING_MODE`) decides who writes a profile's
-`WorkerProfile`. It is the deployment's: the console's Policy page shows it and cannot
-change it, and a value stored there before 0.7.0 is not read. The same page holds the
+`WorkerProfile`. It is the deployment's: the console's **Policy and settings** shows it and cannot
+change it, and a value stored there before 0.7.0 is not read. The console's **Client versions** holds the
 versions people's clients may run ([routine-tasks.md](routine-tasks.md#client-versions))
 and the settings their machines start from and cannot go past
 ([configuration.md](configuration.md#defaults-and-limits-for-peoples-machines)).
@@ -506,7 +560,7 @@ not take down a profile that was running. The reasons are in the log once, in
 `admin.profiles.list` (each profile carries `gitops`: the source, the generation it was
 read at, and a `problem` of `refused`, `missing`, `plane_only` or `unwritten` with
 `reasons`; a refused resource with no profile is listed with nothing running), and on the
-console's Workers page and the profile's own.
+console's **Workers and pods** and the profile's own page.
 
 In this mode the console shows every profile read-only, marked **Locked to gitops** with
 `plane.gitops.source`, and `admin.profile.put` and `admin.profile.delete` are refused as
@@ -538,7 +592,7 @@ places and scales by is read off `sessionsPerPod`.
 
 ### A profile in a repository
 
-`admin.profiles.export` (the console's Workers page, **Manifests for a repository**) gives
+`admin.profiles.export` (the console's **Workers and pods**, **Manifests for a repository**) gives
 every profile in this shape, the policy and every trigger. This one is written by hand:
 
 ```yaml
@@ -624,7 +678,7 @@ server-side apply's field ownership.
 
 **Direct to gitops.** Export the manifests, commit them, and let the applier apply them
 while the plane is still in direct mode: it takes the fields over, and the workers do not
-notice. Export them with `admin.profiles.export` or the Workers page, not
+notice. Export them with `admin.profiles.export` or the console's **Workers and pods**, not
 `kubectl get workerprofiles`: a resource the plane wrote in direct mode has no field for a
 profile's ceiling, its warm count or its provisioner, which the export gives as the
 `troupe.dev/max-sessions`, `troupe.dev/warm-workers` and `troupe.dev/provisioner`

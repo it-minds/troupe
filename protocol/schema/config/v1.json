@@ -495,6 +495,52 @@
         "null"
       ]
     },
+    "permissions": {
+      "description": "Per-tool rules: a tool, or a tool with a pattern in brackets: a command prefix for `shell`, a path glob for the file tools, `server.tool` for `mcp`. Every scope's rules are added together, not replaced, and of those that match a call `deny` beats `ask` beats `allow`; inside one file the more specific pattern decides. `troupe config --explain` lists them with where each came from. An organisation may add rules of its own, and none of its rules is loosened by one here.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "deny": {
+          "description": "Calls refused, with a sentence naming the rule: `shell(git push)`, `read_file(secrets/**)`.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "pattern": "^\\s*[^()\\s]+(\\(.*\\))?\\s*$"
+          }
+        },
+        "ask": {
+          "description": "Calls that ask a person first, even under `auto_approve` or an earlier \"allow for the session\".",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "pattern": "^\\s*[^()\\s]+(\\(.*\\))?\\s*$"
+          }
+        },
+        "allow": {
+          "description": "Calls that run without asking. From a project's file only in a trusted workspace; with `managed_permission_rules_only` on, only the organisation's. Read from a project's file only in a trusted workspace.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "pattern": "^\\s*[^()\\s]+(\\(.*\\))?\\s*$"
+          }
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
     "shell_timeout_ms": {
       "description": "How long a shell command may run before it, and everything it started, is stopped.",
       "default": 120000,

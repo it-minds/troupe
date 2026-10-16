@@ -9,7 +9,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/control/connection.ex
   - apps/troupe_plane/lib/troupe/plane/control/listener.ex
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/provisioners.ex
+  - clients/gui/apps/console/src/views/Hosts.tsx
   - apps/troupe_worker/lib/troupe/worker/plane/link.ex
   - config/runtime.exs
   - charts/troupe/templates/plane-control-tls.yaml

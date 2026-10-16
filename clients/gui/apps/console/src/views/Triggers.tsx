@@ -12,13 +12,14 @@
 // plane takes a put on an existing trigger, so a field this form does not show (its terms,
 // who is told) is left as it is. Each is shown as the audit recorded it. On a plane in
 // `gitops` mode the triggers are resources a repository holds: shown locked, with where
-// they come from, and nothing offers a write. Running one by hand and minting its webhook
-// key are in the current console for now.
+// they come from, and nothing offers a write. A new webhook trigger is made with its key,
+// which is shown once, with a button that copies it; a trigger on a GitHub repository is
+// fired by the App's signed deliveries and has none. Running one by hand and rotating a key
+// are done over the plane's admin API for now.
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { AdminTeam, Trigger } from "@troupe/client";
-import { currentConsole } from "../plane";
+import type { AdminTeam, Trigger, TriggerPut } from "@troupe/client";
 import { go, href } from "../route";
 import { recorded, show, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, modeOf, useChange, when } from "./bits";
@@ -34,6 +35,13 @@ function useTeams(): ReturnType<typeof useLoad<AdminTeam[]>> {
 function firedBy(source: Record<string, unknown> | null): string {
   const kind = source?.["kind"];
   if (kind === "schedule") return `on a schedule: ${show(source?.["cron"])} (UTC)`;
+  if (kind === "webhook" && source?.["repository"]) {
+    const on = [
+      source["label"] ? `an issue labelled ${String(source["label"])}` : null,
+      source["command"] ? `a comment saying ${String(source["command"])}` : null,
+    ].filter(Boolean);
+    return `by GitHub on ${String(source["repository"])}: ${on.join(", or ") || "nothing yet"}`;
+  }
   if (kind === "webhook") return `by a webhook${source?.["provider"] ? ` from ${String(source["provider"])}` : ""}`;
   if (kind === "manual") return "only by hand";
   return show(kind);
@@ -107,6 +115,7 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
   const { admin } = useConsole();
   const [load, reload] = useLoad(() => Promise.all([admin.triggers(team.name), admin.provisioningMode().catch(() => null)]), [admin, team.name]);
   const [creating, setCreating] = useState(false);
+  const [minted, setMinted] = useState<{ name: string; key: string; url: string } | null>(null);
   const { done, apply } = useChange(reload);
 
   return (
@@ -121,10 +130,11 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
           <>
             {locked && (
               <Locked things="triggers" source={source}>
-                <p className="note">Running one by hand and minting its key still work, in the current console: they are things done with a trigger, not what it is.</p>
+                <p className="note">Running one by hand and minting its key still work, over the admin API: they are things done with a trigger, not what it is.</p>
               </Locked>
             )}
             {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
+            {minted && <KeyOnce name={minted.name} secret={minted.key} url={minted.url} onDone={() => setMinted(null)} />}
             {triggers.length === 0 ? (
               <Empty title={`${team.name} has no trigger`}>{locked ? "A trigger is a manifest in the repository." : "Make one below."}</Empty>
             ) : (
@@ -182,7 +192,14 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
                 names={triggers.map((t) => t.name)}
                 onCancel={() => setCreating(false)}
                 onConfirm={async (changes, name) => {
-                  await apply("trigger.put", `${team.name}/${name}`, () => admin.putTrigger({ team: team.name, name, ...changes }), `${name} is a trigger of ${team.name}.`, (a) => (a as { changes?: Record<string, unknown> }).changes);
+                  // A webhook trigger comes back with its key, this once: kept for the panel
+                  // below until the person says they have it, and nowhere else.
+                  const write = async (): Promise<TriggerPut> => {
+                    const answer = await admin.putTrigger({ team: team.name, name, ...changes });
+                    if (answer.key) setMinted({ name, key: answer.key, url: answer.url ?? "" });
+                    return answer;
+                  };
+                  await apply("trigger.put", `${team.name}/${name}`, write, `${name} is a trigger of ${team.name}.`, (a) => (a as { changes?: Record<string, unknown> }).changes);
                   setCreating(false);
                 }}
               />
@@ -194,10 +211,52 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
   );
 }
 
+/**
+ * A new webhook trigger's key, the one time the plane answers it: where to send, the key,
+ * a button that copies it, and that it is not shown again. Kept on screen until the person
+ * says they have it; reading the trigger again shows only that it has a key.
+ */
+function KeyOnce({ name, secret, url, onDone }: { name: string; secret: string; url: string; onDone: () => void }): JSX.Element {
+  const { plane } = useConsole();
+  const [copied, setCopied] = useState<"yes" | "no" | null>(null);
+  const address = `${plane.url.replace(/\/$/, "")}${url}`;
+  const copy = async () => {
+    try {
+      await globalThis.navigator.clipboard.writeText(secret);
+      setCopied("yes");
+    } catch {
+      setCopied("no");
+    }
+  };
+  return (
+    <section className="card key-once" aria-label={`${name}'s webhook key`}>
+      <header>
+        <span>{name}'s webhook key</span>
+      </header>
+      <p>
+        POST to <code>{address}</code> with <code>Authorization: Bearer</code> and this key. Copy it now: it is not shown again, and losing it costs a rotation.
+      </p>
+      <p>
+        <code className="mono secret">{secret}</code>
+      </p>
+      <div className="actions">
+        <button type="button" className="primary" onClick={() => void copy()}>
+          Copy the key
+        </button>
+        <button type="button" onClick={onDone}>
+          I have copied it
+        </button>
+      </div>
+      {copied === "yes" && <p className="note" role="status">Copied.</p>}
+      {copied === "no" && <p className="note" role="status">This browser would not copy it; select it above and copy it by hand.</p>}
+    </section>
+  );
+}
+
 // -- a trigger ---------------------------------------------------------------------------
 
 export function TriggerPage({ team, name }: { team: string; name: string }): JSX.Element {
-  const { admin, me, plane, notify } = useConsole();
+  const { admin, me, notify } = useConsole();
   const [load, reload] = useLoad(
     () => Promise.all([admin.triggers(team), admin.triggerRevisions(team, name).catch(() => null), admin.provisioningMode().catch(() => null), admin.teams()]),
     [admin, team, name],
@@ -297,8 +356,8 @@ export function TriggerPage({ team, name }: { team: string; name: string }): JSX
                 </div>
               )}
               <p className="note">
-                Running it now by hand, and minting its webhook key, come to this console next; for now they are on the{" "}
-                <a href={currentConsole(plane.url, `/triggers/${encodeURIComponent(team)}`)}>current console's Triggers page</a>.
+                Running it now by hand, and rotating its webhook key, come to this console next; for now they are <code>admin.trigger.run</code> and{" "}
+                <code>admin.trigger.key.rotate</code>, with <code>troupe admin</code> or over <code>/rpc</code>.
               </p>
               {editing && (
                 <TriggerForm
@@ -379,9 +438,15 @@ interface TriggerFields {
   principal: string;
   profile: string;
   agent: string;
+  /** schedule, webhook or manual, or github: a webhook from GitHub on one repository. */
   kind: string;
   cron: string;
   provider: string;
+  repository: string;
+  label: string;
+  command: string;
+  /** The branch a GitHub trigger's sessions clone: kept as it is, since no field here shows it. */
+  ref: string;
   prompt: string;
   visibility: string;
   review: string;
@@ -396,9 +461,13 @@ function fieldsOf(t: Trigger | null): TriggerFields {
     principal: t?.principal ?? "",
     profile: t?.profile ?? "",
     agent: t?.agent ?? "",
-    kind: String(s["kind"] ?? "schedule"),
+    kind: s["kind"] === "webhook" && s["repository"] ? "github" : String(s["kind"] ?? "schedule"),
     cron: String(s["cron"] ?? ""),
     provider: String(s["provider"] ?? ""),
+    repository: String(s["repository"] ?? ""),
+    label: String(s["label"] ?? ""),
+    command: String(s["command"] ?? ""),
+    ref: String(s["ref"] ?? ""),
     prompt: t?.prompt_template ?? "",
     visibility: t?.visibility ?? "team",
     review: t?.review === "none" || t?.review === false ? "none" : "required",
@@ -409,9 +478,15 @@ function fieldsOf(t: Trigger | null): TriggerFields {
 
 /** What the form says, as the fields `admin.trigger.put` takes; blank optional ones as null. */
 function valuesOf(f: TriggerFields): Record<string, unknown> {
-  const source: Record<string, unknown> = { kind: f.kind };
+  const source: Record<string, unknown> = { kind: f.kind === "github" ? "webhook" : f.kind };
   if (f.kind === "schedule") Object.assign(source, { cron: f.cron.trim(), tz: "UTC" });
   if (f.kind === "webhook" && f.provider.trim()) source["provider"] = f.provider.trim();
+  if (f.kind === "github") {
+    Object.assign(source, { provider: "github", repository: f.repository.trim() });
+    if (f.label.trim()) source["label"] = f.label.trim();
+    if (f.command.trim()) source["command"] = f.command.trim();
+    if (f.ref) source["ref"] = f.ref;
+  }
   return {
     principal: f.principal,
     profile: f.profile,
@@ -456,7 +531,9 @@ function TriggerForm({
   const name = f.name.trim();
   const nameProblem = creating && name !== "" ? (names.includes(name) ? `${team.name} has a trigger called ${name} already.` : NAME.test(name) ? null : "Lowercase letters, digits and dashes.") : null;
   const cronProblem = f.kind === "schedule" && f.cron.trim() !== "" && f.cron.trim().split(/\s+/).length !== 5 ? "Five fields: minute, hour, day of the month, month, day of the week." : null;
-  const missing = creating && (!name || !f.principal || !f.profile || (f.kind === "schedule" && !f.cron.trim()));
+  const repositoryProblem = f.kind === "github" && f.repository.trim() !== "" && !/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/.test(f.repository.trim()) ? "owner/name, as GitHub writes it." : null;
+  const githubMissing = f.kind === "github" && (!f.repository.trim() || (!f.label.trim() && !f.command.trim()));
+  const missing = githubMissing || (creating && (!name || !f.principal || !f.profile || (f.kind === "schedule" && !f.cron.trim())));
   const set = (patch: Partial<TriggerFields>) => setF({ ...f, ...patch });
 
   if (previewing) {
@@ -491,7 +568,7 @@ function TriggerForm({
             ? "Reading the team's service principals…"
             : principals.length
               ? "A service principal of the team: a credential somebody is answerable for, since it fires with nobody watching."
-              : `${team.name} has no service principal that works: one is made on Identity, in the current console for now.`
+              : `${team.name} has no service principal that works: one is made on Identity.`
         }
       >
         {(p) => (
@@ -520,15 +597,29 @@ function TriggerForm({
       <Field label="Agent" hint="The primary agent. Empty is the profile's default.">
         {(p) => <input {...p} value={f.agent} onChange={(e) => set({ agent: e.target.value })} autoComplete="off" spellCheck={false} />}
       </Field>
-      <Field label="Fired by" hint="A webhook's address and key are minted for it, and shown once.">
+      <Field label="Fired by" hint="A webhook is made with its key, shown once. A GitHub repository is fired by the plane's GitHub App, with no key.">
         {(p) => (
           <select {...p} value={f.kind} onChange={(e) => set({ kind: e.target.value })}>
             <option value="schedule">a schedule</option>
             <option value="webhook">a webhook</option>
+            <option value="github">an issue on a GitHub repository</option>
             <option value="manual">only by hand</option>
           </select>
         )}
       </Field>
+      {f.kind === "github" && (
+        <>
+          <Field label="Repository" hint="owner/name: one the plane's GitHub App is installed on. Its sessions clone it and propose a fix as a draft pull request." error={repositoryProblem}>
+            {(p) => <input {...p} value={f.repository} onChange={(e) => set({ repository: e.target.value })} autoComplete="off" spellCheck={false} />}
+          </Field>
+          <Field label="Label" hint="An issue given this label starts a run. A label, a command, or both.">
+            {(p) => <input {...p} value={f.label} onChange={(e) => set({ label: e.target.value })} autoComplete="off" spellCheck={false} />}
+          </Field>
+          <Field label="Command" hint="A comment whose first line is this, such as /troupe fix, by the repository's owner, a member or a collaborator, starts a run.">
+            {(p) => <input {...p} value={f.command} onChange={(e) => set({ command: e.target.value })} autoComplete="off" spellCheck={false} />}
+          </Field>
+        </>
+      )}
       {f.kind === "schedule" && (
         <Field label="Schedule" hint="Five fields, in UTC, the only zone this plane keeps: 0 3 * * 1-5 is three in the morning on weekdays." error={cronProblem}>
           {(p) => <input {...p} value={f.cron} onChange={(e) => set({ cron: e.target.value })} autoComplete="off" spellCheck={false} />}
@@ -566,7 +657,7 @@ function TriggerForm({
       </Field>
       {!creating && <p className="note">Its terms and who is made a collaborator on each run are kept as they are; this form does not change them.</p>}
       <div className="actions">
-        <button type="submit" className="primary" disabled={Boolean(missing || nameProblem || cronProblem) || lines.length === 0}>
+        <button type="submit" className="primary" disabled={Boolean(missing || nameProblem || cronProblem || repositoryProblem) || lines.length === 0}>
           Preview
         </button>
         <button type="button" onClick={onCancel}>
@@ -581,7 +672,12 @@ function triggerWords(team: string, name: string, creating: boolean, changes: Re
   const out: string[] = [];
   if (creating) {
     out.push(`${name} fires ${firedBy(changes["source"] as Record<string, unknown>)}, and each firing starts a ${team} session that spends ${team}'s budget.`);
-    if ((changes["source"] as Record<string, unknown>)["kind"] === "webhook") out.push("Its webhook key is minted in the current console, and shown once there.");
+    const source = changes["source"] as Record<string, unknown>;
+    if (source["kind"] === "webhook" && source["repository"]) {
+      out.push(`Each run starts a session on ${String(source["repository"])} with the issue as its task, given as data, and proposes a fix as a draft pull request. GitHub's deliveries to the plane's App fire it; it has no key.`);
+    } else if (source["kind"] === "webhook") {
+      out.push("It is made with its webhook key, which is shown once, here, when it is created: copy it then.");
+    }
   } else {
     if ("source" in changes) out.push(`From now it fires ${firedBy(changes["source"] as Record<string, unknown>)}.`);
     if ("profile" in changes || "principal" in changes) out.push("Runs already going carry on as they started; the next one uses the new setting.");

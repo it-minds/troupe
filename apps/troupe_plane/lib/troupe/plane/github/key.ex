@@ -66,6 +66,31 @@ defmodule Troupe.Plane.GitHub.Key do
   end
 
   @doc """
+  Take the key out of transit, every version, when the App is removed. Transit imports a
+  new version only of the type a key already has, so a key left there would refuse the
+  next App's key wherever it is another size. `:ok` where there was none.
+  """
+  @spec destroy(keyword()) :: :ok | {:error, term()}
+  def destroy(opts \\ []), do: destroy_key(name(opts), opts)
+
+  @doc false
+  # Transit deletes a key only once its config allows it, which every key starts without;
+  # the webhook secret's removal uses this too.
+  @spec destroy_key(String.t(), keyword()) :: :ok | {:error, term()}
+  def destroy_key(name, opts) do
+    path = "/v1/#{Tokens.mount(opts)}/keys/#{name}"
+
+    with {:ok, _} <- Tokens.request(:get, path, nil, opts),
+         {:ok, _} <- Tokens.request(:post, path <> "/config", %{"deletion_allowed" => true}, opts),
+         {:ok, _} <- Tokens.request(:delete, path, nil, opts) do
+      :ok
+    else
+      {:error, :not_found} -> :ok
+      error -> error
+    end
+  end
+
+  @doc """
   Sign a JWT's signing input with the App's key, as RS256: transit hashes it with SHA-256
   and signs with PKCS #1 v1.5, and the signature comes back base64url, as a JWT carries it.
   """
@@ -139,7 +164,11 @@ defmodule Troupe.Plane.GitHub.Key do
 
   # -- transit's import -------------------------------------------------------
 
-  defp wrapping_key(opts) do
+  @doc false
+  # Transit's RSA wrapping key, which every bring-your-own-key import wraps under; the
+  # webhook secret's import uses it too.
+  @spec wrapping_key(keyword()) :: {:ok, term()} | {:error, term()}
+  def wrapping_key(opts) do
     case Tokens.request(:get, "/v1/#{Tokens.mount(opts)}/wrapping_key", nil, opts) do
       {:ok, %{"data" => %{"public_key" => pem}}} ->
         [entry] = :public_key.pem_decode(pem)

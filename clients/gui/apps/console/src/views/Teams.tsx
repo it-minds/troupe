@@ -120,7 +120,7 @@ function nameFrom(group: { external_id: string; display_name: string | null }): 
  * another id, and the mismatch that most likely made it. Nothing merges the two, since only
  * the provider knows which id is right, so the person choosing is told before they choose.
  */
-function Twice({ group }: { group: AdminGroup | undefined }): JSX.Element | null {
+export function Twice({ group }: { group: AdminGroup | undefined }): JSX.Element | null {
   if (!group?.looks_duplicated) return null;
   const { others, likely } = group.looks_duplicated;
   return (

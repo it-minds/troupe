@@ -1,7 +1,7 @@
 defmodule Troupe.Plane.Web.Live.Layout do
   @moduledoc """
-  The chrome every console page sits in: a nav rail, a content column, and the two
-  banners that are allowed to interrupt.
+  The chrome the page at `/admin` sits in: a nav rail with the way to the console, a
+  content column, and the two banners that are allowed to interrupt.
 
   A control room, not a dashboard. The rail is a fixed 216px column at desktop widths
   and wraps above the content below 900px, where the console is in checking-in mode —
@@ -26,34 +26,22 @@ defmodule Troupe.Plane.Web.Live.Layout do
 
   use Phoenix.Component
 
+  # The one page left here. Everything an administrator does is in the console at
+  # `/console`, which the rail links to where the plane has one.
   @pages [
-    {:overview, "Overview", "/admin"},
-    {:workers, "Workers", "/admin/workers"},
-    {:provisioners, "Provisioners", "/admin/provisioners"},
-    {:teams, "Teams", "/admin/teams"},
-    {:identity, "Identity", "/admin/identity"},
-    {:provider, "Identity provider", "/admin/provider"},
-    {:bundles, "Configuration bundles", "/admin/bundles"},
-    {:integrations, "Integrations", "/admin/integrations"},
-    {:triggers, "Triggers", "/admin/triggers"},
-    {:review, "Review", "/admin/review"},
-    {:sessions, "Sessions and spend", "/admin/sessions"},
-    {:budgets, "Budgets", "/admin/budgets"},
-    {:connections, "Connections", "/admin/connections"},
-    {:audit, "Audit", "/admin/audit"},
-    {:policy, "Policy", "/admin/policy"}
+    {:overview, "Overview", "/admin"}
   ]
 
   @doc "Every page in the rail, in the order it appears."
   @spec pages() :: [{atom(), String.t(), String.t()}]
   def pages, do: @pages
-
   @doc "The shell: the rail, who you are, the banners, and the page."
   attr(:actor, :map, required: true)
   attr(:page, :atom, required: true)
   # Defaulted rather than required so a page rendered outside the console's own mount —
   # a test, a preview — does not have to know the door exists.
   attr(:breakglass, :boolean, default: false)
+  attr(:console_url, :string, default: nil)
   slot(:inner_block, required: true)
 
   def shell(assigns) do
@@ -66,6 +54,7 @@ defmodule Troupe.Plane.Web.Live.Layout do
         <.rail_item :for={{page, label, href} <- @pages} page={@page} this={page} href={href}>
           {label}
         </.rail_item>
+        <a :if={@console_url} href={@console_url} class="rail__item">Console</a>
       </nav>
 
       <main class="content">
@@ -112,27 +101,6 @@ defmodule Troupe.Plane.Web.Live.Layout do
   end
 
   @doc """
-  Which rung decided a value.
-
-  Rule 1 of the console: every effective value names the rung that decided it. The chip
-  lives here rather than on the Policy screen because the ladder is a property of the
-  value and not of one page — a team's idle timeout carries the same claim on the Teams
-  screen as it does on Policy, and two spellings of it would eventually disagree.
-
-  **Text, not colour.** "Who decided this" is an assertion, and the design's rule that
-  the console's assertions must be readable without colour applies to assertions about
-  provenance exactly as it does to a health status. The class exists so a chip can be set
-  apart from the number beside it, and the rung's name is in the element either way.
-  """
-  attr(:rung, :atom, required: true)
-
-  def rung(assigns) do
-    ~H"""
-    <span class={"rung rung--#{@rung}"}>{@rung}</span>
-    """
-  end
-
-  @doc """
   A labelled field grid: what a thing is configured as, readable without scrolling.
 
   Borrowed from the drafting sheets in the platform's own documentation, and used here
@@ -173,116 +141,6 @@ defmodule Troupe.Plane.Web.Live.Layout do
     </div>
     """
   end
-
-  @doc """
-  A Kubernetes condition, rendered so its status is readable at a glance.
-
-  The console's own states are `Troupe.Plane.Web.Live.Status`; these are the cluster's,
-  reported verbatim on a profile, and they keep the cluster's vocabulary rather than
-  being translated into a state the cluster did not claim. `nil` is a cluster that could
-  not be asked, which is said as such rather than as a profile with none.
-  """
-  attr(:conditions, :list, default: [])
-
-  def conditions(assigns) do
-    ~H"""
-    <ul class="conditions">
-      <li :for={condition <- @conditions || []} class={condition_class(condition)}>
-        {condition["type"]}
-        <span :if={condition["message"]}>— {condition["message"]}</span>
-      </li>
-      <li :if={@conditions == []} class="muted">no conditions reported</li>
-      <li :if={is_nil(@conditions)} class="muted">unknown: the cluster did not answer</li>
-    </ul>
-    """
-  end
-
-  defp condition_class(%{"type" => type, "status" => "True"}) when type in ["Ready"], do: "good"
-  defp condition_class(%{"status" => "True"}), do: "bad"
-  defp condition_class(_condition), do: "neutral"
-
-  @doc """
-  The marker a page shows over what a repository holds, in GitOps mode (Decisions 736 and
-  737): what is locked, by what, and where to go instead.
-
-  First on the page and in words, because a form whose fields will not take a keystroke
-  and says nothing about why reads as a broken console rather than a deliberate one. Here
-  rather than on one page because the profiles and the triggers are locked the same way,
-  and two spellings of the lock would come to disagree about what it means. The slot is
-  what the page adds: what is left to do there, and what the last pass could not use.
-  """
-  attr(:kind, :string, required: true, doc: "the resource's kind: `WorkerProfile`")
-  attr(:things, :string, required: true, doc: "what the page shows, plural: `profiles`")
-  attr(:source, :string, default: nil)
-  slot(:inner_block)
-
-  def locked(assigns) do
-    ~H"""
-    <section class="panel" id="locked-to-gitops">
-      <h2>Locked to gitops</h2>
-      <p class="lede">
-        This plane's {@things} are the {@kind} resources a repository holds, applied to
-        the cluster {if @source, do: "from #{@source}", else: "by something other than this plane"}.
-        Change one there, with a commit; the plane reads it from the cluster within a
-        quarter of a minute of it being applied.
-      </p>
-      {render_slot(@inner_block)}
-    </section>
-    """
-  end
-
-  @doc """
-  What the last GitOps pass could not use or could not find, one line per reason. Nothing
-  where there is no problem.
-  """
-  attr(:gitops, :map, default: nil, doc: "the `gitops` a listing carries, atom or string keys")
-
-  def gitops_problems(assigns) do
-    assigns =
-      assign(assigns,
-        problem: gitops_field(assigns.gitops, :problem),
-        reasons: gitops_field(assigns.gitops, :reasons) || [],
-        name: problem_name(assigns.gitops)
-      )
-
-    ~H"""
-    <ul :if={@problem} class="checks">
-      <li :for={reason <- @reasons} class="checks__bad">
-        <span class="checks__name">{@name}</span>
-        <span class="checks__detail">{reason}</span>
-      </li>
-    </ul>
-    """
-  end
-
-  defp problem_name(gitops) do
-    case gitops_field(gitops, :problem) do
-      "refused" -> "generation #{gitops_field(gitops, :problem_generation)} is not used"
-      "missing" -> "no resource in the cluster"
-      "plane_only" -> "not applied from a repository"
-      problem -> problem
-    end
-  end
-
-  # The profiles' listing keys by atom and the triggers' by string, as each listing does.
-  defp gitops_field(nil, _key), do: nil
-  defp gitops_field(gitops, key), do: Map.get(gitops, key, Map.get(gitops, to_string(key)))
-
-  @doc """
-  Bytes, for a person.
-
-  Binary units, because what is being measured is a volume and a disk, and a reader
-  comparing this against `kubectl` should see the same number.
-  """
-  @spec bytes(integer() | nil) :: String.t()
-  def bytes(nil), do: "—"
-  def bytes(count) when count < 1024, do: "#{count} B"
-  def bytes(count) when count < 1024 * 1024, do: "#{Float.round(count / 1024, 1)} KiB"
-
-  def bytes(count) when count < 1024 * 1024 * 1024,
-    do: "#{Float.round(count / 1024 / 1024, 1)} MiB"
-
-  def bytes(count), do: "#{Float.round(count / 1024 / 1024 / 1024, 2)} GiB"
 
   @doc """
   Micros, as money.
@@ -328,29 +186,6 @@ defmodule Troupe.Plane.Web.Live.Layout do
     <span class="mono" style="font-variant-numeric: tabular-nums">
       <span :if={is_integer(@micros) and @micros > 0} class="muted">$</span>{figure(@micros)}
     </span>
-    """
-  end
-
-  @doc """
-  What a session did on GitHub, from its record (`sessions.github`): its draft pull request
-  as a link, its branch and last commit where it has opened none, and that it stopped after
-  its red CI rounds. An em dash for a session that has done nothing there.
-  """
-  attr(:github, :map, default: nil)
-
-  def on_github(assigns) do
-    ~H"""
-    <span :if={@github && @github["pull_request"]}>
-      <a href={@github["pull_request"]["url"]}>#{@github["pull_request"]["number"]}</a>
-      <span :if={@github["branch"]} class="mono muted">{@github["branch"]}</span>
-    </span>
-    <span :if={@github && !@github["pull_request"] && @github["branch"]} class="mono">
-      {@github["branch"]} {String.slice(@github["commit"] || "", 0, 7)}
-    </span>
-    <span :if={@github && @github["stopped"]} class="muted">
-      stopped after its red CI rounds
-    </span>
-    <span :if={!(@github && @github["branch"])} class="none">—</span>
     """
   end
 

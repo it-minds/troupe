@@ -56,9 +56,14 @@ defmodule Troupe.Plane.Admin.API do
     %Argument{
       name: "image",
       type: :string,
-      required: true,
       description:
-        "The worker image, as repository:tag or repository@sha256:digest. A digest pins it; a tag does not. Or the word release: the worker image of the release this plane is running, which the plane writes again after every upgrade so the profile moves with the platform. release is refused on a plane deployed without a worker image."
+        "The worker image, as repository:tag or repository@sha256:digest. A digest pins it; a tag does not. Or the word release: the worker image of the release this plane is running, which the plane writes again after every upgrade so the profile moves with the platform. release is refused on a plane deployed without a worker image. Needed unless extends names a profile, whose image is then this one's where it sets none."
+    },
+    %Argument{
+      name: "extends",
+      type: :string,
+      description:
+        "The one profile this one extends, or null for none. The plane resolves the two into the profile in effect, which is all the cluster sees: egress.fqdns, egress.gitHosts and MCP servers are added to the parent's (a server with a parent's name replaces it only with override: true); max_sessions is the lower of the two; a parent's personalTools forbid and repositoryOverridesBundle false hold whatever this one says; image, size_class, provisioner, the llm fields, the channel and every other spec field are the parent's where this one sets none; llm.secretRef, mcpIdentities, warm_workers and grants are never inherited. Send only what differs from the parent: what this profile sets stops following the parent. A chain is at most four profiles; a missing parent or a cycle is refused. Refused on a gitops plane."
     },
     %Argument{
       name: "size_class",
@@ -139,6 +144,12 @@ defmodule Troupe.Plane.Admin.API do
       type: :string,
       description:
         "The App's private key, the PEM file GitHub downloads, as text. Imported into OpenBao's transit engine as a key that cannot be exported; a key already there gets this one as its next version, and the plane signs with the newest. Blank or absent leaves the key as it is."
+    },
+    %Argument{
+      name: "webhook_secret",
+      type: :string,
+      description:
+        "The secret typed into the App's webhook settings, at least 32 characters (openssl rand -hex 32 makes one). Imported into OpenBao's transit engine as an HMAC key that cannot be exported, and checked against every delivery's X-Hub-Signature-256 at POST /webhook/github. A secret already there gets this one as its next version. Blank or absent leaves it as it is."
     }
   ]
 
@@ -309,7 +320,7 @@ defmodule Troupe.Plane.Admin.API do
           values: Trigger.source_kinds(),
           required: true,
           description:
-            "schedule (fired by cron), webhook (fired at POST /trigger/<id> with its own key, or by an executor outside the plane) or manual (fired only by hand)."
+            "schedule (fired by cron), webhook (fired at POST /trigger/<id> with its own key, minted when the trigger is created and answered once; or, naming a repository, by the GitHub App's signed deliveries) or manual (fired only by hand)."
         },
         %Argument{
           name: "cron",
@@ -326,7 +337,32 @@ defmodule Troupe.Plane.Admin.API do
         %Argument{
           name: "provider",
           type: :string,
-          description: "For a webhook: who sends it, for the executor that receives it."
+          description:
+            "For a webhook: who sends it, for the executor that receives it; github for a trigger on a repository."
+        },
+        %Argument{
+          name: "repository",
+          type: :string,
+          description:
+            "For a webhook from GitHub: the repository, owner/name, one the plane's GitHub App is installed on and the profile declares the Git host for. Its sessions are created with it, and the trigger is fired by the App's deliveries, with no key."
+        },
+        %Argument{
+          name: "label",
+          type: :string,
+          description:
+            "For a trigger on a repository: an issue given this label starts a run (issues.labeled)."
+        },
+        %Argument{
+          name: "command",
+          type: :string,
+          description:
+            "For a trigger on a repository: a comment on an issue whose first line is this, such as /troupe fix, by the repository's owner, a member or a collaborator, starts a run (issue_comment.created)."
+        },
+        %Argument{
+          name: "ref",
+          type: :string,
+          description:
+            "For a trigger on a repository: the branch its sessions clone. The default branch where absent."
         }
       ]
     },
@@ -403,6 +439,13 @@ defmodule Troupe.Plane.Admin.API do
       function: :profiles_list,
       summary:
         "Every profile, with its pods, conditions and load. On a gitops plane each carries `gitops`: the repository it comes from, the resource generation it was read at, and any problem the last pass reported — `refused` (the resource fails the plane's checks and is not used, with the reasons), `missing` (a row the cluster has no resource for), `plane_only` (nothing applies it from a repository yet) or `unwritten`. A refused resource with no row is listed too.",
+      risk: :read
+    },
+    %Method{
+      name: "admin.profile.choices",
+      function: :profile_choices,
+      summary:
+        "What a profile's fields may be: every provider type llm.provider may name, with what each asks for (where it is, whether it needs a key), and every size class with how many sessions share a worker and what it is for. The lists the plane checks a profile against, so a form offers no choice it would refuse.",
       risk: :read
     },
     %Method{
@@ -513,7 +556,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.get",
       function: :profile_get,
       summary:
-        "One profile in full: the spec that was asked for, what policy makes of it, and what is actually running. Read this before changing one.",
+        "One profile in full: the spec that was asked for, what policy makes of it, and what is actually running. Read this before changing one. For a profile that extends another, spec and written are what it sets itself, which is what to send back, and profile is the profile in effect; extended_by names the profiles that extend this one.",
       risk: :read,
       arguments: [
         %Argument{
@@ -521,6 +564,12 @@ defmodule Troupe.Plane.Admin.API do
           type: :string,
           required: true,
           description: "The profile's name."
+        },
+        %Argument{
+          name: "effective",
+          type: :boolean,
+          description:
+            "With true, the answer's effective is the profile in effect, resolved through what it extends: the chain, the profile, and fields, each path and value with the profile it came from, and problems the resolution reports (a parent's key or server this one has no credential of its own for)."
         }
       ]
     },
@@ -528,7 +577,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.put",
       function: :profile_put,
       summary:
-        "Create or update a profile, returning the diff that was applied. Refused on a gitops plane as managed_by_gitops: there a repository holds the profiles, and a change is a commit to it. Refused as invalid_params, with Cilium or without, for a profile whose workers are pods and whose LLM endpoint, MCP servers (its own or its channel's) or egress.fqdns name a loopback or link-local address, which those pods do not reach: `unreachable` names each, `reason` says what to do. Without Cilium, one on another port, or at another address, gets a rule of its own in the pods' NetworkPolicy.",
+        "Create or update a profile, returning the diff that was applied. Refused on a gitops plane as managed_by_gitops: there a repository holds the profiles, and a change is a commit to it. Refused as invalid_params, with Cilium or without, for a profile whose workers are pods and whose LLM endpoint, MCP servers (its own or its channel's) or egress.fqdns name a loopback or link-local address, which those pods do not reach: `unreachable` names each, `reason` says what to do. Without Cilium, one on another port, or at another address, gets a rule of its own in the pods' NetworkPolicy. A change to a profile others extend rewrites each of them as it now resolves, after checking each as a put of it would be, and is audited once with extended_by naming them; the answer's extended_by has each one's changes and provisioning.",
       risk: :write,
       arguments: [
         %Argument{
@@ -545,7 +594,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.preview",
       function: :preview,
       summary:
-        "What policy makes of a profile and what would change, without writing anything. The same check admission makes.",
+        "What policy makes of a profile and what would change, without writing anything. The same check admission makes. A profile that extends another is judged as it would be in effect; extended_by lists every profile below this one as the write would leave it, each with its changes, the policy's verdict and a problem that would refuse the write.",
       risk: :read,
       arguments: [
         %Argument{
@@ -561,7 +610,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.delete",
       function: :profile_delete,
       summary:
-        "Remove a profile. Sessions on it become read-only rather than being erased, and its pods go away. Refused on a gitops plane as managed_by_gitops, except for a row the cluster has no resource for (reported missing), which it deletes and nothing else.",
+        "Remove a profile. Sessions on it become read-only rather than being erased, and its pods go away. Refused on a gitops plane as managed_by_gitops, except for a row the cluster has no resource for (reported missing), which it deletes and nothing else. Refused as conflict while other profiles extend it, naming them in extended_by.",
       risk: :destructive,
       confirm: "name",
       arguments: [
@@ -1233,6 +1282,45 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.github.check",
+      function: :github_check,
+      summary:
+        "Test the plane's GitHub App without changing it: an App ID is set, OpenBao transit signs with its key, GitHub knows the App by the JWT that key signs, and every installation set here is one GitHub lists for it. Four named checks, each with what it found, and GitHub's slug and name for the App once GitHub has answered.",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
+      name: "admin.github.deliveries",
+      function: :github_deliveries,
+      summary:
+        "The deliveries the App's webhook took, newest first: GitHub's id for each (X-GitHub-Delivery), its event and action, when it came, and what the plane did with it (the runs it fired, the session it resumed, or why neither). Never a body.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "limit",
+          type: :integer,
+          required: false,
+          description: "How many, newest first: 50 when absent, 200 at most."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.github.delete",
+      function: :github_delete,
+      summary:
+        "Forget the plane's GitHub App: its App ID, API URL, installations, and which key version and webhook secret version are its own. A session naming a repository is refused from then on, a pod is given no token for one, and a delivery to /webhook/github is refused. The key and the secret stay in OpenBao transit, unused. Confirmed by the App ID.",
+      risk: :destructive,
+      confirm: "app_id",
+      arguments: [
+        %Argument{
+          name: "app_id",
+          type: :integer,
+          required: true,
+          description: "The App ID, typed back to confirm."
+        }
+      ]
+    },
+    %Method{
       name: "admin.identity.check",
       function: :identity_check,
       summary:
@@ -1360,7 +1448,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.trigger.put",
       function: :trigger_put,
       summary:
-        "Create or update a trigger. Refused on a gitops plane as managed_by_gitops, switching one on or off included: there a repository holds the triggers, and a change is a commit to it.",
+        "Create or update a trigger. A new webhook trigger is made with its key: the answer carries key and url once, and nothing shows the key again (a trigger on a GitHub repository needs none). Refused on a gitops plane as managed_by_gitops, switching one on or off included: there a repository holds the triggers, and a change is a commit to it.",
       risk: :write,
       arguments: [
         %Argument{

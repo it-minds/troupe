@@ -232,7 +232,6 @@ tbody tr:hover td,
 tbody tr:hover th { background: var(--color-bg-hover); }
 
 td.num, th.num { text-align: right; }
-td.actions { text-align: right; white-space: nowrap; }
 
 /* A non-healthy row carries a 3px left marker in its own status colour. No zebra
    striping anywhere: it fights the marker and adds noise at this density. */
@@ -247,12 +246,6 @@ tr.row--marked.row--rejected th[scope="row"] { color: var(--color-status-rejecte
 tr.row--marked.row--missingCredential th[scope="row"] { color: var(--color-status-missing-credential-fg); }
 tr.row--marked.row--dormant th[scope="row"] { color: var(--color-status-dormant-fg); }
 tr.row--marked.row--disconnected th[scope="row"] { color: var(--color-status-disconnected-fg); }
-
-/* A changed cell flashes once and fades. The only decorative timing in the product, and
-   decorative on purpose: it says where to look after you glanced away. */
-td.changed { animation: settle var(--motion-duration-settle) ease-out 1; }
-
-@keyframes settle { from { background: var(--color-table-changed-cell); } to { background: transparent; } }
 
 .empty {
   padding: var(--space-6) var(--space-5);
@@ -398,20 +391,7 @@ button,
 button:hover, .button:hover { background: var(--color-bg-hover); }
 button[disabled] { opacity: 0.5; cursor: not-allowed; }
 
-/* Buttons are neutral. Status is the accent system and nothing else is coloured — the
-   one exception is a destructive confirm, which only becomes red at the moment it
-   becomes destructive. */
-button.destructive:not([disabled]) {
-  border-color: var(--color-status-broken-border);
-  background: var(--color-status-broken-bg);
-  color: var(--color-status-broken-fg);
-  min-height: var(--density-control-height-touch);
-}
-
-.actions button { min-height: var(--density-control-height); }
-
 form { display: flex; flex-direction: column; gap: var(--density-field-gap); max-width: 34rem; }
-form.row { flex-direction: row; flex-wrap: wrap; align-items: flex-end; }
 
 label { display: flex; flex-direction: column; gap: var(--space-1); font: var(--typography-role-label); color: var(--color-text-secondary); }
 
@@ -476,22 +456,10 @@ pre {
 .setting:last-of-type { border-bottom: 0; }
 .setting__actions { display: flex; gap: var(--space-2); }
 
-.setting--fixed {
-  display: grid;
-  grid-template-columns: minmax(11rem, auto) 1fr;
-  column-gap: var(--space-4);
-  align-items: baseline;
-}
-
-.setting__label { font: var(--typography-role-label); color: var(--color-text-secondary); }
-.setting__value { color: var(--color-text-primary); overflow-wrap: anywhere; }
-.setting--fixed .field-help { grid-column: 1 / -1; margin: var(--space-1) 0 0; }
-
 /* ---------- check lists ---------- */
 
 /* A result with what each check proved and how long it took, rather than a tick. Read
    after something has gone wrong, so every line says which thing it is about. */
-.checks-block { margin-top: var(--space-6); }
 .checks { list-style: none; margin: var(--space-4) 0; padding: 0; }
 
 .checks li {
@@ -511,132 +479,12 @@ pre {
 .checks__bad { border-left-color: var(--color-status-broken-fg); }
 .checks__name { font: var(--typography-role-data-strong); color: var(--color-text-primary); }
 .checks__detail { color: var(--color-text-secondary); }
-.checks__took { white-space: nowrap; }
 
 @media (max-width: 900px) {
-  .checks li,
-  .setting--fixed { grid-template-columns: 1fr; }
+  .checks li { grid-template-columns: 1fr; }
 }
 
-/* ---------- diffs ---------- */
-
-/* One line per field that moved, with the path and both values. Used identically for a
-   profile's changes, a bundle version and an audit entry — never a coloured blob that
-   says something changed without saying what. */
-.diff { list-style: none; margin: var(--space-4) 0; padding: 0; }
-
-.diff__row {
-  display: grid;
-  grid-template-columns: minmax(12rem, auto) 1fr 1fr;
-  gap: var(--space-3);
-  align-items: baseline;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  background: var(--color-diff-gutter-bg);
-  margin-bottom: var(--space-1);
-  overflow-wrap: anywhere;
-}
-
-.diff__field { color: var(--color-diff-hunk-header); }
-
-.diff__from {
-  color: var(--color-diff-removed-text);
-  background: var(--color-diff-removed-bg);
-  box-shadow: inset var(--border-marker) 0 0 0 var(--color-diff-removed-marker);
-  padding: 0 var(--space-2);
-}
-
-.diff__to {
-  color: var(--color-diff-added-text);
-  background: var(--color-diff-added-bg);
-  box-shadow: inset var(--border-marker) 0 0 0 var(--color-diff-added-marker);
-  padding: 0 var(--space-2);
-}
-
-/* ---------- one MCP server's row in the profile editor ---------- */
-
-.server {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-  gap: var(--space-3);
-  align-items: end;
-  padding: var(--space-4);
-  border: var(--border-hairline) solid var(--color-border-hairline);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-raised);
-  margin-bottom: var(--space-3);
-  max-width: none;
-}
-
-.server .setting__actions,
-.server .field-help { grid-column: 1 / -1; }
-
-/* A checkbox reads left to right; every other label reads top to bottom. */
-.toggle { flex-direction: row; align-items: center; gap: var(--space-3); }
-.toggle input { min-height: auto; }
-
-@media (max-width: 900px) {
-  .diff__row { grid-template-columns: 1fr; }
-}
-
-/* ---------- the ladder ----------
-
-   Rule 1 of the console: every effective value names the rung that decided it. The chip
-   is text — the rung's name is inside the element — and everything here is set apart by
-   weight, a hairline and a background, never by hue alone. A reader who cannot see the
-   colour reads the same page. */
-
-.rung {
-  display: inline-block;
-  font: var(--typography-role-micro);
-  letter-spacing: 0.03em;
-  padding: 0 var(--space-2);
-  border: var(--border-hairline) solid var(--color-border-hairline);
-  border-radius: var(--radius-pill);
-  background: var(--color-bg-sunken);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-}
-
-/* The floor and the rungs nobody edits from here read quieter than the two that are
-   somebody's to change. Still only a reinforcement of what the word already says. */
-.rung--deployment { color: var(--color-text-muted); }
-.rung--platform { color: var(--color-text-primary); border-color: var(--color-border-strong); }
-.rung--team { color: var(--color-text-primary); }
-
-.rungs { margin: 0 0 var(--space-6); display: grid; gap: var(--space-3); }
-
-.rungs__rung {
-  display: grid;
-  grid-template-columns: 9rem 1fr;
-  gap: var(--space-4);
-  align-items: baseline;
-}
-
-.rungs__rung dt { margin: 0; }
-.rungs__rung dd { margin: 0; color: var(--color-text-secondary); font: var(--typography-role-body); }
-
-@media (max-width: 40rem) {
-  .rungs__rung { grid-template-columns: 1fr; gap: var(--space-1); }
-}
-
-/* The cell that won. Marked, and also *said* — the template writes "in force" into the
-   cell, because the most consequential assertion on the page cannot be a shade. */
-.ladder__won {
-  background: var(--color-bg-selected);
-  color: var(--color-text-primary);
-  font: var(--typography-role-data-strong);
-}
-
-/* The chip beside a field, where what is in force is not what this rung holds. */
-.setting__rung {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  margin-left: var(--space-3);
-  font: var(--typography-role-micro);
-  color: var(--color-text-muted);
-}
+/* ---------- prose ---------- */
 
 /* A sentence under a heading that qualifies what follows. Between `.lede`, which
    introduces a page, and `.field-help`, which belongs to one control. */
@@ -645,48 +493,3 @@ pre {
   color: var(--color-text-secondary);
   margin: 0 0 var(--space-4);
 }
-
-/* "Nothing here", inside a table rather than instead of one. `.empty` is the panel-level
-   version; this is a cell. */
-.none { color: var(--color-text-muted); font: var(--typography-role-body); }
-
-/* A trigger's revisions, fetched when somebody asks. Each carries its whole document, so
-   the document is set in a sunken block rather than run together with the heading. */
-.revisions { display: grid; gap: var(--space-5); margin: var(--space-4) 0 var(--space-6); }
-.revision h4 { margin: 0 0 var(--space-2); font: var(--typography-role-section-title); }
-
-.revision pre {
-  margin: 0;
-  padding: var(--space-4);
-  overflow-x: auto;
-  font: var(--typography-role-data);
-  background: var(--color-bg-sunken);
-  border: var(--border-hairline) solid var(--color-border-hairline);
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-}
-
-/* ---------- ceilings ----------
-
-   One rung per block, narrowest first, each a bar with its figures beside it. The one
-   that binds is marked with a chip that says so in words: which number refuses first is
-   the whole answer, and an answer given in a shade is no answer to half the readers. */
-
-.ceilings { display: grid; gap: var(--space-5); margin-top: var(--space-5); }
-
-.ceiling {
-  padding: var(--space-4) var(--space-5);
-  border: var(--border-hairline) solid var(--color-border-hairline);
-  border-left-width: var(--border-marker);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-sunken);
-}
-
-.ceiling h3 {
-  margin: 0 0 var(--space-1);
-  display: flex;
-  gap: var(--space-3);
-  align-items: baseline;
-}
-
-.ceiling p { margin: 0 0 var(--space-3); }

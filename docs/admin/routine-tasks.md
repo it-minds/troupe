@@ -1,7 +1,7 @@
 # Routine tasks
 
 Step lists for the common changes. Each administrative step names the `admin.*` method it
-is; run it from its console page at `/admin`, as the MCP tool of the same name with
+is; run it from its page in the console at `/console` ([console.md](console.md)), as the MCP tool of the same name with
 underscores (`admin_team_enable`) on `/mcp`, or as JSON-RPC on `/rpc` with a plane token.
 Arguments and their meanings are in the method table
 ([roles-and-permissions.md §9](roles-and-permissions.md#9-the-admin-methods)). `kubectl` and
@@ -79,6 +79,35 @@ The setting changes every profile's pod template: each reports `UpgradePending` 
 pods are replaced as they empty, under the profile. `kubectl -n troupe-system rollout status
 daemonset/troupe-worker-profiles` says every node has it.
 
+**Upgrading to 0.20.0 from earlier.** The control port now takes TLS only by default
+(`plane.controlTls.requireTls: true`): a worker that dials it in plaintext is closed
+before it is read, and cannot reach the plane until it is replaced. Every pod a 0.19
+operator made dials with TLS, so check first that none older is left:
+
+1. `kubectl -n troupe-system logs <plane pod> | grep 'enrolled as'` on every plane
+   replica: each pod says once, when it enrols, whether it came "over TLS" or "in
+   plaintext", and every pod enrols again when the plane restarts. A pod whose last line
+   says "in plaintext" and that still runs is one an operator before 0.19 made;
+   `admin.pod.drain` it, or wait for it to empty and be replaced, until none is left.
+2. Or upgrade with `plane.controlTls.requireTls: false`, and turn it on once the log is
+   clear. An installation without TLS on the control port
+   (`plane.controlTls.enabled: false`) sets `requireTls: false` too, or the chart refuses
+   to render.
+
+After the upgrade, a pod still dialling in plaintext shows as a warning, "refused a
+plaintext control connection", once a minute per address with the count of the rest. A
+profile whose namespace has no `troupe-plane-ca` yet says so in its `PlaneCAMissing`
+condition.
+
+**Identity, from 0.20.0.** A sign-in or a SCIM push that finds nobody under its subject
+adopts the row SCIM gave that `externalId` only when the row's email or `userName` agrees
+with the token's or the push's. Otherwise the sign-in gets a row of its own, a push is
+refused (`409`, `uniqueness`), the refusal is audited as `person.adopt_refused`, and
+`admin.identity.duplicates` lists the pair ([§SCIM](#scim)). A SCIM `PUT` to
+`/Users/<id>` changes the person at that id, and a push under a `removed:` or `svc:`
+subject is refused. A person SCIM deletes comes off every trigger's `notify` list, and
+their spend stays with their tombstone.
+
 A release publishes the chart and the images and deploys nothing; every deployment rolls
 it this way, from wherever it keeps its own values.
 
@@ -147,7 +176,7 @@ people may offer their own signed-in tools to a profile's pods is the profile's
 
 Which versions of troupe, troupe-daemon and the desktop app this plane serves, per
 component (`tui`, `daemon`, `desktop`): a **recommended** version, a **minimum** and a
-**blocked** list (Decision 868). The **Client versions** panel on the console's Policy page
+**blocked** list (Decision 868). The console's **Client versions** screen
 is `admin.clients.get` and `admin.clients.put {component, policy: {recommended, minimum,
 blocked}}`; a platform admin's to change, a team admin's to read, audited as `clients.put`.
 Nothing set serves every version.
@@ -184,23 +213,33 @@ Nobody is a platform admin because `platform_admin_group` or `groups_claim` is w
 1. Turn break-glass on if it is not: a Secret with key `token`
    (`openssl rand -base64 48`), `plane.breakglass.secretName` naming it, `helm upgrade`.
 2. Open `https://<plane>/admin/breakglass` and enter the token. You are a platform admin
-   for the lifetime, marked on every page and in the audit log.
-3. Check the right group and save it on the **Policy** page.
+   for the lifetime, marked on the page and in the audit log. The page shows the identity
+   check, and sign-in as the plane holds it.
+3. Where the wrong value was saved in the console, put it back to the deployment's there
+   (*back to the deployment*). Where the deployment's own value is wrong, set
+   `plane.platformAdminGroup` or `plane.groupsClaim` and roll; the page sets nothing
+   itself.
 4. Sign in normally to confirm; turn break-glass off (`secretName: ""`, upgrade, delete the
    Secret).
 
 ## SCIM
 
-On the console's **Identity provider** card, *create a token* (`admin.scim.rotate`): shown
+On the console's **Sign-in** screen, *make a token* (`admin.scim.rotate`): shown
 once. Give the provider the token and the base URL `https://<plane>/scim/v2`, keyed on
 `externalId` = the subject. `admin.scim.get` shows the last request; `admin.scim.update
 {attrs: {teams_from_groups: true}}` makes pushed groups teams; `admin.scim.delete` removes the
 token. The deployment's `troupe-plane-scim` Secret (`plane.scim.enabled`) opens the door
 too. Authentik, step by step: [authentik.md §4](authentik.md#4-scim-dry-run-first).
 
+`admin.identity.duplicates` lists people held twice. A set `by: "external_id"` is an
+adoption the plane refused: a sign-in or a push under a value SCIM gave another row as its
+`externalId`, whose email and `userName` both differ from that row's. If they are one
+person, make the email or `userName` agree at the provider; if they are two, the
+provider's `externalId` mapping gives two people one value, and is what to fix.
+
 ## The identity provider
 
-The **Identity provider** card (`admin.provider.get`, `admin.provider.check`,
+The console's **Sign-in** screen (`admin.provider.get`, `admin.provider.check`,
 `admin.provider.put`, `admin.provider.reset`) changes the issuer, client, secret,
 endpoints and scopes behind a check against what the provider publishes; it overrides the
 deployment until reset. To rotate the client secret in the deployment instead, update

@@ -73,6 +73,15 @@ every `sub` changes, and nothing links a person's old one to their new one.
 > push into a plane that has people on it, with the wrong answer here, is how a directory
 > of duplicates is made.
 
+**Check the email and the username too.** A sign-in or a push that finds nobody under its
+subject but finds the row SCIM gave that value as `externalId` takes that row over only
+when the row's email or `userName` agrees with what it carries: a sign-in's `email` or
+`preferred_username` claim, a push's primary email or `userName`. Map SCIM's `userName`
+from the same attribute the token's `preferred_username` comes from (the username, by
+default), and keep `email` in the token's scopes. When neither agrees, nothing is merged:
+a sign-in gets a row of its own, a push is refused, and `admin.identity.duplicates` lists
+the pair, which is the place to look after changing a mapping.
+
 ### Groups are the same problem again
 
 A team draws its members from groups, and `Group.external_id` is the key. It is set by
@@ -198,8 +207,8 @@ values.
 | `mcp_scope` | blank, unless the registration exposes the MCP scope under another name |
 
 `groups_claim` (`groups`) and `platform_admin_group` (the admin group's UUID; see section 3
-for when) are on the **Policy** page, under who administers the platform, which saves the
-group behind the same check.
+for when) are on the console's **Policy and settings**, under who administers the platform,
+which saves the group behind the same check.
 
 The same values go in the chart if you would rather the deployment hold them:
 `plane.oidc.*`, the client secret in the `troupe-plane-oidc` Secret, and
@@ -227,16 +236,19 @@ Authentik starts at step 2, and needs break-glass all the same.
    and the repair is a database write. `/admin/breakglass` answering 404 means it is not
    set.
 2. **Create the Authentik objects.** SSO only. No SCIM provider yet.
-3. **Point the plane at Authentik.** The Provider card, or `plane.oidc.*` and a rollout.
+3. **Point the plane at Authentik.** The console's **Sign-in** screen, or `plane.oidc.*` and a rollout.
    Everyone signed in at this moment keeps their console session until it expires and
    nothing else.
 4. **One person signs in through Authentik.** They arrive as a new person: no team, not
    an administrator, and none of their old sessions. That is expected. What matters is
    that their groups are now rows here.
-5. **Open `/admin/breakglass`** with the token, go to **Policy**, and set
-   `platform_admin_group` to the admin group's UUID. The check now passes, because the
-   person from step 4 is known to carry it. Break-glass sessions are short, audited, and
-   marked on every page.
+5. **Make the admin group the deployment's**: set `plane.platformAdminGroup` to its UUID
+   and roll. Then open `/admin/breakglass` with the token: the page there shows the
+   identity check, which now passes because the person from step 4 is known to carry it.
+   If `platform_admin_group` was changed in the console, the stored value still wins over
+   the deployment's, so put it back to the deployment's there. That page only reads, and
+   puts sign-in back to what the deployment says; a value is set in the deployment.
+   Break-glass sessions are short, audited, and marked on every page.
 6. **That person signs in again.** They are a platform admin.
 7. **Enable teams** from the groups on the Teams screen, and grant profiles.
 

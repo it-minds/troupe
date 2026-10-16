@@ -68,14 +68,14 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_HOST` | `localhost` | endpoint host; issuer fallback | `plane.host` |
 | `TROUPE_BASE_URL` | unset | public URL: console redirect URI, MCP resource and scope, token issuer. Effectively required; the chart always renders it | `plane.baseUrl`, default `https://<plane.host>` |
 | `TROUPE_APP_URL` | `/app` | where `/` links to the GUI, and the `plane.app` address `/.well-known/troupe` gives `troupe-daemon open`; empty says no GUI is mounted | `plane.appUrl`, default `gui.basePath` when `gui.enabled` |
-| `TROUPE_CONSOLE_URL` | `/console` | where `/`'s console door and the LiveView console's Overview point; empty says no console is mounted, and both keep `/admin` | `console.basePath` when `console.enabled`, else empty |
+| `TROUPE_CONSOLE_URL` | `/console` | where `/`'s console door and the `/admin` page point; empty says no console is mounted, and both say the plane is administered over the admin API | `console.basePath` when `console.enabled`, else empty |
 | `TROUPE_CLI_URL` | empty | where `/` links to the TUI; empty says to ask an administrator | `plane.cliUrl` |
 | `TROUPE_CORS_ORIGINS` | CORS off | exact origins answered on `/rpc`, `/auth/exchange`, `/.well-known/*` | `plane.corsOrigins` |
 | `TROUPE_LOG_FORMAT` | text | `"json"`: one object per line with `request_id`, `session_id` | none |
 | `RELEASE_DISTRIBUTION`, `TROUPE_NODE_BASENAME`, `TROUPE_PLANE_SELECTOR` | set by chart | `name` clusters replicas through libcluster's Kubernetes topology | `plane.distribution` |
 | `TROUPE_PLANE_CONTROL_PORT` | `4001` | the control listener workers dial | `plane.controlPort` |
 | `TROUPE_PLANE_CONTROL_TLS_DIR` | unset | where the control port's certificate is (`tls.crt`, `tls.key`, `ca.crt`, as cert-manager writes them), read at each handshake; a registered machine enrols over TLS only and is given `ca.crt` at registration. Unset: plaintext alone, and no machine can be registered | `/etc/troupe/control-tls` from `plane.controlTls.secretName`, with `plane.controlTls.enabled` |
-| `TROUPE_PLANE_CONTROL_REQUIRE_TLS` | unset (off) | `"true"`: the control port takes TLS only, a pod's connection included; a plaintext one is closed once its first byte says what it is, with a warning naming the peer. The log line of each enrolment says whether it came over TLS | `plane.controlTls.requireTls` |
+| `TROUPE_PLANE_CONTROL_REQUIRE_TLS` | unset: on where `TROUPE_PLANE_CONTROL_TLS_DIR` is set, off where it is not | `"true"`: the control port takes TLS only, a pod's connection included; a plaintext one is closed once its first byte says what it is, with a warning naming the peer, once a minute per address with the count of those not said. `"false"`: pods may dial in plaintext beside TLS, and the port says so as a warning when it starts, as it does when it has no certificate. The log line of each enrolment says whether it came over TLS | `"true"` or `"false"` from `plane.controlTls.requireTls` with `plane.controlTls.enabled`, on by default from 0.20 |
 | `TROUPE_GROUPS_CLAIM` | `groups` | deployed `groups_claim` | `plane.groupsClaim` |
 | `TROUPE_PLATFORM_ADMIN_GROUP` | unset (nobody); the chart's is `troupe-platform-admins` | deployed `platform_admin_group` | `plane.platformAdminGroup` |
 | `TROUPE_DEPLOYMENT_BUDGET_MICROS` | `0` (no ceiling) | the deployment's monthly ceiling on everything the plane spends, in millionths; the console's `platform_budget_micros` may narrow it, never raise it | `plane.deploymentBudgetMicros` |
@@ -174,7 +174,7 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 | `plane.ingress.enabled`, `.bodySize`, `.rateLimit.{rps,burstMultiplier,connections}` | `true`, `1m`, `20`/`5`/`100` | the plane's Ingress and its nginx limits, per client IP; `rateLimit: null` turns them off |
 | `plane.ingressClassName`, `plane.certIssuer`, `plane.tlsSecretName` | `nginx`, `""`, `""` | the plane's Ingress class and TLS |
 | `plane.distPort`, `plane.maxPorts` | `9100`, `65536` | Erlang distribution port; `+Q` |
-| `plane.controlTls.enabled`, `.certManager`, `.issuer.{kind,name}`, `.secretName`, `.dnsNames`, `.ipAddresses`, `.requireTls` | `true`, `true`, the chart's own CA, `troupe-plane-control-tls`, `[]`, `[]`, `false` | TLS on the control port: a cert-manager `Certificate` for `troupe-plane-control` by its in-cluster names and these, from the named issuer (a CA, not ACME) or from a CA the chart makes (ten years, its key kept on renewal), mounted into the plane. `certManager: false` mounts the Secret as somebody else put it there. The operator is given `ca.crt` alone from the same Secret and copies it into every worker namespace (`troupe-plane-ca`), so the pods dial with TLS. A string for any flag is refused, and `requireTls` without `enabled` ([single-machine.md](single-machine.md)) |
+| `plane.controlTls.enabled`, `.certManager`, `.issuer.{kind,name}`, `.secretName`, `.dnsNames`, `.ipAddresses`, `.requireTls` | `true`, `true`, the chart's own CA, `troupe-plane-control-tls`, `[]`, `[]`, `true` | TLS on the control port: a cert-manager `Certificate` for `troupe-plane-control` by its in-cluster names and these, from the named issuer (a CA, not ACME) or from a CA the chart makes (ten years, its key kept on renewal), mounted into the plane. `certManager: false` mounts the Secret as somebody else put it there. The operator is given `ca.crt` alone from the same Secret and copies it into every worker namespace (`troupe-plane-ca`), so the pods dial with TLS. `requireTls` closes a plaintext connection, a pod's included; before upgrading from 0.19, see [routine-tasks.md](routine-tasks.md#upgrade). A string for any flag is refused, and `requireTls` without `enabled`, so turning `enabled` off needs `requireTls: false` beside it ([single-machine.md](single-machine.md)) |
 | `*.resources` | small requests and limits | container resources; `limits.cpu` also sets `+S` |
 | `gui.enabled`, `gui.replicas`, `gui.basePath` | `true`, `2`, `/app` | the GUI's Deployment, Service, Ingress on `plane.host` and NetworkPolicy. `basePath` must match the image's `TROUPE_GUI_BASE`; `/` is refused |
 | `console.enabled`, `console.basePath` | `true`, `/console` | the [console](console.md)'s Ingress on `plane.host`, to the GUI's Service, which runs while either is enabled. `basePath` must match the image's `TROUPE_CONSOLE_BASE`; `/` and `gui.basePath` are refused |
@@ -296,7 +296,7 @@ Troupe creates no Secrets. Each must exist before the pod that references it sta
 |---|---|---|---|
 | `troupe-plane-database` | `troupe-system` | `url` | always |
 | `troupe-plane-secret-key-base` | `troupe-system` | `value` (≥ 64 bytes) | always |
-| `troupe-plane-oidc` | `troupe-system` | `client-secret` | console sign-in, unless the client secret is saved on the console's **Identity provider** card instead (both copyable overlays leave `plane.oidc.secretName` empty) |
+| `troupe-plane-oidc` | `troupe-system` | `client-secret` | console sign-in, unless the client secret is saved on the console's **Sign-in** screen instead (both copyable overlays leave `plane.oidc.secretName` empty) |
 | `troupe-object-store` | `troupe-system` **and every** `troupe-w-<profile>` | `access-key-id`, `secret-access-key` | the plane's index rebuild and private sessions; every session on a worker |
 | break-glass (your name) | `troupe-system` | `token` | only when the door is wanted |
 | `troupe-plane-scim` | `troupe-system` | `token` | the deployment's SCIM token, with `plane.scim.enabled` |
@@ -401,7 +401,7 @@ machine in one of two ways.
 **From a plane.** The *client defaults* settings (Part C) are the defaults: provider, URL,
 how the key is sent, and the three models; never a key. `client_enforced` is the enforced
 set, a JSON object such as `{"approvals": "deny", "max_turns": 100}`, set on the console's
-Policy page or with `admin.setting.put`, audited like every setting. The plane answers both
+**Organisation** screen or with `admin.setting.put`, audited like every setting. The plane answers both
 in `me.client_defaults` (as `defaults` and `enforced`, beside the fields older clients
 read). A signed-in machine's daemon fetches it whenever a client connects with a plane
 token, keeps a copy in its state directory (`organisation.json`, with which plane and
@@ -435,6 +435,9 @@ enforced:
   base_url: https://llm-gw.example.com/v1
   max_turns: 100
   wall_clock_ms: 3600000
+  permissions:
+    deny: ["shell(git push --force)", "read_file(~/.ssh/**)"]
+    ask: ["mcp(tracker)"]
 ```
 
 `defaults:` takes any key a user's `config.yaml` takes except `trusted_workspaces`, and is
@@ -447,6 +450,13 @@ file and the line, and an unknown key warns. `enforced:` takes only these, each 
 | `approvals` | tighten `wait` to `deny`, not loosen `deny` |
 | `managed_mcp_servers_only`, `managed_permission_rules_only` | turn one on, not turn it off |
 | `provider`, `base_url` | nothing else: the session's provider is this one, and a named provider of another type or at another URL is refused |
+| `permissions` | add rules of its own, not loosen these: every file's per-tool rules are added together and the strictest that matches a call holds, so an enforced `ask` beats a person's `allow` ([per-tool rules](../user/configuration.md#per-tool-permission-rules)) |
+
+A rule under `defaults:` is added the same way and holds the same: no rule is a default a
+person's own file replaces, so `defaults:` and `enforced:` differ for rules only in what
+`managed_permission_rules_only` keeps (both) and how `--explain` names them (`org` and
+`enforced`). On a plane, `client_enforced` takes them as
+`{"permissions": {"deny": ["shell(git push --force)"]}}`, each rule checked when it is set.
 
 Any other key under `enforced:` is not enforced and warns, with the list; the plane refuses
 it outright when it is set. An enforced value is written out in full: `{env:VAR}` is

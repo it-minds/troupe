@@ -104,7 +104,8 @@ defmodule Troupe.Plane.Triggers.Notify do
   Post a run's outcome to its trigger's target, if it has one and the target is allowed.
 
   The body is lifecycle and never content: which trigger, which run, which session, how
-  it ended. Somebody who wants to know what the session *said* has a session id and a
+  it ended, and the link to the draft pull request it opened, if it opened one. Somebody
+  who wants to know what the session *said* has a session id and a
   credential to read it with, which is a different question with a different answer.
 
   Every refusal is logged and none raises. A notification is the last thing that happens
@@ -269,7 +270,10 @@ defmodule Troupe.Plane.Triggers.Notify do
       "fired_at" => DateTime.to_iso8601(run.fired_at),
       "state" => outcome["state"],
       "done_reason" => outcome["done_reason"],
-      "failed_reason" => outcome["failed_reason"]
+      "failed_reason" => outcome["failed_reason"],
+      # The draft pull request the run opened, as a link, or null for none: where a person
+      # goes to review what it did. Metadata like the rest; never its text.
+      "pull_request" => outcome["pull_request"]
     }
   end
 

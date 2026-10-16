@@ -1,17 +1,18 @@
 defmodule Troupe.Plane.ConsoleWalkthroughTest do
   @moduledoc """
-  A whole working deployment, configured from the console and nothing else.
+  A whole working deployment, configured through the console's surface and nothing else.
 
-  Done item 2 of `control-panel.md`, and the one that cannot be proven a screen at a time:
+  Done item 2 of `control-panel.md`, and the one that cannot be proven a method at a time:
   *a platform admin configures a complete working deployment from the console alone —
   identity, a team, a policy, a bundle, a profile, a provisioner, a trigger, a budget —
   with no `kubectl`, no environment variable and no database write, and every step is in
   the audit trail.*
 
-  Every other test here asks whether one screen does its job. This asks whether the screens
-  join up, which is a different question and the one an administrator actually has: each
-  step below starts from what the previous step left on the page, and a step that needed a
-  shell would fail here rather than being discovered by somebody on their first evening.
+  The console is an app of its own (`/console`) and calls the admin methods and nothing
+  else, so the console alone is those methods: each step below is the call its screen
+  makes, through `Troupe.Plane.Admin.API` as `/rpc` dispatches it. The console's own tests
+  prove each screen makes its call; this proves the calls join up, which is the question
+  an administrator actually has on their first evening.
 
   The plane starts empty. Nothing in this file writes through a context except to stand up
   the identity the provider would have supplied — which is exactly the one thing a console
@@ -19,21 +20,24 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
   the escalation the whole arrangement refuses.
   """
 
-  use Troupe.Plane.PanelCase, async: false
+  use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Audit, Bundles, Fleet, Identity, Sessions, Settings, Triggers}
+  alias Troupe.Plane.{Admin, Audit, Bundles, Fleet, Identity, Sessions, Settings, Triggers}
+  alias Troupe.Plane.Admin.API
 
   @moduletag timeout: 120_000
 
   setup do
     start_supervised!(Troupe.Plane.Singleton)
+    Application.put_env(:troupe_plane, :platform_admin_group, "platform")
+    on_exit(fn -> Application.delete_env(:troupe_plane, :platform_admin_group) end)
 
     # What the identity provider supplies and the console cannot: a person, and the group
-    # they arrive carrying. Everything after this is done through a screen.
+    # they arrive carrying. Everything after this is done through the console's methods.
     {:ok, platform} =
       Identity.upsert_group(%{external_id: "platform", display_name: "Platform engineering"})
 
-    {:ok, delivery} =
+    {:ok, _delivery} =
       Identity.upsert_group(%{external_id: "org-consultants", display_name: "Consultants"})
 
     root = person("root@example.test", ["platform"])
@@ -44,50 +48,36 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
     # have an administrator before any team exists.
     {:ok, _} = Identity.enable_team(platform, %{name: "platform"})
 
-    %{root: root, platform: platform, delivery: delivery}
+    on_exit(fn ->
+      Settings.reset("platform_admin_group", "test")
+      Settings.reset("default_erase_after_days", "test")
+    end)
+
+    %{root: Admin.actor_for(root)}
   end
 
-  test "an empty plane becomes a working one, from the console alone", context do
-    conn = sign_in(context.conn, context.root.subject)
+  test "an empty plane becomes a working one, from the console's methods alone", context do
+    call = fn method, params ->
+      assert {:ok, answer} = API.call(method, params, context.root), "#{method} was refused"
+      answer
+    end
 
     # -- 1. Identity: who administers this platform ---------------------------
-    {:ok, identity, _html} = live(conn, "/admin/identity")
-
-    html = identity |> form("#identity-check", %{"group" => "platform"}) |> render_submit()
-
     # The useful question, and the only one worth gating a save on: how many people would
     # administer this afterwards, and are you one of them.
-    assert html =~ "including you."
+    check = call.("admin.identity.check", %{"group" => "platform"})
+    assert List.last(check.checks).detail =~ "including you."
 
     # -- 2. Policy: the group, and a ceiling every team will inherit ----------
-    {:ok, policy, _html} = live(conn, "/admin/policy")
-
-    policy
-    |> element(~s(form[phx-submit="save"]), "platform_admin_group")
-    |> render_change(%{"key" => "platform_admin_group", "value" => "platform"})
-
-    policy |> element(~s(button[phx-click="check"])) |> render_click()
-
-    policy
-    |> element(~s(form[phx-submit="save"]), "platform_admin_group")
-    |> render_submit(%{"key" => "platform_admin_group", "value" => "platform"})
-
-    policy
-    |> element(~s(form[phx-submit="save"]), "default_erase_after_days")
-    |> render_submit(%{"key" => "default_erase_after_days", "value" => "30"})
-
+    call.("admin.setting.put", %{"key" => "platform_admin_group", "value" => "platform"})
+    call.("admin.setting.put", %{"key" => "default_erase_after_days", "value" => "30"})
     assert Settings.get("default_erase_after_days") == 30
 
     # -- 3. Teams: a provider group becomes a team ----------------------------
-    {:ok, teams, _html} = live(conn, "/admin/teams")
-
-    teams
-    |> form("#enable-team", %{
+    call.("admin.team.enable", %{
       "group" => "org-consultants",
-      "name" => "delivery",
-      "budget_micros" => "500000000"
+      "attrs" => %{"name" => "delivery", "budget_micros" => 500_000_000}
     })
-    |> render_submit()
 
     assert %{budget_micros: 500_000_000} = Identity.get_team("delivery")
 
@@ -95,75 +85,58 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
     # retention starts at the platform's value rather than at the release's.
     assert Identity.get_team("delivery").erase_after_days == 30
 
-    # -- 4. Profiles: a worker profile, written from a screen -----------------
-    {:ok, editor, _html} = live(conn, "/admin/profile/new")
+    # -- 4. Profiles: a worker profile, from the choices the plane offers -----
+    choices = call.("admin.profile.choices", %{})
+    assert "standard" in Enum.map(choices.size_classes, & &1.name)
 
-    fields = %{
+    profile = %{
       "name" => "dev",
       "image" => "ghcr.io/troupe/worker:1.4.0",
-      "sizeClass" => "standard",
-      "configBundleChannel" => "stable"
+      "size_class" => "standard",
+      "spec" => %{"configBundleChannel" => "stable"}
     }
 
-    # Typed, then applied. `apply` reads the form's state from the socket rather than from
-    # the submit — which is what lets the page show the diff and the policy verdict *before*
-    # anybody presses it, and means a submit that never changed anything applies nothing.
-    editor |> element("#profile-editor") |> render_change(fields)
-    editor |> element("#profile-editor") |> render_submit(fields)
+    # Rule 2: nothing is applied until its diff has been read.
+    preview = call.("admin.profile.preview", %{"profile" => profile})
+    assert preview.changes["image"]["to"] == "ghcr.io/troupe/worker:1.4.0"
 
-    assert %Fleet.Profile{} = profile = Fleet.get_profile("dev")
-    assert profile.image == "ghcr.io/troupe/worker:1.4.0"
+    call.("admin.profile.put", %{"profile" => profile})
+    assert %Fleet.Profile{image: "ghcr.io/troupe/worker:1.4.0"} = Fleet.get_profile("dev")
 
     # -- 5. Provisioners: what makes its workers, and what that does not give --
-    {:ok, _provisioners, html} = live(conn, "/admin/provisioners")
-
-    assert html =~ "dev"
-    assert html =~ "kubernetes"
+    [kubernetes | _] = call.("admin.provisioners.list", %{})
+    assert kubernetes.name == "kubernetes"
 
     # No operator has reconciled `dev` here, so nothing says its workers have egress by
-    # hostname: the page names that and what they have in its place, rather than claim
-    # everything is enforced. It is still a profile a team may be granted as it stands.
-    assert html =~ "the egress allowlist is checked at admission, not on the wire"
-    refute html =~ "No team may be granted dev"
+    # hostname, and what stands in for it is named. It is still a profile a team may be
+    # granted as it stands.
+    [dev] = call.("admin.profiles.list", %{})
+    assert "fqdn_egress" in dev.missing_guarantees
+    assert dev.guarantees_instead["fqdn_egress"]
+    refute dev.unenforced
 
     # -- 6. Bundles: what a session on that profile gets ----------------------
-    {:ok, bundles, _html} = live(conn, "/admin/bundles")
+    document = %{
+      "schema" => 1,
+      "skills" => [],
+      "mcp_servers" => [],
+      "agents" => [
+        %{
+          "name" => "pr-reviewer",
+          "definition" => "---\ndescription: Reviews\nmode: primary\n---\nYou review."
+        }
+      ]
+    }
 
-    document =
-      Jason.encode!(%{
-        "schema" => 1,
-        "skills" => [],
-        "mcp_servers" => [],
-        "agents" => [
-          %{
-            "name" => "pr-reviewer",
-            "definition" => "---\ndescription: Reviews\nmode: primary\n---\nYou review."
-          }
-        ]
-      })
+    # The first version has nothing to be measured against, and says so.
+    assert call.("admin.bundle.preview", %{"channel" => "stable", "content" => document}).from ==
+             nil
 
-    html =
-      bundles
-      |> element("#bundle-draft")
-      |> render_submit(%{"content" => document, "action" => "check"})
-
-    # Rule 2: nothing is applied until its diff has been read. The first version has
-    # nothing to be measured against, and the page says so rather than showing an empty
-    # diff and letting somebody take it for "no change".
-    assert html =~ "this would be the first version"
-
-    bundles
-    |> element("#bundle-draft")
-    |> render_submit(%{"content" => document, "action" => "publish"})
-
+    call.("admin.bundle.publish", %{"channel" => "stable", "content" => document})
     assert %{version: 1} = Bundles.current("stable")
 
     # -- 7. Teams again: the grant that lets the team use it ------------------
-    {:ok, teams, _html} = live(conn, "/admin/teams")
-
-    teams
-    |> form("#grant-delivery", %{"team" => "delivery", "profile" => "dev"})
-    |> render_submit()
+    call.("admin.team.grant", %{"name" => "delivery", "profile" => "dev"})
 
     assert "dev" in Enum.map(
              Identity.grants_for_team(Identity.get_team("delivery")),
@@ -171,52 +144,45 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
            )
 
     # -- 8. Identity again: a principal for work nobody starts by hand --------
-    {:ok, identity, _html} = live(conn, "/admin/identity")
-
-    html =
-      identity
-      |> form("#new-principal-delivery", %{
+    principal =
+      call.("admin.principal.create", %{
         "team" => "delivery",
-        "name" => "nightly-deps",
-        "profiles" => "dev",
-        "sponsor" => "ada@example.test",
-        "description" => "the nightly dependency update"
+        "principal" => %{
+          "name" => "nightly-deps",
+          "profiles" => ["dev"],
+          "sponsor" => "ada@example.test",
+          "description" => "the nightly dependency update"
+        }
       })
-      |> render_submit()
 
-    assert html =~ "shown once"
+    # Shown once: in this answer and in no other.
+    assert is_binary(principal.secret)
 
     # -- 9. Triggers: a way for it to start on its own ------------------------
-    {:ok, triggers, _html} = live(conn, "/admin/triggers/delivery")
-
-    triggers
-    |> form("#new-trigger", %{
-      "name" => "nightly",
-      "principal" => "svc:delivery/nightly-deps",
-      "profile" => "dev",
-      "cron" => "0 3 * * 1-5",
-      "prompt_template" => "Update every dependency."
+    call.("admin.trigger.put", %{
+      "trigger" => %{
+        "team" => "delivery",
+        "name" => "nightly",
+        "principal" => "svc:delivery/nightly-deps",
+        "profile" => "dev",
+        "source" => %{"kind" => "schedule", "cron" => "0 3 * * 1-5", "tz" => "UTC"},
+        "prompt_template" => "Update every dependency."
+      }
     })
-    |> render_submit()
 
     assert Triggers.get(Identity.get_team("delivery"), "nightly")
 
     # -- 10. Budgets: which ceiling would refuse, and for whom ----------------
-    {:ok, budgets, _html} = live(conn, "/admin/budgets")
+    ceilings =
+      call.("admin.budget.explain", %{"subject" => "ada@example.test", "team" => "delivery"})
 
-    html =
-      budgets
-      |> element("#explain-budget")
-      |> render_submit(%{"team" => "delivery", "subject" => "ada@example.test"})
-
-    assert html =~ "is what refuses first"
-    assert html =~ "the team&#39;s ceiling" or html =~ "the team's ceiling"
+    assert ceilings != []
 
     # -- 11. And a session can be created on what was configured --------------
     #
-    # The proof that the eleven steps above join up rather than each being separately
-    # plausible: what a person's client asks for, answered from configuration that only
-    # ever came from a screen.
+    # The proof that the steps above join up rather than each being separately plausible:
+    # what a person's client asks for, answered from configuration that only ever came
+    # through the console's methods.
     ada = Identity.get_user("ada@example.test")
     assert Identity.may_use?(ada, "dev")
 
@@ -233,8 +199,6 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
     assert session.profile == "dev"
 
     # -- 12. Audit: every step of it, with diffs keyed by path ----------------
-    {:ok, audit, _html} = live(conn, "/admin/audit")
-
     actions = Audit.list(limit: 100) |> Enum.map(& &1.action) |> MapSet.new()
 
     for action <- ~w(setting.put team.enable profile.put bundle.publish team.grant
@@ -245,11 +209,13 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
 
     # Keyed by the path that changed rather than by the object that contains it, which is
     # what makes an audit row readable a year later.
-    setting = Audit.list(limit: 100) |> Enum.find(&(&1.action == "setting.put"))
+    setting =
+      Audit.list(limit: 100)
+      |> Enum.find(&(&1.action == "setting.put" and &1.subject_id == "default_erase_after_days"))
+
     assert %{"default_erase_after_days" => %{"from" => _, "to" => 30}} = setting.detail
 
     # And the trail says so itself: every row of it written through the console verifies.
-    html = audit |> element("#audit-verify") |> render_submit()
-    assert html =~ "The chain verifies"
+    assert call.("admin.audit.verify", %{}).result == :ok
   end
 end

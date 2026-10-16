@@ -126,6 +126,29 @@ defmodule Troupe.Plane.SCIMAnswersTest do
     end
   end
 
+  # The person's subject is their `externalId`, else their `userName`; a body with neither,
+  # or with one that is not a string, names nobody, which is the provider's mistake to fix
+  # and a 400 that says so, not a 500.
+  describe "a user that names nobody" do
+    test "is refused 400 invalidValue, as a create and as a replace", context do
+      {201, ada, _} = request(context, :post, "/scim/v2/Users", user("ada"))
+
+      nobody = user("bo") |> Map.delete("externalId") |> Map.delete("userName")
+      numbered = user("bo") |> Map.delete("externalId") |> Map.put("userName", 42)
+      blank = user("bo") |> Map.put("externalId", "") |> Map.delete("userName")
+
+      for body <- [nobody, numbered, blank],
+          {method, at} <- [post: "/scim/v2/Users", put: path(ada)] do
+        assert {400, error, _} = request(context, method, at, body)
+        assert error["schemas"] == @error
+        assert error["scimType"] == "invalidValue"
+        assert error["detail"] =~ "externalId"
+      end
+
+      assert [_ada] = Identity.list_users()
+    end
+  end
+
   defp user(name) do
     %{
       "schemas" => ["urn:ietf:params:scim:schemas:core:2.0:User"],

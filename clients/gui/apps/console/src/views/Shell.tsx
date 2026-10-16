@@ -15,12 +15,21 @@ import { useConsole } from "../console";
 import { shownMode, useMode } from "../theme";
 import { Wordmark } from "./brand";
 import { Audit } from "./Audit";
+import { Budgets } from "./Budgets";
 import { Bundles, Channel, Version } from "./Bundles";
 import { ClientVersions } from "./ClientVersions";
+import { Connections } from "./Connections";
+import { Hosts } from "./Hosts";
+import { Identity } from "./Identity";
+import { IdentityProvider } from "./IdentityProvider";
+import { Integrations } from "./Integrations";
+import { Pods } from "./Pods";
+import { Policy } from "./Policy";
 import { Profile, Profiles } from "./Profiles";
 import { TriggerPage, Triggers } from "./Triggers";
 import { Organisation } from "./Organisation";
 import { Overview } from "./Overview";
+import { RunPage, Runs } from "./Runs";
 import { Sessions } from "./Sessions";
 import { Team } from "./Team";
 import { Teams } from "./Teams";
@@ -75,9 +84,9 @@ export function Shell(): JSX.Element {
                 <a key={a.id} href={href({ page: a.id })} aria-current={a.id === here.page ? "page" : undefined} className={a.built ? "built" : "later"}>
                   {a.label}
                   {!a.built && (
-                    <span className="later-mark" title="In the plane's current console, for now">
-                      <span aria-hidden="true"> ↗</span>
-                      <span className="visually-hidden"> (in the current console)</span>
+                    <span className="later-mark" title="Not in this console yet">
+                      <span aria-hidden="true"> ○</span>
+                      <span className="visually-hidden"> (not in this console yet)</span>
                     </span>
                   )}
                 </a>
@@ -123,6 +132,8 @@ function titleWithin(page: string, path: string[]): string | null {
   if (!first) return null;
   if (page === "bundles") return second ? `${first} v${second}` : first;
   if (page === "triggers") return second ?? null;
+  if (page === "runs") return "A run";
+  if (page === "sessions") return null;
   return first;
 }
 
@@ -138,10 +149,20 @@ function Screen({ route }: { route: Route }): JSX.Element {
   if (route.page === "teams" && route.team) return <Team name={route.team} tab={route.tab ?? "members"} />;
   if (route.page === "teams") return <Teams />;
   if (route.page === "overview") return <Overview />;
-  if (route.page === "sessions") return <Sessions />;
+  if (route.page === "sessions") return <Sessions query={first ?? ""} key={first ?? ""} />;
+  if (route.page === "runs" && first) return <RunPage id={first} key={first} />;
+  if (route.page === "runs") return <Runs />;
   if (route.page === "audit") return <Audit />;
   if (route.page === "clients") return <ClientVersions />;
   if (route.page === "organisation") return <Organisation />;
+  if (route.page === "integrations") return <Integrations />;
+  if (route.page === "identity") return <Identity />;
+  if (route.page === "signin") return <IdentityProvider />;
+  if (route.page === "policy") return <Policy />;
+  if (route.page === "pods") return <Pods />;
+  if (route.page === "hosts") return <Hosts />;
+  if (route.page === "budgets") return <Budgets />;
+  if (route.page === "connections") return <Connections />;
   return <Unbuilt area={area(route.page)!} />;
 }
 

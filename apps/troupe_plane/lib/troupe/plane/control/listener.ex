@@ -18,7 +18,7 @@ defmodule Troupe.Plane.Control.Listener do
 
   use GenServer
 
-  alias Troupe.Plane.Control.{Connections, Replay, TLS}
+  alias Troupe.Plane.Control.{Connections, Refusals, Replay, TLS}
 
   require Logger
 
@@ -45,13 +45,15 @@ defmodule Troupe.Plane.Control.Listener do
     Process.flag(:trap_exit, true)
     Process.set_label("troupe control listener")
     :ok = Replay.start()
+    :ok = Refusals.start()
 
     port = Keyword.get(opts, :port, Application.get_env(:troupe_plane, :control_port, 4001))
 
     case :gen_tcp.listen(port, backend(opts) ++ @socket_opts) do
       {:ok, socket} ->
         {:ok, actual} = :inet.port(socket)
-        Logger.info("troupe plane: control listener on #{actual}, #{tls_note(opts)}")
+        {level, note} = tls_note(opts)
+        Logger.log(level, "troupe plane: control listener on #{actual}, #{note}")
 
         state = %__MODULE__{socket: socket, port: actual, options: opts}
         {:ok, %{state | acceptor: spawn_acceptor(socket)}}
@@ -99,15 +101,23 @@ defmodule Troupe.Plane.Control.Listener do
   end
 
   # Said once, at start, so a plane that cannot enrol a single machine says why where an
-  # operator looks first.
+  # operator looks first; and as a warning whenever the port takes plaintext, or can take
+  # nothing, since TLS only is what a plane is meant to run with.
   defp tls_note(opts) do
     certificate = TLS.server_options(Keyword.get_lazy(opts, :tls, &TLS.dir/0))
 
     case {certificate, Keyword.get_lazy(opts, :require_tls, &TLS.required?/0)} do
-      {{:ok, _options}, true} -> "TLS only"
-      {{:ok, _options}, _} -> "TLS with its certificate, plaintext for pods"
-      {{:error, why}, true} -> "TLS only, and no worker can enrol until it has one: #{why}"
-      {{:error, why}, _} -> "plaintext only: #{why}"
+      {{:ok, _options}, true} ->
+        {:info, "TLS only"}
+
+      {{:ok, _options}, _} ->
+        {:warning, "TLS with its certificate, plaintext for pods (requireTls is off)"}
+
+      {{:error, why}, true} ->
+        {:warning, "TLS only, and no worker can enrol until it has one: #{why}"}
+
+      {{:error, why}, _} ->
+        {:warning, "plaintext only: #{why}"}
     end
   end
 

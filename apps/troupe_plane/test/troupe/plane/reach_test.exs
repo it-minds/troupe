@@ -16,7 +16,7 @@ defmodule Troupe.Plane.ReachTest do
 
   use Troupe.Plane.PanelCase, async: false
 
-  alias Troupe.Plane.{Admin, Bundles, FakeWorkerProfiles, Fleet, Identity}
+  alias Troupe.Plane.{Admin, Bundles, Fleet, Identity}
   alias Troupe.WorkerProfile.Reach
 
   @moduletag timeout: 60_000
@@ -244,54 +244,6 @@ defmodule Troupe.Plane.ReachTest do
                "MCP server jira at https://169.254.169.254/mcp is at 169.254.169.254, a link-local address"
 
       assert Bundles.current("stable") == nil
-    end
-  end
-
-  describe "the profile editor" do
-    test "says why it was refused, in the console", context do
-      {:ok, view, _html} =
-        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/new")
-
-      view
-      |> element("form")
-      |> render_change(%{
-        "name" => "local",
-        "image" => "ghcr.io/troupe/worker:1",
-        "llm.endpoint" => "http://127.0.0.1:4000/v1"
-      })
-
-      html = view |> element("#profile-editor") |> render_submit()
-
-      assert html =~ "llm.endpoint http://127.0.0.1:4000/v1 is at 127.0.0.1, a loopback address"
-      assert html =~ "metadata"
-      assert Fleet.get_profile("local") == nil
-    end
-  end
-
-  describe "the Workers page" do
-    test "shows what the operator reports of a profile a repository holds", context do
-      # In gitops mode nothing refuses the resource where it is written, so the operator
-      # says it on the profile and the page shows it among the profile's problems.
-      Application.put_env(:troupe_plane, :provisioning_mode, :gitops)
-      on_exit(fn -> Application.delete_env(:troupe_plane, :provisioning_mode) end)
-
-      said = Reach.unreachable([{:llm, "http://127.0.0.1:4000/v1"}])
-
-      condition = %{
-        "type" => "EndpointUnreachable",
-        "status" => "True",
-        "reason" => "LoopbackOrLinkLocal",
-        "message" => Reach.explain(said)
-      }
-
-      FakeWorkerProfiles.start(%{"local" => %{"conditions" => [condition]}})
-      {:ok, _} = Fleet.put_profile(%{name: "local", image: "ghcr.io/troupe/worker:1"})
-
-      {:ok, view, _html} = context.conn |> sign_in(context.root.subject) |> live("/admin/workers")
-
-      shown = view |> element("li.bad", "EndpointUnreachable") |> render()
-      assert shown =~ "llm.endpoint http://127.0.0.1:4000/v1 is at 127.0.0.1, a loopback address"
-      assert shown =~ "metadata"
     end
   end
 

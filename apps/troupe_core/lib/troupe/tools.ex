@@ -9,6 +9,7 @@ defmodule Troupe.Tools do
   """
 
   alias Troupe.Agent.Definition
+  alias Troupe.Config.Permissions
   alias Troupe.Session.{Approvals, ClientTools}
   alias Troupe.{Skills, Tool}
   alias Troupe.Tool.{Ctx, Result}
@@ -64,6 +65,14 @@ defmodule Troupe.Tools do
   # longer, Decision 835), and an agent with every tool (`build`) is neither offered it nor
   # let call it.
   @named_only ~w(onboard_write)
+
+  @doc """
+  The built-in tools by name, each with whether it runs as a task or inside the agent
+  (`:inline`), which never asks: what a permission rule's tool is checked against when a
+  file is read.
+  """
+  @spec builtins() :: [{String.t(), :task | :inline}]
+  def builtins, do: Enum.map(@builtins, &{Tool.name(&1), Tool.mode(&1)})
 
   @doc """
   Every tool available, built-ins plus anything registered in `:extra_tools` that this
@@ -290,19 +299,20 @@ defmodule Troupe.Tools do
   Decide whether a call may proceed at all, before anything is spawned.
 
   Returns `{:run, module, mode}`, or a `Result` the agent hands straight back to the
-  model without running anything.
+  model without running anything. A per-tool rule that denies the call (#658) refuses it
+  here, with its arguments, whatever kind of tool it is.
   """
-  @spec authorize(String.t(), Definition.t(), Ctx.t()) ::
+  @spec authorize(String.t(), Definition.t(), Ctx.t(), map()) ::
           {:run, Tool.handle(), :task | :inline} | {:reject, Result.t()}
-  def authorize(name, %Definition{} = definition, %Ctx{} = ctx) do
+  def authorize(name, %Definition{} = definition, %Ctx{} = ctx, args \\ %{}) do
     case Enum.find(loop_tools(ctx), &(Tool.name(&1) == name)) do
-      nil -> authorize_listed(name, definition, ctx)
+      nil -> authorize_listed(name, definition, ctx, args)
       tool when is_binary(ctx.loop) -> {:run, tool, Tool.mode(tool)}
       _outside_a_loop -> {:reject, Result.error(ctx.call_id, name, {:no_loop, name})}
     end
   end
 
-  defp authorize_listed(name, definition, ctx) do
+  defp authorize_listed(name, definition, ctx, args) do
     case fetch(name, ctx.session_id) |> or_scoped(name, definition, ctx) |> or_gone(name, ctx) do
       {:error, reason} ->
         {:reject, Result.error(ctx.call_id, name, reason)}
@@ -316,10 +326,25 @@ defmodule Troupe.Tools do
             {:reject, Result.error(ctx.call_id, name, {:denied_by_policy, name})}
 
           true ->
-            {:run, tool, Tool.mode(tool)}
+            unless_denied(tool, name, args, ctx)
         end
     end
   end
+
+  defp unless_denied(tool, name, args, ctx) do
+    case rule(name, args, ctx) do
+      {:deny, rule} -> {:reject, Result.error(ctx.call_id, name, {:denied_by_rule, name, rule})}
+      _other -> {:run, tool, Tool.mode(tool)}
+    end
+  end
+
+  # What the configuration's per-tool rules say about this call (#658), or `nil`.
+  defp rule(name, args, %Ctx{config: %{permissions: [_ | _] = rules}} = ctx) do
+    root = if ctx.workspace, do: ctx.workspace.root_real
+    Permissions.decide(rules, name, args, root)
+  end
+
+  defp rule(_name, _args, _ctx), do: nil
 
   # The pod-wide list first, then the session-scoped tools. A name found in neither is
   # unknown; a session-scoped tool the profile does not qualify for is unknown too,
@@ -352,41 +377,65 @@ defmodule Troupe.Tools do
   def run_task(tool, args, %Definition{} = definition, %Ctx{} = ctx) do
     name = Tool.name(tool)
 
-    case permission(tool, name, args, definition) do
-      ask when ask in [:ask, :must_ask] ->
-        case ask(ctx, name, args, ask == :must_ask) do
+    case permission(tool, name, args, definition, ctx) do
+      {ask, rule} when ask in [:ask, :must_ask] ->
+        case ask(ctx, name, args, ask == :must_ask, rule) do
           :allow -> execute(tool, args, ctx)
           :deny -> Result.error(ctx.call_id, name, {:denied, name})
           {:deny, :unattended} -> Result.error(ctx.call_id, name, {:denied_unattended, name})
         end
 
-      :auto ->
+      {:auto, _rule} ->
         execute(tool, args, ctx)
 
-      :deny ->
+      {:deny, nil} ->
         Result.error(ctx.call_id, name, {:denied_by_policy, name})
+
+      {:deny, rule} ->
+        Result.error(ctx.call_id, name, {:denied_by_rule, name, rule})
     end
   end
 
   # A call the tool says a person must answer (`onboard_write` into the config directory,
   # Decision 823) is asked about whatever the profile grants, and the session's
   # `auto_approve` does not answer it; a profile's `deny` still denies.
-  defp permission(tool, name, args, definition) do
+  #
+  # Then the configuration's per-tool rules (#658), the strictest that matches holding: a
+  # `deny` refuses, an `ask` asks as a must-answer call does, whatever the profile's `auto`,
+  # `auto_approve` and a standing "allow for the session" say, and an `allow` runs a call
+  # that would have asked, unless a person must answer it. Answers the permission and the
+  # rule that decided it, `nil` where none did.
+  defp permission(tool, name, args, definition, ctx) do
     case Definition.permission(definition, name, Tool.default_permission(tool)) do
-      :deny -> :deny
-      permission -> if Tool.must_ask?(tool, args), do: :must_ask, else: permission
+      :deny ->
+        {:deny, nil}
+
+      permission ->
+        must_ask? = Tool.must_ask?(tool, args)
+
+        case rule(name, args, ctx) do
+          {:deny, rule} -> {:deny, rule}
+          {:ask, rule} -> {:must_ask, rule}
+          _none when must_ask? -> {:must_ask, nil}
+          {:allow, rule} -> {:auto, rule}
+          nil -> {permission, nil}
+        end
     end
   end
 
-  defp ask(ctx, name, args, always?) do
+  defp ask(ctx, name, args, always?, rule) do
     Approvals.request(ctx.session_id, %{
       call_id: ctx.call_id,
       tool: name,
       args: args,
       agent_path: ctx.agent_path,
       always: always?
-    })
+    }
+    |> put_rule(rule))
   end
+
+  defp put_rule(req, nil), do: req
+  defp put_rule(req, rule), do: Map.put(req, :rule, Permissions.to_json(rule))
 
   @doc """
   Run a tool and normalise whatever it returns into a `Result`.

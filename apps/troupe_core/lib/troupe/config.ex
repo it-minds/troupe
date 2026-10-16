@@ -52,7 +52,7 @@ defmodule Troupe.Config do
         windows: {some-bare-model: 128000}
   """
 
-  alias Troupe.Config.{Error, Explain, Issue, Layers, Migrate, Org, Schema, Trust}
+  alias Troupe.Config.{Error, Explain, Issue, Layers, Migrate, Org, Permissions, Schema, Trust}
   alias Troupe.LLM.Catalog
   alias Troupe.LLM.Catalog.Store
   alias Troupe.LLM.{Endpoint, ProviderType}
@@ -184,6 +184,10 @@ defmodule Troupe.Config do
             # no `:auto` here: a session that approves its own shell commands with
             # nobody watching is the thing this refuses to be.
             approvals: :wait,
+            # The per-tool rules in force (#658), from every file's `permissions`, each
+            # with its layer and file: `Troupe.Config.Permissions` says what they make of
+            # a call, and the harness applies that before anything asks.
+            permissions: [],
             # The agents a `delegate` to asks the person first, by name: `delegation.ask` in a
             # file (Decision 850). An agent's own definition can ask too, with `delegation:
             # ask`. Empty, the default, and a delegation runs at once.
@@ -324,6 +328,9 @@ defmodule Troupe.Config do
          {:ok, config, layers} <- layers |> build() |> apply_overrides(overrides, layers) do
       # What the organisation enforces is above the command line (Decision 869).
       {config, layers} = Org.hold(config, layers)
+      # Every file's rules, and a caller's beside them, never instead.
+      layers = %{layers | rules: Permissions.hold(layers.rules, config)}
+      config = %{config | permissions: Permissions.in_force(layers.rules) ++ List.wrap(overrides[:permissions])}
       config = apply_catalog(config)
       {:ok, %{config | warnings: Enum.map(layers.warnings ++ layers.refusals, &Issue.format/1)}, layers}
     else

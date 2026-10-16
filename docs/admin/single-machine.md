@@ -111,8 +111,10 @@ machine needs `TROUPE_BAO_TOKEN`, and the object store's credentials as a pod's
 signed, for the name it dials. Without it, a worker holding a machine's secret does not
 dial at all and logs why; and a plane that is sent a machine's secret in plaintext refuses
 it with a sentence before looking at it, and says in its log to rotate it, since it has
-crossed the network unencrypted. A pod dials the same port on the pod network and may
-still do so in plaintext.
+crossed the network unencrypted. A pod dials the same port on the pod network, with TLS
+too; the chart's plane refuses plaintext from anybody unless
+`plane.controlTls.requireTls` is turned off, and so does a plane given a certificate
+without the chart unless `TROUPE_PLANE_CONTROL_REQUIRE_TLS` is `"false"`.
 
 The chart does not expose the control port outside the cluster: no Ingress, and its
 NetworkPolicy admits the port only from worker namespaces and the operator. Reaching

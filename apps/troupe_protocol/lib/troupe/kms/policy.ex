@@ -159,16 +159,31 @@ defmodule Troupe.KMS.Policy do
   bring-your-own-key import, so it reads the wrapping key and writes `import` and
   `import_version` on this key alone. The key is created without `exportable`, and this
   policy has no `export` path either, so not even the plane can take the key back out.
+
+  The App's webhook secret is the same, as an HMAC key (`webhook_key`): imported, given a
+  version, and asked for the HMAC of each delivery's body, which the plane compares with
+  the signature GitHub sent; never exported.
+
+  Both are deleted when the App is removed (`admin.github.delete`), which transit allows
+  once a key's `config` says so: `update` on each `config` and `delete` on each key.
   """
-  @spec github_app(String.t(), String.t()) :: String.t()
-  def github_app(mount \\ "transit", key \\ "troupe-github-app") do
+  @spec github_app(String.t(), String.t(), String.t()) :: String.t()
+  def github_app(
+        mount \\ "transit",
+        key \\ "troupe-github-app",
+        webhook_key \\ "troupe-github-webhook"
+      ) do
     """
     path "#{mount}/wrapping_key" {
       capabilities = ["read"]
     }
 
     path "#{mount}/keys/#{key}" {
-      capabilities = ["read"]
+      capabilities = ["read", "delete"]
+    }
+
+    path "#{mount}/keys/#{key}/config" {
+      capabilities = ["update"]
     }
 
     path "#{mount}/keys/#{key}/import" {
@@ -180,6 +195,26 @@ defmodule Troupe.KMS.Policy do
     }
 
     path "#{mount}/sign/#{key}" {
+      capabilities = ["create", "update"]
+    }
+
+    path "#{mount}/keys/#{webhook_key}" {
+      capabilities = ["read", "delete"]
+    }
+
+    path "#{mount}/keys/#{webhook_key}/config" {
+      capabilities = ["update"]
+    }
+
+    path "#{mount}/keys/#{webhook_key}/import" {
+      capabilities = ["create", "update"]
+    }
+
+    path "#{mount}/keys/#{webhook_key}/import_version" {
+      capabilities = ["create", "update"]
+    }
+
+    path "#{mount}/hmac/#{webhook_key}/sha2-256" {
       capabilities = ["create", "update"]
     }
     """

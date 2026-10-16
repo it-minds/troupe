@@ -180,13 +180,23 @@ function parseSet(value: unknown): Record<string, unknown> {
 
 /** A field's text, as the form holds it, and back. */
 function asText(value: unknown): string {
-  return value === undefined || value === null ? "" : String(value);
+  if (value === undefined || value === null) return "";
+  // The per-tool rules (troupe #658) are an object, written as JSON.
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
 function fromText(key: EnforceableKey, text: string): unknown {
   if (text === "") return null;
   if (key.type === "integer") return /^\d+$/.test(text.trim()) ? Number(text.trim()) : text;
   if (key.type === "boolean") return text === "true";
+  // Sent as written when it is not JSON, so the plane's refusal says what is wrong with it.
+  if (key.type === "rules") {
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return text;
+    }
+  }
   return text;
 }
 
@@ -201,7 +211,7 @@ function EnforcedSet({ setting, editable, onPut }: { setting: PlatformSetting; e
     return (
       <div className="card">
         <pre className="mono">{Object.keys(set).length ? JSON.stringify(set, null, 2) : "Nothing is enforced."}</pre>
-        <p className="note">This plane does not list the keys it may enforce, so the set is shown as stored. Change it on the current console's Policy page.</p>
+        <p className="note">This plane does not list the keys it may enforce, so the set is shown as stored. It is changed over the admin API, as the client_enforced setting.</p>
       </div>
     );
   }
@@ -317,5 +327,6 @@ function enforcing(spec: EnforceableKey, to: unknown): string {
   if (to === null) return `${spec.key} is no longer enforced: machines go back to their own value.`;
   if (spec.kind === "ceiling") return `No machine may set ${spec.key} above ${show(to)}; a lower value stays.`;
   if (spec.kind === "order") return `No machine may loosen ${spec.key} past ${show(to)}; a tighter value stays.`;
+  if (spec.kind === "rules") return `Every machine adds these rules to its own, the strictest holding: ${show(to)}.`;
   return `Every machine uses ${show(to)} for ${spec.key}, whatever its own files say.`;
 }

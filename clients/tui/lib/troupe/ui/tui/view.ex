@@ -1458,7 +1458,8 @@ defmodule Troupe.UI.TUI.View do
       ] ++ String.split(String.trim_trailing(field.help), "\n") ++ [""]
 
     %Paragraph{
-      text: Enum.join(head ++ Settings.help_lines(state.commands), "\n"),
+      text:
+        Enum.join(head ++ Settings.help_lines(state.commands, Map.get(s.view, :rules, [])), "\n"),
       wrap: true,
       scroll: {s.scroll, 0},
       block: %Block{title: " help — PgUp/PgDn or the wheel scrolls ", borders: [:all]}

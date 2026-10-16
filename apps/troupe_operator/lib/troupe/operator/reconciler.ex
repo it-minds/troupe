@@ -144,6 +144,7 @@ defmodule Troupe.Operator.Reconciler do
 
     failures = Enum.filter(applied, &match?({_resource, {:error, _}}, &1))
     pruned = prune(conn, profile, policy, desired, settings)
+    plane_ca = plane_ca_present?(conn, settings, namespace)
 
     status =
       resource
@@ -153,6 +154,7 @@ defmodule Troupe.Operator.Reconciler do
       |> identity_status(Profile.identity_problems(profile), generation(resource))
       |> upgrade_status(upgrade, generation(resource))
       |> endpoint_status(profile, settings, generation(resource))
+      |> plane_ca_status(plane_ca, settings, generation(resource))
 
     write_status(conn, resource, status)
 
@@ -244,6 +246,39 @@ defmodule Troupe.Operator.Reconciler do
       end
 
     Status.put(status, "EndpointUnreachable", unreachable?, reason, message, generation)
+  end
+
+  # The plane's CA, where the installation gives pods one, missing from the profile's
+  # namespace: the operator has not yet read a CA out of the file the chart mounts, so it
+  # has written none there, and the pods wait for the file before they dial the plane.
+  # Reported beside `SecretMissing` and for the same reason: the profile reconciled, and
+  # what is missing is something its pods need to start working, which otherwise only the
+  # operator's log and the pods' own said. Looked for rather than inferred from this pass,
+  # because a pass that could not read the file leaves the CA an earlier one wrote.
+  defp plane_ca_present?(_conn, %Settings{plane_ca_path: nil}, _namespace), do: :not_given
+
+  defp plane_ca_present?(conn, _settings, namespace) do
+    operation = K8s.Client.get("v1", "ConfigMap", namespace: namespace, name: Names.plane_ca())
+    match?({:ok, _config_map}, K8s.Client.run(conn, operation))
+  end
+
+  defp plane_ca_status(status, :not_given, _settings, generation) do
+    message = "the installation gives pods no CA (plane.controlTls), so they dial in plaintext"
+    Status.put(status, "PlaneCAMissing", false, "NotGiven", message, generation)
+  end
+
+  defp plane_ca_status(status, true, _settings, generation) do
+    message = "the namespace has the plane's CA (#{Names.plane_ca()})"
+    Status.put(status, "PlaneCAMissing", false, "Present", message, generation)
+  end
+
+  defp plane_ca_status(status, false, settings, generation) do
+    message =
+      "the namespace has no #{Names.plane_ca()} yet: the operator has read no CA from " <>
+        "#{settings.plane_ca_path} (the plane's plane.controlTls Secret, ca.crt), and the " <>
+        "pods wait for it before they dial the plane"
+
+    Status.put(status, "PlaneCAMissing", true, "NotWritten", message, generation)
   end
 
   # A secret the profile refers to and the cluster does not have. Reported rather than

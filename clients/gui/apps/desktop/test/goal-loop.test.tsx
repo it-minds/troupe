@@ -7,10 +7,13 @@
 // the log the way the daemon does.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { JSX } from "react";
+import { createRoot } from "react-dom/client";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
+import { GoalLine } from "../src/views/Goal";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, render, says, startOnTheList, type, waitFor } from "./support";
+import { button, render, says, sleep, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -98,6 +101,35 @@ describe("the goal in the session's head", () => {
     await waitFor(() => daemon.calls.some((c) => c.method === "session.goal.clear"), "session.goal.clear");
     await waitFor(() => goalText() === null && button("Set a goal", head()) !== null, "the goal gone from the head");
     expect(says("goal cleared")).toBe(true);
+  });
+});
+
+describe("the goal line, as the goal arrives", () => {
+  // The goal comes from the event, and the line is drawn the moment it does. A click on it
+  // right then, before React had run the effect that closes the line for a new goal, was
+  // undone by that effect: the nightly's "the goal opened" timed out under load.
+  it("opens on the first click after a goal arrives, however soon", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const line = (goal: string | undefined): JSX.Element => (
+      <GoalLine goal={goal} loop={undefined} canChange onSet={async () => {}} onClear={async () => {}} onStartLoop={async () => {}} />
+    );
+    try {
+      root.render(line(undefined));
+      await waitFor(() => button("Set a goal", container), "the line with no goal");
+
+      root.render(line("The notes build"));
+      let text: HTMLButtonElement | null = null;
+      while (!(text = container.querySelector<HTMLButtonElement>(".goal .text"))) await new Promise((r) => setTimeout(r, 0));
+      text.click();
+
+      await sleep(100);
+      expect(container.querySelector(".goal .text")?.getAttribute("aria-expanded")).toBe("true");
+    } finally {
+      root.unmount();
+      container.remove();
+    }
   });
 });
 

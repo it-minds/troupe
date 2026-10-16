@@ -188,7 +188,9 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
 - **The control channel.** A worker dials the plane's control port, never the other way
   round. A pod enrols with its projected token, bound to the plane's audience and good for
   an hour, on the pod network, where the plane's NetworkPolicy admits the port from worker
-  namespaces alone; it may do so in plaintext. A machine registered outside the cluster
+  namespaces alone, over TLS against the CA the operator gives its namespace; the plane
+  closes a plaintext connection unless `plane.controlTls.requireTls` is turned off
+  (Decision 906). A machine registered outside the cluster
   ([single-machine.md](single-machine.md)) enrols with a secret that lasts until it is
   rotated, so it does so over TLS only: the port serves a certificate cert-manager issues
   for the control Service, the machine is given that certificate's CA when it is registered
@@ -232,6 +234,7 @@ OpenBao holds the rest, under policies rendered by `Troupe.KMS.Policy`:
 | A private session's data key | KV v2, `troupe/people/<name>/sessions/<id>` | the person's own daemon, through an assertion the plane signs; no pod role covers it |
 | The key that signs session tokens | transit, `troupe-session-tokens` | the plane signs with it; it is not exportable |
 | The GitHub App's private key | transit, `troupe-github-app` | imported once through `admin.github.put` and not exportable; the plane signs the App's JWT with it and keeps only its fingerprint ([github.md](github.md)) |
+| The GitHub App's webhook secret | transit, `troupe-github-webhook` | imported once through `admin.github.put` as an HMAC key and not exportable; the plane asks transit for each delivery's HMAC and compares it with the signature in constant time, and keeps only its version ([github.md](github.md)) |
 
 A session's data in object storage is AES-256-GCM under its data key, with a fresh nonce
 per object and the session's id as associated data, so an object moved to another

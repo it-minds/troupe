@@ -41,7 +41,10 @@ describe("the overview", () => {
     expect(said.some((s) => s.includes("heavy asked for 2 pods and has 1."))).toBe(true);
     expect(said.some((s) => s.includes("1 session an unattended run started is waiting for a person"))).toBe(true);
     expect(link("design's limits")!.getAttribute("href")).toBe("#/teams/design/limits");
-    expect(link("Look at heavy")!.href).toBe(`${fake.plane.baseUrl}/admin/workers/heavy`);
+    // Each is fixed in this console: a pod where the pods are, the runs where runs are read.
+    expect(link("Look at heavy")!.getAttribute("href")).toBe("#/pods");
+    expect(link("Runs and review")!.getAttribute("href")).toBe("#/runs");
+    expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);
 
     expect(says("4", metric("Active sessions")!)).toBe(true);
     expect(says("5 dormant, 1 read-only", metric("Active sessions")!)).toBe(true);
@@ -54,6 +57,8 @@ describe("the overview", () => {
     visit("#/overview");
     unmount = render(<App />).unmount;
     await waitFor(() => says("Fleet · per profile") && link("build-box"), "the fleet");
+    // A profile is linked to its own page in this console.
+    expect(link("build-box")!.getAttribute("href")).toBe("#/profiles/build-box");
     expect(says("over budget")).toBe(true);
     expect(link("core")!.getAttribute("href")).toBe("#/teams/core/limits");
   });

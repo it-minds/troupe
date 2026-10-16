@@ -50,15 +50,17 @@ defmodule Troupe.Plane.Admin do
   }
 
   alias Troupe.Plane.Control.TLS
-  alias Troupe.Plane.Fleet.{Bundle, Provisioner, SizeClass, Worker}
+  alias Troupe.Plane.Fleet.{Bundle, Extends, Provisioner, SizeClass, Worker}
+  alias Troupe.Plane.GitHub.Issue, as: GitHubIssue
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
-  alias Troupe.Plane.Triggers.{Notify, Revision}
+  alias Troupe.Plane.Triggers.{Notify, Revision, Trigger}
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
+  alias Troupe.Protocol.ProviderTypes
 
   require Logger
 
@@ -273,21 +275,53 @@ defmodule Troupe.Plane.Admin do
   a violation, and whose pods are still running the previous image is three different
   problems, and a view that merged them would make each one look like the others.
   """
-  @spec profile_get(actor(), String.t()) :: result()
-  def profile_get(actor, name) do
+  #
+  # A profile that extends another is read as it was written: `spec` and `written` are
+  # what its administrator set, which is what an editor loads and sends back, so that a
+  # save keeps following the parent rather than copying it. The summary is the profile in
+  # effect, since that is what its pods run. With `effective`, the resolved profile too,
+  # each field with the profile it came from.
+  @spec profile_get(actor(), String.t(), boolean() | nil) :: result()
+  def profile_get(actor, name, effective \\ false) do
     with :ok <- require_platform_admin(actor),
          {:ok, profile} <- fetch_profile(name) do
+      written = Extends.written(profile)
+
       {:ok,
        %{
          profile: profile_summary(profile),
-         spec: profile.spec,
+         spec: written["spec"],
+         written: Map.put(written, "extends", profile.extends),
+         extended_by: Extends.children(profile.name),
          policy: Provision.verdict(profile),
          bundle: bundle_state(profile),
          # A server the bundle calls as the profile's own identity that the profile gives
-         # none, or an incomplete one (Decision 747): reported, like a missing Secret.
+         # none, or an incomplete one: reported, like a missing Secret, since the bundle and
+         # the profile are written by different people and either may come first.
          identity_problems: Provision.identity_problems(profile),
          gitops: gitops_state(profile, gitops_reports())
-       }}
+       }
+       |> then(
+         &if(effective == true, do: Map.put(&1, :effective, effective_view(profile)), else: &1)
+       )}
+    end
+  end
+
+  # The profile in effect and where each of its fields came from. A profile that extends
+  # nothing has all of its own; a chain that no longer resolves says why.
+  defp effective_view(profile) do
+    case Extends.resolve(profile.name) do
+      {:ok, resolved} ->
+        %{
+          extends: profile.extends,
+          chain: resolved.chain,
+          profile: Extends.row_attrs(resolved),
+          fields: Extends.fields(resolved),
+          problems: resolved.problems
+        }
+
+      {:error, reason} ->
+        %{extends: profile.extends, chain: [], profile: nil, fields: [], problems: [reason]}
     end
   end
 
@@ -303,24 +337,31 @@ defmodule Troupe.Plane.Admin do
   def profile_put(actor, attrs) do
     with :ok <- require_platform_admin(actor),
          {:ok, name} <- require_name(attrs),
+         :ok <- extends_held_by_repository(actor, attrs, name),
          :ok <- not_held_by_repository(actor, "profile.put", name),
          {:ok, attrs} <- without_derived(attrs),
+         {:ok, attrs} <- in_effect(attrs),
          :ok <- release_named(attrs),
          :ok <- Provision.check(attrs),
-         :ok <- Reach.check(attrs) do
+         :ok <- Reach.check(attrs),
+         {:ok, below} <- below_in_effect(name, attrs) do
       before = Fleet.get_profile(name)
 
       case Fleet.put_profile(attrs) do
         {:ok, profile} ->
           changes = Audit.diff(comparable(before), comparable(profile))
-          {:ok, _} = Audit.record(actor.subject, "profile.put", name, changes)
+          children = rewrite_below(below, actor)
+
+          {:ok, _} =
+            Audit.record(actor.subject, "profile.put", name, with_below(changes, children))
 
           {:ok,
            %{
              profile: profile_summary(profile),
              changes: changes,
              provisioning: provision(profile, actor),
-             identity_problems: Provision.identity_problems(profile)
+             identity_problems: Provision.identity_problems(profile),
+             extended_by: children
            }}
 
         {:error, changeset} ->
@@ -329,10 +370,188 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # One audit record for the profile that was changed, naming every profile below it that
+  # changed with it: one change made, however many resources it rewrote.
+  defp with_below(changes, children) when children == %{}, do: changes
+
+  defp with_below(changes, children) do
+    below = Map.new(children, fn {child, done} -> {child, done.changes} end)
+    Map.put(changes, "extended_by", below)
+  end
+
   # What `profile_put/2` reads of a profile: an administrator's answers and the rest of
   # the resource's spec. `admin.profile.put`'s schema declares exactly these, and a test
   # holds the two together.
-  @profile_keys ~w(name image size_class max_sessions warm_workers provisioner spec)
+  @profile_keys ~w(name image size_class max_sessions warm_workers provisioner spec extends)
+
+  # A put that names a parent is resolved before anything checks it: the policy, the
+  # reach check and the row's own validation judge the profile in effect, which is what
+  # the resource will be, and the row keeps what was written as `own`. Anything this put
+  # does not send stays as the profile last wrote it, as the row's columns do for a profile
+  # that extends nothing. A put that names none extends nothing, and is the put it always
+  # was; a profile that stops extending one keeps what it had in effect, the put laid over
+  # it, so that the change is to what it follows and not to what its pods run.
+  defp in_effect(attrs) do
+    name = attrs["name"]
+    row = Fleet.get_profile(name)
+    kept = if row && row.extends, do: row.own || %{}, else: %{}
+    own = Map.merge(kept, Map.take(attrs, Extends.written_keys()))
+
+    case {presence(attrs["extends"]), row} do
+      {nil, %{extends: parent}} when is_binary(parent) ->
+        with {:ok, resolved} <- resolve_put(name, %{name => %{extends: parent, written: own}}) do
+          {:ok,
+           resolved
+           |> Extends.row_attrs()
+           |> Map.merge(%{"name" => name, "extends" => nil, "own" => nil})}
+        end
+
+      {nil, _row} ->
+        {:ok, Map.merge(attrs, %{"extends" => nil, "own" => nil})}
+
+      {parent, _row} ->
+        with :ok <- extends_check(name, parent),
+             {:ok, resolved} <- resolve_put(name, %{name => %{extends: parent, written: own}}) do
+          {:ok,
+           resolved
+           |> Extends.row_attrs()
+           |> Map.merge(%{"name" => name, "extends" => parent, "own" => own})}
+        end
+    end
+  end
+
+  defp extends_check(name, parent) do
+    case Extends.check(name, parent) do
+      :ok -> :ok
+      {:error, reason} -> {:error, Error.new(:invalid_params, %{extends: parent, reason: reason})}
+    end
+  end
+
+  defp resolve_put(name, overrides) do
+    case Extends.resolve(name, overrides) do
+      {:ok, resolved} -> {:ok, resolved}
+      {:error, reason} -> {:error, Error.new(:invalid_params, %{reason: reason})}
+    end
+  end
+
+  # Every profile below this one, as it would be with this write made, each checked as a
+  # put of it would be: a change to a parent that would leave a child the row or the
+  # policy refuses is refused, naming the child, before anything is written.
+  defp below_in_effect(name, attrs) do
+    below = effects_below(name, attrs)
+
+    case Enum.find(below, &match?(%{problem: problem} when is_binary(problem), &1)) do
+      nil ->
+        {:ok, Enum.map(below, & &1.name)}
+
+      %{name: child, problem: problem} ->
+        {:error,
+         Error.new(:invalid_params, %{
+           extended_by: child,
+           reason:
+             "#{child} extends #{name}, and with this change it would not be saved: #{problem}"
+         })}
+    end
+  end
+
+  # What each profile below `name` becomes with `attrs` written, the order they extend in:
+  # its attributes in effect, the diff from what it is now, and the policy's verdict, or
+  # the reason it could not be.
+  defp effects_below(name, attrs) do
+    overrides = %{name => %{extends: attrs["extends"], written: written_of(name, attrs)}}
+
+    for child <- Extends.descendants(name) do
+      with {:ok, resolved} <- Extends.resolve(child, overrides),
+           child_attrs = resolved |> Extends.row_attrs() |> Map.put("name", child),
+           %{valid?: true} <- Fleet.Profile.changeset(Fleet.get_profile(child), child_attrs) do
+        current = Fleet.get_profile(child)
+        policy = Provision.verdict(child_attrs)
+
+        %{
+          name: child,
+          changes: Audit.diff(comparable(current), as_written(current, child_attrs)),
+          policy: policy,
+          problem: if(policy.allowed?, do: nil, else: Enum.join(policy.violations, "; "))
+        }
+      else
+        {:error, reason} ->
+          %{name: child, changes: %{}, policy: nil, problem: reason}
+
+        %Ecto.Changeset{errors: errors} ->
+          %{name: child, changes: %{}, policy: nil, problem: changeset_sentence(errors)}
+      end
+    end
+  end
+
+  # What a write leaves a profile having written: for one that extends another, `own` as
+  # the write makes it, and otherwise the row's columns with the write's fields over them,
+  # which is what a put casts. A profile that stops extending keeps what was in effect.
+  defp written_of(name, attrs) do
+    case attrs["own"] do
+      %{} = own ->
+        own
+
+      nil ->
+        base =
+          case Fleet.get_profile(name) do
+            nil -> %{}
+            row -> Extends.written(%{row | extends: nil})
+          end
+
+        Map.merge(base, Map.take(attrs, Extends.written_keys()))
+    end
+  end
+
+  defp changeset_sentence(errors) do
+    Enum.map_join(errors, "; ", fn {field, {message, _details}} -> "#{field} #{message}" end)
+  end
+
+  # The profiles below one that changed, written again as they now resolve and put into
+  # the cluster, each after the one it extends. Their pods roll as for any change to their
+  # resource. Answered by name with what changed and how it reached the cluster.
+  defp rewrite_below(below, actor) do
+    for child <- below, into: %{} do
+      current = Fleet.get_profile(child)
+
+      result =
+        case Extends.rewrite(child) do
+          {:ok, profile} ->
+            %{
+              changes: Audit.diff(comparable(current), comparable(profile)),
+              provisioning: provision(profile, actor)
+            }
+
+          {:error, reason} ->
+            %{changes: %{}, provisioning: %{state: :not_applied, reason: inspect(reason)}}
+        end
+
+      {child, result}
+    end
+  end
+
+  # A repository's manifest extends nothing yet, so neither does a profile on a plane in
+  # gitops mode: refused with what to do instead, and recorded as any refused write is.
+  defp extends_held_by_repository(actor, attrs, name) do
+    parent = presence(attrs[:extends] || attrs["extends"])
+
+    if parent && Gitops.enabled?() do
+      detail = %{"outcome" => "refused", "reason" => "managed_by_gitops", "extends" => parent}
+      {:ok, _} = Audit.record(actor.subject, "profile.put", name, detail)
+
+      {:error,
+       Error.new(:managed_by_gitops, %{
+         kind: "WorkerProfile",
+         name: name,
+         extends: parent,
+         reason:
+           "this plane is in gitops mode, and a profile extends another only on a plane that " <>
+             "writes its profiles itself: a repository's manifest holds the whole profile, " <>
+             "#{parent}'s fields included, until a plane resolves extends from a repository"
+       })}
+    else
+      :ok
+    end
+  end
 
   @doc "The fields of a profile `admin.profile.put` takes, as its schema declares them."
   @spec profile_keys() :: [String.t()]
@@ -417,15 +636,6 @@ defmodule Troupe.Plane.Admin do
   defp derived_in?(spec, key), do: Map.has_key?(spec, key)
 
   @doc """
-  The image a profile whose image is `release` runs on this plane, or `nil` if it names none.
-
-  Here for the reason `size_classes/0` is: the console says what the word means right now,
-  and a LiveView is an admin API client with no private way to find out.
-  """
-  @spec release_image() :: String.t() | nil
-  def release_image, do: Provision.release_image()
-
-  @doc """
   The size classes a profile may be, in the order a console offers them.
 
   Here rather than read from `Fleet.SizeClass` by whoever is rendering: a LiveView is an
@@ -434,6 +644,21 @@ defmodule Troupe.Plane.Admin do
   """
   @spec size_classes() :: [String.t()]
   def size_classes, do: SizeClass.names()
+
+  @doc """
+  What a profile's fields may be, from the lists the plane checks against: each provider
+  type `llm.provider` may name, with what it asks for (the protocol's one list, as every
+  other place a person picks a provider reads it), and each size class with what it is for.
+
+  So a console offers the choices rather than a text field, and offers none the plane
+  would refuse.
+  """
+  @spec profile_choices(actor()) :: result()
+  def profile_choices(actor) do
+    with :ok <- require_admin(actor) do
+      {:ok, %{provider_types: ProviderTypes.wire(), size_classes: size_class_summaries()}}
+    end
+  end
 
   @doc "Each size class with what it is for, as the console and a model both read it."
   @spec size_class_summaries() :: [map()]
@@ -461,12 +686,34 @@ defmodule Troupe.Plane.Admin do
   def profile_delete(actor, name) do
     with :ok <- require_platform_admin(actor),
          {:ok, profile} <- fetch_profile(name),
+         :ok <- not_extended(profile),
          {:ok, removal} <- removal(actor, profile) do
       {:ok, _} = Audit.record(actor.subject, "profile.delete", name, comparable(profile))
       removal = removal.(profile)
       Fleet.delete_profile(name)
 
       {:ok, %{profile: name, deleted: true, provisioning: removal}}
+    end
+  end
+
+  # A profile others extend stays while they do: taken away, each of them would lose every
+  # field it has from it at once, and their pods would roll onto whatever was left. A name
+  # is never changed in place, so a rename is a new profile and this delete.
+  defp not_extended(profile) do
+    case Extends.children(profile.name) do
+      [] ->
+        :ok
+
+      children ->
+        {:error,
+         Error.new(:conflict, %{
+           profile: profile.name,
+           extended_by: children,
+           reason:
+             "#{Enum.join(children, ", ")} #{if length(children) == 1, do: "extends", else: "extend"} " <>
+               "#{profile.name}: make #{if length(children) == 1, do: "it", else: "each"} extend " <>
+               "another profile, or none, before deleting #{profile.name}"
+         })}
     end
   end
 
@@ -821,26 +1068,6 @@ defmodule Troupe.Plane.Admin do
        })}
     end
   end
-
-  @doc """
-  What a team name must be, in words, for a form to show beside the field.
-
-  Here rather than read off `Identity.Team` by the screen, because a LiveView reaches the
-  plane through this module and nowhere else. Zero arity, so it is a fact rather than an
-  action and needs no API method of its own: every rendering that wants it already has the
-  refusal, which carries the same sentence.
-  """
-  @spec team_name_rule() :: String.t()
-  def team_name_rule, do: Identity.Team.name_rule()
-
-  @doc """
-  The periods a team's budget may be measured over, for a form to offer.
-
-  The list the team's own changeset accepts, so a screen cannot offer a period that saving
-  then refuses. Zero arity for the same reason as `team_name_rule/0`.
-  """
-  @spec budget_periods() :: [String.t()]
-  def budget_periods, do: Identity.Team.budget_periods()
 
   # A refused changeset as a sentence per field rather than an inspected keyword list. A
   # console shows `reason` beside the form, and `[name: {"must be…", [validation:
@@ -1545,19 +1772,35 @@ defmodule Troupe.Plane.Admin do
   from: an approximation that disagreed would be worse than no check at all, because a
   person would trust it.
   """
+  #
+  # A profile that extends another is previewed as it would be in effect. And every profile
+  # below the one previewed is too, as this write would leave it, with its diff and the
+  # policy's verdict: a change to a parent is seen in each child before it is applied.
   @spec preview(actor(), map()) :: result()
   def preview(actor, attrs) do
-    with :ok <- require_platform_admin(actor) do
-      current =
-        attrs |> Map.get("name", Map.get(attrs, :name)) |> then(&(&1 && Fleet.get_profile(&1)))
+    with :ok <- require_platform_admin(actor),
+         {:ok, attrs} <- preview_attrs(attrs) do
+      name = attrs["name"]
+      current = name && Fleet.get_profile(name)
 
       {:ok,
        %{
          policy: Provision.verdict(attrs),
          changes: Audit.diff(comparable(current), as_written(current, attrs)),
-         mode: Provision.mode()
+         mode: Provision.mode(),
+         extended_by: if(is_binary(name), do: effects_below(name, attrs), else: [])
        }}
     end
+  end
+
+  # The write as `profile_put/2` would read it, resolved where it names a parent or stops
+  # naming one; a parent the put would refuse is refused here too, with the same sentence.
+  defp preview_attrs(attrs) do
+    attrs = comparable_attrs(attrs)
+
+    if is_binary(attrs["name"]),
+      do: in_effect(Map.take(attrs, @profile_keys)),
+      else: {:ok, attrs}
   end
 
   # The stored profile with the write laid over it, which is what a put leaves: what the
@@ -1842,8 +2085,9 @@ defmodule Troupe.Plane.Admin do
 
   @doc """
   Change the plane's GitHub App. Only the keys sent change; `installations` is the whole
-  list; `private_key`, the PEM GitHub downloads, is imported into OpenBao's transit engine
-  and is in no answer, row, log or audit entry afterwards. Refused with the field and the
+  list; `private_key`, the PEM GitHub downloads, and `webhook_secret`, what the App's
+  webhook signs deliveries with, are imported into OpenBao's transit engine and are in no
+  answer, row, log or audit entry afterwards. Refused with the field and the
   reason, and nothing written, for anything that does not read. Audited with the diff,
   in which the key is its fingerprint.
   """
@@ -1862,6 +2106,81 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  @doc """
+  Whether the App works: an App id is set, transit signs with its key, GitHub knows the
+  App by the JWT that key signs, and every installation the plane was given is one GitHub
+  lists for it. Each a named check with what it found; writes nothing.
+
+  A platform admin's, like changing the App: it is the question somebody asks before and
+  after they do, and it signs with the App's key to ask it.
+  """
+  @spec github_check(actor()) :: result()
+  def github_check(actor) do
+    with :ok <- require_platform_admin(actor), do: {:ok, GitHub.check()}
+  end
+
+  @doc """
+  What the App's webhook has taken lately: each delivery's id, event and action, when it
+  came and what the plane did with it (the runs it fired, the session it resumed, or why
+  neither), newest first. Never a body. A platform admin's, as the App is: the deliveries
+  name every team's repositories.
+  """
+  @spec github_deliveries(actor(), integer() | nil) :: result()
+  def github_deliveries(actor, limit) do
+    with :ok <- require_platform_admin(actor) do
+      limit = if is_integer(limit) and limit > 0, do: min(limit, 200), else: 50
+      {:ok, GitHub.deliveries(limit)}
+    end
+  end
+
+  @doc """
+  Forget the plane's GitHub App: its id, API URL and installations, and its key and
+  webhook secret, which are taken out of transit, so the next App may have a key of
+  another size. Confirmed by the App id, which is the one thing about it somebody has in
+  front of them. A session that names a repository is refused from then on, and a pod
+  asking for a session's token is not given one. Audited with the diff, the key by its
+  fingerprint.
+  """
+  @spec github_delete(actor(), integer() | String.t() | nil) :: result()
+  def github_delete(actor, app_id) do
+    with :ok <- require_platform_admin(actor),
+         :ok <- confirm_app_id(app_id),
+         {:ok, before} <- forget_github() do
+      changes = Audit.diff(github_fields(before), github_fields(GitHub.describe()))
+      {:ok, _} = Audit.record(actor.subject, "github.delete", "app", changes)
+      {:ok, Map.put(GitHub.describe(), :changes, changes)}
+    end
+  end
+
+  defp forget_github do
+    case GitHub.delete() do
+      {:ok, before} ->
+        {:ok, before}
+
+      {:error, :not_configured} ->
+        {:error, Error.new(:not_found, %{reason: "this plane has no GitHub App"})}
+    end
+  end
+
+  defp confirm_app_id(app_id) do
+    expected = GitHub.describe().app_id
+
+    cond do
+      is_nil(expected) ->
+        :ok
+
+      to_string(app_id) == to_string(expected) ->
+        :ok
+
+      true ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason: "the App ID to confirm with is #{expected}",
+           app_id: expected
+         })}
+    end
+  end
+
   # What a diff of the App shows: the key by its fingerprint and version, which is what
   # tells one key from another, and never more.
   defp github_fields(app) do
@@ -1870,7 +2189,8 @@ defmodule Troupe.Plane.Admin do
       api_url: app.api_url,
       installations: app.installations,
       fingerprint: app.private_key.fingerprint,
-      transit_version: app.private_key.version
+      transit_version: app.private_key.version,
+      webhook_secret_version: app.webhook.secret.version
     }
   end
 
@@ -2658,6 +2978,10 @@ defmodule Troupe.Plane.Admin do
   Refused in GitOps mode as `managed_by_gitops` (Decision 737), switching one on or off
   included: the trigger is a `Trigger` resource a repository holds, and a change to it is
   a commit there. The attempt is in the audit trail, as a refused profile write is.
+
+  A new webhook trigger is made with its key: the answer carries `key` and `url` this once,
+  and the audit row says only that one was minted. A trigger on a GitHub repository is
+  checked against the App as a session naming it is, and is made with none.
   """
   @spec trigger_put(actor(), map()) :: result()
   def trigger_put(actor, attrs) do
@@ -2672,19 +2996,23 @@ defmodule Troupe.Plane.Admin do
              "#{team.name}/#{name}",
              GitopsTriggers.kind()
            ),
-         :ok <- known_profile(attrs) do
+         :ok <- known_profile(attrs),
+         :ok <- reachable_repository(team, name, attrs) do
       before = Triggers.get(team, name)
 
       case Triggers.put(team, attrs, actor.subject) do
         {:ok, trigger} ->
           changes = Audit.diff(comparable(before), comparable(trigger))
           {:ok, revision} = Triggers.revise(trigger)
+          {trigger, key} = minted_at_create(before, trigger, actor)
 
           detail =
-            Map.merge(changes, %{
+            changes
+            |> Map.merge(%{
               "__revision__" => revision.revision,
               "__revision_hash__" => revision.hash
             })
+            |> Map.merge(key_minted(key))
 
           {:ok, _} = Audit.record(actor.subject, "trigger.put", "#{team.name}/#{name}", detail)
 
@@ -2693,11 +3021,53 @@ defmodule Troupe.Plane.Admin do
              trigger: Triggers.trigger_json(trigger),
              changes: changes,
              revision: Revision.json(revision)
-           }}
+           }
+           |> Map.merge(key_answer(key, trigger))}
 
         {:error, %Error{} = error} ->
           {:error, error}
       end
+    end
+  end
+
+  # A webhook trigger is made with its key, which this answer carries once and nothing
+  # carries again: a trigger that cannot be fired until somebody finds a second button was
+  # half made. A trigger on a GitHub repository is fired by the App's signed deliveries and
+  # needs none; nor does a trigger that existed already, whose key is rotated as before.
+  defp minted_at_create(nil, %Trigger{source: %{"kind" => "webhook"} = source} = trigger, actor) do
+    if GitHubIssue.repository?(source) do
+      {trigger, nil}
+    else
+      {:ok, trigger, key} = Triggers.rotate_key(trigger, actor.subject)
+      {trigger, key}
+    end
+  end
+
+  defp minted_at_create(_before, trigger, _actor), do: {trigger, nil}
+
+  # The audit row says a key was minted, never which.
+  defp key_minted(nil), do: %{}
+  defp key_minted(_key), do: %{"__key_minted__" => true}
+
+  defp key_answer(nil, _trigger), do: %{}
+  defp key_answer(key, trigger), do: %{key: key, url: "/trigger/#{trigger.id}"}
+
+  # A trigger on a GitHub repository is checked as a session naming it will be: the App is
+  # here, installed for its owner, and the trigger's profile declares the Git host. Asked of
+  # a put that sends a source or a profile, against the trigger as it would then be.
+  defp reachable_repository(team, name, attrs) do
+    existing = Triggers.get(team, name)
+    source = attrs["source"] || (existing && existing.source)
+    profile = attrs["profile"] || (existing && existing.profile)
+
+    with true <- Map.has_key?(attrs, "source") or Map.has_key?(attrs, "profile"),
+         {owner, repository} <- GitHubIssue.repository(source),
+         {:error, reason} <-
+           GitHub.repository(%{"owner" => owner, "name" => repository}, profile) do
+      {:error,
+       Error.new(:invalid_params, %{field: "source", reason: "source.repository: " <> reason})}
+    else
+      _ -> :ok
     end
   end
 
@@ -2944,7 +3314,9 @@ defmodule Troupe.Plane.Admin do
     team
     |> Triggers.runs(Keyword.take(opts, [:trigger, :limit]))
     |> Enum.map(fn {run, trigger, session} ->
-      run |> Triggers.run_json(session) |> Map.put("trigger", trigger.name)
+      run
+      |> Triggers.run_json(session)
+      |> Map.merge(%{"trigger" => trigger.name, "team" => team.name})
     end)
   end
 
@@ -3322,6 +3694,8 @@ defmodule Troupe.Plane.Admin do
 
     %{
       name: profile.name,
+      # The profile this one extends, if any; everything below is the profile in effect.
+      extends: profile.extends,
       # What an administrator answers, first, because it is what they came for.
       size_class: profile.size_class,
       size_class_summary: SizeClass.get(profile.size_class).summary,
@@ -3545,7 +3919,8 @@ defmodule Troupe.Plane.Admin do
       :config_bundle_channel,
       :image,
       :workers_domain,
-      :spec
+      :spec,
+      :extends
     ])
   end
 

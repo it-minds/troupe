@@ -1411,33 +1411,54 @@ Found by the chunk 34 fixers, 2026-10-13.
   - On a 6.17 kernel, containerd's default profile as Debian 12's parser compiles it refuses every unix socket; kind's nodes now take the host's compile. A node whose runtime compiles its default with an old parser would meet the same.
 - **Identity** (Decision 899).
   - There is no admin action to fold a claim-named group into SCIM's UUID group, so the stale one stays, empty.
-  - The console flags look-alike groups only where a group is enabled as a team, not on a team's "Link a group" picker, and the people half is API-only (`admin.identity.duplicates`).
   - Session lists show a removed owner as `removed:<uuid>`, not the tombstone's display name.
-  - Triggers' `notify` lists and usage records still name a removed subject, so a person later provisioned under it gets those notifications and that month's spend.
-  - SCIM `PUT /Users/<id>` keys on the body for an id that exists, so a body naming another subject updates that one; and a SCIM push can still make a `removed:` or `svc:` subject (inert, since sign-in refuses them).
   - A session read-only because its grant was revoked, whose index row is gone entirely, rebuilds as dormant.
 - **Control TLS** (Decision 902).
-  - `plane.controlTls.requireTls` is off by default in 0.19 and turns on in 0.20.
-  - A worker namespace whose `troupe-plane-ca` was never written shows nothing on the WorkerProfile; a `PlaneCAMissing` condition would.
-  - With `requireTls` on, a pod still dialling plaintext is logged once per connection, every second or two, until it is replaced.
   - `scripts/verify-local.ps1` can't pass on scratch homes: it compares the listening process's path with `$env:LOCALAPPDATA\Programs`.
   - OTP 28.5's `:inet.getfd/1` raises on an `inet_backend: socket` socket (upstream).
-- **The console** (Decision 901).
-  - The admin API serves neither the provider types nor the size classes, so the console takes the provider as free text and offers two sizes it knows, short of Decision 894's one list.
-  - A webhook trigger has no key until one is made on its row; whether `trigger.put` should mint one at create is open.
-  - Overview's profile links still go to the previous console's Workers page.
-  - `Team.tsx` keeps its own copy of `useChange`, which now lives in `bits.tsx`.
 - **The audit** replaces `secretRef.key`, `tokenUrl` and `transitKey` values with `[redacted]` in profile diffs, so changes to those names don't show.
-- **The desktop app.**
-  - `daemon_start` is a synchronous Tauri command, so the window doesn't repaint for up to 30 s while it starts a daemon after a crash.
-  - `alive` checks only that something accepts on the port; a stale port another program took reads as a running daemon.
-  - CI runs no `cargo test` for the desktop crate, and nothing checks Rust formatting.
-- **Tests.**
-  - The worker's `IndexRebuildTest` logs dozens of errors from earlier runs' session prefixes left in MinIO's test bucket.
-  - The fake GitHub asks `contents: write` for every `git/*` call, GET included.
-  - PanelTest's provisioners-page test failed once and passed on the next run.
+- **The desktop app.** Nothing checks the desktop crate's Rust formatting.
 
 Found by the chunk 35 fixers, 2026-10-14.
+
+### D129 - The complete console, GitHub webhooks, rules and extends after chunk 36 (low)
+
+- **Identity** (Decision 906).
+  - No admin action settles a refused adoption pair, whether by merging or by adopting anyway. The console lists it and nothing more.
+  - An MCP access token carrying neither email nor username makes a row of its own at a person's first sign-in after a claim switch, which then blocks a later adoption.
+  - After a refused sign-in, a SCIM push for that `externalId` gets a 400 for the unique index, and the error doesn't name the pair.
+  - SCIM's subject is the `externalId` itself (Decision 751), so a mapping that is wrong from the first push can't be detected.
+  - `mix troupe.index.rebuild` still restores a removed owner's subject from a manifest written after the removal.
+- **GitHub** (Decision 905).
+  - GitHub makes each reply in a review thread its own review, so a burst of replies becomes several turns.
+  - Conversation comments on a draft don't resume its session, and `issues.assigned` and a scheduled sweep aren't done.
+  - An org member whose membership is private may be reported as `CONTRIBUTOR`, so their command comment is ignored. Not checked against real GitHub.
+  - The Trigger CRD's repository pattern is looser than the plane's own check.
+- **The console** (Decision 904).
+  - In a break-glass session, `/admin` can reset sign-in and the admin group to the deployment's values, so it isn't strictly read-only. 904 names what to remove to make it so.
+  - A plane deployed with `console.enabled: false` has no editing screens.
+  - The organisation's enforced-set editor writes an object-typed key such as `permissions` as JSON text; a rules editor would serve better.
+  - `admin.trigger.run` and `admin.trigger.key.rotate` are still owed.
+  - `--color-table-changed-cell` is an unused token.
+- **Per-tool rules** (Decision 907).
+  - Shell rules read the command line and aren't a sandbox: `sh -c`, scripts and aliases run what no rule sees.
+  - Path rules match only the path a call names, so a search over the whole workspace isn't caught by a rule on `secrets/**`, and symlinks aren't resolved.
+  - A person's own `!cmd` isn't a tool call, so no rule applies to it.
+  - On a call a rule made ask, "allow for the session" still records an allow for that tool's other calls.
+  - A worker profile can't carry rules yet (#724).
+- **Extends** (Decision 908).
+  - A child on its own channel has its parent's MCP servers on its resource but not in the bundle its pods load, and a child's `override: true` is lost when its own channel next publishes (slice 2).
+  - GitOps has only the `troupe.dev/extends` annotation to carry `extends` (slice 4).
+  - A profile created after its channel's bundle was published gets no `mcpServers` until the next publish (#722).
+- **The plane.**
+  - A 413 for a body over the limit answers generic JSON, not SCIM's error schema or a JSON-RPC error.
+  - The shared MinIO test bucket holds about 2,500 sessions left by earlier runs, never cleaned.
+  - Two worktrees running the plane suite at once still deadlock in the shared test database.
+- **CI.**
+  - The desktop crate's new `cargo test` job runs only on pull requests into `main`, and its apt package names are untested before then.
+  - Nothing checks Rust formatting.
+
+Found by the chunk 36 fixers, 2026-10-16.
 
 ## Taken
 

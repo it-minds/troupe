@@ -386,7 +386,8 @@ step "9. Where things are"
 cat <<EOF
 
   plane      http://plane.localtest.me:30080
-  panel      http://plane.localtest.me:30080/admin
+  console    http://plane.localtest.me:30080/console
+  break-glass http://plane.localtest.me:30080/admin
   identity   http://dex.localtest.me:30080/dex   (ada@example.test / troupe)
   workers    ws://<n>.${profile}.workers.localtest.me:30080/v1/socket
 
@@ -396,7 +397,8 @@ Log in and use it — the GUI at http://plane.localtest.me:30080/app, or the TUI
   troupe --remote sessions
   troupe --remote
 
-Or open the console at /admin, which this repository does serve.
+Or administer it from the console at /console; /admin is the read-only page and the
+break-glass sign-in.
 
 EOF
 

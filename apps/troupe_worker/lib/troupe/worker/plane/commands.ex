@@ -3,8 +3,9 @@ defmodule Troupe.Worker.Plane.Commands do
   What the plane may tell a worker to do.
 
   A short list on purpose. The plane decides *where* a session runs and *when* it should
-  stop running here; it never says anything about what the session contains, and there
-  is no method here that could carry it.
+  stop running here; it never reads what the session contains. It hands an unattended
+  session two kinds of input and nothing more: the first prompt, in `session.activate`,
+  and a review on the draft pull request a run opened, in `session.input`, each bounded.
 
   Every one of these is idempotent. The plane retries on a reconnect without knowing
   whether the first attempt landed, so activating a session that is already up is a
@@ -127,6 +128,27 @@ defmodule Troupe.Worker.Plane.Commands do
 
         {:error,
          unreachable_error(reason) || Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  # The session's next input, from what an unattended run is answering: a review on the
+  # draft pull request it opened. With the first prompt `session.activate` carries, the
+  # only session content the plane ever pushes, and bounded as that is. Taken only by a
+  # session up on this pod at the plane's epoch, which the plane has just woken; the id is
+  # the input's own, so the log says which delivery it came from.
+  defp dispatch("session.input", params) do
+    session_id = params["session_id"]
+
+    with :ok <- shaped(session_id),
+         {:ok, id, text} <- input_of(params["input"]),
+         {:ok, _tree} <- running_at(session_id, params["epoch"]) do
+      case Troupe.send_input(session_id, text, :user, actor_of(params["actor"]), command_id: id) do
+        :ok ->
+          {:ok, %{"session_id" => session_id, "input" => id, "queued" => true}}
+
+        {:error, :no_session} ->
+          {:error, Error.new(:not_found, %{reason: "the session is not up here"})}
+      end
     end
   end
 
@@ -403,6 +425,53 @@ defmodule Troupe.Worker.Plane.Commands do
       &match?({_key, nil}, &1)
     )
   end
+
+  # The same bound as a first prompt's.
+  @max_input_bytes 65_536
+
+  defp input_of(%{"id" => id, "text" => text})
+       when is_binary(id) and byte_size(id) in 1..128 and is_binary(text) and text != "" and
+              byte_size(text) <= @max_input_bytes,
+       do: {:ok, id, text}
+
+  defp input_of(_input),
+    do:
+      {:error,
+       Error.new(:invalid_params, %{
+         field: "input",
+         reason: "an input is {id, text}, the text at most #{@max_input_bytes} bytes"
+       })}
+
+  # Up here, and at the epoch the plane names: a pod the session has since moved on from
+  # takes nothing for it.
+  defp running_at(session_id, epoch) do
+    with {:ok, tree} <- not_found(Sessions.running(session_id)),
+         :ok <- same_epoch(session_id, epoch) do
+      {:ok, tree}
+    end
+  end
+
+  defp not_found({:ok, tree}), do: {:ok, tree}
+
+  defp not_found({:error, :not_found}),
+    do: {:error, Error.new(:not_found, %{reason: "the session is not up on this pod"})}
+
+  defp same_epoch(session_id, epoch) when is_integer(epoch) do
+    case Sessions.epoch(session_id) do
+      ^epoch ->
+        :ok
+
+      nil ->
+        :ok
+
+      held ->
+        {:error, Error.new(:conflict, %{reason: "stale epoch", stored: held, offered: epoch})}
+    end
+  end
+
+  defp same_epoch(_session_id, _epoch),
+    do:
+      {:error, Error.new(:invalid_params, %{field: "epoch", reason: "an input names the epoch"})}
 
   defp actor_of(nil), do: nil
   defp actor_of(%{} = json), do: Event.Actor.from_json(json)

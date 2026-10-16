@@ -14,6 +14,7 @@ defmodule Troupe.Plane.GitopsTriggersTest do
   alias Troupe.Plane.{Admin, Audit, FakeCluster, FakePod, Gitops, Identity, Triggers}
   alias Troupe.Plane.Admin.{API, MCP}
   alias Troupe.Plane.Control.{Connections, Listener}
+  alias Troupe.Plane.GitHub.Issue
   alias Troupe.Plane.Gitops.Profiles
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
 
@@ -653,6 +654,19 @@ defmodule Troupe.Plane.GitopsTriggersTest do
 
       # Nothing a person writes is dropped before the plane can say it is wrong.
       assert spec["x-kubernetes-preserve-unknown-fields"]
+
+      # A trigger on a GitHub repository is spelt in the schema too, so `kubectl explain`
+      # shows it and the API server checks its shape before the plane reads it.
+      source = spec["properties"]["source"]
+
+      assert Enum.sort(Map.keys(source["properties"]) -- ~w(cron tz)) ==
+               Enum.sort(Issue.source_keys())
+
+      assert source["properties"]["repository"]["pattern"]
+      assert source["properties"]["label"]["maxLength"] == 50
+      assert source["properties"]["command"]["maxLength"] == 100
+      assert source["properties"]["ref"]["maxLength"] == 200
+      assert source["x-kubernetes-preserve-unknown-fields"]
     end
   end
 

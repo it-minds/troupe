@@ -12,7 +12,9 @@ defmodule Troupe.Plane.TriggersTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.Control.{Connections, Listener}
-  alias Troupe.Plane.{FakePod, Harness, Identity, Repo, Sessions, Triggers}
+  alias Troupe.Plane.{FakePod, Harness, Identity, Principals, Repo, Sessions, Triggers}
+  alias Troupe.Plane.Identity.ServicePrincipal
+  alias Troupe.Plane.Sessions.ACL
   alias Troupe.Plane.Triggers.{Cron, Revision, Scheduler, Template}
   alias Troupe.Plane.Web.Live.Status
 
@@ -206,6 +208,37 @@ defmodule Troupe.Plane.TriggersTest do
       json = Triggers.fired_json(again)
       assert json["run"]["state"] == "running"
       assert json["session_id"] == session.id
+    end
+
+    # A run's revision is frozen, and a removal takes the person off the trigger's `notify`
+    # but not off a revision recorded before it. A run whose create failed is created again
+    # by the next call with its key, from that revision, and letting its `notify` in would
+    # grant the session to whoever holds the removed person's subject next.
+    test "a run retried after a person was removed does not let that person's subject in",
+         context do
+      lead = person("lead@example.test", ["engineering"])
+      trigger = trigger!(context, %{"name" => "triage", "notify" => [lead.subject]})
+
+      # The first call fails: the principal is disabled, so nothing is created.
+      {:ok, _} = Principals.disable(context.principal)
+      assert {:error, _} = Triggers.fire(trigger, "webhook", "hook:retry", %{}, "hatchet")
+
+      {:ok, _tombstone, _effect} = Identity.remove_user(lead, "scim")
+      newcomer = person("lead@example.test", ["engineering"])
+
+      context.principal.subject
+      |> Principals.get()
+      |> ServicePrincipal.changeset(%{disabled_at: nil})
+      |> Repo.update!()
+
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+
+      assert {:ok, fired} = Triggers.fire(trigger, "webhook", "hook:retry", %{}, "hatchet")
+      assert_receive {:pushed, "session.activate", _}, 5_000
+      assert fired.revision.notify == [lead.subject]
+
+      assert Repo.get_by(ACL, session_id: fired.session.id, subject: lead.subject) == nil
+      assert Sessions.role_for(newcomer, fired.session) == nil
     end
 
     test "over its concurrency cap, a run is recorded as skipped and no session is made",

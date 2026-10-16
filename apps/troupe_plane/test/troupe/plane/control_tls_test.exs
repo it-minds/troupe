@@ -10,7 +10,7 @@ defmodule Troupe.Plane.ControlTLSTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.Control.{Connection, Connections, Listener, TLS}
+  alias Troupe.Plane.Control.{Connection, Connections, Listener, Refusals, TLS}
   alias Troupe.Plane.ControlTLSFixture
   alias Troupe.Plane.Fleet
 
@@ -141,6 +141,40 @@ defmodule Troupe.Plane.ControlTLSTest do
     end
   end
 
+  # A pod an old operator made reconnects every second or two until it is replaced, and a
+  # line for each would bury everything else in the plane's log.
+  describe "the plaintext refusal's log line" do
+    @tag :require_tls
+    test "is said once a minute per address, however often it dials", context do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          for _ <- 1..3 do
+            {:ok, socket} =
+              :gen_tcp.connect(~c"127.0.0.1", context.port, [:binary, active: false])
+
+            :ok = :gen_tcp.send(socket, "{")
+            assert {:error, :closed} = :gen_tcp.recv(socket, 0, 5_000)
+          end
+        end)
+
+      assert [_one] = Regex.scan(~r/refused a plaintext control connection/, log)
+      assert log =~ "from 127.0.0.1"
+    end
+
+    test "says how many it did not, when it is said again" do
+      address = {192, 0, 2, System.unique_integer([:positive]) |> rem(250)}
+
+      assert {:log, 0} = Refusals.note(address, 60_000, 0)
+      assert :quiet = Refusals.note(address, 60_000, 10)
+      assert :quiet = Refusals.note(address, 60_000, 59_999)
+      assert {:log, 2} = Refusals.note(address, 60_000, 60_000)
+      assert :quiet = Refusals.note(address, 60_000, 60_001)
+
+      # Another address is its own.
+      assert {:log, 0} = Refusals.note({198, 51, 100, 7}, 60_000, 60_001)
+    end
+  end
+
   describe "a registered machine" do
     test "is refused in plaintext with a sentence, before its secret is looked at", context do
       {:ok, socket} =
@@ -178,6 +212,76 @@ defmodule Troupe.Plane.ControlTLSTest do
 
       assert {:ok, %{"profile" => "dev"}} =
                call(socket, "enrol", %{"token" => "dev-token", "pod_name" => "troupe-w-dev-0"})
+    end
+  end
+
+  # The chart turns `requireTls` on by default, and a plane deployed without the chart
+  # should not be the one place plaintext is still taken: where the port has a
+  # certificate, TLS only, unless the deployment says otherwise.
+  describe "whether TLS is required, left unsaid" do
+    setup do
+      before =
+        for key <- [:control_tls, :control_require_tls],
+            do: {key, Application.fetch_env(:troupe_plane, key)}
+
+      on_exit(fn ->
+        for {key, value} <- before do
+          case value do
+            {:ok, value} -> Application.put_env(:troupe_plane, key, value)
+            :error -> Application.delete_env(:troupe_plane, key)
+          end
+        end
+      end)
+    end
+
+    test "is yes where the port has a certificate, and what the deployment says otherwise",
+         context do
+      Application.put_env(:troupe_plane, :control_tls, context.dir)
+      Application.delete_env(:troupe_plane, :control_require_tls)
+      assert TLS.required?()
+
+      Application.put_env(:troupe_plane, :control_require_tls, false)
+      refute TLS.required?()
+
+      Application.put_env(:troupe_plane, :control_require_tls, true)
+      assert TLS.required?()
+
+      # No certificate: plaintext is all the port can speak.
+      Application.delete_env(:troupe_plane, :control_tls)
+      Application.delete_env(:troupe_plane, :control_require_tls)
+      refute TLS.required?()
+    end
+
+    test "a port that takes plaintext says so as a warning when it starts", context do
+      for {tls, required, said} <- [
+            {context.dir, false, "plaintext for pods"},
+            {Path.join(context.dir, "nothing-mounted"), false, "plaintext only"}
+          ] do
+        stop_supervised!(Listener)
+
+        log =
+          ExUnit.CaptureLog.capture_log([level: :warning], fn ->
+            start_supervised!(
+              {Listener,
+               port: 0, verify: fn _ -> {:error, :no} end, tls: tls, require_tls: required}
+            )
+          end)
+
+        assert log =~ "[warning]"
+        assert log =~ said
+      end
+
+      stop_supervised!(Listener)
+
+      log =
+        ExUnit.CaptureLog.capture_log([level: :warning], fn ->
+          start_supervised!(
+            {Listener,
+             port: 0, verify: fn _ -> {:error, :no} end, tls: context.dir, require_tls: true}
+          )
+        end)
+
+      refute log =~ "control listener"
     end
   end
 

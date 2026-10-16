@@ -19,11 +19,10 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/provision.ex
   - apps/troupe_plane/lib/troupe/plane/settings.ex
   - apps/troupe_plane/lib/troupe/plane/web/live/layout.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/profile_editor.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/workers.ex
+  - clients/gui/apps/console/src/views/Profiles.tsx
+  - clients/gui/apps/console/src/views/Pods.tsx
   - apps/troupe_plane/priv/repo/migrations/20260929000035_gitops_sources.exs
   - apps/troupe_plane/test/support/fake_cluster.ex
-  - apps/troupe_plane/test/troupe/plane/gitops_console_test.exs
   - apps/troupe_plane/test/troupe/plane/gitops_test.exs
   - apps/troupe_plane/test/troupe/plane/provision_test.exs
   - apps/troupe_plane/test/troupe/plane/release_image_test.exs
