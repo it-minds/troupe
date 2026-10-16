@@ -20,8 +20,12 @@
 # `--build-context licences=<the repository's root>` is the one thing read from outside
 # this directory: LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt, which go into the image
 # because Apache-2.0 and the licences of the packages in the bundle ask that they go with
-# every copy; and PROTOCOL.md, whose error table the client's tests hold the client's own
-# to (`packages/client/test/errors.test.ts`). Only those four are sent. Without it the
+# every copy; PROTOCOL.md, whose error table the client's tests hold the client's own
+# to (`packages/client/test/errors.test.ts`); and the per-tool rule cases
+# (`apps/troupe_protocol/test/support/permission_rules.json`), which
+# `packages/client/test/rules.test.ts` reads. Only those five are sent: the repository's
+# `.dockerignore` decides, and a file this image reads from there is re-included in it by
+# name. Without it the
 # stages below stop at the first COPY that reads it: `lstat /PROTOCOL.md: no such file or
 # directory`.
 
@@ -48,6 +52,9 @@ COPY . .
 # Where that test looks for it from `packages/client/test`: the repository's root, which
 # is `/` here.
 COPY --from=licences PROTOCOL.md /PROTOCOL.md
+# And the per-tool rule cases the protocol's own test reads, which `test/rules.test.ts`
+# holds the client's reading of a rule to, from the same root.
+COPY --from=licences apps/troupe_protocol/test/support/permission_rules.json /apps/troupe_protocol/test/support/permission_rules.json
 
 ARG TROUPE_GUI_BASE=/
 ENV TROUPE_GUI_BASE=${TROUPE_GUI_BASE}

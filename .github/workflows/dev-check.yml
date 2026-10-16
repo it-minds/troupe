@@ -81,6 +81,9 @@ jobs:
               - scripts/build-images
               - apps/troupe_operator/**
               - .github/workflows/cluster.yml
+              # The images it builds: the GUI's, and what every image build's context leaves out.
+              - clients/gui/Dockerfile
+              - .dockerignore
 
   elixir:
     name: umbrella - compile, credo, schema
