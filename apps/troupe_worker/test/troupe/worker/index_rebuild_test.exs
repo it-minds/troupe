@@ -50,7 +50,7 @@ defmodule Troupe.Worker.IndexRebuildTest do
     PlaneSessions.delete(context.session_id)
     assert PlaneSessions.get(context.session_id) == nil
 
-    assert {:ok, report} = Index.rebuild(store: context.store)
+    assert {:ok, report} = rebuild(context)
     assert report.rebuilt >= 1
 
     rebuilt = PlaneSessions.get(context.session_id)
@@ -76,8 +76,8 @@ defmodule Troupe.Worker.IndexRebuildTest do
   test "a rebuild over a populated index overwrites rather than duplicates", context do
     original = run_a_real_session(context)
 
-    assert {:ok, _} = Index.rebuild(store: context.store)
-    assert {:ok, _} = Index.rebuild(store: context.store)
+    assert {:ok, _} = rebuild(context)
+    assert {:ok, _} = rebuild(context)
 
     rebuilt = PlaneSessions.get(context.session_id)
     assert rebuilt.epoch == original.epoch
@@ -115,7 +115,7 @@ defmodule Troupe.Worker.IndexRebuildTest do
       })
 
     PlaneSessions.delete(context.session_id)
-    assert {:ok, _} = Index.rebuild(store: context.store)
+    assert {:ok, _} = rebuild(context)
 
     rebuilt = PlaneSessions.get(context.session_id)
 
@@ -141,7 +141,7 @@ defmodule Troupe.Worker.IndexRebuildTest do
     # The tombstone stands even if something is left in the bucket.
     {:ok, _} = Storage.put_manifest(context.store, context.session_id, %{team: context.team, epoch: 9})
 
-    assert {:ok, report} = Index.rebuild(store: context.store)
+    assert {:ok, report} = rebuild(context)
     assert report.skipped >= 1
     assert PlaneSessions.get(context.session_id).state == "erased"
     assert PlaneSessions.get(context.session_id).epoch != 9
@@ -165,7 +165,7 @@ defmodule Troupe.Worker.IndexRebuildTest do
       })
 
     # Over the row the removal left.
-    assert {:ok, _} = Index.rebuild(store: context.store)
+    assert {:ok, _} = rebuild(context)
     rebuilt = PlaneSessions.get(context.session_id)
     assert rebuilt.owner_subject == marker
     assert rebuilt.owner_id == nil
@@ -173,7 +173,7 @@ defmodule Troupe.Worker.IndexRebuildTest do
 
     # And with no row at all: the manifest was last written before the removal.
     PlaneSessions.delete(context.session_id)
-    assert {:ok, _} = Index.rebuild(store: context.store)
+    assert {:ok, _} = rebuild(context)
     rebuilt = PlaneSessions.get(context.session_id)
     assert rebuilt.owner_subject == marker
     refute rebuilt.owner_id == newcomer.id
@@ -214,6 +214,21 @@ defmodule Troupe.Worker.IndexRebuildTest do
       })
 
     PlaneSessions.get(context.session_id)
+  end
+
+  # The test bucket is shared: every earlier run, and any suite running beside this one,
+  # has left sessions in it that this test knows nothing of, and rebuilding those too
+  # logged their failures here. A rebuild of this test's own session, from what storage
+  # lists, which is the whole of what the rebuild found.
+  defp rebuild(context) do
+    result = Index.rebuild(store: context.store, only: [context.session_id])
+
+    with {:ok, report} <- result do
+      assert report.found == 1
+      assert report.failed == 0
+    end
+
+    result
   end
 
   defp record(context, report) do

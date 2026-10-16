@@ -542,7 +542,10 @@ defmodule Troupe.Plane.Triggers do
              context(user)
            ) do
       session_id = endpoint["session_id"]
-      Enum.each(revision.notify, &let_in(user, session_id, &1))
+
+      revision.notify
+      |> Enum.reject(&Identity.removed_owner(&1, revision.inserted_at))
+      |> Enum.each(&let_in(user, session_id, &1))
 
       {:ok, run} =
         run |> Run.changeset(%{session_id: session_id, state: "created"}) |> Repo.update()
@@ -677,6 +680,10 @@ defmodule Troupe.Plane.Triggers do
 
   # Through the public method, as the owner: the same path a person sharing a session
   # takes, so what a `notify` subject may do is exactly what a collaborator may.
+  #
+  # Not a subject whose person was removed after the revision was recorded: a removal
+  # takes them off the trigger's list, but a run retried from a revision older than that
+  # still names them, and the grant would go to whoever holds the subject next.
   defp let_in(user, session_id, subject) do
     params = %{"session_id" => session_id, "subject" => subject, "role" => "collaborator"}
 

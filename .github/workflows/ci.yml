@@ -86,6 +86,7 @@ jobs:
       tui: ${{ steps.plan.outputs.tui }}
       gui: ${{ steps.plan.outputs.gui }}
       gui_e2e: ${{ steps.plan.outputs.gui_e2e }}
+      desktop: ${{ steps.plan.outputs.desktop }}
       vscode: ${{ steps.plan.outputs.vscode }}
       native: ${{ steps.plan.outputs.native }}
       images: ${{ steps.plan.outputs.images }}
@@ -148,6 +149,10 @@ jobs:
             gui_e2e:
               - clients/gui/packages/client/**
               - clients/gui/dev/**
+            # The desktop app's Rust: finding and starting the daemon, the update, the
+            # sign-in's keychain entry.
+            desktop:
+              - clients/gui/apps/desktop/src-tauri/**
             vscode:
               - clients/vscode/**
               - scripts/version.exs
@@ -222,6 +227,7 @@ jobs:
           gui=$(flag eval 'on shared || on gui')
           # The client against a plane built from this commit.
           gui_e2e=$(flag eval 'on shared || on gui_e2e || on chart || has troupe_plane || has troupe_gateway')
+          desktop=$(flag eval 'on shared || on desktop')
           vscode=$(flag eval 'on shared || on vscode')
           # Native builds on a pull request that touches them; a full run leaves them to
           # its caller, which attaches them to what it publishes.
@@ -241,6 +247,7 @@ jobs:
             echo "tui=$tui"
             echo "gui=$gui"
             echo "gui_e2e=$gui_e2e"
+            echo "desktop=$desktop"
             echo "vscode=$vscode"
             echo "native=$native"
             echo "images=$images"
@@ -253,7 +260,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| umbrella apps | \`$json\` |"
-            for k in chart protocol tui gui gui_e2e vscode native images cluster; do echo "| $k | ${!k} |"; done
+            for k in chart protocol tui gui gui_e2e desktop vscode native images cluster; do echo "| $k | ${!k} |"; done
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Compile, format, credo, generated assets and boundaries: once, for the whole
@@ -539,10 +546,17 @@ jobs:
             echo "the operator is not given ca.crt alone from the control certificate's Secret"
             exit 1
           fi
-          # TLS only by default, and so TLS off alone is TLS-only without TLS.
+          # TLS only by default, and so TLS off alone is TLS-only without TLS. Turned off, it
+          # is said as "false": the plane with a certificate and nothing said takes TLS only.
           if ! helm template troupe charts/troupe --show-only templates/plane-deployment.yaml \
-              | grep -q 'name: TROUPE_PLANE_CONTROL_REQUIRE_TLS'; then
+              | grep -A1 'name: TROUPE_PLANE_CONTROL_REQUIRE_TLS' | grep -q 'value: "true"'; then
             echo "the plane does not take TLS only by default"
+            exit 1
+          fi
+          if ! helm template troupe charts/troupe --set plane.controlTls.requireTls=false \
+              --show-only templates/plane-deployment.yaml \
+              | grep -A1 'name: TROUPE_PLANE_CONTROL_REQUIRE_TLS' | grep -q 'value: "false"'; then
+            echo "plane.controlTls.requireTls=false does not tell the plane so"
             exit 1
           fi
           for bad in "--set plane.controlTls.requireTls=true --set plane.controlTls.enabled=false" \
@@ -752,6 +766,37 @@ jobs:
 
       - run: pnpm test
 
+  # The desktop crate's own tests, which nothing else runs: the native build compiles it
+  # and the GUI's tests are the web bundle's. On Linux, with the system libraries Tauri
+  # links, and a `dist` the context macro can embed, since the tests need no bundle.
+  desktop:
+    name: the desktop app's Rust — cargo test
+    needs: [changes]
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: clients/gui/apps/desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libayatana-appindicator3-dev libdbus-1-dev libssl-dev pkg-config build-essential
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: clients/gui/apps/desktop/src-tauri -> target
+
+      - name: A web bundle to embed
+        run: mkdir -p ../dist && echo '<!doctype html><title>Troupe</title>' > ../dist/index.html
+
+      - run: cargo test --locked
+
   gui-e2e:
     name: the GUI against a plane built from this commit
     needs: [changes]
@@ -924,7 +969,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, vscode, native, cluster]
+    needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, desktop, vscode, native, cluster]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:

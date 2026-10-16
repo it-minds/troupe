@@ -11,7 +11,7 @@ defmodule Troupe.Plane.Web.Endpoint do
 
   use Phoenix.Endpoint, otp_app: :troupe_plane
 
-  alias Troupe.Plane.Web.{AdminRouter, Router}
+  alias Troupe.Plane.Web.{AdminRouter, BodyLimit, Router}
 
   @session_options [
     store: :cookie,
@@ -65,12 +65,18 @@ defmodule Troupe.Plane.Web.Endpoint do
   plug(Plug.RequestId)
   plug(Plug.Telemetry, event_prefix: [:troupe, :plane, :endpoint])
 
+  # Every body is read here, before either router sees the request, so this is where the
+  # plane's one limit on a body holds: refused by its declared length before it is read,
+  # and read no further than the limit when it declares none.
+  plug(BodyLimit)
+
   # The GitHub App's webhook is signed over its body as it arrived, so `RawBody` keeps
   # those bytes for that route; the router's own parsers find the body read already.
   plug(Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
     json_decoder: Phoenix.json_library(),
+    length: BodyLimit.bytes(),
     body_reader: {Troupe.Plane.Web.RawBody, :read_body, []}
   )
 

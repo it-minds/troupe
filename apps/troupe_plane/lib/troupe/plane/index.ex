@@ -35,13 +35,18 @@ defmodule Troupe.Plane.Index do
   Returns a report rather than raising, because a rebuild runs against storage that may
   have a session in it nobody can explain, and stopping at the first would leave the
   index half built.
+
+  `only:` rebuilds those of the sessions storage lists and no others, for a repair of a
+  few, or a bucket somebody else writes to as well.
   """
   @spec rebuild(keyword()) :: {:ok, map()} | {:error, term()}
   def rebuild(opts \\ []) do
     store = Keyword.get_lazy(opts, :store, &ObjectStore.from_env/0)
 
     case Storage.list_sessions(store) do
-      {:ok, session_ids} ->
+      {:ok, listed} ->
+        session_ids = only(listed, opts)
+
         report =
           session_ids
           |> Enum.map(&rebuild_one(store, &1, opts))
@@ -57,6 +62,13 @@ defmodule Troupe.Plane.Index do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp only(session_ids, opts) do
+    case Keyword.fetch(opts, :only) do
+      {:ok, only} -> Enum.filter(session_ids, &(&1 in only))
+      :error -> session_ids
     end
   end
 

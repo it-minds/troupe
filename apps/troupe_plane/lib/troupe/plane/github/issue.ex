@@ -34,6 +34,10 @@ defmodule Troupe.Plane.GitHub.Issue do
   @body_bytes 8_192
   @comment_bytes 3_072
 
+  @doc "The keys a repository trigger's source takes, which the `Trigger` CRD names too."
+  @spec source_keys() :: [String.t()]
+  def source_keys, do: @source_keys
+
   @doc "Whether a trigger's source names a GitHub repository, which makes it the App's."
   @spec repository?(map() | nil) :: boolean()
   def repository?(%{"kind" => "webhook", "repository" => repository})

@@ -163,6 +163,9 @@ defmodule Troupe.KMS.Policy do
   The App's webhook secret is the same, as an HMAC key (`webhook_key`): imported, given a
   version, and asked for the HMAC of each delivery's body, which the plane compares with
   the signature GitHub sent; never exported.
+
+  Both are deleted when the App is removed (`admin.github.delete`), which transit allows
+  once a key's `config` says so: `update` on each `config` and `delete` on each key.
   """
   @spec github_app(String.t(), String.t(), String.t()) :: String.t()
   def github_app(
@@ -176,7 +179,11 @@ defmodule Troupe.KMS.Policy do
     }
 
     path "#{mount}/keys/#{key}" {
-      capabilities = ["read"]
+      capabilities = ["read", "delete"]
+    }
+
+    path "#{mount}/keys/#{key}/config" {
+      capabilities = ["update"]
     }
 
     path "#{mount}/keys/#{key}/import" {
@@ -192,7 +199,11 @@ defmodule Troupe.KMS.Policy do
     }
 
     path "#{mount}/keys/#{webhook_key}" {
-      capabilities = ["read"]
+      capabilities = ["read", "delete"]
+    }
+
+    path "#{mount}/keys/#{webhook_key}/config" {
+      capabilities = ["update"]
     }
 
     path "#{mount}/keys/#{webhook_key}/import" {

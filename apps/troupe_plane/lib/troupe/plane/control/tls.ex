@@ -23,9 +23,18 @@ defmodule Troupe.Plane.Control.TLS do
   Whether the control port takes TLS only (`TROUPE_PLANE_CONTROL_REQUIRE_TLS`, the chart's
   `plane.controlTls.requireTls`): a plaintext connection, a pod's included, is then closed
   before any of it is read.
+
+  Left unsaid, it is yes wherever the port has a certificate (`dir/0`), as the chart's
+  default is, so a plane deployed without the chart takes plaintext only where it was
+  told to or has nothing else to speak.
   """
   @spec required?() :: boolean()
-  def required?, do: Application.get_env(:troupe_plane, :control_require_tls, false) == true
+  def required? do
+    case Application.get_env(:troupe_plane, :control_require_tls) do
+      nil -> dir() != nil
+      said -> said == true
+    end
+  end
 
   @doc """
   What `:ssl.handshake/3` takes to serve the certificate in `dir`: TLS 1.3 or 1.2, the

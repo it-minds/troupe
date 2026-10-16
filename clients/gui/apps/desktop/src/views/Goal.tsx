@@ -56,11 +56,15 @@ export function GoalLine({
   const [error, setError] = useState<string | null>(null);
   const running = loop?.state === "running";
 
-  // Another client's change closes whatever was half-done here about the old goal.
-  useEffect(() => {
+  // Another client's change closes whatever was half-done here about the old goal. While
+  // drawing, not in an effect: an effect runs after the new goal is on the screen, and a
+  // click on it in between was undone by it.
+  const [drawnFor, setDrawnFor] = useState(goal);
+  if (drawnFor !== goal) {
+    setDrawnFor(goal);
     setOpen(false);
-    setMode((m) => (m === "loop" && !goal ? "show" : m));
-  }, [goal]);
+    if (mode === "loop" && !goal) setMode("show");
+  }
 
   const act = async (what: () => Promise<void>, refusal: (e: unknown) => string = message): Promise<boolean> => {
     setBusy(true);
