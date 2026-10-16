@@ -1424,11 +1424,7 @@ Found by the chunk 35 fixers, 2026-10-14.
 ### D129 - The complete console, GitHub webhooks, rules and extends after chunk 36 (low)
 
 - **Identity** (Decision 906).
-  - No admin action settles a refused adoption pair, whether by merging or by adopting anyway. The console lists it and nothing more.
-  - An MCP access token carrying neither email nor username makes a row of its own at a person's first sign-in after a claim switch, which then blocks a later adoption.
-  - After a refused sign-in, a SCIM push for that `externalId` gets a 400 for the unique index, and the error doesn't name the pair.
   - SCIM's subject is the `externalId` itself (Decision 751), so a mapping that is wrong from the first push can't be detected.
-  - `mix troupe.index.rebuild` still restores a removed owner's subject from a manifest written after the removal.
 - **GitHub** (Decision 905).
   - GitHub makes each reply in a review thread its own review, so a burst of replies becomes several turns.
   - Conversation comments on a draft don't resume its session, and `issues.assigned` and a scheduled sweep aren't done.

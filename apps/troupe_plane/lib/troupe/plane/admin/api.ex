@@ -710,6 +710,28 @@ defmodule Troupe.Plane.Admin.API do
       risk: :read
     },
     %Method{
+      name: "admin.identity.adopt",
+      function: :identity_adopt,
+      summary:
+        "Settle a refused adoption that admin.identity.duplicates lists by external_id: the row SCIM gave the subject as its externalId is that person's. A row a sign-in made under the subject is folded into SCIM's row, which takes the subject; with none, the next push or sign-in adopts SCIM's row. It hands that row, with its sessions and administration, to whoever signs in under the subject.",
+      risk: :destructive,
+      confirm: "subject",
+      arguments: [
+        %Argument{
+          name: "row",
+          type: :string,
+          required: true,
+          description: "The id of the row SCIM gave the externalId, as the listing names it."
+        },
+        %Argument{
+          name: "subject",
+          type: :string,
+          required: true,
+          description: "The externalId, which is the subject the sign-in or push came under."
+        }
+      ]
+    },
+    %Method{
       name: "admin.team.link",
       function: :team_link,
       summary:
@@ -1526,7 +1548,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.trigger.key.rotate",
       function: :trigger_key_rotate,
       summary:
-        "Mint the trigger's own webhook key, replacing whatever it had. Returned once and never readable again; the old key stops working immediately. Works on a gitops plane too: the key is the plane's and never in a resource.",
+        "Mint the trigger's own webhook key, replacing whatever it had. Returned once and never readable again; the old key stops working immediately. Only a webhook that names no GitHub repository has one: any other trigger is refused. Works on a gitops plane too: the key is the plane's and never in a resource.",
       risk: :write,
       arguments: [
         %Argument{name: "team", type: :string, required: true, description: "The team's name."},

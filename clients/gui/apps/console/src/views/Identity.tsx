@@ -7,7 +7,9 @@
 // administer this afterwards, and are you one), the groups this plane has actually seen,
 // and the people and groups that look held twice: the same email or name under two keys,
 // with the mismatch at the provider that most likely made them so. Nothing merges them on
-// that evidence; the plane says what to make agree, and the person fixes it there.
+// that evidence; the plane says what to make agree, and the person fixes it there. An
+// adoption the plane refused on an externalId can be settled here, typed by the subject,
+// for when the provider cannot make anything agree.
 //
 // Service principals are a team's: a team admin makes, rotates and disables their own
 // team's, a platform admin anybody's. A secret is in the answer to making and rotating one
@@ -87,12 +89,17 @@ function WhoAdministers(): JSX.Element {
 
 // -- held twice --------------------------------------------------------------------------
 
+type PeopleSet = IdentityDuplicates["people"][number];
+
 function LooksTwice(): JSX.Element {
   const { admin } = useConsole();
   const [load, reload] = useLoad(() => admin.identityDuplicates(), [admin]);
+  const { done, clear, apply } = useChange(reload);
+  const [settling, setSettling] = useState<PeopleSet | null>(null);
   return (
     <section aria-label="People and groups that look held twice">
       <Region tone="waiting">Looks held twice</Region>
+      {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
       <Loaded load={load} what="the people and groups that look held twice" retry={reload}>
         {(d: IdentityDuplicates) =>
           d.people.length === 0 && d.groups.length === 0 ? (
@@ -101,18 +108,44 @@ function LooksTwice(): JSX.Element {
             <>
               <p className="note">
                 The same email or name under two keys. Nothing is merged on that: only the provider knows whether they are one. Each says what most likely made it,
-                which is changed at the provider; the next sign-in or push settles it.
+                which is changed at the provider; the next sign-in or push settles it. An adoption refused on an externalId can also be settled here, where the provider
+                cannot say so.
               </p>
               {d.people.map((set, i) => (
                 <div className="card" key={`p${i}`} aria-label={`People sharing ${set.by.replace("_", " ")}`}>
                   <header>
-                    <h3>{peopleTitle(set.by, set.people)}</h3>
+                    <h3>{peopleTitle(set.by, set.people, set.subject)}</h3>
                   </header>
                   <PeopleTable people={set.people} />
                   <p>Most likely {set.likely}.</p>
-                  <Extra set={set} known={["by", "people", "likely"]} />
+                  <Extra set={set} known={["by", "people", "likely", "subject", "row"]} />
+                  {settleable(set) && !settling && (
+                    <div className="actions">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          clear();
+                          setSettling(set);
+                        }}
+                      >
+                        Settle
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
+              {settling && (
+                <Settle
+                  set={settling}
+                  onCancel={() => setSettling(null)}
+                  onConfirm={async () => {
+                    const subject = settling.subject!;
+                    const row = settling.row!;
+                    await apply("person.adopt", subject, () => admin.adoptIdentity(row, subject), `${subject} is SCIM's row now.`);
+                    setSettling(null);
+                  }}
+                />
+              )}
               {d.groups.map((set, i) => (
                 <div className="card" key={`g${i}`} aria-label={`Groups sharing ${set.by.replace("_", " ")}`}>
                   <header>
@@ -148,8 +181,8 @@ function sharedValue(by: string, people: LookalikePerson[]): string {
  * What a set of people has in common, as its heading: an email or a name two rows share,
  * or an externalId a sign-in or a push was refused adoption on, which may be one row.
  */
-function peopleTitle(by: string, people: LookalikePerson[]): string {
-  const value = sharedValue(by, people);
+function peopleTitle(by: string, people: LookalikePerson[], subject?: string): string {
+  const value = by === "external_id" && subject ? subject : sharedValue(by, people);
   if (by === "external_id") return `Not merged on externalId ${value}`;
   const what = by === "email" ? "an email" : by === "display_name" ? "a name" : by.replace(/_/g, " ");
   return `${people.length} people share ${what}: ${value}`;
@@ -183,6 +216,49 @@ function PeopleTable({ people }: { people: LookalikePerson[] }): JSX.Element {
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** A refused adoption the plane names by its value and SCIM's row, which `admin.identity.adopt` settles. */
+function settleable(set: PeopleSet): boolean {
+  return set.by === "external_id" && typeof set.subject === "string" && typeof set.row === "string";
+}
+
+/**
+ * Settling a refused adoption, typed by the subject: it hands SCIM's row, with its sessions
+ * and administration, to whoever signs in under the subject, which is what the plane would
+ * not do on the evidence it had. The row a sign-in made under the subject is folded into it;
+ * with none, the next push or sign-in under it adopts SCIM's row.
+ */
+function Settle({ set, onCancel, onConfirm }: { set: PeopleSet; onCancel: () => void; onConfirm: () => Promise<void> }): JSX.Element {
+  const subject = set.subject!;
+  const kept = set.people.find((p) => p.id === set.row);
+  const signed = set.people.find((p) => p.id !== set.row && p.subject === subject);
+  return (
+    <Preview
+      title={`person/${subject}`}
+      lines={
+        signed
+          ? [
+              { field: "row a sign-in made", from: `${signed.id ?? "—"}, under ${subject}`, to: "folded into SCIM's, and removed" },
+              { field: "SCIM's row's subject", from: kept?.subject ?? "—", to: subject },
+            ]
+          : [{ field: `the next push or sign-in under ${subject}`, from: "refused", to: "adopts SCIM's row" }]
+      }
+      effects={[
+        `Whoever signs in under ${subject} is SCIM's row's person from now on, with its sessions, shares and team administration. Settle only when they are one person.`,
+        ...(signed
+          ? [
+              "The sessions, shares and administration of the row the sign-in made move to SCIM's row, which keeps the id the provider holds.",
+              "Of the two names at the key manager, the one first known is kept; what was stored under the other stays there, and the audit names it.",
+            ]
+          : ["Nothing moves now: SCIM's row takes what the next push or sign-in carries."]),
+      ]}
+      verb="Settle"
+      typeToConfirm={subject}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 

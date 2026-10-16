@@ -1411,6 +1411,57 @@ defmodule Troupe.Plane.Admin do
   end
 
   @doc """
+  Settle a pair `admin.identity.duplicates` lists by `external_id`: the row SCIM gave
+  `subject` as its `externalId` (`row`) is that person's, whatever the email and username
+  said.
+
+  A platform admin's, typed to confirm by the subject, since it hands a row, with its
+  sessions, shares and administration, to whoever signs in under that subject. The row a
+  sign-in made under the subject is folded into SCIM's, which takes the subject; with none
+  there, the next push or sign-in adopts SCIM's row (`Identity.settle/2`). Audited as
+  `person.adopt`, with the ids and subjects and any key-manager name left behind.
+  """
+  @spec identity_adopt(actor(), String.t(), String.t()) :: result()
+  def identity_adopt(actor, row, subject) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, detail} <- settle(row, subject) do
+      detail = Map.put(detail, "via", "admin")
+      {:ok, _} = Audit.record(actor.subject, "person.adopt", subject, detail)
+
+      Logger.info(
+        "troupe plane: #{actor.subject} settled #{subject} on the row SCIM gave it (#{row})" <>
+          if(detail["folded"], do: ", folding #{detail["folded"]["id"]} into it", else: "")
+      )
+
+      {:ok, detail}
+    end
+  end
+
+  defp settle(row, subject) when is_binary(row) and is_binary(subject) do
+    case Identity.settle(row, subject) do
+      {:ok, detail} ->
+        {:ok, detail}
+
+      {:error, :settled} ->
+        {:error,
+         Error.new(:not_found, %{
+           reason:
+             "no refused adoption of #{subject} by row #{row} stands: it is settled, or the row is gone"
+         })}
+
+      {:error, {:named_by_scim, other}} ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason:
+             "the row under #{subject} is SCIM's for externalId #{other.external_id}, somebody else, and is not folded into another person"
+         })}
+    end
+  end
+
+  defp settle(_row, _subject),
+    do: {:error, Error.new(:invalid_params, %{missing: "row and subject"})}
+
+  @doc """
   Draw a team's members from one more identity-provider group.
 
   Membership is still never typed here. What this adds is *which groups count*; who is in
@@ -3266,11 +3317,15 @@ defmodule Troupe.Plane.Admin do
   The same in GitOps mode (Decision 737). The key is not part of what a trigger is: it
   is a credential the plane holds as a hash, never in a resource, and a rotation after a
   leak cannot wait for a review and an applier's interval.
+
+  Only a webhook that names no GitHub repository has a key (`Triggers.keyed?/1`). Asked
+  of any other trigger, this is refused with what fires it instead, and mints nothing.
   """
   @spec trigger_key_rotate(actor(), String.t(), String.t()) :: result()
   def trigger_key_rotate(actor, team_name, name) do
     with {:ok, team} <- fetch_team(actor, team_name),
-         {:ok, trigger} <- fetch_trigger(team, name) do
+         {:ok, trigger} <- fetch_trigger(team, name),
+         :ok <- keyed(trigger) do
       {:ok, rotated, key} = Triggers.rotate_key(trigger, actor.subject)
 
       {:ok, _} =
@@ -3288,6 +3343,26 @@ defmodule Troupe.Plane.Admin do
        }}
     end
   end
+
+  defp keyed(trigger) do
+    if Triggers.keyed?(trigger) do
+      :ok
+    else
+      {:error,
+       Error.new(:invalid_params, %{
+         trigger: trigger.name,
+         reason:
+           "#{trigger.name} #{fired_by(trigger.source)}, so it has no key: one would let whoever held it fire it with any event they liked"
+       })}
+    end
+  end
+
+  defp fired_by(%{"kind" => "schedule"}), do: "is fired by its schedule"
+
+  defp fired_by(%{"kind" => "webhook", "repository" => repository}),
+    do: "is fired by the GitHub App's signed deliveries for #{repository}"
+
+  defp fired_by(_manual), do: "is run by hand, or by a principal that signs in"
 
   @doc """
   Set or clear a person's own spend ceiling, across every team they are in, per calendar
@@ -3445,8 +3520,10 @@ defmodule Troupe.Plane.Admin do
   Fire a trigger now, by hand.
 
   The same `fire/5` a schedule or an executor reaches, with an idempotency key that
-  names the person and the moment, so a second click a minute later is a second run and
-  a retry of a failed one is not.
+  names the person and the minute, as a webhook's window and a schedule's tick are drawn
+  on the minute too: a second click, or a retry of a call whose answer was lost, within
+  the same minute is the run the first one made, and a click in a later minute is a
+  second run. On the second, a retry that crossed one boundary made a second session.
 
   The source is `manual` and the console is the only door that may say so: a person's
   hand is the one thing about a run that cannot be inferred afterwards.
@@ -3460,7 +3537,8 @@ defmodule Troupe.Plane.Admin do
     with {:ok, team} <- fetch_team(actor, team_name),
          {:ok, trigger} <- fetch_trigger(team, name) do
       now = DateTime.utc_now() |> DateTime.truncate(:second)
-      key = "manual:#{trigger.id}:#{actor.subject}:#{DateTime.to_iso8601(now)}"
+      minute = %{now | second: 0}
+      key = "manual:#{trigger.id}:#{actor.subject}:#{DateTime.to_iso8601(minute)}"
       event = %{"kind" => "manual", "by" => actor.subject, "at" => DateTime.to_iso8601(now)}
 
       {:ok, _} =

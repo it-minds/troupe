@@ -80,7 +80,9 @@ when the row's email or `userName` agrees with what it carries: a sign-in's `ema
 from the same attribute the token's `preferred_username` comes from (the username, by
 default), and keep `email` in the token's scopes. When neither agrees, nothing is merged:
 a sign-in gets a row of its own, a push is refused, and `admin.identity.duplicates` lists
-the pair, which is the place to look after changing a mapping.
+the pair, which is the place to look after changing a mapping. A later sign-in whose
+token agrees folds the row the first one made into SCIM's; where nothing will agree,
+`admin.identity.adopt` settles the pair ([routine-tasks.md](routine-tasks.md#scim)).
 
 ### Groups are the same problem again
 

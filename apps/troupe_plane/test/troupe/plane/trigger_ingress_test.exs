@@ -177,6 +177,52 @@ defmodule Troupe.Plane.TriggerIngressTest do
       assert {401, _body} = one
     end
 
+    # A key is the webhook's door. On a schedule, a GitHub repository's trigger or a manual
+    # one it would be a second door nobody asked for, through which whoever held it fired the
+    # trigger with any event body they liked.
+    test "is minted for a plain webhook only, and opens nothing on any other", context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev"})
+
+      for {name, source, said} <- [
+            {"nightly", %{"kind" => "schedule", "cron" => "0 3 * * *"},
+             "is fired by its schedule"},
+            {"by-hand", %{"kind" => "manual"}, "is run by hand"},
+            {"fixes",
+             %{
+               "kind" => "webhook",
+               "provider" => "github",
+               "repository" => "acme/widgets",
+               "label" => "troupe"
+             }, "is fired by the GitHub App's signed deliveries for acme/widgets"}
+          ] do
+        trigger = trigger!(context, %{"name" => name, "source" => source})
+
+        assert {:error, refused} = Admin.trigger_key_rotate(context.actor, "engineering", name)
+        assert refused.message == "invalid_params"
+        assert refused.data.reason =~ said
+        assert refused.data.reason =~ "so it has no key"
+        refute Triggers.get(context.team, name).key_hash
+
+        assert {:ok, %{status: 401}} = fire(context, trigger, "twk_anything", %{})
+      end
+
+      # A webhook keyed once, then made a schedule: the key it still carries opens nothing.
+      trigger = trigger!(context, %{"name" => "triage"})
+      {:ok, key} = Admin.trigger_key_rotate(context.actor, "engineering", "triage")
+      assert {:ok, %{status: 202}} = fire(context, trigger, key.key, %{}, "before")
+
+      {:ok, _} =
+        Triggers.put(
+          context.team,
+          %{"name" => "triage", "source" => %{"kind" => "schedule", "cron" => "0 3 * * *"}},
+          "root@example.test"
+        )
+
+      assert {:ok, %{status: 401}} = fire(context, trigger, key.key, %{}, "after")
+      assert {:error, _refused} = Admin.trigger_key_rotate(context.actor, "engineering", "triage")
+      assert length(Triggers.runs(context.team)) == 1
+    end
+
     test "is refused when it is absent altogether", context do
       trigger = trigger!(context, %{"name" => "triage"})
       {:ok, _} = Admin.trigger_key_rotate(context.actor, "engineering", "triage")

@@ -170,7 +170,9 @@ minute is within the last 120 s.
 `/rpc`, by the trigger's principal or an admin of its team, writes the run row first, so
 two callers racing on one key get the same run: skipped stays skipped, failed is retried, a
 run with a session is handed it and a fresh token. `event` is capped at 16 KiB.
-`admin.trigger.run` fires one by hand, as the console's **Run now** on a trigger's page does.
+`admin.trigger.run` fires one by hand, as the console's **Run now** on a trigger's page does;
+its key names the caller and the minute, so a second click or a retry within the same minute
+is the run the first one made.
 
 **A trigger's own URL.** A trigger with a key is fired by `POST /trigger/<id>` with
 `Authorization: Bearer <key>` and a JSON object as the body, which becomes the run's
@@ -178,9 +180,12 @@ run with a session is handed it and a fresh token. `event` is capped at 16 KiB.
 answers `key` and `url` once, and the console shows them once with a button that copies
 the key; nothing shows it again. `admin.trigger.key.rotate` (the console's **Rotate**, typed
 by the trigger's name) mints a new one, shows it once with the URL and keeps a salted hash;
-rotating replaces it at once, and is how a trigger
-made another way (another kind, a resource in `gitops` mode) gets one. A trigger on a
-GitHub repository is fired by the App's signed deliveries and is made with none. The key
+rotating replaces it at once, and is how a webhook
+made another way (a resource in `gitops` mode, or a trigger changed to a webhook) gets one.
+Only a webhook that names no repository has a key: a schedule is fired by the plane, a
+manual trigger by a person or a principal, and a trigger on a GitHub repository by the
+App's signed deliveries, so rotating one of those is refused, and a key a trigger kept from
+before its source changed opens nothing. The key
 fires that one trigger and does
 nothing else, which makes it the credential to give a CI job or a provider's webhook, and
 a wrong key and an unknown id get the same `401`. An `Idempotency-Key` header names the
@@ -188,8 +193,7 @@ run; without one, a retry in the same minute against the same revision gets the 
 already made. The answer is `202` with the run and where its session is, as from
 `trigger.fire`; a disabled trigger is `403`, an event over 16 KiB `413` and a team with no
 budget left `402`. `source.kind: webhook` says a trigger is meant to be fired from
-outside, this way or by an executor that calls `trigger.fire`; any trigger with a key can
-be.
+outside, this way or by an executor that calls `trigger.fire`.
 
 **Runs** store only what the plane decided — `created`, `skipped`, `failed` — and read the
 rest from the session: `running`, `waiting` (on an approval), `done`, `failed`. A turn the
