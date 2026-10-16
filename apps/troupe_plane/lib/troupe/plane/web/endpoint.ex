@@ -65,10 +65,13 @@ defmodule Troupe.Plane.Web.Endpoint do
   plug(Plug.RequestId)
   plug(Plug.Telemetry, event_prefix: [:troupe, :plane, :endpoint])
 
+  # The GitHub App's webhook is signed over its body as it arrived, so `RawBody` keeps
+  # those bytes for that route; the router's own parsers find the body read already.
   plug(Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
-    json_decoder: Phoenix.json_library()
+    json_decoder: Phoenix.json_library(),
+    body_reader: {Troupe.Plane.Web.RawBody, :read_body, []}
   )
 
   plug(Plug.MethodOverride)

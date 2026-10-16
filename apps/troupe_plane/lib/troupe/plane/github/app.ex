@@ -1,7 +1,7 @@
 defmodule Troupe.Plane.GitHub.App do
   @moduledoc """
   The plane's one GitHub App, as a row: who it is, where its API is, which installations
-  it may use, and what is known about its private key.
+  it may use, and what is known about its private key and its webhook secret.
 
   What is known, not the key. The key is in OpenBao's transit engine, imported there by
   `Troupe.Plane.GitHub.Key`, and nothing can read it back; the row keeps its type, the
@@ -20,6 +20,8 @@ defmodule Troupe.Plane.GitHub.App do
     field(:key_type, :string)
     field(:key_fingerprint, :string)
     field(:key_version, :integer)
+    # The version transit holds the webhook secret at; the secret itself is only there.
+    field(:webhook_secret_version, :integer)
     field(:updated_by, :string)
 
     timestamps(type: :utc_datetime_usec)

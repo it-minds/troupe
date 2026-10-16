@@ -41,13 +41,21 @@ defmodule Troupe.Plane.GitHub do
   round the session's pushes are closed: the record says it stopped, and a write token is
   minted from then on with `contents: read`, so a pod could not push if it tried. The
   pull request stays a draft for a person.
+
+  ## GitHub as the trigger
+
+  The App's webhook secret is in transit beside its key (`GitHub.WebhookSecret`), and the
+  deliveries it signs reach `POST /webhook/github` (`GitHub.Webhook`): an issue starts a run
+  of a trigger on its repository (`GitHub.Issue`), and a review on a run's draft resumes
+  its session (`GitHub.Review`), whose comments the plane reads here
+  (`review_comments/3`).
   """
 
   import Ecto.Changeset
   import Ecto.Query, only: [from: 2]
 
   alias Troupe.Plane.{Audit, Fleet, Repo}
-  alias Troupe.Plane.GitHub.{App, Key}
+  alias Troupe.Plane.GitHub.{App, Key, WebhookSecret}
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Policy
 
@@ -177,6 +185,16 @@ defmodule Troupe.Plane.GitHub do
         transit_key: Key.name(),
         version: row.key_version
       },
+      # Where GitHub sends the App's events, and whether the secret it signs them with is
+      # in transit: its version there, never the secret.
+      webhook: %{
+        path: "/webhook/github",
+        secret: %{
+          set: not is_nil(row.webhook_secret_version),
+          transit_key: WebhookSecret.name(),
+          version: row.webhook_secret_version
+        }
+      },
       permissions: @permissions,
       updated_by: row.updated_by,
       updated_at: row.updated_at
@@ -185,8 +203,9 @@ defmodule Troupe.Plane.GitHub do
 
   @doc """
   Change the App. Only the keys sent change: `app_id` and `api_url` (`null` puts the API
-  back to GitHub's own), `installations` as the whole list, and `private_key` as the PEM
-  GitHub downloads, which is imported into transit and not kept anywhere else.
+  back to GitHub's own), `installations` as the whole list, `private_key` as the PEM
+  GitHub downloads, and `webhook_secret` as typed into the App's webhook settings; the key
+  and the secret are imported into transit and not kept anywhere else.
 
   Everything is checked before anything is written, the key last of all: a refusal names
   the field and says why, and leaves the App as it was. Answers the App as it was and as
@@ -203,10 +222,12 @@ defmodule Troupe.Plane.GitHub do
     with :ok <- only(attrs),
          {:ok, changes} <- read_fields(attrs),
          {:ok, pem} <- read_key(attrs),
-         {:ok, key} <- import_key(pem, opts) do
+         {:ok, secret} <- read_webhook_secret(attrs),
+         {:ok, key} <- import_key(pem, opts),
+         {:ok, webhook} <- import_webhook_secret(secret, opts) do
       stored =
         row
-        |> change(Map.merge(changes, key))
+        |> change(changes |> Map.merge(key) |> Map.merge(webhook))
         |> put_change(:updated_by, actor)
         |> Repo.insert_or_update!()
 
@@ -216,7 +237,7 @@ defmodule Troupe.Plane.GitHub do
 
   def put(_attrs, _actor, _opts), do: {:error, %{field: "app", reason: "the App is an object"}}
 
-  @fields ~w(app_id api_url installations private_key)
+  @fields ~w(app_id api_url installations private_key webhook_secret)
 
   @doc "The keys `put/3` reads, as `admin.github.put` declares them."
   @spec keys() :: [String.t()]
@@ -365,6 +386,37 @@ defmodule Troupe.Plane.GitHub do
     end
   end
 
+  # The webhook secret as the App's settings on GitHub have it. Blank leaves it as it is,
+  # as a blank key does; the webhook is turned off on GitHub.
+  defp read_webhook_secret(%{"webhook_secret" => secret}) when secret in [nil, ""],
+    do: {:ok, nil}
+
+  defp read_webhook_secret(%{"webhook_secret" => secret}) do
+    case WebhookSecret.read(secret) do
+      :ok -> {:ok, secret}
+      {:error, reason} -> {:error, %{field: "webhook_secret", reason: reason}}
+    end
+  end
+
+  defp read_webhook_secret(_attrs), do: {:ok, nil}
+
+  defp import_webhook_secret(nil, _opts), do: {:ok, %{}}
+
+  defp import_webhook_secret(secret, opts) do
+    case WebhookSecret.import(secret, opts) do
+      {:ok, version} ->
+        {:ok, %{webhook_secret_version: version}}
+
+      {:error, reason} ->
+        {:error,
+         %{field: "webhook_secret", reason: "OpenBao did not take the secret: #{explain(reason)}"}}
+    end
+  end
+
+  @doc "The App's row, or `nil` where there is none or it could not be read."
+  @spec app() :: App.t() | nil
+  def app, do: stored()
+
   defp stored do
     Repo.get(App, App.id())
   rescue
@@ -501,6 +553,23 @@ defmodule Troupe.Plane.GitHub do
       installation -> {:ok, installation}
     end
   end
+
+  @doc """
+  Whether a delivery that names this owner and installation is about one of this plane's
+  installations: the App is configured here, and the installation it lists for the owner
+  is the one the delivery names.
+  """
+  @spec installed?(term(), term()) :: boolean()
+  def installed?(owner, installation_id) when is_binary(owner) and is_integer(installation_id) do
+    with {:ok, app} <- configured(),
+         {:ok, installation} <- installation_for(app, owner) do
+      installation["installation_id"] == installation_id
+    else
+      _ -> false
+    end
+  end
+
+  def installed?(_owner, _installation_id), do: false
 
   # A pod reaches the hosts its profile declares and no others, so a repository on a host
   # the profile does not name is refused here rather than left to time out on the pod.
@@ -652,6 +721,89 @@ defmodule Troupe.Plane.GitHub do
 
   defp message(%{"message" => message}) when is_binary(message), do: message
   defp message(_body), do: nil
+
+  # -- a review on a session's pull request -------------------------------------
+
+  # The most of a review's comments the plane reads: one page, which is more than a review
+  # that a session could take in one turn.
+  @review_comments 50
+
+  @doc """
+  The comments of one review on a session's pull request, oldest first, each
+  `{path, line, body, author}`: what a review that resumes the session says beside its
+  body. Read by the plane with a token of its own, narrowed to the session's repository and
+  `pull_requests: read`, an hour long and audited as `github.token` for the session's
+  owner; the token is used for this one request and kept nowhere.
+  """
+  @spec review_comments(Session.t(), pos_integer(), pos_integer()) ::
+          {:ok, [map()]} | {:error, term()}
+  def review_comments(
+        %Session{repository: %{"owner" => owner, "name" => name}} = session,
+        number,
+        review_id
+      )
+      when is_integer(number) and is_integer(review_id) do
+    permissions = %{"pull_requests" => "read"}
+
+    with {:ok, app} <- configured(),
+         {:ok, installation} <- installation_for(app, owner),
+         {:ok, jwt} <- jwt(app),
+         {:ok, token, expires_at} <- exchange(app, installation, name, permissions, jwt) do
+      {:ok, _} =
+        Audit.record(
+          "github",
+          "github.token",
+          "#{owner}/#{name}",
+          %{
+            "session_id" => session.id,
+            "permissions" => permissions,
+            "expires_at" => expires_at,
+            "for" => "review #{review_id} on pull request #{number}"
+          },
+          on_behalf_of: session.owner_subject
+        )
+
+      url =
+        "#{api_url(app)}/repos/#{owner}/#{name}/pulls/#{number}/reviews/#{review_id}/comments"
+
+      case Req.request(
+             method: :get,
+             url: url,
+             params: [per_page: @review_comments],
+             headers: [
+               {"authorization", "Bearer " <> token},
+               {"accept", "application/vnd.github+json"},
+               {"x-github-api-version", "2022-11-28"},
+               {"user-agent", "troupe-plane"}
+             ],
+             redirect: false,
+             retry: false,
+             receive_timeout: 15_000
+           ) do
+        {:ok, %{status: 200, body: comments}} when is_list(comments) ->
+          {:ok, Enum.map(comments, &review_comment/1)}
+
+        {:ok, %{status: status, body: body}} ->
+          {:error, {:github, status, message(body), owner, name}}
+
+        {:error, reason} ->
+          {:error, {:github_unreachable, URI.parse(url).host, reason}}
+      end
+    end
+  end
+
+  def review_comments(%Session{}, _number, _review_id), do: {:error, :no_repository}
+
+  defp review_comment(comment) when is_map(comment) do
+    %{
+      "path" => comment["path"],
+      "line" => comment["line"] || comment["original_line"],
+      "body" => comment["body"],
+      "author" => get_in(comment, ["user", "login"])
+    }
+  end
+
+  defp review_comment(_other), do: %{"body" => nil}
 
   # -- what a session did there -----------------------------------------------
 
@@ -900,6 +1052,7 @@ defmodule Troupe.Plane.GitHub do
 
   def explain(:no_repository), do: "the session names no repository"
   def explain(:no_key), do: "the App's private key is not in OpenBao"
+  def explain(:no_secret), do: "the App's webhook secret is not in OpenBao"
 
   def explain({:github, 401, message, _owner, _name}),
     do:

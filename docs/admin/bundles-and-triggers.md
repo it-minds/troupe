@@ -137,7 +137,7 @@ repository holds the triggers' definitions as well ([below](#triggers-from-a-rep
 | `principal` | a principal of the same team, which the session runs as | required |
 | `profile`, `agent` | where it starts and which primary agent; one the plane does not have is saved, and fails at each firing (the gitops reader refuses it up front) | profile required |
 | `enabled` | a disabled trigger refuses to fire | `true` |
-| `source` | `{"kind": "schedule", "cron": "…", "tz": "UTC"}`, `{"kind": "webhook", "provider": "…"}` or `{"kind": "manual"}`; a `tz` other than UTC is refused | required |
+| `source` | `{"kind": "schedule", "cron": "…", "tz": "UTC"}`, `{"kind": "webhook", "provider": "…"}`, `{"kind": "webhook", "provider": "github", "repository": "owner/name", "label": "…", "command": "…"}` ([github.md §8](github.md#8-github-as-the-trigger)) or `{"kind": "manual"}`; a `tz` other than UTC is refused | required |
 | `prompt_template` | ≤ 64 KiB, with `{{event.issue.key}}`, `{{trigger.name}}`, `{{run.fired_at}}` placeholders; a missing path renders empty, nothing is escaped | `""` |
 | `terms` | §3 | `{}` |
 | `visibility` | `private` or `team` | `team` |
@@ -161,8 +161,13 @@ run with a session is handed it and a fresh token. `event` is capped at 16 KiB.
 
 **A trigger's own URL.** A trigger with a key is fired by `POST /trigger/<id>` with
 `Authorization: Bearer <key>` and a JSON object as the body, which becomes the run's
-`event`. `admin.trigger.key.rotate` mints the key, shows it once with the URL and keeps a
-salted hash; rotating again replaces it at once. The key fires that one trigger and does
+`event`. A webhook trigger is made with its key: the `admin.trigger.put` that creates it
+answers `key` and `url` once, and the console shows them once with a button that copies
+the key; nothing shows it again. `admin.trigger.key.rotate` mints a new one, shows it once
+with the URL and keeps a salted hash; rotating replaces it at once, and is how a trigger
+made another way (another kind, a resource in `gitops` mode) gets one. A trigger on a
+GitHub repository is fired by the App's signed deliveries and is made with none. The key
+fires that one trigger and does
 nothing else, which makes it the credential to give a CI job or a provider's webhook, and
 a wrong key and an unknown id get the same `401`. An `Idempotency-Key` header names the
 run; without one, a retry in the same minute against the same revision gets the run it
@@ -176,9 +181,14 @@ be.
 rest from the session: `running`, `waiting` (on an approval), `done`, `failed`. A turn the
 harness stopped is `failed` with its `failed_reason`: `tool_failures`, a tool that kept
 failing, or `agent_failed`, an agent that kept crashing. `admin.runs.list` and
-`admin.run.review` are the inbox. A `notify_url` is posted `{trigger, run, source,
-session_id, fired_at, state, done_reason, failed_reason}` when the run is `done` or
-`failed`, with `state` as the run listing gives it.
+`admin.run.review` are the inbox, and the console's **Runs and review** screen draws them
+for a platform admin and a team admin alike: each run's trigger, the repository and issue a
+GitHub run worked on, its state, its draft pull request with its CI rounds, its spend and
+who has read it, and a run's page with its session's GitHub record and a link to the
+session. A `notify_url` is posted `{trigger, run, source, session_id, fired_at, state,
+done_reason, failed_reason, pull_request}` when the run is `done` or `failed`, with
+`state` as the run listing gives it and `pull_request` the link to the draft pull request
+the run opened, or `null`.
 
 ### Triggers from a repository
 

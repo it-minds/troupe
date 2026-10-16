@@ -22,6 +22,7 @@ defmodule Troupe.Plane.Web.Live.Triggers do
 
   import Troupe.Plane.Web.Live.Layout
 
+  alias Phoenix.LiveView.JS
   alias Troupe.Plane.Admin
 
   @impl Phoenix.LiveView
@@ -32,7 +33,7 @@ defmodule Troupe.Plane.Web.Live.Triggers do
 
     {:ok,
      socket
-     |> assign(teams: teams, team: team, flash_message: nil, confirming: nil)
+     |> assign(teams: teams, team: team, flash_message: nil, confirming: nil, minted: nil)
      |> assign(mode: mode, locked: mode == :gitops, source: source(socket, mode))
      |> load()}
   end
@@ -149,6 +150,17 @@ defmodule Troupe.Plane.Web.Live.Triggers do
       |> put_present("notify_url", params["notify_url"])
 
     case Admin.trigger_put(socket.assigns.actor, attrs) do
+      # A webhook trigger is made with its key, and this is the one time it is legible:
+      # shown under the form with a copy button until the person dismisses it, in no
+      # listing and no audit row.
+      {:ok, %{key: key, url: url}} ->
+        minted = %{name: params["name"], key: key, url: url}
+
+        {:noreply,
+         socket
+         |> assign(flash_message: "#{params["name"]} created", minted: minted)
+         |> load()}
+
       {:ok, _result} ->
         {:noreply, socket |> assign(flash_message: "#{params["name"]} created") |> load()}
 
@@ -156,6 +168,8 @@ defmodule Troupe.Plane.Web.Live.Triggers do
         {:noreply, assign(socket, error: refusal(error))}
     end
   end
+
+  def handle_event("dismiss-key", _params, socket), do: {:noreply, assign(socket, minted: nil)}
 
   def handle_event("revisions", %{"name" => name}, socket) do
     case Admin.trigger_revisions(socket.assigns.actor, socket.assigns.team, name) do
@@ -167,9 +181,9 @@ defmodule Troupe.Plane.Web.Live.Triggers do
     end
   end
 
-  # The two sources a form can express. A webhook needs no field of its own — it has no key
-  # until one is made on its row, which is when its URL and key are shown — and anything
-  # else is a document somebody writes. The
+  # The two sources a form can express. A webhook needs no field of its own — it is made
+  # with its key, which is when its URL and key are shown — and anything else is a document
+  # somebody writes. The
   # zone is `tz`, as everywhere else a trigger is written down: saved as `timezone` it was
   # read by nothing, and the trigger fired in UTC whatever the field said.
   defp source_from(%{"kind" => "webhook"}), do: %{"kind" => "webhook"}
@@ -248,6 +262,19 @@ defmodule Troupe.Plane.Web.Live.Triggers do
       <p :if={@error} class="error">{@error}</p>
       <p :if={@flash_message} class="notice">{@flash_message}</p>
 
+      <section :if={@minted} class="panel" id="minted-key">
+        <h2>{@minted.name}'s webhook key</h2>
+        <p>
+          POST <code>{@minted.url}</code> with <code>Authorization: Bearer</code> and this key.
+          Copy it now: it is not shown again, and losing it costs a rotation.
+        </p>
+        <p><code id="minted-key-value" class="mono">{@minted.key}</code></p>
+        <button type="button" phx-click={JS.dispatch("troupe:copy", to: "#minted-key-value")}>
+          Copy the key
+        </button>
+        <button type="button" phx-click="dismiss-key">I have copied it</button>
+      </section>
+
       <form id="trigger-team" :if={length(@teams) > 1} phx-change="pick">
         <label>
           team
@@ -322,8 +349,8 @@ defmodule Troupe.Plane.Web.Live.Triggers do
           <label for="new-trigger-cron">Schedule</label>
           <input id="new-trigger-cron" name="cron" placeholder="0 3 * * 1-5" autocomplete="off" />
           <p class="field-help">
-            Five fields, in UTC. Ignored for a webhook, which has no key until you make one
-            with make a key on its row below; its URL and key are shown then, once.
+            Five fields, in UTC. Ignored for a webhook, which is made with its key: its URL
+            and key are shown once, when it is created.
           </p>
 
           <label for="new-trigger-timezone">Timezone</label>

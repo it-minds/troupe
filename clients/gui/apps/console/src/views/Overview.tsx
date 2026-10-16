@@ -254,9 +254,9 @@ function attention(overview: FleetOverview, unread: number, current: (path: stri
     items.push({
       state: "waiting",
       what: `${count(unread, "session")} an unattended run started ${unread === 1 ? "is" : "are"} waiting for a person to look at ${unread === 1 ? "it" : "them"}.`,
-      where: current("/review"),
+      where: href({ page: "runs" }),
       action: "Runs and review",
-      elsewhere: true,
+      elsewhere: false,
     });
   }
   return items.sort((a, b) => STATES[a.state].rank - STATES[b.state].rank);

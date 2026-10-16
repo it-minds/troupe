@@ -21,6 +21,7 @@ import { Profile, Profiles } from "./Profiles";
 import { TriggerPage, Triggers } from "./Triggers";
 import { Organisation } from "./Organisation";
 import { Overview } from "./Overview";
+import { RunPage, Runs } from "./Runs";
 import { Sessions } from "./Sessions";
 import { Team } from "./Team";
 import { Teams } from "./Teams";
@@ -123,6 +124,8 @@ function titleWithin(page: string, path: string[]): string | null {
   if (!first) return null;
   if (page === "bundles") return second ? `${first} v${second}` : first;
   if (page === "triggers") return second ?? null;
+  if (page === "runs") return "A run";
+  if (page === "sessions") return null;
   return first;
 }
 
@@ -138,7 +141,9 @@ function Screen({ route }: { route: Route }): JSX.Element {
   if (route.page === "teams" && route.team) return <Team name={route.team} tab={route.tab ?? "members"} />;
   if (route.page === "teams") return <Teams />;
   if (route.page === "overview") return <Overview />;
-  if (route.page === "sessions") return <Sessions />;
+  if (route.page === "sessions") return <Sessions query={first ?? ""} key={first ?? ""} />;
+  if (route.page === "runs" && first) return <RunPage id={first} key={first} />;
+  if (route.page === "runs") return <Runs />;
   if (route.page === "audit") return <Audit />;
   if (route.page === "clients") return <ClientVersions />;
   if (route.page === "organisation") return <Organisation />;

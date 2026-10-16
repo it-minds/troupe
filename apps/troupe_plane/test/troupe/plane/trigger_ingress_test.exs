@@ -54,6 +54,64 @@ defmodule Troupe.Plane.TriggerIngressTest do
   end
 
   describe "the key" do
+    # Before, a webhook trigger had no key until somebody found the button that made one on
+    # its row, and a trigger that cannot be fired was half made.
+    test "is minted when a webhook trigger is made, answered once, and fires it", context do
+      {:ok, _} = Troupe.Plane.Fleet.put_profile(%{name: "dev"})
+
+      attrs = %{
+        "team" => "engineering",
+        "name" => "deploys",
+        "principal" => context.principal.subject,
+        "profile" => "dev",
+        "source" => %{"kind" => "webhook", "provider" => "generic"},
+        "prompt_template" => "Deploy {{event.k}}",
+        "visibility" => "private"
+      }
+
+      assert {:ok, made} = Admin.trigger_put(context.actor, attrs)
+      assert "twk_" <> _rest = made.key
+      trigger = Triggers.get(context.team, "deploys")
+      assert made.url == "/trigger/" <> trigger.id
+      assert made.trigger["has_key"]
+      assert made.trigger["key_rotated_by"] == context.actor.subject
+
+      # In no listing and no audit row: the answer to the create is the one place it is.
+      {:ok, [listed]} = Admin.triggers_list(context.actor, "engineering")
+      refute listed |> Jason.encode!() |> String.contains?(made.key)
+      {:ok, rows} = Admin.audit_list(context.actor, subject_id: "engineering/deploys")
+      refute rows |> Jason.encode!() |> String.contains?(made.key)
+
+      assert Enum.any?(
+               rows,
+               &(&1.action == "trigger.put" and &1.detail["__key_minted__"] == true)
+             )
+
+      assert {:ok, %{status: 202}} = fire(context, trigger, made.key, %{"k" => "v2"})
+
+      # A change to it mints nothing: its key is rotated as it always was.
+      assert {:ok, changed} =
+               Admin.trigger_put(context.actor, %{
+                 "team" => "engineering",
+                 "name" => "deploys",
+                 "prompt_template" => "Deploy {{event.k}} now"
+               })
+
+      refute Map.has_key?(changed, :key)
+      assert {:ok, %{status: 202}} = fire(context, trigger, made.key, %{"k" => "v3"}, "again")
+
+      # A schedule has no door for a key to open, and gets none.
+      assert {:ok, scheduled} =
+               Admin.trigger_put(context.actor, %{
+                 attrs
+                 | "name" => "nightly",
+                   "source" => %{"kind" => "schedule", "cron" => "0 3 * * *"}
+               })
+
+      refute Map.has_key?(scheduled, :key)
+      refute scheduled.trigger["has_key"]
+    end
+
     test "is legible once, and the listing says only that there is one", context do
       trigger!(context, %{"name" => "triage"})
 

@@ -261,6 +261,36 @@ export interface FakeTrigger {
   updated_at: string;
   revisions: Array<{ revision: number; hash: string; created_by: string; created_at: string; document: Record<string, unknown> }>;
   gitops?: { generation: number | null; problem: string | null; reasons: string[] };
+  /** Whether it has a webhook key; where absent, a webhook that names no repository has one. */
+  has_key?: boolean;
+}
+
+/** A trigger's run, as `admin.runs.list` answers it, with the team whose trigger it is. */
+export interface FakeRun {
+  id: string;
+  team: string;
+  trigger: string;
+  trigger_id: string;
+  idempotency_key: string;
+  session_id: string | null;
+  fired_at: string;
+  fired_by: string | null;
+  source: string;
+  revision: number | null;
+  revision_hash: string | null;
+  event: Record<string, unknown> | null;
+  state: string;
+  status: string | null;
+  done_reason: string | null;
+  failed_reason: string | null;
+  pending_approvals: number | null;
+  pending_questions: number | null;
+  cost_micros: number | null;
+  repository: string | null;
+  issue: { number: number; url: string | null; title: string | null } | null;
+  github: Record<string, unknown> | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
 }
 
 /** An entitlement row: what a team may use of a bundle on a profile, which a publish can take away. */
@@ -483,6 +513,7 @@ export class FakeAdmin {
   /** Every published version, by channel, oldest first. */
   readonly bundles = new Map<string, FakeBundle[]>();
   readonly triggerRows: FakeTrigger[] = [];
+  readonly runRows: FakeRun[] = [];
   readonly entitlements: FakeEntitlement[] = [];
   /** The cluster policy, as far as a profile and a bundle are checked against it. */
   readonly policy = {
@@ -960,10 +991,14 @@ export class FakeAdmin {
         for (const key of TRIGGER_KEYS) if (key in attrs) (row as unknown as Record<string, unknown>)[key] = attrs[key] ?? TRIGGER_DEFAULTS[key] ?? null;
         row.updated_at = now;
         if (!existing) this.triggerRows.push(row);
+        // A new webhook trigger is made with its key, answered this once; one on a GitHub
+        // repository is fired by the App and has none.
+        const minted = !existing && row.source["kind"] === "webhook" && !row.source["repository"] ? `twk_fake${Math.random().toString(36).slice(2, 14)}` : null;
+        if (!existing) row.has_key = minted !== null;
         const changes = diff(before, this.comparable_trigger(row));
         const revision = this.revise(row, subject);
-        this.record(subject, "trigger.put", `${t.name}/${name}`, { ...changes, __revision__: revision.revision, __revision_hash__: revision.hash });
-        return { result: { trigger: this.triggerJson(row), changes, revision: revisionJson(revision) } };
+        this.record(subject, "trigger.put", `${t.name}/${name}`, { ...changes, __revision__: revision.revision, __revision_hash__: revision.hash, ...(minted ? { __key_minted__: true } : {}) });
+        return { result: { trigger: this.triggerJson(row), changes, revision: revisionJson(revision), ...(minted ? { key: minted, url: `/trigger/${row.id}` } : {}) } };
       }
 
       case "admin.trigger.delete":
@@ -980,6 +1015,34 @@ export class FakeAdmin {
         this.record(subject, "trigger.delete", `${row.team}/${row.name}`, this.comparable_trigger(row));
         this.triggerRows.splice(this.triggerRows.indexOf(row), 1);
         return { result: { team: row.team, name: row.name, deleted: true } };
+      }
+
+      case "admin.runs.list": {
+        if (!admin) return notAdmin;
+        const filter = this.filterOf(params);
+        let teams = this.visible(subject);
+        if (typeof filter["team"] === "string") {
+          const found = this.fetchTeam(subject, filter["team"]);
+          if ("error" in found) return found;
+          teams = [found.team];
+        }
+        const names = teams.map((t) => t.name);
+        let rows = this.runRows.filter((r) => names.includes(r.team));
+        if (typeof filter["trigger"] === "string") rows = rows.filter((r) => r.trigger === filter["trigger"]);
+        rows = [...rows].sort((a, b) => b.fired_at.localeCompare(a.fired_at));
+        const limit = typeof filter["limit"] === "number" ? filter["limit"] : 50;
+        return { result: rows.slice(0, limit).map((r) => ({ ...r })) };
+      }
+
+      case "admin.run.review": {
+        if (!admin) return notAdmin;
+        const names = this.visible(subject).map((t) => t.name);
+        const row = this.runRows.find((r) => r.session_id === params["session_id"] && names.includes(r.team));
+        if (!row) return refuse(NOT_FOUND, "not_found", { session_id: params["session_id"] });
+        row.reviewed_by = subject;
+        row.reviewed_at = new Date().toISOString();
+        this.record(subject, "run.review", row.session_id!, {});
+        return { result: { session_id: row.session_id, reviewed_by: subject } };
       }
 
       case "admin.sessions.list": {
@@ -1398,6 +1461,14 @@ export class FakeAdmin {
       if (source["kind"] === "schedule" && (typeof source["cron"] !== "string" || source["cron"].trim().split(/\s+/).length !== 5)) {
         return refuse(INVALID_PARAMS, "invalid_params", { reason: "source: a schedule's cron is five fields, minute hour day-of-month month day-of-week" });
       }
+      if (source["kind"] === "webhook" && source["repository"] !== undefined) {
+        if (typeof source["repository"] !== "string" || !/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/.test(source["repository"])) {
+          return refuse(INVALID_PARAMS, "invalid_params", { reason: `source: ${String(source["repository"])} is not a GitHub repository, owner/name` });
+        }
+        if (!source["label"] && !source["command"]) {
+          return refuse(INVALID_PARAMS, "invalid_params", { reason: "source: a GitHub trigger names a label, a command, or both: what on an issue starts a run" });
+        }
+      }
       if (source["tz"] !== undefined && source["tz"] !== null && source["tz"] !== "" && source["tz"] !== "UTC") {
         return refuse(INVALID_PARAMS, "invalid_params", { reason: `source: ${String(source["tz"])} is not a zone this plane keeps; it keeps UTC` });
       }
@@ -1433,6 +1504,7 @@ export class FakeAdmin {
   private triggerJson(row: FakeTrigger): Record<string, unknown> {
     const last = row.revisions.at(-1);
     const kind = (row.source ?? {})["kind"];
+    const hasKey = row.has_key ?? (kind === "webhook" && !(row.source ?? {})["repository"]);
     return {
       id: row.id,
       team: row.team,
@@ -1449,9 +1521,9 @@ export class FakeAdmin {
       notify: row.notify,
       notify_url: row.notify_url,
       concurrency: row.concurrency,
-      has_key: kind === "webhook",
-      key_rotated_at: kind === "webhook" ? row.updated_at : null,
-      key_rotated_by: kind === "webhook" ? row.created_by : null,
+      has_key: hasKey,
+      key_rotated_at: hasKey ? row.updated_at : null,
+      key_rotated_by: hasKey ? row.created_by : null,
       last_fired_at: row.last_fired_at,
       created_by: row.created_by,
       updated_at: row.updated_at,
@@ -1946,6 +2018,60 @@ export function exampleAdmin(): FakeAdmin {
     },
   );
   for (const row of admin.triggerRows) admin.revise(row, row.created_by, row.updated_at);
+  // What core's and design's triggers have done: a run that opened a draft pull request and
+  // went round CI twice, one that failed and nobody has read, one the cap skipped, and
+  // design's waiting on a person.
+  const run = (fields: Partial<FakeRun> & { id: string; team: string; trigger: string; fired_at: string }): FakeRun => ({
+    trigger_id: `trg-${fields.team}-${fields.trigger}`,
+    idempotency_key: `k-${fields.id}`,
+    session_id: `s-${fields.id}`,
+    fired_by: "system:scheduler",
+    source: "schedule",
+    revision: 1,
+    revision_hash: "9f2c41aa",
+    event: {},
+    state: "done",
+    status: "done",
+    done_reason: "finished",
+    failed_reason: null,
+    pending_approvals: 0,
+    pending_questions: 0,
+    cost_micros: 1_250_000,
+    repository: null,
+    issue: null,
+    github: null,
+    reviewed_by: null,
+    reviewed_at: null,
+    ...fields,
+  });
+  admin.runRows.push(
+    run({
+      id: "run-fix-7",
+      team: "core",
+      trigger: "nightly-deps",
+      fired_at: "2026-10-15T03:00:00Z",
+      fired_by: "github:triager",
+      source: "webhook",
+      cost_micros: 3_400_000,
+      repository: "example-org/widgets",
+      issue: { number: 7, url: "https://github.example.com/example-org/widgets/issues/7", title: "Widgets wobble" },
+      github: {
+        base: "a".repeat(40),
+        branch: "troupe/issue-7",
+        commit: "2".repeat(40),
+        pushes: 2,
+        pushed_at: "2026-10-15T03:40:00Z",
+        pull_request: { number: 21, url: "https://github.example.com/example-org/widgets/pull/21" },
+        rounds: [
+          { commit: "1".repeat(40), state: "red", failing: ["test (ubuntu)"], at: "2026-10-15T03:20:00Z" },
+          { commit: "2".repeat(40), state: "green", failing: [], at: "2026-10-15T03:50:00Z" },
+        ],
+      },
+    }),
+    run({ id: "run-nightly-14", team: "core", trigger: "nightly-deps", fired_at: "2026-10-14T03:00:00Z", state: "failed", status: "interrupted", done_reason: null, failed_reason: "the turn hit its wall clock", cost_micros: 900_000 }),
+    run({ id: "run-nightly-13", team: "core", trigger: "nightly-deps", fired_at: "2026-10-13T03:00:00Z", session_id: null, state: "skipped", status: null, done_reason: null, cost_micros: null, reviewed_by: "dan@example.com", reviewed_at: "2026-10-13T09:00:00Z" }),
+    run({ id: "run-digest-1", team: "design", trigger: "weekly-digest", fired_at: "2026-10-12T08:00:00Z", source: "webhook", state: "waiting", status: "waiting", done_reason: null, pending_approvals: 1, cost_micros: 200_000 }),
+  );
   admin.stored.set("client_model_default", "glm-5.2");
   admin.stored.set("client_enforced", { approvals: "wait", max_turns: 200 });
   admin.stored.set("default_erase_after_days", 180);

@@ -475,28 +475,47 @@ export interface TriggerRevision {
   document?: Record<string, unknown>;
 }
 
-/** What `admin.trigger.put` answers: the trigger as it now is, what moved, and its revision. */
+/**
+ * What `admin.trigger.put` answers: the trigger as it now is, what moved, and its revision.
+ * A new webhook trigger is made with its key: `key` and `url` are in this answer once, and
+ * in nothing after it.
+ */
 export interface TriggerPut {
   trigger: Trigger;
   changes: AuditChanges;
   revision: TriggerRevision;
+  key?: string;
+  url?: string;
 }
 
 export interface TriggerRun {
   id: string;
   trigger: string;
+  /** The team whose trigger it is. */
+  team?: string;
   trigger_id: string;
   idempotency_key: string;
   session_id: string | null;
   fired_at: string;
   fired_by: string | null;
+  /** How the firing arrived: schedule, webhook, manual and the rest. */
+  source?: string | null;
+  revision?: number | null;
+  revision_hash?: string | null;
   event: Record<string, unknown> | null;
   state: "created" | "running" | "waiting" | "done" | "failed" | "skipped" | string;
   status: string | null;
   done_reason: string | null;
+  failed_reason?: string | null;
   pending_approvals: number | null;
   pending_questions?: number | null;
   cost_micros: number | null;
+  /** The GitHub repository a run on one worked in, `owner/name`; null for none. */
+  repository?: string | null;
+  /** The issue that started it, where GitHub did. */
+  issue?: { number: number; url: string | null; title: string | null } | null;
+  /** What its session did on GitHub: its branch, its draft pull request and the CI rounds on it. */
+  github?: SessionGitHub | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
 }
@@ -874,8 +893,14 @@ export class AdminApi {
     return this.rpc<TriggerRun>("admin.trigger.run", { team, name });
   }
 
-  runs(filter: AdminFilter & { team: string }): Promise<TriggerRun[]> {
+  /** One team's runs where `team` is named, every team the caller administers where it is not. */
+  runs(filter: AdminFilter & { team?: string } = {}): Promise<TriggerRun[]> {
     return this.rpc<TriggerRun[]>("admin.runs.list", { filter });
+  }
+
+  /** Mark the run behind a session as read, by whoever is asking. */
+  reviewRun(sessionId: string): Promise<{ session_id: string; reviewed_by: string }> {
+    return this.rpc("admin.run.review", { session_id: sessionId });
   }
 }
 
