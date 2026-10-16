@@ -408,15 +408,44 @@ defmodule Troupe.Plane.PanelTest do
       refute design_html =~ "nightly-deps"
     end
 
-    # The form said a webhook's key is minted when the trigger is made, and `trigger.put`
-    # mints none: the trigger has no key until somebody makes one on its row.
-    test "the form says how a webhook gets its key, which is not by being made", context do
-      {:ok, _view, html} =
+    # A webhook trigger is made with its key now (`trigger.put` mints it), so the form says
+    # so, and the key is shown once, with a button that copies it, until it is dismissed.
+    test "a webhook is made with its key, shown once with a copy button", context do
+      {:ok, principal, _secret} =
+        principal!(context.engineering, %{name: "hook", profiles: ["dev"]})
+
+      {:ok, view, html} =
         context.conn |> sign_in(context.lead.subject) |> live("/admin/triggers")
 
-      refute html =~ "minted when it"
-      assert html =~ "has no key until"
-      assert html =~ "make a key"
+      assert html =~ "which is made with its key"
+      refute html =~ "has no key until"
+
+      html =
+        view
+        |> form("#new-trigger", %{
+          "name" => "deploys",
+          "principal" => principal.subject,
+          "profile" => "dev",
+          "kind" => "webhook",
+          "prompt_template" => "Deploy."
+        })
+        |> render_submit()
+
+      trigger = Triggers.get(context.engineering, "deploys")
+      assert trigger.key_hash
+      [key] = Regex.run(~r/twk_[A-Za-z0-9_-]+/, html)
+      assert Triggers.by_key(trigger.id, key) == trigger
+      assert html =~ "/trigger/#{trigger.id}"
+      assert html =~ "it is not shown again"
+      assert has_element?(view, "#minted-key button", "Copy the key")
+
+      html = view |> element("#minted-key button", "I have copied it") |> render_click()
+      refute html =~ key
+
+      {:ok, _view, again} =
+        context.conn |> sign_in(context.lead.subject) |> live("/admin/triggers")
+
+      refute again =~ key
     end
 
     # The form saved the zone where nothing read it, and the trigger fired in UTC.

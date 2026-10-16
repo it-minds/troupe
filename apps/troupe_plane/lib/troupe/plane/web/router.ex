@@ -11,6 +11,7 @@ defmodule Troupe.Plane.Web.Router do
                                        which provider an MCP client should authenticate to
       POST /rpc                        the harness JSON-RPC (§ Plane API)
       POST /trigger/<id>               fire one trigger, with that trigger's own key
+      POST /webhook/github             the GitHub App's events, signed with its webhook secret
       POST /mcp                        the same admin methods, as MCP tools
       POST /mcp/session                four of them, for an agent already inside
       *    /scim/v2/...                users and groups, pushed by the identity provider
@@ -40,8 +41,9 @@ defmodule Troupe.Plane.Web.Router do
   }
 
   alias Troupe.Plane.Admin.API, as: AdminAPI
+  alias Troupe.Plane.GitHub.Webhook, as: GitHubWebhook
   alias Troupe.Plane.SCIM.Connector
-  alias Troupe.Plane.Web.{Docs, Index}
+  alias Troupe.Plane.Web.{Docs, Index, RawBody}
   alias Troupe.Protocol.{Error, JSONRPC, Token}
 
   require Logger
@@ -58,7 +60,17 @@ defmodule Troupe.Plane.Web.Router do
   # runs well past 256 KiB. Anything larger than this is not a request the plane has a
   # method for, and reading it before finding that out would be the plane buffering a
   # stranger's upload.
-  plug(Plug.Parsers, parsers: [:json], pass: ["*/*"], json_decoder: Jason, length: 4_194_304)
+  #
+  # Read through `RawBody`, which keeps the bytes as they came for the GitHub App's
+  # webhook, whose signature is over them.
+  plug(Plug.Parsers,
+    parsers: [:json],
+    pass: ["*/*"],
+    json_decoder: Jason,
+    length: 4_194_304,
+    body_reader: {Troupe.Plane.Web.RawBody, :read_body, []}
+  )
+
   plug(:dispatch)
 
   # The root, which every other route is a poor answer for. A person handed this URL and
@@ -263,6 +275,31 @@ defmodule Troupe.Plane.Web.Router do
     case fire_from_webhook(conn, id) do
       {:ok, fired} -> send_json(conn, 202, fired)
       {:error, error} -> send_json(conn, webhook_status(error), error_json(error))
+    end
+  end
+
+  # The GitHub App's webhook (`GitHub.Webhook`). The credential is the signature over the
+  # body, under the App's webhook secret; nothing else is asked of the caller. A delivery is
+  # answered as soon as it is checked and recorded, `202`, and worked afterwards; one already
+  # taken is `200`, and does nothing again.
+  post "/webhook/github" do
+    {body, conn} = raw_body(conn)
+
+    case GitHubWebhook.take(body, Map.new(conn.req_headers)) do
+      {:ok, :accepted} ->
+        send_json(conn, 202, %{"accepted" => true})
+
+      {:ok, :duplicate} ->
+        send_json(conn, 200, %{"accepted" => true, "duplicate" => true})
+
+      {:error, reason} when reason in [:unsigned, :mismatch] ->
+        send_json(conn, 401, %{"error" => "unauthenticated"})
+
+      {:error, :malformed} ->
+        send_json(conn, 400, %{"error" => "invalid_request"})
+
+      {:error, _unverifiable} ->
+        send_json(conn, 503, %{"error" => "unavailable"})
     end
   end
 
@@ -682,6 +719,25 @@ defmodule Troupe.Plane.Web.Router do
     do: Settings.get(Atom.to_string(key)) || default
 
   defp config(key, default), do: Application.get_env(:troupe_plane, :oidc, [])[key] || default
+
+  # -- the GitHub App's webhook ---------------------------------------------
+
+  # The bytes `Plug.Parsers` read and `RawBody` kept, for a JSON delivery; for any other
+  # content type the parsers left the body unread, and it is read here, as large as they
+  # would have taken.
+  defp raw_body(conn) do
+    case RawBody.of(conn) do
+      nil ->
+        case Plug.Conn.read_body(conn, length: 4_194_304) do
+          {:ok, body, conn} -> {body, conn}
+          {_more_or_error, _partial, conn} -> {"", conn}
+          {:error, _reason} -> {"", conn}
+        end
+
+      body ->
+        {body, conn}
+    end
+  end
 
   # -- the trigger ingress ----------------------------------------------------
 

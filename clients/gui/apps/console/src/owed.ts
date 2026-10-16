@@ -29,11 +29,6 @@ export const OWED: Owed[] = [
     methods: ["admin.connections.list"],
   },
   {
-    area: "runs",
-    why: "Trigger runs and marking one reviewed, which Overview counts and links to; the current console's Review page does it.",
-    methods: ["admin.runs.list", "admin.run.review"],
-  },
-  {
     area: "triggers",
     why: "Running a trigger by hand, and minting its webhook key behind a typed confirm; a trigger's page links to the current console's Triggers page for both.",
     methods: ["admin.trigger.run", "admin.trigger.key.rotate"],

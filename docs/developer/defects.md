@@ -1419,7 +1419,6 @@ Found by the chunk 34 fixers, 2026-10-13.
   - OTP 28.5's `:inet.getfd/1` raises on an `inet_backend: socket` socket (upstream).
 - **The console** (Decision 901).
   - The admin API serves neither the provider types nor the size classes, so the console takes the provider as free text and offers two sizes it knows, short of Decision 894's one list.
-  - A webhook trigger has no key until one is made on its row; whether `trigger.put` should mint one at create is open.
   - Overview's profile links still go to the previous console's Workers page.
   - `Team.tsx` keeps its own copy of `useChange`, which now lives in `bits.tsx`.
 - **The audit** replaces `secretRef.key`, `tokenUrl` and `transitKey` values with `[redacted]` in profile diffs, so changes to those names don't show.
