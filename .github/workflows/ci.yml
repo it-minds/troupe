@@ -51,6 +51,10 @@ on:
         description: Run each app's suite this many more times, for the race that shows one time in five.
         type: number
         default: 0
+      hunt:
+        description: The nightly's flake hunt - the TUI's suite 3 more times and the GUI's 5, besides the soak.
+        type: boolean
+        default: false
       cluster:
         description: Run the suite that needs a Kubernetes cluster (twenty minutes).
         type: boolean
@@ -418,17 +422,20 @@ jobs:
       # app: some suites read across the umbrella — `troupe_protocol`'s checks every
       # app's version and borrows the operator's fixtures — and only the root loads it all.
       - name: Test
+        id: test
         run: mix test "apps/${{ matrix.app }}/test"
 
       # A full run's soak: the suite is concurrent, and a race that shows up one time in
       # five is a bug this project cares about. The nightly and a release owe it; a pull
-      # request and an ordinary merge do not.
+      # request and an ordinary merge do not. Every run goes on whatever the last did
+      # (each with a seed of its own), also after the first pass failed, and the step
+      # names every test that failed in any of them (`scripts/flake-hunt`).
       - name: Test, ${{ inputs.soak }} more times
-        if: inputs.soak > 0
+        if: inputs.soak > 0 && (success() || steps.test.outcome == 'failure')
         env:
           SOAK: ${{ inputs.soak }}
           APP: ${{ matrix.app }}
-        run: for _ in $(seq "$SOAK"); do mix test "apps/$APP/test" || exit 1; done
+        run: scripts/flake-hunt "$SOAK" mix test "apps/$APP/test"
 
   chart:
     name: helm lint, render, kubeconform
@@ -686,7 +693,8 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.tui == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # The flake hunt's three more runs of the suite take about seven minutes.
+    timeout-minutes: ${{ inputs.hunt && 35 || 20 }}
     defaults:
       run:
         working-directory: clients/tui
@@ -725,13 +733,21 @@ jobs:
 
       - run: mix deps.get
       - run: mix check
+        id: check
+
+      # The nightly's flake hunt: the suite three more times, each with a seed of its own,
+      # naming every test that failed in any of them (`scripts/flake-hunt`).
+      - name: Test, 3 more times
+        if: inputs.hunt && (success() || steps.check.outcome == 'failure')
+        run: ../../scripts/flake-hunt 3 mix test
 
   gui:
     name: the GUI — tokens, typecheck, build, test
     needs: [changes]
     if: needs.changes.outputs.gui == 'true'
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
+    # The flake hunt's five more runs of the suites take about ten minutes.
+    timeout-minutes: ${{ inputs.hunt && 30 || 15 }}
     defaults:
       run:
         working-directory: clients/gui
@@ -768,6 +784,15 @@ jobs:
       - run: pnpm build
 
       - run: pnpm test
+        id: test
+
+      # The nightly's flake hunt: the suites five more times, the apps' files and tests in
+      # an order of their own each time, naming every test that failed in any of them.
+      - name: Test, 5 more times
+        if: inputs.hunt && (success() || steps.test.outcome == 'failure')
+        env:
+          TROUPE_TEST_SHUFFLE: "1"
+        run: ../../scripts/flake-hunt 5 pnpm test
 
   # The desktop crate's own tests, which nothing else runs: the native build compiles it
   # and the GUI's tests are the web bundle's. On Linux, with the system libraries Tauri

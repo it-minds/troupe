@@ -72,11 +72,9 @@ restart of the machine or the WSL VM, and OpenBao writes its transit key again a
 starts, but only once Docker is running. A suite failing with `econnrefused` or a closed
 connection is checked against `docker ps` before anything is blamed on a change.
 
-Besides the install, the plane's tests share one database, `troupe_plane_test`, so one
-plane suite runs at a time: two at once deadlock (Postgrex `40P01`). The suite does not
-migrate it, so a fixer who adds a plane migration applies it there
-(`MIX_ENV=test mix ecto.migrate` in `apps/troupe_plane`); until someone does, the plane
-tests fail on every branch that carries it.
+The plane's tests run against a database of their checkout's own,
+`troupe_plane_test_<hash of the checkout's path>`, which the suite creates and migrates as
+it starts, so two worktrees' plane suites run at once without deadlocking (Decision 915).
 
 Scratch directories may be shared between fixers. Each fixer writes only under a
 subfolder named for its issue (`fix-<N>/`), and reads its pull request body back just

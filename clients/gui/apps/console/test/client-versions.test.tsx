@@ -8,7 +8,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -33,11 +33,11 @@ describe("client versions", () => {
     await signedInAs(fake, PEOPLE.alice);
     unmount = render(<App />).unmount;
     const terminal = await waitFor(() => card("The terminal"), "the terminal's policy");
-    expect(says("0.16.0-beta", terminal)).toBe(true);
-    expect(says("0.14.0-beta", terminal)).toBe(true);
-    expect(says("0.15.0-beta", terminal)).toBe(true);
-    expect(says("last set by alice@example.com", terminal)).toBe(true);
-    expect(says("never set", card("The daemon")!)).toBe(true);
+    await sees("0.16.0-beta", terminal);
+    await sees("0.14.0-beta", terminal);
+    await sees("0.15.0-beta", terminal);
+    await sees("last set by alice@example.com", terminal);
+    await sees("never set", () => card("The daemon"));
     expect(card("The desktop app")).not.toBeNull();
   });
 
@@ -50,9 +50,9 @@ describe("client versions", () => {
     button("Preview", terminal)!.click();
 
     await waitFor(() => says("What will happen", terminal), "the preview");
-    expect(says("minimum: 0.14.0-beta", terminal)).toBe(true);
-    expect(says("minimum: 0.16.0-beta", terminal)).toBe(true);
-    expect(says("Every troupe older than 0.16.0-beta is refused when it next connects, and told to run troupe update.", terminal)).toBe(true);
+    await sees("minimum: 0.14.0-beta", terminal);
+    await sees("minimum: 0.16.0-beta", terminal);
+    await sees("Every troupe older than 0.16.0-beta is refused when it next connects, and told to run troupe update.", terminal);
     // Nothing is sent until it is confirmed.
     expect(fake.admin.policies["tui"]!.minimum).toBe("0.14.0-beta");
 
@@ -60,7 +60,7 @@ describe("client versions", () => {
     await waitFor(() => says("Recorded in the audit as clients.put on tui"), "the audit's note");
     expect(fake.admin.policies["tui"]!.minimum).toBe("0.16.0-beta");
     expect(fake.admin.audit.at(-1)).toMatchObject({ actor: "alice@example.com", action: "clients.put", subject_id: "tui", detail: { minimum: { from: "0.14.0-beta", to: "0.16.0-beta" } } });
-    expect(says("version policy is applied")).toBe(true);
+    await sees("version policy is applied");
     await waitFor(() => !says("What will happen") && says("0.16.0-beta", card("The terminal")!), "the policy, as it now is");
   });
 
@@ -94,9 +94,9 @@ describe("client versions", () => {
     await signedInAs(fake, PEOPLE.bob);
     unmount = render(<App />).unmount;
     const terminal = await waitFor(() => card("The terminal"), "the terminal's policy");
-    expect(says("0.14.0-beta", terminal)).toBe(true);
+    await sees("0.14.0-beta", terminal);
     expect(button("Change", terminal)).toBeNull();
-    expect(says("Only a platform admin changes these")).toBe(true);
+    await sees("Only a platform admin changes these");
   });
 
   it("says when there is no policy at all", async () => {
@@ -104,6 +104,6 @@ describe("client versions", () => {
     await signedInAs(fake, PEOPLE.alice);
     unmount = render(<App />).unmount;
     await waitFor(() => says("No policy yet"), "the empty state");
-    expect(says("This plane serves every version of every client.")).toBe(true);
+    await sees("This plane serves every version of every client.");
   });
 });

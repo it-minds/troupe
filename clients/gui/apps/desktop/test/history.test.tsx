@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { render, says, startOnTheList, waitFor } from "./support";
+import { render, says, sees, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -44,7 +44,7 @@ describe("a session with a history", () => {
 
     await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
     await waitFor(() => says("Two templates, and the VAT line moved."), "the replayed answer");
-    expect(says("What changed in the invoices?")).toBe(true);
+    await sees("What changed in the invoices?");
     // Once each: the replay is folded by one listener, not by a late one as well.
     expect(document.body.textContent!.split("Two templates, and the VAT line moved.").length).toBe(2);
   });

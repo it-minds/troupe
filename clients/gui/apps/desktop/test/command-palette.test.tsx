@@ -9,7 +9,7 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { COMMANDS } from "../../../packages/client/test/support/commands.js";
-import { button, render, says, startOnTheList, type, waitFor } from "./support";
+import { button, render, says, sees, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -74,8 +74,8 @@ describe("the command palette", () => {
     const sections = [...dialog.querySelectorAll(".section")].map((el) => el.textContent);
     expect(sections).toEqual(["Session", "Navigate", "Workspace", "Setup", "Agents", "Custom", "Quit"]);
     expect(rowNames()).toContain("/merge");
-    expect(says("Land a worktree branch on the checkout")).toBe(true);
-    expect(says("Set, show or clear the session's goal")).toBe(true);
+    await sees("Land a worktree branch on the checkout");
+    await sees("Set, show or clear the session's goal");
 
     // What this app cannot run is greyed with the reason, not hidden.
     const merge = [...dialog.querySelectorAll<HTMLElement>(".row")].find((r) => r.textContent?.startsWith("/merge"))!;
@@ -161,7 +161,7 @@ describe("the command palette", () => {
     const row = [...dialog.querySelectorAll<HTMLElement>(".row")].find((r) => r.textContent?.startsWith("/review"))!;
     expect(row.classList.contains("unavailable")).toBe(false);
     expect(row.textContent).toContain("Review the change on this branch");
-    expect(says("/review <what to look at>")).toBe(true);
+    await sees("/review <what to look at>");
 
     key(input, "Enter");
     await waitFor(

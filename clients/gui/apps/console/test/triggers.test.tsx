@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -37,14 +37,14 @@ describe("a team's triggers", () => {
   it("lists them per team, and a platform admin picks the team", async () => {
     await open("#/triggers");
     await waitFor(() => row("nightly-deps"), "core's triggers");
-    expect(says("on a schedule: 0 3 * * 1-5 (UTC)", row("nightly-deps")!)).toBe(true);
-    expect(says("svc:core/nightly", row("nightly-deps")!)).toBe(true);
-    expect(says("on", row("nightly-deps")!)).toBe(true);
+    await sees("on a schedule: 0 3 * * 1-5 (UTC)", () => row("nightly-deps"));
+    await sees("svc:core/nightly", () => row("nightly-deps"));
+    await sees("on", () => row("nightly-deps"));
 
     type(field("Team")!, "design");
     await waitFor(() => row("weekly-digest"), "design's triggers");
-    expect(says("paused", row("weekly-digest")!)).toBe(true);
-    expect(says("by a webhook from github", row("weekly-digest")!)).toBe(true);
+    await sees("paused", () => row("weekly-digest"));
+    await sees("by a webhook from github", () => row("weekly-digest"));
     expect(location.hash).toBe("#/triggers/design");
   });
 
@@ -63,12 +63,12 @@ describe("a trigger", () => {
   it("reads every field the plane keeps of it, and every revision with what it said", async () => {
     await open("#/triggers/core/nightly-deps");
     await waitFor(() => heading() === "nightly-deps" && says("Revisions"), "nightly-deps");
-    expect(says("Update the dependencies of {{trigger.name}} and open a pull request.")).toBe(true);
-    expect(says("max_turns: 80, approvals: deny")).toBe(true);
-    expect(says("dan@example.com")).toBe(true);
-    expect(says("pr-reviewer")).toBe(true);
-    expect(says("2026-10-13 03:00 UTC")).toBe(true);
-    expect(says("Revision 1")).toBe(true);
+    await sees("Update the dependencies of {{trigger.name}} and open a pull request.");
+    await sees("max_turns: 80, approvals: deny");
+    await sees("dan@example.com");
+    await sees("pr-reviewer");
+    await sees("2026-10-13 03:00 UTC");
+    await sees("Revision 1");
     // Running it is offered here, and nothing sends a person to the admin API or a page under /admin for it.
     expect(button("Run nightly-deps now")).not.toBeNull();
     expect(says("admin.trigger.run")).toBe(false);
@@ -149,8 +149,8 @@ describe("running a trigger now", () => {
     await open("#/triggers/core/nightly-deps");
     (await waitFor(() => button("Run nightly-deps now"), "nightly-deps")).click();
     await waitFor(() => says("nightly-deps fires now, by hand: a session on dev, run as svc:core/nightly, which spends core's budget."), "the preview");
-    expect(says("is listed on Runs and review as fired by hand, by you")).toBe(true);
-    expect(says("If a run of it is going already, this one is recorded as skipped")).toBe(true);
+    await sees("is listed on Runs and review as fired by hand, by you");
+    await sees("If a run of it is going already, this one is recorded as skipped");
     // Nothing fires by looking.
     expect(fake.admin.runRows.length).toBe(before);
 
@@ -159,7 +159,7 @@ describe("running a trigger now", () => {
     const made = fake.admin.runRows.at(-1)!;
     expect(fake.admin.runRows.length).toBe(before + 1);
     expect(made).toMatchObject({ team: "core", trigger: "nightly-deps", source: "manual", fired_by: PEOPLE.alice.subject, state: "created" });
-    expect(says(made.idempotency_key)).toBe(true);
+    await sees(made.idempotency_key);
 
     (await waitFor(() => link("Its run, on Runs and review"), "the run's link")).click();
     await waitFor(() => location.hash === `#/runs/${made.id}` && says(made.session_id!), "the run's page");
@@ -172,7 +172,7 @@ describe("running a trigger now", () => {
     await open("#/triggers/design/weekly-digest", PEOPLE.bob);
     await waitFor(() => button("Resume weekly-digest"), "weekly-digest");
     expect(button("Run weekly-digest now")).toBeNull();
-    expect(says("A paused trigger is not run, by hand or otherwise; resume it first.")).toBe(true);
+    await sees("A paused trigger is not run, by hand or otherwise; resume it first.");
   });
 });
 
@@ -185,8 +185,8 @@ describe("a webhook's key and a trigger on a GitHub repository", () => {
     await open("#/triggers/design/weekly-digest", PEOPLE.bob);
     (await waitFor(() => button("Rotate weekly-digest's key"), "weekly-digest")).click();
     await waitFor(() => says("stops working the moment you rotate it"), "the preview");
-    expect(says("There is no overlap.")).toBe(true);
-    expect(says("The new key is shown once")).toBe(true);
+    await sees("There is no overlap.");
+    await sees("The new key is shown once");
     expect(button("Rotate weekly-digest's key")!.disabled).toBe(true);
     expect(trigger("design", "weekly-digest")!.key).toBe("twk_theoldone");
 
@@ -200,7 +200,7 @@ describe("a webhook's key and a trigger on a GitHub repository", () => {
     // The plane's key is now the new one: the old one fires nothing.
     expect(trigger("design", "weekly-digest")!.key).toBe(key);
     expect(key).not.toBe("twk_theoldone");
-    expect(says(`${fake.plane.baseUrl}/trigger/trg-design-weekly-digest`, panel)).toBe(true);
+    await sees(`${fake.plane.baseUrl}/trigger/trg-design-weekly-digest`, panel);
     await waitFor(() => says("Recorded in the audit as trigger.key.rotate on design/weekly-digest"), "the audit's note");
     expect(fake.admin.audit.at(-1)!.detail).toEqual({ had_key: true });
 
@@ -234,8 +234,8 @@ describe("a webhook's key and a trigger on a GitHub repository", () => {
     const panel = await waitFor(() => document.querySelector<HTMLElement>("section.key-once"), "the key");
     const key = panel.querySelector("code.secret")!.textContent!;
     expect(key).toMatch(/^twk_/);
-    expect(says("it is not shown again", panel)).toBe(true);
-    expect(says(`${fake.plane.baseUrl}/trigger/trg-core-deploys`, panel)).toBe(true);
+    await sees("it is not shown again", panel);
+    await sees(`${fake.plane.baseUrl}/trigger/trg-core-deploys`, panel);
     expect(trigger("core", "deploys")!.has_key).toBe(true);
     expect(fake.admin.audit.find((a) => a.action === "trigger.put" && a.subject_id === "core/deploys")?.detail?.["__key_minted__"]).toBe(true);
 
@@ -266,7 +266,7 @@ describe("a webhook's key and a trigger on a GitHub repository", () => {
     await waitFor(() => !button("Preview")!.disabled, "the form complete");
     button("Preview")!.click();
     await waitFor(() => says("by GitHub on example-org/widgets: an issue labelled troupe-fix, or a comment saying /troupe fix"), "the preview");
-    expect(says("it has no key")).toBe(true);
+    await sees("it has no key");
     button("Create fix-issues")!.click();
     await waitFor(() => says("Recorded in the audit as trigger.put on core/fix-issues"), "the audit's note");
     expect(document.querySelector("section.key-once")).toBeNull();
@@ -282,11 +282,11 @@ describe("a plane in gitops mode", () => {
     await open("#/triggers/core");
     await waitFor(() => row("nightly-deps") && says("Held in a repository"), "the locked list");
     expect(button("New trigger")).toBeNull();
-    expect(says("Running one by hand and rotating its webhook key still work, from its page")).toBe(true);
+    await sees("Running one by hand and rotating its webhook key still work, from its page");
 
     visit("#/triggers/core/nightly-deps");
     await waitFor(() => heading() === "nightly-deps" && says("It comes from the resource core.nightly-deps"), "the locked trigger");
-    expect(says("https://git.example.com/platform/troupe.git")).toBe(true);
+    await sees("https://git.example.com/platform/troupe.git");
     expect(button("Change nightly-deps")).toBeNull();
     expect(button("Pause nightly-deps")).toBeNull();
     expect(button("Delete nightly-deps")).toBeNull();

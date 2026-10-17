@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, render, says, waitFor } from "./support";
+import { button, render, says, sees, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -88,7 +88,7 @@ describe("the address troupe-daemon open opens", () => {
 
     await thisComputer();
     await waitFor(() => says(`does not admit pages from ${location.origin}`), "the origin the daemon has to admit");
-    expect(says("troupe-daemon open")).toBe(true);
+    await sees("troupe-daemon open");
     await daemon.start();
   });
 });

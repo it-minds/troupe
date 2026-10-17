@@ -187,10 +187,12 @@ describe("the servers and skills panel", () => {
       "the sign-out says what the provider was told",
     );
 
-    // Signed in again with nothing more wanted, a sign-out the provider revoked says so.
+    // Signed in again with nothing more wanted, a sign-out the provider revoked says so. The
+    // row shows the sign-out before the sign-in is finished elsewhere: the panel reads the
+    // list again after the sign-out, and on a busy machine it read the new sign-in instead.
     delete daemon.revocations["notes"];
-    daemon.finishSignIn("notes");
     const signedOut = await waitFor(() => [...document.querySelectorAll("tr")].find((r) => r.textContent?.includes("Not signed in")), "the row signed out");
+    daemon.finishSignIn("notes");
     button("Check", signedOut)!.click();
     const again = await waitFor(() => [...document.querySelectorAll("tr")].find((r) => r.textContent?.includes("Signed in as ada@example.test")), "the row signed in again", 5000);
     expect(again.textContent).not.toContain("Wants");

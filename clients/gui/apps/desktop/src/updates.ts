@@ -62,9 +62,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * `rows` reads the list as it is now, which a restart waits on: a function, because the
- * list is built after this, from what the plane said here.
+ * list is built after this, from what the plane said here. Null while this computer's
+ * sessions are not known yet.
  */
-export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null, rows: () => FleetRow[]): Updates {
+export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null, rows: () => FleetRow[] | null): Updates {
   const updater = shell()?.updater ?? null;
   const [word, setWord] = useState<PlaneVersionWord | null>(null);
   // Whether the plane signed in to has answered, or could not be asked: the release check
@@ -169,9 +170,14 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
       const now = phaseRef.current;
       if (!updater || now.kind !== "ready") return;
       const offer = now.offer;
-      // Never under a turn on this computer.
-      for (let busy = atWork(rowsRef.current()); busy; busy = atWork(rowsRef.current())) {
-        setPhase({ kind: "waiting", offer, why: `Restarts when the turn in ${busy.title ?? busy.id} ends.` });
+      // Never under a turn on this computer, nor before its sessions are known: on a busy
+      // machine the offer is on screen before the daemon has answered.
+      for (;;) {
+        const rows = rowsRef.current();
+        const busy = rows && atWork(rows);
+        if (rows && !busy) break;
+        const why = busy ? `Restarts when the turn in ${busy.title ?? busy.id} ends.` : "Restarts once this computer's sessions are known.";
+        setPhase({ kind: "waiting", offer, why });
         await sleep(updateTiming.waitMs);
       }
       // The daemon's release is replaced only once it has stopped, and it stops only

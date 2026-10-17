@@ -19,11 +19,11 @@ defmodule Troupe.Config.ExplainTest do
     File.mkdir_p!(Path.join(ws, ".troupe"))
     on_exit(fn -> File.rm_rf!(base) end)
     user = Path.join(base, "config.yaml")
-    System.put_env("TROUPE_EXPLAIN_TEST_KEY", "sk-from-the-environment-123456")
+    System.put_env("TROUPE_TEST_EXPLAIN_KEY", "sk-from-the-environment-123456")
 
     File.write!(user, """
     trusted_workspaces: [#{Jason.encode!(ws)}]
-    api_key: "{env:TROUPE_EXPLAIN_TEST_KEY}"
+    api_key: "{env:TROUPE_TEST_EXPLAIN_KEY}"
     model: user-model
     max_turns: 10
     """)
@@ -58,7 +58,7 @@ defmodule Troupe.Config.ExplainTest do
       assert text =~ ~r/project\s+20\s+.*config\.yaml  <- in effect/
 
       {text, 0} = Config.explain(ctx.ws, "api_key", ctx.opts)
-      assert text =~ "api_key = sk-f...56 (from {env:TROUPE_EXPLAIN_TEST_KEY})"
+      assert text =~ "api_key = sk-f...56 (from {env:TROUPE_TEST_EXPLAIN_KEY})"
       refute text =~ "sk-from-the-environment-123456"
     end
 
@@ -91,7 +91,7 @@ defmodule Troupe.Config.ExplainTest do
       assert keys["max_turns"]["source"] == Path.join(ctx.ws, ".troupe/config.yaml")
       assert Enum.map(keys["max_turns"]["ladder"], & &1["layer"]) == ["default", "user", "project"]
       assert keys["api_key"]["value"] == "sk-f...56"
-      assert hd(tl(keys["api_key"]["ladder"]))["from"] == "{env:TROUPE_EXPLAIN_TEST_KEY}"
+      assert hd(tl(keys["api_key"]["ladder"]))["from"] == "{env:TROUPE_TEST_EXPLAIN_KEY}"
       refute json =~ "sk-from-the-environment-123456"
     end
   end

@@ -10,7 +10,7 @@ import { App } from "../src/App";
 import { applyMode, storedMode } from "../src/theme";
 import { exampleAdmin } from "../../../packages/client/test/support/admin.js";
 import type { FakeAdmin } from "../../../packages/client/test/support/admin.js";
-import { PEOPLE, button, freshBrowser, link, render, says, signedInAs, startFake, visit, waitFor } from "./support";
+import { PEOPLE, button, freshBrowser, link, render, says, sees, seesLink, signedInAs, startFake, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment | null = null;
@@ -44,12 +44,12 @@ describe("the shell", () => {
     const groups = [...rail().querySelectorAll(".group > .screen")].map((g) => g.textContent);
     expect(groups).toEqual(["Watch", "Configure", "Operate", "Govern"]);
     for (const area of ["Overview", "Sessions", "Worker profiles", "Configuration bundles", "Workers and pods", "Budgets", "Teams", "Client versions", "Organisation", "Audit"]) {
-      expect(link(area, rail())).not.toBeNull();
+      await seesLink(area, rail());
     }
-    expect(says("Alice", rail())).toBe(true);
-    expect(says("alice@example.com", rail())).toBe(true);
-    expect(says("platform admin", rail())).toBe(true);
-    expect(says(`fake · ${new URL(fake!.plane.baseUrl).host}`, rail())).toBe(true);
+    await sees("Alice", rail());
+    await sees("alice@example.com", rail());
+    await sees("platform admin", rail());
+    await sees(`fake · ${new URL(fake!.plane.baseUrl).host}`, rail());
     // It opens on the Overview, the first area of the map.
     await waitFor(() => heading() === "Overview", "the Overview");
     expect(link("Overview", rail())!.getAttribute("aria-current")).toBe("page");
@@ -77,8 +77,8 @@ describe("the shell", () => {
     await open();
     link("Company memory", rail())!.click();
     await waitFor(() => heading() === "Company memory", "the area");
-    expect(says("Not in this console yet")).toBe(true);
-    expect(says("troupe admin")).toBe(true);
+    await sees("Not in this console yet");
+    await sees("troupe admin");
     // The plane's pages under /admin are its break-glass page: nothing here leads there.
     expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);
   });
@@ -127,7 +127,7 @@ describe("the shell", () => {
     await open(PEOPLE.alice, admin);
     await waitFor(() => says("Loading the version policy"), "the loading state");
     await waitFor(() => says("Could not load the version policy"), "the error state");
-    expect(says("the policy table is unreadable")).toBe(true);
+    await sees("the policy table is unreadable");
     admin.failing.clear();
     button("Try again")!.click();
     await waitFor(() => says("The terminal") && says("0.14.0-beta"), "the policy");

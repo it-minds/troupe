@@ -57,16 +57,13 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
 - On the 0.6.3 tip under full load, the worker's `ReaderLogTest` "a log an activation has
   taken over" and the gateway's `RestartTest` (once with a `FunctionClauseError` in
   `Troupe.LLM.Fake.render/2`) each failed once; both pass alone.
-- The worker suite's plane-backed tests share `troupe_plane_test` with the plane suite, so
-  running both at once can deadlock in Postgres (`40P01` in `plane_link_test.exs`).
+- The worker suite's plane-backed tests share their checkout's plane test database with its
+  plane suite, so running both at once in one checkout can deadlock in Postgres (`40P01`).
 - The gateway suite prints `erl_child_setup: failed with error 32 on line 284` a few
   times, with or without failures (probably a port child writing to a closed pipe).
 - `apps/troupe_gateway/test/troupe/gateway/restart_test.exs` `create/2` never stops the
   sessions it creates. They live in a second daemon OS process, so they probably don't
   leak into the test VM the way the two fixed in chunk 6 did (unconfirmed).
-- The desktop app's tests time out now and then when the machine is busy (goal-loop,
-  local-mode, onboarding, command-palette); local-mode sends before its session is
-  attached ("not attached").
 - Under full load, two of the gateway's `PrivateTest` tests ("a seal with nobody linked",
   "carrying on another person's link") failed now and then, beside `session_ids_test` and
   `daemon_test`; both pass alone. Core `Session.ShellTest` "a restart puts back a note ...
@@ -100,9 +97,6 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
     dozen first turns past the default five seconds (`IdentifyTest`,
     `UnattendedApprovalsTest`, `UnseenTest`, `LocalPricingTest` and others), where it had
     54;
-  - at the default 64 cases while another suite runs, now and then `CutShortTest`'s
-    `wall_clock` case: the root's own four seconds run out under load, so it waits on a
-    budget question nobody answers and is never idle;
   - and `CrashLoopTest`, whose session was not down within five seconds of the kill:
     probably three slow restarts no longer fit `Agent.Node`'s five-second window, so it
     goes on restarting (unconfirmed).
@@ -1394,7 +1388,6 @@ Found by the chunk 33 fixers, 2026-10-13.
   - The desktop app draws a `patch` call as a generic tool row.
   - The "only when asked, or past about 80 lines" wording hasn't been measured live.
 - **Tests.**
-  - Plane suites run at once against the shared `troupe_plane_test` database deadlock (`40P01`).
   - The core and gateway suites in one VM make gateway tests fail on sessions core left behind; CI runs them apart.
   - The gateway's `PrivateTest` (two tests) fails under load.
   - A `helm upgrade` from `dev/kind/values.yaml` alone, on a development cluster `scripts/remote-up` set up with a gateway URL, narrows the policy back to the placeholder host, after which every write to the dev profile is refused.
@@ -1449,7 +1442,6 @@ Found by the chunk 35 fixers, 2026-10-14.
 - **The plane.**
   - A 413 for a body over the limit answers generic JSON, not SCIM's error schema or a JSON-RPC error.
   - The shared MinIO test bucket holds about 2,500 sessions left by earlier runs, never cleaned.
-  - Two worktrees running the plane suite at once still deadlock in the shared test database.
 - **CI.**
   - The desktop crate's new `cargo test` job runs only on pull requests into `main`, and its apt package names are untested before then.
   - Nothing checks Rust formatting.

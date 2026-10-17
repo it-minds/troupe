@@ -1,5 +1,5 @@
-# Every night, on `main`: the full suite — every job whatever changed, the soak and the
-# cluster suite — the native builds, and the harness against a real model through the
+# Every night, on `main`: the full suite — every job whatever changed, the soak and flake
+# hunt, and the cluster suite — the native builds, and the harness against a real model through the
 # gateway, so a race, a cluster regression, a broken Windows build or a model the harness
 # no longer stops is found the next morning rather than by the next release. Nothing is
 # published. `docs/developer/ci.md` has the picture.
@@ -30,9 +30,13 @@ jobs:
       contents: read
       pull-requests: read
       packages: write
+    # The flake hunt: every soak names each test that failed in any of its runs rather
+    # than stopping at the first, and the TUI's and the GUI's suites run 3 and 5 more
+    # times beside the umbrella's 9, so a new flake is seen here the next morning.
     with:
       full: true
       soak: 9
+      hunt: true
       cluster: true
 
   native:

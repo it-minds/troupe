@@ -16,7 +16,7 @@ import { Provider } from "../src/views/Onboarding/Provider";
 import { Where } from "../src/views/Onboarding/Where";
 import { Workspace } from "../src/views/Onboarding/Workspace";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, nav, render, says, startOnTheList, type, waitFor } from "./support";
+import { button, nav, render, says, sees, startOnTheList, type, waitFor } from "./support";
 
 // jsdom lays nothing out, so it has nothing to scroll; the transcript asks anyway.
 Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -79,8 +79,8 @@ describe("a fresh machine's first run", () => {
     // Key: says where it goes, and that there is no keychain. A wrong key is refused
     // plainly and the step stays; the right one goes on.
     await waitFor(() => says("The key"), "the key step");
-    expect(says(`${fake.settings.exists ? "" : ""}/home/ada/.config/troupe/config.yaml`)).toBe(true);
-    expect(says("there is no keychain in this build")).toBe(true);
+    await sees(`${fake.settings.exists ? "" : ""}/home/ada/.config/troupe/config.yaml`);
+    await sees("there is no keychain in this build");
     type(field("API key"), "wrong");
     button("Check the key and continue")!.click();
     await waitFor(() => says("The provider refused the key: 401 unauthorized: the key was refused. Check it and try again."), "the refusal");
@@ -92,13 +92,13 @@ describe("a fresh machine's first run", () => {
     // Models: the suggestion is pressed, with what it reads and costs.
     await waitFor(() => says("Which models?"), "the models step");
     expect(pressed("claude-opus-5")).toBe(true);
-    expect(says("200k tokens of context · $5.00 in, $25.00 out per million tokens")).toBe(true);
+    await sees("200k tokens of context · $5.00 in, $25.00 out per million tokens");
     button("Save these models and continue")!.click();
 
     // Workspace: the safe approval model is pressed, in two sentences.
     await waitFor(() => says("Where is the first project?"), "the workspace step");
     expect(pressed("Ask me first")).toBe(true);
-    expect(says("nothing changes on disk until you say so")).toBe(true);
+    await sees("nothing changes on disk until you say so");
     type(field("Directory"), "/home/ada/project");
     button("Continue")!.click();
 
@@ -112,8 +112,8 @@ describe("a fresh machine's first run", () => {
     // Finish: what was set up, and the first session with its suggested prompt.
     await waitFor(() => says("Ready"), "the finish step");
     expect(fake.atLogin).toBe(true);
-    expect(says("starts when you log in")).toBe(true);
-    expect(says("saved in /home/ada/.config/troupe/config.yaml")).toBe(true);
+    await sees("starts when you log in");
+    await sees("saved in /home/ada/.config/troupe/config.yaml");
     expect((field("What to ask first") as HTMLTextAreaElement).value).toBe("Look around this directory and tell me what you find.");
     button("Start the first session")!.click();
 
@@ -160,7 +160,7 @@ describe("a fresh machine's first run", () => {
     expect(says("Welcome.")).toBe(false);
     nav("Setup")!.click();
     await waitFor(() => says("Where does the work run?"), "the questions again");
-    expect(says("The first run's questions, again")).toBe(true);
+    await sees("The first run's questions, again");
 
     // A refused key in a session: the step under the error is a way into the same flow.
     nav("Sessions")!.click();
@@ -169,7 +169,7 @@ describe("a fresh machine's first run", () => {
     await waitFor(() => fake.calls.some((c) => c.method === "presence.set"), "the session to be open");
     session.log.append("llm_error", { reason: "the provider rejected the credentials (invalid x-api-key)" });
     const offer = await waitFor(() => button("Run setup"), "the offer under the error");
-    expect(says("Check the key on This computer, under Models.")).toBe(true);
+    await sees("Check the key on This computer, under Models.");
     offer.click();
     await waitFor(() => says("Where does the work run?"), "the setup screen");
   });
@@ -185,7 +185,7 @@ describe("a fresh machine's first run", () => {
     // What is here comes first, and the key in the environment is the pressed answer.
     await waitFor(() => says("Already on this computer"), "the provider step");
     expect(pressed("ANTHROPIC_API_KEY is set on this computer")).toBe(true);
-    expect(says("opencode is set up here, with portal")).toBe(true);
+    await sees("opencode is set up here, with portal");
     button("Continue")!.click();
     await waitFor(() => says("The key"), "the key step");
     expect(pressed("Keep it in ANTHROPIC_API_KEY")).toBe(true);
@@ -325,9 +325,9 @@ describe("each screen", () => {
     unmount = render(<Key flow={flow} {...idle} onAnswer={onAnswer} />).unmount;
     await shown("The key");
 
-    expect(says("/home/ada/.config/troupe/config.yaml")).toBe(true);
-    expect(says("there is no keychain in this build")).toBe(true);
-    expect(says("The provider refused the key: 401 unauthorized: the key was refused. Check it and try again.")).toBe(true);
+    await sees("/home/ada/.config/troupe/config.yaml");
+    await sees("there is no keychain in this build");
+    await sees("The provider refused the key: 401 unauthorized: the key was refused. Check it and try again.");
     expect(pressed("Keep it in ANTHROPIC_API_KEY")).toBe(true);
     button("Check the key and continue")!.click();
     expect(onAnswer).toHaveBeenLastCalledWith({ env: "ANTHROPIC_API_KEY" });
@@ -356,7 +356,7 @@ describe("each screen", () => {
     const first = render(<PickModels flow={listed} {...idle} onAnswer={onAnswer} />);
     await shown("Which models?");
     expect(pressed("claude-opus-5")).toBe(true);
-    expect(says("200k tokens of context · $5.00 in, $25.00 out per million tokens")).toBe(true);
+    await sees("200k tokens of context · $5.00 in, $25.00 out per million tokens");
     expect((field("Small model") as HTMLSelectElement | HTMLInputElement).value).toBe("claude-haiku-4-5");
     button("claude-haiku-4-5")!.click();
     await waitFor(() => pressed("claude-haiku-4-5") || null, "the small model pressed as the main one");
@@ -381,8 +381,8 @@ describe("each screen", () => {
     await shown("Where is the first project?");
 
     expect(pressed("Ask me first")).toBe(true);
-    expect(says("The agent reads freely, and asks before it writes a file or runs a command.")).toBe(true);
-    expect(says("Every write and every command runs as soon as the agent asks for it.")).toBe(true);
+    await sees("The agent reads freely, and asks before it writes a file or runs a command.");
+    await sees("Every write and every command runs as soon as the agent asks for it.");
     expect(button("Continue")!.disabled).toBe(true);
     const chip = await waitFor(() => button("/home/ada/repo"), "the recent workspace");
     chip.click();
@@ -397,8 +397,8 @@ describe("each screen", () => {
     const off = render(<Daemon flow={flowAt("daemon")} {...idle} onAnswer={onAnswer} />);
     await shown("Start Troupe when you log in?");
     expect(pressed("Only when an app needs it")).toBe(true);
-    expect(says("Adds a systemd user unit. It starts /home/ada/.local/bin/troupe-daemon from your next login; nothing starts now.")).toBe(true);
-    expect(says("Its entry would be /home/ada/.config/systemd/user/troupe-daemon.service")).toBe(true);
+    await sees("Adds a systemd user unit. It starts /home/ada/.local/bin/troupe-daemon from your next login; nothing starts now.");
+    await sees("Its entry would be /home/ada/.config/systemd/user/troupe-daemon.service");
     button("Continue")!.click();
     expect(onAnswer).toHaveBeenLastCalledWith({ at_login: false });
     button("Start it when I log in")!.click();
@@ -414,8 +414,8 @@ describe("each screen", () => {
     const on = render(<Daemon flow={windows} {...idle} onAnswer={onAnswer} />);
     await shown("It starts at login now, from C:\\Users\\ada\\Startup\\troupe-daemon.cmd");
     expect(pressed("Start it when I log in")).toBe(true);
-    expect(says("console window minimised to the taskbar")).toBe(true);
-    expect(says("and the entry there now is removed")).toBe(true);
+    await sees("console window minimised to the taskbar");
+    await sees("and the entry there now is removed");
     button("Only when an app needs it")!.click();
     await waitFor(() => pressed("Only when an app needs it") || null, "off pressed");
     button("Continue")!.click();
@@ -434,11 +434,11 @@ describe("each screen", () => {
     const local = flowAt("finish", { suggested_prompt: "Tell me what this project does, how it is built and tested, and where you would start reading." });
     const first = render(<Finish flow={local} {...idle} onAnswer={onAnswer} />);
     await shown("Ready");
-    expect(says("Anthropic")).toBe(true);
-    expect(says("claude-opus-5 · claude-haiku-4-5 for small work")).toBe(true);
-    expect(says("saved in /home/ada/.config/troupe/config.yaml")).toBe(true);
-    expect(says("/home/ada/repo")).toBe(true);
-    expect(says("the agent asks before it writes or runs anything")).toBe(true);
+    await sees("Anthropic");
+    await sees("claude-opus-5 · claude-haiku-4-5 for small work");
+    await sees("saved in /home/ada/.config/troupe/config.yaml");
+    await sees("/home/ada/repo");
+    await sees("the agent asks before it writes or runs anything");
     expect((field("What to ask first") as HTMLTextAreaElement).value).toBe("Tell me what this project does, how it is built and tested, and where you would start reading.");
     type(field("What to ask first"), "Say hello.");
     await waitFor(() => (field("What to ask first") as HTMLTextAreaElement).value === "Say hello." || null, "the prompt typed");
@@ -456,7 +456,7 @@ describe("each screen", () => {
     plane.answers = { where: { choice: "plane", plane_url: "https://troupe.example" } };
     unmount = render(<Finish flow={plane} {...idle} onAnswer={onAnswer} />).unmount;
     await shown("Sign in next");
-    expect(says("https://troupe.example")).toBe(true);
+    await sees("https://troupe.example");
     button("Finish and sign in")!.click();
     expect(onAnswer).toHaveBeenLastCalledWith({});
   });

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FleetRow } from "@troupe/client";
 import { Launcher } from "../src/views/Launcher";
 import { statusOf } from "../src/views/bits";
-import { button, render, says, waitFor } from "./support";
+import { button, render, says, sees, waitFor } from "./support";
 
 function row(overrides: Partial<FleetRow> = {}): FleetRow {
   return {
@@ -89,18 +89,18 @@ describe("the launcher", () => {
     ));
 
     await waitFor(() => says("1 waiting for you"), "the launcher");
-    expect(says("The oldest stopped 41 min ago.")).toBe(true);
-    expect(says("3 on this computer")).toBe(true);
+    await sees("The oldest stopped 41 min ago.");
+    await sees("3 on this computer");
     // Not signed in to a platform, so the platform's count is not a count of anything.
     expect(says("on the platform")).toBe(false);
     // The three most recent, in the list's order, each saying where it runs.
-    expect(says("Regnskabsafstemning Q3")).toBe(true);
-    expect(says("Tilbud til Kolding Kommune")).toBe(true);
-    expect(says("Ryd op i kundelisten")).toBe(true);
+    await sees("Regnskabsafstemning Q3");
+    await sees("Tilbud til Kolding Kommune");
+    await sees("Ryd op i kundelisten");
     expect(says("Mine noter")).toBe(false);
     expect(document.querySelector(".recent .is-waiting")).not.toBeNull();
-    expect(says("daemon connected")).toBe(true);
-    expect(says("local only")).toBe(true);
+    await sees("daemon connected");
+    await sees("local only");
 
     button("01")!.click();
     button("02")!.click();
@@ -128,7 +128,7 @@ describe("the launcher", () => {
     ));
     await waitFor(() => says("Nothing waiting"), "the launcher");
     expect(document.querySelector(".tile.needs")).toBeNull();
-    expect(says("daemon not running")).toBe(true);
-    expect(says("not signed in")).toBe(true);
+    await sees("daemon not running");
+    await sees("not signed in");
   });
 });

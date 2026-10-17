@@ -8,7 +8,7 @@ import type { Entry } from "@troupe/client";
 import { App } from "../src/App";
 import { ApprovalPanel } from "../src/views/Approval";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { nav, render, says, startOnTheList, waitFor } from "./support";
+import { nav, render, says, sees, startOnTheList, waitFor } from "./support";
 
 // jsdom lays nothing out, so it has nothing to scroll; the transcript asks anyway.
 Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -93,8 +93,8 @@ describe("an approval a rule asked for", () => {
 
     unmount = render(<ApprovalPanel entry={entry} canAnswer others={[]} onAnswer={async () => undefined} />).unmount;
     await waitFor(() => says("Asked by the rule") || null, "the rule");
-    expect(says("ask shell(git push)")).toBe(true);
-    expect(says("set by your organisation")).toBe(true);
+    await sees("ask shell(git push)");
+    await sees("set by your organisation");
   });
 
   it("names the worker profile, and which, when the rule came from the profile a pod session runs on", async () => {
@@ -113,6 +113,6 @@ describe("an approval a rule asked for", () => {
 
     unmount = render(<ApprovalPanel entry={entry} canAnswer others={[]} onAnswer={async () => undefined} />).unmount;
     await waitFor(() => says("Asked by the rule") || null, "the rule");
-    expect(says("Asked by the rule ask shell(git push), from the worker profile (fixing).")).toBe(true);
+    await sees("Asked by the rule ask shell(git push), from the worker profile (fixing).");
   });
 });

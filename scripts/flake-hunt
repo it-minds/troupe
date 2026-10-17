@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Run a test command several times and name every test that failed in any run.
+#
+#   scripts/flake-hunt <runs> <command...>
+#   scripts/flake-hunt 9 mix test apps/troupe_core/test
+#   scripts/flake-hunt 5 pnpm test
+#
+# The nightly's flake hunt: a test that fails one run in five is a race, and a race found
+# by the nightly is found the next morning rather than in somebody's pull request. Every
+# run goes on whatever the one before it did, so one run's failure hides nothing, and
+# ExUnit and vitest draw a seed or an order of their own each time. At the end it names
+# each test that failed with how many runs it failed in, in the job's summary and as an
+# error annotation, and exits 1 when any run failed.
+#
+# It reads ExUnit's `1) test <name> (<Module>)` and `<Module>: failure on setup_all`, and
+# vitest's `FAIL <file> > <name>`. A run that failed and names no test is said as such.
+set -uo pipefail
+
+if [ $# -lt 2 ]; then
+  echo "usage: scripts/flake-hunt <runs> <command...>" >&2
+  exit 2
+fi
+
+runs=$1
+shift
+logs=$(mktemp -d)
+failed=0
+
+for i in $(seq "$runs"); do
+  echo "::group::run $i of $runs: $*"
+  if "$@" 2>&1 | tee "$logs/run-$i.log"; then
+    echo "run $i of $runs passed"
+  else
+    failed=$((failed + 1))
+    : > "$logs/failed-$i"
+    echo "run $i of $runs FAILED"
+  fi
+  echo "::endgroup::"
+done
+
+# One line per failure per run: the test's name as the runner printed it.
+names() {
+  sed -e 's/\x1b\[[0-9;]*m//g' "$1" |
+    sed -n -E \
+      -e 's/^[[:space:]]+[0-9]+\) test (.*) \(([A-Za-z0-9_.]+)\)$/\2: \1/p' \
+      -e 's/^[[:space:]]+[0-9]+\) ([A-Za-z0-9_.]+): failure on setup_all callback.*/\1: setup_all/p' \
+      -e 's/^.*FAIL[[:space:]]+(.*\.test\.[jt]sx?) > (.*)$/\1 > \2/p' |
+    sort -u
+}
+
+summary=${GITHUB_STEP_SUMMARY:-/dev/null}
+found="$logs/found"
+: > "$found"
+for i in $(seq "$runs"); do
+  [ -e "$logs/failed-$i" ] || continue
+  named=$(names "$logs/run-$i.log")
+  if [ -n "$named" ]; then
+    printf '%s\n' "$named" >> "$found"
+  else
+    echo "(no test named: the run's log is in its group above)" >> "$found"
+  fi
+done
+
+if [ "$failed" -eq 0 ]; then
+  echo "flake hunt: $runs of $runs runs passed: $*"
+  echo "Flake hunt: $runs of $runs runs passed (\`$*\`)." >> "$summary"
+  exit 0
+fi
+
+echo "flake hunt: $failed of $runs runs failed: $*"
+{
+  echo "### Flake hunt: $failed of $runs runs failed"
+  echo
+  echo "\`$*\`"
+  echo
+  echo "| runs failed | test |"
+  echo "|---|---|"
+} >> "$summary"
+sort "$found" | uniq -c | sort -rn | while read -r count name; do
+  echo "  failed in $count of $runs runs: $name"
+  echo "| $count of $runs | $name |" >> "$summary"
+  echo "::error title=flaky test::failed in $count of $runs runs: $name"
+done
+exit 1

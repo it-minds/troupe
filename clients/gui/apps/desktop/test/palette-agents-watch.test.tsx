@@ -12,7 +12,7 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { DaemonClient } from "@troupe/client";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, nav, render, says, type, waitFor } from "./support";
+import { button, nav, render, says, sees, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -132,7 +132,7 @@ describe("the agents manager after #503 (D107, D112)", () => {
 
     await waitFor(() => agentRow("explore"), "the subagents listed");
     for (const name of ["explore", "general", "implementer", "reviewer"]) expect(agentRow(name), name).toBeTruthy();
-    expect(says("Subagents")).toBe(true);
+    await sees("Subagents");
     expect(daemon.calls.find((c) => c.method === "agents.list")?.params).toMatchObject({ workspace: REPO, subagents: true });
 
     button("explore", agentRow("explore")!)!.click();
@@ -191,7 +191,7 @@ describe("the agents manager after #503 (D107, D112)", () => {
     await openManager();
 
     const mend = await waitFor(() => document.querySelector<HTMLButtonElement>('button[aria-label="Open review to mend it"]'), "review not read, to mend");
-    expect(says('not read: mode must be primary or subagent, not "main"')).toBe(true);
+    await sees('not read: mode must be primary or subagent, not "main"');
     mend.click();
 
     const editor = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="Mend review"]'), "the editor on the broken file");
@@ -225,7 +225,7 @@ describe("the watch box (D114)", () => {
     const terminal = new DaemonClient({ transport: "ws", port: daemon.port, token: daemon.token });
     await terminal.setWatch(REPO, true);
     await waitFor(() => document.querySelector<HTMLInputElement>('input[aria-label="Act on notes I leave in the files"]')?.checked === true, "the box on");
-    expect(says("A comment you save in this workspace is read and answered as if you had typed it.")).toBe(true);
+    await sees("A comment you save in this workspace is read and answered as if you had typed it.");
 
     await terminal.setWatch(REPO, false);
     await waitFor(() => document.querySelector<HTMLInputElement>('input[aria-label="Act on notes I leave in the files"]')?.checked === false, "the box off");

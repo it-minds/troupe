@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { ENFORCEABLE } from "../../../packages/client/test/support/admin.js";
-import { PEOPLE, button, field, freshBrowser, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -33,16 +33,16 @@ describe("the organisation's document", () => {
     unmount = render(<App />).unmount;
     await waitFor(() => enforced(), "the enforced set");
 
-    expect(says("openai", row("client_provider")!)).toBe(true);
-    expect(says("deployed", row("client_provider")!)).toBe(true);
-    expect(says("glm-5.2", row("client_model_default")!)).toBe(true);
-    expect(says("set here", row("client_model_default")!)).toBe(true);
-    expect(says("unset", row("client_model_expensive")!)).toBe(true);
+    await sees("openai", () => row("client_provider"));
+    await sees("deployed", () => row("client_provider"));
+    await sees("glm-5.2", () => row("client_model_default"));
+    await sees("set here", () => row("client_model_default"));
+    await sees("unset", () => row("client_model_expensive"));
 
     const keys = [...enforced()!.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
     expect(keys).toEqual(ENFORCEABLE.map((k) => k.key));
-    expect(says("200", enforced()!)).toBe(true);
-    expect(says("the most it may be", enforced()!)).toBe(true);
+    await sees("200", () => enforced());
+    await sees("the most it may be", () => enforced());
   });
 
   it("offers a key the plane lists that this console has never heard of", async () => {
@@ -68,13 +68,13 @@ describe("the organisation's document", () => {
     button("Preview", enforced()!)!.click();
 
     await waitFor(() => says("What will happen", enforced()!), "the preview");
-    expect(says("No machine may set max_turns above 50; a lower value stays.", enforced()!)).toBe(true);
-    expect(says("No machine may loosen approvals past deny; a tighter value stays.", enforced()!)).toBe(true);
+    await sees("No machine may set max_turns above 50; a lower value stays.", () => enforced());
+    await sees("No machine may loosen approvals past deny; a tighter value stays.", () => enforced());
     expect(fake.admin.stored.get("client_enforced")).toEqual({ approvals: "wait", max_turns: 200 });
 
     button("Apply", enforced()!)!.click();
     await waitFor(() => says("Recorded in the audit as setting.put on client_enforced"), "the audit's note");
-    expect(says("client_enforced.max_turns")).toBe(true);
+    await sees("client_enforced.max_turns");
     expect(fake.admin.stored.get("client_enforced")).toEqual({ approvals: "deny", max_turns: 50 });
     expect(fake.admin.audit.at(-1)!.detail).toEqual({
       "client_enforced.approvals": { from: "wait", to: "deny" },
@@ -119,7 +119,7 @@ describe("the organisation's document", () => {
     await waitFor(() => enforced(), "the enforced set");
     expect(button("Change the enforced set")).toBeNull();
     expect(button("Change", row("client_provider")!)).toBeNull();
-    expect(says("Only a platform admin changes the organisation's document.")).toBe(true);
+    await sees("Only a platform admin changes the organisation's document.");
   });
 
   it("keeps the enforced rules when another key of the set is changed", async () => {
@@ -142,7 +142,7 @@ describe("the organisation's document", () => {
     await signedInAs(fake, PEOPLE.alice);
     unmount = render(<App />).unmount;
     await waitFor(() => says("This plane does not list the keys it may enforce"), "the older plane's set");
-    expect(says('"max_turns": 200')).toBe(true);
+    await sees('"max_turns": 200');
     expect(button("Change the enforced set")).toBeNull();
   });
 });
@@ -160,10 +160,10 @@ describe("the organisation's permission rules", () => {
     await signedInAs(fake, PEOPLE.alice);
     unmount = render(<App />).unmount;
     await waitFor(() => rules(), "the rules");
-    expect(says("2 deny, 1 ask (below)", enforced()!)).toBe(true);
+    await sees("2 deny, 1 ask (below)", () => enforced());
     const deny = rules()!.querySelector<HTMLElement>('[aria-label="deny rules"]')!;
     expect([...deny.querySelectorAll("li code")].map((c) => c.textContent)).toEqual(["shell(git push)", "read_file(secrets/**)"]);
-    expect(says("none", rules()!.querySelector<HTMLElement>('[aria-label="allow rules"]')!)).toBe(true);
+    await sees("none", () => rules()?.querySelector<HTMLElement>('[aria-label="allow rules"]'));
   });
 
   it("adds, edits and removes rules as a tool and a pattern, previews them in words, and records the change", async () => {
@@ -186,10 +186,10 @@ describe("the organisation's permission rules", () => {
 
     button("Preview", rules()!)!.click();
     await waitFor(() => says("What will happen", rules()!), "the preview");
-    expect(says("Every machine refuses shell(git push --force), whatever its own files allow.", rules()!)).toBe(true);
-    expect(says("shell(git push) is no longer refused by the organisation", rules()!)).toBe(true);
-    expect(says("read_file(secrets/**) is no longer refused by the organisation", rules()!)).toBe(true);
-    expect(says("Every machine may run shell(mix test) unasked", rules()!)).toBe(true);
+    await sees("Every machine refuses shell(git push --force), whatever its own files allow.", () => rules());
+    await sees("shell(git push) is no longer refused by the organisation", () => rules());
+    await sees("read_file(secrets/**) is no longer refused by the organisation", () => rules());
+    await sees("Every machine may run shell(mix test) unasked", () => rules());
     // The ask list did not move, so it is not in the diff.
     expect(says("permissions.ask", rules()!)).toBe(false);
     expect(fake.admin.stored.get("client_enforced")).toEqual({ approvals: "wait", max_turns: 200, permissions: stored });
@@ -224,7 +224,7 @@ describe("the organisation's permission rules", () => {
     type(field("Tool", ruleRow("ask", 1))!, "web_fetch");
     type(field("Pattern", ruleRow("ask", 1))!, "example.com");
     await waitFor(() => says("web_fetch takes no pattern", ruleRow("ask", 1)), "a pattern on a tool that takes none");
-    expect(says("web_fetch takes no pattern: leave this empty.", ruleRow("ask", 1))).toBe(true);
+    await sees("web_fetch takes no pattern: leave this empty.", ruleRow("ask", 1));
 
     type(field("Pattern", ruleRow("ask", 1))!, "");
     await waitFor(() => !button("Preview", rules()!)!.disabled, "the rule fixed");

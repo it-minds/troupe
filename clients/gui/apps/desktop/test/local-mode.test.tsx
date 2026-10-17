@@ -14,7 +14,7 @@ import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, externalResources, nav, recordNetwork, render, says, sleep, startOnTheList, type, waitFor } from "./support";
+import { button, externalResources, nav, recordNetwork, render, says, sees, sleep, startOnTheList, type, waitFor } from "./support";
 import type { Recorder } from "./support";
 
 // jsdom lays nothing out, so it has nothing to scroll; the transcript asks anyway.
@@ -217,7 +217,7 @@ describe("a plane that does not answer", () => {
     expect(refreshTokenFor(plane)).toBeTruthy();
     carryOn.click();
     await waitFor(() => says("/home/ada/notes"), "this computer's sessions");
-    expect(says("The platform is not answering")).toBe(true);
+    await sees("The platform is not answering");
     // Offline is not the setting: nothing about it is remembered.
     expect(localStorage.getItem("troupe.pref.localOnly")).toBeNull();
 

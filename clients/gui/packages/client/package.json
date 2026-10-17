@@ -18,7 +18,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "node --test --import tsx \"test/**/*.test.ts\""
+    "test": "node --test --import tsx --import ./test/support/image-reads.ts \"test/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/node": "^24.19.0",

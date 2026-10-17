@@ -12,7 +12,7 @@ import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, nav, render, says, type, waitFor } from "./support";
+import { button, nav, render, says, sees, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -63,7 +63,7 @@ describe("signing in to a plane", () => {
     type(await waitFor(() => document.querySelector<HTMLInputElement>('[aria-label="The plane\'s address"]'), "the address field"), harness.plane.baseUrl);
     button("Continue")!.click();
     await waitFor(() => says("Sign in next"), "the plane's finish");
-    expect(says("Finishing here signs you in to it.")).toBe(true);
+    await sees("Finishing here signs you in to it.");
     button("Finish and sign in")!.click();
 
     // The sign-in has started by itself, at the address the run recorded: the code is
