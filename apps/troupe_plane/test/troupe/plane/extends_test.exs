@@ -385,13 +385,15 @@ defmodule Troupe.Plane.ExtendsTest do
       :ok
     end
 
-    test "a put that extends is refused with what to do instead", context do
+    # A repository's manifest names the parent in spec.extends (#655 slice 4,
+    # `gitops_extends_test.exs`); a put is refused as every put on a gitops plane is.
+    test "a put that extends is refused as any put is, the change being a commit", context do
       assert {:error, error} = Admin.profile_put(context.actor, data_team())
       assert error.message == "managed_by_gitops"
-      assert error.data.reason =~ "a repository's manifest holds the whole profile"
+      assert error.data.reason =~ "a change to one is a commit there"
     end
 
-    test "a manifest that names a parent is refused, not read as flat" do
+    test "a parent named in an annotation is refused, not read as flat" do
       resource = %{
         "metadata" => %{
           "name" => "data-team",
@@ -402,7 +404,7 @@ defmodule Troupe.Plane.ExtendsTest do
       }
 
       assert {:error, [reason]} = GitopsProfiles.read(resource, nil)
-      assert reason =~ "extends standard: in gitops mode a manifest holds the whole profile"
+      assert reason =~ "name the profile this one extends in spec.extends"
     end
   end
 

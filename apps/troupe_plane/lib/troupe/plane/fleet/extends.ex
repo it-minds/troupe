@@ -19,6 +19,7 @@ defmodule Troupe.Plane.Fleet.Extends do
   | `personalTools`, `repositoryOverridesBundle`, `github.allowPublic` | **restrict only**: a parent's `forbid` or `false` holds whatever the child says; otherwise the child's, or the parent's |
   | `github.denyPaths` | **added**, as the egress lists are |
   | `github.maxPushes`, `github.maxRuns` | **narrow only**, as `max_sessions` is |
+  | `permissions.deny`, `permissions.ask`, `permissions.allow` | **added**: a child adds rules and drops none of its parent's; each profile's are its own scope on the pods (`rules/1`), so the strictest holds and no child loosens a parent's `deny` or `ask` |
   | `image`, `size_class`, `provisioner`, every `llm` field but `secretRef`, `storage.storageClassName`, `configBundleChannel`, and any other spec field | **replaced** where the child sets it, the parent's where it does not |
   | `llm.secretRef`, `mcpIdentities` | **never inherited**: credentials are each profile's own, in its own namespace |
   | `warm_workers` | **never inherited**: how many of the child's own workers stay up |
@@ -28,11 +29,17 @@ defmodule Troupe.Plane.Fleet.Extends do
   on its own name.
 
   A chain is at most four profiles long, counting from the one that extends nothing.
+
+  In GitOps mode a repository's manifest names the parent in `spec.extends`
+  (`Troupe.Plane.Gitops.Profiles`), and the same resolution is written into the resource's
+  status rather than onto its spec. There `sessionsPerPod`, `resources` and `storage.size`
+  are the repository's numbers rather than the size class's, so they are **replaced** where
+  the child sets them, as any other field is.
   """
 
   import Ecto.Query
 
-  alias Troupe.Plane.{Bundles, Fleet, Repo}
+  alias Troupe.Plane.{Bundles, Fleet, Provision, Repo}
   alias Troupe.Plane.Bundles.Effective
   alias Troupe.Plane.Fleet.Profile
 
@@ -72,8 +79,17 @@ defmodule Troupe.Plane.Fleet.Extends do
          "denyPaths" => :added,
          "maxPushes" => :narrow,
          "maxRuns" => :narrow
-       }}
+       }},
+    # Per-tool rules: a child's are added to its parent's, and on the pods each profile's
+    # are a scope of their own, the strictest holding (`rules/1`).
+    "permissions" => {:each, %{"deny" => :added, "ask" => :added, "allow" => :added}},
+    # A resource's own words for the parent and the budget, which are the row's columns.
+    "extends" => :dropped,
+    "budgetMicros" => :dropped
   }
+
+  # In GitOps mode the repository sizes its pods, not the class, so these are its to give.
+  @gitops_plane_written ~w(replicas teams image)
 
   @type resolved :: %{attrs: map(), from: map(), problems: [String.t()], chain: [String.t()]}
 
@@ -417,6 +433,59 @@ defmodule Troupe.Plane.Fleet.Extends do
     end)
   end
 
+  @doc """
+  The per-tool rules a profile's sessions obey, each with the profile that wrote it: every
+  profile's in its chain, the one that extends nothing first, as
+  `%{"action" => "deny", "rule" => "shell(curl)", "profile" => "standard"}`.
+
+  Kept apart by profile rather than merged into one list, because on the pods each
+  profile's rules are a scope of their own: of every scope's rules that match a call the
+  strictest holds, so a child's `allow` cannot loosen its parent's `ask`, which it would if
+  the two were one list and the child's the more specific. A chain the plane cannot walk
+  any more gives the profile's own rules alone.
+  """
+  @spec rules(Profile.t()) :: [map()]
+  def rules(%Profile{name: name} = profile) do
+    chain =
+      case chain(name) do
+        {:ok, chain} -> chain
+        {:error, _reason} -> [{name, written(profile)}]
+      end
+
+    for {from, written} <- chain,
+        set = map(map(written["spec"])["permissions"]),
+        action <- ~w(deny ask allow),
+        rule <- Enum.uniq(list(set[action])),
+        is_binary(rule),
+        do: %{"action" => action, "rule" => rule, "profile" => from}
+  end
+
+  @doc """
+  Why what `name` wrote cannot stand under its parent's budget, or `nil`: a profile that
+  extends another can only lower its budget, and one written above what it has from above
+  is refused rather than quietly lowered, because whoever wrote it believes the profile's
+  sessions may spend that much, and they may not. A parent lowered below a child's is not
+  refused; the lower is in effect, and the view says whose it is.
+  """
+  @spec budget_problem(String.t(), map(), resolved()) :: String.t() | nil
+  def budget_problem(name, own, %{attrs: attrs, from: from}) do
+    wrote = own["budget_micros"]
+    ceiling = attrs["budget_micros"]
+    source = from["budget_micros"]
+
+    if is_integer(wrote) and is_integer(ceiling) and source != name and ceiling < wrote do
+      "#{name} has a monthly budget of #{dollars(ceiling)} from #{source}, and a profile " <>
+        "that extends another can only lower its budget: set #{name}'s at or below " <>
+        "#{dollars(ceiling)}, or raise #{source}'s"
+    end
+  end
+
+  defp dollars(micros) do
+    cents = div(micros + 5_000, 10_000)
+
+    "$#{div(cents, 100)}.#{cents |> rem(100) |> Integer.to_string() |> String.pad_leading(2, "0")}"
+  end
+
   defp ordered(attrs, "spec.mcpServers", _items),
     do: for(server <- attrs["spec"]["mcpServers"] || [], do: server["name"])
 
@@ -440,13 +509,15 @@ defmodule Troupe.Plane.Fleet.Extends do
         {put_set(attrs, key, value), put_set(from, key, source)}
       end)
 
+    plane_written = plane_written()
+    rules = spec_rules()
     parent_spec = parent.attrs["spec"] || %{}
-    own_spec = Map.drop(map(written["spec"]), @plane_written)
+    own_spec = Map.drop(map(written["spec"]), plane_written)
 
     keys =
       (Map.keys(parent_spec) ++ Map.keys(own_spec))
       |> Enum.uniq()
-      |> Enum.reject(&(&1 in @plane_written))
+      |> Enum.reject(&(&1 in plane_written))
 
     {spec, from, problems} =
       Enum.reduce(keys, {%{}, from, []}, fn key, {spec, from, problems} ->
@@ -454,7 +525,7 @@ defmodule Troupe.Plane.Fleet.Extends do
 
         {value, from, found} =
           spec_field(
-            Map.get(@spec_rules, key, :replaced),
+            Map.get(rules, key, :replaced),
             path,
             parent_spec[key],
             own_spec[key],
@@ -473,6 +544,16 @@ defmodule Troupe.Plane.Fleet.Extends do
       from: from,
       problems: parent.problems ++ problems ++ key_problems(parent, attrs, from, own_spec, name)
     }
+  end
+
+  defp plane_written do
+    if Provision.mode() == :gitops, do: @gitops_plane_written, else: @plane_written
+  end
+
+  defp spec_rules do
+    if Provision.mode() == :gitops,
+      do: Map.put(@spec_rules, "storage", {:each, %{}}),
+      else: @spec_rules
   end
 
   defp spec_field({:each, rules}, path, parent, own, parent_from, from, name)

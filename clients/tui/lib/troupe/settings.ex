@@ -413,6 +413,7 @@ defmodule Troupe.Settings do
 
   defp rule_scope(%{"scope" => "enforced"} = rule), do: "set by your organisation" <> from(rule)
   defp rule_scope(%{"scope" => "org"} = rule), do: "organisation" <> from(rule)
+  defp rule_scope(%{"scope" => "profile"} = rule), do: "the worker profile" <> from(rule)
   defp rule_scope(rule), do: to_string(rule["scope"]) <> from(rule)
 
   defp from(%{"source" => source}) when is_binary(source), do: " (#{source})"

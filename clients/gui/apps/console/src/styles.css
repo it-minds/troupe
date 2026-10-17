@@ -1005,8 +1005,9 @@ fieldset.server .note {
   overflow-wrap: anywhere;
 }
 
-/* The organisation's permission rules: a list per action to read, and in the editor a
- * fieldset per action whose rows are a tool, a pattern and a way to take the rule away. */
+/* Permission rules, the organisation's and a worker profile's: a list per action to read,
+ * and in an editor a fieldset per action whose rows are a tool, a pattern and a way to take
+ * the rule away. */
 .rules-editor {
   margin-top: var(--space-6);
 }
@@ -1024,6 +1025,18 @@ fieldset.server .note {
 }
 .rules-editor .edit {
   max-width: none;
+}
+.rule-lists {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.edit.grid .rule-lists {
+  grid-column: 1 / -1;
+}
+.rule-lists .inherited code {
+  overflow-wrap: anywhere;
 }
 fieldset.rule-action {
   display: flex;

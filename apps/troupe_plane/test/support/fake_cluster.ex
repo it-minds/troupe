@@ -18,8 +18,11 @@ defmodule Troupe.Plane.FakeCluster do
       with;
     * gives up every leaf it named last time and not this time, and a leaf nobody owns
       any more is removed from the object;
-    * is refused as `Invalid` where the object it would leave has no `spec.image`, the
-      one field the CRD requires, and changes nothing.
+    * is refused as `Invalid` where the object it would leave has no `spec.image` and
+      extends no other profile, as the CRD refuses it, and changes nothing.
+
+  A `WorkerProfile`'s status subresource is applied the same way, with owners of its own,
+  touching neither the spec nor the generation.
 
   What it answers carries `metadata.managedFields` in the API server's own shape, so the
   plane reads ownership the way it would read it from a cluster. `put/1` stores an object
@@ -104,6 +107,17 @@ defmodule Troupe.Plane.FakeCluster do
     end)
   end
 
+  @doc """
+  Fill in a field nobody applied, as the API server does from a CRD's `default`: the value
+  is there and no field manager owns it.
+  """
+  @spec default(String.t(), String.t(), [String.t()], term()) :: :ok
+  def default(kind, name, path, value) do
+    Agent.update(__MODULE__, fn state ->
+      update_in(state, [:objects, {kind, name}, :object], &put_path(&1, path, value))
+    end)
+  end
+
   @doc "Set an object's status, as the operator does through the status subresource."
   @spec put_status(String.t(), String.t(), map()) :: :ok
   def put_status(kind, name, status) do
@@ -134,6 +148,7 @@ defmodule Troupe.Plane.FakeCluster do
        "groupVersion" => @group_version,
        "resources" => [
          %{"name" => "workerprofiles", "kind" => "WorkerProfile", "namespaced" => true},
+         %{"name" => "workerprofiles/status", "kind" => "WorkerProfile", "namespaced" => true},
          %{"name" => "troupepolicies", "kind" => "TroupePolicy", "namespaced" => false},
          %{"name" => "triggers", "kind" => "Trigger", "namespaced" => true}
        ]
@@ -168,6 +183,9 @@ defmodule Troupe.Plane.FakeCluster do
 
       ["apis", "troupe.dev", "v1alpha1", "namespaces", _ns, "workerprofiles", name] ->
         {:one, "WorkerProfile", name}
+
+      ["apis", "troupe.dev", "v1alpha1", "namespaces", _ns, "workerprofiles", name, "status"] ->
+        {:status, "WorkerProfile", name}
 
       ["apis", "troupe.dev", "v1alpha1", "troupepolicies", name] ->
         {:one, "TroupePolicy", name}
@@ -210,6 +228,16 @@ defmodule Troupe.Plane.FakeCluster do
     manager = URI.decode_query(query || "")["fieldManager"]
     state = %{state | requests: [{:patch, name, manager} | state.requests]}
     ssa(state, manager, Jason.decode!(body))
+  end
+
+  defp answer(state, :patch, {:status, kind, name}, query, body) do
+    manager = URI.decode_query(query || "")["fieldManager"]
+    state = %{state | requests: [{:patch_status, name, manager} | state.requests]}
+
+    case Map.fetch(state.objects, {kind, name}) do
+      {:ok, entry} -> ssa_status(state, {kind, name}, entry, manager, Jason.decode!(body))
+      :error -> {not_found(), state}
+    end
   end
 
   defp answer(state, :delete, {:one, kind, name}, _query, _body) do
@@ -269,7 +297,8 @@ defmodule Troupe.Plane.FakeCluster do
     owners = Map.put(owners, manager, wanted)
 
     if key |> elem(0) == "WorkerProfile" and
-         is_nil(get_in(object, ["spec", "image", "repository"])) do
+         is_nil(get_in(object, ["spec", "image", "repository"])) and
+         get_in(object, ["spec", "extends"]) in [nil, ""] do
       {invalid("spec.image: Required value"), state}
     else
       generation = get_in(entry.object, ["metadata", "generation"]) || 0
@@ -287,6 +316,43 @@ defmodule Troupe.Plane.FakeCluster do
       entry = %{entry | object: object, owners: owners, tracked: true}
       {{:ok, render(entry)}, put_in(state, [:objects, key], entry)}
     end
+  end
+
+  # The status subresource, applied the same way over the status alone, with owners of its
+  # own: what one manager stops naming there goes, and the spec is untouched, as is the
+  # generation.
+  defp ssa_status(state, key, entry, manager, config) do
+    status_owners = Map.get(entry, :status_owners, %{})
+    wanted = MapSet.new(walk(config["status"] || %{}, ["status"]))
+    had = Map.get(status_owners, manager, MapSet.new())
+
+    owners =
+      Map.new(status_owners, fn {other, paths} ->
+        taken =
+          for path <- paths,
+              MapSet.member?(wanted, path),
+              value_at(config, path) != value_at(entry.object, path),
+              into: MapSet.new(),
+              do: path
+
+        {other, MapSet.difference(paths, taken)}
+      end)
+
+    object = Enum.reduce(wanted, entry.object, &put_path(&2, &1, value_at(config, &1)))
+    others = owners |> Map.delete(manager) |> Map.values() |> Enum.reduce(MapSet.new(), &MapSet.union/2)
+
+    object =
+      had
+      |> MapSet.difference(wanted)
+      |> Enum.reject(&MapSet.member?(others, &1))
+      |> Enum.reduce(object, &drop_path(&2, &1))
+
+    entry =
+      entry
+      |> Map.put(:object, object)
+      |> Map.put(:status_owners, Map.put(owners, manager, wanted))
+
+    {{:ok, render(entry)}, put_in(state, [:objects, key], entry)}
   end
 
   # The leaves of an applied configuration, as paths. Not the identity of the object —
@@ -323,14 +389,15 @@ defmodule Troupe.Plane.FakeCluster do
     do: Map.put(map || %{}, key, put_path(Map.get(map || %{}, key), rest, value))
 
   # A map left empty by what was removed from it goes too, except the two every object has.
-  defp drop_path(map, [key]), do: Map.delete(map, key)
+  defp drop_path(map, path, top? \\ true)
+  defp drop_path(map, [key], _top?), do: Map.delete(map, key)
 
-  defp drop_path(map, [key | rest]) do
+  defp drop_path(map, [key | rest], top?) do
     case Map.get(map, key) do
       inner when is_map(inner) ->
-        inner = drop_path(inner, rest)
+        inner = drop_path(inner, rest, false)
 
-        if inner == %{} and key not in ["spec", "metadata"],
+        if inner == %{} and not (top? and key in ["spec", "metadata"]),
           do: Map.delete(map, key),
           else: Map.put(map, key, inner)
 
@@ -343,7 +410,7 @@ defmodule Troupe.Plane.FakeCluster do
 
   defp render(%{object: object, tracked: false}), do: object
 
-  defp render(%{object: object, owners: owners}) do
+  defp render(%{object: object, owners: owners} = entry) do
     managed =
       for {manager, paths} <- Enum.sort(owners), MapSet.size(paths) > 0 do
         %{
@@ -354,6 +421,20 @@ defmodule Troupe.Plane.FakeCluster do
           "fieldsV1" => fields_v1(paths)
         }
       end
+
+    managed =
+      managed ++
+        for {manager, paths} <- Enum.sort(Map.get(entry, :status_owners, %{})),
+            MapSet.size(paths) > 0 do
+          %{
+            "manager" => manager,
+            "operation" => "Apply",
+            "apiVersion" => @group_version,
+            "fieldsType" => "FieldsV1",
+            "fieldsV1" => fields_v1(paths),
+            "subresource" => "status"
+          }
+        end
 
     put_in(object, ["metadata", "managedFields"], managed)
   end

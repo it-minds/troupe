@@ -21,7 +21,7 @@ manifest's ([§6](#6-provisioning-direct-or-from-a-repository)).
 | `image` | `repository:tag` or `repository@sha256:…`, or `release` (below) |
 | `size_class` | `standard` (several sessions share a worker) or `heavy` (fewer, with more CPU, memory and disk each). A resource question, not a safety one: sessions cannot see each other's files either way |
 | `max_sessions` | how far it may grow, in sessions at once. Absent is no ceiling, bounded by the team's budget |
-| `budget_micros` | what its sessions may spend in a calendar month (UTC), in millionths of a dollar, whoever starts them and in whichever team: a ceiling beside each person's, team's and the platform's ([bundles-and-triggers.md §4](bundles-and-triggers.md#4-budgets)). Absent or `0` is none. Direct mode only for now: a repository's manifest has no field for it |
+| `budget_micros` | what its sessions may spend in a calendar month (UTC), in millionths of a dollar, whoever starts them and in whichever team: a ceiling beside each person's, team's and the platform's ([bundles-and-triggers.md §4](bundles-and-triggers.md#4-budgets)). Absent or `0` is none. In a repository's manifest, `spec.budgetMicros` |
 | `warm_workers` | workers kept up when nothing runs. `0` scales to zero, and the next session waits about half a minute |
 | `spec` | the rest of the resource in its own camelCase: `llm`, `egress`, `configBundleChannel`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, `github`, and `storage.storageClassName`, the class a worker's disk comes from (one `allowedStorageClasses` names; absent is the cluster's default) |
 
@@ -52,6 +52,7 @@ Other `spec` fields:
 | `orgMount` | mount the policy's org volume at `/mnt/org`, always read-only |
 | `repositoryOverridesBundle` | `true` lets a session's working copy replace the bundle's agents and skills, and Troupe's built-in agents, of the same name; absent or `false`, those win ([below](#a-repositorys-agents-and-skills-on-a-pod)) |
 | `personalTools` | `allow` (the default, and what absent means) lets a person offer a session on these pods the tools of MCP servers they signed in to on their own machine; `forbid` has the pods refuse ([below](#a-persons-own-tools-on-a-pod)) |
+| `permissions` | per-tool rules every session on these pods obeys: `deny`, `ask` and `allow`, each a list of rules as in a person's config ([below](#per-tool-rules-on-a-profile)) |
 | `github.permissions` | what a session's token may do on GitHub beyond cloning its repository, in GitHub's names: `contents` (`read` or `write`, which pushes its `troupe/*` branch), `pull_requests` (`read` or `write`, which opens its draft pull request and comments on it), `checks` and `statuses` (`read`, its CI). Absent, sessions clone and do no more; a profile that pushes also declares the API's host in `egress.gitHosts` ([github.md](github.md#5-let-a-profile-reach-github)) |
 | `github.allowPublic`, `github.denyPaths`, `github.maxPushes`, `github.maxRuns` | how far the fix loop goes: `allowPublic` (absent, `false`: pushes and pull requests to private and internal repositories only), `denyPaths` (patterns a push never carries, added to `.env`, `*.pem`, private keys and the rest of the defaults), `maxPushes` (pushes a run may make) and `maxRuns` (runs on a repository at once). A team's own caps hold where lower ([github.md](github.md#9-how-far-a-run-may-go)) |
 | `mcpIdentities` | who the profile is at each MCP server its bundle calls with client credentials ([below](#calling-an-mcp-server-as-the-profile)). Yours to write, in direct and gitops mode alike; nothing in it is secret |
@@ -132,9 +133,10 @@ refused with a sentence.
 - **Deleting the parent** is refused (`conflict`, `extended_by`) while a profile extends it.
   Make each extend another profile, or none: a put without `extends` keeps the profile as
   it was in effect, and from then on it follows nothing.
-- **In gitops mode** a profile extends nothing yet: `admin.profile.put` with `extends` is
-  refused, and so is a manifest that names a parent (`spec.extends` or the
-  `troupe.dev/extends` annotation). `admin.profiles.export` writes a child's manifest whole.
+- **In gitops mode** a manifest names its parent in `spec.extends` and says only what
+  differs; the plane resolves it and writes the profile in effect into the resource's
+  status ([§6](#a-manifest-that-extends-another)). `admin.profiles.export` writes a child's
+  manifest that way, the parent named and only its own fields.
 
 ### Calling an MCP server as the profile
 
@@ -311,6 +313,38 @@ next time it wakes and restarts no pod, and an `ssh` profile has it too. A sessi
 when the setting changes keeps what it had until then. The platform's own
 `managed_mcp_servers_only` refuses the same offer on every profile at once.
 
+### Per-tool rules on a profile
+
+A profile may carry the per-tool rules a person's config carries
+([permissions](../user/configuration/permissions.md)), and every session on its pods obeys
+them (Decision 913, #724):
+
+```yaml
+spec:
+  permissions:
+    deny: ["shell(curl)", "read_file(secrets/**)"]
+    ask: ["mcp(issues.delete)"]
+    allow: ["shell(mix test)"]
+```
+
+They are an enforced layer, the `profile` scope: of every rule that matches a call the
+strictest holds, `deny` over `ask` over `allow`, so nothing in a repository's
+`.troupe/config.yaml` loosens them, and a profile's `allow` stands under
+`managed_permission_rules_only` as the organisation's does. A refused call names the rule
+and the profile ("refused by the rule deny shell(curl), from the worker profile fixing"),
+and an asked one says so on its approval in the TUI and the desktop app. A `deny` for
+`shell` also refuses a command a person types with `!` in a session on these pods,
+answering `forbidden` with `setting: permissions`; an `ask` does not, since the person
+typing it is who it would ask.
+
+`admin.profile.put` and the resource's reading refuse a rule the pods could not read, with
+the reader's sentence. Like `personalTools`, the rules ride the activation: a change
+reaches a session the next time it wakes and restarts no pod. A profile that extends
+another has its parent's rules as well as its own, each profile's a scope of its own on
+the pods, so a child adds rules and cannot loosen or drop its parent's. The console's
+profile editor edits a profile's own rules, and its page lists every rule in effect with
+the profile it came from.
+
 ## 2. What the operator creates
 
 `Troupe.Operator.Resources.for_profile/3` is a pure function from profile, policy and
@@ -356,7 +390,8 @@ This is a summary; the detail is where each part is set.
 
 | Condition | `True` means |
 |---|---|
-| `Ready` | every manifest applied; `False` with `PolicyViolation`, `NoPolicy` or `ApplyFailed` |
+| `Ready` | every manifest applied; `False` with `PolicyViolation`, `NoPolicy`, `ApplyFailed` or `AwaitingPlane` |
+| `Resolved` | only on a profile that extends another: the operator runs the profile in effect the plane wrote into `status.effective`, and the message names the chain. `False` with `AwaitingPlane` while the plane has written none: **nothing is created**, rather than pods made from what differs from the parent alone ([§6](#a-manifest-that-extends-another)) |
 | `PolicyViolation` | the profile exceeds the policy, or no policy could be read; **nothing is created** |
 | `SecretMissing` | a referenced Secret was not found in the worker namespace. The operator has no RBAC on Secrets, so do not rely on it |
 | `MCPIdentityMissing` | a server the bundle calls with client credentials has no identity in `mcpIdentities`, or its identity is incomplete; the message says which ([above](#calling-an-mcp-server-as-the-profile)) |
@@ -608,7 +643,9 @@ What a profile takes from its resource:
 | `warm_workers` | annotation `troupe.dev/warm-workers`, 0 to 10; absent is 0 |
 | `provisioner` | annotation `troupe.dev/provisioner`; absent is `kubernetes` |
 | channel | `spec.configBundleChannel`; absent is `stable` |
-| `spec` | the rest: `llm`, `egress`, `storage`, `resources`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, `github`, `mcpIdentities` |
+| `budget_micros` | `spec.budgetMicros`; absent or 0 is none |
+| `extends` | `spec.extends`, the one profile this one extends ([below](#a-manifest-that-extends-another)) |
+| `spec` | the rest: `llm`, `egress`, `storage`, `resources`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, `github`, `permissions`, `mcpIdentities` |
 
 CPU, memory and disk are the manifest's to size, within the policy; the class the plane
 places and scales by is read off `sessionsPerPod`.
@@ -683,6 +720,64 @@ which profile has which identity ([above](#calling-an-mcp-server-as-the-profile)
 The policy is the chart's `policy.*` values, which are then the repository's already, or
 a `TroupePolicy` manifest in the repository with `policy.install: false`; the export gives
 one.
+
+### A manifest that extends another
+
+A manifest may name one profile it extends and say only what differs, by the rules of
+[§1](#a-profile-that-extends-another) (Decision 913, #655):
+
+```yaml
+# profiles/data-team.yaml
+apiVersion: troupe.dev/v1alpha1
+kind: WorkerProfile
+metadata:
+  name: data-team
+  namespace: troupe-system
+spec:
+  extends: standard
+  llm:
+    model: example-large-2
+    secretRef: {name: troupe-llm-data, key: api-key}
+  egress:
+    fqdns: [warehouse.example.com]
+  budgetMicros: 200000000
+  permissions:
+    deny: ["shell(curl)"]
+```
+
+Flux applies it as written: the image may be left to the parent, and nothing else is
+required. At its next pass the plane reads every parent before the profiles that extend
+it, resolves the chain against its rows, keeps the profile in effect as the child's
+profile, and writes it flat into the resource's status, `status.effective`: the spec its
+pods run, the chain (`[standard, data-team]`), `from` (each field and the profile it came
+from) and a `revision`. The operator and the admission policy read the profile from there,
+with `replicas`, `teams` and `mcpServers` from the spec as for any profile, so they only
+ever see a flat profile; the plane writes nothing of the manifest's spec but those three,
+and Flux, which owns the spec, and the plane, which owns `status.effective`, never write
+the same field. Its ServiceAccount may patch `workerprofiles/status` for this.
+
+- **Before the plane has written the status** the child runs nothing: the operator says
+  `Resolved: False, AwaitingPlane` and creates nothing, rather than make pods from what
+  differs from the parent alone. Admission judges the manifest as written then (the image
+  only where it names one), and the profile in effect from then on, at each write that
+  changes it.
+- **A parent's change** reaches its children's status in the same pass, and their pods
+  roll as for any change to a resource ([§3](#3-upgrades-and-drains)). A change to the
+  child's own manifest runs the last profile in effect until the plane's next pass has
+  resolved it.
+- **Refused**, and reported as any manifest is, with the last version that passed kept: a
+  parent that is not a profile here, a cycle or a chain longer than four, a budget above
+  the parent's, a rule the pods could not read, and a profile in effect the policy
+  refuses. The parent is named in `spec.extends`; the `troupe.dev/extends` annotation is
+  refused with that sentence.
+- **Defaults are not the child's.** The API server fills `sessionsPerPod`,
+  `configBundleChannel`, `orgMount` and `storage.size` into every resource from the CRD's
+  defaults; in a child they count only where its manifest names them, so a default never
+  replaces what the parent gives. In gitops mode `sessionsPerPod`, `resources` and
+  `storage.size` are the repository's numbers, inherited from the parent where the child
+  sets none.
+- **Stopping** to extend is a manifest without `spec.extends`, whole again; the plane takes
+  its block out of the status.
 
 ### The record of finished drains, under an applier
 

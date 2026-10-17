@@ -40,7 +40,7 @@ defmodule Troupe.Plane.Harness do
     Sessions
   }
   alias Troupe.Plane.Control.Router
-  alias Troupe.Plane.Fleet.Scaler
+  alias Troupe.Plane.Fleet.{Extends, Scaler}
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Provision
   alias Troupe.Plane.Sessions.{ACL, Session, Share}
@@ -2533,6 +2533,11 @@ defmodule Troupe.Plane.Harness do
       pin
       |> Map.put("repository_overrides_bundle", repository_overrides?(profile))
       |> Map.put("personal_tools", personal_tools(profile))
+      # The per-tool rules of the profile and of every profile above it, each with the one
+      # that wrote it: an enforced layer for every session on its pods. Read again at every
+      # activation like the two above, so a rule reaches a session at its next wake and
+      # restarts no pod; an empty list takes away what was there.
+      |> Map.put("permission_rules", Extends.rules(profile))
     else
       _ -> %{"bundle_version" => session.bundle_version}
     end

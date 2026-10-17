@@ -76,11 +76,15 @@ defmodule Troupe.Operator.Reconciler do
 
   # -- one pass ---------------------------------------------------------------
 
+  # A profile that extends another is run as the plane resolved it, from its status; the
+  # spec as written is only what differs from its parent and never runs on its own.
   defp run(conn, %{"kind" => "WorkerProfile"} = resource) do
-    profile = Profile.from_resource(resource)
-
-    case load_policy(conn) do
-      {:ok, policy} -> reconcile_profile(conn, resource, profile, policy)
+    with {:ok, effective} <- Profile.in_effect(resource),
+         profile = Profile.from_resource(effective),
+         {:ok, policy} <- load_policy(conn) do
+      reconcile_profile(conn, resource, profile, policy)
+    else
+      {:waiting, message} -> unresolved(conn, resource, message)
       {:error, reason} -> policy_missing(conn, resource, reason)
     end
   end
@@ -155,6 +159,7 @@ defmodule Troupe.Operator.Reconciler do
       |> upgrade_status(upgrade, generation(resource))
       |> endpoint_status(profile, settings, generation(resource))
       |> plane_ca_status(plane_ca, settings, generation(resource))
+      |> resolved_status(resource)
 
     write_status(conn, resource, status)
 
@@ -564,6 +569,49 @@ defmodule Troupe.Operator.Reconciler do
     end
   end
 
+  # -- a profile that extends another -----------------------------------------
+
+  # Not resolved yet: the plane has not written the profile in effect into the status. It
+  # waits, with nothing created, rather than running the spec as written, which is only
+  # what differs from its parent: pods made from it would lack all the parent gives, and
+  # could be what nobody checked.
+  defp unresolved(conn, resource, message) do
+    status =
+      resource
+      |> current_status()
+      |> Status.put("Resolved", false, "AwaitingPlane", message, generation(resource))
+      |> Status.put("Ready", false, "AwaitingPlane", message, generation(resource))
+
+    write_status(conn, resource, status)
+    {:ok, :awaiting_plane}
+  end
+
+  # Which resolution this pass ran, so the plane's next one is acted on when it arrives
+  # (`Troupe.Operator.SkipObserved`), and from what. A profile that extends none says none.
+  defp resolved_status(status, resource) do
+    case Profile.extends(resource) do
+      nil ->
+        status
+        |> Map.delete("effectiveRevision")
+        |> Map.update("conditions", [], fn conditions ->
+          Enum.reject(conditions, &(&1["type"] == "Resolved"))
+        end)
+
+      parent ->
+        chain = get_in(resource, ["status", "effective", "chain"]) || [parent]
+
+        status
+        |> Map.put("effectiveRevision", Profile.effective_revision(resource))
+        |> Status.put(
+          "Resolved",
+          true,
+          "Resolved",
+          "runs the profile in effect the plane resolved from #{Enum.join(chain, " → ")}",
+          generation(resource)
+        )
+    end
+  end
+
   # Without a policy nothing is allowed, because "no policy" and "a policy that permits
   # everything" must not look the same.
   defp policy_missing(conn, resource, reason) do
@@ -587,7 +635,10 @@ defmodule Troupe.Operator.Reconciler do
     |> Bonny.Resource.apply_status(conn, apply_opts())
   end
 
-  defp current_status(resource), do: Map.get(resource, "status") || %{}
+  # The status as the cluster holds it, less the profile in effect: that block is the
+  # plane's, and a pass that wrote it back from what it read could put an older one over
+  # the plane's newer.
+  defp current_status(resource), do: Map.delete(Map.get(resource, "status") || %{}, "effective")
 
   defp namespace_of(resources) do
     resources |> Enum.find(&(&1["kind"] == "Namespace")) |> get_in(["metadata", "name"])

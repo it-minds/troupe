@@ -368,7 +368,6 @@ defmodule Troupe.Plane.Admin do
   def profile_put(actor, attrs) do
     with :ok <- require_platform_admin(actor),
          {:ok, name} <- require_name(attrs),
-         :ok <- extends_held_by_repository(actor, attrs, name),
          :ok <- not_held_by_repository(actor, "profile.put", name),
          {:ok, attrs} <- without_derived(attrs),
          {:ok, attrs} <- in_effect(attrs),
@@ -510,34 +509,15 @@ defmodule Troupe.Plane.Admin do
     })
   end
 
-  # A profile's budget may only be lowered by one that extends it. One set above what it
-  # has from above is refused rather than quietly lowered: whoever typed it believes the
-  # profile's sessions may spend that much, and they may not. A parent lowered below a
-  # budget a child already has is not refused; the lower is in effect, and the view says
-  # whose it is.
-  defp budget_lowers(name, own, %{attrs: attrs, from: from}) do
-    wrote = own["budget_micros"]
-    ceiling = attrs["budget_micros"]
-    source = from["budget_micros"]
+  # A profile's budget may only be lowered by one that extends it (`Extends.budget_problem/3`).
+  defp budget_lowers(name, own, resolved) do
+    case Extends.budget_problem(name, own, resolved) do
+      nil ->
+        :ok
 
-    if is_integer(wrote) and is_integer(ceiling) and source != name and ceiling < wrote do
-      {:error,
-       Error.new(:invalid_params, %{
-         budget_micros: wrote,
-         reason:
-           "#{name} has a monthly budget of #{dollars(ceiling)} from #{source}, and a " <>
-             "profile that extends another can only lower its budget: set #{name}'s at or " <>
-             "below #{dollars(ceiling)}, or raise #{source}'s"
-       })}
-    else
-      :ok
+      reason ->
+        {:error, Error.new(:invalid_params, %{budget_micros: own["budget_micros"], reason: reason})}
     end
-  end
-
-  defp dollars(micros) do
-    cents = div(micros + 5_000, 10_000)
-
-    "$#{div(cents, 100)}.#{cents |> rem(100) |> Integer.to_string() |> String.pad_leading(2, "0")}"
   end
 
   defp extends_check(name, parent) do
@@ -656,30 +636,6 @@ defmodule Troupe.Plane.Admin do
         end
 
       {child, result}
-    end
-  end
-
-  # A repository's manifest extends nothing yet, so neither does a profile on a plane in
-  # gitops mode: refused with what to do instead, and recorded as any refused write is.
-  defp extends_held_by_repository(actor, attrs, name) do
-    parent = presence(attrs[:extends] || attrs["extends"])
-
-    if parent && Gitops.enabled?() do
-      detail = %{"outcome" => "refused", "reason" => "managed_by_gitops", "extends" => parent}
-      {:ok, _} = Audit.record(actor.subject, "profile.put", name, detail)
-
-      {:error,
-       Error.new(:managed_by_gitops, %{
-         kind: "WorkerProfile",
-         name: name,
-         extends: parent,
-         reason:
-           "this plane is in gitops mode, and a profile extends another only on a plane that " <>
-             "writes its profiles itself: a repository's manifest holds the whole profile, " <>
-             "#{parent}'s fields included, until a plane resolves extends from a repository"
-       })}
-    else
-      :ok
     end
   end
 
