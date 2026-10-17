@@ -113,6 +113,6 @@ describe("an approval a rule asked for", () => {
 
     unmount = render(<ApprovalPanel entry={entry} canAnswer others={[]} onAnswer={async () => undefined} />).unmount;
     await waitFor(() => says("Asked by the rule") || null, "the rule");
-    expect(says("Asked by the rule ask shell(git push), from the worker profile (fixing).")).toBe(true);
+    await sees("Asked by the rule ask shell(git push), from the worker profile (fixing).");
   });
 });

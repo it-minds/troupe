@@ -512,7 +512,7 @@ describe("a profile's permission rules", () => {
   it("are added in the editor, a malformed one refused at its field in the plane's words, and saved through the preview", async () => {
     await open("#/profiles/dev");
     await waitFor(() => heading() === "dev" && says("Permission rules"), "dev");
-    expect(says("None: the organisation's rules and each person's own decide.")).toBe(true);
+    await sees("None: the organisation's rules and each person's own decide.");
 
     button("Change dev")!.click();
     (await waitFor(() => button("Add a deny rule"), "the editor")).click();
@@ -525,8 +525,8 @@ describe("a profile's permission rules", () => {
     await waitFor(() => !button("Preview")!.disabled, "the rule fixed");
     button("Preview")!.click();
     await waitFor(() => says("What will happen"), "the preview");
-    expect(says("spec.permissions")).toBe(true);
-    expect(says("Every session on dev refuses shell(curl), whatever a person's own rules allow.")).toBe(true);
+    await sees("spec.permissions");
+    await sees("Every session on dev refuses shell(curl), whatever a person's own rules allow.");
     expect(fake.admin.profiles.find((p) => p.name === "dev")!.spec!["permissions"]).toBeUndefined();
 
     button("Apply")!.click();
@@ -537,7 +537,7 @@ describe("a profile's permission rules", () => {
     expect(spec["sandboxHints"]).toEqual({ tmpfs: "1Gi" });
     await waitFor(() => inEffect("deny"), "the rule on dev's page");
     expect(inEffect("deny")!.textContent).toBe("deny shell(curl)");
-    expect(says("sandboxHints.tmpfs")).toBe(true);
+    await sees("sandboxHints.tmpfs");
   });
 
   it("are refused by the plane, rule by rule, in the same words", async () => {
@@ -565,14 +565,14 @@ describe("a profile's permission rules", () => {
     button("Change data-team")!.click();
     await waitFor(() => button("Add a deny rule"), "the editor");
     expect(ruleRow("deny", 1)).toBeNull();
-    expect(says("Added to what it has from dev: shell(curl).")).toBe(true);
+    await sees("Added to what it has from dev: shell(curl).");
     button("Add a deny rule")!.click();
     type(await waitFor(() => ruleRow("deny", 1) && field("Tool", ruleRow("deny", 1)!), "the new row"), "shell");
     type(field("Pattern", ruleRow("deny", 1)!)!, "rm -rf");
     await waitFor(() => !button("Preview")!.disabled, "the rule typed");
     button("Preview")!.click();
     await waitFor(() => says("What will happen"), "the preview");
-    expect(says("Every session on data-team refuses shell(rm -rf)")).toBe(true);
+    await sees("Every session on data-team refuses shell(rm -rf)");
     button("Apply")!.click();
     await waitFor(() => says("Recorded in the audit as profile.put on data-team"), "the audit's note");
 

@@ -1,11 +1,20 @@
+import { readFileSync } from "node:fs";
 import { defineConfig, mergeConfig } from "vitest/config";
 import app from "./vite.config.ts";
 
 // The console's tests run on its own Vite configuration, with jsdom for a page, against
 // the fake plane in `packages/client/test/support` over a real HTTP socket.
+
+// The version the app says it is, as `pnpm test` gives it, also where nothing set it: `vitest`
+// run on its own, or through `pnpm exec`, left `npm_package_version` unset, the app said `dev`,
+// and the tests that compare it with a plane's policy failed whatever the machine was doing.
+const version =
+  process.env["npm_package_version"] ?? (JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string }).version;
+
 export default mergeConfig(
   app,
   defineConfig({
+    define: { __TROUPE_VERSION__: JSON.stringify(version) },
     test: {
       environment: "jsdom",
       include: ["test/**/*.test.{ts,tsx}"],
