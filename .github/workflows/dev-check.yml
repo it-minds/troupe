@@ -117,6 +117,10 @@ jobs:
       # admin API is found here rather than on the chunk's pull request into `main`.
       - name: Every app and the panel keep to their boundaries
         run: MIX_ENV=test mix troupe.boundaries
+      # As `ci.yml` checks it, so a file left unformatted is found here and not on the
+      # chunk's pull request into `main`.
+      - name: The umbrella is formatted
+        run: mix format --check-formatted
       # `protocol/schema/config/v1.json` and the key reference in
       # docs/user/configuration.md, both generated from Troupe.Config.Schema.
       - name: The committed config schema and its reference are current
