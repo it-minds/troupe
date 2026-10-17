@@ -96,4 +96,23 @@ describe("an approval a rule asked for", () => {
     await sees("ask shell(git push)");
     await sees("set by your organisation");
   });
+
+  it("names the worker profile, and which, when the rule came from the profile a pod session runs on", async () => {
+    const entry: Extract<Entry, { kind: "approval" }> = {
+      kind: "approval",
+      seq: 4,
+      agent: ["root"],
+      callId: "c2",
+      tool: "shell",
+      args: { command: "git push origin main" },
+      decision: undefined,
+      resolvedBy: undefined,
+      closed: false,
+      rule: { rule: "shell(git push)", scope: "profile", source: "fixing" },
+    };
+
+    unmount = render(<ApprovalPanel entry={entry} canAnswer others={[]} onAnswer={async () => undefined} />).unmount;
+    await waitFor(() => says("Asked by the rule") || null, "the rule");
+    expect(says("Asked by the rule ask shell(git push), from the worker profile (fixing).")).toBe(true);
+  });
 });

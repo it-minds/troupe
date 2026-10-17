@@ -503,3 +503,83 @@ describe("a plane in gitops mode", () => {
     await waitFor(() => says("this deletes the plane's row and nothing else"), "the preview");
   });
 });
+
+describe("a profile's permission rules", () => {
+  const ruleRow = (action: string, n: number): HTMLElement | null => document.querySelector<HTMLElement>(`form.profile-editor [aria-label="${action} rule ${n}"]`);
+  const inEffect = (action: string): HTMLElement | null => document.querySelector<HTMLElement>(`ul.rules-in-effect[aria-label="${action} rules"]`);
+  const ruleCell = (text: string): HTMLTableRowElement | undefined => [...document.querySelectorAll<HTMLTableRowElement>("table.where-from tbody tr")].find((r) => (r.cells[1]?.textContent ?? "") === text);
+
+  it("are added in the editor, a malformed one refused at its field in the plane's words, and saved through the preview", async () => {
+    await open("#/profiles/dev");
+    await waitFor(() => heading() === "dev" && says("Permission rules"), "dev");
+    expect(says("None: the organisation's rules and each person's own decide.")).toBe(true);
+
+    button("Change dev")!.click();
+    (await waitFor(() => button("Add a deny rule"), "the editor")).click();
+    type(await waitFor(() => ruleRow("deny", 1) && field("Tool", ruleRow("deny", 1)!), "the new row"), "Bash");
+    await waitFor(() => says("Bash is another tool's name for it; Troupe's is shell, as in shell(...)", ruleRow("deny", 1)!), "the tool refused");
+    expect(button("Preview")!.disabled).toBe(true);
+
+    type(field("Tool", ruleRow("deny", 1)!)!, "shell");
+    type(field("Pattern", ruleRow("deny", 1)!)!, "curl");
+    await waitFor(() => !button("Preview")!.disabled, "the rule fixed");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    expect(says("spec.permissions")).toBe(true);
+    expect(says("Every session on dev refuses shell(curl), whatever a person's own rules allow.")).toBe(true);
+    expect(fake.admin.profiles.find((p) => p.name === "dev")!.spec!["permissions"]).toBeUndefined();
+
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
+    const spec = fake.admin.profiles.find((p) => p.name === "dev")!.spec!;
+    // Only the list that holds a rule is sent; the rest of the spec is carried as it was.
+    expect(spec["permissions"]).toEqual({ deny: ["shell(curl)"] });
+    expect(spec["sandboxHints"]).toEqual({ tmpfs: "1Gi" });
+    await waitFor(() => inEffect("deny"), "the rule on dev's page");
+    expect(inEffect("deny")!.textContent).toBe("deny shell(curl)");
+    expect(says("sandboxHints.tmpfs")).toBe(true);
+  });
+
+  it("are refused by the plane, rule by rule, in the same words", async () => {
+    const refused = await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", {
+      profile: { name: "rules", image: "registry.example.com/troupe/worker:0.17.0-beta", spec: { permissions: { deny: ["Bash(ls)"], ask: ["shell(npm test:*)"] } } },
+    });
+    expect("error" in refused).toBe(true);
+    const text = JSON.stringify(refused);
+    expect(text).toContain("permissions.ask: shell(npm test:*): drop the :*");
+    expect(text).toContain("permissions.deny: Bash is another tool's name for it");
+    expect(fake.admin.profiles.some((p) => p.name === "rules")).toBe(false);
+  });
+
+  it("of a parent hold in a profile that extends it, which adds its own and cannot take the parent's away", async () => {
+    fake.admin.profiles.find((p) => p.name === "dev")!.spec!["permissions"] = { deny: ["shell(curl)"] };
+    await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", { profile: { name: "data-team", extends: "dev", spec: { egress: { fqdns: ["wiki.example.com"] } } } });
+    await open("#/profiles/data-team");
+    await waitFor(() => heading() === "data-team" && inEffect("deny"), "data-team's rules");
+    expect(inEffect("deny")!.textContent).toBe("deny shell(curl) — from dev");
+    expect(link("dev", inEffect("deny")!)!.getAttribute("href")).toBe("#/profiles/dev");
+    expect(ruleCell("shell(curl)")!.cells[0]!.textContent).toBe("spec.permissions.deny");
+    expect(ruleCell("shell(curl)")!.cells[2]!.textContent).toBe("dev");
+
+    // Its editor holds what it wrote: dev's rule is said, and is no row it could remove.
+    button("Change data-team")!.click();
+    await waitFor(() => button("Add a deny rule"), "the editor");
+    expect(ruleRow("deny", 1)).toBeNull();
+    expect(says("Added to what it has from dev: shell(curl).")).toBe(true);
+    button("Add a deny rule")!.click();
+    type(await waitFor(() => ruleRow("deny", 1) && field("Tool", ruleRow("deny", 1)!), "the new row"), "shell");
+    type(field("Pattern", ruleRow("deny", 1)!)!, "rm -rf");
+    await waitFor(() => !button("Preview")!.disabled, "the rule typed");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    expect(says("Every session on data-team refuses shell(rm -rf)")).toBe(true);
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as profile.put on data-team"), "the audit's note");
+
+    const made = fake.admin.profiles.find((p) => p.name === "data-team")!;
+    expect((made.own!["spec"] as Record<string, unknown>)["permissions"]).toEqual({ deny: ["shell(rm -rf)"] });
+    expect(made.spec!["permissions"]).toEqual({ deny: ["shell(curl)", "shell(rm -rf)"] });
+    await waitFor(() => inEffect("deny") && says("shell(rm -rf)", inEffect("deny")!), "the rules read again");
+    expect([...inEffect("deny")!.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["deny shell(curl) — from dev", "deny shell(rm -rf) — its own"]);
+  });
+});

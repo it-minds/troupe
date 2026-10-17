@@ -2,8 +2,9 @@
 // (`Troupe.Plane.Fleet.Extends`), for the fake plane: the parent's profile in effect with
 // what the child wrote laid over it, field by field, and where each field came from.
 //
-// Egress hosts and MCP servers are added (a server with a parent's name replaces it only
-// with `override: true`); `max_sessions` and `budget_micros` narrow; a parent's `personalTools: forbid` and
+// Egress hosts, MCP servers and each list of permission rules are added (a server with a
+// parent's name replaces it only with `override: true`; a rule the parent has is the
+// parent's, so a child cannot drop one); `max_sessions` and `budget_micros` narrow; a parent's `personalTools: forbid` and
 // `repositoryOverridesBundle: false` hold; `llm.secretRef`, `mcpIdentities` and
 // `warm_workers` are never inherited; everything else is the child's where it sets it.
 
@@ -38,6 +39,7 @@ const TOP: Array<[string, Rule]> = [
 const EACH: Record<string, Record<string, Rule>> = {
   llm: { secretRef: "own" },
   egress: { fqdns: "added", gitHosts: "added" },
+  permissions: { deny: "added", ask: "added", allow: "added" },
   storage: { size: "dropped" },
 };
 

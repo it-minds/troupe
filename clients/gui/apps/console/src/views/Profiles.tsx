@@ -40,15 +40,25 @@
 // The page also lists the bundle its pods load, each agent, skill and server with the
 // profile whose channel gave it: for a profile on a channel of its own below a parent on
 // another, the one the plane composes from both.
+//
+// A profile may carry per-tool permission rules (`spec.permissions`: deny, ask and allow),
+// which every session on it runs under beside the organisation's and a person's own, the
+// strictest holding. The editor edits them as the organisation's are edited, a tool and a
+// pattern checked as typed by the plane's reading, and sends only the lists that hold a
+// rule. A profile that extends another has its parent's rules and adds its own: its editor
+// edits only what it wrote, and its page says which profile each rule in effect came from.
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { AdminProfile, AdminTeam, EffectiveBundle, EffectiveProfile, ProfileBelow, ProfileDetail, ProfileWrite, ProviderTypeChoice } from "@troupe/client";
+import { RULE_ACTIONS } from "@troupe/client";
+import type { AdminProfile, AdminTeam, EffectiveBundle, EffectiveProfile, ProfileBelow, ProfileDetail, ProfileWrite, ProviderTypeChoice, RuleAction } from "@troupe/client";
 import { href } from "../route";
 import { describeError, recorded, show, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, count, linesOf, modeOf, money, useChange } from "./bits";
 import type { DiffLine, Done } from "./bits";
 import { STATES, profileState } from "./Overview";
+import { RuleListsEditor, draftInvalid, draftOfRules, ruleSetOf, rulesIn, rulesOfDraft } from "./RuleLists";
+import type { ActionWords, RuleDraft, RuleLists } from "./RuleLists";
 
 /** Which teams are granted each profile, from the teams this person may see. */
 function grantedTo(teams: AdminTeam[]): Map<string, string[]> {
@@ -294,6 +304,7 @@ const READ_HERE = [
   "github.denyPaths",
   "github.maxPushes",
   "github.maxRuns",
+  "permissions",
   "configBundleChannel",
   "orgMount",
   "repositoryOverridesBundle",
@@ -411,6 +422,9 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
         ]}
       />
       <p className="note">A team's own caps hold where they are lower, and a team's list says which repositories its sessions may name.</p>
+
+      <Region>Permission rules</Region>
+      <RulesInEffect name={p.name} parent={parent} spec={spec} fields={parent ? (effective?.fields ?? null) : null} />
 
       <Region>MCP servers</Region>
       {servers.length === 0 ? (
@@ -626,6 +640,73 @@ function WhereFrom({ name, effective }: { name: string; effective: EffectiveProf
   );
 }
 
+/** Each action, as a profile's page and editor head its list and say what it does in a session on it. */
+const PROFILE_ACTION: ActionWords = {
+  deny: { title: "Refused", does: "A call a deny rule matches is refused in every session on this profile, whatever a person's own rules allow.", article: "a" },
+  ask: { title: "Asked", does: "A call an ask rule matches asks a person first in every session on this profile, whatever auto_approve or a person's own allow says.", article: "an" },
+  allow: {
+    title: "Allowed",
+    does: "A call an allow rule matches runs unasked, unless the organisation's rules or a person's own are stricter, or a person must answer it.",
+    article: "an",
+  },
+};
+
+/** The profile each rule in effect came from, by action, from the effective view's fields. */
+function rulesFrom(fields: EffectiveProfile["fields"] | null): Record<RuleAction, Map<string, string>> {
+  const out = { deny: new Map(), ask: new Map(), allow: new Map() } as Record<RuleAction, Map<string, string>>;
+  for (const f of fields ?? []) {
+    const action = f.path.startsWith("spec.permissions.") ? (f.path.slice("spec.permissions.".length) as RuleAction) : null;
+    if (action && action in out && typeof f.value === "string") out[action].set(f.value, f.from);
+  }
+  return out;
+}
+
+/** The permission rules a profile's sessions run under, each with the profile it came from where it extends another. */
+function RulesInEffect({ name, parent, spec, fields }: { name: string; parent: string | null; spec: Record<string, unknown>; fields: EffectiveProfile["fields"] | null }): JSX.Element {
+  const rules = rulesIn(spec["permissions"]);
+  const from = rulesFrom(fields);
+  const total = RULE_ACTIONS.reduce((n, a) => n + rules[a].length, 0);
+  return (
+    <>
+      <p className="note">
+        Every session on it runs under these beside the organisation's rules and the person's own, and for each call the strictest that matches holds: nobody's own rules loosen them.
+        {parent ? ` It has ${parent}'s and adds its own; it cannot take one of ${parent}'s away.` : ""}
+      </p>
+      {total === 0 ? (
+        <p className="hint">None: the organisation's rules and each person's own decide.</p>
+      ) : (
+        <Fields
+          rows={RULE_ACTIONS.map((a): [string, JSX.Element] => [
+            PROFILE_ACTION[a].title,
+            rules[a].length === 0 ? (
+              <span className="muted">none</span>
+            ) : (
+              <ul className="plain rules-in-effect" aria-label={`${a} rules`}>
+                {rules[a].map((r) => {
+                  const source = from[a].get(r);
+                  return (
+                    <li key={r}>
+                      <code>
+                        {a} {r}
+                      </code>
+                      {parent && source && (
+                        <span className="hint">
+                          {" "}
+                          — {source === name ? "its own" : <>from <a href={href({ page: "profiles", path: [source] })}>{source}</a></>}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            ),
+          ])}
+        />
+      )}
+    </>
+  );
+}
+
 /** A profile's monthly budget in effect, whose it is, and what its sessions have used of it this month. */
 function BudgetLine({ name, budget }: { name: string; budget: ProfileDetail["budget"] }): JSX.Element {
   if (!budget?.budget_micros) return <>no ceiling: its sessions spend what their people and teams have</>;
@@ -728,6 +809,7 @@ const FORM_PATHS = [
   ["github", "denyPaths"],
   ["github", "maxPushes"],
   ["github", "maxRuns"],
+  ["permissions"],
 ];
 
 /** What the plane writes into the resource itself: never sent back, and refused if it were. */
@@ -875,7 +957,7 @@ function formOf(detail: ProfileDetail | null): Form {
  * merged key by key over what was loaded without the form's paths, so nothing the form
  * has no field for is lost. Exported for the test that holds the mapping.
  */
-export function draftOf(form: Form, servers: Plain[], kept: Plain): ProfileWrite {
+export function draftOf(form: Form, servers: Plain[], kept: Plain, rules: RuleLists = { deny: [], ask: [], allow: [] }): ProfileWrite {
   const typed = compact({
     llm: compact({
       endpoint: form.endpoint.trim(),
@@ -905,6 +987,8 @@ export function draftOf(form: Form, servers: Plain[], kept: Plain): ProfileWrite
       maxPushes: whole(form.maxPushes),
       maxRuns: whole(form.maxRuns),
     }),
+    // Only the lists that hold a rule, and no key at all when none does.
+    permissions: ruleSetOf(rules),
   });
   return {
     name: form.name.trim(),
@@ -961,6 +1045,9 @@ export function ProfileEditor({
   // Each row as it was loaded; the form's fields go over it, so a server's credential settings survive an edit to its URL.
   const [servers, setServers] = useState<Plain[]>(() => ((detail?.spec?.["mcpServers"] ?? []) as Plain[]).map((s) => ({ ...s })));
   const [kept] = useState<Plain>(() => keptOf(detail?.spec ?? {}));
+  // The profile's own rules, as it wrote them: for one that extends another, not its parent's.
+  const [had] = useState<RuleLists>(() => rulesIn(detail?.spec?.["permissions"]));
+  const [rules, setRules] = useState<RuleDraft>(() => draftOfRules(had));
   const [checked, setChecked] = useState<Record<number, { host: string; allowed: boolean } | string>>({});
   const [preview, setPreview] = useState<{ lines: DiffLine[]; effects: string[] } | null>(null);
   const [asking, setAsking] = useState(false);
@@ -978,7 +1065,7 @@ export function ProfileEditor({
   const parent = form.extends.trim();
   const theirs = parent ? `empty: ${parent}'s` : null;
 
-  const draft = draftOf(form, servers, kept);
+  const draft = draftOf(form, servers, kept, rulesOfDraft(rules));
   const llm = (draft.spec?.["llm"] ?? {}) as Plain;
   // A profile that extends another may have its endpoint from it; the plane judges the profile in effect.
   const llmProblem = parent ? null : llmWithoutEndpoint(llm);
@@ -992,7 +1079,9 @@ export function ProfileEditor({
           : "Lowercase letters, digits and dashes, starting and ending with a letter or digit: it is the name of a resource in the cluster."
     : null;
   const budgetProblem = Number.isNaN(draft.budget_micros) ? "An amount in dollars, like 500 or 120.50." : null;
-  const blocked = Boolean(llmProblem || nameProblem || budgetProblem) || draft.name === "" || (draft.image === "" && !parent);
+  const blocked = Boolean(llmProblem || nameProblem || budgetProblem) || draftInvalid(rules) || draft.name === "" || (draft.image === "" && !parent);
+  // The rules it has from the profile it extends, as the page loaded them: only while it still extends that one.
+  const inherited = parent && detail?.written?.extends === parent ? rulesFrom(detail.effective?.fields ?? null) : null;
   const set = (patch: Partial<Form>) => {
     setForm({ ...form, ...patch });
     setError(null);
@@ -1026,7 +1115,10 @@ export function ProfileEditor({
             const below = answer.extended_by ?? [];
             // Each profile that extends this one, as the write would leave it, under its own name.
             const theirLines = below.flatMap((b) => linesOf(b.changes).map((l) => ({ ...l, field: `${b.name}: ${l.field}` })));
-            setPreview({ lines: [...lines, ...theirLines], effects: [...effectsOf(answer.policy, answer.mode, draft, detail, lines), ...belowEffects(draft.name, below)] });
+            setPreview({
+              lines: [...lines, ...theirLines],
+              effects: [...effectsOf(answer.policy, answer.mode, draft, detail, lines), ...ruleEffects(draft.name, parent, had, rulesOfDraft(rules)), ...belowEffects(draft.name, below)],
+            });
           },
           (e: unknown) => {
             setAsking(false);
@@ -1173,6 +1265,45 @@ export function ProfileEditor({
       <Field label="Runs on a repository at once" hint={`1 to 1000, across every trigger on this profile; a firing over it is skipped.${parent ? ` Empty is ${parent}'s.` : " Empty is no cap of the profile's."}`}>
         {(p) => <input {...p} value={form.maxRuns} placeholder={theirs ?? undefined} onChange={(e) => set({ maxRuns: e.target.value })} inputMode="numeric" />}
       </Field>
+
+      <Region>Permission rules</Region>
+      <p className="note">
+        Every session on it runs under these beside the organisation's rules and the person's own, the strictest holding for each call.
+        {parent ? ` These are ${form.name.trim() || "this profile"}'s own, added to ${parent}'s, which hold whatever it says here.` : ""}
+      </p>
+      <RuleListsEditor
+        draft={rules}
+        onChange={(change) => {
+          setRules(change);
+          setError(null);
+        }}
+        words={PROFILE_ACTION}
+        also={
+          parent
+            ? (a) => {
+                const theirs = inherited ? [...inherited[a].entries()].filter(([, from]) => from !== form.name.trim()).map(([r]) => r) : [];
+                return (
+                  <p className="note inherited">
+                    {theirs.length ? (
+                      <>
+                        Added to what it has from {parent}:{" "}
+                        {theirs.map((r, i) => (
+                          <span key={r}>
+                            {i > 0 && ", "}
+                            <code>{r}</code>
+                          </span>
+                        ))}
+                        .
+                      </>
+                    ) : (
+                      `Added to what it has from ${parent}.`
+                    )}
+                  </p>
+                );
+              }
+            : undefined
+        }
+      />
 
       <Region>MCP servers</Region>
       <div className="servers">
@@ -1341,6 +1472,24 @@ function extendsChange(parent: string, form: Form, creating: boolean): Partial<F
 /** A switch as a select's value: empty is the parent's. */
 const tri = (v: boolean | null): string => (v === null ? "" : String(v));
 const untri = (v: string): boolean | null => (v === "" ? null : v === "true");
+
+/** What the rules a write adds and takes away do in the sessions on the profile, in words. */
+function ruleEffects(name: string, parent: string, had: RuleLists, now: RuleLists): string[] {
+  return RULE_ACTIONS.flatMap((a) => [
+    ...now[a]
+      .filter((r) => !had[a].includes(r))
+      .map((r) =>
+        a === "deny"
+          ? `Every session on ${name} refuses ${r}, whatever a person's own rules allow.`
+          : a === "ask"
+            ? `Every session on ${name} asks a person before ${r}, whatever auto_approve or a person's own allow says.`
+            : `Every session on ${name} may run ${r} unasked, unless the organisation's rules or a person's own are stricter, or a person must answer it.`,
+      ),
+    ...had[a]
+      .filter((r) => !now[a].includes(r))
+      .map((r) => `${r} is no longer one of ${name}'s own ${a} rules${parent ? `, though ${parent}'s still hold` : ""}.`),
+  ]);
+}
 
 /** What a write does to each profile that extends the one written, in words. */
 function belowEffects(name: string, below: ProfileBelow[]): string[] {

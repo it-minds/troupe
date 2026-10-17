@@ -62,6 +62,16 @@ only once you trust the workspace (`troupe config trust`), as with every setting
 something run unasked. A branch an `AI!` comment starts asks before every write whatever
 an `allow` says, unless `watch_auto_approve` is on.
 
-`troupe config --explain` lists every rule in force, with its file, and those held back
-with why; `troupe config --explain permissions` lists only them. The terminal UI's
-`/settings` and the desktop app's settings show them too.
+**On a team's pods.** A session on a plane's pods also obeys the rules of the worker
+profile it runs on, which a platform administrator sets
+([profiles](../../admin/profiles-and-policy.md#per-tool-rules-on-a-profile)). They are a
+scope of their own and the same rule holds: the strictest wins, so nothing in a repository
+loosens them. A call one refuses or asks about names "the worker profile" and its name, in
+the transcript and on the approval. A `deny` for `shell` there refuses a command you type
+with `!` too.
+
+`troupe config --explain` lists every rule in force on this machine, with its file, and
+those held back with why; `troupe config --explain permissions` lists only them. The
+terminal UI's `/settings` and the desktop app's settings show them too. A pod's profile
+rules are not among them: they are the session's on the pod, and the console's profile
+page lists them.

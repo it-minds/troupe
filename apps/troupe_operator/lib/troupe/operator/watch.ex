@@ -9,7 +9,8 @@ defmodule Troupe.Operator.Watch do
   delivers.
 
   The pipeline is two steps: skip events that only restated a generation already
-  handled, then hand the resource to its reconciler. Nothing is applied here — the
+  handled, and for a profile that extends another the plane's resolution of it as well
+  (`Troupe.Operator.SkipObserved`), then hand the resource to its reconciler. Nothing is applied here — the
   reconciler does its own applying, because a pass can also be started by the resync or
   by one of the operator's own objects being deleted from under it, and all three want
   the same thing to happen.
@@ -19,7 +20,7 @@ defmodule Troupe.Operator.Watch do
 
   alias Troupe.Operator.Controller
 
-  step Bonny.Pluggable.SkipObservedGenerations
+  step Troupe.Operator.SkipObserved
   step :delegate_to_controller
 
   @impl Bonny.Operator

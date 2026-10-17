@@ -165,7 +165,10 @@ defmodule Troupe.Operator.FakeCluster do
   defp act(state, :patch, key, "status", _uri, body) do
     case Map.fetch(state.objects, key) do
       {:ok, object} ->
-        object = Map.put(object, "status", Jason.decode!(body)["status"])
+        # The profile in effect is the plane's, under a field manager of its own: an apply
+        # by the operator that does not name it leaves it where it is.
+        kept = Map.take(object["status"] || %{}, ["effective"])
+        object = Map.put(object, "status", Map.merge(kept, Jason.decode!(body)["status"]))
         {{:ok, object}, put_in(state.objects[key], object)}
 
       :error ->

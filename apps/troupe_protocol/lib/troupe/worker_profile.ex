@@ -414,6 +414,76 @@ defmodule Troupe.WorkerProfile do
     |> Enum.uniq()
   end
 
+  # -- a profile that extends another -------------------------------------------
+  #
+  # A repository's manifest may name one profile it extends (`spec.extends`) and say only
+  # what differs. Nothing past the plane resolves that: the plane reads the chain, merges it
+  # and writes the flat spec it comes to into the resource's status, `status.effective`,
+  # beside the fields it already writes onto the spec (replicas, teams, MCP servers). The
+  # operator and admission read the profile from there, so they still only ever see a flat
+  # profile, and Flux, which owns the spec, and the plane, which owns that block of the
+  # status, never write the same field.
+
+  # The fields the plane writes onto the spec of every profile, a child's included, and
+  # which the block in the status leaves out so that each has one place.
+  @projected ~w(replicas teams mcpServers)
+
+  @doc "The profile a resource names in `spec.extends`, or `nil` where it extends none."
+  @spec extends(map()) :: String.t() | nil
+  def extends(resource) do
+    case get_in(resource, ["spec", "extends"]) do
+      parent when is_binary(parent) and parent != "" -> parent
+      _none -> nil
+    end
+  end
+
+  @doc """
+  The resource as its pods are to run it: as it is where it extends nothing, and with the
+  spec the plane wrote into `status.effective` where it does, the plane's own projected
+  fields taken from the spec as for any profile.
+
+  `{:waiting, sentence}` for a profile that extends another and whose status the plane has
+  not written yet. Nothing is run from the spec as written then: it is only what differs
+  from the parent, and pods made from it would lack everything the parent gives.
+  """
+  @spec in_effect(map()) :: {:ok, map()} | {:waiting, String.t()}
+  def in_effect(resource) do
+    case {extends(resource), get_in(resource, ["status", "effective", "spec"])} do
+      {nil, _status} ->
+        {:ok, resource}
+
+      {_parent, %{} = effective} ->
+        projected = Map.take(resource["spec"] || %{}, @projected)
+        {:ok, Map.put(resource, "spec", Map.merge(effective, projected))}
+
+      {parent, _none} ->
+        {:waiting,
+         "#{get_in(resource, ["metadata", "name"])} extends #{parent}, and the plane has not " <>
+           "written the profile in effect into its status yet: nothing runs until it has"}
+    end
+  end
+
+  @doc "The fields every profile has on its spec from the plane, and the effective block leaves out."
+  @spec projected_fields() :: [String.t()]
+  def projected_fields, do: @projected
+
+  @doc """
+  Which resolution of the profile in effect a resource carries (`status.effective.revision`),
+  or `nil` where it carries none: a hash the plane writes with it, which the operator
+  records as `status.effectiveRevision` once it has run it.
+  """
+  @spec effective_revision(map()) :: String.t() | nil
+  def effective_revision(resource), do: get_in(resource, ["status", "effective", "revision"])
+
+  @doc "The revision of a profile in effect: a hash of its spec, the same for the same spec."
+  @spec revision_of(map()) :: String.t()
+  def revision_of(spec) do
+    :sha256
+    |> :crypto.hash(:erlang.term_to_binary(spec, [:deterministic]))
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 16)
+  end
+
   # -- finishing an upgrade (Decision 726) --------------------------------------
   #
   # A pod rolls `OnDelete`, and the two halves of replacing one belong to two writers. The

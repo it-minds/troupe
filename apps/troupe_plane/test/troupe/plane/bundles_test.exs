@@ -472,6 +472,41 @@ defmodule Troupe.Plane.BundlesTest do
       assert pushed(pod, later, user)["personal_tools"] == "forbid"
     end
 
+    # Issue #724: the profile's per-tool rules ride the same way, each with the profile that
+    # wrote it, those of a profile it extends first, so a rule reaches a session at its next
+    # wake and restarts no pod.
+    test "the push carries the profile's per-tool rules and its parent's", context do
+      {:ok, v1} = Bundles.publish("stable", %{"agents" => ["build"]}, announce: false)
+      pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+      user = granted_user()
+      before = dormant_session(user, "dev", v1.version)
+      later = dormant_session(user, "dev", v1.version)
+
+      assert pushed(pod, before, user)["permission_rules"] == []
+
+      {:ok, _} =
+        Fleet.put_profile(%{
+          name: "standard",
+          image: "ghcr.io/troupe/worker:1",
+          spec: %{"permissions" => %{"deny" => ["shell(curl)"]}}
+        })
+
+      dev = Fleet.get_profile("dev")
+
+      {:ok, _} =
+        Fleet.put_profile(%{
+          name: "dev",
+          extends: "standard",
+          own: %{"spec" => %{"permissions" => %{"ask" => ["mcp(issues.delete)"]}}},
+          spec: Map.put(dev.spec, "permissions", %{"ask" => ["mcp(issues.delete)"]})
+        })
+
+      assert pushed(pod, later, user)["permission_rules"] == [
+               %{"action" => "deny", "rule" => "shell(curl)", "profile" => "standard"},
+               %{"action" => "ask", "rule" => "mcp(issues.delete)", "profile" => "dev"}
+             ]
+    end
+
     test "activating on a version that is still live is not an upgrade", context do
       {:ok, v1} = Bundles.publish("stable", %{"agents" => ["build"]}, announce: false)
       pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
