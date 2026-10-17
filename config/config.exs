@@ -76,7 +76,8 @@ if Mix.env() in [:dev, :test] do
     test_database =
       System.get_env("TROUPE_PLANE_TEST_DB") ||
         if(System.get_env("CI") in [nil, "", "false"],
-          do: "troupe_plane_test_#{checkout |> :erlang.phash2() |> Integer.to_string(36) |> String.downcase()}",
+          do:
+            "troupe_plane_test_#{checkout |> :erlang.phash2() |> Integer.to_string(36) |> String.downcase()}",
           else: "troupe_plane_test"
         )
 
