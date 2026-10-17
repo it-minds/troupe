@@ -383,8 +383,9 @@ defmodule Troupe.CLI.Runner do
   @doc """
   One turn on a session that already has a history, printed to `io` as `troupe run
   --headless` prints its run, and its exit code (Decision 812). The printer starts from
-  now, so what the session did before is neither printed nor taken for the turn's end,
-  and the message goes once it listens.
+  now and from the last event this client has of the session, so what the session did
+  before is neither printed nor taken for the turn's end, and the message goes once it
+  listens.
   """
   @spec one_turn(Client.session_id(), String.t(), IO.device()) :: non_neg_integer()
   def one_turn(sid, message, io \\ :stdio) do
@@ -396,6 +397,7 @@ defmodule Troupe.CLI.Runner do
        target: "root",
        io: io,
        since: System.system_time(:millisecond),
+       after_seq: last_seq(sid),
        on_rest: fn code -> send(me, {:quit, code}) end}
 
     {:ok, printer} = DynamicSupervisor.start_child(Troupe.UI.Windows, spec)
@@ -408,6 +410,16 @@ defmodule Troupe.CLI.Runner do
 
     _ = DynamicSupervisor.terminate_child(Troupe.UI.Windows, printer)
     code
+  end
+
+  # The newest durable event this client holds of the session: a run ended by the last
+  # turn's rest has every event of that turn by then, whatever its stamp says.
+  defp last_seq(sid) do
+    sid
+    |> Client.events()
+    |> Enum.map(& &1.seq)
+    |> Enum.filter(&is_integer/1)
+    |> Enum.max(fn -> nil end)
   end
 
   # Mouse reporting: `--mouse`/`--no-mouse` beats the `mouse` setting, which

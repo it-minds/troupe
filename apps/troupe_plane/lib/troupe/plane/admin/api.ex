@@ -63,7 +63,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "extends",
       type: :string,
       description:
-        "The one profile this one extends, or null for none. The plane resolves the two into the profile in effect, which is all the cluster sees: egress.fqdns, egress.gitHosts and MCP servers are added to the parent's (a server with a parent's name replaces it only with override: true); max_sessions is the lower of the two; a parent's personalTools forbid and repositoryOverridesBundle false hold whatever this one says; image, size_class, provisioner, the llm fields, the channel and every other spec field are the parent's where this one sets none; llm.secretRef, mcpIdentities, warm_workers and grants are never inherited. Send only what differs from the parent: what this profile sets stops following the parent. A chain is at most four profiles; a missing parent or a cycle is refused. Refused on a gitops plane."
+        "The one profile this one extends, or null for none. The plane resolves the two into the profile in effect, which is all the cluster sees: egress.fqdns, egress.gitHosts and MCP servers are added to the parent's (a server with a parent's name replaces it only with override: true); on a channel of its own, its pods load one bundle, the parent's with its channel's agents, skills, MCP servers and ACP agents added, an entry with a parent's name replacing it only where that channel's document says override: true; max_sessions and budget_micros are the lower of the two, and a budget_micros above the parent's is refused; permissions.deny, ask and allow are added to the parent's, which a child cannot drop; a parent's personalTools forbid and repositoryOverridesBundle false hold whatever this one says; image, size_class, provisioner, the llm fields, the channel and every other spec field are the parent's where this one sets none; llm.secretRef, mcpIdentities, warm_workers and grants are never inherited. Send only what differs from the parent: what this profile sets stops following the parent. A chain is at most four profiles; a missing parent or a cycle is refused. Puts are refused on a gitops plane, where a manifest names its parent in spec.extends and the plane writes the profile in effect into its status."
     },
     %Argument{
       name: "size_class",
@@ -76,6 +76,12 @@ defmodule Troupe.Plane.Admin.API do
       type: :integer,
       description:
         "How far this may grow, in sessions at once rather than workers. Absent is no ceiling, bounded by the team's budget. A session refused here is told this number."
+    },
+    %Argument{
+      name: "budget_micros",
+      type: :integer,
+      description:
+        "What this profile's sessions may spend in a calendar month (UTC, turning over on the 1st), in millionths of a dollar, whoever starts them and in whichever team: a ceiling beside the person's, the team's and the platform's, and a session it refuses is told it is the profile's. Absent, null or 0 is no ceiling. A profile that extends another can only lower its parent's: the lower of the two is in effect, and one higher than the parent's is refused."
     },
     %Argument{
       name: "warm_workers",
@@ -94,7 +100,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "spec",
       type: :object,
       description:
-        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount, repositoryOverridesBundle, personalTools, github, storage.storageClassName. configBundleChannel is the bundle channel the profile follows, stable where absent. repositoryOverridesBundle true lets a session's working copy replace the bundle's agents and skills, and the built-in agents, of the same name with its own; absent or false, those win and the working copy's are skipped and listed. personalTools is allow (the default, also when absent) or forbid: forbid has the profile's pods refuse a person's offer of their own signed-in tools (tools.register), saying why. github.permissions is what a session's token may do on GitHub beyond cloning, in GitHub's names: contents (read or write: write pushes its troupe/* branch), pull_requests (read or write: write opens its draft pull request and comments), checks and statuses (read: its CI); absent, sessions clone and do no more. Every llm field but endpoint needs llm.endpoint, without which the pods are given none of them, and is refused without it. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. storage.storageClassName is the storage class a worker's disk comes from, one the cluster policy allows; absent is the cluster's default. mcpIdentities says who the profile is at each server its bundle calls with client credentials: {server, clientId, scope, tokenUrl, transitKey, keyVersion, certificateThumbprint, algorithm}, none of it secret; the answer's identity_problems lists a server the bundle marks client_credentials that has none, or an identity that is incomplete. Replicas, sessionsPerPod, resources and storage.size are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
+        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount, repositoryOverridesBundle, personalTools, github, permissions, storage.storageClassName. permissions is per-tool rules every session on the profile's pods obeys, as config's: {\"deny\": [\"shell(curl)\"], \"ask\": [\"mcp(issues.delete)\"], \"allow\": [...]}; an enforced layer, the strictest rule that matches a call holding, so a session's own configuration cannot loosen them, and a shell deny refuses a command a person types with ! there too; a rule the pods could not read is refused. mcpServers are the profile's own servers, which its pods load beside its bundle's: the resource's list is the bundle's with these added by name, one with a bundle server's name replacing it only with override: true, and a publish to the channel composes the two again rather than overwriting these; servers sent back that are the bundle's are dropped as the bundle's. configBundleChannel is the bundle channel the profile follows, stable where absent. repositoryOverridesBundle true lets a session's working copy replace the bundle's agents and skills, and the built-in agents, of the same name with its own; absent or false, those win and the working copy's are skipped and listed. personalTools is allow (the default, also when absent) or forbid: forbid has the profile's pods refuse a person's offer of their own signed-in tools (tools.register), saying why. github.permissions is what a session's token may do on GitHub beyond cloning, in GitHub's names: contents (read or write: write pushes its troupe/* branch), pull_requests (read or write: write opens its draft pull request and comments), checks and statuses (read: its CI); absent, sessions clone and do no more. Every llm field but endpoint needs llm.endpoint, without which the pods are given none of them, and is refused without it. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. storage.storageClassName is the storage class a worker's disk comes from, one the cluster policy allows; absent is the cluster's default. mcpIdentities says who the profile is at each server its bundle calls with client credentials: {server, clientId, scope, tokenUrl, transitKey, keyVersion, certificateThumbprint, algorithm}, none of it secret; the answer's identity_problems lists a server the bundle marks client_credentials that has none, or an identity that is incomplete. Replicas, sessionsPerPod, resources and storage.size are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
     }
   ]
 
@@ -231,6 +237,32 @@ defmodule Troupe.Plane.Admin.API do
       type: :boolean,
       description:
         "Whether this team may be granted a profile whose workers run where nothing is enforced (machines rather than a cluster). A platform admin's to set; refused from a team admin, and refused as false while the team holds such a grant."
+    },
+    %Argument{
+      name: "github",
+      type: :object,
+      description:
+        "What the team's sessions may do on GitHub through the plane's App. Only the keys sent change; null clears them all. A team that lists no repository names none, and the App's installations bound every list.",
+      properties: [
+        %Argument{
+          name: "repositories",
+          type: :array,
+          description:
+            "The repositories the team's sessions and triggers may name, each owner/name or owner/* for every repository of the owner. A session, a trigger or a token for one not listed is refused."
+        },
+        %Argument{
+          name: "max_pushes",
+          type: :integer,
+          description:
+            "Pushes a run may make, 1 to 1000; the lower of this and the profile's github.maxPushes holds. A run at its cap is stopped, with a comment on its pull request. Null for no cap of the team's."
+        },
+        %Argument{
+          name: "max_runs",
+          type: :integer,
+          description:
+            "Runs on a repository the team's triggers may have going at once, 1 to 1000; a firing over it is skipped. Null for no cap of the team's."
+        }
+      ]
     }
   ]
 
@@ -675,7 +707,8 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.team.update",
       function: :team_update,
-      summary: "Change a team's budget, retention, volume or default visibility.",
+      summary:
+        "Change a team's budget, retention, volume, default visibility, or the GitHub repositories its sessions may name and its fix loop's caps.",
       risk: :write,
       arguments: [
         %Argument{name: "name", type: :string, required: true, description: "The team's name."},
@@ -702,6 +735,28 @@ defmodule Troupe.Plane.Admin.API do
       summary:
         "People and groups that look like one held twice: the same email or display name under different keys. Each set says which rows, where each came from (a sign-in or SCIM), and the mismatch it most likely comes from. Nothing is merged on this evidence.",
       risk: :read
+    },
+    %Method{
+      name: "admin.identity.adopt",
+      function: :identity_adopt,
+      summary:
+        "Settle a refused adoption that admin.identity.duplicates lists by external_id: the row SCIM gave the subject as its externalId is that person's. A row a sign-in made under the subject is folded into SCIM's row, which takes the subject; with none, the next push or sign-in adopts SCIM's row. It hands that row, with its sessions and administration, to whoever signs in under the subject.",
+      risk: :destructive,
+      confirm: "subject",
+      arguments: [
+        %Argument{
+          name: "row",
+          type: :string,
+          required: true,
+          description: "The id of the row SCIM gave the externalId, as the listing names it."
+        },
+        %Argument{
+          name: "subject",
+          type: :string,
+          required: true,
+          description: "The externalId, which is the subject the sign-in or push came under."
+        }
+      ]
     },
     %Method{
       name: "admin.team.link",
@@ -1418,7 +1473,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.budget.explain",
       function: :budget_explain,
       summary:
-        "Every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, the period its spend is counted over, and which rung set it.",
+        "Every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, the period its spend is counted over, and which rung set it. With a profile that has a monthly budget, that ceiling too (scope profile), after the person's: what the profile's sessions have spent this month, and set_by, the profile whose budget is in effect, itself or one it extends.",
       risk: :read,
       arguments: [
         %Argument{
@@ -1431,6 +1486,12 @@ defmodule Troupe.Plane.Admin.API do
           name: "team",
           type: :string,
           description: "The team whose ceiling to include. Absent leaves that rung out."
+        },
+        %Argument{
+          name: "profile",
+          type: :string,
+          description:
+            "The worker profile whose monthly budget to include. Absent, or a profile with none, leaves that rung out."
         }
       ]
     },
@@ -1514,7 +1575,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.trigger.key.rotate",
       function: :trigger_key_rotate,
       summary:
-        "Mint the trigger's own webhook key, replacing whatever it had. Returned once and never readable again; the old key stops working immediately. Works on a gitops plane too: the key is the plane's and never in a resource.",
+        "Mint the trigger's own webhook key, replacing whatever it had. Returned once and never readable again; the old key stops working immediately. Only a webhook that names no GitHub repository has one: any other trigger is refused. Works on a gitops plane too: the key is the plane's and never in a resource.",
       risk: :write,
       arguments: [
         %Argument{name: "team", type: :string, required: true, description: "The team's name."},

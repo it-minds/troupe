@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { render, says, startOnTheList, waitFor } from "./support";
+import { render, says, sees, startOnTheList, waitFor } from "./support";
 
 // jsdom lays nothing out, so it has nothing to scroll; the transcript asks anyway.
 Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -47,12 +47,12 @@ async function open(reason: string): Promise<void> {
 describe("a model error in a session on this computer", () => {
   it("with no key, says where the model settings are", async () => {
     await open("no API key is configured for the provider");
-    expect(says("Set up a provider on This computer, under Models.")).toBe(true);
+    await sees("Set up a provider on This computer, under Models.");
   });
 
   it("with a key the provider refused, says where to check it", async () => {
     await open("the provider rejected the credentials (invalid x-api-key)");
-    expect(says("Check the key on This computer, under Models.")).toBe(true);
+    await sees("Check the key on This computer, under Models.");
   });
 
   it("of any other kind, adds nothing", async () => {

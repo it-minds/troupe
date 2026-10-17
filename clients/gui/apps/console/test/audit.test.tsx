@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -29,11 +29,11 @@ describe("the audit", () => {
     await signedInAs(fake, PEOPLE.alice);
     unmount = render(<App />).unmount;
     await waitFor(() => rows().length === 7, "the trail");
-    expect(says("clients.put", rows()[0]!)).toBe(true);
-    expect(says("2026-10-11 09:30 UTC", rows()[0]!)).toBe(true);
+    await sees("clients.put", rows()[0]!);
+    await sees("2026-10-11 09:30 UTC", rows()[0]!);
     const update = rows().find((r) => says("team.update", r))!;
-    expect(says("dan@example.com", update)).toBe(true);
-    expect(says("idle_timeout_seconds 1800 → 1200", update)).toBe(true);
+    await sees("dan@example.com", update);
+    await sees("idle_timeout_seconds 1800 → 1200", update);
   });
 
   it("narrows by actor, kind and subject at the plane, and searches what came back", async () => {
@@ -69,7 +69,7 @@ describe("the audit", () => {
     unmount = render(<App />).unmount;
     (await waitFor(() => button("Check the chain"), "the integrity check")).click();
     await waitFor(() => says("The chain verifies"), "the verdict");
-    expect(says("7 chained rows back to 2026-10-01 09:00 UTC. Every row is chained.")).toBe(true);
+    await sees("7 chained rows back to 2026-10-01 09:00 UTC. Every row is chained.");
   });
 
   it("says plainly when the plane could not check the chain", async () => {

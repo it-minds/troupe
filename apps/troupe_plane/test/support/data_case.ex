@@ -81,7 +81,10 @@ defmodule Troupe.Plane.DataCase do
     Principals.create(team, Map.put(attrs, :sponsor, sponsor), by)
   end
 
-  @doc "An enabled team over a group, with a grant on a profile."
+  @doc """
+  An enabled team over a group, with a grant on a profile. `github:` is the team's GitHub
+  policy, its repositories among it.
+  """
   @spec team_with_grant(String.t(), String.t(), keyword()) :: Troupe.Plane.Identity.Team.t()
   def team_with_grant(group_id, profile, opts \\ []) do
     alias Troupe.Plane.Identity
@@ -90,7 +93,9 @@ defmodule Troupe.Plane.DataCase do
     {:ok, team} =
       Identity.enable_team(
         group,
-        Map.new(Keyword.take(opts, [:name, :budget_micros, :volume_storage_class, :volume_size]))
+        Map.new(
+          Keyword.take(opts, [:name, :budget_micros, :volume_storage_class, :volume_size, :github])
+        )
       )
     {:ok, _} = Identity.grant(team, profile, Map.new(Keyword.take(opts, [:volume_mode])))
     team

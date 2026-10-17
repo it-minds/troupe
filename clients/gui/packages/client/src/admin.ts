@@ -137,6 +137,8 @@ export interface AdminProfile {
   extends?: string | null;
   size_class?: string | null;
   max_sessions?: number | null;
+  /** What the profile's sessions may spend in a calendar month (UTC), in millionths, in effect; null is none. */
+  budget_micros?: number | null;
   warm_workers?: number | null;
   /** What makes these workers exist: `kubernetes`, or `ssh` for machines registered to it. */
   provisioner?: string | null;
@@ -148,7 +150,10 @@ export interface AdminProfile {
   unenforced?: boolean;
   replicas: number | null;
   sessions_per_pod: number | null;
+  /** The channel the profile names, or has from the profile it extends. */
   channel: string | null;
+  /** The channel its pods load: the bundle the plane composes for it, where it extends a profile on another channel. */
+  bundle_channel?: string | null;
   image: string | null;
   /** `null` where the plane could not ask the cluster, which is not the same as none. */
   conditions: Array<{ type?: string; status?: string; reason?: string; message?: string; [k: string]: unknown }> | null;
@@ -198,8 +203,41 @@ export interface ProfileDetail {
   bundle: { channel: string | null; published: number | null; "adopted?"?: boolean | null; pods?: number; current?: string[]; stale?: unknown[]; [k: string]: unknown } | null;
   identity_problems: string[];
   gitops: GitopsState | null;
+  /** The profile's monthly budget in effect, whose it is, and what its sessions spent and hold this month. */
+  budget?: ProfileBudget;
   /** Asked for with `effective`: the profile in effect, each field with the profile it came from. */
   effective?: EffectiveProfile;
+}
+
+/** A profile's own monthly ceiling on what its sessions spend. */
+export interface ProfileBudget {
+  budget_micros: number | null;
+  budget_period: string;
+  /** The profile whose budget is in effect: this one, or one it extends. Null for none. */
+  set_by: string | null;
+  spent_micros: number;
+  reserved_micros: number;
+}
+
+/** One agent, skill, MCP server or ACP agent in the bundle a profile's pods load, with the profile whose channel gave it. */
+export interface BundleEntry {
+  kind: "agents" | "skills" | "mcp_servers" | "acp_agents" | string;
+  name: string;
+  from: string;
+  /** The channel whose bundle gave it; null for a server the profile wrote itself. */
+  channel: string | null;
+}
+
+/** The bundle a profile's pods load: one channel's, or the one the plane composes from the channels of its chain. */
+export interface EffectiveBundle {
+  channel: string;
+  hash: string | null;
+  composed: boolean;
+  /** What it is made from, in order: a channel's bundle, or the MCP servers a profile wrote itself, each under its profile. */
+  layers: Array<{ profile: string; channel?: string; servers?: string[] }>;
+  entries: BundleEntry[];
+  /** A child's entry with a parent's name that does not say override: true, and so is not in effect. */
+  problems: string[];
 }
 
 /** What a profile's administrator wrote, before anything it extends is laid under it. */
@@ -208,6 +246,7 @@ export interface ProfileWritten {
   image?: string | null;
   size_class?: string | null;
   max_sessions?: number | null;
+  budget_micros?: number | null;
   warm_workers?: number | null;
   provisioner?: string | null;
   spec?: Record<string, unknown> | null;
@@ -223,6 +262,8 @@ export interface EffectiveProfile {
   fields: Array<{ path: string; value: unknown; from: string }>;
   /** What the resolution reports: a parent's key or server this one has no credential of its own for, a server name that clashes. */
   problems: string[];
+  /** The bundle its pods load, each entry with where it came from; null where the chain does not resolve. */
+  bundle?: EffectiveBundle | null;
 }
 
 /**
@@ -238,6 +279,8 @@ export interface ProfileWrite {
   /** Null, for a profile that extends another, is its parent's. */
   size_class?: string | null;
   max_sessions?: number | null;
+  /** The monthly budget, in millionths; null or 0 for none. Below a parent's only, for a profile that extends one. */
+  budget_micros?: number | null;
   warm_workers?: number;
   provisioner?: string;
   spec?: Record<string, unknown>;
@@ -312,6 +355,15 @@ export interface AdminTeamMember {
   reserved_micros?: number;
 }
 
+/** A team's GitHub policy, as `admin.teams.list` answers it and `admin.team.update` takes it. */
+export interface TeamGitHub {
+  repositories: string[];
+  /** Pushes a run may make; the lower of this and the profile's `github.maxPushes` holds. */
+  max_pushes: number | null;
+  /** Runs on a repository its triggers may have going at once. */
+  max_runs: number | null;
+}
+
 export interface AdminTeam extends TeamSpend {
   members_may_control: boolean | null;
   idle_timeout_seconds: number | null;
@@ -322,6 +374,12 @@ export interface AdminTeam extends TeamSpend {
   volume_size: string | null;
   /** A platform admin's to set; whether the team may be granted a profile nothing is enforced on. */
   allow_unenforced_workers?: boolean | null;
+  /**
+   * What the team's sessions may do on GitHub: the repositories they may name (`owner/name`,
+   * or `owner/*`; none listed names none) and the fix loop's caps. Its own administrators'.
+   * Absent from a plane older than the field.
+   */
+  github?: TeamGitHub;
   admins: string[];
   grants: Array<{ profile: string; volume_mode: string | null }>;
   groups: AdminTeamGroup[];
@@ -551,6 +609,26 @@ export interface TriggerPut {
   url?: string;
 }
 
+/**
+ * What `admin.trigger.run` answers: the run it made (or the one a second click in the same
+ * minute already made), the session it started, if any, and how the run stands.
+ */
+export interface TriggerFired {
+  run: TriggerRun;
+  session_id: string | null;
+  state: TriggerRun["state"];
+}
+
+/** What `admin.trigger.key.rotate` answers: where to send, and the key, this once. */
+export interface TriggerKey {
+  team: string;
+  name: string;
+  /** The plane's path a sender POSTs to, from its base URL. */
+  url: string;
+  key: string;
+  rotated_at: string;
+}
+
 export interface TriggerRun {
   id: string;
   trigger: string;
@@ -753,8 +831,19 @@ export interface LookalikePerson {
  * Nothing is merged on this; a set may carry more the plane says about it.
  */
 export interface IdentityDuplicates {
-  people: Array<{ by: string; people: LookalikePerson[]; likely: string; [k: string]: unknown }>;
+  /** A set `by: "external_id"` is a refused adoption: `subject` is the value, `row` the id of the row SCIM gave it. */
+  people: Array<{ by: string; people: LookalikePerson[]; likely: string; subject?: string; row?: string; [k: string]: unknown }>;
   groups: Array<{ by: string; groups: Array<{ external_id: string; display_name: string | null }>; likely: string; [k: string]: unknown }>;
+}
+
+/** What `admin.identity.adopt` answers: the pair settled, and the row folded into SCIM's, if any. */
+export interface IdentityAdopted {
+  subject: string;
+  row: string;
+  row_subject: string | null;
+  folded: { id: string; subject: string } | null;
+  kms_names_left: string[];
+  via: string;
 }
 
 /** What a substrate gives a profile's workers, and what it does not, by name. */
@@ -821,7 +910,10 @@ export interface Connections {
 
 /** One ceiling over a person's spending, as `admin.budget.explain` lists them, narrowest first. */
 export interface Ceiling {
-  scope: "person" | "team" | "platform" | string;
+  scope: "person" | "profile" | "team" | "platform" | string;
+  /** On a profile's: the profile, and the one whose budget is in effect on it (itself or one it extends). */
+  profile?: string;
+  set_by?: string | null;
   budget_micros: number | null;
   budget_period: string | null;
   spent_micros: number;
@@ -997,8 +1089,8 @@ export class AdminApi {
   }
 
   /** Every ceiling over a person's spending, narrowest first, and which binds. A platform admin's. */
-  budgetExplain(subject: string, team?: string): Promise<Ceiling[]> {
-    return this.rpc<Ceiling[]>("admin.budget.explain", team ? { subject, team } : { subject });
+  budgetExplain(subject: string, team?: string, profile?: string): Promise<Ceiling[]> {
+    return this.rpc<Ceiling[]>("admin.budget.explain", { subject, ...(team ? { team } : {}), ...(profile ? { profile } : {}) });
   }
 
   /** Every group the identity provider has told the plane about: what a team links to. */
@@ -1009,6 +1101,15 @@ export class AdminApi {
   /** People and groups that look like one held twice, and what most likely makes them so. A platform admin's. */
   identityDuplicates(): Promise<IdentityDuplicates> {
     return this.rpc<IdentityDuplicates>("admin.identity.duplicates", {});
+  }
+
+  /**
+   * Settle a refused adoption: SCIM's `row` is the person under `subject`. A row a sign-in
+   * made under the subject is folded into it; with none, the next push or sign-in adopts it.
+   * A platform admin's. Destructive: confirmed in the dialog by typing the subject.
+   */
+  adoptIdentity(row: string, subject: string): Promise<IdentityAdopted> {
+    return this.rpc<IdentityAdopted>("admin.identity.adopt", { row, subject });
   }
 
   /** Make a group a team. A platform admin's; `attrs.name` is the team's name, made from the group's where absent. */
@@ -1220,8 +1321,14 @@ export class AdminApi {
     return this.rpc<TriggerRevision[]>("admin.trigger.revisions", { team, name });
   }
 
-  runTrigger(team: string, name: string): Promise<TriggerRun> {
-    return this.rpc<TriggerRun>("admin.trigger.run", { team, name });
+  /** Fire a trigger now, by hand: a run whose source is `manual`, named after the caller and the minute. */
+  runTrigger(team: string, name: string): Promise<TriggerFired> {
+    return this.rpc<TriggerFired>("admin.trigger.run", { team, name });
+  }
+
+  /** Mint a trigger's webhook key, answered this once; the one it had stops working at once. */
+  rotateTriggerKey(team: string, name: string): Promise<TriggerKey> {
+    return this.rpc<TriggerKey>("admin.trigger.key.rotate", { team, name });
   }
 
   /** One team's runs where `team` is named, every team the caller administers where it is not. */

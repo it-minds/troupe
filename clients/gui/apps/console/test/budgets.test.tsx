@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -38,8 +38,8 @@ describe("budgets", () => {
     button("Explain")!.click();
     // Dan's own cap is 150 and he has spent 120: tighter than core's ceiling.
     await waitFor(() => says("This person's own cap is what refuses first: 30.00 left."), "the answer");
-    expect(says("the team's ceiling")).toBe(true);
-    expect(says("the platform's, or the deployment's")).toBe(true);
+    await sees("the team's ceiling");
+    await sees("the platform's, or the deployment's");
   });
 
   it("sets a person's own cap behind a preview, and shows the audit's record", async () => {
@@ -68,10 +68,10 @@ describe("connections", () => {
   it("says who has connected to each person-mode server and whose identity a session carries, and that nothing reads a credential", async () => {
     await open("#/connections");
     await waitFor(() => says("calendar · slot calendar"), "the server");
-    expect(says("1 of 3 people have connected")).toBe(true);
+    await sees("1 of 3 people have connected");
     const dan = [...document.querySelectorAll("tr")].find((r) => (r.textContent ?? "").includes("dan@example.com") && (r.textContent ?? "").includes("connected"));
     expect(dan?.textContent).toContain("connected");
-    expect(says("s-7f3a9c21")).toBe(true);
-    expect(says("Nobody here can read or remove a person's credential")).toBe(true);
+    await sees("s-7f3a9c21");
+    await sees("Nobody here can read or remove a person's credential");
   });
 });

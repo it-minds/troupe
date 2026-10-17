@@ -151,8 +151,8 @@ defmodule Troupe.ConfigSetupTest do
     end
 
     test "a provider set up here: the key's reference is saved, the model is picked from the list" do
-      System.put_env("TROUPE_SETUP_TEST_KEY", "k-from-env")
-      on_exit(fn -> System.delete_env("TROUPE_SETUP_TEST_KEY") end)
+      System.put_env("TROUPE_TEST_SETUP_KEY", "k-from-env")
+      on_exit(fn -> System.delete_env("TROUPE_TEST_SETUP_KEY") end)
 
       daemon = fn
         "config.get", _ ->
@@ -167,7 +167,7 @@ defmodule Troupe.ConfigSetupTest do
       end
 
       # choice, provider, base URL, key, default model, cheap model, save
-      answers = ["1", "2", "https://llm-gw.example/v1", "{env:TROUPE_SETUP_TEST_KEY}", "2", "1", ""]
+      answers = ["1", "2", "https://llm-gw.example/v1", "{env:TROUPE_TEST_SETUP_KEY}", "2", "1", ""]
       assert ConfigSetup.run("/w", io(daemon: daemon, answers: answers)) == 0
 
       assert_received {:secret, _}
@@ -179,7 +179,7 @@ defmodule Troupe.ConfigSetupTest do
       assert %{
                "provider" => "openai",
                "base_url" => "https://llm-gw.example/v1",
-               "api_key" => "{env:TROUPE_SETUP_TEST_KEY}",
+               "api_key" => "{env:TROUPE_TEST_SETUP_KEY}",
                "models" => %{"default" => "qwen3-235b", "cheap" => "qwen3.6-35b"}
              } = params
 

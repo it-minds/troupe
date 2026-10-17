@@ -13,11 +13,14 @@ defmodule Troupe.Plane.IdentityGapsTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Audit, Identity, Ledger, Login, Sessions, Settings, Triggers}
+  alias Troupe.ObjectStore
+  alias Troupe.Plane.{Admin, Audit, Identity, Index, Ledger, Login, Sessions, Settings, Triggers}
   alias Troupe.Plane.Identity.{Tombstone, User}
   alias Troupe.Plane.SCIM.Connector
+  alias Troupe.Plane.Sessions.Session
   alias Troupe.Plane.Triggers.Trigger
   alias Troupe.Plane.Web.Router
+  alias Troupe.Sessions.Storage
 
   # Ada's `sub`, pairwise as Entra's is, and her `oid`.
   @sub "kX9vQ2pL7mN4rT8wY1zA3bC5dE6fG0hJ-pairwise"
@@ -144,6 +147,139 @@ defmodule Troupe.Plane.IdentityGapsTest do
     end
   end
 
+  describe "a refused pair, later" do
+    # An MCP client's access token minted without the email or profile scopes carries
+    # neither, so the first sign-in after the switch is refused and makes a row of its own.
+    test "a token with neither email nor username, then one that agrees: the two are folded",
+         context do
+      pushed = scim_row_under_oid(context)
+      bare = Map.drop(claims(), ["email", "name"])
+
+      {:ok, signed_in, _teams} = Login.from_claims(bare)
+      refute signed_in.id == pushed["id"]
+      assert [_refused] = audited("person.adopt_refused")
+      session = session!(context, signed_in)
+
+      # The desktop app's sign-in carries the email the row has: the same rule an adoption
+      # needs, met now. The row the bare token made is folded into SCIM's, which takes the
+      # subject, and what was made under it comes along.
+      {:ok, back, _teams} = Login.from_claims(claims())
+      assert back.id == pushed["id"]
+      assert back.subject == @sub
+      assert [_one] = Identity.list_users()
+      assert Repo.reload(session).owner_id == back.id
+      assert Repo.reload(session).owner_subject == @sub
+
+      assert [adopted] = audited("person.adopt")
+      assert adopted.detail["via"] == "sign-in"
+      assert adopted.detail["folded"]["id"] == signed_in.id
+      assert {:ok, %{people: []}} = Admin.identity_duplicates(@root)
+
+      # And nothing more on the next one.
+      {:ok, again, _teams} = Login.from_claims(claims())
+      assert again.id == back.id
+      assert [_adopted] = audited("person.adopt")
+    end
+
+    test "a push onto the row a refused sign-in made is a 409 naming both, and listed",
+         context do
+      pushed = scim_row_under_oid(context)
+      {:ok, signed_in, _teams} = Login.from_claims(Map.drop(claims(), ["email"]))
+
+      # The provider pushes Ada again. Keyed on the subject, it finds the sign-in's row,
+      # and the unique externalId refuses giving it SCIM's value too.
+      assert {409, body, _} = scim(context, :post, "/scim/v2/Users", ada())
+      assert body["scimType"] == "uniqueness"
+      assert body["detail"] =~ pushed["id"]
+      assert body["detail"] =~ signed_in.id
+      assert body["detail"] =~ "admin.identity.adopt"
+
+      assert Identity.get_user_by_id(signed_in.id).external_id == nil
+      assert Identity.get_user_by_id(pushed["id"]).subject == @oid
+
+      assert [_, _] = audited("person.adopt_refused")
+      refused = Enum.find(audited("person.adopt_refused"), &(&1.actor == "scim"))
+      assert refused.detail["via"] == "scim"
+      assert refused.detail["other"] == signed_in.id
+
+      assert {:ok, %{people: [pair]}} = Admin.identity_duplicates(@root)
+
+      assert pair.people |> Enum.map(& &1.id) |> Enum.sort() ==
+               Enum.sort([pushed["id"], signed_in.id])
+
+      assert pair.row == pushed["id"]
+      assert pair.subject == @sub
+    end
+
+    test "an administrator settles a sign-in's pair: its row is folded into SCIM's", context do
+      pushed = scim_row_under_oid(context)
+      mallory = mallory()
+      {:ok, signed_in, _teams} = Login.from_claims(mallory)
+      session = session!(context, signed_in)
+      lead = %{subject: "lead@example.test", role: :team_admin, teams: ["engineering"]}
+
+      assert {:error, %{message: "forbidden"}} =
+               Admin.identity_adopt(lead, pushed["id"], @sub)
+
+      assert {:ok, settled} = Admin.identity_adopt(@root, pushed["id"], @sub)
+      assert settled["folded"]["id"] == signed_in.id
+      assert settled["row_subject"] == @oid
+
+      kept = Identity.get_user_by_id(pushed["id"])
+      assert kept.subject == @sub
+      assert kept.external_id == @sub
+      assert Identity.get_user_by_id(signed_in.id) == nil
+      assert Repo.reload(session).owner_id == kept.id
+
+      assert [adopted] = audited("person.adopt")
+      assert adopted.actor == "root@example.test"
+      assert adopted.detail["via"] == "admin"
+      assert {:ok, %{people: []}} = Admin.identity_duplicates(@root)
+
+      # Settled once; the next sign-in under the subject is the kept row.
+      assert {:error, %{message: "not_found"}} =
+               Admin.identity_adopt(@root, pushed["id"], @sub)
+
+      {:ok, again, _teams} = Login.from_claims(mallory)
+      assert again.id == kept.id
+    end
+
+    test "an administrator settles a refused push: the next push adopts SCIM's row", context do
+      pushed = scim_row_under_oid(context)
+
+      # Her email and her username both changed at the provider.
+      moved =
+        ada()
+        |> Map.put("userName", "ada.king@example.test")
+        |> Map.put("emails", [%{"value" => "ada.king@example.test", "primary" => true}])
+
+      assert {409, _body, _} = scim(context, :post, "/scim/v2/Users", moved)
+      assert {:ok, settled} = Admin.identity_adopt(@root, pushed["id"], @sub)
+      assert settled["folded"] == nil
+      assert {:ok, %{people: []}} = Admin.identity_duplicates(@root)
+
+      assert {201, again, _} = scim(context, :post, "/scim/v2/Users", moved)
+      assert again["id"] == pushed["id"]
+      held = Identity.get_user_by_id(pushed["id"])
+      assert held.email == "ada.king@example.test"
+      assert held.subject == @oid
+      assert [_one] = Identity.list_users()
+    end
+
+    test "a row SCIM named by another externalId is not folded into anybody", context do
+      pushed = scim_row_under_oid(context)
+      # Somebody SCIM provisioned under the value as their userName, with an externalId of
+      # their own.
+      {:ok, other} =
+        Identity.upsert_user(%{subject: @sub, external_id: "someone-else", user_name: "eve"})
+
+      assert {:error, refused} = Admin.identity_adopt(@root, pushed["id"], @sub)
+      assert refused.data.reason =~ "is SCIM's for externalId someone-else"
+      assert Identity.get_user_by_id(other.id)
+      assert Identity.get_user_by_id(pushed["id"]).subject == @oid
+    end
+  end
+
   describe "a SCIM PUT" do
     test "replaces the person at the id in its path", context do
       assert {201, ada, _} = scim(context, :post, "/scim/v2/Users", ada())
@@ -255,6 +391,52 @@ defmodule Troupe.Plane.IdentityGapsTest do
       assert Ledger.spent_micros_for(@sub) == 0
       refute @sub in Repo.get(Trigger, trigger.id).notify
     end
+
+    # A session parked as its owner was removed can have its manifest written after the
+    # removal. A rebuild of a lost index read that as the subject's, and handed it to
+    # whoever the provider sent later under the same subject.
+    test "names the tombstone in a rebuilt index, however late the manifest was written",
+         context do
+      store = ObjectStore.from_env()
+      assert {201, pushed, _} = scim(context, :post, "/scim/v2/Users", ada())
+      ada = Identity.get_user_by_id(pushed["id"])
+      parked = session!(context, ada, "20261016T000000-e37a#{System.unique_integer([:positive])}")
+
+      assert {204, nil, _} = scim(context, :delete, path(pushed))
+      [tombstone] = Repo.all(Tombstone)
+      marker = Tombstone.marker(tombstone)
+
+      # Written after the removal, naming the subject the session's owner had.
+      manifest!(store, parked.id, @sub)
+      lose!(parked)
+      assert {:ok, _} = Index.rebuild_one(store, parked.id)
+
+      assert %{owner_subject: ^marker, owner_id: nil, state: "read_only"} =
+               Sessions.get(parked.id)
+
+      # Somebody new under the subject: a manifest they wrote is theirs, one written before
+      # they arrived is still the tombstone's.
+      Process.sleep(5)
+      assert {201, again, _} = scim(context, :post, "/scim/v2/Users", ada())
+      Process.sleep(5)
+
+      theirs =
+        session!(
+          context,
+          Identity.get_user_by_id(again["id"]),
+          "20261016T000000-e37b#{System.unique_integer([:positive])}"
+        )
+
+      manifest!(store, theirs.id, @sub)
+      lose!(theirs)
+      lose!(parked)
+
+      assert {:ok, _} = Index.rebuild_one(store, parked.id)
+      assert {:ok, _} = Index.rebuild_one(store, theirs.id)
+      assert Sessions.get(parked.id).owner_subject == marker
+      assert %{owner_subject: @sub, state: "dormant"} = Sessions.get(theirs.id)
+      assert Sessions.get(theirs.id).owner_id == again["id"]
+    end
   end
 
   # -- helpers ----------------------------------------------------------------
@@ -300,6 +482,45 @@ defmodule Troupe.Plane.IdentityGapsTest do
       "emails" => [%{"value" => "bo@example.test", "primary" => true}],
       "active" => true
     }
+  end
+
+  # Somebody else's token whose subject is the `externalId` the provider gave Ada.
+  defp mallory do
+    claims()
+    |> Map.put("email", "mallory@example.test")
+    |> Map.put("preferred_username", "mallory")
+    |> Map.put("name", "Mallory")
+  end
+
+  # What a pod writes beside a session's segments: plaintext, and written now.
+  defp manifest!(store, session_id, subject) do
+    {:ok, _} =
+      Storage.put_manifest(store, session_id, %{
+        kind: "team",
+        team: "engineering",
+        owner_subject: subject,
+        profile: "dev",
+        epoch: 1,
+        last_seq: 0
+      })
+  end
+
+  # The index lost the row, as a restore from a backup older than the session loses it.
+  defp lose!(session), do: Repo.delete_all(from(s in Session, where: s.id == ^session.id))
+
+  defp session!(context, user, id \\ "s-#{System.unique_integer([:positive])}") do
+    {:ok, session} =
+      Sessions.create(%{
+        id: id,
+        owner_id: user.id,
+        owner_subject: user.subject,
+        team_id: context.team.id,
+        profile: "dev",
+        state: "dormant",
+        epoch: 1
+      })
+
+    session
   end
 
   defp audited(action), do: Enum.filter(Audit.list(), &(&1.action == action))

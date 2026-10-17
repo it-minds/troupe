@@ -33,7 +33,8 @@ defmodule Troupe.Config.Permissions do
   @typedoc """
   One rule as the configuration holds it: what it does, its tool and pattern, how it is
   written, the layer (`org`, `enforced`, `user`, `project`, `local`) and file or URL it
-  came from, and why it is not applied, or `nil`.
+  came from (`profile` for a worker profile's, its name the source), and why it is not
+  applied, or `nil`.
   """
   @type rule :: %{
           action: action(),
@@ -45,8 +46,13 @@ defmodule Troupe.Config.Permissions do
           ignored: String.t() | nil
         }
 
-  # Which file's rule is named when several of one kind hold: the organisation's first.
-  @priority %{enforced: 5, org: 4, user: 3, project: 2, local: 1}
+  # Which file's rule is named when several of one kind hold: the platform's first, the
+  # worker profile's on a pod and the organisation's elsewhere.
+  @priority %{profile: 6, enforced: 5, org: 4, user: 3, project: 2, local: 1}
+
+  # The layers whose `allow` stands under `managed_permission_rules_only`: what a platform
+  # set, not anything a session's own files say.
+  @managed [:org, :enforced, :profile]
   @strictness %{deny: 2, ask: 1, allow: 0}
 
   @doc """
@@ -82,7 +88,7 @@ defmodule Troupe.Config.Permissions do
   @spec hold([rule()], Troupe.Config.t()) :: [rule()]
   def hold(rules, %{managed_permission_rules_only: true}) do
     Enum.map(rules, fn rule ->
-      if rule.action == :allow and rule.layer not in [:org, :enforced] and is_nil(rule.ignored),
+      if rule.action == :allow and rule.layer not in @managed and is_nil(rule.ignored),
         do: %{
           rule
           | ignored:
@@ -388,9 +394,12 @@ defmodule Troupe.Config.Permissions do
 
   @doc """
   Where a rule came from, in words: "your organisation (managed.yaml)", "your config.yaml",
-  "this project's .troupe/config.yaml".
+  "this project's .troupe/config.yaml", and on a pod "the worker profile fixing".
   """
   @spec scope(rule()) :: String.t()
+  # A worker profile's rules are its name's, not a file's.
+  def scope(%{layer: :profile, source: profile}), do: "the worker profile #{profile}"
+
   def scope(%{layer: layer, source: source}) do
     shown = if source, do: " (#{Troupe.Paths.display(source)})", else: ""
 
@@ -417,8 +426,12 @@ defmodule Troupe.Config.Permissions do
       "tool" => rule.tool,
       "pattern" => rule.pattern,
       "scope" => Atom.to_string(rule.layer),
-      "source" => rule.source && Troupe.Paths.display(rule.source),
+      "source" => source(rule),
       "ignored" => rule.ignored
     }
   end
+
+  defp source(%{layer: :profile, source: profile}), do: profile
+  defp source(%{source: nil}), do: nil
+  defp source(%{source: path}), do: Troupe.Paths.display(path)
 end

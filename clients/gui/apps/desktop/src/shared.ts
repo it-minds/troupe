@@ -42,22 +42,32 @@ export function onSharedChange(listener: () => void): () => void {
   return () => void listeners.delete(listener);
 }
 
-/** A choice made in this window: kept here, and by the daemon when one keeps these. */
+/** Choices made in this window before a daemon that keeps these had answered. */
+const unshared = new Set<SharedPref>();
+
+/**
+ * A choice made in this window: kept here, and by the daemon when one keeps these. One
+ * made before the daemon has answered is written once it has: on a busy machine the
+ * Appearance screen is up before the daemon's settings are.
+ */
 export function share(name: SharedPref, value: string): void {
   prefs.set(name, value);
-  void keeper?.setSetting(KEYS[name], asSetting(name, value)).catch(() => undefined);
+  if (keeper) void keeper.setSetting(KEYS[name], asSetting(name, value)).catch(() => undefined);
+  else unshared.add(name);
 }
 
 /**
  * Take what the daemon says. On first reaching it, only what a file sets: a choice made
  * here before there was anywhere to share it is not undone by a default. After that a
- * default too, since it means somebody took the choice out.
+ * default too, since it means somebody took the choice out. `mine` are the choices made
+ * here while the daemon was being reached, newer than its file: they are written to it
+ * rather than taken from it.
  */
-function adopt(config: ModelConfig, defaults: boolean): void {
+function adopt(config: ModelConfig, defaults: boolean, mine: SharedPref[] = []): void {
   let changed = false;
   for (const name of Object.keys(KEYS) as SharedPref[]) {
     const entry = configKey(config, KEYS[name]);
-    if (!entry || (entry.layer === "default" && !defaults)) continue;
+    if (!entry || (entry.layer === "default" && !defaults) || mine.includes(name)) continue;
     const value = asPref(name, entry.value);
     if (value !== null && prefs.get(name) !== value) {
       prefs.set(name, value);
@@ -69,6 +79,9 @@ function adopt(config: ModelConfig, defaults: boolean): void {
 
 /** The app's half: read when the daemon is reached, and again whenever a `ui` key changes. */
 export function useSharedPrefs(client: DaemonClient | null): void {
+  // What this window chose and has not written goes with it, not to the next one.
+  useEffect(() => () => unshared.clear(), []);
+
   useEffect(() => {
     if (!client) return;
     let live = true;
@@ -78,7 +91,11 @@ export function useSharedPrefs(client: DaemonClient | null): void {
         .then((config) => {
           if (!live) return;
           keeper = servesKeys(config) ? client : null;
-          if (keeper) adopt(config, defaults);
+          if (!keeper) return;
+          const mine = [...unshared];
+          unshared.clear();
+          adopt(config, defaults, mine);
+          for (const name of mine) void keeper.setSetting(KEYS[name], asSetting(name, prefs.get(name))).catch(() => undefined);
         })
         .catch(() => undefined);
     };

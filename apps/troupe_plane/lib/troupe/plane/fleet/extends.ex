@@ -14,9 +14,12 @@ defmodule Troupe.Plane.Fleet.Extends do
   | Field | Rule |
   | --- | --- |
   | `egress.fqdns`, `egress.gitHosts` | **added**: the parent's, then the child's that the parent lacks |
-  | `mcpServers` | **added** by name. A child's server with a parent's name replaces it only with `override: true`; otherwise the parent's is kept, and the clash is reported |
-  | `max_sessions` | **narrow only**: the lower of the two, where either sets one |
-  | `personalTools`, `repositoryOverridesBundle` | **restrict only**: a parent's `forbid` or `false` holds whatever the child says; otherwise the child's, or the parent's |
+  | `mcpServers`, and the bundle its pods load | **added** by name, composed with the chain's channels' bundles (`Troupe.Plane.Bundles.Effective`). An entry with a name above it replaces that one only with `override: true`; otherwise the one above is kept, and the clash is reported |
+  | `max_sessions`, `budget_micros` | **narrow only**: the lower of the two, where either sets one; a child's budget above its parent's is refused where it is written |
+  | `personalTools`, `repositoryOverridesBundle`, `github.allowPublic` | **restrict only**: a parent's `forbid` or `false` holds whatever the child says; otherwise the child's, or the parent's |
+  | `github.denyPaths` | **added**, as the egress lists are |
+  | `github.maxPushes`, `github.maxRuns` | **narrow only**, as `max_sessions` is |
+  | `permissions.deny`, `permissions.ask`, `permissions.allow` | **added**: a child adds rules and drops none of its parent's; each profile's are its own scope on the pods (`rules/1`), so the strictest holds and no child loosens a parent's `deny` or `ask` |
   | `image`, `size_class`, `provisioner`, every `llm` field but `secretRef`, `storage.storageClassName`, `configBundleChannel`, and any other spec field | **replaced** where the child sets it, the parent's where it does not |
   | `llm.secretRef`, `mcpIdentities` | **never inherited**: credentials are each profile's own, in its own namespace |
   | `warm_workers` | **never inherited**: how many of the child's own workers stay up |
@@ -26,17 +29,24 @@ defmodule Troupe.Plane.Fleet.Extends do
   on its own name.
 
   A chain is at most four profiles long, counting from the one that extends nothing.
+
+  In GitOps mode a repository's manifest names the parent in `spec.extends`
+  (`Troupe.Plane.Gitops.Profiles`), and the same resolution is written into the resource's
+  status rather than onto its spec. There `sessionsPerPod`, `resources` and `storage.size`
+  are the repository's numbers rather than the size class's, so they are **replaced** where
+  the child sets them, as any other field is.
   """
 
   import Ecto.Query
 
-  alias Troupe.Plane.{Fleet, Repo}
+  alias Troupe.Plane.{Bundles, Fleet, Provision, Repo}
+  alias Troupe.Plane.Bundles.Effective
   alias Troupe.Plane.Fleet.Profile
 
   @max_depth 4
 
   # What `own` keeps: what a parent can give, as `admin.profile.put` takes it.
-  @written ~w(image size_class max_sessions warm_workers provisioner spec)
+  @written ~w(image size_class max_sessions budget_micros warm_workers provisioner spec)
 
   # What the plane writes into a resource itself, which neither a parent nor a child gives.
   @plane_written ~w(replicas sessionsPerPod resources teams image)
@@ -46,6 +56,7 @@ defmodule Troupe.Plane.Fleet.Extends do
     {"size_class", :replaced},
     {"provisioner", :replaced},
     {"max_sessions", :narrow},
+    {"budget_micros", :narrow},
     {"warm_workers", :own}
   ]
 
@@ -54,11 +65,31 @@ defmodule Troupe.Plane.Fleet.Extends do
     "egress" => {:each, %{"fqdns" => :added, "gitHosts" => :added}},
     # The size is the class's, written by the plane; only the storage class is anybody's.
     "storage" => {:each, %{"size" => :dropped}},
-    "mcpServers" => :servers,
+    # Composed with the chain's bundles once the chain is merged (`with_bundle/3`).
+    "mcpServers" => :dropped,
     "mcpIdentities" => :own,
     "personalTools" => {:restrict, "forbid"},
-    "repositoryOverridesBundle" => {:restrict, false}
+    "repositoryOverridesBundle" => {:restrict, false},
+    # The fix loop's policy on GitHub: a parent's denied paths stay denied, its "no public
+    # repositories" holds, and its caps can only be lowered.
+    "github" =>
+      {:each,
+       %{
+         "allowPublic" => {:restrict, false},
+         "denyPaths" => :added,
+         "maxPushes" => :narrow,
+         "maxRuns" => :narrow
+       }},
+    # Per-tool rules: a child's are added to its parent's, and on the pods each profile's
+    # are a scope of their own, the strictest holding (`rules/1`).
+    "permissions" => {:each, %{"deny" => :added, "ask" => :added, "allow" => :added}},
+    # A resource's own words for the parent and the budget, which are the row's columns.
+    "extends" => :dropped,
+    "budgetMicros" => :dropped
   }
+
+  # In GitOps mode the repository sizes its pods, not the class, so these are its to give.
+  @gitops_plane_written ~w(replicas teams image)
 
   @type resolved :: %{attrs: map(), from: map(), problems: [String.t()], chain: [String.t()]}
 
@@ -72,20 +103,47 @@ defmodule Troupe.Plane.Fleet.Extends do
 
   @doc """
   A profile as its administrator wrote it: `own` for one that extends another, and the
-  row's own columns for one that does not.
+  row's own columns for one that does not, with the MCP servers it wrote itself rather than
+  the ones its bundle gives it.
   """
   @spec written(Profile.t()) :: map()
   def written(%Profile{extends: parent, own: own}) when is_binary(parent), do: own || %{}
 
   def written(%Profile{} = profile) do
+    spec =
+      (profile.spec || %{})
+      |> Map.delete("mcpServers")
+      |> put_new_channel(profile.config_bundle_channel)
+
     %{
       "image" => profile.image,
       "size_class" => profile.size_class,
       "max_sessions" => profile.max_sessions,
+      "budget_micros" => profile.budget_micros,
       "warm_workers" => profile.warm_workers,
       "provisioner" => profile.provisioner,
-      "spec" => profile.spec || %{}
+      "spec" => put_set(spec, "mcpServers", blank_to_nil(own_servers(profile)))
     }
+  end
+
+  # A row whose spec names no channel follows its column's, which a row written by the plane
+  # alone may hold without the spec saying so; the channel the plane composes onto is not one.
+  defp put_new_channel(spec, channel) do
+    if presence(spec["configBundleChannel"]) || Effective.reserved?(channel) || is_nil(channel),
+      do: spec,
+      else: Map.put(spec, "configBundleChannel", channel)
+  end
+
+  @doc """
+  The MCP servers a profile that extends nothing wrote itself. For a row from before the
+  plane kept them apart, the spec's servers its channel's bundle does not name as they are.
+  """
+  @spec own_servers(Profile.t()) :: [map()]
+  def own_servers(%Profile{own_servers: servers}) when is_list(servers), do: servers
+
+  def own_servers(%Profile{} = profile) do
+    projected = Bundles.mcp_servers(profile.config_bundle_channel)
+    Enum.reject(list((profile.spec || %{})["mcpServers"]), &(&1 in projected))
   end
 
   # -- the chain ----------------------------------------------------------------
@@ -230,27 +288,109 @@ defmodule Troupe.Plane.Fleet.Extends do
   def resolve(name, overrides \\ %{}) do
     case chain(name, overrides) do
       {:ok, chain} ->
-        resolved =
-          Enum.reduce(chain, empty(), fn {profile, written}, parent ->
-            merge(parent, written, profile)
+        {resolved, channels} =
+          Enum.reduce(chain, {empty(), []}, fn {profile, written}, {parent, channels} ->
+            merged = merge(parent, written, profile)
+            servers = list(map(written["spec"])["mcpServers"])
+            {merged, channels ++ [{profile, channel_in(merged), servers}]}
           end)
 
-        {:ok, Map.put(resolved, :chain, Enum.map(chain, &elem(&1, 0)))}
+        names = Enum.map(chain, &elem(&1, 0))
+        {:ok, resolved |> Map.put(:chain, names) |> with_bundle(name, channels)}
 
       {:error, reason} ->
         {:error, sentence(reason)}
     end
   end
 
+  defp channel_in(%{attrs: attrs}), do: presence(attrs["spec"]["configBundleChannel"]) || "stable"
+
+  # The bundle in effect and the servers the resource says. A chain on one channel whose
+  # profiles wrote no servers has that channel's bundle as it is; any other has the bundle
+  # composed from its channels and its profiles' own servers, on a channel of the profile's
+  # own. Either way the resource's servers are the bundle's, each from the profile that gave
+  # it, so the resource and the pods' bundle say the same servers, and a publish composes
+  # them again rather than overwriting what a profile wrote.
+  defp with_bundle(resolved, name, channels) do
+    layers = Effective.layers(channels)
+    composed = Effective.compose(layers)
+
+    bundle =
+      if Effective.composed?(layers) do
+        Map.put(composed, :channel, Effective.channel(name))
+      else
+        [channel] = Effective.channels(layers)
+        current = Bundles.current(channel)
+        Map.merge(composed, %{channel: channel, content: nil, hash: current && current.hash})
+      end
+
+    sources =
+      for %{kind: "mcp_servers"} = entry <- composed.entries,
+          into: %{},
+          do: {entry.name, entry.from}
+
+    %{attrs: attrs, from: from} = resolved
+    servers = blank_to_nil(composed.servers)
+    spec = put_set(Map.delete(attrs["spec"], "mcpServers"), "mcpServers", servers)
+    from = put_set(Map.delete(from, "spec.mcpServers"), "spec.mcpServers", blank_to_nil(sources))
+
+    %{
+      resolved
+      | attrs: Map.put(attrs, "spec", spec),
+        from: from,
+        problems: resolved.problems ++ composed.problems
+    }
+    |> Map.put(:bundle, bundle)
+  end
+
   @doc """
   Write a profile's row again as it now resolves, after something above it changed. Its
-  `own` is untouched; only what it has in effect moves.
+  `own` is untouched; only what it has in effect moves, its bundle in effect with it, which
+  its pods are told of unless `announce: false`.
   """
-  @spec rewrite(String.t()) :: {:ok, Profile.t()} | {:error, term()}
-  def rewrite(name) do
-    with {:ok, resolved} <- resolve(name) do
-      Fleet.put_profile(resolved |> row_attrs() |> Map.put("name", name))
+  @spec rewrite(String.t(), keyword()) :: {:ok, Profile.t()} | {:error, term()}
+  def rewrite(name, opts \\ []) do
+    with {:ok, resolved} <- resolve(name),
+         {:ok, profile} <- Fleet.put_profile(resolved |> row_attrs() |> Map.put("name", name)) do
+      Bundles.publish_effective(profile, opts)
+      {:ok, profile}
     end
+  end
+
+  @doc """
+  Write a profile's servers and bundle in effect again, after a channel in its chain
+  published: `rewrite/2` for one that extends another, and for one that extends nothing,
+  its servers and channel only, the rest of its row as it is. Its own servers are kept
+  apart from then on, where a row from before had them only in its spec.
+  """
+  @spec refresh(String.t(), keyword()) :: {:ok, Profile.t()} | {:error, term()}
+  def refresh(name, opts \\ []) do
+    case Fleet.get_profile(name) do
+      nil ->
+        {:error, :not_found}
+
+      %Profile{extends: parent} when is_binary(parent) ->
+        rewrite(name, opts)
+
+      profile ->
+        with {:ok, resolved} <- resolve(name),
+             {:ok, profile} <- Fleet.put_profile(refreshed(profile, resolved)) do
+          Bundles.publish_effective(profile, opts)
+          {:ok, profile}
+        end
+    end
+  end
+
+  defp refreshed(profile, %{attrs: attrs, bundle: bundle}) do
+    # None is said as none: a publish that leaves the channel with nothing is a change.
+    servers = attrs["spec"]["mcpServers"] || []
+
+    %{
+      "name" => profile.name,
+      "spec" => Map.put(profile.spec || %{}, "mcpServers", servers),
+      "config_bundle_channel" => bundle.channel,
+      "own_servers" => own_servers(profile)
+    }
   end
 
   @doc """
@@ -259,14 +399,20 @@ defmodule Troupe.Plane.Fleet.Extends do
   column from the spec it resolved to.
   """
   @spec row_attrs(resolved()) :: map()
-  def row_attrs(%{attrs: attrs}) do
+  def row_attrs(%{attrs: attrs} = resolved) do
     spec = attrs["spec"] || %{}
+
+    channel =
+      case resolved do
+        %{bundle: %{channel: channel}} -> channel
+        _unresolved -> presence(spec["configBundleChannel"]) || "stable"
+      end
 
     @written
     |> Map.new(&{&1, attrs[&1]})
     |> Map.put("spec", spec)
     |> Map.put("warm_workers", attrs["warm_workers"] || 0)
-    |> Map.put("config_bundle_channel", presence(spec["configBundleChannel"]) || "stable")
+    |> Map.put("config_bundle_channel", channel)
   end
 
   @doc """
@@ -285,6 +431,59 @@ defmodule Troupe.Plane.Fleet.Extends do
       {path, source} ->
         [%{path: path, value: get_in(attrs, String.split(path, ".")), from: source}]
     end)
+  end
+
+  @doc """
+  The per-tool rules a profile's sessions obey, each with the profile that wrote it: every
+  profile's in its chain, the one that extends nothing first, as
+  `%{"action" => "deny", "rule" => "shell(curl)", "profile" => "standard"}`.
+
+  Kept apart by profile rather than merged into one list, because on the pods each
+  profile's rules are a scope of their own: of every scope's rules that match a call the
+  strictest holds, so a child's `allow` cannot loosen its parent's `ask`, which it would if
+  the two were one list and the child's the more specific. A chain the plane cannot walk
+  any more gives the profile's own rules alone.
+  """
+  @spec rules(Profile.t()) :: [map()]
+  def rules(%Profile{name: name} = profile) do
+    chain =
+      case chain(name) do
+        {:ok, chain} -> chain
+        {:error, _reason} -> [{name, written(profile)}]
+      end
+
+    for {from, written} <- chain,
+        set = map(map(written["spec"])["permissions"]),
+        action <- ~w(deny ask allow),
+        rule <- Enum.uniq(list(set[action])),
+        is_binary(rule),
+        do: %{"action" => action, "rule" => rule, "profile" => from}
+  end
+
+  @doc """
+  Why what `name` wrote cannot stand under its parent's budget, or `nil`: a profile that
+  extends another can only lower its budget, and one written above what it has from above
+  is refused rather than quietly lowered, because whoever wrote it believes the profile's
+  sessions may spend that much, and they may not. A parent lowered below a child's is not
+  refused; the lower is in effect, and the view says whose it is.
+  """
+  @spec budget_problem(String.t(), map(), resolved()) :: String.t() | nil
+  def budget_problem(name, own, %{attrs: attrs, from: from}) do
+    wrote = own["budget_micros"]
+    ceiling = attrs["budget_micros"]
+    source = from["budget_micros"]
+
+    if is_integer(wrote) and is_integer(ceiling) and source != name and ceiling < wrote do
+      "#{name} has a monthly budget of #{dollars(ceiling)} from #{source}, and a profile " <>
+        "that extends another can only lower its budget: set #{name}'s at or below " <>
+        "#{dollars(ceiling)}, or raise #{source}'s"
+    end
+  end
+
+  defp dollars(micros) do
+    cents = div(micros + 5_000, 10_000)
+
+    "$#{div(cents, 100)}.#{cents |> rem(100) |> Integer.to_string() |> String.pad_leading(2, "0")}"
   end
 
   defp ordered(attrs, "spec.mcpServers", _items),
@@ -310,13 +509,15 @@ defmodule Troupe.Plane.Fleet.Extends do
         {put_set(attrs, key, value), put_set(from, key, source)}
       end)
 
+    plane_written = plane_written()
+    rules = spec_rules()
     parent_spec = parent.attrs["spec"] || %{}
-    own_spec = Map.drop(map(written["spec"]), @plane_written)
+    own_spec = Map.drop(map(written["spec"]), plane_written)
 
     keys =
       (Map.keys(parent_spec) ++ Map.keys(own_spec))
       |> Enum.uniq()
-      |> Enum.reject(&(&1 in @plane_written))
+      |> Enum.reject(&(&1 in plane_written))
 
     {spec, from, problems} =
       Enum.reduce(keys, {%{}, from, []}, fn key, {spec, from, problems} ->
@@ -324,7 +525,7 @@ defmodule Troupe.Plane.Fleet.Extends do
 
         {value, from, found} =
           spec_field(
-            Map.get(@spec_rules, key, :replaced),
+            Map.get(rules, key, :replaced),
             path,
             parent_spec[key],
             own_spec[key],
@@ -343,6 +544,16 @@ defmodule Troupe.Plane.Fleet.Extends do
       from: from,
       problems: parent.problems ++ problems ++ key_problems(parent, attrs, from, own_spec, name)
     }
+  end
+
+  defp plane_written do
+    if Provision.mode() == :gitops, do: @gitops_plane_written, else: @plane_written
+  end
+
+  defp spec_rules do
+    if Provision.mode() == :gitops,
+      do: Map.put(@spec_rules, "storage", {:each, %{}}),
+      else: @spec_rules
   end
 
   defp spec_field({:each, rules}, path, parent, own, parent_from, from, name)
@@ -365,13 +576,6 @@ defmodule Troupe.Plane.Fleet.Extends do
 
   defp spec_field({:each, _rules}, path, parent, own, parent_from, from, name),
     do: spec_field(:replaced, path, parent, own, parent_from, from, name)
-
-  defp spec_field(:servers, path, parent, own, parent_from, from, name) do
-    {servers, sources, problems} =
-      servers(list(parent), parent_from[path] || %{}, list(own), name)
-
-    {blank_to_nil(servers), put_set(from, path, blank_to_nil(sources)), problems}
-  end
 
   defp spec_field(rule, path, parent, own, parent_from, from, name) do
     {value, source} = field(rule, parent, parent_from[path], own, name)
@@ -413,48 +617,6 @@ defmodule Troupe.Plane.Fleet.Extends do
     {blank_to_nil(parent ++ added),
      blank_to_nil(Map.merge(Map.take(sources, parent), Map.new(added, &{&1, name})))}
   end
-
-  # The parent's servers, then the child's: one with a parent's name takes its place only
-  # when it says `override: true`, which the resource has no field for and does not get.
-  defp servers(parent, parent_sources, own, name) do
-    names = Enum.map(parent, & &1["name"])
-    start = {Enum.map(parent, &strip/1), Map.take(parent_sources, names), []}
-
-    Enum.reduce(own, start, &add_server(&1, &2, MapSet.new(names), parent_sources, name))
-  end
-
-  defp add_server(
-         %{"name" => server} = entry,
-         {kept, sources, problems},
-         known,
-         parent_sources,
-         name
-       ) do
-    cond do
-      not MapSet.member?(known, server) ->
-        {kept ++ [strip(entry)], Map.put(sources, server, name), problems}
-
-      entry["override"] == true ->
-        {Enum.map(kept, &if(&1["name"] == server, do: strip(entry), else: &1)),
-         Map.put(sources, server, name), problems}
-
-      strip(entry) == Enum.find(kept, &(&1["name"] == server)) ->
-        {kept, sources, problems}
-
-      true ->
-        theirs = parent_sources[server]
-
-        clash =
-          "#{name}'s MCP server #{server} has the name of one #{theirs} gives it, and " <>
-            "#{theirs}'s is kept: say override: true on #{name}'s to replace it"
-
-        {kept, sources, problems ++ [clash]}
-    end
-  end
-
-  defp add_server(_unnamed, acc, _known, _parent_sources, _name), do: acc
-
-  defp strip(entry), do: Map.delete(entry, "override")
 
   # A model endpoint the parent gives comes without the parent's key, which is the parent's
   # own: a child that names no key of its own calls it without one.

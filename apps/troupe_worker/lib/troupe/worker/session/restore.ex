@@ -13,6 +13,7 @@ defmodule Troupe.Worker.Session.Restore do
   history.
   """
 
+  alias Troupe.Config.Permissions
   alias Troupe.KMS.OpenBao
   alias Troupe.ObjectStore
   alias Troupe.Paths
@@ -383,6 +384,7 @@ defmodule Troupe.Worker.Session.Restore do
       |> Keyword.put_new(:fs_events, true)
       |> Keyword.merge(contract(Keyword.get(opts, :terms, [])))
       |> Keyword.merge(personal_tools(Keyword.get(opts, :personal_tools), context.profile))
+      |> Keyword.merge(profile_rules(Keyword.get(opts, :permission_rules)))
 
     Troupe.resume(context.session_id,
       workspace: root,
@@ -424,6 +426,29 @@ defmodule Troupe.Worker.Session.Restore do
     do: [personal_tools_forbidden_by: profile || "of this pod"]
 
   defp personal_tools(_setting, _profile), do: []
+
+  # The worker profile's per-tool rules, and those of every profile it extends, which the
+  # plane reads at every activation and sends beside the pin: an enforced layer, each
+  # profile's rules a scope of their own, so of every rule that matches a call the
+  # strictest holds and nothing in the session's own files loosens them. A rule the pod
+  # cannot read is dropped and said, since the plane checked it when it was written.
+  defp profile_rules(rules) when is_list(rules),
+    do: [permissions: Enum.flat_map(rules, &profile_rule/1)]
+
+  defp profile_rules(_none), do: []
+
+  defp profile_rule(%{"action" => action, "rule" => text, "profile" => profile}) do
+    case Permissions.from(%{action => [text]}, :profile, profile) do
+      [] ->
+        Logger.warning("troupe worker: the worker profile #{profile}'s rule #{action} #{text} is not read")
+        []
+
+      read ->
+        read
+    end
+  end
+
+  defp profile_rule(_other), do: []
 
   defp default_workspace(context) do
     Path.join([Paths.state_dir(context.state_dir), "workspaces", context.session_id])

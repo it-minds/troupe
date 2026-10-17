@@ -54,7 +54,11 @@ without_cluster =
 
 # The plane is the one app in the umbrella that needs a database. Without one its tests
 # are skipped — loudly, with the command that brings it up — rather than failing in a way
-# that looks like a bug in the code.
+# that looks like a bug in the code. This checkout's own database is made and migrated
+# first, where Postgres is up.
+Code.require_file("support/test_database.exs", __DIR__)
+_ = Troupe.Plane.TestDatabase.ensure()
+
 case Repo.start_link(pool: Sandbox) do
   {:ok, _pid} ->
     Sandbox.mode(Repo, :manual)

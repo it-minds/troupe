@@ -147,6 +147,20 @@ defmodule Troupe.Protocol.BundleTest do
       assert {:error, [m2]} = Bundle.validate(document(%{"extra" => 1}))
       assert m2 =~ "unknown keys"
     end
+
+    test "any entry may say override, and it is true or false" do
+      server = %{"name" => "jira", "url" => "https://jira.example/mcp", "override" => true}
+      assert {:ok, _parsed} = Bundle.validate(document(%{"mcp_servers" => [server]}))
+
+      for {kind, entry} <- [
+            {"mcp_servers", %{server | "override" => "yes"}},
+            {"acp_agents", %{"name" => "gemini", "command" => "gemini", "override" => 1}},
+            {"agents", %{"name" => "reviewer", "definition" => @reviewer, "override" => "true"}}
+          ] do
+        assert {:error, [message]} = Bundle.validate(document(%{kind => [entry]})), kind
+        assert message =~ "override is true or false"
+      end
+    end
   end
 
   describe "schema 0" do

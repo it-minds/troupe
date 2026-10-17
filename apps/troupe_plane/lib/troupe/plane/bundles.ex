@@ -33,6 +33,7 @@ defmodule Troupe.Plane.Bundles do
 
   import Ecto.Query
 
+  alias Troupe.Plane.Bundles.Effective
   alias Troupe.Plane.{ClusterPolicy, Fleet, Provision, Reach, Repo}
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Fleet.{Bundle, Extends}
@@ -138,7 +139,9 @@ defmodule Troupe.Plane.Bundles do
   # After a publish or a retire, the profiles' `mcpServers` say what the channel now
   # publishes — unless the caller asked for the projection to be left alone.
   defp reprojected(bundle, channel, opts) do
-    if Keyword.get(opts, :project, true), do: project_mcp_servers(channel, actor(opts))
+    if Keyword.get(opts, :project, true),
+      do: project_mcp_servers(channel, actor(opts), Keyword.take(opts, [:announce]))
+
     bundle
   end
 
@@ -491,18 +494,97 @@ defmodule Troupe.Plane.Bundles do
   # and has its servers from its parent: it is written again with the profile it extends,
   # as is every profile below one whose servers changed, since what they have in effect
   # includes them.
-  @spec project_mcp_servers(String.t(), map()) :: projection()
-  def project_mcp_servers(channel, actor) do
-    servers = mcp_servers(channel)
+  #
+  # A profile whose bundle the plane composes, from this channel and others in its chain,
+  # follows a channel of its own rather than this one: it is written again as it now
+  # resolves, which composes its bundle again and publishes it where it changed, so its
+  # pods hear of a publish to any channel in its chain as of one to their own.
+  @spec project_mcp_servers(String.t(), map(), keyword()) :: projection()
+  def project_mcp_servers(channel, actor, opts \\ []) do
+    followed =
+      for name <- profiles_on(channel),
+          profile = Fleet.get_profile(name),
+          own_channel?(profile),
+          reduce: %{} do
+        projected ->
+          projected
+          |> Map.put(name, project_profile(profile, actor, opts))
+          |> Map.merge(project_below(name, actor, opts))
+      end
 
-    for name <- profiles_on(channel),
-        profile = Fleet.get_profile(name),
-        own_channel?(profile),
-        reduce: %{} do
-      projected ->
-        projected
-        |> Map.put(name, project_profile(profile, servers, actor))
-        |> Map.merge(project_below(name, actor))
+    for name <- composed_on(channel), not Map.has_key?(followed, name), into: followed do
+      {name, projected(name, Extends.refresh(name, opts), actor)}
+    end
+  end
+
+  @doc """
+  The profiles whose bundle the plane composes with `channel` among its layers, each after
+  the profiles it extends (`Troupe.Plane.Bundles.Effective`).
+  """
+  @spec composed_on(String.t()) :: [String.t()]
+  def composed_on(channel) do
+    for profile <- Fleet.list_profiles(),
+        Effective.reserved?(profile.config_bundle_channel),
+        {:ok, resolved} <- [Extends.resolve(profile.name)],
+        channel in Effective.channels(resolved.bundle.layers) do
+      {length(resolved.chain), profile.name}
+    end
+    |> Enum.sort()
+    |> Enum.map(&elem(&1, 1))
+  end
+
+  @doc """
+  Every profile whose pods load what `channel` publishes: those that follow it, and those
+  whose composed bundle has it among its layers. Whose pods a publish has to be reachable
+  from, and whose grants it can take something from.
+  """
+  @spec followers(String.t()) :: [String.t()]
+  def followers(channel), do: Enum.uniq(profiles_on(channel) ++ composed_on(channel))
+
+  @doc """
+  Publish a profile's composed bundle on its own channel where it differs from what that
+  channel has now, and tell its pods unless `announce: false`. Nothing for a profile on a
+  channel of the chain's, nor where nothing in the chain is published. `{:error, messages}`
+  for a composition that does not validate, which is logged and leaves its pods on the
+  version they have.
+  """
+  @spec publish_effective(Fleet.Profile.t() | String.t(), keyword()) ::
+          {:ok, Bundle.t()} | :unchanged | :none | {:error, term()}
+  def publish_effective(name, opts \\ [])
+
+  def publish_effective(name, opts) when is_binary(name) do
+    case Fleet.get_profile(name) do
+      nil -> :none
+      profile -> publish_effective(profile, opts)
+    end
+  end
+
+  def publish_effective(%Fleet.Profile{} = profile, opts) do
+    channel = profile.config_bundle_channel
+
+    with true <- Effective.reserved?(channel),
+         {:ok, %{bundle: %{content: %{} = content, hash: hash}}} <- Extends.resolve(profile.name) do
+      if match?(%Bundle{hash: ^hash}, current(channel)),
+        do: :unchanged,
+        else: publish_composed(profile.name, channel, content, opts)
+    else
+      false -> :none
+      {:ok, _nothing_published} -> :none
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp publish_composed(name, channel, content, opts) do
+    case publish(channel, content, Keyword.merge(opts, project: false, by: "plane")) do
+      {:ok, bundle} ->
+        {:ok, bundle}
+
+      {:error, reason} ->
+        Logger.warning(
+          "troupe plane: #{name}'s bundle in effect was not published: #{inspect(reason)}"
+        )
+
+        {:error, reason}
     end
   end
 
@@ -511,29 +593,15 @@ defmodule Troupe.Plane.Bundles do
   defp own_channel?(%{own: own}),
     do: get_in(own || %{}, ["spec", "configBundleChannel"]) not in [nil, ""]
 
-  defp project_profile(%{extends: nil} = profile, servers, actor) do
-    spec = Map.put(profile.spec || %{}, "mcpServers", servers)
-    projected(profile.name, Fleet.put_profile(%{name: profile.name, spec: spec}), actor)
+  # The channel's servers composed again with the ones the profile wrote itself, never laid
+  # over them: a publish that overwrote the list would take a profile's own servers away.
+  defp project_profile(profile, actor, opts) do
+    projected(profile.name, Extends.refresh(profile.name, opts), actor)
   end
 
-  # The servers of its own channel are its own: written into what it wrote, and resolved
-  # over its parent's again.
-  defp project_profile(profile, servers, actor) do
-    own =
-      Map.update(
-        profile.own || %{},
-        "spec",
-        %{"mcpServers" => servers},
-        &Map.put(&1, "mcpServers", servers)
-      )
-
-    {:ok, _} = Fleet.put_profile(%{name: profile.name, own: own})
-    projected(profile.name, Extends.rewrite(profile.name), actor)
-  end
-
-  defp project_below(name, actor) do
+  defp project_below(name, actor, opts) do
     for child <- Extends.descendants(name), into: %{} do
-      {child, projected(child, Extends.rewrite(child), actor)}
+      {child, projected(child, Extends.rewrite(child, opts), actor)}
     end
   end
 
@@ -564,13 +632,21 @@ defmodule Troupe.Plane.Bundles do
   # with no credential has no `secretRef` and no `credentialRef` — it is still listed,
   # because egress is decided from this list too.
   defp mcp_servers_spec(nil), do: []
+  defp mcp_servers_spec(%Bundle{} = bundle), do: mcp_servers_of(bundle.content)
 
-  defp mcp_servers_spec(%Bundle{} = bundle) do
-    case contents(bundle) do
-      nil ->
+  @doc """
+  The `mcpServers` a resource carries for a bundle's document, in the resource's shape:
+  what a profile on its channel is written with, and what a profile whose bundle the plane
+  composes (`Troupe.Plane.Bundles.Effective`) is written with from the composed document.
+  Empty for a document this code cannot read.
+  """
+  @spec mcp_servers_of(map()) :: [map()]
+  def mcp_servers_of(content) do
+    case Document.validate(content) do
+      {:error, _messages} ->
         []
 
-      parsed ->
+      {:ok, parsed} ->
         parsed
         |> Document.mcp_server_configs()
         |> Enum.map(fn server ->

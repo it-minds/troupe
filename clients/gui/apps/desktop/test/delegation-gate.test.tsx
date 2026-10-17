@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { Entry, GateAnswer } from "@troupe/client";
 import { ApprovalPanel, DecisionRecord } from "../src/views/Approval";
-import { button, render, says, type, waitFor } from "./support";
+import { button, render, says, sees, type, waitFor } from "./support";
 
 type Approval = Extract<Entry, { kind: "approval" }>;
 
@@ -65,10 +65,10 @@ describe("the delegation gate", () => {
     ));
 
     await waitFor(() => says("Hand this to general?"), "the gate's question");
-    for (const part of ["Write notes.md", "Goal", "Context", "Constraints", "Deliverable", "Do not"]) expect(says(part)).toBe(true);
-    expect(says("1 of 3")).toBe(true);
-    expect(says("50% of the budget")).toBe(true);
-    expect(says("write_file ask")).toBe(true);
+    for (const part of ["Write notes.md", "Goal", "Context", "Constraints", "Deliverable", "Do not"]) await sees(part);
+    await sees("1 of 3");
+    await sees("50% of the budget");
+    await sees("write_file ask");
 
     button("Open its definition")!.click();
     expect(opened).toEqual(["general"]);
@@ -126,6 +126,6 @@ describe("the delegation gate", () => {
     const answered: Approval = { ...gated(), decision: "allow", answered: { agent: "explore", edited: ["constraints"] } };
     ({ unmount } = render(<DecisionRecord entry={answered} self={undefined} />));
     await waitFor(() => says("sent to explore"), "the switch recorded");
-    expect(says("edited constraints")).toBe(true);
+    await sees("edited constraints");
   });
 });

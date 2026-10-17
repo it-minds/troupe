@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -38,18 +38,18 @@ describe("the channels", () => {
   it("lists each channel a profile follows, with its current version and the profiles on it", async () => {
     await open("#/bundles");
     await waitFor(() => rowOf("channels", "stable") && rowOf("channels", "canary"), "the channels");
-    expect(says("v2", rowOf("channels", "stable")!)).toBe(true);
-    expect(says("2 agents · 1 skill · 2 MCP servers", rowOf("channels", "stable")!)).toBe(true);
-    expect(says("dev, ux, build-box", rowOf("channels", "stable")!)).toBe(true);
-    expect(says("heavy", rowOf("channels", "canary")!)).toBe(true);
+    await sees("v2", () => rowOf("channels", "stable"));
+    await sees("2 agents · 1 skill · 2 MCP servers", () => rowOf("channels", "stable"));
+    await sees("dev, ux, build-box", () => rowOf("channels", "stable"));
+    await sees("heavy", () => rowOf("channels", "canary"));
   });
 
   it("lists a channel's versions, newest first, with the current one marked", async () => {
     await open("#/bundles/stable");
     await waitFor(() => heading() === "stable" && rowOf("versions", "v2"), "stable's versions");
-    expect(says("current", rowOf("versions", "v2")!)).toBe(true);
-    expect(says("older", rowOf("versions", "v1")!)).toBe(true);
-    expect(says("dev, ux, build-box")).toBe(true);
+    await sees("current", () => rowOf("versions", "v2"));
+    await sees("older", () => rowOf("versions", "v1"));
+    await sees("dev, ux, build-box");
   });
 });
 
@@ -57,15 +57,15 @@ describe("a version", () => {
   it("reads whole: its agents, skills and servers, which profiles use it, and what changed from the one before", async () => {
     await open("#/bundles/stable/2");
     await waitFor(() => heading() === "stable v2" && says("Which profiles use it"), "stable v2");
-    expect(says("Writes the docs a change needs.")).toBe(true);
-    expect(says("SKILL.md, checklist.md")).toBe(true);
-    expect(says("JIRA_TOKEN, from the Secret troupe-mcp-jira")).toBe(true);
-    expect(says("search_issues, get_issue")).toBe(true);
+    await sees("Writes the docs a change needs.");
+    await sees("SKILL.md, checklist.md");
+    await sees("JIRA_TOKEN, from the Secret troupe-mcp-jira");
+    await sees("search_issues, get_issue");
     const dev = rowOf("adoption", "dev")!;
-    expect(says("troupe-w-dev-0, troupe-w-dev-1", dev)).toBe(true);
-    expect(says("What changed from v1")).toBe(true);
-    expect(says("agents: pr-reviewer, docs-writer")).toBe(true);
-    expect(says("mcp_servers: jira, wiki")).toBe(true);
+    await sees("troupe-w-dev-0, troupe-w-dev-1", dev);
+    await sees("What changed from v1");
+    await sees("agents: pr-reviewer, docs-writer");
+    await sees("mcp_servers: jira, wiki");
   });
 
   it("retires a version, previewed and shown as the audit recorded it", async () => {
@@ -101,7 +101,7 @@ describe("publishing", () => {
     type(source, JSON.stringify({ schema: 1, agents: [docsWriter], skills: [checklist], mcp_servers: [] }));
     button("Check and preview")!.click();
     await waitFor(() => says("core loses the agent pr-reviewer on dev: its grant allows an entry this version no longer has."), "who loses what");
-    expect(says("Every pod on dev, ux, build-box is told to update")).toBe(true);
+    await sees("Every pod on dev, ux, build-box is told to update");
     expect(button("Publish to stable")!.disabled).toBe(true);
     type(field("Type stable to confirm")!, "stable");
     await waitFor(() => !button("Publish to stable")!.disabled, "the name typed");
@@ -125,7 +125,7 @@ describe("publishing", () => {
       type(source, JSON.stringify({ schema: 1, agents: [{ name: "Bad Name", definition: "x" }], skills: [], mcp_servers: [{ name: "tools", url: "http://tools.example.com/mcp" }] }));
       button("Check and preview")!.click();
       await waitFor(() => says('"Bad Name" is not a name'), "the plane's sentences");
-      expect(says("mcp server tools: its url is https://")).toBe(true);
+      await sees("mcp server tools: its url is https://");
       expect(calls.some((c) => c.method === "admin.bundle.publish")).toBe(false);
     } finally {
       restore();
@@ -153,7 +153,7 @@ describe("a team admin", () => {
     await open("#/bundles", PEOPLE.bob);
     await waitFor(() => rowOf("channels", "stable"), "the channels");
     expect(rowOf("channels", "canary")).toBeNull();
-    expect(says("ux", rowOf("channels", "stable")!)).toBe(true);
+    await sees("ux", () => rowOf("channels", "stable"));
 
     link("stable", rowOf("channels", "stable")!)!.click();
     await waitFor(() => heading() === "stable" && rowOf("versions", "v2"), "stable");

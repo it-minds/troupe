@@ -557,6 +557,8 @@ export class FakeDaemon {
   directories: string[] = ["/home/ada/project", "/home/ada/notes", "/home/ada/repo"];
   /** How long `subscribe` takes to answer: a busy machine, where a screen is up before its view is. */
   subscribeDelayMs = 0;
+  /** How long a method takes to answer, by its name: a busy machine, for any other method. */
+  delayMs: Record<string, number> = {};
   /** Whether sessions approve every tool call themselves, as `auto_approve: true` in the machine's config does. */
   autoApprove: boolean;
   /**
@@ -658,7 +660,10 @@ export class FakeDaemon {
     await new Promise<void>((resolve) => setTimeout(resolve, 100));
     for (const ws of this.wss?.clients ?? []) ws.terminate();
     await new Promise<void>((resolve) => this.wss?.close(() => resolve()));
-    await new Promise<void>((resolve) => this.server?.close(() => resolve()));
+    // And what is not a socket: a request a page cut off by its unmount, which a close waits for.
+    const closed = new Promise<void>((resolve) => (this.server ? this.server.close(() => resolve()) : resolve()));
+    this.server?.closeAllConnections();
+    await closed;
   }
 
   /**
@@ -1072,6 +1077,11 @@ export class FakeDaemon {
     const ws = client.ws;
     const sessionId = String(params["session_id"] ?? "");
     const session = this.sessions.get(sessionId);
+    const delay = this.delayMs[method] ?? 0;
+    if (delay > 0 && !params["__delayed"]) {
+      setTimeout(() => this.handle(client, id, method, { ...params, __delayed: true }), delay);
+      return;
+    }
 
     switch (method) {
       case "identity.get":

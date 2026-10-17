@@ -31,12 +31,17 @@ defmodule Troupe.Worker.GitCredentials do
   A token lives an hour. One held here is handed out until five minutes before it runs
   out, and the next caller gets a new one; an activation starts with none, so a session
   activated again gets a new token rather than the last activation's; and the session's
-  going away takes it (`forget/1`). Losing the table costs a round trip to the plane.
+  going dormant or stopping takes it and revokes it at GitHub (`forget/2`), so no token
+  outlives the activation it was minted for. Losing the table costs a round trip to the
+  plane.
   """
 
   use GenServer
 
+  alias Troupe.Worker.GitHub.API
   alias Troupe.Worker.Plane.Link
+
+  require Logger
 
   @table __MODULE__
 
@@ -69,20 +74,66 @@ defmodule Troupe.Worker.GitCredentials do
   end
 
   @doc """
-  Drop a session's tokens: its activation starts, or the session has gone. `access:` drops
-  only that one, which is how the fix loop asks again for a token whose permissions the
-  plane has narrowed since.
+  Drop a session's tokens, and revoke them at GitHub: its activation starts, or the
+  session has gone dormant or stopped. `access:` drops only that one, which is how the fix
+  loop gives up a token whose permissions the plane has narrowed since.
+
+  A dropped token is revoked rather than left to run out its hour: each is sent to
+  GitHub's `DELETE /installation/token` at the API URL the plane put in it, after this
+  returns and out of the caller's way. One GitHub cannot be reached for (a profile that
+  declares the Git host and not the API's, for a clone-only session) is said in the log
+  by session and expiry, never by token, and runs out on its own.
   """
   @spec forget(String.t(), keyword()) :: :ok
   def forget(session_id, opts \\ []) do
     if :ets.whereis(@table) != :undefined do
-      case Keyword.fetch(opts, :access) do
-        {:ok, access} -> :ets.delete(@table, {session_id, access})
-        :error -> :ets.match_delete(@table, {{session_id, :_}, :_})
-      end
+      dropped =
+        case Keyword.fetch(opts, :access) do
+          {:ok, access} ->
+            :ets.take(@table, {session_id, access})
+
+          :error ->
+            held = :ets.match_object(@table, {{session_id, :_}, :_})
+            :ets.match_delete(@table, {{session_id, :_}, :_})
+            held
+        end
+
+      revoke(session_id, dropped)
     end
 
     :ok
+  end
+
+  defp revoke(_session_id, []), do: :ok
+
+  defp revoke(session_id, dropped) do
+    now = System.system_time(:second)
+
+    live =
+      for {{_id, access}, held} <- dropped,
+          unexpired?(held["expires_at"], now),
+          do: {access, held}
+
+    if live != [], do: {:ok, _pid} = Task.start(fn -> revoke_all(session_id, live) end)
+    :ok
+  end
+
+  defp revoke_all(session_id, live) do
+    Process.set_label("troupe git credentials revoke")
+    Enum.each(live, fn {access, held} -> revoke_one(session_id, access, held) end)
+  end
+
+  defp revoke_one(session_id, access, held) do
+    case API.revoke(held) do
+      :ok ->
+        Logger.info("troupe worker: revoked #{session_id}'s #{access} GitHub token at GitHub")
+
+      {:error, reason} ->
+        Logger.info(
+          "troupe worker: could not revoke #{session_id}'s #{access} GitHub token " <>
+            "(#{API.explain(reason)}); it runs out at #{held["expires_at"]}"
+        )
+    end
   end
 
   @doc "Which sessions hold one, for tests. Never the tokens."
@@ -157,6 +208,13 @@ defmodule Troupe.Worker.GitCredentials do
   defp reason_of(%{"reason" => reason}), do: reason
   defp reason_of(%{reason: reason}), do: reason
   defp reason_of(_data), do: nil
+
+  defp unexpired?(expires_at, now) do
+    case DateTime.from_iso8601(to_string(expires_at)) do
+      {:ok, at, _offset} -> DateTime.to_unix(at) > now
+      _unreadable -> false
+    end
+  end
 
   defp usable?(expires_at, now) do
     case DateTime.from_iso8601(to_string(expires_at)) do

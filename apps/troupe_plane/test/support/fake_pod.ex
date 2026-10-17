@@ -9,6 +9,14 @@ defmodule Troupe.Plane.FakePod do
   `hold:` is not answered until the test says so: it receives
   `{:held, method, params, answer}` instead and calls `answer.()`, and the pod goes on
   answering everything else meanwhile.
+
+  The token it sends carries this VM's own mark, and `verify/1` takes no token without it.
+  Every worker suite's link enrols as `troupe-w-dev-0` with `dev-token` too, and redials
+  every quarter second to two seconds once its plane has gone; another suite on the same
+  machine (another checkout's) can reach a port the system has since handed this suite's
+  listener. Taken, the stranger was the newer connection under the pod's name, and the
+  plane dropped the fake pod's, before its enrolment was answered or in the middle of a
+  test.
   """
 
   @doc "Enrol a pod on a listener port with a token the test's verifier accepts."
@@ -26,7 +34,7 @@ defmodule Troupe.Plane.FakePod do
         "id" => 0,
         "method" => "enrol",
         "params" => %{
-          "token" => token,
+          "token" => token(token),
           "pod_name" => pod_name,
           "capacity" => Keyword.get(opts, :capacity, 4),
           "disk_total_bytes" => 1_000_000
@@ -51,11 +59,16 @@ defmodule Troupe.Plane.FakePod do
     %{worker_id: result["worker_id"], socket: socket}
   end
 
-  @doc "The verifier a test hands the listener: `<profile>-token` enrols on `<profile>`."
+  @doc """
+  The verifier a test hands the listener: `<profile>-token`, as `enrol/4` sends it with
+  this VM's mark, enrols on `<profile>`.
+  """
   @spec verify(String.t()) :: {:ok, map()} | {:error, :unauthenticated}
   def verify(token) do
+    mark = mark()
+
     case String.split(token, "-token") do
-      [profile, ""] ->
+      [profile, ^mark] ->
         {:ok,
          %{
            profile: profile,
@@ -68,6 +81,13 @@ defmodule Troupe.Plane.FakePod do
         {:error, :unauthenticated}
     end
   end
+
+  @doc "A token as `enrol/4` sends it, for a test that speaks the control channel itself."
+  @spec token(String.t()) :: String.t()
+  def token(token), do: token <> mark()
+
+  # This VM's operating-system process, which no other VM on the machine has while it runs.
+  defp mark, do: "." <> System.pid()
 
   defp answer(id, method, refuse) do
     case Map.get(refuse, method) do

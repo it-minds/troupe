@@ -144,6 +144,67 @@ defmodule Troupe.Session.PermissionRulesTest do
     assert Enum.map(opts[:config].permissions, &{&1.action, &1.text}) == [{:deny, "web_fetch"}]
   end
 
+  # Issue #724: a worker profile's rules are an enforced layer on its pods, a scope of their
+  # own, so the strictest holds and nothing in the session's own files loosens them.
+  describe "a worker profile's rules" do
+    defp profile_rules(set), do: Permissions.from(set, :profile, "fixing")
+
+    test "a deny refuses the call over the user's allow, naming the profile", context do
+      %{session: session} =
+        start_session(context,
+          config_overrides: [
+            permissions:
+              profile_rules(%{"deny" => ["shell(touch)"]}) ++
+                user_rules(%{"allow" => ["shell(touch ran.txt)"]})
+          ],
+          steps: [
+            {:tools, [{"shell", %{"command" => "touch ran.txt"}}]},
+            {:text, "done without it"}
+          ]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "go")
+      await_state(session.id, [:idle], 10_000)
+
+      [completed] = events_of_type(session.id, "tool_call_completed")
+      refute completed.data["ok"]
+      assert completed.data["content"] =~ "refused by the rule deny shell(touch), from the worker profile fixing"
+      refute File.exists?(Path.join(context.workspace, "ran.txt"))
+    end
+
+    test "an ask asks over the user's allow, and the request names the profile", context do
+      %{session: session} =
+        start_session(context,
+          config_overrides: [
+            auto_approve: true,
+            permissions:
+              profile_rules(%{"ask" => ["needs_approval"]}) ++
+                user_rules(%{"allow" => ["needs_approval"]})
+          ],
+          steps: [{:tools, [{"needs_approval", %{"n" => 1}}]}, {:text, "done"}]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "go")
+      await_event(session.id, :approval_requested)
+
+      [requested] = events_of_type(session.id, "approval_requested")
+
+      assert %{"action" => "ask", "scope" => "profile", "source" => "fixing"} =
+               requested.data["rule"]
+    end
+
+    test "its allow is the platform's, and stands under managed_permission_rules_only" do
+      held =
+        (profile_rules(%{"allow" => ["shell(mix test)"]}) ++ user_rules(%{"allow" => ["shell"]}))
+        |> Permissions.hold(%Troupe.Config{managed_permission_rules_only: true})
+
+      assert [%{layer: :profile, ignored: nil}, %{layer: :user, ignored: why}] = held
+      assert why =~ "managed_permission_rules_only"
+    end
+  end
+
   defp eventually(check, deadline \\ 5_000) do
     cond do
       check.() ->

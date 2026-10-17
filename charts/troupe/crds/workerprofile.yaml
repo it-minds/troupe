@@ -27,8 +27,64 @@ spec:
           properties:
             spec:
               type: object
-              required: [image]
+              # A profile that extends another may leave the image to its parent; one that
+              # extends none runs nothing without one.
+              x-kubernetes-validations:
+                - rule: "has(self.image) || (has(self.extends) && self.extends != '')"
+                  message: "spec.image is required unless the profile extends another (spec.extends)"
+                # The same rule the plane checks a profile by, of the profile in effect: one
+                # that extends another may leave llm.endpoint to its parent, and the plane
+                # checks what the two come to. `provider` has no default: one the API
+                # server filled in would be a setting nobody wrote, and an `llm: {}` would
+                # then be refused for it. The operator reads an absent one as openai.
+                - rule: "(has(self.extends) && self.extends != '') || !has(self.llm) || (has(self.llm.endpoint) && self.llm.endpoint != '') || !(has(self.llm.provider) || has(self.llm.model) || has(self.llm.smallModel) || has(self.llm.secretRef) || has(self.llm.prices))"
+                  message: "llm settings need llm.endpoint: without it the pods are given none of them and run on Troupe's built-in model settings instead. Set llm.endpoint, or remove the other llm fields."
               properties:
+                extends:
+                  type: string
+                  description: >-
+                    The one profile this one extends, by name, in this namespace. Say only what
+                    differs: the plane resolves the two and writes the profile in effect into
+                    status.effective, which the operator and admission read. Egress hosts, MCP
+                    servers and permission rules are added to the parent's; max sessions and
+                    the budget can only be lowered; the parent's personalTools forbid,
+                    repositoryOverridesBundle false and github.allowPublic false hold; the
+                    model key (llm.secretRef), mcpIdentities and the grants are never
+                    inherited; any other field is the parent's where this one sets none. The
+                    pods wait until the plane has written the status.
+                budgetMicros:
+                  type: integer
+                  minimum: 0
+                  description: >-
+                    What the sessions on this profile may spend in a calendar month (UTC), in
+                    millionths of a dollar, beside the team's, the person's and the platform's
+                    ceilings. Absent or 0 is none. A profile that extends another can only
+                    lower its parent's. Read by the plane alone.
+                permissions:
+                  type: object
+                  description: >-
+                    Per-tool rules every session on this profile's pods obeys, as config's
+                    permissions: deny, ask and allow, each a list of rules such as
+                    shell(git push), read_file(secrets/**) or mcp(issues.delete). They are
+                    an enforced layer: of every rule that matches a call the strictest
+                    holds, so a session's own configuration cannot loosen them. A shell deny
+                    also refuses a command a person types with ! in a session here. A profile
+                    that extends another has its parent's rules as well as its own. The
+                    plane checks each rule, and reads them at every activation; no pod
+                    restarts.
+                  properties:
+                    deny:
+                      type: array
+                      maxItems: 200
+                      items: {type: string, minLength: 1, maxLength: 500}
+                    ask:
+                      type: array
+                      maxItems: 200
+                      items: {type: string, minLength: 1, maxLength: 500}
+                    allow:
+                      type: array
+                      maxItems: 200
+                      items: {type: string, minLength: 1, maxLength: 500}
                 image:
                   type: object
                   required: [repository]
@@ -47,13 +103,8 @@ spec:
                   type: object
                   description: >-
                     Where the pods' model calls go and how. Every field but `endpoint` needs
-                    `endpoint`: without one the pods are given none of these settings.
-                  # The same rule the plane checks a profile by. `provider` has no default: one
-                  # the API server filled in would be a setting nobody wrote, and an `llm: {}`
-                  # would then be refused for it. The operator reads an absent one as openai.
-                  x-kubernetes-validations:
-                    - rule: "(has(self.endpoint) && self.endpoint != '') || !(has(self.provider) || has(self.model) || has(self.smallModel) || has(self.secretRef) || has(self.prices))"
-                      message: "llm settings need llm.endpoint: without it the pods are given none of them and run on Troupe's built-in model settings instead. Set llm.endpoint, or remove the other llm fields."
+                    `endpoint`, here or from the profile this one extends: without one the pods
+                    are given none of these settings.
                   properties:
                     endpoint: {type: string}
                     provider:
@@ -216,6 +267,37 @@ spec:
                         pull_requests: {type: string, enum: [read, write]}
                         checks: {type: string, enum: [read]}
                         statuses: {type: string, enum: [read]}
+                    allowPublic:
+                      type: boolean
+                      description: >-
+                        Whether a session may push to, and open a pull request on, a
+                        repository GitHub reports as public. Absent or false, private and
+                        internal repositories only; the pod asks GitHub at every push.
+                    denyPaths:
+                      type: array
+                      maxItems: 100
+                      items: {type: string, minLength: 1, maxLength: 200}
+                      description: >-
+                        Paths a push never carries, as .gitignore patterns, added to the
+                        defaults (.env, .env.*, *.pem, *.key, *.p12, *.pfx and SSH private
+                        keys), which cannot be taken away. A push whose tree adds or changes
+                        one is refused, naming it, and nothing reaches GitHub.
+                    maxPushes:
+                      type: integer
+                      minimum: 1
+                      maximum: 1000
+                      description: >-
+                        Pushes a run may make. A run that asks for one more stops, as three
+                        red CI rounds stop it, with a comment on its pull request. The lower
+                        of this and its team's cap holds.
+                    maxRuns:
+                      type: integer
+                      minimum: 1
+                      maximum: 1000
+                      description: >-
+                        Runs on a GitHub repository that triggers may have going at once on
+                        this profile; a firing over it is skipped. The team may set a lower
+                        one of its own.
                 configBundleChannel: {type: string, default: stable}
                 storage:
                   type: object
@@ -275,6 +357,39 @@ spec:
             status:
               type: object
               properties:
+                effective:
+                  type: object
+                  description: >-
+                    Written by the plane, for a profile that extends another: the profile in
+                    effect, resolved from its chain. The operator and admission read spec
+                    from here, with replicas, teams and mcpServers from the resource's own
+                    spec, which the plane writes there for every profile.
+                  properties:
+                    spec:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      description: The flat spec the pods run, as a profile that extends nothing writes it.
+                    chain:
+                      type: array
+                      description: The profiles it was resolved from, the one that extends nothing first.
+                      items: {type: string}
+                    from:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      description: >-
+                        Where each field came from: a path such as spec.llm.model and the
+                        profile that gave it, or for a list, each item and its profile.
+                    revision:
+                      type: string
+                      description: A hash of spec, which the operator records once it has run it.
+                    observedGeneration:
+                      type: integer
+                      description: The generation of this resource the plane resolved.
+                effectiveRevision:
+                  type: string
+                  description: >-
+                    The operator's: the status.effective.revision it last reconciled, so a
+                    change the plane makes there is acted on at once.
                 observedGeneration: {type: integer}
                 readyReplicas: {type: integer}
                 namespace: {type: string}

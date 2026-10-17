@@ -10,6 +10,7 @@ defmodule Troupe.Session.ShellTest do
   use Troupe.SessionCase, async: true
 
   alias Troupe.Agent.{Definition, Definitions, Server}
+  alias Troupe.Config.Permissions
   alias Troupe.LLM.Message
   alias Troupe.Session.Shell
 
@@ -209,6 +210,45 @@ defmodule Troupe.Session.ShellTest do
       # One profile that may is enough: switching to `plan` does not take the person's shell.
       assert Shell.refusal(%Troupe.Config{}, Definitions.from_list([reads, asks])) == nil
       assert Shell.refusal(%Troupe.Config{}, Definitions.load(System.tmp_dir!())) == nil
+    end
+  end
+
+  # Issue #724: on a pod a command the person types obeys the worker profile's deny rules,
+  # read as the agent's shell call is; a scope the person could change does not refuse it.
+  describe "denied/3" do
+    defp rules(set, layer, source), do: Permissions.from(set, layer, source)
+
+    test "a deny of the worker profile's refuses the command, naming the rule and the profile" do
+      config = %Troupe.Config{permissions: rules(%{"deny" => ["shell(curl)"]}, :profile, "fixing")}
+
+      assert {"permissions", sentence} = Shell.denied(config, "ls && curl https://example.com", nil)
+      assert sentence =~ "deny shell(curl), from the worker profile fixing"
+      assert Shell.denied(config, "ls -la", nil) == nil
+    end
+
+    test "an ask of the profile's, and any other scope's deny, leave it alone" do
+      config = %Troupe.Config{
+        permissions:
+          rules(%{"ask" => ["shell(git push)"]}, :profile, "fixing") ++
+            rules(%{"deny" => ["shell(curl)"]}, :project, "/repo/.troupe/config.yaml")
+      }
+
+      assert Shell.denied(config, "git push origin", nil) == nil
+      assert Shell.denied(config, "curl https://example.com", nil) == nil
+    end
+
+    test "a session on such a profile refuses it before it runs", context do
+      %{session: session} =
+        start(context,
+          config_overrides: [permissions: rules(%{"deny" => ["shell(touch)"]}, :profile, "fixing")],
+          steps: []
+        )
+
+      assert {:error, {:forbidden, "permissions", sentence}} =
+               Troupe.shell_run(session.id, "touch ran.txt")
+
+      assert sentence =~ "the worker profile fixing"
+      refute File.exists?(Path.join(context.workspace, "ran.txt"))
     end
   end
 

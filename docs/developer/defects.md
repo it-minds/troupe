@@ -57,16 +57,13 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
 - On the 0.6.3 tip under full load, the worker's `ReaderLogTest` "a log an activation has
   taken over" and the gateway's `RestartTest` (once with a `FunctionClauseError` in
   `Troupe.LLM.Fake.render/2`) each failed once; both pass alone.
-- The worker suite's plane-backed tests share `troupe_plane_test` with the plane suite, so
-  running both at once can deadlock in Postgres (`40P01` in `plane_link_test.exs`).
+- The worker suite's plane-backed tests share their checkout's plane test database with its
+  plane suite, so running both at once in one checkout can deadlock in Postgres (`40P01`).
 - The gateway suite prints `erl_child_setup: failed with error 32 on line 284` a few
   times, with or without failures (probably a port child writing to a closed pipe).
 - `apps/troupe_gateway/test/troupe/gateway/restart_test.exs` `create/2` never stops the
   sessions it creates. They live in a second daemon OS process, so they probably don't
   leak into the test VM the way the two fixed in chunk 6 did (unconfirmed).
-- The desktop app's tests time out now and then when the machine is busy (goal-loop,
-  local-mode, onboarding, command-palette); local-mode sends before its session is
-  attached ("not attached").
 - Under full load, two of the gateway's `PrivateTest` tests ("a seal with nobody linked",
   "carrying on another person's link") failed now and then, beside `session_ids_test` and
   `daemon_test`; both pass alone. Core `Session.ShellTest` "a restart puts back a note ...
@@ -100,9 +97,6 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
     dozen first turns past the default five seconds (`IdentifyTest`,
     `UnattendedApprovalsTest`, `UnseenTest`, `LocalPricingTest` and others), where it had
     54;
-  - at the default 64 cases while another suite runs, now and then `CutShortTest`'s
-    `wall_clock` case: the root's own four seconds run out under load, so it waits on a
-    budget question nobody answers and is never idle;
   - and `CrashLoopTest`, whose session was not down within five seconds of the kill:
     probably three slow restarts no longer fit `Agent.Node`'s five-second window, so it
     goes on restarting (unconfirmed).
@@ -1394,7 +1388,6 @@ Found by the chunk 33 fixers, 2026-10-13.
   - The desktop app draws a `patch` call as a generic tool row.
   - The "only when asked, or past about 80 lines" wording hasn't been measured live.
 - **Tests.**
-  - Plane suites run at once against the shared `troupe_plane_test` database deadlock (`40P01`).
   - The core and gateway suites in one VM make gateway tests fail on sessions core left behind; CI runs them apart.
   - The gateway's `PrivateTest` (two tests) fails under load.
   - A `helm upgrade` from `dev/kind/values.yaml` alone, on a development cluster `scripts/remote-up` set up with a gateway URL, narrows the policy back to the placeholder host, after which every write to the dev profile is refused.
@@ -1424,11 +1417,7 @@ Found by the chunk 35 fixers, 2026-10-14.
 ### D129 - The complete console, GitHub webhooks, rules and extends after chunk 36 (low)
 
 - **Identity** (Decision 906).
-  - No admin action settles a refused adoption pair, whether by merging or by adopting anyway. The console lists it and nothing more.
-  - An MCP access token carrying neither email nor username makes a row of its own at a person's first sign-in after a claim switch, which then blocks a later adoption.
-  - After a refused sign-in, a SCIM push for that `externalId` gets a 400 for the unique index, and the error doesn't name the pair.
   - SCIM's subject is the `externalId` itself (Decision 751), so a mapping that is wrong from the first push can't be detected.
-  - `mix troupe.index.rebuild` still restores a removed owner's subject from a manifest written after the removal.
 - **GitHub** (Decision 905).
   - GitHub makes each reply in a review thread its own review, so a burst of replies becomes several turns.
   - Conversation comments on a draft don't resume its session, and `issues.assigned` and a scheduled sweep aren't done.
@@ -1453,12 +1442,39 @@ Found by the chunk 35 fixers, 2026-10-14.
 - **The plane.**
   - A 413 for a body over the limit answers generic JSON, not SCIM's error schema or a JSON-RPC error.
   - The shared MinIO test bucket holds about 2,500 sessions left by earlier runs, never cleaned.
-  - Two worktrees running the plane suite at once still deadlock in the shared test database.
 - **CI.**
   - The desktop crate's new `cargo test` job runs only on pull requests into `main`, and its apt package names are untested before then.
   - Nothing checks Rust formatting.
 
 Found by the chunk 36 fixers, 2026-10-16.
+
+### D130 - Extends, the push policy, rules on profiles and the test guards after chunk 37 (low)
+
+- **Profiles that extend another** (Decisions 908, 910 and 913).
+  - Sessions pin a bundle version number, not its channel, and composition makes channel moves more common.
+  - A profile that stops extending loads its channel's plain bundle until the next recompose.
+  - In GitOps, a child's own manifest change runs its last profile in effect until the plane's next pass. Admission judges a child's spec write against its previous effective profile. A parent deleted in Git leaves the child refused but running its last profile in effect.
+  - There is no `troupe config --explain` for a pod session, so a profile's rules aren't listed there.
+- **The fix loop's push policy** (Decision 911).
+  - There's no content scan: a secret pasted into an ordinary file isn't caught by the path denylist. GitHub's push protection on the App's repositories covers it.
+  - A refused push leaves what it staged in the agent's index; the refusal says to run `git rm --cached`, and a temporary index would remove the trap.
+  - A clone-only profile that doesn't declare the API host can't revoke its clone token from the pod.
+  - A trigger run skipped by a cap records no reason.
+  - The App can't yet be configured from GitOps (#653).
+- **Triggers and identity** (Decisions 912 and 914).
+  - Keys already stored on triggers that may no longer have one are dead, but listings still show `has_key: true`.
+  - Folding a refused adoption pair keeps one key-manager name, so a private session the folded row made won't open.
+  - A refused push stays listed after a later agreeing push adopts the row.
+  - There's no editor for rules under the organisation's `defaults:`, which the plane doesn't store.
+- **Tests** (Decision 915).
+  - About 90 `expect(button(…))` assertions after async steps aren't covered by the new waiting-assertion check.
+  - A first turn takes about 3 s unloaded on a Windows checkout over WSL, 1.3 s of it in `Troupe.Tools.available/2`. Under load that fails gateway `WaitingSessionsTest` and core `RememberTest`, and is probably D8's slow first turns.
+  - CrashLoop restart intensity is counted in time, so restarts slower than about 1.7 s may never trip it. Unconfirmed.
+  - Per-checkout plane test databases (`troupe_plane_test_<hash>`) stay in the dev Postgres until `scripts/dev-down --purge`.
+  - The cluster suite's WebhookTest pod-replacement wait has failed with nothing in the job log to say why.
+  - `bundles_test.exs` and `control_test.exs` still accept a bare `dev-token`.
+
+Found by the chunk 37 fixers, 2026-10-17.
 
 ## Taken
 

@@ -29,6 +29,16 @@ defmodule Troupe.Worker.GitHub do
     (its token can no longer write contents), and this comments on the pull request what
     still fails. The agent is told to comment what it tried, and to stop. The run's
     budget, turns and wall clock stop it sooner, as they stop anything.
+  - **Private repositories, unless the profile allows public ones.** A push and a pull
+    request ask GitHub, there and then, whether the repository is public, and are refused
+    if it is and the profile's `github.allowPublic` is not true.
+  - **No denied path leaves the pod.** Every path a push adds or changes is matched
+    against the profile's `github.denyPaths` and the defaults it cannot drop
+    (`Troupe.PushPaths`), and against what is mounted on the pod from a secret
+    (`GitHub.Secrets`); one that matches refuses the push, naming it, before anything of
+    the tree is sent.
+  - **A cap of pushes.** A run that asks for a push past its cap (the lower of its
+    profile's and its team's) stops as three red rounds stop it.
 
   ## What the plane is told
 
@@ -42,7 +52,7 @@ defmodule Troupe.Worker.GitHub do
   use GenServer
 
   alias Troupe.Worker.GitCredentials
-  alias Troupe.Worker.GitHub.{API, Tree}
+  alias Troupe.Worker.GitHub.{API, Secrets, Tree}
   alias Troupe.Worker.Plane.Link
 
   require Logger
@@ -142,6 +152,7 @@ defmodule Troupe.Worker.GitHub do
            {:ok, record} <- with_base(session_id, record, root, opts),
            {:ok, branch} <- branch_for(branch, record, session_id),
            {:ok, credential} <- credential(session_id, opts),
+           :ok <- under_cap(session_id, credential, record, opts),
            :ok <- granted(credential, "contents", "write", "push"),
            {:ok, record} <- reconcile(session_id, credential, branch, record, root, opts),
            :ok <- ci_settled(session_id, credential, record, opts),
@@ -149,6 +160,7 @@ defmodule Troupe.Worker.GitHub do
            {:ok, tree} <- Tree.write(root),
            {:ok, changes} <- Tree.changes(root, parent_tree, tree),
            :ok <- something(changes),
+           :ok <- may_leave(credential, root, changes),
            {:ok, entries} <- upload(credential, root, tree, changes),
            {:ok, ^tree} <- same_tree(API.tree(credential, parent_tree, entries), tree),
            {:ok, commit} <- api(API.commit(credential, message, tree, parent)),
@@ -344,6 +356,124 @@ defmodule Troupe.Worker.GitHub do
 
   defp something(_changes), do: :ok
 
+  # -- what may leave the pod -----------------------------------------------------------
+
+  # Before anything of the tree is sent: the repository is not public unless the profile
+  # allows that, as GitHub says now rather than as anybody remembers; and no path the push
+  # adds or changes is denied, by the profile's patterns or as a file mounted from a
+  # secret. Every reason is said at once, so a push refused for two is refused for both.
+  defp may_leave(credential, root, changes) do
+    policy = credential["policy"] || %{}
+    sent = Enum.reject(changes, &(&1.status == "D"))
+
+    paths = path_problems(root, sent, policy)
+
+    how =
+      if paths == [],
+        do: "",
+        else:
+          " Delete them, or leave them out with .gitignore and take them out of git's index " <>
+            "with `git rm --cached`, then push again."
+
+    case public_problems(credential, policy) ++ paths do
+      [] -> :ok
+      problems -> {:error, Enum.join(problems, " ") <> " Nothing was pushed." <> how}
+    end
+  end
+
+  defp public_problems(_credential, %{"allow_public" => true}), do: []
+
+  defp public_problems(credential, _policy) do
+    case API.repository(credential) do
+      {:ok, repository} ->
+        if public?(repository), do: [public_sentence(credential, repository)], else: []
+
+      {:error, reason} ->
+        [
+          "Whether #{credential["repository"]} is public could not be read " <>
+            "(#{API.explain(reason)}), and a session pushes only where it knows it may."
+        ]
+    end
+  end
+
+  # Private or internal as GitHub reports it; anything else, an answer that says neither
+  # included, is taken as public.
+  defp public?(%{"visibility" => visibility}) when visibility in ["private", "internal"],
+    do: false
+
+  defp public?(%{"visibility" => "public"}), do: true
+  defp public?(%{"private" => true}), do: false
+  defp public?(_repository), do: true
+
+  defp public_sentence(credential, repository) do
+    said = repository["visibility"] || if(repository["private"] == false, do: "public")
+
+    "#{credential["repository"]} is #{said || "not reported as private"} on GitHub, and this " <>
+      "session's worker profile pushes to private repositories only (github.allowPublic)."
+  end
+
+  defp path_problems(root, sent, policy) do
+    patterns = Troupe.PushPaths.effective(policy["deny_paths"])
+    denied = Troupe.PushPaths.denied(Enum.map(sent, & &1.path), patterns)
+    secrets = Secrets.copies(root, sent)
+
+    by_pattern =
+      if denied == [],
+        do: [],
+        else: [
+          "The push would carry paths the worker profile denies (github.denyPaths): " <>
+            Enum.map_join(denied, ", ", fn {path, pattern} -> "#{path} (#{pattern})" end) <>
+            "."
+        ]
+
+    by_secret =
+      if secrets == [],
+        do: [],
+        else: [
+          "The push would carry what is mounted on this pod from a secret: " <>
+            Enum.join(secrets, ", ") <> "."
+        ]
+
+    by_pattern ++ by_secret
+  end
+
+  # Whether the repository may take a pull request from this session: what a push checks
+  # of its visibility, asked again, since a repository can be made public in between. The
+  # one there is, answered again, asks nothing of GitHub.
+  defp may_open(%{"pull_request" => %{}}, _credential), do: :ok
+
+  defp may_open(_record, credential) do
+    case public_problems(credential, credential["policy"] || %{}) do
+      [] -> :ok
+      problems -> {:error, Enum.join(problems, " ") <> " No pull request was opened."}
+    end
+  end
+
+  # -- caps -------------------------------------------------------------------------------
+
+  # A run that asks for a push past its cap stops, as three red rounds stop one: the plane
+  # records why and mints no token that can push after it, the pull request is told, and
+  # the agent is told to say what it tried. The plane refuses the push either way.
+  defp under_cap(session_id, credential, record, opts) do
+    cap = get_in(credential, ["policy", "max_pushes"])
+
+    if is_integer(cap) and (record["pushes"] || 0) >= cap do
+      case record(session_id, %{"stop" => %{"reason" => "pushes"}}, opts) do
+        {:ok, %{"github" => now, "stopped_now" => true}} ->
+          stopped(session_id, credential, now)
+          {:error, stopped_sentence(now)}
+
+        {:ok, %{"github" => now}} ->
+          {:error, stopped_sentence(now)}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      :ok
+    end
+  end
+
   # Each file the push adds or changes, sent as a blob; a deleted one is an entry with no
   # name; a submodule is its commit. Within bounds, or nothing is sent at all.
   defp upload(credential, root, tree, changes) do
@@ -462,6 +592,7 @@ defmodule Troupe.Worker.GitHub do
            {:ok, credential} <- credential(session_id, opts),
            :ok <- granted(credential, "pull_requests", "write", "open a pull request"),
            {:ok, %{"github" => record}} <- record(session_id, %{}, opts),
+           :ok <- may_open(record, credential),
            do: open(session_id, credential, title, body, record, opts)
     end)
   end
@@ -661,8 +792,6 @@ defmodule Troupe.Worker.GitHub do
   # held here is dropped, and the pull request is told what still fails, by the bot, in
   # words that are this code's and not the agent's.
   defp stopped(session_id, credential, record) do
-    GitCredentials.forget(session_id, access: :write)
-
     lines =
       for round <- record["rounds"] || [], round["state"] == "red" do
         failing = round["failing"] || []
@@ -670,10 +799,19 @@ defmodule Troupe.Worker.GitHub do
         "- #{Tree.short(round["commit"])}: #{names}"
       end
 
+    head =
+      if pushes_cap?(record),
+        do:
+          "Troupe stopped: this run asked to push again after #{record["pushes"]} " <>
+            "#{if record["pushes"] == 1, do: "push", else: "pushes"}, which is " <>
+            "#{record["stopped"]["reason"]}, and pushes nothing more to it.",
+        else:
+          "Troupe stopped after #{red_rounds()} red CI rounds on this pull request, and " <>
+            "pushes nothing more to it."
+
     body =
-      "Troupe stopped after #{red_rounds()} red CI rounds on this pull request, and pushes " <>
-        "nothing more to it.\n\n" <>
-        Enum.join(lines, "\n") <>
+      head <>
+        if(lines == [], do: "", else: "\n\n" <> Enum.join(lines, "\n")) <>
         "\n\nIt is left as a draft for a person. Troupe session `#{session_id}`."
 
     with {:ok, number} <- pull_request(record),
@@ -683,9 +821,14 @@ defmodule Troupe.Worker.GitHub do
       )
     end
 
-    Logger.info("troupe worker: #{session_id} stopped after #{red_rounds()} red CI rounds")
+    # The token that could push goes, at GitHub too; the next one the plane mints cannot.
+    GitCredentials.forget(session_id, access: :write)
+    Logger.info("troupe worker: #{session_id} stopped: #{record["stopped"]["reason"]}")
     :ok
   end
+
+  defp pushes_cap?(%{"stopped" => %{"cap" => "pushes"}}), do: true
+  defp pushes_cap?(_record), do: false
 
   # A push over a commit whose CI has not finished would be a round nobody counted, so it
   # waits; a red one is counted now if the agent never read it, and may be the third.
@@ -865,9 +1008,16 @@ defmodule Troupe.Worker.GitHub do
         _ -> ""
       end
 
-    "This session's pull request#{pr} has had #{red_rounds()} red CI rounds, so its pushes " <>
-      "are closed and it stays a draft for a person. Comment on it with pr_comment what you " <>
-      "tried and what still fails, then stop."
+    if pushes_cap?(record) do
+      "This run has made #{record["pushes"]} #{if record["pushes"] == 1, do: "push", else: "pushes"}, " <>
+        "#{record["stopped"]["reason"]}, so its pushes are closed and its pull request#{pr} " <>
+        "stays a draft for a person. Comment on it with pr_comment what you tried and what is " <>
+        "left to do, then stop."
+    else
+      "This session's pull request#{pr} has had #{red_rounds()} red CI rounds, so its pushes " <>
+        "are closed and it stays a draft for a person. Comment on it with pr_comment what you " <>
+        "tried and what still fails, then stop."
+    end
   end
 
   defp credential(session_id, opts) do

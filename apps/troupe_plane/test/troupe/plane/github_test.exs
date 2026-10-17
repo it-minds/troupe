@@ -15,7 +15,17 @@ defmodule Troupe.Plane.GitHubTest do
   import ExUnit.CaptureLog
 
   alias Troupe.KMS.Policy
-  alias Troupe.Plane.{Admin, Audit, FakeGitHub, FakePod, Fleet, GitHub, Harness, Sessions}
+  alias Troupe.Plane.{
+    Admin,
+    Audit,
+    FakeGitHub,
+    FakePod,
+    Fleet,
+    GitHub,
+    Harness,
+    Identity,
+    Sessions
+  }
   alias Troupe.Plane.Admin.API
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.GitHub.Key
@@ -325,7 +335,7 @@ defmodule Troupe.Plane.GitHubTest do
       refute_key(audit.detail, pem(context.key))
 
       # A session that names a repository is refused now, and saying so names the fix.
-      assert {:error, reason} = GitHub.repository("example-org/widgets", "dev")
+      assert {:error, reason} = GitHub.repository("example-org/widgets", "dev", nil)
       assert GitHub.explain(reason) =~ "no GitHub App"
 
       assert {:error, missing} = API.call("admin.github.delete", %{"app_id" => @app_id}, @root)
@@ -500,7 +510,13 @@ defmodule Troupe.Plane.GitHubTest do
 
     test "is named at creation, kept on the row and carried to the pod", context do
       configure(context)
-      team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+
+      team_with_grant("engineering", "dev",
+        name: "engineering",
+        budget_micros: 0,
+        github: %{"repositories" => ["example-org/widgets"]}
+      )
+
       ada = person("ada@example.test", ["engineering"])
       _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
 
@@ -531,9 +547,16 @@ defmodule Troupe.Plane.GitHubTest do
                })
     end
 
-    test "is refused at creation for an owner, a host or a plane the App does not cover",
+    test "is refused at creation for an owner, a host or a plane the App does not cover, " <>
+           "or a repository the team does not list",
          context do
-      team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      team =
+        team_with_grant("engineering", "dev",
+          name: "engineering",
+          budget_micros: 0,
+          github: %{"repositories" => ["example-org/widgets"]}
+        )
+
       ada = person("ada@example.test", ["engineering"])
       as_ada = %{user: ada, platform_admin?: false}
       create = &Harness.call("session.create", %{"profile" => "dev", "repository" => &1}, as_ada)
@@ -543,10 +566,24 @@ defmodule Troupe.Plane.GitHubTest do
       assert error.data.field == "repository"
       assert error.data.reason =~ "no GitHub App"
 
-      configure(context)
+      configure(context, ["widgets", "gadgets"])
 
       assert {:error, error} = create.("someone-else/widgets")
       assert error.data.reason =~ "not installed for someone-else"
+
+      # The App reaches gadgets; the team does not list it (#653).
+      assert {:error, error} = create.("example-org/gadgets")
+      assert error.data.field == "repository"
+
+      assert error.data.reason =~
+               "the team engineering does not list example-org/gadgets among the GitHub " <>
+                 "repositories its sessions may name"
+
+      # A team that lists nothing names nothing.
+      {:ok, _} = Identity.update_team(team, %{github: nil})
+      assert {:error, error} = create.("example-org/widgets")
+      assert error.data.reason =~ "the team engineering lists no GitHub repositories"
+      {:ok, _} = Identity.update_team(team, %{github: %{"repositories" => ["example-org/*"]}})
 
       assert {:error, error} = create.("example-org/../widgets")
       assert error.data.field == "repository"
@@ -631,11 +668,22 @@ defmodule Troupe.Plane.GitHubTest do
     :ok
   end
 
+  # A session of a team that lists every repository of the owner, as a team's must for its
+  # sessions to have a token for one.
   defp session_with(id, repository) do
+    n = System.unique_integer([:positive])
+
+    team =
+      team_with_grant("gh-#{n}", "dev",
+        name: "gh-#{n}",
+        github: %{"repositories" => ["example-org/*"]}
+      )
+
     {:ok, session} =
       Sessions.create(%{
-        id: id <> "-#{System.unique_integer([:positive])}",
+        id: id <> "-#{n}",
         owner_subject: "idp|ada",
+        team_id: team.id,
         profile: "dev",
         repository: repository
       })
@@ -727,7 +775,7 @@ defmodule Troupe.Plane.GitHubTest do
     {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false, packet: :line])
 
     send_line(socket, 0, "enrol", %{
-      "token" => "dev-token",
+      "token" => FakePod.token("dev-token"),
       "pod_name" => pod_name,
       "capacity" => 4,
       "disk_total_bytes" => 1_000

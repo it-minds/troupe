@@ -14,12 +14,17 @@
 // `gitops` mode the triggers are resources a repository holds: shown locked, with where
 // they come from, and nothing offers a write. A new webhook trigger is made with its key,
 // which is shown once, with a button that copies it; a trigger on a GitHub repository is
-// fired by the App's signed deliveries and has none. Running one by hand and rotating a key
-// are done over the plane's admin API for now.
+// fired by the App's signed deliveries and has none.
+//
+// Running one now, by hand, is a plain confirm that says what it starts and spends, and the
+// run it makes is linked on Runs. Rotating a webhook trigger's key is typed by its name,
+// after saying that the old key stops working the moment it is done; the new one is shown
+// once, as a new trigger's is. Both work on a `gitops` plane too: they are things done with
+// a trigger, not changes to what it is, and the key is never in a resource.
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { AdminTeam, Trigger, TriggerPut } from "@troupe/client";
+import type { AdminTeam, Trigger, TriggerFired, TriggerKey, TriggerPut } from "@troupe/client";
 import { go, href } from "../route";
 import { recorded, show, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, modeOf, useChange, when } from "./bits";
@@ -130,7 +135,7 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
           <>
             {locked && (
               <Locked things="triggers" source={source}>
-                <p className="note">Running one by hand and minting its key still work, over the admin API: they are things done with a trigger, not what it is.</p>
+                <p className="note">Running one by hand and rotating its webhook key still work, from its page: they are things done with a trigger, not what it is.</p>
               </Locked>
             )}
             {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
@@ -253,6 +258,29 @@ function KeyOnce({ name, secret, url, onDone }: { name: string; secret: string; 
   );
 }
 
+/** What running a trigger by hand starts and spends, in words, before it is confirmed. */
+function runWords(team: string, t: Trigger): string[] {
+  const at = t.concurrency ?? 1;
+  return [
+    `${t.name} fires now, by hand: a session on ${show(t.profile)}, run as ${show(t.principal)}, which spends ${team}'s budget.`,
+    `It runs ${t.revision ? `revision ${t.revision.revision}` : "the current revision"} of what it says, and is listed on Runs and review as fired by hand, by you.`,
+    `If ${at === 1 ? "a run of it is" : `${at} of its runs are`} going already, this one is recorded as skipped and starts nothing.`,
+    t.review === "none" || t.review === false ? "" : "A person is expected to read the run once it ends.",
+  ].filter(Boolean);
+}
+
+/** A run just fired by hand: how it stands, and where it is on Runs. */
+function FiredNote({ name, fired }: { name: string; fired: TriggerFired }): JSX.Element {
+  return (
+    <p className="note fired" role="status">
+      {fired.state === "skipped"
+        ? `${name} was fired, and the run is recorded as skipped: as many of its runs as it may have at once are going already.`
+        : `${name} is fired by hand${fired.session_id ? ", and its session is starting" : ""}.`}{" "}
+      <a href={href({ page: "runs", path: [fired.run.id] })}>Its run, on Runs and review</a>
+    </p>
+  );
+}
+
 // -- a trigger ---------------------------------------------------------------------------
 
 export function TriggerPage({ team, name }: { team: string; name: string }): JSX.Element {
@@ -264,6 +292,10 @@ export function TriggerPage({ team, name }: { team: string; name: string }): JSX
   const [editing, setEditing] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const [fired, setFired] = useState<TriggerFired | null>(null);
+  const [minted, setMinted] = useState<TriggerKey | null>(null);
   const [gone, setGone] = useState<Done | null>(null);
   const { done, apply } = useChange(reload);
 
@@ -296,7 +328,10 @@ export function TriggerPage({ team, name }: { team: string; name: string }): JSX
           }
           const locked = modeOf(mode) === "gitops";
           const deletable = !locked || t.gitops?.problem === "missing";
-          const busy = editing || switching || deleting;
+          const busy = editing || switching || deleting || running || rotating;
+          // A webhook that names no repository is fired with its own key; one on a GitHub
+          // repository is fired by the App's signed deliveries, and a schedule by the plane.
+          const keyed = t.source?.["kind"] === "webhook" && !t.source?.["repository"];
           const terms = t.terms ?? {};
           const notifyList = Array.isArray(t.notify) ? t.notify : [];
           return (
@@ -313,6 +348,8 @@ export function TriggerPage({ team, name }: { team: string; name: string }): JSX
                 </Locked>
               )}
               {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
+              {fired && <FiredNote name={name} fired={fired} />}
+              {minted && <KeyOnce name={name} secret={minted.key} url={minted.url} onDone={() => setMinted(null)} />}
               <Fields
                 rows={[
                   ["State", <TriggerState trigger={t} />],
@@ -338,6 +375,28 @@ export function TriggerPage({ team, name }: { team: string; name: string }): JSX
 
               {!busy && (
                 <div className="actions">
+                  {t.enabled && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFired(null);
+                        setRunning(true);
+                      }}
+                    >
+                      Run {name} now
+                    </button>
+                  )}
+                  {keyed && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMinted(null);
+                        setRotating(true);
+                      }}
+                    >
+                      {t.has_key ? `Rotate ${name}'s key` : `Mint ${name}'s key`}
+                    </button>
+                  )}
                   {!locked && (
                     <>
                       <button type="button" onClick={() => setEditing(true)}>
@@ -355,10 +414,57 @@ export function TriggerPage({ team, name }: { team: string; name: string }): JSX
                   )}
                 </div>
               )}
-              <p className="note">
-                Running it now by hand, and rotating its webhook key, come to this console next; for now they are <code>admin.trigger.run</code> and{" "}
-                <code>admin.trigger.key.rotate</code>, with <code>troupe admin</code> or over <code>/rpc</code>.
-              </p>
+              {!t.enabled && !busy && <p className="note">A paused trigger is not run, by hand or otherwise; resume it first.</p>}
+              {running && (
+                <Preview
+                  title={`trigger/${team}/${name}`}
+                  lines={[{ field: "run", from: null, to: `by hand, by ${me.subject}` }]}
+                  effects={runWords(team, t)}
+                  verb={`Run ${name} now`}
+                  onCancel={() => setRunning(false)}
+                  onConfirm={async () => {
+                    await apply(
+                      "trigger.run",
+                      `${team}/${name}`,
+                      async () => {
+                        const answer = await admin.runTrigger(team, name);
+                        setFired(answer);
+                        return answer;
+                      },
+                      `${name} is fired.`,
+                    );
+                    setRunning(false);
+                  }}
+                />
+              )}
+              {rotating && (
+                <Preview
+                  title={`trigger/${team}/${name}`}
+                  lines={[{ field: "webhook key", from: t.has_key ? `set${t.key_rotated_at ? `, minted ${when(t.key_rotated_at)}` : ""}` : "none", to: "a new key, shown once" }]}
+                  effects={[
+                    t.has_key
+                      ? `The key ${name} has now stops working the moment you rotate it: every sender still using it is refused from then on, until it is given the new one. There is no overlap.`
+                      : `${name} has no key, so nothing can fire it by its webhook until it has one.`,
+                    "The new key is shown once, here, with a button that copies it. The plane keeps only its hash, so losing it costs another rotation.",
+                  ]}
+                  verb={t.has_key ? `Rotate ${name}'s key` : `Mint ${name}'s key`}
+                  typeToConfirm={name}
+                  onCancel={() => setRotating(false)}
+                  onConfirm={async () => {
+                    await apply(
+                      "trigger.key.rotate",
+                      `${team}/${name}`,
+                      async () => {
+                        const answer = await admin.rotateTriggerKey(team, name);
+                        setMinted(answer);
+                        return answer;
+                      },
+                      `${name}'s key is ${t.has_key ? "rotated" : "minted"}.`,
+                    );
+                    setRotating(false);
+                  }}
+                />
+              )}
               {editing && (
                 <TriggerForm
                   team={owner}

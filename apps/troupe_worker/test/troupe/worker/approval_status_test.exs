@@ -120,23 +120,38 @@ defmodule Troupe.Worker.ApprovalStatusTest do
   # One manager per log, with no tree behind it and marked active so that it reports: the
   # lifecycle is a fold over the events a session publishes, and those are what each one
   # is sent here, in the order the session wrote them. The answer is the last report each
-  # one made once they have all gone quiet, since a report is debounced.
+  # one made once it has folded every event and has no change left to send, since a
+  # report is debounced: asked of each manager, not read off a quiet second, which a busy
+  # machine's long log outlasted.
   defp replay(dir, names), do: replay_events(Map.new(names, &{&1, recorded(dir, &1)}))
 
   defp replay_events(logs) do
     test = self()
 
-    for {name, events} <- logs do
-      session_id = "recorded-" <> name
-      opts = [session_id: session_id, report: &send(test, {:report, &1})]
-      manager = start_supervised!(Supervisor.child_spec({Manager, opts}, id: name))
-      :sys.replace_state(manager, &%{&1 | status: :active})
+    managers =
+      for {name, events} <- logs do
+        session_id = "recorded-" <> name
+        opts = [session_id: session_id, report: &send(test, {:report, &1})]
+        manager = start_supervised!(Supervisor.child_spec({Manager, opts}, id: name))
+        :sys.replace_state(manager, &%{&1 | status: :active})
 
-      for event <- events, do: send(manager, {:troupe_event, session_id, event})
-    end
+        for event <- events, do: send(manager, {:troupe_event, session_id, event})
+        manager
+      end
+
+    Enum.each(managers, &reported/1)
 
     last_reports(%{})
     |> Map.new(fn {"recorded-" <> name, report} -> {name, report} end)
+  end
+
+  # Every event sent before this is folded, since a call is answered after them; and a
+  # change the debounce still holds goes out at its tick.
+  defp reported(manager) do
+    if :sys.get_state(manager).status_dirty do
+      Process.sleep(50)
+      reported(manager)
+    end
   end
 
   defp last_reports(acc) do
@@ -144,7 +159,7 @@ defmodule Troupe.Worker.ApprovalStatusTest do
       {:report, %{"type" => "session.status", "session_id" => id} = report} ->
         last_reports(Map.put(acc, id, report))
     after
-      1_000 -> acc
+      0 -> acc
     end
   end
 

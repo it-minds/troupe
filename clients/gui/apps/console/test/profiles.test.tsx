@@ -5,8 +5,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { draftOf, keptOf, llmWithoutEndpoint } from "../src/views/Profiles";
-import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { budgetMicros, draftOf, keptOf, llmWithoutEndpoint } from "../src/views/Profiles";
+import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import { PROVIDER_TYPES } from "../../../packages/client/test/support/provider-types.js";
 import type { FakeDeployment } from "./support";
 
@@ -38,14 +38,14 @@ describe("the profile list", () => {
   it("lists every profile with its state, its pods, its image and the teams it is granted to", async () => {
     await open("#/profiles");
     await waitFor(() => row("dev") && row("build-box"), "the profiles");
-    expect(says("draining", row("dev")!)).toBe(true);
-    expect(says("2 / 2", row("dev")!)).toBe(true);
-    expect(says("registry.example.com/troupe/worker:0.17.0-beta", row("dev")!)).toBe(true);
-    expect(says("core", row("dev")!)).toBe(true);
-    expect(says("core, design", row("ux")!)).toBe(true);
-    expect(says("degraded", row("heavy")!)).toBe(true);
-    expect(says("none", row("heavy")!)).toBe(true);
-    expect(says("unknown", row("build-box")!)).toBe(true);
+    await sees("draining", () => row("dev"));
+    await sees("2 / 2", () => row("dev"));
+    await sees("registry.example.com/troupe/worker:0.17.0-beta", () => row("dev"));
+    await sees("core", () => row("dev"));
+    await sees("core, design", () => row("ux"));
+    await sees("degraded", () => row("heavy"));
+    await sees("none", () => row("heavy"));
+    await sees("unknown", () => row("build-box"));
     expect(link("dev", row("dev")!)!.getAttribute("href")).toBe("#/profiles/dev");
     expect(button("New profile")).not.toBeNull();
   });
@@ -55,7 +55,7 @@ describe("the profile list", () => {
     await waitFor(() => row("ux"), "design's profiles");
     expect(row("dev")).toBeNull();
     expect(link("ux", row("ux")!)).toBeNull();
-    expect(says("A profile's settings are a platform admin's")).toBe(true);
+    await sees("A profile's settings are a platform admin's");
     expect(button("New profile")).toBeNull();
 
     visit("#/profiles/ux");
@@ -69,41 +69,41 @@ describe("a profile", () => {
     await open("#/profiles/dev");
     await waitFor(() => heading() === "dev" && says("What the cluster policy makes of it"), "dev");
     // The fields the editor writes.
-    expect(says("https://llm-gw.example.com/v1")).toBe(true);
-    expect(says("qwen3.6-35b")).toBe(true);
-    expect(says("llm-gateway · api-key")).toBe(true);
-    expect(says("llm-gw.example.com, mcp.example.com")).toBe(true);
-    expect(says("fast-ssd")).toBe(true);
+    await sees("https://llm-gw.example.com/v1");
+    await sees("qwen3.6-35b");
+    await sees("llm-gateway · api-key");
+    await sees("llm-gw.example.com, mcp.example.com");
+    await sees("fast-ssd");
     // Those it has none for: prices, a server's credential settings, identities, GitHub.
-    expect(says("glm-5.2: 0.5 in, 1.5 out")).toBe(true);
-    expect(says("credentialMode: profile")).toBe(true);
-    expect(says('secretRef: {"name":"jira-mcp","key":"token"}')).toBe(true);
-    expect(says("troupe-dev")).toBe(true);
-    expect(says("wiki.read")).toBe(true);
-    expect(says("contents: write, pull_requests: write, checks: read")).toBe(true);
+    await sees("glm-5.2: 0.5 in, 1.5 out");
+    await sees("credentialMode: profile");
+    await sees('secretRef: {"name":"jira-mcp","key":"token"}');
+    await sees("troupe-dev");
+    await sees("wiki.read");
+    await sees("contents: write, pull_requests: write, checks: read");
     // One no section reads, as it is; and what the plane writes, apart.
-    expect(says("Everything else in its spec")).toBe(true);
-    expect(says("sandboxHints.tmpfs")).toBe(true);
-    expect(says("Written by the plane")).toBe(true);
-    expect(says("sessionsPerPod")).toBe(true);
-    expect(says("granted to core")).toBe(true);
-    expect(says("troupe-w-dev-1")).toBe(true);
-    expect(says("v2, on every pod")).toBe(true);
+    await sees("Everything else in its spec");
+    await sees("sandboxHints.tmpfs");
+    await sees("Written by the plane");
+    await sees("sessionsPerPod");
+    await sees("granted to core");
+    await sees("troupe-w-dev-1");
+    await sees("v2, on every pod");
   });
 
   it("says which server the bundle calls as the profile that it names no identity for", async () => {
     await open("#/profiles/ux");
     await waitFor(() => heading() === "ux" && says("Who it is at MCP servers"), "ux");
-    expect(says("mcp server wiki is called with client credentials, and the profile gives it no identity in mcpIdentities")).toBe(true);
-    expect(says("kept off these pods")).toBe(true);
+    await sees("mcp server wiki is called with client credentials, and the profile gives it no identity in mcpIdentities");
+    await sees("kept off these pods");
   });
 
   it("says what the cluster says of it, a CA its namespace does not have yet included", async () => {
     await open("#/profiles/ux");
     await waitFor(() => heading() === "ux" && says("What the cluster says"), "ux");
-    expect(says("PlaneCAMissing")).toBe(true);
-    expect(says("the namespace has no troupe-plane-ca yet")).toBe(true);
-    expect(says("14 resources reconciled")).toBe(true);
+    await sees("PlaneCAMissing");
+    await sees("the namespace has no troupe-plane-ca yet");
+    await sees("14 resources reconciled");
   });
 });
 
@@ -114,20 +114,20 @@ describe("the editor", () => {
     const hosts = await waitFor(() => field("Allowed hosts"), "the editor");
     type(hosts, "llm-gw.example.com\nmcp.example.com\nwiki.example.com");
     type(field("URL")!, "https://mcp.example.com/jira/v2");
-    expect(says("Kept as it is: secretRef, credentialMode.")).toBe(true);
-    expect(says("Carried through unchanged, with no field here:")).toBe(true);
+    await sees("Kept as it is: secretRef, credentialMode.");
+    await sees("Carried through unchanged, with no field here:");
 
     button("Can a pod reach it?")!.click();
     await waitFor(() => says("The egress policy allows mcp.example.com."), "the reachability check");
 
     button("Preview")!.click();
     await waitFor(() => says("What will happen"), "the preview");
-    expect(says("spec.egress.fqdns")).toBe(true);
+    await sees("spec.egress.fqdns");
     // The plane's diff, of the stored profile with the write laid over it: not its
     // replicas, which no write sends, nor the name, which says which profile.
     expect(says("replicas:")).toBe(false);
-    expect(says("Applying changes the cluster now.")).toBe(true);
-    expect(says("spec.sessionsPerPod is the plane's to write")).toBe(true);
+    await sees("Applying changes the cluster now.");
+    await sees("spec.sessionsPerPod is the plane's to write");
 
     button("Apply")!.click();
     await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
@@ -166,6 +166,7 @@ describe("the editor", () => {
         image: "registry.example.com/troupe/worker:1",
         sizeClass: "standard",
         maxSessions: "",
+        budget: "",
         warmWorkers: "0",
         endpoint: "",
         provider: "",
@@ -180,11 +181,19 @@ describe("the editor", () => {
         orgMount: false,
         repositoryOverridesBundle: false,
         forbidPersonalTools: false,
+        allowPublic: false,
+        denyPaths: "",
+        maxPushes: "",
+        maxRuns: "",
       },
       [],
       kept,
     );
     expect(draft.max_sessions).toBeNull();
+    // Blank is no budget, sent as such; dollars are sent as the plane's millionths.
+    expect(draft.budget_micros).toBeNull();
+    expect(budgetMicros("120.50")).toBe(120_500_000);
+    expect(budgetMicros("a lot")).toBeNaN();
     expect(draft.spec).toEqual({
       llm: { prices: { m: { input: 1 } }, extra: 1 },
       egress: { other: true, fqdns: ["b.example.com"] },
@@ -195,6 +204,63 @@ describe("the editor", () => {
     });
     // The prices it carries need an endpoint, as the plane holds them to.
     expect(llmWithoutEndpoint(draft.spec!["llm"] as Record<string, unknown>)).toContain("llm.prices is set without an endpoint");
+  });
+
+  // #147 slice 4: the fix loop's policy on GitHub has fields; the token's permissions, which
+  // have none, are carried through as they were loaded.
+  it("maps the fix loop's GitHub policy onto spec.github beside the permissions it carries", () => {
+    const loaded = { github: { permissions: { contents: "write" }, allowPublic: true, maxRuns: 4 } };
+    const kept = keptOf(loaded);
+    expect(kept).toEqual({ github: { permissions: { contents: "write" } } });
+    const form = {
+      name: "p",
+      extends: "",
+      image: "registry.example.com/troupe/worker:1",
+      sizeClass: "standard",
+      maxSessions: "",
+      warmWorkers: "0",
+      endpoint: "",
+      provider: "",
+      model: "",
+      smallModel: "",
+      secretName: "",
+      secretKey: "",
+      fqdns: "",
+      gitHosts: "",
+      storageClass: "",
+      channel: "",
+      orgMount: false,
+      repositoryOverridesBundle: false,
+      forbidPersonalTools: false,
+      budget: "",
+      allowPublic: false,
+      denyPaths: "secrets/\n *.tfstate \n",
+      maxPushes: "3",
+      maxRuns: "",
+    };
+    // Public repositories turned off: absent, which is off; the cap of runs taken away.
+    expect(draftOf(form, [], kept).spec!["github"]).toEqual({ permissions: { contents: "write" }, denyPaths: ["secrets/", "*.tfstate"], maxPushes: 3 });
+    // A profile that extends another says false, or its parent's true would hold.
+    expect(draftOf({ ...form, extends: "base", denyPaths: "", maxPushes: "" }, [], kept).spec!["github"]).toEqual({ permissions: { contents: "write" }, allowPublic: false });
+    expect(draftOf({ ...form, extends: "base", allowPublic: null, denyPaths: "", maxPushes: "" }, [], kept).spec!["github"]).toEqual({ permissions: { contents: "write" } });
+  });
+
+  it("reads a profile's GitHub policy, and edits it behind the plane's preview", async () => {
+    await open("#/profiles/dev");
+    (await waitFor(() => button("Change dev"), "dev")).click();
+    type(await waitFor(() => field("Paths a push never carries"), "the editor"), "secrets/");
+    type(field("Pushes a run may make")!, "4");
+    type(field("Public repositories")!, "true");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    await sees("spec.github.maxPushes");
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
+    const github = fake.admin.profiles.find((p) => p.name === "dev")!.spec!["github"] as Record<string, unknown>;
+    expect(github).toMatchObject({ allowPublic: true, denyPaths: ["secrets/"], maxPushes: 4 });
+    await waitFor(() => says("pushes and pull requests allowed"), "dev read again");
+    await sees("secrets/, and");
+    await sees(".env, .env.*, *.pem");
   });
 
   it("says at the endpoint, before anything is sent, that model settings need one", async () => {
@@ -248,7 +314,7 @@ describe("the editor", () => {
     visit("#/profiles/batch");
     (await waitFor(() => button("Delete batch"), "batch's page")).click();
     await waitFor(() => says("Type batch to confirm"), "the typed confirmation");
-    expect(says("No team is granted it.")).toBe(true);
+    await sees("No team is granted it.");
     const confirm = button("Delete batch")!;
     expect(confirm.disabled).toBe(true);
     type(field("Type batch to confirm")!, "batch");
@@ -262,7 +328,7 @@ describe("the editor", () => {
     await open("#/profiles/ux");
     (await waitFor(() => button("Delete ux"), "ux")).click();
     await waitFor(() => says("Every grant goes: core, design lose ux."), "the warning");
-    expect(says("turn read-only rather than being erased")).toBe(true);
+    await sees("turn read-only rather than being erased");
   });
 });
 
@@ -282,7 +348,7 @@ describe("a profile that extends another", () => {
     await open("#/profiles/data-team");
     await waitFor(() => heading() === "data-team" && says("Where each field comes from"), "data-team");
     expect(link("dev")!.getAttribute("href")).toBe("#/profiles/dev");
-    expect(says("dev → data-team.")).toBe(true);
+    await sees("dev → data-team.");
     // Added: dev's hosts, then data-team's.
     expect(cell("llm-gw.example.com")!.cells[2]!.textContent).toBe("dev");
     expect(cell("wiki.example.com")!.cells[2]!.textContent).toBe("data-team");
@@ -291,14 +357,14 @@ describe("a profile that extends another", () => {
     expect(cell("https://llm-gw.example.com/v1")!.cells[2]!.textContent).toBe("dev");
     expect(cell("12")!.cells[0]!.textContent).toBe("max_sessions");
     // dev's key is dev's own, which is said rather than left silent.
-    expect(says("set llm.secretRef to a Secret of data-team's")).toBe(true);
+    await sees("set llm.secretRef to a Secret of data-team's");
     // The sections read what its pods run.
-    expect(says("llm-gw.example.com, mcp.example.com, wiki.example.com")).toBe(true);
+    await sees("llm-gw.example.com, mcp.example.com, wiki.example.com");
 
     visit("#/profiles/dev");
     await waitFor(() => heading() === "dev" && says("Extended by"), "dev");
     expect(link("data-team")!.getAttribute("href")).toBe("#/profiles/data-team");
-    expect(says("A change here reaches it after a preview.")).toBe(true);
+    await sees("A change here reaches it after a preview.");
   });
 
   it("is made in the editor by naming what it extends, and leaves the rest to it", async () => {
@@ -333,12 +399,62 @@ describe("a profile that extends another", () => {
     type(await waitFor(() => field("Allowed hosts"), "the editor"), "llm-gw.example.com\nmcp.example.com\nhooks.example.com");
     button("Preview")!.click();
     await waitFor(() => says("What will happen") && says("data-team: spec.egress.fqdns"), "data-team in the preview");
-    expect(says("data-team extends dev: applying writes it again with spec.egress.fqdns as above")).toBe(true);
+    await sees("data-team extends dev: applying writes it again with spec.egress.fqdns as above");
     expect((fake.admin.profiles.find((p) => p.name === "data-team")!.spec!["egress"] as Record<string, unknown>)["fqdns"]).toEqual(["llm-gw.example.com", "mcp.example.com", "wiki.example.com"]);
 
     button("Apply")!.click();
     await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
     expect((fake.admin.profiles.find((p) => p.name === "data-team")!.spec!["egress"] as Record<string, unknown>)["fqdns"]).toEqual(["llm-gw.example.com", "mcp.example.com", "hooks.example.com", "wiki.example.com"]);
+  });
+
+  it("lists the bundle its pods load, each entry with the profile whose channel gave it", async () => {
+    const analyst = { name: "analyst", definition: "---\nmode: primary\ndescription: Analyses.\n---\nYou analyse." };
+    const clash = { name: "jira", url: "https://mcp.example.com/other-jira" };
+    const warehouse = { name: "warehouse", url: "https://mcp.example.com/warehouse" };
+    const published = await fake.admin.call(PEOPLE.alice.subject, "admin.bundle.publish", { channel: "data", content: { schema: 1, agents: [analyst], skills: [], mcp_servers: [clash, warehouse] } });
+    expect("result" in published).toBe(true);
+    await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", { profile: { ...dataTeam, spec: { ...dataTeam.spec, configBundleChannel: "data" } } });
+    await open("#/profiles/data-team");
+    await waitFor(() => heading() === "data-team" && says("The bundle its pods load"), "data-team's bundle");
+    await sees("One bundle, composed by the plane from stable (dev's) and data (data-team's)");
+    const from = (name: string) => [...document.querySelectorAll<HTMLTableRowElement>("table.bundle-in-effect tbody tr")].find((r) => (r.cells[1]?.textContent ?? "") === name)?.cells[2]?.textContent;
+    expect(from("pr-reviewer")).toBe("dev on stable");
+    expect(from("analyst")).toBe("data-team on data");
+    expect(from("warehouse")).toBe("data-team on data");
+    // data's jira has dev's name and does not say override: dev's is kept, and that is said.
+    expect(from("jira")).toBe("dev on stable");
+    await sees("say override: true on it in data's bundle to replace it");
+    // Its pods' channel is not one anybody publishes to.
+    expect("error" in (await fake.admin.call(PEOPLE.alice.subject, "admin.bundle.publish", { channel: "profile:data-team", content: { schema: 1 } }))).toBe(true);
+  });
+
+  it("has a monthly budget set, previewed and audited, and below its parent's only", async () => {
+    await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", { profile: dataTeam });
+    await open("#/profiles/dev");
+    await waitFor(() => heading() === "dev" && says("Monthly budget"), "dev");
+    await sees("no ceiling: its sessions spend what their people and teams have");
+
+    button("Change dev")!.click();
+    type(await waitFor(() => field("Monthly budget, in dollars"), "the editor"), "500");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen") && says("budget_micros"), "the preview");
+    await sees("Its sessions may spend $500.00 a month from now");
+    // data-team has it from dev, and is told so in the preview.
+    await sees("data-team: budget_micros");
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
+    expect(fake.admin.profiles.find((p) => p.name === "dev")!.budget_micros).toBe(500_000_000);
+    expect(fake.admin.profiles.find((p) => p.name === "data-team")!.budget_micros).toBe(500_000_000);
+
+    visit("#/profiles/data-team");
+    await waitFor(() => heading() === "data-team" && says("$500.00 a month, from dev"), "data-team's budget, from dev");
+
+    // Higher than dev's: refused, in the plane's words, before anything is written.
+    (await waitFor(() => button("Change data-team"), "data-team")).click();
+    type(await waitFor(() => field("Monthly budget, in dollars"), "the editor"), "800");
+    button("Preview")!.click();
+    await waitFor(() => says("a profile that extends another can only lower its budget"), "the refusal");
+    expect(fake.admin.profiles.find((p) => p.name === "data-team")!.budget_micros).toBe(500_000_000);
   });
 
   it("keeps its parent from being deleted while it extends it", async () => {
@@ -362,19 +478,19 @@ describe("a plane in gitops mode", () => {
     fake.admin.profiles.find((p) => p.name === "dev")!.gitops = { generation: 7, problem: null, reasons: [] };
     await open("#/profiles");
     await waitFor(() => row("dev") && says("Held in a repository"), "the locked list");
-    expect(says("https://git.example.com/platform/troupe.git")).toBe(true);
-    expect(says("refused", row("heavy")!)).toBe(true);
+    await sees("https://git.example.com/platform/troupe.git");
+    await sees("refused", () => row("heavy"));
     expect(button("New profile")).toBeNull();
 
     visit("#/profiles/dev");
     await waitFor(() => heading() === "dev" && says("What is below is what the plane read, at generation 7."), "dev, locked");
-    expect(says("Held in a repository")).toBe(true);
+    await sees("Held in a repository");
     expect(button("Change dev")).toBeNull();
     expect(button("Delete dev")).toBeNull();
 
     visit("#/profiles/heavy");
     await waitFor(() => heading() === "heavy" && says("The plane refused the resource"), "heavy, refused");
-    expect(says("is not from a repository the cluster policy allows")).toBe(true);
+    await sees("is not from a repository the cluster policy allows");
   });
 
   it("offers deleting only a row the cluster has no resource for", async () => {
@@ -385,5 +501,85 @@ describe("a plane in gitops mode", () => {
     expect(button("Change build-box")).toBeNull();
     (await waitFor(() => button("Delete build-box's row"), "the row's delete")).click();
     await waitFor(() => says("this deletes the plane's row and nothing else"), "the preview");
+  });
+});
+
+describe("a profile's permission rules", () => {
+  const ruleRow = (action: string, n: number): HTMLElement | null => document.querySelector<HTMLElement>(`form.profile-editor [aria-label="${action} rule ${n}"]`);
+  const inEffect = (action: string): HTMLElement | null => document.querySelector<HTMLElement>(`ul.rules-in-effect[aria-label="${action} rules"]`);
+  const ruleCell = (text: string): HTMLTableRowElement | undefined => [...document.querySelectorAll<HTMLTableRowElement>("table.where-from tbody tr")].find((r) => (r.cells[1]?.textContent ?? "") === text);
+
+  it("are added in the editor, a malformed one refused at its field in the plane's words, and saved through the preview", async () => {
+    await open("#/profiles/dev");
+    await waitFor(() => heading() === "dev" && says("Permission rules"), "dev");
+    await sees("None: the organisation's rules and each person's own decide.");
+
+    button("Change dev")!.click();
+    (await waitFor(() => button("Add a deny rule"), "the editor")).click();
+    type(await waitFor(() => ruleRow("deny", 1) && field("Tool", ruleRow("deny", 1)!), "the new row"), "Bash");
+    await waitFor(() => says("Bash is another tool's name for it; Troupe's is shell, as in shell(...)", ruleRow("deny", 1)!), "the tool refused");
+    expect(button("Preview")!.disabled).toBe(true);
+
+    type(field("Tool", ruleRow("deny", 1)!)!, "shell");
+    type(field("Pattern", ruleRow("deny", 1)!)!, "curl");
+    await waitFor(() => !button("Preview")!.disabled, "the rule fixed");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    await sees("spec.permissions");
+    await sees("Every session on dev refuses shell(curl), whatever a person's own rules allow.");
+    expect(fake.admin.profiles.find((p) => p.name === "dev")!.spec!["permissions"]).toBeUndefined();
+
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
+    const spec = fake.admin.profiles.find((p) => p.name === "dev")!.spec!;
+    // Only the list that holds a rule is sent; the rest of the spec is carried as it was.
+    expect(spec["permissions"]).toEqual({ deny: ["shell(curl)"] });
+    expect(spec["sandboxHints"]).toEqual({ tmpfs: "1Gi" });
+    await waitFor(() => inEffect("deny"), "the rule on dev's page");
+    expect(inEffect("deny")!.textContent).toBe("deny shell(curl)");
+    await sees("sandboxHints.tmpfs");
+  });
+
+  it("are refused by the plane, rule by rule, in the same words", async () => {
+    const refused = await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", {
+      profile: { name: "rules", image: "registry.example.com/troupe/worker:0.17.0-beta", spec: { permissions: { deny: ["Bash(ls)"], ask: ["shell(npm test:*)"] } } },
+    });
+    expect("error" in refused).toBe(true);
+    const text = JSON.stringify(refused);
+    expect(text).toContain("permissions.ask: shell(npm test:*): drop the :*");
+    expect(text).toContain("permissions.deny: Bash is another tool's name for it");
+    expect(fake.admin.profiles.some((p) => p.name === "rules")).toBe(false);
+  });
+
+  it("of a parent hold in a profile that extends it, which adds its own and cannot take the parent's away", async () => {
+    fake.admin.profiles.find((p) => p.name === "dev")!.spec!["permissions"] = { deny: ["shell(curl)"] };
+    await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", { profile: { name: "data-team", extends: "dev", spec: { egress: { fqdns: ["wiki.example.com"] } } } });
+    await open("#/profiles/data-team");
+    await waitFor(() => heading() === "data-team" && inEffect("deny"), "data-team's rules");
+    expect(inEffect("deny")!.textContent).toBe("deny shell(curl) — from dev");
+    expect(link("dev", inEffect("deny")!)!.getAttribute("href")).toBe("#/profiles/dev");
+    expect(ruleCell("shell(curl)")!.cells[0]!.textContent).toBe("spec.permissions.deny");
+    expect(ruleCell("shell(curl)")!.cells[2]!.textContent).toBe("dev");
+
+    // Its editor holds what it wrote: dev's rule is said, and is no row it could remove.
+    button("Change data-team")!.click();
+    await waitFor(() => button("Add a deny rule"), "the editor");
+    expect(ruleRow("deny", 1)).toBeNull();
+    await sees("Added to what it has from dev: shell(curl).");
+    button("Add a deny rule")!.click();
+    type(await waitFor(() => ruleRow("deny", 1) && field("Tool", ruleRow("deny", 1)!), "the new row"), "shell");
+    type(field("Pattern", ruleRow("deny", 1)!)!, "rm -rf");
+    await waitFor(() => !button("Preview")!.disabled, "the rule typed");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    await sees("Every session on data-team refuses shell(rm -rf)");
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as profile.put on data-team"), "the audit's note");
+
+    const made = fake.admin.profiles.find((p) => p.name === "data-team")!;
+    expect((made.own!["spec"] as Record<string, unknown>)["permissions"]).toEqual({ deny: ["shell(rm -rf)"] });
+    expect(made.spec!["permissions"]).toEqual({ deny: ["shell(curl)", "shell(rm -rf)"] });
+    await waitFor(() => inEffect("deny") && says("shell(rm -rf)", inEffect("deny")!), "the rules read again");
+    expect([...inEffect("deny")!.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["deny shell(curl) — from dev", "deny shell(rm -rf) — its own"]);
   });
 });

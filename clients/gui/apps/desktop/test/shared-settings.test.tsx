@@ -131,6 +131,17 @@ describe("what follows the person: the theme, light or dark, and notifications",
     await waitFor(() => document.documentElement.dataset["theme"] === "afterglow", "the default theme");
   });
 
+  it("a theme picked before the daemon's settings have come is kept by the daemon once they have", async () => {
+    // A busy machine: the Appearance screen is up before the daemon has said what it keeps.
+    await start({}, (d) => void (d.delayMs["config.get"] = 600));
+    nav("Appearance")!.click();
+    await waitFor(() => document.querySelector("button.theme"), "the theme cards");
+
+    click("button.theme", "Signal");
+    await waitFor(() => daemon.ui["ui.theme"] === "signal", "ui.theme written to the daemon");
+    expect(document.documentElement.dataset["theme"]).toBe("signal");
+  });
+
   it("notifications turned off here are off in the daemon, and turned on elsewhere are on here", async () => {
     await start();
     nav("Appearance")!.click();

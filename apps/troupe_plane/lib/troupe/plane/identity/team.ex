@@ -74,6 +74,11 @@ defmodule Troupe.Plane.Identity.Team do
     # for why it is not a platform-wide switch.
     field :allow_unenforced_workers, :boolean, default: false
 
+    # What the team's sessions may do on GitHub: the repositories they may name and the
+    # fix loop's caps (`Troupe.Plane.GitHub.Policy`). Its own administrators'; `nil` lists
+    # nothing, and a team that lists nothing names no repository.
+    field :github, :map
+
     has_many :grants, Troupe.Plane.Identity.Grant
 
     timestamps(type: :utc_datetime_usec)
@@ -95,7 +100,8 @@ defmodule Troupe.Plane.Identity.Team do
     :budget_period,
     :volume_storage_class,
     :volume_size,
-    :allow_unenforced_workers
+    :allow_unenforced_workers,
+    :github
   ]
 
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()

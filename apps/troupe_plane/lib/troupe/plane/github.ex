@@ -55,9 +55,9 @@ defmodule Troupe.Plane.GitHub do
   import Ecto.Query, only: [from: 2]
 
   alias Troupe.Plane.{Audit, Fleet, Repo}
-  alias Troupe.Plane.GitHub.{App, Key, WebhookSecret}
+  alias Troupe.Plane.GitHub.{App, Key, Policy, WebhookSecret}
+  alias Troupe.Plane.Identity.Team
   alias Troupe.Plane.Sessions.Session
-  alias Troupe.Policy
 
   require Logger
 
@@ -122,15 +122,21 @@ defmodule Troupe.Plane.GitHub do
   @doc """
   The problems with a profile's `spec.github`, as sentences, for `admin.profile.put` and a
   resource read in GitOps mode alike: an object with `permissions`, each one GitHub's name
-  for a permission this may grant, at a level it may be granted.
+  for a permission this may grant, at a level it may be granted; and the fix loop's policy
+  (`GitHub.Policy`): `allowPublic`, `denyPaths`, `maxPushes` and `maxRuns`.
   """
   @spec spec_problems(term()) :: [String.t()]
   def spec_problems(nil), do: []
 
   def spec_problems(%{} = github) do
-    case Map.keys(github) -- ["permissions"] do
-      [] -> permission_problems(github["permissions"])
-      [key | _] -> ["github takes permissions, not #{key}"]
+    keys = ["permissions" | Policy.profile_keys()]
+
+    case Map.keys(github) -- keys do
+      [] ->
+        permission_problems(github["permissions"]) ++ Policy.profile_problems(github)
+
+      [key | _] ->
+        ["github takes #{Enum.join(keys, ", ")}, not #{key}"]
     end
   end
 
@@ -691,22 +697,25 @@ defmodule Troupe.Plane.GitHub do
   # -- a session's repository -------------------------------------------------
 
   @doc """
-  Read `session.create`'s `repository` for a session on `profile`: `"owner/name"` or
-  `{owner, name, ref}`. Answers what the row keeps, `nil` for none, or why it will not do,
-  as a sentence: no App here, no installation for that owner, or a profile that does not
-  declare the Git host.
+  Read `session.create`'s `repository` for a session of `team` on `profile`:
+  `"owner/name"` or `{owner, name, ref}`. Answers what the row keeps, `nil` for none, or
+  why it will not do, as a sentence: no App here, no installation for that owner, a team
+  that does not list it, or a profile that does not declare the Git host.
   """
-  @spec repository(term(), String.t() | nil) :: {:ok, map() | nil} | {:error, String.t()}
-  def repository(nil, _profile), do: {:ok, nil}
+  @spec repository(term(), String.t() | nil, Team.t() | nil) ::
+          {:ok, map() | nil} | {:error, String.t()}
+  def repository(given, profile, team)
 
-  def repository(text, profile) when is_binary(text) do
+  def repository(nil, _profile, _team), do: {:ok, nil}
+
+  def repository(text, profile, team) when is_binary(text) do
     case String.split(text, "/") do
-      [owner, name] -> repository(%{"owner" => owner, "name" => name}, profile)
+      [owner, name] -> repository(%{"owner" => owner, "name" => name}, profile, team)
       _ -> {:error, "a repository is owner/name, or {owner, name, ref}"}
     end
   end
 
-  def repository(%{} = given, profile) do
+  def repository(%{} = given, profile, team) do
     given = Map.new(given, fn {key, value} -> {to_string(key), value} end)
 
     with :ok <- only_repository_keys(given),
@@ -715,6 +724,7 @@ defmodule Troupe.Plane.GitHub do
          {:ok, ref} <- ref(given["ref"]),
          {:ok, app} <- configured(),
          {:ok, _installation} <- installation_for(app, owner),
+         :ok <- Policy.listed(team, owner, name),
          :ok <- reachable(profile, app) do
       {:ok, %{"owner" => owner, "name" => name, "ref" => ref}}
     else
@@ -722,7 +732,7 @@ defmodule Troupe.Plane.GitHub do
     end
   end
 
-  def repository(_other, _profile),
+  def repository(_other, _profile, _team),
     do: {:error, "a repository is owner/name, or {owner, name, ref}"}
 
   defp only_repository_keys(given) do
@@ -793,7 +803,7 @@ defmodule Troupe.Plane.GitHub do
   defp reachable(profile, app) do
     host = app |> api_url() |> git_url() |> URI.parse() |> Map.get(:host)
 
-    if Enum.any?(declared(profile), &Policy.matches?(host, &1)),
+    if Enum.any?(declared(profile), &Troupe.Policy.matches?(host, &1)),
       do: :ok,
       else: {:error, {:host_not_declared, profile, host}}
   end
@@ -810,14 +820,17 @@ defmodule Troupe.Plane.GitHub do
   @doc """
   A new installation token for a session's repository, and where to clone it from:
   `{token, expires_at, url, host, username, ref, repository, installation_id,
-  permissions}`, and with `access: :write` the `api_url` the fix loop's calls go to.
+  permissions, api_url}`, the API URL being where the token is revoked and where the fix
+  loop's calls go. With `access: :write`, `policy` too: what the pod checks before a push
+  or a pull request (`GitHub.Policy.for_session/1`).
 
   Asked of GitHub every time, narrowed to the one repository. `access: :read` (the
   default) is the clone's, `permissions/0`; `access: :write` is the fix loop's, what the
   session's profile grants (`grants/1`), refused where that is reading alone, and with
-  `contents: read` once the session's pushes are closed. The checks `repository/2` made
-  at creation are made again, since the App, its installations and the profile may all
-  have changed since; a write token also needs the profile to declare the API's host.
+  `contents: read` once the session's pushes are closed or it has made as many as its
+  caps allow. The checks `repository/3` made at creation are made again, since the App,
+  its installations, the team's repositories and the profile may all have changed since;
+  a write token also needs the profile to declare the API's host.
   """
   @spec credential(Session.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def credential(session, opts \\ [])
@@ -830,6 +843,7 @@ defmodule Troupe.Plane.GitHub do
 
     with {:ok, app} <- configured(),
          {:ok, installation} <- installation_for(app, owner),
+         :ok <- Policy.listed(Policy.team_of(session), owner, name),
          :ok <- reachable(session.profile, app),
          {:ok, permissions} <- permissions_for(access, session),
          :ok <- api_reachable(access, session.profile, app),
@@ -846,19 +860,24 @@ defmodule Troupe.Plane.GitHub do
         "ref" => repository["ref"],
         "repository" => "#{owner}/#{name}",
         "installation_id" => installation["installation_id"],
-        "permissions" => permissions
+        "permissions" => permissions,
+        "api_url" => api_url(app)
       }
 
       {:ok,
-       if(access == :write, do: Map.put(credential, "api_url", api_url(app)), else: credential)}
+       if(access == :write,
+         do: Map.put(credential, "policy", Policy.for_session(session)),
+         else: credential
+       )}
     end
   end
 
   def credential(%Session{}, _opts), do: {:error, :no_repository}
 
   # The clone's is read-only whatever the profile says. The fix loop's is the profile's
-  # grant, and only where it grants something to write with; once three red rounds have
-  # closed the session's pushes, it still comments and reads CI, and can no longer push.
+  # grant, and only where it grants something to write with; once three red rounds or its
+  # cap of pushes have closed the session's pushes, it still comments and reads CI, and can
+  # no longer push.
   defp permissions_for(:read, _session), do: {:ok, @permissions}
 
   defp permissions_for(:write, %Session{} = session) do
@@ -867,6 +886,7 @@ defmodule Troupe.Plane.GitHub do
     cond do
       "write" not in Map.values(granted) -> {:error, {:no_write, session.profile}}
       stopped?(session.github) -> {:ok, Map.put(granted, "contents", "read")}
+      Policy.pushes_spent?(session, session.github) -> {:ok, Map.put(granted, "contents", "read")}
       true -> {:ok, granted}
     end
   end
@@ -879,7 +899,7 @@ defmodule Troupe.Plane.GitHub do
   defp api_reachable(:write, profile, app) do
     host = app |> api_url() |> URI.parse() |> Map.get(:host)
 
-    if Enum.any?(declared(profile), &Policy.matches?(host, &1)),
+    if Enum.any?(declared(profile), &Troupe.Policy.matches?(host, &1)),
       do: :ok,
       else: {:error, {:api_not_declared, profile, host}}
   end
@@ -1039,7 +1059,11 @@ defmodule Troupe.Plane.GitHub do
   - `round`: `{commit, state, failing}`, the CI of its last push on that pull request,
     `red` or `green` with the names of the checks that failed, once a commit. The third red
     one stops the session: `stopped` says when and why, and `stopped_now` is true in the
-    answer that did it.
+    answer that did it;
+  - `stop`: `{reason: "pushes"}`, the pod saying the run asked for a push past its cap of
+    pushes (`GitHub.Policy.max_pushes/1`). Taken only once the record has that many; it
+    stops the session as the third red round does. A push past the cap is refused here
+    whether or not the pod says so.
 
   Checked whole before anything is written, under the row's lock, so two reports at once
   cannot both be the first push or both miss the third red round. Each step is an audit
@@ -1075,7 +1099,7 @@ defmodule Troupe.Plane.GitHub do
   def stopped?(%{"stopped" => %{}}), do: true
   def stopped?(_github), do: false
 
-  @changes ~w(base push pull_request round)
+  @changes ~w(base push pull_request round stop)
 
   # In a fixed order, so a report of a push and its round together applies the push first.
   defp apply_changes(record, changes, session, now) do
@@ -1103,13 +1127,17 @@ defmodule Troupe.Plane.GitHub do
     end
   end
 
-  defp change_record("push", %{} = push, record, _session, now) do
+  defp change_record("push", %{} = push, record, session, now) do
     branch = push["branch"]
 
     cond do
       stopped?(record) ->
+        {:error, "this session's pushes are closed (#{record["stopped"]["reason"]})"}
+
+      Policy.pushes_spent?(session, record) ->
         {:error,
-         "this session's pushes are closed after #{@red_rounds} red CI rounds on its pull request"}
+         "this run has made #{record["pushes"]} pushes, as many as its cap of " <>
+           "#{Policy.max_pushes(session)} allows"}
 
       not troupe_branch?(branch) ->
         {:error, "a session pushes only to a branch under troupe/, not #{inspect(branch)}"}
@@ -1188,8 +1216,32 @@ defmodule Troupe.Plane.GitHub do
     end
   end
 
+  defp change_record("stop", %{"reason" => "pushes"}, record, session, now) do
+    cond do
+      stopped?(record) ->
+        {:ok, record, []}
+
+      Policy.pushes_spent?(session, record) ->
+        cap = Policy.max_pushes(session)
+
+        stopped = %{
+          "at" => now,
+          "reason" => "its cap of #{cap} #{plural(cap, "push", "pushes")}",
+          "cap" => "pushes"
+        }
+
+        {:ok, Map.put(record, "stopped", stopped), [{:stopped, stopped}]}
+
+      true ->
+        {:error, "this run has pushes left under its cap, so nothing stops it"}
+    end
+  end
+
   defp change_record(key, _value, _record, _session, _now),
     do: {:error, "#{key} is not one this takes in that shape"}
+
+  defp plural(1, one, _many), do: one
+  defp plural(_n, _one, many), do: many
 
   # The checks that failed, by name: what a person reading the run sees first. Bounded,
   # since the names are the repository's CI's to choose.
@@ -1249,6 +1301,21 @@ defmodule Troupe.Plane.GitHub do
     do:
       "the GitHub App is not installed for #{owner} on this plane; it is for " <>
         Enum.join(owners, ", ")
+
+  def explain({:no_team, full}),
+    do:
+      "a session names a repository through a team that lists it, and this one has no team, " <>
+        "so it cannot name #{full}"
+
+  def explain({:not_listed, team, full, []}),
+    do:
+      "the team #{team} lists no GitHub repositories, so its sessions name none: a team " <>
+        "admin adds #{full} to the team's github.repositories"
+
+  def explain({:not_listed, team, full, _listed}),
+    do:
+      "the team #{team} does not list #{full} among the GitHub repositories its sessions " <>
+        "may name: a team admin adds it to the team's github.repositories"
 
   def explain({:host_not_declared, profile, host}),
     do:

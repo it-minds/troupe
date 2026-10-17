@@ -25,6 +25,7 @@ defmodule Troupe.Plane.Triggers do
   import Ecto.Query
 
   alias Troupe.Plane.GitHub.Issue
+  alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
   alias Troupe.Plane.{Harness, Identity, Principals, Repo, Sessions}
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
@@ -342,7 +343,7 @@ defmodule Troupe.Plane.Triggers do
   def by_key(id, key) when is_binary(id) and is_binary(key) do
     case fetch(id) do
       %Trigger{key_hash: hash, key_salt: salt} = trigger when is_binary(hash) and is_binary(salt) ->
-        if key_matches?(trigger, key), do: trigger
+        if keyed?(trigger) and key_matches?(trigger, key), do: trigger
 
       _none ->
         nil
@@ -350,6 +351,19 @@ defmodule Troupe.Plane.Triggers do
   end
 
   def by_key(_id, _key), do: nil
+
+  @doc """
+  Whether a trigger is one its own key fires: a webhook that names no GitHub repository.
+
+  A schedule is fired by the plane's clock, a repository's trigger by the App's signed
+  deliveries, and a manual one by a person or a principal who signed in. A key on any of
+  those would be a second door, through which whoever held it fired the trigger with any
+  event body they liked. So none is minted for them, and one they still carry from before
+  their source changed opens nothing.
+  """
+  @spec keyed?(Trigger.t()) :: boolean()
+  def keyed?(%Trigger{source: %{"kind" => "webhook"} = source}), do: not Issue.repository?(source)
+  def keyed?(%Trigger{}), do: false
 
   # 256 bits, URL-safe so it survives a shell, a YAML file and a CI secret store. Prefixed
   # so that a key found in a log or a repository says what it is and what to rotate — the
@@ -495,9 +509,16 @@ defmodule Troupe.Plane.Triggers do
 
     case %Run{} |> Run.changeset(attrs) |> Repo.insert() do
       {:ok, run} ->
-        if live_runs(trigger, run) >= revision.concurrency,
-          do: skip(trigger, revision, run),
-          else: create(trigger, revision, run)
+        cond do
+          live_runs(trigger, run) >= revision.concurrency ->
+            skip(trigger, revision, run)
+
+          over = over_repository_cap(trigger, revision, run) ->
+            skip(trigger, revision, run, over)
+
+          true ->
+            create(trigger, revision, run)
+        end
 
       {:error, changeset} ->
         # The unique key said somebody else fired first, between our lookup and our
@@ -527,9 +548,47 @@ defmodule Troupe.Plane.Triggers do
     ) || 0
   end
 
-  defp skip(trigger, revision, run) do
+  # A run on a GitHub repository counts against the fix loop's caps as well as its
+  # trigger's own: the runs on a repository its profile (`spec.github.maxRuns`) and its
+  # team (`github.max_runs`) allow at once, across every trigger of theirs. Live as above.
+  defp over_repository_cap(trigger, revision, run) do
+    if Issue.repository?(trigger.source) do
+      GitHubPolicy.over_runs_cap(revision.profile, trigger.team_id, fn narrow ->
+        live_repository_runs(run, narrow)
+      end)
+    end
+  end
+
+  defp live_repository_runs(%Run{id: except}, narrow) do
+    query =
+      from(r in Run,
+        join: t in Trigger,
+        on: t.id == r.trigger_id,
+        join: v in Revision,
+        on: v.id == r.revision_id,
+        left_join: s in Session,
+        on: s.id == r.session_id,
+        where:
+          r.id != ^except and r.state == "created" and
+            fragment("(?->>'repository') IS NOT NULL", t.source) and
+            (is_nil(r.session_id) or s.status == "waiting" or
+               (s.state == "active" and s.status not in ["done", "interrupted"] and
+                  is_nil(s.failed_reason))),
+        select: count(r.id)
+      )
+
+    Repo.one(narrow_runs(query, narrow)) || 0
+  end
+
+  defp narrow_runs(query, profile: profile),
+    do: from([_r, _t, v, _s] in query, where: v.profile == ^profile)
+
+  defp narrow_runs(query, team_id: team_id),
+    do: from([_r, t, _v, _s] in query, where: t.team_id == ^team_id)
+
+  defp skip(trigger, revision, run, why \\ "over its concurrency cap") do
     {:ok, run} = run |> Run.changeset(%{state: "skipped"}) |> Repo.update()
-    Logger.info("troupe plane: trigger #{trigger.name} fired over its concurrency cap; skipped")
+    Logger.info("troupe plane: trigger #{trigger.name} fired #{why}; skipped")
     {:ok, fired(trigger, revision, run, nil, nil)}
   end
 

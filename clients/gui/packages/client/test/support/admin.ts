@@ -9,9 +9,10 @@
 // records it. A console that is right against this is right against the plane's rules,
 // which `apps/troupe_plane/test` holds the plane to.
 
+import { checkRuleSet } from "../../src/rules.js";
 import { older } from "./plane.js";
 import { PROVIDER_TYPES } from "./provider-types.js";
-import { MAX_DEPTH, WRITTEN_KEYS, empty as emptyResolved, fieldsOf, merge as mergeExtends, rowOf } from "./extends.js";
+import { MAX_DEPTH, WRITTEN_KEYS, composeBundle, empty as emptyResolved, fieldsOf, merge as mergeExtends, rowOf } from "./extends.js";
 import type { Resolved } from "./extends.js";
 
 type Refusal = { error: { code: number; message: string; data?: unknown } };
@@ -136,6 +137,11 @@ function revisionJson(r: { revision: number; hash: string; created_by: string; c
   return { id: `rev-${r.revision}-${r.hash.slice(7, 15)}`, revision: r.revision, hash: r.hash, reconstructed: false, created_by: r.created_by, created_at: r.created_at };
 }
 
+/** A trigger's webhook key, as `Triggers.rotate_key/2` mints one: answered once. */
+function mintKey(): string {
+  return `twk_fake${Math.random().toString(36).slice(2, 14)}`;
+}
+
 const SECTIONS = { agents: "agent", skills: "skill", mcp_servers: "mcp_server", acp_agents: "acp_agent" } as const;
 type Section = keyof typeof SECTIONS;
 
@@ -237,6 +243,8 @@ export interface FakeTeam {
   volume_storage_class: string | null;
   volume_size: string | null;
   allow_unenforced_workers: boolean;
+  /** The repositories its sessions may name and the fix loop's caps, as the plane answers them. */
+  github: { repositories: string[]; max_pushes: number | null; max_runs: number | null };
   admins: string[];
   grants: Array<{ profile: string; volume_mode: string | null }>;
   groups: Array<{ external_id: string; display_name: string | null; issuer: string | null; linked_by: string | null }>;
@@ -275,6 +283,10 @@ export interface FakeProfile {
   unenforced: boolean;
   pods: FakePod[];
   max_sessions?: number | null;
+  /** What its sessions may spend in a calendar month, in effect; null is none. */
+  budget_micros?: number | null;
+  /** What its sessions spent this month, for the fake's budget answers. */
+  spent_micros?: number;
   warm_workers?: number;
   /** The rest of the WorkerProfile spec, in the resource's camelCase, as `admin.profile.put` was sent it. */
   spec?: Record<string, unknown>;
@@ -322,6 +334,10 @@ export interface FakeTrigger {
   gitops?: { generation: number | null; problem: string | null; reasons: string[] };
   /** Whether it has a webhook key; where absent, a webhook that names no repository has one. */
   has_key?: boolean;
+  /** The key a sender presents now, and when it was minted: the plane keeps a hash; the fake keeps it to say an old one is dead. */
+  key?: string;
+  key_rotated_at?: string;
+  key_rotated_by?: string;
 }
 
 /** A trigger's run, as `admin.runs.list` answers it, with the team whose trigger it is. */
@@ -414,6 +430,7 @@ export const ENFORCEABLE = [
   { key: "base_url", kind: "fixed", meaning: "what it is", type: "string" },
   { key: "managed_mcp_servers_only", kind: "order", order: [false, true], meaning: "the loosest it may be", type: "boolean" },
   { key: "managed_permission_rules_only", kind: "order", order: [false, true], meaning: "the loosest it may be", type: "boolean" },
+  { key: "permissions", kind: "rules", meaning: "added to its own rules, the strictest holding", type: "rules" },
   { key: "max_tokens", kind: "ceiling", meaning: "the most it may be", type: "integer", min: 1 },
   { key: "max_turns", kind: "ceiling", meaning: "the most it may be", type: "integer", min: 1 },
   { key: "wall_clock_ms", kind: "ceiling", meaning: "the most it may be", type: "integer", min: 1 },
@@ -585,8 +602,39 @@ const TEAM_KEYS = [
   "volume_size",
   "volume_storage_class",
   "allow_unenforced_workers",
+  "github",
 ];
 const INTEGER_KEYS = ["budget_micros", "idle_timeout_seconds", "cache_eviction_days", "erase_after_days"];
+
+type TeamGitHubFake = FakeTeam["github"];
+
+/** A repository a team may list: `owner/name`, or `owner/*` for every one of the owner's. */
+const TEAM_REPOSITORY = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?:\*|[A-Za-z0-9._-]{1,100})$/;
+
+/** A team's `github` as the plane reads it: only the keys sent, each checked, over what the team has. */
+function readTeamGitHub(current: TeamGitHubFake, sent: unknown): { github: TeamGitHubFake } | { refused: Answer } {
+  const refused = (field: string, reason: string) => ({ refused: refuse(INVALID_PARAMS, "invalid_params", { field, reason }) });
+  if (sent === null) return { github: { repositories: [], max_pushes: null, max_runs: null } };
+  if (typeof sent !== "object" || Array.isArray(sent)) return refused("github", "github is an object: {repositories, max_pushes, max_runs}");
+  const github = { ...current };
+  for (const [key, value] of Object.entries(sent as Record<string, unknown>)) {
+    if (key === "repositories") {
+      if (value !== null && !Array.isArray(value)) return refused("github.repositories", "repositories is a list of owner/name, or owner/*");
+      const list = (value ?? []) as unknown[];
+      const bad = list.find((r) => typeof r !== "string" || !TEAM_REPOSITORY.test(r.trim()) || r.trim().endsWith("/.."));
+      if (bad !== undefined) return refused("github.repositories", `${JSON.stringify(bad)} is not a repository: owner/name, or owner/* for every repository of the owner`);
+      github.repositories = [...new Set((list as string[]).map((r) => r.trim()))];
+    } else if (key === "max_pushes" || key === "max_runs") {
+      if (value !== null && !(Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 1000)) {
+        return refused(`github.${key}`, `github.${key} is a whole number from 1 to 1000, not ${JSON.stringify(value)}`);
+      }
+      github[key] = value as number | null;
+    } else {
+      return refused(`github.${key}`, "github takes repositories, max_pushes, max_runs");
+    }
+  }
+  return { github };
+}
 const BOOLEAN_KEYS = ["members_may_control", "pins_allowed", "allow_unenforced_workers"];
 
 /** A team's name, as `Identity.Team` holds it to. */
@@ -785,6 +833,12 @@ export class FakeAdmin {
             reason: "only a platform admin decides whether a team may run where nothing is enforced",
           });
         }
+        if ("github" in attrs) {
+          // As `GitHub.Policy.read_team/2` reads it: the keys sent, over what the team has.
+          const read = readTeamGitHub(team.github, attrs["github"]);
+          if ("refused" in read) return read.refused;
+          attrs["github"] = read.github;
+        }
         for (const [k, v] of Object.entries(attrs)) {
           if (INTEGER_KEYS.includes(k) && v !== null && !(Number.isInteger(v) && (v as number) >= 0)) {
             return refuse(INVALID_PARAMS, "invalid_params", { reason: `${k} must be a whole number, 0 or more` });
@@ -976,6 +1030,7 @@ export class FakeAdmin {
           extended_by: this.childrenOf(p.name),
           policy: this.verdict({ name: p.name, image: p.image, spec: p.spec ?? {} }),
           bundle: this.bundleState(p),
+          budget: this.budgetOf(p),
           identity_problems: this.identityProblems(p.spec ?? {}),
           gitops: this.gitopsOf(p.gitops),
         };
@@ -983,8 +1038,15 @@ export class FakeAdmin {
           const resolved = this.resolveProfile(p.name, {});
           result["effective"] =
             typeof resolved === "string"
-              ? { extends: p.extends ?? null, chain: [], profile: null, fields: [], problems: [resolved] }
-              : { extends: p.extends ?? null, chain: resolved.chain, profile: rowOf(resolved), fields: fieldsOf(resolved), problems: resolved.problems };
+              ? { extends: p.extends ?? null, chain: [], profile: null, fields: [], problems: [resolved], bundle: null }
+              : {
+                  extends: p.extends ?? null,
+                  chain: resolved.chain,
+                  profile: rowOf(resolved),
+                  fields: fieldsOf(resolved),
+                  problems: resolved.problems,
+                  bundle: this.effectiveBundle(resolved.channels),
+                };
         }
         return { result };
       }
@@ -1006,8 +1068,16 @@ export class FakeAdmin {
             reason: `this plane is in gitops mode, and a profile extends another only on a plane that writes its profiles itself: a repository's manifest holds the whole profile, ${parent}'s fields included, until a plane resolves extends from a repository`,
           });
         }
+        // The profile's own permission rules, each read as `PermissionRule` reads it and
+        // refused in its words, as the enforced set's are.
+        const sentSpec = sentAttrs["spec"];
+        const rules = typeof sentSpec === "object" && sentSpec !== null ? (sentSpec as Record<string, unknown>)["permissions"] : undefined;
+        if (rules !== undefined && rules !== null) {
+          const why = checkRuleSet(rules);
+          if (why.length) return refuse(INVALID_PARAMS, "invalid_params", { field: "spec.permissions", reason: why.join("; ") });
+        }
         // A write that names a parent, or stops naming one, is the profile in effect.
-        const effect = this.inEffect(name, sentAttrs, parent, before);
+        const effect =this.inEffect(name, sentAttrs, parent, before);
         if (typeof effect === "string") return refuse(INVALID_PARAMS, "invalid_params", { ...(parent ? { extends: parent } : {}), reason: effect });
         const { attrs, own } = effect;
         const below = this.effectsBelow(name, { extends: parent, written: own ?? this.rootWritten(before, attrs) });
@@ -1045,6 +1115,8 @@ export class FakeAdmin {
         after.size_class = sizeClass;
         after.sessions_per_pod = sizeClass === "heavy" ? 2 : 4;
         if ("max_sessions" in attrs) after.max_sessions = typeof attrs["max_sessions"] === "number" ? attrs["max_sessions"] : null;
+        // Zero is no ceiling, and is kept as none.
+        if ("budget_micros" in attrs) after.budget_micros = typeof attrs["budget_micros"] === "number" && attrs["budget_micros"] > 0 ? attrs["budget_micros"] : null;
         if ("warm_workers" in attrs) after.warm_workers = typeof attrs["warm_workers"] === "number" ? attrs["warm_workers"] : 0;
         if (typeof attrs["provisioner"] === "string") after.provisioner = attrs["provisioner"];
         if ("spec" in attrs) {
@@ -1151,6 +1223,8 @@ export class FakeAdmin {
         if (role !== "platform_admin") return notPlatform;
         const channel = params["channel"];
         if (typeof channel !== "string" || channel === "") return refuse(INVALID_PARAMS, "invalid_params", { method, missing: ["channel"] });
+        if (channel.startsWith("profile:"))
+          return refuse(INVALID_PARAMS, "invalid_params", { channel, reason: `${channel} is the bundle the plane composes for a profile from the channels of the profiles it extends; publish to those channels instead` });
         const errors = bundleProblems(params["content"], this.policy.egress);
         if (errors.length) return refuse(INVALID_PARAMS, "invalid_params", { errors });
         const versions = this.bundles.get(channel) ?? [];
@@ -1241,6 +1315,31 @@ export class FakeAdmin {
       case "admin.identity.duplicates": {
         if (role !== "platform_admin") return notPlatform;
         return { result: { people: this.peopleAlike, groups: this.groupsAlike() } };
+      }
+
+      // Settling a refused adoption, as `Identity.settle/2` does: the row a sign-in made
+      // under the subject is folded into SCIM's, which takes the subject; with none, the
+      // next push or sign-in adopts SCIM's row. Either way the pair is no longer listed.
+      case "admin.identity.adopt": {
+        if (role !== "platform_admin") return notPlatform;
+        const rowId = String(params["row"] ?? "");
+        const who = String(params["subject"] ?? "");
+        const at = this.peopleAlike.findIndex((s) => s.by === "external_id" && s["row"] === rowId && s["subject"] === who);
+        if (at < 0) return refuse(NOT_FOUND, "not_found", { reason: `no refused adoption of ${who} by row ${rowId} stands: it is settled, or the row is gone` });
+        const set = this.peopleAlike[at]!;
+        const kept = set.people.find((p) => p["id"] === rowId);
+        const signed = set.people.find((p) => p["id"] !== rowId && p["subject"] === who) ?? null;
+        this.peopleAlike.splice(at, 1);
+        const detail = {
+          subject: who,
+          row: rowId,
+          row_subject: kept?.["subject"] ?? null,
+          folded: signed ? { id: signed["id"], subject: who } : null,
+          kms_names_left: [],
+          via: "admin",
+        };
+        this.record(subject, "person.adopt", who, detail);
+        return { result: detail };
       }
 
       case "admin.identity.check": {
@@ -1492,7 +1591,12 @@ export class FakeAdmin {
           if ("error" in found) return found;
           t = found.team;
         }
-        return { result: this.ceilings(who, t) };
+        let profile: FakeProfile | null = null;
+        if (params["profile"] !== undefined) {
+          profile = this.profiles.find((p) => p.name === params["profile"]) ?? null;
+          if (!profile) return refuse(NOT_FOUND, "not_found", { profile: params["profile"] });
+        }
+        return { result: this.ceilings(who, t, profile) };
       }
 
 
@@ -1545,8 +1649,9 @@ export class FakeAdmin {
         if (!existing) this.triggerRows.push(row);
         // A new webhook trigger is made with its key, answered this once; one on a GitHub
         // repository is fired by the App and has none.
-        const minted = !existing && row.source["kind"] === "webhook" && !row.source["repository"] ? `twk_fake${Math.random().toString(36).slice(2, 14)}` : null;
+        const minted = !existing && row.source["kind"] === "webhook" && !row.source["repository"] ? mintKey() : null;
         if (!existing) row.has_key = minted !== null;
+        if (minted) Object.assign(row, { key: minted, key_rotated_at: now, key_rotated_by: subject });
         const changes = diff(before, this.comparable_trigger(row));
         const revision = this.revise(row, subject);
         this.record(subject, "trigger.put", `${t.name}/${name}`, { ...changes, __revision__: revision.revision, __revision_hash__: revision.hash, ...(minted ? { __key_minted__: true } : {}) });
@@ -1567,6 +1672,71 @@ export class FakeAdmin {
         this.record(subject, "trigger.delete", `${row.team}/${row.name}`, this.comparable_trigger(row));
         this.triggerRows.splice(this.triggerRows.indexOf(row), 1);
         return { result: { team: row.team, name: row.name, deleted: true } };
+      }
+
+      // Both are things done with a trigger rather than changes to what it is, so a gitops
+      // plane takes them too, as `Admin.trigger_run/3` and `trigger_key_rotate/3` do.
+      case "admin.trigger.run":
+      case "admin.trigger.key.rotate": {
+        const found = this.fetchTeam(subject, params["team"]);
+        if ("error" in found) return found;
+        const row = this.triggerRows.find((r) => r.team === found.team.name && r.name === params["name"]);
+        if (!row) return refuse(NOT_FOUND, "not_found", { trigger: params["name"] });
+        const now = new Date().toISOString();
+        if (method === "admin.trigger.key.rotate") {
+          // A webhook that names no repository is the only trigger a key fires.
+          if (row.source["kind"] !== "webhook" || row.source["repository"]) {
+            const by = row.source["kind"] === "schedule" ? "is fired by its schedule" : row.source["repository"] ? `is fired by the GitHub App's signed deliveries for ${String(row.source["repository"])}` : "is run by hand, or by a principal that signs in";
+            return refuse(INVALID_PARAMS, "invalid_params", { trigger: row.name, reason: `${row.name} ${by}, so it has no key: one would let whoever held it fire it with any event they liked` });
+          }
+          // Replaces whatever it had, at once: no window in which the old one still fires.
+          const had = this.triggerJson(row)["has_key"] === true;
+          const key = mintKey();
+          Object.assign(row, { has_key: true, key, key_rotated_at: now, key_rotated_by: subject });
+          this.record(subject, "trigger.key.rotate", `${row.team}/${row.name}`, { had_key: had });
+          return { result: { team: row.team, name: row.name, url: `/trigger/${row.id}`, key, rotated_at: now } };
+        }
+        // The caller and the minute: a second click within it is the run already made.
+        const at = `${now.slice(0, 19)}Z`;
+        const key = `manual:${row.id}:${subject}:${now.slice(0, 16)}:00Z`;
+        this.record(subject, "trigger.run", `${row.team}/${row.name}`, { run: key });
+        if (!row.enabled) return refuse(FORBIDDEN, "forbidden", { reason: "trigger is disabled", trigger: row.name });
+        const again = this.runRows.find((r) => r.idempotency_key === key);
+        const live = this.runRows.filter((r) => r.trigger_id === row.id && ["created", "running", "waiting"].includes(r.state)).length;
+        const last = row.revisions.at(-1);
+        const id = `run-${row.name}-manual-${this.runRows.length + 1}`;
+        const skipped = live >= row.concurrency;
+        const made: FakeRun = again ?? {
+          id,
+          team: row.team,
+          trigger: row.name,
+          trigger_id: row.id,
+          idempotency_key: key,
+          session_id: skipped ? null : `s-${id}`,
+          fired_at: now,
+          fired_by: subject,
+          source: "manual",
+          revision: last?.revision ?? null,
+          revision_hash: last?.hash ?? null,
+          event: { kind: "manual", by: subject, at },
+          state: skipped ? "skipped" : "created",
+          status: null,
+          done_reason: null,
+          failed_reason: null,
+          pending_approvals: null,
+          pending_questions: null,
+          cost_micros: null,
+          repository: null,
+          issue: null,
+          github: null,
+          reviewed_by: null,
+          reviewed_at: null,
+        };
+        if (!again) {
+          this.runRows.push(made);
+          row.last_fired_at = now;
+        }
+        return { result: { run: { ...made }, session_id: made.session_id, state: made.state } };
       }
 
       case "admin.runs.list": {
@@ -1823,7 +1993,7 @@ export class FakeAdmin {
   /** What a profile wrote: `own` for one that extends another, its own fields otherwise. */
   private writtenOf(p: FakeProfile): Record<string, unknown> {
     if (p.extends) return { ...(p.own ?? {}) };
-    return { image: p.image, size_class: p.size_class, max_sessions: p.max_sessions ?? null, warm_workers: p.warm_workers ?? 0, provisioner: p.provisioner, spec: p.spec ?? {} };
+    return { image: p.image, size_class: p.size_class, max_sessions: p.max_sessions ?? null, budget_micros: p.budget_micros ?? null, warm_workers: p.warm_workers ?? 0, provisioner: p.provisioner, spec: p.spec ?? {} };
   }
 
   /** What a write that names no parent leaves a profile having written: its fields, the write's over them. */
@@ -1869,12 +2039,35 @@ export class FakeAdmin {
     return below;
   }
 
-  private resolveProfile(name: string, overrides: Record<string, { extends: string | null; written: Record<string, unknown> }>): (Resolved & { chain: string[] }) | string {
+  private resolveProfile(name: string, overrides: Record<string, { extends: string | null; written: Record<string, unknown> }>): (Resolved & { chain: string[]; channels: Array<[string, string]> }) | string {
     const chain = this.chainOf(name, overrides);
     if ("missing" in chain) return `${chain.missing} is extended in this chain and is not a profile on this plane any more`;
     if ("cycle" in chain) return `${chain.cycle.join(" → ")} extend each other in a circle`;
-    const resolved = chain.reduce<Resolved>((parent, [profile, written]) => mergeExtends(parent, written, profile), emptyResolved());
-    return { ...resolved, chain: chain.map(([n]) => n) };
+    // Each profile with the channel it follows in effect, for the bundle its pods load.
+    const channels: Array<[string, string]> = [];
+    const resolved = chain.reduce<Resolved>((parent, [profile, written]) => {
+      const merged = mergeExtends(parent, written, profile);
+      channels.push([profile, String(rowOf(merged)["channel"])]);
+      return merged;
+    }, emptyResolved());
+    return { ...resolved, chain: chain.map(([n]) => n), channels };
+  }
+
+  /** The bundle a profile's pods load, each entry with the profile whose channel gave it, as `effective.bundle` answers. */
+  private effectiveBundle(channels: Array<[string, string]>): Record<string, unknown> {
+    const composed = composeBundle(channels, (channel) => this.current(channel)?.content ?? null);
+    const single = composed.composed ? null : this.current(composed.channel);
+    return { ...composed, hash: single ? single.hash : null };
+  }
+
+  /** A profile's own monthly ceiling as `admin.profile.get` answers `budget`. */
+  private budgetOf(p: FakeProfile): Record<string, unknown> {
+    let setBy: string | null = p.budget_micros ? p.name : null;
+    if (p.budget_micros && p.extends) {
+      const resolved = this.resolveProfile(p.name, {});
+      if (typeof resolved !== "string") setBy = String(resolved.from["budget_micros"] ?? p.name);
+    }
+    return { budget_micros: p.budget_micros ?? null, budget_period: "monthly", set_by: setBy, spent_micros: p.spent_micros ?? 0, reserved_micros: 0 };
   }
 
   /** Whether `name` may extend `parent`, in the plane's sentences where it may not. */
@@ -1905,6 +2098,14 @@ export class FakeAdmin {
     }
     const resolved = this.resolveProfile(name, { [name]: { extends: via, written: own } });
     if (typeof resolved === "string") return resolved;
+    // A budget above the one it has from above is refused, as the plane refuses it.
+    const wrote = own["budget_micros"];
+    const ceiling = resolved.attrs["budget_micros"];
+    const source = resolved.from["budget_micros"];
+    if (parent && typeof wrote === "number" && wrote > 0 && typeof ceiling === "number" && source !== name && ceiling < wrote) {
+      const dollars = `$${(ceiling / 1_000_000).toFixed(2)}`;
+      return `${name} has a monthly budget of ${dollars} from ${String(source)}, and a profile that extends another can only lower its budget: set ${name}'s at or below ${dollars}, or raise ${String(source)}'s`;
+    }
     const { channel: _channel, ...row } = rowOf(resolved);
     return { attrs: { ...row, name }, own: parent ? own : null };
   }
@@ -1936,6 +2137,7 @@ export class FakeAdmin {
       size_class: p.size_class,
       size_class_summary: SIZE_CLASSES[p.size_class] ?? null,
       max_sessions: p.max_sessions ?? null,
+      budget_micros: p.budget_micros ?? null,
       warm_workers: p.warm_workers ?? 0,
       gitops: this.gitopsOf(p.gitops),
       replicas: p.replicas,
@@ -1979,6 +2181,7 @@ export class FakeAdmin {
     return {
       size_class: p.size_class,
       max_sessions: p.max_sessions ?? null,
+      budget_micros: p.budget_micros ?? null,
       warm_workers: p.warm_workers ?? 0,
       provisioner: p.provisioner,
       replicas: p.replicas,
@@ -2188,8 +2391,8 @@ export class FakeAdmin {
       notify_url: row.notify_url,
       concurrency: row.concurrency,
       has_key: hasKey,
-      key_rotated_at: hasKey ? row.updated_at : null,
-      key_rotated_by: hasKey ? row.created_by : null,
+      key_rotated_at: hasKey ? (row.key_rotated_at ?? row.updated_at) : null,
+      key_rotated_by: hasKey ? (row.key_rotated_by ?? row.created_by) : null,
       last_fired_at: row.last_fired_at,
       created_by: row.created_by,
       updated_at: row.updated_at,
@@ -2295,6 +2498,13 @@ export class FakeAdmin {
           if (!spec) {
             const keys = listed.map((e) => e.key);
             reasons.push(`${key} is not a key an organisation may enforce; the ones it may are ${keys.slice(0, -1).join(", ")} and ${keys.at(-1)}`);
+            continue;
+          }
+          // Rules are checked one by one, each refused in its own words, as `PermissionRule.check_set/1` does.
+          if (spec.type === "rules") {
+            const why = checkRuleSet(value);
+            if (why.length) reasons.push(...why);
+            else kept[key] = value;
             continue;
           }
           const values = (spec.values ?? []) as string[];
@@ -2604,8 +2814,8 @@ export class FakeAdmin {
     };
   }
 
-  /** `Budget.ceilings/2`: the person's own, the team's and the platform's, narrowest first. */
-  private ceilings(subject: string, team: FakeTeam | null): Array<Record<string, unknown>> {
+  /** `Budget.ceilings/3`: the person's own, the profile's where it has one, the team's and the platform's, narrowest first. */
+  private ceilings(subject: string, team: FakeTeam | null, profile: FakeProfile | null = null): Array<Record<string, unknown>> {
     const rows = [...this.teams.values()].flatMap((t) => t.members.filter((m) => m.subject === subject));
     const cap = rows[0]?.budget_micros ?? null;
     const spent = rows.reduce((n, m) => n + m.spent_micros, 0);
@@ -2625,7 +2835,10 @@ export class FakeAdmin {
       budget_micros: platformCap ?? 0,
       remaining_micros: remaining(platformCap, all),
     };
-    return [person, ...teamRung, platform];
+    const profileRung = profile?.budget_micros
+      ? [{ scope: "profile", profile: profile.name, ...this.budgetOf(profile), remaining_micros: remaining(profile.budget_micros, profile.spent_micros ?? 0) }]
+      : [];
+    return [person, ...profileRung, ...teamRung, platform];
   }
 
   private record(actor: string, action: string, subject: string, detail: Record<string, unknown>): void {
@@ -2649,6 +2862,7 @@ export function team(name: string, fields: Partial<FakeTeam> = {}): FakeTeam {
     volume_storage_class: null,
     volume_size: null,
     allow_unenforced_workers: false,
+    github: { repositories: [], max_pushes: null, max_runs: null },
     admins: [],
     grants: [],
     groups: [],
@@ -2761,6 +2975,7 @@ export function exampleAdmin(): FakeAdmin {
         members_may_control: true,
         volume_size: "20Gi",
         volume_storage_class: "fast-ssd",
+        github: { repositories: ["example-org/widgets"], max_pushes: 5, max_runs: null },
         admins: ["dan@example.com"],
         grants: [
           { profile: "dev", volume_mode: "rw" },

@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, recordCalls, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, recordCalls, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -47,10 +47,10 @@ describe("what looks held twice", () => {
     await open();
     const twice = await waitFor(() => section("People and groups that look held twice"), "the section");
     await waitFor(() => says("2 people share an email: dan@example.com", twice), "Dan, twice");
-    expect(says("sign-in", twice)).toBe(true);
-    expect(says("scim", twice)).toBe(true);
-    expect(says("6f1e2d3c-4b5a-4968-8776-1a2b3c4d5e6f", twice)).toBe(true);
-    expect(says("make them the same at the provider", twice)).toBe(true);
+    await sees("sign-in", twice);
+    await sees("scim", twice);
+    await sees("6f1e2d3c-4b5a-4968-8776-1a2b3c4d5e6f", twice);
+    await sees("make them the same at the provider", twice);
   });
 
   it("lists an adoption the plane refused, by the externalId it was refused on", async () => {
@@ -64,7 +64,38 @@ describe("what looks held twice", () => {
     await open();
     const twice = await waitFor(() => section("People and groups that look held twice"), "the section");
     await waitFor(() => says("Not merged on externalId 4d3c2b1a", twice), "the refused adoption");
-    expect(says("neither the email nor the userName it sent agrees", twice)).toBe(true);
+    await sees("neither the email nor the userName it sent agrees", twice);
+  });
+
+  it("settles a refused adoption, typed by the subject, folding the sign-in's row into SCIM's", async () => {
+    fake.admin.peopleAlike.push({
+      by: "external_id",
+      subject: "4d3c2b1a",
+      row: "u-gus",
+      people: [
+        { id: "u-gus", subject: "9a8b7c6d", external_id: "4d3c2b1a", user_name: "gus@example.com", email: "gus@example.com", display_name: "Gus", origin: "scim" },
+        { id: "u-gus-2", subject: "4d3c2b1a", external_id: null, user_name: null, email: null, display_name: null, origin: "sign-in" },
+      ],
+      likely: "a sign-in under 4d3c2b1a found this row by its SCIM externalId, but neither the email nor the userName its token carried agrees with the row's",
+    });
+    await open();
+    const twice = await waitFor(() => section("People and groups that look held twice"), "the section");
+    await waitFor(() => says("Not merged on externalId 4d3c2b1a", twice), "the refused adoption");
+    // Dan's set shares an email and is nothing to settle here.
+    expect(twice.querySelectorAll("button").length).toBe(1);
+    button("Settle", twice)!.click();
+    await waitFor(() => says("Type 4d3c2b1a to confirm"), "the typed confirmation");
+    await sees("folded into SCIM's, and removed");
+    await sees("Settle only when they are one person.");
+    const go = [...document.querySelectorAll<HTMLButtonElement>(".preview button")].find((b) => (b.textContent ?? "").startsWith("Settle"))!;
+    expect(go.disabled).toBe(true);
+    type(field("Type 4d3c2b1a to confirm")!, "4d3c2b1a");
+    await waitFor(() => !go.disabled, "the subject typed");
+    go.click();
+    await waitFor(() => says("Recorded in the audit as person.adopt on 4d3c2b1a"), "the audit's note");
+    await waitFor(() => !says("Not merged on externalId 4d3c2b1a", twice), "the pair settled");
+    const adopted = fake.admin.audit.find((a) => a.action === "person.adopt")!;
+    expect(adopted.detail?.["folded"]).toEqual({ id: "u-gus-2", subject: "4d3c2b1a" });
   });
 
   it("flags a group held twice where it is listed, and says what else the plane says of a set", async () => {
@@ -75,10 +106,10 @@ describe("what looks held twice", () => {
     await open();
     const groups = await waitFor(() => section("Groups this plane has seen"), "the groups");
     await waitFor(() => says("looks held twice", groups), "the flag");
-    expect(says("Platform owners looks held twice: grp-platform has the same name.", groups)).toBe(true);
+    await sees("Platform owners looks held twice: grp-platform has the same name.", groups);
     const twice = section("People and groups that look held twice")!;
     await waitFor(() => says("2 groups share the name Platform owners", twice), "the groups' set");
-    expect(says("the sign-in was not adopted", twice)).toBe(true);
+    await sees("the sign-in was not adopted", twice);
   });
 
   it("is not asked for by a team admin, who is shown their team's principals alone", async () => {
@@ -111,7 +142,7 @@ describe("a team's service principals", () => {
     expect(shown).toMatch(/^tps_/);
     expect(JSON.stringify(fake.admin.audit)).not.toContain(shown);
     await waitFor(() => row("svc:core/weekly-audit"), "the new principal listed");
-    expect(says("works", row("svc:core/weekly-audit")!)).toBe(true);
+    await sees("works", () => row("svc:core/weekly-audit"));
   });
 
   it("are rotated and disabled, each typed by the subject", async () => {
@@ -152,7 +183,7 @@ describe("a team's service principals", () => {
     });
     await open();
     await waitFor(() => row("svc:core/orphan"), "the orphan");
-    expect(says("needs a sponsor", row("svc:core/orphan")!)).toBe(true);
+    await sees("needs a sponsor", () => row("svc:core/orphan"));
   });
 });
 

@@ -57,15 +57,23 @@ defmodule Troupe.Plane.GitHubRunTest do
           :public_key.pem_encode([:public_key.pem_entry_encode(:RSAPrivateKey, key)])
       })
 
+    # A team that lists the repository, as a team's must for its sessions to name one.
+    team =
+      team_with_grant("fixers", "dev",
+        name: "fixers",
+        github: %{"repositories" => ["example-org/widgets"]}
+      )
+
     {:ok, session} =
       Sessions.create(%{
         id: "s-gh-run-#{System.unique_integer([:positive])}",
         owner_subject: "idp|ada",
+        team_id: team.id,
         profile: "dev",
         repository: %{"owner" => "example-org", "name" => "widgets"}
       })
 
-    %{fake: fake, session: session}
+    %{fake: fake, session: session, team: team}
   end
 
   describe "what a worker profile grants" do
@@ -108,7 +116,16 @@ defmodule Troupe.Plane.GitHubRunTest do
       assert write["permissions"] == @grants
       assert write["api_url"] == context.fake.api_url
       assert read["permissions"] == %{"contents" => "read"}
-      refute Map.has_key?(read, "api_url")
+      # Each says where it is revoked; only the fix loop's carries the policy a push checks.
+      assert read["api_url"] == context.fake.api_url
+      refute Map.has_key?(read, "policy")
+
+      assert write["policy"] == %{
+               "allow_public" => false,
+               "deny_paths" => Troupe.PushPaths.defaults(),
+               "max_pushes" => nil
+             }
+
       assert Enum.all?(FakeGitHub.requests(context.fake), &(&1.repositories == ["widgets"]))
     end
 
@@ -358,7 +375,7 @@ defmodule Troupe.Plane.GitHubRunTest do
     {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false, packet: :line])
 
     send_line(socket, 0, "enrol", %{
-      "token" => "dev-token",
+      "token" => FakePod.token("dev-token"),
       "pod_name" => pod_name,
       "capacity" => 4,
       "disk_total_bytes" => 1_000

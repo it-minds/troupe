@@ -130,6 +130,7 @@ defmodule Troupe.Plane.Admin.Console do
     team_admin_remove: {:area, :teams},
     groups_list: {:area, :identity},
     identity_duplicates: {:area, :identity},
+    identity_adopt: {:area, :identity},
     principals_list: {:area, :identity},
     principal_create: {:area, :identity},
     principal_rotate: {:area, :identity},

@@ -12,7 +12,7 @@ import { App } from "../src/App";
 import { Key } from "../src/views/Onboarding/Key";
 import { Provider } from "../src/views/Onboarding/Provider";
 import { FakeDaemon, SETUP_KINDS } from "../../../packages/client/test/support/daemon.js";
-import { button, nav, render, says, startOnTheList, type, waitFor } from "./support";
+import { button, nav, render, says, sees, startOnTheList, type, waitFor } from "./support";
 
 // jsdom lays nothing out, so it has nothing to scroll; the transcript asks anyway.
 Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -107,7 +107,7 @@ describe("the first run's provider step", () => {
     button("Ollama")!.click();
     const ollama = await waitFor(() => field("Address"), "Ollama's address");
     expect(ollama.placeholder).toBe("http://localhost:11434");
-    expect(says("leave empty for http://localhost:11434")).toBe(true);
+    await sees("leave empty for http://localhost:11434");
     expect(button("Continue")!.disabled).toBe(false);
     button("Continue")!.click();
     expect(onAnswer).toHaveBeenLastCalledWith({ provider: "ollama", kind: "ollama", base_url: null });
@@ -138,7 +138,7 @@ describe("the first run's provider step", () => {
     });
     unmount = render(<Key flow={flow} {...idle} onAnswer={onAnswer} />).unmount;
     await shown("The key");
-    expect(says("a real request to Azure OpenAI")).toBe(true);
+    await sees("a real request to Azure OpenAI");
     expect(button("This gateway needs no key")).toBeNull();
     expect(field("API key")).not.toBeNull();
   });
@@ -203,7 +203,7 @@ describe("the Models panel", () => {
     choose(select, "azure_openai");
     await waitFor(() => field("API key"), "Azure's key");
     expect(field("Address")!.placeholder).toBe("https://<resource>.openai.azure.com");
-    expect(says("required — your Azure OpenAI resource's own address")).toBe(true);
+    await sees("required — your Azure OpenAI resource's own address");
     expect(button("Save")!.disabled).toBe(true);
     type(field("Address")!, "https://standin.openai.azure.example.test");
     await waitFor(() => !button("Save")!.disabled || null, "Save enabled");

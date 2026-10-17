@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -34,25 +34,25 @@ describe("the GitHub App", () => {
   it("reads what is set, the key by its fingerprint and never the key", async () => {
     await open();
     await waitFor(() => says("The GitHub App") && says("configured"), "the App");
-    expect(says("4242", card())).toBe(true);
-    expect(says("example-org (77001)", card())).toBe(true);
-    expect(says("https://github.com", card())).toBe(true);
-    expect(says(fake.admin.github.key!.fingerprint, card())).toBe(true);
-    expect(says("never shown", card())).toBe(true);
+    await sees("4242", card());
+    await sees("example-org (77001)", card());
+    await sees("https://github.com", card());
+    await sees(fake.admin.github.key!.fingerprint, card());
+    await sees("never shown", card());
   });
 
   it("is tested against GitHub, writing nothing, and says which check failed", async () => {
     await open();
     (await waitFor(() => button("Test it"), "the App")).click();
     await waitFor(() => says("GitHub knows the App as troupe-example, and every installation set here."), "GitHub's answer");
-    expect(says("Installations")).toBe(true);
+    await sees("Installations");
     expect(fake.admin.audit.some((a) => a.action.startsWith("github."))).toBe(false);
 
     // GitHub holds another key for the App: the plane signs, and GitHub refuses it.
     fake.admin.githubKnows!.fingerprint = "SHA256:another";
     button("Test it")!.click();
     await waitFor(() => says("GitHub refused the App's JWT"), "the refusal");
-    expect(says("Not tried: GitHub did not pass.")).toBe(true);
+    await sees("Not tried: GitHub did not pass.");
   });
 
   it("is changed behind a preview, the key pasted once and kept nowhere, and shown as the audit recorded it", async () => {
@@ -64,7 +64,7 @@ describe("the GitHub App", () => {
     type(field("Private key")!, PEM);
     button("Preview")!.click();
     await waitFor(() => says("What will happen") && says("Sessions may name repositories of example-org, other-org."), "the preview");
-    expect(says("The key becomes the next version in OpenBao")).toBe(true);
+    await sees("The key becomes the next version in OpenBao");
     button("Apply")!.click();
     await waitFor(() => says("Recorded in the audit as github.put on app"), "the audit's note");
     expect(fake.admin.github.installations).toEqual([
@@ -81,7 +81,7 @@ describe("the GitHub App", () => {
     await open();
     await waitFor(() => says("signed with a secret at version 1"), "the webhook");
     await waitFor(() => says("pull_request_review.submitted") && says("s-7f3a9c24"), "the deliveries");
-    expect(says("nothing here acts on a push")).toBe(true);
+    await sees("nothing here acts on a push");
 
     button("Change the App")!.click();
     type(await waitFor(() => field("Webhook secret"), "the form"), "0123456789abcdef0123456789abcdef");
@@ -107,7 +107,7 @@ describe("the GitHub App", () => {
     await open();
     (await waitFor(() => button("Remove the App"), "the App")).click();
     await waitFor(() => says("Type 4242 to confirm"), "the typed confirmation");
-    expect(says("A session that names a repository is refused from now on")).toBe(true);
+    await sees("A session that names a repository is refused from now on");
     const go = () => [...document.querySelectorAll<HTMLButtonElement>(".preview button")].find((b) => (b.textContent ?? "").startsWith("Remove the App"))!;
     expect(go().disabled).toBe(true);
     type(field("Type 4242 to confirm")!, "4242");
@@ -124,7 +124,7 @@ describe("the GitHub App", () => {
     expect(button("Test it")).toBeNull();
     expect(button("Change the App")).toBeNull();
     expect(button("Remove the App")).toBeNull();
-    expect(says("Only a platform admin changes or tests the App")).toBe(true);
+    await sees("Only a platform admin changes or tests the App");
     expect(says("What GitHub has sent")).toBe(false);
   });
 });
@@ -135,11 +135,11 @@ describe("what the plane dials", () => {
     await open();
     await waitFor(() => says("Every host anything here dials"), "the hosts");
     const hostRow = (host: string) => [...document.querySelectorAll("tr")].find((r) => r.cells[0]?.textContent === host) ?? null;
-    expect(says("allowed", hostRow("llm-gw.example.com")!)).toBe(true);
-    expect(says("refused", hostRow("elsewhere.example.org")!)).toBe(true);
-    expect(says("ux", hostRow("elsewhere.example.org")!)).toBe(true);
-    expect(says("a Secret named JIRA_TOKEN")).toBe(true);
-    expect(says("design/weekly-digest")).toBe(true);
-    expect(says("https://hooks.example.com/troupe")).toBe(true);
+    await sees("allowed", () => hostRow("llm-gw.example.com"));
+    await sees("refused", () => hostRow("elsewhere.example.org"));
+    await sees("ux", () => hostRow("elsewhere.example.org"));
+    await sees("a Secret named JIRA_TOKEN");
+    await sees("design/weekly-digest");
+    await sees("https://hooks.example.com/troupe");
   });
 });

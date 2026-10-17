@@ -124,6 +124,7 @@ export type {
   AdminSessionRow,
   SessionGitHub,
   AdminTeam,
+  TeamGitHub,
   AdminGroup,
   AdminTeamGroup,
   AdminTeamMember,
@@ -150,6 +151,9 @@ export type {
   GitopsState,
   PolicyVerdict,
   EffectiveProfile,
+  EffectiveBundle,
+  BundleEntry,
+  ProfileBudget,
   ProfileBelow,
   ProfileDetail,
   ProfilePreview,
@@ -169,6 +173,8 @@ export type {
   ServicePrincipal,
   TeamSpend,
   Trigger,
+  TriggerFired,
+  TriggerKey,
   TriggerRun,
   Ceiling,
   Connections,
@@ -177,6 +183,7 @@ export type {
   GitHubCheck,
   GitHubDelivery,
   Host,
+  IdentityAdopted,
   IdentityDuplicates,
   IntegrationServer,
   Integrations,
@@ -283,6 +290,8 @@ export type {
   PermissionRule,
   ProviderTypeInfo,
 } from "./config.js";
+export { PATH_TOOLS, RULE_ACTIONS, checkRuleSet, parseRule, ruleKind, ruleParts } from "./rules.js";
+export type { ReadRule, RuleAction, RuleKind, RuleSet } from "./rules.js";
 export {
   APPROVAL_CHOICES,
   OLDER_DAEMON_KINDS,

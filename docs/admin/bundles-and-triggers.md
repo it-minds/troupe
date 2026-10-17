@@ -53,6 +53,15 @@ or at another address, gets a rule of its own in those workers' NetworkPolicy
 ([profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy)). `admin.bundle.validate`
 is not given a channel and does not make this check.
 
+**A profile that extends another.** Any entry, of any kind, may say `"override": true`
+(`true` or `false`, nothing else). It matters where a profile on this channel extends a
+profile on another: the plane composes the two channels' bundles into the one its pods
+load, and an entry with a name the parent's bundle already has replaces the parent's only
+with the flag; without it the parent's is kept and the clash is reported
+([profiles-and-policy.md](profiles-and-policy.md#a-profile-that-extends-another),
+Decision 910). The composed bundle is published on the channel `profile:<name>`, which is
+the plane's: a publish to it by hand is refused.
+
 **MCP entries.**
 
 | Field | Meaning | Default |
@@ -87,7 +96,11 @@ client, the certificate and the key, and rotating them, is in
 
 **Publish, adopt, retire.** `admin.bundle.publish {channel, content}` validates, assigns
 the channel's next version, stores the document under `sha256:<canonical JSON>`, pushes
-`config.updated` to every pod on the channel and rewrites `mcpServers` on those profiles.
+`config.updated` to every pod on the channel and rewrites `mcpServers` on those profiles:
+the channel's servers composed again with the ones each profile wrote itself, which a
+publish keeps (Decision 910). A profile created on a channel, or moved onto one, gets the
+channel's current servers on its resource with that write, not at the channel's next
+publish.
 History is append-only; a rollback is a new version with the old content. Pods fetch the
 version over the control channel, verify the hash and materialise
 `bundles/<hash>/{agents, skills, bundle.json}`; one that missed the push catches up at its
@@ -157,16 +170,22 @@ minute is within the last 120 s.
 `/rpc`, by the trigger's principal or an admin of its team, writes the run row first, so
 two callers racing on one key get the same run: skipped stays skipped, failed is retried, a
 run with a session is handed it and a fresh token. `event` is capped at 16 KiB.
-`admin.trigger.run` fires one by hand.
+`admin.trigger.run` fires one by hand, as the console's **Run now** on a trigger's page does;
+its key names the caller and the minute, so a second click or a retry within the same minute
+is the run the first one made.
 
 **A trigger's own URL.** A trigger with a key is fired by `POST /trigger/<id>` with
 `Authorization: Bearer <key>` and a JSON object as the body, which becomes the run's
 `event`. A webhook trigger is made with its key: the `admin.trigger.put` that creates it
 answers `key` and `url` once, and the console shows them once with a button that copies
-the key; nothing shows it again. `admin.trigger.key.rotate` mints a new one, shows it once
-with the URL and keeps a salted hash; rotating replaces it at once, and is how a trigger
-made another way (another kind, a resource in `gitops` mode) gets one. A trigger on a
-GitHub repository is fired by the App's signed deliveries and is made with none. The key
+the key; nothing shows it again. `admin.trigger.key.rotate` (the console's **Rotate**, typed
+by the trigger's name) mints a new one, shows it once with the URL and keeps a salted hash;
+rotating replaces it at once, and is how a webhook
+made another way (a resource in `gitops` mode, or a trigger changed to a webhook) gets one.
+Only a webhook that names no repository has a key: a schedule is fired by the plane, a
+manual trigger by a person or a principal, and a trigger on a GitHub repository by the
+App's signed deliveries, so rotating one of those is refused, and a key a trigger kept from
+before its source changed opens nothing. The key
 fires that one trigger and does
 nothing else, which makes it the credential to give a CI job or a provider's webhook, and
 a wrong key and an unknown id get the same `401`. An `Idempotency-Key` header names the
@@ -174,8 +193,7 @@ run; without one, a retry in the same minute against the same revision gets the 
 already made. The answer is `202` with the run and where its session is, as from
 `trigger.fire`; a disabled trigger is `403`, an event over 16 KiB `413` and a team with no
 budget left `402`. `source.kind: webhook` says a trigger is meant to be fired from
-outside, this way or by an executor that calls `trigger.fire`; any trigger with a key can
-be.
+outside, this way or by an executor that calls `trigger.fire`.
 
 **Runs** store only what the plane decided — `created`, `skipped`, `failed` — and read the
 rest from the session: `running`, `waiting` (on an approval), `done`, `failed`. A turn the
@@ -339,6 +357,17 @@ review queue (`needs_review` on `sessions.list` and `admin.sessions.list`);
   `admin.team.update`. There is also a platform budget and a per-person budget;
   `admin.budget.explain` says which ceiling binds and why, `admin.person.budget` one
   person's.
+- **A profile's budget** (Decision 910). A worker profile may carry `budget_micros`, a
+  ceiling on what the sessions on it spend in a calendar month (UTC), whoever starts them
+  and in whichever team. It is asked after the person's and before the team's, as their
+  rung is, with the same reservations; a session it refuses is `budget_exhausted` with
+  `scope: profile`, the profile's name and a sentence saying it is that profile's. A
+  profile that extends another has the lower of its own and its parent's, and one set
+  higher than its parent's is refused; each profile's sessions count against its own
+  ceiling, not its parent's. `admin.budget.explain` with `profile` lists it, with
+  `set_by`, the profile whose budget is in effect; `admin.profile.get` answers `budget`,
+  what is spent and held this month. The console sets it on the profile's editor, in
+  dollars, through the usual preview and audit.
 - **Reservation, then spend.** A session reserves a slice at activation (`terms.budget_micros`
   or the default); the ledger records what model calls actually cost, one row per gateway
   request id. A reservation is granted when spend plus reservations stays within the

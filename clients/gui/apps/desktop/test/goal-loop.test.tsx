@@ -13,7 +13,7 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { GoalLine } from "../src/views/Goal";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, render, says, sleep, startOnTheList, type, waitFor } from "./support";
+import { button, render, says, sees, sleep, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -81,7 +81,7 @@ describe("the goal in the session's head", () => {
     goalText()!.click();
     await waitFor(() => goalText()?.getAttribute("aria-expanded") === "false", "the goal closed");
     // The transcript says it once, where it happened.
-    expect(says(`goal: ${long}`)).toBe(true);
+    await sees(`goal: ${long}`);
 
     // Another client changes it: the head follows the event.
     session.goal = "Only the changelog";
@@ -100,7 +100,7 @@ describe("the goal in the session's head", () => {
     button("Clear", head())!.click();
     await waitFor(() => daemon.calls.some((c) => c.method === "session.goal.clear"), "session.goal.clear");
     await waitFor(() => goalText() === null && button("Set a goal", head()) !== null, "the goal gone from the head");
-    expect(says("goal cleared")).toBe(true);
+    await sees("goal cleared");
   });
 });
 
@@ -157,14 +157,14 @@ describe("the loop in the session's head", () => {
     session.log.append("loop_iteration_started", { loop_id: "loop-1", iteration: 2, command_id: "loop-1-2" });
     await waitFor(() => loopPill() === "Loop · iteration 2/3", "iteration 2/3");
     // The transcript says which iteration it is, not the words the loop gave the model.
-    expect(says("loop iteration 2/3")).toBe(true);
+    await sees("loop iteration 2/3");
     expect(says("Work towards the goal.")).toBe(false);
     // While it runs, the goal line offers no second loop.
     expect(button("Loop", head())).toBeNull();
 
     // The input box is the person's throughout: it types, says where it goes, and sends.
     const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
-    expect(says("A loop is working towards the goal")).toBe(true);
+    await sees("A loop is working towards the goal");
     type(composer, "also check the macOS path");
     button("Send")!.click();
     await waitFor(() => daemon.calls.some((c) => c.method === "input.send" && c.params["text"] === "also check the macOS path"), "the person's input sent mid-loop");

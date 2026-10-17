@@ -457,6 +457,39 @@ defmodule Troupe.FramesTest do
     assert screen =~ "asked by the rule ask shell(git push), from your organisation"
   end
 
+  # Root #724: on a pod, a rule of the worker profile the session runs on says so, by name.
+  test "an approval a worker profile's rule asked for names the profile" do
+    model =
+      fold(
+        opened() ++
+          [
+            event(
+              :tool_started,
+              %{call_id: "c1", name: "mcp.issues.delete", input: %{}},
+              1
+            ),
+            event(
+              :approval_requested,
+              %{
+                call_id: "c1",
+                name: "mcp.issues.delete",
+                preview: nil,
+                rule: %{
+                  "action" => "ask",
+                  "rule" => "mcp(issues.delete)",
+                  "scope" => "profile",
+                  "source" => "fixing"
+                }
+              },
+              2
+            )
+          ]
+      )
+
+    screen = model |> draw() |> text()
+    assert screen =~ "from the worker profile (fixing)"
+  end
+
   test "a scratchpad document stays a card at every level" do
     model =
       fold(

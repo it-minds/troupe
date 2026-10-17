@@ -21,7 +21,7 @@ defmodule Troupe.Plane.Fleet.Profile do
 
   alias Troupe.Plane.Fleet.{Provisioner, SizeClass}
   alias Troupe.Plane.GitHub
-  alias Troupe.Protocol.ProviderTypes
+  alias Troupe.Protocol.{PermissionRule, ProviderTypes}
 
   @primary_key {:name, :string, autogenerate: false}
   @derive {Phoenix.Param, key: :name}
@@ -35,6 +35,9 @@ defmodule Troupe.Plane.Fleet.Profile do
     # `nil` is no ceiling, bounded by the team's money. A ceiling is a decision somebody
     # makes, and a default would be a refusal nobody chose.
     field :max_sessions, :integer
+    # What the profile's sessions may spend in a calendar month in UTC, in millionths,
+    # beside the person's, the team's and the platform's ceilings. `nil` is none.
+    field :budget_micros, :integer
     field :warm_workers, :integer, default: 0
     # When the last session here stopped being active, so scale-to-zero waits rather
     # than removing a worker the instant somebody's session goes dormant.
@@ -57,6 +60,10 @@ defmodule Troupe.Plane.Fleet.Profile do
     # reader of the row and the resource gets. Both `nil` for a profile that extends none.
     field :extends, :string
     field :own, :map
+    # The MCP servers a profile that extends nothing was written with itself, apart from
+    # its bundle's: `spec.mcpServers` is the two composed, as its pods load them. `nil` for
+    # a row from before there was the column (`Troupe.Plane.Fleet.Extends.written/1`).
+    field :own_servers, {:array, :map}
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -71,6 +78,7 @@ defmodule Troupe.Plane.Fleet.Profile do
     :sessions_per_pod,
     :size_class,
     :max_sessions,
+    :budget_micros,
     :warm_workers,
     :idle_since,
     :provisioner,
@@ -79,7 +87,8 @@ defmodule Troupe.Plane.Fleet.Profile do
     :workers_domain,
     :spec,
     :extends,
-    :own
+    :own,
+    :own_servers
   ]
 
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()
@@ -102,10 +111,12 @@ defmodule Troupe.Plane.Fleet.Profile do
   def cluster_changeset(profile, attrs) do
     profile
     |> cast(attrs, [:resource_generation | @fields])
-    # A resource is a whole, flat profile, and a repository's manifest extends nothing
-    # yet: a row read from one has no parent, whatever it had in direct mode.
-    |> put_change(:extends, nil)
-    |> put_change(:own, nil)
+    # The parent and what the manifest wrote are the resource's to say, as `spec.extends`
+    # and its spec: a row read from one that names none has no parent, whatever it had in
+    # direct mode.
+    |> put_change(:extends, attrs[:extends])
+    |> put_change(:own, attrs[:own])
+    |> put_change(:own_servers, nil)
     |> validate()
     |> derive_from_class()
   end
@@ -117,6 +128,7 @@ defmodule Troupe.Plane.Fleet.Profile do
     |> validate_inclusion(:size_class, SizeClass.names())
     |> validate_inclusion(:provisioner, Provisioner.names())
     |> validate_number(:max_sessions, greater_than: 0)
+    |> validate_number(:budget_micros, greater_than: 0)
     |> validate_number(:warm_workers, greater_than_or_equal_to: 0, less_than_or_equal_to: 10)
     |> validate_change(:spec, &spec_switches/2)
     |> check_constraint(:provisioner, name: :profiles_provisioner)
@@ -160,10 +172,24 @@ defmodule Troupe.Plane.Fleet.Profile do
     # `administration: write` would be asking for what no session is given.
     github = Enum.map(GitHub.spec_problems(Map.get(spec, "github")), &{:spec, &1})
 
-    overrides ++ personal ++ github ++ llm_problems(Map.get(spec, "llm"))
+    overrides ++
+      personal ++
+      github ++ llm_problems(Map.get(spec, "llm")) ++ rule_problems(Map.get(spec, "permissions"))
   end
 
   defp spec_switches(:spec, _spec), do: []
+
+  # `permissions` are per-tool rules every session on the profile's pods obeys, read as a
+  # person's config reads them: one the pods could not read would be a rule an
+  # administrator believes holds and does not, so it is refused with the reader's sentence.
+  defp rule_problems(nil), do: []
+
+  defp rule_problems(rules) do
+    case PermissionRule.check_set(rules) do
+      {:ok, _set} -> []
+      {:error, reasons} -> Enum.map(reasons, &{:spec, &1})
+    end
+  end
 
   # `llm.provider` is one of the provider types, the list the clients offer, which the
   # resource's schema declares in the same words, so a profile that is never a resource,

@@ -92,6 +92,15 @@ defmodule Troupe.Plane.Gitops do
   """
   @callback gone(row :: struct()) :: :removed | {:missing, [String.t()]}
 
+  @doc """
+  The order a pass reads the resources in, where one depends on another: a profile after
+  the one it extends, so a parent's change reaches its children in the same pass. As
+  listed where a source says nothing.
+  """
+  @callback order(resources :: [map()]) :: [map()]
+
+  @optional_callbacks order: 1
+
   @doc "Every kind a pass reads."
   @spec sources() :: [module()]
   def sources, do: [Profiles, Triggers]
@@ -124,6 +133,10 @@ defmodule Troupe.Plane.Gitops do
   def sync(source) do
     with {:ok, resources} <- list(source) do
       rows = source.rows()
+
+      resources =
+        if function_exported?(source, :order, 1), do: source.order(resources), else: resources
+
       context = source.context()
       listed = MapSet.new(resources, &name_of/1)
 

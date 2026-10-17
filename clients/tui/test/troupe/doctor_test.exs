@@ -60,15 +60,21 @@ defmodule Troupe.DoctorCLITest do
   test "--bench runs the checks, then the nine scenarios offline, a line each, and exits 0 when all pass",
        %{user: user} do
     File.write!(user, "version: 1\nprovider: fake\n")
-    # Nothing of the person's moves: their config and state directories are as they were,
-    # and the bench's own directories are gone.
+    # Nothing of the bench's lands in the person's config or state directories, and its own
+    # directories are gone. The directories are the suite's, and a session another test
+    # left behind still writes there while this runs (a remote session's cache, the
+    # librarian's and onboarding's records), so what is asked is that nothing in them names
+    # the bench's directories and the person's file is as it was, not that nothing moved.
     homes = Enum.map(~w(TROUPE_CONFIG_HOME TROUPE_STATE_HOME), &System.get_env/1)
-    before = Enum.map(homes, &tree/1)
     scratch = bench_dirs()
+    straggler = straggler()
 
     out = capture_io(fn -> assert Doctor.run(args(~w(doctor --bench))) == 0 end)
 
-    assert Enum.map(homes, &tree/1) == before
+    stop(straggler, List.last(homes))
+    assert Enum.map(~w(TROUPE_CONFIG_HOME TROUPE_STATE_HOME), &System.get_env/1) == homes
+    assert File.read!(user) == "version: 1\nprovider: fake\n"
+    assert homes |> Enum.flat_map(&tree/1) |> Enum.filter(&bench?/1) == []
     assert bench_dirs() == scratch
 
     # The checks first, then the bench.
@@ -167,4 +173,33 @@ defmodule Troupe.DoctorCLITest do
   end
 
   defp bench_dirs, do: Path.wildcard(Path.join(System.tmp_dir!(), "troupe-bench-*"))
+
+  # A file the bench wrote names one of its own directories: the workspace a session log,
+  # the librarian's or onboarding's records are keyed by.
+  defp bench?({path, content}),
+    do: String.contains?(path, "troupe-bench-") or String.contains?(content || "", "troupe-bench-")
+
+  # What another test's leftover session does while this one runs: writes to whichever
+  # state directory is named at that moment, never making one. In the bench's while it
+  # runs, which the bench removes with the rest of its own.
+  defp straggler do
+    spawn_link(fn -> straggle(0) end)
+  end
+
+  defp stop(straggler, state_home) do
+    send(straggler, {:stop, self()})
+    assert_receive :stopped, 1_000
+    File.rm(Path.join(state_home, "straggler.json"))
+  end
+
+  defp straggle(n) do
+    receive do
+      {:stop, from} -> send(from, :stopped)
+    after
+      5 ->
+        path = Path.join(System.get_env("TROUPE_STATE_HOME"), "straggler.json")
+        _ = File.write(path, ~s({"n": #{n}}))
+        straggle(n + 1)
+    end
+  end
 end

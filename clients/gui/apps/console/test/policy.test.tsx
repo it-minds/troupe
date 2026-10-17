@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -35,11 +35,11 @@ describe("the settings", () => {
   it("are listed by panel with where each value came from, the deployment's read-only and a secret never shown", async () => {
     await open();
     await waitFor(() => row("platform_admin_group"), "the settings");
-    expect(says("Who administers this platform")).toBe(true);
-    expect(says("from the deployment", row("platform_admin_group")!)).toBe(true);
-    expect(says("changed here", row("default_erase_after_days")!)).toBe(true);
+    await sees("Who administers this platform");
+    await sees("from the deployment", () => row("platform_admin_group"));
+    await sees("changed here", () => row("default_erase_after_days"));
     // The deployment's: read, with why it is not changed here, and nothing to press.
-    expect(says("The deployment's: changed in the deployment and rolled", row("base_url")!)).toBe(true);
+    await sees("The deployment's: changed in the deployment and rolled", () => row("base_url"));
     expect(button("Change", row("base_url")!)).toBeNull();
     expect(says("set · never shown", row("breakglass_token")!) || says("not set", row("breakglass_token")!)).toBe(true);
     // The two panels with screens of their own are pointed at, not drawn twice.
@@ -69,7 +69,7 @@ describe("the settings", () => {
   it("is read by a team admin, who is offered nothing to change", async () => {
     await open(PEOPLE.bob);
     await waitFor(() => row("platform_admin_group"), "the settings");
-    expect(says("Read-only for you")).toBe(true);
+    await sees("Read-only for you");
     expect(button("Change")).toBeNull();
     expect(button("Reset")).toBeNull();
   });
@@ -105,12 +105,12 @@ describe("the ladder", () => {
   it("names the rung that decided each value and every opinion, above every team and for one", async () => {
     await open();
     const erase = await waitFor(() => ladderRow("default_erase_after_days"), "the ladder");
-    expect(says("the platform: what no team may exceed", erase)).toBe(true);
-    expect(says("deployment 365", erase)).toBe(true);
-    expect(says("platform 180 (in force)", erase)).toBe(true);
+    await sees("the platform: what no team may exceed", erase);
+    await sees("deployment 365", erase);
+    await sees("platform 180 (in force)", erase);
 
     type(field("As one team sees it")!, "core");
     await waitFor(() => says("team 90", ladderRow("default_erase_after_days")!), "core's own opinion");
-    expect(says("team 90 (in force)", ladderRow("default_erase_after_days")!)).toBe(true);
+    await sees("team 90 (in force)", () => ladderRow("default_erase_after_days"));
   });
 });

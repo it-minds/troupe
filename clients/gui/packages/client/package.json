@@ -1,6 +1,6 @@
 {
   "name": "@troupe/client",
-  "version": "0.20.0-beta",
+  "version": "0.21.0-beta",
   "description": "Troupe protocol v1 client: JSON-RPC 2.0 over WebSocket, usable from a browser or Node",
   "license": "Apache-2.0",
   "type": "module",
@@ -18,7 +18,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "node --test --import tsx \"test/**/*.test.ts\""
+    "test": "node --test --import tsx --import ./test/support/image-reads.ts \"test/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/node": "^24.19.0",

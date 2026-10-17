@@ -18,9 +18,14 @@ defmodule Troupe.Plane.BodyLimitTest do
 
   @moduletag timeout: 60_000
 
+  # Connections of the test's own. A 413 answered before its body was read closes the
+  # connection, and a pool shared with the test before could hand that closed one to the
+  # next request, which then fails `closed` without reaching the plane.
   setup do
     {:ok, {_address, port}} = Endpoint.server_info(:http)
-    %{url: "http://127.0.0.1:#{port}"}
+    finch = :"body_limit_test_#{System.unique_integer([:positive])}"
+    start_supervised!({Finch, name: finch})
+    %{url: "http://127.0.0.1:#{port}", finch: finch}
   end
 
   # Only the request's head is sent: the answer comes before any of the body it declares,
@@ -36,12 +41,12 @@ defmodule Troupe.Plane.BodyLimitTest do
           {"/auth/exchange", "application/json"},
           {"/admin/breakglass", "application/x-www-form-urlencoded"}
         ] do
-      assert "HTTP/1.1 413" <> _ = head_only(context, path, type, @limit + 1),
+      assert "HTTP/1.1 413" <> _ = head_only(context, path, type, @limit + 1, 10_000),
              "#{path} did not answer 413 before its body"
     end
 
-    # At the limit, the plane waits for the body it was promised.
-    assert head_only(context, "/rpc", "application/json", @limit) == :no_answer
+    # At the limit, the plane waits for the body it was promised: a second of silence.
+    assert head_only(context, "/rpc", "application/json", @limit, 1_000) == :no_answer
   end
 
   test "a body sent with no length is read only as far as the limit", context do
@@ -55,6 +60,7 @@ defmodule Troupe.Plane.BodyLimitTest do
         url: context.url <> "/rpc",
         headers: [{"content-type", "application/json"}],
         body: Stream.concat(chunks, [rest]),
+        finch: [name: context.finch],
         retry: false,
         decode_body: false
       )
@@ -70,8 +76,10 @@ defmodule Troupe.Plane.BodyLimitTest do
   end
 
   # A POST's head declaring `length` bytes of body, and none of the body: the first line of
-  # what the plane answers within a second, or `:no_answer`.
-  defp head_only(context, path, type, length) do
+  # what the plane answers within `wait_ms`, or `:no_answer`. An answer that must come is
+  # waited for as long as it takes to come, since the first request a route takes loads
+  # its code and took over a second now and then; the silence at the limit is a second's.
+  defp head_only(context, path, type, length, wait_ms) do
     %URI{port: port} = URI.parse(context.url)
     {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false])
 
@@ -82,7 +90,7 @@ defmodule Troupe.Plane.BodyLimitTest do
     :ok = :gen_tcp.send(socket, head)
 
     answer =
-      case :gen_tcp.recv(socket, 0, 1_000) do
+      case :gen_tcp.recv(socket, 0, wait_ms) do
         {:ok, data} -> data |> String.split("\r\n") |> hd()
         {:error, :timeout} -> :no_answer
       end
@@ -104,6 +112,7 @@ defmodule Troupe.Plane.BodyLimitTest do
         url: context.url <> path,
         headers: [{"content-type", type}],
         body: body,
+        finch: [name: context.finch],
         redirect: false,
         retry: false,
         decode_body: false

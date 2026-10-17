@@ -13,8 +13,28 @@ defmodule Troupe.Plane.Gitops.Profiles do
   | `warm_workers` | the annotation `troupe.dev/warm-workers`, 0 where absent |
   | `provisioner` | the annotation `troupe.dev/provisioner`, `kubernetes` where absent |
   | `config_bundle_channel` | `spec.configBundleChannel`, `stable` where absent |
+  | `budget_micros` | `spec.budgetMicros`, the profile's monthly budget; absent or 0 is none |
   | `spec` | the rest of the spec, which is what the operator reads |
   | `replicas` | `spec.replicas` when the row is made, and the scaler's after that |
+
+  ## A manifest that extends another
+
+  A manifest may name one profile it extends in `spec.extends` and say only what differs
+  (`Troupe.Plane.Fleet.Extends`). Flux applies it as written; the plane reads it as what the
+  child wrote (`own` on the row), resolves the chain against its rows, and keeps the profile
+  in effect on the row, as it does for a profile written through the admin API. It then
+  writes that profile, flat, into the resource's status (`status.effective`, with the chain
+  and where each field came from), which the operator and admission read; the plane writes
+  nothing of a manifest's spec but the three fields it writes onto every resource, so Flux
+  and the plane never write the same field. A pass reads every parent before the profiles
+  that extend it (`order/1`), so a parent's change in the repository reaches its children's
+  status in the same pass, and their pods roll as for any change.
+
+  A field the CRD gives a default (`sessionsPerPod`, `configBundleChannel`, `orgMount`,
+  `storage.size`) is one the child set only where something applied it: the API server
+  fills it into every resource, and a default must not replace what the parent gives. The
+  checks below are made of the profile in effect, and a parent that is not a profile here,
+  a cycle, a chain too long or a budget above the parent's refuse the child.
 
   The class is read off the resource's number rather than written onto it, as it is for a
   profile from before there were classes: the numbers are the repository's here. The
@@ -42,8 +62,8 @@ defmodule Troupe.Plane.Gitops.Profiles do
 
   @behaviour Troupe.Plane.Gitops
 
-  alias Troupe.Plane.{Audit, ClusterPolicy, Fleet, Gitops, Provision}
-  alias Troupe.Plane.Fleet.{Profile, Provisioner, SizeClass}
+  alias Troupe.Plane.{Audit, Bundles, ClusterPolicy, Fleet, Gitops, Provision}
+  alias Troupe.Plane.Fleet.{Extends, Profile, Provisioner, SizeClass}
   alias Troupe.Policy
   alias Troupe.WorkerProfile
 
@@ -55,8 +75,16 @@ defmodule Troupe.Plane.Gitops.Profiles do
   # Flux applied, and this is the plane recording that it saw it.
   @actor "system:gitops"
 
-  # Where a manifest would say which profile it extends, which this mode refuses.
+  # An annotation slice 1 refused a parent by; the parent is `spec.extends`.
   @extends "troupe.dev/extends"
+
+  # Fields the API server fills in from the CRD's defaults, which a child sets only where
+  # its manifest names them.
+  @defaulted [["sessionsPerPod"], ["configBundleChannel"], ["orgMount"], ["storage", "size"]]
+
+  # What a resource's spec holds that the row keeps elsewhere: the image and the parent and
+  # the budget in columns, and the plane's own three.
+  @not_spec ~w(image replicas teams extends budgetMicros)
 
   # What an audit diff is taken over, as for an administrator's edit, with the plane's own
   # projection taken out: a repository never sets `mcpServers`, so a change in them is the
@@ -90,6 +118,13 @@ defmodule Troupe.Plane.Gitops.Profiles do
 
   @impl Gitops
   def read(resource, policy) do
+    case WorkerProfile.extends(resource) do
+      nil -> read_whole(resource, policy)
+      parent -> read_child(resource, parent, policy)
+    end
+  end
+
+  defp read_whole(resource, policy) do
     spec = resource["spec"] || %{}
     annotations = get_in(resource, ["metadata", "annotations"]) || %{}
     per_pod = spec["sessionsPerPod"] || 4
@@ -102,21 +137,132 @@ defmodule Troupe.Plane.Gitops.Profiles do
         sessions_per_pod: per_pod,
         size_class: SizeClass.of_sessions_per_pod(per_pod),
         config_bundle_channel: spec["configBundleChannel"] || "stable",
+        budget_micros: budget(spec),
         # The image and the count have columns of their own and `teams` is the grants';
         # `mcpServers` stays, as what the resource carries, for a reader of the profile.
-        spec: Map.drop(spec, ~w(image replicas teams)),
-        resource_generation: get_in(resource, ["metadata", "generation"])
+        spec: Map.drop(spec, @not_spec),
+        resource_generation: get_in(resource, ["metadata", "generation"]),
+        extends: nil,
+        own: nil
       })
 
     reasons =
       unreadable ++
-        extends(resource) ++
+        annotated_parent(resource) ++
         no_image(attrs) ++
         not_a_class(per_pod) ++
         written_elsewhere(resource) ++ violations(resource, policy) ++ invalid(attrs)
 
     if reasons == [], do: {:ok, attrs}, else: {:error, reasons}
   end
+
+  # What the child wrote, resolved against the rows of the chain above it, and checked as
+  # the profile in effect: that is what its pods will run. The resolution rides along to
+  # `take/4`, which writes it into the status.
+  defp read_child(resource, parent, policy) do
+    name = get_in(resource, ["metadata", "name"])
+    annotations = get_in(resource, ["metadata", "annotations"]) || %{}
+    {answers, unreadable} = answers(annotations)
+    own = written(resource, answers, annotations)
+
+    with :ok <- unread(unreadable ++ annotated_parent(resource)),
+         {:ok, resolved} <- resolved(name, parent, own) do
+      attrs =
+        resolved
+        |> Extends.row_attrs()
+        |> Map.new(fn {key, value} -> {String.to_existing_atom(key), value} end)
+        |> Map.merge(%{
+          name: name,
+          extends: parent,
+          own: own,
+          resource_generation: get_in(resource, ["metadata", "generation"])
+        })
+
+      per_pod =
+        attrs.spec["sessionsPerPod"] ||
+          (attrs.size_class && SizeClass.sessions_per_pod(attrs.size_class)) || 4
+
+      attrs = Map.put(attrs, :sessions_per_pod, per_pod)
+
+      reasons =
+        List.wrap(Extends.budget_problem(name, own, resolved)) ++
+          no_image(attrs) ++
+          not_a_class(per_pod) ++
+          written_elsewhere(resource) ++
+          violations(in_effect(resource, attrs), policy) ++ invalid(attrs)
+
+      if reasons == [],
+        do: {:ok, Map.put(attrs, :resolution, resolved)},
+        else: {:error, reasons}
+    end
+  end
+
+  defp unread([]), do: :ok
+  defp unread(reasons), do: {:error, reasons}
+
+  defp resolved(name, parent, own) do
+    with :ok <- Extends.check(name, parent),
+         {:ok, resolved} <- Extends.resolve(name, %{name => %{extends: parent, written: own}}) do
+      {:ok, resolved}
+    else
+      {:error, reason} -> {:error, [reason]}
+    end
+  end
+
+  # A child's manifest as `admin.profile.put` would have taken it: what it names, and
+  # nothing the API server filled in for it.
+  defp written(resource, answers, annotations) do
+    spec = resource["spec"] || %{}
+    authored = authored_spec(resource)
+    provisioner = Provision.answer_annotations().provisioner
+
+    %{
+      "image" => if(spec["image"], do: image(resource)),
+      "size_class" =>
+        if(authored["sessionsPerPod"],
+          do: SizeClass.of_sessions_per_pod(authored["sessionsPerPod"])
+        ),
+      "max_sessions" => answers.max_sessions,
+      "budget_micros" => budget(spec),
+      "warm_workers" => answers.warm_workers,
+      "provisioner" => if(annotations[provisioner], do: answers.provisioner),
+      "spec" => Map.drop(authored, ["mcpServers" | @not_spec])
+    }
+    |> Map.reject(fn {_key, value} -> is_nil(value) end)
+  end
+
+  defp authored_spec(resource) do
+    Enum.reduce(@defaulted, resource["spec"] || %{}, fn path, spec ->
+      if Gitops.tracked?(resource) and get_in(spec, path) != nil and
+           Gitops.managers(resource, ["spec" | path]) == [],
+         do: drop_in(spec, path),
+         else: spec
+    end)
+  end
+
+  defp drop_in(map, [key]), do: Map.delete(map, key)
+
+  defp drop_in(map, [key | rest]) do
+    case Map.get(map, key) do
+      %{} = inner ->
+        inner = drop_in(inner, rest)
+        if inner == %{}, do: Map.delete(map, key), else: Map.put(map, key, inner)
+
+      _other ->
+        map
+    end
+  end
+
+  # The resource as its pods would run it: the profile in effect, with the plane's own
+  # three fields as the resource holds them.
+  defp in_effect(resource, attrs) do
+    projected = Map.take(resource["spec"] || %{}, WorkerProfile.projected_fields())
+    Map.put(resource, "spec", Map.merge(Provision.effective_spec(attrs), projected))
+  end
+
+  # Zero and absent are no budget, as through the admin API.
+  defp budget(%{"budgetMicros" => micros}) when is_integer(micros) and micros > 0, do: micros
+  defp budget(_spec), do: nil
 
   defp answers(annotations) do
     %{max_sessions: max, warm_workers: warm, provisioner: provisioner} =
@@ -163,19 +309,14 @@ defmodule Troupe.Plane.Gitops.Profiles do
     end
   end
 
-  # A profile extends another only where the plane writes its profiles itself: a manifest
-  # here is read as the whole profile, and one that named a parent would run without
-  # everything it meant to have from it. Refused rather than read as flat.
-  defp extends(resource) do
-    annotation = get_in(resource, ["metadata", "annotations", @extends])
-    field = get_in(resource, ["spec", "extends"])
-
-    case annotation || field do
+  # A parent named in an annotation is not read: it would run as a flat profile without
+  # everything it meant to have from the parent. Refused, saying where a parent is named.
+  defp annotated_parent(resource) do
+    case get_in(resource, ["metadata", "annotations", @extends]) do
       parent when is_binary(parent) and parent != "" ->
         [
-          "extends #{parent}: in gitops mode a manifest holds the whole profile, and the plane " <>
-            "resolves extends only for the profiles it writes itself; put #{parent}'s fields into " <>
-            "this manifest (admin.profiles.export writes a profile that extends another so)"
+          "the annotation #{@extends} is not read: name the profile this one extends in " <>
+            "spec.extends (spec.extends: #{parent})"
         ]
 
       _none ->
@@ -245,9 +386,88 @@ defmodule Troupe.Plane.Gitops.Profiles do
 
   @impl Gitops
   def take(name, attrs, row, resource) do
+    {resolution, attrs} = Map.pop(attrs, :resolution)
     state = put(name, attrs, row, resource)
-    {state, settle(Fleet.get_profile(name), resource)}
+    profile = Fleet.get_profile(name)
+
+    # A child's bundle in effect first, where the plane composes one, so the servers the
+    # plane then writes onto its spec are the ones its pods load.
+    if resolution, do: Bundles.publish_effective(profile)
+
+    problem =
+      settle(profile, resource) || effective(profile, resource, resolution) ||
+        resolution_problems(resolution)
+
+    {state, problem}
   end
+
+  @impl Gitops
+  def order(resources) do
+    by_name = Map.new(resources, &{name_of(&1), &1})
+    Enum.sort_by(resources, &{depth(&1, by_name, 0), name_of(&1)})
+  end
+
+  # How many of the resources listed stand above this one, so each is read after them. A
+  # cycle stops at the longest chain there may be, and is refused when it is read.
+  defp depth(resource, by_name, seen) do
+    case by_name[WorkerProfile.extends(resource)] do
+      nil -> 0
+      parent when seen < 4 -> 1 + depth(parent, by_name, seen + 1)
+      _too_far -> 0
+    end
+  end
+
+  defp name_of(resource), do: get_in(resource, ["metadata", "name"])
+
+  # The profile in effect, written into the status of a resource that extends another
+  # where it is not what the status already says; and taken out of one that no longer does.
+  defp effective(profile, resource, nil) do
+    if get_in(resource, ["status", "effective"]) do
+      case Provision.forget_effective(profile) do
+        :ok -> nil
+        {:error, reason} -> {"unwritten", ["the plane could not take the profile in effect out of the status: #{inspect(reason)}"]}
+      end
+    end
+  end
+
+  defp effective(profile, resource, resolution) do
+    spec = Provision.effective_spec(profile)
+
+    wanted = %{
+      "spec" => spec,
+      "chain" => resolution.chain,
+      "from" => resolution.from,
+      "revision" => WorkerProfile.revision_of(spec),
+      "observedGeneration" => get_in(resource, ["metadata", "generation"])
+    }
+
+    held = get_in(resource, ["status", "effective"]) || %{}
+
+    if Map.take(held, ~w(revision chain from observedGeneration)) ==
+         Map.delete(wanted, "spec") do
+      nil
+    else
+      case Provision.record_effective(profile, wanted) do
+        :ok ->
+          Logger.info(
+            "troupe plane: gitops: #{profile.name}'s profile in effect written, from " <>
+              Enum.join(resolution.chain, " → ")
+          )
+
+          nil
+
+        {:error, reason} ->
+          {"unresolved",
+           [
+             "the plane could not write the profile in effect into the status (status.effective), " <>
+               "and its pods wait for it: #{inspect(reason)}"
+           ]}
+      end
+    end
+  end
+
+  defp resolution_problems(%{problems: [_ | _] = problems}), do: {"extends", problems}
+  defp resolution_problems(_resolution), do: nil
 
   # The count is the resource's when the row is made — what the operator is running — and
   # the scaler's from then on, which is why a change to the resource does not touch it.
@@ -386,12 +606,12 @@ defmodule Troupe.Plane.Gitops.Profiles do
 
   defp notes(profile), do: extends_notes(profile) ++ release_notes(profile)
 
-  # The row of a profile that extends another holds it in effect, so its manifest is
-  # already whole; it no longer follows the parent once a repository holds it.
+  # A profile that extends another is written as it was written, naming its parent; the
+  # plane resolves it from the parent's manifest as it does here.
   defp extends_notes(%Profile{extends: parent} = profile) when is_binary(parent) do
     [
-      "#{profile.name} extends #{parent} on the plane: this is the profile in effect, whole.",
-      "A repository's manifest extends nothing, so a change to #{parent} is one here too."
+      "#{profile.name} extends #{parent}: only what it sets itself is here, and the plane",
+      "resolves the rest from #{parent}'s manifest, which the repository must hold too."
     ]
   end
 

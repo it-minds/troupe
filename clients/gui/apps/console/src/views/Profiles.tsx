@@ -2,9 +2,11 @@
 //
 // The list says, per profile, how its pods are doing, which image it runs and which teams
 // may use it. A profile's page reads every field of its spec: what the editor has fields
-// for, what it has none for (identities at MCP servers, what its sessions may do on GitHub,
-// model prices, a server's credential settings) and anything the resource gains that this
-// console has never heard of, which is listed as it is rather than left out.
+// for, what it has none for (identities at MCP servers, the GitHub permissions its
+// sessions' token is granted, model prices, a server's credential settings) and anything
+// the resource gains that this console has never heard of, which is listed as it is rather
+// than left out. The fix loop's policy on GitHub (public repositories, the paths a push
+// never carries, its caps) has fields of its own.
 //
 // The editor offers the provider types and size classes the plane lists
 // (`admin.profile.choices`), the protocol's one list, rather than free text.
@@ -30,15 +32,33 @@
 // `effective`). Its editor loads and sends what the profile wrote itself, so a save keeps
 // following the parent; a field left empty there is the parent's. A change to a parent is
 // previewed in every profile that extends it before it is applied.
+//
+// A profile may carry a monthly budget, what its sessions may spend in a calendar month
+// (UTC). Its page says the one in effect, whose it is and what is spent; the editor sets
+// it in dollars, through the same preview, confirmation and audit as any other field. A
+// profile that extends another can only lower its parent's, and the plane says so if not.
+// The page also lists the bundle its pods load, each agent, skill and server with the
+// profile whose channel gave it: for a profile on a channel of its own below a parent on
+// another, the one the plane composes from both.
+//
+// A profile may carry per-tool permission rules (`spec.permissions`: deny, ask and allow),
+// which every session on it runs under beside the organisation's and a person's own, the
+// strictest holding. The editor edits them as the organisation's are edited, a tool and a
+// pattern checked as typed by the plane's reading, and sends only the lists that hold a
+// rule. A profile that extends another has its parent's rules and adds its own: its editor
+// edits only what it wrote, and its page says which profile each rule in effect came from.
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { AdminProfile, AdminTeam, EffectiveProfile, ProfileBelow, ProfileDetail, ProfileWrite, ProviderTypeChoice } from "@troupe/client";
+import { RULE_ACTIONS } from "@troupe/client";
+import type { AdminProfile, AdminTeam, EffectiveBundle, EffectiveProfile, ProfileBelow, ProfileDetail, ProfileWrite, ProviderTypeChoice, RuleAction } from "@troupe/client";
 import { href } from "../route";
 import { describeError, recorded, show, useConsole, useLoad } from "../console";
-import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, count, linesOf, modeOf, useChange } from "./bits";
+import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, count, linesOf, modeOf, money, useChange } from "./bits";
 import type { DiffLine, Done } from "./bits";
 import { STATES, profileState } from "./Overview";
+import { RuleListsEditor, draftInvalid, draftOfRules, ruleSetOf, rulesIn, rulesOfDraft } from "./RuleLists";
+import type { ActionWords, RuleDraft, RuleLists } from "./RuleLists";
 
 /** Which teams are granted each profile, from the teams this person may see. */
 function grantedTo(teams: AdminTeam[]): Map<string, string[]> {
@@ -280,11 +300,19 @@ const READ_HERE = [
   "mcpServers",
   "mcpIdentities",
   "github.permissions",
+  "github.allowPublic",
+  "github.denyPaths",
+  "github.maxPushes",
+  "github.maxRuns",
+  "permissions",
   "configBundleChannel",
   "orgMount",
   "repositoryOverridesBundle",
   "personalTools",
 ];
+
+/** What every profile denies a push, which `github.denyPaths` adds to and cannot take from. */
+const DENIED_ALWAYS = ".env, .env.*, *.pem, *.key, *.p12, *.pfx and SSH private keys";
 
 /** What the plane writes into the resource itself, which a spec read back may hold. */
 const PLANE_WRITTEN = ["replicas", "sessionsPerPod", "resources", "teams", "image", "storage.size"];
@@ -314,6 +342,7 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
   const servers = (Array.isArray(spec["mcpServers"]) ? spec["mcpServers"] : []) as Array<Record<string, unknown>>;
   const identities = (Array.isArray(spec["mcpIdentities"]) ? spec["mcpIdentities"] : []) as Array<Record<string, unknown>>;
   const permissions = (at(spec, "github.permissions") ?? {}) as Record<string, unknown>;
+  const denied = (Array.isArray(at(spec, "github.denyPaths")) ? at(spec, "github.denyPaths") : []) as string[];
   const prices = (at(spec, "llm.prices") ?? {}) as Record<string, { input?: unknown; output?: unknown }>;
   const rest = leaves(spec).filter(([path]) => !under(path, READ_HERE) && !under(path, PLANE_WRITTEN));
   const written = leaves(spec).filter(([path]) => under(path, PLANE_WRITTEN));
@@ -345,6 +374,7 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
           ["Image", <span className="mono">{show(p.image)}</span>],
           ["How demanding", <>{show(p["size_class"])}{typeof p["size_class_summary"] === "string" && <span className="hint"> {p["size_class_summary"]}</span>}</>],
           ["Most sessions at once", p["max_sessions"] === null || p["max_sessions"] === undefined ? "no ceiling" : show(p["max_sessions"])],
+          ["Monthly budget", <BudgetLine name={p.name} budget={detail.budget} />],
           ["Workers kept warm", show(p["warm_workers"] ?? 0)],
           ["Pods, as the plane runs them", `${show(p.replicas)} × ${show(p.sessions_per_pod)} sessions`],
           ["Made by", <>{show(p["provisioner"])}{missing.length > 0 && <span className="hint"> without {missing.join(", ")}</span>}</>],
@@ -372,9 +402,29 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
           ["Allowed hosts", <span className="mono">{show(at(spec, "egress.fqdns"))}</span>],
           ["Git hosts", <span className="mono">{show(at(spec, "egress.gitHosts"))}</span>],
           ["Storage class", show(at(spec, "storage.storageClassName") ?? "the cluster's default")],
-          ["On GitHub", Object.keys(permissions).length ? Object.entries(permissions).map(([k, v]) => `${k}: ${show(v)}`).join(", ") : "clone, and no more"],
         ]}
       />
+
+      <Region>On GitHub</Region>
+      <Fields
+        rows={[
+          ["May do", Object.keys(permissions).length ? Object.entries(permissions).map(([k, v]) => `${k}: ${show(v)}`).join(", ") : "clone, and no more"],
+          ["Public repositories", at(spec, "github.allowPublic") === true ? "pushes and pull requests allowed" : "refused: private and internal repositories only"],
+          [
+            "Paths a push never carries",
+            <>
+              {denied.length > 0 && <span className="mono">{denied.join(", ")}, and </span>}
+              <span className="hint">{DENIED_ALWAYS}, which every profile denies</span>
+            </>,
+          ],
+          ["Pushes a run may make", at(spec, "github.maxPushes") === undefined ? "no cap of the profile's" : show(at(spec, "github.maxPushes"))],
+          ["Runs on a repository at once", at(spec, "github.maxRuns") === undefined ? "no cap of the profile's" : show(at(spec, "github.maxRuns"))],
+        ]}
+      />
+      <p className="note">A team's own caps hold where they are lower, and a team's list says which repositories its sessions may name.</p>
+
+      <Region>Permission rules</Region>
+      <RulesInEffect name={p.name} parent={parent} spec={spec} fields={parent ? (effective?.fields ?? null) : null} />
 
       <Region>MCP servers</Region>
       {servers.length === 0 ? (
@@ -471,6 +521,7 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
           ["People's own signed-in tools", spec["personalTools"] === "forbid" ? "kept off these pods" : "allowed"],
         ]}
       />
+      {effective?.bundle && <BundleInEffect name={p.name} bundle={effective.bundle} />}
 
       {rest.length > 0 && (
         <>
@@ -589,6 +640,147 @@ function WhereFrom({ name, effective }: { name: string; effective: EffectiveProf
   );
 }
 
+/** Each action, as a profile's page and editor head its list and say what it does in a session on it. */
+const PROFILE_ACTION: ActionWords = {
+  deny: { title: "Refused", does: "A call a deny rule matches is refused in every session on this profile, whatever a person's own rules allow.", article: "a" },
+  ask: { title: "Asked", does: "A call an ask rule matches asks a person first in every session on this profile, whatever auto_approve or a person's own allow says.", article: "an" },
+  allow: {
+    title: "Allowed",
+    does: "A call an allow rule matches runs unasked, unless the organisation's rules or a person's own are stricter, or a person must answer it.",
+    article: "an",
+  },
+};
+
+/** The profile each rule in effect came from, by action, from the effective view's fields. */
+function rulesFrom(fields: EffectiveProfile["fields"] | null): Record<RuleAction, Map<string, string>> {
+  const out = { deny: new Map(), ask: new Map(), allow: new Map() } as Record<RuleAction, Map<string, string>>;
+  for (const f of fields ?? []) {
+    const action = f.path.startsWith("spec.permissions.") ? (f.path.slice("spec.permissions.".length) as RuleAction) : null;
+    if (action && action in out && typeof f.value === "string") out[action].set(f.value, f.from);
+  }
+  return out;
+}
+
+/** The permission rules a profile's sessions run under, each with the profile it came from where it extends another. */
+function RulesInEffect({ name, parent, spec, fields }: { name: string; parent: string | null; spec: Record<string, unknown>; fields: EffectiveProfile["fields"] | null }): JSX.Element {
+  const rules = rulesIn(spec["permissions"]);
+  const from = rulesFrom(fields);
+  const total = RULE_ACTIONS.reduce((n, a) => n + rules[a].length, 0);
+  return (
+    <>
+      <p className="note">
+        Every session on it runs under these beside the organisation's rules and the person's own, and for each call the strictest that matches holds: nobody's own rules loosen them.
+        {parent ? ` It has ${parent}'s and adds its own; it cannot take one of ${parent}'s away.` : ""}
+      </p>
+      {total === 0 ? (
+        <p className="hint">None: the organisation's rules and each person's own decide.</p>
+      ) : (
+        <Fields
+          rows={RULE_ACTIONS.map((a): [string, JSX.Element] => [
+            PROFILE_ACTION[a].title,
+            rules[a].length === 0 ? (
+              <span className="muted">none</span>
+            ) : (
+              <ul className="plain rules-in-effect" aria-label={`${a} rules`}>
+                {rules[a].map((r) => {
+                  const source = from[a].get(r);
+                  return (
+                    <li key={r}>
+                      <code>
+                        {a} {r}
+                      </code>
+                      {parent && source && (
+                        <span className="hint">
+                          {" "}
+                          — {source === name ? "its own" : <>from <a href={href({ page: "profiles", path: [source] })}>{source}</a></>}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            ),
+          ])}
+        />
+      )}
+    </>
+  );
+}
+
+/** A profile's monthly budget in effect, whose it is, and what its sessions have used of it this month. */
+function BudgetLine({ name, budget }: { name: string; budget: ProfileDetail["budget"] }): JSX.Element {
+  if (!budget?.budget_micros) return <>no ceiling: its sessions spend what their people and teams have</>;
+  const used = budget.spent_micros + budget.reserved_micros;
+  return (
+    <>
+      ${money(budget.budget_micros)} a month
+      {budget.set_by && budget.set_by !== name && (
+        <>
+          , from <a href={href({ page: "profiles", path: [budget.set_by] })}>{budget.set_by}</a>
+        </>
+      )}
+      <span className="hint">
+        {" "}
+        ${money(budget.spent_micros)} spent this month{budget.reserved_micros ? `, $${money(budget.reserved_micros)} held by running sessions` : ""}; ${money(Math.max(budget.budget_micros - used, 0))} left. It turns over on the 1st, in UTC.
+      </span>
+    </>
+  );
+}
+
+const KIND_WORDS: Record<string, string> = { agents: "agent", skills: "skill", mcp_servers: "MCP server", acp_agents: "ACP agent" };
+
+/**
+ * The bundle a profile's pods load, entry by entry, with the profile whose channel gave
+ * each: one channel's as it is, or the one the plane composes from the channels of its chain.
+ */
+function BundleInEffect({ name, bundle }: { name: string; bundle: EffectiveBundle }): JSX.Element {
+  return (
+    <>
+      <Region>The bundle its pods load</Region>
+      <p className="note">
+        {bundle.composed
+          ? `One bundle, composed by the plane from ${bundle.layers.map((l) => (l.channel ? `${l.channel} (${l.profile}'s)` : `${l.profile}'s own servers`)).join(" and ")}: each agent, skill and server is added to the ones above it, and replaces one of the same name only where it says override: true. A publish to any of these channels reaches ${name}'s pods, and keeps the servers a profile wrote itself.`
+          : `${bundle.channel}'s, as it is published.`}
+        {bundle.hash && <span className="mono"> {bundle.hash}</span>}
+      </p>
+      {bundle.entries.length === 0 ? (
+        <Empty title="Nothing published">Its pods have the built-in agents and nothing else until one of these channels publishes.</Empty>
+      ) : (
+        <div className="scroll">
+          <table className="bundle-in-effect">
+            <thead>
+              <tr>
+                <th>Kind</th>
+                <th>Name</th>
+                <th>From</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bundle.entries.map((e) => (
+                <tr key={`${e.kind}-${e.name}`}>
+                  <td>{KIND_WORDS[e.kind] ?? e.kind}</td>
+                  <td className="mono">{e.name}</td>
+                  <td>
+                    {e.from === name ? <span>{e.from}</span> : <a href={href({ page: "profiles", path: [e.from] })}>{e.from}</a>}
+                    <span className="hint">{e.channel ? ` on ${e.channel}` : ", its own"}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {bundle.problems.length > 0 && (
+        <ul className="effects">
+          {bundle.problems.map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
 /** A policy violation in words: the plane's sentence, or the parts of one it sent. */
 function violation(v: unknown): string {
   if (typeof v === "string") return v;
@@ -613,6 +805,11 @@ const FORM_PATHS = [
   ["orgMount"],
   ["repositoryOverridesBundle"],
   ["personalTools"],
+  ["github", "allowPublic"],
+  ["github", "denyPaths"],
+  ["github", "maxPushes"],
+  ["github", "maxRuns"],
+  ["permissions"],
 ];
 
 /** What the plane writes into the resource itself: never sent back, and refused if it were. */
@@ -658,6 +855,18 @@ function whole(text: string): number | null {
   return /^\d+$/.test(t) ? Number(t) : null;
 }
 
+/** Dollars typed, as the plane's millionths: null for blank, NaN for what is not an amount. */
+export function budgetMicros(text: string): number | null {
+  const t = text.trim();
+  if (t === "") return null;
+  return /^\d+(\.\d{1,6})?$/.test(t) ? Math.round(Number(t) * 1_000_000) : NaN;
+}
+
+/** Millionths as dollars for a field to hold: empty for none. */
+function dollars(micros: unknown): string {
+  return typeof micros === "number" && micros > 0 ? String(micros / 1_000_000) : "";
+}
+
 /** The `llm` fields a profile may set only beside `llm.endpoint`, as the plane names them. */
 const LLM_FIELDS = ["provider", "model", "smallModel", "secretRef", "prices"];
 
@@ -680,6 +889,8 @@ interface Form {
   image: string;
   sizeClass: string;
   maxSessions: string;
+  /** The monthly budget, in dollars as typed; empty is none, or the parent's. */
+  budget: string;
   warmWorkers: string;
   endpoint: string;
   provider: string;
@@ -695,6 +906,11 @@ interface Form {
   orgMount: boolean | null;
   repositoryOverridesBundle: boolean | null;
   forbidPersonalTools: boolean | null;
+  /** The fix loop's policy on GitHub: public repositories, paths a push never carries, its caps. */
+  allowPublic: boolean | null;
+  denyPaths: string;
+  maxPushes: string;
+  maxRuns: string;
 }
 
 const SERVER_FIELDS = ["name", "url", "credentialRef", "header", "timeoutMs"] as const;
@@ -714,6 +930,7 @@ function formOf(detail: ProfileDetail | null): Form {
     image: text(written ? written.image : detail?.profile.image),
     sizeClass: text(written ? written.size_class : (detail?.profile["size_class"] ?? "standard")) || (parent ? "" : "standard"),
     maxSessions: text(written ? written.max_sessions : detail?.profile["max_sessions"]),
+    budget: dollars(written ? written.budget_micros : detail?.profile["budget_micros"]),
     warmWorkers: text((written ? written.warm_workers : detail?.profile["warm_workers"]) ?? (detail ? 0 : 1)),
     endpoint: text(at(spec, "llm.endpoint")),
     provider: text(at(spec, "llm.provider")),
@@ -728,6 +945,10 @@ function formOf(detail: ProfileDetail | null): Form {
     orgMount: own("orgMount", spec["orgMount"] === true),
     repositoryOverridesBundle: own("repositoryOverridesBundle", spec["repositoryOverridesBundle"] === true),
     forbidPersonalTools: own("personalTools", spec["personalTools"] === "forbid"),
+    allowPublic: parent && at(spec, "github.allowPublic") === undefined ? null : at(spec, "github.allowPublic") === true,
+    denyPaths: lines(at(spec, "github.denyPaths")),
+    maxPushes: text(at(spec, "github.maxPushes")),
+    maxRuns: text(at(spec, "github.maxRuns")),
   };
 }
 
@@ -736,7 +957,7 @@ function formOf(detail: ProfileDetail | null): Form {
  * merged key by key over what was loaded without the form's paths, so nothing the form
  * has no field for is lost. Exported for the test that holds the mapping.
  */
-export function draftOf(form: Form, servers: Plain[], kept: Plain): ProfileWrite {
+export function draftOf(form: Form, servers: Plain[], kept: Plain, rules: RuleLists = { deny: [], ask: [], allow: [] }): ProfileWrite {
   const typed = compact({
     llm: compact({
       endpoint: form.endpoint.trim(),
@@ -756,6 +977,18 @@ export function draftOf(form: Form, servers: Plain[], kept: Plain): ProfileWrite
     orgMount: form.orgMount ?? undefined,
     repositoryOverridesBundle: form.repositoryOverridesBundle ?? undefined,
     personalTools: form.forbidPersonalTools === null ? undefined : form.forbidPersonalTools ? "forbid" : "allow",
+    github: compact({
+      // Absent is false, so false is sent only where a parent's true would otherwise hold.
+      allowPublic: form.allowPublic === true ? true : form.allowPublic === false && form.extends.trim() ? false : undefined,
+      denyPaths: form.denyPaths
+        .split("\n")
+        .map((p) => p.trim())
+        .filter(Boolean),
+      maxPushes: whole(form.maxPushes),
+      maxRuns: whole(form.maxRuns),
+    }),
+    // Only the lists that hold a rule, and no key at all when none does.
+    permissions: ruleSetOf(rules),
   });
   return {
     name: form.name.trim(),
@@ -766,6 +999,7 @@ export function draftOf(form: Form, servers: Plain[], kept: Plain): ProfileWrite
     size_class: form.sizeClass || null,
     // Sent when blank too, as null: a ceiling taken away is a change.
     max_sessions: whole(form.maxSessions),
+    budget_micros: budgetMicros(form.budget),
     warm_workers: whole(form.warmWorkers) ?? 0,
     spec: compact(deepMerge(kept, typed)),
   };
@@ -811,6 +1045,9 @@ export function ProfileEditor({
   // Each row as it was loaded; the form's fields go over it, so a server's credential settings survive an edit to its URL.
   const [servers, setServers] = useState<Plain[]>(() => ((detail?.spec?.["mcpServers"] ?? []) as Plain[]).map((s) => ({ ...s })));
   const [kept] = useState<Plain>(() => keptOf(detail?.spec ?? {}));
+  // The profile's own rules, as it wrote them: for one that extends another, not its parent's.
+  const [had] = useState<RuleLists>(() => rulesIn(detail?.spec?.["permissions"]));
+  const [rules, setRules] = useState<RuleDraft>(() => draftOfRules(had));
   const [checked, setChecked] = useState<Record<number, { host: string; allowed: boolean } | string>>({});
   const [preview, setPreview] = useState<{ lines: DiffLine[]; effects: string[] } | null>(null);
   const [asking, setAsking] = useState(false);
@@ -828,7 +1065,7 @@ export function ProfileEditor({
   const parent = form.extends.trim();
   const theirs = parent ? `empty: ${parent}'s` : null;
 
-  const draft = draftOf(form, servers, kept);
+  const draft = draftOf(form, servers, kept, rulesOfDraft(rules));
   const llm = (draft.spec?.["llm"] ?? {}) as Plain;
   // A profile that extends another may have its endpoint from it; the plane judges the profile in effect.
   const llmProblem = parent ? null : llmWithoutEndpoint(llm);
@@ -841,7 +1078,10 @@ export function ProfileEditor({
           ? null
           : "Lowercase letters, digits and dashes, starting and ending with a letter or digit: it is the name of a resource in the cluster."
     : null;
-  const blocked = Boolean(llmProblem || nameProblem) || draft.name === "" || (draft.image === "" && !parent);
+  const budgetProblem = Number.isNaN(draft.budget_micros) ? "An amount in dollars, like 500 or 120.50." : null;
+  const blocked = Boolean(llmProblem || nameProblem || budgetProblem) || draftInvalid(rules) || draft.name === "" || (draft.image === "" && !parent);
+  // The rules it has from the profile it extends, as the page loaded them: only while it still extends that one.
+  const inherited = parent && detail?.written?.extends === parent ? rulesFrom(detail.effective?.fields ?? null) : null;
   const set = (patch: Partial<Form>) => {
     setForm({ ...form, ...patch });
     setError(null);
@@ -875,7 +1115,10 @@ export function ProfileEditor({
             const below = answer.extended_by ?? [];
             // Each profile that extends this one, as the write would leave it, under its own name.
             const theirLines = below.flatMap((b) => linesOf(b.changes).map((l) => ({ ...l, field: `${b.name}: ${l.field}` })));
-            setPreview({ lines: [...lines, ...theirLines], effects: [...effectsOf(answer.policy, answer.mode, draft, detail, lines), ...belowEffects(draft.name, below)] });
+            setPreview({
+              lines: [...lines, ...theirLines],
+              effects: [...effectsOf(answer.policy, answer.mode, draft, detail, lines), ...ruleEffects(draft.name, parent, had, rulesOfDraft(rules)), ...belowEffects(draft.name, below)],
+            });
           },
           (e: unknown) => {
             setAsking(false);
@@ -937,6 +1180,17 @@ export function ProfileEditor({
       >
         {(p) => <input {...p} value={form.maxSessions} placeholder={theirs ?? undefined} onChange={(e) => set({ maxSessions: e.target.value })} inputMode="numeric" />}
       </Field>
+      <Field
+        label="Monthly budget, in dollars"
+        hint={
+          parent
+            ? `What its sessions may spend in a calendar month, in UTC, whoever starts them. Empty is ${parent}'s; it can only be lower than ${parent}'s, and a higher one is refused.`
+            : "What its sessions may spend in a calendar month, in UTC, whoever starts them and in whichever team, beside each person's and team's. Empty is no ceiling."
+        }
+        error={budgetProblem}
+      >
+        {(p) => <input {...p} value={form.budget} placeholder={theirs ?? undefined} onChange={(e) => set({ budget: e.target.value })} inputMode="decimal" />}
+      </Field>
       <Field label="Workers kept warm" hint="How many stay up when nothing runs. 0 costs the next session a cold start of about half a minute.">
         {(p) => <input {...p} value={form.warmWorkers} onChange={(e) => set({ warmWorkers: e.target.value })} inputMode="numeric" />}
       </Field>
@@ -988,6 +1242,68 @@ export function ProfileEditor({
       <Field label="Storage class" hint="Where a worker's disk comes from: one the cluster policy allows. Empty is the cluster's default. Fixed once pods exist.">
         {(p) => <input {...p} value={form.storageClass} onChange={(e) => set({ storageClass: e.target.value })} autoComplete="off" spellCheck={false} />}
       </Field>
+
+      <Region>On GitHub</Region>
+      <Field
+        label="Public repositories"
+        hint={`Whether an unattended run may push to, and open a pull request on, a repository GitHub reports as public. The pod asks GitHub at every push.${parent ? ` If ${parent} refuses them, so does this one, whatever it says.` : ""}`}
+      >
+        {(p) => (
+          <select {...p} value={tri(form.allowPublic)} onChange={(e) => set({ allowPublic: untri(e.target.value) })}>
+            {parent && <option value="">{parent}'s</option>}
+            <option value="false">refused: private and internal only</option>
+            <option value="true">allowed</option>
+          </select>
+        )}
+      </Field>
+      <Field label="Paths a push never carries" hint={`One pattern per line, as .gitignore writes them: secrets/, *.tfstate, deploy/**/*.json. Beside ${DENIED_ALWAYS}, which no profile can take away.${parent ? ` Added to ${parent}'s.` : ""}`}>
+        {(p) => <textarea {...p} value={form.denyPaths} onChange={(e) => set({ denyPaths: e.target.value })} rows={3} spellCheck={false} />}
+      </Field>
+      <Field label="Pushes a run may make" hint={`1 to 1000; a run that asks for one more stops, with a comment on its pull request. A team's lower cap holds.${parent ? ` Empty is ${parent}'s; a number above ${parent}'s has ${parent}'s in effect.` : " Empty is no cap of the profile's."}`}>
+        {(p) => <input {...p} value={form.maxPushes} placeholder={theirs ?? undefined} onChange={(e) => set({ maxPushes: e.target.value })} inputMode="numeric" />}
+      </Field>
+      <Field label="Runs on a repository at once" hint={`1 to 1000, across every trigger on this profile; a firing over it is skipped.${parent ? ` Empty is ${parent}'s.` : " Empty is no cap of the profile's."}`}>
+        {(p) => <input {...p} value={form.maxRuns} placeholder={theirs ?? undefined} onChange={(e) => set({ maxRuns: e.target.value })} inputMode="numeric" />}
+      </Field>
+
+      <Region>Permission rules</Region>
+      <p className="note">
+        Every session on it runs under these beside the organisation's rules and the person's own, the strictest holding for each call.
+        {parent ? ` These are ${form.name.trim() || "this profile"}'s own, added to ${parent}'s, which hold whatever it says here.` : ""}
+      </p>
+      <RuleListsEditor
+        draft={rules}
+        onChange={(change) => {
+          setRules(change);
+          setError(null);
+        }}
+        words={PROFILE_ACTION}
+        also={
+          parent
+            ? (a) => {
+                const theirs = inherited ? [...inherited[a].entries()].filter(([, from]) => from !== form.name.trim()).map(([r]) => r) : [];
+                return (
+                  <p className="note inherited">
+                    {theirs.length ? (
+                      <>
+                        Added to what it has from {parent}:{" "}
+                        {theirs.map((r, i) => (
+                          <span key={r}>
+                            {i > 0 && ", "}
+                            <code>{r}</code>
+                          </span>
+                        ))}
+                        .
+                      </>
+                    ) : (
+                      `Added to what it has from ${parent}.`
+                    )}
+                  </p>
+                );
+              }
+            : undefined
+        }
+      />
 
       <Region>MCP servers</Region>
       <div className="servers">
@@ -1141,14 +1457,39 @@ const SERVER_HINTS: Record<(typeof SERVER_FIELDS)[number], string> = {
  */
 function extendsChange(parent: string, form: Form, creating: boolean): Partial<Form> {
   if (parent === "") {
-    return { extends: "", sizeClass: form.sizeClass || "standard", orgMount: form.orgMount ?? false, repositoryOverridesBundle: form.repositoryOverridesBundle ?? false, forbidPersonalTools: form.forbidPersonalTools ?? false };
+    return {
+      extends: "",
+      sizeClass: form.sizeClass || "standard",
+      orgMount: form.orgMount ?? false,
+      repositoryOverridesBundle: form.repositoryOverridesBundle ?? false,
+      forbidPersonalTools: form.forbidPersonalTools ?? false,
+      allowPublic: form.allowPublic ?? false,
+    };
   }
-  return creating && form.extends === "" ? { extends: parent, sizeClass: "", orgMount: null, repositoryOverridesBundle: null, forbidPersonalTools: null } : { extends: parent };
+  return creating && form.extends === "" ? { extends: parent, sizeClass: "", orgMount: null, repositoryOverridesBundle: null, forbidPersonalTools: null, allowPublic: null } : { extends: parent };
 }
 
 /** A switch as a select's value: empty is the parent's. */
 const tri = (v: boolean | null): string => (v === null ? "" : String(v));
 const untri = (v: string): boolean | null => (v === "" ? null : v === "true");
+
+/** What the rules a write adds and takes away do in the sessions on the profile, in words. */
+function ruleEffects(name: string, parent: string, had: RuleLists, now: RuleLists): string[] {
+  return RULE_ACTIONS.flatMap((a) => [
+    ...now[a]
+      .filter((r) => !had[a].includes(r))
+      .map((r) =>
+        a === "deny"
+          ? `Every session on ${name} refuses ${r}, whatever a person's own rules allow.`
+          : a === "ask"
+            ? `Every session on ${name} asks a person before ${r}, whatever auto_approve or a person's own allow says.`
+            : `Every session on ${name} may run ${r} unasked, unless the organisation's rules or a person's own are stricter, or a person must answer it.`,
+      ),
+    ...had[a]
+      .filter((r) => !now[a].includes(r))
+      .map((r) => `${r} is no longer one of ${name}'s own ${a} rules${parent ? `, though ${parent}'s still hold` : ""}.`),
+  ]);
+}
 
 /** What a write does to each profile that extends the one written, in words. */
 function belowEffects(name: string, below: ProfileBelow[]): string[] {
@@ -1168,6 +1509,11 @@ function effectsOf(policy: { "allowed?": boolean; violations: unknown[] }, mode:
   if (theirs.length) out.push(`${theirs.join(", ")} ${theirs.length === 1 ? "is" : "are"} the plane's to write, from the size class and what runs: not sent back, and written again by the plane.`);
   out.push(mode === "direct" ? "Applying changes the cluster now. Running sessions keep the pods they are on." : "This plane did not say how it provisions; applying may not reach the cluster.");
   if (detail === null) out.push(`No team may use ${draft.name} until a platform admin grants it to one, on the team's Access tab.`);
+  const budget = draft.budget_micros ?? null;
+  // What it wrote itself, as the form loaded it: for one that extends another, not what it has in effect.
+  const had = detail ? ((detail.written ? (detail.written.budget_micros ?? null) : (detail.profile.budget_micros ?? null)) as number | null) : null;
+  if (budget !== had && !Number.isNaN(budget))
+    out.push(budget ? `Its sessions may spend $${money(budget)} a month from now; a session that would go past it is refused, and told it is ${draft.name}'s budget.` : draft.extends ? `It has ${draft.extends}'s monthly budget from now, if ${draft.extends} has one.` : "Its sessions have no monthly budget of their own from now.");
   const channel = String(draft.spec?.["configBundleChannel"] ?? "stable");
   if (detail && channel !== String(detail.spec?.["configBundleChannel"] ?? detail.bundle?.channel ?? "stable")) out.push(`Its pods follow ${channel} from now, and are told to update.`);
   return out;

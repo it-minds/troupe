@@ -46,12 +46,14 @@ defmodule Troupe.Plane.Admin do
     GitHub,
     Gitops,
     Identity,
-    Ledger
+    Ledger,
+    ProfileBudget
   }
 
   alias Troupe.Plane.Control.TLS
   alias Troupe.Plane.Fleet.{Bundle, Extends, Provisioner, SizeClass, Worker}
   alias Troupe.Plane.GitHub.Issue, as: GitHubIssue
+  alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
@@ -295,6 +297,7 @@ defmodule Troupe.Plane.Admin do
          extended_by: Extends.children(profile.name),
          policy: Provision.verdict(profile),
          bundle: bundle_state(profile),
+         budget: budget_state(profile),
          # A server the bundle calls as the profile's own identity that the profile gives
          # none, or an incomplete one: reported, like a missing Secret, since the bundle and
          # the profile are written by different people and either may come first.
@@ -317,12 +320,40 @@ defmodule Troupe.Plane.Admin do
           chain: resolved.chain,
           profile: Extends.row_attrs(resolved),
           fields: Extends.fields(resolved),
-          problems: resolved.problems
+          problems: resolved.problems,
+          bundle: bundle_view(resolved.bundle)
         }
 
       {:error, reason} ->
-        %{extends: profile.extends, chain: [], profile: nil, fields: [], problems: [reason]}
+        %{
+          extends: profile.extends,
+          chain: [],
+          profile: nil,
+          fields: [],
+          problems: [reason],
+          bundle: nil
+        }
     end
+  end
+
+  # The bundle the profile's pods load: the channel it is on, its hash, the channels of the
+  # chain it is made from, and each agent, skill and server with the profile whose channel
+  # gave it. `composed` where the plane makes it from more than one channel.
+  defp bundle_view(bundle) do
+    %{
+      channel: bundle.channel,
+      hash: bundle.hash,
+      composed: Bundles.Effective.composed?(bundle.layers),
+      # A channel, or a profile's own servers, by name.
+      layers:
+        Enum.map(bundle.layers, fn
+          %{channel: channel, profile: profile} -> %{profile: profile, channel: channel}
+          %{servers: servers, profile: profile} ->
+            %{profile: profile, servers: Enum.map(servers, & &1["name"])}
+        end),
+      entries: bundle.entries,
+      problems: bundle.problems
+    }
   end
 
   @doc """
@@ -337,7 +368,6 @@ defmodule Troupe.Plane.Admin do
   def profile_put(actor, attrs) do
     with :ok <- require_platform_admin(actor),
          {:ok, name} <- require_name(attrs),
-         :ok <- extends_held_by_repository(actor, attrs, name),
          :ok <- not_held_by_repository(actor, "profile.put", name),
          {:ok, attrs} <- without_derived(attrs),
          {:ok, attrs} <- in_effect(attrs),
@@ -350,6 +380,9 @@ defmodule Troupe.Plane.Admin do
       case Fleet.put_profile(attrs) do
         {:ok, profile} ->
           changes = Audit.diff(comparable(before), comparable(profile))
+          # Its bundle in effect, where the plane composes one for it; each profile below
+          # it has its own composed again as it is written.
+          Bundles.publish_effective(profile)
           children = rewrite_below(below, actor)
 
           {:ok, _} =
@@ -382,7 +415,7 @@ defmodule Troupe.Plane.Admin do
   # What `profile_put/2` reads of a profile: an administrator's answers and the rest of
   # the resource's spec. `admin.profile.put`'s schema declares exactly these, and a test
   # holds the two together.
-  @profile_keys ~w(name image size_class max_sessions warm_workers provisioner spec extends)
+  @profile_keys ~w(name image size_class max_sessions budget_micros warm_workers provisioner spec extends)
 
   # A put that names a parent is resolved before anything checks it: the policy, the
   # reach check and the row's own validation judge the profile in effect, which is what
@@ -394,16 +427,31 @@ defmodule Troupe.Plane.Admin do
   defp in_effect(attrs) do
     name = attrs["name"]
     row = Fleet.get_profile(name)
+    attrs = own_servers_only(attrs, row)
     kept = if row && row.extends, do: row.own || %{}, else: %{}
     own = Map.merge(kept, Map.take(attrs, Extends.written_keys()))
 
     case {presence(attrs["extends"]), row} do
       {nil, %{extends: parent}} when is_binary(parent) ->
         with {:ok, resolved} <- resolve_put(name, %{name => %{extends: parent, written: own}}) do
+          attrs = Extends.row_attrs(resolved)
+          # Extending nothing, it has one channel, and follows it.
+          channel = presence(attrs["spec"]["configBundleChannel"]) || "stable"
+
           {:ok,
-           resolved
-           |> Extends.row_attrs()
-           |> Map.merge(%{"name" => name, "extends" => nil, "own" => nil})}
+           Map.merge(attrs, %{
+             "name" => name,
+             "extends" => nil,
+             "own" => nil,
+             "config_bundle_channel" => channel,
+             "own_servers" => servers_of(own["spec"])
+           })}
+        end
+
+      {nil, _row} when is_map_key(attrs, "spec") ->
+        with {:ok, resolved} <-
+               resolve_put(name, %{name => %{extends: nil, written: written_of(name, attrs)}}) do
+          {:ok, servers_in_effect(attrs, resolved)}
         end
 
       {nil, _row} ->
@@ -411,12 +459,64 @@ defmodule Troupe.Plane.Admin do
 
       {parent, _row} ->
         with :ok <- extends_check(name, parent),
-             {:ok, resolved} <- resolve_put(name, %{name => %{extends: parent, written: own}}) do
+             {:ok, resolved} <- resolve_put(name, %{name => %{extends: parent, written: own}}),
+             :ok <- budget_lowers(name, own, resolved) do
           {:ok,
            resolved
            |> Extends.row_attrs()
            |> Map.merge(%{"name" => name, "extends" => parent, "own" => own})}
         end
+    end
+  end
+
+  # A profile's MCP servers are its own and its bundle's, composed (`Bundles.Effective`), so
+  # what a put sends is its own: the servers it wrote, without any that came from a bundle.
+  # A caller that read the resource and sends its servers back sends the bundle's too, and
+  # those are dropped here as the bundle's, whose next publish would otherwise find them
+  # copied into the profile. A put that names no parent has its servers in effect as the
+  # chain of one resolves them, with the channel its pods load.
+  defp own_servers_only(
+         %{"spec" => %{"mcpServers" => sent} = spec} = attrs,
+         %Fleet.Profile{} = row
+       )
+       when is_list(sent) do
+    mine =
+      if row.extends,
+        do: servers_of(row.own["spec"]),
+        else: Extends.own_servers(row)
+
+    names = MapSet.new(mine, & &1["name"])
+    bundles = for s <- servers_of(row.spec), not MapSet.member?(names, s["name"]), do: s
+    own = Enum.reject(sent, &(Map.delete(&1, "override") in bundles))
+    Map.put(attrs, "spec", Map.put(spec, "mcpServers", own))
+  end
+
+  defp own_servers_only(attrs, _row), do: attrs
+
+  defp servers_of(%{"mcpServers" => servers}) when is_list(servers), do: servers
+  defp servers_of(_spec), do: []
+
+  defp servers_in_effect(attrs, %{attrs: resolved, bundle: bundle}) do
+    servers = resolved["spec"]["mcpServers"]
+    spec = Map.delete(attrs["spec"], "mcpServers")
+
+    Map.merge(attrs, %{
+      "spec" => if(servers, do: Map.put(spec, "mcpServers", servers), else: spec),
+      "config_bundle_channel" => bundle.channel,
+      "own_servers" => servers_of(attrs["spec"]),
+      "extends" => nil,
+      "own" => nil
+    })
+  end
+
+  # A profile's budget may only be lowered by one that extends it (`Extends.budget_problem/3`).
+  defp budget_lowers(name, own, resolved) do
+    case Extends.budget_problem(name, own, resolved) do
+      nil ->
+        :ok
+
+      reason ->
+        {:error, Error.new(:invalid_params, %{budget_micros: own["budget_micros"], reason: reason})}
     end
   end
 
@@ -498,9 +598,19 @@ defmodule Troupe.Plane.Admin do
             row -> Extends.written(%{row | extends: nil})
           end
 
-        Map.merge(base, Map.take(attrs, Extends.written_keys()))
+        base
+        |> Map.merge(Map.take(attrs, Extends.written_keys()))
+        |> with_own_servers(attrs["own_servers"])
     end
   end
+
+  # A write that resolved its servers in effect still wrote only its own.
+  defp with_own_servers(%{"spec" => %{} = spec} = written, own) when is_list(own) do
+    spec = Map.delete(spec, "mcpServers")
+    Map.put(written, "spec", if(own == [], do: spec, else: Map.put(spec, "mcpServers", own)))
+  end
+
+  defp with_own_servers(written, _own), do: written
 
   defp changeset_sentence(errors) do
     Enum.map_join(errors, "; ", fn {field, {message, _details}} -> "#{field} #{message}" end)
@@ -526,30 +636,6 @@ defmodule Troupe.Plane.Admin do
         end
 
       {child, result}
-    end
-  end
-
-  # A repository's manifest extends nothing yet, so neither does a profile on a plane in
-  # gitops mode: refused with what to do instead, and recorded as any refused write is.
-  defp extends_held_by_repository(actor, attrs, name) do
-    parent = presence(attrs[:extends] || attrs["extends"])
-
-    if parent && Gitops.enabled?() do
-      detail = %{"outcome" => "refused", "reason" => "managed_by_gitops", "extends" => parent}
-      {:ok, _} = Audit.record(actor.subject, "profile.put", name, detail)
-
-      {:error,
-       Error.new(:managed_by_gitops, %{
-         kind: "WorkerProfile",
-         name: name,
-         extends: parent,
-         reason:
-           "this plane is in gitops mode, and a profile extends another only on a plane that " <>
-             "writes its profiles itself: a repository's manifest holds the whole profile, " <>
-             "#{parent}'s fields included, until a plane resolves extends from a repository"
-       })}
-    else
-      :ok
     end
   end
 
@@ -588,10 +674,27 @@ defmodule Troupe.Plane.Admin do
            not_yours: ["config_bundle_channel"]
          })}
 
+      Bundles.Effective.reserved?(spec["configBundleChannel"]) ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason:
+             "#{spec["configBundleChannel"]} is the bundle the plane composes for a profile; " <>
+               "name a channel bundles are published to, or extend that profile",
+           not_yours: ["spec.configBundleChannel"]
+         })}
+
       true ->
-        {:ok, attrs |> Map.take(@profile_keys) |> with_channel()}
+        {:ok, attrs |> Map.take(@profile_keys) |> with_channel() |> no_budget_as_nil()}
     end
   end
+
+  # A budget of zero is no ceiling, as a person's and a team's is, and is kept as none: a
+  # zero in the column would be the lower of two ceilings to a profile that extends this one.
+  defp no_budget_as_nil(%{"budget_micros" => budget} = attrs)
+       when is_integer(budget) and budget <= 0,
+       do: Map.put(attrs, "budget_micros", nil)
+
+  defp no_budget_as_nil(attrs), do: attrs
 
   # The channel has one home, `spec.configBundleChannel`, which the operator gives the
   # pods, and the row's column, which bundles, adoption and a profile's servers follow, is
@@ -951,9 +1054,11 @@ defmodule Troupe.Plane.Admin do
   # leaves the rest of what it is sent, as the other admin methods leave a key they do not
   # declare. Either admin sets these for a team they administer, within the ladder, except
   # `allow_unenforced_workers`, which is a platform admin's (`may_set_unenforced/2`).
+  # `github` is the repositories the team's sessions may name and its fix loop's caps,
+  # read by `GitHub.Policy.read_team/2` over what the team has, key by key.
   @team_keys ~w(budget_micros budget_period idle_timeout_seconds cache_eviction_days) ++
                ~w(erase_after_days members_may_control pins_allowed volume_size) ++
-               ~w(volume_storage_class allow_unenforced_workers)
+               ~w(volume_storage_class allow_unenforced_workers github)
 
   @doc "The fields of a team `admin.team.update` sets, as its schema declares them."
   @spec team_keys() :: [String.t()]
@@ -987,6 +1092,7 @@ defmodule Troupe.Plane.Admin do
     with :ok <- require_platform_admin(actor),
          %Identity.Group{} = group <- Identity.get_group(group_id),
          {:ok, existing} <- not_another_team(group, attrs, link == true),
+         {:ok, attrs} <- read_team_github(attrs, existing && existing.github),
          :ok <- same_settings(existing, group, attrs, link == true) do
       # Its name and its settings. The group it is enabled from, and when and by whom, are
       # the record of this call, written by it.
@@ -1101,6 +1207,7 @@ defmodule Troupe.Plane.Admin do
     attrs = settable(attrs, @team_keys)
 
     with {:ok, team} <- fetch_team(actor, name),
+         {:ok, attrs} <- read_team_github(attrs, team.github),
          :ok <- may_set_unenforced(actor, attrs),
          :ok <- still_allowed(team, attrs),
          # Before the changeset, so a widening attempt is refused with the ceiling
@@ -1121,6 +1228,27 @@ defmodule Troupe.Plane.Admin do
       end
     end
   end
+
+  # A team's `github`, sent as the keys to change, laid over what the team has and checked
+  # whole: a repository that is not `owner/name` or `owner/*`, or a cap that is not a
+  # whole number, is refused by name with nothing written.
+  defp read_team_github(attrs, current) when is_map(attrs) do
+    case Enum.find(attrs, fn {key, _value} -> to_string(key) == "github" end) do
+      nil ->
+        {:ok, attrs}
+
+      {key, sent} ->
+        case GitHubPolicy.read_team(current, sent) do
+          {:ok, github} ->
+            {:ok, attrs |> Map.delete(key) |> Map.put("github", github)}
+
+          {:error, %{field: field, reason: reason}} ->
+            {:error, Error.new(:invalid_params, %{field: field, reason: reason})}
+        end
+    end
+  end
+
+  defp read_team_github(attrs, _current), do: {:ok, attrs}
 
   defp within_the_ladder(team, attrs) do
     case Ladder.check(team, Map.new(attrs)) do
@@ -1263,6 +1391,57 @@ defmodule Troupe.Plane.Admin do
   def identity_duplicates(actor) do
     with :ok <- require_platform_admin(actor), do: {:ok, Identity.lookalikes()}
   end
+
+  @doc """
+  Settle a pair `admin.identity.duplicates` lists by `external_id`: the row SCIM gave
+  `subject` as its `externalId` (`row`) is that person's, whatever the email and username
+  said.
+
+  A platform admin's, typed to confirm by the subject, since it hands a row, with its
+  sessions, shares and administration, to whoever signs in under that subject. The row a
+  sign-in made under the subject is folded into SCIM's, which takes the subject; with none
+  there, the next push or sign-in adopts SCIM's row (`Identity.settle/2`). Audited as
+  `person.adopt`, with the ids and subjects and any key-manager name left behind.
+  """
+  @spec identity_adopt(actor(), String.t(), String.t()) :: result()
+  def identity_adopt(actor, row, subject) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, detail} <- settle(row, subject) do
+      detail = Map.put(detail, "via", "admin")
+      {:ok, _} = Audit.record(actor.subject, "person.adopt", subject, detail)
+
+      Logger.info(
+        "troupe plane: #{actor.subject} settled #{subject} on the row SCIM gave it (#{row})" <>
+          if(detail["folded"], do: ", folding #{detail["folded"]["id"]} into it", else: "")
+      )
+
+      {:ok, detail}
+    end
+  end
+
+  defp settle(row, subject) when is_binary(row) and is_binary(subject) do
+    case Identity.settle(row, subject) do
+      {:ok, detail} ->
+        {:ok, detail}
+
+      {:error, :settled} ->
+        {:error,
+         Error.new(:not_found, %{
+           reason:
+             "no refused adoption of #{subject} by row #{row} stands: it is settled, or the row is gone"
+         })}
+
+      {:error, {:named_by_scim, other}} ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason:
+             "the row under #{subject} is SCIM's for externalId #{other.external_id}, somebody else, and is not folded into another person"
+         })}
+    end
+  end
+
+  defp settle(_row, _subject),
+    do: {:error, Error.new(:invalid_params, %{missing: "row and subject"})}
 
   @doc """
   Draw a team's members from one more identity-provider group.
@@ -2664,7 +2843,7 @@ defmodule Troupe.Plane.Admin do
   defp losers(channel, removed) do
     gone = MapSet.new(removed, &{&1.kind, &1.name})
 
-    for profile <- Bundles.profiles_on(channel),
+    for profile <- Bundles.followers(channel),
         grant <- Identity.grants_for_profile(profile),
         team = grant.team,
         row <- Identity.entitlements_for(team, profile),
@@ -2676,7 +2855,8 @@ defmodule Troupe.Plane.Admin do
   @doc "Publish a new version, which pushes `config.updated` to every pod on the channel."
   @spec bundle_publish(actor(), String.t(), map()) :: result()
   def bundle_publish(actor, channel, content) do
-    with :ok <- require_platform_admin(actor) do
+    with :ok <- require_platform_admin(actor),
+         :ok <- not_composed(channel) do
       case Bundles.publish(channel, content, by: actor.subject) do
         {:ok, bundle} ->
           {:ok, _} =
@@ -2700,7 +2880,8 @@ defmodule Troupe.Plane.Admin do
   @doc "Retire a version, so nothing new starts on it. Running sessions are untouched."
   @spec bundle_retire(actor(), String.t(), integer()) :: result()
   def bundle_retire(actor, channel, version) do
-    with :ok <- require_platform_admin(actor) do
+    with :ok <- require_platform_admin(actor),
+         :ok <- not_composed(channel) do
       case Bundles.retire(channel, version, by: actor.subject) do
         {:ok, bundle} ->
           {:ok, _} =
@@ -2711,6 +2892,23 @@ defmodule Troupe.Plane.Admin do
         {:error, reason} ->
           {:error, Error.new(:not_found, %{reason: inspect(reason)})}
       end
+    end
+  end
+
+  # A profile's composed bundle is the plane's to write, from the channels of its chain: a
+  # version published or retired there by hand would be undone by the next publish to any
+  # of them, and would say something none of them does meanwhile.
+  defp not_composed(channel) do
+    if Bundles.Effective.reserved?(channel) do
+      {:error,
+       Error.new(:invalid_params, %{
+         channel: channel,
+         reason:
+           "#{channel} is the bundle the plane composes for a profile from the channels of " <>
+             "the profiles it extends; publish to those channels instead"
+       })}
+    else
+      :ok
     end
   end
 
@@ -3053,7 +3251,8 @@ defmodule Troupe.Plane.Admin do
   defp key_answer(key, trigger), do: %{key: key, url: "/trigger/#{trigger.id}"}
 
   # A trigger on a GitHub repository is checked as a session naming it will be: the App is
-  # here, installed for its owner, and the trigger's profile declares the Git host. Asked of
+  # here, installed for its owner, the team lists it, and the trigger's profile declares
+  # the Git host. Asked of
   # a put that sends a source or a profile, against the trigger as it would then be.
   defp reachable_repository(team, name, attrs) do
     existing = Triggers.get(team, name)
@@ -3063,7 +3262,7 @@ defmodule Troupe.Plane.Admin do
     with true <- Map.has_key?(attrs, "source") or Map.has_key?(attrs, "profile"),
          {owner, repository} <- GitHubIssue.repository(source),
          {:error, reason} <-
-           GitHub.repository(%{"owner" => owner, "name" => repository}, profile) do
+           GitHub.repository(%{"owner" => owner, "name" => repository}, profile, team) do
       {:error,
        Error.new(:invalid_params, %{field: "source", reason: "source.repository: " <> reason})}
     else
@@ -3101,11 +3300,15 @@ defmodule Troupe.Plane.Admin do
   The same in GitOps mode (Decision 737). The key is not part of what a trigger is: it
   is a credential the plane holds as a hash, never in a resource, and a rotation after a
   leak cannot wait for a review and an applier's interval.
+
+  Only a webhook that names no GitHub repository has a key (`Triggers.keyed?/1`). Asked
+  of any other trigger, this is refused with what fires it instead, and mints nothing.
   """
   @spec trigger_key_rotate(actor(), String.t(), String.t()) :: result()
   def trigger_key_rotate(actor, team_name, name) do
     with {:ok, team} <- fetch_team(actor, team_name),
-         {:ok, trigger} <- fetch_trigger(team, name) do
+         {:ok, trigger} <- fetch_trigger(team, name),
+         :ok <- keyed(trigger) do
       {:ok, rotated, key} = Triggers.rotate_key(trigger, actor.subject)
 
       {:ok, _} =
@@ -3123,6 +3326,26 @@ defmodule Troupe.Plane.Admin do
        }}
     end
   end
+
+  defp keyed(trigger) do
+    if Triggers.keyed?(trigger) do
+      :ok
+    else
+      {:error,
+       Error.new(:invalid_params, %{
+         trigger: trigger.name,
+         reason:
+           "#{trigger.name} #{fired_by(trigger.source)}, so it has no key: one would let whoever held it fire it with any event they liked"
+       })}
+    end
+  end
+
+  defp fired_by(%{"kind" => "schedule"}), do: "is fired by its schedule"
+
+  defp fired_by(%{"kind" => "webhook", "repository" => repository}),
+    do: "is fired by the GitHub App's signed deliveries for #{repository}"
+
+  defp fired_by(_manual), do: "is run by hand, or by a principal that signs in"
 
   @doc """
   Set or clear a person's own spend ceiling, across every team they are in, per calendar
@@ -3161,12 +3384,28 @@ defmodule Troupe.Plane.Admin do
   with the one that would bind first at the top. A person told they are over budget
   should be able to see which of the four without asking anybody.
   """
-  @spec budget_explain(actor(), String.t(), String.t() | nil) :: result()
-  def budget_explain(actor, subject, team_name) do
+  #
+  # With a profile, that profile's own monthly ceiling too, where it has one: which profile
+  # set the ceiling in effect (`set_by`, itself or one it extends) and what its sessions
+  # have left.
+  @spec budget_explain(actor(), String.t(), String.t() | nil, String.t() | nil) :: result()
+  def budget_explain(actor, subject, team_name, profile_name \\ nil) do
+    # A name or nothing. The admin API hands over an absent `profile` argument as the call's
+    # whole params, which is how `admin.profile.put` reads its profile, so anything but a
+    # name is no profile here.
+    profile_name = if is_binary(profile_name), do: profile_name
+
     with :ok <- require_platform_admin(actor),
-         {:ok, team} <- optional_team(actor, team_name) do
-      {:ok, Budget.ceilings(team, subject)}
+         {:ok, team} <- optional_team(actor, team_name),
+         :ok <- optional_profile(profile_name) do
+      {:ok, Budget.ceilings(team, subject, profile_name)}
     end
+  end
+
+  defp optional_profile(nil), do: :ok
+
+  defp optional_profile(name) do
+    with {:ok, _profile} <- fetch_profile(name), do: :ok
   end
 
   defp optional_team(_actor, nil), do: {:ok, nil}
@@ -3264,8 +3503,10 @@ defmodule Troupe.Plane.Admin do
   Fire a trigger now, by hand.
 
   The same `fire/5` a schedule or an executor reaches, with an idempotency key that
-  names the person and the moment, so a second click a minute later is a second run and
-  a retry of a failed one is not.
+  names the person and the minute, as a webhook's window and a schedule's tick are drawn
+  on the minute too: a second click, or a retry of a call whose answer was lost, within
+  the same minute is the run the first one made, and a click in a later minute is a
+  second run. On the second, a retry that crossed one boundary made a second session.
 
   The source is `manual` and the console is the only door that may say so: a person's
   hand is the one thing about a run that cannot be inferred afterwards.
@@ -3279,7 +3520,8 @@ defmodule Troupe.Plane.Admin do
     with {:ok, team} <- fetch_team(actor, team_name),
          {:ok, trigger} <- fetch_trigger(team, name) do
       now = DateTime.utc_now() |> DateTime.truncate(:second)
-      key = "manual:#{trigger.id}:#{actor.subject}:#{DateTime.to_iso8601(now)}"
+      minute = %{now | second: 0}
+      key = "manual:#{trigger.id}:#{actor.subject}:#{DateTime.to_iso8601(minute)}"
       event = %{"kind" => "manual", "by" => actor.subject, "at" => DateTime.to_iso8601(now)}
 
       {:ok, _} =
@@ -3700,6 +3942,8 @@ defmodule Troupe.Plane.Admin do
       size_class: profile.size_class,
       size_class_summary: SizeClass.get(profile.size_class).summary,
       max_sessions: profile.max_sessions,
+      # What the profile's sessions may spend in a calendar month, in effect; `nil` is none.
+      budget_micros: profile.budget_micros,
       warm_workers: profile.warm_workers,
       # What the plane decided from it. Shown, not offered: a console should be able to
       # say how many workers are up and why, and an administrator who wants to know what
@@ -3707,7 +3951,12 @@ defmodule Troupe.Plane.Admin do
       replicas: profile.replicas,
       sessions_per_pod: profile.sessions_per_pod,
       capacity_sessions: profile.replicas * profile.sessions_per_pod,
-      channel: profile.config_bundle_channel,
+      # The channel the profile names, or has from the profile it extends; and the one its
+      # pods load, which for a profile on a channel of its own below a parent on another is
+      # the bundle the plane composes from both.
+      channel:
+        presence((profile.spec || %{})["configBundleChannel"]) || profile.config_bundle_channel,
+      bundle_channel: profile.config_bundle_channel,
       image: profile.image,
       # What makes these workers exist, and what that substrate does *not* guarantee.
       # Named individually rather than summed into a flag: "unenforced" is not a useful
@@ -3751,6 +4000,19 @@ defmodule Troupe.Plane.Admin do
     Map.new(account.instead, fn {missing, weaker} -> {to_string(missing), to_string(weaker)} end)
   end
 
+  # The profile's monthly ceiling in effect, whose it is, and what its sessions have spent
+  # and hold this month: read from the ledger, so a page asking for it starts no actor.
+  defp budget_state(profile) do
+    %{
+      budget_micros: profile.budget_micros,
+      budget_period: "monthly",
+      set_by: ProfileBudget.set_by(profile.name),
+      spent_micros: Ledger.profile_spent_micros(profile.name),
+      reserved_micros:
+        profile.name |> Ledger.open_reservations_for_profile() |> Map.values() |> Enum.sum()
+    }
+  end
+
   defp bundle_state(profile) do
     channel = profile.config_bundle_channel
 
@@ -3784,6 +4046,13 @@ defmodule Troupe.Plane.Admin do
       volume_storage_class: team.volume_storage_class,
       volume_size: team.volume_size,
       allow_unenforced_workers: team.allow_unenforced_workers,
+      # The repositories its sessions may name, and its fix loop's caps: an empty list
+      # names none.
+      github: %{
+        repositories: get_in(team.github || %{}, ["repositories"]) || [],
+        max_pushes: get_in(team.github || %{}, ["max_pushes"]),
+        max_runs: get_in(team.github || %{}, ["max_runs"])
+      },
       admins: Identity.admins_of(team),
       grants:
         Enum.map(
@@ -3912,6 +4181,7 @@ defmodule Troupe.Plane.Admin do
     Map.take(profile, [
       :size_class,
       :max_sessions,
+      :budget_micros,
       :warm_workers,
       :provisioner,
       :replicas,
@@ -3934,7 +4204,8 @@ defmodule Troupe.Plane.Admin do
       :erase_after_days,
       :pins_allowed,
       :volume_storage_class,
-      :volume_size
+      :volume_size,
+      :github
     ])
   end
 
