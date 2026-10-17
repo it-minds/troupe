@@ -30,10 +30,11 @@ spec:
   # run. A write to the status is judged when it changes that block and at no other time,
   # because the operator's own conditions must still be written when the policy has
   # tightened under a profile: that is how it says so.
+  # A request to the resource itself carries no `subResource` at all, rather than an empty one.
   matchConditions:
     - name: the-spec-or-the-profile-in-effect
       expression: >-
-        request.subResource != 'status' ||
+        !has(request.subResource) || request.subResource != 'status' ||
         (has(object.status) && has(object.status.effective) &&
           (!has(oldObject.status) || !has(oldObject.status.effective) ||
             object.status.effective != oldObject.status.effective))
