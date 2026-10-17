@@ -169,6 +169,10 @@ defmodule Troupe.Plane.GitHub.Key do
   # webhook secret's import uses it too.
   @spec wrapping_key(keyword()) :: {:ok, term()} | {:error, term()}
   def wrapping_key(opts) do
+    # The first read on a mount makes OpenBao generate a 4096-bit RSA key, which takes
+    # seconds on a busy host, longer than the 5 s every other call is given.
+    opts = Keyword.put_new(opts, :receive_timeout, 60_000)
+
     case Tokens.request(:get, "/v1/#{Tokens.mount(opts)}/wrapping_key", nil, opts) do
       {:ok, %{"data" => %{"public_key" => pem}}} ->
         [entry] = :public_key.pem_decode(pem)

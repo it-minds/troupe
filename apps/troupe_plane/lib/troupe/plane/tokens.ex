@@ -202,9 +202,11 @@ defmodule Troupe.Plane.Tokens do
          {:ok, token} <- Credential.fetch(config) do
       url = address <> path
 
+      timeout = Keyword.get(opts, :receive_timeout, 5_000)
+
       method
-      |> perform(url, token, body)
-      |> retry_refused(config, token, &perform(method, url, &1, body))
+      |> perform(url, token, body, timeout)
+      |> retry_refused(config, token, &perform(method, url, &1, body, timeout))
     end
   end
 
@@ -220,7 +222,7 @@ defmodule Troupe.Plane.Tokens do
 
   defp retry_refused(other, _config, _token, _again), do: other
 
-  defp perform(method, url, token, body) do
+  defp perform(method, url, token, body, timeout) do
     options =
       [
         method: method,
@@ -228,7 +230,7 @@ defmodule Troupe.Plane.Tokens do
         headers: [{"x-vault-token", token}],
         decode_body: true,
         retry: false,
-        receive_timeout: 5_000
+        receive_timeout: timeout
       ] ++ if(body, do: [json: body], else: [])
 
     case Req.request(options) do
