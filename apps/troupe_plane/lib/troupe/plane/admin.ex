@@ -53,6 +53,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Control.TLS
   alias Troupe.Plane.Fleet.{Bundle, Extends, Provisioner, SizeClass, Worker}
   alias Troupe.Plane.GitHub.Issue, as: GitHubIssue
+  alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
@@ -1097,9 +1098,11 @@ defmodule Troupe.Plane.Admin do
   # leaves the rest of what it is sent, as the other admin methods leave a key they do not
   # declare. Either admin sets these for a team they administer, within the ladder, except
   # `allow_unenforced_workers`, which is a platform admin's (`may_set_unenforced/2`).
+  # `github` is the repositories the team's sessions may name and its fix loop's caps,
+  # read by `GitHub.Policy.read_team/2` over what the team has, key by key.
   @team_keys ~w(budget_micros budget_period idle_timeout_seconds cache_eviction_days) ++
                ~w(erase_after_days members_may_control pins_allowed volume_size) ++
-               ~w(volume_storage_class allow_unenforced_workers)
+               ~w(volume_storage_class allow_unenforced_workers github)
 
   @doc "The fields of a team `admin.team.update` sets, as its schema declares them."
   @spec team_keys() :: [String.t()]
@@ -1133,6 +1136,7 @@ defmodule Troupe.Plane.Admin do
     with :ok <- require_platform_admin(actor),
          %Identity.Group{} = group <- Identity.get_group(group_id),
          {:ok, existing} <- not_another_team(group, attrs, link == true),
+         {:ok, attrs} <- read_team_github(attrs, existing && existing.github),
          :ok <- same_settings(existing, group, attrs, link == true) do
       # Its name and its settings. The group it is enabled from, and when and by whom, are
       # the record of this call, written by it.
@@ -1247,6 +1251,7 @@ defmodule Troupe.Plane.Admin do
     attrs = settable(attrs, @team_keys)
 
     with {:ok, team} <- fetch_team(actor, name),
+         {:ok, attrs} <- read_team_github(attrs, team.github),
          :ok <- may_set_unenforced(actor, attrs),
          :ok <- still_allowed(team, attrs),
          # Before the changeset, so a widening attempt is refused with the ceiling
@@ -1267,6 +1272,27 @@ defmodule Troupe.Plane.Admin do
       end
     end
   end
+
+  # A team's `github`, sent as the keys to change, laid over what the team has and checked
+  # whole: a repository that is not `owner/name` or `owner/*`, or a cap that is not a
+  # whole number, is refused by name with nothing written.
+  defp read_team_github(attrs, current) when is_map(attrs) do
+    case Enum.find(attrs, fn {key, _value} -> to_string(key) == "github" end) do
+      nil ->
+        {:ok, attrs}
+
+      {key, sent} ->
+        case GitHubPolicy.read_team(current, sent) do
+          {:ok, github} ->
+            {:ok, attrs |> Map.delete(key) |> Map.put("github", github)}
+
+          {:error, %{field: field, reason: reason}} ->
+            {:error, Error.new(:invalid_params, %{field: field, reason: reason})}
+        end
+    end
+  end
+
+  defp read_team_github(attrs, _current), do: {:ok, attrs}
 
   defp within_the_ladder(team, attrs) do
     case Ladder.check(team, Map.new(attrs)) do
@@ -3269,7 +3295,8 @@ defmodule Troupe.Plane.Admin do
   defp key_answer(key, trigger), do: %{key: key, url: "/trigger/#{trigger.id}"}
 
   # A trigger on a GitHub repository is checked as a session naming it will be: the App is
-  # here, installed for its owner, and the trigger's profile declares the Git host. Asked of
+  # here, installed for its owner, the team lists it, and the trigger's profile declares
+  # the Git host. Asked of
   # a put that sends a source or a profile, against the trigger as it would then be.
   defp reachable_repository(team, name, attrs) do
     existing = Triggers.get(team, name)
@@ -3279,7 +3306,7 @@ defmodule Troupe.Plane.Admin do
     with true <- Map.has_key?(attrs, "source") or Map.has_key?(attrs, "profile"),
          {owner, repository} <- GitHubIssue.repository(source),
          {:error, reason} <-
-           GitHub.repository(%{"owner" => owner, "name" => repository}, profile) do
+           GitHub.repository(%{"owner" => owner, "name" => repository}, profile, team) do
       {:error,
        Error.new(:invalid_params, %{field: "source", reason: "source.repository: " <> reason})}
     else
@@ -4063,6 +4090,13 @@ defmodule Troupe.Plane.Admin do
       volume_storage_class: team.volume_storage_class,
       volume_size: team.volume_size,
       allow_unenforced_workers: team.allow_unenforced_workers,
+      # The repositories its sessions may name, and its fix loop's caps: an empty list
+      # names none.
+      github: %{
+        repositories: get_in(team.github || %{}, ["repositories"]) || [],
+        max_pushes: get_in(team.github || %{}, ["max_pushes"]),
+        max_runs: get_in(team.github || %{}, ["max_runs"])
+      },
       admins: Identity.admins_of(team),
       grants:
         Enum.map(
@@ -4214,7 +4248,8 @@ defmodule Troupe.Plane.Admin do
       :erase_after_days,
       :pins_allowed,
       :volume_storage_class,
-      :volume_size
+      :volume_size,
+      :github
     ])
   end
 

@@ -23,7 +23,7 @@ defmodule Troupe.Worker.GitCloneTest do
   alias Troupe.Plane.Admin
   alias Troupe.Plane.Audit
   alias Troupe.Plane.Control.{Connections, Listener}
-  alias Troupe.Plane.{FakeGitHub, Fleet, Repo}
+  alias Troupe.Plane.{FakeGitHub, Fleet, Identity, Repo}
   alias Troupe.Plane.Sessions, as: PlaneSessions
   alias Troupe.Sandbox
   alias Troupe.Worker.GitCredentials
@@ -107,11 +107,20 @@ defmodule Troupe.Worker.GitCloneTest do
           :public_key.pem_encode([:public_key.pem_entry_encode(:RSAPrivateKey, key)])
       })
 
-    # The session, on its row as the plane's, held by this pod.
+    # The session, on its row as the plane's, held by this pod; its team lists the
+    # repository, as a team's must for its sessions to name one.
+    name = "cloners-#{System.unique_integer([:positive])}"
+    {:ok, group} = Identity.upsert_group(%{external_id: name, display_name: name})
+    {:ok, team} = Identity.enable_team(group, %{name: name})
+
+    {:ok, team} =
+      Identity.update_team(team, %{github: %{"repositories" => ["example-org/widgets"]}})
+
     {:ok, _} =
       PlaneSessions.create(%{
         id: context.session_id,
         owner_subject: @owner,
+        team_id: team.id,
         profile: "dev",
         epoch: 1,
         repository: @repository

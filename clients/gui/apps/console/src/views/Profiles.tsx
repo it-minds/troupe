@@ -2,9 +2,11 @@
 //
 // The list says, per profile, how its pods are doing, which image it runs and which teams
 // may use it. A profile's page reads every field of its spec: what the editor has fields
-// for, what it has none for (identities at MCP servers, what its sessions may do on GitHub,
-// model prices, a server's credential settings) and anything the resource gains that this
-// console has never heard of, which is listed as it is rather than left out.
+// for, what it has none for (identities at MCP servers, the GitHub permissions its
+// sessions' token is granted, model prices, a server's credential settings) and anything
+// the resource gains that this console has never heard of, which is listed as it is rather
+// than left out. The fix loop's policy on GitHub (public repositories, the paths a push
+// never carries, its caps) has fields of its own.
 //
 // The editor offers the provider types and size classes the plane lists
 // (`admin.profile.choices`), the protocol's one list, rather than free text.
@@ -288,11 +290,18 @@ const READ_HERE = [
   "mcpServers",
   "mcpIdentities",
   "github.permissions",
+  "github.allowPublic",
+  "github.denyPaths",
+  "github.maxPushes",
+  "github.maxRuns",
   "configBundleChannel",
   "orgMount",
   "repositoryOverridesBundle",
   "personalTools",
 ];
+
+/** What every profile denies a push, which `github.denyPaths` adds to and cannot take from. */
+const DENIED_ALWAYS = ".env, .env.*, *.pem, *.key, *.p12, *.pfx and SSH private keys";
 
 /** What the plane writes into the resource itself, which a spec read back may hold. */
 const PLANE_WRITTEN = ["replicas", "sessionsPerPod", "resources", "teams", "image", "storage.size"];
@@ -322,6 +331,7 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
   const servers = (Array.isArray(spec["mcpServers"]) ? spec["mcpServers"] : []) as Array<Record<string, unknown>>;
   const identities = (Array.isArray(spec["mcpIdentities"]) ? spec["mcpIdentities"] : []) as Array<Record<string, unknown>>;
   const permissions = (at(spec, "github.permissions") ?? {}) as Record<string, unknown>;
+  const denied = (Array.isArray(at(spec, "github.denyPaths")) ? at(spec, "github.denyPaths") : []) as string[];
   const prices = (at(spec, "llm.prices") ?? {}) as Record<string, { input?: unknown; output?: unknown }>;
   const rest = leaves(spec).filter(([path]) => !under(path, READ_HERE) && !under(path, PLANE_WRITTEN));
   const written = leaves(spec).filter(([path]) => under(path, PLANE_WRITTEN));
@@ -381,9 +391,26 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
           ["Allowed hosts", <span className="mono">{show(at(spec, "egress.fqdns"))}</span>],
           ["Git hosts", <span className="mono">{show(at(spec, "egress.gitHosts"))}</span>],
           ["Storage class", show(at(spec, "storage.storageClassName") ?? "the cluster's default")],
-          ["On GitHub", Object.keys(permissions).length ? Object.entries(permissions).map(([k, v]) => `${k}: ${show(v)}`).join(", ") : "clone, and no more"],
         ]}
       />
+
+      <Region>On GitHub</Region>
+      <Fields
+        rows={[
+          ["May do", Object.keys(permissions).length ? Object.entries(permissions).map(([k, v]) => `${k}: ${show(v)}`).join(", ") : "clone, and no more"],
+          ["Public repositories", at(spec, "github.allowPublic") === true ? "pushes and pull requests allowed" : "refused: private and internal repositories only"],
+          [
+            "Paths a push never carries",
+            <>
+              {denied.length > 0 && <span className="mono">{denied.join(", ")}, and </span>}
+              <span className="hint">{DENIED_ALWAYS}, which every profile denies</span>
+            </>,
+          ],
+          ["Pushes a run may make", at(spec, "github.maxPushes") === undefined ? "no cap of the profile's" : show(at(spec, "github.maxPushes"))],
+          ["Runs on a repository at once", at(spec, "github.maxRuns") === undefined ? "no cap of the profile's" : show(at(spec, "github.maxRuns"))],
+        ]}
+      />
+      <p className="note">A team's own caps hold where they are lower, and a team's list says which repositories its sessions may name.</p>
 
       <Region>MCP servers</Region>
       {servers.length === 0 ? (
@@ -697,6 +724,10 @@ const FORM_PATHS = [
   ["orgMount"],
   ["repositoryOverridesBundle"],
   ["personalTools"],
+  ["github", "allowPublic"],
+  ["github", "denyPaths"],
+  ["github", "maxPushes"],
+  ["github", "maxRuns"],
 ];
 
 /** What the plane writes into the resource itself: never sent back, and refused if it were. */
@@ -793,6 +824,11 @@ interface Form {
   orgMount: boolean | null;
   repositoryOverridesBundle: boolean | null;
   forbidPersonalTools: boolean | null;
+  /** The fix loop's policy on GitHub: public repositories, paths a push never carries, its caps. */
+  allowPublic: boolean | null;
+  denyPaths: string;
+  maxPushes: string;
+  maxRuns: string;
 }
 
 const SERVER_FIELDS = ["name", "url", "credentialRef", "header", "timeoutMs"] as const;
@@ -827,6 +863,10 @@ function formOf(detail: ProfileDetail | null): Form {
     orgMount: own("orgMount", spec["orgMount"] === true),
     repositoryOverridesBundle: own("repositoryOverridesBundle", spec["repositoryOverridesBundle"] === true),
     forbidPersonalTools: own("personalTools", spec["personalTools"] === "forbid"),
+    allowPublic: parent && at(spec, "github.allowPublic") === undefined ? null : at(spec, "github.allowPublic") === true,
+    denyPaths: lines(at(spec, "github.denyPaths")),
+    maxPushes: text(at(spec, "github.maxPushes")),
+    maxRuns: text(at(spec, "github.maxRuns")),
   };
 }
 
@@ -855,6 +895,16 @@ export function draftOf(form: Form, servers: Plain[], kept: Plain): ProfileWrite
     orgMount: form.orgMount ?? undefined,
     repositoryOverridesBundle: form.repositoryOverridesBundle ?? undefined,
     personalTools: form.forbidPersonalTools === null ? undefined : form.forbidPersonalTools ? "forbid" : "allow",
+    github: compact({
+      // Absent is false, so false is sent only where a parent's true would otherwise hold.
+      allowPublic: form.allowPublic === true ? true : form.allowPublic === false && form.extends.trim() ? false : undefined,
+      denyPaths: form.denyPaths
+        .split("\n")
+        .map((p) => p.trim())
+        .filter(Boolean),
+      maxPushes: whole(form.maxPushes),
+      maxRuns: whole(form.maxRuns),
+    }),
   });
   return {
     name: form.name.trim(),
@@ -1101,6 +1151,29 @@ export function ProfileEditor({
         {(p) => <input {...p} value={form.storageClass} onChange={(e) => set({ storageClass: e.target.value })} autoComplete="off" spellCheck={false} />}
       </Field>
 
+      <Region>On GitHub</Region>
+      <Field
+        label="Public repositories"
+        hint={`Whether an unattended run may push to, and open a pull request on, a repository GitHub reports as public. The pod asks GitHub at every push.${parent ? ` If ${parent} refuses them, so does this one, whatever it says.` : ""}`}
+      >
+        {(p) => (
+          <select {...p} value={tri(form.allowPublic)} onChange={(e) => set({ allowPublic: untri(e.target.value) })}>
+            {parent && <option value="">{parent}'s</option>}
+            <option value="false">refused: private and internal only</option>
+            <option value="true">allowed</option>
+          </select>
+        )}
+      </Field>
+      <Field label="Paths a push never carries" hint={`One pattern per line, as .gitignore writes them: secrets/, *.tfstate, deploy/**/*.json. Beside ${DENIED_ALWAYS}, which no profile can take away.${parent ? ` Added to ${parent}'s.` : ""}`}>
+        {(p) => <textarea {...p} value={form.denyPaths} onChange={(e) => set({ denyPaths: e.target.value })} rows={3} spellCheck={false} />}
+      </Field>
+      <Field label="Pushes a run may make" hint={`1 to 1000; a run that asks for one more stops, with a comment on its pull request. A team's lower cap holds.${parent ? ` Empty is ${parent}'s; a number above ${parent}'s has ${parent}'s in effect.` : " Empty is no cap of the profile's."}`}>
+        {(p) => <input {...p} value={form.maxPushes} placeholder={theirs ?? undefined} onChange={(e) => set({ maxPushes: e.target.value })} inputMode="numeric" />}
+      </Field>
+      <Field label="Runs on a repository at once" hint={`1 to 1000, across every trigger on this profile; a firing over it is skipped.${parent ? ` Empty is ${parent}'s.` : " Empty is no cap of the profile's."}`}>
+        {(p) => <input {...p} value={form.maxRuns} placeholder={theirs ?? undefined} onChange={(e) => set({ maxRuns: e.target.value })} inputMode="numeric" />}
+      </Field>
+
       <Region>MCP servers</Region>
       <div className="servers">
         {servers.length === 0 && <p className="note">None of its own: sessions get what the bundle gives them.</p>}
@@ -1253,9 +1326,16 @@ const SERVER_HINTS: Record<(typeof SERVER_FIELDS)[number], string> = {
  */
 function extendsChange(parent: string, form: Form, creating: boolean): Partial<Form> {
   if (parent === "") {
-    return { extends: "", sizeClass: form.sizeClass || "standard", orgMount: form.orgMount ?? false, repositoryOverridesBundle: form.repositoryOverridesBundle ?? false, forbidPersonalTools: form.forbidPersonalTools ?? false };
+    return {
+      extends: "",
+      sizeClass: form.sizeClass || "standard",
+      orgMount: form.orgMount ?? false,
+      repositoryOverridesBundle: form.repositoryOverridesBundle ?? false,
+      forbidPersonalTools: form.forbidPersonalTools ?? false,
+      allowPublic: form.allowPublic ?? false,
+    };
   }
-  return creating && form.extends === "" ? { extends: parent, sizeClass: "", orgMount: null, repositoryOverridesBundle: null, forbidPersonalTools: null } : { extends: parent };
+  return creating && form.extends === "" ? { extends: parent, sizeClass: "", orgMount: null, repositoryOverridesBundle: null, forbidPersonalTools: null, allowPublic: null } : { extends: parent };
 }
 
 /** A switch as a select's value: empty is the parent's. */

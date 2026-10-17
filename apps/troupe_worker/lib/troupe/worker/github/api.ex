@@ -117,6 +117,37 @@ defmodule Troupe.Worker.GitHub.API do
          do: {:ok, statuses}
   end
 
+  @doc """
+  Revoke the token itself, as GitHub's `DELETE /installation/token` does for the token it
+  is made with, so it stops working now rather than at the end of its hour. A token GitHub
+  no longer takes (`401`) is gone already, which is what was asked for.
+  """
+  @spec revoke(map()) :: :ok | {:error, error()}
+  def revoke(%{"api_url" => api_url, "token" => token}) when is_binary(api_url) do
+    url = api_url <> "/installation/token"
+
+    case Req.request(
+           method: :delete,
+           url: url,
+           headers: [
+             {"authorization", "Bearer " <> token},
+             {"accept", "application/vnd.github+json"},
+             {"x-github-api-version", "2022-11-28"},
+             {"user-agent", "troupe-worker"}
+           ],
+           redirect: false,
+           retry: false,
+           receive_timeout: 10_000
+         ) do
+      {:ok, %{status: status}} when status in [204, 401] -> :ok
+      {:ok, %{status: status, body: answer}} -> {:error, {:github, status, message(answer)}}
+      {:error, %{reason: reason}} -> {:error, {:unreachable, URI.parse(url).host, reason}}
+      {:error, reason} -> {:error, {:unreachable, URI.parse(url).host, reason}}
+    end
+  end
+
+  def revoke(_credential), do: {:error, {:unreachable, "nowhere", :no_api_url}}
+
   @doc "Why a call came to nothing, as a clause: no capital, no full stop."
   @spec explain(error() | term()) :: String.t()
   def explain({:github, status, nil}), do: "GitHub answered #{status}"

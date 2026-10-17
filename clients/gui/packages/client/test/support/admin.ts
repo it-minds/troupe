@@ -243,6 +243,8 @@ export interface FakeTeam {
   volume_storage_class: string | null;
   volume_size: string | null;
   allow_unenforced_workers: boolean;
+  /** The repositories its sessions may name and the fix loop's caps, as the plane answers them. */
+  github: { repositories: string[]; max_pushes: number | null; max_runs: number | null };
   admins: string[];
   grants: Array<{ profile: string; volume_mode: string | null }>;
   groups: Array<{ external_id: string; display_name: string | null; issuer: string | null; linked_by: string | null }>;
@@ -600,8 +602,39 @@ const TEAM_KEYS = [
   "volume_size",
   "volume_storage_class",
   "allow_unenforced_workers",
+  "github",
 ];
 const INTEGER_KEYS = ["budget_micros", "idle_timeout_seconds", "cache_eviction_days", "erase_after_days"];
+
+type TeamGitHubFake = FakeTeam["github"];
+
+/** A repository a team may list: `owner/name`, or `owner/*` for every one of the owner's. */
+const TEAM_REPOSITORY = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?:\*|[A-Za-z0-9._-]{1,100})$/;
+
+/** A team's `github` as the plane reads it: only the keys sent, each checked, over what the team has. */
+function readTeamGitHub(current: TeamGitHubFake, sent: unknown): { github: TeamGitHubFake } | { refused: Answer } {
+  const refused = (field: string, reason: string) => ({ refused: refuse(INVALID_PARAMS, "invalid_params", { field, reason }) });
+  if (sent === null) return { github: { repositories: [], max_pushes: null, max_runs: null } };
+  if (typeof sent !== "object" || Array.isArray(sent)) return refused("github", "github is an object: {repositories, max_pushes, max_runs}");
+  const github = { ...current };
+  for (const [key, value] of Object.entries(sent as Record<string, unknown>)) {
+    if (key === "repositories") {
+      if (value !== null && !Array.isArray(value)) return refused("github.repositories", "repositories is a list of owner/name, or owner/*");
+      const list = (value ?? []) as unknown[];
+      const bad = list.find((r) => typeof r !== "string" || !TEAM_REPOSITORY.test(r.trim()) || r.trim().endsWith("/.."));
+      if (bad !== undefined) return refused("github.repositories", `${JSON.stringify(bad)} is not a repository: owner/name, or owner/* for every repository of the owner`);
+      github.repositories = [...new Set((list as string[]).map((r) => r.trim()))];
+    } else if (key === "max_pushes" || key === "max_runs") {
+      if (value !== null && !(Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 1000)) {
+        return refused(`github.${key}`, `github.${key} is a whole number from 1 to 1000, not ${JSON.stringify(value)}`);
+      }
+      github[key] = value as number | null;
+    } else {
+      return refused(`github.${key}`, "github takes repositories, max_pushes, max_runs");
+    }
+  }
+  return { github };
+}
 const BOOLEAN_KEYS = ["members_may_control", "pins_allowed", "allow_unenforced_workers"];
 
 /** A team's name, as `Identity.Team` holds it to. */
@@ -799,6 +832,12 @@ export class FakeAdmin {
             field: "allow_unenforced_workers",
             reason: "only a platform admin decides whether a team may run where nothing is enforced",
           });
+        }
+        if ("github" in attrs) {
+          // As `GitHub.Policy.read_team/2` reads it: the keys sent, over what the team has.
+          const read = readTeamGitHub(team.github, attrs["github"]);
+          if ("refused" in read) return read.refused;
+          attrs["github"] = read.github;
         }
         for (const [k, v] of Object.entries(attrs)) {
           if (INTEGER_KEYS.includes(k) && v !== null && !(Number.isInteger(v) && (v as number) >= 0)) {
@@ -2815,6 +2854,7 @@ export function team(name: string, fields: Partial<FakeTeam> = {}): FakeTeam {
     volume_storage_class: null,
     volume_size: null,
     allow_unenforced_workers: false,
+    github: { repositories: [], max_pushes: null, max_runs: null },
     admins: [],
     grants: [],
     groups: [],
@@ -2927,6 +2967,7 @@ export function exampleAdmin(): FakeAdmin {
         members_may_control: true,
         volume_size: "20Gi",
         volume_storage_class: "fast-ssd",
+        github: { repositories: ["example-org/widgets"], max_pushes: 5, max_runs: null },
         admins: ["dan@example.com"],
         grants: [
           { profile: "dev", volume_mode: "rw" },

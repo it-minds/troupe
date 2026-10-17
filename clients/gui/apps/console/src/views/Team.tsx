@@ -1,5 +1,6 @@
-// One team, in five tabs: who is in it and from which groups, which profiles it may use,
-// who administers it, its limits, and what removing it would take with it.
+// One team, in six tabs: who is in it and from which groups, which profiles it may use,
+// who administers it, its limits, the GitHub repositories its sessions may name with its
+// fix loop's caps, and what removing it would take with it.
 //
 // Every tab reads, and every tab changes what it shows: a group linked or unlinked, a
 // profile granted or revoked, an administrator named or removed, a limit narrowed, the
@@ -7,8 +8,8 @@
 // confirmed: plainly where it can be changed back, and by typing the name of what goes
 // where it takes something away that nobody can simply give back (a group's people, a
 // profile's running sessions, the team). Once made, it is shown as the audit recorded it.
-// The edits other than the limits are a platform admin's, as the plane holds them, and a
-// team admin is not offered them.
+// The edits other than the limits and the GitHub repositories are a platform admin's, as
+// the plane holds them, and a team admin is not offered them.
 //
 // The plane has no read of one team: `admin.teams.list` is the read, and a team a team
 // admin does not administer is not in their answer, so it is "not found" here as it is
@@ -30,6 +31,7 @@ const TAB_LABELS: Record<TeamTab, string> = {
   access: "Access",
   admins: "Admins",
   limits: "Limits",
+  github: "GitHub",
   danger: "Danger zone",
 };
 
@@ -68,6 +70,7 @@ export function Team({ name, tab }: { name: string; tab: TeamTab }): JSX.Element
               {tab === "access" && <Access team={team} onApplied={reload} />}
               {tab === "admins" && <Admins team={team} onApplied={reload} />}
               {tab === "limits" && <Limits team={team} onApplied={reload} />}
+              {tab === "github" && <GitHub team={team} onApplied={reload} />}
               {tab === "danger" && role === "platform_admin" && <Danger team={team} />}
             </>
           );
@@ -799,6 +802,127 @@ function consequence(team: string, line: DiffLine, laddered: LadderValue | undef
     default:
       return `${line.field} becomes ${show(to)}.`;
   }
+}
+
+// -- GitHub ------------------------------------------------------------------------------
+
+/** One repository per line, as a team lists it: `owner/name`, or `owner/*`. */
+const repositoryLines = (text: string): string[] => [...new Set(text.split(/[\s,]+/).map((r) => r.trim()).filter(Boolean))];
+
+const capWords = (cap: number | null | undefined, what: string): string => (cap === null || cap === undefined ? "no cap of the team's" : `${cap} ${what}`);
+
+/**
+ * The repositories the team's sessions and triggers may name, and its fix loop's caps:
+ * the team's own administrators', as the plane holds them. The plane's App bounds them all.
+ */
+function GitHub({ team, onApplied }: { team: AdminTeam; onApplied: () => void }): JSX.Element {
+  const { admin, notify } = useConsole();
+  const github = team.github ?? { repositories: [], max_pushes: null, max_runs: null };
+  const [form, setForm] = useState<{ repositories: string; maxPushes: string; maxRuns: string } | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [done, setDone] = useState<Done | null>(null);
+
+  const cap = (text: string): number | string | null => (text.trim() === "" ? null : /^\d+$/.test(text.trim()) ? Number(text.trim()) : text.trim());
+  const asked = form ? { repositories: repositoryLines(form.repositories), max_pushes: cap(form.maxPushes), max_runs: cap(form.maxRuns) } : null;
+  const lines: DiffLine[] = asked
+    ? [
+        ...(asked.repositories.join("\n") !== github.repositories.join("\n") ? [{ field: "github.repositories", from: github.repositories.join(", ") || "none", to: asked.repositories.join(", ") || "none" }] : []),
+        ...(asked.max_pushes !== github.max_pushes ? [{ field: "github.max_pushes", from: github.max_pushes, to: asked.max_pushes }] : []),
+        ...(asked.max_runs !== github.max_runs ? [{ field: "github.max_runs", from: github.max_runs, to: asked.max_runs }] : []),
+      ]
+    : [];
+  const dropped = asked ? github.repositories.filter((r) => !asked.repositories.includes(r)) : [];
+
+  return (
+    <section className="tab">
+      <p className="lead">
+        The GitHub repositories {team.name}'s sessions and triggers may name, through the plane's App, and how far its unattended runs may go. A repository not listed here is refused, a session at its creation and a push at
+        its token. The App's installations bound every list: a team cannot list its way to an owner the App is not installed for.
+      </p>
+      {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
+      {!form && (
+        <>
+          <Region>Repositories</Region>
+          {github.repositories.length === 0 ? (
+            <Empty title="None listed">{team.name}'s sessions name no repository until one is listed here.</Empty>
+          ) : (
+            <ul className="repositories">
+              {github.repositories.map((r) => (
+                <li key={r} className="mono">
+                  {r}
+                  {r.endsWith("/*") && <span className="hint"> every repository of {r.slice(0, -2)} the App reaches</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+          <Region>Caps</Region>
+          <div className="limits">
+            <div className="limit">
+              <span className="name">Pushes a run may make</span>
+              <span className="value mono">{capWords(github.max_pushes, "pushes")}</span>
+            </div>
+            <div className="limit">
+              <span className="name">Runs on a repository at once</span>
+              <span className="value mono">{capWords(github.max_runs, "runs")}</span>
+            </div>
+          </div>
+          <p className="note">A worker profile may set its own caps; the lower of the two holds. A run that asks for a push past its cap stops, with a comment on its draft pull request, as three red CI rounds stop it.</p>
+          <button type="button" onClick={() => setForm({ repositories: github.repositories.join("\n"), maxPushes: github.max_pushes === null ? "" : String(github.max_pushes), maxRuns: github.max_runs === null ? "" : String(github.max_runs) })}>
+            Change {team.name}'s repositories
+          </button>
+        </>
+      )}
+      {form && !previewing && (
+        <form
+          className="edit grid"
+          aria-label={`${team.name}'s GitHub repositories`}
+          onSubmit={(e) => {
+            e.preventDefault();
+            setPreviewing(true);
+          }}
+        >
+          <Field label="Repositories" hint="One per line: owner/name, or owner/* for every repository of the owner.">
+            {(p) => <textarea {...p} value={form.repositories} onChange={(e) => setForm({ ...form, repositories: e.target.value })} rows={5} spellCheck={false} />}
+          </Field>
+          <Field label="Pushes a run may make" hint="1 to 1000. Empty is no cap of the team's.">
+            {(p) => <input {...p} value={form.maxPushes} onChange={(e) => setForm({ ...form, maxPushes: e.target.value })} inputMode="numeric" />}
+          </Field>
+          <Field label="Runs on a repository at once" hint="1 to 1000, across the team's triggers; a firing over it is skipped. Empty is no cap of the team's.">
+            {(p) => <input {...p} value={form.maxRuns} onChange={(e) => setForm({ ...form, maxRuns: e.target.value })} inputMode="numeric" />}
+          </Field>
+          <div className="actions">
+            <button type="submit" className="primary" disabled={lines.length === 0}>
+              Preview
+            </button>
+            <button type="button" onClick={() => setForm(null)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+      {form && previewing && asked && (
+        <Preview
+          title={`team/${team.name}`}
+          lines={lines}
+          effects={[
+            ...(dropped.length ? [`${team.name}'s sessions on ${dropped.join(", ")} get no new token from now: their next clone, push or pull request is refused.`] : []),
+            ...(asked.repositories.length === 0 ? [`${team.name}'s sessions name no repository.`] : []),
+            ...lines.filter((l) => l.field !== "github.repositories").map((l) => `${l.field} becomes ${l.to === null ? "no cap of the team's" : show(l.to)}.`),
+          ]}
+          verb="Apply"
+          onCancel={() => setPreviewing(false)}
+          onConfirm={async () => {
+            const answer = await admin.updateTeam(team.name, { github: asked });
+            setForm(null);
+            setPreviewing(false);
+            setDone({ action: "team.update", subject: team.name, detail: answer.changes });
+            notify(`${team.name}'s GitHub repositories are applied.`);
+            onApplied();
+          }}
+        />
+      )}
+    </section>
+  );
 }
 
 // -- danger zone -------------------------------------------------------------------------

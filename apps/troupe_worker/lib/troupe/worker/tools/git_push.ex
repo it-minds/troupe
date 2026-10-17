@@ -23,7 +23,10 @@ defmodule Troupe.Worker.Tools.GitPush do
       "branch, which must start with `troupe/` (default `troupe/session-<id>`); every later " <>
       "push goes to the same branch, never with force. Once the session has a pull request, " <>
       "a push waits until CI on the last one has finished (read it with pr_checks), and after " <>
-      "#{GitHub.red_rounds()} red CI rounds pushes are closed."
+      "#{GitHub.red_rounds()} red CI rounds pushes are closed. A push carrying a credential " <>
+      "file (.env, *.pem, a private key, or a path the profile denies) is refused, naming it; " <>
+      "so is one to a public repository unless the profile allows it, and one past the " <>
+      "run's cap of pushes."
   end
 
   @impl Troupe.Tool

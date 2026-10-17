@@ -213,6 +213,13 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   never with force, and no tool merges, approves or marks a pull request ready. After
   three red CI rounds the session's tokens can no longer push. Each push, pull request, CI
   round and stop is an audit entry (Decision 891, [github.md](github.md#7-the-fix-loop)).
+- **A run pushes only where it is allowed, and nothing that looks like a credential.** A
+  session names only a repository its team lists; a push or a pull request to a repository
+  GitHub reports as public is refused unless the profile allows public ones; a push that
+  would carry `.env`, a key file, a path the profile denies or a copy of what the pod mounts
+  from a secret is refused before anything is sent; a run has caps on its pushes and on how
+  many run at once; and a session's tokens are revoked at GitHub when it goes dormant or
+  stops (Decision 911, [github.md](github.md#9-how-far-a-run-may-go)).
 - **One OpenBao role for every profile, by default.** Every worker logs in as
   `troupe-worker`. `bao.workerRolePerProfile` gives each profile a role of its own, so one
   profile's pods cannot read another's session keys
