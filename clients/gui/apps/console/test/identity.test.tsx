@@ -142,7 +142,7 @@ describe("a team's service principals", () => {
     expect(shown).toMatch(/^tps_/);
     expect(JSON.stringify(fake.admin.audit)).not.toContain(shown);
     await waitFor(() => row("svc:core/weekly-audit"), "the new principal listed");
-    await sees("works", row("svc:core/weekly-audit")!);
+    await sees("works", () => row("svc:core/weekly-audit"));
   });
 
   it("are rotated and disabled, each typed by the subject", async () => {
@@ -183,7 +183,7 @@ describe("a team's service principals", () => {
     });
     await open();
     await waitFor(() => row("svc:core/orphan"), "the orphan");
-    await sees("needs a sponsor", row("svc:core/orphan")!);
+    await sees("needs a sponsor", () => row("svc:core/orphan"));
   });
 });
 

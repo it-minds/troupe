@@ -135,9 +135,9 @@ describe("what the plane dials", () => {
     await open();
     await waitFor(() => says("Every host anything here dials"), "the hosts");
     const hostRow = (host: string) => [...document.querySelectorAll("tr")].find((r) => r.cells[0]?.textContent === host) ?? null;
-    await sees("allowed", hostRow("llm-gw.example.com")!);
-    await sees("refused", hostRow("elsewhere.example.org")!);
-    await sees("ux", hostRow("elsewhere.example.org")!);
+    await sees("allowed", () => hostRow("llm-gw.example.com"));
+    await sees("refused", () => hostRow("elsewhere.example.org"));
+    await sees("ux", () => hostRow("elsewhere.example.org"));
     await sees("a Secret named JIRA_TOKEN");
     await sees("design/weekly-digest");
     await sees("https://hooks.example.com/troupe");

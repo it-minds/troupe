@@ -127,14 +127,25 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Poll until `find` answers something, the way a person waits for a screen. */
+/**
+ * Poll until `find` answers something, the way a person waits for a screen. A `find` that
+ * throws has not found it yet: an element it reaches into can be gone for a render while
+ * the screen redraws it. At the deadline the last thing it threw is said.
+ */
 export async function waitFor<T>(find: () => T | null | undefined | false, what: string, timeoutMs = 10_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const found = find();
+    let found: T | null | undefined | false = null;
+    let threw: unknown = null;
+    try {
+      found = find();
+    } catch (e) {
+      threw = e;
+    }
     if (found) return found;
     if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${what}. The page says:\n${document.body.textContent ?? ""}`);
+      const why = threw ? ` (it last threw: ${threw instanceof Error ? threw.message : String(threw)})` : "";
+      throw new Error(`timed out waiting for ${what}${why}. The page says:\n${document.body.textContent ?? ""}`);
     }
     await sleep(20);
   }

@@ -36,10 +36,10 @@ describe("the settings", () => {
     await open();
     await waitFor(() => row("platform_admin_group"), "the settings");
     await sees("Who administers this platform");
-    await sees("from the deployment", row("platform_admin_group")!);
-    await sees("changed here", row("default_erase_after_days")!);
+    await sees("from the deployment", () => row("platform_admin_group"));
+    await sees("changed here", () => row("default_erase_after_days"));
     // The deployment's: read, with why it is not changed here, and nothing to press.
-    await sees("The deployment's: changed in the deployment and rolled", row("base_url")!);
+    await sees("The deployment's: changed in the deployment and rolled", () => row("base_url"));
     expect(button("Change", row("base_url")!)).toBeNull();
     expect(says("set · never shown", row("breakglass_token")!) || says("not set", row("breakglass_token")!)).toBe(true);
     // The two panels with screens of their own are pointed at, not drawn twice.
@@ -111,6 +111,6 @@ describe("the ladder", () => {
 
     type(field("As one team sees it")!, "core");
     await waitFor(() => says("team 90", ladderRow("default_erase_after_days")!), "core's own opinion");
-    await sees("team 90 (in force)", ladderRow("default_erase_after_days")!);
+    await sees("team 90 (in force)", () => ladderRow("default_erase_after_days"));
   });
 });

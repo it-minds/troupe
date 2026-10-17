@@ -37,14 +37,14 @@ describe("a team's triggers", () => {
   it("lists them per team, and a platform admin picks the team", async () => {
     await open("#/triggers");
     await waitFor(() => row("nightly-deps"), "core's triggers");
-    await sees("on a schedule: 0 3 * * 1-5 (UTC)", row("nightly-deps")!);
-    await sees("svc:core/nightly", row("nightly-deps")!);
-    await sees("on", row("nightly-deps")!);
+    await sees("on a schedule: 0 3 * * 1-5 (UTC)", () => row("nightly-deps"));
+    await sees("svc:core/nightly", () => row("nightly-deps"));
+    await sees("on", () => row("nightly-deps"));
 
     type(field("Team")!, "design");
     await waitFor(() => row("weekly-digest"), "design's triggers");
-    await sees("paused", row("weekly-digest")!);
-    await sees("by a webhook from github", row("weekly-digest")!);
+    await sees("paused", () => row("weekly-digest"));
+    await sees("by a webhook from github", () => row("weekly-digest"));
     expect(location.hash).toBe("#/triggers/design");
   });
 

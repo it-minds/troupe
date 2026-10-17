@@ -106,13 +106,26 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Poll until `find` answers something, the way a person waits for a screen. */
+/**
+ * Poll until `find` answers something, the way a person waits for a screen. A `find` that
+ * throws has not found it yet: a row it reaches into can be gone for a render while the
+ * screen redraws it. At the deadline the last thing it threw is said.
+ */
 export async function waitFor<T>(find: () => T | null | undefined | false, what: string, timeoutMs = 10_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const found = find();
+    let found: T | null | undefined | false = null;
+    let threw: unknown = null;
+    try {
+      found = find();
+    } catch (e) {
+      threw = e;
+    }
     if (found) return found;
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}. The page says:\n${document.body.textContent ?? ""}`);
+    if (Date.now() > deadline) {
+      const why = threw ? ` (it last threw: ${threw instanceof Error ? threw.message : String(threw)})` : "";
+      throw new Error(`timed out waiting for ${what}${why}. The page says:\n${document.body.textContent ?? ""}`);
+    }
     await sleep(20);
   }
 }
@@ -128,8 +141,12 @@ export function says(text: string, within: ParentNode = document.body): boolean 
  * the same tick, on a busy machine. `expect(says(…)).toBe(true)` is refused by
  * `waits.test.ts` unless its line says why it is meant at once (`// at once: <why>`).
  */
-export async function sees(text: string, within: ParentNode = document.body): Promise<void> {
-  await waitFor(() => says(text, within), `the page to say "${text}"`);
+export async function sees(text: string, within: ParentNode | (() => ParentNode | null | undefined) = document.body): Promise<void> {
+  // A function is asked again on every look: the row it finds can be drawn anew meanwhile.
+  await waitFor(() => {
+    const at = typeof within === "function" ? within() : within;
+    return Boolean(at) && says(text, at!);
+  }, `the page to say "${text}"`);
 }
 
 /** Wait for the link whose words begin with `label`, as `sees` waits for words. */

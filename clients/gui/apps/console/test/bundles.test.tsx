@@ -38,17 +38,17 @@ describe("the channels", () => {
   it("lists each channel a profile follows, with its current version and the profiles on it", async () => {
     await open("#/bundles");
     await waitFor(() => rowOf("channels", "stable") && rowOf("channels", "canary"), "the channels");
-    await sees("v2", rowOf("channels", "stable")!);
-    await sees("2 agents · 1 skill · 2 MCP servers", rowOf("channels", "stable")!);
-    await sees("dev, ux, build-box", rowOf("channels", "stable")!);
-    await sees("heavy", rowOf("channels", "canary")!);
+    await sees("v2", () => rowOf("channels", "stable"));
+    await sees("2 agents · 1 skill · 2 MCP servers", () => rowOf("channels", "stable"));
+    await sees("dev, ux, build-box", () => rowOf("channels", "stable"));
+    await sees("heavy", () => rowOf("channels", "canary"));
   });
 
   it("lists a channel's versions, newest first, with the current one marked", async () => {
     await open("#/bundles/stable");
     await waitFor(() => heading() === "stable" && rowOf("versions", "v2"), "stable's versions");
-    await sees("current", rowOf("versions", "v2")!);
-    await sees("older", rowOf("versions", "v1")!);
+    await sees("current", () => rowOf("versions", "v2"));
+    await sees("older", () => rowOf("versions", "v1"));
     await sees("dev, ux, build-box");
   });
 });
@@ -153,7 +153,7 @@ describe("a team admin", () => {
     await open("#/bundles", PEOPLE.bob);
     await waitFor(() => rowOf("channels", "stable"), "the channels");
     expect(rowOf("channels", "canary")).toBeNull();
-    await sees("ux", rowOf("channels", "stable")!);
+    await sees("ux", () => rowOf("channels", "stable"));
 
     link("stable", rowOf("channels", "stable")!)!.click();
     await waitFor(() => heading() === "stable" && rowOf("versions", "v2"), "stable");

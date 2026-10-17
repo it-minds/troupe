@@ -60,7 +60,12 @@ defmodule Troupe.Credo.AsyncEnv do
   defp env_calls(body) do
     body
     |> own_nodes()
-    |> Enum.filter(&match?({{:., _, [{:__aliases__, _, [:System]}, f]}, _, _} when f in [:put_env, :delete_env], &1))
+    |> Enum.filter(
+      &match?(
+        {{:., _, [{:__aliases__, _, [:System]}, f]}, _, _} when f in [:put_env, :delete_env],
+        &1
+      )
+    )
   end
 
   # Every node of a module's body, but not those of a module nested in it: that one is
@@ -75,14 +80,21 @@ defmodule Troupe.Credo.AsyncEnv do
     if own?(var, source), do: ctx, else: put_issue(ctx, issue(ctx, meta, fun))
   end
 
-  defp check_call({{:., _, [_, fun]}, meta, _args}, ctx, _source), do: put_issue(ctx, issue(ctx, meta, fun))
+  defp check_call({{:., _, [_, fun]}, meta, _args}, ctx, _source),
+    do: put_issue(ctx, issue(ctx, meta, fun))
 
   defp own?(name, _source) when is_binary(name), do: String.starts_with?(name, @own)
-  defp own?({:<<>>, _, [prefix | _]}, _source) when is_binary(prefix), do: String.starts_with?(prefix, @own)
+
+  defp own?({:<<>>, _, [prefix | _]}, _source) when is_binary(prefix),
+    do: String.starts_with?(prefix, @own)
 
   # A name, or a field of the test's context: own when the module binds that name to one.
-  defp own?({name, _, context}, source) when is_atom(name) and is_atom(context), do: bound_to_own?(name, source)
-  defp own?({{:., _, [_map, field]}, _, []}, source) when is_atom(field), do: bound_to_own?(field, source)
+  defp own?({name, _, context}, source) when is_atom(name) and is_atom(context),
+    do: bound_to_own?(name, source)
+
+  defp own?({{:., _, [_map, field]}, _, []}, source) when is_atom(field),
+    do: bound_to_own?(field, source)
+
   defp own?(_var, _source), do: false
 
   defp bound_to_own?(name, source) do

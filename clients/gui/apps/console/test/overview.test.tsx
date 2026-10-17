@@ -46,10 +46,10 @@ describe("the overview", () => {
     expect(link("Runs and review")!.getAttribute("href")).toBe("#/runs");
     expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);
 
-    await sees("4", metric("Active sessions")!);
-    await sees("5 dormant, 1 read-only", metric("Active sessions")!);
-    await sees("3 / 5", metric("Pods")!);
-    await sees("473.50", metric("Spent")!);
+    await sees("4", () => metric("Active sessions"));
+    await sees("5 dormant, 1 read-only", () => metric("Active sessions"));
+    await sees("3 / 5", () => metric("Pods"));
+    await sees("473.50", () => metric("Spent"));
   });
 
   it("shows each profile's fleet and each team's spend against its budget", async () => {
@@ -69,7 +69,7 @@ describe("the overview", () => {
     await waitFor(() => says("Spend · per team") && link("design"), "the overview, as the design team's admin");
     expect(link("core")).toBeNull();
     expect(link("dev")).toBeNull();
-    await sees("2 dormant, 0 read-only", metric("Active sessions")!);
+    await sees("2 dormant, 0 read-only", () => metric("Active sessions"));
   });
 
   it("says so when nothing needs attention", async () => {

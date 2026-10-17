@@ -17,7 +17,9 @@ fixtures without declaring the dependency.
 
 CI runs each app's suite as its own job; the nightly and a release run every suite nine
 more times, because the suite is concurrent and a race that shows one time in five is a
-bug this project cares about.
+bug this project cares about. The nightly also runs the TUI's suite three more times and
+the GUI's five, in a random order, and names every test that failed in any run
+(`scripts/flake-hunt`, which runs any suite that way: `scripts/flake-hunt 20 mix test <file>`).
 
 ## 2. What each suite needs
 
@@ -26,7 +28,7 @@ dependency up, never silence.
 
 | Dependency | Suites | Without it |
 |---|---|---|
-| PostgreSQL on 25432, `troupe_plane_test` migrated | all of the plane's | every test excluded, with the two commands to run |
+| PostgreSQL on 25432 (the suite creates and migrates its checkout's own database) | all of the plane's | every test excluded, with the two commands to run |
 | PostgreSQL | the worker's control-channel failover test | skipped, flunks |
 | OpenBao on 28200 | plane tokens, protocol KMS, every `Troupe.Worker.SessionCase` suite, the gateway's `PrivateTest` sealing | `setup_all` says so; each test flunks (the plane's `PersonCredentialsTest` and `PrivateErasureTest`, which need MinIO too, are skipped by a tag instead) |
 | MinIO on 29000 | protocol object store and storage, worker sessions, the gateway's `PrivateTest` sealing | same |
@@ -43,7 +45,27 @@ temporary directory once per run and passes `state_dir` through config, because
 `System.put_env/2` is global; worker tests set `TROUPE_STATE_HOME` per test and are
 `async: false`. Suites assert on events and telemetry, never on log lines.
 
-## 3. Fixtures
+## 3. What keeps a test from flaking
+
+Decision 915 is the long form.
+
+- **A GUI test waits for what comes after an async step**: `await sees("…")` (and the
+  console's `await seesLink("…")`), not `expect(says("…")).toBe(true)`, which each app's
+  `waits.test.tsx` refuses unless the line says why it is meant at once
+  (`// at once: <why>`). To show a race on purpose, make the fake slow:
+  `daemon.delayMs["config.get"] = 300`, or `subscribeDelayMs`.
+- **An async ExUnit module sets no environment variable** but a `TROUPE_TEST_...` one of its
+  own; `Troupe.Credo.AsyncEnv` checks it. A test that needs another home is
+  `async: false` or passes the home as an option.
+- **Each checkout has its own plane test database**, `troupe_plane_test_<hash of its
+  path>`, so two worktrees' plane suites no longer deadlock (`40P01`); CI keeps
+  `troupe_plane_test`, and `TROUPE_PLANE_TEST_DB` names one.
+- **The GUI's client tests read nothing from outside `clients/gui`** that
+  `clients/gui/Dockerfile` does not copy and the root's `.dockerignore` keeps: the image
+  runs them with that context alone (`packages/client/test/support/image-reads.ts`).
+- **A flaky test is fixed at its cause**: no retry, no longer timeout, no skip.
+
+## 4. Fixtures
 
 - `test/fixtures/logs/<version>/` — six recorded logs per recorded version (0.2.0 and
   0.3.0; no release since has recorded its own) and the fold hash each produces.
@@ -57,7 +79,7 @@ temporary directory once per run and passes `state_dir` through config, because
   `TroupePolicy` maps as the API server hands them over, and `FakeCluster`, an API server
   in memory that a reconcile pass runs against (operator).
 
-## 4. Checks that are tests in all but name
+## 5. Checks that are tests in all but name
 
 - **The Python conformance client** is a client written against `PROTOCOL.md` in the
   standard library alone. The test starts a daemon on a Unix socket with the fake
@@ -77,7 +99,7 @@ temporary directory once per run and passes `state_dir` through config, because
   number held to a budget in `apps/troupe_core/priv/bench/budgets.json`; CI's `lint` job
   and `scripts/ci` fail past one ([bench.md](bench.md)).
 
-## 5. Beyond the unit suites
+## 6. Beyond the unit suites
 
 - `mix troupe.e2e` (operator): the cluster suite, against `scripts/remote-up`'s kind
   cluster; CI's `cluster` job.

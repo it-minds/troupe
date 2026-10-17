@@ -110,8 +110,8 @@ describe("a team", () => {
     await sees("1200 s", idle);
     button("Why?", erase)!.click();
     await waitFor(() => says("deployment", limit("Sessions erased after")!) && says("365 days", limit("Sessions erased after")!), "the ladder");
-    await sees("180 days", limit("Sessions erased after")!);
-    await sees("500.00", limit("Budget")!);
+    await sees("180 days", () => limit("Sessions erased after"));
+    await sees("500.00", () => limit("Budget"));
   });
 
   it("previews a narrower limit in words, applies it on confirm, and shows what the audit recorded", async () => {
@@ -197,7 +197,7 @@ describe("a team's edits", () => {
     expect(fake.admin.teams.get("core")!.groups).toHaveLength(1);
     button("Link")!.click();
     await waitFor(() => says("Recorded in the audit as team.link on core"), "the audit's note");
-    await sees("grp-platform", document.querySelector(".audit-note")!);
+    await sees("grp-platform", () => document.querySelector(".audit-note"));
     expect(fake.admin.teams.get("core")!.groups.map((g) => g.external_id)).toEqual(["grp-core", "grp-platform"]);
     await waitFor(() => says("hana@example.com"), "the person the group brought in");
 

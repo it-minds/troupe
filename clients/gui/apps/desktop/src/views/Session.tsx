@@ -10,7 +10,7 @@
 // the stream, because the stream's order is the server's and a reconnect must not
 // reshuffle what somebody has already read.
 
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import {
   configKey,
@@ -136,8 +136,10 @@ export function Session({
   // chose for this session (troupe #474).
   const detail = useDetail(daemon, workspace, sessionId);
 
-  // Ctrl-K (⌘K on a Mac) opens the command palette from anywhere on the screen.
-  useEffect(() => {
+  // Ctrl-K (⌘K on a Mac) opens the command palette from anywhere on the screen, from the
+  // moment it is drawn: a layout effect, since a passive one runs a while after the screen
+  // shows on a busy machine, and a Ctrl-K pressed meanwhile was lost.
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") {
         e.preventDefault();

@@ -37,7 +37,7 @@ describe("client versions", () => {
     await sees("0.14.0-beta", terminal);
     await sees("0.15.0-beta", terminal);
     await sees("last set by alice@example.com", terminal);
-    await sees("never set", card("The daemon")!);
+    await sees("never set", () => card("The daemon"));
     expect(card("The desktop app")).not.toBeNull();
   });
 

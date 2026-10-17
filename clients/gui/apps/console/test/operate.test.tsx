@@ -36,9 +36,9 @@ describe("workers and pods", () => {
   it("lists each profile's pods, and drains one once its name is typed", async () => {
     await open("#/pods");
     await waitFor(() => row("troupe-w-dev-0"), "dev's pods");
-    await sees("healthy", row("troupe-w-dev-0")!);
-    await sees("draining", row("troupe-w-dev-1")!);
-    await sees("unknown", row("build-box-0")!);
+    await sees("healthy", () => row("troupe-w-dev-0"));
+    await sees("draining", () => row("troupe-w-dev-1"));
+    await sees("unknown", () => row("build-box-0"));
     // A draining pod is not offered a second drain.
     expect(button("Drain", row("troupe-w-dev-1")!)).toBeNull();
 
@@ -67,19 +67,19 @@ describe("provisioners and hosts", () => {
   it("names each guarantee a substrate does not give, and what a profile's workers lack", async () => {
     await open("#/hosts");
     await waitFor(() => row("kubernetes"), "the provisioners");
-    await sees("egress by hostname", row("kubernetes")!);
-    await sees("the egress allowlist checked at admission, not on the wire", row("kubernetes")!);
-    await sees("admission policy, network policy, egress by hostname, disruption budget", row("ssh")!);
+    await sees("egress by hostname", () => row("kubernetes"));
+    await sees("the egress allowlist checked at admission, not on the wire", () => row("kubernetes"));
+    await sees("admission policy, network policy, egress by hostname, disruption budget", () => row("ssh"));
     await waitFor(() => says("everything is enforced", row("dev")!), "dev");
-    await sees("not enforced", row("build-box")!);
+    await sees("not enforced", () => row("build-box"));
     await sees("No team may be granted a profile nothing is enforced on");
   });
 
   it("registers a machine with its secret and CA shown once, rotates it by name, and switches it off", async () => {
     await open("#/hosts");
     await waitFor(() => row("build-box-0"), "build-box's machines");
-    await sees("enrolled", row("build-box-0")!);
-    await sees("never seen", row("build-box-1")!);
+    await sees("enrolled", () => row("build-box-0"));
+    await sees("never seen", () => row("build-box-1"));
 
     button("Register a machine to build-box")!.click();
     type(await waitFor(() => field("Name"), "the form"), "build-box-2");
@@ -89,7 +89,7 @@ describe("provisioners and hosts", () => {
     await waitFor(() => says("build-box-2's enrolment secret, shown once"), "the secret");
     await sees("BEGIN CERTIFICATE");
     await waitFor(() => row("build-box-2"), "the machine listed");
-    await sees("never seen", row("build-box-2")!);
+    await sees("never seen", () => row("build-box-2"));
     expect(JSON.stringify(fake.admin.audit)).not.toMatch(/wh_/);
 
     button("Rotate", row("build-box-0")!)!.click();

@@ -14,18 +14,23 @@ defmodule Troupe.Plane.TestDatabase do
   does: the worker's control-channel tests run against a real plane too.
   """
 
+  alias Ecto.Adapters.Postgres
   alias Troupe.Plane.Repo
 
   @spec ensure() :: :ok | {:error, term()}
   def ensure do
     config = Repo.config()
 
-    case Ecto.Adapters.Postgres.storage_up(config) do
-      :ok -> migrate()
-      {:error, :already_up} -> migrate()
+    case Postgres.storage_up(config) do
+      :ok ->
+        migrate()
+
+      {:error, :already_up} ->
+        migrate()
+
       # Two suites of one checkout starting together: the other one made it.
-      {:error, message} when is_binary(message) -> if message =~ "already exists", do: migrate(), else: {:error, message}
-      {:error, reason} -> {:error, reason}
+      {:error, message} ->
+        if message =~ "already exists", do: migrate(), else: {:error, message}
     end
   end
 

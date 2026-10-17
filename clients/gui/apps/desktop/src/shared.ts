@@ -79,6 +79,9 @@ function adopt(config: ModelConfig, defaults: boolean, mine: SharedPref[] = []):
 
 /** The app's half: read when the daemon is reached, and again whenever a `ui` key changes. */
 export function useSharedPrefs(client: DaemonClient | null): void {
+  // What this window chose and has not written goes with it, not to the next one.
+  useEffect(() => () => unshared.clear(), []);
+
   useEffect(() => {
     if (!client) return;
     let live = true;

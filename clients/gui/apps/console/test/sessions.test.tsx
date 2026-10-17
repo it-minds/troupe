@@ -41,7 +41,7 @@ describe("sessions", () => {
     await sees("dan@example.com", pinned);
     await sees("dormant", pinned);
     await sees("pinned by dan@example.com", pinned);
-    await sees("171.7 MiB", row("s-7f3a9c21")!);
+    await sees("171.7 MiB", () => row("s-7f3a9c21"));
     await sees("Metadata only");
   });
 
@@ -71,7 +71,7 @@ describe("sessions", () => {
     await sees("9e8d7c6", pushed);
     await sees("troupe/session-s-7f3a9c23", pushed);
     expect(pushed.querySelector("a[href]")).toBeNull();
-    await sees("—", row("s-7f3a9c21")!);
+    await sees("—", () => row("s-7f3a9c21"));
   });
 
   it("shows a team admin their own team's sessions and none of another's", async () => {

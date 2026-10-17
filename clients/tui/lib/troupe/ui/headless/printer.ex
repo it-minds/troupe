@@ -103,6 +103,9 @@ defmodule Troupe.UI.Headless.Printer do
       # `troupe resume --headless` (root Decision 812): an event stamped before this (ms) is
       # the session's history, neither printed nor read as this run's rest.
       since: Keyword.get(opts, :since),
+      # And a durable event at or below this `seq`, whenever it reaches this process: the
+      # last turn's end can be stamped after `since` by the time it is read here.
+      after_seq: Keyword.get(opts, :after_seq),
       # Set while the connection is down: the timer that ends the run if it stays down.
       lost: nil
     }
@@ -156,8 +159,12 @@ defmodule Troupe.UI.Headless.Printer do
     end
   end
 
-  # By the stamp alone: what this client wrote in the journal when it opened the session
-  # before carries no `seq`, and is history all the same.
+  # By its place in the log where it has one; by the stamp otherwise: what this client
+  # wrote in the journal when it opened the session before carries no `seq`, and is
+  # history all the same.
+  defp history?(%{seq: seq}, %{after_seq: last}) when is_integer(seq) and is_integer(last),
+    do: seq <= last
+
   defp history?(%{ts: ts}, %{since: since}) when is_integer(ts) and is_integer(since),
     do: ts < since
 

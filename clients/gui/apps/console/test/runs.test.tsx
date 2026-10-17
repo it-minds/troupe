@@ -49,10 +49,10 @@ describe("the runs", () => {
     expect(link("nightly-deps", fix)!.getAttribute("href")).toBe("#/triggers/core/nightly-deps");
 
     // A run that ended and nobody has read is said to be unread; one somebody read, by whom.
-    await sees("not yet", row("nightly-deps", "2026-10-14 03:00")!);
-    await sees("failed", row("nightly-deps", "2026-10-14 03:00")!);
-    await sees("by dan@example.com", row("nightly-deps", "2026-10-13 03:00")!);
-    await sees("waiting on a person", row("weekly-digest", "2026-10-12 08:00")!);
+    await sees("not yet", () => row("nightly-deps", "2026-10-14 03:00"));
+    await sees("failed", () => row("nightly-deps", "2026-10-14 03:00"));
+    await sees("by dan@example.com", () => row("nightly-deps", "2026-10-13 03:00"));
+    await sees("waiting on a person", () => row("weekly-digest", "2026-10-12 08:00"));
 
     type(field("Showing")!, "github");
     await waitFor(() => rows().length === 1, "only the GitHub run");

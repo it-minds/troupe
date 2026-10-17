@@ -33,16 +33,16 @@ describe("the organisation's document", () => {
     unmount = render(<App />).unmount;
     await waitFor(() => enforced(), "the enforced set");
 
-    await sees("openai", row("client_provider")!);
-    await sees("deployed", row("client_provider")!);
-    await sees("glm-5.2", row("client_model_default")!);
-    await sees("set here", row("client_model_default")!);
-    await sees("unset", row("client_model_expensive")!);
+    await sees("openai", () => row("client_provider"));
+    await sees("deployed", () => row("client_provider"));
+    await sees("glm-5.2", () => row("client_model_default"));
+    await sees("set here", () => row("client_model_default"));
+    await sees("unset", () => row("client_model_expensive"));
 
     const keys = [...enforced()!.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
     expect(keys).toEqual(ENFORCEABLE.map((k) => k.key));
-    await sees("200", enforced()!);
-    await sees("the most it may be", enforced()!);
+    await sees("200", () => enforced());
+    await sees("the most it may be", () => enforced());
   });
 
   it("offers a key the plane lists that this console has never heard of", async () => {
@@ -68,8 +68,8 @@ describe("the organisation's document", () => {
     button("Preview", enforced()!)!.click();
 
     await waitFor(() => says("What will happen", enforced()!), "the preview");
-    await sees("No machine may set max_turns above 50; a lower value stays.", enforced()!);
-    await sees("No machine may loosen approvals past deny; a tighter value stays.", enforced()!);
+    await sees("No machine may set max_turns above 50; a lower value stays.", () => enforced());
+    await sees("No machine may loosen approvals past deny; a tighter value stays.", () => enforced());
     expect(fake.admin.stored.get("client_enforced")).toEqual({ approvals: "wait", max_turns: 200 });
 
     button("Apply", enforced()!)!.click();
@@ -160,10 +160,10 @@ describe("the organisation's permission rules", () => {
     await signedInAs(fake, PEOPLE.alice);
     unmount = render(<App />).unmount;
     await waitFor(() => rules(), "the rules");
-    await sees("2 deny, 1 ask (below)", enforced()!);
+    await sees("2 deny, 1 ask (below)", () => enforced());
     const deny = rules()!.querySelector<HTMLElement>('[aria-label="deny rules"]')!;
     expect([...deny.querySelectorAll("li code")].map((c) => c.textContent)).toEqual(["shell(git push)", "read_file(secrets/**)"]);
-    await sees("none", rules()!.querySelector<HTMLElement>('[aria-label="allow rules"]')!);
+    await sees("none", () => rules()?.querySelector<HTMLElement>('[aria-label="allow rules"]'));
   });
 
   it("adds, edits and removes rules as a tool and a pattern, previews them in words, and records the change", async () => {
@@ -186,10 +186,10 @@ describe("the organisation's permission rules", () => {
 
     button("Preview", rules()!)!.click();
     await waitFor(() => says("What will happen", rules()!), "the preview");
-    await sees("Every machine refuses shell(git push --force), whatever its own files allow.", rules()!);
-    await sees("shell(git push) is no longer refused by the organisation", rules()!);
-    await sees("read_file(secrets/**) is no longer refused by the organisation", rules()!);
-    await sees("Every machine may run shell(mix test) unasked", rules()!);
+    await sees("Every machine refuses shell(git push --force), whatever its own files allow.", () => rules());
+    await sees("shell(git push) is no longer refused by the organisation", () => rules());
+    await sees("read_file(secrets/**) is no longer refused by the organisation", () => rules());
+    await sees("Every machine may run shell(mix test) unasked", () => rules());
     // The ask list did not move, so it is not in the diff.
     expect(says("permissions.ask", rules()!)).toBe(false);
     expect(fake.admin.stored.get("client_enforced")).toEqual({ approvals: "wait", max_turns: 200, permissions: stored });

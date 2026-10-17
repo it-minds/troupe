@@ -38,14 +38,14 @@ describe("the profile list", () => {
   it("lists every profile with its state, its pods, its image and the teams it is granted to", async () => {
     await open("#/profiles");
     await waitFor(() => row("dev") && row("build-box"), "the profiles");
-    await sees("draining", row("dev")!);
-    await sees("2 / 2", row("dev")!);
-    await sees("registry.example.com/troupe/worker:0.17.0-beta", row("dev")!);
-    await sees("core", row("dev")!);
-    await sees("core, design", row("ux")!);
-    await sees("degraded", row("heavy")!);
-    await sees("none", row("heavy")!);
-    await sees("unknown", row("build-box")!);
+    await sees("draining", () => row("dev"));
+    await sees("2 / 2", () => row("dev"));
+    await sees("registry.example.com/troupe/worker:0.17.0-beta", () => row("dev"));
+    await sees("core", () => row("dev"));
+    await sees("core, design", () => row("ux"));
+    await sees("degraded", () => row("heavy"));
+    await sees("none", () => row("heavy"));
+    await sees("unknown", () => row("build-box"));
     expect(link("dev", row("dev")!)!.getAttribute("href")).toBe("#/profiles/dev");
     expect(button("New profile")).not.toBeNull();
   });
@@ -418,7 +418,7 @@ describe("a plane in gitops mode", () => {
     await open("#/profiles");
     await waitFor(() => row("dev") && says("Held in a repository"), "the locked list");
     await sees("https://git.example.com/platform/troupe.git");
-    await sees("refused", row("heavy")!);
+    await sees("refused", () => row("heavy"));
     expect(button("New profile")).toBeNull();
 
     visit("#/profiles/dev");
