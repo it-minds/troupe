@@ -505,6 +505,194 @@ defmodule Troupe.MCPOAuthTest do
     end
   end
 
+  # Issue #585: no client id in the entry, and the provider introduces Troupe itself.
+  describe "an entry with no client_id" do
+    defp unconfigured do
+      {:ok, config} = OAuth.config(%{})
+      config
+    end
+
+    defp unconfigured_binding(context),
+      do: OAuth.binding("notes", context.fake.mcp_url, unconfigured(), context.state_dir)
+
+    defp sign_in_unconfigured(context, opts \\ []) do
+      OAuth.sign_in(
+        "notes",
+        context.fake.mcp_url,
+        unconfigured(),
+        Keyword.put(opts, :state_dir, context.state_dir)
+      )
+    end
+
+    defp registrations, do: Enum.filter(requests(), &(&1.path == "/tenant/register"))
+
+    defp query(url), do: url |> URI.parse() |> Map.get(:query) |> URI.decode_query()
+
+    @tag fake: [registration: true]
+    test "registers a public client where the provider offers it, signs in as it, and keeps it beside the tokens",
+         context do
+      assert {:ok, started} = sign_in_unconfigured(context)
+
+      assert [register] = registrations()
+      sent = Jason.decode!(register.body)
+
+      # Troupe's name, the loopback redirect the sign-in listens on, the code and refresh
+      # grants, and no secret: a public client.
+      assert sent == %{
+               "client_name" => "Troupe",
+               "client_uri" => "https://github.com/it-minds/troupe",
+               "redirect_uris" => [started.redirect_uri],
+               "grant_types" => ["authorization_code", "refresh_token"],
+               "response_types" => ["code"],
+               "token_endpoint_auth_method" => "none"
+             }
+
+      assert started.redirect_uri =~ ~r"^http://127\.0\.0\.1:\d+/callback$"
+      [id] = Map.keys(FakeOAuth.clients(context.fake))
+      assert query(started.url)["client_id"] == id
+
+      assert {200, page} = FakeOAuth.browse(started.url)
+      assert page =~ "Signed in to notes as ada@example.test"
+
+      binding = unconfigured_binding(context)
+      assert %{state: :signed_in} = OAuth.status(binding)
+      assert %{"client_id" => ^id} = Store.get(context.state_dir, binding.key)
+
+      # Kept in the state directory, beside the sign-ins, readable by its owner alone.
+      key = OAuth.client_key(context.fake.issuer, nil)
+
+      assert %{"client_id" => ^id, "redirect_uri" => redirect, "issuer" => issuer} =
+               Store.client(context.state_dir, key)
+
+      assert redirect == started.redirect_uri
+      assert issuer == context.fake.issuer
+      assert Troupe.OwnerOnly.restricted?(Store.clients_path(context.state_dir))
+      refute File.read!(Store.clients_path(context.state_dir)) =~ "secret"
+
+      # The next sign-in is made as the same client, at the same redirect, registering
+      # nothing; a refresh goes as that client too.
+      _ = requests()
+      assert {:ok, again} = sign_in_unconfigured(context)
+      assert registrations() == []
+      assert query(again.url)["client_id"] == id
+      assert again.redirect_uri == started.redirect_uri
+      assert {200, _page} = FakeOAuth.browse(again.url)
+
+      FakeOAuth.revoke_access(context.fake)
+      assert {:ok, "at-3"} = Tokens.rejected(binding, "at-2")
+      [refresh] = Enum.filter(requests(), &(&1.path == "/tenant/token" and &1.body =~ "refresh_token"))
+      assert URI.decode_query(refresh.body)["client_id"] == id
+    end
+
+    @tag fake: [registration: true]
+    test "a client_id the entry gives still wins", context do
+      started = sign_in(context)
+      assert query(started.url)["client_id"] == FakeOAuth.client_id()
+      assert registrations() == []
+      assert FakeOAuth.clients(context.fake) == %{}
+    end
+
+    @tag fake: [registration: true]
+    test "a client the provider has forgotten is forgotten here too, and registered again at the next sign-in",
+         context do
+      {:ok, started} = sign_in_unconfigured(context)
+      {200, _page} = FakeOAuth.browse(started.url)
+      [first] = Map.keys(FakeOAuth.clients(context.fake))
+      binding = unconfigured_binding(context)
+
+      FakeOAuth.forget_clients(context.fake)
+      FakeOAuth.revoke_access(context.fake)
+
+      # The refresh is refused as an unknown client: the sign-in ends, and so does the client.
+      assert {:error, :sign_in_required} = Tokens.rejected(binding, "at-1")
+      assert %{state: :expired} = OAuth.status(binding)
+      assert Store.client(context.state_dir, OAuth.client_key(context.fake.issuer, nil)) == nil
+
+      _ = requests()
+      assert {:ok, again} = sign_in_unconfigured(context)
+      assert [_register] = registrations()
+      [second] = Map.keys(FakeOAuth.clients(context.fake))
+      refute second == first
+      assert query(again.url)["client_id"] == second
+      assert {200, page} = FakeOAuth.browse(again.url)
+      assert page =~ "Signed in"
+    end
+
+    @tag fake: [registration: true]
+    test "a redirect port something else holds now is registered again on a free one", context do
+      {:ok, started} = sign_in_unconfigured(context)
+      {200, _page} = FakeOAuth.browse(started.url)
+      port = started.redirect_uri |> URI.parse() |> Map.get(:port)
+
+      {:ok, squatter} =
+        :gen_tcp.listen(port, [:binary, active: false, ip: {127, 0, 0, 1}, reuseaddr: true])
+      on_exit(fn -> :gen_tcp.close(squatter) end)
+
+      assert {:ok, again} = sign_in_unconfigured(context)
+      refute again.redirect_uri == started.redirect_uri
+      assert map_size(FakeOAuth.clients(context.fake)) == 2
+      assert {200, page} = FakeOAuth.browse(again.url)
+      assert page =~ "Signed in"
+    end
+
+    @tag fake: [registration: true, metadata_document: true]
+    test "presents the client ID metadata document where the provider takes one", context do
+      document = FakeOAuth.metadata_document_url(context.fake)
+      assert {:ok, started} = sign_in_unconfigured(context, client_metadata_url: document)
+
+      assert query(started.url)["client_id"] == document
+      assert registrations() == []
+
+      assert {200, page} = FakeOAuth.browse(started.url)
+      assert page =~ "Signed in to notes as ada@example.test"
+
+      binding = unconfigured_binding(context)
+      assert %{state: :signed_in} = OAuth.status(binding)
+      assert %{"client_id" => ^document} = Store.get(context.state_dir, binding.key)
+    end
+
+    test "a provider that offers neither is answered with the sentence asking for a client id",
+         context do
+      assert {:error, why} = sign_in_unconfigured(context)
+      assert why =~ "oauth has no client_id"
+      assert why =~ "give the id of a client registered with the server's authorization server"
+      assert registrations() == []
+    end
+
+    @tag fake: [registration: :confidential]
+    test "a provider that registers only a client with a secret is refused, and nothing is kept",
+         context do
+      assert {:error, why} = sign_in_unconfigured(context)
+      assert why =~ "client_secret_basic"
+      assert why =~ "oauth.client_id"
+      assert Store.client(context.state_dir, OAuth.client_key(context.fake.issuer, nil)) == nil
+    end
+
+    @tag fake: [registration: :refuse]
+    test "a provider that will not register says why", context do
+      assert {:error, why} = sign_in_unconfigured(context)
+
+      assert why ==
+               "the authorization server would not register Troupe: the authorization server " <>
+                 "refused: invalid_client_metadata (registration is closed)"
+    end
+
+    test "the metadata document Troupe publishes is the client it registers as" do
+      published =
+        Path.expand("../../../../docs/oauth/client.json", __DIR__) |> File.read!() |> Jason.decode!()
+
+      assert published["client_id"] == OAuth.client_metadata_url()
+
+      registered = OAuth.client_metadata("http://127.0.0.1/callback")
+
+      assert Map.delete(published, "client_id") |> Map.delete("redirect_uris") ==
+               Map.delete(registered, "redirect_uris")
+
+      assert "http://127.0.0.1/callback" in published["redirect_uris"]
+      assert Enum.all?(published["redirect_uris"], &(OAuth.loopback_redirect(&1) != :error))
+    end
+  end
+
   describe "reading the entry" do
     test "oauth is read from mcp.json, with the spellings other tools write" do
       assert {:ok, entry, []} =
@@ -534,12 +722,16 @@ defmodule Troupe.MCPOAuthTest do
       assert %{oauth: %{client_id: "abc", resource: true, scopes: nil}} = config
       refute Map.has_key?(config, :refused)
 
-      assert %{refused: "notes: oauth has no client_id" <> _} =
-               Local.to_config(
-                 "notes",
-                 %{"url" => "https://mcp.example.com/mcp", "oauth" => %{"scopes" => ["a"]}},
-                 nil
-               )
+      # With no client_id, the sign-in introduces Troupe to the provider (issue #585).
+      unregistered =
+        Local.to_config(
+          "notes",
+          %{"url" => "https://mcp.example.com/mcp", "oauth" => %{"scopes" => ["a"]}},
+          nil
+        )
+
+      assert %{oauth: %{client_id: nil, scopes: ["a"]}} = unregistered
+      refute Map.has_key?(unregistered, :refused)
 
       assert %{refused: "notes has oauth but no url" <> _} =
                Local.to_config(

@@ -137,7 +137,7 @@ defmodule Troupe.MCP.OAuth.SignIn do
          state}
 
       is_binary(query["error"]) ->
-        why = refusal(query)
+        why = refusal(query) <> gone(state.binding, query["error"])
         _ = Tokens.failed(state.binding, why)
         Logger.info("troupe: mcp: signing in to #{name} failed: #{why}")
         {:stop, :normal, {200, "Signing in to #{name} failed: #{why}."}, state}
@@ -175,12 +175,26 @@ defmodule Troupe.MCP.OAuth.SignIn do
       as = if tokens["account"], do: " as #{tokens["account"]}", else: ""
       {200, "Signed in to #{binding.name}#{as}. You can close this tab and go back to Troupe."}
     else
-      {:error, why} ->
-        _ = Tokens.failed(binding, why)
-        Logger.info("troupe: mcp: signing in to #{binding.name} failed: #{why}")
-        {200, "Signing in to #{binding.name} failed: #{why}."}
+      {:error, {:invalid_client, why}} -> failed(binding, why <> gone(binding, "invalid_client"))
+      {:error, why} -> failed(binding, why)
     end
   end
+
+  defp failed(binding, why) do
+    _ = Tokens.failed(binding, why)
+    Logger.info("troupe: mcp: signing in to #{binding.name} failed: #{why}")
+    {200, "Signing in to #{binding.name} failed: #{why}."}
+  end
+
+  # The authorization server says it does not know the client: one Troupe registered is
+  # gone there, so it is forgotten here, and the next sign-in registers anew.
+  defp gone(%{config: %{registered: key}} = binding, error)
+       when is_binary(key) and error in ["invalid_client", "unauthorized_client"] do
+    _ = Tokens.forget_client(binding.state_dir, key)
+    "; the client Troupe registered with it is gone there, so sign in again and Troupe registers a new one"
+  end
+
+  defp gone(_binding, _error), do: ""
 
   defp refusal(%{"error" => error} = query) do
     case query["error_description"] do
@@ -216,8 +230,13 @@ defmodule Troupe.MCP.OAuth.SignIn do
          do: {:ok, [listener], bound}
   end
 
+  # `reuseaddr`, so a port the last sign-in answered on can be listened on again while its
+  # closed connection waits out its time: a fixed or registered redirect comes back to the
+  # same port every time. Another listener on it is still refused.
   defp listen_on(ip, family, port) do
-    case :gen_tcp.listen(port, family ++ [:binary, active: false, packet: :raw, ip: ip]) do
+    options = family ++ [:binary, active: false, packet: :raw, ip: ip, reuseaddr: true]
+
+    case :gen_tcp.listen(port, options) do
       {:ok, listener} ->
         {:ok, bound} = :inet.port(listener)
         {:ok, listener, bound}

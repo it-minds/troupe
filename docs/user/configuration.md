@@ -370,9 +370,25 @@ profiles list them.
 Some servers act as *you*: they answer a call without a sign-in with `401`, name an
 authorization server (your organisation's identity provider, often), and then call what
 is behind them as you, or show you only what is yours. A key in `env` will not do for
-those. Give the entry an `oauth` with the id of a client registered for it with that
-authorization server — whoever runs the server says what it is, since a provider with
-no dynamic registration has no other way to know Troupe:
+those. Give the entry an `oauth`. Many providers introduce Troupe themselves, and then
+`{}` is enough:
+
+```json
+{
+  "mcpServers": {
+    "wiki": {"url": "https://mcp.example.com/mcp", "oauth": {}}
+  }
+}
+```
+
+With no `client_id`, Troupe presents its client ID metadata document
+(`https://it-minds.github.io/troupe/oauth/client.json`, a public client with loopback
+redirects and no secret) where the authorization server takes one, or registers itself where it offers
+dynamic client registration (RFC 7591). A client it registers is kept in Troupe's state
+directory (`mcp-oauth-clients.json`, readable by you alone) and used for every later
+sign-in there; when the provider forgets it, the next sign-in registers a new one. A
+provider that does neither needs the id of a client registered for Troupe with it in
+advance — whoever runs the server says what it is — and the sign-in says so:
 
 ```json
 {
@@ -384,6 +400,8 @@ no dynamic registration has no other way to know Troupe:
   }
 }
 ```
+
+A `client_id` the entry gives is always the one used.
 
 The rest is found from the server: where to sign in (its protected-resource metadata
 and the authorization server's), and which scopes it wants. `oauth.scopes` overrides
@@ -1348,7 +1366,7 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `mcp.<name>.url` | string |  | user; project if trusted |  | A server over HTTP: its URL. |
 | `mcp.<name>.headers` | map of name to string |  | user; project if trusted |  | Headers sent with every request to a server over HTTP. `{env:VAR}` reads a value from the environment. |
 | `mcp.<name>.oauth` | settings |  | user; project if trusted |  | A server over HTTP that wants you signed in: how to sign in. |
-| `mcp.<name>.oauth.client_id` | string |  | user; project if trusted |  | A client registered in advance with the server's authorization server. |
+| `mcp.<name>.oauth.client_id` | string |  | user; project if trusted |  | A client registered in advance with the server's authorization server. Unset: Troupe registers itself, or presents its client metadata document, where that server takes either. |
 | `mcp.<name>.oauth.scopes` | list of strings |  | user; project if trusted |  | The scopes to ask for. Unset: what the server says it wants. |
 | `mcp.<name>.oauth.redirect_uri` | string |  | user; project if trusted |  | Where the browser comes back: `http://` on 127.0.0.1, [::1] or localhost. Unset: 127.0.0.1, any free port. |
 | `mcp.<name>.oauth.resource` | boolean | `true` | user; project if trusted |  | Send the resource indicator; `false` for an authorization server that refuses it. |

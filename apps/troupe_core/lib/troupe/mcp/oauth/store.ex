@@ -18,18 +18,49 @@ defmodule Troupe.MCP.OAuth.Store do
   showing, the scope a server wanted on top of the sign-in (Decision 872), and the last
   failure, if the last sign-in failed. Nothing else in Troupe reads this file, and nothing writes it but
   `Troupe.MCP.OAuth.Tokens`, which is what keeps two refreshes from racing.
+
+  Beside it, `<state>/mcp-oauth-clients.json` keeps the clients Troupe registered with an
+  authorization server that offers it (RFC 7591), one per authorization server and
+  redirect, kept and written the same way: the client id and the redirect it was
+  registered with, and never a secret.
   """
 
   @file_name "mcp-oauth.json"
+
+  # The clients Troupe registered with authorization servers that offer it, beside the
+  # sign-ins and kept the same way; a sign-out leaves them, as they are Troupe's and not
+  # the person's grant.
+  @clients_name "mcp-oauth-clients.json"
 
   @doc "The file: `<state>/mcp-oauth.json`."
   @spec path(Path.t() | nil) :: Path.t()
   def path(state_dir), do: Path.join(Troupe.Paths.state_dir(state_dir), @file_name)
 
+  @doc "The registered clients' file: `<state>/mcp-oauth-clients.json`."
+  @spec clients_path(Path.t() | nil) :: Path.t()
+  def clients_path(state_dir), do: Path.join(Troupe.Paths.state_dir(state_dir), @clients_name)
+
   @doc "Every entry, by key. A file that is missing or unreadable is no sign-ins."
   @spec all(Path.t() | nil) :: %{String.t() => map()}
-  def all(state_dir) do
-    with {:ok, text} <- File.read(path(state_dir)),
+  def all(state_dir), do: read(path(state_dir))
+
+  @doc """
+  A client Troupe registered (RFC 7591), by `Troupe.MCP.OAuth.client_key/2`, or `nil`:
+  its id, the redirect it was registered with, the authorization server and when.
+  """
+  @spec client(Path.t() | nil, String.t()) :: map() | nil
+  def client(state_dir, key), do: Map.get(read(clients_path(state_dir)), key)
+
+  @doc "Keep a registered client, or forget it with `nil`."
+  @spec put_client(Path.t() | nil, String.t(), map() | nil) :: :ok | {:error, String.t()}
+  def put_client(state_dir, key, nil),
+    do: write(clients_path(state_dir), Map.delete(read(clients_path(state_dir)), key))
+
+  def put_client(state_dir, key, entry),
+    do: write(clients_path(state_dir), Map.put(read(clients_path(state_dir)), key, entry))
+
+  defp read(file) do
+    with {:ok, text} <- File.read(file),
          {:ok, map} when is_map(map) <- Jason.decode(text) do
       Map.filter(map, fn {_key, entry} -> is_map(entry) end)
     else
@@ -43,11 +74,10 @@ defmodule Troupe.MCP.OAuth.Store do
 
   @doc "Write one server's entry, or take it out with `nil`."
   @spec put(Path.t() | nil, String.t(), map() | nil) :: :ok | {:error, String.t()}
-  def put(state_dir, key, nil), do: save(state_dir, Map.delete(all(state_dir), key))
-  def put(state_dir, key, entry), do: save(state_dir, Map.put(all(state_dir), key, entry))
+  def put(state_dir, key, nil), do: write(path(state_dir), Map.delete(all(state_dir), key))
+  def put(state_dir, key, entry), do: write(path(state_dir), Map.put(all(state_dir), key, entry))
 
-  defp save(state_dir, map) do
-    file = path(state_dir)
+  defp write(file, map) do
     tmp = file <> ".tmp"
 
     # The temporary file is restricted before anything is in it, so there is no moment

@@ -159,7 +159,11 @@ defmodule Troupe.Config.Schema do
   # Decision 741: what cannot be discovered about a person's sign-in, and the overrides.
   defp oauth_entry do
     [
-      spec("client_id", :string, "A client registered in advance with the server's authorization server."),
+      spec(
+        "client_id",
+        :string,
+        "A client registered in advance with the server's authorization server. Unset: Troupe registers itself, or presents its client metadata document, where that server takes either."
+      ),
       spec("scopes", {:list, :string}, "The scopes to ask for. Unset: what the server says it wants."),
       spec(
         "redirect_uri",
