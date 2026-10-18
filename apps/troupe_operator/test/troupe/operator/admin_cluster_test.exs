@@ -258,8 +258,9 @@ defmodule Troupe.Operator.AdminClusterTest do
     output |> String.split("\n", trim: true) |> List.last() |> to_string() |> String.trim()
   end
 
-  # A change the operator will notice, so a reconcile happens without waiting for the
-  # resync interval.
+  # A change to the resource for a test to wait on. An annotation alone is a new
+  # generation of nothing, which `SkipObserved` passes over, so the operator acts on it at
+  # the next resync (about 30 s), not sooner.
   defp touched(resource) do
     put_in(resource, ["metadata", "annotations"], %{"troupe.dev/test-nudge" => "#{System.unique_integer()}"})
   end

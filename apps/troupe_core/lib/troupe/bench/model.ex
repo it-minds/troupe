@@ -70,7 +70,8 @@ defmodule Troupe.Bench.Model do
   def measure(%Request{} = request, workspace) do
     neutral = &String.replace(&1, workspace, "<workspace>")
 
-    system = byte_size(neutral.(request.system || ""))
+    # The whole system prompt, the task list after it included, as the log counts it.
+    system = byte_size(neutral.(Request.system_text(request) || ""))
 
     tools =
       request.tools

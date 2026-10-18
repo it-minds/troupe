@@ -14,6 +14,11 @@ defmodule Troupe.Instructions do
   Every one applies; where two disagree the nearer wins, which is why the nearer comes
   later in the prompt.
 
+  Before all of them come the organisation's memory documents (`Troupe.PlaneMemory`): the
+  organisation's, a team's and a worker profile's, from the plane, in their own section
+  that says they are the organisation's word and no agent's to change. Each is held to its
+  own limit on the plane rather than to the files' budget, and listed with its version.
+
   Other tools' files are not read (Decision 828): `troupe onboard` brings what they say
   into Troupe's own files once. A `CLAUDE.md` or a `GEMINI.md` in one of those
   directories, Copilot's `.github/copilot-instructions.md` and
@@ -108,11 +113,26 @@ defmodule Troupe.Instructions do
   working on wins; nearer files come later here.
   """
 
-  @typedoc """
-  One scope, in the order they are read: the person's own file, the repository root's,
-  a directory between the root and where the session works, and the brief.
+  # The organisation's memory documents (`Troupe.PlaneMemory`), read before every file.
+  @memory_scopes [:organisation, :team, :profile]
+
+  @memory_preamble """
+  What your organisation's administrators wrote for every agent in their scope, kept on
+  its Troupe plane: instructions from the organisation, which apply as written. Where two
+  disagree the narrower wins: a team's over the organisation's, a worker profile's over
+  the team's, and the person's own instructions and the repository's files below over all
+  three. You cannot change these: no tool of yours writes them, and `remember` keeps only
+  the repository's memory. If you are asked to change one, say that you cannot, and that
+  an administrator edits it in the Troupe console: the organisation's and a team's under
+  Company memory, a worker profile's on that profile's page.
   """
-  @type scope :: :user | :root | :nested | :brief
+
+  @typedoc """
+  One scope, in the order they are read: the organisation's, a team's and a worker
+  profile's memory documents, the person's own file, the repository root's, a directory
+  between the root and where the session works, and the brief.
+  """
+  @type scope :: :organisation | :team | :profile | :user | :root | :nested | :brief
 
   @typedoc """
   One file in force. `size` is its bytes on disk; `chars` what reached the prompt, which
@@ -235,7 +255,15 @@ defmodule Troupe.Instructions do
       |> allot(budget)
       |> Kernel.++([brief(workspace, config)])
 
-    used = files |> Enum.reject(&(&1.scope == :brief)) |> Enum.map(& &1.chars) |> Enum.sum()
+    # The organisation's memory before everything, outside the files' budget: each document
+    # is held to its own limit on the plane, and none is cut to make room for a file.
+    files = memory(config) ++ files
+
+    used =
+      files
+      |> Enum.reject(&(&1.scope in [:brief | @memory_scopes]))
+      |> Enum.map(& &1.chars)
+      |> Enum.sum()
 
     %{
       files: files,
@@ -257,6 +285,7 @@ defmodule Troupe.Instructions do
 
   def to_prompt(%{files: files}, opts) do
     recall? = Keyword.get(opts, :recall, true)
+    {memory, files} = Enum.split_with(files, &(&1.scope in @memory_scopes))
     {briefs, instructions} = Enum.split_with(files, &(&1.scope == :brief))
 
     blocks =
@@ -270,9 +299,25 @@ defmodule Troupe.Instructions do
         _ -> "# Instruction files\n#{@preamble}\n" <> Enum.join(blocks, "\n\n")
       end
 
-    [section | Enum.map(briefs, &brief_text(&1, recall?))]
+    [memory_section(memory), section | Enum.map(briefs, &brief_text(&1, recall?))]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
+  end
+
+  defp memory_section([]), do: ""
+
+  defp memory_section(documents) do
+    blocks =
+      Enum.map(documents, fn f ->
+        cut =
+          if f.trimmed > 0,
+            do: "\n\n(cut here: #{f.trimmed} more bytes of this document did not fit its limit)",
+            else: ""
+
+        "#{String.capitalize(f.label, :ascii)} (version #{f.version}):\n#{f.text}#{cut}"
+      end)
+
+    "# Your organisation's memory\n#{@memory_preamble}\n" <> Enum.join(blocks, "\n\n")
   end
 
   defp brief_text(%{memory: %{} = prompt}, recall?), do: Memory.compose(prompt, recall?)
@@ -920,6 +965,47 @@ defmodule Troupe.Instructions do
     }
   end
 
+  # The organisation's memory documents in force for the session, as its configuration was
+  # resolved with them (`Troupe.PlaneMemory`), each one file of its own scope: named by
+  # where it is kept, `memory:organisation`, `memory:team/<name>`, `memory:profile/<name>`,
+  # with its version, and whole unless a plane that allows more sent more than this limit.
+  defp memory(%Config{plane_memory: documents}) when is_list(documents) do
+    max = Troupe.Protocol.Memory.max_bytes()
+
+    Enum.map(documents, fn document ->
+      scope = String.to_existing_atom(document["scope"])
+      text = document["text"]
+      trimmed = document["trimmed"] || 0
+
+      %{
+        scope: scope,
+        path: memory_path(document),
+        directory: nil,
+        where: document["name"],
+        label: Troupe.PlaneMemory.label(document),
+        version: document["version"],
+        size: byte_size(text) + trimmed,
+        chars: String.length(text),
+        budget: max,
+        hash: document["hash"],
+        status: if(trimmed > 0, do: :trimmed, else: :whole),
+        reason: nil,
+        trimmed: trimmed,
+        skipped: [],
+        imported_by: nil,
+        unfollowed: [],
+        rule: nil,
+        applies: nil,
+        text: text
+      }
+    end)
+  end
+
+  defp memory(_config), do: []
+
+  defp memory_path(%{"scope" => "organisation"}), do: "memory:organisation"
+  defp memory_path(%{"scope" => scope, "name" => name}), do: "memory:#{scope}/#{name}"
+
   defp stat(path) do
     case File.read(path) do
       {:ok, content} -> {byte_size(content), hash(content)}
@@ -937,6 +1023,7 @@ defmodule Troupe.Instructions do
       unfollowed = Enum.map(f.unfollowed, &"#{&1.import}:#{&1.reason}")
       text = :crypto.hash(:sha256, f.text) |> Base.encode16(case: :lower)
       fields = [f.path, f.hash || "", f.status, f.chars, f.trimmed, f.imported_by || "", text]
+      fields = fields ++ List.wrap(Map.get(f, :version))
       Enum.join(fields ++ [f.applies || ""] ++ f.skipped ++ unfollowed, "\t")
     end)
     |> then(&:crypto.hash(:sha256, &1))
@@ -994,7 +1081,14 @@ defmodule Troupe.Instructions do
       "rule" => rule_json(f.rule),
       "applies" => f.applies
     }
+    |> Map.merge(memory_json(f))
   end
+
+  # A memory document says which version is in force, and whose it is.
+  defp memory_json(%{scope: scope, version: version} = f) when scope in @memory_scopes,
+    do: %{"version" => version, "name" => f.where, "label" => f.label}
+
+  defp memory_json(_file), do: %{}
 
   defp rule_json(nil), do: nil
 

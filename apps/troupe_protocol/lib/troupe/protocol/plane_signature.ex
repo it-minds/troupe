@@ -24,7 +24,7 @@ defmodule Troupe.Protocol.PlaneSignature do
   bytes it was sent and parses them afterwards, so no two encoders ever have to agree. It is
   canonical JSON (`Troupe.Protocol.Canonical`) of
 
-      {"kind": "client_versions" | "client_defaults", "plane": URL or null,
+      {"kind": "client_versions" | "client_defaults" | "memory", "plane": URL or null,
        "signed_at": ISO 8601, "expires_at": ISO 8601, "body": the answer}
 
   and the signature is plain Ed25519 over it (RFC 8032), which is what transit's `ed25519`
@@ -39,7 +39,9 @@ defmodule Troupe.Protocol.PlaneSignature do
 
   alias Troupe.Protocol.Canonical
 
-  @kinds ~w(client_versions client_defaults)
+  # And the memory documents a person's sessions read (`me.memory`): instructions from the
+  # organisation, which a machine takes only as the plane signed them.
+  @kinds ~w(client_versions client_defaults memory)
   @algorithm "ed25519"
 
   # A week: long enough for a laptop that is not signed in every day, short enough that an

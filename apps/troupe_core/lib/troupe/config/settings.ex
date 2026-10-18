@@ -74,12 +74,21 @@ defmodule Troupe.Config.Settings do
   (`enforced`), the terms the session was created with (`session`) and its repository's
   files, and no key has a scope: none of it is a client's to write there. `nil` for a
   session not running here.
+
+  `withhold: true` is the answer for someone who may only watch the session
+  (`Explain.withhold/2`): the provider's address and the state directory read as set by
+  the profile, or by the session's owner on a laptop, marked `withheld`.
   """
-  @spec describe_session(String.t()) :: %{String.t() => term()} | nil
-  def describe_session(session_id) do
+  @spec describe_session(String.t(), keyword()) :: %{String.t() => term()} | nil
+  def describe_session(session_id, opts \\ []) do
     case Troupe.Session.resolved(session_id) do
       %{layers: %Layers.Result{} = layers, kind: kind, workspace: workspace} ->
         scopes = if kind == :team, do: fn _path -> [] end, else: &scopes(&1, workspace, layers.trusted?)
+
+        {layers, workspace} =
+          if opts[:withhold],
+            do: {Explain.withhold(layers, kind), Explain.veil(layers).(workspace)},
+            else: {layers, workspace}
 
         layers
         |> described(workspace, scopes)
@@ -138,13 +147,16 @@ defmodule Troupe.Config.Settings do
       "source" => source_json(row),
       "default" => spec && spec.default,
       "scopes" => if(enforced, do: [], else: scopes.(path)),
-      "enforced" => enforced && %{"value" => enforced.value, "source" => shown(enforced.source)},
+      "enforced" =>
+        enforced && %{"value" => as_written(enforced.value), "source" => shown(enforced.source)},
       "secret" => secret?,
       "label" => spec && spec.label,
       "doc" => spec && spec.doc
     }
+    |> Map.merge(if Explain.withheld?(row), do: %{"withheld" => true}, else: %{})
   end
 
+  defp value_json({:withheld, sentence}, _secret?), do: sentence
   defp value_json({:unset_env, _var, raw}, _secret?), do: raw
   defp value_json(nil, _secret?), do: nil
   defp value_json(_value, true), do: "****"
@@ -153,6 +165,7 @@ defmodule Troupe.Config.Settings do
   # A list or map can hold a `{env:VAR}` whose variable is not set, too: it is answered
   # as the file wrote it.
   defp as_written({:unset_env, _var, raw}), do: raw
+  defp as_written({:withheld, sentence}), do: sentence
   defp as_written(list) when is_list(list), do: Enum.map(list, &as_written/1)
   defp as_written(map) when is_map(map), do: Map.new(map, fn {k, v} -> {k, as_written(v)} end)
   defp as_written(value), do: value

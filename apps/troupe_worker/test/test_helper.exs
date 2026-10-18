@@ -1,4 +1,8 @@
+# The level is the VM's, which the next app's suite in the same `mix test` shares, so it
+# is put back as this one ends.
+level = Logger.level()
 Logger.configure(level: :warning)
+ExUnit.after_suite(fn _result -> Logger.configure(level: level) end)
 
 # One test in this app — the end-to-end control channel — needs a real plane on the
 # other end of the socket, and a plane needs a database. Started here rather than in a

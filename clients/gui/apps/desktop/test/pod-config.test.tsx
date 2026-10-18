@@ -8,7 +8,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { webTokenStore } from "@troupe/client";
+import type { ConfigKey, SessionConfig, SessionView } from "@troupe/client";
 import { App } from "../src/App";
+import { PodConfig } from "../src/views/PodConfig";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
@@ -64,11 +66,35 @@ describe("a team session's settings", () => {
     await sees("this project's .troupe/config.yaml");
     await sees("shell(curl)");
     await sees("the worker profile");
+    // The owner may steer it, so the pod says what it runs on.
+    await sees("http://llm.example.test/v1");
 
     // What nobody set is the default, and not listed.
     expect(pane().textContent).not.toContain("max_depth");
     // Nothing on it changes anything.
     expect(pane().querySelectorAll("input, select, textarea")).toHaveLength(0);
+  });
+});
+
+describe("a team session's settings, for someone who may only watch it", () => {
+  it("say what the session runs on was set by the profile, as the pod answers, and not what it is", async () => {
+    const withheld: ConfigKey = {
+      key: "base_url", value: "set by the profile", layer: "profile", source: "the worker profile dev (TROUPE_BASE_URL)",
+      default: null, scopes: [], secret: false, label: null, doc: null, withheld: true,
+    };
+    const config: SessionConfig = {
+      session_id: "team-1", pod: true, workspace: "<state directory>/workspaces/team-1", trusted: false,
+      keys: [withheld, { ...withheld, key: "max_turns", value: 7, layer: "session", source: "the session's terms", withheld: false }],
+      files: [], permissions: [], warnings: [], errors: [],
+    };
+    const view = { config: () => Promise.resolve(config) } as unknown as SessionView;
+
+    unmount = render(<PodConfig view={view} />).unmount;
+    await sees("set by the profile");
+    await sees("the worker profile dev (TROUPE_BASE_URL)");
+    const cell = [...document.querySelectorAll("td span.muted")].find((s) => s.textContent === "set by the profile");
+    expect(cell?.getAttribute("title")).toBe("Shown to the people who can steer this session");
+    expect(document.body.textContent).not.toContain("llm.example.test");
   });
 });
 

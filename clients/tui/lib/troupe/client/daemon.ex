@@ -1290,6 +1290,7 @@ defmodule Troupe.Client.Daemon do
                 plane_url: nil,
                 endpoint: "ws://127.0.0.1:#{ws.port}/v1/socket",
                 token: ws.token,
+                relocate: &relocate/0,
                 impl: __MODULE__,
                 state: :active,
                 workspace: meta[:workspace],
@@ -1302,6 +1303,15 @@ defmodule Troupe.Client.Daemon do
       {:ok, sid}
     else
       {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  # Where the daemon's loopback is now, as it publishes it: a restarted daemon's new port
+  # and token, which a window or a headless run follows (`Worker`'s `:relocate`).
+  defp relocate do
+    case Link.websocket() do
+      {:ok, ws} -> {:ok, %{endpoint: "ws://127.0.0.1:#{ws.port}/v1/socket", token: ws.token}}
+      {:error, reason} -> {:error, reason}
     end
   end
 

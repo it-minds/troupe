@@ -287,6 +287,10 @@ defmodule Troupe.Remote.Worker do
       # activating command by itself.
       plane_url: Keyword.get(opts, :plane_url),
       token: Keyword.get(opts, :token),
+      # A daemon session's: where the daemon says it is now, `{:ok, %{endpoint, token}}`,
+      # asked before each attempt after a failure. A daemon that restarted listens on a new
+      # port with a new token, so the pair given at the attach names nothing once it has.
+      relocate: Keyword.get(opts, :relocate),
       workspace: Keyword.get(opts, :workspace),
       # `{parent_session_id, window}` when this session is a branch shown inside another
       # session's screen: what it publishes is renamed for that screen (`Troupe.Remote.Branch`).
@@ -697,8 +701,20 @@ defmodule Troupe.Remote.Worker do
   # endpoint held here would be asked for ever (PROTOCOL.md §6, "A session that moves").
   # A plane that does not answer leaves the endpoint as it was, since a live session does
   # not need it; one that says the session is not there for this person ends the search.
-  defp locate(%{plane_url: nil} = state), do: {:ok, state}
   defp locate(%{misses: 0} = state), do: {:ok, state}
+  defp locate(%{plane_url: nil, relocate: nil} = state), do: {:ok, state}
+
+  # A daemon session after a failure: the daemon where it says it is now. One that does not
+  # say leaves the pair as it was, and the next attempt asks again.
+  defp locate(%{plane_url: nil, relocate: relocate} = state) do
+    case relocate.() do
+      {:ok, %{endpoint: endpoint, token: token}} when is_binary(endpoint) and is_binary(token) ->
+        {:ok, %{state | endpoint: endpoint, token: token}}
+
+      _not_yet ->
+        {:ok, state}
+    end
+  end
 
   defp locate(state) do
     case Plane.call(state.plane_url, "session.open", %{session_id: state.session_id, mode: "read"}) do

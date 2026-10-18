@@ -831,6 +831,74 @@ export interface SigningKey extends SigningKeyVersion {
   changes?: AuditChanges;
 }
 
+/** Whose memory document (#55): the organisation's, a team's, or a worker profile's. */
+export type MemoryScope = "organisation" | "team" | "profile";
+
+/** One version of a memory document as a listing shows it: its number, who saved it, when, and its size. */
+export interface MemoryVersion {
+  version: number;
+  hash: string;
+  bytes: number;
+  changed_by: string;
+  changed_at: string;
+}
+
+/** One document in `admin.memory.list`: whose it is, the version in force, and whether you may change it. */
+export interface MemoryRow {
+  scope: MemoryScope;
+  name: string | null;
+  subject: string;
+  editable: boolean;
+  current: MemoryVersion | null;
+}
+
+/** Every memory document an admin may read, and the limit in bytes each is held to. */
+export interface MemoryListing {
+  limit: number;
+  organisation: MemoryRow;
+  teams: MemoryRow[];
+  profiles: MemoryRow[];
+}
+
+/** One line of a memory document's change: as it stays, goes or comes. */
+export interface MemoryLine {
+  op: "same" | "del" | "add";
+  text: string;
+}
+
+/** One memory document as `admin.memory.get` answers it: a version's text, its change against the one before, and every version. */
+export interface MemoryDocument {
+  scope: MemoryScope;
+  name: string | null;
+  subject: string;
+  limit: number;
+  editable: boolean;
+  /** The version shown; null for a document never saved. */
+  version: number | null;
+  text: string;
+  shown: MemoryVersion | null;
+  diff: MemoryLine[];
+  versions: MemoryVersion[];
+}
+
+/** What saving a text would do, written nowhere. */
+export interface MemoryPreview {
+  subject: string;
+  /** The version in force, which the save replaces; null for none. */
+  version: number | null;
+  bytes: number;
+  limit: number;
+  unchanged: boolean;
+  diff: MemoryLine[];
+  effect: string;
+}
+
+/** A save: the version now in force, and the audit's diff. */
+export interface MemorySaved {
+  document: MemoryVersion | null;
+  changes: AuditChanges;
+}
+
 /** One delivery the App's webhook took: GitHub's id, what it was, and what the plane did with it. Never its body. */
 export interface GitHubDelivery {
   id: string;
@@ -1119,6 +1187,26 @@ export class AdminApi {
   /** A new version of the signing key. Destructive for every machine that pinned it: confirmed by the current key's fingerprint. */
   rotateSigning(fingerprint: string): Promise<SigningKey> {
     return this.rpc<SigningKey>("admin.signing.rotate", { fingerprint });
+  }
+
+  /** Every memory document you may read: the organisation's, your teams', and for a platform admin each profile's. */
+  memoryList(): Promise<MemoryListing> {
+    return this.rpc<MemoryListing>("admin.memory.list", {});
+  }
+
+  /** One memory document: a version (the one in force where none is named), its change against the one before, and every version. */
+  memoryGet(scope: MemoryScope, name: string | null, version?: number): Promise<MemoryDocument> {
+    return this.rpc<MemoryDocument>("admin.memory.get", { scope, name, ...(version ? { version } : {}) });
+  }
+
+  /** What saving a text as the document would do, written nowhere. */
+  memoryPreview(scope: MemoryScope, name: string | null, text: string): Promise<MemoryPreview> {
+    return this.rpc<MemoryPreview>("admin.memory.preview", { scope, name, text });
+  }
+
+  /** Save the next version over `version`, the one edited (0 for none); a save by somebody else since is a conflict. */
+  memoryPut(scope: MemoryScope, name: string | null, text: string, version: number): Promise<MemorySaved> {
+    return this.rpc<MemorySaved>("admin.memory.put", { scope, name, text, version });
   }
 
   teams(): Promise<AdminTeam[]> {

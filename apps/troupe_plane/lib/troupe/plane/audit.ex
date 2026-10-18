@@ -275,6 +275,7 @@ defmodule Troupe.Plane.Audit do
   end
 
   # The rows about these teams and no other: a team's own changes, which name it; its
+  # memory's (`team/<team>`), its
   # triggers' (`<team>/<name>`) and its principals' (`svc:<team>/<name>`), whose subjects
   # name it; and its sessions' and their runs', which name one of its sessions, or carry
   # one in their detail as a token minted for it does. A row about the plane as a whole
@@ -284,7 +285,13 @@ defmodule Troupe.Plane.Audit do
     ids = Enum.map(teams, & &1.id)
     sessions = from(s in Session, where: s.team_id in ^ids, select: s.id)
 
-    where(query, ^dynamic(^naming(names) or ^of_sessions(sessions)))
+    where(query, ^dynamic(^naming(names) or ^memory_of(names) or ^of_sessions(sessions)))
+  end
+
+  # A team's memory document is named `team/<team>`.
+  defp memory_of(names) do
+    subjects = Enum.map(names, &("team/" <> &1))
+    dynamic([e], e.subject_kind == "memory" and e.subject_id in ^subjects)
   end
 
   defp naming(names) do

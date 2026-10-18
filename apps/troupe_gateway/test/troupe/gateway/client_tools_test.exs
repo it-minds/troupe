@@ -216,6 +216,30 @@ defmodule Troupe.Gateway.ClientToolsTest do
       assert "session_tainted" in types
     end
 
+    test "a failure on the client reaches the model with why, not the error's word alone",
+         context do
+      %{session: session} =
+        start_session(context,
+          steps: [{:tools, [{"client.notes.search", %{"q" => "the thing"}}]}],
+          default: {:text, "it failed"}
+        )
+
+      ada = attach(context, @ada)
+      assert {:ok, _result} = register(ada, session.id)
+      {:ok, _} = Client.subscribe(ada, "session:#{session.id}", from_seq: 0)
+      {:ok, _} = input(ada, session.id, "search my notes", Client.command_id())
+
+      assert_receive {:troupe_request, id, "tool.invoke", _params}, 15_000
+      :ok = Client.respond_error(ada, id, "the daemon on this computer is not answering")
+
+      events = collect("session:#{session.id}", &(&1.type == "tool_call_completed"))
+      completed = Enum.find(events, &(&1.type == "tool_call_completed"))
+      assert completed.data["ok"] == false
+
+      assert completed.data["content"] =~
+               "failed on the client: internal_error: the daemon on this computer is not answering"
+    end
+
     test "is invoked on its registrant's connection and on no other", context do
       %{session: session} =
         start_session(context,

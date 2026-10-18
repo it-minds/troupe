@@ -908,6 +908,7 @@ defmodule Troupe.Operator.Resources do
     base ++
       plane_ca_env(settings) ++
       bao_role_env(profile, settings) ++
+      bao_auth_path_env(settings) ++
       workers_port_env(settings) ++
       allowed_origins_env(settings) ++
       object_store_env(settings) ++
@@ -921,6 +922,14 @@ defmodule Troupe.Operator.Resources do
 
   defp bao_role_env(profile, _settings),
     do: [%{"name" => "TROUPE_BAO_ROLE", "value" => KMSPolicy.worker_role_name(profile.name)}]
+
+  # The mount the pod logs in at, the installation's as the plane's is. Named only where
+  # it is not the worker's own default, for the same reason as the role.
+  defp bao_auth_path_env(%Settings{bao_auth_path: path}) when path in [nil, "", "kubernetes"],
+    do: []
+
+  defp bao_auth_path_env(%Settings{bao_auth_path: path}),
+    do: [%{"name" => "TROUPE_BAO_AUTH_PATH", "value" => path}]
 
   # With a CA the link dials the control port with TLS, trusts that CA and nothing else,
   # and checks the certificate against the name in `TROUPE_PLANE_CONTROL`, the control

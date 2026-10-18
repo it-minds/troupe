@@ -528,6 +528,11 @@ export class FakeWorker {
         const key = (key: string, value: unknown, layer: string, source: string | null, enforced: unknown = null) => ({
           key, value, layer, source, default: null, scopes: [], enforced, secret: false, label: null, doc: null,
         });
+        // What the session runs on, which a pod shows only to someone who may steer it.
+        const machinery = (name: string, value: string, layer: string, source: string) =>
+          client.token.scopes.includes("control")
+            ? key(name, value, layer, source)
+            : { ...key(name, "set by the profile", layer, source), withheld: true };
         return reply(ws, id, {
           session_id: session.id,
           pod: true,
@@ -538,6 +543,7 @@ export class FakeWorker {
           keys: [
             key("models.default", "pod-model", "profile", `the worker profile ${session.profile} (TROUPE_MODEL)`),
             key("max_turns", 7, "session", "the session's terms"),
+            machinery("base_url", "http://llm.example.test/v1", "profile", `the worker profile ${session.profile} (TROUPE_BASE_URL)`),
             key("compact_at", 0.6, "project", `/state/workspaces/${session.id}/.troupe/config.yaml`),
             key("managed_permission_rules_only", true, "enforced", "the plane's platform settings", {
               value: true,

@@ -102,6 +102,50 @@ defmodule Troupe.ContextCommandTest do
              "context: no instruction files in 2 directories · /b/.troupe/memory.md (brief) off"
   end
 
+  # Root issue #55: the organisation's memory documents come first, each by name and version.
+  test "the line names the organisation's and a team's memory first, each with its version" do
+    answer = %{
+      "budget" => 16_000,
+      "used" => 9,
+      "searched" => ["/home/me/repo"],
+      "files" => [
+        %{
+          "scope" => "organisation",
+          "path" => "memory:organisation",
+          "label" => "the organisation's memory",
+          "version" => 3,
+          "chars" => 22,
+          "status" => "whole",
+          "trimmed" => 0,
+          "reason" => nil
+        },
+        %{
+          "scope" => "team",
+          "path" => "memory:team/design",
+          "name" => "design",
+          "label" => "the team design's memory",
+          "version" => 5,
+          "chars" => 1_200,
+          "status" => "whole",
+          "trimmed" => 0,
+          "reason" => nil
+        },
+        %{
+          "scope" => "root",
+          "path" => "/home/me/repo/AGENTS.md",
+          "chars" => 9,
+          "status" => "whole",
+          "trimmed" => 0,
+          "skipped" => []
+        }
+      ]
+    }
+
+    assert Instructions.line(answer, "/home/me/repo") ==
+             "context: 9 of 16,000 chars · the organisation's memory, version 3 (organisation) 22 · " <>
+               "the team design's memory, version 5 (team) 1,200 · AGENTS.md (root) 9"
+  end
+
   # Decision 148: a file left out says why in words, as `context.get`'s `reason` puts it,
   # and so does an import that was not followed; no bare "0".
   test "a file left out, and an import not followed, say why" do
