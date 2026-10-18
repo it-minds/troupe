@@ -22,6 +22,9 @@ defmodule Troupe.Plane.GitHub.App do
     field(:key_version, :integer)
     # The version transit holds the webhook secret at; the secret itself is only there.
     field(:webhook_secret_version, :integer)
+    # In GitOps mode, the generation of the `GitHubApp` resource the settings above were
+    # last read from; `nil` for settings an administrator put through the admin API.
+    field(:resource_generation, :integer)
     field(:updated_by, :string)
 
     timestamps(type: :utc_datetime_usec)

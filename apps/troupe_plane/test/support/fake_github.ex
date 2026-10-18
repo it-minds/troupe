@@ -75,7 +75,9 @@ defmodule Troupe.Plane.FakeGitHub do
                # Each repository's visibility as GitHub reports it (private unless set),
                # and every token revoked with `DELETE /installation/token`.
                visibility: %{},
-               revoked: []
+               revoked: [],
+               # A repository's issues, by number, which a sweep and "fix this" read.
+               issues: %{}
              }
            end},
           id: {__MODULE__, :agent}
@@ -188,6 +190,59 @@ defmodule Troupe.Plane.FakeGitHub do
       )
 
     {response, delivery}
+  end
+
+  @doc """
+  An issue of `full_name`: `number`, and `title`, `body`, `state` (open unless said),
+  `labels` (names) and `author` where given. Listed by `GET .../issues`, read by
+  `GET .../issues/<n>`, and found by the search, for a token holding `issues: read`.
+  """
+  def issue(fake, full_name, attrs) do
+    number = Map.fetch!(attrs, :number)
+
+    issue = %{
+      "number" => number,
+      "title" => Map.get(attrs, :title, "Issue #{number}"),
+      "body" => Map.get(attrs, :body, "What is wrong with #{number}."),
+      "state" => Map.get(attrs, :state, "open"),
+      "html_url" => "https://github.example.test/#{full_name}/issues/#{number}",
+      "user" => %{"login" => Map.get(attrs, :author, "reporter"), "type" => "User"},
+      "labels" => Enum.map(Map.get(attrs, :labels, []), &%{"name" => &1}),
+      "created_at" => Map.get(attrs, :created_at, "2026-10-0#{rem(number, 9) + 1}T00:00:00Z")
+    }
+
+    full = String.downcase(full_name)
+
+    Agent.update(fake.agent, fn state ->
+      issues = Map.get(state.issues, full, %{})
+      put_in(state, [:issues, full], Map.put(issues, number, issue))
+    end)
+  end
+
+  @doc """
+  Change one pull request of `full_name`, as a person marking it ready or closing it would;
+  or make it, an open draft, where the test's session only recorded one.
+  """
+  def pull(fake, full_name, number, changes) do
+    full = String.downcase(full_name)
+
+    Agent.update(fake.agent, fn state ->
+      pulls = Map.get(state.pulls, full, %{})
+
+      made = %{
+        "number" => number,
+        "html_url" => "#{fake.url}/#{full_name}/pull/#{number}",
+        "state" => "open",
+        "draft" => true,
+        "merged" => false
+      }
+
+      put_in(
+        state,
+        [:pulls, full],
+        Map.put(pulls, number, Map.merge(pulls[number] || made, changes))
+      )
+    end)
   end
 
   @doc "Make `full_name` public, private or internal, as GitHub reports its visibility."
@@ -362,6 +417,31 @@ defmodule Troupe.Plane.FakeGitHub do
     end
   end
 
+  # GitHub's issue search, for a token of the repository its `repo:` names, holding
+  # `issues: read`: `is:issue is:open`, `label:<name>` and words in the title, which is as
+  # much of the search as a sweep's tests ask.
+  def call(%Plug.Conn{method: "GET", path_info: ["api", "v3", "search", "issues"]} = conn, agent) do
+    conn = fetch_query_params(conn)
+    terms = String.split(conn.query_params["q"] || "", ~r/\s+/, trim: true)
+    {repos, terms} = Enum.split_with(terms, &String.starts_with?(&1, "repo:"))
+
+    with ["repo:" <> full] <- repos,
+         [owner, name] <- String.split(full, "/"),
+         {:ok, issued} <- api_token(conn, agent, owner, name),
+         :ok <- allowed(issued, %{"issues" => "read"}) do
+      items =
+        agent
+        |> issues_of(String.downcase(full))
+        |> Enum.filter(&searched?(&1, terms))
+        |> Enum.map(&Map.put(&1, "repository_url", "#{base_url(conn)}/api/v3/repos/#{full}"))
+
+      answer(conn, 200, %{"total_count" => length(items), "items" => items})
+    else
+      {:error, status, message} -> answer(conn, status, %{"message" => message})
+      _ -> answer(conn, 422, %{"message" => "Validation Failed"})
+    end
+  end
+
   # A token revoking itself, as GitHub's `DELETE /installation/token` does: `204`, and the
   # token is refused from then on; one it does not take is `401`.
   def call(
@@ -398,6 +478,7 @@ defmodule Troupe.Plane.FakeGitHub do
   defp needs("GET", ["pulls" | _]), do: %{"pull_requests" => "read"}
   defp needs(_method, ["pulls" | _]), do: %{"pull_requests" => "write"}
   defp needs(_method, ["issues", _number, "comments"]), do: %{"pull_requests" => "write"}
+  defp needs("GET", ["issues" | _]), do: %{"issues" => "read"}
   defp needs("GET", ["commits", _sha, "check-runs"]), do: %{"checks" => "read"}
   defp needs("GET", ["commits", _sha, "status"]), do: %{"statuses" => "read"}
   defp needs(_method, _rest), do: %{"administration" => "write"}
@@ -413,7 +494,13 @@ defmodule Troupe.Plane.FakeGitHub do
   defp at_least?(_held, _level), do: false
 
   defp api("GET", [], _asked, ctx) do
-    {branch, 0} = git(ctx.path, ["symbolic-ref", "--short", "HEAD"])
+    # A repository a test serves only to be read about, not cloned, need not be one.
+    branch =
+      case git(ctx.path, ["symbolic-ref", "--short", "HEAD"]) do
+        {branch, 0} -> branch
+        _not_a_repository -> "main"
+      end
+
     visibility = Agent.get(ctx.agent, &Map.get(&1.visibility, ctx.full, "private"))
 
     answer(ctx.conn, 200, %{
@@ -594,6 +681,50 @@ defmodule Troupe.Plane.FakeGitHub do
     end
   end
 
+  # A repository's issues, pull requests among them as GitHub lists them, filtered by state
+  # and by every label named, oldest first.
+  defp api("GET", ["issues"], _asked, ctx) do
+    query = fetch_query_params(ctx.conn).query_params
+    wanted = query["labels"] |> to_string() |> String.split(",", trim: true)
+
+    listed =
+      (issues_of(ctx.agent, ctx.full) ++ pulls_as_issues(ctx))
+      |> Enum.filter(fn issue ->
+        names = Enum.map(issue["labels"] || [], &String.downcase(&1["name"]))
+
+        (query["state"] in [nil, "all"] or issue["state"] == query["state"]) and
+          Enum.all?(wanted, &(String.downcase(&1) in names))
+      end)
+      |> Enum.sort_by(& &1["number"])
+
+    answer(ctx.conn, 200, listed)
+  end
+
+  defp api("GET", ["issues", number], _asked, ctx) do
+    number = String.to_integer(number)
+
+    case Enum.find(
+           issues_of(ctx.agent, ctx.full) ++ pulls_as_issues(ctx),
+           &(&1["number"] == number)
+         ) do
+      nil -> answer(ctx.conn, 404, %{"message" => "Not Found"})
+      issue -> answer(ctx.conn, 200, issue)
+    end
+  end
+
+  defp api("GET", ["pulls"], _asked, ctx) do
+    state = fetch_query_params(ctx.conn).query_params["state"] || "open"
+
+    pulls =
+      ctx.agent
+      |> pulls_of(ctx.full)
+      |> Map.values()
+      |> Enum.filter(&(state == "all" or &1["state"] == state))
+      |> Enum.sort_by(& &1["number"])
+
+    answer(ctx.conn, 200, pulls)
+  end
+
   defp api("GET", ["pulls", number], _asked, ctx) do
     case Map.get(pulls_of(ctx.agent, ctx.full), String.to_integer(number)) do
       nil -> answer(ctx.conn, 404, %{"message" => "Not Found"})
@@ -710,6 +841,38 @@ defmodule Troupe.Plane.FakeGitHub do
 
   defp pulls_of(agent, full), do: Agent.get(agent, &Map.get(&1.pulls, full, %{}))
 
+  defp issues_of(agent, full),
+    do: agent |> Agent.get(&Map.get(&1.issues, full, %{})) |> Map.values()
+
+  defp pulls_as_issues(ctx) do
+    for {number, pull} <- pulls_of(ctx.agent, ctx.full) do
+      %{
+        "number" => number,
+        "title" => pull["title"],
+        "state" => pull["state"],
+        "labels" => [],
+        "html_url" => pull["html_url"],
+        "pull_request" => %{"html_url" => pull["html_url"]}
+      }
+    end
+  end
+
+  defp searched?(issue, terms) do
+    Enum.all?(terms, fn
+      "is:issue" ->
+        not Map.has_key?(issue, "pull_request")
+
+      "is:open" ->
+        issue["state"] == "open"
+
+      "label:" <> label ->
+        Enum.any?(issue["labels"] || [], &(String.downcase(&1["name"]) == String.downcase(label)))
+
+      word ->
+        String.contains?(String.downcase(issue["title"] || ""), String.downcase(word))
+    end)
+  end
+
   defp bot(agent, issued) do
     slug =
       Agent.get(agent, fn state ->
@@ -789,7 +952,8 @@ defmodule Troupe.Plane.FakeGitHub do
     "contents" => ["read", "write"],
     "pull_requests" => ["read", "write"],
     "checks" => ["read"],
-    "statuses" => ["read"]
+    "statuses" => ["read"],
+    "issues" => ["read"]
   }
 
   defp permissions(%{} = asked) when map_size(asked) > 0 do

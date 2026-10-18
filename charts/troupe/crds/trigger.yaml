@@ -91,6 +91,21 @@ spec:
                       minLength: 1
                       maxLength: 200
                       description: The branch a run starts from. Absent means the default.
+                    sweep:
+                      type: string
+                      description: >-
+                        A five-field cron in UTC at whose minutes the plane goes over the
+                        repository's open issues, those with the label or those the query
+                        finds, and starts a run on each that no run is fixing and that has
+                        not been tried as often as github.maxAttempts allows.
+                    query:
+                      type: string
+                      minLength: 1
+                      maxLength: 200
+                      description: >-
+                        What a sweep looks for instead of the label: GitHub's issue search
+                        qualifiers, such as label:bug no:assignee. The plane adds the
+                        repository and is:issue is:open.
                 promptTemplate:
                   type: string
                   maxLength: 65536

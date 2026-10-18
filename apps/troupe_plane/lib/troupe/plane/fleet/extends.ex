@@ -18,7 +18,7 @@ defmodule Troupe.Plane.Fleet.Extends do
   | `max_sessions`, `budget_micros` | **narrow only**: the lower of the two, where either sets one; a child's budget above its parent's is refused where it is written |
   | `personalTools`, `repositoryOverridesBundle`, `github.allowPublic` | **restrict only**: a parent's `forbid` or `false` holds whatever the child says; otherwise the child's, or the parent's |
   | `github.denyPaths` | **added**, as the egress lists are |
-  | `github.maxPushes`, `github.maxRuns` | **narrow only**, as `max_sessions` is |
+  | `github.maxPushes`, `github.maxRuns`, `github.maxAttempts` | **narrow only**, as `max_sessions` is |
   | `permissions.deny`, `permissions.ask`, `permissions.allow` | **added**: a child adds rules and drops none of its parent's; each profile's are its own scope on the pods (`rules/1`), so the strictest holds and no child loosens a parent's `deny` or `ask` |
   | `image`, `size_class`, `provisioner`, every `llm` field but `secretRef`, `storage.storageClassName`, `configBundleChannel`, and any other spec field | **replaced** where the child sets it, the parent's where it does not |
   | `llm.secretRef`, `mcpIdentities` | **never inherited**: credentials are each profile's own, in its own namespace |
@@ -78,7 +78,8 @@ defmodule Troupe.Plane.Fleet.Extends do
          "allowPublic" => {:restrict, false},
          "denyPaths" => :added,
          "maxPushes" => :narrow,
-         "maxRuns" => :narrow
+         "maxRuns" => :narrow,
+         "maxAttempts" => :narrow
        }},
     # Per-tool rules: a child's are added to its parent's, and on the pods each profile's
     # are a scope of their own, the strictest holding (`rules/1`).
