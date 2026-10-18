@@ -160,6 +160,75 @@ defmodule Troupe.PlaneVersionTest do
     end
   end
 
+  # #657: the plane signs its version policy with a key of its own, pinned at sign-in.
+  describe "the plane's signing key" do
+    test "is pinned at sign-in, and the policy is taken as the plane signed it, with where releases are" do
+      {remote, url} = start_remote!(transport: :http)
+      fingerprint = FakeRemote.sign(remote)
+      lines = login!(remote, url)
+
+      assert "the plane signs what it tells clients with the key #{fingerprint}; pinned" in lines
+
+      FakeRemote.client_versions(remote, %{"tui" => %{"recommended" => "99.0.1"}})
+      FakeRemote.release_url(remote, "https://mirror.example.test/troupe")
+
+      assert %{versions: versions, release_url: "https://mirror.example.test/troupe"} =
+               Troupe.CLI.Remote.client_versions(say: &send(self(), {:said, &1}))
+
+      assert versions["tui"]["recommended"] == "99.0.1"
+      refute Map.has_key?(versions, "release")
+      refute_received {:said, _}
+    end
+
+    test "a policy signed by another key is refused until the person accepts the new one by its fingerprint" do
+      {remote, url} = start_remote!(transport: :http)
+      old = FakeRemote.sign(remote)
+      login!(remote, url)
+      FakeRemote.client_versions(remote, %{"tui" => %{"recommended" => "99.0.1"}})
+
+      new = FakeRemote.sign(remote)
+      me = self()
+      say = &send(me, {:said, &1})
+
+      assert Troupe.CLI.Remote.client_versions(say: say) == nil
+      assert_received {:said, refused}
+      assert refused =~ "the version policy from #{url} is signed by the key #{new}, not by #{old}"
+      assert refused =~ "troupe plane-key accept #{new}"
+      assert refused =~ "going on as without a plane"
+
+      assert Troupe.CLI.Remote.plane_key(nil, say: say) == 1
+      assert_received {:said, pinned}
+      assert pinned =~ "signs with the key #{old}"
+      assert_received {:said, offered}
+      assert offered =~ "it now offers the key #{new} instead"
+
+      assert Troupe.CLI.Remote.accept_plane_key(old <> "x", nil, say: say) == 1
+      assert_received {:said, _not_that_one}
+
+      assert Troupe.CLI.Remote.accept_plane_key(new, nil, say: say) == 0
+      assert_received {:said, accepted}
+      assert accepted =~ "the key #{new} is pinned for #{url}"
+
+      assert %{versions: %{"tui" => %{"recommended" => "99.0.1"}}} =
+               Troupe.CLI.Remote.client_versions(say: say)
+    end
+
+    test "a plane that signs nothing is said so at sign-in, and its policy taken as it is" do
+      {remote, url} = start_remote!(transport: :http)
+      lines = login!(remote, url)
+      assert "the plane signs nothing it tells clients (a plane from before 0.22)" in lines
+
+      FakeRemote.client_versions(remote, %{"tui" => %{"recommended" => "99.0.1"}})
+      me = self()
+
+      assert %{versions: %{"tui" => _}, release_url: nil} =
+               Troupe.CLI.Remote.client_versions(say: &send(me, {:said, &1}))
+
+      assert_received {:said, line}
+      assert line =~ "signs nothing it tells clients"
+    end
+  end
+
   defp local_session! do
     ws = tmp_workspace()
 

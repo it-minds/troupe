@@ -266,6 +266,37 @@ defmodule Troupe.Plane.IdentityGapsTest do
       assert [_one] = Identity.list_users()
     end
 
+    test "a refused push a later agreeing push resolves is no longer listed; refused again, it is",
+         context do
+      pushed = scim_row_under_oid(context)
+
+      other =
+        ada()
+        |> Map.put("userName", "mallory@example.test")
+        |> Map.put("emails", [%{"value" => "mallory@example.test", "primary" => true}])
+
+      assert {409, _body, _} = scim(context, :post, "/scim/v2/Users", other)
+      assert {:ok, %{people: [_pair]}} = Admin.identity_duplicates(@root)
+
+      # The provider sends the right record again: it agrees, and updates SCIM's row.
+      assert {201, again, _} = scim(context, :post, "/scim/v2/Users", ada())
+      assert again["id"] == pushed["id"]
+      assert {:ok, %{people: []}} = Admin.identity_duplicates(@root)
+      assert [_one] = audited("person.adopt_agreed")
+
+      # Every push that agrees after it is the same answer, and audits nothing more.
+      assert {201, _, _} = scim(context, :post, "/scim/v2/Users", ada())
+      assert [_still_one] = audited("person.adopt_agreed")
+
+      # A later refusal is listed again: what resolved the first says nothing of it.
+      assert {409, _body, _} = scim(context, :post, "/scim/v2/Users", other)
+      assert {:ok, %{people: [pair]}} = Admin.identity_duplicates(@root)
+      assert pair.row == pushed["id"]
+
+      # And an agreeing push no longer moves a disagreeing one past the check.
+      assert Identity.get_user_by_id(pushed["id"]).user_name == "ada@example.test"
+    end
+
     test "a row SCIM named by another externalId is not folded into anybody", context do
       pushed = scim_row_under_oid(context)
       # Somebody SCIM provisioned under the value as their userName, with an externalId of

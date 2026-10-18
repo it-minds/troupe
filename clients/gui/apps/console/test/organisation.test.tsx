@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { ENFORCEABLE } from "../../../packages/client/test/support/admin.js";
-import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, render, says, sees, seesButton, seesField, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -171,8 +171,8 @@ describe("the organisation's permission rules", () => {
     unmount = render(<App />).unmount;
     (await waitFor(() => button("Change the rules"), "the rules")).click();
     await waitFor(() => ruleRow("deny", 1), "the rules' form");
-    expect(field("Tool", ruleRow("deny", 1))!.value).toBe("shell");
-    expect(field("Pattern", ruleRow("deny", 1))!.value).toBe("git push");
+    expect((await seesField("Tool", ruleRow("deny", 1))).value).toBe("shell");
+    expect((await seesField("Pattern", ruleRow("deny", 1))).value).toBe("git push");
 
     // Edited: the push rule now reaches only a forced push.
     type(field("Pattern", ruleRow("deny", 1))!, "git   push  --force");
@@ -214,12 +214,12 @@ describe("the organisation's permission rules", () => {
 
     type(field("Tool", ruleRow("ask", 1))!, "Bash");
     await waitFor(() => says("Bash is another tool's name for it; Troupe's is shell, as in shell(...)", ruleRow("ask", 1)), "the tool refused");
-    expect(button("Preview", rules()!)!.disabled).toBe(true);
+    expect((await seesButton("Preview", rules()!)).disabled).toBe(true);
 
     type(field("Tool", ruleRow("ask", 1))!, "shell");
     type(field("Pattern", ruleRow("ask", 1))!, "npm test:*");
     await waitFor(() => says("drop the :*, since shell(npm test) already matches every command that starts with it", ruleRow("ask", 1)), "the pattern refused");
-    expect(button("Preview", rules()!)!.disabled).toBe(true);
+    expect((await seesButton("Preview", rules()!)).disabled).toBe(true);
 
     type(field("Tool", ruleRow("ask", 1))!, "web_fetch");
     type(field("Pattern", ruleRow("ask", 1))!, "example.com");

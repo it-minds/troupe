@@ -8,8 +8,10 @@ defmodule Troupe.Update do
       troupe update --rollback         put the previous troupe and troupe-daemon back
 
   **Where from.** `TROUPE_RELEASE_URL`, when it is set, is one release's assets, as the
-  installers read it: a mirror, or a `file://` directory. Otherwise GitHub's: the latest
-  release is the one `/releases/latest` redirects to, and `--version X` is the tag `vX`.
+  installers read it: a mirror, or a `file://` directory. Otherwise, signed in to a plane
+  that names where its releases are (its signed `release.url`, #657), there: the version
+  asked for under `v<version>/`. Otherwise GitHub's: the latest release is the one
+  `/releases/latest` redirects to, and `--version X` is the tag `vX`.
 
   **What is checked, and when.** The release's `manifest.json` and its
   `manifest.json.minisig` come first, and nothing else is fetched until the signature
@@ -58,8 +60,8 @@ defmodule Troupe.Update do
   Run one action and return the exit status.
 
   `opts`: `:version` (the release asked for), `:installed` (this troupe's version),
-  `:plane` (`%{url: plane, versions: %{"tui" => policy, "daemon" => policy}}`, what a
-  plane signed in to says, or `nil`), and, standing in for the machine in tests,
+  `:plane` (`%{url: plane, versions: %{"tui" => policy, "daemon" => policy}, release_url:
+  url}`, what a plane signed in to says, or `nil`), and, standing in for the machine in tests,
   `:release_url`, `:repo`, `:keys`, `:target`, `:tui`, `:lib`, `:windows?`, `:out` (a line
   printed), `:fetch`, `:daemon` (what quiets the daemon) and `:sleep`.
   """
@@ -216,6 +218,20 @@ defmodule Troupe.Update do
 
   defp source(%{release_url: url}) when is_binary(url),
     do: {:ok, String.trim_trailing(url, "/"), nil}
+
+  # Where the plane signed in to says releases are (#657): its own `/downloads`, or a
+  # mirror laid out as GitHub's, each release under `v<version>`. There is no "latest"
+  # there to be redirected to, so the version is the plane's recommended one or the one
+  # named.
+  defp source(%{plane: %{release_url: url}, version: version})
+       when is_binary(url) and is_binary(version),
+       do: {:ok, String.trim_trailing(url, "/") <> "/v#{version}", version}
+
+  defp source(%{plane: %{release_url: url} = plane}) when is_binary(url),
+    do:
+      {:error,
+       "the plane at #{plane.url} has releases at #{url} and recommends no version: " <>
+         "name one with troupe update --version X"}
 
   defp source(%{version: version, repo: repo}) when is_binary(version),
     do: {:ok, "https://github.com/#{repo}/releases/download/v#{version}", version}

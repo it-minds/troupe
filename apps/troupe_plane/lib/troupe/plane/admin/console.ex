@@ -94,6 +94,7 @@ defmodule Troupe.Plane.Admin.Console do
     trigger_put: {:area, :triggers},
     trigger_delete: {:area, :triggers},
     trigger_run: {:area, :triggers},
+    trigger_fix: {:area, :triggers},
     trigger_revisions: {:area, :triggers},
     trigger_key_rotate: {:area, :triggers},
     integrations: {:area, :integrations},
@@ -102,6 +103,8 @@ defmodule Troupe.Plane.Admin.Console do
     github_check: {:area, :integrations},
     github_deliveries: {:area, :integrations},
     github_delete: {:area, :integrations},
+    signing_get: {:area, :integrations},
+    signing_rotate: {:area, :integrations},
 
     # -- Operate -------------------------------------------------------------
     pod_drain: {:area, :pods},

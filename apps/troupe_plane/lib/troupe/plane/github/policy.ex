@@ -9,10 +9,12 @@ defmodule Troupe.Plane.GitHub.Policy do
   - **The worker profile** (`spec.github`, a platform admin's): `allowPublic` (absent,
     false: pushes and pull requests go to private and internal repositories only),
     `denyPaths` (patterns added to `Troupe.PushPaths.defaults/0`, never in place of them),
-    `maxPushes` (pushes per run) and `maxRuns` (runs on a repository at once on it).
-  - **The team** (`teams.github`, its own administrators'): `repositories`, the ones its
-    sessions and triggers may name, as `owner/name` or `owner/*`; `max_pushes` and
-    `max_runs`, the same caps for its runs.
+    `maxPushes` (pushes per run), `maxRuns` (runs on a repository at once on it) and
+    `maxAttempts` (runs on one issue that may end before a sweep leaves it for a person).
+  - **The team** (`teams.github`, its own administrators', or in GitOps mode the
+    `GitHubApp` resource's): `repositories`, the ones its sessions and triggers may name,
+    as `owner/name` or `owner/*`; `max_pushes`, `max_runs` and `max_attempts`, the same
+    caps for its runs.
 
   A team that lists no repository names none. The plane's App bounds them all: a team
   cannot list its way to an owner the App has no installation for.
@@ -36,8 +38,14 @@ defmodule Troupe.Plane.GitHub.Policy do
   @max_repositories 500
   @max_cap 1_000
 
-  @profile_keys ~w(allowPublic denyPaths maxPushes maxRuns)
-  @team_keys ~w(repositories max_pushes max_runs)
+  @profile_keys ~w(allowPublic denyPaths maxPushes maxRuns maxAttempts)
+  @team_keys ~w(repositories max_pushes max_runs max_attempts)
+
+  # How many runs on one issue may stop before a sweep leaves it for a person, where neither
+  # the profile nor the team says: one. A sweep is the part nobody watches, and an issue
+  # whose first run could not fix it is more often one a run cannot fix than one a second
+  # run will.
+  @default_attempts 1
 
   @doc "The keys of a profile's `spec.github` this module reads, beside `permissions`."
   @spec profile_keys() :: [String.t()]
@@ -64,7 +72,8 @@ defmodule Troupe.Plane.GitHub.Policy do
     public ++
       Troupe.PushPaths.problems(github["denyPaths"]) ++
       cap_problems("github.maxPushes", github["maxPushes"]) ++
-      cap_problems("github.maxRuns", github["maxRuns"])
+      cap_problems("github.maxRuns", github["maxRuns"]) ++
+      cap_problems("github.maxAttempts", github["maxAttempts"])
   end
 
   @doc """
@@ -90,7 +99,10 @@ defmodule Troupe.Plane.GitHub.Policy do
   def read_team(_current, _sent),
     do:
       {:error,
-       %{field: "github", reason: "github is an object: {repositories, max_pushes, max_runs}"}}
+       %{
+         field: "github",
+         reason: "github is an object: {repositories, max_pushes, max_runs, max_attempts}"
+       }}
 
   defp read_team_keys(current, sent) do
     Enum.reduce_while(sent, {:ok, current}, fn {key, value}, {:ok, acc} ->
@@ -122,7 +134,7 @@ defmodule Troupe.Plane.GitHub.Policy do
   defp team_value("repositories", _other),
     do: {:error, "repositories is a list of owner/name, or owner/*"}
 
-  defp team_value(cap, value) when cap in ["max_pushes", "max_runs"] do
+  defp team_value(cap, value) when cap in ["max_pushes", "max_runs", "max_attempts"] do
     case cap_problems(cap, value) do
       [] -> {:ok, value}
       [problem | _] -> {:error, problem}
@@ -242,6 +254,22 @@ defmodule Troupe.Plane.GitHub.Policy do
 
   defp runs(1), do: "run"
   defp runs(_n), do: "runs"
+
+  # -- attempts on one issue -------------------------------------------------------------------
+
+  @doc """
+  How many runs on one issue may end before a sweep leaves the issue for a person: the
+  lower of the profile's `maxAttempts` and the team's `max_attempts`, and one where neither
+  says. A person asking again, with the label, the command or the console's "fix this", is
+  not held to it, and starts the count again.
+  """
+  @spec max_attempts(String.t() | nil, String.t() | nil) :: pos_integer()
+  def max_attempts(profile, team_id) do
+    team = (team_id && Repo.get(Team, team_id)) || %Team{}
+
+    lowest([profile_github(profile)["maxAttempts"], get_in(team.github || %{}, ["max_attempts"])]) ||
+      @default_attempts
+  end
 
   # -- small things ---------------------------------------------------------------------------
 

@@ -12,7 +12,7 @@ import { App } from "../src/App";
 import { Key } from "../src/views/Onboarding/Key";
 import { Provider } from "../src/views/Onboarding/Provider";
 import { FakeDaemon, SETUP_KINDS } from "../../../packages/client/test/support/daemon.js";
-import { button, nav, render, says, sees, startOnTheList, type, waitFor } from "./support";
+import { button, nav, render, says, sees, seesButton, startOnTheList, type, waitFor } from "./support";
 
 // jsdom lays nothing out, so it has nothing to scroll; the transcript asks anyway.
 Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -108,7 +108,7 @@ describe("the first run's provider step", () => {
     const ollama = await waitFor(() => field("Address"), "Ollama's address");
     expect(ollama.placeholder).toBe("http://localhost:11434");
     await sees("leave empty for http://localhost:11434");
-    expect(button("Continue")!.disabled).toBe(false);
+    expect((await seesButton("Continue")).disabled).toBe(false);
     button("Continue")!.click();
     expect(onAnswer).toHaveBeenLastCalledWith({ provider: "ollama", kind: "ollama", base_url: null });
 
@@ -117,7 +117,7 @@ describe("the first run's provider step", () => {
     await waitFor(() => pressed("Azure OpenAI") || null, "Azure pressed");
     const azure = field("Address")!;
     expect(azure.placeholder).toBe("https://<resource>.openai.azure.com");
-    expect(button("Continue")!.disabled).toBe(true);
+    expect((await seesButton("Continue")).disabled).toBe(true);
     type(azure, "https://standin.openai.azure.example.test");
     await waitFor(() => !button("Continue")!.disabled || null, "Continue enabled");
     button("Continue")!.click();
@@ -140,7 +140,7 @@ describe("the first run's provider step", () => {
     await shown("The key");
     await sees("a real request to Azure OpenAI");
     expect(button("This gateway needs no key")).toBeNull();
-    expect(field("API key")).not.toBeNull();
+    await waitFor(() => field("API key"), "the key field");
   });
 
   it("an older daemon, which lists no types, is offered the four ways it takes", async () => {
@@ -193,18 +193,18 @@ describe("the Models panel", () => {
   it("offers every type, and asks each only what it needs", async () => {
     const select = await openPanel();
     expect([...select.options].map((o) => o.value)).toEqual(["anthropic", "openai", "ollama", "openrouter", "azure_openai", "gemini"]);
-    expect(field("API key")).not.toBeNull();
+    await waitFor(() => field("API key"), "the key field");
 
     choose(select, "ollama");
     await waitFor(() => says("Ollama takes no key.") || null, "Ollama asking no key");
     expect(field("API key")).toBeNull();
-    expect(field("Address")!.placeholder).toBe("http://localhost:11434");
+    expect((await waitFor(() => field("Address"), "the address field")).placeholder).toBe("http://localhost:11434");
 
     choose(select, "azure_openai");
     await waitFor(() => field("API key"), "Azure's key");
-    expect(field("Address")!.placeholder).toBe("https://<resource>.openai.azure.com");
+    expect((await waitFor(() => field("Address"), "the address field")).placeholder).toBe("https://<resource>.openai.azure.com");
     await sees("required — your Azure OpenAI resource's own address");
-    expect(button("Save")!.disabled).toBe(true);
+    expect((await seesButton("Save")).disabled).toBe(true);
     type(field("Address")!, "https://standin.openai.azure.example.test");
     await waitFor(() => !button("Save")!.disabled || null, "Save enabled");
   });

@@ -47,13 +47,16 @@ defmodule Troupe.Plane.Admin do
     Gitops,
     Identity,
     Ledger,
-    ProfileBudget
+    ProfileBudget,
+    Signing
   }
 
   alias Troupe.Plane.Control.TLS
   alias Troupe.Plane.Fleet.{Bundle, Extends, Provisioner, SizeClass, Worker}
   alias Troupe.Plane.GitHub.Issue, as: GitHubIssue
+  alias Troupe.Plane.GitHub.Issues, as: GitHubIssues
   alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
+  alias Troupe.Plane.Gitops.GitHubApp, as: GitopsGitHubApp
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
@@ -1092,6 +1095,7 @@ defmodule Troupe.Plane.Admin do
     with :ok <- require_platform_admin(actor),
          %Identity.Group{} = group <- Identity.get_group(group_id),
          {:ok, existing} <- not_another_team(group, attrs, link == true),
+         :ok <- team_github_unlocked(actor, "team.enable", group_id, attrs),
          {:ok, attrs} <- read_team_github(attrs, existing && existing.github),
          :ok <- same_settings(existing, group, attrs, link == true) do
       # Its name and its settings. The group it is enabled from, and when and by whom, are
@@ -1207,6 +1211,7 @@ defmodule Troupe.Plane.Admin do
     attrs = settable(attrs, @team_keys)
 
     with {:ok, team} <- fetch_team(actor, name),
+         :ok <- team_github_unlocked(actor, "team.update", name, attrs),
          {:ok, attrs} <- read_team_github(attrs, team.github),
          :ok <- may_set_unenforced(actor, attrs),
          :ok <- still_allowed(team, attrs),
@@ -1227,6 +1232,14 @@ defmodule Troupe.Plane.Admin do
           {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
       end
     end
+  end
+
+  # In GitOps mode a team's `github` is what the `GitHubApp` resource says of the team, as
+  # the App's own settings are: a change to it is a commit there.
+  defp team_github_unlocked(actor, action, name, attrs) do
+    if Enum.any?(attrs, fn {key, _value} -> to_string(key) == "github" end),
+      do: not_held_by_repository(actor, action, name, GitopsGitHubApp.kind()),
+      else: :ok
   end
 
   # A team's `github`, sent as the keys to change, laid over what the team has and checked
@@ -2247,6 +2260,62 @@ defmodule Troupe.Plane.Admin do
 
   defp policy_fields(policy), do: Map.take(policy, [:recommended, :minimum, :blocked])
 
+  # -- the plane's own signing key --------------------------------------------
+
+  @doc """
+  The key this plane signs what it tells people's machines with (`Signing`): its public
+  half, fingerprint and when it was made, and every version's. Made on first use.
+
+  Readable by a team admin, whose people are asked to check the fingerprint; rotated only
+  by a platform admin, since every machine signed in to the plane is then asked to accept
+  the new one.
+  """
+  @spec signing_get(actor()) :: result()
+  def signing_get(actor) do
+    with :ok <- require_admin(actor), do: signing_key(Signing.key())
+  end
+
+  @doc """
+  A new version of the signing key, which signs from then on. Every machine that pinned the
+  old one refuses what the new one signs until its person accepts it, with its fingerprint
+  shown, so it is confirmed by the current key's fingerprint, typed back. Audited with the
+  fingerprints and versions, before and after.
+  """
+  @spec signing_rotate(actor(), String.t() | nil) :: result()
+  def signing_rotate(actor, fingerprint) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, current} <- signing_key(Signing.key()),
+         :ok <- confirm_fingerprint(current, fingerprint),
+         {:ok, %{before: before, now: now}} <- signing_key(Signing.rotate()) do
+      changes = Audit.diff(signing_fields(before), signing_fields(now))
+      {:ok, _} = Audit.record(actor.subject, "signing.rotate", Signing.name(), changes)
+      {:ok, Map.put(now, "changes", changes)}
+    end
+  end
+
+  defp signing_key({:ok, key}), do: {:ok, key}
+
+  defp signing_key({:error, reason}),
+    do:
+      {:error,
+       Error.new(:unavailable, %{
+         reason:
+           "OpenBao's transit engine did not answer for the plane's signing key: " <>
+             inspect(reason)
+       })}
+
+  defp confirm_fingerprint(%{"fingerprint" => fingerprint}, fingerprint), do: :ok
+
+  defp confirm_fingerprint(%{"fingerprint" => expected}, _given) do
+    {:error,
+     Error.new(:invalid_params, %{
+       reason: "the fingerprint to confirm with is the current key's, #{expected}",
+       fingerprint: expected
+     })}
+  end
+
+  defp signing_fields(key), do: %{fingerprint: key["fingerprint"], version: key["version"]}
+
   # -- the plane's GitHub App -------------------------------------------------
 
   @doc """
@@ -2259,7 +2328,27 @@ defmodule Troupe.Plane.Admin do
   """
   @spec github_get(actor()) :: result()
   def github_get(actor) do
-    with :ok <- require_admin(actor), do: {:ok, GitHub.describe()}
+    with :ok <- require_admin(actor), do: {:ok, github_described()}
+  end
+
+  # The App, and on a GitOps plane where its settings come from: the `GitHubApp` resource,
+  # the generation they were read at, and what the last pass could not use.
+  defp github_described do
+    described = GitHub.describe()
+
+    if Gitops.enabled?() do
+      report = Gitops.report(GitopsGitHubApp.kind(), GitopsGitHubApp.name())
+
+      Map.put(described, :gitops, %{
+        resource: GitopsGitHubApp.name(),
+        generation: described.resource_generation,
+        source: Gitops.source(),
+        problem: report && report.problem,
+        reasons: (report && report.reasons) || []
+      })
+    else
+      described
+    end
   end
 
   @doc """
@@ -2272,18 +2361,32 @@ defmodule Troupe.Plane.Admin do
   """
   @spec github_put(actor(), map()) :: result()
   def github_put(actor, app) do
-    with :ok <- require_platform_admin(actor) do
+    with :ok <- require_platform_admin(actor),
+         :ok <- app_settings_unlocked(actor, app || %{}) do
       case GitHub.put(app || %{}, actor.subject) do
         {:ok, %{before: before, now: now}} ->
           changes = Audit.diff(github_fields(before), github_fields(now))
           {:ok, _} = Audit.record(actor.subject, "github.put", "app", changes)
-          {:ok, Map.put(now, :changes, changes)}
+
+          {:ok,
+           now |> Map.merge(Map.take(github_described(), [:gitops])) |> Map.put(:changes, changes)}
 
         {:error, why} ->
           {:error, Error.new(:invalid_params, why)}
       end
     end
   end
+
+  # In GitOps mode the App's id, API URL and installations are the `GitHubApp` resource's,
+  # and a change to them is a commit there. Its key and its webhook secret are never in a
+  # resource, and are still sent here.
+  defp app_settings_unlocked(actor, app) when is_map(app) do
+    if Enum.any?(app, fn {key, _value} -> to_string(key) in GitHub.settings() end),
+      do: not_held_by_repository(actor, "github.put", "app", GitopsGitHubApp.kind()),
+      else: :ok
+  end
+
+  defp app_settings_unlocked(_actor, _app), do: :ok
 
   @doc """
   Whether the App works: an App id is set, transit signs with its key, GitHub knows the
@@ -2324,11 +2427,27 @@ defmodule Troupe.Plane.Admin do
   def github_delete(actor, app_id) do
     with :ok <- require_platform_admin(actor),
          :ok <- confirm_app_id(app_id),
+         :ok <- app_removable(actor),
          {:ok, before} <- forget_github() do
       changes = Audit.diff(github_fields(before), github_fields(GitHub.describe()))
       {:ok, _} = Audit.record(actor.subject, "github.delete", "app", changes)
       {:ok, Map.put(GitHub.describe(), :changes, changes)}
     end
+  end
+
+  # In GitOps mode the App goes when its resource leaves the repository; only an App the
+  # cluster has no resource for (reported missing), set before the plane read the cluster,
+  # is removed here.
+  defp app_removable(actor) do
+    missing? =
+      match?(
+        %{problem: "missing"},
+        Gitops.report(GitopsGitHubApp.kind(), GitopsGitHubApp.name())
+      )
+
+    if missing?,
+      do: :ok,
+      else: not_held_by_repository(actor, "github.delete", "app", GitopsGitHubApp.kind())
   end
 
   defp forget_github do
@@ -3556,6 +3675,49 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  @doc """
+  Start one run of a trigger on a GitHub repository on one of its issues, by hand: the
+  console's "fix this", from the trigger's page or with an issue's link pasted.
+
+  `issue` is the issue's number, or its link on the App's host, which must be the trigger's
+  repository. Read from GitHub first with a token of the plane's own (`issues: read`), and
+  held to what a run on the repository is: the team lists it, it is private or internal
+  unless the profile allows public ones, it is an open issue and not a pull request. Then
+  fired `manual`, by the person, under the trigger's concurrency, the profile's and the
+  team's caps of runs and the budget, with the issue fenced as data as a delivery's is. A
+  second click in the same minute is the run the first made. Works on a GitOps plane too,
+  as running a trigger by hand does.
+  """
+  @spec trigger_fix(actor(), String.t(), String.t(), term()) :: result()
+  def trigger_fix(actor, team_name, name, issue) do
+    with {:ok, team} <- fetch_team(actor, team_name),
+         {:ok, trigger} <- fetch_trigger(team, name),
+         :ok <- on_a_repository(trigger) do
+      {:ok, _} =
+        Audit.record(actor.subject, "trigger.fix", "#{team.name}/#{name}", %{
+          "issue" =>
+            if(is_binary(issue) or is_integer(issue), do: to_string(issue), else: inspect(issue))
+        })
+
+      case GitHubIssues.fix(trigger, issue, actor.subject) do
+        {:ok, fired} -> {:ok, Triggers.fired_json(fired)}
+        {:error, %Error{} = error} -> {:error, error}
+      end
+    end
+  end
+
+  defp on_a_repository(trigger) do
+    if GitHubIssue.repository?(trigger.source),
+      do: :ok,
+      else:
+        {:error,
+         Error.new(:invalid_params, %{
+           trigger: trigger.name,
+           reason:
+             "#{trigger.name} is not a trigger on a GitHub repository: run it with admin.trigger.run"
+         })}
+  end
+
   @doc "A team's runs, newest first; `trigger:` narrows to one, `limit:` caps the list."
   @spec runs_list(actor(), keyword()) :: result()
   def runs_list(actor, opts \\ []) do
@@ -4073,7 +4235,8 @@ defmodule Troupe.Plane.Admin do
       github: %{
         repositories: get_in(team.github || %{}, ["repositories"]) || [],
         max_pushes: get_in(team.github || %{}, ["max_pushes"]),
-        max_runs: get_in(team.github || %{}, ["max_runs"])
+        max_runs: get_in(team.github || %{}, ["max_runs"]),
+        max_attempts: get_in(team.github || %{}, ["max_attempts"])
       },
       admins: Identity.admins_of(team),
       grants:

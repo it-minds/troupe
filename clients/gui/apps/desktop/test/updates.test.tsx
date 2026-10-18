@@ -266,3 +266,47 @@ describe("the app's own update", () => {
     expect(banner()).toBeNull();
   });
 });
+
+// #657: the plane signs its version policy with a key of its own, which this computer's
+// daemon pinned at sign-in; the policy is acted on only as that key signed it.
+describe("the plane's signing key", () => {
+  async function signedInWithDaemon(h: Harness, updater: Updater, planeKey: FakeDaemon["planeKey"]): Promise<FakeDaemon> {
+    const d = new FakeDaemon({ osUser: "ada" });
+    d.planeKey = planeKey;
+    await d.start();
+    const found = async () => ({ transport: "ws" as const, port: d.port, token: d.token });
+    window.troupe = { name: "Test shell", version: "0", signInFlow: "device", updater, findDaemon: found, readDaemon: found };
+    await signIn(h);
+    return d;
+  }
+
+  it("a policy the pinned key signed is followed, with where the plane says releases are", async () => {
+    harness = await startHarness({ plane: { clientVersions: { desktop: { recommended: "99.0.1", minimum: "1.0.0" } } } });
+    const pinned = await harness.plane.sign();
+    const updater = new Updater();
+    daemon = await signedInWithDaemon(harness, updater, { plane_url: harness.plane.baseUrl, ...pinned });
+
+    await waitFor(() => updater.checks.some((c) => c.version === "99.0.1"), "a check for the version the signed policy recommends");
+    const asked = updater.checks.find((c) => c.version === "99.0.1")!;
+    expect(asked.plane?.versions["desktop"]?.minimum).toBe("1.0.0");
+    expect(asked.plane?.versions["signed"]).toBeUndefined();
+  });
+
+  it("a key changed since sign-in is shown beside the pinned one, nothing it signs followed until the person accepts it", async () => {
+    harness = await startHarness({ plane: { clientVersions: { desktop: { recommended: "99.0.1" } } } });
+    const pinned = await harness.plane.sign();
+    const offered = await harness.plane.sign();
+    const updater = new Updater();
+    daemon = await signedInWithDaemon(harness, updater, { plane_url: harness.plane.baseUrl, ...pinned, offered });
+
+    await waitFor(() => says(`This plane now signs what it tells this computer with the key ${offered.fingerprint}`), "the changed key");
+    expect(banner()?.textContent).toContain(pinned.fingerprint);
+    await sees("Check the fingerprint with the plane's administrators first");
+    expect(updater.checks.some((c) => c.version === "99.0.1")).toBe(false);
+
+    button("Accept the new key", banner()!)!.click();
+    await waitFor(() => daemon!.planeKey?.fingerprint === offered.fingerprint, "the new key pinned");
+    await waitFor(() => !says("This plane now signs what it tells this computer"), "the banner gone");
+    await waitFor(() => updater.checks.some((c) => c.version === "99.0.1"), "the policy followed again");
+  });
+});

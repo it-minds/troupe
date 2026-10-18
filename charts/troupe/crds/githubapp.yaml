@@ -1,0 +1,87 @@
+# The plane's GitHub App, as a repository holds it. Read by the plane in gitops mode
+# (#653), which makes its App's settings and each team's GitHub repositories follow this;
+# in direct mode the plane keeps them in its database, set through the console or
+# admin.github.put, and nothing reads this kind.
+#
+# One, named `github`, in the plane's namespace. Nothing here is a secret: the App's
+# private key and its webhook secret are never in a resource. They are imported into
+# OpenBao's transit engine through the console or admin.github.put, and nothing reads them
+# back. The spec keeps what it is not told about, so that a misspelt field reaches the
+# plane and is reported instead of being dropped on the way.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: githubapps.troupe.dev
+  labels:
+    app.kubernetes.io/name: troupe
+spec:
+  group: troupe.dev
+  scope: Namespaced
+  names:
+    kind: GitHubApp
+    plural: githubapps
+    singular: githubapp
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+              properties:
+                appId:
+                  type: integer
+                  minimum: 1
+                  description: The App ID GitHub shows on the App's settings page.
+                apiUrl:
+                  type: string
+                  description: >-
+                    Where GitHub's API is: https://api.github.com where absent,
+                    https://api.<name>.ghe.com for GitHub Enterprise Cloud, or
+                    https://<host>/api/v3 for GitHub Enterprise Server. Clones come from the
+                    matching host, which a worker profile declares in egress.gitHosts.
+                installations:
+                  type: array
+                  description: >-
+                    Every installation the plane may use: the organisation or account the
+                    App is installed on, and the number at the end of the installation's
+                    settings URL. One per owner.
+                  items:
+                    type: object
+                    required: [owner, installationId]
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      owner: {type: string, minLength: 1, maxLength: 39}
+                      installationId: {type: integer, minimum: 1}
+                teams:
+                  type: object
+                  description: >-
+                    Each team's GitHub repositories and caps, by the team's name. A team not
+                    named here lists no repository, and its sessions and triggers name none.
+                  additionalProperties:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      repositories:
+                        type: array
+                        maxItems: 500
+                        description: owner/name, or owner/* for every repository of the owner.
+                        items: {type: string, minLength: 3, maxLength: 141}
+                      maxPushes: {type: integer, minimum: 1, maximum: 1000}
+                      maxRuns: {type: integer, minimum: 1, maximum: 1000}
+                      maxAttempts: {type: integer, minimum: 1, maximum: 1000}
+      additionalPrinterColumns:
+        - name: App
+          type: integer
+          jsonPath: .spec.appId
+        - name: API
+          type: string
+          jsonPath: .spec.apiUrl
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

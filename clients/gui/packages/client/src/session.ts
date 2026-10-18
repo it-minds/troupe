@@ -1,5 +1,6 @@
 import type { AgentDefinition, AgentRow, AgentSkippedFile, ProfileSwitch } from "./agents.js";
 import type { TroupeConnection } from "./connection.js";
+import type { SessionConfig } from "./config.js";
 import type { GateAnswer } from "./transcript.js";
 import type {
   BlobResponse,
@@ -297,6 +298,16 @@ export class SessionView {
    */
   commands(): Promise<CommandsList> {
     return this.conn.call<CommandsList>("commands.list", { session_id: this.sessionId });
+  }
+
+  /**
+   * `config.get` naming the session: what is in force in it, each key and rule with where
+   * it came from. A pod answers it over the session's own connection, with its worker
+   * profile's settings and rules, the platform's, the session's terms and its repository's.
+   * Wakes nothing; a session not running where it is asked is `not_found`.
+   */
+  config(): Promise<SessionConfig> {
+    return this.conn.call<SessionConfig>("config.get", { session_id: this.sessionId });
   }
 
   /**

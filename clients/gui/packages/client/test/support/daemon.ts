@@ -1117,6 +1117,16 @@ export class FakeDaemon {
         return reply(ws, id, this.identityJson());
       }
 
+      // The person accepting the plane's new key, by the fingerprint they were shown (#657).
+      case "identity.accept_plane_key": {
+        const offered = this.planeKey?.offered;
+        if (!this.planeKey || !offered || offered.fingerprint !== params["fingerprint"]) {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: `the plane offers no key ${String(params["fingerprint"])}: nothing is accepted` } });
+        }
+        this.planeKey = { plane_url: this.planeKey.plane_url, ...offered };
+        return reply(ws, id, { plane_key: this.planeKey });
+      }
+
       case "identity.unlink":
         this.linked = null;
         this.planeToken = null;
@@ -2212,14 +2222,23 @@ export class FakeDaemon {
     };
   }
 
+  /**
+   * The key the linked plane signs with, as this machine pinned it, and the one it offers
+   * instead where it changed (#657): what `identity.get` carries as `plane_key`. None, as a
+   * daemon from before it or one linked to a plane that signs nothing.
+   */
+  planeKey: { plane_url: string; algorithm: string; public_key: string; fingerprint: string; offered?: { algorithm: string; public_key: string; fingerprint: string } } | null = null;
+
   private identityJson(): Record<string, unknown> {
-    if (!this.linked) return { linked: false };
+    const key = this.planeKey ? { plane_key: this.planeKey } : {};
+    if (!this.linked) return { linked: false, ...key };
     return {
       linked: true,
       subject: this.linked.subject,
       display_name: this.linked.display_name ?? null,
       plane_url: this.linked.plane_url ?? null,
       linked_at: new Date().toISOString(),
+      ...key,
     };
   }
 

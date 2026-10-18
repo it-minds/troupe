@@ -39,13 +39,38 @@ defmodule Troupe.Config.Explain do
   @doc "The configuration for a workspace, every key or the ones under `key`, as text or JSON."
   @spec explain(Path.t() | nil, String.t() | nil, keyword()) :: {String.t(), non_neg_integer()}
   def explain(workspace, key \\ nil, opts \\ []) do
+    case Config.resolve(workspace, [], Keyword.take(opts, [:user_path])) do
+      {:ok, _config, layers} -> explained(layers, key, opts)
+      {:error, _reason} = error -> explained(error, key, opts)
+    end
+  end
+
+  @doc """
+  A running session's configuration, as `explain/3` says a workspace's: what was resolved
+  as it started, which is what is in force in it (`Troupe.Session.resolved/1`). On a pod
+  that is its worker profile's settings and rules, what the platform enforces, the terms
+  it was created with and its repository's files, each named. A session not running here
+  answers so, with exit status 1.
+  """
+  @spec explain_session(String.t(), String.t() | nil, keyword()) :: {String.t(), non_neg_integer()}
+  def explain_session(session_id, key \\ nil, opts \\ []) do
+    case Troupe.Session.resolved(session_id) do
+      %{layers: %Layers.Result{} = layers, kind: kind} ->
+        explained(layers, key, Keyword.put(opts, :session, %{id: session_id, kind: kind}))
+
+      _ ->
+        as_run_by({"session #{session_id} is not running here, so nothing of it is in force to explain\n", 1}, opts)
+    end
+  end
+
+  defp explained(resolved, key, opts) do
     json? = Keyword.get(opts, :json, false)
 
-    with {:ok, _config, layers} <- Config.resolve(workspace, [], Keyword.take(opts, [:user_path])),
+    with %Layers.Result{} = layers <- resolved,
          {:ok, selected, note} <- layers |> rows() |> select(key) do
       if json?,
-        do: {Jason.encode!(json(layers, selected), pretty: true), 0},
-        else: as_run_by({text(layers, selected, key, note), 0}, opts)
+        do: {Jason.encode!(json(layers, selected, opts[:session]), pretty: true), 0},
+        else: as_run_by({text(layers, selected, key, note, opts[:session]), 0}, opts)
     else
       {:error, %Config.Error{} = error} when json? ->
         {Jason.encode!(%{"errors" => Enum.map(error.issues, &Issue.to_json/1)}, pretty: true), 1}
@@ -130,7 +155,7 @@ defmodule Troupe.Config.Explain do
     winner = ladder |> Enum.reject(&(&1.ignored || limit?(&1))) |> List.last()
 
     cond do
-      winner.layer in [:default, :cli, :enforced] -> winner
+      winner.layer in [:default, :cli, :session, :enforced] -> winner
       winner.value != nil and present?(layers.values, path) -> winner
       true -> %{hd(ladder) | layer: :default}
     end
@@ -159,6 +184,8 @@ defmodule Troupe.Config.Explain do
   end
 
   defp plain(value) when is_binary(value), do: value
+  # An enum a caller set as an atom (`approvals: :deny`) reads as a file writes it.
+  defp plain(value) when is_atom(value) and not is_boolean(value) and not is_nil(value), do: Atom.to_string(value)
   defp plain(value) when value == %{}, do: "{}"
   defp plain(value) when is_list(value), do: "[" <> Enum.map_join(value, ", ", &plain/1) <> "]"
   defp plain(value), do: inspect(value)
@@ -192,9 +219,9 @@ defmodule Troupe.Config.Explain do
     end
   end
 
-  defp text(layers, rows, key, note) do
+  defp text(layers, rows, key, note, session) do
     header = [
-      "configuration for #{if layers.workspace, do: shown(layers.workspace), else: "no workspace"}" <> trust(layers),
+      title(layers, session),
       Enum.map_join(layers.files, "\n", fn file ->
         "  #{String.pad_trailing(Atom.to_string(file.layer), 8)} #{shown(file.path)}" <> file_note(file)
       end)
@@ -247,6 +274,19 @@ defmodule Troupe.Config.Explain do
   defp file_note(%{fetched_at: at, cache: cache}), do: " (fetched #{at}, kept in #{shown(cache)})"
   defp file_note(%{exists?: true}), do: ""
   defp file_note(_file), do: " (none)"
+
+  defp title(layers, nil),
+    do: "configuration for #{if layers.workspace, do: shown(layers.workspace), else: "no workspace"}" <> trust(layers)
+
+  # A pod trusts no repository: its files set no key marked trusted, and no command here
+  # changes that.
+  defp title(layers, %{id: id, kind: :team}),
+    do:
+      "configuration in force in session #{id}, on a worker pod, in #{shown(layers.workspace)} " <>
+        "(its repository's files set no key marked trusted)"
+
+  defp title(layers, %{id: id}),
+    do: "configuration in force in session #{id}, as it started, in #{shown(layers.workspace)}" <> trust(layers)
 
   defp trust(%{workspace: nil}), do: ""
   defp trust(%{trusted?: true}), do: " (trusted)"
@@ -302,7 +342,7 @@ defmodule Troupe.Config.Explain do
     end
   end
 
-  defp json(layers, rows) do
+  defp json(layers, rows, session) do
     %{
       "workspace" => layers.workspace,
       "trusted" => layers.trusted?,
@@ -334,7 +374,11 @@ defmodule Troupe.Config.Explain do
       "refusals" => Enum.map(layers.refusals, &Issue.to_json/1),
       "permissions" => Enum.map(layers.rules, &Permissions.to_json/1)
     }
+    |> Map.merge(session_json(session))
   end
+
+  defp session_json(nil), do: %{}
+  defp session_json(%{id: id, kind: kind}), do: %{"session_id" => id, "pod" => kind == :team}
 
   # A plane's document adds when it was fetched and where it is kept.
   defp file_json(file) do

@@ -185,12 +185,20 @@ defmodule Troupe.Client.Remote do
   @impl true
   def discard(_sid, _path), do: {:error, "a remote session has no local worktree to discard"}
 
+  # What is in force in the session on its pod, over its own connection (`config.get`
+  # naming it): the worker profile's settings and rules, what the platform enforces, the
+  # terms it was created with and its repository's files, each with where it came from.
   @impl true
-  def settings(_sid), do: {:error, "settings for a remote session belong to its plane"}
+  def settings(sid) do
+    case Worker.rpc(sid, "config.get", %{session_id: sid}) do
+      {:ok, %{"keys" => keys} = answer} when is_list(keys) -> {:ok, answer}
+      {:ok, other} -> {:error, "unexpected config.get answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
 
   @impl true
-  def put_setting(_sid, _key, _value, _scope),
-    do: {:error, "settings for a remote session belong to its plane"}
+  def put_setting(_sid, _key, _value, _scope), do: {:error, Troupe.Settings.pod_line()}
 
   @impl true
   def watch(_sid, _enabled?), do: {:error, "watch mode runs where the files are"}

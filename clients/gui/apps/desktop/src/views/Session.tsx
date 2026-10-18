@@ -47,6 +47,7 @@ import { AnswerRecord, QuestionPanel } from "./Question";
 import { CommandPalette } from "./CommandPalette";
 import type { PaletteScreen } from "./CommandPalette";
 import { Files } from "./Files";
+import { PodConfig } from "./PodConfig";
 import { Curtain, ProseFrame, ReasoningFrame, StripLine, ToolFrame, useNow } from "./Frames";
 import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
@@ -56,8 +57,11 @@ import { OfferLine, OfferPanel } from "./Offer";
 import { StartLine, StartPanel } from "./Onboard";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
 
-/** A backstage pane: the running order, the files, or the repository's memory. */
-type Pane = "tasks" | "files" | "memory";
+/**
+ * A backstage pane: the running order, the files, the repository's memory, or for a team
+ * session what is in force in it on its pod.
+ */
+type Pane = "tasks" | "files" | "memory" | "settings";
 
 /** A line this app says in the transcript, after the event it was said at. */
 interface Note {
@@ -1071,8 +1075,10 @@ function Backstage({
   } | null;
 }): JSX.Element {
   const agents = Object.entries(view.state.agentState).filter(([path]) => path !== "");
-  // A team session's memory is its pod's, and `memory.get` is this computer's daemon's.
-  const shown: Pane = pane === "memory" && !memory ? "tasks" : pane;
+  // A team session's memory is its pod's, and `memory.get` is this computer's daemon's; a
+  // local session's settings are this computer's, which its settings screens show.
+  const team = row?.kind === "team";
+  const shown: Pane = (pane === "memory" && !memory) || (pane === "settings" && !team) ? "tasks" : pane;
 
   return (
     <aside className="backstage">
@@ -1089,10 +1095,20 @@ function Backstage({
               Memory
             </button>
           )}
+          {team && (
+            <button className="tab" aria-selected={shown === "settings"} onClick={() => onPane("settings")}>
+              Settings
+            </button>
+          )}
         </div>
       </section>
 
-      {shown === "memory" && memory ? (
+      {shown === "settings" ? (
+        <section>
+          <h3>Settings</h3>
+          <PodConfig view={view.view} />
+        </section>
+      ) : shown === "memory" && memory ? (
         <section>
           <h3>Memory</h3>
           <MemoryPane

@@ -191,8 +191,9 @@ rotating replaces it at once, and is how a webhook
 made another way (a resource in `gitops` mode, or a trigger changed to a webhook) gets one.
 Only a webhook that names no repository has a key: a schedule is fired by the plane, a
 manual trigger by a person or a principal, and a trigger on a GitHub repository by the
-App's signed deliveries, so rotating one of those is refused, and a key a trigger kept from
-before its source changed opens nothing. The key
+App's signed deliveries, so rotating one of those is refused, and a trigger whose source
+changes to one of those loses its key: changed back to a webhook, it has none until a
+rotation gives it one, and a listing's `has_key` is true only for a webhook that has. The key
 fires that one trigger and does
 nothing else, which makes it the credential to give a CI job or a provider's webhook, and
 a wrong key and an unknown id get the same `401`. An `Idempotency-Key` header names the

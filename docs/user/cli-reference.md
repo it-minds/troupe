@@ -27,9 +27,12 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe login PLANE_URL` | sign in to a plane with the device flow |
 | `troupe logout [PLANE_URL]` | forget a plane's credentials and sign this machine's daemon out of it (--all: every plane); without a plane named, out of your own MCP servers too, revoked at their providers |
 | `troupe whoami [PLANE_URL]` | print who the plane says you are, and your teams |
+| `troupe plane-key [PLANE_URL]` | the key the plane signs what it tells clients with, as this machine pinned it at sign-in, and a new one it offers instead |
+| `troupe plane-key accept FINGERPRINT [PLANE_URL]` | trust the plane's new signing key, by the fingerprint you checked with its administrators |
 | `troupe setup` | set up the provider, its key, the models, a first project and the daemon at login, one screen at a time; Esc leaves with nothing written |
 | `troupe config` | show the resolved providers and models (keys masked); with none, set them up |
 | `troupe config --explain [KEY] [--json]` | every setting, or KEY's, and which file set it (secrets masked) |
+| `troupe config --explain [KEY] [--json] --session SESSION_ID` | what is in force in a running session, here or on a worker pod of the plane you are signed in to, and where each part came from: its profile, the platform, its terms, its files |
 | `troupe config validate [PATH]` | check the config files, or one; exits 1 on any problem |
 | `troupe config migrate [--write] [PATH]` | show, or make, the rewrite to the current spellings |
 | `troupe config trust [PATH]` | let a workspace's own files set the trusted keys; --list shows them |

@@ -52,7 +52,12 @@ Decision 915 is the long form.
 - **A GUI test waits for what comes after an async step**: `await sees("…")` (and the
   console's `await seesLink("…")`), not `expect(says("…")).toBe(true)`, which each app's
   `waits.test.tsx` refuses unless the line says why it is meant at once
-  (`// at once: <why>`). To show a race on purpose, make the fake slow:
+  (`// at once: <why>`). A control is the same: `await seesButton("…")` (the console's
+  `await seesField("…")` too, or `await waitFor(() => row(…), …)`) and read it from what
+  the wait answers, `expect((await seesButton("Save")).disabled).toBe(true)`, not
+  `expect(button("…")).not.toBeNull()` or `button("…")!.disabled`, which the same check
+  refuses for `button`, `field` and `row`. Absence (`toBeNull()`) is not checked: it
+  cannot flake this way, only pass early. To show a race on purpose, make the fake slow:
   `daemon.delayMs["config.get"] = 300`, or `subscribeDelayMs`.
 - **An async ExUnit module sets no environment variable** but a `TROUPE_TEST_...` one of its
   own; `Troupe.Credo.AsyncEnv` checks it. A test that needs another home is

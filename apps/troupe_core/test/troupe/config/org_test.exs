@@ -11,7 +11,8 @@ defmodule Troupe.Config.OrgTest do
 
   alias Troupe.Config
   alias Troupe.Config.{Org, Schema, Settings}
-  alias Troupe.Protocol.Organisation
+  alias Troupe.PlaneKeys
+  alias Troupe.Protocol.{Organisation, PlaneSignature}
 
   @plane "https://plane.example.test"
 
@@ -25,7 +26,11 @@ defmodule Troupe.Config.OrgTest do
     managed = Path.join(base, "managed.yaml")
     cache = Path.join(base, "state/organisation.json")
     previous = Application.get_env(:troupe_core, :organisation)
-    Application.put_env(:troupe_core, :organisation, managed_path: managed, cache_path: cache)
+    Application.put_env(:troupe_core, :organisation,
+      managed_path: managed,
+      cache_path: cache,
+      keys_path: Path.join(base, "state/plane-keys.json")
+    )
 
     on_exit(fn ->
       if previous,
@@ -65,6 +70,19 @@ defmodule Troupe.Config.OrgTest do
 
   defp pulled!(answer) do
     assert {:ok, _kept} = Org.save(@plane, answer)
+  end
+
+  # A plane's signing key, pinned for `@plane` as a sign-in would.
+  defp signing_key!(_ctx) do
+    {public, secret} = :crypto.generate_key(:eddsa, :ed25519)
+    {:ok, _} = PlaneKeys.see(@plane, PlaneSignature.key_json(public))
+    %{secret: secret, fingerprint: PlaneSignature.fingerprint(public)}
+  end
+
+  defp sign(key, body, opts \\ []) do
+    document = PlaneSignature.document("client_defaults", body, opts)
+    signature = :crypto.sign(:eddsa, :none, document, [key.secret, :ed25519])
+    PlaneSignature.envelope(document, signature, key.fingerprint)
   end
 
   describe "reproduction" do
@@ -162,6 +180,51 @@ defmodule Troupe.Config.OrgTest do
       assert config.auth == :bearer
       assert config.model == "glm-5.2"
       assert config.small_model == nil
+    end
+
+    # #657: the plane signs the document, and the copy keeps the signature, checked against
+    # the key this machine pinned whenever it is read.
+    test "a signed copy is used; one edited on this machine is refused with a sentence", ctx do
+      key = signing_key!(ctx)
+      answer = %{
+        "defaults" => %{"models" => %{"default" => "plane-model"}},
+        "enforced" => %{"max_turns" => 40}
+      }
+      assert {:ok, _} = Org.save(@plane, answer, ctx.cache, sign(key, answer))
+
+      assert load!(ctx).max_turns == 40
+      assert {:ok, %{"signed" => %{"fingerprint" => _}}} = Org.read_cache(ctx.cache)
+
+      # A person lifting the limit in the copy.
+      edited =
+        ctx.cache |> File.read!() |> Jason.decode!() |> put_in(["enforced", "max_turns"], 900)
+
+      File.write!(ctx.cache, Jason.encode!(edited))
+
+      assert {:error, why} = Org.read_cache(ctx.cache)
+      assert why =~ "does not match the plane's signature: it was changed on this machine"
+      layers = layers!(ctx)
+      assert Enum.any?(
+               layers.warnings,
+               &(&1.message =~ "the organisation's document from #{@plane} does not match")
+             )
+
+      assert load!(ctx).max_turns != 900
+
+      # And the signature taken away, with the key still pinned.
+      File.write!(ctx.cache, edited |> Map.delete("signed") |> Jason.encode!())
+      assert {:error, unsigned} = Org.read_cache(ctx.cache)
+      assert unsigned =~ "is not signed, and this machine holds that plane's signing key"
+    end
+
+    test "a signed copy past its time still holds, and says so", ctx do
+      key = signing_key!(ctx)
+      answer = %{"defaults" => %{}, "enforced" => %{"max_turns" => 40}}
+      long_ago = DateTime.add(DateTime.utc_now(), -30 * 24 * 3600, :second)
+      assert {:ok, _} = Org.save(@plane, answer, ctx.cache, sign(key, answer, now: long_ago))
+
+      assert load!(ctx).max_turns == 40
+      assert Enum.any?(layers!(ctx).warnings, &(&1.message =~ "was the plane's word until"))
     end
 
     test "a document the loader would refuse is not saved, and the copy before it stays", ctx do

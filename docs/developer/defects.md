@@ -1454,25 +1454,15 @@ Found by the chunk 36 fixers, 2026-10-16.
   - Sessions pin a bundle version number, not its channel, and composition makes channel moves more common.
   - A profile that stops extending loads its channel's plain bundle until the next recompose.
   - In GitOps, a child's own manifest change runs its last profile in effect until the plane's next pass. Admission judges a child's spec write against its previous effective profile. A parent deleted in Git leaves the child refused but running its last profile in effect.
-  - There is no `troupe config --explain` for a pod session, so a profile's rules aren't listed there.
 - **The fix loop's push policy** (Decision 911).
   - There's no content scan: a secret pasted into an ordinary file isn't caught by the path denylist. GitHub's push protection on the App's repositories covers it.
-  - A refused push leaves what it staged in the agent's index; the refusal says to run `git rm --cached`, and a temporary index would remove the trap.
   - A clone-only profile that doesn't declare the API host can't revoke its clone token from the pod.
-  - A trigger run skipped by a cap records no reason.
-  - The App can't yet be configured from GitOps (#653).
 - **Triggers and identity** (Decisions 912 and 914).
-  - Keys already stored on triggers that may no longer have one are dead, but listings still show `has_key: true`.
   - Folding a refused adoption pair keeps one key-manager name, so a private session the folded row made won't open.
-  - A refused push stays listed after a later agreeing push adopts the row.
   - There's no editor for rules under the organisation's `defaults:`, which the plane doesn't store.
 - **Tests** (Decision 915).
-  - About 90 `expect(button(…))` assertions after async steps aren't covered by the new waiting-assertion check.
   - A first turn takes about 3 s unloaded on a Windows checkout over WSL, 1.3 s of it in `Troupe.Tools.available/2`. Under load that fails gateway `WaitingSessionsTest` and core `RememberTest`, and is probably D8's slow first turns.
   - CrashLoop restart intensity is counted in time, so restarts slower than about 1.7 s may never trip it. Unconfirmed.
-  - Per-checkout plane test databases (`troupe_plane_test_<hash>`) stay in the dev Postgres until `scripts/dev-down --purge`.
-  - The cluster suite's WebhookTest pod-replacement wait has failed with nothing in the job log to say why.
-  - `bundles_test.exs` and `control_test.exs` still accept a bare `dev-token`.
 
 Found by the chunk 37 fixers, 2026-10-17.
 

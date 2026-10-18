@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, render, says, sees, seesLink, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, render, says, sees, seesButton, seesLink, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -52,7 +52,7 @@ describe("the team list", () => {
     unmount = render(<App />).unmount;
     await waitFor(() => says("No teams yet"), "the empty state");
     await sees("Enable a group as a team to begin");
-    expect(button("Enable a group as a team")).not.toBeNull();
+    await seesButton("Enable a group as a team");
   });
 });
 
@@ -159,9 +159,9 @@ describe("a team", () => {
     type(await waitFor(() => field("Sessions erased after"), "the form"), "30");
     button("Preview")!.click();
     await waitFor(() => says("core's sessions older than 30 days are erased. Erasure cannot be undone."), "the preview");
-    expect(button("Apply")!.disabled).toBe(true);
+    expect((await seesButton("Apply")).disabled).toBe(true);
     type(field("Type core to confirm")!, "cor");
-    expect(button("Apply")!.disabled).toBe(true);
+    expect((await seesButton("Apply")).disabled).toBe(true);
     type(field("Type core to confirm")!, "core");
     await waitFor(() => !button("Apply")!.disabled, "the confirmation");
     button("Apply")!.click();
@@ -206,6 +206,32 @@ describe("a team", () => {
     await waitFor(() => says("every repository of example-org the App reaches"), "the list as it now is");
   });
 
+  it("sets a team's cap of attempts per issue, sending it only once it moves", async () => {
+    await signedInAs(fake, PEOPLE.alice);
+    visit("#/teams/core/github");
+    unmount = render(<App />).unmount;
+    await waitFor(() => says("Runs a sweep starts on one issue"), "core's caps");
+    button("Change core's repositories")!.click();
+    type(await waitFor(() => field("Runs a sweep starts on one issue"), "the form"), "2");
+    button("Preview")!.click();
+    await waitFor(() => says("github.max_attempts becomes 2."), "the preview");
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as team.update on core"), "the audit's note");
+    expect(fake.admin.teams.get("core")!.github.max_attempts).toBe(2);
+    await waitFor(() => says("2 that end without a fix"), "the cap as it now is");
+  });
+
+  it("shows a team's repositories locked on a gitops plane, where the GitHubApp resource holds them", async () => {
+    fake.admin.mode = "gitops";
+    fake.admin.gitopsSource = "https://git.example.com/platform/troupe.git";
+    await signedInAs(fake, PEOPLE.alice);
+    visit("#/teams/core/github");
+    unmount = render(<App />).unmount;
+    await waitFor(() => says("Held in a repository") && says("spec.teams.core"), "the locked tab");
+    await sees("example-org/widgets");
+    expect(button("Change core's repositories")).toBeNull();
+  });
+
   it("lets a team admin change their team's limits but not whether it may use unenforced workers", async () => {
     await signedInAs(fake, PEOPLE.bob);
     visit("#/teams/design/limits");
@@ -242,7 +268,7 @@ describe("a team's edits", () => {
     await waitFor(() => says("1 person loses core: hana@example.com"), "the unlink preview");
     await sees("1 keeps it through another group");
     await sees("Sessions do not move");
-    expect(button("Unlink grp-platform")!.disabled).toBe(true);
+    expect((await seesButton("Unlink grp-platform")).disabled).toBe(true);
     type(field("Type grp-platform to confirm")!, "grp-platform");
     await waitFor(() => !button("Unlink grp-platform")!.disabled, "the confirmation");
     button("Unlink grp-platform")!.click();
@@ -269,7 +295,7 @@ describe("a team's edits", () => {
     // The team is read again after the grant, so heavy can join the lines a moment after the warning.
     await waitFor(() => says("Every core session on dev turns read-only"), "the warning");
     await waitFor(() => says("grants: dev, ux, heavy") && says("grants: ux, heavy"), "the grants before and after");
-    expect(button("Revoke dev")!.disabled).toBe(true);
+    expect((await seesButton("Revoke dev")).disabled).toBe(true);
     type(field("Type dev to confirm")!, "dev");
     await waitFor(() => !button("Revoke dev")!.disabled, "the confirmation");
     button("Revoke dev")!.click();
@@ -335,7 +361,7 @@ describe("a team's edits", () => {
     await waitFor(() => (field("Team name") as HTMLInputElement).value === "platform-owners", "the name made from the group's");
     type(field("Team name")!, "core");
     await waitFor(() => says("There is already a team called core"), "the collision");
-    expect(button("Preview")!.disabled).toBe(true);
+    expect((await seesButton("Preview")).disabled).toBe(true);
     type(field("Team name")!, "platform");
     button("Preview")!.click();
     await waitFor(() => says("Platform owners becomes the team platform"), "the preview");

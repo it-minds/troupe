@@ -87,6 +87,45 @@ defmodule Troupe.Config.SettingsTest do
     end
   end
 
+  describe "describe_session/1" do
+    test "a running session's configuration as it started, with where each part came from", ctx do
+      File.write!(ctx.user, "max_depth: 2\n")
+      File.write!(ctx.project, "compact_at: 0.6\n")
+      fake = start_supervised!({Troupe.LLM.Fake, steps: []})
+
+      {:ok, session} =
+        Troupe.start_session(
+          workspace: ctx.ws,
+          fake: fake,
+          config_overrides: [provider: "fake", model: "fake-model", max_turns: 3, state_dir: Path.join(ctx.base, "state")],
+          config_sources: %{max_turns: {:session, "the session's terms"}}
+        )
+
+      on_exit(fn -> Troupe.stop_session(session.id) end)
+
+      # Written after it started: what is in force is what it started with.
+      File.write!(ctx.project, "compact_at: 0.5\n")
+      answer = Settings.describe_session(session.id)
+
+      assert answer["session_id"] == session.id
+      assert answer["pod"] == false
+      assert %{"value" => 3, "layer" => "session", "source" => "the session's terms"} = key(answer, "max_turns")
+      assert %{"value" => 0.6, "layer" => "project"} = key(answer, "compact_at")
+      assert %{"value" => 2, "layer" => "user", "scopes" => scopes} = key(answer, "max_depth")
+      assert "user" in scopes
+
+      {text, 0} = Config.Explain.explain_session(session.id, "max_turns")
+      assert text =~ "configuration in force in session #{session.id}, as it started"
+      assert text =~ ~r/session\s+3\s+the session's terms  <- in effect/
+    end
+
+    test "a session not running here has none" do
+      assert Settings.describe_session("20260923T101112-zz9_Bq") == nil
+      assert {text, 1} = Config.Explain.explain_session("20260923T101112-zz9_Bq")
+      assert text =~ "is not running here"
+    end
+  end
+
   describe "set/4" do
     test "writes the key's own line in the user's file, by its new name", ctx do
       File.write!(ctx.user, "# mine\nmodel: old   # the old spelling\nmax_turns: 9\n")

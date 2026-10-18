@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, render, says, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -70,7 +70,7 @@ describe("a trigger", () => {
     await sees("2026-10-13 03:00 UTC");
     await sees("Revision 1");
     // Running it is offered here, and nothing sends a person to the admin API or a page under /admin for it.
-    expect(button("Run nightly-deps now")).not.toBeNull();
+    await seesButton("Run nightly-deps now");
     expect(says("admin.trigger.run")).toBe(false);
     expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);
     // A schedule is fired by the plane, so it has no key to rotate.
@@ -125,7 +125,7 @@ describe("a trigger", () => {
 
     (await waitFor(() => button("Delete nightly-deps"), "the page again")).click();
     await waitFor(() => says("Type nightly-deps to confirm"), "the typed confirmation");
-    expect(button("Delete nightly-deps")!.disabled).toBe(true);
+    expect((await seesButton("Delete nightly-deps")).disabled).toBe(true);
     type(field("Type nightly-deps to confirm")!, "nightly-deps");
     await waitFor(() => !button("Delete nightly-deps")!.disabled, "the name typed");
     button("Delete nightly-deps")!.click();
@@ -187,7 +187,7 @@ describe("a webhook's key and a trigger on a GitHub repository", () => {
     await waitFor(() => says("stops working the moment you rotate it"), "the preview");
     await sees("There is no overlap.");
     await sees("The new key is shown once");
-    expect(button("Rotate weekly-digest's key")!.disabled).toBe(true);
+    expect((await seesButton("Rotate weekly-digest's key")).disabled).toBe(true);
     expect(trigger("design", "weekly-digest")!.key).toBe("twk_theoldone");
 
     type(field("Type weekly-digest to confirm")!, "weekly-digest");
@@ -258,7 +258,7 @@ describe("a webhook's key and a trigger on a GitHub repository", () => {
     type(field("Fired by")!, "github");
     type(await waitFor(() => field("Repository"), "the GitHub fields"), "not a repository");
     await waitFor(() => says("owner/name, as GitHub writes it."), "the repository refused");
-    expect(button("Preview")!.disabled).toBe(true);
+    expect((await seesButton("Preview")).disabled).toBe(true);
     type(field("Repository")!, "example-org/widgets");
     await waitFor(() => button("Preview")!.disabled, "a label or a command still wanted");
     type(field("Label")!, "troupe-fix");
@@ -272,6 +272,85 @@ describe("a webhook's key and a trigger on a GitHub repository", () => {
     expect(document.querySelector("section.key-once")).toBeNull();
     expect(trigger("core", "fix-issues")!.source).toEqual({ kind: "webhook", provider: "github", repository: "example-org/widgets", label: "troupe-fix", command: "/troupe fix" });
     expect(trigger("core", "fix-issues")!.has_key).toBe(false);
+  });
+});
+
+describe("a trigger on a GitHub repository", () => {
+  const onRepository = (): void => {
+    const t = trigger("core", "nightly-deps")!;
+    t.source = { kind: "webhook", provider: "github", repository: "example-org/widgets", label: "troupe-fix" };
+  };
+
+  it("fixes one issue by its number or its link, confirmed after saying what the plane checks first", async () => {
+    onRepository();
+    const before = fake.admin.runRows.length;
+    await open("#/triggers/core/nightly-deps");
+    type(await waitFor(() => field("Fix an issue"), "the fix this field"), "https://github.com/example-org/gadgets/issues/7");
+    button("Fix this")!.click();
+    await waitFor(() => says("The plane reads https://github.com/example-org/gadgets/issues/7 from GitHub first"), "the preview");
+    await sees("it must be an open issue of example-org/widgets, not a pull request");
+    expect(fake.admin.runRows.length).toBe(before);
+
+    // Another repository's issue is refused by the plane, saying so.
+    button("Fix https://github.com/example-org/gadgets/issues/7")!.click();
+    await waitFor(() => says("that issue is on example-org/gadgets, and this trigger works on example-org/widgets"), "the refusal");
+    expect(fake.admin.runRows.length).toBe(before);
+
+    button("Back to editing")!.click();
+    type(await waitFor(() => field("Fix an issue"), "the field again"), "7");
+    button("Fix this")!.click();
+    (await waitFor(() => button("Fix 7"), "the preview")).click();
+    await waitFor(() => says("Recorded in the audit as trigger.fix on core/nightly-deps"), "the audit's note");
+    const made = fake.admin.runRows.at(-1)!;
+    expect(made).toMatchObject({ trigger: "nightly-deps", source: "manual", fired_by: PEOPLE.alice.subject, repository: "example-org/widgets", state: "created" });
+    expect(made.issue?.number).toBe(7);
+    await waitFor(() => link("Its run, on Runs and review"), "the run's link");
+  });
+
+  it("says why a run it fired was skipped", async () => {
+    onRepository();
+    await open("#/triggers/core/nightly-deps");
+    for (const issue of ["7", "8"]) {
+      type(await waitFor(() => field("Fix an issue"), "the fix this field"), issue);
+      button("Fix this")!.click();
+      (await waitFor(() => button(`Fix ${issue}`), "the preview")).click();
+      await waitFor(() => says("Recorded in the audit as trigger.fix on core/nightly-deps") && !button(`Fix ${issue}`), "fired");
+    }
+    await sees("the run is recorded as skipped: nightly-deps allows 1 run at once (concurrency), and one is going.");
+    const skipped = fake.admin.runRows.at(-1)!;
+
+    visit(`#/runs/${skipped.id}`);
+    await waitFor(() => says("Why it was skipped"), "the run's page");
+    await sees("nightly-deps allows 1 run at once (concurrency), and one is going");
+  });
+
+  it("is not offered on a trigger that is not on a repository", async () => {
+    await open("#/triggers/core/nightly-deps");
+    await waitFor(() => button("Run nightly-deps now"), "nightly-deps");
+    expect(field("Fix an issue")).toBeNull();
+  });
+
+  it("sweeps on a schedule for its label, or for what a query finds", async () => {
+    await open("#/triggers/core");
+    (await waitFor(() => button("New trigger"), "core's triggers")).click();
+    type(await waitFor(() => field("Name"), "the form"), "sweeper");
+    const principal = await waitFor(() => (field("Runs as") as HTMLSelectElement | null)?.querySelector('option[value="svc:core/nightly"]') && field("Runs as"), "the principals");
+    type(principal, "svc:core/nightly");
+    type(field("Profile")!, "dev");
+    type(field("Fired by")!, "github");
+    type(await waitFor(() => field("Repository"), "the GitHub fields"), "example-org/widgets");
+    type(field("Sweep")!, "0 */6 * * *");
+    await waitFor(() => says("A sweep looks for the label, or for what a query finds: give one."), "a sweep with nothing to look for");
+    await waitFor(() => button("Preview")!.disabled, "Preview held back");
+    type(await waitFor(() => field("Sweep looks for"), "the query field"), "repo:other/thing label:bug");
+    await waitFor(() => says("The plane adds the repository and is:issue is:open itself."), "a query naming a repository");
+    type(field("Sweep looks for")!, "label:bug no:assignee");
+    await waitFor(() => !button("Preview")!.disabled, "the form complete");
+    button("Preview")!.click();
+    await waitFor(() => says("swept on a schedule, 0 */6 * * * (UTC), for open issues label:bug no:assignee finds"), "the preview");
+    button("Create sweeper")!.click();
+    await waitFor(() => says("Recorded in the audit as trigger.put on core/sweeper"), "the audit's note");
+    expect(trigger("core", "sweeper")!.source).toEqual({ kind: "webhook", provider: "github", repository: "example-org/widgets", sweep: "0 */6 * * *", query: "label:bug no:assignee" });
   });
 });
 
@@ -291,6 +370,6 @@ describe("a plane in gitops mode", () => {
     expect(button("Pause nightly-deps")).toBeNull();
     expect(button("Delete nightly-deps")).toBeNull();
     // Running it is something done with it, not a change to what the repository holds.
-    expect(button("Run nightly-deps now")).not.toBeNull();
+    await seesButton("Run nightly-deps now");
   });
 });

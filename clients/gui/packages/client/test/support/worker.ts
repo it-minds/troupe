@@ -507,6 +507,39 @@ export class FakeWorker {
         return reply(ws, id, { agents, skipped: [] });
       }
 
+      // What is in force in the session on this pod, as a worker answers `config.get`
+      // naming it (the worker's `config_explain_test`): the profile's settings and rules,
+      // the platform's switch, the session's terms and its repository's file.
+      case "config.get": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { session_id: sessionId } });
+        const key = (key: string, value: unknown, layer: string, source: string | null, enforced: unknown = null) => ({
+          key, value, layer, source, default: null, scopes: [], enforced, secret: false, label: null, doc: null,
+        });
+        return reply(ws, id, {
+          session_id: session.id,
+          pod: true,
+          workspace: `/state/workspaces/${session.id}`,
+          trusted: false,
+          files: [{ scope: "project", path: `/state/workspaces/${session.id}/.troupe/config.yaml`, exists: true }],
+          organisation: [],
+          keys: [
+            key("models.default", "pod-model", "profile", `the worker profile ${session.profile} (TROUPE_MODEL)`),
+            key("max_turns", 7, "session", "the session's terms"),
+            key("compact_at", 0.6, "project", `/state/workspaces/${session.id}/.troupe/config.yaml`),
+            key("managed_permission_rules_only", true, "enforced", "the plane's platform settings", {
+              value: true,
+              source: "the plane's platform settings",
+            }),
+            key("max_depth", 3, "default", null),
+          ],
+          permissions: [
+            { action: "deny", rule: "shell(curl)", tool: "shell", pattern: "curl", scope: "profile", source: "standard", ignored: null },
+          ],
+          warnings: [],
+          errors: [],
+        });
+      }
+
       // A command a file defines is a turn on its prompt, as `input.send` is on its text.
       case "commands.run": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });

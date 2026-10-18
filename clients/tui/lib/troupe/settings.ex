@@ -53,6 +53,9 @@ defmodule Troupe.Settings do
   """
   @type view :: %{
           served?: boolean(),
+          # A session on a worker pod: the answer is what is in force in it, over its own
+          # connection, shown, and nothing on the page changes it.
+          pod?: boolean(),
           keys: %{String.t() => %{String.t() => term()}},
           files: %{String.t() => String.t()},
           rules: [map()]
@@ -104,13 +107,25 @@ defmodule Troupe.Settings do
   def view(%{"keys" => keys} = answer) when is_list(keys) do
     %{
       served?: true,
+      pod?: answer["pod"] == true,
       keys: Map.new(keys, &{&1["key"], &1}),
       files: Map.new(List.wrap(answer["files"]), &{&1["scope"], &1["path"]}),
       rules: Enum.filter(List.wrap(answer["permissions"]), &is_map/1)
     }
   end
 
-  def view(_answer), do: %{served?: false, keys: %{}, files: %{}, rules: []}
+  def view(_answer), do: %{served?: false, pod?: false, keys: %{}, files: %{}, rules: []}
+
+  @doc """
+  What the page says of a session on a worker pod when a setting is to be changed: what is
+  in force there is its profile's, the platform's, its terms' and its repository's, and
+  this machine writes none of it.
+  """
+  @spec pod_line() :: String.t()
+  def pod_line,
+    do:
+      "a session on a worker pod runs what its profile, the platform, its terms and its " <>
+        "repository set; nothing here changes it"
 
   @doc """
   The current value of a setting: the daemon's, or the config's for an old daemon, which

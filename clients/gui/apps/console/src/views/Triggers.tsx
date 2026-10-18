@@ -20,7 +20,9 @@
 // run it makes is linked on Runs. Rotating a webhook trigger's key is typed by its name,
 // after saying that the old key stops working the moment it is done; the new one is shown
 // once, as a new trigger's is. Both work on a `gitops` plane too: they are things done with
-// a trigger, not changes to what it is, and the key is never in a resource.
+// a trigger, not changes to what it is, and the key is never in a resource. So does "fix
+// this" on a trigger on a GitHub repository: one issue, by its number or its pasted link,
+// one run on it, behind a plain confirm that says what the plane checks first.
 
 import { useState } from "react";
 import type { JSX } from "react";
@@ -45,7 +47,10 @@ function firedBy(source: Record<string, unknown> | null): string {
       source["label"] ? `an issue labelled ${String(source["label"])}` : null,
       source["command"] ? `a comment saying ${String(source["command"])}` : null,
     ].filter(Boolean);
-    return `by GitHub on ${String(source["repository"])}: ${on.join(", or ") || "nothing yet"}`;
+    const swept = source["sweep"]
+      ? `; and swept on a schedule, ${String(source["sweep"])} (UTC), for ${source["query"] ? `open issues ${String(source["query"])} finds` : `open issues labelled ${String(source["label"])}`}`
+      : "";
+    return `by GitHub on ${String(source["repository"])}: ${on.join(", or ") || (swept ? "no delivery" : "nothing yet")}${swept}`;
   }
   if (kind === "webhook") return `by a webhook${source?.["provider"] ? ` from ${String(source["provider"])}` : ""}`;
   if (kind === "manual") return "only by hand";
@@ -269,12 +274,21 @@ function runWords(team: string, t: Trigger): string[] {
   ].filter(Boolean);
 }
 
+/** What "fix this" reads, starts and spends, in words, before it is confirmed. */
+function fixWords(team: string, t: Trigger, repository: string, issue: string): string[] {
+  return [
+    `The plane reads ${issue} from GitHub first: it must be an open issue of ${repository}, not a pull request, and ${repository} one ${team} lists, private or internal unless the profile allows public ones.`,
+    `Then one run of ${t.name} starts on it, by hand, by you: a session on ${show(t.profile)}, run as ${show(t.principal)}, with the issue as its task, given as data. It spends ${team}'s budget.`,
+    `If as many of its runs as it may have at once are going, or the profile's or the team's cap of runs on a repository is reached, the run is recorded as skipped and says why.`,
+  ];
+}
+
 /** A run just fired by hand: how it stands, and where it is on Runs. */
 function FiredNote({ name, fired }: { name: string; fired: TriggerFired }): JSX.Element {
   return (
     <p className="note fired" role="status">
       {fired.state === "skipped"
-        ? `${name} was fired, and the run is recorded as skipped: as many of its runs as it may have at once are going already.`
+        ? `${name} was fired, and the run is recorded as skipped: ${fired.run.reason ?? "as many of its runs as it may have at once are going already"}.`
         : `${name} is fired by hand${fired.session_id ? ", and its session is starting" : ""}.`}{" "}
       <a href={href({ page: "runs", path: [fired.run.id] })}>Its run, on Runs and review</a>
     </p>
@@ -294,6 +308,9 @@ export function TriggerPage({ team, name }: { team: string; name: string }): JSX
   const [deleting, setDeleting] = useState(false);
   const [running, setRunning] = useState(false);
   const [rotating, setRotating] = useState(false);
+  // "Fix this": the issue typed or pasted, and the one waiting to be confirmed.
+  const [issue, setIssue] = useState("");
+  const [fixing, setFixing] = useState<string | null>(null);
   const [fired, setFired] = useState<TriggerFired | null>(null);
   const [minted, setMinted] = useState<TriggerKey | null>(null);
   const [gone, setGone] = useState<Done | null>(null);
@@ -328,10 +345,11 @@ export function TriggerPage({ team, name }: { team: string; name: string }): JSX
           }
           const locked = modeOf(mode) === "gitops";
           const deletable = !locked || t.gitops?.problem === "missing";
-          const busy = editing || switching || deleting || running || rotating;
+          const busy = editing || switching || deleting || running || rotating || fixing !== null;
           // A webhook that names no repository is fired with its own key; one on a GitHub
           // repository is fired by the App's signed deliveries, and a schedule by the plane.
           const keyed = t.source?.["kind"] === "webhook" && !t.source?.["repository"];
+          const repository = t.source?.["kind"] === "webhook" && typeof t.source?.["repository"] === "string" ? t.source["repository"] : null;
           const terms = t.terms ?? {};
           const notifyList = Array.isArray(t.notify) ? t.notify : [];
           return (
@@ -415,6 +433,49 @@ export function TriggerPage({ team, name }: { team: string; name: string }): JSX
                 </div>
               )}
               {!t.enabled && !busy && <p className="note">A paused trigger is not run, by hand or otherwise; resume it first.</p>}
+              {repository && t.enabled && !busy && (
+                <form
+                  className="edit fix"
+                  aria-label={`Fix an issue of ${repository}`}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setFired(null);
+                    setFixing(issue.trim());
+                  }}
+                >
+                  <Field label="Fix an issue" hint={`Its number, or its link on GitHub: an open issue of ${repository}. One run starts on it, as ${show(t.principal)}, held to ${name}'s caps.`}>
+                    {(p) => <input {...p} value={issue} onChange={(e) => setIssue(e.target.value)} placeholder={`7, or https://github.com/${repository}/issues/7`} autoComplete="off" spellCheck={false} />}
+                  </Field>
+                  <div className="actions">
+                    <button type="submit" disabled={issue.trim() === ""}>
+                      Fix this
+                    </button>
+                  </div>
+                </form>
+              )}
+              {fixing !== null && repository && (
+                <Preview
+                  title={`trigger/${team}/${name}`}
+                  lines={[{ field: "fix", from: null, to: `${repository}, issue ${fixing}, by hand, by ${me.subject}` }]}
+                  effects={fixWords(team, t, repository, fixing)}
+                  verb={`Fix ${fixing}`}
+                  onCancel={() => setFixing(null)}
+                  onConfirm={async () => {
+                    await apply(
+                      "trigger.fix",
+                      `${team}/${name}`,
+                      async () => {
+                        const answer = await admin.fixIssue(team, name, fixing);
+                        setFired(answer);
+                        setIssue("");
+                        return answer;
+                      },
+                      `A run of ${name} on ${fixing} is fired.`,
+                    );
+                    setFixing(null);
+                  }}
+                />
+              )}
               {running && (
                 <Preview
                   title={`trigger/${team}/${name}`}
@@ -553,6 +614,9 @@ interface TriggerFields {
   command: string;
   /** The branch a GitHub trigger's sessions clone: kept as it is, since no field here shows it. */
   ref: string;
+  /** A GitHub trigger's sweep: a cron in UTC, empty for none, and what it looks for beside the label. */
+  sweep: string;
+  query: string;
   prompt: string;
   visibility: string;
   review: string;
@@ -574,6 +638,8 @@ function fieldsOf(t: Trigger | null): TriggerFields {
     label: String(s["label"] ?? ""),
     command: String(s["command"] ?? ""),
     ref: String(s["ref"] ?? ""),
+    sweep: String(s["sweep"] ?? ""),
+    query: String(s["query"] ?? ""),
     prompt: t?.prompt_template ?? "",
     visibility: t?.visibility ?? "team",
     review: t?.review === "none" || t?.review === false ? "none" : "required",
@@ -592,6 +658,8 @@ function valuesOf(f: TriggerFields): Record<string, unknown> {
     if (f.label.trim()) source["label"] = f.label.trim();
     if (f.command.trim()) source["command"] = f.command.trim();
     if (f.ref) source["ref"] = f.ref;
+    if (f.sweep.trim()) source["sweep"] = f.sweep.trim();
+    if (f.sweep.trim() && f.query.trim()) source["query"] = f.query.trim();
   }
   return {
     principal: f.principal,
@@ -638,7 +706,16 @@ function TriggerForm({
   const nameProblem = creating && name !== "" ? (names.includes(name) ? `${team.name} has a trigger called ${name} already.` : NAME.test(name) ? null : "Lowercase letters, digits and dashes.") : null;
   const cronProblem = f.kind === "schedule" && f.cron.trim() !== "" && f.cron.trim().split(/\s+/).length !== 5 ? "Five fields: minute, hour, day of the month, month, day of the week." : null;
   const repositoryProblem = f.kind === "github" && f.repository.trim() !== "" && !/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/.test(f.repository.trim()) ? "owner/name, as GitHub writes it." : null;
-  const githubMissing = f.kind === "github" && (!f.repository.trim() || (!f.label.trim() && !f.command.trim()));
+  const sweepProblem =
+    f.kind === "github" && f.sweep.trim() !== ""
+      ? f.sweep.trim().split(/\s+/).length !== 5
+        ? "Five fields, in UTC: 0 */6 * * * is every six hours."
+        : !f.label.trim() && !f.query.trim()
+          ? "A sweep looks for the label, or for what a query finds: give one."
+          : null
+      : null;
+  const queryProblem = f.kind === "github" && /(^|\s)-?(repo|org|user|is|type|state|archived):/i.test(f.query) ? "The plane adds the repository and is:issue is:open itself." : null;
+  const githubMissing = f.kind === "github" && (!f.repository.trim() || (!f.label.trim() && !f.command.trim() && !f.sweep.trim()));
   const missing = githubMissing || (creating && (!name || !f.principal || !f.profile || (f.kind === "schedule" && !f.cron.trim())));
   const set = (patch: Partial<TriggerFields>) => setF({ ...f, ...patch });
 
@@ -724,6 +801,18 @@ function TriggerForm({
           <Field label="Command" hint="A comment whose first line is this, such as /troupe fix, by the repository's owner, a member or a collaborator, starts a run.">
             {(p) => <input {...p} value={f.command} onChange={(e) => set({ command: e.target.value })} autoComplete="off" spellCheck={false} />}
           </Field>
+          <Field
+            label="Sweep"
+            hint="Optional. Five fields, in UTC: at these minutes the plane goes over the open issues with the label, or those the query finds, and starts a run on each that no run is fixing and that has not been tried too often."
+            error={sweepProblem}
+          >
+            {(p) => <input {...p} value={f.sweep} onChange={(e) => set({ sweep: e.target.value })} placeholder="0 */6 * * *" autoComplete="off" spellCheck={false} />}
+          </Field>
+          {f.sweep.trim() !== "" && (
+            <Field label="Sweep looks for" hint="Optional: GitHub's issue search qualifiers instead of the label, such as label:bug no:assignee." error={queryProblem}>
+              {(p) => <input {...p} value={f.query} onChange={(e) => set({ query: e.target.value })} autoComplete="off" spellCheck={false} />}
+            </Field>
+          )}
         </>
       )}
       {f.kind === "schedule" && (
@@ -763,7 +852,7 @@ function TriggerForm({
       </Field>
       {!creating && <p className="note">Its terms and who is made a collaborator on each run are kept as they are; this form does not change them.</p>}
       <div className="actions">
-        <button type="submit" className="primary" disabled={Boolean(missing || nameProblem || cronProblem || repositoryProblem) || lines.length === 0}>
+        <button type="submit" className="primary" disabled={Boolean(missing || nameProblem || cronProblem || repositoryProblem || sweepProblem || queryProblem) || lines.length === 0}>
           Preview
         </button>
         <button type="button" onClick={onCancel}>

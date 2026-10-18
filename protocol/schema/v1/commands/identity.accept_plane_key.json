@@ -1,0 +1,22 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/identity.accept_plane_key.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "fingerprint": {
+      "type": "string"
+    },
+    "plane_url": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "fingerprint"
+  ],
+  "title": "identity.accept_plane_key",
+  "type": "object"
+}

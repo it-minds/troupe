@@ -9,6 +9,12 @@ defmodule Troupe.Plane.GitHub.Issue do
   member or collaborator. Either or both. `ref` is the branch its sessions clone, the
   repository's default where it names none.
 
+  `sweep`, a five-field cron in UTC, has the plane go over the repository's open issues at
+  those minutes as well (`GitHub.Issues.sweep/2`): those with the trigger's `label`, or
+  those a `query` finds, GitHub's search qualifiers for issues (`label:bug no:assignee`),
+  to which the plane adds the repository and `is:issue is:open` itself. A query is the
+  sweep's alone; a delivery is matched by its label and its command.
+
   What a delivery is reduced to is the run's event: the repository, the issue's number,
   link, title, labels, author and text, the comment that asked, and who sent it, each
   bounded so the event stays under `Triggers.max_event_bytes/0`. The text is GitHub's
@@ -19,9 +25,14 @@ defmodule Troupe.Plane.GitHub.Issue do
   """
 
   alias Troupe.Plane.Triggers
-  alias Troupe.Plane.Triggers.Template
+  alias Troupe.Plane.Triggers.{Cron, Template}
 
-  @source_keys ~w(kind provider repository label command ref)
+  @source_keys ~w(kind provider repository label command ref sweep query)
+
+  # Qualifiers a sweep's query may not carry: the plane says which repository, and that it
+  # is open issues, itself, and a query that named another would be a sweep of somewhere
+  # the trigger is not about.
+  @owned_qualifiers ~r/(?:\A|\s)-?(?:repo|org|user|is|type|state|archived):/i
 
   # Who may ask for a run in a comment: what GitHub says of the commenter on that
   # repository. Anybody can comment on a public repository's issue; a run spends a team's
@@ -76,7 +87,9 @@ defmodule Troupe.Plane.GitHub.Issue do
 
       true ->
         repository_problems(source["repository"]) ++
-          on_problems(source["label"], source["command"]) ++ ref_problems(source["ref"])
+          on_problems(source["label"], source["command"], source["sweep"]) ++
+          sweep_problems(source["sweep"], source["label"], source["query"]) ++
+          ref_problems(source["ref"])
     end
   end
 
@@ -96,10 +109,54 @@ defmodule Troupe.Plane.GitHub.Issue do
 
   defp repository_problems(_text), do: ["a repository is owner/name"]
 
-  defp on_problems(nil, nil),
-    do: ["a GitHub trigger names a label, a command, or both: what on an issue starts a run"]
+  defp on_problems(nil, nil, nil),
+    do: [
+      "a GitHub trigger names a label, a command or a sweep, or more than one: what on an " <>
+        "issue starts a run"
+    ]
 
-  defp on_problems(label, command), do: label_problems(label) ++ command_problems(command)
+  defp on_problems(label, command, _sweep),
+    do: label_problems(label) ++ command_problems(command)
+
+  defp sweep_problems(nil, _label, nil), do: []
+
+  defp sweep_problems(nil, _label, _query),
+    do: ["a query is what a sweep looks for, and this source has no sweep"]
+
+  defp sweep_problems(sweep, label, query) do
+    cron =
+      case Cron.parse(sweep) do
+        {:ok, _cron} -> []
+        {:error, reason} -> ["sweep is a five-field cron in UTC, and #{reason}"]
+      end
+
+    cron ++ query_problems(query, label)
+  end
+
+  defp query_problems(nil, nil),
+    do: ["a sweep looks for the trigger's label, or for what a query finds: it has neither"]
+
+  defp query_problems(nil, _label), do: []
+
+  defp query_problems(query, _label) when is_binary(query) do
+    cond do
+      String.trim(query) == "" or String.length(query) > 200 or
+          String.contains?(query, ["\n", "\r"]) ->
+        ["a query is one line of GitHub's search qualifiers, at most 200 characters"]
+
+      Regex.match?(@owned_qualifiers, query) ->
+        [
+          "a query does not say repo:, org:, user:, is:, type:, state: or archived: " <>
+            "the plane adds the repository and is:issue is:open itself"
+        ]
+
+      true ->
+        []
+    end
+  end
+
+  defp query_problems(_query, _label),
+    do: ["a query is one line of GitHub's search qualifiers, at most 200 characters"]
 
   defp label_problems(nil), do: []
 
@@ -230,6 +287,22 @@ defmodule Troupe.Plane.GitHub.Issue do
         )
     }
     |> within(Triggers.max_event_bytes())
+  end
+
+  @doc """
+  What a run keeps of an issue the plane read from GitHub itself, for a sweep (`"sweep"`)
+  or a person's "fix this" (`"fix"`): what `event/4` keeps of one a delivery brought, with
+  `github.event` saying which, and `sender` who asked, where a person did.
+  """
+  @spec found(String.t(), map(), String.t(), String.t() | nil) :: map()
+  def found(kind, issue, full_name, by) when kind in ["sweep", "fix"] do
+    payload = %{
+      "issue" => issue,
+      "repository" => %{"full_name" => full_name},
+      "sender" => %{"login" => by}
+    }
+
+    event(kind, nil, payload, %{})
   end
 
   defp labels(labels) when is_list(labels) do

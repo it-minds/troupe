@@ -7,6 +7,14 @@
 // The private key and the webhook secret are pasted once and imported into OpenBao by the
 // plane; nothing here keeps them, and no answer ever carries them back. A platform admin
 // also sees what the App's webhook took lately and what the plane did with each delivery.
+// On a `gitops` plane the App's ID, API URL and installations come from a `GitHubApp`
+// resource: shown locked, with where they come from, and only its key and webhook secret,
+// which no repository holds, are set here.
+//
+// Then the key the plane signs what it tells people's machines with (#657): its fingerprint,
+// which a person compares with what their machine pinned at sign-in, when it was made, and
+// every version. A platform admin rotates it, typed by the current fingerprint: every machine
+// that pinned the old one then asks its person to accept the new one.
 //
 // Then three lists `admin.integrations.list` answers, read-only on purpose: the MCP servers
 // more than one profile carries (the organisation's, and the blast radius of retiring one),
@@ -16,9 +24,9 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { GitHubApp, GitHubAppChange, GitHubCheck, GitHubDelivery, IntegrationServer, Integrations as IntegrationsAnswer } from "@troupe/client";
+import type { GitHubApp, GitHubAppChange, GitHubCheck, GitHubDelivery, IntegrationServer, Integrations as IntegrationsAnswer, SigningKey } from "@troupe/client";
 import { describeError, show, useConsole, useLoad } from "../console";
-import { AuditNote, Checks, DetailList, Empty, Field, Fields, Loaded, Preview, Region, Status, changed, useChange, when } from "./bits";
+import { AuditNote, Checks, DetailList, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, changed, useChange, when } from "./bits";
 import type { DiffLine } from "./bits";
 
 export function Integrations(): JSX.Element {
@@ -32,6 +40,7 @@ export function Integrations(): JSX.Element {
           <>
             <GitHubCard app={app} onApplied={reload} />
             <Deliveries />
+            <SigningCard />
             <Servers answer={answer} />
             <Egress answer={answer} />
             <Notify answer={answer} />
@@ -72,11 +81,19 @@ function installationsOf(text: string): Array<{ owner: string; installation_id: 
   return read.every((r) => r !== null) ? (read as Array<{ owner: string; installation_id: number }>) : null;
 }
 
-/** What the form asks for, as `admin.github.put` takes it: only the keys that moved. */
+/**
+ * What the form asks for, as `admin.github.put` takes it: only the keys that moved. On a
+ * gitops plane only the key and the webhook secret, which no resource holds.
+ */
 function changeOf(app: GitHubApp, form: AppForm): GitHubAppChange | null {
+  const change: GitHubAppChange = {};
+  if (app.gitops) {
+    if (form.privateKey.trim() !== "") change.private_key = form.privateKey.trim();
+    if (form.webhookSecret.trim() !== "") change.webhook_secret = form.webhookSecret.trim();
+    return change;
+  }
   const installations = installationsOf(form.installations);
   if (installations === null) return null;
-  const change: GitHubAppChange = {};
   const id = form.appId.trim() === "" ? null : /^\d+$/.test(form.appId.trim()) ? Number(form.appId.trim()) : NaN;
   if (Number.isNaN(id)) return null;
   if (id !== app.app_id) change.app_id = id;
@@ -109,6 +126,8 @@ function GitHubCard({ app, onApplied }: { app: GitHubApp; onApplied: () => void 
       ]
     : [];
   const busy = form !== null || removing;
+  // On a gitops plane the App's ID, API URL and installations are a `GitHubApp` resource's.
+  const locked = Boolean(app.gitops);
 
   const test = () => {
     setCheck({ state: "asking" });
@@ -135,6 +154,15 @@ function GitHubCard({ app, onApplied }: { app: GitHubApp; onApplied: () => void 
         </span>
       </header>
       <p>The one identity this plane's pods clone and push with, on the repositories the organisation installed it on. Its key is in OpenBao's transit engine, where nothing can take a copy.</p>
+      {app.gitops && (
+        <Locked things="GitHub App's ID, API URL and installations, and every team's GitHub repositories," source={app.gitops.source}>
+          <p className="note">
+            They come from the resource <code>GitHubApp/{app.gitops.resource}</code>
+            {app.gitops.generation !== null ? `, read at generation ${app.gitops.generation}` : ""}. The App's private key and webhook secret are no resource's: they are still set here, into OpenBao.
+          </p>
+          <GitopsProblem gitops={app.gitops} />
+        </Locked>
+      )}
       {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
       <Fields
         rows={[
@@ -180,9 +208,9 @@ function GitHubCard({ app, onApplied }: { app: GitHubApp; onApplied: () => void 
             {check?.state === "asking" ? "Asking GitHub…" : "Test it"}
           </button>
           <button type="button" onClick={() => setForm(formOf(app))}>
-            {app.app_id === null ? "Set the App" : "Change the App"}
+            {locked ? "Set its key or webhook secret" : app.app_id === null ? "Set the App" : "Change the App"}
           </button>
-          {app.app_id !== null && (
+          {app.app_id !== null && (!locked || app.gitops?.problem === "missing") && (
             <button type="button" className="danger" onClick={() => setRemoving(true)}>
               Remove the App
             </button>
@@ -210,19 +238,23 @@ function GitHubCard({ app, onApplied }: { app: GitHubApp; onApplied: () => void 
             setPreviewing(true);
           }}
         >
-          <Field label="App ID" hint="The number on the App's settings page at GitHub.">
-            {(p) => <input {...p} value={form.appId} onChange={(e) => setForm({ ...form, appId: e.target.value })} inputMode="numeric" autoComplete="off" />}
-          </Field>
-          <Field label="API URL" hint="Empty for github.com. https://api.<name>.ghe.com for Enterprise Cloud; https://<host>/api/v3 for Enterprise Server.">
-            {(p) => <input {...p} value={form.apiUrl} onChange={(e) => setForm({ ...form, apiUrl: e.target.value })} placeholder="https://api.github.com" spellCheck={false} />}
-          </Field>
-          <Field
-            label="Installations"
-            hint="One a line: the organisation or account, then the installation's number from its URL at GitHub. The whole list: one left out is no longer used."
-            error={installationsOf(form.installations) === null ? "Each line is an owner and a number, like example-org 77001." : null}
-          >
-            {(p) => <textarea {...p} value={form.installations} onChange={(e) => setForm({ ...form, installations: e.target.value })} rows={3} spellCheck={false} />}
-          </Field>
+          {!locked && (
+            <>
+              <Field label="App ID" hint="The number on the App's settings page at GitHub.">
+                {(p) => <input {...p} value={form.appId} onChange={(e) => setForm({ ...form, appId: e.target.value })} inputMode="numeric" autoComplete="off" />}
+              </Field>
+              <Field label="API URL" hint="Empty for github.com. https://api.<name>.ghe.com for Enterprise Cloud; https://<host>/api/v3 for Enterprise Server.">
+                {(p) => <input {...p} value={form.apiUrl} onChange={(e) => setForm({ ...form, apiUrl: e.target.value })} placeholder="https://api.github.com" spellCheck={false} />}
+              </Field>
+              <Field
+                label="Installations"
+                hint="One a line: the organisation or account, then the installation's number from its URL at GitHub. The whole list: one left out is no longer used."
+                error={installationsOf(form.installations) === null ? "Each line is an owner and a number, like example-org 77001." : null}
+              >
+                {(p) => <textarea {...p} value={form.installations} onChange={(e) => setForm({ ...form, installations: e.target.value })} rows={3} spellCheck={false} />}
+              </Field>
+            </>
+          )}
           <Field
             label="Private key"
             hint={
@@ -317,6 +349,85 @@ function appWords(app: GitHubApp, change: GitHubAppChange): string[] {
   if ("api_url" in change) out.push(`Clones come from where ${change.api_url ?? "https://api.github.com"} says, and each profile must declare that host in egress.gitHosts.`);
   out.push("Test it afterwards: the test asks GitHub with the App's own key.");
   return out;
+}
+
+// -- the plane's signing key ------------------------------------------------------------
+
+function SigningCard(): JSX.Element {
+  const { admin, role } = useConsole();
+  const platform = role === "platform_admin";
+  const [load, reload] = useLoad(() => admin.signing(), [admin]);
+  const { done, apply } = useChange(reload);
+  const [rotating, setRotating] = useState(false);
+
+  return (
+    <section className="card" aria-label="The plane's signing key">
+      <header>
+        <h2>The plane's signing key</h2>
+      </header>
+      <p>
+        What this plane tells people's machines, the versions it serves and the organisation's defaults and limits, it signs with this key. Each machine pins it
+        when its person signs in, and takes nothing it did not sign. It is in OpenBao's transit engine, where nothing can take a copy, and it is not the
+        release key.
+      </p>
+      {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
+      <Loaded load={load} what="the signing key" retry={reload}>
+        {(key: SigningKey) => (
+          <>
+            <Fields
+              rows={[
+                ["Fingerprint", <span className="mono">{key.fingerprint}</span>],
+                ["Algorithm", key.algorithm],
+                ["Made", key.created_at ? when(key.created_at) : "—"],
+                ["Version", String(key.version)],
+                ["Public key", <span className="mono">{key.public_key}</span>],
+              ]}
+            />
+            {key.versions.length > 1 && (
+              <p className="note">
+                Earlier versions, which sign nothing any more:{" "}
+                {key.versions
+                  .filter((v) => v.version !== key.version)
+                  .map((v) => `${v.version} (${v.fingerprint})`)
+                  .join(", ")}
+                .
+              </p>
+            )}
+            <p className="note">A person whose machine says this plane's key has changed checks the fingerprint it shows against the one here before accepting it.</p>
+            {platform && !rotating && (
+              <div className="actions">
+                <button type="button" className="danger" onClick={() => setRotating(true)}>
+                  Rotate the key
+                </button>
+              </div>
+            )}
+            {!platform && <p className="note">Only a platform admin rotates the key: every machine signed in to the plane is asked to accept the new one.</p>}
+            {rotating && (
+              <Preview
+                title="signing/key"
+                lines={[
+                  { field: "fingerprint", from: key.fingerprint, to: "a new key's, made by OpenBao" },
+                  { field: "version", from: key.version, to: key.version + 1 },
+                ]}
+                effects={[
+                  "The new key signs everything from now on; the old one signs nothing again.",
+                  "Every machine that pinned the old key refuses what the new one signs until its person accepts the new fingerprint, which they check here.",
+                  "Until they do, those machines keep the organisation's document they have and update as if signed in nowhere.",
+                ]}
+                verb="Rotate the key"
+                typeToConfirm={key.fingerprint}
+                onCancel={() => setRotating(false)}
+                onConfirm={async () => {
+                  await apply("signing.rotate", "troupe-plane-signing", () => admin.rotateSigning(key.fingerprint), "The plane's signing key is rotated.", (a) => (a as SigningKey).changes);
+                  setRotating(false);
+                }}
+              />
+            )}
+          </>
+        )}
+      </Loaded>
+    </section>
+  );
 }
 
 // -- what the plane dials ---------------------------------------------------------------

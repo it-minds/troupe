@@ -81,18 +81,36 @@ defmodule Troupe.Git do
   Run `git args` in `dir`, as `Troupe.Reaper.run/3` would, neutralised and confined as
   above. Leading `-c name=value` pairs in `args` stay git's own options. A directory that
   is not in a repository answers as git does, with its exit status.
+
+  `index:` names a file in the repository's own git directory to use as the index instead
+  of `index` (`GIT_INDEX_FILE`): a name, not a path, so it is always beside the index git
+  would use and nowhere else.
   """
   @spec run(Path.t(), [String.t()], keyword()) ::
-          {:ok, String.t(), integer() | :timeout} | {:error, error()}
+          {:ok, String.t(), integer() | :timeout} | {:error, error() | :bad_index}
   def run(dir, args, opts \\ []) do
     timeout = Keyword.get(opts, :timeout_ms, 30_000)
     {globals, command} = split_globals(args)
 
-    with {:ok, repo} <- locate(dir, timeout),
+    with :ok <- index_name(opts[:index]),
+         {:ok, repo} <- locate(dir, timeout),
          {:ok, drivers} <- drivers(dir, repo, command, timeout) do
-      git(dir, globals ++ with_flags(command), drivers, repo, timeout)
+      git(dir, globals ++ with_flags(command), drivers, with_index(repo, opts[:index]), timeout)
     end
   end
+
+  defp index_name(nil), do: :ok
+
+  defp index_name(name) when is_binary(name) do
+    if Regex.match?(~r/\A[A-Za-z0-9][A-Za-z0-9._-]{0,99}\z/, name) and name != "index",
+      do: :ok,
+      else: {:error, :bad_index}
+  end
+
+  defp index_name(_name), do: {:error, :bad_index}
+
+  defp with_index(repo, nil), do: repo
+  defp with_index(repo, name), do: Map.put(repo, :index, Path.join(repo.git_dir, name))
 
   @doc "Why git did not run, as a clause for a tool's answer: no capital, no full stop."
   @spec explain(term()) :: String.t()
@@ -117,6 +135,8 @@ defmodule Troupe.Git do
 
   def explain(:unlocated),
     do: "git did not say where this workspace's repository is (git 2.31 or later is needed)"
+
+  def explain(:bad_index), do: "an index is a file name in the repository's git directory"
 
   def explain(reason), do: Reaper.explain(reason)
 
@@ -372,6 +392,9 @@ defmodule Troupe.Git do
   end
 
   defp pinned(nil), do: []
+
+  defp pinned(%{index: index} = repo),
+    do: [{"GIT_INDEX_FILE", index} | pinned(Map.delete(repo, :index))]
 
   defp pinned(%{top: top, git_dir: git_dir, common: common}),
     do: [{"GIT_DIR", git_dir}, {"GIT_COMMON_DIR", common}, {"GIT_WORK_TREE", top}]

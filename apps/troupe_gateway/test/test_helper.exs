@@ -23,7 +23,8 @@ Application.put_env(:troupe_core, :agents_home, Path.join(config_home, "home/.ag
 # suite's own, not this machine's, and not there until a test writes one.
 Application.put_env(:troupe_core, :organisation,
   managed_path: Path.join(config_home, "org/managed.yaml"),
-  cache_path: Path.join(config_home, "org/organisation.json")
+  cache_path: Path.join(config_home, "org/organisation.json"),
+  keys_path: Path.join(config_home, "org/plane-keys.json")
 )
 
 # The first run's `daemon` step writes a login entry (Decision 762): into a scratch home

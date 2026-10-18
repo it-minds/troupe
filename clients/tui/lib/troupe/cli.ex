@@ -32,6 +32,8 @@ defmodule Troupe.CLI do
           | :login
           | :logout
           | :whoami
+          | :plane_key
+          | :plane_key_accept
           | :daemon
           | :update
 
@@ -56,6 +58,7 @@ defmodule Troupe.CLI do
           all: boolean(),
           daemon_args: [String.t()],
           explain: boolean(),
+          explain_session: String.t() | nil,
           json: boolean(),
           bench: boolean(),
           write: boolean(),
@@ -95,6 +98,7 @@ defmodule Troupe.CLI do
     remote: :boolean,
     all: :boolean,
     explain: :boolean,
+    session: :string,
     json: :boolean,
     bench: :boolean,
     write: :boolean,
@@ -153,6 +157,15 @@ defmodule Troupe.CLI do
        "without a plane named, out of your own MCP servers too, revoked at their providers",
      [["logout"], ["logout", "--all"]]},
     {"troupe whoami [PLANE_URL]", "print who the plane says you are, and your teams", [["whoami"]]},
+    {"troupe plane-key [PLANE_URL]",
+     "the key the plane signs what it tells clients with, as this machine pinned it at sign-in, " <>
+       "and a new one it offers instead", [["plane-key"], ["plane-key", "https://plane.example"]]},
+    {"troupe plane-key accept FINGERPRINT [PLANE_URL]",
+     "trust the plane's new signing key, by the fingerprint you checked with its administrators",
+     [
+       ["plane-key", "accept", "SHA256:abc"],
+       ["plane-key", "accept", "SHA256:abc", "https://plane.example"]
+     ]},
     {"troupe setup",
      "set up the provider, its key, the models, a first project and the daemon at login, " <>
        "one screen at a time; Esc leaves with nothing written",
@@ -162,6 +175,13 @@ defmodule Troupe.CLI do
     {"troupe config --explain [KEY] [--json]",
      "every setting, or KEY's, and which file set it (secrets masked)",
      [["config", "--explain"], ["config", "--explain", "max_turns", "--json"]]},
+    {"troupe config --explain [KEY] [--json] --session SESSION_ID",
+     "what is in force in a running session, here or on a worker pod of the plane you are " <>
+       "signed in to, and where each part came from: its profile, the platform, its terms, its files",
+     [
+       ["config", "--explain", "--session", "id"],
+       ["config", "--explain", "max_turns", "--json", "--session", "id"]
+     ]},
     {"troupe config validate [PATH]", "check the config files, or one; exits 1 on any problem",
      [["config", "validate"]]},
     {"troupe config migrate [--write] [PATH]",
@@ -320,6 +340,8 @@ defmodule Troupe.CLI do
       all: Keyword.get(opts, :all, false),
       daemon_args: [],
       explain: Keyword.get(opts, :explain, false),
+      # `config --explain --session ID`: that running session's configuration, not the files'.
+      explain_session: Keyword.get(opts, :session),
       json: Keyword.get(opts, :json, false),
       bench: Keyword.get(opts, :bench, false),
       write: Keyword.get(opts, :write, false),
@@ -373,6 +395,18 @@ defmodule Troupe.CLI do
   defp parse_rest(["logout", url], base), do: {:ok, %{base | mode: :logout, plane_url: url}}
   defp parse_rest(["whoami"], base), do: {:ok, %{base | mode: :whoami}}
   defp parse_rest(["whoami", url], base), do: {:ok, %{base | mode: :whoami, plane_url: url}}
+  defp parse_rest(["plane-key"], base), do: {:ok, %{base | mode: :plane_key}}
+
+  defp parse_rest(["plane-key", "accept", fingerprint], base),
+    do: {:ok, %{base | mode: :plane_key_accept, key: fingerprint}}
+
+  defp parse_rest(["plane-key", "accept", fingerprint, url], base),
+    do: {:ok, %{base | mode: :plane_key_accept, key: fingerprint, plane_url: url}}
+
+  defp parse_rest(["plane-key", "accept"], _base),
+    do: {:error, "usage: troupe plane-key accept FINGERPRINT [PLANE_URL]"}
+
+  defp parse_rest(["plane-key", url], base), do: {:ok, %{base | mode: :plane_key, plane_url: url}}
 
   defp parse_rest(["run", task], base), do: {:ok, %{base | mode: :run, task: task}}
 

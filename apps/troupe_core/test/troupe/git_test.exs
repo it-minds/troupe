@@ -341,6 +341,30 @@ defmodule Troupe.GitTest do
     end
   end
 
+  describe "an index of its own" do
+    test "stages into a file of the git directory, and leaves the repository's index as it was",
+         c do
+      File.write!(Path.join(c.root, "new.txt"), "new\n")
+
+      assert {:ok, _, 0} = Troupe.Git.run(c.root, ["add", "-A"], index: "troupe-test-index")
+      assert File.exists?(Path.join(c.root, ".git/troupe-test-index"))
+      assert {:ok, staged, 0} = Troupe.Git.run(c.root, ["diff", "--cached", "--name-only"])
+      assert staged == ""
+
+      assert {:ok, other, 0} =
+               Troupe.Git.run(c.root, ["diff", "--cached", "--name-only"],
+                 index: "troupe-test-index"
+               )
+
+      assert other =~ "new.txt"
+
+      # A name, never a path: nothing but a file beside the index git would use.
+      for bad <- ["../outside", "/tmp/x", "index", "", ".hidden"] do
+        assert {:error, :bad_index} = Troupe.Git.run(c.root, ["add", "-A"], index: bad)
+      end
+    end
+  end
+
   # What ran, for a failure's message; built whether or not the assertion fails.
   defp marker(c) do
     case File.read(c.marker) do

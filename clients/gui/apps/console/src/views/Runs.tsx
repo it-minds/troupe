@@ -226,7 +226,8 @@ export function RunPage({ id }: { id: string }): JSX.Element {
                   ["Trigger", r.team ? <a href={href({ page: "triggers", path: [r.team, r.trigger] })}>{`${r.team}/${r.trigger}`}</a> : r.trigger],
                   ["Fired", `${when(r.fired_at)}${r.source ? `, by ${r.source}` : ""}${r.fired_by ? ` (${r.fired_by})` : ""}`],
                   ["Revision", r.revision ? `${r.revision}${r.revision_hash ? ` · ${r.revision_hash}` : ""}` : "—"],
-                  ["Why it ended", show(r.failed_reason ?? r.done_reason)],
+                  // A skipped run says which cap said no; one that ran, why it ended.
+                  [r.state === "skipped" ? "Why it was skipped" : "Why it ended", show(r.state === "skipped" ? (r.reason ?? null) : (r.failed_reason ?? r.done_reason))],
                   ["Waiting on", r.pending_approvals || r.pending_questions ? `${count(r.pending_approvals ?? 0, "approval")}, ${count(r.pending_questions ?? 0, "question")}` : "nothing"],
                   ["Repository", <span className="mono">{show(r.repository)}</span>],
                   ["Issue", r.issue ? <span><Issue run={r} /> {r.issue.title ?? ""}</span> : "—"],

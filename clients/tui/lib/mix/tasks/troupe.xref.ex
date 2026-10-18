@@ -41,6 +41,8 @@ defmodule Mix.Tasks.Troupe.Xref do
       Troupe.Bench                                 the offline suite `troupe bench` runs on this binary's harness
       Troupe.Update                                 `troupe update`: a signed release, checked and swapped in
       Troupe.Protocol.ClientUpdate                  a plane's version policy, and the sentence its refusal is
+      Troupe.PlaneKeys                              the key each plane signs with, pinned at sign-in, and every answer checked
+      Troupe.Protocol.PlaneSignature                what a plane signs, and how a signed answer reads
       Troupe.OwnerOnly                              a file its owner alone may read, as the daemon's own are
       Troupe.Protocol.ProviderTypes                 the provider types a person picks from, and what each asks
 
@@ -86,6 +88,8 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.Bench,
     Troupe.Update,
     Troupe.Protocol.ClientUpdate,
+    Troupe.PlaneKeys,
+    Troupe.Protocol.PlaneSignature,
     Troupe.OwnerOnly,
     Troupe.Protocol.ProviderTypes
   ]

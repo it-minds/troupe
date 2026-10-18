@@ -2887,6 +2887,9 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # A pod's answer is the session's there, not this machine's: the theme stays the person's.
+  defp appearance(state, %{pod?: true}), do: state
+
   defp appearance(state, %{served?: true} = view) do
     value = Settings.value(view, nil, "ui.theme")
     theme = Theme.blinking(state.theme, Settings.value(view, nil, "ui.blink"))
@@ -3008,12 +3011,21 @@ defmodule Troupe.UI.TUI.Server do
 
   # A key the organisation enforces is not edited, nor moved to another file: the page says
   # whose it is instead (root Decision 869).
+  # A session on a worker pod's are its profile's, the platform's, its terms' and its
+  # repository's, shown and not written from here.
   defp settings_key(%Key{code: code}, %{settings: s} = state) when code in ["s", "enter", " "] do
     field = Enum.at(Settings.fields(), s.cursor)
 
-    if Settings.enforced(s.view, field.key),
-      do: put_settings(state, status: Settings.enforced_line(s.view, field.key)),
-      else: settings_change(code, field, state)
+    cond do
+      s.view[:pod?] ->
+        put_settings(state, status: Settings.pod_line())
+
+      Settings.enforced(s.view, field.key) ->
+        put_settings(state, status: Settings.enforced_line(s.view, field.key))
+
+      true ->
+        settings_change(code, field, state)
+    end
   end
 
   defp settings_key(_key, state), do: state
