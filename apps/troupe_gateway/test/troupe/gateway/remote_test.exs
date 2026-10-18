@@ -164,6 +164,22 @@ defmodule Troupe.Gateway.RemoteTest do
       cancelled = await_event("v-own", "cancelled")
       assert cancelled["actor"]["subject"] == @ada
       assert cancelled["actor"]["via"] == "plane"
+
+      # The agent, from the picker's rows the laptop lists for the session.
+      assert %{"result" => %{"agents" => agents}} =
+               ask(ctx, "v-own", 4, "agents.list", %{"session_id" => session.id})
+
+      assert "plan" in Enum.map(agents, & &1["name"])
+
+      assert %{"result" => %{"accepted" => true, "profile" => "plan"}} =
+               ask(ctx, "v-own", 5, "profile.switch", %{
+                 "command_id" => "c-sw",
+                 "session_id" => session.id,
+                 "profile" => "plan"
+               })
+
+      switched = await_event("v-own", "profile_switched")
+      assert switched["actor"]["via"] == "plane"
     end
 
     test "a person shared at control answers an approval once, and may not allow for the session", ctx do
