@@ -1220,14 +1220,21 @@ them, and a fork carries the ones its history shows.
 #### `agents.list`
 ```json
 {"workspace": "/home/me/project"}
+{"session_id": "20260923T101112-q3Vx_A"}
 ```
-→ `{"agents": [{"name", "description", "source", "notes", "mode", "layer", "model",
-"tool_count", "read_only", "max_turns", "worktree", "available", "reason"}], "skipped":
-[{"name", "path", "reason"}]}` — the primary agents a session in that
+→ `{"agents": [{"name", "description", "source", "notes", "mode", "layer", "origin",
+"profile", "model", "tool_count", "read_only", "max_turns", "worktree", "available",
+"reason", "path", "editable", "editable_reason", "overrides"}], "skipped": [{"name",
+"path", "reason"}]}` — the primary agents a session in that
 workspace may be created with, resolved as `session.create` resolves them (built-ins, the
 machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `global`
-or `project`. A pod reads the same layers of its own (not the profile's bundle), and a
-token a plane mints for one session may not call it there (§7). `skipped` is each agent file found and
+or `project`. Named by a session instead (#594), the rows are that session's own agents,
+read again from their files as `profile.switch` reads them: on a pod the profile's bundle's,
+the built-ins and its working copy's, in the order Decision 826 gives them. That is the one
+list both clients' agent pickers read, and on a pod a token a plane mints for the session
+may ask it (§7) when it names the session and no `workspace`; named by a workspace, a pod's
+listing is about a path on the pod and such a token is refused it. One of the two is named.
+`skipped` is each agent file found and
 not read, with why: one that is a link out of the workspace (`not read: outside the
 workspace`; a `.troupe/agents` linked out whole is one entry with a null `name`,
 Decision 829), in a git worktree one the main checkout has not committed, or one that does
@@ -1262,14 +1269,25 @@ with `reason` in words when a session could not run it here, which today is a mo
 provider does not serve by the list the daemon keeps (Decision 778); a list never fetched
 says nothing either way.
 
+What a picker shows of each (#594, additive): `origin` is where it comes from in the four
+words a person uses, the same in every client: `Shipped` (Troupe's own), `Your
+organisation's` (the profile's bundle), `Yours` (the person's `agents/`, read in every
+workspace) and `This repository's` (`.troupe/agents/`, read once the workspace is trusted);
+`profile` names the plane's profile a bundle's agent came with, as the session's pin says
+it, `null` for any other; `path` is its file; `editable` and `editable_reason` say whether
+a person may change it here as `agents.get` says it; and `overrides` (`[{"layer",
+"origin", "path"}]`, nearest first) are the files of the same name in lower layers it
+stands in for, which `agents.get` has called `also`.
+
 #### `agents.get`, `agents.validate`, `agents.put`, `agents.delete`, and `agents.changed`
 
 An agent read whole, checked, written and taken away (#503, Decision 841). Both clients
 manage one set through these and never write the directories themselves, so the checks
 and the choice of layer happen in one place. Writing is the daemon's, like `mcp.*`
-(Decision 700). On a pod none of the four is a session's method, so a token a plane mints
-for one session is refused them (§7); with a token for no session, a pod reads and
-checks, and refuses `agents.put` and `agents.delete` as `forbidden` with `reason` "On a pod
+(Decision 700). On a pod a token a plane mints for one session reads and checks its own
+session's agents, `agents.get` and `agents.validate` naming the session and no
+`workspace` (#594), and is refused the rest (§7); with a token for no session, a pod reads
+and checks, and refuses `agents.put` and `agents.delete` as `forbidden` with `reason` "On a pod
 the agents come from the profile's bundle and are read-only here: change them in the
 console".
 
@@ -2396,8 +2414,11 @@ ACL of each session a request names.
 require `session_id` (§6) but the five below: `session.get`, `input.send`, `turn.cancel`,
 `profile.switch`, `session.goal.*`, `session.loop.*`, `approval.respond`,
 `question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `scratch.list`, `blob.get`,
-`mcp.status`, `context.get`, `commands.list`, `commands.run`, `presence.set`, `tools.register`, `tools.unregister`, `shell.run` and `shell.cancel`. Everything else a
-worker serves is about the pod or a path on it — `session.create`, `agents.list`,
+`mcp.status`, `context.get`, `commands.list`, `commands.run`, `presence.set`, `tools.register`, `tools.unregister`, `shell.run` and `shell.cancel`; and `agents.list`,
+`agents.get` and `agents.validate` when they name the session and no `workspace`, which
+are its own agents, its bundle's (#594). Everything else a
+worker serves is about the pod or a path on it — `session.create`, `agents.list` and the
+other two named by a path,
 `workflows.list`, `memory.get`, `memory.forget`, `memory.decline`, `workspace.recent`, `workspace.search`,
 `worktree.*`, `watch.*`, `identity.*`, `config.*`, `skills.*` and the `mcp.*` methods
 but `mcp.status` — and a token for one session is
@@ -2600,7 +2621,8 @@ that team.
 | `admin.session.erase` | either | erases one, for authorised roles |
 | `admin.bundles.list` | either | every version of a channel, each with its `summary` (names of agents, skills and MCP servers) |
 | `admin.bundle.get` | either | one version in full: the document, its `detail` (agents with mode and skills, skills with files, MCP servers with the Secret to create), and adoption per profile |
-| `admin.bundle.validate` | platform | checks a document the way publishing will, without publishing; `{ok: true, summary, hash}` or `invalid_params` with `data.errors` |
+| `admin.bundle.validate` | platform | checks a document the way publishing will, without publishing, each agent by the rules the daemon's `agents.validate` applies (`agent <name>: <what is wrong>`, #594); `{ok: true, summary, hash}` or `invalid_params` with `data.errors` |
+| `admin.agent.check` | platform | one agent's definition (`name`, `definition`) checked as a bundle's agent is: `{ok, errors, warnings}`, each `{field, message}` in the words `agents.validate` answers, what the console's agent builder shows at each field (#594) |
 | `admin.bundle.publish` / `admin.bundle.retire` | platform | publish a version — refused as `invalid_params` with `data.errors`, one sentence per problem, when the document is malformed or names an MCP host outside `allowedEgress` — or retire one |
 | `admin.mcp.check` | either | `{host, allowed}`: whether the cluster policy lets a pod reach an MCP server's host |
 | `admin.audit.list` | either | who changed what, with diffs, each change keyed by its path (`spec.llm.model`); a team admin's is the rows about their teams (the team, its triggers, principals and sessions) |

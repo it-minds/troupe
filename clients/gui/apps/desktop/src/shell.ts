@@ -56,6 +56,14 @@ export interface TroupeShell {
   /** Stage 2: pick a workspace directory. */
   pickDirectory?: () => Promise<string | null>;
   /**
+   * Open an agent's file in the person's own editor, the program their system opens a
+   * Markdown file with (troupe #594). Only a person's or a repository's agent file: a `.md`
+   * in an `agents` directory of `.troupe` or of Troupe's config, which the shell checks
+   * where the file really is, so the page cannot open anything else through it. Rejects
+   * with a sentence when it is not one, or nothing opens it.
+   */
+  openAgentFile?: (path: string) => Promise<void>;
+  /**
    * The operating system's notifications. A browser has its own `Notification`, and a
    * webview has one that does nothing: WebView2 refuses the permission unless the host
    * answers for it. So a shell brings its own, and `notify.ts` prefers it.

@@ -1,6 +1,6 @@
 // Configuration bundles: the channels, a version read whole, and publishing and retiring,
 // against the fake plane's `admin.bundles.list`, `admin.bundle.get`, `.validate`,
-// `.preview`, `.publish` and `.retire`.
+// `.preview`, `.publish` and `.retire`, and the agent builder's `admin.agent.check` (#594).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
@@ -81,24 +81,35 @@ describe("a version", () => {
   it("publishes an older version's content again, as a new version", async () => {
     await open("#/bundles/stable/1");
     (await waitFor(() => button("Publish this content again"), "v1")).click();
-    const source = await waitFor(() => field("The bundle document"), "the document");
-    expect(JSON.parse(source.value)).toEqual(fake.admin.bundles.get("stable")![0]!.content);
+    const source = await waitFor(() => field("Skills and MCP servers"), "the document");
+    // The agents are the builder's; the rest of the document is as v1 had it.
+    const { agents, ...rest } = fake.admin.bundles.get("stable")![0]!.content as Record<string, unknown>;
+    expect(JSON.parse(source.value)).toEqual(rest);
+    for (const a of agents as Array<{ name: string }>) await waitFor(() => rowOf("draft-agents", a.name), `${a.name} in the builder`);
     button("Check and preview")!.click();
     await waitFor(() => says("What will happen") && says("agents: pr-reviewer, docs-writer"), "the preview against v2");
     // Taking docs-writer away loses no team anything: nobody is allowed it.
-    expect(says("Type stable to confirm")).toBe(false);
+    expect(says("Type stable to confirm")).toBe(false); // at once: the preview above is drawn, and its words with it
     button("Publish to stable")!.click();
     await waitFor(() => says("Recorded in the audit as bundle.publish on stable"), "the audit's note");
     expect(fake.admin.bundles.get("stable")!.map((b) => b.version)).toEqual([1, 2, 3]);
+    expect(fake.admin.bundles.get("stable")!.at(-1)!.content).toEqual(fake.admin.bundles.get("stable")![0]!.content);
   });
 });
+
+/** The builder's form for one agent, once it is open. */
+function builder(label: string): Promise<HTMLElement> {
+  return waitFor(() => document.querySelector<HTMLElement>(`[role="group"][aria-label="${label}"]`), label);
+}
 
 describe("publishing", () => {
   it("previews who loses what, waits for the channel's name where a team loses something, and shows the record", async () => {
     await open("#/bundles/stable");
     (await waitFor(() => button("Publish a new version"), "stable")).click();
-    const source = await waitFor(() => field("The bundle document"), "the document");
-    type(source, JSON.stringify({ schema: 1, agents: [docsWriter], skills: [checklist], mcp_servers: [] }));
+    const source = await waitFor(() => field("Skills and MCP servers"), "the document");
+    (await waitFor(() => button("Remove pr-reviewer"), "pr-reviewer in the builder")).click();
+    await waitFor(() => rowOf("draft-agents", "pr-reviewer") === null, "pr-reviewer taken out");
+    type(source, JSON.stringify({ schema: 1, skills: [checklist], mcp_servers: [] }));
     button("Check and preview")!.click();
     await waitFor(() => says("core loses the agent pr-reviewer on dev: its grant allows an entry this version no longer has."), "who loses what");
     await sees("Every pod on dev, ux, build-box is told to update");
@@ -110,22 +121,63 @@ describe("publishing", () => {
     const published = fake.admin.bundles.get("stable")!.at(-1)!;
     expect(published.version).toBe(3);
     expect(published.published_by).toBe("alice@example.com");
+    expect((published.content["agents"] as Array<{ name: string }>).map((a) => a.name)).toEqual(["docs-writer"]);
     await waitFor(() => rowOf("versions", "v3"), "v3 in the list");
+  });
+
+  it("builds an agent as fields, refused at its field in the daemon's words, and publishes the file it makes", async () => {
+    await open("#/bundles/stable");
+    (await waitFor(() => button("Publish a new version"), "stable")).click();
+    (await waitFor(() => button("Add an agent"), "the builder")).click();
+    const form = await builder("A new agent");
+    type(field("Name", form)!, "triager");
+    type(field("Description", form)!, "Sorts the incoming issues.");
+    type(field("Tools", form)!, "read_file\nteleport");
+    type(field("Instruction", form)!, "You sort the incoming issues by who should look at them.");
+    await waitFor(() => form.querySelector('[aria-label="The definition"]')?.textContent?.includes("  - teleport"), "the file it makes");
+
+    // Asked of the plane, which checks it by the daemon's rules and answers in its words.
+    button("Check and add it", form)!.click();
+    await waitFor(() => form.querySelector(".field-error")?.textContent?.startsWith("teleport is not a tool: the nearest are"), "the tool refused at Tools");
+    expect(rowOf("draft-agents", "triager")).toBeNull();
+
+    type(field("Tools", form)!, "read_file\ngrep");
+    button("Check and add it", form)!.click();
+    await waitFor(() => rowOf("draft-agents", "triager"), "triager in the draft");
+
+    button("Check and preview")!.click();
+    await waitFor(() => says("What will happen") && says("agents: pr-reviewer, docs-writer, triager"), "the preview");
+    button("Publish to stable")!.click();
+    await waitFor(() => says("Recorded in the audit as bundle.publish on stable"), "the audit's note");
+    const published = fake.admin.bundles.get("stable")!.at(-1)!.content["agents"] as Array<{ name: string; definition: string }>;
+    expect(published.find((a) => a.name === "triager")!.definition).toBe(
+      "---\ndescription: Sorts the incoming issues.\nmode: primary\ntools:\n  - read_file\n  - grep\n---\nYou sort the incoming issues by who should look at them.",
+    );
   });
 
   it("shows the plane's own sentences for a document it would refuse, and publishes nothing", async () => {
     await open("#/bundles/stable");
     (await waitFor(() => button("Publish a new version"), "stable")).click();
-    const source = await waitFor(() => field("The bundle document"), "the document");
+    const source = await waitFor(() => field("Skills and MCP servers"), "the document");
     const { calls, restore } = recordCalls();
     try {
       type(source, "{ not json");
       button("Check and preview")!.click();
       await waitFor(() => says("That is not JSON"), "the parse error");
-      type(source, JSON.stringify({ schema: 1, agents: [{ name: "Bad Name", definition: "x" }], skills: [], mcp_servers: [{ name: "tools", url: "http://tools.example.com/mcp" }] }));
+      // An agent is not published as JSON any more: it is the builder's.
+      type(source, JSON.stringify({ schema: 1, agents: [docsWriter], skills: [], mcp_servers: [] }));
       button("Check and preview")!.click();
-      await waitFor(() => says('"Bad Name" is not a name'), "the plane's sentences");
-      await sees("mcp server tools: its url is https://");
+      await waitFor(() => says("The agents are the builder's, above"), "agents refused in the JSON");
+      // A name the daemon would refuse, at the name, in its words.
+      (await waitFor(() => button("Add an agent"), "the builder")).click();
+      const form = await builder("A new agent");
+      type(field("Name", form)!, "Bad Name");
+      button("Check and add it", form)!.click();
+      await waitFor(() => form.querySelector(".field-error")?.textContent?.includes('"Bad Name" is not a name an agent may have'), "the name refused");
+      button("Cancel the agent", form)!.click();
+      type(source, JSON.stringify({ schema: 1, skills: [], mcp_servers: [{ name: "tools", url: "http://tools.example.com/mcp" }] }));
+      button("Check and preview")!.click();
+      await waitFor(() => says("mcp server tools: its url is https://"), "the plane's sentences");
       expect(calls.some((c) => c.method === "admin.bundle.publish")).toBe(false);
     } finally {
       restore();
@@ -139,12 +191,20 @@ describe("publishing", () => {
     button("Open")!.click();
     await waitFor(() => heading() === "nightly" && says("Nothing published on this channel"), "the empty channel");
     button("Publish the first version")!.click();
-    type(await waitFor(() => field("The bundle document"), "the document"), JSON.stringify({ schema: 1, agents: [docsWriter], skills: [], mcp_servers: [] }));
+    (await waitFor(() => button("Add an agent"), "the builder")).click();
+    const form = await builder("A new agent");
+    type(field("Name", form)!, "docs-writer");
+    type(field("Mode", form)!, "subagent");
+    type(field("Description", form)!, "Writes the docs a change needs.");
+    type(field("Instruction", form)!, "You write docs.");
+    button("Check and add it", form)!.click();
+    await waitFor(() => rowOf("draft-agents", "docs-writer"), "docs-writer in the draft");
     button("Check and preview")!.click();
     await waitFor(() => says("No profile follows nightly yet"), "the preview");
     button("Publish to nightly")!.click();
     await waitFor(() => says("Recorded in the audit as bundle.publish on nightly"), "the audit's note");
     expect(fake.admin.bundles.get("nightly")!.length).toBe(1);
+    expect((fake.admin.bundles.get("nightly")![0]!.content["agents"] as Array<{ definition: string }>)[0]!.definition).toContain("mode: subagent");
   });
 });
 

@@ -447,6 +447,10 @@ export function App(): JSX.Element {
             onBack={() => setWhere({ screen: "sessions" })}
             onGo={(screen) => setWhere({ screen })}
             onAgents={(agent) => setWhere({ screen: "agents", ...workspaceOf(row), ...(agent ? { agent } : {}) })}
+            onStarted={(id, kind, workspace) => {
+              refresh();
+              setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
+            }}
           />
         )}
       </main>

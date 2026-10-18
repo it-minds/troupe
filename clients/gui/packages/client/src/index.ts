@@ -198,12 +198,14 @@ export type {
   ProviderTypeChoice,
 } from "./admin.js";
 export {
+  AGENT_ORIGINS,
   agentConflict,
   agentRefusal,
   agentTemplate,
   findingsFor,
   layerOf,
   layerWords,
+  originOf,
   parseAgent,
   permissionsOf,
   validAgentName,

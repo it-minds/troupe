@@ -2872,6 +2872,27 @@ defmodule Troupe.Plane.Admin do
   end
 
   @doc """
+  One agent's definition checked as a bundle's agent is (#594): the findings the daemon's
+  `agents.validate` answers for the same text, each with its field, for the console's agent
+  builder to show beside the field it is about. An answer, never a refusal: `ok` says
+  whether a bundle carrying it would publish. A platform admin's, as publishing is.
+  """
+  @spec agent_check(actor(), String.t() | nil, String.t()) :: result()
+  def agent_check(actor, name, definition)
+      when is_binary(definition) and (is_binary(name) or is_nil(name)) do
+    with :ok <- require_platform_admin(actor) do
+      {:ok, Bundles.check_agent(name, definition)}
+    end
+  end
+
+  def agent_check(_actor, _name, _definition),
+    do:
+      {:error,
+       Error.new(:invalid_params, %{
+         reason: "an agent's definition is text, and its name a string"
+       })}
+
+  @doc """
   What publishing this document would change, and **who loses something**.
 
   Rule 2 of the console: nothing is applied until its diff has been read. For a bundle
@@ -3056,8 +3077,9 @@ defmodule Troupe.Plane.Admin do
   defp host_of(other),
     do: {:error, Error.new(:invalid_params, %{reason: "url is a string", url: other})}
 
+  # A draft, held to every agent rule the daemon holds a person's file to (#594).
   defp validate_bundle(content) when is_map(content) do
-    case Bundles.validate(content) do
+    case Bundles.check(content) do
       {:ok, parsed} -> {:ok, parsed}
       {:error, {:invalid_bundle, messages}} -> {:error, invalid_bundle(messages)}
     end

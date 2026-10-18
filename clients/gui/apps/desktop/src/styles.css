@@ -3468,6 +3468,56 @@ pre.instruction {
 .agent-switch .micro.error {
   color: var(--error-fg);
 }
+.agent-switch .agent-current {
+  font: var(--t-ui-small);
+}
+/* The one agent picker (#594): the agents grouped by where they come from, the chosen
+   one's facts and the three things done with it. In the head it opens below the switch,
+   on the panel, the full width of the head. */
+.agent-switch .agent-picker {
+  flex-basis: 100%;
+  padding: var(--space-3);
+  border: var(--bw-hairline) solid var(--border-strong);
+  background: var(--bg-panel);
+}
+.agent-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.agent-picker-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.agent-option {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+  text-align: left;
+}
+.agent-option[aria-selected="true"] {
+  background: var(--bg-selected);
+}
+.agent-option .facts {
+  font: var(--t-micro);
+  color: var(--text-secondary);
+}
+.agent-option.unavailable {
+  color: var(--text-muted);
+}
+.agent-option .why {
+  flex-basis: 100%;
+  font: var(--t-micro);
+  color: var(--text-muted);
+}
+.agent-picker-detail {
+  margin-top: var(--space-3);
+}
+.agent-picker .micro.error {
+  color: var(--error-fg);
+}
 /* A switch of the agent is a frame in the transcript, so the history says when the rules
    changed (#474). */
 .note.switched {

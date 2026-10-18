@@ -329,7 +329,7 @@ defmodule Troupe.Plane.EntitlementsTest do
           "name" => "pr-reviewer",
           "definition" => "---\nmode: primary\nskills: [review]\n---\nReview."
         },
-        %{"name" => "helper", "definition" => "You help."}
+        %{"name" => "helper", "definition" => "---\nmode: subagent\n---\nYou help."}
       ],
       "skills" => [
         %{

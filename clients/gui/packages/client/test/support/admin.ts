@@ -10,6 +10,7 @@
 // which `apps/troupe_plane/test` holds the plane to.
 
 import { checkRuleSet } from "../../src/rules.js";
+import { checkAgent } from "./agents.js";
 import { older } from "./plane.js";
 import { PROVIDER_TYPES } from "./provider-types.js";
 import { MAX_DEPTH, WRITTEN_KEYS, composeBundle, empty as emptyResolved, fieldsOf, merge as mergeExtends, rowOf } from "./extends.js";
@@ -184,6 +185,16 @@ function describeBundle(content: Record<string, unknown>): Record<string, unknow
 }
 
 /** What publishing would refuse, a sentence each, as the plane's `data.errors`. */
+/**
+ * One agent's definition as the plane checks a bundle's (troupe #594): the daemon's
+ * `agents.validate` rules, with nothing to check a model against, which a warning says.
+ */
+function agentCheck(name: unknown, definition: string): ReturnType<typeof checkAgent> {
+  const checked = checkAgent(definition, { ...(typeof name === "string" ? { name } : {}), served: null, roles: [] });
+  const warnings = checked.warnings.map((w) => (w.field === "model" ? { field: "model", message: "not checked: there is no configuration here to check it against" } : w));
+  return { ...checked, warnings };
+}
+
 function bundleProblems(content: unknown, egress: string[]): string[] {
   if (typeof content !== "object" || content === null || Array.isArray(content)) return ["a bundle is a JSON object"];
   const doc = content as Record<string, unknown>;
@@ -205,6 +216,8 @@ function bundleProblems(content: unknown, egress: string[]): string[] {
   const skills = new Set(entries(doc, "skills").map((s) => s["name"]));
   for (const a of entries(doc, "agents")) {
     if (typeof a["definition"] !== "string" || a["definition"].trim() === "") out.push(`agent ${String(a["name"])} has no definition`);
+    // A draft's agent is held to the daemon's rules, in its words (troupe #594).
+    else for (const e of agentCheck(a["name"], a["definition"]).errors) out.push(`agent ${String(a["name"])}: ${e.message}`);
     for (const s of (a["skills"] ?? []) as unknown[]) if (!skills.has(s)) out.push(`agent ${String(a["name"])} lists the skill ${String(s)}, which this bundle does not have`);
   }
   for (const s of entries(doc, "skills")) {
@@ -1197,6 +1210,12 @@ export class FakeAdmin {
             adoption: this.profiles.filter((p) => p.channel === b.channel).map((p) => this.adoption(p, b.hash)),
           },
         };
+      }
+
+      case "admin.agent.check": {
+        if (role !== "platform_admin") return notPlatform;
+        if (typeof params["definition"] !== "string") return refuse(INVALID_PARAMS, "invalid_params", { reason: "an agent's definition is text, and its name a string" });
+        return { result: agentCheck(params["name"], params["definition"]) };
       }
 
       case "admin.bundle.validate": {

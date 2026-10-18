@@ -45,11 +45,17 @@ defmodule Troupe.Gateway.Agents do
   # session runs reads this list, and `profile.switch` and `session.create` refuse a
   # subagent, so a manager asks for those too and the rest are answered as before. Each row
   # says its `mode`, the primaries first.
+  #
+  # Named by a session rather than a workspace, the rows are that session's own agents,
+  # read again from their files as a switch reads them: on a pod its bundle's, the
+  # built-ins and its working copy's, with the profile the bundle came from, which is the
+  # one list both clients' pickers read (#594). Each row says where it comes from in the
+  # four words a person uses (`origin`), what it stands in for (`overrides`), its file and
+  # whether a person may change it here.
   defp list(params) do
-    with {:ok, workspace} <- required(params, "workspace") do
-      workspace = Path.expand(workspace)
-      definitions = load(workspace)
-      context = row_context(workspace)
+    with {:ok, workspace, session} <- listing(params) do
+      definitions = definitions(workspace, session)
+      context = Map.put(row_context(workspace), :pin, Definitions.pin(definitions))
 
       chosen =
         if params["subagents"] == true,
@@ -83,7 +89,8 @@ defmodule Troupe.Gateway.Agents do
 
       case {Definitions.fetch(definitions, name), broken} do
         {{:ok, definition}, _broken} ->
-          {:ok, Map.put(whole(definition, workspace, session), "broken", broken)}
+          whole = whole(definition, workspace, session, Definitions.pin(definitions))
+          {:ok, Map.put(whole, "broken", broken)}
 
         {{:error, _unknown}, %{} = broken} ->
           {:ok, %{"name" => name, "broken" => broken}}
@@ -256,6 +263,7 @@ defmodule Troupe.Gateway.Agents do
 
   defp row(%Definition{} = definition, context) do
     {available, reason} = available(definition, context.config)
+    why = Local.not_editable(definition, pod: context.pod)
 
     %{
       "name" => definition.name,
@@ -263,6 +271,8 @@ defmodule Troupe.Gateway.Agents do
       "source" => Atom.to_string(definition.source),
       "mode" => Atom.to_string(definition.mode),
       "layer" => Local.layer(definition),
+      "origin" => Local.origin(definition),
+      "profile" => profile(definition, Map.get(context, :pin)),
       "model" => definition.model,
       "tool_count" => definition |> Troupe.Tools.for_definition() |> length(),
       "read_only" => Local.read_only?(definition),
@@ -270,13 +280,36 @@ defmodule Troupe.Gateway.Agents do
       "worktree" => context.worktree,
       "available" => available,
       "reason" => reason,
+      "path" => definition.path && Paths.display(definition.path),
+      "editable" => why == nil,
+      "editable_reason" => why,
+      "overrides" =>
+        Enum.map(Local.hidden(definition, context.workspace), fn file ->
+          %{
+            "layer" => file.layer,
+            "origin" => Local.origin(file.layer),
+            "path" => Paths.display(file.path)
+          }
+        end),
       "notes" => Enum.map(definition.notes, &%{"key" => &1.key, "reason" => &1.reason})
     }
   end
 
-  defp whole(definition, workspace, session) do
-    context = row_context(workspace)
-    why = Local.not_editable(definition, pod: context.pod)
+  # The plane's profile a bundle's agent came with, as the session's pin names it: the
+  # profile the plane said it activated the session for, else the one its channel is
+  # composed for (`profile:<name>`). Nothing for any other agent, or a pin with neither.
+  defp profile(%Definition{source: :bundle}, %{} = pin) do
+    case pin do
+      %{profile: profile} when is_binary(profile) -> profile
+      %{channel: "profile:" <> profile} -> profile
+      _neither -> nil
+    end
+  end
+
+  defp profile(_definition, _pin), do: nil
+
+  defp whole(definition, workspace, session, pin) do
+    context = Map.put(row_context(workspace), :pin, pin)
     text = text(definition.path)
 
     definition
@@ -290,11 +323,9 @@ defmodule Troupe.Gateway.Agents do
       "delegation" => Atom.to_string(definition.delegation),
       "skills" => names(definition.skills),
       "prompt" => definition.prompt,
-      "path" => definition.path && Paths.display(definition.path),
       "text" => text,
       "hash" => Local.hash(text),
-      "editable" => why == nil,
-      "editable_reason" => why,
+      # What `overrides` says, in the words `agents.get` has always said it in.
       "also" =>
         Enum.map(Local.hidden(definition, workspace), fn file ->
           %{"layer" => file.layer, "path" => Paths.display(file.path)}
@@ -411,6 +442,16 @@ defmodule Troupe.Gateway.Agents do
   end
 
   defp where(params), do: {:ok, workspace_of(params), nil}
+
+  # A listing is a session's, or a workspace's; one of them is named.
+  defp listing(%{"session_id" => session_id} = params)
+       when is_binary(session_id) and session_id != "",
+       do: where(params)
+
+  defp listing(params) do
+    with {:ok, workspace} <- required(params, "workspace"),
+         do: {:ok, Path.expand(workspace), nil}
+  end
 
   defp workspace_of(%{"workspace" => workspace}) when is_binary(workspace) and workspace != "",
     do: Path.expand(workspace)

@@ -3,6 +3,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "session_id": {
+      "type": "string"
+    },
     "subagents": {
       "type": "boolean"
     },
@@ -10,9 +13,7 @@
       "type": "string"
     }
   },
-  "required": [
-    "workspace"
-  ],
+  "required": [],
   "title": "agents.list",
   "type": "object"
 }

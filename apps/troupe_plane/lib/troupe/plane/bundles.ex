@@ -38,6 +38,7 @@ defmodule Troupe.Plane.Bundles do
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Fleet.{Bundle, Extends}
   alias Troupe.Plane.Identity.Entitlement
+  alias Troupe.Protocol.AgentCheck
   alias Troupe.Protocol.Bundle, as: Document
 
   require Logger
@@ -87,6 +88,39 @@ defmodule Troupe.Plane.Bundles do
   end
 
   @doc """
+  Check a draft the way publishing will: `validate/1`, and each agent's definition by the
+  rules the daemon checks a person's and a repository's with (`Troupe.Protocol.AgentCheck`,
+  #594), so a definition `agents.put` would refuse is refused here in the same words, one
+  sentence per error, `agent <name>: <what is wrong>`. What only a session's harness can
+  know (its model's provider, an MCP server's tools) is a warning there and here alike.
+
+  Only a draft is held to it. A version already published is checked by `validate/1`
+  alone wherever it is read again (composed into a child's bundle, compared with a draft),
+  so one an older plane published still runs.
+  """
+  @spec check(map()) :: {:ok, Document.t()} | {:error, {:invalid_bundle, [String.t()]}}
+  def check(content) do
+    with {:ok, parsed} <- validate(content) do
+      case Enum.flat_map(parsed.agents, &agent_errors/1) do
+        [] -> {:ok, parsed}
+        messages -> {:error, {:invalid_bundle, messages}}
+      end
+    end
+  end
+
+  @doc """
+  One agent's definition checked as a bundle's agent is: what the console's agent builder
+  asks as it is typed, field by field, before the bundle is checked whole.
+  """
+  @spec check_agent(String.t() | nil, String.t()) :: AgentCheck.result()
+  def check_agent(name, definition), do: AgentCheck.check(definition, name: name)
+
+  defp agent_errors(%{name: name, definition: definition}) do
+    for finding <- check_agent(name, definition).errors,
+        do: "agent #{name}: #{finding.message}"
+  end
+
+  @doc """
   Publish a new version of a channel.
 
   The version number is the channel's next, assigned here rather than by the caller: two
@@ -95,12 +129,12 @@ defmodule Troupe.Plane.Bundles do
   (default true); `:project`, whether to rewrite the profiles' `mcpServers` (default
   true).
 
-  Refused for what `validate/1` refuses, and, without Cilium, for an MCP server the pods
+  Refused for what `check/1` refuses, and, without Cilium, for an MCP server the pods
   of a profile on the channel could not reach (`Troupe.Plane.Reach`, Decision 749).
   """
   @spec publish(String.t(), map(), keyword()) :: {:ok, Bundle.t()} | {:error, term()}
   def publish(channel, content, opts \\ []) do
-    with {:ok, parsed} <- validate(content),
+    with {:ok, parsed} <- check(content),
          :ok <- Reach.bundle(channel, parsed) do
       version = next_version(channel)
 

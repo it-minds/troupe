@@ -107,6 +107,15 @@ defmodule Troupe.Agent.Definitions do
   defp kind_name(:agent), do: "an agent"
   defp kind_name(:skill), do: "a skill"
 
+  @doc """
+  The bundle pin the snapshot was loaded with (`t:Troupe.Skills.bundle/0`), or `nil`: a
+  laptop's, one built from a list, or one loaded with no bundle. What a listing names a
+  bundle's agent's profile from.
+  """
+  @spec pin(t()) :: map() | nil
+  def pin(%__MODULE__{loaded: {_workspace, opts}}), do: pin_of(opts)
+  def pin(%__MODULE__{}), do: nil
+
   @doc "The files found and not read, each with why."
   @spec skipped(t()) :: [skipped()]
   def skipped(%__MODULE__{skipped: skipped}), do: skipped
@@ -144,7 +153,7 @@ defmodule Troupe.Agent.Definitions do
   """
   @spec load(Path.t() | nil, keyword()) :: t()
   def load(workspace_root, opts \\ []) do
-    pin = pin(opts)
+    pin = pin_of(opts)
     bundle = bundle_layer(pin && pin[:dir])
     project = project_layer(workspace_root)
     {checkout, uncommitted} = checkout_layer(workspace_root, project)
@@ -188,7 +197,7 @@ defmodule Troupe.Agent.Definitions do
   end
 
   # The pin, given whole, or as the directory and the profile's word on it.
-  defp pin(opts) do
+  defp pin_of(opts) do
     case Keyword.fetch(opts, :bundle) do
       {:ok, pin} ->
         pin

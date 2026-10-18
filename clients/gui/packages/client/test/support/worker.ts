@@ -492,6 +492,21 @@ export class FakeWorker {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
         return reply(ws, id, { commands: COMMANDS });
 
+      // As a pod answers a session's own token since troupe #594: named by the session and
+      // no path, the session's agents, its bundle's and the built-ins, each saying where it
+      // comes from; named by a path, the pod's, which the token is refused.
+      case "agents.list": {
+        if (!session || "workspace" in params) {
+          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: "not about the token's session", method } });
+        }
+        const ctx = { worktree: false, served: null, roles: [], workspace: null };
+        const agents = this.agents
+          .resolve(null)
+          .filter((d) => d.meta["mode"] === "primary")
+          .map((d) => this.agents.row(d, ctx));
+        return reply(ws, id, { agents, skipped: [] });
+      }
+
       // What is in force in the session on this pod, as a worker answers `config.get`
       // naming it (the worker's `config_explain_test`): the profile's settings and rules,
       // the platform's switch, the session's terms and its repository's file.
