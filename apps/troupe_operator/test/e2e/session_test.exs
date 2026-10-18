@@ -84,14 +84,15 @@ defmodule Troupe.E2E.SessionTest do
       what: "the StatefulSet to replace #{pod}"
     )
 
+    # The replacement by its name, which the StatefulSet gives it again: waiting on every
+    # worker pod by label fails outright when another one is scaled away meanwhile
+    # (`pods "troupe-w-dev-1" not found`), and the plane does scale them.
     World.kubectl!([
       "wait",
       "-n",
       namespace,
       "--for=condition=ready",
-      "pod",
-      "-l",
-      "app.kubernetes.io/name=troupe-worker",
+      "pod/#{pod}",
       "--timeout=300s"
     ])
 
