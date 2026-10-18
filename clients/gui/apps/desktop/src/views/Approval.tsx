@@ -89,6 +89,7 @@ export function ApprovalPanel({
   others,
   onAnswer,
   onDefinition,
+  onceOnly = false,
 }: {
   entry: Approval;
   /** False on a read-only session: the buttons are absent, not disabled. */
@@ -98,12 +99,27 @@ export function ApprovalPanel({
   onAnswer: (decision: Decision, answer?: GateAnswer) => Promise<void>;
   /** Opens a delegation's agent in the agents manager, where there is one to open. */
   onDefinition?: ((agent: string) => void) | undefined;
+  /**
+   * A laptop's session steered from here, through the plane: a call is allowed or denied
+   * once, and allowing it for the rest of the session is the laptop's person's to do there.
+   */
+  onceOnly?: boolean;
 }): JSX.Element {
   // A delegation a person asked to see first has five answers, not three (troupe Decision 850).
   if (entry.delegation && entry.decision === undefined) {
-    return <DelegationPanel entry={entry} gate={entry.delegation} canAnswer={canAnswer} others={others} onAnswer={onAnswer} onDefinition={onDefinition} />;
+    return (
+      <DelegationPanel
+        entry={entry}
+        gate={entry.delegation}
+        canAnswer={canAnswer}
+        others={others}
+        onAnswer={onAnswer}
+        onDefinition={onDefinition}
+        onceOnly={onceOnly}
+      />
+    );
   }
-  return <ToolApproval entry={entry} canAnswer={canAnswer} others={others} onAnswer={onAnswer} />;
+  return <ToolApproval entry={entry} canAnswer={canAnswer} others={others} onAnswer={onAnswer} onceOnly={onceOnly} />;
 }
 
 function ToolApproval({
@@ -111,11 +127,13 @@ function ToolApproval({
   canAnswer,
   others,
   onAnswer,
+  onceOnly,
 }: {
   entry: Approval;
   canAnswer: boolean;
   others: string[];
   onAnswer: (decision: Decision) => Promise<void>;
+  onceOnly: boolean;
 }): JSX.Element {
   const [busy, setBusy] = useState<Decision | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -202,9 +220,11 @@ function ToolApproval({
           <button className="deny" onClick={() => void answer("deny")} disabled={busy !== null}>
             {busy === "deny" ? "Denying…" : "Deny"}
           </button>
-          <button className="scoped" onClick={() => void answer("allow_session")} disabled={busy !== null}>
-            {scopedLabel(entry.tool)}
-          </button>
+          {!onceOnly && (
+            <button className="scoped" onClick={() => void answer("allow_session")} disabled={busy !== null}>
+              {scopedLabel(entry.tool)}
+            </button>
+          )}
         </div>
       ) : (
         <p className="also">You can read this session but not answer for it.</p>
@@ -229,6 +249,7 @@ function DelegationPanel({
   others,
   onAnswer,
   onDefinition,
+  onceOnly,
 }: {
   entry: Approval;
   gate: DelegationGate;
@@ -236,6 +257,7 @@ function DelegationPanel({
   others: string[];
   onAnswer: (decision: Decision, answer?: GateAnswer) => Promise<void>;
   onDefinition?: ((agent: string) => void) | undefined;
+  onceOnly: boolean;
 }): JSX.Element {
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<string | null>(null);
@@ -427,9 +449,11 @@ function DelegationPanel({
               ))}
             </select>
           </label>
-          <button className="scoped" onClick={() => void send("allow_session", answer())} disabled={busy !== null || editing !== null}>
-            {busy === "allow_session" ? "Starting…" : `Run, and let ${agent} run unasked for this session`}
-          </button>
+          {!onceOnly && (
+            <button className="scoped" onClick={() => void send("allow_session", answer())} disabled={busy !== null || editing !== null}>
+              {busy === "allow_session" ? "Starting…" : `Run, and let ${agent} run unasked for this session`}
+            </button>
+          )}
         </div>
       )}
     </section>

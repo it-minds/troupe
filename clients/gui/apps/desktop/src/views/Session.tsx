@@ -256,6 +256,7 @@ export function Session({
               others={others}
               onAnswer={(d, a) => view.respond(entry.callId, d, a)}
               onDefinition={here ? onAgents : undefined}
+              onceOnly={kind === "remote"}
             />
           ))}
 

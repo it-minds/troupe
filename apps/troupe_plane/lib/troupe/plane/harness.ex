@@ -51,7 +51,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.{Tokens, Triggers}
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Protocol.Bundle, as: Document
-  alias Troupe.Protocol.{Canonical, ClientUpdate, Error, Origin, Principal, SessionId, Token}
+  alias Troupe.Protocol.{Canonical, ClientUpdate, Error, Origin, Principal, Relay, SessionId, Token}
   alias Troupe.Sessions.Fork
 
   require Logger
@@ -463,7 +463,7 @@ defmodule Troupe.Plane.Harness do
         "name" => user.display_name,
         "session_id" => offer.session_id,
         "role" => role,
-        "scopes" => Enum.map(Troupe.Protocol.Relay.scopes(role), &Atom.to_string/1)
+        "scopes" => Enum.map(Relay.scopes(role), &Atom.to_string/1)
       }
 
       case Tokens.mint(claims, audience: Remote.audience()) do

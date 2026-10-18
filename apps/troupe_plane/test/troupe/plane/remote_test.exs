@@ -12,7 +12,7 @@ defmodule Troupe.Plane.RemoteTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.Web.Router
-  alias Troupe.Protocol.Client
+  alias Troupe.Protocol.{Client, SessionId}
 
   @moduletag timeout: 60_000
 
@@ -42,7 +42,7 @@ defmodule Troupe.Plane.RemoteTest do
 
     ctx = %{url: "http://127.0.0.1:#{port}", ws: "ws://127.0.0.1:#{port}"}
     tokens = Map.new([@ada, @bea, @cy], &{&1, plane_token(ctx, &1)})
-    session_id = Troupe.Protocol.SessionId.generate()
+    session_id = SessionId.generate()
 
     Map.merge(ctx, %{tokens: tokens, session_id: session_id})
   end

@@ -57,7 +57,11 @@ defmodule Troupe.Worker.AuthTest do
     "worktree.list",
     "worktree.remove",
     "worktree.merge",
-    "worktree.discard"
+    "worktree.discard",
+    # A laptop's session offered to the plane for steering from another device (#58): a
+    # pod's sessions are reached through the plane already.
+    "remote.offer",
+    "remote.withdraw"
   ]
 
   # About the session, and done through the plane, which holds a pod session's row, key

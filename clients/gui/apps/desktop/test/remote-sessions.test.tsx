@@ -69,6 +69,19 @@ describe("a laptop's session, from another computer", () => {
       "the prompt at the laptop",
     );
     expect(sent.params["text"]).toBe("ship the invoice fix");
+
+    // An approval from here is for the one call: allowing for the session is the laptop's.
+    await sees("You said: ship the invoice fix");
+    const again = await waitFor(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]'), "the composer");
+    type(again, "approve: rm -rf build");
+    (await waitFor(() => button("Send"), "the send button")).click();
+    const panel = await waitFor(() => document.querySelector<HTMLElement>("section.approval:not(.answered)"), "the approval");
+    await waitFor(() => button("Allow", panel), "the allow button");
+    // at once: drawn with its buttons, the scoped one is not among them
+    expect(panel.querySelector("button.scoped")).toBeNull();
+    button("Allow", panel)!.click();
+    const decided = await waitFor(() => harness.worker.calls.find((c) => c.method === "approval.respond"), "the answer at the laptop");
+    expect(decided.params["decision"]).toBe("allow");
   });
 
   it("says the laptop is offline, and since when, when it is opened while away", async () => {

@@ -162,8 +162,9 @@ on the open socket, which the plane answers itself. The plane takes `auth` out o
   as a `remote` kind, *Remote*, from the plane's `remote.list`, with *Offline since …* for an
   away laptop; this computer's own offered session stays its own row. Opening one attaches
   through `remote.open` exactly as a pod session attaches through `session.open`, and the
-  head says *On Ada's laptop · Online*. A person's input sent from another device is drawn
-  with *from another device*.
+  head says *On Ada's laptop · Online*. Its approvals offer *Allow* and *Deny* and not the
+  session-wide allow. A person's input sent from another device is drawn with *from another
+  device*.
 - **The console**: Sessions lists *Offered to you from laptops* apart from the
   administrative table, steered as the person and never as an administrator; opening one
   follows the transcript and answers its approvals (once) and questions, sends a prompt,

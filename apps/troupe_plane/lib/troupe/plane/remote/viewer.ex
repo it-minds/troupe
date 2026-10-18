@@ -18,8 +18,8 @@ defmodule Troupe.Plane.Remote.Viewer do
   @behaviour WebSock
 
   alias Troupe.Plane.{Identity, Remote}
-  alias Troupe.Plane.Remote.Auth
   alias Troupe.Plane.Identity.User
+  alias Troupe.Plane.Remote.Auth
   alias Troupe.Protocol.{Error, JSONRPC, Relay}
 
   @renew_warning_seconds 120
