@@ -78,6 +78,29 @@ defmodule Troupe.Config.Layers do
               errors: []
 
     @type t :: %__MODULE__{}
+
+    # Its values and ladder hold every key a file or the environment gave, a provider's
+    # among them, and a running session keeps it (`Troupe.Session.resolved/1`), so a crash
+    # report or a status that prints it prints which files it read and how much they set,
+    # never a value.
+    defimpl Inspect do
+      def inspect(result, opts) do
+        Inspect.Algebra.concat([
+          "#Troupe.Config.Layers.Result<",
+          Inspect.Algebra.to_doc(
+            [
+              workspace: result.workspace,
+              trusted?: result.trusted?,
+              files: Enum.map(result.files, & &1.path),
+              keys: map_size(result.ladder),
+              rules: length(result.rules)
+            ],
+            opts
+          ),
+          ", values redacted>"
+        ])
+      end
+    end
   end
 
   @env [

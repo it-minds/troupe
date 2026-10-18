@@ -25,9 +25,11 @@ defmodule Troupe.Session do
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
+    # Kept beside the name, not in the tree's own state, which a status prints.
+    {layers, opts} = Keyword.pop(opts, :layers)
 
     resolved = %{
-      layers: Keyword.get(opts, :layers),
+      layers: layers,
       kind: Keyword.get(opts, :kind, :local),
       workspace: Keyword.fetch!(opts, :workspace).root_real
     }
