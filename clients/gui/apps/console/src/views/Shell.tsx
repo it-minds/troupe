@@ -28,6 +28,7 @@ import { Policy } from "./Policy";
 import { Profile, Profiles } from "./Profiles";
 import { TriggerPage, Triggers } from "./Triggers";
 import { Organisation } from "./Organisation";
+import { Memory } from "./Memory";
 import { Overview } from "./Overview";
 import { RunPage, Runs } from "./Runs";
 import { Sessions } from "./Sessions";
@@ -155,6 +156,7 @@ function Screen({ route }: { route: Route }): JSX.Element {
   if (route.page === "audit") return <Audit />;
   if (route.page === "clients") return <ClientVersions />;
   if (route.page === "organisation") return <Organisation />;
+  if (route.page === "memory") return <Memory />;
   if (route.page === "integrations") return <Integrations />;
   if (route.page === "identity") return <Identity />;
   if (route.page === "signin") return <IdentityProvider />;

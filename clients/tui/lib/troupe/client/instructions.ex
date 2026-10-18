@@ -12,7 +12,8 @@ defmodule Troupe.Client.Instructions do
   Copilot file below the root, one that cannot be read, the budget; root Decision 828),
   and each import that was not followed, after the file that names it. A rule in
   `.troupe/rules` says why it applies, as `context.get`'s `applies` puts it, or why it
-  does not, as its `reason` does (root Decisions 809 and 828).
+  does not, as its `reason` does (root Decisions 809 and 828). The organisation's memory
+  documents come first, each named with its version and its scope (root issue #55).
   """
 
   @doc "The line for an answer to `context.get`; `workspace` is `nil` when unknown."
@@ -50,6 +51,13 @@ defmodule Troupe.Client.Instructions do
       _ ->
         "#{show(f["path"], workspace)} (brief) #{number(f["chars"])} of #{number(f["budget"])}#{cut(f)}"
     end
+  end
+
+  # The organisation's memory documents (root issue #55), named as the daemon names them,
+  # with the version in force: they come from the plane, not from a path on this machine.
+  defp entry(%{"scope" => scope, "label" => label} = f, _workspace)
+       when scope in ["organisation", "team", "profile"] and is_binary(label) do
+    "#{label}, version #{f["version"]} (#{scope}) #{number(f["chars"])}#{cut(f)}"
   end
 
   defp entry(f, workspace) do

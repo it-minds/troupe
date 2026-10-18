@@ -39,6 +39,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Mounts
   alias Troupe.Onboard.Start, as: Onboarding
   alias Troupe.PlaneKeys
+  alias Troupe.PlaneMemory
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
@@ -1197,7 +1198,11 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, url} <- linked_plane(params["plane_url"]),
          {:ok, served} <- served_key(url),
          {:ok, _fingerprint} <- accepted(PlaneKeys.accept(url, fingerprint, served: served)) do
-      Task.start(&refresh_organisation/0)
+      Task.start(fn ->
+        refresh_organisation()
+        refresh_memory()
+      end)
+
       {:ok, put_plane_key(%{}, url)}
     end
   end
@@ -1666,6 +1671,7 @@ defmodule Troupe.Gateway.Dispatch do
         _served_or_unknown ->
           see_plane_key()
           refresh_organisation()
+          refresh_memory()
           Private.apply_erasures()
           Private.resume()
       end
@@ -1713,6 +1719,31 @@ defmodule Troupe.Gateway.Dispatch do
         :ok
     end
   end
+
+  # The organisation's memory documents the person's sessions read (#55): the
+  # organisation's and their teams', from `me.memory`, kept as the plane signed them, as the
+  # organisation's document is, for every session started after. A plane from before them
+  # has no `me.memory`, and the copy stays as it was; so does one the pin refuses.
+  defp refresh_memory do
+    with url when is_binary(url) <- Plane.url(),
+         {:ok, answer} <- Plane.call("me.memory", %{}),
+         {:ok, body, signed?} <- PlaneKeys.check(url, answer, "memory"),
+         {:ok, _kept} <- PlaneMemory.save(url, body, PlaneMemory.cache_path(), signature(signed?, answer)) do
+      :ok
+    else
+      {:error, {:rpc, %{"code" => -32_601}}} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.info("troupe-daemon: the organisation's memory was not refreshed: #{format_reason(reason)}")
+
+      _no_plane ->
+        :ok
+    end
+  end
+
+  defp format_reason(reason) when is_binary(reason), do: reason
+  defp format_reason(reason), do: inspect(reason)
 
   # Somebody else linking over the person before stops that person's sealing first, as an
   # unlink would: a sealer seals with whatever token the daemon holds, and the one this link
