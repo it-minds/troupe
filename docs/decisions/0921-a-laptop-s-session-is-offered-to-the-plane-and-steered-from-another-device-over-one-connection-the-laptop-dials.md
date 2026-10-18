@@ -154,9 +154,9 @@ on the open socket, which the plane answers itself. The plane takes `auth` out o
 
 ## The clients
 
-- **The terminal**: `/remote` says whether the session is offered and who is steering;
-  `/remote on [person[:observe] ...]` offers it, an email to steer and `:observe` to follow;
-  `/remote off` withdraws it (`Troupe.Client.Steering`).
+- **The terminal**: `/steer` says whether the session is offered and who is steering;
+  `/steer on [person[:observe] ...]` offers it, an email to steer and `:observe` to follow;
+  `/steer off` withdraws it (`Troupe.Client.Steering`).
 - **The desktop app**: a local session's head has *Steer from elsewhere*, then *Offered ·
   Online* with the people steering, *Share* and *Withdraw*. Its list has laptops' sessions
   as a `remote` kind, *Remote*, from the plane's `remote.list`, with *Offline since …* for an
@@ -202,5 +202,5 @@ on the open socket, which the plane answers itself. The plane takes `auth` out o
   relayed checked, a token never reaching the laptop, a renewal answered by the plane; an
   observer held to it on the plane; a plane token refused at the viewer's door; a withdrawal
   ending every view; an away laptop offline since then with nothing queued, and back again.
-- `clients/tui/test/troupe/remote_command_test.exs`; `clients/gui/packages/client/test/remote.test.ts`;
+- `clients/tui/test/troupe/steer_command_test.exs`; `clients/gui/packages/client/test/remote.test.ts`;
   `clients/gui/apps/desktop/test/remote-sessions.test.tsx`; `clients/gui/apps/console/test/remote.test.tsx`.

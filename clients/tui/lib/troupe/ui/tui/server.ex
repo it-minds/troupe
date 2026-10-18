@@ -995,7 +995,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(new cancel dismiss merge discard goal loop remote sessions back hq observer files
+  @builtins ~w(new cancel dismiss merge discard goal loop steer sessions back hq observer files
                scratch upload copy memory context watch settings models mcp skills help agents
                worktree workflow detail quit)
 
@@ -1341,14 +1341,14 @@ defmodule Troupe.UI.TUI.Server do
 
   # The session offered to the plane, to steer it from another device (root #58): alone it
   # says how the offer stands, `on` offers it to the people named, `off` withdraws it.
-  defp builtin("remote", args, state, _target) do
+  defp builtin("steer", args, state, _target) do
     sid = state.session_id
 
     case split_first(String.trim(args)) do
       {"", _} -> notice_of(Client.remote_steering(sid, :status))
       {"off", _} -> notice_of(Client.remote_steering(sid, :withdraw))
       {"on", people} -> remote_on(sid, people)
-      {other, _} -> {:error, "/remote on, /remote off, or /remote alone: not #{other}"}
+      {other, _} -> {:error, "/steer on, /steer off, or /steer alone: not #{other}"}
     end
   end
 
@@ -1602,7 +1602,7 @@ defmodule Troupe.UI.TUI.Server do
 
   ## Steering from another device
 
-  # `/remote on` with nobody named offers the session for its person alone, from their
+  # `/steer on` with nobody named offers the session for its person alone, from their
   # other devices; each email named may steer it, `email:observe` only follow it.
   defp remote_on(sid, people) do
     case Troupe.Client.Steering.share(people) do

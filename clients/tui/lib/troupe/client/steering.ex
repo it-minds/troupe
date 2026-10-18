@@ -1,14 +1,14 @@
 defmodule Troupe.Client.Steering do
   @moduledoc """
   A session offered to the plane for steering from another device (root #58), in the
-  sentences `/remote` says: whether it is offered, to whom, whether the plane has it now,
+  sentences `/steer` says: whether it is offered, to whom, whether the plane has it now,
   and who is steering it from elsewhere. The desktop app says the same.
   """
 
-  @doc "What `/remote` says of a session's offer, as the daemon's `session.get` has it."
+  @doc "What `/steer` says of a session's offer, as the daemon's `session.get` has it."
   @spec line(map() | nil) :: String.t()
   def line(nil),
-    do: "Not offered to the plane. /remote on offers it, to steer it from another device."
+    do: "Not offered to the plane. /steer on offers it, to steer it from another device."
 
   def line(%{} = remote) do
     [offered(remote), steering(remote["steering"])]
@@ -22,11 +22,11 @@ defmodule Troupe.Client.Steering do
 
   def offered(%{} = remote) do
     "Offered to the plane#{shared(remote["shares"])} (#{presence(remote)}). " <>
-      "/remote off withdraws it."
+      "/steer off withdraws it."
   end
 
   @doc """
-  The people `/remote on` names: each `email` steers it, `email:observe` only follows it.
+  The people `/steer on` names: each `email` steers it, `email:observe` only follows it.
   A word that is neither a person nor a role is refused, saying which.
   """
   @spec share(String.t()) :: {:ok, [map()]} | {:error, String.t()}

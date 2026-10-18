@@ -260,7 +260,7 @@ defmodule Troupe.Client.Remote do
   # this computer (root #58).
   @impl true
   def remote_steering(_sid, _verb) do
-    {:error, "this session runs on the plane already: /remote offers a session on this computer"}
+    {:error, "this session runs on the plane already: /steer offers a session on this computer"}
   end
 
   @impl true
