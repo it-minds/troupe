@@ -225,6 +225,7 @@ defmodule Troupe.Config.Explain do
       Enum.map_join(layers.files, "\n", fn file ->
         "  #{String.pad_trailing(Atom.to_string(file.layer), 8)} #{shown(file.path)}" <> file_note(file)
       end)
+      |> Kernel.<>(memory_text(layers.memory))
     ]
 
     body =
@@ -268,6 +269,30 @@ defmodule Troupe.Config.Explain do
       "\n"
     )
   end
+
+  # The organisation's memory documents a session reads as instructions (`Troupe.PlaneMemory`),
+  # one line each with its version and where it came from, after the files.
+  defp memory_text(memory) do
+    case Troupe.PlaneMemory.lines(memory) do
+      [] -> ""
+      lines -> Enum.map_join(lines, "", &("\n  memory   " <> &1))
+    end
+  end
+
+  defp memory_json(%{documents: documents} = memory) do
+    Enum.map(documents, fn document ->
+      %{
+        "scope" => document["scope"],
+        "name" => document["name"],
+        "version" => document["version"],
+        "hash" => document["hash"],
+        "source" => memory.source,
+        "fetched_at" => memory.fetched_at
+      }
+    end)
+  end
+
+  defp memory_json(_none), do: []
 
   # A plane's document is named by the plane, with when it was fetched and where it is
   # kept; a file by its path, and `(none)` where it is not there.
@@ -347,6 +372,7 @@ defmodule Troupe.Config.Explain do
       "workspace" => layers.workspace,
       "trusted" => layers.trusted?,
       "files" => Enum.map(layers.files, &file_json/1),
+      "memory" => memory_json(layers.memory),
       "keys" =>
         Enum.map(rows, fn row ->
           spec = Schema.at(String.split(row.key, "."))

@@ -385,6 +385,7 @@ defmodule Troupe.Worker.Session.Restore do
       |> Keyword.merge(contract(Keyword.get(opts, :terms, [])))
       |> Keyword.merge(personal_tools(Keyword.get(opts, :personal_tools), context.profile))
       |> Keyword.merge(profile_rules(Keyword.get(opts, :permission_rules)))
+      |> Keyword.merge(plane_memory(Keyword.get(opts, :memory)))
 
     Troupe.resume(context.session_id,
       workspace: root,
@@ -473,6 +474,13 @@ defmodule Troupe.Worker.Session.Restore do
   end
 
   defp profile_rule(_other), do: []
+
+  # The organisation's, the team's and the worker profile's memory documents, which the
+  # plane reads at every activation and sends beside the pin, so a save reaches a session at
+  # its next wake. The session reads them as instructions from the organisation before
+  # every file; a plane that sends none, or one from before them, gives it none.
+  defp plane_memory(documents) when is_list(documents), do: [plane_memory: documents]
+  defp plane_memory(_none), do: []
 
   defp default_workspace(context) do
     Path.join([Paths.state_dir(context.state_dir), "workspaces", context.session_id])

@@ -159,6 +159,31 @@ defmodule Troupe.Plane.Admin.API do
     }
   ]
 
+  # Which memory document: the organisation's, a team's or a worker profile's.
+  @memory_document [
+    %Argument{
+      name: "scope",
+      type: :string,
+      required: true,
+      values: Troupe.Protocol.Memory.scopes(),
+      description:
+        "Whose document: organisation (every session's), team (that team's sessions and its members' machines) or profile (the sessions on that worker profile's pods)."
+    },
+    %Argument{
+      name: "name",
+      type: :string,
+      description: "The team's or the profile's name. Not for the organisation's."
+    }
+  ]
+
+  @memory_text %Argument{
+    name: "text",
+    type: :string,
+    required: true,
+    description:
+      "The whole document, as Markdown or plain text, at most 8192 bytes. Empty clears it."
+  }
+
   @filter_properties [
     %Argument{name: "limit", type: :integer, description: "How many rows at most."},
     %Argument{name: "team", type: :string, description: "Narrow to one team, by name."},
@@ -1373,6 +1398,55 @@ defmodule Troupe.Plane.Admin.API do
           description: "The current key's fingerprint, SHA256:..., typed back to confirm."
         }
       ]
+    },
+    %Method{
+      name: "admin.memory.list",
+      function: :memory_list,
+      summary:
+        "Every memory document you may read: the organisation's, each team's you administer (every team's for a platform admin) and, for a platform admin, each worker profile's; each with the version in force, who saved it and when, its size, and whether you may change it, and the limit in bytes a document is held to. A memory document is instructions from the organisation that every session in its scope reads, before the person's own and the repository's, read-only to agents.",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
+      name: "admin.memory.get",
+      function: :memory_get,
+      summary:
+        "One memory document: a version's text (the one in force where no version is named), every version with who saved it and when, and what the version shown changed against the one before it, line by line (op same, del or add).",
+      risk: :read,
+      arguments: @memory_document ++
+        [
+          %Argument{
+            name: "version",
+            type: :integer,
+            description: "The version to show. Absent is the one in force."
+          }
+        ]
+    },
+    %Method{
+      name: "admin.memory.preview",
+      function: :memory_preview,
+      summary:
+        "What saving a text as a memory document would do, written nowhere: the lines it changes against the version in force, its size against the limit, and which sessions read it and when. Refused as the save would be.",
+      risk: :read,
+      arguments: @memory_document ++ [@memory_text]
+    },
+    %Method{
+      name: "admin.memory.put",
+      function: :memory_put,
+      summary:
+        "Save a text as the next version of a memory document. The organisation's and a profile's are a platform admin's to change, a team's its team admins'. version names the version the text was edited from (0 for a document never saved): a save by somebody else since is refused as conflict, naming the version in force. An empty text clears the document; the same text as the one in force makes no version. Sessions read it from their next activation, and signed-in machines once their daemon next signs in. Audited as memory.put.",
+      risk: :write,
+      arguments:
+        @memory_document ++
+          [
+            @memory_text,
+            %Argument{
+              name: "version",
+              type: :integer,
+              description:
+                "The version the text was edited from, as admin.memory.get answered it; 0 for a document never saved."
+            }
+          ]
     },
     %Method{
       name: "admin.github.get",

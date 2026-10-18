@@ -56,6 +56,7 @@ import { href } from "../route";
 import { describeError, recorded, show, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, count, linesOf, modeOf, money, useChange } from "./bits";
 import type { DiffLine, Done } from "./bits";
+import { MemoryEditor } from "./Memory";
 import { STATES, profileState } from "./Overview";
 import { RuleListsEditor, draftInvalid, draftOfRules, ruleSetOf, rulesIn, rulesOfDraft } from "./RuleLists";
 import type { ActionWords, RuleDraft, RuleLists } from "./RuleLists";
@@ -275,6 +276,13 @@ export function Profile({ name }: { name: string }): JSX.Element {
                     notify(`${name} is deleted.`);
                   }}
                 />
+              )}
+              {!busy && (
+                <>
+                  {/* The plane's, not the profile's spec: kept beside it, on a gitops plane too. */}
+                  <Region>Memory</Region>
+                  <MemoryEditor scope="profile" name={name} title={`The ${name} profile's memory`} />
+                </>
               )}
             </>
           );

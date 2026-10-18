@@ -158,7 +158,13 @@ defmodule Troupe.Plane.Admin.Console do
     clients_get: {:area, :clients},
     clients_put: {:area, :clients},
     audit_list: {:area, :audit},
-    audit_verify: {:area, :audit}
+    audit_verify: {:area, :audit},
+    # The organisation's and the teams' documents are on Company memory; a profile's is
+    # edited on the profile's own page as well, through the same three.
+    memory_list: {:area, :memory},
+    memory_get: {:area, :memory},
+    memory_preview: {:area, :memory},
+    memory_put: {:area, :memory}
   }
 
   @doc """
