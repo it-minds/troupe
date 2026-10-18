@@ -15,8 +15,9 @@ defmodule Troupe.Plane.TriggerIngressTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, FakePod, Fleet, Triggers}
+  alias Troupe.Plane.{Admin, FakePod, Fleet, Repo, Triggers}
   alias Troupe.Plane.Control.{Connections, Listener}
+  alias Troupe.Plane.Triggers.Trigger
   alias Troupe.Plane.Web.Router
 
   @moduletag timeout: 60_000
@@ -245,8 +246,8 @@ defmodule Troupe.Plane.TriggerIngressTest do
       {:ok, kept} =
         context.team
         |> Triggers.get("kept")
-        |> Triggers.Trigger.changeset(%{"source" => %{"kind" => "manual"}})
-        |> Troupe.Plane.Repo.update()
+        |> Trigger.changeset(%{"source" => %{"kind" => "manual"}})
+        |> Repo.update()
 
       assert is_binary(kept.key_hash)
       refute Triggers.trigger_json(kept)["has_key"]

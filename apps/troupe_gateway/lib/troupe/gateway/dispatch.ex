@@ -15,7 +15,7 @@ defmodule Troupe.Gateway.Dispatch do
   """
 
   alias Troupe.Agent.{Definitions, Local}
-  alias Troupe.Config.{ModelSettings, Org, Settings}
+  alias Troupe.Config.{Explain, ModelSettings, Org, Settings}
 
   alias Troupe.Gateway.{
     Agents,
@@ -1479,7 +1479,7 @@ defmodule Troupe.Gateway.Dispatch do
   defp explained(_session_id, nil, _key), do: %{}
 
   defp explained(session_id, form, key) do
-    {output, status} = Troupe.Config.Explain.explain_session(session_id, key, json: form == "json")
+    {output, status} = Explain.explain_session(session_id, key, json: form == "json")
     explanation = if form == "json" and status == 0, do: Jason.decode!(output), else: output
     %{"explain" => explanation, "explain_status" => status}
   end
