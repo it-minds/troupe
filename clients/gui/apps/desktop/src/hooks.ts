@@ -165,6 +165,8 @@ export function useDaemon(auth: AuthSession | null = null): {
   client: DaemonClient | null;
   endpoint: DaemonEndpoint | null;
   status: "unsupported" | "searching" | "absent" | "connected" | "error";
+  /** How many times the socket has opened again since the daemon first answered. */
+  opened: number;
   identity: DaemonIdentity | null;
   user: MachineUser | null;
   error: string | null;
@@ -185,6 +187,9 @@ export function useDaemon(auth: AuthSession | null = null): {
   );
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState(0);
+  // How many times the socket has opened again since the first answer: a screen holding
+  // something the daemon keeps asks again at each.
+  const [opened, setOpened] = useState(0);
   // Where the client reached it last, which is not `endpoint` once the daemon restarted
   // somewhere else and the client followed it there.
   const [reached, setReached] = useState<DaemonEndpoint | null>(null);
@@ -241,6 +246,7 @@ export function useDaemon(auth: AuthSession | null = null): {
         setPrincipal(next.principal);
         setStatus("connected");
         setError(null);
+        setOpened((n) => n + 1);
         // A socket opened again may be to a daemon that restarted, which holds no token.
         void next
           .identity()
@@ -303,6 +309,7 @@ export function useDaemon(auth: AuthSession | null = null): {
     client,
     endpoint: reached ?? endpoint,
     status,
+    opened,
     identity,
     user: machineUser(identity, principal),
     error,
