@@ -541,7 +541,7 @@ a key by, in the desktop app and the TUI alike.
 | `mcp.<name>.url` | string |  | user; project if trusted |  | A server over HTTP: its URL. |
 | `mcp.<name>.headers` | map of name to string |  | user; project if trusted |  | Headers sent with every request to a server over HTTP. `{env:VAR}` reads a value from the environment. |
 | `mcp.<name>.oauth` | settings |  | user; project if trusted |  | A server over HTTP that wants you signed in: how to sign in. |
-| `mcp.<name>.oauth.client_id` | string |  | user; project if trusted |  | A client registered in advance with the server's authorization server. |
+| `mcp.<name>.oauth.client_id` | string |  | user; project if trusted |  | A client registered in advance with the server's authorization server. Unset: Troupe registers itself, or presents its client metadata document, where that server takes either. |
 | `mcp.<name>.oauth.scopes` | list of strings |  | user; project if trusted |  | The scopes to ask for. Unset: what the server says it wants. |
 | `mcp.<name>.oauth.redirect_uri` | string |  | user; project if trusted |  | Where the browser comes back: `http://` on 127.0.0.1, [::1] or localhost. Unset: 127.0.0.1, any free port. |
 | `mcp.<name>.oauth.resource` | boolean | `true` | user; project if trusted |  | Send the resource indicator; `false` for an authorization server that refuses it. |

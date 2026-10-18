@@ -341,7 +341,7 @@ Durable:
 | `share_created` | `id`, `role` (`observe` or `control`), `expires_at`, `audience` — a share of a team session, announced by the plane |
 | `share_revoked` | `id`, `reason` |
 | `tools_registered` | `tools`, `connection`, `consent` — a client offered tools of its own (§8) |
-| `tools_unregistered` | `tools`, `connection`, `reason` |
+| `tools_unregistered` | `tools`, `connection`, `reason` (`disconnected`: the client left; `unregistered`: it took them back), `actor` — whose they were, the subject the registration was made for, also the event's `actor`; a log written before it has neither |
 | `session_tainted` | `kind` (`personal_connector`), `tools`, `actor` — a person's own tools were offered to the session, which says so from then on (§8) |
 
 A spent budget is a question, not a stop (Decision 660): the agent's `agent_state` is
@@ -2003,7 +2003,7 @@ every server the layers give the workspace, merged by name, the workspace's file
 the user's over `config.yaml`. `layer` is `config`, `user` or `workspace` and `source`
 the file; `env` is the names of its variables and `headers` the names of the headers it
 is sent (Decision 820), never their values; `refused` says why one will not start (an
-unset `{env:VAR}`, an `oauth` with no `client_id`, a header Troupe sends itself); `trust` is
+unset `{env:VAR}`, an `oauth` whose `redirect_uri` is not loopback, a header Troupe sends itself); `trust` is
 `trusted` or `pending` for a workspace-level server and null otherwise. `notes` is
 `[{"key", "reason"}]`, as `agents.list`'s: a workspace-level server set to `permission:
 auto` in a workspace not on `trusted_workspaces` has one `permission` note, since its tools
@@ -2012,8 +2012,8 @@ ask until the workspace is trusted, whatever its start's answer (Decision 830);
 the repository until the workspace is trusted: an `include` from elsewhere (the person's
 own `~/.claude.json`, say), or a `.troupe/mcp.json` that is a link out, gives no servers,
 and `warnings` names it with the command that trusts the workspace (Decision 830). For a server
-that wants the person signed in, `oauth` is `{"client_id", "scopes"?, "issuer"?}` as its
-entry says, and `auth` is how their sign-in stands — `{"state", "account", "error"}`,
+that wants the person signed in, `oauth` is `{"client_id"?, "scopes"?, "issuer"?}` as its
+entry says (no `client_id` when Troupe introduces itself to the provider), and `auth` is how their sign-in stands — `{"state", "account", "error"}`,
 `state` one of `signed_out`, `signing_in` (a browser is out), `signed_in` and `expired`
 (it ran out or was refused: sign in again), `account` whose it is when the provider said,
 `error` why the last attempt failed — and never a token; both are null for any other
@@ -2110,10 +2110,16 @@ the next session, or until an `mcp.check` with the `session_id` asks again. A wo
 #### `mcp.sign_in`, `mcp.sign_out`
 
 A person's sign-in to one of their own servers that wants *them* rather than a machine
-(Decision 741): an entry with a `url` and an `oauth` naming a client registered with the
-server's authorization server. **The daemon's only**, like the rest of this section. The
-daemon runs the sign-in, because it is the process that calls the server: it discovers
-the authorization server from the server's `401` and protected-resource metadata, makes
+(Decision 741): an entry with a `url` and an `oauth`. **The daemon's only**, like the
+rest of this section. The daemon runs the sign-in, because it is the process that calls
+the server: it discovers the authorization server from the server's `401` and
+protected-resource metadata, signs in as the client the entry names, or, with none,
+presents Troupe's client ID metadata document where the authorization server's metadata
+says `client_id_metadata_document_supported`, or registers a public client
+(`token_endpoint_auth_method: none`, the loopback redirect) at its
+`registration_endpoint` (RFC 7591) and keeps it beside the tokens for later sign-ins
+(Decision 924); an authorization server with neither answers `invalid_params` asking for
+a `client_id`. It makes
 the PKCE pair and the `state`, and listens on a loopback port of its own machine for the
 browser to come back; the client only opens the URL. The tokens stay in the daemon's
 state directory and are never in an answer, an event or a log.
@@ -2608,7 +2614,10 @@ that the call may have run on its machine before it did (Decision 861). The regi
 is gone by then (`tools_unregistered`, reason `disconnected`), and the tool leaves the
 model's list at its next turn: a tool registered or gone in the middle of a turn changes
 the list the turn after, so the tools in front of the turn's thinking stay as they were,
-and a call to a gone one fails with a result saying so (Decision 871). Troupe's own
+and a call to a gone one fails with a result saying so (Decision 871). A call to a
+person's tool after it went, in that turn or a later one, is answered with whose it was
+and that their client left, or that they took it back; a name nobody offered the session
+is still an unknown tool (Decision 924). Troupe's own
 clients send no `tools.unregister` when the person leaves a session: leaving is a drop.
 The grace comes out of the call's own timeout, so a dropped laptop is never a hung turn.
 

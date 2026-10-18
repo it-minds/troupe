@@ -7,14 +7,18 @@
 # with `401` and a `WWW-Authenticate` naming its protected-resource metadata; the
 # authorization server's issuer has a path (`/tenant`) and publishes OpenID Connect
 # discovery only at the path-appended place, so discovery has to try the other two
-# first; there is no dynamic registration, so only the one pre-registered client id is
-# taken; PKCE is S256 and checked; the resource indicator is checked against the server;
+# first; there is no dynamic registration unless asked for, so only the one
+# pre-registered client id is taken; PKCE is S256 and checked; the resource indicator is checked against the server;
 # refresh tokens rotate and a spent one is refused. A token carries the scopes its sign-in
 # asked for, and the server's `write` tool wants `notes.write` on top of them, answering
 # `403 insufficient_scope` without it (issue #586). The authorization server revokes a
 # token at its `revocation_endpoint` (RFC 7009, issue #587), or refuses to, or is slow, or
-# names none. Every request is sent to the test process as `{:fake_oauth, request}`, so a
-# test can read what crossed the wire.
+# names none. With `registration`, it names a registration endpoint (RFC 7591) and takes
+# the clients registered there, each with the redirects it was registered with, matched
+# exactly; with `metadata_document`, it takes a client id that is the URL of a client ID
+# metadata document, which it fetches, as one at that URL serves (issue #585). Every request
+# is sent to the test process as `{:fake_oauth, request}`, so a test can read what crossed
+# the wire.
 unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
   defmodule Troupe.Test.FakeOAuth do
     @client_id "troupe-test-client"
@@ -31,7 +35,11 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
     either way), `revocation` (`:ok`, `:refuse`, `:slow` or `:none`, which names no
     endpoint; `:ok`), `revocation_endpoint`, `token_endpoint` and `authorization_endpoint`
     (a URL the metadata names instead of its own), and `host` (the name its own URLs use
-    for the loopback address it listens on, `127.0.0.1`; issue #618).
+    for the loopback address it listens on, `127.0.0.1`; issue #618), `registration`
+    (`false`; `true` names a registration endpoint that registers a public client,
+    `:confidential` one that answers with a secret and `client_secret_basic`, `:refuse` one
+    that refuses), and `metadata_document` (whether the metadata says it takes a client ID
+    metadata document, false; the fake serves one at `/troupe-client.json`).
     """
     def start(test, opts \\ []) do
       {:ok, listener} =
@@ -54,6 +62,10 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
             revocation_endpoint: Keyword.get(opts, :revocation_endpoint),
             token_endpoint: Keyword.get(opts, :token_endpoint),
             authorization_endpoint: Keyword.get(opts, :authorization_endpoint),
+            registration: Keyword.get(opts, :registration, false),
+            metadata_document: Keyword.get(opts, :metadata_document, false),
+            # Registered clients, by id, with the redirects each was registered with.
+            clients: %{},
             codes: %{},
             # Each token with the scopes it was granted.
             access: %{},
@@ -92,6 +104,15 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
     def refuse_refresh(fake), do: Agent.update(fake.agent, &%{&1 | refuse_refresh: true})
 
     def set(fake, key, value), do: Agent.update(fake.agent, &Map.put(&1, key, value))
+
+    @doc "The clients registered, by id, each with what it was registered with."
+    def clients(fake), do: Agent.get(fake.agent, & &1.clients)
+
+    @doc "The authorization server forgets every client registered with it."
+    def forget_clients(fake), do: Agent.update(fake.agent, &%{&1 | clients: %{}})
+
+    @doc "The URL of the client ID metadata document the fake serves."
+    def metadata_document_url(fake), do: fake.base <> "/troupe-client.json"
 
     @doc """
     The person's part: open the URL (the authorization server sends the browser on to
@@ -165,6 +186,16 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
           _named -> %{"revocation_endpoint" => base <> "/tenant/revoke"}
         end
 
+      registration =
+        if state.registration,
+          do: %{"registration_endpoint" => base <> "/tenant/register"},
+          else: %{}
+
+      document =
+        if state.metadata_document,
+          do: %{"client_id_metadata_document_supported" => true},
+          else: %{}
+
       json(
         200,
         Map.merge(
@@ -182,9 +213,55 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
             ],
             "code_challenge_methods_supported" => ["S256"]
           },
-          revocation
+          revocation |> Map.merge(registration) |> Map.merge(document)
         )
       )
+    end
+
+    # RFC 7591: a public client, with the redirects it asks for, each loopback.
+    defp route(%{method: "POST", path: "/tenant/register", body: body}, agent) do
+      metadata = Jason.decode!(body)
+      redirects = List.wrap(metadata["redirect_uris"])
+
+      cond do
+        Agent.get(agent, & &1.registration) == :refuse ->
+          json(400, %{
+            "error" => "invalid_client_metadata",
+            "error_description" => "registration is closed"
+          })
+
+        redirects == [] or not Enum.all?(redirects, &loopback?/1) ->
+          json(400, %{"error" => "invalid_redirect_uri"})
+
+        true ->
+          id = "registered-" <> Integer.to_string(System.unique_integer([:positive]))
+          Agent.update(agent, &put_in(&1, [:clients, id], metadata))
+
+          answer =
+            case Agent.get(agent, & &1.registration) do
+              :confidential ->
+                %{"client_secret" => "s3cret", "token_endpoint_auth_method" => "client_secret_basic"}
+
+              _public ->
+                %{"token_endpoint_auth_method" => "none"}
+            end
+
+          json(201, Map.merge(metadata, Map.put(answer, "client_id", id)))
+      end
+    end
+
+    # A client ID metadata document, as one at its own URL serves it.
+    defp route(%{method: "GET", path: "/troupe-client.json"}, agent) do
+      base = Agent.get(agent, & &1.base)
+
+      json(200, %{
+        "client_id" => base <> "/troupe-client.json",
+        "client_name" => "Troupe",
+        "redirect_uris" => ["http://127.0.0.1/callback", "http://localhost/callback"],
+        "grant_types" => ["authorization_code", "refresh_token"],
+        "response_types" => ["code"],
+        "token_endpoint_auth_method" => "none"
+      })
     end
 
     # What a `403` names as its metadata, pointing somewhere else: a step-up must not be
@@ -239,13 +316,38 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
     # Why the authorization endpoint turns a request away, or nil.
     defp authorize_refusal(params, state) do
       cond do
-        params["client_id"] != @client_id -> text(400, "unknown client")
+        not client?(params["client_id"], params["redirect_uri"], state) ->
+          text(400, "unknown client")
+
         not pkce?(params) -> text(400, "PKCE with S256 is required")
         not loopback?(params["redirect_uri"]) -> text(400, "the redirect is not a loopback one")
         not resource?(params, state) -> text(400, "the resource is not this server")
         true -> nil
       end
     end
+
+    # The pre-registered client; a registered one, at a redirect it was registered with
+    # when there is one to check; or, where documents are taken, the URL of a document
+    # whose own client_id it is and that lists the redirect, a loopback one on any port.
+    defp client?(@client_id, _redirect, _state), do: true
+
+    defp client?(id, redirect, %{clients: clients}) when is_map_key(clients, id),
+      do: redirect == nil or redirect in List.wrap(clients[id]["redirect_uris"])
+
+    defp client?("http" <> _ = url, redirect, %{metadata_document: true}) do
+      case Req.get(url, retry: false) do
+        {:ok, %{status: 200, body: %{"client_id" => ^url} = document}} ->
+          redirect == nil or
+            Enum.any?(List.wrap(document["redirect_uris"]), &(portless(&1) == portless(redirect)))
+
+        _other ->
+          false
+      end
+    end
+
+    defp client?(_id, _redirect, _state), do: false
+
+    defp portless(uri), do: URI.to_string(%{URI.parse(uri) | port: nil})
 
     defp pkce?(params) do
       params["response_type"] == "code" and params["code_challenge_method"] == "S256" and
@@ -303,7 +405,10 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
             "error_description" => "the verifier does not match"
           })
 
-        form["redirect_uri"] != issued["redirect_uri"] or form["client_id"] != @client_id ->
+        not client?(form["client_id"], nil, state) ->
+          json(401, %{"error" => "invalid_client", "error_description" => "no such client"})
+
+        form["redirect_uri"] != issued["redirect_uri"] or form["client_id"] != issued["client_id"] ->
           json(400, %{
             "error" => "invalid_grant",
             "error_description" => "not the request it was issued for"
@@ -320,8 +425,13 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
     defp refresh(form, agent) do
       state = Agent.get(agent, & &1)
 
-      if not state.refuse_refresh and Map.has_key?(state.refresh, form["refresh_token"]) and
-           form["client_id"] == @client_id do
+      if client?(form["client_id"], nil, state),
+        do: refresh_known(form, agent, state),
+        else: json(401, %{"error" => "invalid_client", "error_description" => "no such client"})
+    end
+
+    defp refresh_known(form, agent, state) do
+      if not state.refuse_refresh and Map.has_key?(state.refresh, form["refresh_token"]) do
         # Rotated: the token just spent is no good again. The new one has its scopes.
         scopes = state.refresh[form["refresh_token"]]
         Agent.update(agent, &%{&1 | refresh: Map.delete(&1.refresh, form["refresh_token"])})
@@ -368,7 +478,7 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
         mode ->
           if mode == :slow, do: Process.sleep(2_000)
 
-          if form["client_id"] == @client_id do
+          if client?(form["client_id"], nil, Agent.get(agent, & &1)) do
             forget(agent, form["token"] || "")
             respond(200, "text/plain", "", [])
           else

@@ -2328,7 +2328,9 @@ defmodule Troupe.UI.TUI.Server do
         sign_in_server(state, server.name)
 
       {:server, server} ->
-        {:error, "#{server.name} takes no sign-in; give its entry an oauth.client_id"}
+        {:error,
+         "#{server.name} takes no sign-in; give its entry an oauth, {} where its " <>
+           "authorization server registers clients, or with oauth.client_id"}
 
       _other ->
         nil

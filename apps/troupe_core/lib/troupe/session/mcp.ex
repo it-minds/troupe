@@ -650,8 +650,9 @@ defmodule Troupe.Session.MCP do
           server: server,
           tools: [],
           error:
-            "answered 401: it wants a sign-in; give its entry oauth.client_id, " <>
-              "a client registered with the server's authorization server"
+            "answered 401: it wants a sign-in; give its entry an oauth, {} where its " <>
+              "authorization server registers clients, or with oauth.client_id, a client " <>
+              "registered with that authorization server"
         }
 
       {:error, reason} when is_binary(reason) ->

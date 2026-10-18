@@ -167,9 +167,25 @@ write back. A linked file is read where it is, values and all. Claude Code's
 Some servers act as *you*: they answer a call without a sign-in with `401`, name an
 authorization server (often your organisation's identity provider), and then call what is
 behind them as you, or show you only what is yours. A key in `env` will not do for those.
-Give the entry an `oauth` with the id of a client registered for it with that
-authorization server; whoever runs the server says what it is, since a provider with no
-dynamic registration has no other way to know Troupe:
+Give the entry an `oauth`. Many providers introduce Troupe themselves, and then `{}` is
+enough:
+
+```json
+{
+  "mcpServers": {
+    "wiki": {"url": "https://mcp.example.com/mcp", "oauth": {}}
+  }
+}
+```
+
+With no `client_id`, Troupe presents its client ID metadata document
+(`https://it-minds.github.io/troupe/oauth/client.json`, a public client with loopback
+redirects and no secret) where the authorization server takes one, or registers itself
+where it offers dynamic client registration (RFC 7591). A client it registers is kept in
+Troupe's state directory (`mcp-oauth-clients.json`, readable by you alone) and used for
+every later sign-in there; when the provider forgets it, the next sign-in registers a new
+one. A provider that does neither needs the id of a client registered for Troupe with it
+in advance (whoever runs the server says what it is), and the sign-in says so:
 
 ```json
 {
@@ -181,6 +197,8 @@ dynamic registration has no other way to know Troupe:
   }
 }
 ```
+
+A `client_id` the entry gives is always the one used.
 
 The rest is found from the server: where to sign in (its protected-resource metadata and
 the authorization server's) and which scopes it wants.

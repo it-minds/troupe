@@ -694,7 +694,47 @@ defmodule Troupe.RemoteTranslateTest do
         })
       )
 
-    assert gone.data.text == "client.notes.read no longer offered to the session: disconnected"
+    assert gone.data.text ==
+             "Martin's tool client.notes.read is no longer offered to the session, " <>
+               "because their client left"
+  end
+
+  # #592: whose tools went, how many and why, so a teammate watching sees it.
+  test "tools unregistered say whose, how many and why in one line" do
+    data = %{
+      "tools" => ["client.notes.read", "client.notes.search"],
+      "connection" => "#PID<0.1.0>",
+      "reason" => "disconnected",
+      "actor" => "ada@example.test"
+    }
+
+    event =
+      "tools_unregistered"
+      |> durable(data)
+      |> Map.put("actor", %{
+        "kind" => "user",
+        "subject" => "ada@example.test",
+        "display_name" => "Ada"
+      })
+
+    [gone] = translate(event)
+
+    assert gone.type == :remote_note
+
+    assert gone.data.text ==
+             "Ada's 2 tools are no longer offered to the session, because their client left: " <>
+               "client.notes.read, client.notes.search"
+
+    assert {:system, gone.data.text} in folded([gone]).transcript
+
+    took_back = %{data | "tools" => ["client.notes.read"], "reason" => "unregistered"}
+
+    [by_subject] =
+      translate(durable("tools_unregistered", took_back, %{"actor" => %{"kind" => "system"}}))
+
+    assert by_subject.data.text ==
+             "ada@example.test's tool client.notes.read is no longer offered to the session, " <>
+               "because they took their tools back"
   end
 
   test "the session's goal is set and cleared as events of its own, not as notes" do

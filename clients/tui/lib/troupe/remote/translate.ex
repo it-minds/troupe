@@ -623,7 +623,7 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:remote_note, %{text: registered(actor_of(event), data)})], memory}
 
       "tools_unregistered" ->
-        {[emit.(:remote_note, %{text: unregistered(data)})], memory}
+        {[emit.(:remote_note, %{text: unregistered(owner_of(event, data), data)})], memory}
 
       other when is_binary(other) ->
         {[emit.(:remote_note, %{text: generic(other, data)})], note_unknown(other, memory)}
@@ -1028,14 +1028,37 @@ defmodule Troupe.Remote.Translate do
     end
   end
 
-  defp unregistered(data) do
-    why = if is_binary(data["reason"]), do: ": " <> data["reason"], else: ""
+  # Whose tools went, how many and why, in one line: a teammate watching the session learns
+  # that what ran on somebody's machine is gone, and the taint line before it stays.
+  defp unregistered(who, data) do
+    whose = "#{who || "somebody"}'s"
+    why = left(data["reason"])
 
     case tool_names(data) do
-      [] -> "tools from somebody's machine no longer offered to the session" <> why
-      tools -> "#{Enum.join(tools, ", ")} no longer offered to the session" <> why
+      [] ->
+        "#{whose} tools are no longer offered to the session#{why}"
+
+      [tool] ->
+        "#{whose} tool #{tool} is no longer offered to the session#{why}"
+
+      tools ->
+        "#{whose} #{length(tools)} tools are no longer offered to the session#{why}: " <>
+          Enum.join(tools, ", ")
     end
   end
+
+  defp left("disconnected"), do: ", because their client left"
+  defp left("unregistered"), do: ", because they took their tools back"
+  defp left(reason) when is_binary(reason) and reason != "", do: " (#{reason})"
+  defp left(_reason), do: ""
+
+  # A person by their name where the event's actor has one, else the subject the event
+  # names; a log from before `tools_unregistered` said whose has neither.
+  defp owner_of(%{"actor" => %{"kind" => "user"} = actor}, data),
+    do: actor["display_name"] || actor["subject"] || owner_of(%{}, data)
+
+  defp owner_of(_event, %{"actor" => subject}) when is_binary(subject), do: subject
+  defp owner_of(_event, _data), do: nil
 
   defp tool_names(data), do: Enum.filter(List.wrap(data["tools"]), &is_binary/1)
 

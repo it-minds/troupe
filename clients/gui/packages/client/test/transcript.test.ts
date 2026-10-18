@@ -611,6 +611,33 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     );
   });
 
+  it("says whose tools left the session, how many and why (troupe #592)", () => {
+    seq = 0;
+    const gone = durable("tools_unregistered", {
+      tools: ["client.notes.read", "client.notes.search"],
+      connection: "#PID<0.1.0>",
+      reason: "disconnected",
+      actor: "ada@example.test",
+    });
+    const state = foldAll([
+      { ...gone, actor: { kind: "user", subject: "ada@example.test", display_name: "Ada" } },
+      {
+        ...durable("tools_unregistered", { tools: ["client.notes.read"], connection: "#PID<0.2.0>", reason: "unregistered", actor: "ada@example.test" }),
+        actor: { kind: "system" },
+      },
+      { ...durable("tools_unregistered", { tools: ["client.mail.send"], connection: "#PID<0.3.0>", reason: "disconnected" }), actor: { kind: "system" } },
+    ]);
+
+    assert.deepEqual(
+      state.entries.map((e) => (e.kind === "system" ? e.text : e.kind)),
+      [
+        "Ada's 2 tools are no longer offered to the session, because their client left: client.notes.read, client.notes.search",
+        "ada@example.test's tool client.notes.read is no longer offered to the session, because they took their tools back",
+        "somebody's tool client.mail.send is no longer offered to the session, because their client left",
+      ],
+    );
+  });
+
   it("shows a config note as the harness's sentence (troupe #644)", () => {
     seq = 0;
     const message =
