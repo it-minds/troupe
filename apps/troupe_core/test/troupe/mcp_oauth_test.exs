@@ -584,6 +584,21 @@ defmodule Troupe.MCPOAuthTest do
       assert URI.decode_query(refresh.body)["client_id"] == id
     end
 
+    # The installed check found it: an empty oauth was dropped as an empty value on import.
+    @tag fake: [registration: true]
+    test "an mcp.json entry whose oauth is {} waits for the sign-in and gets its tools as the registered client",
+         context do
+      %{session: session} = with_server(context, %{})
+      assert %{state: :sign_in} = wait_for_state(session.id, "notes", [:sign_in])
+
+      assert {:ok, started} = sign_in_unconfigured(context)
+      assert {200, _page} = FakeOAuth.browse(started.url)
+      assert %{state: :ready, tools: ["search"]} = wait_for_state(session.id, "notes", [:ready])
+
+      assert {:ok, "notes on trains, for ada@example.test"} =
+               Tool.invoke(tool(session.id), %{"topic" => "trains"}, ctx(session, context))
+    end
+
     @tag fake: [registration: true]
     test "a client_id the entry gives still wins", context do
       started = sign_in(context)
@@ -709,6 +724,10 @@ defmodule Troupe.MCPOAuthTest do
 
       assert {:error, "oauth is not an object"} =
                Import.normalize("notes", %{"url" => "x", "oauth" => "yes"})
+
+      # An empty one asks for a sign-in with no client id, and is kept as one.
+      assert {:ok, %{"oauth" => %{}}, []} =
+               Import.normalize("notes", %{"url" => "https://mcp.example.com/mcp", "oauth" => %{}})
     end
 
     test "a server's config carries the sign-in, or refuses to start without what it needs" do

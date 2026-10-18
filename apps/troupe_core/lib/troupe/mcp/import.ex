@@ -180,13 +180,18 @@ defmodule Troupe.MCP.Import do
           "timeout_ms" => timeout(raw),
           "disabled" => raw["disabled"] == true
         }
-        |> Map.reject(fn {_key, value} -> value in [nil, [], %{}, false] end)
+        |> Map.reject(fn {key, value} -> empty?(key, value) end)
 
       {:ok, entry, warnings(name, raw, entry)}
     end
   end
 
   def normalize(_name, _raw, _opts), do: {:error, "is not an object"}
+
+  # An empty `oauth` is not nothing: it asks for a sign-in with Troupe introducing itself
+  # to the provider, where an entry with no `oauth` takes none.
+  defp empty?("oauth", value), do: value == nil
+  defp empty?(_key, value), do: value in [nil, [], %{}, false]
 
   @doc """
   Whether a name is one Troupe can spell a tool with: `mcp.<server>.<tool>` splits on
