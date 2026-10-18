@@ -342,6 +342,17 @@ function useStartNotes(daemon: DaemonClient | null, sessionId: string, said: str
     notes.set(sessionId, [...kept, ...said.slice(kept.length).map((text) => ({ after: at.current, text }))]);
     redraw((n) => n + 1);
   }, [daemon, sessionId, said]);
+  // A line said before the transcript had reached any event, its replay slower than the
+  // start's questions, goes where the transcript has reached once it reaches one: after
+  // the session's first line, not above it for good.
+  useEffect(() => {
+    if (!daemon || lastSeq === 0) return;
+    const notes = anchored.get(daemon);
+    const had = notes?.get(sessionId);
+    if (!notes || !had?.some((n) => n.after === 0)) return;
+    notes.set(sessionId, had.map((n) => (n.after === 0 ? { ...n, after: lastSeq } : n)));
+    redraw((n) => n + 1);
+  }, [daemon, sessionId, lastSeq]);
   return (daemon && anchored.get(daemon)?.get(sessionId)) || [];
 }
 
