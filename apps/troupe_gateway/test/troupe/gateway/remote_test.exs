@@ -1,7 +1,6 @@
 defmodule Troupe.Gateway.RemoteTest do
   @moduledoc """
-  A laptop's session offered to the plane and steered from another device (#58, Decision
-  921), from the daemon's side: one connection it dials and renews, a remote person's
+  A laptop's session offered to the plane and steered from another device (#58), from the daemon's side: one connection it dials and renews, a remote person's
   messages relayed over it into an ordinary connection, held to the one session and to
   the daemon's own record of the share whatever the plane says, the transcript naming
   who did what from where, and a withdrawal or a drop ending every view at once.

@@ -43,7 +43,7 @@ export type Entry =
       text: string;
       author: string | undefined;
       source: string;
-      /** `plane` for a person who sent it from another device, through the plane (troupe Decision 921). */
+      /** `plane` for a person who sent it from another device, through the plane (troupe #58). */
       via?: string;
     }
   /** What the model answered. Empty answers (a pure tool call) produce no entry. */

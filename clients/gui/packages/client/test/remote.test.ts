@@ -1,5 +1,4 @@
-// A laptop's session offered to the plane for steering from another device (troupe #58,
-// Decision 921), as the client library reads it: the plane's `remote.list` row, the
+// A laptop's session offered to the plane for steering from another device (troupe #58), as the client library reads it: the plane's `remote.list` row, the
 // daemon's word on its own offer, the one list where this computer's row wins, and
 // `remote.open` with an endpoint taken against the plane and a refusal said in words.
 

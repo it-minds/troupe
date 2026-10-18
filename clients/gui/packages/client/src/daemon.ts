@@ -690,7 +690,7 @@ export class DaemonClient {
 
   /**
    * Offer a session to the plane this computer is signed in to, so its person, and the
-   * people named in `share`, can steer it from another device (troupe #58, Decision 921).
+   * people named in `share`, can steer it from another device (troupe #58).
    * Offering again replaces the share. A private session is refused. The answer is what
    * the session's row then says of it.
    */

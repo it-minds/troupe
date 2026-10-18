@@ -1,4 +1,4 @@
-// Laptop sessions offered to you, steered from the console (troupe #58, Decision 921).
+// Laptop sessions offered to you, steered from the console (troupe #58).
 //
 // Not an administrative view: these are the sessions a laptop's person offered to the
 // plane, your own from your laptops and those somebody shared with you, and you steer them

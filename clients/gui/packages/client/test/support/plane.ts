@@ -89,7 +89,7 @@ export const GATEWAY_DEFAULTS = {
 };
 
 /**
- * A laptop's session offered to the plane for steering (troupe #58, Decision 921). The
+ * A laptop's session offered to the plane for steering (troupe #58). The
  * fake has no laptop: the worker stands in for it, so `remote.open` hands out the worker's
  * endpoint and a token for it, and what a test steers it is the worker's session.
  */

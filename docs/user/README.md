@@ -156,6 +156,18 @@ One with nothing running goes dormant on its own a while after you stop looking 
 even while it waits on your answer to an approval or a question, so it does not keep the
 daemon up; answering it later wakes it, and the turn carries on.
 
+**Steering from another device.** A session on your machine you offer to the plane you are
+signed in to, so you can follow and steer it from the desktop app or the console on
+another device: `/remote on` in the terminal, or *Steer from elsewhere* in the session's
+head in the desktop app. Name the people who may steer it too (`/remote on
+bea@example.com`), or only follow it (`cy@example.com:observe`). Your machine keeps one
+connection to the plane while it is offered and nothing listens on it; your rules and
+approvals hold for every prompt, and an approval answered from elsewhere is for that one
+call. Elsewhere it is listed as *Remote*, with *Offline since …* while your machine is
+away. `/remote off`, or *Withdraw*, ends every remote view at once. The connection rides
+your client's sign-in, so with no client signed in on your machine it goes offline when
+that sign-in runs out. A private session is never offered.
+
 **Agent.** The thing that talks to the model. A session starts with one — `build`, or
 `plan` for a proposal first — which may delegate to others, waiting for each or letting it
 work in the background while it goes on; it can look in on one at work and stop it, and

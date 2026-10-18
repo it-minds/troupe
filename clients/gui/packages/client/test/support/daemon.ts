@@ -74,7 +74,7 @@ interface Session {
   /** The session this one is a branch of. */
   parent?: string | null;
   /**
-   * Offered to the plane for steering from another device (troupe #58, Decision 921), as
+   * Offered to the plane for steering from another device (troupe #58), as
    * `remote.offer` left it and `session.list` says it.
    */
   remote?: { owner: string | null; shares: Array<{ subject: string; role: string }>; state: string; since: string | null; steering: unknown[] } | null;

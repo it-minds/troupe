@@ -1,6 +1,6 @@
 defmodule Troupe.RemoteCommandTest do
   @moduledoc """
-  `/remote` (root #58, Decision 921): a session on this computer offered to the plane, to
+  `/remote` (root #58): a session on this computer offered to the plane, to
   steer it from another device. Alone it says how the offer stands and who is steering;
   `/remote on` offers it to the people named, an email to steer it and `email:observe` to
   follow it; `/remote off` withdraws it. What the daemon refuses is said as it says it: a

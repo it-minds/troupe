@@ -15,6 +15,8 @@ defmodule Troupe.Gateway.Remote.Viewer do
   alias Troupe.Gateway.Connections
   alias Troupe.Protocol.Client
 
+  @max_message_bytes 16 * 1024 * 1024
+
   @spec start(String.t(), pid(), Troupe.Protocol.Endpoint.t()) :: GenServer.on_start()
   def start(id, link, endpoint), do: GenServer.start(__MODULE__, {id, link, endpoint})
 
@@ -36,7 +38,11 @@ defmodule Troupe.Gateway.Remote.Viewer do
   def init({id, link, endpoint}) do
     Process.set_label({"troupe remote viewer", id})
 
-    case Connections.attach(transport: {:relay, self()}, endpoint: endpoint) do
+    # A remote person's client is held to a pod socket's ceiling, which the plane's relay
+    # socket takes, and `initialize` says so.
+    attach = [transport: {:relay, self()}, endpoint: endpoint, max_message_bytes: @max_message_bytes]
+
+    case Connections.attach(attach) do
       {:ok, connection} ->
         monitor = Process.monitor(connection)
         send(connection, :socket_ready)

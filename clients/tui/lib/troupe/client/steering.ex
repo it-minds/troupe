@@ -1,8 +1,8 @@
 defmodule Troupe.Client.Steering do
   @moduledoc """
-  A session offered to the plane for steering from another device (root #58, Decision
-  921), in the sentences `/remote` says: whether it is offered, to whom, whether the plane
-  has it now, and who is steering it from elsewhere. The desktop app says the same.
+  A session offered to the plane for steering from another device (root #58), in the
+  sentences `/remote` says: whether it is offered, to whom, whether the plane has it now,
+  and who is steering it from elsewhere. The desktop app says the same.
   """
 
   @doc "What `/remote` says of a session's offer, as the daemon's `session.get` has it."

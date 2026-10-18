@@ -16,7 +16,7 @@ import type { Unseen } from "./types.js";
 /**
  * Where a session runs, which is the one thing a person must be able to see at a glance.
  * `remote` is a session on somebody's laptop, theirs or another person's, offered to the
- * plane for steering from another device (troupe #58, Decision 921).
+ * plane for steering from another device (troupe #58).
  */
 export type SessionKind = "team" | "local" | "private" | "remote";
 

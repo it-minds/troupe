@@ -1,4 +1,4 @@
-// Steering a session from another device, through the plane (troupe #58, Decision 921).
+// Steering a session from another device, through the plane (troupe #58).
 //
 // Two halves, one in each session's head. On this computer's own session, the offer:
 // the people it is shared with and at what, whether the plane has it now, who is steering

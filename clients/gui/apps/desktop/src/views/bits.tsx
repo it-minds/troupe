@@ -96,7 +96,7 @@ function word(s: string): string {
  */
 export function Where({ kind }: { kind: SessionKind }): JSX.Element {
   if (kind === "private") return <Pill status="private">Private</Pill>;
-  // A laptop's session offered to the plane, steered from here (Decision 921): plain, as
+  // A laptop's session offered to the plane, steered from here: plain, as
   // the platform's is, since the plane is what it is reached through.
   if (kind === "remote")
     return (

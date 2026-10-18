@@ -1,8 +1,8 @@
 defmodule Troupe.Protocol.RelayTest do
   @moduledoc """
-  The one table both ends of a relayed session check each message against (#58, Decision
-  921): the session's own steering and reading, at the role each end holds the person to,
-  and nothing of the laptop.
+  The one table both ends of a relayed session check each message against (#58): the
+  session's own steering and reading, at the role each end holds the person to, and
+  nothing of the laptop.
   """
 
   use ExUnit.Case, async: true

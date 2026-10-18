@@ -123,7 +123,7 @@ export function Session({
   const here = onThisComputer(kind);
   const self = (!here ? auth?.me?.subject : (machineUser ?? auth?.me?.subject)) ?? undefined;
 
-  // A relayed session shared to observe is read here as a viewer's is (Decision 921).
+  // A relayed session shared to observe is read here as a viewer's is.
   const readOnly = row?.state === "read_only" || row?.yourRole === "viewer" || row?.yourRole === "observe";
   const dormant = row?.state === "dormant";
   const open = openApprovals(view.state);

@@ -497,8 +497,7 @@ defmodule Troupe.Client do
   def instructions(sid), do: impl(sid).instructions(sid)
 
   @doc """
-  The session offered to the plane for steering from another device (root #58, Decision
-  921): `:status` says whether it is and who is steering, `{:offer, share}` offers it
+  The session offered to the plane for steering from another device (root #58): `:status` says whether it is and who is steering, `{:offer, share}` offers it
   shared with `[%{"person" => email, "role" => "control" | "observe"}]`, `:withdraw` takes
   it back. Each answers the sentence to show.
   """

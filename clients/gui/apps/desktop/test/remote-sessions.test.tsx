@@ -1,5 +1,4 @@
-// Steering a laptop's session from another device, through the plane (troupe #58,
-// Decision 921). On this computer: a local session's head offers it to the plane, shared
+// Steering a laptop's session from another device, through the plane (troupe #58). On this computer: a local session's head offers it to the plane, shared
 // with the people named, says it is offered and takes it back. From another computer: the
 // list has it as Remote, says since when one whose laptop is away has been, and opening
 // an online one steers it like any session: a prompt goes, and the head says whose laptop.

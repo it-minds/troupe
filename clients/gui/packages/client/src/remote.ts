@@ -1,5 +1,4 @@
-// A laptop's session steered from another device, through the plane (troupe #58,
-// Decision 921).
+// A laptop's session steered from another device, through the plane (troupe #58).
 //
 // The laptop dials the plane and the plane relays the protocol between it and this
 // client, so attaching is what attaching to a pod is: an endpoint and a token from the

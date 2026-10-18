@@ -69,7 +69,7 @@ export function useFleet(
     if (auth) store.addSource(new PlaneSource(auth.plane, () => auth.token()));
     else store.removeSource("plane");
     // Laptop sessions offered for steering from another device: the person's own from
-    // their other computers, and those shared with them (Decision 921).
+    // their other computers, and those shared with them.
     if (auth) store.addSource(new RemoteSource(auth.plane, () => auth.token()));
     else store.removeSource("remote");
     if (daemon) store.addSource(new DaemonSource(daemon));
@@ -453,7 +453,7 @@ export function useSessionView(
   // The answer the offer's question waits for, until the person gives it.
   const answering = useRef<((allow: boolean) => void) | null>(null);
   const local = onThisComputer(kind);
-  // A laptop's session offered to the plane, steered from here through it (Decision 921).
+  // A laptop's session offered to the plane, steered from here through it.
   const relayed = kind === "remote";
 
   useEffect(() => {

@@ -1,7 +1,6 @@
 defmodule Troupe.Plane.RemoteTest do
   @moduledoc """
-  A laptop's session offered to the plane and steered from another device (#58, Decision
-  921), from the plane's side: a laptop's one connection at `/v1/relay`, the people it
+  A laptop's session offered to the plane and steered from another device (#58), from the plane's side: a laptop's one connection at `/v1/relay`, the people it
   shares a session with finding it in `remote.list` and attaching with `remote.open`'s
   token at `/v1/relay/session`, each relayed message checked on the way, no token ever
   reaching the laptop, a withdrawal ending every view, and a laptop that went shown

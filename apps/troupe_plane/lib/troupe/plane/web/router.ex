@@ -373,7 +373,9 @@ defmodule Troupe.Plane.Web.Router do
       [] ->
         conn
         |> WebSockAdapter.upgrade(Remote.Laptop, [bearer: bearer_or_nil(conn)],
-          timeout: :timer.hours(24)
+          timeout: :timer.hours(24),
+          # A viewer's message is at most a pod socket's ceiling, carried as a string.
+          max_frame_size: 64 * 1024 * 1024
         )
         |> halt()
 
@@ -389,7 +391,9 @@ defmodule Troupe.Plane.Web.Router do
     if relay_origin_allowed?(conn) do
       conn
       |> WebSockAdapter.upgrade(Remote.Viewer, [bearer: bearer_or_nil(conn)],
-        timeout: :timer.hours(24)
+        timeout: :timer.hours(24),
+        # A pod socket's ceiling, which the laptop's connection says at `initialize`.
+        max_frame_size: 16 * 1024 * 1024
       )
       |> halt()
     else

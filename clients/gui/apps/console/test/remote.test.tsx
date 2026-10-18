@@ -1,4 +1,4 @@
-// Laptop sessions offered to you, steered from the console (troupe #58, Decision 921):
+// Laptop sessions offered to you, steered from the console (troupe #58):
 // listed on Sessions apart from the administrative table, opened as yourself, the
 // transcript followed live, a prompt sent and an approval answered once; a laptop that is
 // away is said to be, with since when. The fake plane's worker stands in for the laptop.
