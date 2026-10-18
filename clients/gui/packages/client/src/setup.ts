@@ -230,6 +230,29 @@ export function previousStep(flow: Pick<SetupFlow, "steps">, step: SetupStepName
   return at > 0 ? flow.steps[at - 1]!.name : null;
 }
 
+/**
+ * Whether the daemon finished a run since it said `before`: a record newer than the one it
+ * had then, or a first run it no longer wants. What a screen goes by when an answer to
+ * `finish` never reached it, or the socket went and came back: the daemon's record is
+ * the truth about a run, whichever reply carried it.
+ */
+export function setupFinishedSince(before: Pick<SetupFlow, "needed" | "completed">, now: Pick<SetupFlow, "needed" | "completed">): boolean {
+  if (now.completed && now.completed.completed_at !== before.completed?.completed_at) return true;
+  return before.needed && !now.needed;
+}
+
+/**
+ * The finished flow a lost `finish` answer would have carried, from what the person
+ * answered (`before`) and what the daemon says now. The session a local run asked for is
+ * not known, so it is none; a run that the record says chose a plane and that never named
+ * one here ends at the sign-in form.
+ */
+export function finishedFlow(before: SetupFlow, now: SetupFlow): SetupFlow {
+  const answers = { ...before.answers };
+  if (!answers.where && now.completed?.choice === "plane") answers.where = { choice: "plane", plane_url: null };
+  return { ...now, step: "done", answers, session: null };
+}
+
 /** Whether a daemon predates the first run's questions: it answers `method_not_found`. */
 export function setupUnsupported(e: unknown): boolean {
   return e instanceof TroupeRpcError && (e.code === ErrorCodes.method_not_found || e.message.includes("method_not_found"));

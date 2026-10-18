@@ -559,6 +559,12 @@ export class FakeDaemon {
   subscribeDelayMs = 0;
   /** How long a method takes to answer, by its name: a busy machine, for any other method. */
   delayMs: Record<string, number> = {};
+  /**
+   * A method the daemon does, once, whose answer never reaches the client: `hold` keeps the
+   * socket open and says nothing, `drop` closes the socket in its place, as a daemon whose
+   * connection went in the middle of the call. What it did stays done.
+   */
+  loseReply: Record<string, "hold" | "drop"> = {};
   /** Whether sessions approve every tool call themselves, as `auto_approve: true` in the machine's config does. */
   autoApprove: boolean;
   /**
@@ -678,6 +684,11 @@ export class FakeDaemon {
     // The label is in `identity.json` and survives; the plane token was in memory.
     this.planeToken = null;
     await this.start();
+  }
+
+  /** Close every client's socket and stay up where it was: the next call dials again, to the same daemon. */
+  dropClients(): void {
+    for (const c of this.clients) c.ws.terminate();
   }
 
   /** What `daemon.json` says while it runs: the port and token a client finds it by. */
@@ -1074,7 +1085,6 @@ export class FakeDaemon {
   }
 
   private handle(client: Client, id: unknown, method: string, params: Record<string, unknown>): void {
-    const ws = client.ws;
     const sessionId = String(params["session_id"] ?? "");
     const session = this.sessions.get(sessionId);
     const delay = this.delayMs[method] ?? 0;
@@ -1082,6 +1092,9 @@ export class FakeDaemon {
       setTimeout(() => this.handle(client, id, method, { ...params, __delayed: true }), delay);
       return;
     }
+    const lose = this.loseReply[method];
+    if (lose) delete this.loseReply[method];
+    const ws = lose ? ({ send: () => lose === "drop" && client.ws.terminate() } as unknown as WebSocket) : client.ws;
 
     switch (method) {
       case "identity.get":
