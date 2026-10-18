@@ -372,8 +372,8 @@ defmodule Troupe.Worker.GitHub do
       if paths == [],
         do: "",
         else:
-          " Delete them, or leave them out with .gitignore and take them out of git's index " <>
-            "with `git rm --cached`, then push again."
+          " Delete them, or leave them out with .gitignore (and take one you staged or " <>
+            "committed yourself out of git's index with `git rm --cached`), then push again."
 
     case public_problems(credential, policy) ++ paths do
       [] -> :ok

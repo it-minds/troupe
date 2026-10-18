@@ -202,6 +202,9 @@ defmodule Troupe.Plane.GitHub do
         }
       },
       permissions: @permissions,
+      # In GitOps mode, the generation of the `GitHubApp` resource its settings were read
+      # from; `nil` for an App set through the admin API.
+      resource_generation: row.resource_generation,
       updated_by: row.updated_by,
       updated_at: row.updated_at
     }
@@ -244,6 +247,54 @@ defmodule Troupe.Plane.GitHub do
   def put(_attrs, _actor, _opts), do: {:error, %{field: "app", reason: "the App is an object"}}
 
   @fields ~w(app_id api_url installations private_key webhook_secret)
+
+  # What a `GitHubApp` resource sets in GitOps mode: the App's settings, and not its key or
+  # its webhook secret, which are only ever in transit.
+  @settings ~w(app_id api_url installations)
+
+  @doc "The keys of the App a `GitHubApp` resource holds in GitOps mode: not the key, not the secret."
+  @spec settings() :: [String.t()]
+  def settings, do: @settings
+
+  @doc """
+  The App's settings as a `GitHubApp` resource gives them, read as `put/3` reads them:
+  `{:ok, changes}` or the field and why. Nothing is written.
+  """
+  @spec read_settings(map()) :: {:ok, map()} | {:error, map()}
+  def read_settings(attrs) when is_map(attrs), do: attrs |> Map.take(@settings) |> read_fields()
+
+  @doc """
+  Make the App's settings what a `GitHubApp` resource says, at its generation, in GitOps
+  mode: the whole of them, so a setting the resource leaves out is its default. The key and
+  the webhook secret are left as they are. Answers the App as it was and as it now is.
+  """
+  @spec follow(map(), integer() | nil, String.t()) :: {:ok, %{before: map(), now: map()}}
+  def follow(changes, generation, actor) do
+    row = stored() || %App{id: App.id()}
+    whole = Map.merge(%{app_id: nil, api_url: nil, installations: []}, changes)
+
+    stored =
+      row
+      |> change(Map.put(whole, :resource_generation, generation))
+      |> then(fn changeset ->
+        if changeset.changes == %{},
+          do: changeset,
+          else: put_change(changeset, :updated_by, actor)
+      end)
+      |> Repo.insert_or_update!()
+
+    {:ok, %{before: describe(row), now: describe(stored)}}
+  end
+
+  @doc """
+  The resource the App's settings followed is gone from the cluster: they go with it, as a
+  removed trigger's row does. The key and the secret stay in transit, for the App the
+  repository names next.
+  """
+  @spec unfollow(String.t()) :: {:ok, %{before: map(), now: map()}}
+  def unfollow(actor) do
+    follow(%{}, nil, actor)
+  end
 
   @doc "The keys `put/3` reads, as `admin.github.put` declares them."
   @spec keys() :: [String.t()]
@@ -982,6 +1033,50 @@ defmodule Troupe.Plane.GitHub do
       when is_integer(number) and is_integer(review_id) do
     permissions = %{"pull_requests" => "read"}
 
+    audit = %{
+      "session_id" => session.id,
+      "for" => "review #{review_id} on pull request #{number}"
+    }
+
+    with {:ok, reader} <- reader(owner, name, permissions, audit, session.owner_subject),
+         {:ok, comments} when is_list(comments) <-
+           reader.get.("/pulls/#{number}/reviews/#{review_id}/comments",
+             per_page: @review_comments
+           ) do
+      {:ok, Enum.map(comments, &review_comment/1)}
+    else
+      {:ok, _other} -> {:error, {:github, 200, "not a list of comments", owner, name}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def review_comments(%Session{}, _number, _review_id), do: {:error, :no_repository}
+
+  # -- the plane's own reads of a repository ---------------------------------------
+
+  @typedoc """
+  The plane's reads of one repository, with one token: `get` of a path under
+  `/repos/<owner>/<name>` (`""` for the repository itself) and its query, and `search` of
+  its open issues for a query, at most a number of them, oldest first.
+  """
+  @type reader :: %{
+          repository: String.t(),
+          get: (String.t(), keyword() -> {:ok, term()} | {:error, term()}),
+          search: (String.t(), pos_integer() -> {:ok, [map()]} | {:error, term()})
+        }
+
+  @doc """
+  The plane's own reads of one repository, with a token of its own: narrowed in the request
+  to the repository and `permissions`, an hour long, used for the reads the caller makes and
+  kept nowhere, and audited as `github.token` with `audit`'s detail for `on_behalf_of`.
+
+  What a review's comments, the pull request a comment is on, and a sweep's or a person's
+  issues are read with. The App, its installation for the owner, and GitHub's answer are
+  the checks; whether a team may name the repository is the caller's.
+  """
+  @spec reader(String.t(), String.t(), map(), map(), String.t() | nil) ::
+          {:ok, reader()} | {:error, term()}
+  def reader(owner, name, permissions, audit, on_behalf_of) do
     with {:ok, app} <- configured(),
          {:ok, installation} <- installation_for(app, owner),
          {:ok, jwt} <- jwt(app),
@@ -991,45 +1086,73 @@ defmodule Troupe.Plane.GitHub do
           "github",
           "github.token",
           "#{owner}/#{name}",
-          %{
-            "session_id" => session.id,
-            "permissions" => permissions,
-            "expires_at" => expires_at,
-            "for" => "review #{review_id} on pull request #{number}"
-          },
-          on_behalf_of: session.owner_subject
+          Map.merge(audit, %{"permissions" => permissions, "expires_at" => expires_at}),
+          on_behalf_of: on_behalf_of
         )
 
-      url =
-        "#{api_url(app)}/repos/#{owner}/#{name}/pulls/#{number}/reviews/#{review_id}/comments"
+      base = "#{api_url(app)}/repos/#{owner}/#{name}"
 
-      case Req.request(
-             method: :get,
-             url: url,
-             params: [per_page: @review_comments],
-             headers: [
-               {"authorization", "Bearer " <> token},
-               {"accept", "application/vnd.github+json"},
-               {"x-github-api-version", "2022-11-28"},
-               {"user-agent", "troupe-plane"}
-             ],
-             redirect: false,
-             retry: false,
-             receive_timeout: 15_000
-           ) do
-        {:ok, %{status: 200, body: comments}} when is_list(comments) ->
-          {:ok, Enum.map(comments, &review_comment/1)}
-
-        {:ok, %{status: status, body: body}} ->
-          {:error, {:github, status, message(body), owner, name}}
-
-        {:error, reason} ->
-          {:error, {:github_unreachable, URI.parse(url).host, reason}}
-      end
+      {:ok,
+       %{
+         repository: "#{owner}/#{name}",
+         get: fn path, params -> read(base <> path, params, token, owner, name) end,
+         search: fn query, limit -> search(app, token, owner, name, query, limit) end
+       }}
     end
   end
 
-  def review_comments(%Session{}, _number, _review_id), do: {:error, :no_repository}
+  # GitHub's issue search, with the repository and `is:issue is:open` the plane's and the
+  # rest the trigger's query.
+  defp search(app, token, owner, name, query, limit) do
+    q = "repo:#{owner}/#{name} is:issue is:open #{query}"
+    params = [q: q, sort: "created", order: "asc", per_page: limit]
+
+    case read("#{api_url(app)}/search/issues", params, token, owner, name) do
+      {:ok, %{"items" => items}} when is_list(items) ->
+        # The token reaches this one repository and the qualifiers are the plane's; an item
+        # of another repository is still not one of this one's issues.
+        {:ok, Enum.filter(items, &of_repository?(&1, owner, name))}
+
+      {:ok, _other} ->
+        {:error, {:github, 200, "not a search answer", owner, name}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp of_repository?(%{"repository_url" => url}, owner, name) when is_binary(url),
+    do: String.ends_with?(String.downcase(url), String.downcase("/repos/#{owner}/#{name}"))
+
+  defp of_repository?(_item, _owner, _name), do: false
+
+  # A read with a token, in the header and nowhere else: not in an error, which names
+  # GitHub's status and message.
+  defp read(url, params, token, owner, name) do
+    case Req.request(
+           method: :get,
+           url: url,
+           params: params,
+           headers: [
+             {"authorization", "Bearer " <> token},
+             {"accept", "application/vnd.github+json"},
+             {"x-github-api-version", "2022-11-28"},
+             {"user-agent", "troupe-plane"}
+           ],
+           redirect: false,
+           retry: false,
+           receive_timeout: 15_000
+         ) do
+      {:ok, %{status: 200, body: body}} ->
+        {:ok, body}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, {:github, status, message(body), owner, name}}
+
+      {:error, reason} ->
+        {:error, {:github_unreachable, URI.parse(url).host, reason}}
+    end
+  end
 
   defp review_comment(comment) when is_map(comment) do
     %{

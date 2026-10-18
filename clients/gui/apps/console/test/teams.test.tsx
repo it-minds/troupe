@@ -206,6 +206,32 @@ describe("a team", () => {
     await waitFor(() => says("every repository of example-org the App reaches"), "the list as it now is");
   });
 
+  it("sets a team's cap of attempts per issue, sending it only once it moves", async () => {
+    await signedInAs(fake, PEOPLE.alice);
+    visit("#/teams/core/github");
+    unmount = render(<App />).unmount;
+    await waitFor(() => says("Runs a sweep starts on one issue"), "core's caps");
+    button("Change core's repositories")!.click();
+    type(await waitFor(() => field("Runs a sweep starts on one issue"), "the form"), "2");
+    button("Preview")!.click();
+    await waitFor(() => says("github.max_attempts becomes 2."), "the preview");
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as team.update on core"), "the audit's note");
+    expect(fake.admin.teams.get("core")!.github.max_attempts).toBe(2);
+    await waitFor(() => says("2 that end without a fix"), "the cap as it now is");
+  });
+
+  it("shows a team's repositories locked on a gitops plane, where the GitHubApp resource holds them", async () => {
+    fake.admin.mode = "gitops";
+    fake.admin.gitopsSource = "https://git.example.com/platform/troupe.git";
+    await signedInAs(fake, PEOPLE.alice);
+    visit("#/teams/core/github");
+    unmount = render(<App />).unmount;
+    await waitFor(() => says("Held in a repository") && says("spec.teams.core"), "the locked tab");
+    await sees("example-org/widgets");
+    expect(button("Change core's repositories")).toBeNull();
+  });
+
   it("lets a team admin change their team's limits but not whether it may use unenforced workers", async () => {
     await signedInAs(fake, PEOPLE.bob);
     visit("#/teams/design/limits");

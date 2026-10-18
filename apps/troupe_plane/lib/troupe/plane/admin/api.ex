@@ -261,6 +261,12 @@ defmodule Troupe.Plane.Admin.API do
           type: :integer,
           description:
             "Runs on a repository the team's triggers may have going at once, 1 to 1000; a firing over it is skipped. Null for no cap of the team's."
+        },
+        %Argument{
+          name: "max_attempts",
+          type: :integer,
+          description:
+            "Runs a sweep may start on one issue that end without a fix before it leaves the issue for a person, 1 to 1000; the lower of this and the profile's github.maxAttempts holds, and one where neither is set. A person asking again (the label, the command, or admin.trigger.fix) starts the count again. Null for no cap of the team's."
         }
       ]
     }
@@ -395,6 +401,18 @@ defmodule Troupe.Plane.Admin.API do
           type: :string,
           description:
             "For a trigger on a repository: the branch its sessions clone. The default branch where absent."
+        },
+        %Argument{
+          name: "sweep",
+          type: :string,
+          description:
+            "For a trigger on a repository: a five-field cron in UTC at whose minutes the plane goes over the repository's open issues, those with label or those query finds, oldest first and at most 50, and starts a run on each that no run is fixing (a run going, or an open pull request a run opened) and that its runs have not tried as often as github.maxAttempts allows, under the trigger's concurrency and the profile's and team's caps. A sweep stops at the first run a cap skips."
+        },
+        %Argument{
+          name: "query",
+          type: :string,
+          description:
+            "For a sweep: GitHub's issue search qualifiers instead of the label, such as label:bug no:assignee. The plane adds the repository and is:issue is:open; repo:, org:, user:, is:, type:, state: and archived: are refused."
         }
       ]
     },
@@ -484,7 +502,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profiles.export",
       function: :profiles_export,
       summary:
-        "Every profile, the cluster policy and every trigger as a repository would hold them, to bootstrap one before switching a plane to gitops mode: a path and the YAML for each, and notes where something needs deciding first. Left out of every profile's manifest is what the plane or the cluster writes (spec.replicas, spec.teams, spec.mcpServers, the troupe.dev/drained annotation, status), listed in left_out: a repository must not hold them. A trigger's manifest has no key, runs or revisions, which stay with the plane.",
+        "Every profile, the cluster policy, every trigger and the GitHub App as a repository would hold them, to bootstrap one before switching a plane to gitops mode: a path and the YAML for each, and notes where something needs deciding first. Left out of every profile's manifest is what the plane or the cluster writes (spec.replicas, spec.teams, spec.mcpServers, the troupe.dev/drained annotation, status), listed in left_out: a repository must not hold them. A trigger's manifest has no key, runs or revisions, which stay with the plane. The GitHubApp's (github) has the App's ID, API URL and installations and each team's repositories and caps, and never its private key or webhook secret, which stay in OpenBao.",
       risk: :read
     },
     %Method{
@@ -1316,7 +1334,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.github.get",
       function: :github_get,
       summary:
-        "The plane's GitHub App: its App ID, API URL and where clones come from, the installations it may use, whether its private key is set (type, fingerprint and the OpenBao transit version, never the key), what a session's token is given, and who changed it last. configured is true once there is an App ID, a key and an installation.",
+        "The plane's GitHub App: its App ID, API URL and where clones come from, the installations it may use, whether its private key is set (type, fingerprint and the OpenBao transit version, never the key), what a session's token is given, and who changed it last. configured is true once there is an App ID, a key and an installation. On a gitops plane it carries gitops: the GitHubApp resource its settings come from (github), the generation they were read at, and any problem the last pass reported.",
       risk: :read,
       arguments: []
     },
@@ -1324,7 +1342,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.github.put",
       function: :github_put,
       summary:
-        "Change the plane's GitHub App, the one identity its pods clone with. Only the keys sent change; installations is the whole list; private_key is imported into OpenBao transit and never readable again, by anybody. Refused with the field and the reason, and nothing written, for anything that does not read.",
+        "Change the plane's GitHub App, the one identity its pods clone with. Only the keys sent change; installations is the whole list; private_key is imported into OpenBao transit and never readable again, by anybody. Refused with the field and the reason, and nothing written, for anything that does not read. On a gitops plane app_id, api_url and installations are the GitHubApp resource's and are refused as managed_by_gitops; private_key and webhook_secret, which no repository holds, are taken.",
       risk: :write,
       arguments: [
         %Argument{
@@ -1568,6 +1586,29 @@ defmodule Troupe.Plane.Admin.API do
           type: :string,
           required: true,
           description: "The trigger's name."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.trigger.fix",
+      function: :trigger_fix,
+      summary:
+        "Start one run of a trigger on a GitHub repository on one of its issues, by hand: the console's fix this. The issue is read from GitHub first and must be an open issue of the trigger's repository, not a pull request; the repository must be one the team lists, and private or internal unless the profile allows public ones. Fired as manual, under the trigger's concurrency, the profile's and team's caps and the budget, with the issue given to the session fenced as data. A second call in the same minute is the run the first made. It starts a real session and spends real money. Works on a gitops plane too.",
+      risk: :write,
+      arguments: [
+        %Argument{name: "team", type: :string, required: true, description: "The team's name."},
+        %Argument{
+          name: "name",
+          type: :string,
+          required: true,
+          description: "The trigger's name: one on a GitHub repository."
+        },
+        %Argument{
+          name: "issue",
+          type: :string,
+          required: true,
+          description:
+            "The issue: its number, or its link on GitHub (https://github.com/<owner>/<name>/issues/<number>), which must be on the trigger's repository."
         }
       ]
     },

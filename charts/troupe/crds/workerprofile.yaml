@@ -298,6 +298,15 @@ spec:
                         Runs on a GitHub repository that triggers may have going at once on
                         this profile; a firing over it is skipped. The team may set a lower
                         one of its own.
+                    maxAttempts:
+                      type: integer
+                      minimum: 1
+                      maximum: 1000
+                      description: >-
+                        Runs a trigger's sweep may start on one issue that end without a fix
+                        before it leaves the issue for a person, who asks again with the
+                        label, the command or the console's fix this. The lower of this and
+                        the team's holds; one where neither is set.
                 configBundleChannel: {type: string, default: stable}
                 storage:
                   type: object

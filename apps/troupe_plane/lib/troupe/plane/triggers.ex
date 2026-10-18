@@ -264,6 +264,55 @@ defmodule Troupe.Plane.Triggers do
   end
 
   @doc """
+  Every enabled trigger on a GitHub repository that sweeps the repository's open issues on
+  a schedule (`source.sweep`), for the scheduler's tick.
+  """
+  @spec sweeping() :: [Trigger.t()]
+  def sweeping do
+    Repo.all(
+      from(t in Trigger,
+        where:
+          t.enabled and fragment("?->>'kind'", t.source) == "webhook" and
+            fragment("(?->>'repository') IS NOT NULL", t.source) and
+            fragment("(?->>'sweep') IS NOT NULL", t.source),
+        order_by: t.name
+      )
+    )
+  end
+
+  @doc """
+  Every run on one issue of a GitHub repository, by any trigger, newest first, each with
+  its session: what says whether the issue is being fixed, and how often it was tried.
+  """
+  @spec issue_runs(String.t(), integer()) :: [{Run.t(), Session.t() | nil}]
+  def issue_runs(full_name, number) when is_binary(full_name) and is_integer(number) do
+    Repo.all(
+      from(r in Run,
+        left_join: s in Session,
+        on: s.id == r.session_id,
+        where:
+          fragment("lower(?->>'repository')", r.event) == ^String.downcase(full_name) and
+            fragment("?->'issue'->>'number'", r.event) == ^Integer.to_string(number),
+        order_by: [desc: r.fired_at],
+        select: {r, s}
+      )
+    )
+  end
+
+  @doc """
+  Whether a run holds a place against a cap: a session still to start, one thinking or
+  acting, or one dormant with an approval pending. What the queries behind `fire/5` count.
+  """
+  @spec live?(Run.t(), Session.t() | nil) :: boolean()
+  def live?(%Run{state: "created", session_id: nil}, _session), do: true
+  def live?(%Run{state: "created"}, %Session{status: "waiting"}), do: true
+
+  def live?(%Run{state: "created"}, %Session{state: "active", failed_reason: nil} = session),
+    do: session.status not in ["done", "interrupted"]
+
+  def live?(%Run{}, _session), do: false
+
+  @doc """
   Record that the scheduler fired a trigger for a minute, if nobody has since.
 
   Conditional, so two schedulers — a replica that thinks it is the singleton and one that
@@ -511,7 +560,7 @@ defmodule Troupe.Plane.Triggers do
       {:ok, run} ->
         cond do
           live_runs(trigger, run) >= revision.concurrency ->
-            skip(trigger, revision, run)
+            skip(trigger, revision, run, concurrency_reason(trigger, revision.concurrency))
 
           over = over_repository_cap(trigger, revision, run) ->
             skip(trigger, revision, run, over)
@@ -586,11 +635,19 @@ defmodule Troupe.Plane.Triggers do
   defp narrow_runs(query, team_id: team_id),
     do: from([_r, t, _v, _s] in query, where: t.team_id == ^team_id)
 
-  defp skip(trigger, revision, run, why \\ "over its concurrency cap") do
-    {:ok, run} = run |> Run.changeset(%{state: "skipped"}) |> Repo.update()
-    Logger.info("troupe plane: trigger #{trigger.name} fired #{why}; skipped")
+  # The run keeps why it started nothing, so the Runs screen and a delivery's outcome can
+  # say it, and not only the plane's log.
+  defp skip(trigger, revision, run, why) do
+    {:ok, run} = run |> Run.changeset(%{state: "skipped", reason: why}) |> Repo.update()
+    Logger.info("troupe plane: trigger #{trigger.name} fired over a cap (#{why}); skipped")
     {:ok, fired(trigger, revision, run, nil, nil)}
   end
+
+  defp concurrency_reason(trigger, 1),
+    do: "#{trigger.name} allows 1 run at once (concurrency), and one is going"
+
+  defp concurrency_reason(trigger, cap),
+    do: "#{trigger.name} allows #{cap} runs at once (concurrency), and that many are going"
 
   defp create(trigger, revision, run) do
     with {:ok, user, principal} <- principal_user(revision),
@@ -976,6 +1033,8 @@ defmodule Troupe.Plane.Triggers do
       "event" => run.event,
       "payload_digest" => run.payload_digest,
       "state" => state_of(run, session),
+      # Why a skipped run started nothing: the cap that said no.
+      "reason" => run.reason,
       "status" => session && session.status,
       "done_reason" => session && session.done_reason,
       "failed_reason" => session && session.failed_reason,

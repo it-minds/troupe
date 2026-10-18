@@ -244,7 +244,7 @@ export interface FakeTeam {
   volume_size: string | null;
   allow_unenforced_workers: boolean;
   /** The repositories its sessions may name and the fix loop's caps, as the plane answers them. */
-  github: { repositories: string[]; max_pushes: number | null; max_runs: number | null };
+  github: { repositories: string[]; max_pushes: number | null; max_runs: number | null; max_attempts?: number | null };
   admins: string[];
   grants: Array<{ profile: string; volume_mode: string | null }>;
   groups: Array<{ external_id: string; display_name: string | null; issuer: string | null; linked_by: string | null }>;
@@ -364,6 +364,8 @@ export interface FakeRun {
   repository: string | null;
   issue: { number: number; url: string | null; title: string | null } | null;
   github: Record<string, unknown> | null;
+  /** Why a skipped run started nothing: the cap that said no. */
+  reason?: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
 }
@@ -614,8 +616,8 @@ const TEAM_REPOSITORY = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?:
 /** A team's `github` as the plane reads it: only the keys sent, each checked, over what the team has. */
 function readTeamGitHub(current: TeamGitHubFake, sent: unknown): { github: TeamGitHubFake } | { refused: Answer } {
   const refused = (field: string, reason: string) => ({ refused: refuse(INVALID_PARAMS, "invalid_params", { field, reason }) });
-  if (sent === null) return { github: { repositories: [], max_pushes: null, max_runs: null } };
-  if (typeof sent !== "object" || Array.isArray(sent)) return refused("github", "github is an object: {repositories, max_pushes, max_runs}");
+  if (sent === null) return { github: { repositories: [], max_pushes: null, max_runs: null, max_attempts: null } };
+  if (typeof sent !== "object" || Array.isArray(sent)) return refused("github", "github is an object: {repositories, max_pushes, max_runs, max_attempts}");
   const github = { ...current };
   for (const [key, value] of Object.entries(sent as Record<string, unknown>)) {
     if (key === "repositories") {
@@ -624,13 +626,13 @@ function readTeamGitHub(current: TeamGitHubFake, sent: unknown): { github: TeamG
       const bad = list.find((r) => typeof r !== "string" || !TEAM_REPOSITORY.test(r.trim()) || r.trim().endsWith("/.."));
       if (bad !== undefined) return refused("github.repositories", `${JSON.stringify(bad)} is not a repository: owner/name, or owner/* for every repository of the owner`);
       github.repositories = [...new Set((list as string[]).map((r) => r.trim()))];
-    } else if (key === "max_pushes" || key === "max_runs") {
+    } else if (key === "max_pushes" || key === "max_runs" || key === "max_attempts") {
       if (value !== null && !(Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 1000)) {
         return refused(`github.${key}`, `github.${key} is a whole number from 1 to 1000, not ${JSON.stringify(value)}`);
       }
       github[key] = value as number | null;
     } else {
-      return refused(`github.${key}`, "github takes repositories, max_pushes, max_runs");
+      return refused(`github.${key}`, "github takes repositories, max_pushes, max_runs, max_attempts");
     }
   }
   return { github };
@@ -834,6 +836,9 @@ export class FakeAdmin {
           });
         }
         if ("github" in attrs) {
+          // On a gitops plane a team's github is the `GitHubApp` resource's.
+          const held = this.heldByRepository(subject, "team.update", team.name, "GitHubApp");
+          if (held) return held;
           // As `GitHub.Policy.read_team/2` reads it: the keys sent, over what the team has.
           const read = readTeamGitHub(team.github, attrs["github"]);
           if ("refused" in read) return read.refused;
@@ -1449,6 +1454,11 @@ export class FakeAdmin {
       case "admin.github.put": {
         if (role !== "platform_admin") return notPlatform;
         const app = ((typeof params["app"] === "object" && params["app"] !== null ? params["app"] : params) ?? {}) as Record<string, unknown>;
+        // On a gitops plane the App's settings are the `GitHubApp` resource's; its key and secret are not.
+        if (["app_id", "api_url", "installations"].some((k) => k in app)) {
+          const held = this.heldByRepository(subject, "github.put", "app", "GitHubApp");
+          if (held) return held;
+        }
         const read = this.readGithub(app);
         if ("error" in read) return read;
         const before = this.githubFields();
@@ -1469,6 +1479,8 @@ export class FakeAdmin {
 
       case "admin.github.delete": {
         if (role !== "platform_admin") return notPlatform;
+        const held = this.heldByRepository(subject, "github.delete", "app", "GitHubApp");
+        if (held) return held;
         if (this.github.app_id === null && this.github.key === null && this.github.installations.length === 0) return refuse(NOT_FOUND, "not_found", { reason: "this plane has no GitHub App" });
         if (this.github.app_id !== null && String(params["app_id"]) !== String(this.github.app_id)) {
           return refuse(INVALID_PARAMS, "invalid_params", { reason: `the App ID to confirm with is ${this.github.app_id}`, app_id: this.github.app_id });
@@ -1701,42 +1713,36 @@ export class FakeAdmin {
         const key = `manual:${row.id}:${subject}:${now.slice(0, 16)}:00Z`;
         this.record(subject, "trigger.run", `${row.team}/${row.name}`, { run: key });
         if (!row.enabled) return refuse(FORBIDDEN, "forbidden", { reason: "trigger is disabled", trigger: row.name });
-        const again = this.runRows.find((r) => r.idempotency_key === key);
-        const live = this.runRows.filter((r) => r.trigger_id === row.id && ["created", "running", "waiting"].includes(r.state)).length;
-        const last = row.revisions.at(-1);
-        const id = `run-${row.name}-manual-${this.runRows.length + 1}`;
-        const skipped = live >= row.concurrency;
-        const made: FakeRun = again ?? {
-          id,
-          team: row.team,
-          trigger: row.name,
-          trigger_id: row.id,
-          idempotency_key: key,
-          session_id: skipped ? null : `s-${id}`,
-          fired_at: now,
-          fired_by: subject,
-          source: "manual",
-          revision: last?.revision ?? null,
-          revision_hash: last?.hash ?? null,
-          event: { kind: "manual", by: subject, at },
-          state: skipped ? "skipped" : "created",
-          status: null,
-          done_reason: null,
-          failed_reason: null,
-          pending_approvals: null,
-          pending_questions: null,
-          cost_micros: null,
-          repository: null,
-          issue: null,
-          github: null,
-          reviewed_by: null,
-          reviewed_at: null,
-        };
-        if (!again) {
-          this.runRows.push(made);
-          row.last_fired_at = now;
+        return { result: this.byHand(row, subject, key, { kind: "manual", by: subject, at }, {}) };
+      }
+
+      // `Admin.trigger_fix/4`, the console's "fix this": one run of a trigger on a GitHub
+      // repository on one of its issues, by its number or its link, by hand.
+      case "admin.trigger.fix": {
+        const found = this.fetchTeam(subject, params["team"]);
+        if ("error" in found) return found;
+        const row = this.triggerRows.find((r) => r.team === found.team.name && r.name === params["name"]);
+        if (!row) return refuse(NOT_FOUND, "not_found", { trigger: params["name"] });
+        const repository = row.source["repository"];
+        if (row.source["kind"] !== "webhook" || typeof repository !== "string") {
+          return refuse(INVALID_PARAMS, "invalid_params", { trigger: row.name, reason: `${row.name} is not a trigger on a GitHub repository: run it with admin.trigger.run` });
         }
-        return { result: { run: { ...made }, session_id: made.session_id, state: made.state } };
+        const text = String(params["issue"] ?? "").trim();
+        this.record(subject, "trigger.fix", `${row.team}/${row.name}`, { issue: text });
+        if (!row.enabled) return refuse(FORBIDDEN, "forbidden", { trigger: row.name, reason: `${row.name} is paused: resume it first` });
+        const link = /^https?:\/\/[^/]+\/([^/]+\/[^/]+)\/issues\/(\d+)$/.exec(text);
+        if (link && link[1]!.toLowerCase() !== repository.toLowerCase()) {
+          return refuse(INVALID_PARAMS, "invalid_params", { field: "issue", reason: `that issue is on ${link[1]}, and this trigger works on ${repository}` });
+        }
+        const number = /^#?\d+$/.test(text) ? Number(text.replace("#", "")) : link ? Number(link[2]) : NaN;
+        if (!Number.isInteger(number) || number <= 0) {
+          return refuse(INVALID_PARAMS, "invalid_params", { field: "issue", reason: `an issue is its number, or its link, such as https://github.com/${repository}/issues/7` });
+        }
+        const now = new Date().toISOString();
+        const key = `fix:${row.id}:${number}:${subject}:${now.slice(0, 16)}:00Z`;
+        const issue = { number, url: `https://github.com/${repository}/issues/${number}`, title: `Issue ${number}` };
+        const event = { github: { event: "fix", action: null, delivery: null }, repository, sender: subject, issue };
+        return { result: this.byHand(row, subject, key, event, { repository, issue }) };
       }
 
       case "admin.runs.list": {
@@ -2258,6 +2264,52 @@ export class FakeAdmin {
     return { locked: true, source: this.gitopsSource, generation: g?.generation ?? null, problem: g?.problem ?? null, problem_generation: null, reasons: g?.reasons ?? [] };
   }
 
+  /**
+   * A run fired by hand, `admin.trigger.run`'s or `admin.trigger.fix`'s, or the one a second
+   * click in the same minute already made; skipped, saying why, over the trigger's cap.
+   */
+  private byHand(row: FakeTrigger, subject: string, key: string, event: Record<string, unknown>, extra: Partial<FakeRun>): Record<string, unknown> {
+    const now = new Date().toISOString();
+    const again = this.runRows.find((r) => r.idempotency_key === key);
+    const live = this.runRows.filter((r) => r.trigger_id === row.id && ["created", "running", "waiting"].includes(r.state)).length;
+    const last = row.revisions.at(-1);
+    const id = `run-${row.name}-manual-${this.runRows.length + 1}`;
+    const skipped = live >= row.concurrency;
+    const made: FakeRun = again ?? {
+      id,
+      team: row.team,
+      trigger: row.name,
+      trigger_id: row.id,
+      idempotency_key: key,
+      session_id: skipped ? null : `s-${id}`,
+      fired_at: now,
+      fired_by: subject,
+      source: "manual",
+      revision: last?.revision ?? null,
+      revision_hash: last?.hash ?? null,
+      event,
+      state: skipped ? "skipped" : "created",
+      status: null,
+      done_reason: null,
+      failed_reason: null,
+      pending_approvals: null,
+      pending_questions: null,
+      cost_micros: null,
+      repository: null,
+      issue: null,
+      github: null,
+      reason: skipped ? `${row.name} allows ${row.concurrency === 1 ? "1 run at once (concurrency), and one is" : `${row.concurrency} runs at once (concurrency), and that many are`} going` : null,
+      reviewed_by: null,
+      reviewed_at: null,
+      ...extra,
+    };
+    if (!again) {
+      this.runRows.push(made);
+      row.last_fired_at = now;
+    }
+    return { run: { ...made }, session_id: made.session_id, state: made.state };
+  }
+
   /** The refusal every write to what a repository holds gets on a gitops plane, recorded as the attempt it is. */
   private heldByRepository(subject: string, action: string, name: string, kind: string): Refusal | null {
     if (this.mode !== "gitops") return null;
@@ -2334,9 +2386,16 @@ export class FakeAdmin {
         if (typeof source["repository"] !== "string" || !/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/.test(source["repository"])) {
           return refuse(INVALID_PARAMS, "invalid_params", { reason: `source: ${String(source["repository"])} is not a GitHub repository, owner/name` });
         }
-        if (!source["label"] && !source["command"]) {
-          return refuse(INVALID_PARAMS, "invalid_params", { reason: "source: a GitHub trigger names a label, a command, or both: what on an issue starts a run" });
+        if (!source["label"] && !source["command"] && !source["sweep"]) {
+          return refuse(INVALID_PARAMS, "invalid_params", { reason: "source: a GitHub trigger names a label, a command or a sweep, or more than one: what on an issue starts a run" });
         }
+        if (source["sweep"] !== undefined && (typeof source["sweep"] !== "string" || source["sweep"].trim().split(/\s+/).length !== 5)) {
+          return refuse(INVALID_PARAMS, "invalid_params", { reason: "source: sweep is a five-field cron in UTC" });
+        }
+        if (source["sweep"] && !source["label"] && !source["query"]) {
+          return refuse(INVALID_PARAMS, "invalid_params", { reason: "source: a sweep looks for the trigger's label, or for what a query finds: it has neither" });
+        }
+        if (source["query"] && !source["sweep"]) return refuse(INVALID_PARAMS, "invalid_params", { reason: "source: a query is what a sweep looks for, and this source has no sweep" });
       }
       if (source["tz"] !== undefined && source["tz"] !== null && source["tz"] !== "" && source["tz"] !== "UTC") {
         return refuse(INVALID_PARAMS, "invalid_params", { reason: `source: ${String(source["tz"])} is not a zone this plane keeps; it keeps UTC` });
@@ -2709,8 +2768,11 @@ export class FakeAdmin {
       private_key: { set: g.key !== null, type: g.key?.type ?? null, fingerprint: g.key?.fingerprint ?? null, transit_key: "troupe-github-app", version: g.key?.version ?? null },
       webhook: { path: "/webhook/github", secret: { set: g.webhook_secret_version !== null, transit_key: "troupe-github-webhook", version: g.webhook_secret_version } },
       permissions: { contents: "read" },
+      resource_generation: this.mode === "gitops" && g.app_id !== null ? 1 : null,
       updated_by: g.updated_by,
       updated_at: g.updated_at,
+      // On a gitops plane its settings are a `GitHubApp` resource's, as the plane says.
+      ...(this.mode === "gitops" ? { gitops: { resource: "github", generation: g.app_id !== null ? 1 : null, source: this.gitopsSource, problem: null, reasons: [] } } : {}),
     };
   }
 
@@ -3281,7 +3343,20 @@ export function exampleAdmin(): FakeAdmin {
       },
     }),
     run({ id: "run-nightly-14", team: "core", trigger: "nightly-deps", fired_at: "2026-10-14T03:00:00Z", state: "failed", status: "interrupted", done_reason: null, failed_reason: "the turn hit its wall clock", cost_micros: 900_000 }),
-    run({ id: "run-nightly-13", team: "core", trigger: "nightly-deps", fired_at: "2026-10-13T03:00:00Z", session_id: null, state: "skipped", status: null, done_reason: null, cost_micros: null, reviewed_by: "dan@example.com", reviewed_at: "2026-10-13T09:00:00Z" }),
+    run({
+      id: "run-nightly-13",
+      team: "core",
+      trigger: "nightly-deps",
+      fired_at: "2026-10-13T03:00:00Z",
+      session_id: null,
+      state: "skipped",
+      status: null,
+      done_reason: null,
+      cost_micros: null,
+      reason: "nightly-deps allows 1 run at once (concurrency), and one is going",
+      reviewed_by: "dan@example.com",
+      reviewed_at: "2026-10-13T09:00:00Z",
+    }),
     run({ id: "run-digest-1", team: "design", trigger: "weekly-digest", fired_at: "2026-10-12T08:00:00Z", source: "webhook", state: "waiting", status: "waiting", done_reason: null, pending_approvals: 1, cost_micros: 200_000 }),
   );
   admin.stored.set("client_model_default", "glm-5.2");

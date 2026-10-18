@@ -21,10 +21,14 @@ defmodule Troupe.Plane.Triggers.Scheduler do
 
   Handles no webhooks and no retries beyond the next tick, which is the honest reason to
   run Hatchet beside a larger plane.
+
+  It also runs the sweeps of triggers on a GitHub repository (`source.sweep`), each at its
+  own cron's minutes and with the same once-a-minute mark (`GitHub.Issues.sweep/2`).
   """
 
   use GenServer
 
+  alias Troupe.Plane.GitHub.Issues
   alias Troupe.Plane.Singleton
   alias Troupe.Plane.Triggers
   alias Troupe.Plane.Triggers.{Cron, Trigger}
@@ -53,7 +57,7 @@ defmodule Troupe.Plane.Triggers.Scheduler do
   scheduler calls it with the wall clock.
   """
   @spec tick(DateTime.t()) :: [
-          {Triggers.Trigger.t(), DateTime.t(), {:ok, map()} | {:error, term()}}
+          {Triggers.Trigger.t(), DateTime.t(), {:ok, map() | [map()]} | {:error, term()}}
         ]
   def tick(now \\ DateTime.utc_now()) do
     for trigger <- Triggers.scheduled(),
@@ -78,8 +82,43 @@ defmodule Troupe.Plane.Triggers.Scheduler do
 
       report(trigger, due, result)
       {trigger, due, result}
+    end ++ sweep(now)
+  end
+
+  # A trigger on a GitHub repository with a `sweep` goes over the repository's open issues
+  # at its minutes (`GitHub.Issues`), marked as a schedule is, so a minute is swept once
+  # between replicas; each run it starts has a key of the trigger, the minute and the issue.
+  defp sweep(now) do
+    for trigger <- Triggers.sweeping(),
+        {:ok, cron} <- [Cron.parse(trigger.source["sweep"])],
+        due = Cron.previous(cron, now),
+        due?(trigger, due, now),
+        Triggers.mark_fired(trigger, due) do
+      result = Issues.sweep(trigger, due)
+      report_sweep(trigger, due, result)
+      {trigger, due, result}
     end
   end
+
+  defp report_sweep(trigger, due, {:ok, outcomes}) do
+    started = Enum.count(outcomes, &is_binary(&1["session_id"]))
+
+    Logger.info(
+      "troupe plane: swept #{trigger.source["repository"]} for #{trigger.name} at " <>
+        "#{DateTime.to_iso8601(due)}: #{length(outcomes)} #{issues(length(outcomes))}, " <>
+        "#{started} started"
+    )
+  end
+
+  defp report_sweep(trigger, due, {:error, reason}) do
+    Logger.warning(
+      "troupe plane: could not sweep #{trigger.source["repository"]} for #{trigger.name} at " <>
+        "#{DateTime.to_iso8601(due)}: #{reason}"
+    )
+  end
+
+  defp issues(1), do: "issue"
+  defp issues(_n), do: "issues"
 
   defp due?(_trigger, nil, _now), do: false
 

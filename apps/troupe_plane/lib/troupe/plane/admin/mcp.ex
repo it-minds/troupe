@@ -252,7 +252,7 @@ defmodule Troupe.Plane.Admin.MCP do
     }
   end
 
-  @not_idempotent ~w(admin.principal.create admin.trigger.run admin.bundle.publish)
+  @not_idempotent ~w(admin.principal.create admin.trigger.run admin.trigger.fix admin.bundle.publish)
 
   defp idempotent?(%Method{name: name}), do: name not in @not_idempotent
 
