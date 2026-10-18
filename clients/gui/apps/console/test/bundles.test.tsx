@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -102,7 +102,7 @@ describe("publishing", () => {
     button("Check and preview")!.click();
     await waitFor(() => says("core loses the agent pr-reviewer on dev: its grant allows an entry this version no longer has."), "who loses what");
     await sees("Every pod on dev, ux, build-box is told to update");
-    expect(button("Publish to stable")!.disabled).toBe(true);
+    expect((await seesButton("Publish to stable")).disabled).toBe(true);
     type(field("Type stable to confirm")!, "stable");
     await waitFor(() => !button("Publish to stable")!.disabled, "the name typed");
     button("Publish to stable")!.click();

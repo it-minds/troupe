@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, render, says, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -70,7 +70,7 @@ describe("a trigger", () => {
     await sees("2026-10-13 03:00 UTC");
     await sees("Revision 1");
     // Running it is offered here, and nothing sends a person to the admin API or a page under /admin for it.
-    expect(button("Run nightly-deps now")).not.toBeNull();
+    await seesButton("Run nightly-deps now");
     expect(says("admin.trigger.run")).toBe(false);
     expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);
     // A schedule is fired by the plane, so it has no key to rotate.
@@ -125,7 +125,7 @@ describe("a trigger", () => {
 
     (await waitFor(() => button("Delete nightly-deps"), "the page again")).click();
     await waitFor(() => says("Type nightly-deps to confirm"), "the typed confirmation");
-    expect(button("Delete nightly-deps")!.disabled).toBe(true);
+    expect((await seesButton("Delete nightly-deps")).disabled).toBe(true);
     type(field("Type nightly-deps to confirm")!, "nightly-deps");
     await waitFor(() => !button("Delete nightly-deps")!.disabled, "the name typed");
     button("Delete nightly-deps")!.click();
@@ -187,7 +187,7 @@ describe("a webhook's key and a trigger on a GitHub repository", () => {
     await waitFor(() => says("stops working the moment you rotate it"), "the preview");
     await sees("There is no overlap.");
     await sees("The new key is shown once");
-    expect(button("Rotate weekly-digest's key")!.disabled).toBe(true);
+    expect((await seesButton("Rotate weekly-digest's key")).disabled).toBe(true);
     expect(trigger("design", "weekly-digest")!.key).toBe("twk_theoldone");
 
     type(field("Type weekly-digest to confirm")!, "weekly-digest");
@@ -258,7 +258,7 @@ describe("a webhook's key and a trigger on a GitHub repository", () => {
     type(field("Fired by")!, "github");
     type(await waitFor(() => field("Repository"), "the GitHub fields"), "not a repository");
     await waitFor(() => says("owner/name, as GitHub writes it."), "the repository refused");
-    expect(button("Preview")!.disabled).toBe(true);
+    expect((await seesButton("Preview")).disabled).toBe(true);
     type(field("Repository")!, "example-org/widgets");
     await waitFor(() => button("Preview")!.disabled, "a label or a command still wanted");
     type(field("Label")!, "troupe-fix");
@@ -291,6 +291,6 @@ describe("a plane in gitops mode", () => {
     expect(button("Pause nightly-deps")).toBeNull();
     expect(button("Delete nightly-deps")).toBeNull();
     // Running it is something done with it, not a change to what the repository holds.
-    expect(button("Run nightly-deps now")).not.toBeNull();
+    await seesButton("Run nightly-deps now");
   });
 });
