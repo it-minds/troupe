@@ -20,6 +20,19 @@ defmodule Troupe.Registry do
   @spec session(String.t()) :: GenServer.name()
   def session(session_id), do: via({:session, session_id})
 
+  @doc "The session's name, registered with `value` beside it, which `value/1` reads back."
+  @spec session(String.t(), term()) :: GenServer.name()
+  def session(session_id, value), do: {:via, Registry, {@registry, {:session, session_id}, value}}
+
+  @doc "What was registered beside a key, or `nil` when nothing is registered under it."
+  @spec value(tuple()) :: term()
+  def value(key) do
+    case Registry.lookup(@registry, key) do
+      [{_pid, value}] -> value
+      [] -> nil
+    end
+  end
+
   @spec log(String.t()) :: GenServer.name()
   def log(session_id), do: via({:log, session_id})
 

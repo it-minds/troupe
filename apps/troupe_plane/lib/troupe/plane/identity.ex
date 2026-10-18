@@ -769,21 +769,29 @@ defmodule Troupe.Plane.Identity do
   # from the audit trail, where each refusal is, because a refused push leaves no second row
   # behind to find; a sign-in leaves its own, under the subject, and it is listed beside the
   # row, as is the row a push keyed on when the unique `externalId` refused it (`other`).
+  # A refusal a later push resolved by agreeing (`person.adopt_agreed`) is not listed; one
+  # after that is.
   defp refused_adoptions do
     settled =
       from(e in "audit_events", where: e.action == "person.adopt", select: e.detail)
       |> Repo.all()
       |> MapSet.new(&{&1["subject"], &1["row"]})
 
+    agreed = agreements()
+
     from(e in "audit_events",
       where: e.action == "person.adopt_refused",
       order_by: [desc: e.occurred_at],
       limit: 500,
-      select: e.detail
+      select: {e.detail, e.occurred_at}
     )
     |> Repo.all()
-    |> Enum.uniq_by(&{&1["subject"], &1["row"]})
-    |> Enum.reject(&MapSet.member?(settled, {&1["subject"], &1["row"]}))
+    |> Enum.uniq_by(fn {detail, _at} -> {detail["subject"], detail["row"]} end)
+    |> Enum.reject(fn {detail, at} ->
+      pair = {detail["subject"], detail["row"]}
+      MapSet.member?(settled, pair) or later?(Map.get(agreed, pair), at)
+    end)
+    |> Enum.map(&elem(&1, 0))
     |> Enum.flat_map(fn detail ->
       subject = detail["subject"]
 
@@ -798,6 +806,61 @@ defmodule Troupe.Plane.Identity do
       end
     end)
     |> Enum.uniq_by(&Enum.map(&1.rows, fn row -> row.id end))
+  end
+
+  # The last time a push under each subject agreed with the row SCIM gave it, after a
+  # refusal of the pair, by pair.
+  defp agreements(pair \\ dynamic(true)) do
+    from(e in "audit_events",
+      where: e.action == "person.adopt_agreed",
+      where: ^pair,
+      group_by: [fragment("?->>'subject'", e.detail), fragment("?->>'row'", e.detail)],
+      select:
+        {fragment("?->>'subject'", e.detail), fragment("?->>'row'", e.detail), max(e.occurred_at)}
+    )
+    |> Repo.all()
+    |> Map.new(fn {subject, row, at} -> {{subject, row}, at} end)
+  end
+
+  defp later?(nil, _refused_at), do: false
+
+  defp later?(agreed_at, refused_at),
+    do: NaiveDateTime.compare(stamp(agreed_at), stamp(refused_at)) == :gt
+
+  defp stamp(%DateTime{} = at), do: DateTime.to_naive(at)
+  defp stamp(at), do: at
+
+  @doc """
+  Whether a refusal of the pair still stands: the last `person.adopt_refused` of a push or
+  a sign-in under `subject` onto the row SCIM gave it, with no administrator's settlement
+  and no agreeing push since. A push that agrees then resolves it, audited
+  `person.adopt_agreed` by its caller (`Troupe.Plane.SCIM`), and the pair is no longer
+  listed; asked first, so that a provider's every sync of an agreeing record audits nothing.
+  Unlike a settlement, an agreement lets no later push that disagrees past the check.
+  """
+  @spec refusal_standing?(String.t(), Ecto.UUID.t()) :: boolean()
+  def refusal_standing?(subject, row_id) do
+    pair =
+      dynamic(
+        [e],
+        fragment("?->>'subject' = ?", e.detail, ^subject) and
+          fragment("?->>'row' = ?", e.detail, ^row_id)
+      )
+
+    refused_at =
+      Repo.one(
+        from(e in "audit_events",
+          where: e.action == "person.adopt_refused",
+          where: ^pair,
+          select: max(e.occurred_at)
+        )
+      )
+
+    settled? =
+      Repo.exists?(from(e in "audit_events", where: e.action == "person.adopt", where: ^pair))
+
+    refused_at != nil and not settled? and
+      not later?(Map.get(agreements(pair), {subject, row_id}), refused_at)
   end
 
   @settle "or, if they are one person, settle it here (admin.identity.adopt), which keeps SCIM's row"

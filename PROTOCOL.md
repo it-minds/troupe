@@ -1635,6 +1635,8 @@ from, and every other key of `config.yaml` — for a settings screen, so the des
 the terminal UI show and change the same settings (#57). **The daemon's only**: a worker
 answers `method_not_found`, because a pod's provider is its profile's business — or
 `forbidden` to a token for one session, like every method not about its session (§7).
+The one exception is `config.get` naming a session (below), which a pod answers too,
+its session's own token included.
 They edit `config.yaml` at the scopes of the configuration ladder: the user's file in the
 daemon's config directory (`user`), a workspace's `.troupe/config.yaml` (`project`) and its
 git-ignored `.troupe/config.local.yaml` (`local`). A client names a scope and never a
@@ -1695,6 +1697,31 @@ keys: every scope's are kept together rather than the highest one's, so `keys` l
 `allow` in a project's file of a workspace that is not trusted, or any `allow` but the
 organisation's under `managed_permission_rules_only`), else null. A client shows them and
 sets none. A daemon before #658 sends no `permissions`.
+
+```json
+{"session_id": "20261018T101112-a1B2c3", "explain": "text", "key": "max_turns"}
+```
+`config.get` with a `session_id` (`observe`) is that running session's configuration
+instead, what is in force in it (Decision 918): what was resolved as it started, each value
+and rule with where it came from, so a file changed since does not change the answer. A
+daemon answers it for its own sessions and a worker for its pod's, to the session's own
+token as to anyone the session's role lets observe; a session not running there is
+`not_found`. The answer is `workspace`, `trusted`, `files`, `organisation`, `keys`,
+`permissions`, `warnings` and `errors` as above, without the model panel's fields, plus
+`session_id` and `pod`. On a pod (`pod: true`) `layer` has two more values: `profile`, the
+worker profile's settings, which are the pod's environment, its `source` naming the
+profile and the variable (`the worker profile fixing (TROUPE_MODEL)`); and `session`, the
+terms the session was created with (`the session's terms`). What the platform enforces
+(`managed_permission_rules_only`, `managed_mcp_servers_only`) is `enforced`, from `the
+plane's platform settings`; what the pod sets of its own is `cli`, from `the worker pod`;
+the worker profile's rules are in `permissions` with `scope` `profile` and `source` the
+profile that wrote each; and a repository's own files are read as a pod reads them, no key
+marked trusted taken from them. No key has a scope on a pod: none of it is a client's to
+write. `explain` (`text` or `json`) adds what `troupe config --explain` prints for the
+session, as `explain` (a string, or the JSON object), with `explain_status`, the exit
+status it would have; `key` narrows it as `--explain KEY` does. A daemon or worker from
+before Decision 918 does not answer this: an answer without `session_id` is not the
+session's, and a worker refuses a session's token `forbidden`.
 
 ```json
 {"provider": "openai", "base_url": "https://llm-gw.example/v1", "api_key": "sk-...", "auth": "bearer"}

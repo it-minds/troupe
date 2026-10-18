@@ -39,8 +39,11 @@ and four gateway tests that spawn or `kill -9` a daemon. They pass on a Linux ru
 the worker's KMS and the plane's transit at `localhost:28200` with the dev root token — "for
 these two environments only".
 
-Stop them with `scripts/dev-down`; `scripts/dev-down --purge` also removes the volumes
-(`scripts/dev-down:7-11`).
+Stop them with `scripts/dev-down`; `scripts/dev-down --purge` also removes the volumes.
+Each checkout's plane suite makes a test database of its own, and those of removed
+worktrees stay: `scripts/dev-down --test-databases [DAYS]` stops nothing and drops the
+ones made more than a week (or DAYS days) ago, saying each, and keeps one in use. A
+checkout that still runs its suite makes its own again.
 
 Then create and migrate the test database (compose creates only `troupe_plane_dev`; the
 plane's `test_helper.exs` says so when it finds none), and run the gate:

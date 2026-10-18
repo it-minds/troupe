@@ -267,6 +267,7 @@ export {
   describeOverride,
   discoveryParams,
   formFromConfig,
+  keySource,
   modelConfigError,
   providerTypes,
   ruleScope,
@@ -289,6 +290,7 @@ export type {
   ModelsParams,
   PermissionRule,
   ProviderTypeInfo,
+  SessionConfig,
 } from "./config.js";
 export { PATH_TOOLS, RULE_ACTIONS, checkRuleSet, parseRule, ruleKind, ruleParts } from "./rules.js";
 export type { ReadRule, RuleAction, RuleKind, RuleSet } from "./rules.js";

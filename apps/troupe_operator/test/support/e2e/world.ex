@@ -295,6 +295,10 @@ defmodule Troupe.E2E.World do
   Polling rather than `kubectl wait`, because most of what this suite waits for is not a
   condition Kubernetes has a word for — a log continuing from a head hash, a bundle
   materialising, a prompt reaching a witness.
+
+  `:explain`, a function answering text, is asked once when it gives up, and what it says
+  goes into the failure: the state of what was waited on, so a job log that times out says
+  why rather than only what.
   """
   @spec eventually((-> boolean()), keyword()) :: :ok
   def eventually(check, opts \\ []) do
@@ -303,21 +307,29 @@ defmodule Troupe.E2E.World do
     what = Keyword.get(opts, :what, "a condition")
 
     deadline = System.monotonic_time(:millisecond) + timeout
-    poll(check, deadline, every, what)
+    poll(check, deadline, every, what, Keyword.get(opts, :explain))
   end
 
-  defp poll(check, deadline, every, what) do
+  defp poll(check, deadline, every, what, explain) do
     cond do
       check.() ->
         :ok
 
       System.monotonic_time(:millisecond) >= deadline ->
-        raise "e2e: gave up waiting for #{what}"
+        raise "e2e: gave up waiting for #{what}" <> explained(explain)
 
       true ->
         Process.sleep(every)
-        poll(check, deadline, every, what)
+        poll(check, deadline, every, what, explain)
     end
+  end
+
+  defp explained(nil), do: ""
+
+  defp explained(explain) do
+    ":\n" <> explain.()
+  rescue
+    error -> " (and saying why failed too: #{Exception.message(error)})"
   end
 
   @doc """

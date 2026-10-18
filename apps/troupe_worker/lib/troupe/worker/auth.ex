@@ -40,8 +40,9 @@ defmodule Troupe.Worker.Auth do
   # that session's topics; and the listings, narrowed to it. Everything else a pod serves is
   # about the pod rather than a session — a session created in any workspace, the brief,
   # agents or workflows of a path, the workspaces and worktrees the pod has seen, the
-  # machine's settings and identity. `initialize` and `auth.refresh` are the connection's
-  # own and never get here.
+  # machine's settings and identity, but for `config.get` naming the session, which is its
+  # own configuration. `initialize` and `auth.refresh` are the connection's own and never
+  # get here.
   @session_methods ~w(
     subscribe unsubscribe session.list fleet.get
     session.get commands.list commands.run
@@ -277,10 +278,21 @@ defmodule Troupe.Worker.Auth do
 
   defp confined(state, subject, session_id, method, named) do
     case Enum.find(named, fn {_field, id} -> id != session_id end) do
-      nil -> method_refusal(method) || held_to_acl(state, subject, [{"session_id", session_id}])
-      {field, _other} -> another_session(field)
+      nil ->
+        method_refusal(method, named) || held_to_acl(state, subject, [{"session_id", session_id}])
+
+      {field, _other} ->
+        another_session(field)
     end
   end
+
+  # `config.get` naming the token's session is that session's configuration, what is in
+  # force in it; without one it is the pod's own settings, which are not the session's.
+  defp method_refusal("config.get", named) do
+    unless List.keymember?(named, "session_id", 0), do: not_about_the_session("config.get")
+  end
+
+  defp method_refusal(method, _named), do: method_refusal(method)
 
   defp method_refusal(method) when method in @plane_methods, do: through_the_plane(method)
 

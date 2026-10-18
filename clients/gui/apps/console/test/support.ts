@@ -159,6 +159,20 @@ export function button(label: string, within: ParentNode = document): HTMLButton
   return [...within.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim().startsWith(label)) ?? null;
 }
 
+/**
+ * Wait for the button whose words begin with `label`, as `sees` waits for words, and answer
+ * it. `expect(button(…)).not.toBeNull()` and a read of a button found at once
+ * (`button(…)!.disabled`) are refused by `waits.test.tsx` unless marked `// at once: <why>`.
+ */
+export function seesButton(label: string, within: ParentNode = document): Promise<HTMLButtonElement> {
+  return waitFor(() => button(label, within), `the button "${label}"`);
+}
+
+/** Wait for the field a label names, as `seesButton` waits for a button, and answer it. */
+export function seesField(label: string, within: ParentNode = document): Promise<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> {
+  return waitFor(() => field(label, within), `the field "${label}"`);
+}
+
 /** The link whose words begin with `label`. */
 export function link(label: string, within: ParentNode = document): HTMLAnchorElement | null {
   return [...within.querySelectorAll("a")].find((a) => (a.textContent ?? "").trim().startsWith(label)) ?? null;

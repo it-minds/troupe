@@ -13,7 +13,7 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { GoalLine } from "../src/views/Goal";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, render, says, sees, sleep, startOnTheList, type, waitFor } from "./support";
+import { button, render, says, sees, seesButton, sleep, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -174,7 +174,7 @@ describe("the loop in the session's head", () => {
     await waitFor(() => daemon.calls.some((c) => c.method === "session.loop.stop"), "session.loop.stop");
     await waitFor(() => loopPill() === null, "the loop pill gone");
     await waitFor(() => head().querySelector(".goal-note")?.textContent === "loop stopped after 2 iterations: stopped on request", "how the loop ended");
-    expect(button("Loop", head())).not.toBeNull();
+    await seesButton("Loop", head());
   });
 
   it("says plainly that a loop needs a goal, and what a cap has to be", async () => {

@@ -173,11 +173,35 @@ defmodule Troupe.Plane.SCIM do
   # refuses it (`save_user/1`).
   defp subject_for(subject, %{external_id: external_id} = attrs) do
     case Identity.adoption(subject, external_id, attrs) do
-      :none -> {:ok, subject}
-      {:fold, _signed, _held} -> {:ok, subject}
-      {:adopt, %User{subject: moved}} -> {:ok, moved}
-      {:refused, held} -> refuse_adoption(held, subject)
+      :none ->
+        {:ok, subject}
+
+      {:fold, _signed, _held} ->
+        {:ok, subject}
+
+      {:adopt, %User{subject: moved} = held} ->
+        :ok = agreed(held, subject)
+        {:ok, moved}
+
+      {:refused, held} ->
+        refuse_adoption(held, subject)
     end
+  end
+
+  # A push that agrees after one of the pair was refused resolves the refusal, which is no
+  # longer listed; the provider sent the right record. Audited once, not at every sync.
+  defp agreed(held, subject) do
+    if Identity.refusal_standing?(subject, held.id) do
+      {:ok, _} =
+        Audit.record("scim", "person.adopt_agreed", subject, %{
+          "subject" => subject,
+          "row" => held.id,
+          "row_subject" => held.subject,
+          "via" => "scim"
+        })
+    end
+
+    :ok
   end
 
   defp refuse_adoption(held, subject) do

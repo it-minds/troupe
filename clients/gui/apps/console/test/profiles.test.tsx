@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { budgetMicros, draftOf, keptOf, llmWithoutEndpoint } from "../src/views/Profiles";
-import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, sees, seesButton, seesField, signedInAs, startFake, type, visit, waitFor } from "./support";
 import { PROVIDER_TYPES } from "../../../packages/client/test/support/provider-types.js";
 import type { FakeDeployment } from "./support";
 
@@ -47,7 +47,7 @@ describe("the profile list", () => {
     await sees("none", () => row("heavy"));
     await sees("unknown", () => row("build-box"));
     expect(link("dev", row("dev")!)!.getAttribute("href")).toBe("#/profiles/dev");
-    expect(button("New profile")).not.toBeNull();
+    await seesButton("New profile");
   });
 
   it("shows a team admin the profiles their teams are granted, and no profile's page or editor", async () => {
@@ -270,8 +270,8 @@ describe("the editor", () => {
     try {
       type(await waitFor(() => field("Endpoint"), "the editor"), "");
       await waitFor(() => says("llm.provider, llm.model, llm.smallModel, llm.secretRef and llm.prices are set without an endpoint"), "the rule at the field");
-      expect(field("Endpoint")!.getAttribute("aria-invalid")).toBe("true");
-      expect(button("Preview")!.disabled).toBe(true);
+      expect((await seesField("Endpoint")).getAttribute("aria-invalid")).toBe("true");
+      expect((await seesButton("Preview")).disabled).toBe(true);
       expect(calls.some((c) => c.method === "admin.profile.preview" || c.method === "admin.profile.put")).toBe(false);
       type(field("Endpoint")!, "https://llm-gw.example.com/v2");
       await waitFor(() => !says("set without an endpoint") && !button("Preview")!.disabled, "the rule satisfied");
@@ -377,7 +377,7 @@ describe("a profile that extends another", () => {
     expect((field("How demanding") as HTMLSelectElement).value).toBe("");
     type(field("Allowed hosts")!, "wiki.example.com");
     // No image of its own: it is dev's.
-    expect(button("Preview")!.disabled).toBe(false);
+    expect((await seesButton("Preview")).disabled).toBe(false);
     button("Preview")!.click();
     await waitFor(() => says("What will happen") && says("extends"), "the preview");
     button("Create data-team")!.click();
@@ -518,7 +518,7 @@ describe("a profile's permission rules", () => {
     (await waitFor(() => button("Add a deny rule"), "the editor")).click();
     type(await waitFor(() => ruleRow("deny", 1) && field("Tool", ruleRow("deny", 1)!), "the new row"), "Bash");
     await waitFor(() => says("Bash is another tool's name for it; Troupe's is shell, as in shell(...)", ruleRow("deny", 1)!), "the tool refused");
-    expect(button("Preview")!.disabled).toBe(true);
+    expect((await seesButton("Preview")).disabled).toBe(true);
 
     type(field("Tool", ruleRow("deny", 1)!)!, "shell");
     type(field("Pattern", ruleRow("deny", 1)!)!, "curl");

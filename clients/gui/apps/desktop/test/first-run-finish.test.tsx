@@ -130,7 +130,7 @@ describe("finishing a first run that names a plane", () => {
     button("Finish and sign in")!.click();
 
     await sees("The daemon has not answered in 0.4 seconds");
-    expect(button("Back")!.disabled).toBe(false);
+    await waitFor(() => button("Back")?.disabled === false, "Back given back");
     await signingInTo(harness!.plane.baseUrl, opened);
   });
 
@@ -157,7 +157,7 @@ describe("no first-run screen is left stuck", () => {
     button("Continue")!.click();
 
     await sees("The daemon has not answered in 0.4 seconds");
-    expect(button("Continue")!.disabled).toBe(false);
+    await waitFor(() => button("Continue")?.disabled === false, "Continue given back");
     // The answer, when it comes, is the step the daemon is at.
     await waitFor(() => says("Which model provider?"), "the provider step");
   });

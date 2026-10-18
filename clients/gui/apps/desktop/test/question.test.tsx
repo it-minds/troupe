@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { Entry } from "@troupe/client";
 import { QuestionPanel } from "../src/views/Question";
-import { button, render, says, type, waitFor } from "./support";
+import { button, render, says, seesButton, type, waitFor } from "./support";
 
 type Question = Extract<Entry, { kind: "question" }>;
 
@@ -48,7 +48,7 @@ describe("the budget question", () => {
     await waitFor(() => says("the turn limit is a safety net"), "the harness's words");
     const ten = await waitFor(() => button("+10 turns this run"), "the first option");
     expect(ten.title).toBe("for the run in flight (about $0.30)");
-    expect(button("stop")).not.toBeNull();
+    await seesButton("stop");
 
     ten.click();
     await waitFor(() => answers.length === 1, "the option answered");
@@ -67,7 +67,7 @@ describe("the budget question", () => {
     ({ unmount } = render(<QuestionPanel entry={budget([])} canAnswer onAnswer={async () => undefined} />));
 
     await waitFor(() => button("Spend one more slice"), "the old first answer");
-    expect(button("Stop here")).not.toBeNull();
-    expect(button("Lift this limit for the session")).not.toBeNull();
+    await seesButton("Stop here");
+    await seesButton("Lift this limit for the session");
   });
 });
