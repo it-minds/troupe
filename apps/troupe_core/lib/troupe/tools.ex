@@ -360,12 +360,29 @@ defmodule Troupe.Tools do
 
   # A tool this turn was offered whose server or client has gone since (Decision 871): it
   # is still in the tools the model is sent until the turn ends, and a call to it is told so.
-  defp or_gone({:error, {:unknown_tool, _name}} = unknown, name, %Ctx{turn_tools: held})
-       when is_list(held) do
-    if Enum.any?(held, &(Tool.name(&1) == name)), do: {:error, {:tool_gone, name}}, else: unknown
+  # A person's own tool says whose it was and that their client left, in this turn or a
+  # later one; a name nobody ever offered the session stays unknown.
+  defp or_gone({:error, {:unknown_tool, _name}} = unknown, name, %Ctx{turn_tools: held} = ctx) do
+    case departed(name, ctx.session_id) do
+      {:ok, gone} ->
+        {:error, {:client_tool_gone, name, gone.who, gone.reason}}
+
+      :error ->
+        if is_list(held) and Enum.any?(held, &(Tool.name(&1) == name)),
+          do: {:error, {:tool_gone, name}},
+          else: unknown
+    end
   end
 
   defp or_gone(found, _name, _ctx), do: found
+
+  defp departed(name, session_id) when is_binary(session_id) do
+    if String.starts_with?(name, ClientTools.prefix()),
+      do: ClientTools.departed(session_id, name),
+      else: :error
+  end
+
+  defp departed(_name, _session_id), do: :error
 
   @doc """
   Run a `:task` tool, blocking on approval if the profile asks for one.

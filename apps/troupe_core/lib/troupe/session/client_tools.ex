@@ -167,6 +167,34 @@ defmodule Troupe.Session.ClientTools do
   @spec owner(String.t(), String.t()) :: {:ok, pid()} | :error
   def owner(session_id, name), do: call(session_id, {:owner, name}, :error)
 
+  @doc """
+  Whose the client tool `name` was and why it went, for a name a client offered this
+  session once and nobody offers now: `{:ok, %{who: name | nil, reason: reason | nil}}`,
+  or `:error` for a name this session never had.
+
+  Read from the log, so it holds across a restart of the session: a call to the tool is
+  answered with whose it was and that their client left, where a bare "no tool named"
+  could as well be a name the model got wrong.
+  """
+  @spec departed(String.t(), String.t()) ::
+          {:ok, %{who: String.t() | nil, reason: String.t() | nil}} | :error
+  def departed(session_id, name) do
+    session_id
+    |> Log.replay()
+    |> Enum.reduce(:error, fn
+      %Event{type: "tools_registered", data: %{"tools" => tools}} = event, acc ->
+        if name in tools, do: {:ok, %{who: name_of(event.actor), reason: nil}}, else: acc
+
+      %Event{type: "tools_unregistered", data: %{"tools" => tools} = data}, {:ok, gone} ->
+        if name in tools, do: {:ok, %{gone | reason: data["reason"]}}, else: {:ok, gone}
+
+      _event, acc ->
+        acc
+    end)
+  catch
+    :exit, _reason -> :error
+  end
+
   @doc "What has tainted this session, oldest first."
   @spec taint(String.t()) :: [map()]
   def taint(session_id), do: call(session_id, :taint, [])
@@ -243,7 +271,9 @@ defmodule Troupe.Session.ClientTools do
   def handle_call({:register, connection, consent, opts}, _from, state) do
     specs = Keyword.fetch!(opts, :specs)
     subject = Keyword.fetch!(opts, :subject)
-    actor = Keyword.get(opts, :actor)
+    # The person the consent was spent for, when the caller names nobody else: whose the
+    # tools are is what the session is told when they go.
+    actor = Keyword.get(opts, :actor) || Event.Actor.user(subject)
     names = Enum.map(specs, & &1.name)
 
     case spend(state, consent, connection, subject, names) do
@@ -467,15 +497,21 @@ defmodule Troupe.Session.ClientTools do
     if gone == [] do
       {[], state}
     else
+      actor = Map.fetch!(state.tools, hd(gone)).actor
       tools = Map.drop(state.tools, gone)
 
       monitors = unwatch(state.monitors, tools, connection)
 
-      Log.append(state.session_id, ["root"], :tools_unregistered, %{
-        "tools" => gone,
-        "connection" => inspect(connection),
-        "reason" => reason
-      })
+      # Whose they were, as the registration said, so the people in the session can be told
+      # whose tools left and not only which.
+      Log.append(
+        state.session_id,
+        ["root"],
+        :tools_unregistered,
+        %{"tools" => gone, "connection" => inspect(connection), "reason" => reason}
+        |> put_actor(actor),
+        actor
+      )
 
       {gone, %{state | tools: tools, monitors: monitors}}
     end
@@ -486,4 +522,13 @@ defmodule Troupe.Session.ClientTools do
 
   defp subject_of(%Event.Actor{subject: subject}) when is_binary(subject), do: subject
   defp subject_of(_actor), do: "system"
+
+  defp put_actor(data, %Event.Actor{subject: subject}) when is_binary(subject),
+    do: Map.put(data, "actor", subject)
+
+  defp put_actor(data, _actor), do: data
+
+  defp name_of(%Event.Actor{display_name: name}) when is_binary(name) and name != "", do: name
+  defp name_of(%Event.Actor{subject: subject}) when is_binary(subject), do: subject
+  defp name_of(_actor), do: nil
 end

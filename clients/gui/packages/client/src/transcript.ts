@@ -699,6 +699,8 @@ function systemText(d: DurableEvent): string {
       return `${str(d.data["subject"], "somebody")}'s access was revoked`;
     case "session_tainted":
       return taintedText(d);
+    case "tools_unregistered":
+      return unregisteredText(d);
     default:
       return d.type;
   }
@@ -739,6 +741,29 @@ function taintedText(d: DurableEvent): string {
   const tools = Array.isArray(d.data["tools"]) ? d.data["tools"].filter((t): t is string => typeof t === "string") : [];
   const said = `${str(d.data["actor"], "somebody")} offered tools that run on their own machine`;
   return tools.length ? `${said}: ${tools.join(", ")}` : said;
+}
+
+/** Why a person's tools left the session, as `tools_unregistered`'s `reason` says it. */
+const LEFT: Record<string, string> = {
+  disconnected: ", because their client left",
+  unregistered: ", because they took their tools back",
+};
+
+/**
+ * A person's own tools gone from the session (troupe #592), as the terminal client says it:
+ * whose, how many and why, so a teammate watching knows what ran on somebody's machine is
+ * gone. Whose is the event's person by name, else the subject the event names; a log
+ * written before it said whose has neither.
+ */
+function unregisteredText(d: DurableEvent): string {
+  const tools = Array.isArray(d.data["tools"]) ? d.data["tools"].filter((t): t is string => typeof t === "string") : [];
+  const person = d.actor?.kind === "user" ? str(d.actor["display_name"], str(d.actor.subject)) : "";
+  const whose = `${person || str(d.data["actor"], "somebody")}'s`;
+  const reason = str(d.data["reason"]);
+  const why = LEFT[reason] ?? (reason ? ` (${reason})` : "");
+  if (tools.length === 1) return `${whose} tool ${tools[0]} is no longer offered to the session${why}`;
+  if (tools.length === 0) return `${whose} tools are no longer offered to the session${why}`;
+  return `${whose} ${tools.length} tools are no longer offered to the session${why}: ${tools.join(", ")}`;
 }
 
 /** Where an agent was read from, as `profile_switched`'s `layer` names it (troupe Decision 841). */
@@ -785,6 +810,7 @@ const SYSTEM_TYPES = new Set([
   "acl_granted",
   "acl_revoked",
   "session_tainted",
+  "tools_unregistered",
 ]);
 
 /** Add an optimistic entry for an input this client has just sent. */

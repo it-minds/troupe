@@ -204,6 +204,57 @@ defmodule Troupe.Session.ClientToolsTest do
       # takes one registrant's tools, not every client's.
       assert {:ok, _} = ClientTools.owner(session.id, "client.notes.search")
     end
+
+    # #592: the people in the session are told whose tools went, and so is the model when
+    # it calls one, where a bare "no tool named" could as well be a mistyped name.
+    test "a call to one whose client left says whose it was and that their client left",
+         %{session: session} do
+      registrant =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      actor = Event.Actor.user("ada@example.test", "Ada")
+      consent = consent!(session.id, registrant, "ada@example.test", ["mail.send", "mail.read"])
+
+      {:ok, _} =
+        ClientTools.register(session.id, registrant, consent,
+          specs: [spec("mail.send"), spec("mail.read")],
+          subject: "ada@example.test",
+          actor: actor
+        )
+
+      send(registrant, :stop)
+      assert eventually(fn -> ClientTools.owner(session.id, "client.mail.send") == :error end)
+
+      unregistered = session.id |> Log.replay() |> Enum.find(&(&1.type == "tools_unregistered"))
+      assert unregistered.actor == actor
+      assert unregistered.data["actor"] == "ada@example.test"
+      assert unregistered.data["tools"] == ["client.mail.read", "client.mail.send"]
+
+      open = %Definition{name: "open", mode: :primary, prompt: "", tools: :all}
+
+      assert {:reject, gone} = Tools.authorize("client.mail.send", open, ctx(session.id))
+      assert gone.content =~ "client.mail.send went: it was offered by Ada from their own machine"
+      assert gone.content =~ "their client left the session"
+      assert gone.content =~ "It did not run."
+
+      # A name nobody ever offered here keeps the answer it always had.
+      assert {:reject, never} = Tools.authorize("client.mail.delete", open, ctx(session.id))
+      assert never.content == "There is no tool named client.mail.delete."
+    end
+
+    test "one its owner took back says so", %{session: session} do
+      assert {:ok, ["client.notes.search"]} =
+               ClientTools.unregister(session.id, self(), ["client.notes.search"])
+
+      open = %Definition{name: "open", mode: :primary, prompt: "", tools: :all}
+      assert {:reject, gone} = Tools.authorize("client.notes.search", open, ctx(session.id))
+      assert gone.content =~ "client.notes.search went: it was offered by ada from their own machine"
+      assert gone.content =~ "they took it back"
+    end
   end
 
   describe "a call parked on a registrant that went away" do

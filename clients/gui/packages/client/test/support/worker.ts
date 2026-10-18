@@ -253,8 +253,21 @@ export class FakeWorker {
       if (!client) return;
       for (const t of client.expiryTimers) clearTimeout(t);
       for (const s of client.subs.values()) s.off();
-      // A registrant that disconnects takes its tools with it.
-      for (const [key, tool] of this.tools) if (tool.client === client) this.tools.delete(key);
+      // A registrant that disconnects takes its tools with it, and the session says whose
+      // they were, as the gateway logs it.
+      const gone = new Map<string, string[]>();
+      for (const [key, tool] of this.tools) {
+        if (tool.client !== client) continue;
+        this.tools.delete(key);
+        gone.set(tool.sessionId, [...(gone.get(tool.sessionId) ?? []), tool.name]);
+      }
+      for (const [sessionId, tools] of gone) {
+        this.sessions.get(sessionId)?.log.append(
+          "tools_unregistered",
+          { tools: tools.sort(), connection: "a socket", reason: "disconnected", actor: client.token.sub },
+          { kind: "user", subject: client.token.sub },
+        );
+      }
       for (const w of client.waiting.values()) w.reject(new Error("the client left"));
       this.clients.delete(client);
     });

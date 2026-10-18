@@ -193,6 +193,16 @@ defmodule Troupe.Tool.Result do
       "The tool #{name} went during this turn: the server or the client that offered it " <>
         "no longer does. It did not run. Do the work another way, or say what is left undone."
 
+  # A person's own tool that left with their client, or that they took back: whose it
+  # was, so the model can tell it from a name it got wrong and does not retry it.
+  def describe({:client_tool_gone, name, who, reason}) do
+    by = if is_binary(who), do: " by #{who}", else: ""
+
+    "The tool #{name} went: it was offered#{by} from their own machine, and #{left(reason)}, " <>
+      "so this session no longer has it. It did not run. Do the work another way, " <>
+      "or ask them to offer it again."
+  end
+
   # Decision 876: a skill listed for the rest of the turn whose file has gone.
   def describe({:skill_gone, name}),
     do:
@@ -210,6 +220,9 @@ defmodule Troupe.Tool.Result do
     do: "The delegated agent failed: #{inspect(reason)}. Consider doing the work directly."
 
   def describe(other), do: inspect(other)
+
+  defp left("unregistered"), do: "they took it back"
+  defp left(_disconnected), do: "their client left the session"
 end
 
 defmodule Troupe.Tool do

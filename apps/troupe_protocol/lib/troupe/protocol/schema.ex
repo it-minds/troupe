@@ -602,7 +602,8 @@ defmodule Troupe.Protocol.Schema do
       "tools_unregistered" => %{
         "tools" => required({:array, :string}),
         "connection" => required(:string),
-        "reason" => required(:string)
+        "reason" => required(:string),
+        "actor" => optional(:string)
       },
       "session_tainted" => %{
         "kind" => required(:string),
