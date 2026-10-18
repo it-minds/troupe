@@ -1466,6 +1466,39 @@ Found by the chunk 36 fixers, 2026-10-16.
 
 Found by the chunk 37 fixers, 2026-10-17.
 
+### D131 - First run, GitHub sweeps, the signed plane and the agent picker after chunk 38 (low)
+
+- **The desktop's first run and sign-in** (Decision 916).
+  - The cause of a lost `setup.answer` reply on a real daemon wasn't found; the app now recovers from one, but the daemon side was only reproduced with the fake.
+  - `DaemonClient` has no per-call timeout, so other buttons that wait on one reply can hang the same way.
+  - The TUI's first-run finish has the same one-reply shape and wasn't checked.
+  - The desktop asks its updater about a recommended version older than itself; harmless, but it shows a fetch error when the release URL is unreachable.
+- **GitHub sweeps and the App from GitOps** (Decision 917).
+  - A sweep reads at most 50 issues and the first 100 open pull requests per run, and reuses the trigger's `last_fired_at`.
+  - In GitOps mode, the App's settings and the teams' GitHub lists lock after the upgrade until `github/github.yaml` is committed; a team the manifest doesn't name lists no repositories.
+  - The GUI's fake admin refuses `admin.github.delete` in every GitOps case, including `missing`, which the plane allows.
+  - #653 still owes naming the person in each commit (`Requested-By:`) and the console's test token for a chosen repository.
+- **A pod session's config** (Decision 918).
+  - On a pod, `config.get` for a session needs only `observe`, so a viewer sees the profile's LLM `base_url`, models, prices and the pod's state directory (never the key).
+  - A session reports what it resolved when it started; a laptop's plain `/settings` reads the files as they are now.
+  - About 65 `expect(button(…)).toBeNull()` checks after async steps stay unchecked; they can't flake, but some may pass before the thing could have been drawn.
+- **The signed plane** (Decision 919).
+  - The key is trusted on first use: whoever answers for the plane at a machine's first sign-in can get their key pinned.
+  - The pin file lives in the person's own state directory, beside the cached document it protects.
+  - `/downloads` is anonymous, so a 404 there tells anyone which versions are refused.
+  - `initialize`'s `update_required` is unsigned.
+  - The desktop's own updater doesn't yet verify the plane's signature against the daemon's pin; a policy change doesn't reach connected clients until they ask again; mirroring a release into the object store is by hand.
+- **The agent picker** (Decision 920, tui/0164).
+  - A bundle draft is refused if an agent has no `mode` or has a key no agent has, which also blocks publishing an older version that carries one again.
+  - The console's `recordCalls()` swaps `fetch` after the admin client is built, so `bundles.test`'s "publishes nothing" passes without checking.
+  - The GUI's fake `checkAgent` lacks `delegation` and has a shorter tool list than the harness.
+  - #594 still owes `/agents` and `/new` onto the TUI picker, new-from-template, the desktop's agent manager on the picker, and the builder's profile-first view.
+- **Tests.**
+  - The gateway's `Loopback`, `PlaneVersion` and `Private` tests fail when run in one VM after `daemon_test`, and pass alone.
+  - Core's test helper sets the Logger level to `:critical`, so one `mix test` naming files from core and another app leaves the second app's `capture_log` empty.
+
+Found by the chunk 38 fixers, 2026-10-18.
+
 ## Taken
 
 | Defect | Taken by |
