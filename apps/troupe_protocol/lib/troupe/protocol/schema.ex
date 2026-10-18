@@ -816,8 +816,13 @@ defmodule Troupe.Protocol.Schema do
       "workspace.search" => %{"query" => required(:string), "limit" => optional(:integer)},
       "workflows.list" => %{"workspace" => required(:string)},
       # The primaries, and with `subagents` the subagents too, each row with its `mode`
-      # (Decision 852).
-      "agents.list" => %{"workspace" => required(:string), "subagents" => optional(:boolean)},
+      # (Decision 852), for a workspace or for a session, which on a pod is its bundle's
+      # agents: one or the other is named (#594).
+      "agents.list" => %{
+        "workspace" => optional(:string),
+        "session_id" => optional(:string),
+        "subagents" => optional(:boolean)
+      },
       # One agent whole, checked, written and taken away (#503, Decision 841). Reading and
       # checking answer on a pod too; writing is the daemon's, and a pod refuses it.
       # `scope` is `user` or `project` (`workspace` is taken as `project`). `if_hash` is

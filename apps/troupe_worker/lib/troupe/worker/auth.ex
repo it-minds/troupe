@@ -53,6 +53,12 @@ defmodule Troupe.Worker.Auth do
     tools.register tools.unregister
   )
 
+  # Reading and checking the agents are the session's own when the request names the
+  # session and no path: then the rows are its own agents, its bundle's, which is what both
+  # clients' pickers list for a pod session (#594). Named by a workspace they are about a
+  # path on the pod, as `agents.list` always was, and stay refused.
+  @session_reads ~w(agents.list agents.get agents.validate)
+
   # About the session, and still not the pod's to do. The plane holds a pod session's row,
   # its key, its placement and its retention, so doing any of these here would leave the
   # two disagreeing: the pod's own `session.erase` deletes its copy and leaves the key, the
@@ -271,16 +277,27 @@ defmodule Troupe.Worker.Auth do
 
     case claims["session_id"] do
       nil -> held_to_acl(state, claims["sub"], named)
-      session_id -> confined(state, claims["sub"], session_id, method, named)
+      session_id -> confined(state, claims["sub"], session_id, method, params, named)
     end
   end
 
-  defp confined(state, subject, session_id, method, named) do
+  defp confined(state, subject, session_id, method, params, named) do
     case Enum.find(named, fn {_field, id} -> id != session_id end) do
-      nil -> method_refusal(method) || held_to_acl(state, subject, [{"session_id", session_id}])
-      {field, _other} -> another_session(field)
+      nil ->
+        method_refusal(method, params) ||
+          held_to_acl(state, subject, [{"session_id", session_id}])
+
+      {field, _other} ->
+        another_session(field)
     end
   end
+
+  defp method_refusal(method, params) when method in @session_reads do
+    if params["session_id"] in [nil, ""] or Map.has_key?(params, "workspace"),
+      do: not_about_the_session(method)
+  end
+
+  defp method_refusal(method, _params), do: method_refusal(method)
 
   defp method_refusal(method) when method in @plane_methods, do: through_the_plane(method)
 

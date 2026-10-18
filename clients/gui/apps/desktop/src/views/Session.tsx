@@ -76,6 +76,7 @@ export function Session({
   onBack,
   onGo,
   onAgents,
+  onStarted,
 }: {
   /** The plane, for a team session. Null in local mode. */
   auth: AuthSession | null;
@@ -93,6 +94,8 @@ export function Session({
   onGo?: (screen: PaletteScreen) => void;
   /** Open the agents manager on this session's workspace, at one agent if named: a session on this computer's. */
   onAgents?: ((agent?: string) => void) | undefined;
+  /** Open a session the agent picker started, as the start screen opens one it made. */
+  onStarted?: ((id: string, kind: SessionKind, workspace?: string) => void) | undefined;
 }): JSX.Element {
   // Where it runs decides which socket it is reached over and nothing else about this
   // screen: the transcript, the approvals and the composer are the same protocol either
@@ -195,12 +198,15 @@ export function Session({
         agent={
           <AgentSwitch
             view={view}
+            auth={auth}
             daemon={daemon}
             kind={kind}
-            workspace={kind !== "team" ? workspaceOf(row) : null}
+            workspace={kind !== "team" ? (workspaceOf(row) ?? workspace ?? null) : null}
+            planeProfile={kind === "team" ? (row?.profile ?? null) : null}
             current={agentOf(view.state, row)}
             canChange={!readOnly}
             onAbout={kind !== "team" ? onAgents : undefined}
+            onStarted={onStarted}
           />
         }
       />

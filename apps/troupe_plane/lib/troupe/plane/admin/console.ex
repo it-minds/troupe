@@ -85,6 +85,8 @@ defmodule Troupe.Plane.Admin.Console do
     bundles_list: {:area, :bundles},
     bundle_get: {:area, :bundles},
     bundle_validate: {:area, :bundles},
+    # The agent builder in the bundle editor asks it as an agent's fields are typed.
+    agent_check: {:area, :bundles},
     bundle_preview: {:area, :bundles},
     bundle_publish: {:area, :bundles},
     bundle_retire: {:area, :bundles},

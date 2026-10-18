@@ -1,4 +1,4 @@
-import type { AgentDefinition, ProfileSwitch } from "./agents.js";
+import type { AgentDefinition, AgentRow, AgentSkippedFile, ProfileSwitch } from "./agents.js";
 import type { TroupeConnection } from "./connection.js";
 import type { GateAnswer } from "./transcript.js";
 import type {
@@ -264,6 +264,17 @@ export class SessionView {
    */
   agent(name: string): Promise<AgentDefinition> {
     return this.conn.call<AgentDefinition>("agents.get", { name, session_id: this.sessionId });
+  }
+
+  /**
+   * Every primary agent this session can pick (`agents.list` with the session named and no
+   * path, troupe #594): on this computer the workspace's, read from their files as a switch
+   * reads them; on a pod its bundle's, the built-ins and its working copy's. Each row says
+   * where it comes from, what it stands in for and whether it may be changed here: the one
+   * list a picker reads.
+   */
+  agents(): Promise<{ agents: AgentRow[]; skipped?: AgentSkippedFile[] }> {
+    return this.conn.call("agents.list", { session_id: this.sessionId });
   }
 
   async editTodo(action: "add" | "cancel" | "complete", params: { id?: string; content?: string }): Promise<void> {

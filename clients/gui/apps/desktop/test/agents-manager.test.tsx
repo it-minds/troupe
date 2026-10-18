@@ -221,6 +221,25 @@ describe("the agents manager", () => {
   });
 });
 
+/** The agent picker in a session's head, opened (troupe #594). */
+async function openPicker(head: ParentNode): Promise<HTMLElement> {
+  const toggle = await waitFor(() => head.querySelector<HTMLButtonElement>('button[aria-label="Agent"]'), "the agent switch");
+  if (toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+  return waitFor(() => head.querySelector<HTMLElement>('[role="group"][aria-label="Agents"]'), "the agent picker");
+}
+
+/** A button of the picker's, once it is drawn and not busy. */
+function enabled(picker: ParentNode, label: string): Promise<HTMLButtonElement> {
+  return waitFor(() => {
+    const b = button(label, picker);
+    return b && !b.disabled ? b : null;
+  }, label);
+}
+/** A picker's row for an agent, once the daemon has answered. */
+function option(picker: ParentNode, name: string): HTMLButtonElement | undefined {
+  return [...picker.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((o) => o.querySelector(".name")?.textContent?.replace(" ●", "") === name);
+}
+
 describe("each window's agent", () => {
   it("is in the window's head, switches from the next turn, and the transcript records the switch", async () => {
     const session = daemon.seed(REPO);
@@ -228,14 +247,19 @@ describe("each window's agent", () => {
     const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes(REPO)), "the session in the list");
     row.click();
     const head = await waitFor(() => document.querySelector<HTMLElement>(".session-head"), "the session");
-    const select = await waitFor(() => head.querySelector<HTMLSelectElement>('select[aria-label="Agent"]'), "the agent switch");
-    expect(select.value).toBe("build");
-    const plan = [...select.options].find((o) => o.value === "plan")!;
-    expect(plan.textContent).toBe("plan · built in · read only");
+    const toggle = await waitFor(() => head.querySelector<HTMLButtonElement>('button[aria-label="Agent"]'), "the agent switch");
+    expect(toggle.textContent).toBe("Agent build");
+    const picker = await openPicker(head);
+    const plan = await waitFor(() => option(picker, "plan"), "plan offered");
+    expect(plan.closest('[role="group"]')!.getAttribute("aria-label")).toBe("Shipped");
+    expect(plan.textContent).toContain("read only");
 
-    choose(select, "plan");
+    plan.click();
+    (await enabled(picker, "Switch to plan")).click();
     await waitFor(() => says("agent build → plan (built in), from the next turn; no longer holds remember, write_file, edit_file, shell"), "the switch in the transcript");
     expect(daemon.calls.find((c) => c.method === "profile.switch")?.params).toMatchObject({ session_id: session.id, profile: "plan" });
+    // The picker read the session's own listing.
+    expect(daemon.calls.find((c) => c.method === "agents.list" && c.params["session_id"] === session.id)).toBeDefined();
     expect(head.querySelector(".crumbs .profile")!.textContent).toBe("plan");
     expect(document.querySelector(".note.switched")).not.toBeNull();
 
@@ -250,7 +274,7 @@ describe("each window's agent", () => {
     unmount = render(<App />).unmount;
     const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes(REPO)), "the session in the list");
     row.click();
-    await waitFor(() => document.querySelector('.session-head select[aria-label="Agent"]'), "the session");
+    await waitFor(() => document.querySelector('.session-head button[aria-label="Agent"]'), "the session");
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true }));
     const palette = await waitFor(() => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Commands"]'), "the palette");
     const input = await waitFor(() => (palette.querySelector(".row") ? palette.querySelector<HTMLInputElement>("input") : null), "the commands");
@@ -277,10 +301,19 @@ describe("each window's agent", () => {
       (await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("Rewrite the placement loop")), "the session")).click();
       const head = await waitFor(() => document.querySelector<HTMLElement>(".session-head"), "the session");
       // The agent the pod runs, from its log; the plane's profile, dev, is never shown as one.
-      const select = await waitFor(() => (head.querySelector<HTMLSelectElement>('select[aria-label="Agent"]')?.value === "build" ? head.querySelector<HTMLSelectElement>('select[aria-label="Agent"]') : null), "the agent switch on build");
-      expect([...select.options].map((o) => o.value)).toEqual(["build", "plan"]);
+      await waitFor(() => head.querySelector('button[aria-label="Agent"]')?.textContent === "Agent build", "the agent switch on build");
+      const picker = await openPicker(head);
+      await waitFor(() => option(picker, "plan"), "the pod's agents");
+      expect([...picker.querySelectorAll('[role="option"] .name')].map((n) => n.textContent?.replace(" ●", ""))).toEqual(["build", "plan"]);
+      expect(harness.worker.calls.some((c) => c.method === "agents.list" && typeof c.params["session_id"] === "string" && !("workspace" in c.params))).toBe(true);
       expect(head.querySelector(".crumbs .profile")!.textContent).toBe("build");
-      choose(select, "plan");
+
+      // Edit is refused on a pod, in the worker's words.
+      option(picker, "plan")!.click();
+      (await enabled(picker, "Edit plan's file")).click();
+      await waitFor(() => picker.querySelector('[role="alert"]')?.textContent?.includes("read-only here"), "the edit refused");
+
+      (await enabled(picker, "Switch to plan")).click();
       await waitFor(() => harness.worker.calls.some((c) => c.method === "profile.switch" && c.params["profile"] === "plan"), "profile.switch on the pod");
       await waitFor(() => says("agent build → plan (built in), from the next turn; no longer holds remember, write_file, edit_file, shell"), "the switch in the transcript");
       expect(head.querySelector(".crumbs .profile")!.textContent).toBe("plan");
@@ -299,11 +332,12 @@ describe("each window's agent", () => {
     unmount = render(<App />).unmount;
     const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes(REPO)), "the session in the list");
     row.click();
-    const select = await waitFor(() => document.querySelector<HTMLSelectElement>('.session-head select[aria-label="Agent"]'), "the agent switch");
-    await waitFor(() => [...select.options].some((o) => o.value === "gone"), "gone offered");
+    const head = await waitFor(() => document.querySelector<HTMLElement>(".session-head"), "the session");
+    const picker = await openPicker(head);
+    (await waitFor(() => option(picker, "gone"), "gone offered")).click();
     daemon.agents.files = daemon.agents.files.filter((f) => f.name !== "gone");
-    choose(select, "gone");
-    await waitFor(() => document.querySelector('.agent-switch [role="alert"]'), "the refusal");
-    expect(document.querySelector('.agent-switch [role="alert"]')!.textContent).toContain("not_found");
+    (await enabled(picker, "Switch to gone")).click();
+    await waitFor(() => picker.querySelector('[role="alert"]'), "the refusal");
+    expect(picker.querySelector('[role="alert"]')!.textContent).toContain("not_found");
   });
 });

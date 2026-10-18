@@ -21,6 +21,8 @@
 //   readDaemon    outside anything a page may open, and a page cannot start a program
 //   pickDirectory a workspace is a directory, and a browser build can only take a path
 //                 somebody typed
+//   openAgentFile a person's or a repository's agent file, in the editor their system
+//                 opens Markdown with; a page cannot start a program
 //   notifications the page's own `Notification` is refused in WebView2, so the OS's are
 //                 reached through the notification plugin, and on Windows through the
 //                 shell's own toast, whose click is heard
@@ -80,6 +82,12 @@ async function findDaemon(): Promise<DaemonEndpoint | null> {
 async function readDaemon(): Promise<DaemonEndpoint | null> {
   const { invoke } = await import("@tauri-apps/api/core");
   return (await invoke<DaemonEndpoint | null>("daemon_endpoint")) ?? null;
+}
+
+/** An agent's file in the person's editor: `agent_file_open`, a command of ours that opens nothing else. */
+async function openAgentFile(path: string): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("agent_file_open", { path });
 }
 
 async function pickDirectory(): Promise<string | null> {
@@ -189,6 +197,7 @@ export async function installShell(): Promise<void> {
     findDaemon,
     readDaemon,
     pickDirectory,
+    openAgentFile,
     notifications: notifications(),
     updater: updater(),
   };

@@ -2033,7 +2033,7 @@ export class FakeDaemon {
     }
     const workspace = typeof params["workspace"] === "string" && params["workspace"] ? params["workspace"] : (named?.workspace ?? null);
     const models = this.servedModels();
-    const ctx = { worktree: workspace !== null && [...this.sessions.values()].some((s) => s.workspace === workspace && s.state === "active"), ...models };
+    const ctx = { worktree: workspace !== null && [...this.sessions.values()].some((s) => s.workspace === workspace && s.state === "active"), ...models, workspace };
     const name = params["name"];
 
     // The primaries, and with `subagents` the subagents after them (troupe Decision 852).

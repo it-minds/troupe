@@ -15,9 +15,10 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import type { AuthSession, DaemonClient, ProfileOffering, SessionKind } from "@troupe/client";
+import type { AgentRow, AuthSession, DaemonClient, ProfileOffering, SessionKind } from "@troupe/client";
 import { useProfiles } from "../hooks";
 import { shell } from "../shell";
+import { AgentPicker } from "./AgentPicker";
 
 export function StartSession({
   auth,
@@ -88,6 +89,22 @@ export function StartSession({
   );
 }
 
+// A profile's agents before any session has them: the offering names them, and each is
+// the organisation's, from that profile's bundle, changed in the console. Once a session
+// runs, its own `agents.list` says the rest.
+function offered(profile: ProfileOffering): AgentRow[] {
+  return profile.agents.map((name) => ({
+    name,
+    description: "",
+    source: "bundle",
+    layer: "bundle",
+    origin: "Your organisation's",
+    profile: profile.name,
+    editable: false,
+    editable_reason: `${name} comes from the profile's bundle; change it in the console`,
+  }));
+}
+
 function TeamSession({
   auth,
   onClose,
@@ -109,14 +126,14 @@ function TeamSession({
   const teams = auth.me?.teams ?? [];
   const free = chosen ? chosen.capacity - chosen.active_sessions : 0;
 
-  const start = async (): Promise<void> => {
+  const start = async (as: string = agent): Promise<void> => {
     if (!chosen) return;
     setBusy(true);
     setError(null);
     try {
       const created = await auth.rpc<{ session_id: string }>("session.create", {
         profile: chosen.name,
-        ...(agent ? { agent } : {}),
+        ...(as ? { agent: as } : {}),
         ...(title.trim() ? { title: title.trim() } : {}),
         ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
       });
@@ -175,19 +192,21 @@ function TeamSession({
             </p>
           </section>
 
-          <div className="fields">
-            <label>
-              How it should start
-              <select value={agent} onChange={(e) => setAgent(e.target.value)}>
-                <option value="">However this profile normally starts</option>
-                {chosen.agents.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <section>
+            <span className="screen">How it should start</span>
+            <p className="note">{agent ? `On ${agent}.` : "However this profile normally starts, unless you pick one of its agents."}</p>
+            <AgentPicker
+              label="The agent it starts as"
+              rows={offered(chosen)}
+              current={null}
+              chosen={agent || null}
+              onChoose={setAgent}
+              start={(name) => start(name)}
+              switchTo="There is no session to switch yet: start one on it."
+            />
+          </section>
 
+          <div className="fields">
             <label>
               What to call it <small>optional</small>
               <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Rewrite the placement loop" />
@@ -244,6 +263,8 @@ function LocalSession({
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [agent, setAgent] = useState<string | null>(null);
+  const agents = useWorkspaceAgents(daemon, workspace.trim());
   const picker = shell()?.pickDirectory;
 
   useEffect(() => {
@@ -257,7 +278,7 @@ function LocalSession({
     };
   }, [daemon]);
 
-  const start = async (): Promise<void> => {
+  const start = async (as: string | null = agent): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
@@ -265,6 +286,7 @@ function LocalSession({
       // setting no client may choose, and the session was made local (issue #365).
       const created = await daemon.createSession({
         workspace: workspace.trim(),
+        ...(as ? { profile: as } : {}),
         worktree,
         ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
         config: { watch },
@@ -307,6 +329,23 @@ function LocalSession({
           </div>
         )}
       </section>
+
+      {workspace.trim() && (
+        <section>
+          <span className="screen local">Which agent</span>
+          <p className="note">{agent ? `On ${agent}.` : "The configuration's default agent, unless you pick one."}</p>
+          <AgentPicker
+            label="The agent it starts as"
+            rows={agents.rows}
+            error={agents.error}
+            current={null}
+            chosen={agent}
+            onChoose={setAgent}
+            start={(name) => start(name)}
+            switchTo="There is no session to switch yet: start one on it."
+          />
+        </section>
+      )}
 
       <label>
         If something is already running there
@@ -365,4 +404,30 @@ function LocalSession({
       </div>
     </>
   );
+}
+
+/**
+ * The agents a session in a workspace could run, as the daemon's `agents.list` answers for
+ * it (troupe #594), asked once the path has stopped changing for a moment.
+ */
+function useWorkspaceAgents(daemon: DaemonClient, workspace: string): { rows: AgentRow[] | null; error: string | null } {
+  const [rows, setRows] = useState<AgentRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setRows(null);
+    setError(null);
+    if (!workspace) return;
+    let live = true;
+    const asked = setTimeout(() => {
+      void daemon
+        .listAgents(workspace)
+        .then((r) => live && setRows(r.agents))
+        .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(asked);
+    };
+  }, [daemon, workspace]);
+  return { rows, error };
 }

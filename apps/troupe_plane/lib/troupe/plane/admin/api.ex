@@ -1132,6 +1132,26 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.agent.check",
+      function: :agent_check,
+      summary:
+        "Check one agent's definition as a bundle's agent is checked, by the rules the daemon's agents.validate applies: {ok, errors, warnings}, each finding with its field. Writes nothing.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "name",
+          type: :string,
+          description: "The name it would have in the bundle, checked when given."
+        },
+        %Argument{
+          name: "definition",
+          type: :string,
+          required: true,
+          description: "The definition: Markdown with YAML frontmatter, as a bundle's agent carries it."
+        }
+      ]
+    },
+    %Method{
       name: "admin.bundle.preview",
       function: :bundle_preview,
       summary:

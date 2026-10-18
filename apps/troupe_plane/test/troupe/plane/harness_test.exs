@@ -107,7 +107,7 @@ defmodule Troupe.Plane.HarnessTest do
                 "name" => "pr-reviewer",
                 "definition" => "---\nmode: primary\nskills: [review]\n---\nReview."
               },
-              %{"name" => "helper", "definition" => "You help."}
+              %{"name" => "helper", "definition" => "---\nmode: subagent\n---\nYou help."}
             ],
             "skills" => [
               %{
@@ -233,7 +233,7 @@ defmodule Troupe.Plane.HarnessTest do
       {:ok, bundle} =
         Bundles.publish(
           "stable",
-          %{"schema" => 1, "agents" => [%{"name" => "pr-reviewer", "definition" => "Review."}]},
+          %{"schema" => 1, "agents" => [%{"name" => "pr-reviewer", "definition" => "---\nmode: primary\n---\nReview."}]},
           announce: false
         )
 

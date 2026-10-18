@@ -249,7 +249,7 @@ defmodule Troupe.Plane.SessionMCPTest do
 mode: primary
 ---
 Review."},
-        %{"name" => "helper", "definition" => "You help."}
+        %{"name" => "helper", "definition" => "---\nmode: subagent\n---\nYou help."}
       ]
     }
   end

@@ -13,6 +13,8 @@
 //   * `forbidden` carries `data.required_role`, and `not_found` is what a team admin
 //     gets for a team that is not theirs — whether it exists is itself privileged.
 
+import type { AgentCheck } from "./agents.js";
+
 /**
  * A session as `admin.sessions.list` describes it: who owns it, where it runs, what state
  * it is in and what it holds, and nothing it said. The plane's answer names no team and
@@ -1184,6 +1186,15 @@ export class AdminApi {
 
   bundle(channel: string, version: number): Promise<BundleDetail> {
     return this.rpc<BundleDetail>("admin.bundle.get", { channel, version });
+  }
+
+  /**
+   * One agent's definition checked as a bundle's agent is, by the rules the daemon's
+   * `agents.validate` applies (troupe #594): each finding with its field, `ok` saying
+   * whether a bundle carrying it would publish. Writes nothing.
+   */
+  checkAgent(name: string | null, definition: string): Promise<AgentCheck> {
+    return this.rpc<AgentCheck>("admin.agent.check", name ? { name, definition } : { definition });
   }
 
   /** Answers `{ok: true}`, or refuses with `invalid_params` whose `data.errors` is a sentence each. */

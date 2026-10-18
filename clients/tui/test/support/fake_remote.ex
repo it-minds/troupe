@@ -974,6 +974,14 @@ defmodule Troupe.FakeRemote do
       "description" => "The team's build agent.",
       "source" => "bundle",
       "layer" => "bundle",
+      # Where it comes from and with which profile, as a worker answers since root #594.
+      "origin" => "Your organisation's",
+      "profile" => "code",
+      "editable" => false,
+      "editable_reason" =>
+        "On a pod the agents come from the profile's bundle and are read-only here: " <>
+          "change them in the console",
+      "overrides" => [],
       "model" => nil,
       "tool_count" => 19,
       "read_only" => false,

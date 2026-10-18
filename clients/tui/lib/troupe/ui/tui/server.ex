@@ -38,13 +38,11 @@ defmodule Troupe.UI.TUI.Server do
             | :memory
             | :hq
             | :palette
-            | :chooser
             | :agents
             | :switcher,
           default_agent: String.t(),
           branches?: boolean(),
           facts: %{model: String.t() | nil},
-          chooser: chooser() | nil,
           choice: %{agent: String.t(), where: :worktree | :checkout} | nil,
           worktrees: [map()],
           worktrees_loading: boolean(),
@@ -169,23 +167,6 @@ defmodule Troupe.UI.TUI.Server do
         }
 
   @typedoc """
-  Command mode's chooser (TUI Decision 155): the primary agents a branch can start on
-  (`agents.list`'s rows), the one selected, each one's instruction as `agents.get` read it
-  once it was shown (`shown`, by name), how far that is scrolled, and the step: the agent,
-  then where it works (`where`, 0 for a worktree of its own, 1 for the checkout). `prompt`
-  is what was typed before it opened, which starts the branch as soon as both are chosen.
-  """
-  @type chooser :: %{
-          step: :agent | :where,
-          agents: [map()],
-          cursor: non_neg_integer(),
-          where: 0 | 1,
-          scroll: non_neg_integer(),
-          shown: %{optional(String.t()) => map()},
-          prompt: String.t()
-        }
-
-  @typedoc """
   A multiple-choice answer being assembled: which question it belongs to and the
   labels ticked so far. Held in the UI rather than the log because it is a
   cursor, not a decision — nothing outside this process may depend on it, and
@@ -268,7 +249,6 @@ defmodule Troupe.UI.TUI.Server do
       back: nil,
       model: model,
       focus: :command,
-      chooser: nil,
       choice: nil,
       worktrees: [],
       worktrees_loading: false,
@@ -282,7 +262,7 @@ defmodule Troupe.UI.TUI.Server do
       # when the palette first opens, not before the first frame.
       agent_rows: %{},
       agents_page: nil,
-      # Tab's chooser of the agent a window runs (TUI Decision 156).
+      # The one agent picker: Ctrl-N's and Tab's.
       switcher: nil,
       commands: Client.command_table(sid),
       palette: nil,
@@ -610,12 +590,9 @@ defmodule Troupe.UI.TUI.Server do
       ),
       do: {:noreply, open_palette(%{state | quit_armed: false})}
 
-  # Ctrl-N chooses the agent what is typed starts on, and where (TUI Decision 155).
+  # Ctrl-N opens the agent picker to start what is typed on, and where.
   def handle_event(%Key{code: "n", modifiers: ["ctrl"]}, %{focus: :command} = state),
     do: {:noreply, open_chooser(%{state | quit_armed: false})}
-
-  def handle_event(%Key{} = key, %{focus: :chooser} = state),
-    do: {:noreply, chooser_key(key, %{state | quit_armed: false})}
 
   def handle_event(%Key{} = key, %{focus: :command} = state) do
     state = %{state | quit_armed: false}
@@ -714,9 +691,6 @@ defmodule Troupe.UI.TUI.Server do
       :palette ->
         {:noreply, state, render?: false}
 
-      :chooser ->
-        {:noreply, state, render?: false}
-
       :switcher ->
         {:noreply, state, render?: false}
 
@@ -740,7 +714,6 @@ defmodule Troupe.UI.TUI.Server do
              :hq,
              :palette,
              :agents,
-             :chooser,
              :switcher
            ],
       do: {:noreply, state, render?: false}
@@ -841,9 +814,6 @@ defmodule Troupe.UI.TUI.Server do
 
       :palette ->
         {:noreply, move_cursor(state, div(step, 3))}
-
-      :chooser ->
-        {:noreply, scroll_instruction(state, step)}
 
       :agents ->
         {:noreply, agents_key(%Key{code: if(step < 0, do: "up", else: "down")}, state)}
@@ -1205,102 +1175,42 @@ defmodule Troupe.UI.TUI.Server do
     notice(%{state | choice: nil}, said)
   end
 
-  # The chooser opens on the agents a branch can start on, the default one selected, with
-  # what was typed kept as the task.
-  defp open_chooser(%{branches?: false} = state),
-    do: notice(state, "a remote session runs one profile; create another session from HQ")
-
+  # Ctrl-N opens the one agent picker to start what was typed on: the
+  # session's own agents as `agents.list` answers for it, the default one selected, with
+  # what was typed kept as the task. On a pod, which starts no branches, it opens all the
+  # same, a start refused with why and `s` switching the session's own agent.
   defp open_chooser(state) do
     prompt =
       if String.starts_with?(state.cmd_text, ["/", "!"]), do: "", else: String.trim(state.cmd_text)
 
-    case Client.profiles({:local, state.workspace}) do
-      {:ok, [_ | _] = agents} ->
-        cursor = Enum.find_index(agents, &(&1.name == state.default_agent)) || 0
+    {current, window, start} =
+      if state.branches? do
+        {state.default_agent, nil, nil}
+      else
+        # A pod session's one window, however the translation named it.
+        own = Model.session_window(state.model) || List.first(Model.windows(state.model))
 
-        chooser = %{
-          step: :agent,
-          agents: agents,
-          cursor: cursor,
-          where: 0,
-          scroll: 0,
-          shown: %{},
-          prompt: prompt
-        }
+        {own && own.profile, (own && own.path) || "root",
+         "a remote session runs one profile; create another session from HQ"}
+      end
 
-        show_instruction(%{state | focus: :chooser, chooser: chooser})
-
-      {:ok, []} ->
-        notice(state, "no agent here to start a branch on")
-
-      {:error, reason} ->
-        notice(state, "the agents could not be listed: " <> to_message(reason))
+    case AgentChooser.open(state.session_id, current,
+           title: " start an agent ",
+           for: {:start, prompt},
+           window: window,
+           start: start
+         ) do
+      {:ok, picker} -> %{state | focus: :switcher, switcher: picker}
+      {:error, reason} -> notice(state, "the agents could not be listed: " <> to_message(reason))
     end
   end
 
-  # The selected agent's instruction, read the first time it is shown.
-  defp show_instruction(%{chooser: c} = state) do
-    %{name: name} = Enum.at(c.agents, c.cursor)
-
-    shown =
-      case c.shown do
-        %{^name => _} ->
-          c.shown
-
-        shown ->
-          case Client.agent_definition(state.session_id, name) do
-            {:ok, agent} -> Map.put(shown, name, agent)
-            {:error, reason} -> Map.put(shown, name, %{error: to_message(reason)})
-          end
-      end
-
-    %{state | chooser: %{c | shown: shown, scroll: 0}}
-  end
-
-  defp chooser_key(%Key{code: "esc"}, %{chooser: %{step: :where} = c} = state),
-    do: %{state | chooser: %{c | step: :agent}}
-
-  defp chooser_key(%Key{code: "esc"}, state), do: %{state | focus: :command, chooser: nil}
-
-  defp chooser_key(%Key{code: code}, %{chooser: %{step: :agent} = c} = state)
-       when code in ["up", "k", "down", "j"] do
-    step = if code in ["up", "k"], do: -1, else: 1
-    cursor = (c.cursor + step) |> max(0) |> min(length(c.agents) - 1)
-    show_instruction(%{state | chooser: %{c | cursor: cursor}})
-  end
-
-  defp chooser_key(%Key{code: "enter"}, %{chooser: %{step: :agent} = c} = state),
-    do: %{state | chooser: %{c | step: :where}}
-
-  defp chooser_key(%Key{code: code}, %{chooser: %{step: :where} = c} = state)
-       when code in ["up", "k", "down", "j"],
-       do: %{state | chooser: %{c | where: if(code in ["up", "k"], do: 0, else: 1)}}
-
-  defp chooser_key(%Key{code: "w"}, %{chooser: %{step: :where}} = state),
-    do: chosen(state, :worktree)
-
-  defp chooser_key(%Key{code: "c"}, %{chooser: %{step: :where}} = state),
-    do: chosen(state, :checkout)
-
-  defp chooser_key(%Key{code: "enter"}, %{chooser: %{step: :where, where: where}} = state),
-    do: chosen(state, if(where == 0, do: :worktree, else: :checkout))
-
-  defp chooser_key(%Key{code: "page_up"}, state), do: scroll_instruction(state, -10)
-  defp chooser_key(%Key{code: "page_down"}, state), do: scroll_instruction(state, 10)
-  defp chooser_key(_key, state), do: state
-
-  defp scroll_instruction(%{chooser: %{} = c} = state, by),
-    do: %{state | chooser: %{c | scroll: max(c.scroll + by, 0)}}
-
-  defp scroll_instruction(state, _by), do: state
-
   # Both chosen: with a task typed it starts now; without one the command line asks for it,
   # and Enter starts it there.
-  defp chosen(%{chooser: c} = state, where) do
-    %{name: agent} = Enum.at(c.agents, c.cursor)
-    state = %{state | focus: :command, chooser: nil, choice: %{agent: agent, where: where}}
+  defp chosen(state, agent, where, prompt) do
+    state = %{state | focus: :command, switcher: nil, choice: %{agent: agent, where: where}}
 
-    case c.prompt do
+    case prompt do
       "" -> put_cmd(state, "")
       prompt -> state |> put_cmd("") |> start_branch(agent, where, prompt)
     end
@@ -1971,7 +1881,6 @@ defmodule Troupe.UI.TUI.Server do
         settings: nil,
         observer: nil,
         sessions: nil,
-        chooser: nil,
         choice: nil,
         # The answer to a listing asked for the session left is dropped when it comes.
         worktrees: [],
@@ -2761,39 +2670,71 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  # Tab in a window opens the agent chooser over it, the cursor on the agent the window runs.
+  # Tab in a window opens the one agent picker over it, the cursor on the
+  # agent the window runs, Enter switching it.
   defp open_switcher(state, path) do
     w = Map.fetch!(state.model.windows, path)
 
+    start =
+      unless state.branches?,
+        do: "a remote session runs one profile; create another session from HQ"
+
     case AgentChooser.open(state.session_id, w.profile,
            title: " the agent #{path} runs ",
-           for: {:window, path}
+           for: {:window, path},
+           window: path,
+           start: start
          ) do
       {:ok, switcher} -> %{state | focus: :switcher, switcher: switcher}
       {:error, reason} -> notice(state, reason)
     end
   end
 
-  # The window keeps its conversation; the agent picked runs it from its next turn, and the
-  # switch is in its transcript once the daemon has made it (root Decision 841).
-  defp switcher_key(key, %{switcher: %{for: {:window, path}} = chooser} = state) do
-    back = %{state | focus: {:window, path}, switcher: nil}
+  # What the picker was opened over, which Esc goes back to.
+  defp picker_back(%{switcher: %{for: {:window, path}}} = state) do
+    if Map.has_key?(state.model.windows, path),
+      do: %{state | focus: {:window, path}, switcher: nil},
+      else: %{state | focus: :command, switcher: nil}
+  end
 
+  defp picker_back(state), do: %{state | focus: :command, switcher: nil}
+
+  # The picker's three actions. A switch keeps the window's conversation; the agent picked
+  # runs it from its next turn, and the switch is in its transcript once the daemon has
+  # made it (root Decision 841). A start is command mode's branch, on the task typed before
+  # Ctrl-N or the one typed next. An edit is `/agents`' editor on the agent's file, the
+  # manager open on it.
+  defp switcher_key(key, %{switcher: chooser} = state) do
     case AgentChooser.key(chooser, key, state.session_id) do
       {:ok, chooser} ->
         %{state | switcher: chooser}
 
       :close ->
-        back
+        picker_back(state)
 
-      {:pick, name} when name == chooser.current ->
-        notice(back, "#{path} runs #{name} already")
+      {:switch, name, path} when name == chooser.current ->
+        notice(picker_back(state), "#{path} runs #{name} already")
 
-      {:pick, name} ->
+      {:switch, name, path} ->
+        back = picker_back(state)
+
         case Client.switch_profile(state.session_id, path, name) do
           :ok -> notice(back, "#{path} runs #{name} from its next turn; its conversation stays")
           {:error, reason} -> notice(back, "#{path} is not switched: " <> to_message(reason))
         end
+
+      {:start, name, where} ->
+        prompt =
+          case chooser.for do
+            {:start, prompt} -> prompt
+            _window -> ""
+          end
+
+        chosen(state, name, where, prompt)
+
+      {:edit, name} ->
+        page = Agents.open(state.session_id, name)
+        agents_key(%Key{code: "e"}, %{put_cmd(state, "") | focus: :agents, agents_page: page, switcher: nil})
     end
   end
 

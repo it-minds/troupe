@@ -214,8 +214,10 @@ defmodule Troupe.Client.Remote do
                 "change them in the console"
 
   @impl true
+  # Named by the session and no path, which is what a session's token may read: its own
+  # agents, its bundle's, with the profile they came from (root #594).
   def agents(sid, "agents.list", params) do
-    case Worker.rpc(sid, "agents.list", params) do
+    case Worker.rpc(sid, "agents.list", Map.put(params, :session_id, sid)) do
       {:ok, %{} = listed} -> {:ok, Map.put(listed, "read_only", @pod_agents)}
       {:ok, other} -> {:error, "unexpected agents.list answer: #{inspect(other)}"}
       {:error, reason} -> {:error, message(reason)}

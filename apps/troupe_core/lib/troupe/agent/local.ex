@@ -47,6 +47,22 @@ defmodule Troupe.Agent.Local do
   def layer(%Definition{source: :global}), do: "user"
   def layer(%Definition{source: source}), do: Atom.to_string(source)
 
+  @doc """
+  Where a definition comes from, in the words a person uses, the same in both clients'
+  pickers (#594): `Shipped` (Troupe's own), `Your organisation's` (the profile's bundle),
+  `Yours` (`<config>/agents/`, in every workspace) and `This repository's`
+  (`.troupe/agents/`, committed). The person's and the repository's stay two: an `auto` in
+  the person's applies in every workspace, trusted or not, and a repository's only once
+  the workspace is trusted. Takes a definition or a layer's name.
+  """
+  @spec origin(Definition.t() | String.t()) :: String.t()
+  def origin(%Definition{} = definition), do: definition |> layer() |> origin()
+  def origin("builtin"), do: "Shipped"
+  def origin("bundle"), do: "Your organisation's"
+  def origin("user"), do: "Yours"
+  def origin("project"), do: "This repository's"
+  def origin(other) when is_binary(other), do: other
+
   @doc "Whether the definition denies writing a file, editing one and running a command."
   @spec read_only?(Definition.t()) :: boolean()
   def read_only?(%Definition{} = definition),
