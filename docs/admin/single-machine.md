@@ -3,15 +3,13 @@
 The rest of this product assumes a cluster. This page is for the case that does not: one
 laptop, or one build box, running a worker that a plane places sessions on.
 
-It exists because the cluster is the expensive half. A developer who wants Troupe's
-sessions, bundles and log on the machine already in front of them should not have to stand
-up Kubernetes first — and a team whose CI runs on one box should be able to give that box
-to a profile and stop there.
+The cluster is the expensive half: a developer who wants Troupe's sessions, bundles and log
+on the machine in front of them should not have to stand up Kubernetes first, and a team
+whose CI runs on one box should be able to give that box to a profile and stop there.
 
 > **This is deliberate friction, and it is not a way around the policy.** A machine is not
-> a cluster, and the guarantees Kubernetes was providing are not there. Everything below
-> says which, where it matters, because a page that implied otherwise would be the most
-> dangerous page in this directory.
+> a cluster, and the guarantees Kubernetes provides are not there. Everything below says
+> which, where it matters.
 
 ---
 
@@ -64,9 +62,8 @@ and register it. You get a secret, **once**, and under it the CA the machine wil
 build-box registered — secret, shown once: twh_9f3c…
 ```
 
-There is no method that shows it again, in any surface. The plane keeps a hash, the same
-way it keeps a service principal's, because a secret it could show twice is a secret it is
-keeping. Lose it and you rotate.
+Nothing shows it again: the plane keeps a hash, as it does a service principal's. Lose it
+and you rotate.
 
 The CA is no secret. It signed the certificate the plane's control port serves, which
 cert-manager issues for the control Service through the chart (`plane.controlTls`), and
@@ -109,12 +106,9 @@ machine needs `TROUPE_BAO_TOKEN`, and the object store's credentials as a pod's
 **The control channel is TLS, and the machine checks whom it is talking to.** With
 `TROUPE_PLANE_CA_PATH` the worker dials with TLS and accepts only a certificate that CA
 signed, for the name it dials. Without it, a worker holding a machine's secret does not
-dial at all and logs why; and a plane that is sent a machine's secret in plaintext refuses
-it with a sentence before looking at it, and says in its log to rotate it, since it has
-crossed the network unencrypted. A pod dials the same port on the pod network, with TLS
-too; the chart's plane refuses plaintext from anybody unless
-`plane.controlTls.requireTls` is turned off, and so does a plane given a certificate
-without the chart unless `TROUPE_PLANE_CONTROL_REQUIRE_TLS` is `"false"`.
+dial and logs why, and a plane sent a machine's secret in plaintext refuses it before
+looking at it and logs that it must be rotated
+([security.md §3](security.md#3-a-worker-isolation-and-egress)).
 
 The chart does not expose the control port outside the cluster: no Ingress, and its
 NetworkPolicy admits the port only from worker namespaces and the operator. Reaching
@@ -123,40 +117,35 @@ a policy that admits it, and the name or address the machine dials goes into the
 certificate: `plane.controlTls.dnsNames` or `.ipAddresses`. Where it dials through
 something else, an SSH tunnel to `localhost` say, `TROUPE_PLANE_SERVER_NAME` names what the
 certificate is checked against instead, such as `troupe-plane-control.troupe-system.svc`.
-No tunnel is needed for the secret's sake any more; one still helps where you would rather
-not open the port to the network the machine is on at all.
+A tunnel is no longer needed for the secret's sake, only where you would rather not open
+the port to the machine's network at all.
 
-`TROUPE_HOST_SECRET` takes the secret directly, for a one-liner. The file is the better of
-the two and is shown first for that reason: an environment variable is readable in `/proc`
-and in `ps` output by anybody on that machine, and a laptop has more of those than a pod
-does. A pod uses neither — its token is projected at a fixed path and rotated in place,
-which is why these are two shapes rather than one with a special case.
+`TROUPE_HOST_SECRET` takes the secret directly, for a one-liner. The file is better, and
+shown first: an environment variable is readable in `/proc` and in `ps` output by anybody
+on the machine. A pod uses neither: its token is projected at a fixed path and rotated in
+place.
 
-It enrols over the control channel exactly as a pod does. Enrolment proves the machine is
-*this* machine of *that* profile — a pod proves it with a TokenReview against its namespace,
-a machine with the secret you just minted — and the refusal is the same single
-`unauthenticated` for every way of failing, so a caller learns nothing from which.
+It enrols over the control channel as a pod does. Enrolment proves the machine is *this*
+machine of *that* profile (a pod proves it with a TokenReview against its namespace, a
+machine with the secret you minted), and every way of failing is the same single
+`unauthenticated`, so a caller learns nothing from which.
 
-The console shows it as **registered, never seen** until it arrives. That is its own state
-and the one you need: a machine nobody has installed the worker on yet is a different job
-from a machine that is switched off.
+The console shows it as **registered, never seen** until it arrives: a machine nobody has
+installed the worker on yet is a different job from one that is switched off.
 
 ---
 
 ## 4. Allow a team on it, deliberately
 
-On **Teams**, with the team open, tick **may run where nothing is enforced**. Only a
-platform admin sees this field, and only a platform admin may set it — a flag a team could
-give itself is not a decision anybody made about that team, so a team admin's attempt is
-refused rather than quietly dropped.
+On **Teams**, with the team open, tick **may run where nothing is enforced**
+(`allow_unenforced_workers`). Only a platform admin sees or sets it: a flag a team could
+give itself is no decision about that team, so a team admin's attempt is refused rather
+than dropped. Then grant the profile; it is refused before this and accepted after, both
+in the audit trail.
 
-Then grant the profile. It is refused before this and accepted after, and both are in the
-audit trail.
-
-Taking the permission back while the grant still stands is also refused, naming the
-profiles: the check at grant time exists to make "granted, and not allowed" impossible, and
-clearing the flag afterwards would produce exactly that state by the back door. Revoke
-first, then clear it.
+Taking the permission back while the grant stands is refused too, naming the profiles,
+since it would make "granted, and not allowed" by the back door. Revoke first, then clear
+it.
 
 ---
 

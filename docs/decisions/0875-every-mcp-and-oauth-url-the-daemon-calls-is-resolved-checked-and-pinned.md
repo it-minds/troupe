@@ -16,6 +16,7 @@ paths:
   - apps/troupe_core/test/support/fake_oauth.exs
   - apps/troupe_core/test/troupe/mcp_oauth_address_test.exs
   - docs/user/configuration.md
+  - docs/user/mcp.md
 symbols:
   - Troupe.MCP.Address
   - Troupe.MCP.Address.target/1

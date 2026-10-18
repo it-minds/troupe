@@ -17,6 +17,7 @@ paths:
   - apps/troupe_daemon/README.md
   - apps/troupe_daemon/lib/troupe/daemon/cli.ex
   - clients/tui/README.md
+  - docs/user/models.md
   - clients/tui/config/test.exs
   - clients/tui/lib/troupe/cli/runner.ex
   - clients/tui/test/troupe/models_cli_test.exs

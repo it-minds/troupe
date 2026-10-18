@@ -29,6 +29,7 @@ paths:
   - apps/troupe_plane/test/troupe/plane/settings_test.exs
   - charts/troupe/templates/plane-rbac.yaml
   - docs/admin/profiles-and-policy.md
+  - docs/admin/gitops.md
 gist: In gitops mode a repository holds the profiles and the policy, and the plane reads them from the cluster and never writes git
 ---
 

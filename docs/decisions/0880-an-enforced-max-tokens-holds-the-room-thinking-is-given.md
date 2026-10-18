@@ -20,6 +20,7 @@ paths:
   - apps/troupe_core/test/troupe/agent/thinking_ceiling_test.exs
   - apps/troupe_core/test/troupe/llm/thinking_test.exs
   - docs/user/configuration.md
+  - docs/user/models.md
   - docs/admin/configuration.md
 symbols:
   - Troupe.LLM.Request.output_cap/1

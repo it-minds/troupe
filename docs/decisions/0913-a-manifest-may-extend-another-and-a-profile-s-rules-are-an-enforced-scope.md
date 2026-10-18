@@ -32,6 +32,7 @@ paths:
   - clients/gui/apps/console/src/views/Profiles.tsx
   - clients/gui/apps/console/src/views/RuleLists.tsx
   - docs/admin/profiles-and-policy.md
+  - docs/admin/gitops.md
 symbols:
   - Troupe.WorkerProfile.in_effect/1
   - Troupe.Plane.Gitops.Profiles.order/1

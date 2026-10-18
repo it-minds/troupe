@@ -23,6 +23,7 @@ paths:
   - apps/troupe_protocol/lib/troupe/mcp/server.ex
   - apps/troupe_protocol/test/troupe/mcp/client_headers_test.exs
   - docs/user/configuration.md
+  - docs/user/mcp.md
 symbols:
   - Troupe.MCP.Server.headers/1
   - Troupe.MCP.Server.header_problem/1

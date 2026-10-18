@@ -49,21 +49,28 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 The daemon is always installed. In a terminal the installer asks whether to add the TUI,
 the desktop app and the VS Code extension, shows what it is about to do, and asks before
 doing it; `--tui`, `--gui` and `--vscode` (`-Tui`, `-Gui`, `-VSCode`) name them, and `-y`
-(`-Yes`) asks nothing, installing the daemon alone when none is named. Once the daemon is in place it asks whether to
-[start it at login](#start-at-login), Enter meaning no; `--start-at-login` and
-`--no-start-at-login` (`-StartAtLogin`, `-NoStartAtLogin`) answer without the question, and
-`-y` alone turns nothing on. The copy attached to a release installs that release.
+(`-Yes`) asks nothing, installing the daemon alone when none is named. Once the daemon is
+in place it asks whether to [start it at login](#start-at-login), Enter meaning no;
+`--start-at-login` and `--no-start-at-login` (`-StartAtLogin`, `-NoStartAtLogin`) answer
+without the question, and `-y` alone turns nothing on.
 
-The Windows release builds the harness's zstd NIF (`ezstd`) from an it-minds fork that
-compiles it with Zig
-([the daemon's Decision 5](../../docs/decisions/daemon/0005-windows-is-back-in-the-matrix-on-a-fork-of-ezstd.md));
-the release itself needs nothing beyond what the tarball carries.
+The copy attached to a release installs that release, and `TROUPE_VERSION=0.15.0-beta`
+names another (with `minisign` installed, none from before 0.13, which were not signed). A
+private repository answers `/releases/latest` only to somebody signed in, so there the
+installers ask for `TROUPE_VERSION`, and `TROUPE_RELEASE_URL` names a mirror. Each release
+at <https://github.com/it-minds/troupe/releases> carries
+`troupe-daemon-<version>-<target>.tar.gz`, the `troupe` binaries and one `SHA256SUMS`,
+which both installers check every download against before replacing anything (and the
+release's signature where minisign is installed, [updating](../../docs/user/updating.md#what-the-signature-proves-and-what-it-does-not)).
 
 The release unpacks to `~/.local/lib/troupe-daemon` (`%LOCALAPPDATA%\Programs\troupe-daemon`)
 with `troupe-daemon` linked into `~/.local/bin` (a `.cmd` shim in
-`%LOCALAPPDATA%\Programs\troupe`, on the user `PATH`). Both installers verify `SHA256SUMS`,
-keep the previous release beside the new one for rollback, and take `--uninstall` /
-`-Uninstall`. Releases are at <https://github.com/it-minds/troupe/releases>.
+`%LOCALAPPDATA%\Programs\troupe`, on the user `PATH`). Both installers keep the previous
+release beside the new one for rollback, and take `--uninstall` / `-Uninstall` (with
+`--purge` / `-Purge`, the settings and session logs too). The Windows release builds the
+harness's zstd NIF (`ezstd`) from an it-minds fork that compiles it with Zig
+([the daemon's Decision 5](../../docs/decisions/daemon/0005-windows-is-back-in-the-matrix-on-a-fork-of-ezstd.md));
+the release itself needs nothing beyond what the tarball carries.
 
 ### Start at login
 
@@ -107,41 +114,18 @@ only you can read, which sends it on, so the token is never on a command line.
 
 ## Configuration
 
-The organisation's defaults, if it has any (a managed file, then the cached copy of a
-plane's document), then `~/.config/troupe/config.yaml` (`%APPDATA%\troupe\config.yaml` on
-Windows), then the project's `.troupe/config.yaml` and `.troupe/config.local.yaml`, then
-`TROUPE_*`, merged by key, and what the organisation enforces over all of them (Decision
-869). A project's files set the provider, keys, approvals, MCP servers and paths only
-in a workspace the user file's `trusted_workspaces` names (`config trust` adds one), and a
-pod's never do. The rules and every key:
-[docs/user/configuration.md](../../docs/user/configuration.md).
-
-```yaml
-providers:
-  gateway:
-    type: anthropic
-    base_url: https://gw.example/anthropic/v1
-    api_key: "{env:GW_TOKEN}"
-    auth: bearer
-    models:
-      claude-opus-5: {id: eu.anthropic.claude-opus-5, context: 400000, max_output: 64000}
-models:
-  default: gateway/claude-opus-5
-  cheap: gateway/claude-haiku-4-5
-```
-
-The daemon reads none of an opencode installation's settings; `troupe-daemon config
-import-opencode` copies its providers and default model into `config.yaml` once.
-`troupe-daemon config` shows what was resolved, `config --explain [KEY]` which file
-set each value, `config validate` what is wrong, and `config migrate` the rewrite to the
-current spellings. `troupe-daemon models` lists what every provider serves, with windows
-and prices, cached in `models.json`: it asks the providers first when the cache is stale,
-and `--refresh` always. A local session that starts refreshes a stale cache in the
-background (root Decision 778).
+The daemon reads the same files as every client: the organisation's defaults, your
+`config.yaml`, a project's `.troupe/config.yaml` and `.troupe/config.local.yaml`, then
+`TROUPE_*`, merged by key, and what the organisation enforces over all of them; a
+project's files set the trusted keys only in a workspace you trust, and a pod's never do.
+The layers, every key and the commands above are on
+[configuration](../../docs/user/configuration.md), with a gateway's file among the
+[examples](../../docs/user/configuration.md#examples); `troupe-daemon models` and its
+cache on [models and providers](../../docs/user/models.md).
 
 | variable | meaning |
 |---|---|
-| `TROUPE_PROVIDER`, `TROUPE_MODEL`, `TROUPE_BASE_URL`, `TROUPE_API_KEY` / `TROUPE_AUTH_TOKEN` | the session-wide provider |
+| `TROUPE_PROVIDER`, `TROUPE_MODEL`, `TROUPE_BASE_URL`, `TROUPE_API_KEY` / `TROUPE_AUTH_TOKEN` | the session-wide provider ([all of them](../../docs/user/configuration.md#the-files)) |
 | `TROUPE_DAEMON_IDLE_MINUTES` | exit after this long with nothing running; `0` never (default 10) |
 | `TROUPE_SESSION_IDLE_MINUTES`, `TROUPE_SESSION_DETACHED_MINUTES` | when a session goes to sleep, watched and unwatched ([below](#how-long-it-stays-up)) |
 | `TROUPE_CLIENT_TOOL_GRACE_SECONDS` | how long a call to a client's own tool waits for that client to come back ([below](#how-long-it-stays-up)) |

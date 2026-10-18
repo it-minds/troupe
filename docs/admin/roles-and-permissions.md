@@ -37,10 +37,9 @@ sequenceDiagram
 The provider's refresh token stays on the client's machine; the plane keeps no credential
 of the person's. A session's pod gets a token of its own, minted per pod (§5).
 
-SCIM (`/scim/v2/Users`, `/scim/v2/Groups`) writes the same rows, keyed on `externalId`
-(else `userName`), which must be what later appears as the subject. Group pushes replace
-membership and a PATCH adds or removes members; deletes are soft. Membership is never
-edited in Troupe.
+SCIM writes the same rows, keyed on `externalId` (else `userName`), which must be what
+later appears as the subject ([integrations.md §8](integrations.md#8-scim)). Membership is
+never edited in Troupe.
 
 ## 2. The admin roles
 
@@ -101,18 +100,16 @@ caller's role on the session:
 | collaborator | `control` | steer: `input.send`, `approval.respond`, `turn.cancel`, … |
 | viewer | `observe` | subscribe and read |
 
-The owner is `admin`; an ACL row gives its role; otherwise a `team`-visible session gives a
-team member `control` when the team's `members_may_control` is set, else `observe`. The
-owner's `admin` comes from owning the session (`owner_subject`), not from a row, so an
-access-list row naming the owner with a narrower role does not narrow them.
-`session.grant` is for the owner or a team admin. Revoking a team's grant on a profile
-freezes its sessions read-only: a running one is put to sleep on its pod, and one still
-waiting for a worker is never started. Workers re-check the ACL on every command, so a
-revoked collaborator is refused before their token expires, and a role you narrow with
-`session.grant` (an owner made a collaborator, a collaborator made a viewer) holds at their
-next command on the pod: the token they hold still says the old role, and the pod no longer
-takes its word for it (Decision 859). Widening a role takes effect with their next token,
-at most 15 minutes later.
+The owner's `admin` comes from owning the session (`owner_subject`), not from a row, so an
+access-list row naming the owner with a narrower role does not narrow them. Anyone else's
+role is their ACL row's; failing one, a `team`-visible session gives a team member
+`control` when the team's `members_may_control` is set, else `observe`. `session.grant` is
+for the owner or a team admin. Revoking a team's grant on a profile freezes its sessions
+read-only: a running one is put to sleep on its pod, and one still waiting for a worker is
+never started. Workers re-check the ACL on every command, so a revoked collaborator, or a
+role narrowed with `session.grant`, holds at their next command on the pod, whatever the
+token they hold still says (Decision 859). Widening a role takes effect with their next
+token, at most 15 minutes later.
 
 Offering a session one's own signed-in tools (`tools.register`) takes `control`. A profile
 with `personalTools: forbid` refuses it on its pods, and the platform's
@@ -159,7 +156,7 @@ Rendered by `Troupe.KMS.Policy`, so the tested string and the installed one are 
 | `troupe-person` | create, read, update on `<mount>/data/troupe/people/<name>/*` and read, list on its metadata, templated on the name OpenBao's JWT auth vouched for: a person's own daemon, logging in at the `jwt` auth path with an assertion the plane signs (audience `troupe-kms`), for their private sessions' keys and their own MCP credentials |
 | signing | create, update on `transit/sign/troupe-session-tokens`, read on its key; not exportable |
 | the plane's signing key | create, read and update on `transit/keys/troupe-plane-signing`, update on its `rotate`, create and update on `transit/sign/troupe-plane-signing` (`Policy.plane_signing/2`): the plane makes the key on first use, `ed25519` and not exportable, signs what it tells people's machines with it, and rotates it from the console; nothing exports it. Without it the plane's answers go out unsigned, which a machine that pinned the key refuses |
-| the GitHub App's key and webhook secret | read on `transit/wrapping_key` and `transit/keys/troupe-github-app`, create and update on its `import` and `import_version` and on `transit/sign/troupe-github-app`; the same on `transit/keys/troupe-github-webhook` and its `import` and `import_version`, and create and update on `transit/hmac/troupe-github-webhook/sha2-256`; delete on both keys and update on their `config` (`Policy.github_app/3`): the plane imports the App's key and webhook secret once, signs its JWT, checks each delivery's signature, and deletes both when the App is removed; nothing exports either ([github.md](github.md)) |
+| the GitHub App's key and webhook secret | import, sign (or HMAC), read and delete on `transit/keys/troupe-github-app` and `transit/keys/troupe-github-webhook`, and read on `transit/wrapping_key` (`Policy.github_app/3`, the paths in [github.md §4](github.md#4-give-the-plane-the-app)): the plane imports both once, signs the App's JWT, checks each delivery's signature, and deletes both when the App is removed; nothing exports either |
 | `troupe-worker-mcp-identity` | update on `transit/sign/<the pod's namespace>.*`, templated on the namespace Kubernetes auth vouched for (`Policy.mcp_identity/2`, Decision 747): a pod signs its profile's MCP assertions with the keys named after its own namespace and with no other, never the session-token key |
 
 The Kubernetes-auth roles in `dev/kind/dependencies.yaml` (`troupe-worker` for the
