@@ -23,6 +23,8 @@ paths:
   - apps/troupe_gateway/test/troupe/gateway/local_sources_test.exs
   - clients/tui/README.md
   - docs/user/configuration.md
+  - docs/user/mcp.md
+  - docs/user/agents.md
 symbols:
   - Troupe.Agent.Definition.permission/3
   - Troupe.Agent.Definition.trust/3

@@ -30,12 +30,9 @@ speaks ACP to, through the session's mounts; a team's grant narrows it as it doe
 A document with no `schema` key is schema 0, of which only `mcp_servers` is read; it is
 accepted for planes upgraded under one and never written again.
 
-On a pod the bundle's agents and skills, and Troupe's built-in agents, beat a session's
-working copy's of the same name, and the working copy's are listed as skipped, unless the
-profile sets
-`repositoryOverridesBundle: true`
-([profiles-and-policy.md](profiles-and-policy.md#a-repositorys-agents-and-skills-on-a-pod),
-Decision 826).
+On a pod the bundle's agents and skills, and Troupe's built-in agents, beat a working
+copy's of the same name unless the profile says otherwise
+([profiles-and-policy.md](profiles-and-policy.md#a-repositorys-agents-and-skills-on-a-pod)).
 
 **Validation.** At most 4 MiB; only those five keys; names `^[a-z0-9][a-z0-9-]{0,63}$`,
 unique per kind. An agent's definition must parse as frontmatter plus prompt, may list only
@@ -43,31 +40,25 @@ skills the bundle has, and replaces an agent Troupe ships (`build`, `plan`, `gen
 `explore`, `quick`, `answer`, `ask`, `reviewer`, `implementer`, `librarian`,
 `orchestrate`: every file in `troupe_core`'s `priv/agents/`) only with `override: true`;
 without it the bundle is refused, naming the agent. A draft's agent is also held to every
-rule the daemon holds a person's or a repository's agent file to (its `agents.validate`:
-the keys an agent has, a `mode`, tools the harness has, permissions that can apply, and the
-rest), and refused in the same words, `agent <name>: <what is wrong>`; what only a session
-can know, a model's provider or an MCP server's tool, is not checked. A version already
-published is not checked again by these rules, so one an older plane published still runs.
-The console's agent builder edits a bundle's agents as fields and asks
-`admin.agent.check` for one at a time (#594). A skill
-needs `SKILL.md` (whose `name`, if present, must be its own), relative text files with no
-`..`, at most 512 KiB. An MCP `url` is `https://`, or `http://` to a `.svc` host, and its
-host must pass the policy's egress check. Publishing to a channel that a profile whose
-workers are pods follows also refuses a `url` at a loopback, link-local, unspecified or
-cloud metadata address, in any spelling, which such a worker does not reach with Cilium or
-without; without Cilium, one on another port,
-or at another address, gets a rule of its own in those workers' NetworkPolicy
-([profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy)). `admin.bundle.validate`
-is not given a channel and does not make this check.
+rule the daemon holds an agent file to (`agents.validate`: its keys, a `mode`, tools the
+harness has, permissions that can apply, and the rest), refused in the same words,
+`agent <name>: <what is wrong>`; what only a session can know, a model's provider or an MCP
+server's tool, is not checked. A version already published is not checked again, so one an
+older plane published still runs. The console's agent builder edits a bundle's agents as
+fields and asks `admin.agent.check` for one at a time (#594). A skill needs `SKILL.md`
+(whose `name`, if present, must be its own), relative text files with no `..`, at most
+512 KiB. An MCP `url` is `https://`, or `http://` to a `.svc` host, and its host must pass
+the policy's egress check. Publishing to a channel a pod profile follows also refuses a
+`url` at a loopback, link-local, unspecified or cloud metadata address, in any spelling
+([profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy));
+`admin.bundle.validate` is given no channel and does not make this check.
 
 **A profile that extends another.** Any entry, of any kind, may say `"override": true`
-(`true` or `false`, nothing else). It matters where a profile on this channel extends a
-profile on another: the plane composes the two channels' bundles into the one its pods
-load, and an entry with a name the parent's bundle already has replaces the parent's only
-with the flag; without it the parent's is kept and the clash is reported
+(`true` or `false`, nothing else). It matters where a profile on this channel extends one on
+another and the plane composes the two channels' bundles: an entry named like one in the
+parent's bundle replaces it only with the flag
 ([profiles-and-policy.md](profiles-and-policy.md#a-profile-that-extends-another),
-Decision 910). The composed bundle is published on the channel `profile:<name>`, which is
-the plane's: a publish to it by hand is refused.
+Decision 910).
 
 **MCP entries.**
 
@@ -120,27 +111,19 @@ recorded when it was created until `admin.bundle.retire` retires that version, a
 it moves to the channel's current version at its next activation, with a durable
 `config_upgraded` event. A channel with nothing published offers the built-in agents.
 
-Personal MCP servers a person offers from their own client are separate: they arrive with
-consent through `tools.register` and are never configured into a pod.
-
-**A server that accepts only a signed-in person** is not a bundle server. Some MCP
-servers publish OAuth protected-resource metadata, answer a call without a token with
-`401`, and act on what is behind them as the person who signed in, refusing a service
-account's token outright; a bundle server's one shared token from a Secret is exactly
-what they refuse, and a person-mode server's `credential_ref` slot holds a value the
-person pasted, not a sign-in that expires every hour and has to be refreshed. For such a
-server, each person adds it to their own `mcp.json` with an `oauth.client_id` and signs
-in from the TUI or the desktop app ([configuration](../user/configuration.md#a-server-that-wants-you-to-sign-in));
-the daemon on their machine keeps and refreshes the tokens, and nothing of them reaches a
-pod or the plane (Decision 741). What you provide is the client: register one public
-client (no secret, PKCE, a loopback redirect such as `http://localhost`, with any port
-where the provider allows it) with the server's authorization server, grant it the
-server's scope, and give people its id. That serves their local sessions, and the desktop
-app and the TUI offer the same tools to a session on a pod they open, through
-`tools.register` once they agree (Decision 748): the pod's agent calls them, the daemon on
-their machine makes the call, and the pod sees the arguments and the answer, never the
-token. A platform with `managed_mcp_servers_only` takes none, as for any client-hosted
-tool, and nor does a profile with `personalTools: forbid`
+**A server that accepts only a signed-in person** is not a bundle server. Some MCP servers
+publish OAuth protected-resource metadata, answer a call without a token with `401`, and
+act as the person who signed in, refusing a service account's token: a bundle server's
+shared token is what they refuse, and a person-mode `credential_ref` slot holds a pasted
+value, not a sign-in refreshed every hour. Each person adds such a server to their own
+`mcp.json` with an `oauth.client_id` and signs in from the TUI or the desktop app
+([configuration](../user/configuration.md#a-server-that-wants-you-to-sign-in)); the daemon
+on their machine keeps and refreshes the tokens, and nothing of them reaches a pod or the
+plane (Decision 741). What you provide is the client: register one public client (no
+secret, PKCE, a loopback redirect such as `http://localhost`, any port where the provider
+allows it) with the server's authorization server, grant it the server's scope, and give
+people its id. Those tools serve their local sessions, and with their consent a session on
+a pod through `tools.register` (Decision 748), never configured into the pod
 ([profiles](profiles-and-policy.md#a-persons-own-tools-on-a-pod)).
 
 ## 2. Triggers
@@ -183,49 +166,45 @@ is the run the first one made.
 
 **A trigger's own URL.** A trigger with a key is fired by `POST /trigger/<id>` with
 `Authorization: Bearer <key>` and a JSON object as the body, which becomes the run's
-`event`. A webhook trigger is made with its key: the `admin.trigger.put` that creates it
-answers `key` and `url` once, and the console shows them once with a button that copies
-the key; nothing shows it again. `admin.trigger.key.rotate` (the console's **Rotate**, typed
-by the trigger's name) mints a new one, shows it once with the URL and keeps a salted hash;
-rotating replaces it at once, and is how a webhook
-made another way (a resource in `gitops` mode, or a trigger changed to a webhook) gets one.
-Only a webhook that names no repository has a key: a schedule is fired by the plane, a
-manual trigger by a person or a principal, and a trigger on a GitHub repository by the
-App's signed deliveries, so rotating one of those is refused, and a trigger whose source
-changes to one of those loses its key: changed back to a webhook, it has none until a
-rotation gives it one, and a listing's `has_key` is true only for a webhook that has. The key
-fires that one trigger and does
-nothing else, which makes it the credential to give a CI job or a provider's webhook, and
-a wrong key and an unknown id get the same `401`. An `Idempotency-Key` header names the
-run; without one, a retry in the same minute against the same revision gets the run it
-already made. The answer is `202` with the run and where its session is, as from
-`trigger.fire`; a disabled trigger is `403`, an event over 16 KiB `413` and a team with no
-budget left `402`. `source.kind: webhook` says a trigger is meant to be fired from
-outside, this way or by an executor that calls `trigger.fire`.
+`event`. The key fires that one trigger and nothing else, which makes it the credential to
+give a CI job or a provider's webhook; a wrong key and an unknown id get the same `401`. An
+`Idempotency-Key` header names the run; without one, a retry in the same minute against the
+same revision gets the run it already made. The answer is `202` with the run and where its
+session is, as from `trigger.fire`; a disabled trigger is `403`, an event over 16 KiB `413`
+and a team with no budget left `402`. `source.kind: webhook` says a trigger is meant to be
+fired from outside, this way or by an executor that calls `trigger.fire`.
+
+A webhook trigger is made with its key: the `admin.trigger.put` that creates it answers
+`key` and `url` once, and the console shows them once with a button that copies the key.
+`admin.trigger.key.rotate` (the console's **Rotate**, typed by the trigger's name) mints a
+new one at once, shown once with the URL and kept as a salted hash; it is how a webhook made
+another way (a resource in `gitops` mode, or a trigger changed to a webhook) gets one. Only
+a webhook that names no repository has a key: a schedule is fired by the plane, a manual
+trigger by a person or a principal, and a trigger on a GitHub repository by the App's
+signed deliveries, so rotating one of those is refused, and a trigger whose source changes
+to one of those loses its key (changed back, it has none until a rotation; a listing's
+`has_key` says which have one).
 
 **Runs** store only what the plane decided — `created`, `skipped`, `failed` — and read the
 rest from the session: `running`, `waiting` (on an approval), `done`, `failed`. A turn the
 harness stopped is `failed` with its `failed_reason`: `tool_failures`, a tool that kept
 failing, or `agent_failed`, an agent that kept crashing. `admin.runs.list` and
-`admin.run.review` are the inbox, and the console's **Runs and review** screen draws them
-for a platform admin and a team admin alike: each run's trigger, the repository and issue a
-GitHub run worked on, its state, its draft pull request with its CI rounds, its spend and
-who has read it, and a run's page with its session's GitHub record and a link to the
-session. A `notify_url` is posted `{trigger, run, source, session_id, fired_at, state,
+`admin.run.review` are the inbox, which the console's **Runs and review** screen draws for
+a platform admin and a team admin alike ([console.md](console.md#what-it-does)). A
+`notify_url` is posted `{trigger, run, source, session_id, fired_at, state,
 done_reason, failed_reason, pull_request}` when the run is `done` or `failed`, with
 `state` as the run listing gives it and `pull_request` the link to the draft pull request
 the run opened, or `null`.
 
 ### Triggers from a repository
 
-In `gitops` mode ([profiles-and-policy.md §6](profiles-and-policy.md#6-provisioning-direct-or-from-a-repository))
-a repository holds the triggers as well as the profiles (Decision 737): `Trigger`
-resources in the plane's namespace, applied by Flux or anything like it. Every fifteen
-seconds, in the pass that reads the profiles and after them, the plane lists them and
-makes its triggers follow. A new resource becomes a trigger, a change changes it and makes
-a revision as an edit did, and a resource that goes takes its trigger with it, runs and key
-included, so that it stops firing. Each is audited as `trigger.put` or `trigger.delete` by
-`system:gitops`, with the revision it made.
+In `gitops` mode ([gitops.md](gitops.md)) a repository holds the triggers as well as the
+profiles (Decision 737): `Trigger` resources in the plane's namespace, applied by Flux or
+anything like it. Every fifteen seconds, after the profiles, the plane lists them and makes
+its triggers follow. A new resource becomes a trigger, a change changes it and makes a
+revision as an edit does, and a resource that goes takes its trigger with it, runs and key
+included. Each is audited as `trigger.put` or `trigger.delete` by `system:gitops`, with the
+revision it made.
 
 One resource per trigger, named **`<team>.<trigger>`**: a trigger's name is unique within
 its team and a resource's within its namespace, a dot is in neither, and a team said once
@@ -271,20 +250,19 @@ spec:
 
 A field the manifest leaves out is its default, not what the trigger said before.
 
-**What is used.** A resource is used only if `admin.trigger.put` would have saved it — its
-name, its source and cron, the keys of its terms, its visibility, review, cap and
-notification target — and what it names is here: a team the plane has, a service principal
-of that team, and a profile the plane has. Profiles are read first in the same pass, so a
-trigger and the profile it starts on can arrive in one commit. A field of the spec that a
-`Trigger` has not got is refused as well: the CRD keeps what it does not know so that a
-misspelt `promptTemplate` reaches the plane, rather than being dropped on the way and
+**What is used.** A resource is used only if `admin.trigger.put` would have saved it (its
+name, source and cron, the keys of its terms, its visibility, review, cap and notification
+target) and what it names is here: a team the plane has, a service principal of that team,
+and a profile the plane has. Profiles are read first in the same pass, so a trigger and its
+profile can arrive in one commit. A spec field a `Trigger` has not got is refused too: the
+CRD keeps unknown fields so that a misspelt `promptTemplate` reaches the plane rather than
 making a trigger that asks for nothing. One that fails is **refused**: a new one gets no
 trigger, and a changed one leaves the trigger as the last version that passed, still
 firing. The reasons are in the log once, in `admin.triggers.list` (each trigger carries
 `gitops`: the resource, the generation it was read at, and a `problem` of `refused` or
-`missing` with `reasons`; a refused resource of the team with no trigger is listed by name,
-and one naming no team the plane has is listed to a platform admin with `team` null), and
-on the console's Triggers page.
+`missing` with `reasons`; a refused resource with no trigger is listed by name, to a
+platform admin with `team` null where it names no team the plane has), and on the
+console's Triggers page.
 
 **Locked.** The Triggers page is marked **Locked to gitops**, with no form, no switch and
 no delete, and `admin.trigger.put` (switching one on or off included) and
@@ -295,15 +273,14 @@ seconds, or disable the trigger's principal, which stays the console's. A trigge
 cluster has no resource for (`missing`, below) may still be deleted.
 
 **What stays the plane's.** Running one now (`admin.trigger.run`), its revisions and runs,
-and its **key**. The key is never in a resource: the plane mints it, shows it once and
-keeps a salted hash, so there is nothing to put in one. A key in a manifest would be a
-credential in a repository, and a reference to a Kubernetes Secret would give the plane,
-which faces the internet, a grant on Secrets that its Role deliberately does not have,
-only to hash a value it could have minted itself. A rotation also answers a leak, which
-cannot wait for a review and an applier's interval. So `admin.trigger.key.rotate` works in
-`gitops` mode as it does in `direct`. A trigger's row is changed in place when its resource
-changes, so its URL (`/trigger/<id>`) and its key survive every commit; a trigger removed
-from the repository and added again is a new trigger, with a new URL and no key.
+and its **key**, which is never in a resource: a key in a manifest would be a credential in
+a repository, and a reference to a Kubernetes Secret would give the internet-facing plane a
+grant on Secrets its Role deliberately lacks, only to hash a value it can mint itself. A
+rotation also answers a leak, which cannot wait for a review and an applier's interval, so
+`admin.trigger.key.rotate` works in `gitops` mode as in `direct`. A trigger's row is changed
+in place when its resource changes, so its URL (`/trigger/<id>`) and its key survive every
+commit; a trigger removed from the repository and added again is a new trigger, with a new
+URL and no key.
 
 **Teams, principals and grants** stay in the plane's database, and a trigger names them.
 Enable the team and make the principal before the manifest merges, or the resource is
@@ -313,10 +290,8 @@ repository.
 
 **From a running plane.** `admin.profiles.export` gives every trigger as
 `triggers/<team>/<trigger>.yaml`, beside the profiles and the policy, with its document and
-nothing the plane keeps. A trigger with a key says so in a note: the key keeps working
-after the switch, because the resource of the same name is read into the row that holds
-it. A trigger the cluster has no resource for after the switch is reported `missing`, kept,
-and goes on firing until its manifest is committed or it is deleted.
+nothing the plane keeps; a trigger with a key says so in a note, and the key keeps working
+after the switch ([gitops.md](gitops.md#switching-a-running-plane)).
 
 Applied by Flux in a Kustomization of its own, after the profiles':
 

@@ -28,24 +28,9 @@ scripts/toolbox            # a shell
 Five tests do not pass in a container and are not made to: the OS-pid cancellation test
 and four gateway tests that spawn or `kill -9` a daemon. They pass on a Linux runner.
 
-| Service | Image | Host port | Credentials | Notes |
-|---|---|---|---|---|
-| `postgres` | `postgres:16-alpine` | 25432 (5432 in the container); 25433 is mapped to 5433 for the restored cluster `scripts/pitr-drill` starts | `troupe` / `troupe`, database `troupe_plane_dev` | `wal_level=replica`, `archive_mode=on`, `archive_timeout=60`, data checksums; WAL archive volume chowned to 70:70 by a `busybox` init service (`docker-compose.yml:21-61`) |
-| `minio` | `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`, pinned by digest (Pigsty's community build; MinIO's own images are no longer public) | 29000 (S3), 29001 (console) | `troupe` / `troupe-secret` | `minio-setup` creates bucket `troupe-sessions` and enables versioning (`:87-98`) |
-| `openbao` | `openbao/openbao:2.4.1`, dev mode | 28200 | root token `troupe-dev-root` | dev mode keeps everything in memory, so the container enables `transit` and creates key `troupe-session-tokens` (`ecdsa-p256`) each time it starts, and is healthy once the key exists (`:105-136`); KV v2 is at `secret/` in dev mode |
+## 2. The gate
 
-`config/config.exs` points the dev and test repos at `localhost:25432`
-(`troupe_plane_dev` / `troupe_plane_test`), the object store at `localhost:29000`, and both
-the worker's KMS and the plane's transit at `localhost:28200` with the dev root token — "for
-these two environments only".
-
-Stop them with `scripts/dev-down`; `scripts/dev-down --purge` also removes the volumes.
-Each checkout's plane suite makes a test database of its own, and those of removed
-worktrees stay: `scripts/dev-down --test-databases [DAYS]` stops nothing and drops the
-ones made more than a week (or DAYS days) ago, saying each, and keeps one in use. A
-checkout that still runs its suite makes its own again.
-
-Then create and migrate the test database (compose creates only `troupe_plane_dev`; the
+Create and migrate the test database (compose creates only `troupe_plane_dev`; the
 plane's `test_helper.exs` says so when it finds none), and run the gate:
 
 ```bash
@@ -56,21 +41,28 @@ mix check          # compile with warnings as errors, format, credo --strict, bo
 
 ## 3. Development services
 
-`scripts/dev-up` starts compose project `troupe-dev` on ports chosen not to collide with a
-Postgres or MinIO already on the machine, and below 32768 so no outgoing connection is
-handed one first; `scripts/dev-down` stops it (`--purge` drops the
-volumes). In between, the three services restart with Docker (`restart: unless-stopped`):
-after the WSL VM or the machine restarts they are back as soon as Docker is, OpenBao with
-its transit key written again, without running `scripts/dev-up`.
+`scripts/dev-up` starts compose project `troupe-dev` (`dev/docker-compose.yml`) on ports
+chosen not to collide with a Postgres or MinIO already on the machine, and below 32768 so
+no outgoing connection is handed one first. The three services restart with Docker
+(`restart: unless-stopped`): after the WSL VM or the machine restarts they are back as
+soon as Docker is, OpenBao with its transit key written again, without `scripts/dev-up`.
 
-| Service | Port | Credentials | Notes |
-|---|---|---|---|
-| PostgreSQL 16 | 25432 (25433 for the PITR drill's restored cluster) | `troupe` / `troupe` | WAL archiving on, for `scripts/pitr-drill` |
-| MinIO | 29000, console 29001 | `troupe` / `troupe-secret` | bucket `troupe-sessions`, versioned |
-| OpenBao, dev mode | 28200 | root token `troupe-dev-root` | `transit` with `troupe-session-tokens`; KV v2 at `secret/` |
+| Service | Image | Host port | Credentials | Notes |
+|---|---|---|---|---|
+| `postgres` | `postgres:16-alpine` | 25432; 25433 for the restored cluster `scripts/pitr-drill` starts | `troupe` / `troupe`, database `troupe_plane_dev` | `wal_level=replica`, `archive_mode=on`, `archive_timeout=60`, data checksums; the WAL archive volume is chowned to 70:70 by a `busybox` init service |
+| `minio` | `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`, pinned by digest (Pigsty's community build; MinIO's own images are no longer public) | 29000 (S3), 29001 (console) | `troupe` / `troupe-secret` | `minio-setup` creates bucket `troupe-sessions` and enables versioning |
+| `openbao` | `openbao/openbao:2.4.1`, dev mode | 28200 | root token `troupe-dev-root` | dev mode keeps everything in memory, so the container enables `transit` and creates key `troupe-session-tokens` (`ecdsa-p256`) each time it starts, and is healthy once the key exists; KV v2 is at `secret/` |
 
-`config/config.exs` points the dev and test environments at these. Then
-`MIX_ENV=test mix ecto.create && MIX_ENV=test mix ecto.migrate` for the plane's suite.
+`config/config.exs` points the dev and test repos at `localhost:25432`
+(`troupe_plane_dev` / `troupe_plane_test`), the object store at `localhost:29000`, and both
+the worker's KMS and the plane's transit at `localhost:28200` with the dev root token, "for
+these two environments only".
+
+`scripts/dev-down` stops them; `--purge` also removes the volumes. Each checkout's plane
+suite makes a test database of its own, and those of removed worktrees stay:
+`scripts/dev-down --test-databases [DAYS]` stops nothing and drops the ones made more than
+a week (or DAYS days) ago, saying each, and keeps one in use. A checkout that still runs
+its suite makes its own again.
 
 ## 4. A plane and a worker on kind
 
@@ -101,12 +93,9 @@ Then `troupe login http://plane.localtest.me:30080` and `troupe --remote`.
 
 ## 5. Configuration
 
-`Troupe.Config` layers built-in defaults, the organisation's defaults (a managed file, then
-the cached copy of a plane's document), `<config dir>/config.yaml`,
-`<workspace>/.troupe/config.yaml`, `<workspace>/.troupe/config.local.yaml`, environment
-variables, then explicit options, and the organisation's enforced values over all of them
-(Decision 869); maps merge by key and any string may say `{env:VAR}`.
-Every key is in one table, `Troupe.Config.Schema`, from which `mix troupe.config.schema`
+`Troupe.Config` layers the files in [the ladder](../user/configuration.md#the-files), then
+environment variables, then explicit options, with the organisation's enforced values over
+all of them (Decision 869). Every key is in one table, `Troupe.Config.Schema`, from which `mix troupe.config.schema`
 writes `protocol/schema/config/v1.json` and the reference in
 [docs/user/configuration.md](../user/configuration.md); CI runs it with `--check`, so run
 it and commit the result after changing a key. `TROUPE_PROVIDER=fake` and

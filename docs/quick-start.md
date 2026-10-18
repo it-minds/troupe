@@ -42,7 +42,8 @@ The programs carry no Apple or Microsoft signature yet. The installers download 
 download made in a browser, the first time:
 
 - **macOS** refuses to open it: **System Settings → Privacy & Security**, then **Open
-  Anyway** beside the message about Troupe.
+  Anyway** beside the message about Troupe, or `xattr -d com.apple.quarantine
+  ~/.local/bin/troupe`.
 - **Windows** says "Windows protected your PC": **More info**, then **Run anyway**.
 
 What makes that safe is the release's own signature, which `troupe update` and the desktop
@@ -72,13 +73,12 @@ troupe doctor
 
 `troupe config` says which provider and model a session will use. With no key anywhere it
 asks instead, for Anthropic, OpenAI, a [gateway](glossary.md#gateway) such as LiteLLM, or
-your organisation's plane, and writes the answer to `config.yaml`. `troupe doctor` checks
-the setup one line at a time: the settings files, the key (by asking the provider for its
-list of models, which costs nothing), the helper every command runs under, and the
-programs on your `PATH`. `troupe doctor --bench` adds a short run of the harness itself
-against a scripted model, offline and in seconds: a turn with tool calls, a cut tool
-output, a compaction, a cancel and a replay, each passed or failed with what failed.
-Every setting, and which file wins: [configuration.md](user/configuration.md).
+your organisation's plane, and writes the answer to `config.yaml`; `troupe setup` asks the
+same on screens. `troupe doctor` checks the setup one line at a time, the key by asking
+the provider for its list of models, which costs nothing. What each checks, and
+`troupe doctor --bench`, an offline run of the harness itself, are in
+[the first run](user/README.md#first-run); every setting, and which file wins, in
+[configuration.md](user/configuration.md).
 
 ## 3. A first session
 

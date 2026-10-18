@@ -36,8 +36,9 @@ flowchart LR
 
 What it is not:
 
-- **A model.** It calls the provider you configure, Anthropic, OpenAI or any
-  OpenAI-compatible gateway, with your key, and counts what each call used.
+- **A model.** It calls the provider you configure (Anthropic, OpenAI, Azure OpenAI,
+  Gemini, OpenRouter, Ollama or a gateway in front of them) with your key, and counts what
+  each call used.
 - **A hosted service.** There is nothing to sign up for. It runs on your machine and, if
   you want one, on your cluster.
 - **A sandbox on your laptop.** There, commands run as you, once you approve them; on a pod
@@ -74,6 +75,9 @@ plane adds. CI runs its commands against the latest release every night.
 
 ## Where next
 
+The [documentation's front page](docs/README.md) has every page, by the reader it is for;
+the [site](https://it-minds.github.io/troupe/) is built from it.
+
 | | |
 |---|---|
 | [Quick start](docs/quick-start.md) | install, a first session, its cost and a cap, in ten minutes |
@@ -85,9 +89,10 @@ plane adds. CI runs its commands against the latest release every night.
 | [Changing it](docs/developer/README.md) | architecture, local setup, tests, builds, releases; [CONTRIBUTING.md](CONTRIBUTING.md) |
 | [Writing a client](PROTOCOL.md) | the protocol, complete on its own, with JSON Schema for every message |
 
-This repository is all of it: the platform, the daemon and both clients, with one
-`VERSION` and one release ([docs/developer/ci.md](docs/developer/ci.md)). [ARCHITECTURE.md](ARCHITECTURE.md)
-is the design and [docs/decisions/](docs/decisions/README.md) why it is that way.
+This repository is all of it: the platform, the daemon and the clients, with one
+`VERSION` and one release ([docs/developer/ci.md](docs/developer/ci.md)).
+[ARCHITECTURE.md](ARCHITECTURE.md) is the design and [docs/decisions/](docs/decisions/README.md)
+why it is that way.
 
 ## Licence
 

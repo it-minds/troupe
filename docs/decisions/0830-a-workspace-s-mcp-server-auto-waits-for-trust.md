@@ -16,6 +16,7 @@ paths:
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
   - apps/troupe_gateway/test/troupe/gateway/local_sources_test.exs
   - docs/user/configuration.md
+  - docs/user/mcp.md
 symbols:
   - Troupe.MCP.Local.waits_for_trust?/1
   - Troupe.MCP.Local.held_reason/2

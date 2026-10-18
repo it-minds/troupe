@@ -8,9 +8,10 @@ and backups on top.
 |---|---|
 | [installing.md](installing.md) | A cluster with nothing on it, to a first team in the console; a worked example on managed services |
 | [configuration.md](configuration.md) | Every environment variable, Helm value, platform setting, expected Secret, port and NetworkPolicy |
-| [console.md](console.md) | The new console at `/console`: where it is, how it is signed in to, and what it does so far |
+| [console.md](console.md) | The console at `/console`: where it is, how it is signed in to, and what each area does |
 | [roles-and-permissions.md](roles-and-permissions.md) | Identity from the provider, admin roles, service principals, break-glass, session roles, how each surface authenticates, RBAC, OpenBao policies, the admin methods |
 | [profiles-and-policy.md](profiles-and-policy.md) | Worker profiles, what the operator creates, conditions, upgrades and drains, `TroupePolicy`, team volumes, provisioning, sizing |
+| [gitops.md](gitops.md) | Profiles held in a repository: what the plane reads, the manifests, and switching a running plane |
 | [bundles-and-triggers.md](bundles-and-triggers.md) | Config bundles and MCP servers, triggers and the scheduler, unattended terms, budgets |
 | [integrations.md](integrations.md) | What the identity provider, OpenBao, PostgreSQL, object storage, the LLM gateway, Kubernetes, MCP, SCIM and the GUI require |
 | [github.md](github.md) | The plane's GitHub App: registering and installing it, giving the plane its key, the read-only token a session clones its repository with, and the fix loop: a `troupe/*` branch, a draft pull request and its CI, never a merge |
@@ -33,9 +34,8 @@ Also: [../a2a.md](../a2a.md) and [../egress-allowlist.md](../egress-allowlist.md
    charts/troupe/crds/` on every upgrade.
 3. **Label the ingress namespace** `troupe.dev/ingress=true`, or the network policies
    keep the ingress controller from the console, the API, `/app` and every worker.
-4. **Platform admin comes from an identity-provider group** carried in a claim. Whether
-   the claim needs a scope is the provider's: Authentik's does, and Entra refuses every
-   sign-in that asks for a `groups` scope.
+4. **Platform admin comes from an identity-provider group** carried in a claim; whether
+   the claim needs a scope is the provider's ([integrations.md §1](integrations.md#1-identity-provider-oidc)).
 5. **Bucket versioning must be on**, or erasure's promise means nothing.
 6. **Do not trust `SecretMissing`**: the operator has no RBAC on Secrets.
 7. **Nothing restarts a drained worker pod** on the current revision. After

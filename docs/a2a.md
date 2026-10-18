@@ -6,12 +6,12 @@ profile, and server-sent events for streaming. LiteLLM's A2A gateway, another ag
 framework, or a script sends a task to `/a2a/<profile>` and gets an answer back without
 learning anything about sessions, pods or the human protocol.
 
-The facade is a client. It uses the same public APIs as the TUI — the plane's `/rpc`
-and the worker WebSocket — holds no database and no credential of its own, and `mix
+The facade is a client. It uses the same public APIs as the TUI (the plane's `/rpc` and
+the worker WebSocket), holds no database and no credential of its own, and `mix
 troupe.boundaries` holds it to `troupe_protocol` alone. What it must remember between
 requests is the session row: the task id **is** the session id, and the plane records
-`origin: {"kind": "a2a", "caller": …, "task": …}` at create. A restarted facade answers
-`tasks/get` the same way, from the plane.
+`origin: {"kind": "a2a", "caller": …, "task": …}` at create, so a restarted facade answers
+`tasks/get` the same way.
 
 ## Routes
 
@@ -34,15 +34,12 @@ and the facade acts as the principal it names. Two kinds of caller, one exchange
 | `Bearer <id_token>` | a person, with an identity provider token | `{"id_token"}` |
 
 The exchange is `POST /auth/exchange` on the plane. The plane token it returns lasts at
-most fifteen minutes and is cached per credential until a minute before it expires;
-the cache holds a digest of the credential, never the credential. There is no
-facade-wide credential that can reach every profile: a compromised facade holds
-nothing more than each caller's own short-lived plane token, and it cannot see a
-session its principal does not own or sit on the ACL of, because the plane decides
-that, not the facade.
-
-LiteLLM's A2A gateway is one caller with one principal, owned by a team and granted
-the profiles it may call.
+most fifteen minutes and is cached, under a digest of the credential, until a minute
+before it expires. No facade-wide credential reaches every profile: a compromised facade
+holds nothing but each caller's own short-lived plane token, and sees no session its
+principal neither owns nor is on the ACL of, because the plane decides that. LiteLLM's A2A
+gateway is one caller with one principal, owned by a team and granted the profiles it may
+call.
 
 ## The card
 
@@ -64,7 +61,7 @@ caller can tell when the capability behind the card changed.
  "defaultInputModes": ["text/plain", "text/markdown"],
  "defaultOutputModes": ["text/markdown", "application/octet-stream"],
  "skills": [{"id": "review-checklist", "name": "review-checklist",
-             "description": "How we review a pull request at IT Minds", "tags": ["troupe", "reviewer"]}]}
+             "description": "How we review a pull request", "tags": ["troupe", "reviewer"]}]}
 ```
 
 ## The mapping
@@ -82,21 +79,18 @@ caller can tell when the capability behind the card changed.
 | task states | `submitted` (row created) → `working` (thinking/acting) → `input-required` (waiting) → `completed` (the model ended a root turn, or `agent_done` with reason `finished`) / `failed` (`llm_error`, `budget_exhausted`, `interrupted`, a root `turn_ended` with a reason, any other `agent_done`) / `canceled` |
 | `tasks/pushNotificationConfig/*` | `PushNotificationNotSupportedError`; the card says so |
 
-The final answer of a task is the text of the last root `llm_response` in the turn that
-ended it, or `agent_done.summary` when the agent used `finish`. The facade returns it
-as the task's `status.message`. It is a rendering of the log, done by the facade with a
-reader, never stored in the plane.
+A task's final answer, its `status.message`, is the text of the last root `llm_response`
+in the turn that ended it, or `agent_done.summary` when the agent used `finish`: a
+rendering of the log by the facade, through a reader, never stored in the plane.
 
-A message on a task that has already completed continues its session: a Troupe session
-can always take another input, and a follow-up that started a fresh session would have
-lost everything the first one knew. `contextId` is the task id, and a message that
-names only a `contextId` addresses that task.
+A message on a completed task continues its session, which can always take another input;
+a fresh session would have lost everything the first one knew. `contextId` is the task id,
+and a message that names only a `contextId` addresses that task.
 
-Every `status-update` carries `metadata.lastSeq`, the sequence number of the event it
-came from. A client that loses its stream sends it back as `metadata.lastSeq` on
-`tasks/resubscribe` or on its next `message/stream` and misses nothing; events from
-before the head are delivered without `final`, so an approval that was answered an hour
-ago does not end the new stream.
+Every `status-update` carries `metadata.lastSeq`, the sequence number of its event. A
+client that loses its stream sends it back as `metadata.lastSeq` on `tasks/resubscribe` or
+its next `message/stream` and misses nothing; events from before the head come without
+`final`, so an approval answered an hour ago does not end the new stream.
 
 ## Artifacts
 

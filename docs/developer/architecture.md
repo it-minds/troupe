@@ -1,8 +1,9 @@
 # Architecture, for someone changing the code
 
-Where things are and which rules the build enforces. The design and its reasons are in
-[../../ARCHITECTURE.md](../../ARCHITECTURE.md); the wire is [../../PROTOCOL.md](../../PROTOCOL.md);
-runtime configuration is [../admin/configuration.md](../admin/configuration.md).
+Where things are and which rules the build enforces. Why they are so is
+[ARCHITECTURE.md](../../ARCHITECTURE.md), and this page does not repeat it; the wire is
+[PROTOCOL.md](../../PROTOCOL.md); runtime configuration is
+[the server's variables](../admin/configuration.md).
 
 ## 1. Apps and releases
 
@@ -46,10 +47,11 @@ here but the protocol. One `VERSION` versions everything ([build.md §4](build.m
 Every cross-app call must also be declared `in_umbrella` in the caller's `mix.exs`.
 Test-only reverse dependencies pass because only `lib/` beams are read. The TUI has its own
 check, `mix troupe.xref` in `clients/tui`: UI modules call only `Troupe.Client` and pure
-data modules, and the whole TUI reaches the harness only through the doors the task lists
-(`@harness_allowed` in `clients/tui/lib/mix/tasks/troupe.xref.ex`: `Troupe.Protocol.Client`,
-`Troupe.Config`, `Troupe.Paths`, `Troupe.Reaper` and a dozen more; Decision 673). The Python conformance client in
-`apps/troupe_gateway/test/conformance/` is the check that the protocol alone is enough.
+data modules, and the whole TUI reaches the harness only through the doors in
+`@harness_allowed` (`clients/tui/lib/mix/tasks/troupe.xref.ex`: `Troupe.Protocol.Client`,
+`Troupe.Config`, `Troupe.Paths`, `Troupe.Reaper` and a dozen more; Decision 673). The
+Python conformance client in `apps/troupe_gateway/test/conformance/` checks that the
+protocol alone is enough.
 
 The operator and the worker both compose a pod's hostname `<ordinal>-<profile>.<domain>`;
 the two cannot share a function across the boundary, and both say so.
@@ -60,9 +62,10 @@ the two cannot share a function across the boundary, and both say so.
 (internal pub/sub), `MCP.OAuth.Tokens` and `MCP.OAuth.SignIns` (a person's sign-ins to
 their own MCP servers), `LLM.Catalog.Refresher`, `Memory.Facts.Stores` (a repository's
 facts, one process each), `Troupe.Sessions.Index`, and `Troupe.Sessions`, a
-`DynamicSupervisor` of `:transient` sessions. One session (`Troupe.Session`, `rest_for_one`, 3 restarts in
-10 s) starts its children in dependency order, top to bottom, so a crash restarts the
-child and everything below it and nothing above:
+`DynamicSupervisor` of `:transient` sessions. One session (`Troupe.Session`, `rest_for_one`,
+3 restarts in 10 s) starts its children in dependency order, top to bottom, so a crash
+restarts the child and everything below it and nothing above
+([why this order](../../ARCHITECTURE.md#21-a-session)):
 
 ```mermaid
 flowchart LR
@@ -90,11 +93,8 @@ flowchart LR
   node --> server["Agent.Server<br/>the gen_statem"]
 ```
 
-A person's shell, the approvals, questions and client tools sit above the agent so that a restarted agent
-finds the same answers and registrations; the watchers, the loop (Decision 679) and the
-projection sit below it so that none of them can restart it. The root `Agent.Node` is
-`significant`: when it gives up, past its own restart limit, the session ends and comes
-back dormant from its log (Decision 727).
+The root `Agent.Node` is `significant`: when it gives up, past its own restart limit, the
+session ends and comes back dormant from its log (Decision 727).
 
 **Daemon** (`Troupe.Gateway.Daemon`, `rest_for_one`, started by `Troupe.Daemon.Application`
 when `troupe-daemon` starts, or under `TROUPE_DAEMON_SERVE=1` from source): `Commands`
@@ -102,7 +102,7 @@ when `troupe-daemon` starts, or under `TROUPE_DAEMON_SERVE=1` from source): `Com
 `Private.Sealers` (a sealer per private session), `Setup` (the first run's answers), `Connections`
 (one process per client, at most 256), `Listener` (Unix socket or loopback TCP),
 `Loopback` (a WebSocket on 127.0.0.1, the only door a browser has) and `Idle`. Sessions
-are not in this tree, so the daemon can lose its listener without disturbing an agent.
+are not in this tree.
 
 **Worker** (`Troupe.Worker.Supervisor`, empty unless `TROUPE_WORKER_AUTOSTART`):
 `KMS.OpenBao.Login` first (the worker's own OpenBao identity), `Sessions` (a
@@ -132,22 +132,26 @@ a plane-token cache, the stream registry, and Bandit when autostarted.
 ## 4. Transports
 
 One JSON-RPC framing, three transports: a Unix socket (NDJSON, mode 0600, authenticated
-by file permissions), loopback TCP (NDJSON, a random token in a user-only file; chosen by
-*trying* `AF_UNIX`), and WebSocket (one message per text frame): a pod's `/v1/socket`
-with a session token whose audience is the pod, and the daemon's loopback WebSocket
-published in `daemon.json`. `TROUPE_DAEMON_SOCKET=tcp` forces loopback TCP; any other
+by file permissions), loopback TCP (NDJSON, a random token in a user-only file; chosen when
+*trying* `AF_UNIX` fails, since whether it works is a property of the OTP build), and
+WebSocket (one message per text frame): a pod's `/v1/socket` with a session token whose
+audience is the pod, and the daemon's loopback WebSocket published in `daemon.json`, the
+one a browser can use. `TROUPE_DAEMON_SOCKET=tcp` forces loopback TCP; any other
 value is a socket path. `Troupe.Protocol.Daemon` finds or starts the local daemon —
 `TROUPE_DAEMON_COMMAND`, else `troupe-daemon` on the `PATH` — serialising concurrent
 starts with an `O_EXCL` lock.
 
 ## 5. Where state lives
 
+A person's config and state directories, and what is in each, are
+[where your files are](../user/configuration/files.md); `<state>` below is the state
+directory.
+
 | State | Where |
 |---|---|
-| A local session's log | `<state>/sessions/<workspace-hash>/<session-id>/events.jsonl`; `<state>` is `TROUPE_STATE_HOME`, else `$XDG_STATE_HOME/troupe` or `%LOCALAPPDATA%\troupe`; blobs beside it |
-| Local config | `TROUPE_CONFIG_HOME`, else `$XDG_CONFIG_HOME/troupe` or `%APPDATA%\troupe`: `config.yaml`, `agents/`, `models.json` |
+| A local session's log | `<state>/sessions/<workspace-hash>/<session-id>/events.jsonl`, blobs beside it |
 | The project brief | `<repository root>/.troupe/memory/facts.jsonl`, one fact per line, and its generated view `.troupe/memory.md`; one process per repository writes both (Decision 838) |
-| Daemon discovery | `$XDG_RUNTIME_DIR/troupe/daemon.sock`, or `daemon.json` (TCP port and token, loopback WebSocket) |
+| Daemon discovery | `$XDG_RUNTIME_DIR/troupe/daemon.sock` (`~/.troupe/run/troupe/` without it), or `daemon.json` (TCP port and token, loopback WebSocket) beside it, or in `%LOCALAPPDATA%\troupe` (`Troupe.Protocol.Endpoint`) |
 | A pod's working copies | the `data` volume at `/var/lib/troupe` |
 | Sealed sessions | S3 `sessions/<id>/…`, written by workers and by daemons for private sessions |
 | Session keys | OpenBao KV v2, `troupe/teams/<team>/…` for pods, `troupe/people/<name>/…` for a person, under the name the plane keeps for them there (Decision 755) |
@@ -177,83 +181,82 @@ flowchart LR
 
 `one_for_one` is the degraded mode: an unreachable plane does not touch attached sessions.
 A worker connection subscribes from the journal's cursor + 1; the journal drops a batch it
-already has, so a reconnect or a `resync_required` produces the same transcript.
-Deltas are coalesced per 33 ms and dropped past 64 KB. `Troupe.Remote.Translate` turns
-protocol events into the harness's own at the edge — the model and view never branch on
-"is this remote". Browsing opens with `session.open read`; the first activating action
-calls `session.open activate` once and reconnects to whatever endpoint comes back. A
-session the plane moves to another pod is followed: a reconnect after a failure asks
-`session.open read` where it is first, a pod's `not_found` for the session sends an
-activating command once more wherever the plane opens it, and after ten tries in a row
-the worker stops and says so until the next command (TUI Decision 118).
-Merge, discard, watch mode, the brief and settings are local-only and answer a remote
-session with a sentence rather than failing silently.
+already has, so a reconnect or a `resync_required` produces the same transcript. Deltas
+are coalesced per 33 ms and dropped past 64 KB. `Troupe.Remote.Translate` turns protocol
+events into the harness's own at the edge, so the model and view never branch on "is this
+remote". Browsing opens with `session.open read`; the first activating action calls
+`session.open activate` once and reconnects to whatever endpoint comes back. A session the
+plane moves to another pod is followed: a reconnect after a failure first asks
+`session.open read` where it is, a pod's `not_found` for the session sends an activating
+command once more wherever the plane opens it, and after ten tries in a row the worker
+stops and says so until the next command (TUI Decision 118). Merge, discard, watch mode,
+the brief and settings are local-only and answer a remote session with a sentence rather
+than failing silently.
 
 ## 7. The GUI (`clients/gui`)
 
-The package layout is in the [GUI README](../../clients/gui/README.md). What its code
-settles:
+The package layout, how to run it and the protocol details the client library knows are
+in the [GUI README](../../clients/gui/README.md). What its code settles:
 
 - **The fold is in `@troupe/client`**, a pure function of the event stream, tested without
-  a DOM — two clients agreeing is a property of that function. The React layer is an
+  a DOM; two clients agreeing is a property of that function. The React layer is an
   adapter over the client's stores and holds nothing. `@troupe/client` has no runtime
   dependencies; every protocol type is an open object, because v1 is additive.
-- **The view owns the cursor**; `SessionAttachment` swaps the socket underneath it. On
-  `auth.expiring` it mints (`token.mint`) and hands the token over with `auth.refresh` on
-  the same socket; on a drop it reconnects with backoff (250 ms to 10 s) and resubscribes
-  from the last `seq` it processed. Every reconnection asks the plane's `session.open`
-  again, so a session moved to another pod is followed, and a command its pod refuses as
-  `not_found` for the session runs once more after the reopen (`SessionAttachment.retrying`).
+- **The view owns the cursor**; `SessionAttachment` swaps the socket underneath it, so a
+  pod token running out is invisible to a turn. On `auth.expiring` it mints (`token.mint`)
+  and hands the token over with `auth.refresh` on the same socket; on a drop it reconnects
+  with backoff (250 ms to 10 s) and resubscribes from the last `seq` it processed, and the
+  server closes the boundary: no gap, no duplicate. Every reconnection asks the plane's
+  `session.open` again, so a session moved to another pod is followed, and a command its
+  pod refuses as `not_found` for the session runs once more after the reopen
+  (`SessionAttachment.retrying`).
 - **Sign-in**: a browser uses authorization code + PKCE (the device grant fails in a browser
   against some providers: Microsoft Entra ID's device-code endpoint, for one, sends no CORS
-  headers), with `prompt=select_account` and, for a tenant-scoped Microsoft
-  issuer, `domain_hint=organizations`; anything else uses the device grant. Redeeming a
-  code is idempotent, and the code comes off the address bar either way. The redirect URI
-  is the origin plus the base path with no trailing slash, registered as a single-page
-  application.
+  headers), with `prompt=select_account` and, for a tenant-scoped Microsoft issuer,
+  `domain_hint=organizations`; anything else uses the device grant. Redeeming a code is
+  idempotent, and the code comes off the address bar either way. The redirect URI is the
+  origin plus the base path with no trailing slash, registered as a single-page application.
 - **Storage**: the provider's refresh token is the only persisted secret
   (`localStorage` `troupe.auth.refresh:<planeUrl>`, or the desktop shell's credential
   store); the PKCE verifier sits in `sessionStorage` `troupe.auth.pending` between leaving
   and coming back; preferences are `troupe.pref.*`. Plane and pod tokens live in memory.
 - **The stored refresh token is spent one caller at a time** (#53). A Web Lock is held per
   plane, across tabs, or a queue within the page where there are no locks, and the token
-  is read inside it. So StrictMode's double effect, or two tabs, never spend a rotating
+  is read inside it, so StrictMode's double effect, or two tabs, never spend a rotating
   token twice. A 400 or 401 is a refusal: its reason is logged, and the store is cleared
   only if it still holds the refused token. A 5xx keeps the token. A sign-in that brings
-  no refresh token is warned about, because the provider lacks `offline_access` and the
-  next reload will ask again.
+  no refresh token is warned about: the provider lacks `offline_access`, and the next
+  reload will ask again.
 - **Two modes, `local` and `plane`** (`mode.ts`, #85). `auth` is optional, and each screen
   says what it needs. In local mode Review and the plane's profiles are hidden, and the
   rail shows *This computer* and the OS user the daemon reported. *Local only* is a
-  remembered setting (`troupe.pref.localOnly`, in the browser's storage). It is reached
-  from the sign-in screen's third door or the switch on *This computer*. Turning it on
-  keeps the stored sign-in. *Offline* is plane mode with a plane that does not answer:
-  "Continue on this computer", nothing remembered, and the plane retried every 15 s. The
-  promise that nothing reaches a plane is tested on traffic: `apps/desktop/test` (Vitest,
-  jsdom) records every request the page opens.
+  remembered setting (`troupe.pref.localOnly`, in the browser's storage), reached from the
+  sign-in screen's third door or the switch on *This computer*; turning it on keeps the
+  stored sign-in. *Offline* is plane mode with a plane that does not answer: "Continue on
+  this computer", nothing remembered, and the plane retried every 15 s. That nothing
+  reaches a plane in local mode is tested on traffic: `apps/desktop/test` (Vitest, jsdom)
+  records every request the page opens.
 - **The fleet** is one list from several sources (the plane's `sessions.list`, polled
   every 4 s because the plane does not push, and the daemon), merged by id with the
   daemon's copy winning. A source that fails keeps its last rows and reports an error.
 - **An input is shown as queued**, below the stream, until `input_accepted` names its
   command id — never inserted optimistically. Approvals are a sticky panel; the inbox
   opens each waiting session in `read` mode.
-- **The base path is baked into the image** (`TROUPE_GUI_BASE`), the Ingress strips it,
-  and a GUI mounted at a sub-path prefills the plane URL with its own origin.
-- **Design tokens are generated**: `pnpm tokens` writes `tokens.css` and `mark.ts` from
-  `clients/gui/docs/design/themes/*.tokens.json` and refuses a theme whose token names
-  differ. Those four files are the repository's only copy: the plane's front page and
-  the TUI are generated from them too (Decision 716). Theme and mode are `data-theme`
-  and `data-mode` on the root, kept in the browser; Afterglow is the default and the
-  design (Decision 702), the other three are palettes on it. `pnpm icons` draws the
-  desktop app's icons from `mark.ts` (Decision 703).
+- **The base path is baked into the image** (`TROUPE_GUI_BASE`), the Ingress strips it
+  ([where it is mounted](../../clients/gui/README.md#where-it-is-mounted)), and a GUI
+  mounted at a sub-path prefills the plane URL with its own origin.
+- **Design tokens are generated** from `clients/gui/docs/design/themes/*.tokens.json`
+  ([the GUI's design](../../clients/gui/README.md#design)). Those four files are the
+  repository's only copy: the plane's front page and the TUI are generated from them too
+  (Decision 716). Afterglow is the default and the design (Decision 702); `pnpm icons`
+  draws the desktop app's icons from `mark.ts` (Decision 703).
 
 ## 8. Things a reader will trip over
 
 - `troupe_protocol` is not "no I/O beyond a socket": it holds the OpenBao, S3 and MCP
   clients and the CRD parsers, because they are contracts the plane and workers both hold.
 - `apps/troupe_protocol/test/troupe/policy_test.exs` imports `Troupe.Operator.Fixtures`
-  from the operator's test support without declaring the dependency; run the protocol
-  suite from the root.
+  without declaring the dependency ([testing.md §1](testing.md#1-running)).
 - `troupe_plane`'s `web/live/status.ex` reads its states from `priv/design/statuses.json`,
   which `mix troupe.admin.tokens` writes, not from `docs/design/admin/tokens.json`
   directly: the image build does not see `docs/`.

@@ -5,61 +5,16 @@ owns. Every git operation a pod makes on GitHub is that App's, so the organisati
 see it, narrow it and revoke it with GitHub's own tools: uninstall the App, or take a
 repository out of its installation.
 
+With it a session can clone a repository with a token it never holds
+([§6](#6-name-a-repository)), propose a fix as a draft pull request on its own `troupe/*`
+branch and never merge ([§7](#7-the-fix-loop)), start from an issue and go back to work on
+a review ([§8](#8-github-as-the-trigger)), within limits each team and profile sets
+([§9](#9-how-far-a-run-may-go)). It does **not** scan what a push carries for secrets by
+their content. This is [#147](https://github.com/it-minds/troupe/issues/147) and what came
+after it (Decisions 885, 891, 905, 911 and 917).
+
 This page sets it up. It uses `example-org` for the organisation and
 `https://troupe.example.com` for the plane; put in your own.
-
-## What it does today
-
-The four slices of [#147](https://github.com/it-minds/troupe/issues/147) and what came
-after them (Decisions 885, 891, 905, 911 and 917):
-
-- **A session can name a GitHub repository** when it is created, and its pod starts with a
-  clone of it: shallow, one branch (the one asked for, or the default), no tags.
-- **The clone uses a token the plane mints for that session**: a GitHub installation token
-  narrowed to the one repository, with `contents: read` and nothing else, that GitHub ends
-  after an hour. A pod asks for it over the control channel, only for a session it holds,
-  and gets a new one the next time the session is activated.
-- **The session works on the repository and proposes a change** with four tools, on a
-  profile that grants them ([the fix loop](#7-the-fix-loop)): it pushes a `troupe/*`
-  branch as the App's bot, opens a **draft** pull request, reads CI on it and pushes fixes.
-  After three red CI rounds it stops, says on the pull request what still fails, and leaves
-  the draft for a person. It never merges, never approves, never forces a push and never
-  pushes anywhere but its own `troupe/*` branch.
-- **The token never reaches the session.** The pod's own git uses the clone's, through a
-  credential helper on its command line; the fix loop's is used by the pod itself, outside
-  the sandbox, in the request it sends GitHub. The workspace's `.git/config` names the
-  remote and no credential, and the agent's `shell` has a token neither in its environment,
-  nor in a file, nor through a helper. A `git fetch` or `git push` from the shell cannot
-  authenticate.
-- **Nothing logs it.** The plane's audit trail has a `github.token` entry for every token,
-  naming the session, the repository, the permissions and when it expires; and an entry
-  for every push, pull request, CI round and stop.
-- **An issue starts a run, and a review sends it back to work** ([GitHub as the
-  trigger](#8-github-as-the-trigger)). The App's webhook delivers to the plane, signed; a
-  trigger on a repository starts a session when an issue gets its label, or when one of the
-  repository's own people comments its command; the session gets the issue as its task,
-  fenced as data. A review that requests changes on the draft it opened resumes that
-  session with the review as its next input, and so does a comment on its conversation; the
-  run's notification carries the pull request's link. The console's **Runs and review**
-  screen lists every run with its repository, issue, state, pull request, CI rounds and
-  spend, and a skipped run says which cap skipped it.
-- **A sweep, and "fix this"** ([§8](#a-sweep)). A trigger on a repository can also go over
-  the repository's open issues on a schedule, those with its label or those a query finds,
-  and start a run on each that nothing is fixing yet and that has not been tried as often as
-  it may be; and a person can start one run on one issue from the trigger's page.
-
-- **How far an unattended run goes is policy** ([§9](#9-how-far-a-run-may-go)). Each team
-  lists the repositories its sessions may name; a push or a pull request to a repository
-  GitHub reports as public is refused unless the profile allows public ones; a push that
-  would carry a credential file (`.env`, `*.pem`, a private key, a path the profile denies,
-  or what is mounted on the pod from a secret) is refused, naming it; a run has caps on its
-  pushes and on how many run at once, and a sweep on how often it tries one issue; and a
-  session's tokens are revoked at GitHub when it goes dormant or stops.
-- **In `gitops` mode the App comes from the repository** ([§10](#10-the-app-from-a-repository)):
-  its App ID, API URL and installations and every team's repositories, as a `GitHubApp`
-  resource. Its key and webhook secret never do.
-
-What it does **not** do: scan what a push carries for secrets by their content.
 
 ## 1. Register the App
 
@@ -98,7 +53,7 @@ installation, and until then the App keeps the ones it has.
 Whatever the App is granted, each token the plane mints is narrowed further, in the
 request, to the one repository and what the session needs: the clone's is
 `contents: read`, and the fix loop's is what the session's worker profile grants
-([step 5](#5-let-a-profile-reach-github)) and nothing more.
+([step 5](#5-let-a-profile-reach-github)).
 
 ## 2. Make its private key
 
@@ -111,14 +66,13 @@ then delete it: the plane is the only place it needs to be.
 **Install App** on the App's page, choose `example-org`, and pick **Only select
 repositories**: the ones sessions on this plane may clone. The installation's settings
 page is `https://github.com/organizations/example-org/settings/installations/<id>`; the
-number at the end is its **installation ID**.
-
-To add or remove a repository later, change it there; nothing on the plane changes.
+number at the end is its **installation ID**. Add or remove a repository there later;
+nothing on the plane changes.
 
 ## 4. Give the plane the App
 
-As a platform admin, set it on the console's **Integrations** screen, which tests it against
-GitHub too (`admin.github.check`) and removes it (`admin.github.delete`); or call
+As a platform admin, set it on the console's **Integrations** screen, which also tests it
+against GitHub (`admin.github.check`) and removes it (`admin.github.delete`); or call
 `admin.github.put` over `/rpc` with a plane token, or the `admin_github_put` tool on `/mcp`:
 
 ```json
@@ -131,15 +85,15 @@ GitHub too (`admin.github.check`) and removes it (`admin.github.delete`); or cal
 ```
 
 - `private_key` is the whole `.pem` file as text. The plane imports it into its OpenBao's
-  transit engine as `troupe-github-app`, a key that cannot be exported, and keeps nothing
-  of it but its type and fingerprint. From then on transit signs the App's JWT, and no one
-  can read the key back: not an administrator, not the plane, not a database backup.
-- `webhook_secret` is the App's webhook secret, at least 32 characters. The plane imports
-  it into transit too, as `troupe-github-webhook`, an HMAC key that cannot be exported,
-  and keeps only its version. Every delivery's `X-Hub-Signature-256` is checked against it:
-  the plane asks transit for the HMAC of the body and compares the two itself, in constant
-  time. Until it is set, the plane refuses every delivery and logs why. Sending another one
-  makes it the key's next version; change it on GitHub at the same moment.
+  transit engine as `troupe-github-app`, a key that cannot be exported, and keeps only its
+  type and fingerprint. From then on transit signs the App's JWT, and nobody can read the
+  key back: not an administrator, not the plane, not a database backup.
+- `webhook_secret`, at least 32 characters, is imported into transit too, as
+  `troupe-github-webhook`, an HMAC key that cannot be exported; the plane keeps only its
+  version. Every delivery's `X-Hub-Signature-256` is checked against it: the plane asks
+  transit for the HMAC of the body and compares the two itself, in constant time. Until it
+  is set the plane refuses every delivery and logs why. Sending another makes it the key's
+  next version.
 - `api_url` is GitHub's own API unless you set it: `https://api.<name>.ghe.com` for GitHub
   Enterprise Cloud, `https://<host>/api/v3` for GitHub Enterprise Server. Clones come from
   the matching host.
@@ -167,30 +121,26 @@ path "transit/hmac/troupe-github-webhook/sha2-256"       { capabilities = ["crea
 ```
 
 `delete` and the `config` paths are for `admin.github.delete`, which takes the key and the
-secret out of transit with the App: transit adds a version to a key only of the type it
-already has, so an App set again with a key of another size needs the old one gone. A
-role without them still removes the App, keeps the two keys and says so in the plane's
-log.
+secret out of transit with the App: transit adds a version only of the type a key already
+has, so an App set again with a key of another size needs the old one gone. A role without
+them still removes the App, keeps the two keys and says so in the plane's log.
 
-`admin.github.get` answers what is set: the App ID, the API URL and where clones come
-from, the installations, the key's type, fingerprint and transit version (compare the
-fingerprint with the one GitHub shows beside the key), the webhook's path and whether its
-secret is set and at which version, and `configured`, true once there is an App ID, a key
-and an installation. Every change is an audit entry, `github.put`, with the key as its
-fingerprint and the secret as its version.
+`admin.github.get` answers what is set: the App ID, the API URL and where clones come from,
+the installations, the key's type, fingerprint (compare it with the one GitHub shows beside
+the key) and transit version, the webhook's path and whether its secret is set and at which
+version, and `configured`, true once there is an App ID, a key and an installation. Every
+change is an audit entry, `github.put`, with the key as its fingerprint and the secret as
+its version.
 
 ## 5. Let a profile reach GitHub
 
-A pod reaches only the hosts its worker profile declares, so a profile whose sessions
-clone needs the Git host in `egress.gitHosts`: `github.com` for GitHub's own, or your
-Enterprise host ([profiles-and-policy.md](profiles-and-policy.md)). A session on a profile
-that does not
+A pod reaches only the hosts its worker profile declares, so a profile whose sessions clone
+needs the Git host in `egress.gitHosts`: `github.com`, or your Enterprise host
+([profiles-and-policy.md](profiles-and-policy.md)). A session on a profile that does not
 declare it is refused when it is created, saying so. The chart's default cluster policy
-(`troupePolicy.allowedEgress`) already allows `github.com`; an Enterprise host has to be
-added there before a profile may name it.
-
-The plane itself calls the API to mint tokens: `api.github.com`, or your Enterprise host
-([What Troupe dials](../egress-allowlist.md)).
+(`policy.allowedEgress`) already allows `github.com`; an Enterprise host has to be added
+there before a profile may name it. The plane itself calls the API to mint tokens:
+`api.github.com`, or your Enterprise host ([What Troupe dials](../egress-allowlist.md)).
 
 **To push and open pull requests**, a profile grants it in `spec.github.permissions`, in
 GitHub's own names, and declares the API's host too, since the pod calls the API itself:
@@ -210,10 +160,9 @@ spec:
 Those four are all a profile may grant: `contents` and `pull_requests` read or write,
 `checks` and `statuses` read; anything else is refused by name when the profile is saved.
 Absent, a session on the profile clones and does no more. The fix loop's token is minted
-with exactly these, narrowed to the session's repository, and a profile that grants
-nothing to write with, or does not declare the API's host, gets no such token: the tool
-that asked says why. The plane reads the grant at every token it mints, so a change needs
-no restart.
+with exactly these, narrowed to the session's repository; a profile that grants nothing to
+write with, or does not declare the API's host, gets no such token, and the tool that asked
+says why. The plane reads the grant at every token it mints, so a change needs no restart.
 
 ## 6. Name a repository
 
@@ -227,9 +176,21 @@ none ([§9](#9-how-far-a-run-may-go)).
 `{"owner": "example-org", "name": "widgets", "ref": "main"}`. It is refused, with
 `invalid_params` and `field: "repository"`, when the plane has no App, the App is not
 installed for that owner here, the session's team does not list it, or the profile does not
-declare the Git host. The session's row and its listing carry it. A clone that fails (the
-installation does not include the repository, GitHub refuses the App) fails the session's
-start with GitHub's reason.
+declare the Git host. The session's row and its listing carry it.
+
+The pod clones it shallow, one branch (the one asked for, or the default), no tags. A clone
+that fails (the installation does not include the repository, GitHub refuses the App) fails
+the session's start with GitHub's reason. Its token is a GitHub installation token for that
+one repository, `contents: read`, which GitHub ends after an hour; a pod asks for it over
+the control channel, only for a session it holds, and gets a new one at each activation.
+
+**The token never reaches the session.** The pod's own git takes the clone's through a
+credential helper on its command line; the fix loop's is used by the pod itself, outside the
+sandbox, in the request it sends GitHub. The workspace's `.git/config` names the remote and
+no credential, and the agent's `shell` has a token neither in its environment, nor in a
+file, nor through a helper, so a `git fetch` or `git push` from the shell cannot
+authenticate. No log names a token; the audit trail has a `github.token` entry for each,
+naming the session, the repository, the permissions and when it expires.
 
 ## 7. The fix loop
 
@@ -247,8 +208,8 @@ one has none of them. Each asks like `shell` unless the agent's definition says 
 can:
 
 - **`troupe/*` only, and one branch a session.** The first push names the branch
-  (`troupe/session-<id>` unless the agent names another under `troupe/`); every later
-  push goes to the same one, and any other branch is refused before GitHub is asked.
+  (`troupe/session-<id>` unless the agent names another under `troupe/`); every later push
+  goes to the same one, and any other branch is refused before GitHub is asked.
 - **Never a force.** A push builds on the session's last commit and moves the branch only
   forward. If a person has pushed to the branch since, the session's push is refused and
   their commit stays.
@@ -260,22 +221,22 @@ can:
   with no author given, so the commit is the App's bot's (`example-org-troupe[bot]`) and
   GitHub signs it: it shows as verified. Its message ends with a `Troupe-Session: <id>`
   trailer, which a reviewer follows to the session and its audit; one the agent wrote
-  itself is taken out. Whatever the agent committed locally, under whatever name, stays
-  on the pod.
+  itself is taken out. Whatever the agent committed locally, under whatever name, stays on
+  the pod.
 - **Three red CI rounds, then stop.** A round is CI on a commit the session pushed to its
   pull request. A push waits until CI on the last one has finished, so no round goes
   uncounted. After the third red round the session's pushes are closed: its next token
-  cannot write contents, the pull request gets a comment from the bot listing the red
-  rounds and the checks that failed, and the agent is told to comment what it tried and
-  stop. The draft stays for a person. The run's budget, turns and wall clock stop it
-  sooner, as they stop any session.
+  cannot write contents, the bot comments on the pull request listing the red rounds and
+  the checks that failed, and the agent is told to comment what it tried and stop. The
+  draft stays for a person. The run's budget, turns and wall clock stop it sooner, as they
+  stop any session.
 - **What the session reads is data.** An issue, a comment or CI's output that tells the
   agent to push elsewhere, merge or print a token changes nothing it may do: the tools take
   their permissions from the profile and the session's row, never from text. `pr_checks`
   shows CI's output fenced and marked as data.
 
-**An agent for it.** The tools describe the loop themselves, so any agent that has them
-is walked through it. A profile made for unattended fixing gives its bundle an agent that
+**An agent for it.** The tools describe the loop themselves, so any agent that has them is
+walked through it. A profile made for unattended fixing gives its bundle an agent that
 names them and marks them `auto`, for example `fixer.md`:
 
 ```markdown
@@ -317,13 +278,13 @@ branch without a person.
 
 **What the run records.** The session's row keeps what it did there; the console's Sessions
 screen shows its pull request as a link, and `session.get`, `sessions.list`,
-`admin.sessions.list` and `admin.runs.list` carry it as `github`: the commit its clone started
-from (`base`), its `branch`, its last `commit`, how many `pushes`, its `pull_request`
-(`number` and `url`), each CI `round` (`commit`, `state` red or green, the checks that
-were `failing`), and `stopped` once three red rounds have closed its pushes. The audit
-trail has `github.push`, `github.pull_request`, `github.round` and `github.stopped`, each
-naming the session, by the pod for the session's owner. Never a commit message, a pull
-request's text or CI's output: those are on GitHub.
+`admin.sessions.list` and `admin.runs.list` carry it as `github`: the commit its clone
+started from (`base`), its `branch`, its last `commit`, how many `pushes`, its
+`pull_request` (`number` and `url`), each CI `round` (`commit`, `state` red or green, the
+checks that were `failing`), and `stopped` once three red rounds have closed its pushes.
+The audit trail has `github.push`, `github.pull_request`, `github.round` and
+`github.stopped`, each naming the session, by the pod for the session's owner; never a
+commit message, a pull request's text or CI's output, which are on GitHub.
 
 ## 8. GitHub as the trigger
 
@@ -331,18 +292,18 @@ With the webhook on (steps 1 and 4), GitHub sends the plane the App's events at
 `POST /webhook/github`, and a **trigger on a repository** turns an issue into a run.
 
 **The webhook.** A delivery is taken only when its `X-Hub-Signature-256` is the webhook
-secret's HMAC of its body; one unsigned or wrongly signed is refused with `401`, and the
-plane's log says so with the delivery's id and event, never its body. Each delivery is done
-once, by its `X-GitHub-Delivery`: GitHub sending it again (a retry, or **Redeliver** on the
-App's page) is answered `200` and does nothing more. The plane answers `202` as soon as a
-delivery is checked and recorded and does the work afterwards, so GitHub's ten seconds are
-never the time a session takes to start. A delivery about a repository whose owner the
-plane lists no installation for does nothing. The plane must be reachable from GitHub at
-that path; nothing else of the plane needs to be.
+secret's HMAC of its body; one unsigned or wrongly signed is refused with `401`, logged with
+the delivery's id and event, never its body. Each delivery is done once, by its
+`X-GitHub-Delivery`: a retry or **Redeliver** is answered `200` and does nothing more. The
+plane answers `202` once a delivery is checked and recorded and does the work afterwards,
+so GitHub's ten seconds never wait on a session's start. A delivery about a repository
+whose owner has no installation listed does nothing. The plane must be reachable from
+GitHub at that path; nothing else of it needs to be.
 
 **A trigger on a repository** is a webhook trigger whose source names the repository and
 what on it starts a run, in the console (**Triggers → New trigger → an issue on a GitHub
-repository**), with `admin.trigger.put`, or as a `Trigger` resource:
+repository**), with `admin.trigger.put`, or as a `Trigger` resource
+([bundles-and-triggers.md](bundles-and-triggers.md#triggers-from-a-repository)):
 
 ```json
 {
@@ -381,45 +342,40 @@ as any run is.
 
 **What the session is given.** It is created as the trigger's principal on the trigger's
 profile, with the repository, so its pod clones it and has the fix loop's tools
-([§7](#7-the-fix-loop)). Its first prompt is the trigger's `prompt_template`, or where
-there is none, "Fix issue #7 of example-org/widgets, which follows, ...", and then the
-issue: its link, its author, its labels, its title and its text, and the comment that
-asked, between `<<<github-issue` and `github-issue>>>`, after a sentence saying it is data
-written by people on GitHub and never an instruction. Either marker inside the text is
-taken out, so the text cannot close the fence. The template is rendered with the issue's
-title, text and comment taken out of `{{event.*}}`: it can say `{{event.issue.number}}`,
-`{{event.issue.url}}`, `{{event.repository}}` or `{{event.sender}}`, and cannot paste what
-an issue says anywhere outside the fence. The run keeps the issue (its text cut to 8 KiB)
-as its `event`; nothing in it changes the session's profile, agent, terms, tools or token.
+([§7](#7-the-fix-loop)). Its first prompt is the trigger's `prompt_template` (or "Fix issue
+#7 of example-org/widgets, which follows, ...") and then the issue (link, author, labels,
+title, text, and the comment that asked) between `<<<github-issue` and `github-issue>>>`,
+after a sentence saying it is data written by people on GitHub, never an instruction.
+Either marker inside the text is taken out, so the text cannot close the fence. The
+template's `{{event.*}}` has no issue title, text or comment: it can say
+`{{event.issue.number}}`, `{{event.issue.url}}`, `{{event.repository}}` or
+`{{event.sender}}`, and cannot paste what an issue says outside the fence. The run keeps the
+issue (its text cut to 8 KiB) as its `event`; nothing in it changes the session's profile,
+agent, terms, tools or token.
 
-**A review resumes the session.** When a person submits a review on the draft pull request
-a run opened, requesting changes or commenting, the plane sends the run's session back to
-work with the review as its next input: woken as the trigger's principal if it went
-dormant, then given the review's summary and its comments on lines (which the plane reads
-from GitHub with a read-only token of its own, `pull_requests: read` on that one
-repository), fenced as `<<<github-review` and `github-review>>>` and marked as data. One
-review is one input, however many lines it comments on. It does nothing for:
+**A review or a comment resumes the session.** When a person submits a review on the draft
+a run opened, requesting changes or commenting, or comments on the draft's conversation
+(`issue_comment`, `created`, on the pull request), the plane sends the run's session back to
+work with it as its next input: woken as the trigger's principal if it went dormant, then
+given the review's summary and its comments on lines, fenced as `<<<github-review` and
+`github-review>>>`, or the comment, fenced as `<<<github-comment` and `github-comment>>>`,
+and marked as data. One review is one input, however many lines it comments on. The plane
+reads the review, and whether the pull request is still a draft, from GitHub with a
+read-only token of its own (`pull_requests: read` on that one repository). Nothing is
+resumed for:
 
-- an approval, or a review with nothing in it;
+- an approval, or a review or comment with nothing in it;
 - a pull request that is not a draft, or that no run's session opened (a session a person
   started stays theirs to steer);
-- a reviewer GitHub does not count as the repository's owner, a member or a collaborator,
-  or a bot;
-- a session whose pushes three red CI rounds have closed: that draft is a person's now.
+- a reviewer or commenter GitHub does not count as the repository's owner, a member or a
+  collaborator, or a bot (so the App's own comments, its CI summary and its stop, resume
+  nothing);
+- a session whose pushes three red CI rounds or a cap have closed: that draft is a
+  person's now.
 
-Each resume is an audit entry, `github.review`, naming the session, the pull request, the
+A comment on a pull request is never a command that starts a run. Each resume is an audit
+entry, `github.review` or `github.comment`, naming the session, the pull request, the
 reviewer and the delivery.
-
-**A comment on its conversation resumes it too.** A comment on the draft's conversation
-(`issue_comment`, `created`, on the pull request) sends the session back to work with the
-comment as its next input, fenced as `<<<github-comment` and `github-comment>>>`, under the
-same rules as a review: from the repository's owner, a member or a collaborator and never a
-bot (so the App's own comments, its CI summary and its stop, never resume anything); with
-something in it; on a draft a run opened, whose pushes three red rounds or a cap have not
-closed. The pull request is read from GitHub to tell whether it is still a draft, with a
-read-only token of the plane's own (`pull_requests: read` on that one repository). A
-comment there is never a command that starts a run. Each resume is an audit entry,
-`github.comment`.
 
 ### A sweep
 
@@ -443,7 +399,7 @@ refuses a query that says `repo:`, `org:`, `user:`, `is:`, `type:`, `state:` or 
 A trigger with a sweep and no label or command is fired only by its sweep.
 
 At each minute the plane reads the issues, oldest first and at most 50, with a token of its
-own narrowed to the repository, `issues: read` and `pull_requests: read`, and audited as
+own narrowed to the repository, `issues: read` and `pull_requests: read`, audited as
 `github.token`, and starts one run on each that is not already being fixed and has not been
 tried as often as it may be:
 
@@ -452,9 +408,9 @@ tried as often as it may be:
   a person's to review.
 - **Tried** is a run the sweep started on the issue that has ended: three red CI rounds or
   its cap of pushes closed it, its budget, turns or wall clock ran out, it failed, or it
-  finished and its pull request is no longer open. Counted since a person last
-  asked for a run on that issue, with its label, its command or "fix this"; a person's own
-  runs are not held to the cap. The cap is the lower of the profile's `maxAttempts` and the
+  finished and its pull request is no longer open. It is counted since a person last asked
+  for a run on that issue, with its label, its command or "fix this"; a person's own runs
+  are not held to the cap. The cap is the lower of the profile's `maxAttempts` and the
   team's `max_attempts`, and **one** where neither says ([§9](#9-how-far-a-run-may-go)).
 
 Each run is the trigger's, under its `concurrency`, the profile's and the team's caps of
@@ -474,31 +430,11 @@ public ones. Or `admin.trigger.fix` with `{team, name, issue}`. The run is `manu
 person, under the same caps as any run of the trigger, and a second click in the same
 minute is the run the first one made. A skipped run says why there and on its page.
 
-**Runs and review.** The console's **Runs and review** screen lists every run of the teams
-you administer, platform admin and team admin alike: its trigger, repository, issue, state,
-draft pull request with its CI rounds, spend, and who has read it; a run's page shows its
-session's record on GitHub and links to the session, and marks the run read. A trigger's
-`notify_url` is told when a run ends, with `pull_request` the link to its draft.
-
-**In a repository** (`gitops` mode), a `Trigger` resource says the same:
-
-```yaml
-apiVersion: troupe.dev/v1alpha1
-kind: Trigger
-metadata:
-  name: platform.fix-issues
-  namespace: troupe-system
-spec:
-  principal: svc:platform/fixer
-  profile: fixer
-  agent: fixer
-  source:
-    kind: webhook
-    provider: github
-    repository: example-org/widgets
-    label: troupe-fix
-  concurrency: 2
-```
+Every run, from a delivery, a sweep or "fix this", is listed on the console's **Runs and
+review** with its repository, issue, state, draft pull request, CI rounds and spend, and a
+skipped one with the cap that skipped it; a trigger's `notify_url` is told when it ends,
+with `pull_request` the link to its draft
+([bundles-and-triggers.md §2](bundles-and-triggers.md#2-triggers)).
 
 ## 9. How far a run may go
 
@@ -546,12 +482,11 @@ What each does:
   path with a `/` from the repository's root, `**` any number of directories, either case).
   A path under what the pod mounts from a secret, a link into it, or a file whose bytes are
   a mounted file's is refused too. The refusal names every path, and nothing of the tree
-  reaches GitHub. The tree is what `git add -A` would stage, staged into an index of the
-  push's own, so a refused push leaves nothing staged behind it: leave such files out with
-  `.gitignore`, and take one the agent staged or committed itself out of git's index with
-  `git rm --cached`. A file already on GitHub that the push does not change is not asked
-  about. The content of what is pushed is not scanned for secrets; GitHub's secret scanning
-  and push protection are the place for that.
+  reaches GitHub. The tree is what `git add -A` would stage, into an index of the push's
+  own, so a refused push leaves nothing staged: leave such files out with `.gitignore`, and
+  take one the agent staged or committed out of git's index with `git rm --cached`. A file
+  already on GitHub that the push does not change is not asked about. Content is not
+  scanned for secrets; GitHub's secret scanning and push protection are the place for that.
 - **A cap of pushes.** The lower of the profile's `maxPushes` and the team's `max_pushes`.
   A run that asks for one more stops as three red CI rounds stop it: the plane records why,
   every token it mints after cannot push, the bot says so on the draft, and the agent is
@@ -576,10 +511,9 @@ parent's `allowPublic: false` whatever it says, and can only lower a parent's ca
 
 ## 10. The App from a repository
 
-On a plane in `gitops` mode ([profiles-and-policy.md §6](profiles-and-policy.md#6-provisioning-direct-or-from-a-repository))
-the App's settings are a repository's too: one `GitHubApp` resource, named `github`, in the
-plane's namespace, which the plane reads at every pass as it reads the profiles and the
-triggers:
+On a plane in `gitops` mode ([gitops.md](gitops.md)) the App's settings are a repository's
+too: one `GitHubApp` resource, named `github`, in the plane's namespace, which the plane
+reads at every pass as it reads the profiles and the triggers:
 
 ```yaml
 apiVersion: troupe.dev/v1alpha1
@@ -601,31 +535,28 @@ spec:
       maxAttempts: 1
 ```
 
-- **What it holds**: the App ID, the API URL and the installations, and each team's
-  repositories and caps under `teams`, by the team's name. The resource is the whole of it:
-  a field it leaves out is that field's default, and **a team it does not name lists no
-  repository**. A team it names that the plane does not have is reported (`unknown_teams`)
-  and its entry is used once the team is enabled.
-- **What it never holds**: the private key and the webhook secret. They go into OpenBao's
-  transit engine through the console's **Integrations** screen or `admin.github.put`, as in
-  [step 4](#4-give-the-plane-the-app), on a `gitops` plane as on any other, and nothing
-  reads them back. A key in the resource (`privateKey`, say) is refused as a field the kind
-  does not have, and the resource is not used.
+- **What it holds**: the App ID, the API URL, the installations, and each team's
+  repositories and caps under `teams`, by name. The resource is the whole of it: a field it
+  leaves out is that field's default, and **a team it does not name lists no repository**.
+  A team it names that the plane does not have is reported (`unknown_teams`) and used once
+  the team is enabled.
+- **What it never holds**: the private key and the webhook secret, which go into transit
+  through the console's **Integrations** screen or `admin.github.put` as in
+  [step 4](#4-give-the-plane-the-app). A key in the resource (`privateKey`, say) is refused
+  as a field the kind does not have, and the resource is not used.
 - **Checked as the console checks it**: an App ID, an API URL that is GitHub's, an
   Enterprise Cloud's or an Enterprise Server's, one installation per owner, repositories as
   `owner/name` or `owner/*`, caps from 1 to 1000. One that fails is reported `refused`, with
   every reason, and the App stays as the last version that passed.
 - **Locked elsewhere**: the console shows the App's settings and every team's **GitHub** tab
-  locked, with where they come from; `admin.github.put` refuses `app_id`, `api_url` and
-  `installations`, and `admin.team.update` refuses `github`, as `managed_by_gitops`.
-  `admin.github.get` says where they come from (`gitops`: the resource, the generation it was
-  read at, and any problem).
+  locked; `admin.github.put` refuses `app_id`, `api_url` and `installations`, and
+  `admin.team.update` refuses `github`, as `managed_by_gitops`. `admin.github.get` says
+  where they come from (`gitops`: the resource, the generation read, and any problem).
 - **Gone**: when the resource leaves the cluster, the App's settings and every team's
-  repositories go with it; its key and webhook secret stay in OpenBao for the App the
-  repository names next.
-- **Switching**: `admin.profiles.export` writes the App's manifest beside the profiles' and
-  the triggers' (`github/github.yaml`). Until it is committed, an App set through the
-  console is reported `missing` and goes on as it was.
+  repositories go with it; its key and webhook secret stay in OpenBao for the next App.
+- **Switching**: `admin.profiles.export` writes the App's manifest beside the profiles'
+  and the triggers' (`github/github.yaml`); until it is committed, an App set through the
+  console is reported `missing` and goes on as it was ([gitops.md](gitops.md#switching-a-running-plane)).
 
 The plane's role reads `githubapps` in `gitops` mode, as it reads `triggers`; the chart
 installs the CRD (`charts/troupe/crds/githubapp.yaml`).

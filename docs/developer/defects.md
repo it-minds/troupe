@@ -2,10 +2,11 @@
 
 Defects found in passing, while working on something else, and not fixed yet. Each has a
 place in the code, what goes wrong and who saw it. An entry leaves this page when an issue
-or a pull request takes it; the line that remains says which one. Every entry but D8 (the
-flaky tests, which have their own pass) was checked against the code of 0.15.0 on
-2026-10-12 (#422): what was fixed went to the table at the end, and what was said twice is
-said once.
+or a pull request takes it; the line that remains says which one. One that will not be
+fixed, or that turns out not to be a defect, moves to the sections at the end with the
+reason. Every entry but D8 (the flaky tests, which have their own pass) was checked
+against the code of 0.15.0 on 2026-10-12 (#422): what was fixed went to the table at the
+end, and what was said twice is said once.
 
 Fixers following [fixing-issues.md](fixing-issues.md) add their `noticed` defects here.
 Stale docs and style nits are not defects and do not belong here.
@@ -401,13 +402,6 @@ Found by the chunk 14 fixer of slot E14 (PR #359), 2026-10-03.
 
 Found by the chunk 14 fixers of slots A14 and B14 (PRs #364, #363), 2026-10-03.
 
-### D61 - Private sessions after #365: what is left (medium)
-
-- A private session sealed before PR #373 lacks its first events (`session_created`): the
-  sealer subscribed after the session started.
-
-Found by the chunk 15 fixer of slot D15 (PR #373), 2026-10-04.
-
 ### D62 - Start at login: small leftovers (low)
 
 - On macOS and Linux a daemon started at login (and one a Finder-launched desktop app
@@ -611,13 +605,6 @@ Found by the #437 fixer, 2026-10-06.
   counts as a try and holds the next off for `memory_max_age_days`.
 
 Found by the #123 fixer, 2026-10-06.
-
-### D79 - `troupe-daemon open` and the loopback: what #449 left (medium)
-
-- The loopback admits an upgrade that carries no `Origin` header (the token is still
-  required).
-
-Found by the #449 fixer, 2026-10-06.
 
 ### D80 - Small leftovers from the 0.8.6 work (low)
 
@@ -1576,7 +1563,21 @@ Found by the chunk 38 fixers, 2026-10-18.
 | D124's three frames items - reasoning on replay, Afterglow dark's `--bg-sunken`, no desktop control for `transcript.detail` | #659 |
 | D46 - the TUI and headless runs didn't follow a restarted daemon; D55 - a worker's OpenBao mount and an empty static token; D66 - `read_output` named to agents without it, the lax stand-in provider; D40's activation on a draining pod and its test comment; D50's first three items; D65's bench item; D79's open-tab fragment; D131's per-call timeout, TUI first run, viewers' config and the two test-order items | chunk 39's criticals sweep (Decision 923) |
 
+## Won't fix
+
+- **A private session sealed before PR #373 lacks its first events.** This was D61: the
+  sealer subscribed after the session started, so `session_created` and what came before
+  it were never sealed. The fix holds for every session since; the events of the older
+  ones were never written to the sealed log, and nothing can restore them. Judged in
+  chunk 39's criticals sweep, 2026-10-18.
+
 ## Checked and not a defect
+
+- **The daemon's loopback admits a WebSocket upgrade with no `Origin`.** This was D79.
+  A browser always names the page in `Origin` on an upgrade, and `origin_allowed?` in
+  `apps/troupe_gateway/lib/troupe/gateway/web.ex` refuses a page whose origin is not
+  listed; an upgrade without one comes from a program (the TUI, the VS Code extension, a
+  script), which still needs the daemon's token. Checked in chunk 39, 2026-10-18.
 
 - **The Authentik provider is Confidential, but the clients are public.** This was D4.
   Checked on 2026-09-23 against the live plane: the GUI's code exchange (PKCE, no

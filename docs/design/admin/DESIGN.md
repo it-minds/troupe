@@ -4,15 +4,12 @@ The platform console for Troupe. This document is the reasoning behind `admin/to
 
 Files:
 
-- `admin/tokens.json` — the system as data.
+- `admin/tokens.json` — the system as data. `mix troupe.admin.tokens` turns it into the console's `apps/troupe_plane/priv/static/tokens.css` and `priv/design/statuses.json`, which `Troupe.Plane.Web.Live.Status` reads; CI checks both are current.
 - `admin/example.dc.html` — all nine surfaces, self-contained, opens directly in a browser. Includes a broken state (Overview, Integrations, Audit integrity failure), a pending state (bundle rollout, committed profile change), a waiting state (`dev-standard`), a draining machine, and a console-offline banner you can toggle from the top bar.
-- `DESIGN.md` — this file.
 
-`mix troupe.admin.tokens` turns `tokens.json` into the console's `apps/troupe_plane/priv/static/tokens.css` and `priv/design/statuses.json`, which `Troupe.Plane.Web.Live.Status` reads, and CI checks both are current.
+The sections below are the design and its mockup. The console in `clients/gui/apps/console/` is built to it (the plane's read-only page at `/admin` keeps the earlier LiveView build of the status system); where the two differ (an erase panel rather than a dialog, an audit page with its integrity check below the log rather than tabs, no changed-cell flash yet) the console is what ships, and the admin track ([profiles and policy](../../admin/profiles-and-policy.md)) says how it works.
 
-What the sections below describe is the design and its mockup, `example.dc.html`; the console in `clients/gui/apps/console/` is built to it (the plane's read-only page at `/admin` keeps the earlier LiveView build of the status system), and where the two differ — an erase panel rather than a dialog, an audit page with its integrity check below the log rather than tabs, no changed-cell flash yet — the console is what ships and the admin track ([profiles and policy](../../admin/profiles-and-policy.md)) says how it works.
-
-It is a sibling of the user client ([`clients/gui/docs/design/`](../../../clients/gui/docs/design/DESIGN.md): its `DESIGN.md`, `example.dc.html` and the four `themes/*.tokens.json`), not a reskin of it. §1 says where they diverged when both were drawn; the client has since moved to Afterglow (Figtree and DM Mono, square corners, pink as its reserved colour), and the console has not.
+It is a sibling of the user client ([its design](../../../clients/gui/docs/design/DESIGN.md)), not a reskin of it. §1 says where they diverged when both were drawn; the client has since moved to Afterglow (Figtree and DM Mono, square corners, pink as its reserved colour), and the console has not. What the two share, that document argues and this one only applies: structure from hairlines and alignment, no gradients, mono for anything literal, sentence-case labels, a status never carried by colour alone, the focus ring, and copy that names the consequence.
 
 ---
 
@@ -28,7 +25,7 @@ So this design keeps the platform's family and changes the grammar.
 
 **What it changes, deliberately:**
 
-1. **Amber is reassigned.** In the client, amber means "a human must decide now", and nothing else may use it. That meaning does not exist here — an administrator is never asked to approve an agent's file edit. Amber here means **degraded**: still serving, needs attention soon. Reusing the colour for a different meaning across two products is a real risk, and it is worth taking: in both cases amber means *stopped short of done, a person is the unblocker*. The alternative — inventing a ninth hue so amber could stay unused — would have made the status system harder to read for the sake of a consistency nobody experiences, since no one has both products open at once.
+1. **Amber is reassigned.** In the client, amber means "a human must decide now", and nothing else may use it. That meaning does not exist here: an administrator is never asked to approve an agent's file edit. Amber here means **degraded**: still serving, needs attention soon. Reusing a colour for another meaning across two products is a real risk, worth taking: in both, amber means *stopped short of done, a person is the unblocker*. Inventing a ninth hue so amber could stay unused would have made the status system harder to read for a consistency nobody experiences, since no one has both products open at once.
 
 2. **No single accent.** The client has one accent doing one job. Here, **status is the accent system**: twelve states, each with a colour, a glyph and a word. Nothing else in the interface is coloured. Buttons are neutral. Links are blue because links are blue. If something on this screen has colour, it is telling you the state of a thing.
 
@@ -237,9 +234,11 @@ The erase dialog is the model for everything irreversible. It states what is del
 
 ## 10. Accessibility
 
-- **Contrast:** body ≥4.5:1 in both themes; `text.muted` is the floor at 4.7:1. Every status foreground clears 4.5:1 on its own background. Focus ring ≥3:1 on every surface.
-- **Never colour alone.** Glyph + word + colour, always, everywhere. A greyscale screenshot of any screen must remain fully readable — this is a hard review criterion, not an aspiration.
-- **Focus:** 2px `border.focus` ring with 2px offset on `:focus-visible`, never removed. DOM order is reading order. The erase dialog traps focus and returns it to the triggering row's button on close; Escape closes it.
+The client's floor ([its §10](../../../clients/gui/docs/design/DESIGN.md#10-accessibility)) holds here: body ≥4.5:1 in both themes, every status foreground ≥4.5:1 on its own background, the focus ring ≥3:1 on every surface, a 2px `border.focus` ring with 2px offset on `:focus-visible` that is never removed, and DOM order as reading order. Where the console differs or adds:
+
+- **Contrast:** `text.muted` is the floor at 4.7:1.
+- **Never colour alone.** Glyph + word + colour, everywhere. A greyscale screenshot of any screen must remain fully readable; this is a hard review criterion, not an aspiration.
+- **Focus:** the erase dialog traps focus and returns it to the triggering row's button on close; Escape closes it.
 - **Keyboard:** every control reachable; tables are ordinary tables with real `th scope` and `caption`; no custom grid behaviour to learn.
 - **Live regions:** `aria-live="polite"` on changing metrics; `role="status"` on the offline banner. Nothing else announces — a busy fleet would otherwise be unusable with a screen reader.
 - **Motion:** `prefers-reduced-motion: reduce` removes the pulse on draining (the one state that pulses) and the settle fade.
@@ -292,30 +291,32 @@ Three rules for error copy: **what failed, what the platform did about it, what 
 
 ## Decisions
 
-1. **Extended the platform family, changed the grammar.** Same grounds, same typefaces, same hairline structure — different density, different colour logic. Two products, one platform, two instruments. A designer could have broken fully; the shared grounds cost nothing and make "this is the same system" legible in one glance.
+Where a section above already gives the reason, the decision names the section.
 
-2. **Amber changed meaning between the two products.** In the client it is "a human must decide"; here it is "degraded". Defensible because no user holds both products in mind at once, and because the underlying sense — stopped short of done, a person unblocks it — is the same. Recorded here because it is the single most arguable call in this document.
+1. **Extended the platform family, changed the grammar** (§1). A designer could have broken fully; the shared grounds cost nothing and make "this is the same system" legible in one glance.
 
-3. **Status is the accent system, and nothing else is coloured.** The brief's strongest warning was one accent asked to mean six things. The inverse solution: no general accent at all. Every coloured pixel is a state. Buttons are neutral grey; the erase confirm button only becomes red once the typed name matches, which is also the moment it becomes destructive.
+2. **Amber changed meaning between the two products** (§1, item 1). Recorded here because it is the single most arguable call in this document.
 
-4. **Twelve states, each with a glyph.** Colour is the third signal. The test is a greyscale screenshot, and it passes.
+3. **Status is the accent system, and nothing else is coloured** (§1, item 2). The brief's strongest warning was one accent asked to mean six things; the inverse is no general accent at all. Buttons are neutral grey; the erase confirm button becomes red only once the typed name matches, the moment it becomes destructive.
 
-5. **Pending and waiting are different colours, not shades.** Blue for "the cluster has not answered me", violet for "the cluster said yes and is holding". They are adjacent in a lifecycle and constantly confused in operations tools; giving them different hue families is worth the extra token.
+4. **Twelve states, each with a glyph** (§2). Colour is the third signal; the test is a greyscale screenshot, and it passes.
 
-6. **Unknown exists.** Most consoles collapse silence into failure. During a partition that turns a console into a wall of red and destroys its usefulness at the exact moment it is needed.
+5. **Pending and waiting are different hue families, not shades** (§2): adjacent in a lifecycle and constantly confused in operations tools, so worth the extra token.
 
-7. **The console-offline banner leads with what is *not* affected.** The single most consequential sentence in this product, because an operator who believes the platform is down at 3 a.m. does something expensive.
+6. **Unknown exists** (§2). Collapsing silence into failure turns a console into a wall of red during a partition, the moment it is most needed.
 
-8. **The no-content guarantee is stated as a property, not a permission.** "There is no setting that changes this" reads as architecture. "You do not have access" reads as a missing feature, and this guarantee is what makes the platform defensible.
+7. **The console-offline banner leads with what is *not* affected** (§7): the most consequential sentence in this product, because an operator who believes the platform is down at 3 a.m. does something expensive.
 
-9. **Dense by default, 44px only where it matters.** 30px controls and 32px rows for the mouse-first work; 44px for destructive actions at any width and for everything on the surfaces people genuinely use on a phone. Making the whole console touch-sized would cost roughly a third of the rows.
+8. **The no-content guarantee is stated as a property, not a permission** (§9). "There is no setting that changes this" reads as architecture; "You do not have access" reads as a missing feature.
 
-10. **Verify-before-save on identity and integrations.** The identity screen can lock every employee out of the platform. The friction is a passing test with four named checks, which is also documentation of what "connected" means. It is the only place in the console where a save button is gated on a prior action.
+9. **Dense by default, 44px only where it matters** (§10). Making the whole console touch-sized would cost roughly a third of the rows.
 
-11. **Typed confirmation for erasure only.** The one action that reaches every copy and cannot be undone. Everything else is either reversible or slow enough to catch, and typing a name for a reversible action teaches people to type names without reading.
+10. **Verify-before-save on identity and integrations** (§5, §8). The identity screen can lock every employee out; the four named checks are also documentation of what "connected" means. It is the only save button gated on a prior action.
 
-12. **Rollback republishes rather than rewinds.** The interface says so in the same breath as the button. An audit trail that can go backwards is not an audit trail.
+11. **Typed confirmation for erasure only** (§8): the one action that reaches every copy and cannot be undone. Typing a name for a reversible action teaches people to type names without reading.
 
-13. **The integrity failure names the exact record, both hashes, and how many records after it are unverifiable — then says the console cannot determine the cause.** A check that only says "failed" is worthless to an auditor, and one that guesses at a cause is worse than worthless.
+12. **Rollback republishes rather than rewinds** (§8). An audit trail that can go backwards is not an audit trail.
 
-14. **Delivered as `admin/example.dc.html` rather than `example.html`.** This project builds designs as single self-contained Design Component files, which is the same artefact the brief asked for — one file, no build step, no dependency beyond webfonts — under that extension. It lives in `admin/` alongside its own `tokens.json` so it does not collide with the user client's deliverables. Tokens are CSS custom properties generated from `admin/tokens.json` at the top of the file; every value in the stylesheet references a token.
+13. **The integrity failure names the exact record, both hashes, and how many records after it are unverifiable, then says the console cannot determine the cause.** A check that only says "failed" is worthless to an auditor, and one that guesses at a cause is worse.
+
+14. **Delivered as `admin/example.dc.html`**, a Design Component file for the client's reason (its Decision 17), in `admin/` beside its own `tokens.json` so it does not collide with the client's; its tokens are generated from `admin/tokens.json`.

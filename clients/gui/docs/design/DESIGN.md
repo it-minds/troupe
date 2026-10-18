@@ -4,10 +4,9 @@ The browser client for Troupe. This document is the reasoning behind the token f
 
 Files:
 
-- `themes/` — the system as data. Four themes from one token contract, and [`themes/THEMES.md`](themes/THEMES.md) for what a theme may change and what it may not. **Afterglow is the default**; the palette tables in §2 below are Footlight's, which is where this document started and is still one of the four.
+- `themes/` — the system as data: four themes from one token contract, and [`themes/THEMES.md`](themes/THEMES.md) for what a theme may change. **Afterglow is the default**; §2's palette tables are Footlight's, where this document started.
 - `afterglow.dc.html` — the Afterglow comp: the launcher, the session list, a new session and a session, dark only. The app is drawn to it (§0).
 - `example.dc.html` — all six surfaces of the design before Afterglow, self-contained, keyboard-usable, works at 380px. Opens directly in a browser.
-- `DESIGN.md` — this file.
 
 ---
 
@@ -54,7 +53,7 @@ Two moods, held at once: long calm reading (canvas, 15px/1.62 body, 68ch measure
 
 Every colour token carries a dark and a light value under one semantic name. Components never choose between them; the theme does. Ratios below are measured against the surface the colour is actually used on.
 
-The hexes in this section are **Footlight's**. There are four themes — Afterglow, Signal, Footlight and Limelight — and each one answers every token name below with its own values and clears the same contrast floor in both modes; `themes/THEMES.md` has the audit table. What does not change between them is everything this document argues for: which token a component reads, what the reserved colour *means*, and the rule that a status is a glyph, then a word, then a colour. Where the text below says "amber", read "the reserved colour" — it is pink in Afterglow, amber in Footlight, magenta in Signal and lime in Limelight, and in all four it means *stopped, a person must decide*. In Footlight and Signal it is used for nothing else; Afterglow lends the hue to the brand as well, through `--accent` and `--link` (§0), and Limelight's focus ring is its lime.
+The hexes in this section are **Footlight's**. Each of the four themes answers every token name below with its own values and clears the same contrast floor in both modes ([THEMES.md](themes/THEMES.md) has the audit, and which hue each reserves). Which token a component reads, what the reserved colour *means*, and status as glyph, then word, then colour do not change between them. Where the text below says "amber", read "the reserved colour": in every theme it means *stopped, a person must decide*.
 
 ### Ground and ink
 
@@ -322,38 +321,38 @@ Errors say what happened and what to do next. Empty screens invite. Waiting time
 
 ## Decisions
 
-Things that were genuinely arguable, and the call I made.
+Things that were genuinely arguable, and the call made. Where a section above already gives the reason, the decision names the section.
 
-1. **Kept the technical-theatre palette, repurposed the amber.** Extending the existing document keeps the platform recognisable. But in a document amber was atmosphere; here it is reserved, at token level, for "stopped, waiting for a person". That is the single change that makes approvals work in a list of thirty sessions on a phone. Everything else in the palette went quieter to pay for it.
+1. **Kept the technical-theatre palette, repurposed the amber** (§1). Extending the existing document keeps the platform recognisable; reserving the hue, at token level, for "stopped, waiting for a person" is the single change that makes approvals work in a list of thirty sessions on a phone. Everything else in the palette went quieter to pay for it.
 
-2. **Dark is the default mode, and "follow my system" is the default answer.** Light and dark are both first-class and generated from the same tokens, but a tool people sit in all day watching output stream defaults dark when the system has no opinion. This originally put a toggle in the header; it now lives in **Appearance**, with the theme, because there are four themes and two questions to answer rather than one switch to flip — see `themes/THEMES.md`.
+2. **Dark is the default mode, and "follow my system" is the default answer.** Light and dark are both first-class and generated from the same tokens, but a tool people sit in all day watching output stream defaults dark when the system has no opinion. The header toggle this once was is now in **Appearance**, with the theme: four themes are two questions, not one switch ([THEMES.md](themes/THEMES.md)).
 
-3. **The agent tree is demoted.** It is the most technically interesting surface and, for consultants and project managers, the least actionable. It is a compact indented status list in the backstage column, below tasks, and it is the first thing to fall below the fold on a phone. If it turns out people use it to decide anything, promote it — but the brief's audience says otherwise.
+3. **The agent tree is demoted** (§4): the most technically interesting surface and, for consultants and project managers, the least actionable. If people turn out to decide anything from it, promote it; the brief's audience says otherwise.
 
-4. **No modal for approvals.** A modal guarantees you see it and guarantees you resent it by the fortieth time. Sticky positioning plus reserved colour plus a unique shadow achieves "unmissable" while leaving the context readable — which matters, because you usually need to scroll up to decide.
+4. **No modal for approvals** (§6). A modal guarantees you see it and guarantees you resent it by the fortieth time; you usually need to scroll up to decide.
 
-5. **"Allow for this session" is visually the weakest of the three buttons.** It is the option users regret, so it is full-width, secondary, and spelled out in full ("Allow every file change for this session") rather than abbreviated.
+5. **"Allow for this session" is the weakest of the three buttons** (§6), because it is the one people regret.
 
-6. **When someone else answers first, the panel transforms in place instead of disappearing.** Disappearing would leave the user unsure whether they pressed something. The replacement names the person and says explicitly that nothing is waiting for them.
+6. **Someone else answering first transforms the panel in place** (§6), so nobody wonders whether they pressed something.
 
-7. **Queued, not optimistic.** Messages sent while the agent is busy render in a distinct queued style until the server confirms. Slightly less magical, correct across a reconnect, and honest about the ordered-stream model that makes multiplayer work.
+7. **Queued, not optimistic** (§7). Slightly less magical, correct across a reconnect, and honest about the ordered stream that makes several people in one session work.
 
-8. **Dormant is violet, not grey.** Grey means broken or disabled. Sleeping is healthy and free, and the copy leans into that.
+8. **Dormant is violet, not grey** (§2): grey means broken or disabled; sleeping is healthy and free.
 
-9. **Denied is not red-as-error.** Denial is the product working. Separate token, softer, neutral wording.
+9. **Denied is not red-as-error** (§2): denial is the product working.
 
-10. **Wrapping flex tracks instead of breakpoint-switched layouts.** A layout that depends on measured width re-renders on every resize and goes wrong at the sizes nobody tried. The breakpoints in the theme files describe intent and exist for anything that genuinely needs a media query — most things do not.
+10. **Wrapping flex tracks instead of breakpoint-switched layouts** (§4). A layout that depends on measured width goes wrong at the sizes nobody tried. The theme files' breakpoints describe intent, for what genuinely needs a media query; most things do not.
 
-11. **Tool activity collapsed by default.** Sessions produce hundreds of tool calls. Showing them expanded makes the product look busy and the conversation unreadable. One scannable mono line each, expandable.
+11. **Tool activity collapsed by default** (§4): expanded, hundreds of calls make the product look busy and the conversation unreadable.
 
-12. **Both `status.error` and `status.offline` exist.** They look similar and mean different things: offline is "wait, it is coming back"; error is "this will not fix itself." The user's next action differs, so the token does too.
+12. **Both `status.error` and `status.offline` exist** (§9): the user's next action differs, so the token does too.
 
-13. **One example file, six surfaces, a demo state switcher.** Rather than six disconnected mockups, `example.dc.html` carries a small honest mock bar ("Mock — nothing here is live") and a demo-state row on the session screen. Someone can move between streaming, both approval kinds, the answered-by-someone-else moment, asleep, and read only without reloading, and compare them directly.
+13. **One example file, six surfaces, a demo state switcher.** Rather than six disconnected mockups, `example.dc.html` carries an honest mock bar ("Mock — nothing here is live") and a demo-state row on the session screen, to move between streaming, both approval kinds, the answered-by-someone-else moment, asleep and read only without reloading.
 
-14. **Private is an owner, not a flag.** "Private — only you" sits at the top of the same list as the teams rather than being a checkbox beside a team. Ownership is one question with one answer, and putting private first makes the cautious choice the easy one. Its colour is a cool slate close to the interface chrome: private is ordinary, not alarming.
+14. **Private is an owner, not a flag** (§6a): one question with one answer, and private first makes the cautious choice the easy one. Its colour is a cool slate close to the chrome: private is ordinary, not alarming.
 
-15. **Tools start on, and the user subtracts.** The admin has already decided what a team may reach. Presenting that set pre-enabled, with plain sentences about what each one can touch, turns a configuration screen into a ten-second review. Administrator-pinned tools are shown disabled with the reason, not hidden — an invisible boundary is one you learn about by being surprised.
+15. **Tools start on, and the user subtracts** (§6a). The admin has already decided what a team may reach, so a configuration screen becomes a ten-second review; a pinned tool is shown disabled with its reason, because an invisible boundary is one you learn about by being surprised.
 
-16. **The output choice is phrased as an audience, not a path.** "The Sales team folder — everyone on Sales can open the finished files" answers the question people actually have. The tool-backed destination is disabled, with a reason, when its tool is switched off, rather than disappearing.
+16. **The output choice is phrased as an audience, not a path** (§6a), and a destination whose tool is off is disabled with a reason rather than gone.
 
-17. **Delivered as `example.dc.html` rather than `example.html`.** This project builds designs as single self-contained Design Component files, which is the same thing the brief asked for — one file, no build step, no dependency beyond webfonts — under that extension. Tokens are CSS custom properties generated from a theme file at the top of the file; every value in the stylesheet references a token.
+17. **Delivered as `example.dc.html` rather than `example.html`.** This project builds designs as single self-contained Design Component files: one file, no build step, no dependency beyond webfonts, as the brief asked, under that extension. Tokens are CSS custom properties generated from a theme file at the top of the file; every value in the stylesheet references a token.
