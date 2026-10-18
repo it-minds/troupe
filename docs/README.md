@@ -1,15 +1,37 @@
-# Troupe documentation
+# Troupe
+
+Troupe is an open-source harness for coding agents, on your own machine and on your team's
+Kubernetes cluster. An agent reads your code, changes it and runs commands, asking first,
+in a session that outlives the window you started it from.
+
+![The desktop app: a team's session on a plane, stopped to ask before it runs a command, with what it has cost so far](assets/desktop-app.png)
+
+**Who it is for.** An engineer who wants an agent's work to carry on when the terminal
+closes, and to follow it from the terminal, the desktop app or a script at once. A team
+that wants agents on shared infrastructure, with sign-in from its identity provider,
+budgets per team and per person, and an audit trail. Anyone writing a client of their own,
+against [one documented protocol](../PROTOCOL.md) that the bundled clients use too.
+[Why Troupe](why-troupe.md) says more, and when you do not need it.
+
+## Start here
+
+| | |
+|---|---|
+| **Install** | The [quick start](quick-start.md): one command on Linux, macOS or Windows, a first session, what it cost and a cap on the next one, in ten minutes. |
+| **The first run** | [Five steps](user/README.md#first-run) from an installed `troupe` to a session in your project: `troupe setup`, or the desktop app's first screens. |
+| **Run it for a team** | [Installing a plane](admin/installing.md), from an empty cluster to a first team in the console, then the rest of the [administrator's guide](admin/README.md). |
+
+Troupe is a beta, Apache-2.0, and has nothing to sign up for. The words it uses are in the
+[glossary](glossary.md).
+
+## The documentation, by reader
 
 Four kinds of reader come here, and each has a track and an order to read it in. The
 tracks do not lean on each other: an operator never needs the contributor's pages, and a
-client author needs nothing but the protocol. The same pages are published as a site at
-<https://it-minds.github.io/troupe/>, built from this directory by `mkdocs.yml`.
+client author needs nothing but the protocol. The site at
+<https://it-minds.github.io/troupe/> is built from this directory by `mkdocs.yml`.
 
-New here: the [quick start](quick-start.md) goes from nothing to a first session, what it
-cost and a cap on the next one in ten minutes; [why Troupe](why-troupe.md) says who it is
-for and when you do not need it; the [glossary](glossary.md) has every word Troupe uses.
-
-## Using Troupe
+### Using Troupe
 
 You run agents, on your own machine or on your team's plane.
 
@@ -21,13 +43,15 @@ You run agents, on your own machine or on your team's plane.
 3. [Command reference](user/cli-reference.md) (generated) — every command line `troupe`
    takes, and every command you type inside a session.
 4. [Configuration](user/configuration.md) — every key in `config.yaml`, and which file
-   set it.
+   set it; [models](user/models.md), [agents and commands](user/agents.md),
+   [MCP servers and skills](user/mcp.md) and [instruction files](user/instructions.md)
+   each have a page.
 5. [The daemon](../apps/troupe_daemon/README.md) — `troupe-daemon`, what runs your
    sessions, and how long it stays up.
 6. [The desktop app](../clients/gui/docs/install.md) — installing the builds while they
    are unsigned.
 
-## Running a deployment
+### Running a deployment
 
 You operate the platform: the chart, the services beside it, and the teams, profiles,
 bundles and triggers on top.
@@ -41,7 +65,7 @@ bundles and triggers on top.
    [integrations](admin/integrations.md) — identity, what each surface accepts, and what
    the identity provider, OpenBao, PostgreSQL and object storage must provide;
    [Authentik](admin/authentik.md) step by step.
-4. [Profiles and policy](admin/profiles-and-policy.md), then
+4. [Profiles and policy](admin/profiles-and-policy.md) (and [from a repository](admin/gitops.md)), then
    [bundles, triggers and budgets](admin/bundles-and-triggers.md).
 5. Day two: [monitoring](admin/monitoring.md), [backup and restore](admin/backup-restore.md),
    [routine tasks](admin/routine-tasks.md).
@@ -49,7 +73,7 @@ bundles and triggers on top.
    setting, Secret and port), [what Troupe dials](egress-allowlist.md) (generated), the
    [A2A facade](a2a.md), and [a worker on your own machine](admin/single-machine.md).
 
-## Changing the code
+### Changing the code
 
 You contribute to Troupe itself.
 
@@ -63,7 +87,7 @@ You contribute to Troupe itself.
 5. [decisions/](decisions/README.md) — the judgment calls that still hold, a file each,
    by number, each naming the code it governs.
 
-## Writing a client
+### Writing a client
 
 You write a program that talks to a daemon or a worker pod, in any language.
 
@@ -76,7 +100,7 @@ You write a program that talks to a daemon or a worker pod, in any language.
 4. [The graphical client](../clients/gui/README.md) — `@troupe/client`, a TypeScript
    implementation, and what it learned that the protocol does not say loudly.
 
-## Also here
+### Also here
 
 [third-party-licences.md](third-party-licences.md) (generated): what Troupe depends on,
 under which licences. [design/admin/](design/admin/DESIGN.md): the console's design.

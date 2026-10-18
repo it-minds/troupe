@@ -25,6 +25,7 @@ paths:
   - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/test/troupe/mcp_page_test.exs
   - docs/user/configuration.md
+  - docs/user/mcp.md
   - PROTOCOL.md
 symbols:
   - Troupe.MCP.OAuth.authorized/2

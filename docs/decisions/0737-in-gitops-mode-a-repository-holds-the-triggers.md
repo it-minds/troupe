@@ -20,6 +20,7 @@ paths:
   - charts/troupe/templates/plane-rbac.yaml
   - docs/admin/bundles-and-triggers.md
   - docs/admin/profiles-and-policy.md
+  - docs/admin/gitops.md
 gist: In gitops mode a repository holds the triggers too, as `Trigger` resources the plane reads; a trigger's key, runs and revisions stay the plane's
 ---
 

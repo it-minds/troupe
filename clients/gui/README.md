@@ -2,10 +2,9 @@
 
 The graphical client for [Troupe](../../README.md) (`troupe-gui`, as its package and image
 are named), and `@troupe/client`, the TypeScript protocol client the desktop app and the
-throughput bench stand on. It lives at `clients/gui` in the Troupe repository, beside the
-platform it talks to, and gets no private door into the server for it: it speaks
-[`PROTOCOL.md`](../../PROTOCOL.md) over a WebSocket, the same as the TUI and the Python
-reference client.
+throughput bench stand on. Living beside the platform gets it no private door into the
+server: it speaks [`PROTOCOL.md`](../../PROTOCOL.md) over a WebSocket, as the TUI and the
+Python reference client do.
 
 Four packages in one pnpm workspace:
 
@@ -75,21 +74,20 @@ pnpm dev:local --port 5185       # anything after the name goes to Vite
 `pnpm dev:local` starts a daemon and the GUI in *local-only* mode against it: no plane,
 no identity provider, no key, and nothing sent anywhere. The app opens on the launcher,
 with no sign-in; start a session in the `demo` directory it prints, and the answers come
-from the daemon's scripted `fake` provider reading `script.json` beside it, in
-`TROUPE_DEV_HOME` — one
-step per model call, per agent under `routes` (`Troupe.LLM.Fake`), from the top for each
-new session.
+from the daemon's scripted `fake` provider reading `script.json` beside it in
+`TROUPE_DEV_HOME`: one step per model call, per agent under `routes` (`Troupe.LLM.Fake`),
+from the top for each new session.
 
-It needs `troupe-daemon` installed (`install.ps1`/`install.sh` at the repository root,
-or `scripts/install-local.ps1` from a checkout); `TROUPE_DAEMON_BIN` names another. The
-daemon it starts is a second instance of that install, with its own state, config and
-`daemon.json` under `TROUPE_DEV_HOME` (a directory in the system's temp by default), so
-it never touches the daemon you work with, its sessions or its keys. It stops by itself
-ten minutes after the last client leaves, and the next `pnpm dev:local` starts it again.
+It needs `troupe-daemon` installed (`install.ps1`/`install.sh` at the repository root, or
+`scripts/install-local.ps1` from a checkout); `TROUPE_DAEMON_BIN` names another. The daemon
+it starts is a second instance of that install, with its own state, config and
+`daemon.json` under `TROUPE_DEV_HOME` (a directory in the system's temp by default), so it
+never touches the daemon you work with, its sessions or its keys. It stops ten minutes
+after the last client leaves; the next `pnpm dev:local` starts it again.
 
-The *Local only* switch is on *This computer*. Turning it off puts the sign-in screen
-back, with "Use this computer only" as its third door; a stored plane sign-in survives
-the round trip.
+The *Local only* switch is on *This computer*. Turning it off puts the sign-in screen back,
+with "Use this computer only" as its third door; a stored plane sign-in survives the round
+trip.
 
 ### Against a fake deployment, with nothing else installed
 
@@ -98,29 +96,31 @@ pnpm fake                        # an identity provider, a worker and a plane, o
 pnpm dev                         # then sign in to the plane URL `pnpm fake` printed
 ```
 
-`pnpm fake` starts the same identity provider, plane and worker the test suite runs
-against, seeded with four sessions: among them one stopped on an approval and one stopped
-by `tool_failures`. Signing in needs
-no clicking: a browser is sent to the provider and straight back as Alice, and a device
-code approves itself. Four
-prompt prefixes drive the scripted agent: `approve: <command>` asks for an approval,
-`big: <label>` returns a tool result too large to inline, `quiet: …` answers without
-streaming, and `show: …` puts `notes.md` on the session's scratchpad. The plane answers `me.client_defaults` with an organisation gateway, so *Use
-organisation defaults* on the models panel has something to fill in;
-`NO_CLIENT_DEFAULTS=1 pnpm fake` is an organisation that has set nothing.
+`pnpm fake` starts the identity provider, plane and worker the test suite runs against,
+seeded with four sessions, among them one stopped on an approval and one stopped by
+`tool_failures`. Signing in needs no clicking: a browser is sent to the provider and
+straight back as Alice, and a device code approves itself. Four prompt prefixes drive the
+scripted agent: `approve: <command>` asks for an approval, `big: <label>` returns a tool
+result too large to inline, `quiet: …` answers without streaming, and `show: …` puts
+`notes.md` on the session's scratchpad. The plane answers `me.client_defaults` with an
+organisation gateway, so *Use organisation defaults* on the models panel has something to
+fill in; `NO_CLIENT_DEFAULTS=1 pnpm fake` is an organisation that has set nothing.
 
-It also starts the fake daemon the tests use, and prints the address to open the app at
-(`#daemon=<port>:<token>`). A new session there in `/home/ada/repo` starts as a
-repository with Claude Code's and Cursor's files does: it asks to onboard them, each as
-a diff under Review, then to have the librarian rewrite a brief an older survey wrote;
-`/memory` there opens the backstage's Memory pane on the repository's facts, one of each
-status, with Refresh and Forget the brief as the terminal's `/memory refresh` and
-`/memory forget`. A new session in `/home/ada/project`, which has no brief, starts the
-librarian by itself and says so in the transcript. The session in `/home/ada/parser`
-shows a turn's frames ([docs/design/frames.md](../../docs/design/frames.md)): its working
-one strip above an answer with a table, a nested list, fenced code, a diff and a csv.
-Anything sent there plays the same turn live, its reasoning streaming and the curtain
-line under it, so `/detail` and a click on the strip have a running turn to work on.
+It also starts the tests' fake daemon and prints the address to open the app at
+(`#daemon=<port>:<token>`). There:
+
+* a new session in `/home/ada/repo` starts as a repository with Claude Code's and Cursor's
+  files does: it asks to onboard them, each as a diff under Review, then to have the
+  librarian rewrite a brief an older survey wrote. `/memory` opens the backstage's Memory
+  pane on the repository's facts, one of each status, with Refresh and Forget the brief as
+  the terminal's `/memory refresh` and `/memory forget`;
+* a new session in `/home/ada/project`, which has no brief, starts the librarian by itself
+  and says so in the transcript;
+* the session in `/home/ada/parser` shows a turn's frames
+  ([docs/design/frames.md](../../docs/design/frames.md)): its working one strip above an
+  answer with a table, a nested list, fenced code, a diff and a csv. Anything sent there
+  plays the same turn live, its reasoning streaming and the curtain line under it, so
+  `/detail` and a click on the strip have a running turn to work on.
 
 ### The console, against a fake plane
 
@@ -129,20 +129,19 @@ pnpm console:fake                # an identity provider and a plane with its adm
 pnpm console                     # then open http://localhost:5174 and sign in to the plane it printed
 ```
 
-The same identity provider and plane, with the plane's administrative half the console's
-tests run against (`packages/client/test/support/admin.ts`): three teams, a version policy,
-an organisation's defaults and enforced set, and an audit every change lands in. The
-provider signs the browser straight back in as a platform admin; `CONSOLE_AS=bob` is a team
-admin and `CONSOLE_AS=carol` somebody who administers nothing. Every admin answer is held a
-quarter of a second so the loading states show; `HOLD_MS=0` answers at once.
+The same identity provider and plane, with the administrative half the console's tests
+run against (`packages/client/test/support/admin.ts`): three teams, a version policy, an
+organisation's defaults and enforced set, and an audit every change lands in. The provider
+signs the browser straight back in as a platform admin; `CONSOLE_AS=bob` is a team admin,
+`CONSOLE_AS=carol` somebody who administers nothing. Every admin answer is held a quarter
+of a second so the loading states show; `HOLD_MS=0` answers at once.
 
 ### Your own daemon beside the fake plane
 
-The fake deployment's daemon runs no agent, and `pnpm dev:local` has no plane. To see both halves
-of the one list — a team session and a session on this computer, with questions, the
-budget question, streamed reasoning and the harness's notes — run the real
-`troupe-daemon` with its scripted model, which is how its own smoke tests and the TUI's
-client tests drive it:
+The fake deployment's daemon runs no agent, and `pnpm dev:local` has no plane. To see both
+halves of the one list (a team session and a session on this computer, with questions, the
+budget question, streamed reasoning and the harness's notes), run the real `troupe-daemon`
+with its scripted model, as its own smoke tests and the TUI's client tests do:
 
 ```sh
 # 1. the daemon: install it (install.sh / install.ps1 from a release; -y for the
@@ -178,12 +177,11 @@ troupe-daemon open --url http://localhost:5173/
 ```
 
 Then *New session* in `~/demo`. The desktop application skips step 4: it reads
-`daemon.json` itself and starts `troupe-daemon run` when nothing is listening, and reads
-it again before it dials a daemon that went away, since one that restarts serves a new port
-with a new token. A browser build dials where it was told, and keeps that for a reload or a
-new tab; after a restart, `troupe-daemon open` tells it again. Steps are
-the daemon's `Troupe.LLM.Fake` script: `text`, `tools`, `reasoning`, `stop`
-(`max_tokens` / `refusal`) and `error`, one step per model call, per agent under `routes`.
+`daemon.json` itself, starts `troupe-daemon run` when nothing is listening, and reads it
+again before dialling a daemon that went away, since a restarted one serves a new port with
+a new token. A browser build dials where it was told and keeps that for a reload or a new
+tab; after a restart, `troupe-daemon open` tells it again. A script step (`Troupe.LLM.Fake`)
+is `text`, `tools`, `reasoning`, `stop` (`max_tokens` / `refusal`) or `error`.
 
 ### Against a real deployment
 
@@ -197,11 +195,10 @@ Three allowlists, not one:
 * **the identity provider must allow that origin too.** The device grant is spoken to the
   provider directly, so a deployment that adds the GUI to the plane and stops there signs
   in as far as discovery and then fails. In Dex this is the public client's
-  `redirectURIs`/allowed origins; in Authentik it is the application's allowed origins.
+  `redirectURIs`/allowed origins; in Authentik the application's allowed origins.
 
-A browser cannot tell a page *why* a cross-origin request failed, so the GUI says both
-possibilities and names the origin to add. It is not guessing at the cause; it cannot
-know it.
+A browser cannot tell a page *why* a cross-origin request failed, so the GUI names both
+possibilities and the origin to add rather than guess.
 
 ## Testing
 
@@ -213,12 +210,12 @@ pnpm icons:check                 # fails if the desktop app's icons are not the 
 ```
 
 The client's tests cover stage 1 and 2's done items, PKCE, the fold, the fleet store and
-model settings, on Node's runner. The app's, in `apps/desktop/test`, render the app
-itself in jsdom under Vitest against the fake daemon on a real socket, and record every
-request the page makes: in local-only mode, with a plane sign-in stored and every screen
-visited, the daemon is the only thing it talks to. They also walk the third door,
-switch local-only off and on without losing the stored sign-in, and fall back to this
-computer when the plane does not answer.
+model settings, on Node's runner. The app's, in `apps/desktop/test`, render the app in
+jsdom under Vitest against the fake daemon on a real socket and record every request the
+page makes: in local-only mode, with a plane sign-in stored and every screen visited, the
+daemon is the only thing it talks to. They also walk the third door, switch local-only off
+and on without losing the stored sign-in, and fall back to this computer when the plane
+does not answer.
 
 `packages/client/test/support` is a deployment that implements the protocol rather than
 imitating a screen: a real WebSocket, a hash-chained log, replay from a cursor with a
@@ -236,15 +233,14 @@ built from the same commit.
 
 ## Shipping it
 
-The GUI is one static bundle behind nginx. There is no server here — it is a protocol
-client, so what ships is HTML, CSS and JavaScript, and every call goes from the browser
-to the plane or to a worker. Nothing in the image holds a secret or needs telling
-anything at runtime.
+The GUI is one static bundle behind nginx: a protocol client, so what ships is HTML, CSS
+and JavaScript, and every call goes from the browser to the plane or a worker. Nothing in
+the image holds a secret or needs telling anything at runtime.
 
-It ships with the platform, not as a release of its own. The image is built from this
-directory, with it as the Docker context; the one other thing it reads is the
-repository's LICENSE, NOTICE, THIRD-PARTY-NOTICES.txt and PROTOCOL.md (whose error table
-the build tests the client against), as the `licences` context:
+It ships with the platform, not as a release of its own. The image is built with this
+directory as the Docker context; the only other thing it reads is the repository's
+LICENSE, NOTICE, THIRD-PARTY-NOTICES.txt and PROTOCOL.md (whose error table the build tests
+the client against), as the `licences` context:
 
 ```sh
 docker build --build-context licences=../.. --build-arg TROUPE_GUI_BASE=app -t troupe-gui .
@@ -262,27 +258,24 @@ CI is the root [`ci.yml`](../../.github/workflows/ci.yml): its `gui` job typeche
 and builds this workspace, `gui-e2e` runs the client against a plane built from the same
 commit, and `images` builds and pushes `troupe-gui` beside the server images on a push to
 `main` that changed a server app, `clients/gui` or the chart, once `ci-ok` has passed,
-tagged `sha-<short>`. **A release is a merged change to `VERSION`** (root
-Decision 669): `scripts/release <version>` opens that pull request, and merging it
-builds the images again from the release commit — this one included — at that version and
-attaches the desktop installers the root [`release.yml`](../../.github/workflows/release.yml) builds. Rolling a
-release onto a cluster is the deployment's own business. See
-[docs/developer/ci.md](../../docs/developer/ci.md#release-the-full-suite-then-everything).
+tagged `sha-<short>`. A release builds this image again, at its version, with the rest
+([ci.md](../../docs/developer/ci.md#release-the-full-suite-then-everything)); rolling it
+onto a cluster is the deployment's own business.
 
 ### Where it is mounted
 
-`TROUPE_GUI_BASE` is baked in at build time, because Vite writes it into every asset
-URL — an image built for `/app/` cannot be served at `/`. The chart's `gui.basePath` must
-match it (CI builds with the repository variable `GUI_BASE`, default `app`); the Ingress
-strips the prefix so the container stays ignorant of where it is.
+`TROUPE_GUI_BASE` is baked in at build time, because Vite writes it into every asset URL:
+an image built for `/app/` cannot be served at `/`. The chart's `gui.basePath` must match
+it (CI builds with the repository variable `GUI_BASE`, default `app`); the Ingress strips
+the prefix so the container stays ignorant of where it is.
 
 **Serving the GUI at a path on the plane's own host is worth preferring**, and it is the
-shape the chart gives it. Same origin means no CORS allowlist to keep in step, no second
-DNS record, no second certificate, and a sign-in whose redirect URI is the address people
-already have. The plane's Ingress owns `/`, the GUI's owns `/app`, and nginx routes the
-more specific path. The GUI's Ingress uses the plane's `tlsSecretName` and asks
-cert-manager for nothing — two Ingresses on one host share one certificate — and the
-chart refuses `gui.basePath: /`, because the root of that host is the plane's.
+shape the chart gives it: no CORS allowlist to keep in step, no second DNS record or
+certificate, and a sign-in whose redirect URI is the address people already have. The
+plane's Ingress owns `/`, the GUI's `/app`, and nginx routes the more specific path. The
+GUI's Ingress uses the plane's `tlsSecretName` and asks cert-manager for nothing (two
+Ingresses on one host share one certificate), and the chart refuses `gui.basePath: /`,
+because the root of that host is the plane's.
 
 ### Its Content-Security-Policy
 
@@ -296,72 +289,43 @@ serves the bundle anywhere else should send the same header.
 
 ### Check the digest, not the tag
 
-A tag that already exists in the registry plus `imagePullPolicy: IfNotPresent` means the
-node keeps the image it has — and since the Deployment's spec did not change, no pod is
-restarted. `helm upgrade` reports success and the old code carries on serving. This is
-not hypothetical; it happened on a real cluster. Read every pod's running digest after
-an upgrade for that reason ([routine-tasks.md](../../docs/admin/routine-tasks.md#upgrade)),
-and CI never publishes a floating tag.
+A tag already in the registry plus `imagePullPolicy: IfNotPresent` means the node keeps
+the image it has, and since the Deployment's spec did not change, no pod is restarted:
+`helm upgrade` reports success and the old code carries on serving. It happened on a real
+cluster. Read every pod's running digest after an upgrade
+([routine-tasks.md](../../docs/admin/routine-tasks.md#upgrade)); CI never publishes a
+floating tag.
 
 ## Design
 
-[`docs/design/DESIGN.md`](docs/design/DESIGN.md) is the system,
-[`docs/design/themes/`](docs/design/themes/THEMES.md) is it as data — four themes from
-one token contract — `afterglow.dc.html` is the design the app is drawn to (Afterglow,
-#52), and `example.dc.html` is every surface of the design before it.
+[`docs/design/DESIGN.md`](docs/design/DESIGN.md) is the system and its rules,
+[`docs/design/themes/`](docs/design/themes/THEMES.md) is it as data (four themes from one
+token contract, each in light and dark, and where a person's choice is kept),
+`afterglow.dc.html` is the design the app is drawn to (#52), and `example.dc.html` every
+surface of the design before it. A change that gives the reserved colour a second job,
+builds structure from cards rather than hairlines, or shows a status by colour alone is a
+bug ([DESIGN.md §12](docs/design/DESIGN.md#12-what-a-developer-must-not-do)).
+
 `apps/desktop/src/tokens.css` and `apps/desktop/src/mark.ts` are **generated** from
-`docs/design/themes/*.tokens.json` by `pnpm tokens` and committed; do not edit them.
-So is everything in `apps/desktop/src-tauri/icons/` — the app's icon on every platform,
-the installer's images and the disk image's background — by `pnpm icons`, from `mark.ts`
-and Signal's dark values; `scripts/icons.ts` says which and why.
-
-Three rules carry most of the weight, and a change that breaks one of them is a bug:
-
-* **The reserved colour is a job, not a mood.** `--waiting-*` marks work that has stopped
-  and needs a person, and no component reaches for it for anything else. Which hue it is
-  depends on the theme; what it means never does. Afterglow lends the same hue to the
-  brand — the mask's lit half, links, the current nav item — but only through `--accent`
-  and `--link`, which is the theme's choice and not a component's.
-* **Structure comes from hairlines and alignment**, not from cards or gradients. Radii
-  are zero; the one depth is a flat block of `--bg-shadow` under a tile or a primary
-  button, and the one glow is the footlight under the approval.
-* **A status is a glyph *and* a word.** Colour is never the only carrier of meaning.
-
-**Themes.** Afterglow (the default, and the design: its type, spacing and square corners
-are every theme's), Signal, Footlight and Limelight, each in light and dark. A
-person picks one on first sign-in and can change it in Appearance; it is `data-theme`
-and `data-mode` on the document root and nothing else. Every theme exposes exactly the
-same token names — a component reads `--waiting-solid` and never a hex, and never
-branches on a theme. A theme that needs a new token name is a redesign, not a theme, and
-`pnpm tokens` refuses to build one.
+`docs/design/themes/*.tokens.json` by `pnpm tokens` (which refuses a theme whose token
+names differ) and committed; do not edit them. So is everything in
+`apps/desktop/src-tauri/icons/` (the app's icon on every platform, the installer's images
+and the disk image's background), by `pnpm icons`, from `mark.ts` and Signal's dark
+values; `scripts/icons.ts` says which and why.
 
 ## The throughput test
 
-A worker with no plane, no object store and the scripted `fake` model is the right
-thing to measure a *client* against: the path from a frame to the session actor and
-back, without a model's latency in the way. It runs as one Docker container:
+A worker with no plane, no object store and the scripted `fake` model measures a
+*client*: the path from a frame to the session actor and back, without a model's latency.
+It runs as one Docker container, dialled with tokens the bench mints itself
+(`packages/bench/src/devToken.ts`); [docs/bench.md](docs/bench.md) has the key pair, the
+`docker run`, the run and its variables.
 
-```sh
-# an ES256 key pair and its JWKS (packages/bench/src/devToken.ts mints the tokens)
-node -e '...'                    # see docs/bench.md for the full incantation
-docker run -d --name troupe-bench-worker -p 4000:4000 \
-  -v "$PWD/keys:/etc/troupe:ro" --tmpfs /workspace:uid=1000,gid=1000 \
-  -e TROUPE_WORKER_AUTOSTART=true -e TROUPE_PROFILE=bench -e TROUPE_POD_ORDINAL=bench-0 \
-  -e TROUPE_JWKS_PATH=/etc/troupe/jwks.json -e TROUPE_PROVIDER=fake -e TROUPE_MODEL=fake \
-  -e TROUPE_FAKE_SCRIPT=/etc/troupe/fake.json -e TROUPE_STATE_HOME=/workspace/.state \
-  -e TROUPE_SESSIONS_PER_POD=64 -e RELEASE_DISTRIBUTION=none -e ERL_FLAGS="+Q 65536" \
-  ghcr.io/it-minds/troupe-worker:dev    # built here by scripts/build-images troupe_worker; CI publishes no :dev
-
-BENCH_SIGNING_KEY="$PWD/keys/signing-key.json" BENCH_POD_ID=bench-0 \
-BENCH_CLIENTS=20 BENCH_PROMPTS=10 pnpm bench
-```
-
-Each client opens its own socket and its own session (five clients on one session
-would measure the model's serialisation, not the transport) and sends its prompts
-one at a time. Every prompt is timed from just before `input.send` to the ack,
-`input_accepted`, the first `llm_delta`, the durable `llm_response` and the end of
-the turn. Results are printed and written as JSON under `packages/bench/bench-results/`
-(`pnpm bench` runs in that package, so a relative path is read from there).
+Each client opens its own socket and its own session (five clients on one session would
+measure the model's serialisation, not the transport) and sends its prompts one at a
+time. Every prompt is timed from just before `input.send` to the ack, `input_accepted`,
+the first `llm_delta`, the durable `llm_response` and the end of the turn. Results are
+printed and written as JSON under `packages/bench/bench-results/`.
 
 Measured on 2026-09-12, Docker Desktop on a Windows laptop, worker image built from
 commit `2f85e39` of the platform's former repository, fake model:
@@ -373,8 +337,8 @@ commit `2f85e39` of the platform's former repository, fake model:
 
 All 300 turns completed; the fake model answers instantly, so these numbers are the
 harness and the transport, not a model. `BENCH_MODE=plane` runs the same test through a
-plane (`BENCH_PLANE`, `BENCH_PLANE_TOKEN`, `BENCH_PROFILE`); that path has not been
-measured yet because it needs Postgres, OpenBao and an identity provider behind it.
+plane; that path has not been measured, since it needs Postgres, OpenBao and an identity
+provider behind it.
 
 ## Layout of the client package
 
@@ -423,8 +387,5 @@ apps/desktop/src
                                   is the rail's Setup entry
 ```
 
-`SessionView` owns the cursor and `SessionAttachment` swaps the socket underneath it, so
-a pod token running out is invisible: the plane mints a new one, `auth.refresh` hands it
-over on the connection that is already open, and a turn in progress never notices. If the
-socket does go, the view resubscribes from the last `seq` it actually processed and the
-server closes the boundary — no gap, no duplicate.
+What the code settles (the fold, the cursor, sign-in, storage, the two modes, the fleet)
+is in [docs/developer/architecture.md §7](../../docs/developer/architecture.md#7-the-gui-clientsgui).

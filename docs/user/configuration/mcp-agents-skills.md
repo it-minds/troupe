@@ -31,7 +31,8 @@ or VS Code keep, so `/mcp import` copies one in and `/mcp link` reads one in pla
 spoken to over HTTP, with a token read from the environment each time it starts and never
 written back; an unset variable keeps it from starting, and `/mcp` says which. A server
 that signs you in rather than taking a key is in
-[the configuration page](../configuration.md#a-server-that-wants-you-to-sign-in).
+[MCP servers and skills](../mcp.md#a-server-that-wants-you-to-sign-in), with how every
+file here is read.
 
 ## A custom agent
 

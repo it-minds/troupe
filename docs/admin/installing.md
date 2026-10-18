@@ -14,10 +14,10 @@ is a worked example.
 | Kubernetes ≥ 1.30 | `ValidatingAdmissionPolicy` | the operator still refuses a bad profile; the cluster no longer does |
 | `kubectl`, `helm` | everything below | — |
 | A CNI that enforces NetworkPolicy | a worker's isolation is a NetworkPolicy | **policies are accepted and enforced by nothing** (kind's default CNI) |
-| Cilium, optionally | egress by hostname: a worker reaches its allowlist and nothing else | a worker reaches any public host on 443 and 80; the allowlist is checked at admission, not on the wire; a profile's own endpoint on another port, or given as an address, opens that port or that address; one at a loopback, unspecified, link-local or cloud metadata address is refused, as it is with Cilium |
+| Cilium, optionally | egress by hostname: a worker reaches its allowlist and nothing else | a worker reaches any public host on 443 and 80, and the allowlist is checked at admission, not on the wire ([profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy)) |
 | An ingress controller | how a client reaches a worker | sessions are created and cannot be attached to from outside |
 | Nodes that allow unprivileged user namespaces, and the chart's seccomp profile on them | every command on a pod runs in bubblewrap, which builds its sandbox from a user namespace ([below](#the-workers-seccomp-profile)) | a pod refuses every command, saying bubblewrap could not start |
-| Where nodes enforce AppArmor (Ubuntu's), the chart's AppArmor profile loaded on them | the runtime's default AppArmor profile refuses bubblewrap's mounts, and Ubuntu's restriction on unprivileged user namespaces refuses an unconfined one its uid map ([below](#the-workers-apparmor-profile)) | a pod refuses every command, saying bubblewrap could not start; on nodes without AppArmor, `worker.appArmor.enabled: false` |
+| Where nodes enforce AppArmor (Ubuntu's), the chart's AppArmor profile loaded on them | the runtime's default AppArmor profile, and Ubuntu's restriction on unprivileged user namespaces, stop bubblewrap ([below](#the-workers-apparmor-profile)) | a pod refuses every command, saying bubblewrap could not start; on nodes without AppArmor, `worker.appArmor.enabled: false` |
 | Kubernetes ≥ 1.33, containerd ≥ 2.0 (runc ≥ 1.2), Linux ≥ 6.3, storage that takes idmapped mounts, `privileged` Pod Security in worker namespaces | each worker pod runs in a user namespace of its own with its `/proc` unmasked, which bubblewrap's own `/proc` needs ([below](#the-workers-user-namespaces)) | a worker pod is refused or does not start; with `worker.userNamespaces: false` it starts and refuses every command |
 
 Label the ingress controller's namespace, or every worker drops its traffic:
@@ -61,15 +61,14 @@ version, and the images it names are public on `ghcr.io/it-minds` (`troupe-plane
 secret. A cluster that pulls through a registry of its own copies them there and sets
 each `*.image.repository`, `policy.allowedImageRepositories` and `imagePullSecrets`.
 
-The chart makes `troupe-system` itself unless `createNamespace: false`. Where the namespace
-is there before the chart (made for the Secrets of section 1, or for OpenBao), set it
-false: Helm does not take over a namespace it did not make, and the install stops, saying
-the namespace exists and is not the release's. Either way, uninstalling leaves the
-namespace and everything in it ([section 7](#7-uninstalling)).
+The chart makes `troupe-system` itself unless `createNamespace: false`. Set that where the
+namespace exists before the chart (made for the Secrets of section 1, or for OpenBao):
+Helm does not take over a namespace it did not make, and the install stops, saying so.
+Either way, uninstalling leaves the namespace and everything in it ([section 7](#7-uninstalling)).
 
-`WorkerProfile`, `TroupePolicy`, `TeamVolume` and `Trigger` go first because Helm does not
-upgrade CRDs it installed. Start from `values.small.yaml` or `values.example.yaml`; what you cannot
-leave unset:
+The CRDs go first because Helm does not upgrade CRDs it installed. Start from
+`values.small.yaml` or `values.example.yaml` ([the overlays](configuration.md#the-overlays));
+what you cannot leave unset:
 
 ```yaml
 plane:
@@ -116,19 +115,17 @@ worker:
 ```
 
 - **`Localhost`**, the default, is the profile the chart ships: the runtime's default plus
-  the calls bubblewrap makes its user, mount and PID namespaces with, and never a network,
-  cgroup or time namespace ([security.md §3](security.md#3-a-worker-isolation-and-egress)
-  says what it allows and why). The kubelet reads it from the node, so it must be on every
-  node that runs workers. The chart's DaemonSet `troupe-worker-profiles` puts it there:
-  its `seccomp` container, one per node, copies it from a ConfigMap and waits, ready while
-  the file is in place. It mounts that one directory from the host
-  (`/var/lib/kubelet/seccomp/troupe`) and nothing else, and runs as root with every
+  the calls bubblewrap makes its namespaces with
+  ([security.md §3](security.md#3-a-worker-isolation-and-egress) says what it allows and
+  why). The kubelet reads it from the node, so it must be on every node that runs workers.
+  The `seccomp` container of the chart's DaemonSet `troupe-worker-profiles`, one per node,
+  copies it there from a ConfigMap and waits, ready while the file is in place. It mounts
+  that one host directory (`/var/lib/kubelet/seccomp/troupe`) and runs as root with every
   capability dropped, because the directory is root's, so **`troupe-system` needs the
-  `privileged` Pod Security level** for it. Where the kubelet runs with another
-  `--root-dir`, set `kubeletSeccompDir` to `<root-dir>/seccomp`. A worker pod that reaches
-  a node before the file waits in `CreateContainerError` ("cannot load seccomp profile")
-  and starts once it is there:
-  `kubectl -n troupe-system rollout status daemonset/troupe-worker-profiles`.
+  `privileged` Pod Security level**. Where the kubelet runs with another `--root-dir`, set
+  `kubeletSeccompDir` to `<root-dir>/seccomp`. A worker pod that reaches a node before the
+  file waits in `CreateContainerError` ("cannot load seccomp profile") and starts once it
+  is there: `kubectl -n troupe-system rollout status daemonset/troupe-worker-profiles`.
 - **With the Security Profiles Operator**, or nodes built with the file, set
   `install.enabled: false` and point `localhostProfile` at where it is. For the operator,
   apply a `SeccompProfile` in `troupe-system` whose spec is the rules of
@@ -152,12 +149,11 @@ Where a node enforces AppArmor, as Ubuntu's do, two things of AppArmor's stop bu
   (`Unconfined`) gets one step further and stops at the namespace's uid map: "bwrap:
   setting up uid map: Permission denied".
 
-`worker.appArmor` gives the worker container a profile of its own, which answers both
-without touching the node's sysctl: it is the runtime's default with bubblewrap's mounts
-and `pivot_root` allowed, and a worker under it is confined, not unconfined, when it makes
-the namespace, so the restriction does not apply to it
-([security.md §3](security.md#3-a-worker-isolation-and-egress) says what it allows and
-denies). The default needs nothing from you:
+`worker.appArmor` gives the worker container a profile of its own that answers both
+without touching the node's sysctl: the runtime's default with bubblewrap's mounts and
+`pivot_root` allowed, under which a worker is confined when it makes the namespace, so the
+restriction does not apply ([security.md §3](security.md#3-a-worker-isolation-and-egress)
+says what it allows and denies). The default needs nothing from you:
 
 ```yaml
 worker:
@@ -169,34 +165,33 @@ worker:
 ```
 
 - **Loaded on every node** by the `apparmor` container of `troupe-worker-profiles`, with
-  `apparmor_parser --replace` from the operator's image, and then it waits, ready while the
-  kernel has the profile in enforce mode. Loading a profile takes root in the node's user
-  namespace with the `MAC_ADMIN` capability, no AppArmor profile of its own, and the host's
-  `/sys/kernel/security`, and that container has those and nothing else (every other
-  capability dropped, a read-only root, no API token). A worker pod that reaches a node
-  before the profile is loaded waits in `CreateContainerError` ("apparmor profile not
-  found") and starts once it is; it never runs without it.
+  `apparmor_parser --replace` from the operator's image; it then waits, ready while the
+  kernel has the profile in enforce mode. Loading takes root in the node's user namespace
+  with `MAC_ADMIN`, no AppArmor profile of its own, and the host's `/sys/kernel/security`,
+  and the container has those and nothing else (every other capability dropped, a read-only
+  root, no API token). A worker pod that reaches a node before the profile waits in
+  `CreateContainerError` ("apparmor profile not found") and starts once it is loaded; it
+  never runs without it.
 - **A node without AppArmor**: the container loads nothing and says so in its log. The
   kubelet refuses a pod that asks for a profile there ("Cannot enforce AppArmor: AppArmor
   is not enabled on the host"), so a cluster whose nodes run no AppArmor sets
-  `enabled: false`, and the worker container keeps the runtime's default, as before 0.19.0.
-- **With the Security Profiles Operator**, or nodes built with the profile, set
-  `install.enabled: false` and `profile` to the name it is loaded under. The profile is
-  `charts/troupe/files/worker-apparmor`.
-- **Not the sysctl.** Setting `kernel.apparmor_restrict_unprivileged_userns=0` would lift
-  the restriction for every process on the node, and a managed node pool often gives no
-  way to set it. The chart never sets it, and the worker container is never `Unconfined`.
+  `enabled: false`, and the worker container keeps the runtime's default.
+- **With the Security Profiles Operator**, or nodes built with the profile
+  (`charts/troupe/files/worker-apparmor`), set `install.enabled: false` and `profile` to the
+  name it is loaded under.
+- **Not the sysctl.** `kernel.apparmor_restrict_unprivileged_userns=0` would lift the
+  restriction for every process on the node, and a managed node pool often cannot set it.
+  The chart never sets it, and the worker container is never `Unconfined`.
 
 ### The workers' user namespaces
 
-The profile is not all bubblewrap needs. It also mounts a fresh `/proc` for the sandbox,
-and a container runtime masks paths under a container's own `/proc` (`/proc/kcore` and
-others mounted over, `/proc/sys` read-only); the kernel refuses a new proc mount in a user
-namespace while those hide part of the old one ("bwrap: Can't mount proc on /newroot/proc:
-Operation not permitted"). Kubernetes unmasks a container's `/proc` only for a pod in a user
-namespace of its own, so with `worker.userNamespaces: true`, the default, every worker pod
-gets `hostUsers: false` and its worker container `procMount: Unmasked`, always together. The
-container's root, and every other user in it, is then an unprivileged user on the node.
+Bubblewrap also mounts a fresh `/proc` for the sandbox, and the kernel refuses that in a
+user namespace while the runtime's masks hide part of the container's own (`/proc/kcore`
+and others mounted over, `/proc/sys` read-only): "bwrap: Can't mount proc on /newroot/proc:
+Operation not permitted". Kubernetes unmasks `/proc` only for a pod in a user namespace of
+its own, so with `worker.userNamespaces: true`, the default, every worker pod gets
+`hostUsers: false` and its worker container `procMount: Unmasked`, always together. Every
+user in the container, root included, is then an unprivileged user on the node.
 
 What the cluster needs for it:
 
@@ -326,16 +321,9 @@ model key, pull secrets) and watch `kubectl -n troupe-system get wp -w`.
 
 People install `troupe` and the desktop app from the release page with the release's
 installers ([quick start](../quick-start.md#1-install)), or from where `plane.cliUrl`
-points. The apps carry no Apple or Microsoft signature yet (#656), so the first time:
-
-- **macOS** refuses an app downloaded in a browser: **System Settings → Privacy &
-  Security**, then **Open Anyway** beside the message about Troupe. `install.sh` downloads
-  with `curl`, which Gatekeeper does not stop.
-- **Windows** SmartScreen says "Windows protected your PC" for a setup downloaded in a
-  browser: **More info**, then **Run anyway**, or `Unblock-File` on it first. `install.ps1`
-  downloads with `Invoke-WebRequest`, which SmartScreen rarely stops.
-
-Why that is safe, and how to check a first download against the release key:
+points. The apps carry no Apple or Microsoft signature yet (#656), so macOS and Windows
+warn the first time one downloaded in a browser runs; how to open it, why that is safe and
+how to check a first download against the release key are in
 [security.md §6](security.md#6-the-apps-are-not-os-code-signed). From then on `troupe
 update` and the desktop app check every update against that key themselves, and follow the
 versions the console's **Client versions** sets ([routine-tasks.md](routine-tasks.md#client-versions)).
@@ -408,25 +396,20 @@ registered domain per week; at a size where that matters, a wildcard in
 **OpenBao stays yours.** Troupe needs KV v2 and a transit engine, which a cloud's key
 manager rarely is, and OpenBao auto-unseals only through a few cloud KMS APIs or another
 transit engine. One replica with Raft storage is enough: there is no quorum to lose, a
-restart is a window in which no session can be *opened*, and live sessions keep their
-keys in memory. Without a KMS it can use, the seal is Shamir and something has to unseal
-it after every restart: a person, or a share kept in a Secret, which protects a stolen
-volume and not against a cluster admin. Set `server.enableServiceLinks: false` in its
-chart, so the `<SERVICE>_PORT` variables Kubernetes injects cannot collide with its own.
-Then the transit key, Kubernetes auth with a reviewer JWT, and the two roles of
-[integrations.md §2](integrations.md#2-openbao); `dev/kind/dependencies.yaml` has them as
-working commands, in development shape.
+restart is a window in which no session can be *opened*, and live sessions keep their keys
+in memory. Without a KMS it can use, the seal is Shamir and something unseals it after
+every restart: a person, or a share kept in a Secret, which protects a stolen volume and
+not against a cluster admin. Set `server.enableServiceLinks: false` in its chart, so the
+`<SERVICE>_PORT` variables Kubernetes injects cannot collide with its own. Then set up what
+[integrations.md §2](integrations.md#2-openbao) lists; `dev/kind/dependencies.yaml` has it
+as working commands, in development shape.
 
-**Every worker namespace** the operator creates needs its own copies: the object-store
-Secret, the pull secret if there is one, the profile's model key (`llm.secretRef`, key
-`api-key`) and `troupe-mcp-<server>` for every bundle MCP server with a `credential_ref`.
-External Secrets Operator is how none is forgotten on a new profile.
+**Every worker namespace** the operator creates needs its own copies of the Secrets
+[configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects) lists for
+`troupe-w-<profile>`; External Secrets Operator is how none is forgotten on a new profile.
 
-**Sizing.** Sessions per pod sizes everything: a pod holds a process tree per *active*
-session and nothing per dormant one. The example's plane is two replicas at 1 vCPU and
-1 GiB each. `values.small.yaml` fits two nodes of about 3 vCPU and 4 GB: the plane, the
-operator, OpenBao, ingress-nginx and cert-manager take about a node and a half at their
-requests, and 2 GB nodes leave workers `Pending` without saying why.
+**Sizing.** The example's plane is two replicas at 1 vCPU and 1 GiB each; the rest is
+[profiles-and-policy.md §7](profiles-and-policy.md#7-sizing).
 
 **Not covered by CI.** The chart runs on kind there, not on a cloud's network, storage or
 load balancer. Every worker pod is internet-facing by design, protected by a pod-bound

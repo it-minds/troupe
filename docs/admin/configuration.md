@@ -31,7 +31,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 |---|---|---|---|
 | `TROUPE_OPERATOR_AUTOSTART` | unset | starts the operator (required) | fixed `"true"` |
 | `TROUPE_PLANE_CONTROL_HOST` | `troupe-plane-control.troupe-system.svc` | host written into every worker's `TROUPE_PLANE_CONTROL` | `troupe-plane-control.<namespace>.svc` |
-| `TROUPE_PLANE_CONTROL_CA` | unset | the control certificate's CA, read on every pass and copied, its certificates alone, into each worker namespace as the ConfigMap `troupe-plane-ca`; every pod is then given it as `TROUPE_PLANE_CA_PATH` and dials with TLS. Unset: pods dial in plaintext | `/etc/troupe/plane-control-ca/ca.crt`, `ca.crt` alone from `plane.controlTls.secretName`, with `plane.controlTls.enabled` |
+| `TROUPE_PLANE_CONTROL_CA` | unset | the control certificate's CA, read on every pass and copied, certificates alone, into each worker namespace as the ConfigMap `troupe-plane-ca`, which pods are given as `TROUPE_PLANE_CA_PATH` to dial with TLS. Unset: pods dial in plaintext | `/etc/troupe/plane-control-ca/ca.crt`, `ca.crt` alone from `plane.controlTls.secretName`, with `plane.controlTls.enabled` |
 | `TROUPE_PLANE_CONTROL_PORT` | `4001` | its port; also the worker egress rule to the plane | `plane.controlPort` |
 | `TROUPE_PLANE_NAMESPACE` | `troupe-system` | namespace the operator watches | `namespace` |
 | `TROUPE_BAO_ADDR` | `http://openbao.troupe-system.svc:8200` | copied into worker pods; a `.svc` host adds an in-cluster egress rule, with Cilium any other host is admitted in the `CiliumNetworkPolicy`, and without it on the port it names ([Part E](#part-e--ports-and-network-policy)) | `bao.address` |
@@ -43,13 +43,13 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_INGRESS_CLASS` | `nginx` | class of every per-pod Ingress; nginx annotations only for `nginx` | `operator.ingressClassName` |
 | `TROUPE_WORKERS_TLS_SECRET` | unset | one TLS Secret shared by every pod Ingress; ignored when a cert issuer is set | `operator.tlsSecretName` |
 | `TROUPE_WORKERS_CERT_ISSUER` | unset | cert-manager ClusterIssuer per pod Ingress, secret `<profile>-<ordinal>-tls` | `operator.certIssuer` |
-| `TROUPE_CILIUM_AVAILABLE` | false | writes a `CiliumNetworkPolicy` with FQDN rules per profile, and drops the public 443/80 rule from the worker NetworkPolicy ([Part E](#part-e--ports-and-network-policy)); each profile's `EgressByHostname` condition says whether it applied, and is what the plane reports. With it or without, `EndpointUnreachable` names a profile's endpoints a worker does not reach | `operator.ciliumAvailable` |
+| `TROUPE_CILIUM_AVAILABLE` | false | writes a `CiliumNetworkPolicy` with FQDN rules per profile, and drops the public 443/80 rule from the worker NetworkPolicy ([Part E](#part-e--ports-and-network-policy)); each profile's `EgressByHostname` condition says whether it applied | `operator.ciliumAvailable` |
 | `TROUPE_MAX_PORTS` | `65536` | `+Q` in every worker's `ERL_FLAGS` | `operator.maxPorts` |
 | `TROUPE_WORKERS_SCHEME`, `TROUPE_WORKERS_PORT` | `wss`, unset | scheme and port of the endpoint a pod advertises (kind uses `ws`, `30080`) | `operator.workersScheme`, `operator.workersPort` |
 | `TROUPE_WORKER_SECCOMP_TYPE`, `TROUPE_WORKER_SECCOMP_PROFILE` | `RuntimeDefault`, unset | the worker container's `seccompProfile`: `Localhost` with the profile's path under the kubelet's seccomp directory, `RuntimeDefault` (bubblewrap cannot start, so no command runs) or `Unconfined`. Anything else, or `Localhost` without a path, stops the operator at boot ([installing.md](installing.md#the-workers-seccomp-profile)) | `worker.seccomp.type`, `worker.seccomp.localhostProfile` (chart default `Localhost`, `troupe/worker.json`) |
-| `TROUPE_WORKER_APPARMOR_PROFILE` | unset | the name of the AppArmor profile, loaded on the nodes, every worker container runs under (`appArmorProfile: Localhost`); unset leaves the runtime's default, which refuses bubblewrap's mounts where a node enforces AppArmor. Never `Unconfined`. A name that is not letters, digits, `.`, `_` and `-` stops the operator at boot ([installing.md](installing.md#the-workers-apparmor-profile)) | `worker.appArmor.enabled`, `worker.appArmor.profile` (chart default on, `troupe-worker`) |
-| `TROUPE_WORKER_USER_NAMESPACES` | false | `true` gives every worker pod `hostUsers: false` and its worker container `procMount: Unmasked`, always together, so bubblewrap can mount the sandbox's own `/proc`; off, a pod refuses every command ([installing.md](installing.md#the-workers-user-namespaces)) | `worker.userNamespaces` (chart default `true`; a non-boolean is refused) |
-| `TROUPE_DRAIN_TIMEOUT_SECONDS` | `300` | worker `terminationGracePeriodSeconds`; **not** put in the pod's env, so the worker's own drain wait stays 300. A pod stopped without a drain gives turns 150 s of its grace period and needs the rest to put its sessions to sleep, so keep this at 300 or more | `operator.drainTimeoutSeconds` |
+| `TROUPE_WORKER_APPARMOR_PROFILE` | unset | the AppArmor profile, loaded on the nodes, every worker container runs under (`appArmorProfile: Localhost`); unset leaves the runtime's default, which refuses bubblewrap's mounts where a node enforces AppArmor. Never `Unconfined`. A name that is not letters, digits, `.`, `_` and `-` stops the operator at boot ([installing.md](installing.md#the-workers-apparmor-profile)) | `worker.appArmor.enabled`, `worker.appArmor.profile` (chart default on, `troupe-worker`) |
+| `TROUPE_WORKER_USER_NAMESPACES` | false | `true` gives every worker pod `hostUsers: false` and its worker container `procMount: Unmasked`, always together; off, a pod refuses every command ([installing.md](installing.md#the-workers-user-namespaces)) | `worker.userNamespaces` (chart default `true`; a non-boolean is refused) |
+| `TROUPE_DRAIN_TIMEOUT_SECONDS` | `300` | worker `terminationGracePeriodSeconds`; **not** put in the pod's env, so the worker's own drain wait stays 300. Keep it at 300 or more ([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)) | `operator.drainTimeoutSeconds` |
 | `TROUPE_IMAGE_PULL_SECRETS` | none | comma-separated pull secrets for worker pods | `imagePullSecrets` |
 | `TROUPE_WORKER_ALLOWED_ORIGINS` | none | browser origins, written to pods as `TROUPE_ALLOWED_ORIGINS`; the chart adds the plane's own origin when it serves the GUI | `operator.workerAllowedOrigins` |
 | `TROUPE_POLICY_NAME` | `default` | which `TroupePolicy` is read | none — keep `policy.name` at `default` |
@@ -75,14 +75,14 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `RELEASE_DISTRIBUTION`, `TROUPE_NODE_BASENAME`, `TROUPE_PLANE_SELECTOR` | set by chart | `name` clusters replicas through libcluster's Kubernetes topology | `plane.distribution` |
 | `TROUPE_PLANE_CONTROL_PORT` | `4001` | the control listener workers dial | `plane.controlPort` |
 | `TROUPE_PLANE_CONTROL_TLS_DIR` | unset | where the control port's certificate is (`tls.crt`, `tls.key`, `ca.crt`, as cert-manager writes them), read at each handshake; a registered machine enrols over TLS only and is given `ca.crt` at registration. Unset: plaintext alone, and no machine can be registered | `/etc/troupe/control-tls` from `plane.controlTls.secretName`, with `plane.controlTls.enabled` |
-| `TROUPE_PLANE_CONTROL_REQUIRE_TLS` | unset: on where `TROUPE_PLANE_CONTROL_TLS_DIR` is set, off where it is not | `"true"`: the control port takes TLS only, a pod's connection included; a plaintext one is closed once its first byte says what it is, with a warning naming the peer, once a minute per address with the count of those not said. `"false"`: pods may dial in plaintext beside TLS, and the port says so as a warning when it starts, as it does when it has no certificate. The log line of each enrolment says whether it came over TLS | `"true"` or `"false"` from `plane.controlTls.requireTls` with `plane.controlTls.enabled`, on by default from 0.20 |
+| `TROUPE_PLANE_CONTROL_REQUIRE_TLS` | unset: on where `TROUPE_PLANE_CONTROL_TLS_DIR` is set, off where it is not | `"true"`: the control port takes TLS only, a pod's connection included; a plaintext one is closed at its first byte, with a warning naming the peer once a minute per address and counting the rest. `"false"`: pods may dial in plaintext beside TLS, and the port warns so when it starts, as it does with no certificate. Each enrolment's log line says whether it came over TLS | `"true"` or `"false"` from `plane.controlTls.requireTls` with `plane.controlTls.enabled`, on by default from 0.20 |
 | `TROUPE_GROUPS_CLAIM` | `groups` | deployed `groups_claim` | `plane.groupsClaim` |
 | `TROUPE_PLATFORM_ADMIN_GROUP` | unset (nobody); the chart's is `troupe-platform-admins` | deployed `platform_admin_group` | `plane.platformAdminGroup` |
 | `TROUPE_DEPLOYMENT_BUDGET_MICROS` | `0` (no ceiling) | the deployment's monthly ceiling on everything the plane spends, in millionths; the console's `platform_budget_micros` may narrow it, never raise it | `plane.deploymentBudgetMicros` |
 | `TROUPE_SCIM_TOKEN` | unset | the deployment's SCIM bearer; the console can mint its own | `plane.scim.*` |
 | `TROUPE_PLANE_AUDIENCE` | `troupe-plane-api` | `aud` of plane tokens | none |
-| `TROUPE_PROVISIONING_MODE` | `direct` | `direct`: the console writes profiles to the cluster. `gitops`: a repository holds the `WorkerProfile`, `TroupePolicy` and `Trigger` resources and something else applies them; the plane reads them, shows them locked, refuses `admin.profile.put`, `admin.trigger.put` and their `.delete` as `managed_by_gitops`, and writes only `spec.replicas`, `spec.teams` and `spec.mcpServers` ([profiles-and-policy.md §6](profiles-and-policy.md#6-provisioning-direct-or-from-a-repository), [bundles-and-triggers.md §2](bundles-and-triggers.md#triggers-from-a-repository)). Deployment only; the chart's Role drops `create` and `delete` on `WorkerProfile` and reads `Trigger` in `gitops` | `plane.provisioningMode` |
-| `TROUPE_GITOPS_SOURCE` | unset | where the profiles and triggers come from in `gitops` mode, as the console shows it beside "Locked to gitops": a repository and a path. Display only; the plane never reads it | `plane.gitops.source` |
+| `TROUPE_PROVISIONING_MODE` | `direct` | `direct`: the console writes profiles to the cluster. `gitops`: a repository holds the `WorkerProfile`, `TroupePolicy`, `Trigger` and `GitHubApp` resources and something else applies them ([gitops.md](gitops.md)). Deployment only; in `gitops` the chart's Role drops `create` and `delete` on `WorkerProfile` and reads `Trigger` and `GitHubApp` | `plane.provisioningMode` |
+| `TROUPE_GITOPS_SOURCE` | unset | the repository and path the console shows beside "Locked to gitops". Display only; the plane never reads it | `plane.gitops.source` |
 | `TROUPE_KUBECONFIG` | unset | how the plane reaches Kubernetes to apply profiles and read the policy; unset, the in-pod ServiceAccount; with neither, profiles are saved and reported `not_applied` | none |
 | `TROUPE_WORKER_IMAGE` | unset | the image a profile whose image is `release` runs | `worker.image.*`, tag default `appVersion` |
 | `TROUPE_OIDC_ISSUER`, `TROUPE_OIDC_CLIENT_ID` | none | the identity provider and app registration (required) | `plane.oidc.issuer`, `clientId` |
@@ -114,7 +114,7 @@ Worker pods are created by the operator, so the chart sets none of these.
 | `TROUPE_MCP_IDENTITIES_PATH` | none | the file holding the profile's `mcpIdentities`, read again whenever a token is asked for ([profiles](profiles-and-policy.md#calling-an-mcp-server-as-the-profile)) | yes, when there are any |
 | `TROUPE_KMS_TOKEN_PATH` | `/var/run/secrets/troupe/kms-token` | projected token (audience `troupe-kms`) for OpenBao | path matches |
 | `TROUPE_TOKEN_PATH`, `TROUPE_HOST_SECRET` | unset | a registered machine's enrolment secret, from a file or directly ([single-machine.md](single-machine.md)) | no |
-| `TROUPE_PLANE_CA_PATH`, `TROUPE_PLANE_SERVER_NAME` | unset, the host dialled | the CA the link trusts for the plane's certificate, and nothing else, read again at each dial: with it the link dials with TLS, and a machine's secret is never sent without it. The name the certificate must carry, for a tunnel or an address it does not name | the CA path, `/etc/troupe/plane-ca/ca.crt` from the namespace's `troupe-plane-ca` ConfigMap, with `plane.controlTls.enabled`; the name, no |
+| `TROUPE_PLANE_CA_PATH`, `TROUPE_PLANE_SERVER_NAME` | unset, the host dialled | the one CA the link trusts for the plane's certificate, read at each dial: with it the link dials with TLS, and without it a machine's secret is never sent. The name the certificate must carry, for a tunnel or an address it does not name | the CA path, `/etc/troupe/plane-ca/ca.crt` from the namespace's `troupe-plane-ca` ConfigMap, with `plane.controlTls.enabled`; the name, no |
 | `TROUPE_BAO_ADDR`, `TROUPE_BAO_TOKEN`, `TROUPE_BAO_MOUNT` | as the plane, unset, `secret` | KV v2 for session keys; without a token, Kubernetes auth | address only |
 | `TROUPE_BAO_ROLE` | `troupe-worker` | the Kubernetes-auth role the pod logs in under; the client token is kept until shortly before its lease ends | `troupe-worker-<profile>` with `bao.workerRolePerProfile` |
 | `TROUPE_OBJECT_*` | as the plane | the object store; credentials from `TROUPE_OBJECT_SECRET_NAME` | yes |
@@ -174,7 +174,7 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 | `plane.ingress.enabled`, `.bodySize`, `.rateLimit.{rps,burstMultiplier,connections}` | `true`, `1m`, `20`/`5`/`100` | the plane's Ingress and its nginx limits, per client IP; `rateLimit: null` turns them off |
 | `plane.ingressClassName`, `plane.certIssuer`, `plane.tlsSecretName` | `nginx`, `""`, `""` | the plane's Ingress class and TLS |
 | `plane.distPort`, `plane.maxPorts` | `9100`, `65536` | Erlang distribution port; `+Q` |
-| `plane.controlTls.enabled`, `.certManager`, `.issuer.{kind,name}`, `.secretName`, `.dnsNames`, `.ipAddresses`, `.requireTls` | `true`, `true`, the chart's own CA, `troupe-plane-control-tls`, `[]`, `[]`, `true` | TLS on the control port: a cert-manager `Certificate` for `troupe-plane-control` by its in-cluster names and these, from the named issuer (a CA, not ACME) or from a CA the chart makes (ten years, its key kept on renewal), mounted into the plane. `certManager: false` mounts the Secret as somebody else put it there. The operator is given `ca.crt` alone from the same Secret and copies it into every worker namespace (`troupe-plane-ca`), so the pods dial with TLS. `requireTls` closes a plaintext connection, a pod's included; before upgrading from 0.19, see [routine-tasks.md](routine-tasks.md#upgrade). A string for any flag is refused, and `requireTls` without `enabled`, so turning `enabled` off needs `requireTls: false` beside it ([single-machine.md](single-machine.md)) |
+| `plane.controlTls.enabled`, `.certManager`, `.issuer.{kind,name}`, `.secretName`, `.dnsNames`, `.ipAddresses`, `.requireTls` | `true`, `true`, the chart's own CA, `troupe-plane-control-tls`, `[]`, `[]`, `true` | TLS on the control port: a cert-manager `Certificate` for `troupe-plane-control` by its in-cluster names and these, from the named issuer (a CA, not ACME) or a CA the chart makes (ten years, its key kept on renewal), mounted into the plane; `certManager: false` mounts the Secret as you put it there. The operator copies its `ca.crt` into every worker namespace (`troupe-plane-ca`), so pods dial with TLS. `requireTls` closes a plaintext connection, a pod's included ([routine-tasks.md](routine-tasks.md#upgrade) before upgrading from 0.19). A string for any flag is refused, and so is `requireTls` without `enabled` |
 | `*.resources` | small requests and limits | container resources; `limits.cpu` also sets `+S` |
 | `gui.enabled`, `gui.replicas`, `gui.basePath` | `true`, `2`, `/app` | the GUI's Deployment, Service, Ingress on `plane.host` and NetworkPolicy. `basePath` must match the image's `TROUPE_GUI_BASE`; `/` is refused |
 | `console.enabled`, `console.basePath` | `true`, `/console` | the [console](console.md)'s Ingress on `plane.host`, to the GUI's Service, which runs while either is enabled. `basePath` must match the image's `TROUPE_CONSOLE_BASE`; `/` and `gui.basePath` are refused |
@@ -186,8 +186,8 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 | `policy.allowedEgress`, `allowedStorageClasses`, `orgVolume` | `["*.anthropic.com", api.openai.com, github.com]`, `[standard]`, `{}` | what profiles may reach and mount |
 | `policy.namespacePrefix`, `policy.workersDomain` | `troupe-w-`, `workers.example.test` | worker namespaces and hostnames. The plane is given the prefix too (`TROUPE_NAMESPACE_PREFIX`) and names an enrolling pod's profile by taking it off its namespace, so a policy installed apart from the chart (`policy.install: false`) has the same `namespacePrefix` as this value; a pod in a namespace without it is refused enrolment, and the plane's log names the prefix it expected |
 | `admission.install` | `true` | the `ValidatingAdmissionPolicy` and binding (`Deny`, `failurePolicy: Fail`) |
-| `worker.seccomp.install.enabled`, `.kubeletSeccompDir`, `.resources` | `true`, `/var/lib/kubelet/seccomp`, tiny | with `worker.seccomp.type: Localhost`, the ConfigMap `troupe-worker-seccomp` and the `seccomp` container of the DaemonSet `troupe-worker-profiles`, which write `files/worker-seccomp.json` to `<kubeletSeccompDir>/<localhostProfile>` on every node, mounting that one directory, as root with no capabilities; needs `privileged` Pod Security in the namespace. A path that leaves the kubelet's directory, or one with no directory of its own, is refused |
-| `worker.appArmor.install.enabled`, `.resources` | `true`, tiny | with `worker.appArmor.enabled`, the ConfigMap `troupe-worker-apparmor` and the `apparmor` container of `troupe-worker-profiles`, which loads `files/worker-apparmor` into every node's kernel under `worker.appArmor.profile` with `apparmor_parser --replace`: root with `MAC_ADMIN` alone, unconfined by AppArmor, the host's `/sys/kernel/security` mounted and nothing else of the host. On a node without AppArmor it loads nothing. A non-boolean, or a profile name that is not letters, digits, `.`, `_` and `-`, is refused |
+| `worker.seccomp.install.enabled`, `.kubeletSeccompDir`, `.resources` | `true`, `/var/lib/kubelet/seccomp`, tiny | with `worker.seccomp.type: Localhost`, the ConfigMap `troupe-worker-seccomp` and the `seccomp` container of the DaemonSet `troupe-worker-profiles`, which writes `files/worker-seccomp.json` to `<kubeletSeccompDir>/<localhostProfile>` on every node ([installing.md](installing.md#the-workers-seccomp-profile)). A path that leaves the kubelet's directory, or has no directory of its own, is refused |
+| `worker.appArmor.install.enabled`, `.resources` | `true`, tiny | with `worker.appArmor.enabled`, the ConfigMap `troupe-worker-apparmor` and the `apparmor` container of `troupe-worker-profiles`, which loads `files/worker-apparmor` into every node's kernel under `worker.appArmor.profile` ([installing.md](installing.md#the-workers-apparmor-profile)). A non-boolean, or a profile name that is not letters, digits, `.`, `_` and `-`, is refused |
 
 Not chart values: worker profiles and team volumes (custom resources), the LLM gateway (a
 profile field plus egress), database TLS and pool size, `TROUPE_LOG_FORMAT`,
@@ -219,9 +219,8 @@ fallback; `reset` deletes the row. Reads are cached for five seconds per node. S
 back as set or unset, never as values.
 
 The groups: **administration** (`platform_admin_group`, `groups_claim`, the platform
-budget), **provisioning** (`provisioning_mode` and `gitops_source`, shown and not
-editable: whether a repository holds the profiles and triggers is the deployment's, and a
-stored value from before 0.7.0 is not read), **team defaults** (a team is enabled with
+budget), **provisioning** (`provisioning_mode` and `gitops_source`, the deployment's, shown
+and not editable; a stored value from before 0.7.0 is not read), **team defaults** (a team is enabled with
 the budget, its period, the idle timeout and erase-after set here; cache eviction, pins,
 whether members may control sessions and a person's monthly ceiling hold for every team
 at once), **sessions** (managed permission rules and MCP servers only, the default
@@ -256,25 +255,24 @@ of the tenant. So set `plane.oidc.subjectClaim: oid`, and in the enterprise appl
 provisioning map `externalId` from `objectId`. An id token carries `oid` when `profile` is
 among the scopes, as it is by default; an access token for MCP always does.
 
-**Switching on a plane that already has people.** At each person's first sign-in after the
-rollout, a person the plane does not know by the new claim but knows by the `sub` the same
-token carries is moved to the new value, once. What moves with them: the sessions they own
-and the runs whose spend counts against them, their ACL entries and the shares made out to
+**Switching on a plane that already has people.** At a person's first sign-in after the
+rollout, one the plane does not know by the new claim but knows by the `sub` the same token
+carries is moved to the new value, once. The sessions they own and the runs whose spend
+counts against them move with them, and so do their ACL entries and the shares made out to
 them, the teams they administer, the triggers that notify them, their recorded spend and
-open reservations, the principals they sponsor; team membership is on their row and stays. If
-SCIM provisioned them under the new value before they signed in, their old row is folded
-into the one SCIM made. Each move is logged and audited as `person.rekey` with the two
-identifiers and nothing else from the token. The audit trail and every `*_by` keep the name
-they were written with. Somebody who never signs in again is never moved.
+open reservations, and the principals they sponsor; team membership is on their row and
+stays. If SCIM provisioned them under the new value first, their old row is folded into the
+one SCIM made. Each move is logged and audited as `person.rekey` with the two identifiers
+and nothing else from the token; the audit trail and every `*_by` keep the name they were
+written with. Somebody who never signs in again is never moved.
 
-What the key manager holds for a person, their credentials for person-mode MCP servers and
-their private sessions' data keys, needs no move: it is under their name there
-(`troupe/people/<name>/`), which the plane fixed when it first knew them, as their subject
-at the time, and keeps through the move (Decision 755). Their servers stay connected, and a
-private session sealed before the move is restored on another device as before. The plane
-tells pods and daemons the name. A daemon from before Decision 755 does not ask for it and
-looks under the person's new subject, where it is refused, so a moved person's private
-sessions on that machine stay local, unsealed, until the daemon is upgraded.
+What the key manager holds for a person (their credentials for person-mode MCP servers and
+their private sessions' data keys) needs no move: it is under the name the plane fixed when
+it first knew them (`troupe/people/<name>/`), kept through the move and told to pods and
+daemons (Decision 755). Their servers stay connected, and a private session sealed before
+the move restores on another device as before. A daemon from before Decision 755 looks
+under the new subject instead and is refused, so a moved person's private sessions on that
+machine stay local, unsealed, until the daemon is upgraded.
 
 What does not move:
 
@@ -341,22 +339,10 @@ from those and from operator pods.
 | `troupe-egress` (Cilium only) | — | `toFQDNs` for the LLM endpoint, MCP servers, `egress.fqdns` and `gitHosts`, and for OpenBao and object storage when their hosts are not `*.svc`; `toCIDR` (`/32`, `/128`) instead for any of these given as an IP address, except a profile's at a loopback, unspecified, link-local or cloud metadata address, which gets nothing; DNS to kube-dns through Cilium's DNS proxy (a `dns` rule), which is how `toFQDNs` learns addresses; `egressDeny` of `169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254` and `100.100.100.200`, and the v4 ones in NAT64's `64:ff9b::/96`, whatever name resolves there, except `169.254.20.10` (NodeLocal DNSCache) and OpenBao or object storage given as an address in them |
 
 With Cilium a worker reaches the hosts its profile names, the installation's own OpenBao
-and object store, and nothing else outside the cluster: Cilium admits the union of both
-policies, so the NetworkPolicy carries no address block. The operator admits OpenBao and
-the object store itself, in the cluster or outside it; the profile's allowlist is for the
-profile's own destinations. Without Cilium a worker can reach any public host on 443 and
-80; `allowedEgress` is then a check at admission and reconcile, not on the wire. OpenBao
-and an object store outside the cluster are admitted on their own ports too, and so are a
-profile's own endpoints, so one named on 9000 opens 9000 to every public host; a name that
-resolves to a private address cannot be admitted by name without Cilium, so give it as an
-address instead ([profiles-and-policy.md](profiles-and-policy.md#4-troupepolicy) says what
-else works). A profile's endpoint at a loopback, link-local or cloud metadata address gets
-no rule, with Cilium or without, even where `allowedEgress` names it: it is refused by the
-plane where it is set up, and reported by the operator as `EndpointUnreachable` on a
-profile a repository holds. With Cilium no name reaches link-local or a metadata address
-either, whatever it resolves to. Without Cilium the public rule leaves out the shared
-address space `100.64.0.0/10` as it leaves out link-local, so an endpoint there, a hosted
-object store's internal address say, is reached only when given as its address.
+and object store, and nothing else outside the cluster; without it, any public host on 443
+and 80, plus the ports its own endpoints name, and `allowedEgress` is a check at admission
+and reconcile, not on the wire. What that means for each kind of endpoint, and what to do
+about one a worker cannot reach, is in [profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy).
 
 **Ingress annotations.** Plane: 3600 s read and send timeouts, `proxy-body-size`, the rate
 limits above. A2A: buffering off, 3600 s timeouts, 2m bodies. Worker (nginx only): 3600 s
@@ -370,24 +356,21 @@ takes 4 MiB, control frames 8 MiB, worker frames 16 MiB.
 
 ## Part F — The config.yaml a session reads
 
-Every session, on a pod or on a laptop, also reads settings from files: the user's
-`config.yaml`, the workspace's `.troupe/config.yaml` and `.troupe/config.local.yaml`, then
-the `TROUPE_*` variables, merged by key and checked against one key table. The rules and
-every key are in [docs/user/configuration.md](../user/configuration.md); the schema is
+Every session, on a pod or on a laptop, also reads settings from files and the `TROUPE_*`
+variables, merged by key and checked against one key table. The layers and every key are
+in [docs/user/configuration.md](../user/configuration.md); the schema is
 `protocol/schema/config/v1.json`. What an administrator needs from them:
 
 - **A pod's provider is its profile's.** The operator writes the provider, model and key
-  into the pod as `TROUPE_*` (A.3). A session on a pod never reads the keys that change
+  into the pod as `TROUPE_*` (A.3). A session on a pod never takes the keys that change
   approvals, endpoints and credentials, commands to run or readable paths from the
-  project's own file, whatever the repository says; the rest of that file (models,
-  budgets, the project brief) applies.
+  project's own file; the rest of that file (models, budgets, the project brief) applies.
 - **A file Troupe refuses fails the session's start**, and says which file, which key and
   what to write: one that is not YAML, a value of the wrong type, an enum value nobody
   knows, both spellings of one setting, or a file written for a newer Troupe.
-- **On a laptop**, a workspace's files set those keys only once the user's own file lists
-  the workspace under `trusted_workspaces`, which `troupe config trust` in the workspace
-  adds. The organisation's defaults sit below the user's file and what it enforces above
-  everything (next section).
+- **On a laptop**, a workspace's files set those keys only once the workspace is trusted
+  ([trusted workspaces](../user/configuration.md#trusted-workspaces)). The organisation's
+  defaults sit below the user's file and what it enforces above everything (next section).
 - **A repository can check its own file** in CI: `troupe config validate
   .troupe/config.yaml` exits non-zero on any problem, an unknown key included.
 
@@ -452,46 +435,26 @@ file and the line, and an unknown key warns. `enforced:` takes only these, each 
 | `provider`, `base_url` | nothing else: the session's provider is this one, and a named provider of another type or at another URL is refused |
 | `permissions` | add rules of its own, not loosen these: every file's per-tool rules are added together and the strictest that matches a call holds, so an enforced `ask` beats a person's `allow` ([per-tool rules](../user/configuration.md#per-tool-permission-rules)) |
 
-A rule under `defaults:` is added the same way and holds the same: no rule is a default a
-person's own file replaces, so `defaults:` and `enforced:` differ for rules only in what
-`managed_permission_rules_only` keeps (both) and how `--explain` names them (`org` and
-`enforced`). On a plane, `client_enforced` takes them as
-`{"permissions": {"deny": ["shell(git push --force)"]}}`, each rule checked when it is set;
-the console's **Organisation** page edits them as rules, each a tool and a pattern checked as
-it is typed, rather than as JSON.
+A rule under `defaults:` is added and holds the same way, since no rule is a default a
+person's file replaces; the two differ for rules only in how `--explain` names them (`org`
+and `enforced`), and `managed_permission_rules_only` keeps both. On a plane,
+`client_enforced` takes them as `{"permissions": {"deny": ["shell(git push --force)"]}}`,
+each checked when set; the console's **Organisation** page edits them as rules (a tool and a
+pattern, checked as typed) rather than JSON.
 
 Any other key under `enforced:` is not enforced and warns, with the list; the plane refuses
-it outright when it is set. An enforced value is written out in full: `{env:VAR}` is
-refused there, since a person sets their own environment. `troupe config validate
-managed.yaml` checks a draft before it is put in place.
+it when it is set. An enforced value is written out in full: `{env:VAR}` is refused there,
+since a person sets their own environment. `troupe config validate managed.yaml` checks a
+draft before it is put in place.
 
 **Both.** Where a machine has both, the plane's defaults win over the file's, the stricter
 of two limits on one key holds, and a provider or URL both fix is the managed file's, with
 a warning: the managed file is the one a person cannot change.
 
-**What a person sees.** A value a person's own file, a variable or a flag sets past an
-enforced one is held to it, with one warning naming the file, the key and the
-organisation's value. `troupe config --explain KEY` shows the organisation's layer with its
-source (the plane's URL or the file's path) at both ends of the ladder, the terminal UI's
-settings page shows an enforced key as set by the organisation and does not change it, and
-the daemon's `config.set` refuses it.
-
-**What a ceiling bounds.** An enforced `max_turns` or `wall_clock_ms` also bounds the
-question a session asks when it reaches that limit: it offers only raises that stay under
-the ceiling, refuses a typed amount past it, names the organisation and where its limit
-came from (the file's path or the plane's URL), and does not offer "no limit"; `allow`,
-which buys the first allowance again, stops at the ceiling too. An enforced `max_tokens`
-is the most output one model call asks for, whatever the call: a provider's model entry
-with its own `max_output` can lower that for its model, and cannot raise it, and the
-summary a compaction asks for is held to it too. It also holds the room a model's
-`reasoning_effort` gives its thinking, which otherwise raises the output cap to fit. On
-an Anthropic model the thinking is shortened so that the answer keeps 4,096 tokens, or
-half the ceiling where that is less, and where that leaves less than Anthropic's minimum
-of 1,024 tokens the call asks for no thinking. An OpenAI-compatible model's reasoning
-spends from the same cap. A session whose thinking is shortened or turned off says so
-once, naming the ceiling and its source, so a person who set a high effort learns why
-the model thinks less than they asked. Under a ceiling of less than 2,047 tokens an
-Anthropic model is never asked to think.
+**What a person sees**, and what a ceiling bounds (the question a session asks at an
+enforced `max_turns` or `wall_clock_ms`, and the room an enforced `max_tokens` leaves a
+model's thinking), are on the user's page:
+[your organisation's defaults and limits](../user/configuration.md#your-organisations-defaults-and-limits).
 
 **What it is not.** It is the organisation's word honoured by Troupe on the machine, not a
 control a person cannot get round on a machine they administer: the plane's copy is in

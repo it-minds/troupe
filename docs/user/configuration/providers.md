@@ -156,3 +156,22 @@ Named providers sit side by side, and a model spelled `<provider>/<model>` goes 
 one: the gateway for the work and Ollama for the small jobs is the
 [Azure](#azure-openai) shape twice, or the example under
 [How the layers merge](../configuration.md#how-the-layers-merge).
+
+## From opencode
+
+Troupe does not read opencode's settings. `troupe-daemon config import-opencode` copies
+its providers and default model into `config.yaml` once, and `troupe config` and `troupe
+setup` offer the same on a machine with no settings yet. The copy reads
+`~/.config/opencode/opencode.jsonc` (keys also from its `auth.json`) and takes
+`options.baseURL`, `options.apiKey`, `options.authToken`, per model `id`,
+`limit.context`, `limit.output` and `options.reasoningEffort`, and opencode's `model` as
+the default when you have none; an `{env:VAR}` stays a reference. `variants`, `agent` and
+`permission` are not copied: agents are files, and `troupe onboard` brings opencode's in.
+
+A provider is copied only where its key would go to the host it was set up for: its SDK
+package is one Troupe has a type for (`@ai-sdk/anthropic`, `@ai-sdk/openai`,
+`@ai-sdk/google`, `@ai-sdk/azure`, OpenRouter's, Ollama's), or opencode's file names its
+`baseURL`, which is then where it goes, as `openai`. Any other, `@ai-sdk/mistral` with no
+`baseURL` for one, is left out, and the copy names it and says why; add it to
+`providers:` yourself with its `type` and `base_url`. `troupe config` then prints what was
+resolved, keys masked.
