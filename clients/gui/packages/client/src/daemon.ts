@@ -16,7 +16,7 @@ import { SessionView } from "./session.js";
 import type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
 import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
-import { syncState } from "./fleet.js";
+import { remoteOffer, syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
 import type { MemoryBrief } from "./memory.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
@@ -688,6 +688,21 @@ export class DaemonClient {
     return this.command<ClaimResult>("session.claim", { session_id: sessionId });
   }
 
+  /**
+   * Offer a session to the plane this computer is signed in to, so its person, and the
+   * people named in `share`, can steer it from another device (troupe #58).
+   * Offering again replaces the share. A private session is refused. The answer is what
+   * the session's row then says of it.
+   */
+  offerRemote(sessionId: string, share: Array<{ person: string; role: "observe" | "control" }> = []): Promise<{ session_id: string; remote: unknown }> {
+    return this.command("remote.offer", { session_id: sessionId, share });
+  }
+
+  /** Take an offer back: every view of the session from another device ends at once. */
+  withdrawRemote(sessionId: string): Promise<{ session_id: string; remote: null }> {
+    return this.command("remote.withdraw", { session_id: sessionId });
+  }
+
   recentWorkspaces(): Promise<{ workspaces: RecentWorkspace[] }> {
     return this.call("workspace.recent");
   }
@@ -1069,6 +1084,7 @@ export function rowFromDaemon(row: DaemonSessionRow, source = "daemon"): FleetRo
     device: kind === "private" ? (row.device ?? null) : null,
     unseen: row.unseen ?? null,
     failed: row.failed ? { reason: row.failed.reason, detail: row.failed.detail ?? null } : null,
+    remote: remoteOffer(row["remote"]),
     raw: row,
   };
 }

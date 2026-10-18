@@ -19,15 +19,22 @@ defmodule Troupe.Protocol.Event do
   alias Troupe.Protocol.Canonical
 
   defmodule Actor do
-    @moduledoc "Who caused an event: a principal, or the system itself."
+    @moduledoc """
+    Who caused an event: a principal, or the system itself.
+
+    `via` says how a person reached a session that is not where they are: `"plane"` for a
+    laptop's session steered from another device through the plane. Absent otherwise,
+    and from every event written before it, so an older log reads as it was written.
+    """
 
     @enforce_keys [:kind]
-    defstruct [:kind, :subject, :display_name]
+    defstruct [:kind, :subject, :display_name, :via]
 
     @type t :: %__MODULE__{
             kind: :user | :system | :service,
             subject: String.t() | nil,
-            display_name: String.t() | nil
+            display_name: String.t() | nil,
+            via: String.t() | nil
           }
 
     @spec system() :: t()
@@ -38,12 +45,19 @@ defmodule Troupe.Protocol.Event do
       %__MODULE__{kind: :user, subject: subject, display_name: display_name}
     end
 
+    @doc "A person acting on a laptop's session from another device, through the plane."
+    @spec remote(String.t(), String.t() | nil) :: t()
+    def remote(subject, display_name \\ nil) do
+      %__MODULE__{kind: :user, subject: subject, display_name: display_name, via: "plane"}
+    end
+
     @spec to_json(t()) :: map()
     def to_json(%__MODULE__{kind: :system}), do: %{"kind" => "system"}
 
     def to_json(%__MODULE__{} = actor) do
       %{"kind" => Atom.to_string(actor.kind), "subject" => actor.subject}
       |> maybe_put("display_name", actor.display_name)
+      |> maybe_put("via", actor.via)
     end
 
     @spec from_json(map() | nil) :: t()
@@ -53,7 +67,8 @@ defmodule Troupe.Protocol.Event do
       %__MODULE__{
         kind: String.to_existing_atom(kind),
         subject: Map.get(json, "subject"),
-        display_name: Map.get(json, "display_name")
+        display_name: Map.get(json, "display_name"),
+        via: Map.get(json, "via")
       }
     end
 

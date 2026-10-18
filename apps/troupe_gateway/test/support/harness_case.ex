@@ -126,7 +126,7 @@ defmodule Troupe.Gateway.HarnessCase do
           config_overrides:
             [provider: "fake", model: "fake", state_dir: context.state_dir] ++
               Keyword.get(opts, :config, auto_approve: true)
-        ] ++ Keyword.take(opts, [:definitions])
+        ] ++ Keyword.take(opts, [:definitions, :kind])
       )
 
     ExUnit.Callbacks.on_exit(fn -> Troupe.stop_session(session.id) end)

@@ -144,6 +144,8 @@ defmodule Troupe.Client do
   @callback memory_facts(session_id()) :: {:ok, memory()} | :no_facts | {:error, term()}
   @callback forget_fact(session_id(), String.t()) :: :ok | {:error, term()}
   @callback instructions(session_id()) :: {:ok, String.t()} | {:error, term()}
+  @callback remote_steering(session_id(), :status | :withdraw | {:offer, String.t()}) ::
+              {:ok, String.t()} | {:error, term()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback scratch_read(session_id(), String.t() | nil, String.t()) ::
@@ -493,6 +495,16 @@ defmodule Troupe.Client do
   """
   @spec instructions(session_id()) :: {:ok, String.t()} | {:error, term()}
   def instructions(sid), do: impl(sid).instructions(sid)
+
+  @doc """
+  The session offered to the plane for steering from another device (root #58): `:status`
+  says whether it is and who is steering, `{:offer, people}` offers it to the people as
+  `/steer on` names them (an email to steer it, `email:observe` to follow it), `:withdraw`
+  takes it back. Each answers the sentence to show.
+  """
+  @spec remote_steering(session_id(), :status | :withdraw | {:offer, String.t()}) ::
+          {:ok, String.t()} | {:error, term()}
+  def remote_steering(sid, verb), do: impl(sid).remote_steering(sid, verb)
 
   @spec fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   def fs_list(sid, path), do: impl(sid).fs_list(sid, path)

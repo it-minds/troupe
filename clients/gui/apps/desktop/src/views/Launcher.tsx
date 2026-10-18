@@ -10,7 +10,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { awaitingYou } from "@troupe/client";
+import { awaitingYou, onThisComputer } from "@troupe/client";
 import type { AuthSession, FleetRow } from "@troupe/client";
 import { capabilities, prefs } from "../shell";
 import { Mask } from "./brand";
@@ -18,7 +18,7 @@ import { failedTitle, relative, statusOf, Unread } from "./bits";
 import type { DaemonState } from "./Local";
 
 /** The one word for where a row runs, as the list's pill says it. */
-const KIND: Record<FleetRow["kind"], string> = { team: "Team", local: "This computer", private: "Private" };
+const KIND: Record<FleetRow["kind"], string> = { team: "Team", local: "This computer", private: "Private", remote: "Remote" };
 
 /** Whether the app opens here, which it does until the person says the list. */
 export function opensOnLauncher(): boolean {
@@ -159,7 +159,7 @@ export function Launcher({
                       <span className="bar" aria-hidden="true" />
                       <span className="title">{r.title ?? r.id}</span>
                       <Unread row={r} />
-                      <span className={`kind ${r.kind === "team" ? "" : "local"}`}>{KIND[r.kind]}</span>
+                      <span className={`kind ${onThisComputer(r.kind) ? "local" : ""}`}>{KIND[r.kind]}</span>
                     </button>
                   </li>
                 ))}

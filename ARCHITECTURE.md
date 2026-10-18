@@ -379,6 +379,16 @@ one caller that places it. `sessions.list` carries the status columns a pod repo
 `cost_micros`), so a review queue is a listing and not a replay. The plane pushes nothing
 to clients: `/rpc` is request and answer.
 
+**A laptop's session offered for steering** is the one place the plane is in a session's
+data path, because nothing can dial a laptop: its daemon dials `/v1/relay` with its
+person's plane token, and the plane relays the protocol between that connection and each
+person attached at `/v1/relay/session` with a token `remote.open` minted for that session
+alone. Both ends hold every message to one table in the protocol app
+(`Troupe.Protocol.Relay`), the laptop again to its own record of whom it shared the session
+with, and each remote person is an ordinary connection on the laptop, so the session's rules
+hold for them as for anybody. The plane keeps who offered what to whom and whether the
+laptop is there, and no copy of what it relays (Decision 921).
+
 **Tokens for pods.** `aud` is **the pod's worker id**: an audience naming the profile would
 make pods interchangeable, which is what a leaked token wants. Workers verify offline
 against a cached JWKS, warn with `auth.expiring` two minutes out and accept `auth.refresh`

@@ -833,6 +833,41 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # Offered to the plane for steering from another device (root #58): the daemon keeps the
+  # offer and its one connection to the plane; this says what it answers.
+  @impl true
+  def remote_steering(sid, :status) do
+    case Link.call("session.get", %{session_id: sid}) do
+      {:ok, %{} = session} -> {:ok, Troupe.Client.Steering.line(session["remote"])}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  def remote_steering(sid, {:offer, people}) do
+    with {:ok, share} <- Troupe.Client.Steering.share(people) do
+      params = %{session_id: sid, share: share, command_id: Troupe.Remote.RPC.command_id()}
+
+      case Link.call("remote.offer", params) do
+        {:ok, %{"remote" => remote}} -> {:ok, Troupe.Client.Steering.offered(remote)}
+        {:ok, _older} -> {:error, "this daemon does not offer sessions to the plane: update it"}
+        {:error, reason} -> {:error, refusal(reason)}
+      end
+    end
+  end
+
+  def remote_steering(sid, :withdraw) do
+    params = %{session_id: sid, command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call("remote.withdraw", params) do
+      {:ok, _} -> {:ok, "Withdrawn from the plane: nobody steers it from another device now."}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  # The daemon's sentence where it gave one, as it gave it.
+  defp refusal(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
+  defp refusal(reason), do: message(reason)
+
   @impl true
   def fs_list(sid, path) do
     case Worker.fs_list(sid, path) do

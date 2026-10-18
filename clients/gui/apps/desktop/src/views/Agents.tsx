@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import { agentConflict, agentRefusal, agentTemplate, layerOf, layerWords, permissionsOf, widenedAutos } from "@troupe/client";
+import { agentConflict, agentRefusal, agentTemplate, layerOf, layerWords, onThisComputer, permissionsOf, widenedAutos } from "@troupe/client";
 import type { AgentDefinition, AgentLayer, AgentRow, AgentScope, AgentSkippedFile, DaemonClient, FleetRow } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import { shell } from "../shell";
@@ -33,7 +33,7 @@ import { Confirm, Failed, Loading, Pill, Table } from "./bits";
 /** The sessions of this workspace running an agent now: the sessions in it and the branches made from them. */
 function runningIn(rows: FleetRow[], workspace: string, name: string): FleetRow[] {
   const raw = (r: FleetRow): { workspace?: unknown; parent?: unknown } => (r.raw ?? {}) as { workspace?: unknown; parent?: unknown };
-  const local = rows.filter((r) => r.kind !== "team");
+  const local = rows.filter((r) => onThisComputer(r.kind));
   const here = new Set(local.filter((r) => raw(r).workspace === workspace).map((r) => r.id));
   return local.filter((r) => r.profile === name && r.state === "active" && (here.has(r.id) || here.has(String(raw(r).parent))));
 }

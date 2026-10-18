@@ -256,6 +256,13 @@ defmodule Troupe.Client.Remote do
 
   # The pod's checkout has instruction files of its own, and `context.get` is a session
   # method a worker answers; the paths are the pod's, shown as they come.
+  # A session on the plane is reached through it already; what is offered is a session on
+  # this computer (root #58).
+  @impl true
+  def remote_steering(_sid, _verb) do
+    {:error, "this session runs on the plane already: /steer offers a session on this computer"}
+  end
+
   @impl true
   def instructions(sid) do
     case Worker.rpc(sid, "context.get", %{}) do

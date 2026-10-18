@@ -86,6 +86,10 @@ origin and the origins in `TROUPE_ALLOWED_ORIGINS` (the operator writes them fro
 with none listed, no browser page gets a socket, and `*` admits every page. A client that
 is not a browser sends no `Origin` and is not refused for it.
 
+A laptop's session offered for steering from another device is reached the same way, at
+the plane's `wss://<plane>/v1/relay/session`, which relays to the laptop
+([Relayed connections](#relayed-connections)).
+
 A frame is one message whatever whitespace it holds, newlines between its tokens
 included. A frame larger than the socket's ceiling, 16 MiB unless the server is
 configured otherwise, closes the connection before it is read; `initialize` says what the
@@ -243,7 +247,7 @@ Persisted, replayable, and totally ordered per session.
 | `seq` | monotonic from 1, no gaps, per session |
 | `prev_hash` | `sha256:` of the previous event's canonical JSON; `null` at `seq` 1 |
 | `ts` | RFC 3339 UTC, microsecond precision |
-| `actor` | who caused it; `{"kind": "system"}` when nobody did |
+| `actor` | who caused it; `{"kind": "system"}` when nobody did; `"via": "plane"` beside a person who did it from another device, through the plane ([Steering from another device](#steering-from-another-device)) |
 | `agent` | agent path from the root, e.g. `["root"]` or `["root", "explore#1"]` |
 | `type` | see the table below |
 | `v` | schema version of `data`, starting at 1 |
@@ -705,9 +709,16 @@ that cannot yet — no token, or no plane answering — makes the session anyway
 ```
 → `{"sessions": [{"id", "workspace", "branch", "parent", "profile", "state", "status",
 "failed", "pending_approvals", "pending_questions", "unseen", "tokens", "cost", "created_at",
-"last_active_at", "pinned", "kind", "sync", "device"}]}`
+"last_active_at", "pinned", "kind", "sync", "device", "remote"}]}`
 
 `filter.parent` selects the branches of one session.
+
+`remote` is `null`, or how the session stands offered to the plane for steering from
+another device ([Steering from another device](#steering-from-another-device)):
+`{"owner", "shares": [{"subject", "display_name", "email", "role"}], "offered_at", "state",
+"since", "steering": [{"subject", "display_name", "role"}]}`, where `state` is `online`,
+`connecting` or `offline` (since `since`), and `steering` is who is attached through the
+plane now.
 
 `kind` is where the session is kept: `local`, `private` (sealed under its person's key,
 see `private` above), or a pod's `team`. A private session's `sync` says how its sealing
@@ -875,7 +886,8 @@ person's own commands never ask, and neither does a workspace on `trusted_worksp
 Each tool call the cancel stops is closed before `cancelled` is written: a
 `tool_call_completed` with `ok: false`, then the turn's `tool_results`. A restart takes
 up nothing a cancel stopped: no call runs again, no approval is asked for again, and no
-model call is made for the cancelled turn.
+model call is made for the cancelled turn. `cancelled` carries who asked as its `actor`,
+as an input does.
 
 #### `shell.run`
 ```json
@@ -1039,6 +1051,44 @@ text. A client offering the question's `options` sends the chosen labels, joined
 {"command_id": "c-5", "session_id": "s-9f", "action": "cancel", "id": "t2"}
 ```
 `action` is `add` (with `content`), `cancel`, or `complete`.
+
+### Steering from another device
+
+*(A daemon's, `admin`. A worker pod is reached through the plane already.)*
+
+A person offers one of their sessions on this computer to the plane they are signed in to,
+so they, from any of their other devices, and the people they name can steer it: follow its
+transcript, answer its approvals and questions, send it prompts, cancel a turn and switch
+its agent (Decision 921). Nothing listens on the laptop: while a session is offered the
+daemon keeps one WebSocket open to the plane's `/v1/relay`, with the plane token a client
+handed it (`identity.link`), and the plane relays each remote person's protocol messages
+over it ([Relayed connections](#relayed-connections)).
+
+#### `remote.offer`
+```json
+{"command_id": "c-6", "session_id": "s-9f",
+ "share": [{"person": "bea@example.com", "role": "control"},
+           {"person": "cy@example.com", "role": "observe"}]}
+```
+→ `{"session_id", "remote"}`, `remote` as `session.list` has it.
+
+`person` is a subject or an email the plane knows, and `role` is `control` (steer it) or
+`observe` (follow it), `observe` where none is said. The session's owner, the person linked
+here, may always steer it and is never named. Offering again replaces the share. The answer
+waits for the plane: one that does not know a person is `not_found` naming them, and
+nothing is recorded; one that cannot be reached is `unavailable`. A private session is
+`forbidden` with a sentence: it is sealed under its person's key, and steering it elsewhere
+is claiming it there (`session.claim`). A daemon with no plane token is `unavailable`, "sign
+in to a plane first", and a session another person made while linked here is `forbidden`.
+
+The daemon keeps the offer and its share (`<state>/remote.json`) and dials the plane again,
+backing off, whenever the connection drops: on connecting it says exactly what it still
+offers, so a session withdrawn while the laptop was away is not offered again.
+
+#### `remote.withdraw` → `{"command_id", "session_id"}` → `{"session_id", "remote": null}`
+
+Every remote view of the session ends at once, closed here before the plane is told.
+Erasing a session withdraws it.
 
 ### Identity
 
@@ -2360,7 +2410,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop`, `remote.offer`, `remote.withdraw` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three, and so does the loopback TCP token; a daemon mints no narrower token.
@@ -2463,6 +2513,47 @@ of each session named, and answers `session.erased`, on which the plane deletes 
 version under the session's prefix, and is named the session again until none is left
 (Decision 804). A daemon erasing one of its own (its `session.erase`, Decision 789) asks
 the plane's first and does the same at once for the session it named.
+
+### Relayed connections
+
+A laptop's session offered for steering from another device
+([Steering from another device](#steering-from-another-device)) is reached through the
+plane: a client asks the plane's `/rpc` for `remote.open {session_id}` and gets
+`{"session_id", "kind": "remote", "endpoint", "role", "your_role", "token", "expires_at"}`,
+then opens `endpoint` (`wss://<plane>/v1/relay/session`, or that path where the plane names
+no address of its own) and speaks this protocol on it exactly as to a pod: `initialize`
+with the token, `subscribe`, the commands, `auth.expiring` and `auth.refresh`, which asks
+`remote.open` again for the token. `remote.list` on the plane lists the sessions offered
+to the caller ([Harness methods](#triggers-and-principals-on-the-harness-side)).
+
+The token is for that session alone, at the caller's role, with the audience `troupe-relay`:
+it opens no pod and no `/rpc`. The plane answers `auth.refresh` itself, takes `auth` out of
+`initialize` before relaying it, and relays nothing else of a token to the laptop.
+
+**What may be asked.** A relayed connection calls the session's own reading — `subscribe`
+and `unsubscribe` on its topics, `session.get`, `session.list` (which lists that session
+alone), `blob.get`, `agents.list` naming the session, `commands.list`, `presence.set`,
+`session.goal.get`, `session.loop.get` — and, at `control`, its steering: `input.send`,
+`commands.run`, `turn.cancel`, `profile.switch`, `approval.respond`, `question.answer`,
+`todo.edit`. Anything else is `forbidden` with `data.method` and a reason, as is a request
+naming another session (`data.field`) or the agents of a path; nothing of the laptop is
+reachable: no `fs.*`, `shell.*`, `tools.*`, setting, server, workspace or identity. An
+approval answered over the relay is `allow` or `deny`; `allow_session` is `forbidden` with
+`data.field` of `decision`, because it would loosen what the session asks, which is the
+laptop person's to do at the laptop.
+
+**Checked at both ends.** The plane checks each request against that list, at the role the
+offer holds the person to, before relaying it, and asks again whether the offer still
+shares the session with them before each steering command. The laptop's daemon checks it
+again against its own record of the share, at the narrower of the two roles, and closes a
+view the plane opened for somebody it never named. `initialize` answers `capabilities.relayed:
+true` and the principal with `via: "plane"`, and every event the person causes carries that
+actor.
+
+**Offline.** A laptop that is not connected is `unavailable` with `data.offline_since` at
+`remote.open` and at `initialize`; nothing is queued for it. A view ends with the
+notification `relay.closed {"reason"}` and the socket closing: `withdrawn`, `the laptop went
+offline`, `no longer shared with you`, `the token expired`.
 
 ### `auth.expiring` (notification, server → client)
 
@@ -2780,6 +2871,18 @@ than an admin uses them:
 | `session.assertion` | control | anybody, for their own private sessions | `{session_id}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`, the same shape `me.connections.grant` answers and for the same reason. The path is `troupe/people/<name>/sessions/<session_id>`; the person policy covers their own subtree and no pod role covers any of it. A daemon makes or finds the session's key under `name`, and under the subject it is linked as only where a plane from before Decision 755 answers none. The session must already be registered, which is what makes this a statement about a session the plane agrees is theirs |
 | `session.erasures` | control | anybody, for their own private sessions | `{device}` → `{erasures: [{session_id, erased_at}]}`: the caller's private sessions whose key is destroyed and whose erasure this `device` has not acknowledged. A daemon asks when a client links it with a plane token. A session whose key is not yet destroyed is tried again first and is not listed until it is (Decision 756) |
 | `session.erased` | control | anybody, for their own erased private sessions | `{session_id, device}` → `{session_id, device, deleting, objects_deleted}`: this device has stopped sealing the session and erased its copy, and the plane deletes every version of every object under `sessions/<session_id>/` and records the device once none is left. `deleting: false` with how many went when that is done within the call; `deleting: true` and no count when it takes longer than the call waits (five seconds), and the plane carries on and records the device when it is done. `unavailable` with `objects_deleted` and `objects_left` where the object store refused or failed some: the device is not recorded, and `session.erasures` names the session to it again, which tries again (Decision 804). `not_found` for a session that is not the caller's, not private or not erased: saying a session is erased does not erase it |
+
+| `remote.list` | observe | anybody | `{}` → `{sessions: [{id, kind: "remote", owner, owner_name, workspace, state, offline_since, offered_at, your_role, shares}]}`: laptop sessions offered for steering from another device that are the caller's own or shared with them ([Relayed connections](#relayed-connections)). `state` is `online` while the laptop's connection is up, else `offline` since `offline_since`; `your_role` is `owner`, `control` or `observe`; `shares` only for the owner. `workspace` is the last name of its folder, never a path; nothing a session says is kept |
+| `remote.open` | observe | the owner, or a person the session is shared with | `{session_id}` → `{session_id, kind: "remote", endpoint, role, your_role, token, expires_at}`: where to attach, and a token for that session alone at the caller's role, audience `troupe-relay`, at most fifteen minutes. Asked again for a fresh one. `not_found` for anybody else; `unavailable` with `offline_since` for a laptop that is away |
+
+The laptop's own half is the WebSocket at `/v1/relay`, which a daemon dials with its
+person's plane token and which a page that names an `Origin` cannot open: `initialize` with
+`capabilities.device`, then `relay.sync {offers: [{session_id, workspace, share}]}` → `{offers:
+[{session_id, shares}], refused}` (every other offer of that person's from that device is
+dropped), `relay.offer {session_id, workspace, share}` → `{shares}`, `relay.withdraw
+{session_id}`, and `auth.refresh`; the plane sends `relay.open {viewer, session_id, person,
+role}`, `relay.frame {viewer, data}` (one protocol message, as text) and `relay.close
+{viewer, reason}`, and the daemon sends `relay.frame` and `relay.close` back.
 
 `session.register`, `session.presign`, `session.objects` and `session.assertion` answer
 `not_found` with `reason: "erased"` for a session that is erased or `erasure_pending`: a

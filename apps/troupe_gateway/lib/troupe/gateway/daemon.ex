@@ -26,7 +26,7 @@ defmodule Troupe.Gateway.Daemon do
 
   use Supervisor
 
-  alias Troupe.Gateway.{Commands, Connections, Idle, Listener, Loopback, Plane, Setup}
+  alias Troupe.Gateway.{Commands, Connections, Idle, Listener, Loopback, Plane, Remote, Setup}
   alias Troupe.Gateway.Private
 
   @spec start_link(keyword()) :: Supervisor.on_start()
@@ -75,6 +75,9 @@ defmodule Troupe.Gateway.Daemon do
       # The first run in progress, which a connection answers a step of at a time.
       {Setup, opts},
       {Connections, opts},
+      # After Connections, which each remote person's view is one of: the sessions offered
+      # to the plane, and the one connection to it they are steered over.
+      {Remote, Keyword.get(opts, :remote, [])},
       {Listener, opts},
       # After the Listener, so that `rest_for_one` republishes the WebSocket entry if
       # the Listener ever restarts and rewrites the discovery file underneath it.
