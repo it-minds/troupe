@@ -1,18 +1,17 @@
 # Authentik: sign-in, and provisioning
 
-Connecting a plane to Authentik, for sign-in and for SCIM provisioning. Authentik is a
-conformant OIDC provider, so nothing here is Authentik-specific on the plane's side: it is
-the plane's ordinary identity-provider configuration, filled in with Authentik's values.
-The examples put Authentik at `https://auth.example.com` and the plane at
-`https://troupe.example.com`.
+Connecting a plane to Authentik, for sign-in and for SCIM provisioning. Nothing on the
+plane's side is Authentik-specific: it is the plane's ordinary identity-provider
+configuration ([integrations.md §1](integrations.md#1-identity-provider-oidc)) filled in
+with Authentik's values. The examples put Authentik at `https://auth.example.com` and the
+plane at `https://troupe.example.com`.
 
-This is written as a checklist for a person with access to Authentik. Nothing in this
-repository can create those objects, and nobody should let it: Authentik is usually shared
-infrastructure for a whole organisation, and a plane is one application on it.
+This is a checklist for a person with access to Authentik. Nothing in this repository can
+create those objects, and nobody should let it: Authentik is usually shared infrastructure
+for a whole organisation, and a plane is one application on it.
 
-The failure this document exists to prevent is not "it does not work". It is locking
-everybody out, or holding every person twice. Section 0 is the half of that which cannot
-be repaired afterwards, and section 3 is the other half.
+The failures it exists to prevent are locking everybody out and holding every person
+twice. Section 0 is the half that cannot be repaired afterwards, and section 3 the other.
 
 ---
 
@@ -29,22 +28,20 @@ where the people running the plane will find them.
 | Break-glass | Required for a move: it is the only way in while `platform_admin_group` still names a group of the old provider that nobody carries (`breakglass.ex`) |
 
 Leaving has two meanings here, and the provider picks one. **Deactivated** (`active`
-false in a push or a PATCH): the row stays, sign-in is refused, every request is refused,
-and sponsored principals stop firing. It is not reversed by signing in (`login.ex`,
-`upsert/2`), only by a push that makes them active again. **Deleted** (a SCIM `DELETE`):
-the row goes and a tombstone keeps what outlives them. Their sessions turn read-only under
-a "removed person" owner, they lose any team they administered, their principals stop, and
-the audit trail keeps their name; somebody pushed or signing in later under the same
-subject is a new person. Rows SCIM never pushes, such as the people from before a move, are
-left alone.
+false in a push or a PATCH): the row stays, sign-in and every request are refused, and
+sponsored principals stop firing; only a push that makes them active again reverses it,
+never signing in (`login.ex`, `upsert/2`). **Deleted** (a SCIM `DELETE`): the row goes and a
+tombstone keeps what outlives them, and somebody later under the same subject is a new
+person ([integrations.md §8](integrations.md#8-scim)). Rows SCIM never pushes, such as the
+people from before a move, are left alone.
 
 ---
 
 ## 0. One string is the person, and it cannot be fixed afterwards
 
-Every record here is keyed on one string taken from the token: team membership, budgets,
-audit entries, the sponsor on a service principal, and the owner of every session. Two
-paths produce it and they must produce the same one:
+Every record here is keyed on one string taken from the token
+([configuration.md](configuration.md#which-claim-is-the-person)). Two paths produce it and
+they must produce the same one:
 
 | Path | Where the string comes from |
 |---|---|
@@ -55,11 +52,10 @@ If those disagree, the person SCIM created and the person who signs in are **two
 and deactivating the first leaves the second able to sign in. That is the single thing
 provisioning is turned on for, so it is worth ten minutes now.
 
-Authentik's OIDC provider has a **subject mode** and its default is a hashed user id,
-which is salted per provider and is not a value SCIM sends. So the default is wrong here,
-in the same way Entra ID's pairwise `sub` is. Entra's answer is `subject_claim: oid`
-([configuration.md](configuration.md#which-claim-is-the-person)); Authentik's is simpler,
-and `subject_claim` stays `sub`.
+Authentik's OIDC provider has a **subject mode** whose default is a hashed user id, salted
+per provider and not a value SCIM sends, so the default is wrong here, as Entra ID's
+pairwise `sub` is. Entra's answer is `subject_claim: oid`; Authentik's is simpler, and
+`subject_claim` stays `sub`.
 
 **Set both sides to the user's UUID.** Subject mode `Based on the User's UUID`, and a SCIM
 user property mapping whose `externalId` is that same UUID. They then agree by
@@ -73,16 +69,13 @@ every `sub` changes, and nothing links a person's old one to their new one.
 > push into a plane that has people on it, with the wrong answer here, is how a directory
 > of duplicates is made.
 
-**Check the email and the username too.** A sign-in or a push that finds nobody under its
-subject but finds the row SCIM gave that value as `externalId` takes that row over only
-when the row's email or `userName` agrees with what it carries: a sign-in's `email` or
-`preferred_username` claim, a push's primary email or `userName`. Map SCIM's `userName`
-from the same attribute the token's `preferred_username` comes from (the username, by
-default), and keep `email` in the token's scopes. When neither agrees, nothing is merged:
-a sign-in gets a row of its own, a push is refused, and `admin.identity.duplicates` lists
-the pair, which is the place to look after changing a mapping. A later sign-in whose
-token agrees folds the row the first one made into SCIM's; where nothing will agree,
-`admin.identity.adopt` settles the pair ([routine-tasks.md](routine-tasks.md#scim)).
+**Check the email and the username too.** A sign-in or a push takes over the row SCIM gave
+its subject as `externalId` only when the row's email or `userName` agrees with what it
+carries (a sign-in's `email` or `preferred_username`, a push's primary email or
+`userName`). So map SCIM's `userName` from the attribute the token's `preferred_username`
+comes from (the username, by default), and keep `email` in the token's scopes. Otherwise
+nothing is merged and `admin.identity.duplicates` lists the pair, the place to look after
+changing a mapping ([routine-tasks.md](routine-tasks.md#scim) settles it).
 
 ### Groups are the same problem again
 
@@ -107,12 +100,10 @@ silently. Create new objects beside them instead.
 
 ### 1a. A scope mapping that emits groups
 
-Groups are a **claim**, not a scope, at every provider. Under Entra ID, asking for
-`groups` as a scope refuses every sign-in before a password is typed. Under Authentik the
-arrangement is the opposite and worth reading twice: a custom claim is carried by a scope
-mapping, and the client must *request that scope by name* for its claim to appear.
-
-So create a scope mapping, do not edit the shipped ones:
+Under Entra ID, asking for `groups` as a scope refuses every sign-in. Under Authentik it
+is the opposite, and worth reading twice: a custom claim is carried by a scope mapping, and
+the client must *request that scope by name* for its claim to appear. So create a scope
+mapping, and do not edit the shipped ones:
 
 | Field | Value |
 |---|---|
@@ -193,7 +184,7 @@ the console exercises it.
 
 ## 2. The plane's side
 
-This is the console's **Identity provider** screen, and no rollout is needed. The save
+This is the console's **Sign-in** screen, and no rollout is needed. The save
 runs a check against the provider first and is refused if it does not stand behind the
 values.
 
@@ -245,12 +236,11 @@ Authentik starts at step 2, and needs break-glass all the same.
    an administrator, and none of their old sessions. That is expected. What matters is
    that their groups are now rows here.
 5. **Make the admin group the deployment's**: set `plane.platformAdminGroup` to its UUID
-   and roll. Then open `/admin/breakglass` with the token: the page there shows the
-   identity check, which now passes because the person from step 4 is known to carry it.
-   If `platform_admin_group` was changed in the console, the stored value still wins over
-   the deployment's, so put it back to the deployment's there. That page only reads, and
-   puts sign-in back to what the deployment says; a value is set in the deployment.
-   Break-glass sessions are short, audited, and marked on every page.
+   and roll. Then open `/admin/breakglass` with the token: its identity check now passes,
+   because the person from step 4 is known to carry the group. If `platform_admin_group`
+   was changed in the console, the stored value still wins, so put it back to the
+   deployment's there; that page sets no value itself
+   ([console.md](console.md#when-the-console-cannot-be-used-admin)).
 6. **That person signs in again.** They are a platform admin.
 7. **Enable teams** from the groups on the Teams screen, and grant profiles.
 
@@ -264,7 +254,7 @@ SCIM is how this plane learns that somebody has *stopped* being in the directory
 their next sign-in, which without it is the only moment it would find out. Nothing breaks
 without it.
 
-1. **Mint the token here.** The Identity provider screen, *create a token*. It is shown
+1. **Mint the token here.** The Sign-in screen, *Make a token*. It is shown
    once, and it is a different credential from anybody's plane token: no user token opens
    the SCIM door and this door opens nothing else.
 2. **Create the outgoing SCIM provider in Authentik:**
@@ -284,28 +274,22 @@ without it.
    as a list of creates for people who already exist.
 4. **Turn `dry_run` off and sync.** Record the counts: created, updated, untouched.
 
-Leave the plane's **create teams from SCIM groups** switch off until that first real sync
-has been read. It is off by default. Turning it on afterwards makes each pushed group a
-team with the platform's defaults, which is convenient precisely because `group_filters`
-already narrows what arrives.
+Leave the plane's **create teams from SCIM groups** switch off (its default) until that
+first real sync has been read. Turned on afterwards, it makes each pushed group a team with
+the platform's defaults, which is convenient because `group_filters` already narrows what
+arrives.
 
 ### What this endpoint does and does not do
 
 Worth knowing before Authentik's first sync, because a client that expects more gets a
-refusal rather than a degraded answer:
+refusal rather than a degraded answer: [integrations.md §8](integrations.md#8-scim) lists
+what the endpoint takes. In short, whole-resource `POST` and `PUT`, `PATCH` on what a push
+sets, one `eq` filter, and no pagination, sort, bulk, ETag, `/Schemas` or `/ResourceTypes`.
 
-| | |
-|---|---|
-| `POST` / `PUT` a whole resource | yes |
-| `PATCH` | `add`, `replace` and `remove` on what a push sets, and on a group's members |
-| `GET` with a filter | one `<attribute> eq "<value>"` on `userName` or `externalId` (a group: `displayName` or `externalId`), and any other filter is refused with `invalidFilter` |
-| `DELETE` a user | removes the row and leaves a tombstone; the id answers `404` afterwards |
-| `DELETE` a group | removes it, and disables a team drawn from it alone |
-| Pagination, sort, bulk, ETag, `/Schemas`, `/ResourceTypes` | no |
-
-Refusing an unreadable filter is deliberate. A provider asks `userName eq "…"` to find
-out whether it has already created somebody, and an endpoint that ignored the filter and
-answered with everybody would be read as *yes, this one* about a stranger.
+Refusing an unreadable filter (`invalidFilter`) is deliberate. A provider asks
+`userName eq "…"` to find out whether it has already created somebody, and an endpoint that
+ignored the filter and answered with everybody would be read as *yes, this one* about a
+stranger.
 
 If Authentik's client needs pagination or a schema document, that is a change here, not a
 setting there. `compatibility_mode` is worth a look first.

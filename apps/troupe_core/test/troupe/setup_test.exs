@@ -147,6 +147,9 @@ defmodule Troupe.SetupTest do
       assert config.model == "fake-model"
       assert config.small_model == "fake-small"
       refute config.auto_approve
+
+      # The key and the choices are the person's: nothing goes into the project's `.troupe/`.
+      refute File.exists?(Path.join(ctx.workspace, ".troupe"))
     end
 
     test "every call runs when asked, a repository is asked to explain itself, and start can be declined",
@@ -168,6 +171,8 @@ defmodule Troupe.SetupTest do
       {:ok, flow} = Setup.answer(flow, "finish", %{"start" => false})
       assert flow.session == nil
       assert Setup.completed()["choice"] == "local"
+      # A repository's `.troupe/` is committed with it, so even every-call-runs stays out.
+      refute File.exists?(Path.join(ctx.workspace, ".troupe"))
     end
 
     # Decision 817: `troupe setup` walks these steps, and `troupe config`'s questions save

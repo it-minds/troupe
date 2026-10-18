@@ -42,7 +42,8 @@ characters, so `git pushx` too. For the file tools (`read_file`, `write_file`, `
 `list_files`, `grep`, `glob`, `git_read`), a path: relative to the workspace unless it starts
 with `/`, a drive or `~`; `*` is any name, `**` any number of directories, and a path with
 neither is that path and everything under it. For `mcp`, `server.tool`, or a server's name
-alone for all its tools. Any other tool is named alone.
+alone for all its tools. Any other tool is named alone. A malformed rule refuses the file,
+saying what to write instead: `Bash(npm test)` is `shell(npm test)` here.
 
 **A shell line is the commands it runs.** `mix test && git push` is two commands: the `deny`
 above refuses it, and an `allow` covers a line only when it covers every command in it.
@@ -57,10 +58,17 @@ file the more specific rule decides, which is how a file says "deny shell, but a
 status": a rule with a pattern is more specific than the tool alone, and the longer of two
 patterns more specific than the shorter.
 
+**What each does.** A `deny` refuses the call before it runs and tells the model the rule
+and its file. An `ask` asks you, and the question says which rule asked. An `allow` runs a
+call that would have asked, except one that must always ask (a write into your config
+directory) and every call in a branch an `AI!` comment started, unless
+`watch_auto_approve` is on. With `approvals: deny` an allowed call runs, as one an agent
+marks `auto` does, and every other call that asks is refused.
+
 **Where a repository's rules apply.** Its `deny` and `ask` apply everywhere; its `allow`
 only once you trust the workspace (`troupe config trust`), as with every setting that lets
-something run unasked. A branch an `AI!` comment starts asks before every write whatever
-an `allow` says, unless `watch_auto_approve` is on.
+something run unasked, and never on a pod. With `managed_permission_rules_only` on, only
+your organisation's `allow` rules apply.
 
 **On a team's pods.** A session on a plane's pods also obeys the rules of the worker
 profile it runs on, which a platform administrator sets

@@ -30,6 +30,7 @@ afterEach(async () => {
   unmount?.();
   unmount = null;
   location.hash = "";
+  delete window.troupe;
   await daemon?.stop();
   daemon = null;
 });
@@ -446,6 +447,13 @@ describe("each screen", () => {
     expect(onAnswer).toHaveBeenLastCalledWith({ start: true, prompt: "Say hello." });
     button("Finish without starting one")!.click();
     expect(onAnswer).toHaveBeenLastCalledWith({ start: false });
+    // The way to the documentation goes to the browser, as the shell opens it.
+    const opened: string[] = [];
+    window.troupe = { name: "Test shell", version: "0", signInFlow: "device", openExternal: async (url: string) => void opened.push(url) };
+    (await seesButton("the documentation")).click();
+    await waitFor(() => opened.length > 0 || null, "the documentation opened");
+    expect(opened).toEqual(["https://it-minds.github.io/troupe/"]);
+    delete window.troupe;
     first.unmount();
 
     const plane = flowAt("finish");
@@ -457,6 +465,7 @@ describe("each screen", () => {
     unmount = render(<Finish flow={plane} {...idle} onAnswer={onAnswer} />).unmount;
     await shown("Sign in next");
     await sees("https://troupe.example");
+    await seesButton("the documentation");
     button("Finish and sign in")!.click();
     expect(onAnswer).toHaveBeenLastCalledWith({});
   });

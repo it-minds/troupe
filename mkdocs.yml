@@ -97,6 +97,10 @@ nav:
       - What a task costs: user/bench.md
       - The daemon: apps/troupe_daemon/README.md
       - Configuration: user/configuration.md
+      - Models and providers: user/models.md
+      - Agents, commands and workflows: user/agents.md
+      - MCP servers and skills: user/mcp.md
+      - Instruction files and onboarding: user/instructions.md
       - Configuration cookbook:
           - user/configuration/cookbook.md
           - Where your files are: user/configuration/files.md
@@ -114,6 +118,7 @@ nav:
       - Roles and permissions: admin/roles-and-permissions.md
       - The console: admin/console.md
       - Profiles and policy: admin/profiles-and-policy.md
+      - Profiles from a repository: admin/gitops.md
       - Bundles, triggers, budgets: admin/bundles-and-triggers.md
       - Integrations: admin/integrations.md
       - The GitHub App: admin/github.md

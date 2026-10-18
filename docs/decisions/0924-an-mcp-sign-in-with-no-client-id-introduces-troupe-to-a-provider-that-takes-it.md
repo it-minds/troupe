@@ -15,6 +15,7 @@ paths:
   - apps/troupe_core/test/troupe/mcp_oauth_test.exs
   - docs/oauth/client.json
   - docs/user/configuration.md
+  - docs/user/mcp.md
   - apps/troupe_core/lib/troupe/session/client_tools.ex
   - apps/troupe_core/lib/troupe/tools.ex
   - apps/troupe_core/lib/troupe/tool.ex

@@ -1,35 +1,29 @@
 # Configuration
 
 Troupe reads its settings from a few YAML files and the environment, checks them against
-one key table, and merges them. This page says where the files are, which one wins, what
-is checked, and how to see what is in effect. The last section lists every key; it is
-generated from the table the loader checks against (`Troupe.Config.Schema`), so it cannot
-say something the loader does not do.
+one key table, and merges them. This page says which file wins, what is checked, and how
+to see what is in effect; the last section lists every key, generated from the table the
+loader checks against (`Troupe.Config.Schema`), so it cannot say something the loader
+does not do. Where each file is on disk is on [Where your files are](configuration/files.md),
+and complete files are in the [cookbook](configuration/cookbook.md).
 
 ## The files
 
 | Layer | Where | What it is for |
 |---|---|---|
-| org | the organisation's `defaults:`, from the plane you are signed in to (kept as `organisation.json` in the state directory) and from a managed file (`C:\ProgramData\troupe\managed.yaml` on Windows, on the drive Windows is on, `/Library/Application Support/troupe/managed.yaml` on macOS, `/etc/troupe/managed.yaml` elsewhere) | what your organisation suggests: a provider, a gateway, the models |
-| user | `~/.config/troupe/config.yaml`; `%APPDATA%\troupe\config.yaml` on Windows; `$TROUPE_CONFIG_HOME/config.yaml` when that is set | this machine: providers, keys, the models you use |
+| org | the organisation's `defaults:`, from the plane you are signed in to (kept as `organisation.json` in the state directory) and from a managed file ([where](configuration/files.md#what-troupe-keeps-for-itself)) | what your organisation suggests: a provider, a gateway, the models |
+| user | `<config>/config.yaml`: `~/.config/troupe/config.yaml`, `%APPDATA%\troupe\config.yaml` on Windows, `$TROUPE_CONFIG_HOME/config.yaml` when that is set | this machine: providers, keys, the models you use |
 | project | `<workspace>/.troupe/config.yaml` | what a repository wants, committed with it |
 | local | `<workspace>/.troupe/config.local.yaml` | one person's settings for one repository, such as a key; add it to `.gitignore` |
 | environment | `TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_AUTH`, `TROUPE_AUTH_TOKEN`, `TROUPE_MODEL`, `TROUPE_SMALL_MODEL`, `TROUPE_EXPENSIVE_MODEL`, `TROUPE_MODEL_PRICES` (`models.prices` as JSON), `TROUPE_FAKE_SCRIPT`; `TROUPE_THINKING_BINDING` and `TROUPE_SYSTEM_PROMPT`, issue #465's two settings | a provider for one shell, or for a pod; a setting changed for one `troupe bench --live` |
 | command line | `--auto-approve`, `--watch`, `--full-send`, and what a client asks for | one session |
 | enforced | the organisation's `enforced:`, from the same two places | what your organisation does not let a machine go past |
 
-Each layer beats the ones above it: the defaults, then the organisation's defaults, the
-user file, the project file, the local file, the environment, the command line, and what
-the organisation enforces last. A file that is not there is not an error.
-
-`<config>` is the directory of the user file, and every other file of your own is in it
-too: `mcp.json`, `agents/`, `skills/`, `commands/` and the terminal client's
-`credentials.json`. Troupe's state directory, where it keeps session logs and what it
-remembers for you (`organisation.json`, your MCP sign-ins, your answers about
-onboarding), is `~/.local/state/troupe` (`$XDG_STATE_HOME/troupe` where that is set),
-`%LOCALAPPDATA%\troupe` on Windows, or `$TROUPE_STATE_HOME`. Where each file is, and what
-happened to the two an older build kept elsewhere on Windows, is on one page:
-[Where your files are](configuration/files.md).
+Each layer beats the ones above it: the defaults, the organisation's defaults, the user
+file, the project file, the local file, the environment, the command line, and what the
+organisation enforces last. A file that is not there is not an error. `<config>`, the
+user file's directory, holds every other file of your own too (`mcp.json`, `agents/`,
+`skills/`, `commands/`, the terminal client's `credentials.json`).
 
 ## Your organisation's defaults and limits
 
@@ -50,24 +44,16 @@ Only these keys can be enforced, and each but the rules is a ceiling:
 | `permissions` | its [per-tool rules](#per-tool-permission-rules) are added to yours, and none of yours loosens one of them |
 
 A file, a variable or a flag that tries to go past an enforced value is held to it, with
-one warning that names the file, the key and the organisation's value. The terminal UI's
-settings page shows such a key as set by your organisation and does not change it, and
-`config.set` refuses it from either client. When a session reaches an enforced
-`max_turns` or `wall_clock_ms`, the question that asks whether to go on offers only what
-stays under it, says the limit is your organisation's and where it came from, and turns
-away a larger amount, `no limit` and an `allow` past it. A model entry's own `max_output` can lower an enforced `max_tokens` for
-its model, and cannot raise it.
+one warning naming the file, the key and the organisation's value, and `config.set`
+refuses it from either client. When a session reaches an enforced `max_turns` or
+`wall_clock_ms`, the question whether to go on offers only what stays under it, says the
+limit is your organisation's and where it came from, and turns away a larger amount,
+`no limit` and an `allow` past it. A model entry's own `max_output` can lower an enforced `max_tokens` for
+its model, not raise it. An enforced `max_tokens` bounds the whole of every model call, a
+compaction's summary and a model's thinking included
+([how thinking is fitted under it](models.md#how-hard-a-model-thinks)).
 
-An enforced `max_tokens` bounds the whole of every model call, the summary a compaction
-asks for and the room a `reasoning_effort` gives the model's thinking included. On an
-Anthropic model the thinking is shortened so that the answer keeps 4,096 tokens, or half
-the limit where that is less; where that leaves less than 1,024 tokens of thinking, which
-is the least Anthropic takes, the call asks for no thinking at all. An OpenAI-compatible
-model's reasoning already spends from the same limit. The first time a session's thinking
-is shortened or turned off, it says so once, naming the limit and where it came from:
-"Your organisation caps a model call's output at 1,000 tokens (https://plane.example.com),
-so reasoning is off for this session: …". `troupe config --explain KEY` shows both ends
-with where they came from:
+`troupe config --explain KEY` shows both ends with where they came from:
 
 ```text
 max_turns = 25
@@ -81,20 +67,20 @@ The organisation's word comes from two places. Signed in to a plane (`troupe log
 daemon fetches its document whenever a client connects and keeps a copy, used as it is
 when the plane cannot be reached; `troupe config pull` fetches it now, and writes nothing
 into `config.yaml`. What a pull before 0.14 wrote there is your own setting and wins over
-the organisation's defaults; `pull` names those keys, and taking the lines out follows
-the organisation again. Without a plane, an administrator writes a managed file at the
-path above. Where both say something, the
-plane's defaults win over the file's, the stricter of two limits holds, and a provider or
-URL both fix is the managed file's. The format, and how an administrator sets either, is
-in the administrator's [configuration page](../admin/configuration.md#defaults-and-limits-for-peoples-machines).
+the organisation's defaults; `pull` names those keys, and taking the lines out follows the
+organisation again. Without a plane, an administrator writes a managed file. Where both
+say something, the plane's defaults win over the file's, the stricter of two limits holds,
+and a provider or URL both fix is the managed file's. The format, and how an administrator
+sets either, is on the administrator's
+[configuration page](../admin/configuration.md#defaults-and-limits-for-peoples-machines).
 
 ## How the layers merge
 
-Maps merge by key, as [RFC 7396](https://www.rfc-editor.org/rfc/rfc7396) says: a
-project file that adds one provider keeps the user file's others, and one that sets
-`models.cheap` keeps the user's `models.default`. `null` removes what a lower layer set.
-A list replaces the list below it. The one exception is `permissions`: every file's rules are
-kept together rather than replaced ([per-tool permission rules](#per-tool-permission-rules)).
+Maps merge by key, as [RFC 7396](https://www.rfc-editor.org/rfc/rfc7396) says: a project
+file that adds one provider keeps the user file's others, and one that sets
+`models.cheap` keeps the user's `models.default`. `null` removes what a lower layer set. A
+list replaces the list below it, except `permissions`, where every file's rules are kept
+together ([per-tool permission rules](#per-tool-permission-rules)).
 
 ```yaml
 # ~/.config/troupe/config.yaml
@@ -121,22 +107,21 @@ cheap one is local.
 
 ## What is checked
 
-A file is refused, and no session starts, when it is not YAML, when a value has the
-wrong type, when an enum has a value nobody knows (`approvals`, `auth`, `provider`, a
-provider's `type`, an MCP server's `permission`), when it spells one setting two ways,
-or when its `version` is newer than this Troupe reads. The message names the file, the
-line when it can, the key, and what to write instead.
+A file is refused, and no session starts, when it is not YAML, when a value has the wrong
+type, when an enum has a value nobody knows (`approvals`, `auth`, `provider`, a provider's
+`type`, an MCP server's `permission`), when it spells one setting two ways, or when its
+`version` is newer than this Troupe reads. The message names the file, the line when it
+can, the key, and what to write instead.
 
-A key Troupe does not know is ignored with a warning that names it and the key it
-probably meant: `max_tokns` is `max_tokens`. Keys that start with `x-` are left alone, for
-notes and for other tools. `troupe config validate` exits non-zero on any warning, so CI
-can run it on a repository's `.troupe/`.
+A key Troupe does not know is ignored with a warning that names it and the key it probably
+meant: `max_tokns` is `max_tokens`. Keys that start with `x-` are left alone, for notes and
+for other tools. `troupe config validate` exits non-zero on any warning, so CI can run it
+on a repository's `.troupe/`.
 
 `yes`, `no`, `on` and `off` are words in the YAML Troupe reads, not booleans. For a
 boolean key they are read as the boolean they mean, with a warning, so `auto_approve: no`
-is off; write `true` or `false`.
-
-A file without `version` is version 1, the only one there is.
+is off; write `true` or `false`. A file without `version` is version 1, the only one there
+is.
 
 ## Secrets from the environment
 
@@ -157,18 +142,19 @@ vendor's own endpoint. A gateway configured without a key is sent none.
 
 ## Trusted workspaces
 
-A repository's files come from whoever wrote the repository. Some keys decide what a
+A repository's files come from whoever wrote the repository. The keys that decide what a
 session may do without asking, where requests go and with which key, what runs on this
-machine and what may be read, and those are read from a workspace's own files only once
-you trust the workspace:
+machine and what may be read are read from a workspace's own files only once you trust
+the workspace:
 
 - approvals: `auto_approve`, `approvals`, `delegation`, `managed_permission_rules_only`, `managed_mcp_servers_only`, `watch`, `watch_auto_approve`
 - endpoints and credentials: `provider`, `base_url`, `api_key`, `auth`, `providers`, `identify`
 - commands to run: `mcp`
 - paths: `read_roots`, `state_dir`, `fake_script`
 
-Until then they are ignored with a warning that names the command to run, and the rest
-of the file applies. Trusting a workspace is a line in the user file:
+Until then they are ignored with a warning that names the command to run, and the rest of
+the file applies. Trusting a workspace is a line in the user file, and
+`trusted_workspaces` is read only from there:
 
 ```yaml
 trusted_workspaces:
@@ -182,583 +168,60 @@ troupe config untrust [PATH]   # remove it
 troupe config trust --list     # what is on the list
 ```
 
-`trust` and `untrust` change that one list and leave the rest of the file, comments
-included, as it was; the file as it was is kept beside it as `config.yaml.previous`.
-A list written in brackets is written out one item a line. A git worktree of a trusted
-checkout is trusted too, which is where a branch session works, and `trust` in a
-worktree adds the checkout. `untrust` does not remove a directory above the workspace,
-which trusts other workspaces too; it says which one still trusts it.
-`trusted_workspaces` is read only from the user file. A session on a team's pod
-never reads these keys from a project's file, trusted or not: a pod's provider and key
-come from its profile.
+`trust` and `untrust` change that one list, keep the rest of the file and its comments,
+and keep the file as it was beside it as `config.yaml.previous`; a list written in
+brackets is written out one item a line. A git worktree of a trusted checkout is trusted
+too, which is where a branch session works, and `trust` in a worktree adds the checkout.
+`untrust` does not remove a directory above the workspace, which trusts other workspaces
+too; it says which one still does. A session on a team's pod never reads these keys from a
+project's file, trusted or not: its provider and key come from its profile.
 
-The workspace's own agents wait for the same answer. A `.troupe/agents/<name>.md` whose
-`permissions:` sets a tool to `auto` runs that tool without asking only in a trusted
-workspace; until then the tool asks as it would without the file, and `agents.list`
-gives the agent a note saying so and naming the command. Its `ask` and `deny` apply
-either way, and your own `<config>/agents/` and the built-ins are not the workspace's.
-Its MCP servers wait for it too: the tools of one its `.troupe/mcp.json` sets to
-`permission: auto` ask before each call until the workspace is trusted
-([Your own MCP servers and skills](#your-own-mcp-servers-and-skills)).
-
-So does what a workspace's `.troupe/skills.json` includes from outside the repository
-(`"include": ["~"]`): its skills are offered, and its files readable with `read_file`,
-only once the workspace is trusted, as a `read_roots` in its `config.yaml` is.
-Until then `skills.list` names it, why, and the command. An include inside the
-repository is read either way.
+A workspace's agents and MCP servers wait for the same answer. A `.troupe/agents/<name>.md`
+whose `permissions:` sets a tool to `auto` runs it unasked only once the workspace is
+trusted; until then the tool asks as it would without the file, and `agents.list` gives
+the agent a note naming the command. Its `ask` and `deny` apply either way, and your own
+`<config>/agents/` and the built-ins are not the workspace's. Its servers' `auto`, and
+what its `mcp.json` or `skills.json` includes from outside the repository, wait too
+([MCP servers and skills](mcp.md#a-workspaces-servers-wait-for-you)).
 
 Trusted or not, a workspace's `.troupe/agents`, `commands`, `workflows` and `skills` are
-read only where they really are inside the workspace. A file there, or the whole
-directory, that is a link to somewhere else on the machine is not read, and is listed
-with why: in `agents.list` and `skills.list`, and in the session's log. Reaching outside
-the repository is what a trusted `skills.json` is for.
+read only where they really are inside it: a file there, or the whole directory, that
+links elsewhere on the machine is not read, and is listed with why in `agents.list`,
+`skills.list` and the session's log. Reaching outside the repository is what a trusted
+`skills.json` is for.
 
-An agent a client saves goes through the daemon (`agents.put`), into your
-`<config>/agents/` or the repository's `.troupe/agents/`, and is checked as it is saved: a
-key no agent has, a missing `mode`, a tool that does not exist, a permission for a tool its
-`tools` leaves out, or a model your provider does not serve is refused with the reason,
-and nothing is written. A built-in is changed by saving a copy of it, under its name or
-another. A file edited by hand that does not load is not read, and is listed with why in
-`agents.list` and the session's log.
+## Agents, MCP servers and instructions
 
-In the desktop app, **Agents** in the rail lists a workspace's agents with where each comes
-from, its model, its tools, whether it can write and the windows running it; opens one
-whole, instruction and all; and saves a new one, a copy (a built-in into the repository is
-one press) or an edit into the layer you choose, with what the daemon finds shown at the
-field. Before a save it shows what the agent may do, every `auto` named, and asks once
-when the save lets a tool run without asking that did not before: an `auto` in your own
-agents applies in every workspace, with no trust asked. A profile bundle's agent is
-changed in the console. A session's head shows the agent it runs and switches it from
-the next turn, the conversation kept; the transcript records the switch.
+Beside `config.yaml` are files with pages of their own:
 
-## Your own MCP servers and skills
+- **Agents, commands and workflows** (`agents/`, `commands/`, a repository's
+  `.troupe/workflows/`), and a delegation shown before it runs (`delegation.ask`):
+  [agents, commands and workflows](agents.md).
+- **MCP servers and skills** (`mcp.json`, `skills/`, and `.agents/skills`), how they are
+  imported, the addresses the daemon may call, and signing in: [MCP servers and skills](mcp.md).
+- **Instruction files** (`AGENTS.md`, `.troupe/rules/`, the project brief), and `troupe
+  onboard`, which brings other tools' files into them once:
+  [instruction files and onboarding](instructions.md).
 
-Beside `config.yaml` there are two more files a person keeps, in the shape other tools
-already use, so what you have for Claude Code, Claude Desktop, Cursor, VS Code, opencode
-or Codex comes over as it is:
+### Your own commands
 
-```
-<config>/mcp.json              your MCP servers, on every workspace
-<config>/skills/<name>/SKILL.md   your skills
-<workspace>/.troupe/mcp.json   the workspace's servers, for whoever opens the repository
-<workspace>/.troupe/skills/    the workspace's skills
-```
-
-Skills are also read in place from `.agents/skills`, the directory other tools share
-for them: `~/.agents/skills/<name>/SKILL.md` (`%USERPROFILE%\.agents\skills` on Windows),
-and `.agents/skills/` in the directory a session starts in and in each directory above
-it up to the repository root. Troupe never writes there. Where two have a skill of one
-name, the nearer `.agents/skills` wins, and a skill in `<config>/skills` or
-`.troupe/skills` beats any of them ([Which one wins](#which-one-wins)). An
-`.agents/skills`, or a skill in it, that is a link to somewhere outside the repository
-(outside `~/.agents`, for yours) is not read. Nothing else under `.agents/` is read but
-`.agents/AGENTS.md` ([Instruction files](#instruction-files)).
-
-`mcp.json` is `{"mcpServers": {name: {"command", "args", "env"}}}` — or
-`{"url", "headers"}` — with one key of Troupe's own: `"include": ["~/.claude/.mcp.json"]`
-reads another file in place. A `command` that is a program's name is looked for on the
-`PATH` alone, never in the directory Troupe was started in; one that is a relative path
-(`bin/server`) is taken from the server's `cd`, else the workspace. `${VAR}` in an imported file becomes `{env:VAR}`, read as
-the rest of the configuration reads it. opencode's servers are under `mcp` in its
-`opencode.json`, and import or link from there. Codex's are `[mcp_servers.<name>]` tables in a
-`config.toml`, a project's `.codex/config.toml` or your own `~/.codex/config.toml`, and
-import or link from there: `bearer_token_env_var` becomes an `Authorization` header read
-from that variable, `env_http_headers` headers read from theirs, and what has no place in
-Troupe's entry (`enabled_tools`, `http_headers_helper`, a tool's approval mode) is named in
-what the import says. Your own `~/.codex/config.toml` goes into your `mcp.json` only,
-never a workspace's. A `skills.json` beside a `skills/` directory does the same for
-directories of skills: `{"include": ["~/.claude/skills"]}`.
-
-A `url` server is spoken to as the MCP specification's streamable HTTP transport has it:
-`initialize` before the first call, and the session the server hands back, if it keeps
-one, carried on every call after, opened again once if the server has forgotten it, and
-ended when the Troupe session ends.
-
-### Where the daemon connects
-
-A `url` server, and everything a sign-in to it calls (the server's metadata, the
-authorization server's metadata, and the token and revocation endpoints), is called from
-your machine, and only at an address that passes one check. The server's name is
-resolved, every address it answers is checked, and the request goes to the address that
-passed, so a name that answers one address to the check and another a moment later is not
-followed there. A redirect is checked the same way before it is followed; the token
-endpoint follows none. TLS still checks the server's certificate against its name.
-
-| | Addresses |
-|---|---|
-| Refused | link-local (`169.254.0.0/16`, `fe80::/10`); a cloud's metadata service (`169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`), however the address is written, an IPv4 address written as IPv6 included; the unspecified address (`0.0.0.0`, `::`) |
-| Allowed | loopback, for a server you run on this machine; the private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`), where an intranet's servers are; everything else |
-
-One refused address among a name's answers refuses the name, and so does a name that
-does not resolve (`does not resolve (nxdomain)`). The server's line on the
-`/mcp` page says what it resolved to (`wiki.example.com resolves to 169.254.169.254, a
-link-local address, and is not called`), and a sign-in whose metadata names such an
-address is refused before your browser opens. The authorization endpoint is opened by
-your browser, not the daemon: its name is refused at the same addresses when it resolves
-on this machine, and left to the browser when it does not. A sign-in's URLs are also
-`https`, or `http` on `127.0.0.1`, `[::1]` or `localhost`.
-
-### A server that wants a key
-
-A server over HTTP that takes a key, a token or a team's name in a header gets it from
-the entry's `headers`, sent with every request to it, the first one too:
-
-```json
-{
-  "mcpServers": {
-    "tracker": {
-      "url": "https://mcp.example.com/mcp",
-      "headers": {"Authorization": "Bearer {env:TRACKER_TOKEN}", "X-Team": "core"}
-    }
-  }
-}
-```
-
-A value is written as it is, or as `{env:VAR}`, read from the environment each time the
-server is started and never written back. An unset variable keeps the server from
-starting, and its line on the `/mcp` page says which; nothing is sent in its place. Keep
-a key out of the file itself: `mcp.json` is a file people link, copy and commit, and
-`{env:VAR}` is how a secret stays out of it. Troupe keeps no keychain for these: a
-server that signs you in keeps its tokens where the next section says, and a key is
-yours to keep in the environment. What the daemon says about a server names its
-headers and never shows a value, and `troupe config --explain` masks one in
-`config.yaml`'s `mcp:` as it masks a key. A header Troupe sends itself (`Accept`,
-`Content-Type`, `Mcp-Session-Id`, `Mcp-Protocol-Version`) cannot be set, and on a server
-with `oauth` the sign-in's token is the `Authorization` that goes out, whatever the
-headers say. A workspace's server that sends headers is asked about with their names,
-and asked again when they change.
-
-Importing another tool's file carries its headers and its servers' `env`. A value that
-reads the environment comes over as `{env:VAR}`. One written out in the file is not
-copied into yours: a header is written as `{env:<SERVER>_<HEADER>}`, after its `Bearer`
-when it has one (`Bearer {env:TRACKER_AUTHORIZATION}`), a variable as
-`{env:<SERVER>_<NAME>}` (`GITHUB_TOKEN` of `github` as `{env:GITHUB_GITHUB_TOKEN}`), and
-the import says which variable to set to what the other file has. That holds for a
-`LOG_LEVEL` as for a token, since an import cannot tell one from the other; a value that
-is no secret is one edit to write back. A linked file is read where it is, values and
-all. Claude Code's `headersHelper`, a command that prints headers, is not run, and the
-import says so.
-
-The layers stack the way the config files do: the workspace's file over yours over
-`config.yaml`'s `mcp:`, an entry of the same name merged key by key, so a workspace can
-say `{"fs": {"disabled": true}}` and no more. The TUI's `/mcp` page and the desktop
-app's "Servers and skills" panel show every server and skill with the layer and file it
-came from, import a file (`/mcp import <path>`, `/skills import <path>`, or `link` to
-read it in place), remove one, and try a server before it is kept. `skills.list`, which
-they ask, also lists every skill that is not offered and why: `skipped`, naming the one
-of that name that is used, or `outside`; both show those too. A skill from an
-`.agents/skills` is shown with its layer, `agents` or `user_agents`, and is removed where
-it is, not from Troupe: removing one there says so.
-
-A workspace's servers are commands a cloned repository would run, so a session starts
-them only after asking you — once per workspace when you answer `allow`, which is kept
-in Troupe's state directory and never in the repository, and asked again when a
-server's command changes. A workspace on `trusted_workspaces` is not asked. The answer
-starts them and no more: a workspace's server set to `"permission": "auto"`, in
-`.troupe/mcp.json` or a file it links, runs its tools without asking only once the
-workspace is trusted, and until then each call asks; the question says so, and
-`mcp.list` gives the server a note naming the command. A server of your own `mcp.json`
-keeps its `auto`. Until the workspace is trusted, its `.troupe/mcp.json` also reads
-nothing from outside the repository: a file it includes from elsewhere (your own
-`~/.claude.json`, say), or a `.troupe/mcp.json` that is itself a link out, gives no
-servers, and the `/mcp` page's warnings say so and name the command. Your own `mcp.json`
-may include any file. Your own skills are offered to every agent; a bundle's stay as its
-profiles list them.
+`<config>/commands/<name>.md` and `<workspace>/.troupe/commands/<name>.md` are slash
+commands, each sending the prompt its body holds ([your own commands](agents.md#your-own-commands)).
 
 ### A server that wants you to sign in
 
-Some servers act as *you*: they answer a call without a sign-in with `401`, name an
-authorization server (your organisation's identity provider, often), and then call what
-is behind them as you, or show you only what is yours. A key in `env` will not do for
-those. Give the entry an `oauth`. Many providers introduce Troupe themselves, and then
-`{}` is enough:
-
-```json
-{
-  "mcpServers": {
-    "wiki": {"url": "https://mcp.example.com/mcp", "oauth": {}}
-  }
-}
-```
-
-With no `client_id`, Troupe presents its client ID metadata document
-(`https://it-minds.github.io/troupe/oauth/client.json`, a public client with loopback
-redirects and no secret) where the authorization server takes one, or registers itself where it offers
-dynamic client registration (RFC 7591). A client it registers is kept in Troupe's state
-directory (`mcp-oauth-clients.json`, readable by you alone) and used for every later
-sign-in there; when the provider forgets it, the next sign-in registers a new one. A
-provider that does neither needs the id of a client registered for Troupe with it in
-advance — whoever runs the server says what it is — and the sign-in says so:
-
-```json
-{
-  "mcpServers": {
-    "wiki": {
-      "url": "https://mcp.example.com/mcp",
-      "oauth": {"client_id": "00000000-0000-0000-0000-000000000000"}
-    }
-  }
-}
-```
-
-A `client_id` the entry gives is always the one used.
-
-The rest is found from the server: where to sign in (its protected-resource metadata
-and the authorization server's), and which scopes it wants. `oauth.scopes` overrides
-them; `offline_access` is added when the authorization server offers it, so the sign-in
-lasts beyond the hour. `oauth.redirect_uri` fixes where the browser comes back, for a
-client registered with one port (`http://localhost:33418/callback`); left out, it is
-`http://127.0.0.1/callback` on any free port, which a client registered with a loopback
-redirect accepts. `oauth.resource: false` leaves out the resource indicator for an
-authorization server that refuses it (Microsoft Entra ID's v2.0 endpoint is one; the
-scopes say which API the token is for there). `oauth.issuer` names the authorization
-server for a server that publishes no metadata of its own.
-
-Then sign in: `/mcp sign-in wiki` in the TUI, or `s` on the server's line of the `/mcp`
-page, or **Sign in** on the desktop app's "Servers and skills" panel. Your browser
-opens on the provider's page; when you are done it comes back to the daemon, which
-listens for it on this machine, so open the URL on the machine the daemon runs on. The
-page says "Signed in to … as …", and a session waiting for the server gets its tools at once.
-The sign-in is kept in Troupe's state directory (`mcp-oauth.json`, readable by you
-alone), never in `mcp.json`, and refreshed when it runs out. When the provider stops
-taking it, the server's line says to sign in again, and a tool the model calls answers
-`sign_in_required` instead of failing. A workspace's server is signed in to only after
-the workspace's servers are allowed, since its `oauth` came with the repository.
-
-Some tools want more than you granted when you signed in: writing where you signed in to
-read, say. The server answers such a call `403` naming the scope it wants, and the model
-is told `sign_in_required` with that scope, to tell you. Nothing signs in for you: the
-server's line on the `/mcp` page says what it wants (`wants notes.write — s`), and when
-you choose to grant it, `s` (or `/mcp sign-in wiki`, or **Sign in**) asks for what you
-granted before and the new scope, at the same provider. Until that sign-in lands, the one
-you had is used, and if you say no at the provider you keep it.
-
-`/mcp sign-out wiki`, `o`, or **Sign out** forgets the sign-in on this machine and asks the
-provider to revoke it, so a copy of Troupe's state directory can no longer renew it.
-The terminal UI says whether the provider was told: one that refuses or does not answer
-within a few seconds is not, and one that offers no way to revoke a sign-in is named as
-such; in both cases the sign-in is still forgotten here, and the provider takes it until
-it runs out. `troupe logout`, without a plane named, does the same for every server you are
-signed in to, and says so for each; if the daemon is not running it says your sign-ins
-were kept.
-
-A session on your team's pod gets them from the desktop app. Open the session and it asks
-whether to take your signed-in servers' tools, naming them; **Offer them** registers
-each as `client.<server>.<tool>`, and a line at the top says what is offered. When the
-agent calls one, the call comes back to the app and the daemon on this machine makes it
-with your sign-in: the pod sees the arguments and the answer, never the sign-in, and
-everyone in the session can see that it uses tools on your machine. A call goes through
-the session's approvals like any other tool's. Closing the session, or the app, takes the tools away;
-a connection that drops and comes back offers them again without asking twice. The TUI
-does the same for a pod session you open from HQ: the session's question waits in its
-window as an approval naming the tools, `y` offers them and `n` does not, and a line in
-the transcript says what was offered. A team may keep people's own tools off its pods
-(`personalTools: forbid` on the profile): such a session asks you nothing, the desktop app
-and the TUI say that your servers are not offered there and why, and neither offers them
-again while the session is open.
-
-## Your own commands
-
-A prompt you type often can be a command of its own, written as a markdown file in the
-shape other tools' command files have:
-
-```
-<config>/commands/<name>.md             your commands, in every workspace
-<workspace>/.troupe/commands/<name>.md  the repository's, for whoever opens it
-```
-
-The file name is the command, so `.troupe/commands/review.md` is `/review`; a name is
-lower-case letters, digits and dashes. The body is the prompt the command sends, and
-`$ARGUMENTS` in it stands for whatever is typed after the name. The frontmatter is
-optional: `description` is what the palette shows (the prompt's first line without
-one), and `argument-hint` what its usage line says follows the name.
-
-```markdown
----
-description: Review the change on this branch
-argument-hint: <what to look at>
----
-Review the change on this branch against main. Look hardest at $ARGUMENTS, and say what
-you would change before changing anything.
-```
-
-`/review the parser` sends that prompt with `the parser` in place of `$ARGUMENTS`, as if
-you had typed it; a prompt without the placeholder gets what you typed as a paragraph
-of its own. In the terminal UI's command mode, with no window open, a command is work
-like any line you type there: it starts a branch in your checkout on the agent its
-frontmatter's `agent` names (`agent: plan`), or on the default agent without one, and the
-prompt goes to that branch. Both the terminal UI's and the desktop app's palettes list the commands in a
-Custom section, each with its description, the file it came from and what it sends: the
-detail under the list shows the prompt's first lines and how many more the file holds,
-since a description is only what the file says of itself. The repository's
-command wins over yours of the same name. A built-in's name, or an agent's, stays
-theirs: a file named `merge.md` is skipped, and the daemon's log says so. A repository's
-commands are read whether or not the workspace is trusted, since a command only sends a
-prompt, which goes through the session's approvals like anything typed.
-
-With `auto_approve` on, nothing asks before the tools a prompt leads to run, so a
-repository's command asks once before it is first sent: the session shows the question
-with the prompt under it, in either client, and you answer `deny` (nothing is sent, and
-the next `/review` asks again), `once` (send it this time) or `allow` (send it, and do not
-ask again in this workspace until the file changes). `allow` is kept in the daemon's
-state directory (`command-trust.json`), never in the repository, beside a hash of the
-prompt, so an edited command asks again and what you type after its name does not. Your
-own commands never ask, and neither does a repository on `trusted_workspaces`, whose
-config could turn `auto_approve` on by itself.
-
-## Onboarding another tool's files
-
-What another coding tool keeps for a repository, or for you, is brought into Troupe's own
-files once, and sessions read Troupe's files from then on. `troupe onboard [--workspace
-DIR]` asks each source Troupe knows what it would write, and shows every file as a diff
-against what is there:
-
-```
-.troupe/agents/reviewer.md: new, from .claude/agents/reviewer.md
-  note: tools: WebSearch left out, Troupe has no such tool
-+ ---
-+ description: Reviews the change on this branch
-+ tools: [read_file, grep]
-+ imported_from: ".claude/agents/reviewer.md"
-+ imported_hash: "9f2c..."
-+ imported_at: "2026-10-09T12:00:00Z"
-+ ---
-+ You review code.
-Write .troupe/agents/reviewer.md? [y/N]
-```
-
-What it brings in:
-
-- **Instruction files.** What a `CLAUDE.md` or `GEMINI.md` says, at the root or in a
-  directory, and Claude Code's `.claude/CLAUDE.md` and Copilot's
-  `.github/copilot-instructions.md` at the root, is proposed as an addition to the
-  `AGENTS.md` in the same directory: the file that is there stays as it is, and only what
-  it does not already say is added after it, under the heading it was under. Said already means the same text, spaces aside, or the same rule as `troupe
-  instructions check` calls a duplicate; anything reworded is proposed and you read the
-  diff. A line that only imports `AGENTS.md` (`@AGENTS.md`) is left out. When there is
-  nothing left to add, nothing is proposed and the file is listed as `skipped:`, saying so.
-- **Your own instruction files.** Your config directory's `CLAUDE.md` and `GEMINI.md`, and
-  Claude Code's `~/.claude/CLAUDE.md`, are proposed as additions to your own
-  `<config>/AGENTS.md` in the same way, never to a repository's. `CLAUDE.local.md` is
-  yours and usually not committed, so it is not proposed anywhere: move what it says into
-  `<config>/AGENTS.md` by hand, or keep it.
-- **Rules.** Cursor's `.cursor/rules/*.mdc` (the root's and a directory's), its legacy
-  `.cursorrules`, and Copilot's `.github/instructions/*.instructions.md` become
-  `.troupe/rules/<name>.md`, with the front matter Cursor's rules have, `description`,
-  `globs` and `alwaysApply`, meaning what it meant there. A directory's rule has its globs
-  written from the root (`src/**` under `web/` is `web/src/**`); Copilot's `applyTo` is
-  its globs, and `applyTo: "**"` is `alwaysApply: true`.
-- **opencode's `instructions`.** The files `opencode.json` names in `instructions`, by
-  path or glob, which opencode adds to every prompt, are proposed as additions to the
-  root's `AGENTS.md`, after what the other tools' files add, without their front matter.
-  One whose own front matter scopes it with `globs` becomes a rule instead. A URL, a file
-  outside the workspace, an `AGENTS.md` (Troupe reads those itself) and another tool's
-  file onboarded on its own are listed as `skipped:`, saying why.
-- **Agents and commands**, Claude Code's and opencode's, become `.troupe/agents/` and
-  `.troupe/commands/` files.
-
-**Creating an `AGENTS.md` is a question of its own.** Every coding tool reads that file,
-not only Troupe, so when the directory has none, `troupe onboard` asks `AGENTS.md is not
-there. Create it?` rather than its usual question, and `--yes` never answers it: the file
-is left for a run at a terminal, and the summary says so. `--json` marks each proposal
-with `question`, `create_agents_md` for a new `AGENTS.md` and `write` for the rest, and
-with `--yes` gives a new `AGENTS.md` `"written": false` and the reason, which does not make
-the run fail. Adding to an `AGENTS.md` that is there is an ordinary proposal.
-
-Only what you answer yes to is written, one file at a time. Onboarding writes two places
-and nothing else, and one file between them: the workspace's `.troupe/`, from the
-repository's files, and your config directory, from files in your home directory, never
-one into the other; and there only `agents/<name>.md`, `commands/<name>.md`,
-`rules/<name>.md` (the repository's), `skills/<name>/...`, `workflows/<name>.json`,
-`mcp.json` and your own `AGENTS.md`; and an `AGENTS.md` at the workspace's root or in one
-of its directories that is there and not hidden. A file that would land anywhere else,
-through a `..` or a `.troupe` that is a link to elsewhere, is refused. Each file written
-says where it came from, `imported_from`, `imported_hash` and `imported_at`,
-`imported_also` for any other file it was made from (an agent's permissions in
-`.claude/settings.json`, say, or the `GEMINI.md` an `AGENTS.md` took from too), and
-`imported_version`, the version of the onboarding rules that wrote it: in its
-frontmatter, for a Markdown file, and for anything else, and an `AGENTS.md`, which is read
-whole into the prompt, in `onboarded.json` (the workspace's `.troupe/onboarded.json` for
-an `AGENTS.md` of the workspace's). A file a source found and made nothing of is listed
-first, as `skipped:` with the reason.
-
-Run it again and it proposes nothing until a source changes: a file onboarded from an
-unchanged source is left alone, your own edits to it included, and a file you said no to
-is not asked about again until its source changes (`--all` asks again; the answer is kept
-in Troupe's state directory, never in the repository). A changed source is offered as a
-diff against the file you have, and nothing is overwritten unasked. `--yes` writes every
-proposal without asking, and `--json` prints them as one object and writes nothing unless
-`--yes` is given too. It exits 1 when a proposal was refused or a write failed, and 2 when
-there was nobody to ask. Inside a session, an agent whose profile names the
-`onboard_write` tool writes the same files with it, asking before each one; into your
-config directory, and into an `AGENTS.md`, it asks even with `auto_approve` on, since what
-lands there runs in every session without a question, or is read by every tool.
-
-Onboarding proposes by itself and never writes by itself. A session in a git repository
-that has other tools' files and nothing onboarded says, in one line, what `troupe onboard` would
-bring in (`1 AGENTS.md, 2 rules and 1 agent`), and the terminal client and the desktop app
-ask about it as the session starts, before the librarian: `Onboard 3 files from Claude
-Code and Cursor into Troupe's own? [Y/n/r]`. Yes writes them, and then asks on its own
-about each `AGENTS.md` that is not there yet; `r` shows each file as `troupe onboard` does
-and asks for it; no leaves them all. The rules onboarding follows have a version,
-recorded in `.troupe/onboarded.json` as `onboarding` when a workspace is first onboarded
-and again once every question is answered; a session in a workspace onboarded under older
-rules than its build's asks `Onboarding rules changed since this repository was onboarded
-(v1 to v2). Re-run now? [Y/n]`, and one whose brief an older version of the librarian's
-survey wrote (its `survey` in `.troupe/memory.md`) asks whether to rewrite it, Yes the
-default for both. Only then does the librarian start, so it reads what onboarding wrote.
-Each is asked at every start until it is answered, and a no is remembered for that
-version in Troupe's state directory (`onboard.json`), never in the repository. Nothing
-re-runs by itself, and a headless run (`troupe run`) prints the line and asks nothing.
-
-## Instruction files
-
-A repository that carries an `AGENTS.md` has told coding agents how to work in it, and
-Troupe reads it the way the other tools do, with no setup of its own. Every agent is
-given these, in this order, each read from disk as a turn begins, so an edit takes effect
-on the next turn. They go with the turn's message, the first turn's and again a later
-one's when one changed, so the system prompt stays the same all session; with
-`system_prompt: per_turn` they open the system prompt instead, rewritten each turn:
-
-1. `<config>/AGENTS.md` — your own, for every repository.
-2. `AGENTS.md` at the repository root (the nearest directory with a `.git`; a worktree
-   reads its own checkout's).
-3. `AGENTS.md` in each directory between the root and where the session works, parents
-   before their children. Where the session works is the directory it was started in
-   and the directory of every file its conversation has read, edited or written, so
-   `frontend/AGENTS.md` applies from the turn after the agent first opened something
-   under `frontend/`.
-4. The project brief Troupe's own agents write: the commands and conventions of the
-   repository's facts (`.troupe/memory/facts.jsonl`), each that may no longer be true
-   marked so, and a line naming the `recall` tool for the rest.
-
-An `.agents/AGENTS.md` at the root, or in one of those directories, belongs to its
-directory too: it is read right before that directory's own `AGENTS.md`, so where the
-two disagree the directory's own wins, and `/context` names it with its directory's
-scope (`.agents/AGENTS.md (root)`). Your own `<config>` has none.
-
-Every file applies. A file in a directory below the root is about the work under that
-directory, and where two disagree, the nearer wins.
-
-The brief is the repository's, kept in its checkout: a worktree reads its checkout's, and
-so does a folder of the repository. Which folders are the repository's follows git: a
-folder it tracks, or one it would add, is; a folder it ignores (say one in its
-`.gitignore`) is not, and is a workspace of its own, as a directory in no repository is.
-Such a folder keeps its own brief, and a session there does not start the librarian by
-itself (`memory_auto_refresh`), so it never rewrites the brief of the repository around
-it; `/memory refresh` still writes the folder's own. The instruction files are read as
-above, up to the nearest `.git`, in either.
-
-Other tools' files are not read. A `CLAUDE.md` or a `GEMINI.md` in one of those
-directories, Copilot's `.github/copilot-instructions.md` and
-`.github/instructions/*.instructions.md` at the root, and Cursor's `.cursorrules` and
-`.cursor/rules/*.mdc` are each listed in the session's log and
-`/context` as skipped, `not read: run troupe onboard`: [`troupe
-onboard`](#onboarding-another-tools-files) brings what they say into `AGENTS.md` and
-`.troupe/rules/` once, and from then on those are what a session reads, the original
-listed as `not read: onboarded into AGENTS.md`. So a repository
-with only a `CLAUDE.md` gives a session nothing until it is onboarded. A Copilot file in
-a directory below the root never counted, as Copilot reads its file at the root only,
-and says so: `not read: Copilot's file counts only at the root`. A file that is a link to
-somewhere outside the repository (outside `<config>`, for your own `AGENTS.md`) is not
-read; `context.get` and the session's log list it as `outside`. The same goes for
-`.troupe/memory.md`, which is then neither read nor written. A file that is there and
-cannot be read is listed as `unreadable`. Every file left out comes with a `reason`, in
-words, which `/context` prints: `not read: run troupe onboard`, `not read: outside the
-repository`, `not read: permission denied`.
-
-A file can pull in another with `@path/to/file.md` on a line of its own or in a
-sentence, as Claude Code's do. The path is taken from the importing file's directory
-(`~/` is your home), the imported file is read right after the one that names it, and
-an import can import again, five deep. Each file is read once, so a cycle ends where it
-comes back round. An `@` inside a code span or a fenced block is not an import. A
-repository's files import only from inside the repository, and your own `AGENTS.md`
-only from inside `<config>`; an import that is not followed (`missing`, `outside`,
-`depth`, `cycle`) is named on the file that asked for it in `context.get` and the
-session's log, and `/context` prints it after that file (`@docs/gone.md (root) import not
-followed: missing`).
-
-A repository's rules are Markdown files in `.troupe/rules/`, each with front matter that
-says when it applies, as Cursor's rules do:
-
-```markdown
----
-description: TypeScript in the web app
-globs: src/**/*.ts, *.tsx
-alwaysApply: false
----
-No `any`; prefer `unknown` and narrow it.
-```
-
-Each `.troupe/rules/*.md` at the repository root, and in a directory on the way to where
-the session works, comes right after that directory's own file, in name order:
-`alwaysApply: true` puts it in every prompt; `globs` (a comma-separated string or a list)
-put it in the prompt from the turn after the agent first read, edited or wrote a file one
-of them matches, for as long as the conversation holds that call; a rule with only a
-`description` is listed in the prompt by it, and the agent reads the file when the
-description fits the work; a rule with none of them is not used. A glob is taken from the
-directory that holds `.troupe` (the repository root, for the root's rules), and one
-without a `/` matches a file's name in any directory. `/context` says of each rule why it
-applies (`always applied`, `applied: src/a.ts matches src/**/*.ts`) or why not (`applies
-when a file matching src/**/*.ts is read or edited`, `requested by description only:
-listed in the prompt, not joined`). Rules share the budget below and are held to the
-repository's edge as every other file is; an `@` in a rule is not followed. `troupe
-onboard` writes them from Cursor's `.mdc` rules and `.cursorrules`.
-
-The files share one budget, `instructions_max_chars` (16,000 characters), a file and
-what it imports counting as one scope. The nearest scope is kept whole first; a file the
-remainder cannot hold is cut, or left out, and the prompt says so where it happened. The
-brief has its own, `memory_max_chars`. `/context` in the terminal UI, and `context.get`
-over the protocol, list every file in force with its scope, its size, what reached the
-prompt and its share of the budget; the session's `instructions_loaded` event records
-the same, what was cut included, whenever what was read changed.
-
-`troupe instructions check [--workspace DIR] [--json]` checks those files, every one a
-session in the workspace would read wherever it worked, nested ones, `.troupe/rules` and
-imports included, and none of the other tools' files a session does not read. It prints
-one line for each finding, with the file and the line:
-
-```
-frontend/AGENTS.md:3: contradiction: how to run the tests: `pnpm test` here, `npm test` in AGENTS.md:3
-AGENTS.md:12: path: `docs/setup.md` does not exist
-AGENTS.md:20: command: `mise` is not on the PATH (`mise exec -- mix test`)
-frontend/AGENTS.md:9: duplicate: the same rule as AGENTS.md:5
-```
-
-- **contradiction**: two files, one of which applies inside the other, name different
-  commands for the same job (test, build, lint, format, run) in the same ecosystem, and
-  no command in common. A root's `mix test` and `frontend/`'s `pnpm test` are two parts
-  of one repository, not a contradiction, and two sibling directories never are.
-- **path**: a path in a code span or a link that is not there, from the file's own
-  directory (for an `.agents/AGENTS.md` or a rule, also from the directory holding its
-  `.agents` or `.troupe`) or from the repository root, and an `@` import that names no
-  file. A span counts as a path when it starts with `./` or `../`, or has a slash and
-  ends in one, names a file with an extension, or starts with a directory that is there;
-  a bare file name, a branch like `origin/main` and a URL are not checked.
-- **command**: a command in a code span, or in a fenced block marked as a shell (or with
-  no language), whose program is not on the `PATH`. A span counts as a command when it
-  starts with a known build tool (`npm`, `pnpm`, `mix`, `cargo`, `go`, `pytest`, `mise`,
-  `make` and their like); the shell's own commands and the platform's package managers
-  are not looked for.
-- **duplicate**: a paragraph or list item said again in another file.
-- **drift**: a file `troupe onboard` wrote, in `.troupe/` or your config directory, whose
-  source, or another file it was made from, has changed or gone since, read from the
-  `imported_from`, `imported_hash` and `imported_also` it recorded; `troupe onboard` shows
-  what changed.
-- **outdated**: the workspace was onboarded under older onboarding rules than this
-  build's (`.troupe/onboarded.json`'s `onboarding`); `troupe onboard` shows what they would
-  write now, and a run that answers every question records the new version.
-
-It would rather miss a finding than make a false one. It exits 0 when it finds nothing, 1
-on a finding and 2 when it cannot read the workspace, so a repository can run it in CI on
-its own instruction files; `--json` prints the same as one object, with `files`,
-`onboarded` and `findings`. Your own `<config>/AGENTS.md` is checked with the rest, except for paths,
-which it names for every repository.
+It is given an `oauth` entry and signed in to from either client
+([a server that wants you to sign in](mcp.md#a-server-that-wants-you-to-sign-in)).
 
 ## Per-tool permission rules
 
 `permissions:` answers a tool's question before it is asked: each rule names a tool, alone
-or with a pattern, under `deny`, `ask` or `allow`.
+or with a pattern (a command prefix for `shell`, a path glob for the file tools,
+`server.tool` for `mcp`), under `deny`, `ask` or `allow`. Every file's rules, your
+organisation's included, are added together, and of those that match a call `deny` beats
+`ask` beats `allow`. A project's `allow` applies only in a trusted workspace. The
+[recipe](configuration/permissions.md) is a complete file, and says what a pattern
+matches, how a shell line is read, which rule holds and what each does.
 
 ```yaml
 permissions:
@@ -767,70 +230,22 @@ permissions:
   allow: ["shell(mix test)", "write_file(lib/**)"]
 ```
 
-- **The pattern** is a command prefix for `shell`, a path glob for the file tools
-  (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `glob`, `git_read`),
-  relative to the workspace unless written in full, and `server.tool` for `mcp`, which
-  covers a server's tools whoever hosts it. Other tools take none. A malformed rule refuses
-  the load with what to write instead: `Bash(npm test)` is `shell(npm test)` here.
-- **Every file's rules count.** Your organisation's, your own `config.yaml`, a project's
-  `.troupe/config.yaml` and its `config.local.yaml` are added together, and of the rules
-  that match a call `deny` beats `ask` beats `allow`, whatever the file. Inside one file
-  the more specific rule decides, so `deny: [shell]` with `allow: ["shell(git status)"]`
-  allows `git status` and nothing else.
-- **What each does.** A `deny` refuses the call before it runs, telling the model the rule
-  and the file it came from. An `ask` asks you, even under `auto_approve` and after an
-  "allow for the session", and the question says which rule asked. An `allow` runs a call
-  that would have asked; a call that must always be asked (writing into your config
-  directory) still asks, and so does every call in a branch an `AI!` comment started,
-  unless `watch_auto_approve` is on. With `approvals: deny` an allowed call runs, as one
-  an agent marks `auto` does, and every other call that asks is refused.
-- **A project's `allow`** applies only in a trusted workspace and never on a pod; its
-  `deny` and `ask` apply everywhere. With `managed_permission_rules_only` on, only your
-  organisation's `allow` rules apply.
-- **A shell line** is the commands it runs: a `deny` or `ask` matching any of them holds,
-  and an `allow` covers the line only if it covers every command and nothing runs inside
-  `$(...)` or backticks. A rule is not a sandbox: a script or `sh -c` runs what no rule
-  sees.
-
-`troupe config --explain permissions` lists them with their files, the terminal UI's
-`/settings` and the desktop app's **This computer** page show them, and the
-[recipe](configuration/permissions.md) is a complete file with each kind.
-
-## Seeing a delegation before it runs
-
-An agent hands work to a subagent with a brief, and by default the subagent starts at
-once. To see the brief first for some agents, name them:
-
-```yaml
-delegation:
-  ask: [general, implementer]
-```
-
-An agent's own definition can ask too, with `delegation: ask` in its frontmatter, which
-is how a profile's bundle makes a pod's sessions ask. Either is enough. A delegation to
-one of them then waits in the approval box (the terminal UI) or the approval panel (the
-desktop app), showing the agent and where its definition is, the brief's five parts, the
-tools and permissions the subagent will hold, its share of the budget and how deep it
-is. You run it; edit the brief's parts; send the same brief to another subagent; deny
-it, with a word back the agent that delegated reads as the answer; or let that agent run
-unasked for the rest of the session. `auto_approve` does not answer it: you asked to see
-these. With nobody attached, `approvals: deny` denies it at once and `wait` keeps it
-waiting, as any approval.
+`troupe config --explain permissions` lists them with their files, and the TUI's
+`/settings` and the desktop app's **This computer** page show them.
 
 ## Every file Troupe reads
 
-In one table, in the order each kind is read, and what happens when two say different
-things:
+In the order each kind is read, and what happens when two say different things:
 
 | File | Layer | What it is for | On conflict |
 |---|---|---|---|
-| the organisation's `defaults:` (the managed file, then the plane's `organisation.json`), `<config>/config.yaml`, then `<workspace>/.troupe/config.yaml`, then `.troupe/config.local.yaml`, then the environment, then the command line, then the organisation's `enforced:` | settings | every key above | later beats earlier; maps merge by key, `null` removes, a list replaces; trusted keys come from a workspace's files only once it is trusted |
+| the organisation's `defaults:` (the managed file, then the plane's `organisation.json`), `<config>/config.yaml`, `<workspace>/.troupe/config.yaml`, `.troupe/config.local.yaml`, the environment, the command line, the organisation's `enforced:` | settings | every key below | later beats earlier; maps merge by key, `null` removes, a list replaces; trusted keys come from a workspace's files only once it is trusted |
 | `<config>/mcp.json`, then `<workspace>/.troupe/mcp.json` | MCP servers | your servers, then the workspace's, over `mcp:` in `config.yaml` | the same name merges key by key, the workspace's file last; a workspace's servers run only once you allow them |
 | a profile's bundle, `~/.agents/skills/`, each `.agents/skills/` from the repository root down to the workspace, `<config>/skills/<name>/SKILL.md`, `<workspace>/.troupe/skills/` | skills | what a skill tool may read | one name, the highest on [the ladder](#which-one-wins); the others listed as skipped |
 | Troupe's built-in agents, a profile's bundle, `<config>/agents/*.md`, `<workspace>/.troupe/agents/*.md` | agents | the agents a session may run | a file at a higher layer replaces the same name below it |
 | `<config>/commands/*.md`, `<workspace>/.troupe/commands/*.md` | commands | the slash commands you and the repository define | one name, the workspace's; a built-in's or an agent's name is theirs |
 | `<workspace>/.troupe/workflows/<name>.json` | workflows | the steps `workflows.list` offers | one name, one file |
-| `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace and to each file the conversation worked on, each directory's `.agents/AGENTS.md` before its own and its `.troupe/rules/*.md` after it, and the files each imports with `@path` | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out. Other tools' files (`CLAUDE.md`, `GEMINI.md`, Copilot's, Cursor's) are not read: `troupe onboard` brings them in once |
+| `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace and to each file the conversation worked on, each directory's `.agents/AGENTS.md` before its own and its `.troupe/rules/*.md` after it, and the files each imports with `@path` | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out. Other tools' files are not read: `troupe onboard` brings them in once ([instruction files](instructions.md)) |
 | `<workspace>/.troupe/memory/facts.jsonl`, and its view `.troupe/memory.md` | instructions | the project brief Troupe's agents write, as facts | its commands and conventions read after the instruction files, the rest through `recall`; never authoritative, `read_file` and `grep` are; an edit to the view is read back as facts |
 
 ## Which one wins
@@ -841,9 +256,9 @@ ladder, lowest first:
 1. **Troupe's built-ins**: the agents that ship with it.
 2. **A profile's bundle**, on a team's pod. There the bundle's agents and skills beat the
    repository's `.agents/` and `.troupe/` unless the profile allows the repository's.
-3. **`.agents/`**: `~/.agents/skills`, then each `.agents/skills` from the repository
-   root down to where the session was started, the nearest highest; and each
-   directory's `.agents/AGENTS.md`.
+3. **`.agents/`**: `~/.agents/skills`, then each `.agents/skills` from the repository root
+   down to where the session was started, the nearest highest; and each directory's
+   `.agents/AGENTS.md`.
 4. **`AGENTS.md`**: the repository root's, then each directory's on the way to the work,
    the nearest highest.
 5. **Your `<config>/`**: `config.yaml`, `mcp.json`, `skills/`, `agents/`, `commands/`.
@@ -855,15 +270,12 @@ highest step that has the name, and the ones below it are not used: `skills.list
 each skill a higher one hid as `skipped`, naming the one that is used. Instruction files
 have no name to lose: every one applies, and the higher comes later in the prompt, wins
 where two disagree, and is kept whole first when the budget runs out. Your own
-`<config>/AGENTS.md` is the exception, read first and so below the repository's files:
-it is about every repository, and theirs is about this one.
+`<config>/AGENTS.md` is the exception, read first and so below the repository's files: it
+is about every repository, and theirs is about this one.
 
-Two things stand beside the ladder rather than on it: a built-in command's name, or an
-agent's, stays theirs whatever a file says ([Your own commands](#your-own-commands)), and
-`config.yaml`'s settings have the organisation's defaults below them and the environment,
-the command line and what the organisation enforces above them ([The files](#the-files)),
-a workspace's own files setting the trusted keys only once you trust it ([Trusted
-workspaces](#trusted-workspaces)).
+Beside the ladder, a built-in command's name, or an agent's, stays theirs whatever a file
+says, and `config.yaml`'s settings have the layers of [the files](#the-files) above and
+below them.
 
 ## Old spellings
 
@@ -879,14 +291,11 @@ that names the new one, and a file that uses both spellings of one setting is re
 | `auth_token: KEY` | `api_key: KEY` with `auth: bearer`, top level or in a provider |
 
 Loading never rewrites a file, because a rewrite drops its comments. `troupe config
-migrate` prints, for each file, the rewrite that stops the warnings, and `troupe config
-migrate --write` makes it and keeps the file as it was beside it as
-`config.yaml.previous`.
-
-The terminal UI's settings page, the desktop app's settings and a budget raised
-for a workspace do not rewrite a file: they change the lines of the settings they set,
-written by the new names, and leave every other line, comments included, as it was. The
-file before the save is kept as `config.yaml.previous` all the same.
+migrate` prints, for each file, the rewrite that stops the warnings, and `--write` makes
+it, keeping the file as it was beside it as `config.yaml.previous`. The settings pages
+and a budget raised for a workspace do not rewrite a file either: they change the lines
+of the settings they set, by the new names, leave every other line as it was, and keep
+`config.yaml.previous` all the same.
 
 ## Seeing what is in effect
 
@@ -905,72 +314,56 @@ troupe config pull                  # your organisation's defaults and limits, f
 ```
 
 A running session's configuration was read as it started, so `--session` asks where it
-runs: this machine's daemon for one of its own, and for a session on your team's pod the
-pod itself, through the plane you are signed in to, without waking it. It reads the same
-way, with what a pod adds: `profile` for its worker profile's settings (the provider and
-models it gave the pod), `session` for the terms the session was created with, `enforced`
-for what the platform enforces, and the profile's per-tool rules, each named by the
-profile that wrote it. A repository's own files count as on any pod, no key marked trusted
-taken from them. The terminal UI's `/settings` shows the same in a pod session, and the
-desktop app's **Settings** pane beside a team session; neither changes any of it. A
-session that is asleep has nothing in force: open it, and ask again.
+runs: this machine's daemon, or for a session on your team's pod the pod itself, through
+the plane you are signed in to, without waking it. A pod adds `profile` (the provider and
+models its worker profile gave it), `session` (the terms the session was created with),
+`enforced` (what the platform enforces) and the profile's per-tool rules, each named by its
+profile; a repository's own files count as on any pod, no trusted key taken from them. The
+TUI's `/settings` in a pod session, and the desktop app's **Settings** pane beside a team
+session, show the same and change none of it. A session that is asleep has nothing in
+force: open it, and ask again.
 
-Secrets are masked everywhere. `troupe-daemon config` takes the same arguments but
-`pull` and `--session`, and one more: `import-opencode` copies opencode's providers and default model
-into `config.yaml` once, since Troupe does not read opencode's settings. A provider is
-copied only where its key would go to the host it was set up for: its SDK package is one
-Troupe has a type for (`@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/google`,
-`@ai-sdk/azure`, OpenRouter's, Ollama's), or opencode's file names its `baseURL`, which is
-then where it goes, as `openai`. Any other, `@ai-sdk/mistral` with no `baseURL` for one,
-is left out, and the copy names it and says why; add it to `providers:` yourself with its
-`type` and `base_url`.
+Secrets are masked everywhere. `troupe-daemon config` takes the same arguments but `pull`
+and `--session`, and one more: `import-opencode` copies opencode's providers and default
+model into `config.yaml` once, since Troupe does not read opencode's settings
+([from opencode](configuration/providers.md#from-opencode)).
 
 ## Settings in the desktop app and the terminal
 
-The desktop app and the terminal UI show and change the same settings, and there is no
-settings file of their own: a setting is a key of the files above. The daemon serves
-them both (`config.get`, `config.set` and `config.changed` in the protocol), so a change
-made in one is there in the other at once, while its settings screen is open, and the
-next session either of them starts reads it.
+The desktop app and the TUI show and change the same settings, and neither has a settings
+file of its own: a setting is a key of the files above. The daemon serves both
+(`config.get`, `config.set` and `config.changed` in the protocol), so a change made in one
+shows in the other at once, and the next session either starts reads it.
 
-- **What each setting is.** Both read every key from the daemon as a session in that
-  workspace would: its value, and the layer and file that set it. The terminal UI's
-  `/settings` shows the layer beside each value that is not a default; secrets are never
-  shown, in either.
-- **Where a change goes.** Into one of the files above, named: the desktop app's model
-  settings and its theme, light or dark and notifications go into your own
-  `config.yaml`. The terminal UI's settings page writes the file the value on screen came
-  from, and a default into your own file; its title says which, and `s` picks another.
-  A key a file may not hold is refused rather than written where it would be ignored:
-  `trusted_workspaces` outside your own file, and, in a workspace that is not trusted, a
-  key marked trusted in its project or local file, such as `auto_approve`. The writer is
-  the one every settings screen uses: the key's own line changes and the rest of the
-  file stays.
-- **Your organisation's.** A value from the organisation's defaults is shown as the
-  organisation's, and a change you make wins over it. A key it enforces is shown as set by
-  your organisation, with where from, and the terminal UI's page does not change it;
-  `config.set` refuses it in any file. The desktop app does not show where a setting came
-  from yet.
-- **One name and one help for each.** A key a settings page shows has a name for it, the
-  `Shown as` column in the reference below, and its help is the `What it does` there. Both
-  clients read them from the same table, so they cannot describe one setting two ways.
-  The terminal leaves out `ui.mode` and `ui.notifications`, which only the desktop app
-  acts on.
-- **What follows you, and what stays.** The `ui` keys are what should follow you from one
-  client to another: the theme both clients draw in (`ui.theme`), the desktop app's light
-  or dark (`ui.mode`) and notifications (`ui.notifications`), and whether the terminal
-  blinks what waits on you (`ui.blink`). The daemon keeps them and acts on none of them,
-  as it does `mouse` and `transcript.detail`. What belongs to one window — its size, which plane the
-  desktop app last used, whether it opens on Home — stays in that window.
-- **The provider.** Every place you pick one offers the same types, the
-  [provider types](#provider-types) below, from one list the daemon serves: `troupe setup`
-  and `troupe config`, the terminal UI's `/settings` (a menu, each type saying what else it
-  needs), the desktop app's first run and its **Models** panel. Each asks only what its
-  type needs: no key for Ollama, whose server's address may be left to its default, and
-  the resource's own address for Azure OpenAI. On a plane, a profile's `llm.provider` and
-  the provider people's own machines are offered take the same names.
-- **Edited by hand.** A file you edit yourself is read at the next session and the next
-  time a settings screen asks; a screen already open does not hear of it.
+- **What each shows.** Every key as a session in that workspace would read it: its value,
+  and the layer and file that set it (the TUI shows the layer beside each value that is
+  not a default; the desktop app does not show where a setting came from yet). Secrets
+  are never shown. A key's name on the page is the `Shown as` column of the reference
+  below, and its help the `What it does` there. The terminal leaves out `ui.mode` and
+  `ui.notifications`, which only the desktop app acts on.
+- **Where a change goes.** The desktop app's model settings, theme, light or dark and
+  notifications go into your own `config.yaml`. The TUI's page writes the file the value
+  on screen came from, and a default into your own; its title says which, and `s` picks
+  another. A key a file may not hold is refused rather than written where it would be
+  ignored: `trusted_workspaces` outside your own file, and a key marked trusted in the
+  project or local file of a workspace that is not trusted, such as `auto_approve`. Only
+  the key's own line changes.
+- **Your organisation's.** A value from its defaults is shown as the organisation's, and
+  a change you make wins over it. A key it enforces is shown as set by your organisation,
+  with where from, and is not changed.
+- **What follows you.** The `ui` keys: the theme both clients draw in (`ui.theme`), the
+  desktop app's light or dark (`ui.mode`) and notifications (`ui.notifications`), and
+  whether the terminal blinks what waits on you (`ui.blink`). The daemon keeps them and
+  acts on none, as with `mouse` and `transcript.detail`. What belongs to one window (its
+  size, the plane the desktop app last used, whether it opens on Home) stays there.
+- **The provider.** Every place you pick one offers the same [provider types](#provider-types),
+  from one list the daemon serves: `troupe setup`, `troupe config`, the TUI's `/settings`,
+  the desktop app's first run and its **Models** panel. Each asks only what its type
+  needs: no key for Ollama, whose address may be left to its default, and the resource's
+  own address for Azure OpenAI. On a plane, a profile's `llm.provider` and the provider
+  people's own machines are offered take the same names.
+- **Edited by hand.** A file you edit is read at the next session and the next time a
+  settings screen asks; a screen already open does not hear of it.
 
 ```yaml
 version: 1
@@ -999,21 +392,8 @@ checkout, or at its raw URL on GitHub.
 
 The [cookbook](configuration/cookbook.md) has a complete, tested file for each provider
 type, a team's project file and a personal `config.local.yaml`, MCP servers, an agent, a
-skill and an unattended session. A few more:
-
-The smallest useful file, with the key in the environment:
-
-```yaml
-version: 1
-provider: anthropic
-api_key: "{env:ANTHROPIC_KEY_FOR_TROUPE}"
-models:
-  default: claude-opus-5
-  cheap: claude-haiku-4-5
-```
-
-A LiteLLM gateway in front of Anthropic, which renames the models and takes a bearer
-token:
+skill, an unattended session and per-tool rules. One more, a LiteLLM gateway in front of
+Anthropic, which renames the models and takes a bearer token:
 
 ```yaml
 version: 1
@@ -1031,45 +411,14 @@ models:
   cheap: gateway/claude-haiku-4-5
 ```
 
-A price for a model the catalog does not price, such as one a LiteLLM gateway serves
-and streams, in dollars per million tokens by the name the model is addressed with. What
-the gateway says a call cost still wins, and then the catalog's price (the provider's
-own list, which refreshes itself when it is a day old); a call none of the three prices
-counts as free, and the daemon's log says so once a session. `troupe models` shows each
-model's price and where it came from, or `no price`, and `troupe config --explain
-models.prices` which file set it. A turn's cost in the terminal UI, in its side box or
-the line under the turn, is priced the same way.
-`TROUPE_MODEL_PRICES` takes the same map as JSON, which is how a profile's `llm.prices`
-reaches its pods.
-
-```yaml
-version: 1
-provider: openai
-base_url: https://llm-gw.example/v1
-api_key: "{env:GATEWAY_TOKEN}"
-models:
-  default: qwen3-235b
-  prices:
-    qwen3-235b: {input: 0.5, output: 1.5}   # what your gateway charges; these are an example
-```
-
-An unattended session that is told no rather than left waiting, on a smaller budget:
-
-```yaml
-version: 1
-approvals: deny
-max_turns: 20
-wall_clock_ms: 600000
-```
-
 ## Provider types
 
 The session-wide `provider`, and a named provider's `type`, is one of the types below. A
 name that is none of them refuses the file, naming the file, the key and these. A Troupe
 before 0.5 read any such name as `openai`; `troupe config migrate` rewrites one that is
 another's name (`litellm`, `vllm` and `lmstudio` are `openai`, `google` is `gemini`,
-`azure` is `azure_openai`) and says what to write for any other. A gateway that speaks
-one of these APIs, such as LiteLLM, is that type with its `base_url`.
+`azure` is `azure_openai`) and says what to write for any other. A gateway that speaks one
+of these APIs, such as LiteLLM, is that type with its `base_url`.
 
 <!-- provider-types:begin -->
 | Type | Endpoint | Key | Keys that apply | Model list | Thinking | Caching |
@@ -1086,191 +435,17 @@ one of these APIs, such as LiteLLM, is that type with its `base_url`.
 An `azure_openai` provider without a `base_url` is refused, as one whose key is not set
 is, and says so; so is a session-wide `provider: azure_openai`, which takes the default
 `api_version`. Bedrock and Vertex are not types: each signs its requests with its own
-cloud's credentials rather than taking a key. A gateway in front of either is the type of
-the API the gateway speaks.
-
-A model on this machine, through Ollama, which needs no key:
-
-```yaml
-version: 1
-providers:
-  local:
-    type: ollama
-models:
-  cheap: local/qwen3
-```
-
-OpenRouter, where a model is OpenRouter's own id after the provider's name, and
-`troupe models` lists each model's window and price:
-
-```yaml
-version: 1
-providers:
-  openrouter:
-    type: openrouter
-    api_key: "{env:OPENROUTER_API_KEY}"
-models:
-  default: openrouter/anthropic/claude-sonnet-4.5
-```
-
-Azure OpenAI, where a model is a deployment of your resource, named under `models:`
-because Azure does not list them to a key:
-
-```yaml
-version: 1
-providers:
-  azure:
-    type: azure_openai
-    base_url: https://example-resource.openai.azure.com
-    api_key: "{env:AZURE_OPENAI_API_KEY}"
-    api_version: "2024-10-21"
-    models:
-      gpt-5: {id: example-gpt-5-deployment, context: 400000}
-models:
-  default: azure/gpt-5
-```
-
-The Gemini API, through its OpenAI-compatible endpoint:
-
-```yaml
-version: 1
-provider: gemini
-api_key: "{env:GEMINI_API_KEY}"
-models:
-  default: gemini-2.5-pro
-  cheap: gemini-2.5-flash
-```
-
-## What each provider caches
-
-One thing you type can take an agent many model calls, and each call sends the whole
-conversation again. A provider that caches the prompt bills what it has seen before at a
-fraction of the input price, which on a long turn is most of what was sent. There is
-nothing to set; what happens depends on the provider.
-
-- **Anthropic** (`provider: anthropic`, or a provider of `type: anthropic`) caches only
-  what a request asks it to, and every call an agent makes asks: the tool definitions,
-  the system prompt and the conversation so far are marked, and the next call reads them
-  back. The cache lasts five minutes from its last use, so the calls of a turn keep it
-  warm and a reply after a long pause starts it again. A prompt shorter than the model's
-  minimum (512 to 4096 tokens, by model) is not cached. A gateway that speaks Anthropic's
-  API passes the marks on or drops them.
-- **OpenAI** caches a long enough prompt by itself, with nothing to ask, and so does
-  Azure OpenAI.
-- **An OpenAI-compatible gateway or server** (`provider: openai` with a `base_url`, such as
-  LiteLLM or vLLM) caches whatever it and the model behind it do, which may be
-  nothing. Troupe sends no marks this way; a LiteLLM deployment can be configured to add
-  them for the Anthropic models it serves, and then reports what Anthropic wrote to the
-  cache as well as what it read.
-- **OpenRouter, the Gemini API and Ollama** cache as the
-  [table of provider types](#provider-types) says: OpenRouter what the model's own
-  provider caches by itself, Gemini a repeated prefix on the models that do, and Ollama a
-  loaded model's last prompt, in memory and unreported.
-
-Whichever it is, the provider's own figures say whether it happened: each model call's
-`cache_read` and `cache_write` in the session's log, and the terminal UI's token detail,
-which says how much of the prompt came from the cache. A call priced from the catalog or
-`models.prices` is priced at its `cache_read` and `cache_write` rates (a LiteLLM gateway's
-catalog quotes both), or at the input price where those are not set.
-
-The agent's task list goes with the turn, as it stood when the turn began, and again only
-when it changed. A rewrite within the turn reaches the model in the `todo_write` call's
-result and leaves the cached prompt as it was, whatever the provider. With
-`system_prompt: per_turn` the list ends the system prompt instead: a list the turn before
-changed is new at the next turn's first call, which writes the conversation to the cache
-again, and Anthropic still reads the tools and the system prompt in front of the list.
-
-## How hard a model thinks
-
-`reasoning_effort` on a model's `models:` entry asks a model that reasons to think before
-it answers: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or a number of
-tokens. An OpenAI-compatible provider is sent the word as it is, and the model decides
-what it means; OpenRouter is sent it in its own `reasoning` field, a number as a budget.
-On every one but Anthropic the reasoning spends from the output cap, so an enforced
-`max_tokens` holds it as it holds the answer.
-
-Anthropic's models take it in one of two forms, and refuse the other:
-
-- **Claude Opus 4.7 and later, Sonnet 5 and later, Fable and Mythos** take adaptive
-  thinking with an effort level, and refuse a budget. A word is the level of that name
-  (`minimal` is `low`); a number is the level whose budget below would hold it, and
-  more than 32768 is `max`.
-- **The models before them** (Opus 4.6, Sonnet 4.6, Haiku 4.5 and older) are sent a
-  thinking budget: 1024 tokens for `minimal`, 4096 for `low`, 8192 for `medium`, 16384
-  for `high`, 32768 for `xhigh` and `max`, or the number given.
-
-Which form a model takes is what Anthropic's model list says of it (`troupe models`
-fetches it), else what its name says, found inside a gateway's renaming such as
-`eu.anthropic.claude-opus-5`. A model neither describes is sent adaptive thinking for a
-word and a budget for a number. Either way the output cap is raised to hold the thinking,
-and no further than a `max_tokens` your organisation enforces: under that limit the
-thinking is shortened to fit, and is off for a call it leaves too little room
-([your organisation's limits](#your-organisations-defaults-and-limits)).
-A model that refuses what it was sent fails the call with a message that names
-`reasoning_effort` and what to set it to.
-
-Claude Opus 5 and later, Sonnet 5 and later, Fable and Mythos think whether or not
-`reasoning_effort` is set. With none (or `none`) they are sent no thinking settings and
-think at their own default effort, and what they thought is handed back to them on the
-next call, as it is when an effort is set, so a turn of tool calls goes on from the
-reasoning it started with.
-
-Claude Fable 5.1, Opus 5.5 and Sonnet 5.5, and later versions, bind what they thought to
-the conversation it was made in, the tools among it: an account that enforces the check
-refuses a call whose earlier thinking was made under other tools, and Troupe sends it
-again without that thinking. For those, an agent's tools stay the same for the whole
-session: the task list's tools are offered from the first call, and `/loop`'s
-`goal_complete` on every call of the session's main agent, refused outside a loop. Troupe
-tells these models by name. A gateway's alias that hides the name, such as `smart`
-for Sonnet 5.5, is said to bind with `binds_thinking`, on the model's entry or for every
-model of the provider; `false` says a model does not:
-
-```yaml
-providers:
-  gateway:
-    type: anthropic
-    base_url: https://llm.example.com
-    models:
-      smart: {reasoning_effort: medium, binds_thinking: true}
-```
-
-The tools of an MCP server, and those a person's client offers a session, may still come
-or go while a session runs: a server that comes back with another list, a sign-in that
-completes, a person who closes the window, a skill added, an agent restarting. Whatever the model, those changes reach the
-model at its next turn, never in the middle of one. A tool that went in the meantime stays
-in the list until the turn ends, and a call to it is told it is gone.
-
-## What Troupe tells the provider
-
-Every model call names the software that made it, so whoever runs the gateway can see
-which of their spend is Troupe's, from which client and on which version:
-
-- **Everywhere**, a User-Agent such as `troupe/0.8.4-beta (tui; windows/x86_64)`. The
-  client is `tui`, `headless` (`troupe run --headless`), `desktop`, `acp` (an editor over
-  ACP), `worker` (a session on a plane's pod) or `other`.
-- **To a gateway** (the `base_url` of an `anthropic`, `openai` or `gemini` provider that is
-  not the vendor's own API, nor OpenRouter), LiteLLM's `x-litellm-tags` (`troupe`,
-  `troupe-<client>`, `troupe-<version>`) and `x-litellm-spend-logs-metadata` with the
-  session's id. An `openai` request's `metadata` carries the session's id, the client and
-  the version too. A server that is not LiteLLM ignores them. An `ollama` server and an
-  `azure_openai` resource get the User-Agent alone.
-- **To OpenRouter** (an `openrouter` provider, or any at openrouter.ai), `HTTP-Referer`
-  (the project's page) and `X-Title: Troupe`.
-
-A session on your machine names nobody: no person, no path, no repository, no host name.
-A session on a plane's pod also carries what the plane attributes it with (its owner, its
-team, its worker profile and the agent), as it always has.
-
-`identify: false` turns all of it off, and the User-Agent is the HTTP client's own.
-`troupe doctor` prints, on its `identify` line, exactly the headers the default model's
-provider is sent, or `off`.
+cloud's credentials rather than taking a key, and a gateway in front of either is the type
+of the API it speaks. A file for each type is in the
+[provider recipes](configuration/providers.md); what each caches, how hard a model thinks
+and what each call tells the provider are on [models and providers](models.md).
 
 ## Every key
 
 `Set by` says which files may set a key. "user; project if trusted" keys are read from a
 workspace's files only once it is trusted; every key may also come from the environment
-or the command line where one exists for it. `Shown as` is the name a settings page
-shows a key by, in the desktop app and the terminal UI alike.
+or the command line where one exists for it. `Shown as` is the name a settings page shows
+a key by, in the desktop app and the TUI alike.
 
 <!-- config-keys:begin -->
 ### File

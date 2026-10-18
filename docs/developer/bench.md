@@ -9,14 +9,14 @@ take of it (issue #516, Decision 834). It is about the harness's shape, not abou
 model answers.
 
 The suite is offline. Each scenario runs against a scripted model, so it costs nothing,
-needs no network, and gives the same numbers every time: the JSON of two runs of one build
-is the same, byte for byte. CI fails when a number goes past its budget, so a change that
-makes every turn more expensive is caught by the pull request that makes it, not by the
-person who gets the bill.
+needs no network, and gives the same numbers every time: two runs of one build write the
+same JSON, byte for byte. CI fails when a number goes past its budget, so a change that
+makes every turn more expensive is caught by its pull request, not by whoever gets the
+bill.
 
-`troupe bench --live` is the other tier: small tasks against a real model (four by default), the
-person's own, under a spending cap it says before it starts, with a history to compare
-runs with (Decision 773; [the live bench](#the-live-bench) below, and
+`troupe bench --live` is the other tier: small tasks (four by default) against the person's
+own model, under a spending cap it states before it starts, with a history to compare runs
+with (Decision 773; [the live bench](#the-live-bench) below, and
 [what a task costs](../user/bench.md) for the person running it). It never runs in CI.
 
 ## Running it
@@ -33,13 +33,14 @@ runs with (Decision 773; [the live bench](#the-live-bench) below, and
 The suite takes a few seconds, and says how many under the table. `mix troupe.bench`
 starts only `troupe_core`, so it runs from the umbrella's root with no database.
 
-Each scenario runs in its own directories (workspace, config, state) under a new temporary
-one, removed afterwards, and while it runs `TROUPE_CONFIG_HOME` and `TROUPE_STATE_HOME`
-name them and opencode's two files name none: nothing of the person running it (their
-config, keys, agents, skills, instruction files, sessions) reaches the prompt being
-measured. One that onboards has a home directory of its own as well, which onboarding is
-given for `~`, so none of the person's own files (`~/.claude/CLAUDE.md`) is read. The session is the harness's own, in the same VM; `troupe bench` never asks the
-machine's daemon, which could be another version.
+Each scenario runs in its own workspace, config and state directories under a new
+temporary one, removed afterwards; while it runs `TROUPE_CONFIG_HOME` and
+`TROUPE_STATE_HOME` name them and opencode's two files name none, so nothing of the person
+running it (config, keys, agents, skills, instruction files, sessions) reaches the prompt
+being measured. One that onboards also has a home directory of its own, given to
+onboarding for `~`, so none of the person's own files (`~/.claude/CLAUDE.md`) is read. The
+session is the harness's own, in the same VM; `troupe bench` never asks the machine's
+daemon, which could be another version.
 
 ## Reading the table
 
@@ -211,19 +212,18 @@ share of the root's. Run each beside its pair:
 `troupe bench --live --scenario fix_test,fix_test_orchestrate --repeat 3`.
 
 The first four are the `smoke` suite, the default; the next six with them are `standard`
-(Decision 775). `follow_up` is in neither, and runs when named: it is issue #465's
-(Decision 815), whose second turn begins with an instruction file the first brought in,
-and [prompt-prefix.md](prompt-prefix.md) says how it is run with each of that issue's
-settings. `task_list` is in neither suite either: that issue's other change, each turn after
-the first beginning with the task list the turn before left (Decision 792; in the system
-prompt with `system_prompt: per_turn`, with the turn by default, Decision 863), on the
-`plan` agent, which always has the list's tools. A scenario's
-`follow_ups` are typed one after another, each once the turn
-before has ended by itself, under the run's one deadline and cap.
-`LiveScenarios.select/2` takes a suite or a list of names, which may come from either, and
-answers them in report order; `--suite` and `--scenario` reach it through `plan/1`'s
-`:suite` and `:only`. A task added to `standard` needs a script in `fake_openai.exs`, so
-the suite's own test can run it, and a test that it fails when nothing is done.
+(Decision 775). `follow_up` and `task_list` are in neither and run when named. Both are
+issue #465's ([prompt-prefix.md](prompt-prefix.md) says how each is run with that issue's
+settings): `follow_up`'s second turn begins with an instruction file the first brought in
+(Decision 815); `task_list`, on the `plan` agent, which always has the list's tools, has
+each turn after the first begin with the task list the turn before left (Decision 792; in
+the system prompt with `system_prompt: per_turn`, with the turn by default, Decision 863).
+A scenario's `follow_ups` are typed one after another, each once the turn before has ended
+by itself, under the run's one deadline and cap. `LiveScenarios.select/2` takes a suite or
+a list of names from either, and answers them in report order; `--suite` and `--scenario`
+reach it through `plan/1`'s `:suite` and `:only`. A task added to `standard` needs a script
+in `fake_openai.exs`, so the suite's own test can run it, and a test that it fails when
+nothing is done.
 
 **Before anything starts**, `Troupe.Bench.plan/1` reads the person's configuration and
 takes from it where a model call goes (provider, URL, key, named providers, windows,
@@ -236,11 +236,9 @@ input and cache-write prices, times the runs; a model nothing prices has its cap
 `troupe bench --live` prints it on standard error and runs nothing until the person answers
 `y` at a terminal, or passed `--yes`; with no terminal to ask in it runs nothing.
 
-**Each run** is the offline suite's kind: its own workspace, config and state directories
-under a new temporary one, `TROUPE_CONFIG_HOME` and `TROUPE_STATE_HOME` naming them and
-opencode's files naming none, and a session of this VM's harness. The person's provider
-settings reach it as config overrides, in memory: the key is in no file, no log and no
-output, and `inspect/1` of a plan leaves it out. Every tool is allowed, a budget stops
+**Each run** is isolated as an offline scenario is ([running it](#running-it)). The
+person's provider settings reach it as config overrides, in memory: the key is in no file,
+no log and no output, and `inspect/1` of a plan leaves it out. Every tool is allowed, a budget stops
 rather than asks, and there is no brief. The runner watches the session's events and stops
 the session when the root agent's turn ends, when the run's cost reaches its share of the
 cap, or a quarter of its wall clock (at most 30 s) after the wall clock, whichever is
@@ -376,11 +374,9 @@ model.
 
 - **The nightly.** The live bench is on demand. Decision 773 says how the nightly should
   run it; wiring it in is a change to `.github/workflows/live.yml` of its own.
-
 - **Lifecycle across a daemon restart**, dormancy, and the budget's own question: scenarios
   #390 named and did not build.
-
-- **A benchmark of models at scale.** The `standard` suite's ten tasks compare one build or one model with
-  another on the same work; they do not rank models the way hundreds of tasks from real
-  repositories do, and the bench runs only this harness, so another harness on the same
-  model is not in the comparison.
+- **A benchmark of models at scale.** The `standard` suite's ten tasks compare one build or
+  model with another on the same work; they do not rank models as hundreds of tasks from
+  real repositories do, and the bench runs only this harness, so another harness on the
+  same model is not in the comparison.

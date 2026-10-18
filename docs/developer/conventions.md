@@ -11,9 +11,8 @@ enforced, this says so.
 ([build.md §3](build.md#3-generated-committed-files)); `scripts/ci` is the CI job on a
 machine. The clients have their own gates: `mix check` in `clients/tui` (with
 `troupe.xref`), and `pnpm typecheck`, `test`, `tokens:check`, `icons:check` in
-`clients/gui`. A package
-both the TUI and the umbrella lock must be the same version in both lock files;
-`elixir scripts/locks-agree.exs` checks it.
+`clients/gui`. A package both the TUI and the umbrella lock must be the same version in
+both lock files; `elixir scripts/locks-agree.exs` checks it.
 
 **The formatter's blind spot.** The root `.formatter.exs` lists
 `{config,lib,test}/**/*.{ex,exs}` relative to the root, and no app has its own, so
@@ -34,10 +33,9 @@ Credo's line-ending check and `dash` both break on CRLF.
 
 ## 2. Boundaries
 
-The rules are in [architecture.md §2](architecture.md#2-boundaries). When a client
-needs a server module, the protocol is missing a method — add it to `PROTOCOL.md` and the
-apps in the same pull request as the client change that needs it. A LiveView (the page at `/admin`) calls
-`Troupe.Plane.Admin` and nothing else in the plane.
+The rules are in [architecture.md §2](architecture.md#2-boundaries). When a client needs a
+server module, the protocol is missing a method: add it to `PROTOCOL.md` and the apps in
+the same pull request as the client change that needs it.
 
 ## 3. Rules the code states and tests check
 
@@ -59,31 +57,29 @@ apps in the same pull request as the client change that needs it. A LiveView (th
   rather than restating the code. When behaviour changes, the moduledoc moves with it.
 - **[`docs/decisions/`](../decisions/README.md)** records the judgment calls that still
   hold and that a reader could have made differently, one file per decision
-  (`0790-one-file-per-decision.md`): a front matter with the decision's `number`, `title`
-  (the one-sentence decision), `date`, `status`, `paths` (globs of what it governs) and
-  `gist` (what someone changing those paths must not undo), then the reasoning. One that
-  is superseded, or whose reasoning the code's own comments now carry, is deleted or
-  marked `superseded`, and its number is never reused. `docs/decisions/tui/` and
-  `docs/decisions/daemon/` hold those two projects' own, numbered on their own.
-  `mix troupe.decisions --for <path>` lists the decisions that govern a path, and
-  `--check`, which CI runs, fails on a duplicate number, a missing field or a `paths`
-  glob that matches nothing (Decision 790).
+  (`0790-one-file-per-decision.md`): front matter with `number`, `title` (the one-sentence
+  decision), `date`, `status`, `paths` (globs of what it governs) and `gist` (what someone
+  changing those paths must not undo), then the reasoning. One that is superseded, or
+  whose reasoning the code's comments now carry, is deleted or marked `superseded`, and its
+  number is never reused. `docs/decisions/tui/` and `docs/decisions/daemon/` hold those two
+  projects' own, numbered on their own. `mix troupe.decisions --for <path>` lists the
+  decisions that govern a path; `--check`, which CI runs, fails on a duplicate number, a
+  missing field or a `paths` glob that matches nothing (Decision 790).
 - **Code cites no decision by number** (Decision 882). A document may name code; code
-  names no document. Where a comment would have said "Decision 800", it says the
-  invariant itself, where it applies: what holds, and what breaks if the line changes -
-  "the write names its epoch, and the plane refuses a stale one, so a sealer that lost
-  the session stops before it writes". The decision points the other way, naming the
-  code in its `paths` (and `symbols`), which is how `--for` finds it. The citations
-  already in the code stay until their file is touched for another reason; then the one
-  in the part you touch is replaced by its invariant in words. CI runs
-  `elixir scripts/decision-citations.exs --base HEAD^1` on every pull request, and it
-  fails when a changed code file (`.ex`, `.exs`, `.ts`, `.tsx` and the other code
-  extensions it lists) cites a decision number more often than it did at the merge base;
-  run it yourself with `--base origin/<the branch you target>`.
+  names no document. Where a comment would have said "Decision 800", it states the
+  invariant where it applies, what holds and what breaks if the line changes: "the write
+  names its epoch, and the plane refuses a stale one, so a sealer that lost the session
+  stops before it writes". The decision names the code in its `paths` (and `symbols`),
+  which is how `--for` finds it. Citations already in the code stay until their file is
+  touched for another reason; then the one in the part you touch becomes its invariant in
+  words. CI runs `elixir scripts/decision-citations.exs --base HEAD^1` on every pull
+  request and fails when a changed code file (`.ex`, `.exs`, `.ts`, `.tsx` and the other
+  extensions it lists) cites a decision number more often than at the merge base; run it
+  yourself with `--base origin/<the branch you target>`.
 - **Commit messages and pull request titles** state the behaviour that is now true, in
-  plain prose — "A session's listing says what it has actually spent" — with a body saying
+  plain prose ("A session's listing says what it has actually spent"), with a body saying
   what was wrong, what changed and why. No conventional-commit prefixes, no ticket numbers,
-  and no attribution trailers. Nothing enforces this. What is enforced is the one trailer a
+  no attribution trailers. Nothing enforces this. What is enforced is the one trailer a
   commit does carry: `Signed-off-by:`, from `git commit -s`, which the `dco` check requires
   ([CONTRIBUTING.md](../../CONTRIBUTING.md#sign-off-dco)).
 

@@ -22,6 +22,7 @@ paths:
   - apps/troupe_protocol/lib/troupe/worker_profile.ex
   - apps/troupe_protocol/test/troupe/worker_profile_upgrade_test.exs
   - docs/admin/profiles-and-policy.md
+  - docs/admin/gitops.md
 gist: "A worker upgrade finishes by itself: the plane drains a pod behind once it holds no active session and records that on the profile, and the…"
 ---
 

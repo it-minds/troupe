@@ -9,11 +9,11 @@ never to a public issue.
 ## Before you start
 
 For anything larger than a small fix, open an issue first, or say on an existing one that
-you are taking it, so nobody builds the same thing twice or something the design rules
+you are taking it, so nobody builds the same thing twice, or something the design rules
 out. Issues labelled `good first issue` are small and self-contained.
-[ARCHITECTURE.md](ARCHITECTURE.md) is the design and [the decisions](docs/decisions/README.md) say why
-things are the way they are: a change that undoes a numbered decision says so. In the code,
-a comment says why in its own words and cites no decision by number
+[ARCHITECTURE.md](ARCHITECTURE.md) is the design and [the decisions](docs/decisions/README.md)
+say why things are the way they are: a change that undoes a numbered decision says so. In
+the code, a comment says why in its own words and cites no decision by number
 ([conventions](docs/developer/conventions.md#4-comments-decisions-and-messages)).
 
 ## Build and check
@@ -28,9 +28,8 @@ mix deps.get && mix check                                        # the umbrella
 (cd clients/gui && pnpm install && pnpm build && pnpm test)      # the GUI
 ```
 
-`mix check` is the gate: it compiles with warnings as errors, checks the format, runs
-`credo --strict`, the boundary check and the tests. `scripts/ci` runs CI's own job on your
-machine, and some suites need the services from `scripts/dev-up`.
+`mix check` is [the gate](docs/developer/conventions.md#1-the-gate); `scripts/ci` runs
+CI's own job on your machine, and some suites need the services from `scripts/dev-up`.
 [docs/developer/](docs/developer/README.md) has the rest: [local setup](docs/developer/local-setup.md),
 [testing](docs/developer/testing.md), [conventions](docs/developer/conventions.md).
 
@@ -41,9 +40,10 @@ machine, and some suites need the services from `scripts/dev-up`.
    clean-ups for another pull request.
 3. Run the gate for the part you changed, and regenerate anything generated that your change
    touches ([build.md](docs/developer/build.md#3-generated-committed-files) lists them).
-4. Commit with `git commit -s` (see below). The message states the behaviour that is now
-   true, in plain prose - "A session's listing says what it has actually spent" - and its
-   body says what was wrong and why this is the fix. No `fix:` prefixes.
+4. Commit with `git commit -s` (see below), the message in
+   [the house style](docs/developer/conventions.md#4-comments-decisions-and-messages): the
+   behaviour that is now true, in plain prose, and a body saying what was wrong and why
+   this is the fix. No `fix:` prefixes.
 5. Open a pull request into `main` and fill in the template. CI runs what your change can
    have broken; `ci-ok`, `dco` and `licences` have to pass. A maintainer reviews it and
    merges it.

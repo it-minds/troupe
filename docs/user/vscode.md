@@ -346,40 +346,24 @@ runtime dependencies: the `.vsix` is its own code, its two icons, `package.json`
 README, LICENSE and NOTICE. Its build and test tools are under the repository's licence
 policy like every other package ([third-party-licences.md](../third-party-licences.md)).
 
-- `pnpm test`: unit tests for the folder choice, the search for `troupe` (on Linux and
-  Windows file systems, the extensionless file included), the message, the line for each
-  shell, the Settings view's rows (never a key, a repository's ignored value and why, the
-  files and the trust, a config that does not load as the errors a failing `troupe`
-  printed), its Models group (each model's window, price and where they came
-  from, the three roles, a model not served shown without a window, each provider's list,
-  a failure as one line with no key in it), the line each command types and the path
-  "Ask Troupe" writes, when opening with the folder opens Troupe (off, no folder, not
-  trusted, a Troupe terminal there from before a reload) and how such a terminal is known
-  (its process kept, whatever its name; or its name), and the manifest (the commands
-  and the menus, the setting and the profile, no Windows key on Ctrl+Alt, every icon in the
-  package). The line is also put through each shell the
-  machine has (sh, bash, zsh, dash, fish, Windows PowerShell, PowerShell 7, cmd.exe), with
-  a folder name full of quotes, `$`, `&` and backticks, and a task and a prompt with double
-  quotes, a line break, `%PATH%` and backslashes, and has to arrive as the arguments it was
-  meant to be; so is the call a `.cmd` gets through cmd.exe for the Settings view.
-- `pnpm test:vscode`: the extension inside a real VS Code, against a fake `troupe` that
-  writes down the directory and arguments it was started with and then waits, quits or
-  fails as it is told, and answers `config --explain --json` and `models --json` with
-  settings and models of its own, on a workspace of four folders: the editor tab, `beside`
-  and `panel`, the editor title bar's file, the side bar's list and the activity bar, the
-  Settings view, and its Models group (`--refresh` only from the group's button, a failing
-  `troupe models`, a config that does not load and its errors, a missing `troupe`), the
-  four commands (a busy terminal left alone, Doctor's kept open and Open Settings typed into
-  it, a task's question dismissed), "Ask Troupe" on a file, a folder, the active editor's
-  file and none, and the Troupe profile (`troupe` as the terminal's program at the editor's
-  folder, a second pick a second terminal, its terminal closed when `troupe` exits, none
-  without `troupe`). Then two more windows on one folder with `troupe.openOnFolderOpen`
-  on: Troupe opens once, at the folder; and with a terminal named for the folder there as
-  the extension starts, nothing more opens. A test run ends when its window reloads, and
-  runs with workspace trust off, so a real reload and the untrusted case were checked by
-  hand (Decision 816). It is downloaded,
-  or `TROUPE_VSCODE_EXECUTABLE` names one, and runs with its own user data and extensions
-  directories under `.vscode-test/`, so nobody's own profile is read or changed. On Linux
-  without a display, run it under `xvfb-run -a`.
+- `pnpm test`: unit tests for everything above that needs no VS Code: the folder choice,
+  the search for `troupe` (the extensionless file included), the line each command types
+  and the path "Ask Troupe" writes, the Settings view's rows and its Models group (never a
+  key), opening with the folder, and the manifest (no Windows key on Ctrl+Alt, every icon
+  in the package). The line is also put through each shell the machine has (sh, bash,
+  zsh, dash, fish, Windows PowerShell, PowerShell 7, cmd.exe), with a folder name full of
+  quotes, `$`, `&` and backticks and a task with double quotes, a line break, `%PATH%` and
+  backslashes, and has to arrive as the arguments it was meant to be; so does the call a
+  `.cmd` gets through cmd.exe for the Settings view.
+- `pnpm test:vscode`: the extension inside a real VS Code, on a workspace of four folders,
+  against a fake `troupe` that writes down how it was started, then waits, quits or fails
+  as told, and answers `config --explain --json` and `models --json` with its own: every
+  way of opening Troupe, the side bar, the four commands, "Ask Troupe", the profile, and
+  `troupe.openOnFolderOpen` in two more windows on one folder. A run ends when its window
+  reloads and runs with workspace trust off, so a real reload and the untrusted case were
+  checked by hand (Decision 816). VS Code is downloaded, or `TROUPE_VSCODE_EXECUTABLE`
+  names one, and runs with its own user data and extensions under `.vscode-test/`, so
+  nobody's profile is read or changed. On Linux without a display, run it under
+  `xvfb-run -a`.
 - CI runs both on Linux and Windows, and macOS in a full run, then builds the `.vsix`
   ([ci.md](../developer/ci.md)).

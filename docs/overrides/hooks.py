@@ -27,8 +27,17 @@ page, and the index, newest first, where a log's README has `<!-- decisions:inde
 The index is made here, as the site is built, and is not a file in the repository: a
 committed index would be the one file every pull request that decides something changes,
 which is the conflict one file per decision is for.
+
+The description. Every page has one, for search engines and for the card a shared link
+shows: the `description` in its front matter if it has one, a decision's `gist`, or else
+its first paragraph of prose as plain text, cut to about a sentence. The theme writes it as
+`<meta name="description">`, and `main.html` as the Open Graph and Twitter tags. Taken from
+the page, it needs no second copy of what the page says first. `site_url` gives each page
+its canonical URL, which the theme writes and `main.html` repeats as `og:url`, and has
+MkDocs write `sitemap.xml`.
 """
 
+import html
 import logging
 import posixpath
 import re
@@ -87,8 +96,91 @@ def on_files(files, *, config):
 def on_page_markdown(markdown, *, page, config, files):
     src = page.file.src_uri
     here = src if src in _state["mirrored"] else f"{_state['docs']}/{src}"
+    given = page.meta.get("description") or page.meta.get("gist")
+    found = _plain(str(given)) if given else description(markdown)
+    # The theme writes the description into an attribute unescaped.
+    page.meta["description"] = html.escape(found or config.site_description or "", quote=True)
     markdown = decision_page(markdown, src, page.meta, _state["decisions"])
     return rewrite(markdown, lambda target: _site_target(target, here, src, files))
+
+
+_LONGEST = 200
+
+
+def description(markdown):
+    """The first paragraph of prose in `markdown` as plain text, or None if it has none.
+
+    A heading, list, table, quote, admonition, image, HTML or code is not prose. Links keep
+    their text, code spans their content; a paragraph longer than `_LONGEST` characters is
+    cut after its last full sentence that fits, or else at a clause or a word, with an
+    ellipsis.
+    """
+    text = ""
+    for block in _blocks(markdown):
+        if not _NOT_PROSE.match(block[0]):
+            text = _plain(" ".join(block))
+            if text:
+                break
+    if not text:
+        return None
+    if len(text) <= _LONGEST:
+        return text
+
+    cut = text[:_LONGEST]
+    sentence = cut.rfind(". ")
+    if sentence >= _LONGEST // 3:
+        return cut[: sentence + 1]
+    clause = max(cut.rfind(": "), cut.rfind("; "))
+    if clause >= _LONGEST // 3:
+        return cut[:clause] + "…"
+    return cut[: cut.rfind(" ")].rstrip(",;:") + "…"
+
+
+_NOT_PROSE = re.compile(r"\s|#|\||!|<|>|[-*+]\s|\d+[.)]\s|\[!\[|\[\^|\[[^\]]+\]:")
+
+
+def _blocks(markdown):
+    """The blocks of `markdown` outside fenced code, each a list of its lines."""
+    block, fence = [], None
+    for line in markdown.split("\n"):
+        marker = _FENCE.match(line)
+        if fence is not None:
+            if marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence):
+                fence = None
+        elif marker:
+            fence = marker.group(1)
+            if block:
+                yield block
+            block = []
+        elif line.strip():
+            block.append(line)
+        elif block:
+            yield block
+            block = []
+    if block:
+        yield block
+
+
+def _plain(text):
+    # A code span is kept as it is written, `<app>` and `*` included.
+    spans = []
+
+    def keep(match):
+        spans.append(match.group(2))
+        return f"\x00{len(spans) - 1}\x00"
+
+    text = re.sub(r"(`+)(.+?)\1", keep, text)
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\[[^\]]*\]", r"\1", text)
+    text = re.sub(r"<(https?://[^>]+)>", r"\1", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"\1", text)
+    text = re.sub(r"\x00(\d+)\x00", lambda match: spans[int(match.group(1))], text)
+    text = re.sub(r"\s+", " ", text).strip()
+    # A paragraph that leads into a list says so with a colon, which ends nothing here.
+    return text[:-1].rstrip() + "." if text.endswith(":") else text
 
 
 def _decisions(files):
