@@ -13,6 +13,7 @@ import type { JSX } from "react";
 import type { AdminSessionRow, SessionErasePreview, SessionErased, SessionGitHub } from "@troupe/client";
 import { recorded, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Loaded, Preview, Status, bytes, count, when } from "./bits";
+import { RemoteSessions } from "./Remote";
 import type { StatusKind } from "./bits";
 
 const PAGE = 25;
@@ -51,6 +52,7 @@ export function Sessions({ query: initial = "" }: { query?: string } = {}): JSX.
         Who owns each session, where it runs, what state it is in and what it holds. Metadata only: no administrative role can read what a session
         said.
       </p>
+      <RemoteSessions />
       {done && (
         <>
           <AuditNote action="session.erase" subject={done.id} detail={done.detail} />

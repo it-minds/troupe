@@ -30,6 +30,7 @@ import { TriggerPage, Triggers } from "./Triggers";
 import { Organisation } from "./Organisation";
 import { Overview } from "./Overview";
 import { RunPage, Runs } from "./Runs";
+import { RemoteSession } from "./Remote";
 import { Sessions } from "./Sessions";
 import { Team } from "./Team";
 import { Teams } from "./Teams";
@@ -149,6 +150,8 @@ function Screen({ route }: { route: Route }): JSX.Element {
   if (route.page === "teams" && route.team) return <Team name={route.team} tab={route.tab ?? "members"} />;
   if (route.page === "teams") return <Teams />;
   if (route.page === "overview") return <Overview />;
+  // A laptop's session offered to this person, steered from here (Decision 921).
+  if (route.page === "sessions" && first === "remote" && second) return <RemoteSession id={second} key={second} />;
   if (route.page === "sessions") return <Sessions query={first ?? ""} key={first ?? ""} />;
   if (route.page === "runs" && first) return <RunPage id={first} key={first} />;
   if (route.page === "runs") return <Runs />;

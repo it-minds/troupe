@@ -13,8 +13,57 @@
 import type { PlaneClient, SessionRow, SessionsFilter } from "./plane.js";
 import type { Unseen } from "./types.js";
 
-/** Where a session runs, which is the one thing a person must be able to see at a glance. */
-export type SessionKind = "team" | "local" | "private";
+/**
+ * Where a session runs, which is the one thing a person must be able to see at a glance.
+ * `remote` is a session on somebody's laptop, theirs or another person's, offered to the
+ * plane for steering from another device (troupe #58, Decision 921).
+ */
+export type SessionKind = "team" | "local" | "private" | "remote";
+
+/**
+ * Whether a session of this kind runs on this computer, reached through its daemon: a
+ * local or a private one. A team session is on a pod and a remote one on somebody's
+ * laptop, both reached through the plane.
+ */
+export function onThisComputer(kind: SessionKind | null | undefined): boolean {
+  return kind === "local" || kind === "private";
+}
+
+/** A person a laptop's session is shared with, or steered by, through the plane. */
+export interface RemotePerson {
+  subject: string;
+  display_name?: string | null;
+  email?: string | null;
+  role: string;
+}
+
+/**
+ * A session offered to the plane for steering from another device: on this computer's
+ * own row, what the daemon says of the offer; on a `remote` row, what the plane says of
+ * the laptop. `state` is `online`, `connecting` or `offline`, and `since` when it went.
+ */
+export interface RemoteOffer {
+  state: string;
+  since: string | null;
+  owner: string | null;
+  ownerName?: string | null;
+  shares: RemotePerson[];
+  steering: RemotePerson[];
+}
+
+/** The daemon's or the plane's word on an offer, or null where it says none. */
+export function remoteOffer(value: unknown): RemoteOffer | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  return {
+    state: typeof v["state"] === "string" ? v["state"] : "offline",
+    since: typeof v["since"] === "string" ? v["since"] : null,
+    owner: typeof v["owner"] === "string" ? v["owner"] : null,
+    ownerName: typeof v["owner_name"] === "string" ? v["owner_name"] : null,
+    shares: Array.isArray(v["shares"]) ? (v["shares"] as RemotePerson[]) : [],
+    steering: Array.isArray(v["steering"]) ? (v["steering"] as RemotePerson[]) : [],
+  };
+}
 
 /**
  * How a private session's sealing stands, as the daemon's `session.list` says it (troupe
@@ -97,6 +146,11 @@ export interface FleetRow {
    * plane holds no content (Decision 750). An older daemon or plane says nothing.
    */
   failed?: { reason: string; detail: string | null } | null;
+  /**
+   * Offered to the plane for steering from another device: this computer's own session
+   * (what the daemon says of it) or a `remote` row (what the plane says of its laptop).
+   */
+  remote?: RemoteOffer | null;
   /** The source's own row, for anything a view needs that this shape does not carry. */
   raw: unknown;
 }
@@ -162,6 +216,66 @@ export class PlaneSource implements FleetSource {
     const token = await this.token();
     const { sessions } = await this.plane.listSessions(token, this.filter);
     return sessions.map((s) => rowFromPlane(s, this.id));
+  }
+}
+
+/** A row of the plane's `remote.list`: a laptop's session offered for steering. */
+export function rowFromRemote(row: Record<string, unknown>, source = "remote"): FleetRow {
+  const state = typeof row["state"] === "string" ? row["state"] : "offline";
+  return {
+    id: String(row["id"]),
+    kind: "remote",
+    source,
+    title: typeof row["workspace"] === "string" ? row["workspace"] : null,
+    profile: null,
+    owner: typeof row["owner"] === "string" ? row["owner"] : null,
+    // Online is a laptop the plane can reach now; offline is said with since when.
+    state: state === "online" ? "active" : "offline",
+    status: null,
+    doneReason: null,
+    pendingApprovals: 0,
+    pendingQuestions: 0,
+    costMicros: null,
+    lastActiveAt: typeof row["offered_at"] === "string" ? row["offered_at"] : null,
+    pinned: false,
+    yourRole: typeof row["your_role"] === "string" ? row["your_role"] : null,
+    origin: null,
+    reviewedBy: null,
+    sync: null,
+    remote: remoteOffer({
+      state,
+      since: row["offline_since"],
+      owner: row["owner"],
+      owner_name: row["owner_name"],
+      shares: row["shares"] ?? [],
+    }),
+    raw: row,
+  };
+}
+
+/**
+ * The laptop sessions the plane relays, as a source: the person's own from their other
+ * computers, and those people shared with them. Polled, as the plane's own list is.
+ */
+export class RemoteSource implements FleetSource {
+  readonly id = "remote";
+  readonly kind = "remote" as const;
+
+  constructor(
+    private readonly plane: PlaneClient,
+    private readonly token: () => Promise<string>,
+  ) {}
+
+  async list(): Promise<FleetRow[]> {
+    const token = await this.token();
+    try {
+      const { sessions } = await this.plane.rpc<{ sessions: Record<string, unknown>[] }>(token, "remote.list", {});
+      return (sessions ?? []).map((s) => rowFromRemote(s, this.id));
+    } catch (e) {
+      // A plane from before #58 relays nothing, which is no sessions rather than a fault.
+      if ((e as { code?: unknown }).code === -32601) return [];
+      throw e;
+    }
   }
 }
 
@@ -286,8 +400,11 @@ export class FleetStore {
     // A private session is one session with two rows — the plane's and the daemon's.
     // The daemon's copy wins on everything the daemon actually knows, because it is the
     // one running the agent; the plane's contributes the fact that it exists elsewhere.
+    //
+    // A session this computer offered is also on the plane's list of relayed ones; this
+    // computer's own row comes after it and wins, since here it is not remote at all.
     const merged = new Map<string, FleetRow>();
-    for (const kind of ["team", "local", "private"] as const) {
+    for (const kind of ["team", "remote", "local", "private"] as const) {
       for (const source of this.sources.filter((s) => s.kind === kind)) {
         for (const row of this.bySource.get(source.id) ?? []) {
           const existing = merged.get(row.id);

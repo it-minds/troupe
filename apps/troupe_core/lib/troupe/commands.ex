@@ -345,6 +345,21 @@ defmodule Troupe.Commands do
             "shows loop 2/10 and /loop stop stops it. Needs a goal.",
         example: "/loop 10"
       ),
+      entry("remote", "session", "Offer this session to the plane, to steer it from another device",
+        usage: "/remote [on [PERSON[:observe] ...] | off]",
+        args: [arg("verb", false, "text"), arg("people", false, "text")],
+        availability: "local",
+        detail:
+          "Offers the session to the plane you are signed in to: you can then follow and " <>
+            "steer it from the desktop app or the console on another device, and so can " <>
+            "each person named, by email, who may steer it, or only follow it with " <>
+            ":observe. This computer keeps one connection to the plane while it is offered " <>
+            "and nothing listens here; your rules and approvals hold for every prompt. " <>
+            "/remote off withdraws it and ends every remote view at once; /remote alone " <>
+            "says whether it is offered and who is steering. A private session is never " <>
+            "offered.",
+        example: "/remote on bea@example.com cy@example.com:observe"
+      ),
       entry("sessions", "navigate", "This directory's sessions, newest first",
         aliases: ["resume"],
         usage: "/sessions [n | id]",

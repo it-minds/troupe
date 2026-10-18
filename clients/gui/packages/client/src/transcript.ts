@@ -36,7 +36,16 @@ export interface QuestionOption {
 
 export type Entry =
   /** Something a person (or watch mode) said. `author` is the subject where there is one. */
-  | { kind: "user"; seq: number; agent: string[]; text: string; author: string | undefined; source: string }
+  | {
+      kind: "user";
+      seq: number;
+      agent: string[];
+      text: string;
+      author: string | undefined;
+      source: string;
+      /** `plane` for a person who sent it from another device, through the plane (troupe Decision 921). */
+      via?: string;
+    }
   /** What the model answered. Empty answers (a pure tool call) produce no entry. */
   | { kind: "assistant"; seq: number; agent: string[]; text: string; model: string | undefined; costMicros: number | undefined }
   | {
@@ -869,7 +878,14 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
           ...state.entries,
           handed
             ? briefOf(handed, base.seq)
-            : { kind: "user", ...base, text, author: d.actor.subject, source: str(d.data["source"], "user") },
+            : {
+                kind: "user",
+                ...base,
+                text,
+                author: d.actor.subject,
+                source: str(d.data["source"], "user"),
+                ...(typeof d.actor["via"] === "string" ? { via: d.actor["via"] } : {}),
+              },
         ],
       };
     }

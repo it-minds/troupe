@@ -16,6 +16,7 @@ import {
   configKey,
   isBusy,
   needsYou,
+  onThisComputer,
   openApprovals,
   openQuestions,
   rootState,
@@ -55,6 +56,7 @@ import { MemoryPane } from "./Memory";
 import type { MemoryAsk } from "./Memory";
 import { OfferLine, OfferPanel } from "./Offer";
 import { StartLine, StartPanel } from "./Onboard";
+import { RemoteLine, RemoteOfferControl } from "./Remote";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
 
 /**
@@ -116,9 +118,13 @@ export function Session({
   // The scratchpad document open beside the conversation, by name; null while it is closed.
   const [scratch, setScratch] = useState<string | null>(null);
   useEffect(() => setScratch(null), [sessionId]);
-  const self = (kind === "team" ? auth?.me?.subject : (machineUser ?? auth?.me?.subject)) ?? undefined;
+  // On this computer, through its daemon; a team session and a laptop's relayed one are
+  // reached through the plane, and the person is who the plane says.
+  const here = onThisComputer(kind);
+  const self = (!here ? auth?.me?.subject : (machineUser ?? auth?.me?.subject)) ?? undefined;
 
-  const readOnly = row?.state === "read_only" || row?.yourRole === "viewer";
+  // A relayed session shared to observe is read here as a viewer's is (Decision 921).
+  const readOnly = row?.state === "read_only" || row?.yourRole === "viewer" || row?.yourRole === "observe";
   const dormant = row?.state === "dormant";
   const open = openApprovals(view.state);
   // Everyone else here, by name: who could answer an approval first, and who reads
@@ -130,12 +136,12 @@ export function Session({
   const [away, seenAway] = useAway(sessionId, row);
   // Onboarding, then the brief, as the session's start found them due (Decision 835), and
   // the librarian for a session started here; what they came to is said in the transcript.
-  const start = useStartQuestions(daemon, sessionId, view.state.onboarding, { local: kind !== "team", canAnswer: !readOnly, startedIn });
+  const start = useStartQuestions(daemon, sessionId, view.state.onboarding, { local: here, canAnswer: !readOnly, startedIn });
   const notes = useStartNotes(daemon, sessionId, start.state?.said, view.state.lastSeq);
   // Where a session on this computer works: what the start screen was told, what the list
   // says, or what the start's event named; the memory pane asks about its repository.
   const workspace =
-    kind === "team" ? undefined : (startedIn ?? (row?.raw as { workspace?: string } | undefined)?.workspace ?? view.state.onboarding?.workspace);
+    !here ? undefined : (startedIn ?? (row?.raw as { workspace?: string } | undefined)?.workspace ?? view.state.onboarding?.workspace);
   // The palette's agent rows carry their facts from the daemon's `agents.list` for this
   // workspace (troupe #565); a session on the platform has its commands.list alone.
   const agentRows = useMemo(() => (daemon && workspace ? () => daemon.listAgents(workspace).then((r) => r.agents) : undefined), [daemon, workspace]);
@@ -162,7 +168,7 @@ export function Session({
       {palette && (
         <CommandPalette
           view={view}
-          local={kind !== "team"}
+          local={here}
           onClose={() => setPalette(false)}
           actions={{
             go: (screen) => (screen === "sessions" ? onBack() : onGo?.(screen)),
@@ -177,7 +183,7 @@ export function Session({
             },
             transcript: () => transcriptText(view.state),
             detail: detail.command,
-            ...(kind !== "team" && onAgents ? { agents: () => onAgents() } : {}),
+            ...(here && onAgents ? { agents: () => onAgents() } : {}),
             ...(agentRows ? { agentRows } : {}),
           }}
         />
@@ -205,13 +211,20 @@ export function Session({
             auth={auth}
             daemon={daemon}
             kind={kind}
-            workspace={kind !== "team" ? (workspaceOf(row) ?? workspace ?? null) : null}
+            workspace={here ? (workspaceOf(row) ?? workspace ?? null) : null}
             planeProfile={kind === "team" ? (row?.profile ?? null) : null}
             current={agentOf(view.state, row)}
             canChange={!readOnly}
-            onAbout={kind !== "team" ? onAgents : undefined}
+            onAbout={here ? onAgents : undefined}
             onStarted={onStarted}
           />
+        }
+        remote={
+          row && daemon && auth && row.kind === "local" ? (
+            <RemoteOfferControl daemon={daemon} row={row} />
+          ) : row?.kind === "remote" ? (
+            <RemoteLine row={row} />
+          ) : null
         }
       />
 
@@ -242,7 +255,7 @@ export function Session({
               canAnswer={!readOnly}
               others={others}
               onAnswer={(d, a) => view.respond(entry.callId, d, a)}
-              onDefinition={kind !== "team" ? onAgents : undefined}
+              onDefinition={here ? onAgents : undefined}
             />
           ))}
 
@@ -284,7 +297,7 @@ export function Session({
             pane={pane}
             onPane={setPane}
             memory={
-              daemon && kind !== "team"
+              daemon && here
                 ? {
                     daemon,
                     workspace,
@@ -418,7 +431,7 @@ function transcriptText(state: TranscriptState): string {
  * names the plane's profile, which is not an agent, so it is not shown as one.
  */
 function agentOf(state: TranscriptState, row: FleetRow | undefined): string | null {
-  return state.profile ?? (row && row.kind !== "team" ? row.profile : null) ?? null;
+  return state.profile ?? (row && onThisComputer(row.kind) ? row.profile : null) ?? null;
 }
 
 /** Where a session on this computer works, as its row says. */
@@ -440,6 +453,7 @@ function Header({
   canChange,
   view,
   agent,
+  remote,
 }: {
   row: FleetRow | undefined;
   sessionId: string;
@@ -456,6 +470,8 @@ function Header({
   view: SessionHandle;
   /** The agent it runs, and the switch (`AgentSwitch`). */
   agent: JSX.Element;
+  /** Steering from another device: this computer's offer, or whose laptop a relayed one is on. */
+  remote?: JSX.Element | null;
 }): JSX.Element {
   const working = rootState(state);
   const here = state.presence.filter((p) => p.subject);
@@ -491,7 +507,9 @@ function Header({
               <span className="sep" aria-hidden="true">
                 ·
               </span>
-              <span>you are {role === "owner" ? "the owner" : role === "collaborator" ? "a collaborator" : "a reader"}</span>
+              <span>
+                you are {role === "owner" ? "the owner" : role === "collaborator" || role === "control" ? "a collaborator" : "a reader"}
+              </span>
             </>
           )}
         </div>
@@ -519,6 +537,8 @@ function Header({
         )}
 
         <LoopStatus loop={loop} canStop={canChange} onStop={view.stopLoop} />
+
+        {remote}
 
         {/* The agent this window runs, and the switch to another from the next turn. */}
         {agent}
@@ -804,6 +824,7 @@ const StreamEntry = memo(function StreamEntry({
             </span>
             <span className="name">{name}</span>
             {entry.source !== "user" && <span className="micro muted">via {entry.source}</span>}
+            {entry.via === "plane" && <span className="micro muted">from another device</span>}
           </div>
           <div className="body">{entry.text}</div>
         </article>
@@ -1156,7 +1177,7 @@ function Backstage({
         </section>
       )}
 
-      {daemon && row && row.kind !== "team" && <LocalControls daemon={daemon} row={row} session={view.view} />}
+      {daemon && row && onThisComputer(row.kind) && <LocalControls daemon={daemon} row={row} session={view.view} />}
 
       <section>
         <h3>This session</h3>
@@ -1172,7 +1193,7 @@ function Backstage({
           <dt>Owner</dt>
           {/* A session on this computer with no owner on record is this computer's user's,
               which is the person looking at it. */}
-          <dd>{row?.owner === self || (row && row.kind !== "team" && !row.owner) ? "you" : (row?.owner ?? "—")}</dd>
+          <dd>{row?.owner === self || (row && onThisComputer(row.kind) && !row.owner) ? "you" : (row?.owner ?? "—")}</dd>
           <dt>Configuration</dt>
           <dd>bundle {view.state.bundleVersion ?? "—"}</dd>
         </dl>
