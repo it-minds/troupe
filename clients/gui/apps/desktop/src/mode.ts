@@ -42,3 +42,18 @@ export function storedLocalOnly(): boolean {
 export function chooseLocalOnly(on: boolean): void {
   prefs.set(KEY, on ? "yes" : "no");
 }
+
+/**
+ * The one way to a plane: the `fetch` every `AuthSession` this app makes is given
+ * (`newSession`), and so every request to a plane, its identity provider or its sign-in.
+ *
+ * Shut while *Local only* is on, and asked at each request rather than when a screen
+ * next renders: the switch writes the setting before anything else happens, so a call
+ * that was already on its way when it went — the second half of a version check, a
+ * poll that comes due, a token renewed for a timer set while signed in — is refused
+ * instead of sent. A refusal is not the provider's, so the stored sign-in stays.
+ */
+export function throughTheGate(send: typeof fetch): typeof fetch {
+  return (input, init) =>
+    storedLocalOnly() ? Promise.reject(new Error("local only: this app does not contact a plane")) : send.call(globalThis, input, init);
+}
