@@ -104,8 +104,9 @@ defmodule Troupe.PodSettingsTest do
     end
 
     test "says a session running nowhere has nothing in force" do
+      # The daemon's link answers its error in words, code first.
       io = %{
-        daemon: fn _ -> {:error, %{message: "not_found"}} end,
+        daemon: fn _ -> {:error, "not_found: the session is not running here"} end,
         pod: fn _, _ -> {:error, :no_plane} end
       }
 

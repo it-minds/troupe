@@ -69,7 +69,10 @@ defmodule Troupe.CLI.SessionConfig do
   defp shown(_answer, _json?),
     do: {"the daemon or pod running this session is too old to explain its configuration\n", 1}
 
+  # A worker connection answers the error; the daemon's link, its words, code first.
   defp not_here?(%{message: message}) when message in ["not_found", "forbidden"], do: true
+  defp not_here?("not_found" <> _reason), do: true
+  defp not_here?("forbidden" <> _reason), do: true
   defp not_here?(%{"message" => message}), do: not_here?(%{message: message})
   defp not_here?(reason) when reason in [:no_plane, :logged_out, :not_found], do: true
   defp not_here?(_reason), do: false
