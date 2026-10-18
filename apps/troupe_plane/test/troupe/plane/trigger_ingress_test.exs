@@ -206,21 +206,50 @@ defmodule Troupe.Plane.TriggerIngressTest do
         assert {:ok, %{status: 401}} = fire(context, trigger, "twk_anything", %{})
       end
 
-      # A webhook keyed once, then made a schedule: the key it still carries opens nothing.
+      # A webhook keyed once, then made a schedule: its key goes, and opened nothing anyway.
       trigger = trigger!(context, %{"name" => "triage"})
       {:ok, key} = Admin.trigger_key_rotate(context.actor, "engineering", "triage")
       assert {:ok, %{status: 202}} = fire(context, trigger, key.key, %{}, "before")
 
-      {:ok, _} =
+      {:ok, scheduled} =
         Triggers.put(
           context.team,
           %{"name" => "triage", "source" => %{"kind" => "schedule", "cron" => "0 3 * * *"}},
           "root@example.test"
         )
 
+      refute scheduled.key_hash
+      refute Triggers.get(context.team, "triage").key_hash
+      refute Triggers.trigger_json(scheduled)["has_key"]
       assert {:ok, %{status: 401}} = fire(context, trigger, key.key, %{}, "after")
       assert {:error, _refused} = Admin.trigger_key_rotate(context.actor, "engineering", "triage")
       assert length(Triggers.runs(context.team)) == 1
+
+      # Made a webhook again, it has no key until a rotation gives it a new one.
+      {:ok, webhook} =
+        Triggers.put(
+          context.team,
+          %{"name" => "triage", "source" => %{"kind" => "webhook", "provider" => "generic"}},
+          "root@example.test"
+        )
+
+      refute Triggers.trigger_json(webhook)["has_key"]
+      assert {:ok, %{status: 401}} = fire(context, trigger, key.key, %{}, "again")
+    end
+
+    test "a key a trigger kept from before it took none is no key in its listing", context do
+      trigger!(context, %{"name" => "kept"})
+      {:ok, _key} = Admin.trigger_key_rotate(context.actor, "engineering", "kept")
+
+      # As a row from before the plane dropped a key on a change of source is.
+      {:ok, kept} =
+        context.team
+        |> Triggers.get("kept")
+        |> Triggers.Trigger.changeset(%{"source" => %{"kind" => "manual"}})
+        |> Troupe.Plane.Repo.update()
+
+      assert is_binary(kept.key_hash)
+      refute Triggers.trigger_json(kept)["has_key"]
     end
 
     test "is refused when it is absent altogether", context do

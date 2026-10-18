@@ -10,7 +10,7 @@ defmodule Troupe.Plane.BundlesTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Bundles, Fleet, Harness, Identity, Provision, Sessions}
+  alias Troupe.Plane.{Bundles, FakePod, Fleet, Harness, Identity, Provision, Sessions}
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.Fleet.Bundle
 
@@ -20,7 +20,7 @@ defmodule Troupe.Plane.BundlesTest do
     start_supervised!({Registry, keys: :duplicate, name: Troupe.Plane.Control.Registry})
     start_supervised!(Connections)
     start_supervised!(Troupe.Plane.Singleton)
-    start_supervised!({Listener, port: 0, verify: &verify/1})
+    start_supervised!({Listener, port: 0, verify: &FakePod.verify/1})
 
     {:ok, _} = Fleet.put_profile(%{name: "dev", config_bundle_channel: "stable", replicas: 1})
     {:ok, _} = Fleet.put_profile(%{name: "ux", config_bundle_channel: "beta", replicas: 1})
@@ -660,7 +660,7 @@ defmodule Troupe.Plane.BundlesTest do
         "id" => 0,
         "method" => "enrol",
         "params" => %{
-          "token" => token,
+          "token" => FakePod.token(token),
           "pod_name" => pod_name,
           "capacity" => 4,
           "disk_total_bytes" => 1_000_000
@@ -721,16 +721,4 @@ defmodule Troupe.Plane.BundlesTest do
       ?\n
     ])
   end
-
-  defp verify("dev-token") do
-    {:ok,
-     %{profile: "dev", namespace: "troupe-w-dev", pod_name: nil, service_account: "troupe-worker"}}
-  end
-
-  defp verify("ux-token") do
-    {:ok,
-     %{profile: "ux", namespace: "troupe-w-ux", pod_name: nil, service_account: "troupe-worker"}}
-  end
-
-  defp verify(_token), do: {:error, :unauthenticated}
 end
