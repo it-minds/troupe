@@ -31,6 +31,10 @@ defmodule Troupe.Gateway.FakePlane do
   document a daemon fetches after it (Decision 869), unanswered unless
   `client_defaults_with/2` says what it is.
 
+  And a signing key of its own where `sign/1` gives it one (#657): served at
+  `/.well-known/troupe-signing-key`, and `me.client_defaults` signed with it as the plane
+  signs it. `sign/1` again is a rotation.
+
   It takes one plane token at a time, `"plane-token"` unless told otherwise, and
   `renew/2` replaces it, as a plane token running out and a client renewing it does: the
   old one is refused from then on (issue #365).
@@ -39,6 +43,7 @@ defmodule Troupe.Gateway.FakePlane do
   use Agent
 
   alias Troupe.ObjectStore
+  alias Troupe.Protocol.PlaneSignature
 
   @spec start_link(keyword()) :: Agent.on_start()
   def start_link(opts \\ []) do
@@ -91,6 +96,25 @@ defmodule Troupe.Gateway.FakePlane do
   """
   @spec client_defaults_with(pid(), map()) :: :ok
   def client_defaults_with(state, answer), do: Agent.update(state, &Map.put(&1, :client_defaults, answer))
+
+  @doc """
+  Sign from now on with a key of the plane's own, a new one each time (a rotation), as
+  `Troupe.Protocol.PlaneSignature` lays it out. Answers its fingerprint.
+  """
+  @spec sign(pid()) :: String.t()
+  def sign(state) do
+    {public, secret} = :crypto.generate_key(:eddsa, :ed25519)
+    Agent.update(state, &Map.put(&1, :signing, %{public: public, secret: secret}))
+    PlaneSignature.fingerprint(public)
+  end
+
+  @doc false
+  def signing_key(state) do
+    case Agent.get(state, &Map.get(&1, :signing)) do
+      nil -> nil
+      %{public: public} -> PlaneSignature.key_json(public)
+    end
+  end
 
   @doc "Take `token` from now on, and refuse the one taken before."
   @spec renew(pid(), String.t()) :: :ok
@@ -346,7 +370,7 @@ defmodule Troupe.Gateway.FakePlane do
   defp dispatch(state, "me.client_defaults", _params) do
     case Agent.get(state, &Map.get(&1, :client_defaults)) do
       nil -> {:rpc_error, -32_601, "method_not_found", %{"method" => "me.client_defaults"}}
-      answer -> {:ok, answer}
+      answer -> {:ok, signed(state, "client_defaults", answer)}
     end
   end
 
@@ -354,6 +378,19 @@ defmodule Troupe.Gateway.FakePlane do
 
   # The device is recorded once every version is gone, and told again otherwise, as the
   # plane's is (Decision 804); this one deletes within the call.
+  defp signed(state, kind, answer) do
+    case Agent.get(state, &Map.get(&1, :signing)) do
+      nil ->
+        answer
+
+      %{public: public, secret: secret} ->
+        document = PlaneSignature.document(kind, answer)
+        signature = :crypto.sign(:eddsa, :none, document, [secret, :ed25519])
+        envelope = PlaneSignature.envelope(document, signature, PlaneSignature.fingerprint(public))
+        Map.put(answer, "signed", envelope)
+    end
+  end
+
   defp delete_objects(state, id, device) do
     case ObjectStore.delete_prefix(ObjectStore.from_env(), "sessions/#{id}/") do
       {:ok, deleted} ->
@@ -435,6 +472,13 @@ defmodule Troupe.Gateway.FakePlane do
         answer(conn, request, FakePlane.call(opts[:state], request["method"], request["params"]))
       else
         send_resp(conn, 401, "")
+      end
+    end
+
+    def call(%{request_path: "/.well-known/troupe-signing-key"} = conn, opts) do
+      case FakePlane.signing_key(opts[:state]) do
+        nil -> send_resp(conn, 404, "")
+        key -> json(conn, key)
       end
     end
 

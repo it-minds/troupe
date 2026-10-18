@@ -17,22 +17,20 @@ defmodule Troupe.Plane.ClientVersions do
   administrator sets something, so a plane with no row holds no policy for that component
   and refuses nobody.
 
-  ## Why the policy carries no signature of its own
+  ## Signed, and where releases come from
 
-  It travels on the plane's authenticated connection, to a client that already chose to
-  trust this plane with its sign-in, and it can only narrow what a client does: refuse to
-  serve it, or name a version for `troupe update` to install, which is still installed only
-  if the release key signed it. A plane, or whoever holds its database, can hold a fleet
-  back or tell it to move; it cannot make a client run anything the release key did not
-  sign. A signed channel document (#66) is what lets the policy outlive the connection —
-  cached, checked offline, pinned to the plane that signed it — and is later work.
+  `me.client_versions` answers the policy signed by the plane's own key
+  (`Troupe.Plane.Signing`), which a client pinned at sign-in, so a policy served by a
+  mirror or carried to a closed network is still the plane's word. With it is where
+  releases are to be had (`release_url/0`). Either way a plane can hold a fleet back or
+  tell it to move; it cannot make a client run anything the release key did not sign.
   """
 
   use Ecto.Schema
 
   import Ecto.Changeset
 
-  alias Troupe.Plane.Repo
+  alias Troupe.Plane.{Repo, Settings}
   alias Troupe.Protocol.ClientUpdate
 
   require Logger
@@ -83,6 +81,28 @@ defmodule Troupe.Plane.ClientVersions do
       nil -> %{recommended: nil, minimum: nil, blocked: []}
       row -> Map.take(row, [:recommended, :minimum, :blocked])
     end
+  end
+
+  @doc """
+  Where people's machines download releases from: the `client_release_url` setting, each
+  release at `<url>/v<version>/`, or `nil` for GitHub's.
+  """
+  @spec release_url() :: String.t() | nil
+  def release_url do
+    case Settings.get("client_release_url") do
+      url when is_binary(url) and url != "" -> String.trim_trailing(url, "/")
+      _none -> nil
+    end
+  end
+
+  @doc """
+  Whether this plane serves `version` to some kind of client: what its `/downloads` hands
+  out. A version every component blocks, or that is below every component's minimum, is
+  served to nobody, and so its files are not either.
+  """
+  @spec served?(String.t()) :: boolean()
+  def served?(version) do
+    Enum.any?(components(), &match?({:ok, _}, ClientUpdate.judge(policy(&1), version)))
   end
 
   @doc """

@@ -341,7 +341,7 @@ describe("a trigger on a GitHub repository", () => {
     type(await waitFor(() => field("Repository"), "the GitHub fields"), "example-org/widgets");
     type(field("Sweep")!, "0 */6 * * *");
     await waitFor(() => says("A sweep looks for the label, or for what a query finds: give one."), "a sweep with nothing to look for");
-    expect(button("Preview")!.disabled).toBe(true);
+    await waitFor(() => button("Preview")!.disabled, "Preview held back");
     type(await waitFor(() => field("Sweep looks for"), "the query field"), "repo:other/thing label:bug");
     await waitFor(() => says("The plane adds the repository and is:issue is:open itself."), "a query naming a repository");
     type(field("Sweep looks for")!, "label:bug no:assignee");

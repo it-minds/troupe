@@ -27,7 +27,8 @@ defmodule Troupe.Config.Org do
 
   alias Troupe.Config
   alias Troupe.Config.{Explain, Issue, Layers, Schema}
-  alias Troupe.Protocol.Organisation
+  alias Troupe.PlaneKeys
+  alias Troupe.Protocol.{Organisation, PlaneSignature}
 
   @cache_version 1
 
@@ -41,6 +42,14 @@ defmodule Troupe.Config.Org do
   @spec cache_path() :: Path.t()
   def cache_path,
     do: override(:cache_path) || Path.join(Troupe.Paths.state_dir(), "organisation.json")
+
+  @doc """
+  Where this machine keeps the key each plane signs with (`Troupe.PlaneKeys`):
+  `<state>/plane-keys.json`, beside the copy of the document that key signed.
+  """
+  @spec keys_path() :: Path.t()
+  def keys_path,
+    do: override(:keys_path) || Path.join(Troupe.Paths.state_dir(), "plane-keys.json")
 
   # A test run is one with Mix running and in its `test` environment. A release has no
   # Mix, so the application environment, which `ERL_FLAGS` could set, moves nothing there;
@@ -88,10 +97,22 @@ defmodule Troupe.Config.Org do
 
   @doc """
   The cached copy of a plane's document, as saved: `version`, `plane_url`,
-  `fetched_at`, `defaults` and `enforced`. `:absent` where there is none.
+  `fetched_at`, `defaults` and `enforced`, and `signed`, the plane's signature over it,
+  where the plane signed it (#657). `:absent` where there is none.
+
+  A signed copy is checked against the key this machine pinned for its plane
+  (`Troupe.PlaneKeys`): one that does not match the signature, or whose sections are not
+  what was signed, was changed on this machine, and is refused; so is an unsigned copy of a
+  plane whose key is pinned. A copy past its `expires_at` still holds, its limits and its
+  defaults, and says so (`expired`): the plane's word does not lapse because a laptop is
+  offline, and a fresh one replaces it at the next sign-in.
   """
   @spec read_cache(Path.t()) :: :absent | {:ok, map()} | {:error, String.t()}
   def read_cache(path \\ cache_path()) do
+    with {:ok, cached} <- read_copy(path), do: signed_copy(cached)
+  end
+
+  defp read_copy(path) do
     case File.read(path) do
       {:error, :enoent} ->
         :absent
@@ -116,6 +137,85 @@ defmodule Troupe.Config.Org do
         end
     end
   end
+
+  # The copy as the plane signed it, or why not. Its sections must be the ones in the
+  # signed body: an edit to either is a copy the plane did not sign.
+  defp signed_copy(%{"plane_url" => plane, "signed" => %{} = signed} = cached) do
+    case PlaneKeys.pinned(plane, keys_path()) do
+      nil -> {:ok, cached}
+      held -> held_copy(cached, signed, held)
+    end
+  end
+
+  defp signed_copy(%{"plane_url" => plane} = cached) do
+    case PlaneKeys.pinned(plane, keys_path()) do
+      nil ->
+        {:ok, cached}
+
+      held ->
+        {:error,
+         "from #{plane} is not signed, and this machine holds that plane's signing key " <>
+           "#{held["fingerprint"]}: it is not used; `troupe config pull` fetches it again"}
+    end
+  end
+
+  defp held_copy(%{"plane_url" => plane} = cached, signed, held) do
+    {:ok, key} = PlaneSignature.read_key(held)
+
+    case verify_copy(signed, key, now: DateTime.utc_now()) do
+      {:ok, body, expired?} ->
+        same_sections(cached, body, if(expired?, do: signed_expiry(signed)))
+
+      {:error, :forged} ->
+        {:error, edited(plane)}
+
+      {:error, reason} ->
+        why =
+          PlaneSignature.refusal(reason, plane, what: "this copy", pinned: held["fingerprint"])
+
+        {:error, "from #{plane} is refused: " <> why <> "; `troupe config pull` fetches it again"}
+    end
+  end
+
+  # The sections the copy is read for must be the ones the plane signed.
+  defp same_sections(%{"plane_url" => plane} = cached, body, expired_at) do
+    sections = ["defaults", "enforced"]
+
+    cond do
+      Map.take(document(body), sections) != Map.take(cached, sections) -> {:error, edited(plane)}
+      expired_at -> {:ok, Map.put(cached, "expired", expired_at)}
+      true -> {:ok, cached}
+    end
+  end
+
+  # Expired is not refused here: what was signed still holds until a fresh copy replaces it.
+  defp verify_copy(signed, key, opts) do
+    case PlaneSignature.verify(signed, key, "client_defaults", opts) do
+      {:ok, %{body: body}} ->
+        {:ok, body, false}
+
+      {:error, {:expired, _at}} ->
+        case PlaneSignature.verify(signed, key, "client_defaults", now: ~U[1970-01-01 00:00:00Z]) do
+          {:ok, %{body: body}} -> {:ok, body, true}
+          error -> error
+        end
+
+      error ->
+        error
+    end
+  end
+
+  defp signed_expiry(%{"document" => document}) do
+    case Jason.decode(document) do
+      {:ok, %{"expires_at" => at}} -> at
+      _other -> nil
+    end
+  end
+
+  defp edited(plane),
+    do:
+      "from #{plane} does not match the plane's signature: it was changed on this machine " <>
+        "after the plane signed it, and is not used; `troupe config pull` fetches it again"
 
   @doc """
   A plane's `me.client_defaults` answer as a document: its `defaults` and `enforced`.
@@ -154,8 +254,8 @@ defmodule Troupe.Config.Org do
   the loader will: a document the loader would refuse is not saved, and the copy before
   it stays. Answers what was saved, with `path` and the `warnings` reading it gives.
   """
-  @spec save(String.t(), map(), Path.t()) :: {:ok, map()} | {:error, String.t()}
-  def save(plane_url, answer, path \\ cache_path())
+  @spec save(String.t(), map(), Path.t(), map() | nil) :: {:ok, map()} | {:error, String.t()}
+  def save(plane_url, answer, path \\ cache_path(), signed \\ nil)
       when is_binary(plane_url) and is_map(answer) do
     plane = String.trim_trailing(plane_url, "/")
     document = document(answer)
@@ -175,6 +275,9 @@ defmodule Troupe.Config.Org do
           "defaults" => document["defaults"],
           "enforced" => document["enforced"]
         }
+
+        # The plane's signature over it, so the copy is checked whenever it is read.
+        cached = if signed, do: Map.put(cached, "signed", signed), else: cached
 
         with :ok <- write(path, cached) do
           {:ok,

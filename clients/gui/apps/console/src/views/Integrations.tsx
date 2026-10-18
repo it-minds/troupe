@@ -11,6 +11,11 @@
 // resource: shown locked, with where they come from, and only its key and webhook secret,
 // which no repository holds, are set here.
 //
+// Then the key the plane signs what it tells people's machines with (#657): its fingerprint,
+// which a person compares with what their machine pinned at sign-in, when it was made, and
+// every version. A platform admin rotates it, typed by the current fingerprint: every machine
+// that pinned the old one then asks its person to accept the new one.
+//
 // Then three lists `admin.integrations.list` answers, read-only on purpose: the MCP servers
 // more than one profile carries (the organisation's, and the blast radius of retiring one),
 // every host anything dials against the same policy the pods' NetworkPolicy is made from,
@@ -19,7 +24,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { GitHubApp, GitHubAppChange, GitHubCheck, GitHubDelivery, IntegrationServer, Integrations as IntegrationsAnswer } from "@troupe/client";
+import type { GitHubApp, GitHubAppChange, GitHubCheck, GitHubDelivery, IntegrationServer, Integrations as IntegrationsAnswer, SigningKey } from "@troupe/client";
 import { describeError, show, useConsole, useLoad } from "../console";
 import { AuditNote, Checks, DetailList, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, changed, useChange, when } from "./bits";
 import type { DiffLine } from "./bits";
@@ -35,6 +40,7 @@ export function Integrations(): JSX.Element {
           <>
             <GitHubCard app={app} onApplied={reload} />
             <Deliveries />
+            <SigningCard />
             <Servers answer={answer} />
             <Egress answer={answer} />
             <Notify answer={answer} />
@@ -343,6 +349,85 @@ function appWords(app: GitHubApp, change: GitHubAppChange): string[] {
   if ("api_url" in change) out.push(`Clones come from where ${change.api_url ?? "https://api.github.com"} says, and each profile must declare that host in egress.gitHosts.`);
   out.push("Test it afterwards: the test asks GitHub with the App's own key.");
   return out;
+}
+
+// -- the plane's signing key ------------------------------------------------------------
+
+function SigningCard(): JSX.Element {
+  const { admin, role } = useConsole();
+  const platform = role === "platform_admin";
+  const [load, reload] = useLoad(() => admin.signing(), [admin]);
+  const { done, apply } = useChange(reload);
+  const [rotating, setRotating] = useState(false);
+
+  return (
+    <section className="card" aria-label="The plane's signing key">
+      <header>
+        <h2>The plane's signing key</h2>
+      </header>
+      <p>
+        What this plane tells people's machines, the versions it serves and the organisation's defaults and limits, it signs with this key. Each machine pins it
+        when its person signs in, and takes nothing it did not sign. It is in OpenBao's transit engine, where nothing can take a copy, and it is not the
+        release key.
+      </p>
+      {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
+      <Loaded load={load} what="the signing key" retry={reload}>
+        {(key: SigningKey) => (
+          <>
+            <Fields
+              rows={[
+                ["Fingerprint", <span className="mono">{key.fingerprint}</span>],
+                ["Algorithm", key.algorithm],
+                ["Made", key.created_at ? when(key.created_at) : "—"],
+                ["Version", String(key.version)],
+                ["Public key", <span className="mono">{key.public_key}</span>],
+              ]}
+            />
+            {key.versions.length > 1 && (
+              <p className="note">
+                Earlier versions, which sign nothing any more:{" "}
+                {key.versions
+                  .filter((v) => v.version !== key.version)
+                  .map((v) => `${v.version} (${v.fingerprint})`)
+                  .join(", ")}
+                .
+              </p>
+            )}
+            <p className="note">A person whose machine says this plane's key has changed checks the fingerprint it shows against the one here before accepting it.</p>
+            {platform && !rotating && (
+              <div className="actions">
+                <button type="button" className="danger" onClick={() => setRotating(true)}>
+                  Rotate the key
+                </button>
+              </div>
+            )}
+            {!platform && <p className="note">Only a platform admin rotates the key: every machine signed in to the plane is asked to accept the new one.</p>}
+            {rotating && (
+              <Preview
+                title="signing/key"
+                lines={[
+                  { field: "fingerprint", from: key.fingerprint, to: "a new key's, made by OpenBao" },
+                  { field: "version", from: key.version, to: key.version + 1 },
+                ]}
+                effects={[
+                  "The new key signs everything from now on; the old one signs nothing again.",
+                  "Every machine that pinned the old key refuses what the new one signs until its person accepts the new fingerprint, which they check here.",
+                  "Until they do, those machines keep the organisation's document they have and update as if signed in nowhere.",
+                ]}
+                verb="Rotate the key"
+                typeToConfirm={key.fingerprint}
+                onCancel={() => setRotating(false)}
+                onConfirm={async () => {
+                  await apply("signing.rotate", "troupe-plane-signing", () => admin.rotateSigning(key.fingerprint), "The plane's signing key is rotated.", (a) => (a as SigningKey).changes);
+                  setRotating(false);
+                }}
+              />
+            )}
+          </>
+        )}
+      </Loaded>
+    </section>
+  );
 }
 
 // -- what the plane dials ---------------------------------------------------------------

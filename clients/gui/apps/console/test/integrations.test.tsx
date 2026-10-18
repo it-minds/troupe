@@ -153,6 +153,35 @@ describe("the GitHub App", () => {
   });
 });
 
+describe("the plane's signing key (#657)", () => {
+  const signing = (): HTMLElement => document.querySelector<HTMLElement>('[aria-label="The plane\'s signing key"]')!;
+
+  it("shows its fingerprint, when it was made and its public half, and is rotated only once that fingerprint is typed", async () => {
+    await open();
+    await waitFor(() => says("SHA256:fake-plane-key-1"), "the key");
+    await sees("ed25519", signing());
+    await sees("not the release key", signing());
+    (await waitFor(() => button("Rotate the key"), "the key")).click();
+    await waitFor(() => says("Type SHA256:fake-plane-key-1 to confirm"), "the typed confirmation");
+    await sees("Every machine that pinned the old key refuses what the new one signs");
+    const go = () => [...document.querySelectorAll<HTMLButtonElement>(".preview button")].find((b) => (b.textContent ?? "").startsWith("Rotate the key"))!;
+    expect(go().disabled).toBe(true);
+    type(field("Type SHA256:fake-plane-key-1 to confirm")!, "SHA256:fake-plane-key-1");
+    await waitFor(() => !go().disabled, "the fingerprint typed");
+    go().click();
+    await waitFor(() => says("Recorded in the audit as signing.rotate on troupe-plane-signing") && says("SHA256:fake-plane-key-2"), "the new key");
+    await sees("Earlier versions, which sign nothing any more: 1 (SHA256:fake-plane-key-1).");
+    expect(fake.admin.signingVersions).toBe(2);
+  });
+
+  it("is read by a team admin, who cannot rotate it", async () => {
+    await open(PEOPLE.bob);
+    await waitFor(() => says("SHA256:fake-plane-key-1"), "the key");
+    expect(button("Rotate the key")).toBeNull();
+    await sees("Only a platform admin rotates the key");
+  });
+});
+
 describe("what the plane dials", () => {
   it("lists the servers, every host against the policy with where it was declared, and each outcome's target", async () => {
     fake.admin.profiles.find((p) => p.name === "ux")!.spec!["egress"] = { fqdns: ["mcp.example.com", "elsewhere.example.org"] };

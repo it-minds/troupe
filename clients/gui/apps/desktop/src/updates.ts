@@ -8,6 +8,11 @@
 // the release keys it was built with; this file decides nothing about what may be
 // installed, only when to ask and what to say.
 //
+// The policy is the plane's word only as its own key signed it (#657): the key this
+// computer pinned at sign-in, which the daemon keeps. A policy that key did not sign is
+// not acted on, and said; where the plane now signs with another key, its fingerprint is
+// shown beside the pinned one and the person may accept it, as an SSH host key is.
+//
 // Nothing is downloaded until the person asks, and nothing restarts until they say so
 // again. Then the app waits for a turn on this computer to end, asks the daemon to stop
 // between turns when its release is replaced too (`daemon.stop`), and only then has the
@@ -16,7 +21,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { askPlane, suggestion, TroupeRpcError } from "@troupe/client";
-import type { AuthSession, DaemonClient, FleetRow, PlaneVersionWord } from "@troupe/client";
+import type { AuthSession, DaemonClient, FleetRow, PinnedPlaneKey, PlaneVersionWord } from "@troupe/client";
 import { shell } from "./shell";
 import type { UpdateOffer, UpdatePlane } from "./shell";
 
@@ -32,9 +37,22 @@ export type UpdatePhase =
   | { kind: "installing"; offer: UpdateOffer }
   | { kind: "refused"; sentence: string };
 
+/** The plane signing with a key other than the one pinned here: both fingerprints, and the person's yes. */
+export interface PlaneKeyChange {
+  pinned: string;
+  offered: string;
+  accept: () => void;
+  /** Why accepting failed, where it did. */
+  error: string | null;
+}
+
 export interface Updates {
   /** The plane's refusal of this version, as a sentence: the app keeps to this computer. */
   required: string | null;
+  /** The plane's key changed since this computer pinned it, for the person to accept. */
+  planeKey: PlaneKeyChange | null;
+  /** A policy the pinned key did not sign, said in a line: the update then does without it. */
+  signatureLine: string | null;
   /** A newer version the plane recommends, as a quiet offer. */
   suggest: string | null;
   phase: UpdatePhase;
@@ -60,6 +78,22 @@ function atWork(rows: FleetRow[]): FleetRow | undefined {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const samePlane = (a: string, b: string) => a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+
+/**
+ * The key this computer pinned for the plane signed in to, which the daemon keeps; null
+ * with no daemon, one from before the key, or none pinned for this plane.
+ */
+async function pinnedFor(daemon: DaemonClient | null, planeUrl: string): Promise<PinnedPlaneKey | null> {
+  if (!daemon) return null;
+  try {
+    const key = (await daemon.identity()).plane_key;
+    return key && samePlane(key.plane_url, planeUrl) ? key : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * `rows` reads the list as it is now, which a restart waits on: a function, because the
  * list is built after this, from what the plane said here. Null while this computer's
@@ -68,6 +102,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null, rows: () => FleetRow[] | null): Updates {
   const updater = shell()?.updater ?? null;
   const [word, setWord] = useState<PlaneVersionWord | null>(null);
+  const [held, setHeld] = useState<PinnedPlaneKey | null>(null);
+  const [keyError, setKeyError] = useState<string | null>(null);
   // Whether the plane signed in to has answered, or could not be asked: the release check
   // waits for it, so that it asks for the version the plane recommends and never offers
   // one the plane would not serve. A sign-in is a new plane to hear from.
@@ -96,14 +132,30 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
       return;
     }
     let live = true;
-    askPlane(auth, __TROUPE_VERSION__)
-      .then((w) => live && setWord(w))
-      .catch(() => live && setWord(null))
-      .finally(() => live && setHeardFor(auth));
+    void (async () => {
+      const key = await pinnedFor(daemon, auth.planeUrl);
+      if (live) setHeld(key);
+      await askPlane(auth, __TROUPE_VERSION__, key)
+        .then((w) => {
+          if (w.state !== "unknown" && w.signature?.state === "unsigned") console.info(w.signature.line);
+          if (live) setWord(w);
+        })
+        .catch(() => live && setWord(null));
+      if (live) setHeardFor(auth);
+    })();
     return () => {
       live = false;
     };
-  }, [auth, round]);
+  }, [auth, daemon, round]);
+
+  const acceptKey = useCallback(() => {
+    if (!daemon || !held?.offered) return;
+    setKeyError(null);
+    daemon.acceptPlaneKey({ fingerprint: held.offered.fingerprint, plane_url: held.plane_url }).then(
+      () => setRound((n) => n + 1),
+      (e: unknown) => setKeyError(message(e)),
+    );
+  }, [daemon, held]);
 
   const params = useCallback((): { version: string | null; plane: UpdatePlane | null } => {
     const versions = word && word.state !== "unknown" ? word.versions : null;
@@ -210,9 +262,17 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
 
   const required = word?.state === "required" ? word.sentence : null;
   const suggest = word?.state === "served" ? suggestion(word.clientUpdate, __TROUPE_VERSION__) : null;
+  const signature = word && word.state !== "unknown" ? word.signature : undefined;
+  // A plane that signs nothing is taken as it always was: said in the log, not on screen,
+  // where an older plane would have the app say so every day.
+  const signatureLine = signature?.state === "refused" ? signature.sentence : null;
+  const planeKey: PlaneKeyChange | null =
+    held?.offered && auth ? { pinned: held.fingerprint, offered: held.offered.fingerprint, accept: acceptKey, error: keyError } : null;
 
   return {
     required,
+    planeKey,
+    signatureLine,
     suggest,
     phase,
     canUpdate: Boolean(updater),

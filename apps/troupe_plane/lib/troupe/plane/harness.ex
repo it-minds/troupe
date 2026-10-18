@@ -37,7 +37,8 @@ defmodule Troupe.Plane.Harness do
     GitHub,
     Identity,
     Placement,
-    Sessions
+    Sessions,
+    Signing
   }
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Fleet.{Extends, Scaler}
@@ -302,29 +303,42 @@ defmodule Troupe.Plane.Harness do
       "models" => models
     }
 
-    {:ok,
-     Map.merge(old, %{
-       "defaults" => client_defaults(old, models),
-       "enforced" => Settings.get("client_enforced") || %{}
-     })}
+    answer =
+      Map.merge(old, %{
+        "defaults" => client_defaults(old, models),
+        "enforced" => Settings.get("client_enforced") || %{}
+      })
+
+    # Signed by the plane's own key (`Signing`), so a machine holds to the copy it keeps
+    # only while it is the plane's word, and an edited one is refused.
+    {:ok, Signing.signed("client_defaults", answer)}
   end
 
   # Each component's version policy, for `troupe update` to choose what to install by:
   # the recommended version, never a blocked one, never below the minimum (Decision 868).
   # Asked on its own rather than through `initialize`, because the client that most needs
   # it is the one `initialize` refuses.
+  #
+  # And where releases are to be had (`release.url`, null for GitHub's), each release under
+  # it as `v<version>/`. Every component's policy stays at the top, as clients from before
+  # read it; the signed body has them under `versions`, with `release` beside them.
   defp handle("me.client_versions", _params, _context) do
-    {:ok,
-     Map.new(ClientVersions.components(), fn component ->
-       policy = ClientVersions.policy(component)
+    versions =
+      Map.new(ClientVersions.components(), fn component ->
+        policy = ClientVersions.policy(component)
 
-       {component,
-        %{
-          "recommended" => policy.recommended,
-          "minimum" => policy.minimum,
-          "blocked" => policy.blocked
-        }}
-     end)}
+        {component,
+         %{
+           "recommended" => policy.recommended,
+           "minimum" => policy.minimum,
+           "blocked" => policy.blocked
+         }}
+      end)
+
+    release = %{"url" => ClientVersions.release_url()}
+    signed = Signing.signed("client_versions", %{"versions" => versions, "release" => release})
+
+    {:ok, versions |> Map.put("release", release) |> Map.put("signed", signed["signed"])}
   end
 
   defp handle("teams.list", _params, %{user: user}) do

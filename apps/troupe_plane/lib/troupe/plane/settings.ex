@@ -462,6 +462,21 @@ defmodule Troupe.Plane.Settings do
           "tightened and not loosened; a provider or URL is fixed. A machine takes it at its next sign-in or " <>
           "troupe config pull, and holds to its last copy offline. Any other key is refused.",
       effect: :immediate
+    },
+    # Where people's machines download releases from (#657): what the plane's signed
+    # `me.client_versions` names as `release.url`, each release at `<url>/v<version>/`.
+    %Setting{
+      key: "client_release_url",
+      group: :releases,
+      type: :string,
+      summary:
+        "Where people's machines download releases from, each at <url>/v<version>/ as GitHub lays them out: " <>
+          "this plane's own /downloads (the release files copied into its object store under releases/), " <>
+          "a mirror, or empty for GitHub's.",
+      consequence:
+        "troupe update installs from here, and only what the release key signed: a mirror cannot change a release, " <>
+          "only fail to serve it. Empty means GitHub, which a closed network cannot reach.",
+      effect: :immediate
     }
   ]
 
@@ -480,6 +495,8 @@ defmodule Troupe.Plane.Settings do
      "Whether the console applies a profile itself, or a repository holds the profiles and something else applies them. Both are the deployment's to decide."},
     {:team_defaults, "What a new team starts with",
      "Applied when a group is enabled as a team. Changing them leaves existing teams alone; each team's own values are on the Teams page."},
+    {:releases, "Where people's machines get releases",
+     "The plane names it in the version policy it signs, so a machine on a closed network updates without reaching GitHub. Every release is still checked against the release key."},
     {:client_defaults, "What people's own machines talk to",
      "The organisation's defaults for a person's local sessions, below their own settings: provider, URL and models. Never a key; each person pastes their own. And what those sessions may not go past, above everything a person sets."},
     {:sessions, "What a new session runs with",
@@ -762,6 +779,18 @@ defmodule Troupe.Plane.Settings do
     parse(setting, to_string(value))
   end
 
+  # An address a machine downloads from, so a URL it can fetch: http or https, with a host.
+  defp parse(%Setting{key: "client_release_url"}, value) do
+    case URI.parse(String.trim(value)) do
+      %URI{scheme: scheme, host: host} = uri
+      when scheme in ["http", "https"] and is_binary(host) and host != "" ->
+        {:ok, uri |> URI.to_string() |> String.trim_trailing("/")}
+
+      _other ->
+        if String.trim(value) == "", do: {:ok, ""}, else: {:error, {:invalid, not_a_url()}}
+    end
+  end
+
   defp parse(%Setting{type: :string}, value), do: {:ok, value}
 
   # Blank is nothing enforced. Every key must be one `Troupe.Protocol.Organisation` lists,
@@ -814,6 +843,8 @@ defmodule Troupe.Plane.Settings do
       _other -> {:error, {:invalid, "must be true or false"}}
     end
   end
+
+  defp not_a_url, do: "must be an http or https URL, such as https://example.test/downloads"
 
   defp enforced(set) do
     case Organisation.check(set) do

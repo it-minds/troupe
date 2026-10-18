@@ -1057,7 +1057,19 @@ A client that is signed in tells it who that is, once.
  "plane_url": "https://troupe.example", "linked_at": "2026-09-14T08:00:00Z"}
 ```
 with `update_required`, a sentence saying what to run, where the plane it is linked to
-refused this daemon's version at the last link ([Client versions](#client-versions)).
+refused this daemon's version at the last link ([Client versions](#client-versions)), and
+`plane_key`, the key that plane signs with as this machine pinned it ([The plane's
+signing key](#the-planes-signing-key)):
+
+```json
+"plane_key": {"plane_url": "https://troupe.example", "algorithm": "ed25519",
+  "public_key": "6kpsY+Kc...", "fingerprint": "SHA256:/oEsEvOr...", "pinned_at": "2026-10-18T08:00:00Z",
+  "offered": {"algorithm": "ed25519", "public_key": "...", "fingerprint": "SHA256:...", "seen_at": "..."}}
+```
+
+`offered` is there only where the plane has served another key since: nothing that key
+signs is taken until a person accepts it (`identity.accept_plane_key`). No `plane_key` for
+a plane that signs nothing, or from a daemon from before it.
 
 #### `identity.link`
 ```json
@@ -1113,6 +1125,19 @@ link is the same link. `signed_out` says whether there was a token to forget: `f
 none, or one that is somebody else's or another plane's, which is left. A client that does
 not know who signed out leaves `subject` out and takes back the token for that plane,
 whoever it is for. `troupe logout` and the desktop app's *Sign out* send it (issue #381).
+
+#### `identity.accept_plane_key`
+```json
+{"command_id": "c-4", "fingerprint": "SHA256:...", "plane_url": "https://troupe.example"}
+```
+→ `{"plane_key": {...}}`, as `identity.get` carries it.
+
+The person accepting the key the linked plane (or `plane_url`) now signs with, in place of
+the one pinned, by the fingerprint they were shown and checked. The daemon asks the plane
+for the key it serves; it must be that fingerprint, and is pinned. Then the organisation's
+document is fetched again. Any other fingerprint is `invalid_params`, naming the one the
+plane offers; a plane that signs nothing has no key to accept. `troupe plane-key accept`
+does the same to the same file.
 
 **This is a label, not authentication.** Nothing here verifies a token, and nothing
 should: anything that can reach the daemon can already do everything on it, and what
@@ -2312,7 +2337,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `config.organisation`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three, and so does the loopback TCP token; a daemon mints no narrower token.
@@ -2586,6 +2611,8 @@ that team.
 | `admin.setting.reset` | platform | `{key}` — drops the stored value, so the setting goes back to what the plane was deployed with |
 | `admin.clients.get` | either | `{clients: {tui, daemon, desktop}}`, each `{component, recommended, minimum, blocked, updated_by, updated_at}`: which versions of its clients this plane serves ([Client versions](#client-versions)) |
 | `admin.clients.put` | platform | `{component, policy: {recommended?, minimum?, blocked?}}` → the component's policy as it now stands, with `changes`. Only the keys sent change, `null` clears one, `blocked` is the whole list; `invalid_params` with `data.field` and `data.reason` for a version SemVer cannot read, a `minimum` newer than `recommended`, or a `recommended` that is blocked. Audited as `clients.put` |
+| `admin.signing.get` | either | the plane's signing key: `{algorithm, public_key, fingerprint, version, created_at, versions: [...]}`, every version's newest first; made on first use, and never the key itself, which transit holds and nothing exports ([The plane's signing key](#the-planes-signing-key)) |
+| `admin.signing.rotate` | platform | `{fingerprint}`, the current key's, typed back to confirm → the key as it now stands, a new version, with `changes`. Every machine that pinned the old one refuses what the new one signs until its person accepts it. `invalid_params` naming the current fingerprint for any other. Audited as `signing.rotate` with the fingerprints and versions |
 | `admin.github.get` | either | the plane's GitHub App: `{configured, app_id, api_url, git_url, installations: [{owner, installation_id}], private_key: {set, type, fingerprint, transit_key, version}, permissions, resource_generation, updated_by, updated_at}`; never the key. In gitops mode also `gitops: {resource, generation, source, problem, reasons}`, the `GitHubApp` resource its settings come from |
 | `admin.github.put` | platform | `{app: {app_id?, api_url?, installations?, private_key?}}` (or flat) → the App as it now stands, with `changes`. Only the keys sent change and `installations` is the whole list; `private_key`, the PEM GitHub downloads, is imported into OpenBao transit as a key that cannot be exported and is in no answer afterwards. `invalid_params` with `data.field` and `data.reason`, and nothing written, for anything that does not read. Audited as `github.put`, the key as its fingerprint ([github.md](docs/admin/github.md)). In gitops mode `app_id`, `api_url` and `installations` are `managed_by_gitops`; `private_key` and `webhook_secret` are taken |
 | `admin.github.check` | platform | `{ok, checks: [{name, ok, detail, took_ms}], app: {slug, name} | null}`: four named checks, writing nothing: an App ID is set (`App`), OpenBao transit signs with its key (`Private key`), GitHub knows the App by the JWT that key signs (`GitHub`), and every installation set is one GitHub lists for it (`Installations`). A check after one that failed says it was not tried |
@@ -2711,8 +2738,8 @@ than an admin uses them:
 | `session.grant` | control | the session's owner, or an admin of its team | `{session_id, subject, role}` (`owner`, `collaborator`, `viewer`; default collaborator) → mirrored in the plane's ACL and pushed to the pod holding the session as `acl.changed` |
 | `session.review` | control | anybody who can see the session | `{session_id}` → sets `reviewed_by`/`reviewed_at` on the session and its run, audited as `session.review` |
 | `initialize` | observe | anybody | `{protocol_version, client_info: {name, version}, capabilities}` → `{protocol_version, server_info: {name: "troupe-plane", version}, principal, client_update}`: the handshake over `/rpc`, where `principal` is what `me` answers and `client_update` is this plane's word on the client's version, or `update_required` ([Client versions](#client-versions)) |
-| `me.client_versions` | observe | anybody | `{}` → `{tui, daemon, desktop}`, each `{recommended, minimum, blocked}`: what `troupe update` installs by, asked on its own because the client that most needs it is the one `initialize` refuses |
-| `me.client_defaults` | observe | anybody | `{}` → `{configured, provider, base_url, auth, models: {default, cheap, expensive}, defaults, enforced}` — what an administrator says people's own machines should talk to (the *Client defaults* settings), for a client to pre-fill its model settings with. **Never a key**: anybody signed in may ask, so each person supplies their own. `configured` is false, and the rest null, until a provider is set. `defaults` is the same in a config file's shape, only what is set, and `enforced` the `client_enforced` setting, `{}` when unset, per-tool `permissions` among what it may hold (Decision 907): the organisation's document a machine reads below its person's file and holds every layer to (Decision 869, `config.organisation`). A plane from before them answers without the two, and a client reads its old fields as the defaults |
+| `me.client_versions` | observe | anybody | `{}` → `{tui, daemon, desktop}`, each `{recommended, minimum, blocked}`: what `troupe update` installs by, asked on its own because the client that most needs it is the one `initialize` refuses; with `release: {url}`, where releases are (null for GitHub's), and `signed`, the same as `{versions, release}` signed by the plane's key ([The plane's signing key](#the-planes-signing-key)) |
+| `me.client_defaults` | observe | anybody | `{}` → `{configured, provider, base_url, auth, models: {default, cheap, expensive}, defaults, enforced}` — what an administrator says people's own machines should talk to (the *Client defaults* settings), for a client to pre-fill its model settings with. **Never a key**: anybody signed in may ask, so each person supplies their own. `configured` is false, and the rest null, until a provider is set. `defaults` is the same in a config file's shape, only what is set, and `enforced` the `client_enforced` setting, `{}` when unset, per-tool `permissions` among what it may hold (Decision 907): the organisation's document a machine reads below its person's file and holds every layer to (Decision 869, `config.organisation`). A plane from before them answers without the two, and a client reads its old fields as the defaults. With `signed`: the whole answer signed by the plane's key ([The plane's signing key](#the-planes-signing-key)) |
 | `me.connections.list` | observe | anybody | the MCP servers on the caller's profiles that act as *them*, each with its `slot` and whether they have `connected` it. Whether, never what: the plane can see that a slot has a version and cannot read one |
 | `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own name at the key manager (`name`, the segment of `path` under `troupe/people/`, not always their subject: Decision 755). The client exchanges it with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
 | `session.register` | control | anybody, for their own private sessions | `{session_id, device, epoch, head_hash, last_seq, object_bytes, workspace_bytes, title, claim}` → the session row. Idempotent on the id: the first call mints epoch 1, a later one is a seal report. A seal carries the `epoch` the device holds and is refused with `stale_version` if another device has moved past it; `last_seq` never goes backwards. `claim: true` takes the session over on this device, bumping the epoch conditionally — two devices sending the same `epoch` produce one winner, and the loser learns it lost on its next seal rather than by being told, and stops sealing (issue #433) |
@@ -2807,6 +2834,56 @@ update itself, which is why `data.run` is `null` for it; served with `action: "s
 it offers the update quietly, as the terminal says it in a line. Its update is the
 `desktop` component's `recommended` version from `me.client_versions`, held to the same
 `minimum` and `blocked` list, and to the release key.
+
+Where releases are is the plane's too: `me.client_versions` names `release.url` (the
+`client_release_url` setting), each release at `<url>/v<version>/` as GitHub lays them out,
+or null for GitHub's. `troupe update` installs from there. The plane can serve them itself:
+`GET /downloads/v<version>/<file>` answers a short-lived presigned URL (302) for the file
+copied into its object store under `releases/v<version>/`, for a version it serves to some
+kind of client, and 404 otherwise; anybody may fetch one, since the release key's signature
+on the manifest is the check, as it is on GitHub.
+
+### The plane's signing key
+
+A plane signs what it tells people's machines with an Ed25519 key of its own (#657), held
+in OpenBao's transit engine where nothing can export it, and separate from the release
+key. `GET /.well-known/troupe-signing-key` serves its public half, made on first use:
+
+```json
+{"algorithm": "ed25519", "public_key": "<base64 of 32 bytes>",
+ "fingerprint": "SHA256:<unpadded base64 of its SHA-256>", "version": 1,
+ "created_at": "2026-10-18T08:00:00Z"}
+```
+
+and `/.well-known/troupe` names it as `plane.signing_key`. A plane from before it has
+neither, and signs nothing; its answers are taken as they always were, said in a line.
+
+`me.client_versions` and `me.client_defaults` carry `signed` beside their fields:
+
+```json
+"signed": {"algorithm": "ed25519", "fingerprint": "SHA256:...",
+  "document": "{\"body\":{...},\"expires_at\":\"...\",\"kind\":\"client_versions\",\"plane\":\"https://troupe.example\",\"signed_at\":\"...\"}",
+  "signature": "<base64 of 64 bytes>"}
+```
+
+`document` is the text that was signed: canonical JSON (section 4's rules) of `kind`
+(`client_versions` or `client_defaults`), `plane`, `signed_at`, `expires_at` (a week
+after) and `body`, the answer. `signature` is plain Ed25519 (RFC 8032) over its bytes. A
+client checks the bytes it was sent, then parses them, and takes the body from there:
+
+- **At sign-in** it pins the key the plane serves, per plane, as SSH pins a host key.
+  The terminal and the daemon keep one file, `<state>/plane-keys.json`, and the desktop
+  app reads the daemon's (`identity.get`).
+- **Every signed answer** must be signed by the pinned key, as the kind asked for, and not
+  past `expires_at`; once a key is pinned, an unsigned answer is refused too. A refusal is
+  a sentence, and the answer is not acted on: `troupe update` goes on as without a plane,
+  and the daemon keeps the organisation's document it had.
+- **A changed key** is kept as offered and trusted for nothing until a person accepts its
+  fingerprint: `troupe plane-key accept`, `identity.accept_plane_key`, or the desktop app.
+  The console shows the key, and rotates it (`admin.signing.rotate`).
+- **The kept copy** of the organisation's document carries the signature, and is checked
+  whenever it is read: a copy changed on the machine is refused with a sentence. Past
+  `expires_at` it still holds until a fresh one replaces it.
 
 ### Errors
 

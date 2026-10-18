@@ -46,6 +46,24 @@ export interface DaemonIdentity {
   display_name?: string | null;
   plane_url?: string | null;
   linked_at?: string | null;
+  /** The plane's refusal of this daemon's version, as a sentence saying what to run. */
+  update_required?: string;
+  /**
+   * The key the linked plane signs with, as this machine pinned it (#657), and the one it
+   * offers instead where it has changed, which nothing it signs is taken by until accepted.
+   * Absent from a daemon from before it, and for a plane that signs nothing.
+   */
+  plane_key?: PinnedPlaneKey;
+}
+
+/** A plane's signing key as this machine pinned it. */
+export interface PinnedPlaneKey {
+  plane_url: string;
+  algorithm: string;
+  public_key: string;
+  fingerprint: string;
+  pinned_at?: string;
+  offered?: { algorithm: string; public_key: string; fingerprint: string; seen_at?: string };
 }
 
 /** What `daemon.stop` answers: stopping now, or why not (`embedded`, `at_work`, with which). */
@@ -625,6 +643,14 @@ export class DaemonClient {
    */
   signOutIdentity(params: { plane_url: string; subject?: string }): Promise<{ signed_out: boolean }> {
     return this.command("identity.sign_out", { ...params });
+  }
+
+  /**
+   * Accept the key the linked plane now signs with in place of the one pinned, by the
+   * fingerprint its person was shown (#657). Answers the key as now pinned.
+   */
+  acceptPlaneKey(params: { fingerprint: string; plane_url?: string }): Promise<{ plane_key?: PinnedPlaneKey }> {
+    return this.command("identity.accept_plane_key", { ...params });
   }
 
   /**

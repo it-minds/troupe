@@ -1492,6 +1492,24 @@ export class FakeAdmin {
         return { result: { ...this.githubJson(), changes } };
       }
 
+      // The plane's own signing key (#657): made on first use, rotated by a platform admin
+      // confirming the current fingerprint. Stand-in values: the fake signs nothing here.
+      case "admin.signing.get":
+        return admin ? { result: this.signingJson() } : notAdmin;
+
+      case "admin.signing.rotate": {
+        if (role !== "platform_admin") return notPlatform;
+        const current = this.signingJson();
+        if (params["fingerprint"] !== current.fingerprint) {
+          return refuse(INVALID_PARAMS, "invalid_params", { reason: `the fingerprint to confirm with is the current key's, ${current.fingerprint}`, fingerprint: current.fingerprint });
+        }
+        this.signingVersions += 1;
+        const now = this.signingJson();
+        const changes = diff({ fingerprint: current.fingerprint, version: current.version }, { fingerprint: now.fingerprint, version: now.version });
+        this.record(subject, "signing.rotate", "troupe-plane-signing", changes);
+        return { result: { ...now, changes } };
+      }
+
       case "admin.provisioners.list":
         return admin ? { result: PROVISIONERS } : notAdmin;
 
@@ -2752,6 +2770,22 @@ export class FakeAdmin {
       for (const host of Array.isArray(fqdns) ? fqdns.map(String) : []) if (!seen.has(host)) seen.set(host, p.name);
     }
     return [...seen.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([host, from]) => ({ host, from, allowed: this.egressAllowed(host) }));
+  }
+
+  // -- the plane's signing key -----------------------------------------------------------
+
+  /** How many versions the plane's signing key has: one, made on first use, and one more a rotation. */
+  signingVersions = 1;
+
+  private signingJson(): { algorithm: string; public_key: string; fingerprint: string; version: number; created_at: string; versions: unknown[] } {
+    const versions = Array.from({ length: this.signingVersions }, (_v, i) => this.signingVersions - i).map((version) => ({
+      algorithm: "ed25519",
+      public_key: Buffer.alloc(32, version).toString("base64"),
+      fingerprint: `SHA256:fake-plane-key-${version}`,
+      version,
+      created_at: `2026-10-${String(10 + version).padStart(2, "0")}T09:00:00Z`,
+    }));
+    return { ...versions[0]!, versions };
   }
 
   // -- the GitHub App ------------------------------------------------------------------

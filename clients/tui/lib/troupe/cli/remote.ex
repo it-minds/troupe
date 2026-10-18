@@ -10,6 +10,7 @@ defmodule Troupe.CLI.Remote do
   """
 
   alias Troupe.Client
+  alias Troupe.PlaneKeys
   alias Troupe.Protocol
   alias Troupe.Remote.{Auth, Credentials, Discovery, HTTP, RPC, Tokens}
 
@@ -23,6 +24,7 @@ defmodule Troupe.CLI.Remote do
          {:ok, tokens} <- Auth.poll(discovery, request, opts),
          {:ok, path} <- Tokens.put_login(discovery.plane_url, discovery, tokens) do
       say.("signed in; credentials saved to #{Troupe.Paths.display(path)}#{permissions(path)}")
+      pin(discovery.plane_url, say)
       identity(discovery.plane_url, say)
     else
       {:error, reason} -> fail(say, reason)
@@ -76,7 +78,13 @@ defmodule Troupe.CLI.Remote do
   @doc """
   What the plane this machine is signed in to says of each component's version, for
   `troupe update` (Decision 868): `%{url: plane, versions: %{"tui" => ..., "daemon" =>
-  ...}}`, or `nil` where it is signed in to none or the plane has no version policy.
+  ...}, release_url: url}`, or `nil` where it is signed in to none or the plane has no
+  version policy.
+
+  Taken only as the plane signed it (#657), checked against the key this machine pinned
+  for the plane: one signed by another key, changed after it was signed or expired is said
+  in a sentence, and the update goes on as without a plane. A plane that signs nothing is
+  taken as it is, and that said in a line.
 
   Asked with `me.client_versions`, one call on its own, not through the connection whose
   handshake a plane refuses for the very version this is meant to replace. A plane that
@@ -88,13 +96,18 @@ defmodule Troupe.CLI.Remote do
     say = Keyword.get(opts, :say, &IO.puts/1)
 
     with url when is_binary(url) <- Keyword.get_lazy(opts, :plane_url, &current/0),
-         {:ok, versions} <- versions(url) do
-      %{url: url, versions: versions}
+         {:ok, answer} <- versions(url),
+         {:ok, plane} <- checked(url, answer, say) do
+      plane
     else
       nil ->
         nil
 
       :none ->
+        nil
+
+      {:refused, sentence} ->
+        say.("troupe update: #{sentence}; going on as without a plane")
         nil
 
       {:error, url, reason} ->
@@ -104,6 +117,128 @@ defmodule Troupe.CLI.Remote do
         )
 
         nil
+    end
+  end
+
+  defp checked(url, answer, say) do
+    case PlaneKeys.check(url, answer, "client_versions") do
+      {:ok, %{"versions" => %{} = versions} = body, :signed} ->
+        {:ok, %{url: url, versions: versions, release_url: release_url(body)}}
+
+      {:ok, _body, :signed} ->
+        {:refused, "the version policy #{url} signed has no versions in it"}
+
+      {:ok, answer, :unsigned} ->
+        say.(PlaneKeys.unsigned_line(url, "client_versions"))
+
+        {:ok,
+         %{url: url, versions: Map.delete(answer, "release"), release_url: release_url(answer)}}
+
+      {:error, sentence} ->
+        {:refused, sentence}
+    end
+  end
+
+  defp release_url(%{"release" => %{"url" => url}}) when is_binary(url) and url != "", do: url
+  defp release_url(_answer), do: nil
+
+  @doc """
+  The key a plane signs what it tells clients with, as this machine pinned it, and the one
+  it offers now where that is another (#657): `troupe plane-key`.
+  """
+  @spec plane_key(String.t() | nil, keyword()) :: non_neg_integer()
+  def plane_key(plane_url, opts \\ []) do
+    say = Keyword.get(opts, :say, &IO.puts/1)
+
+    case plane_url || current() do
+      nil ->
+        say.("not signed in; run troupe login <plane-url>")
+        1
+
+      url ->
+        url = Discovery.base(url)
+        served = PlaneKeys.fetch(url)
+        if match?({:ok, _}, served), do: PlaneKeys.see(url, elem(served, 1))
+        describe_key(url, PlaneKeys.pinned(url), served, say)
+    end
+  end
+
+  defp describe_key(url, nil, :unsigned, say) do
+    say.("#{url} signs nothing it tells clients (a plane from before 0.22)")
+    0
+  end
+
+  defp describe_key(url, nil, {:error, why}, say) do
+    say.("no key is pinned for #{url}, and its key could not be fetched: #{why}")
+    1
+  end
+
+  defp describe_key(url, held, _served, say) do
+    say.("#{url} signs with the key #{held["fingerprint"]}, pinned #{held["pinned_at"]}")
+
+    case held["offered"] do
+      %{"fingerprint" => offered} ->
+        say.(
+          "it now offers the key #{offered} instead, which is not trusted: check it with the " <>
+            "plane's administrators (the console shows it), then run troupe plane-key accept #{offered}"
+        )
+
+        1
+
+      _none ->
+        0
+    end
+  end
+
+  @doc """
+  Accept the key a plane now signs with in place of the one pinned, by the fingerprint the
+  person checked (#657): `troupe plane-key accept FINGERPRINT`.
+  """
+  @spec accept_plane_key(String.t(), String.t() | nil, keyword()) :: non_neg_integer()
+  def accept_plane_key(fingerprint, plane_url, opts \\ []) do
+    say = Keyword.get(opts, :say, &IO.puts/1)
+
+    with url when is_binary(url) <- plane_url || current(),
+         url = Discovery.base(url),
+         {:ok, served} <- served_key(url),
+         {:ok, accepted} <- PlaneKeys.accept(url, fingerprint, served: served) do
+      say.("the key #{accepted} is pinned for #{url}: what it signs is taken from now on")
+      0
+    else
+      nil -> fail(say, :logged_out)
+      {:error, why} -> fail(say, why)
+    end
+  end
+
+  defp served_key(url) do
+    case PlaneKeys.fetch(url) do
+      {:ok, served} -> {:ok, served}
+      :unsigned -> {:error, "#{url} signs nothing, so there is no key to accept"}
+      {:error, why} -> {:error, why}
+    end
+  end
+
+  # At sign-in: the key the plane signs with, pinned where none is (#657).
+  defp pin(url, say) do
+    with {:ok, served} <- PlaneKeys.fetch(url),
+         {:ok, seen} <- PlaneKeys.see(url, served) do
+      case seen do
+        {:pinned, fingerprint} ->
+          say.("the plane signs what it tells clients with the key #{fingerprint}; pinned")
+
+        {:same, _fingerprint} ->
+          :ok
+
+        {:changed, pinned, offered} ->
+          say.(
+            "the plane now signs with the key #{offered}, not #{pinned}, the one this machine " <>
+              "pinned: nothing it signs is taken until you check the new key with its " <>
+              "administrators and run troupe plane-key accept #{offered}"
+          )
+      end
+    else
+      :unsigned -> say.("the plane signs nothing it tells clients (a plane from before 0.22)")
+      {:error, why} -> say.("the plane's signing key was not pinned: #{why}")
     end
   end
 

@@ -283,6 +283,7 @@ defmodule Troupe.Config.Layers do
         cached
         |> Map.take(["defaults", "enforced"])
         |> org_document(cached["plane_url"], nil, ctx)
+        |> Map.update!(:warnings, &(&1 ++ expired(cached, cache)))
         |> Map.put(:file, %{
           layer: :org,
           path: cached["plane_url"],
@@ -292,6 +293,21 @@ defmodule Troupe.Config.Layers do
         })
     end
   end
+
+  # A signed copy past its time still holds, and says so once (`Org.read_cache/1`).
+  defp expired(%{"expired" => at, "plane_url" => plane}, cache) when is_binary(at),
+    do: [
+      issue(
+        :warning,
+        cache,
+        nil,
+        nil,
+        "the organisation's document from #{plane} was the plane's word until #{at}, and holds " <>
+          "until the plane is reached again (troupe config pull)"
+      )
+    ]
+
+  defp expired(_cached, _cache), do: []
 
   @org_keys ~w(version $schema defaults enforced)
 

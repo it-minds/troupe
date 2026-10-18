@@ -22,7 +22,8 @@ end
 # suite's own, not this machine's, and not there until a test writes one.
 Application.put_env(:troupe_core, :organisation,
   managed_path: Path.join([tmp, "org", "managed.yaml"]),
-  cache_path: Path.join([tmp, "org", "organisation.json"])
+  cache_path: Path.join([tmp, "org", "organisation.json"]),
+  keys_path: Path.join([tmp, "org", "plane-keys.json"])
 )
 
 System.put_env("TROUPE_OPENCODE_CONFIG", Path.join(tmp, "no-opencode.jsonc"))
