@@ -23,7 +23,8 @@ System.at_exit(fn _ -> File.rm_rf!(config_home) end)
 # own that are not there until a test writes them.
 Application.put_env(:troupe_core, :organisation,
   managed_path: Path.join(config_home, "org/managed.yaml"),
-  cache_path: Path.join(config_home, "org/organisation.json")
+  cache_path: Path.join(config_home, "org/organisation.json"),
+  keys_path: Path.join(config_home, "org/plane-keys.json")
 )
 
 # The person's own `~/.agents/skills` (Decision 822) is read from the home directory,

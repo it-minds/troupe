@@ -99,7 +99,7 @@ defmodule Troupe.AgentsPaletteTest do
     assert user_state(pid).focus == :switcher
     text = screen_text(pid, session)
     assert text =~ "the agent build-1 runs"
-    assert text =~ ~r/build +● built-in · default · checkout/
+    assert text =~ ~r/build +● Shipped +· default · checkout/
     assert text =~ "You are Troupe's build agent"
 
     # Down to plan: its instruction is beside the list before it is chosen.

@@ -47,6 +47,7 @@ import { AnswerRecord, QuestionPanel } from "./Question";
 import { CommandPalette } from "./CommandPalette";
 import type { PaletteScreen } from "./CommandPalette";
 import { Files } from "./Files";
+import { PodConfig } from "./PodConfig";
 import { Curtain, ProseFrame, ReasoningFrame, StripLine, ToolFrame, useNow } from "./Frames";
 import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
@@ -56,8 +57,11 @@ import { OfferLine, OfferPanel } from "./Offer";
 import { StartLine, StartPanel } from "./Onboard";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
 
-/** A backstage pane: the running order, the files, or the repository's memory. */
-type Pane = "tasks" | "files" | "memory";
+/**
+ * A backstage pane: the running order, the files, the repository's memory, or for a team
+ * session what is in force in it on its pod.
+ */
+type Pane = "tasks" | "files" | "memory" | "settings";
 
 /** A line this app says in the transcript, after the event it was said at. */
 interface Note {
@@ -76,6 +80,7 @@ export function Session({
   onBack,
   onGo,
   onAgents,
+  onStarted,
 }: {
   /** The plane, for a team session. Null in local mode. */
   auth: AuthSession | null;
@@ -93,6 +98,8 @@ export function Session({
   onGo?: (screen: PaletteScreen) => void;
   /** Open the agents manager on this session's workspace, at one agent if named: a session on this computer's. */
   onAgents?: ((agent?: string) => void) | undefined;
+  /** Open a session the agent picker started, as the start screen opens one it made. */
+  onStarted?: ((id: string, kind: SessionKind, workspace?: string) => void) | undefined;
 }): JSX.Element {
   // Where it runs decides which socket it is reached over and nothing else about this
   // screen: the transcript, the approvals and the composer are the same protocol either
@@ -195,12 +202,15 @@ export function Session({
         agent={
           <AgentSwitch
             view={view}
+            auth={auth}
             daemon={daemon}
             kind={kind}
-            workspace={kind !== "team" ? workspaceOf(row) : null}
+            workspace={kind !== "team" ? (workspaceOf(row) ?? workspace ?? null) : null}
+            planeProfile={kind === "team" ? (row?.profile ?? null) : null}
             current={agentOf(view.state, row)}
             canChange={!readOnly}
             onAbout={kind !== "team" ? onAgents : undefined}
+            onStarted={onStarted}
           />
         }
       />
@@ -1065,8 +1075,10 @@ function Backstage({
   } | null;
 }): JSX.Element {
   const agents = Object.entries(view.state.agentState).filter(([path]) => path !== "");
-  // A team session's memory is its pod's, and `memory.get` is this computer's daemon's.
-  const shown: Pane = pane === "memory" && !memory ? "tasks" : pane;
+  // A team session's memory is its pod's, and `memory.get` is this computer's daemon's; a
+  // local session's settings are this computer's, which its settings screens show.
+  const team = row?.kind === "team";
+  const shown: Pane = (pane === "memory" && !memory) || (pane === "settings" && !team) ? "tasks" : pane;
 
   return (
     <aside className="backstage">
@@ -1083,10 +1095,20 @@ function Backstage({
               Memory
             </button>
           )}
+          {team && (
+            <button className="tab" aria-selected={shown === "settings"} onClick={() => onPane("settings")}>
+              Settings
+            </button>
+          )}
         </div>
       </section>
 
-      {shown === "memory" && memory ? (
+      {shown === "settings" ? (
+        <section>
+          <h3>Settings</h3>
+          <PodConfig view={view.view} />
+        </section>
+      ) : shown === "memory" && memory ? (
         <section>
           <h3>Memory</h3>
           <MemoryPane

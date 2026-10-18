@@ -1454,27 +1454,50 @@ Found by the chunk 36 fixers, 2026-10-16.
   - Sessions pin a bundle version number, not its channel, and composition makes channel moves more common.
   - A profile that stops extending loads its channel's plain bundle until the next recompose.
   - In GitOps, a child's own manifest change runs its last profile in effect until the plane's next pass. Admission judges a child's spec write against its previous effective profile. A parent deleted in Git leaves the child refused but running its last profile in effect.
-  - There is no `troupe config --explain` for a pod session, so a profile's rules aren't listed there.
 - **The fix loop's push policy** (Decision 911).
   - There's no content scan: a secret pasted into an ordinary file isn't caught by the path denylist. GitHub's push protection on the App's repositories covers it.
-  - A refused push leaves what it staged in the agent's index; the refusal says to run `git rm --cached`, and a temporary index would remove the trap.
   - A clone-only profile that doesn't declare the API host can't revoke its clone token from the pod.
-  - A trigger run skipped by a cap records no reason.
-  - The App can't yet be configured from GitOps (#653).
 - **Triggers and identity** (Decisions 912 and 914).
-  - Keys already stored on triggers that may no longer have one are dead, but listings still show `has_key: true`.
   - Folding a refused adoption pair keeps one key-manager name, so a private session the folded row made won't open.
-  - A refused push stays listed after a later agreeing push adopts the row.
   - There's no editor for rules under the organisation's `defaults:`, which the plane doesn't store.
 - **Tests** (Decision 915).
-  - About 90 `expect(button(…))` assertions after async steps aren't covered by the new waiting-assertion check.
   - A first turn takes about 3 s unloaded on a Windows checkout over WSL, 1.3 s of it in `Troupe.Tools.available/2`. Under load that fails gateway `WaitingSessionsTest` and core `RememberTest`, and is probably D8's slow first turns.
   - CrashLoop restart intensity is counted in time, so restarts slower than about 1.7 s may never trip it. Unconfirmed.
-  - Per-checkout plane test databases (`troupe_plane_test_<hash>`) stay in the dev Postgres until `scripts/dev-down --purge`.
-  - The cluster suite's WebhookTest pod-replacement wait has failed with nothing in the job log to say why.
-  - `bundles_test.exs` and `control_test.exs` still accept a bare `dev-token`.
 
 Found by the chunk 37 fixers, 2026-10-17.
+
+### D131 - First run, GitHub sweeps, the signed plane and the agent picker after chunk 38 (low)
+
+- **The desktop's first run and sign-in** (Decision 916).
+  - The cause of a lost `setup.answer` reply on a real daemon wasn't found; the app now recovers from one, but the daemon side was only reproduced with the fake.
+  - `DaemonClient` has no per-call timeout, so other buttons that wait on one reply can hang the same way.
+  - The TUI's first-run finish has the same one-reply shape and wasn't checked.
+  - The desktop asks its updater about a recommended version older than itself; harmless, but it shows a fetch error when the release URL is unreachable.
+- **GitHub sweeps and the App from GitOps** (Decision 917).
+  - A sweep reads at most 50 issues and the first 100 open pull requests per run, and reuses the trigger's `last_fired_at`.
+  - In GitOps mode, the App's settings and the teams' GitHub lists lock after the upgrade until `github/github.yaml` is committed; a team the manifest doesn't name lists no repositories.
+  - The GUI's fake admin refuses `admin.github.delete` in every GitOps case, including `missing`, which the plane allows.
+  - #653 still owes naming the person in each commit (`Requested-By:`) and the console's test token for a chosen repository.
+- **A pod session's config** (Decision 918).
+  - On a pod, `config.get` for a session needs only `observe`, so a viewer sees the profile's LLM `base_url`, models, prices and the pod's state directory (never the key).
+  - A session reports what it resolved when it started; a laptop's plain `/settings` reads the files as they are now.
+  - About 65 `expect(button(…)).toBeNull()` checks after async steps stay unchecked; they can't flake, but some may pass before the thing could have been drawn.
+- **The signed plane** (Decision 919).
+  - The key is trusted on first use: whoever answers for the plane at a machine's first sign-in can get their key pinned.
+  - The pin file lives in the person's own state directory, beside the cached document it protects.
+  - `/downloads` is anonymous, so a 404 there tells anyone which versions are refused.
+  - `initialize`'s `update_required` is unsigned.
+  - The desktop's own updater doesn't yet verify the plane's signature against the daemon's pin; a policy change doesn't reach connected clients until they ask again; mirroring a release into the object store is by hand.
+- **The agent picker** (Decision 920, tui/0164).
+  - A bundle draft is refused if an agent has no `mode` or has a key no agent has, which also blocks publishing an older version that carries one again.
+  - The console's `recordCalls()` swaps `fetch` after the admin client is built, so `bundles.test`'s "publishes nothing" passes without checking.
+  - The GUI's fake `checkAgent` lacks `delegation` and has a shorter tool list than the harness.
+  - #594 still owes `/agents` and `/new` onto the TUI picker, new-from-template, the desktop's agent manager on the picker, and the builder's profile-first view.
+- **Tests.**
+  - The gateway's `Loopback`, `PlaneVersion` and `Private` tests fail when run in one VM after `daemon_test`, and pass alone.
+  - Core's test helper sets the Logger level to `:critical`, so one `mix test` naming files from core and another app leaves the second app's `capture_log` empty.
+
+Found by the chunk 38 fixers, 2026-10-18.
 
 ## Taken
 

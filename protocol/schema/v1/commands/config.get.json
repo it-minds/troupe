@@ -3,6 +3,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "explain": {
+      "type": "string"
+    },
+    "key": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    },
     "workspace": {
       "type": "string"
     }

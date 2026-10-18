@@ -182,6 +182,8 @@ export type {
   GitHubAppChange,
   GitHubCheck,
   GitHubDelivery,
+  SigningKey,
+  SigningKeyVersion,
   Host,
   IdentityAdopted,
   IdentityDuplicates,
@@ -196,12 +198,14 @@ export type {
   ProviderTypeChoice,
 } from "./admin.js";
 export {
+  AGENT_ORIGINS,
   agentConflict,
   agentRefusal,
   agentTemplate,
   findingsFor,
   layerOf,
   layerWords,
+  originOf,
   parseAgent,
   permissionsOf,
   validAgentName,
@@ -227,7 +231,9 @@ export type {
   ProfileSwitch,
 } from "./agents.js";
 export { DESKTOP_CLIENT, askPlane, suggestion, updateRequiredSentence } from "./update.js";
-export type { ClientUpdate, PlaneVersionWord, UpdateRequired, VersionPolicy } from "./update.js";
+export { fingerprintOf, refusalSentence, verifySigned } from "./planeSignature.js";
+export type { PlaneKey, SignatureRefusal, SignedAnswer, SignedKind, Verified } from "./planeSignature.js";
+export type { ClientUpdate, PlaneVersionWord, SignatureWord, UpdateRequired, VersionPolicy } from "./update.js";
 export { DaemonClient, DaemonSource, claimRefusal, daemonUrl, revocationText, rowFromDaemon } from "./daemon.js";
 export type {
   ClaimResult,
@@ -236,6 +242,7 @@ export type {
   DaemonHooks,
   DaemonIdentity,
   DaemonSessionRow,
+  PinnedPlaneKey,
   DaemonStop,
   ImportResult,
   LocalServer,
@@ -267,6 +274,7 @@ export {
   describeOverride,
   discoveryParams,
   formFromConfig,
+  keySource,
   modelConfigError,
   providerTypes,
   ruleScope,
@@ -289,6 +297,7 @@ export type {
   ModelsParams,
   PermissionRule,
   ProviderTypeInfo,
+  SessionConfig,
 } from "./config.js";
 export { PATH_TOOLS, RULE_ACTIONS, checkRuleSet, parseRule, ruleKind, ruleParts } from "./rules.js";
 export type { ReadRule, RuleAction, RuleKind, RuleSet } from "./rules.js";
@@ -298,9 +307,11 @@ export {
   answeredKind,
   asksAddress,
   describeCheck,
+  finishedFlow,
   nextStep,
   previousStep,
   setupError,
+  setupFinishedSince,
   setupKinds,
   setupUnsupported,
   vendorKeyVar,

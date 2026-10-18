@@ -111,6 +111,8 @@ export const BUILTIN_AGENTS: FakeAgent[] = [
   },
 ];
 
+const ORIGIN: Record<FakeAgentLayer, string> = { builtin: "Shipped", bundle: "Your organisation's", user: "Yours", project: "This repository's" };
+
 const ON_A_POD = "On a pod the agents come from the profile's bundle and are read-only here: change them in the console";
 
 function split(text: string): { yaml: string; body: string } {
@@ -268,6 +270,8 @@ export function checkAgent(source: string, opts: { name?: unknown; served: strin
 export class FakeAgents {
   files: FakeAgent[] = [...BUILTIN_AGENTS];
   skipped: FakeSkippedAgent[] = [];
+  /** The plane's profile a bundle's agent is listed with, as a pod's pin names it. */
+  profile: string | null = null;
 
   constructor(
     private readonly configDir: string,
@@ -345,9 +349,10 @@ export class FakeAgents {
     return ["write_file", "edit_file", "shell"].every((t) => !tools.includes(t) || p[t] === "deny");
   }
 
-  row(d: Parsed, ctx: { worktree: boolean; served: string[] | null; roles: string[] }): Record<string, unknown> {
+  row(d: Parsed, ctx: { worktree: boolean; served: string[] | null; roles: string[]; workspace?: string | null }): Record<string, unknown> {
     const model = typeof d.meta["model"] === "string" ? d.meta["model"] : null;
     const unserved = model !== null && ctx.served !== null && !ctx.roles.includes(model) && !ctx.served.includes(model);
+    const why = this.notEditable(d);
     return {
       name: d.name,
       description: typeof d.meta["description"] === "string" ? d.meta["description"] : "",
@@ -362,6 +367,16 @@ export class FakeAgents {
       worktree: ctx.worktree,
       available: !unserved,
       reason: unserved ? `its model, ${model}, is not one the provider serves` : null,
+      // Where it comes from, in the four words, and the rest a picker reads (troupe #594).
+      origin: ORIGIN[d.layer],
+      profile: d.layer === "bundle" ? this.profile : null,
+      path: d.path,
+      editable: why === null,
+      editable_reason: why,
+      overrides: this.stack(d.name, ctx.workspace ?? null)
+        .filter((f) => f.layer !== d.layer && f.layer !== "bundle")
+        .reverse()
+        .map((f) => ({ layer: f.layer, origin: ORIGIN[f.layer], path: this.pathOf(f) })),
     };
   }
 

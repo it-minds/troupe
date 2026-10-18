@@ -240,6 +240,7 @@ OpenBao holds the rest, under policies rendered by `Troupe.KMS.Policy`:
 | A team session's data key | KV v2, `troupe/teams/<team>/sessions/<id>` | the pods of a profile granted to the team create and read it (every profile's, while they share one role); the plane can only destroy it |
 | A private session's data key | KV v2, `troupe/people/<name>/sessions/<id>` | the person's own daemon, through an assertion the plane signs; no pod role covers it |
 | The key that signs session tokens | transit, `troupe-session-tokens` | the plane signs with it; it is not exportable |
+| The plane's signing key | transit, `troupe-plane-signing`, `ed25519` | made by the plane on first use, not exportable; it signs the version policy and the organisation's document it tells people's machines, which pin its public half at sign-in and refuse what it did not sign. Shown and rotated in the console's Integrations; not the release key |
 | The GitHub App's private key | transit, `troupe-github-app` | imported once through `admin.github.put` and not exportable; the plane signs the App's JWT with it and keeps only its fingerprint ([github.md](github.md)) |
 | The GitHub App's webhook secret | transit, `troupe-github-webhook` | imported once through `admin.github.put` as an HMAC key and not exportable; the plane asks transit for each delivery's HMAC and compares it with the signature in constant time, and keeps only its version ([github.md](github.md)) |
 

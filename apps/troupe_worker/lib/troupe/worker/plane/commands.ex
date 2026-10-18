@@ -603,7 +603,8 @@ defmodule Troupe.Worker.Plane.Commands do
            channel: params["channel"],
            dir: nil,
            upgraded_from: nil,
-           repository_overrides: params["repository_overrides_bundle"] == true
+           repository_overrides: params["repository_overrides_bundle"] == true,
+           profile: params["profile"]
          }}
 
       version ->
@@ -615,7 +616,10 @@ defmodule Troupe.Worker.Plane.Commands do
              dir: dir,
              upgraded_from: params["bundle_upgraded_from"],
              entitlements: params["entitlements"],
-             repository_overrides: params["repository_overrides_bundle"] == true
+             repository_overrides: params["repository_overrides_bundle"] == true,
+             # The plane's profile the session runs on, which a listing of its agents
+             # names a bundle's agent's origin by (#594).
+             profile: params["profile"]
            })}
         end
     end

@@ -144,7 +144,7 @@ defmodule Troupe.CommandModeTest do
 
     type(pid, "write the note")
     press(pid, "n", ["ctrl"])
-    assert user_state(pid).focus == :chooser
+    assert user_state(pid).focus == :switcher
 
     # The default agent is the one selected, and what it is told is on screen: the
     # instruction `agents.get` serves, or on a daemon from before it the description.
@@ -152,8 +152,8 @@ defmodule Troupe.CommandModeTest do
     steps = Enum.find_index(names, &(&1 == "quick"))
     for _ <- 1..steps//1, do: press(pid, "down")
 
-    assert %{name: "quick"} =
-             Enum.at(user_state(pid).chooser.agents, user_state(pid).chooser.cursor)
+    assert %{"name" => "quick"} =
+             Enum.at(user_state(pid).switcher.rows, user_state(pid).switcher.cursor)
 
     {:ok, quick} = Client.agent_definition(sid, "quick")
     said = (quick.prompt || quick.description) |> String.split("\n", trim: true) |> hd()
@@ -162,7 +162,7 @@ defmodule Troupe.CommandModeTest do
     assert text =~ String.slice(said, 0, 40)
 
     press(pid, "enter")
-    assert user_state(pid).chooser.step == :where
+    assert user_state(pid).switcher.step == :where
     assert screen_text(pid, session) =~ "a worktree of its own"
     press(pid, "w")
 
@@ -228,7 +228,7 @@ defmodule Troupe.CommandModeTest do
     ready(pid)
 
     press(pid, "n", ["ctrl"])
-    assert user_state(pid).focus == :chooser
+    assert user_state(pid).focus == :switcher
     press(pid, "enter")
     press(pid, "c")
 
@@ -340,9 +340,37 @@ defmodule Troupe.CommandModeTest do
         Enum.any?(FakeRemote.calls(remote), &match?({"input.send", %{"text" => "carry on"}}, &1))
       end)
 
+      # The one picker opens on a pod too, on its own agents, its bundle's; a start is
+      # refused with why, an edit with the sentence the worker refuses a write with, and a
+      # switch is the session's own agent's.
       press(pid, "n", ["ctrl"])
+      assert user_state(pid).focus == :switcher
+      eventually(fn -> screen_text(pid, screen) =~ "Your organisation's" end)
+      assert screen_text(pid, screen) =~ "the code profile"
+
+      press(pid, "enter")
+      assert user_state(pid).switcher.status =~ "runs one profile"
+      press(pid, "b")
+      assert user_state(pid).switcher.status =~ "runs one profile"
+      press(pid, "e")
+      assert user_state(pid).switcher.status =~ "read-only here"
+      assert screen_text(pid, screen) =~ "read-only here"
+
+      press(pid, "s")
       assert user_state(pid).focus == :command
-      assert Enum.any?(notices(pid), &(&1 =~ "runs one profile"))
+      assert Enum.any?(notices(pid), &(&1 =~ "runs build from its next turn"))
+
+      eventually(fn ->
+        Enum.any?(
+          FakeRemote.calls(remote),
+          &match?({"profile.switch", %{"profile" => "build"}}, &1)
+        )
+      end)
+
+      assert Enum.any?(
+               FakeRemote.calls(remote),
+               &match?({"agents.list", %{"session_id" => "s-cm"}}, &1)
+             )
 
       GenServer.stop(pid, :normal)
     end

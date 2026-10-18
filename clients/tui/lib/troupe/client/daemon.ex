@@ -632,15 +632,14 @@ defmodule Troupe.Client.Daemon do
   def manage_sources(_sid, method, _params), do: {:error, "unknown method #{method}"}
 
   # The agents of this session's workspace, read, checked and written by the daemon (root
-  # Decision 841). Reading and checking name the session too, so `agents.get` answers
-  # with the session's own definitions and the windows of its family that run one, and go
+  # Decision 841). Listing, reading and checking name the session too, so `agents.list`
+  # and `agents.get` answer with the session's own definitions (root #594) and the windows
+  # of its family that run one, and go
   # over the session's own socket, as the command table does, so a fleet call the link is
   # busy with never holds them; a write gets its command id here, as every other does.
   @impl true
   def agents(sid, method, params) when method in ~w(agents.list agents.get agents.validate) do
-    base = %{workspace: workspace(sid)}
-    base = if method == "agents.list", do: base, else: Map.put(base, :session_id, sid)
-    params = Map.merge(base, params)
+    params = Map.merge(%{workspace: workspace(sid), session_id: sid}, params)
 
     case Worker.whereis(sid) do
       nil ->

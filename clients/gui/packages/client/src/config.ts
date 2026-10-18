@@ -87,7 +87,12 @@ export interface ConfigKey {
   key: string;
   /** The value in effect. A secret's is `****`, never itself. */
   value: unknown;
-  layer: "default" | "user" | "project" | "local" | "env" | "cli" | "opencode";
+  /**
+   * `org` and `enforced` are the organisation's; `profile` (its worker profile) and
+   * `session` (the terms it was created with) a session's on a pod, whose answer names them
+   * in `source`.
+   */
+  layer: "default" | "org" | "user" | "project" | "local" | "env" | "cli" | "enforced" | "profile" | "session" | "opencode";
   /** The file that set it, or the variable; null for a default. */
   source: string | null;
   default: unknown;
@@ -155,6 +160,42 @@ export interface ModelConfig {
   errors?: string[];
   /** What a `config.set` of one key wrote. */
   written?: { key: string; scope: ConfigScope; path: string };
+}
+
+/**
+ * A running session's configuration, as `config.get` naming it answers over the session's
+ * own connection: what was resolved as it started, which is what is in force in it, each
+ * key and rule with where it came from. On a pod (`pod`) that is its worker profile's
+ * settings and rules, what the platform enforces, the terms it was created with and its
+ * repository's files, and no key has a scope: none of it is a client's to write.
+ */
+export interface SessionConfig {
+  session_id: string;
+  pod: boolean;
+  workspace: string | null;
+  trusted: boolean;
+  keys: ConfigKey[];
+  files: Array<{ scope: string; path: string; exists: boolean }>;
+  permissions: PermissionRule[];
+  warnings: string[];
+  errors: string[];
+}
+
+/** Where a key's value came from, in words a settings page shows. */
+export function keySource(key: Pick<ConfigKey, "layer" | "source">): string {
+  const whose: Record<string, string> = {
+    default: "the default",
+    org: "your organisation's defaults",
+    enforced: "set by your organisation",
+    user: "your config.yaml",
+    project: "this project's .troupe/config.yaml",
+    local: "this project's config.local.yaml",
+    env: "the environment",
+    cli: "the command line",
+  };
+  // A pod's own layers say whose in their source: the worker profile, the session's terms.
+  if (key.layer === "profile" || key.layer === "session") return key.source ?? key.layer;
+  return whose[key.layer] ?? key.layer;
 }
 
 /** One key of a `config.get` answer, when the daemon answers every key. */

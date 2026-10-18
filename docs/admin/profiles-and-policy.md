@@ -54,7 +54,7 @@ Other `spec` fields:
 | `personalTools` | `allow` (the default, and what absent means) lets a person offer a session on these pods the tools of MCP servers they signed in to on their own machine; `forbid` has the pods refuse ([below](#a-persons-own-tools-on-a-pod)) |
 | `permissions` | per-tool rules every session on these pods obeys: `deny`, `ask` and `allow`, each a list of rules as in a person's config ([below](#per-tool-rules-on-a-profile)) |
 | `github.permissions` | what a session's token may do on GitHub beyond cloning its repository, in GitHub's names: `contents` (`read` or `write`, which pushes its `troupe/*` branch), `pull_requests` (`read` or `write`, which opens its draft pull request and comments on it), `checks` and `statuses` (`read`, its CI). Absent, sessions clone and do no more; a profile that pushes also declares the API's host in `egress.gitHosts` ([github.md](github.md#5-let-a-profile-reach-github)) |
-| `github.allowPublic`, `github.denyPaths`, `github.maxPushes`, `github.maxRuns` | how far the fix loop goes: `allowPublic` (absent, `false`: pushes and pull requests to private and internal repositories only), `denyPaths` (patterns a push never carries, added to `.env`, `*.pem`, private keys and the rest of the defaults), `maxPushes` (pushes a run may make) and `maxRuns` (runs on a repository at once). A team's own caps hold where lower ([github.md](github.md#9-how-far-a-run-may-go)) |
+| `github.allowPublic`, `github.denyPaths`, `github.maxPushes`, `github.maxRuns`, `github.maxAttempts` | how far the fix loop goes: `allowPublic` (absent, `false`: pushes and pull requests to private and internal repositories only), `denyPaths` (patterns a push never carries, added to `.env`, `*.pem`, private keys and the rest of the defaults), `maxPushes` (pushes a run may make), `maxRuns` (runs on a repository at once) and `maxAttempts` (runs a sweep starts on one issue that may end without a fix; one where nobody says). A team's own caps hold where lower ([github.md](github.md#9-how-far-a-run-may-go)) |
 | `mcpIdentities` | who the profile is at each MCP server its bundle calls with client credentials ([below](#calling-an-mcp-server-as-the-profile)). Yours to write, in direct and gitops mode alike; nothing in it is secret |
 | `mcpServers` | the MCP servers the profile adds to its bundle's, its own (Decision 910). The resource's list, which its pods load, is its channel's bundle's with these added by name: one with a bundle server's name replaces it only with `"override": true`. A publish to the channel composes the two again and keeps the profile's own; `admin.profile.get` answers the own ones in `spec`, and a put that sends the resource's whole list back has the bundle's dropped as the bundle's |
 | `teams` | **written by the plane** from grants; do not set it |
@@ -335,7 +335,10 @@ and the profile ("refused by the rule deny shell(curl), from the worker profile 
 and an asked one says so on its approval in the TUI and the desktop app. A `deny` for
 `shell` also refuses a command a person types with `!` in a session on these pods,
 answering `forbidden` with `setting: permissions`; an `ask` does not, since the person
-typing it is who it would ask.
+typing it is who it would ask. A person sees them, and the rest of what is in force in a
+session on these pods (the profile's provider and models, the platform's switches, the
+session's terms), with `troupe config --explain --session <id>`, the terminal UI's
+`/settings` in the session, or the desktop app's **Settings** pane beside it.
 
 `admin.profile.put` and the resource's reading refuse a rule the pods could not read, with
 the reader's sentence. Like `personalTools`, the rules ride the activation: a change
@@ -818,6 +821,11 @@ switch, and has no triggers. Then redeploy the plane with `plane.provisioningMod
   it came from, key and runs included; one the cluster has no resource for is reported
   `missing`, kept and still firing, until its manifest is committed or
   `admin.trigger.delete` deletes it.
+- And the GitHub App, as a `GitHubApp` named `github`: its App ID, API URL and
+  installations and every team's repositories and caps, never its key or webhook secret,
+  which stay in OpenBao ([github.md](github.md#10-the-app-from-a-repository)). Until its
+  manifest is committed the App is reported `missing` and goes on as it was; from the first
+  pass that reads it, a team the manifest does not name lists no repository.
 
 **Gitops to direct.** Stop the applier reconciling the profiles first — suspend the
 Kustomization, or take them out of it — or it puts back the repository's version at its

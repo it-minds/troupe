@@ -4,7 +4,8 @@ org = Path.join(System.tmp_dir!(), "troupe-daemon-test-org-#{System.unique_integ
 
 Application.put_env(:troupe_core, :organisation,
   managed_path: Path.join(org, "managed.yaml"),
-  cache_path: Path.join(org, "organisation.json")
+  cache_path: Path.join(org, "organisation.json"),
+  keys_path: Path.join(org, "plane-keys.json")
 )
 
 ExUnit.start()

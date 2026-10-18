@@ -152,6 +152,31 @@ defmodule Troupe.KMS.Policy do
   end
 
   @doc """
+  The policy for the plane's own signing key (#657), which signs what it tells people's
+  machines: create it on first use, read its public half, rotate it and sign with it.
+
+  `create` and `update` on the key's path are the create; transit makes a key there with
+  the type the plane sends, `ed25519`, not exportable. There is no `export`, `backup` or
+  `config` path, so not even the plane can take a copy of it or make it exportable later.
+  """
+  @spec plane_signing(String.t(), String.t()) :: String.t()
+  def plane_signing(mount \\ "transit", key \\ "troupe-plane-signing") do
+    """
+    path "#{mount}/keys/#{key}" {
+      capabilities = ["create", "read", "update"]
+    }
+
+    path "#{mount}/keys/#{key}/rotate" {
+      capabilities = ["update"]
+    }
+
+    path "#{mount}/sign/#{key}" {
+      capabilities = ["create", "update"]
+    }
+    """
+  end
+
+  @doc """
   The policy for the plane's GitHub App key: import it, add a version, sign with it, and
   read its public half; nothing that exports it.
 

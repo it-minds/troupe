@@ -198,12 +198,15 @@ export function App(): JSX.Element {
 
   // Where a run ends: on the session it started, on the list, or at the sign-in screen
   // for a plane — which is local-only turned off again, signing in to the plane's address
-  // straight away when the run was given one.
+  // straight away when the run was given one. Signed in, it lands where a start does; and
+  // so it does at once where the plane signed in to does not serve this version, which
+  // the banner there says in words, since there is no sign-in to go to.
   const setupDone = (outcome: SetupOutcome): void => {
     setup.done();
     refresh();
     if (outcome.plane !== null) {
       setLocalOnly(false);
+      setWhere(startScreen());
       if (outcome.plane) {
         prefs.set("planeUrl", outcome.plane);
         setSignInNow(true);
@@ -220,7 +223,7 @@ export function App(): JSX.Element {
   };
 
   if (mode === "local" && daemon.client && setup.needed === true) {
-    return <FirstRun client={daemon.client} appearance={appearance} onDone={setupDone} />;
+    return <FirstRun client={daemon.client} opened={daemon.opened} appearance={appearance} onDone={setupDone} />;
   }
 
   // A private session another device holds, taken over by this computer's daemon, and the
@@ -420,7 +423,7 @@ export function App(): JSX.Element {
 
         {where.screen === "appearance" && <AppearanceSettings {...appearance} />}
 
-        {where.screen === "setup" && <SetupScreen client={daemon.client} onDone={setupDone} />}
+        {where.screen === "setup" && <SetupScreen client={daemon.client} opened={daemon.opened} onDone={setupDone} />}
 
         {where.screen === "approvals" && (
           <Approvals
@@ -444,6 +447,10 @@ export function App(): JSX.Element {
             onBack={() => setWhere({ screen: "sessions" })}
             onGo={(screen) => setWhere({ screen })}
             onAgents={(agent) => setWhere({ screen: "agents", ...workspaceOf(row), ...(agent ? { agent } : {}) })}
+            onStarted={(id, kind, workspace) => {
+              refresh();
+              setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
+            }}
           />
         )}
       </main>

@@ -59,7 +59,9 @@ describe("the runs", () => {
     type(field("Showing")!, "unread");
     await waitFor(() => rows().length === 3, "the unread runs");
     type(field("Showing")!, "");
-    type(field("Team")!, "design");
+    // The team filter is drawn once the plane has said which teams there are, which can
+    // come after the rows.
+    type(await waitFor(() => field("Team"), "the team filter"), "design");
     await waitFor(() => rows().length === 1 && row("weekly-digest", "2026-10-12"), "design's run");
   });
 

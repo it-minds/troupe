@@ -289,6 +289,7 @@ export function GitopsProblem({ gitops }: { gitops: { problem: string | null; re
     missing: "The cluster has no resource for it: the plane kept the row from before it read the cluster",
     plane_only: "Nothing applies it from a repository yet",
     unwritten: "The plane has not written it to the cluster",
+    unknown_teams: "It names teams this plane does not have; the rest of it is used",
   };
   return (
     <div className="gitops-problem" role="status">

@@ -20,6 +20,11 @@ defmodule Troupe.Plane.GitHub.Review do
   - the reviewer is the repository's owner, a member or a collaborator, and not a bot;
   - the session's pushes are not closed by three red CI rounds: that draft is a person's.
 
+  A comment on the pull request's conversation (`issue_comment` with `created` on a pull
+  request) resumes it the same way, under the same rules, with the comment as the input
+  (`resume_comment/2`); whether the pull request is still a draft is read from GitHub,
+  since such a delivery does not say.
+
   The session is woken as the run's principal, through `session.open`, as anything that
   wakes a session does, and the review is pushed to its pod as its next input, fenced and
   marked as data (`session.input`), the one other piece of session content the control
@@ -58,7 +63,13 @@ defmodule Troupe.Plane.GitHub.Review do
          {:ok, comments} <- comments(session, pull, review),
          {:ok, user} <- acting(run),
          {:ok, _endpoint} <- wake(session, user),
-         :ok <- push(session.id, delivery, input(pull, review, comments), review) do
+         :ok <-
+           push(
+             session.id,
+             "github-review-#{delivery}",
+             input(pull, review, comments),
+             "a GitHub review by #{review.author}"
+           ) do
       audit(session, pull, review, delivery)
       %{"resumed" => session.id}
     else
@@ -70,6 +81,153 @@ defmodule Troupe.Plane.GitHub.Review do
         Logger.warning("troupe plane: a review on GitHub could not resume its session: #{reason}")
         %{"failed" => reason}
     end
+  end
+
+  @doc """
+  A comment on the conversation of a draft pull request a run opened resumes that run's
+  session with the comment as its next input, as a review does and under the same rules:
+  a comment GitHub calls the repository's owner's, a member's or a collaborator's, never a
+  bot's (the App's own among them), with something to say; a pull request that is a draft,
+  of an installation the plane lists, recorded by exactly one session that is a trigger's
+  run and whose pushes are not closed. Whether it is still a draft is read from GitHub, with
+  a token of the plane's own (`pull_requests: read`), since an issue's comment does not say.
+  """
+  @spec resume_comment(String.t(), map()) :: map()
+  def resume_comment(delivery, payload) do
+    with {:ok, comment} <- comment(payload),
+         {:ok, pull} <- commented_pull_request(payload),
+         {:ok, session, run} <- session_for(payload, pull),
+         :ok <- open(session),
+         :ok <- still_draft(session, pull, comment),
+         {:ok, user} <- acting(run),
+         {:ok, _endpoint} <- wake(session, user),
+         :ok <-
+           push(
+             session.id,
+             "github-comment-#{delivery}",
+             comment_input(pull, comment),
+             "a GitHub comment by #{comment.author}"
+           ) do
+      audit_comment(session, pull, comment, delivery)
+      %{"resumed" => session.id}
+    else
+      {:ignore, why} ->
+        %{"ignored" => why}
+
+      {:error, why} ->
+        reason = explain(why)
+
+        Logger.warning(
+          "troupe plane: a comment on GitHub could not resume its session: #{reason}"
+        )
+
+        %{"failed" => reason}
+    end
+  end
+
+  # -- what the comment is -----------------------------------------------------------------
+
+  defp comment(%{"action" => "created", "comment" => %{} = comment} = payload) do
+    cond do
+      Issue.bot?(comment["user"]) or Issue.bot?(payload["sender"]) ->
+        {:ignore, "a bot's comment"}
+
+      not Issue.own?(comment["author_association"]) ->
+        {:ignore, "a comment by somebody the repository does not count as its own"}
+
+      blank?(comment["body"]) ->
+        {:ignore, "a comment with nothing to say"}
+
+      true ->
+        {:ok,
+         %{
+           id: comment["id"],
+           body: Issue.cut(comment["body"], @body_bytes),
+           author: get_in(comment, ["user", "login"]),
+           url: comment["html_url"]
+         }}
+    end
+  end
+
+  defp comment(_payload), do: {:ignore, "not a new comment"}
+
+  defp commented_pull_request(%{"issue" => %{"number" => number} = issue} = payload)
+       when is_integer(number) do
+    cond do
+      not is_map(issue["pull_request"]) ->
+        {:ignore, "a comment on an issue, not on a pull request's conversation"}
+
+      not installed?(payload) ->
+        {:ignore, "a repository of no installation of this plane's App"}
+
+      true ->
+        {:ok, %{number: number, url: issue["pull_request"]["html_url"] || issue["html_url"]}}
+    end
+  end
+
+  defp commented_pull_request(_payload), do: {:ignore, "a comment on no pull request"}
+
+  defp still_draft(
+         %Session{repository: %{"owner" => owner, "name" => name}} = session,
+         pull,
+         comment
+       ) do
+    audit = %{
+      "session_id" => session.id,
+      "for" => "comment #{comment.id} on pull request #{pull.number}"
+    }
+
+    with {:ok, reader} <-
+           GitHub.reader(owner, name, %{"pull_requests" => "read"}, audit, session.owner_subject),
+         {:ok, %{} = read} <- reader.get.("/pulls/#{pull.number}", []) do
+      cond do
+        read["state"] not in [nil, "open"] ->
+          {:ignore, "a comment on a pull request that is closed"}
+
+        read["draft"] != true ->
+          {:ignore, "a comment on a pull request that is not a draft"}
+
+        true ->
+          :ok
+      end
+    else
+      {:ok, _other} -> {:error, "GitHub's answer for pull request ##{pull.number} was not one"}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  The input a comment gives a session: what happened and what to do, then the comment,
+  fenced and marked as data.
+  """
+  @spec comment_input(map(), map()) :: String.t()
+  def comment_input(pull, comment) do
+    head =
+      "A comment on your draft pull request ##{pull.number} (#{pull.url}) by " <>
+        "#{comment.author}. Work on what it asks in this repository, then push with " <>
+        "git_push and read CI with pr_checks, as before. If it asks for something you will " <>
+        "not do, say why with pr_comment."
+
+    text = Issue.cut("Comment by #{comment.author}:\n\n#{comment.body}", @input_bytes)
+
+    Enum.join([head, "", Issue.data_note("comment"), Issue.fence("github-comment", text)], "\n")
+  end
+
+  defp audit_comment(session, pull, comment, delivery) do
+    {:ok, _} =
+      Audit.record(
+        "github",
+        "github.comment",
+        "#{session.repository["owner"]}/#{session.repository["name"]}",
+        %{
+          "session_id" => session.id,
+          "pull_request" => pull.number,
+          "commenter" => comment.author,
+          "comment" => comment.id,
+          "delivery" => delivery
+        },
+        on_behalf_of: session.owner_subject
+      )
   end
 
   # -- what the review is ----------------------------------------------------------------
@@ -214,24 +372,24 @@ defmodule Troupe.Plane.GitHub.Review do
     end
   end
 
-  defp push(session_id, delivery, text, review) do
+  defp push(session_id, input_id, text, display_name) do
     with %Session{worker_id: worker_id} = session when is_binary(worker_id) <-
            Sessions.get(session_id),
          %{} = worker <- Fleet.get_worker(worker_id) do
       params = %{
         "session_id" => session_id,
         "epoch" => session.epoch,
-        "input" => %{"id" => "github-review-#{delivery}", "text" => text},
+        "input" => %{"id" => input_id, "text" => text},
         "actor" => %{
           "kind" => "service",
           "subject" => session.owner_subject,
-          "display_name" => "a GitHub review by #{review.author}"
+          "display_name" => display_name
         }
       }
 
       case Router.push(worker, "session.input", params) do
         {:ok, _} -> :ok
-        {:error, reason} -> {:error, "its pod did not take the review: #{inspect(reason)}"}
+        {:error, reason} -> {:error, "its pod did not take the input: #{inspect(reason)}"}
       end
     else
       _ -> {:error, "no pod holds the session"}

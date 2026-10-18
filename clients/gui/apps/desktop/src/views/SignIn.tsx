@@ -11,7 +11,8 @@
 //
 // The address is asked once. A first run that chose a plane has recorded it (the
 // `planeUrl` preference, which a sign-in keeps too), and finishing that run signs in there
-// straight away: the field is filled and the provider's page, or its code, comes next.
+// straight away: the field is filled and the provider's page, or its code, comes next. With
+// a code, the shell opens the provider's page for it too.
 //
 // And a door that is not a sign-in at all. Where this host can reach the daemon on this
 // computer, "Use this computer only" skips the plane for good (until the setting says
@@ -135,7 +136,18 @@ export function SignIn({
         return; // this tab is leaving
       }
 
-      await auth.signIn({ onDeviceCode: setDevice, onStatus: setStatus });
+      // The code is shown, and the provider's page is opened for it where a shell can open
+      // one: the sign-in was asked for, by the button or by a first run's finish, and the
+      // link stays for opening it again.
+      await auth.signIn({
+        onDeviceCode: (code) => {
+          setDevice(code);
+          void shell()
+            ?.openExternal?.(code.verification_uri_complete ?? code.verification_uri)
+            .catch(() => undefined);
+        },
+        onStatus: setStatus,
+      });
       onSignedIn(auth);
     } catch (e) {
       setError(describe(e));

@@ -10,8 +10,8 @@ This page sets it up. It uses `example-org` for the organisation and
 
 ## What it does today
 
-The four slices of [#147](https://github.com/it-minds/troupe/issues/147) (Decisions 885,
-891, 905 and 911):
+The four slices of [#147](https://github.com/it-minds/troupe/issues/147) and what came
+after them (Decisions 885, 891, 905, 911 and 917):
 
 - **A session can name a GitHub repository** when it is created, and its pod starts with a
   clone of it: shallow, one branch (the one asked for, or the default), no tags.
@@ -39,21 +39,27 @@ The four slices of [#147](https://github.com/it-minds/troupe/issues/147) (Decisi
   trigger on a repository starts a session when an issue gets its label, or when one of the
   repository's own people comments its command; the session gets the issue as its task,
   fenced as data. A review that requests changes on the draft it opened resumes that
-  session with the review as its next input, and the run's notification carries the pull
-  request's link. The console's **Runs and review** screen lists every run with its
-  repository, issue, state, pull request, CI rounds and spend.
+  session with the review as its next input, and so does a comment on its conversation; the
+  run's notification carries the pull request's link. The console's **Runs and review**
+  screen lists every run with its repository, issue, state, pull request, CI rounds and
+  spend, and a skipped run says which cap skipped it.
+- **A sweep, and "fix this"** ([§8](#a-sweep)). A trigger on a repository can also go over
+  the repository's open issues on a schedule, those with its label or those a query finds,
+  and start a run on each that nothing is fixing yet and that has not been tried as often as
+  it may be; and a person can start one run on one issue from the trigger's page.
 
 - **How far an unattended run goes is policy** ([§9](#9-how-far-a-run-may-go)). Each team
   lists the repositories its sessions may name; a push or a pull request to a repository
   GitHub reports as public is refused unless the profile allows public ones; a push that
   would carry a credential file (`.env`, `*.pem`, a private key, a path the profile denies,
   or what is mounted on the pod from a secret) is refused, naming it; a run has caps on its
-  pushes and on how many run at once; and a session's tokens are revoked at GitHub when it
-  goes dormant or stops.
+  pushes and on how many run at once, and a sweep on how often it tries one issue; and a
+  session's tokens are revoked at GitHub when it goes dormant or stops.
+- **In `gitops` mode the App comes from the repository** ([§10](#10-the-app-from-a-repository)):
+  its App ID, API URL and installations and every team's repositories, as a `GitHubApp`
+  resource. Its key and webhook secret never do.
 
-What it does **not** do yet: take the App's configuration from a repository in `gitops`
-mode, start a run from a schedule that sweeps issues, or scan what a push carries for
-secrets by their content.
+What it does **not** do: scan what a push carries for secrets by their content.
 
 ## 1. Register the App
 
@@ -80,7 +86,7 @@ On GitHub, as an owner of the organisation: **Settings → Developer settings �
 | Repository → Pull requests | Read and write | opening the session's draft pull request, and commenting on it |
 | Repository → Checks | Read-only | reading CI's check runs on the session's commits |
 | Repository → Commit statuses | Read-only | reading CI that reports statuses rather than check runs |
-| Repository → Issues | Read-only | receiving the Issues and Issue comment events that start runs |
+| Repository → Issues | Read-only | receiving the Issues and Issue comment events that start and resume runs, and reading the issues a sweep or "fix this" starts a run on |
 | Repository → Metadata | Read-only | GitHub requires it of every App |
 
 **Subscribe to events**: **Issues**, **Issue comment** and **Pull request review**, and no
@@ -138,6 +144,9 @@ GitHub too (`admin.github.check`) and removes it (`admin.github.delete`); or cal
   Enterprise Cloud, `https://<host>/api/v3` for GitHub Enterprise Server. Clones come from
   the matching host.
 - Only the keys you send change. `installations` is the whole list.
+- In `gitops` mode `app_id`, `api_url` and `installations` are the `GitHubApp` resource's
+  ([§10](#10-the-app-from-a-repository)) and are refused here as `managed_by_gitops`; the
+  key and the webhook secret are sent here as ever.
 
 The plane's OpenBao role needs the policy `Troupe.KMS.Policy.github_app/3` renders, beside
 the plane and signing policies
@@ -401,6 +410,70 @@ review is one input, however many lines it comments on. It does nothing for:
 Each resume is an audit entry, `github.review`, naming the session, the pull request, the
 reviewer and the delivery.
 
+**A comment on its conversation resumes it too.** A comment on the draft's conversation
+(`issue_comment`, `created`, on the pull request) sends the session back to work with the
+comment as its next input, fenced as `<<<github-comment` and `github-comment>>>`, under the
+same rules as a review: from the repository's owner, a member or a collaborator and never a
+bot (so the App's own comments, its CI summary and its stop, never resume anything); with
+something in it; on a draft a run opened, whose pushes three red rounds or a cap have not
+closed. The pull request is read from GitHub to tell whether it is still a draft, with a
+read-only token of the plane's own (`pull_requests: read` on that one repository). A
+comment there is never a command that starts a run. Each resume is an audit entry,
+`github.comment`.
+
+### A sweep
+
+A trigger on a repository can also sweep it on a schedule: add `sweep`, a five-field cron
+in UTC, to its source, and the plane goes over the repository's open issues at those
+minutes, those with the trigger's `label`, or those `query` finds:
+
+```json
+{
+  "kind": "webhook",
+  "provider": "github",
+  "repository": "example-org/widgets",
+  "label": "troupe-fix",
+  "sweep": "0 */6 * * *"
+}
+```
+
+`query` is GitHub's issue search qualifiers instead of the label, such as
+`label:bug no:assignee`; the plane adds the repository and `is:issue is:open` itself, and
+refuses a query that says `repo:`, `org:`, `user:`, `is:`, `type:`, `state:` or `archived:`.
+A trigger with a sweep and no label or command is fired only by its sweep.
+
+At each minute the plane reads the issues, oldest first and at most 50, with a token of its
+own narrowed to the repository, `issues: read` and `pull_requests: read`, and audited as
+`github.token`, and starts one run on each that is not already being fixed and has not been
+tried as often as it may be:
+
+- **Being fixed** is a run on the issue in flight (still to start, working, or waiting on a
+  person), or an open pull request that a run on the issue opened: the App's own draft, now
+  a person's to review.
+- **Tried** is a run the sweep started on the issue that has ended: three red CI rounds or
+  its cap of pushes closed it, its budget, turns or wall clock ran out, it failed, or it
+  finished and its pull request is no longer open. Counted since a person last
+  asked for a run on that issue, with its label, its command or "fix this"; a person's own
+  runs are not held to the cap. The cap is the lower of the profile's `maxAttempts` and the
+  team's `max_attempts`, and **one** where neither says ([§9](#9-how-far-a-run-may-go)).
+
+Each run is the trigger's, under its `concurrency`, the profile's and the team's caps of
+runs on a repository at once, and the budget, as any run is, with the issue fenced as data
+as a delivery's is and `source` `schedule`. A sweep stops at the first run a cap skips,
+which is recorded with why, and the rest of the issues wait for its next minute. The
+repository must be one the team lists, and private or internal unless the profile allows
+public ones, or the sweep starts nothing and the plane's log says why.
+
+### "Fix this"
+
+On the console's page of a trigger on a repository, **Fix an issue** takes an issue's
+number or its link (pasted from GitHub, and on the trigger's repository) and starts one run
+on it, after a confirm that says what the plane checks first: an open issue, not a pull
+request, on a repository the team lists, private or internal unless the profile allows
+public ones. Or `admin.trigger.fix` with `{team, name, issue}`. The run is `manual`, by the
+person, under the same caps as any run of the trigger, and a second click in the same
+minute is the run the first one made. A skipped run says why there and on its page.
+
 **Runs and review.** The console's **Runs and review** screen lists every run of the teams
 you administer, platform admin and team admin alike: its trigger, repository, issue, state,
 draft pull request with its CI rounds, spend, and who has read it; a run's page shows its
@@ -445,13 +518,14 @@ spec:
     denyPaths: [secrets/, "*.tfstate", "deploy/**/*.json"]
     maxPushes: 10                 # pushes a run may make
     maxRuns: 3                    # runs on a repository at once, across its triggers
+    maxAttempts: 2                # runs a sweep starts on one issue that may end without a fix
 ```
 
 **A team** (its own administrators'), on its console page's **GitHub** tab, or
 `admin.team.update`:
 
 ```json
-{"github": {"repositories": ["example-org/widgets", "example-org/docs"], "max_pushes": 5, "max_runs": 2}}
+{"github": {"repositories": ["example-org/widgets", "example-org/docs"], "max_pushes": 5, "max_runs": 2, "max_attempts": 1}}
 ```
 
 What each does:
@@ -472,8 +546,9 @@ What each does:
   path with a `/` from the repository's root, `**` any number of directories, either case).
   A path under what the pod mounts from a secret, a link into it, or a file whose bytes are
   a mounted file's is refused too. The refusal names every path, and nothing of the tree
-  reaches GitHub. The tree is what `git add -A` stages, so leave such files out with
-  `.gitignore`, and take one a refused push staged out of git's index with
+  reaches GitHub. The tree is what `git add -A` would stage, staged into an index of the
+  push's own, so a refused push leaves nothing staged behind it: leave such files out with
+  `.gitignore`, and take one the agent staged or committed itself out of git's index with
   `git rm --cached`. A file already on GitHub that the push does not change is not asked
   about. The content of what is pushed is not scanned for secrets; GitHub's secret scanning
   and push protection are the place for that.
@@ -483,7 +558,14 @@ What each does:
   told to comment what it tried and stop.
 - **A cap of runs at once.** The profile's `maxRuns` and the team's `max_runs`, each across
   all the triggers on a repository that are theirs; a firing over either is recorded as
-  skipped, as a trigger's own `concurrency` is. The run's budget still comes first.
+  skipped, as a trigger's own `concurrency` is, and the run says which cap it was
+  (`reason` in `admin.runs.list`, and on its page under Runs and review). The run's budget
+  still comes first.
+- **A cap of attempts per issue.** The lower of the profile's `maxAttempts` and the team's
+  `max_attempts`, and one where neither says: how many runs a sweep starts on one issue
+  that may end without a fix before it leaves the issue for a person
+  ([§8](#a-sweep)). A person asking again, with the label, the command or "fix this", is
+  not held to it, and starts the count again.
 - **Tokens revoked at dormancy.** When a session goes dormant or stops, its pod revokes
   its installation tokens at GitHub (`DELETE /installation/token`) rather than leaving
   them their hour. A profile that clones and does no more need not declare the API's host;
@@ -491,6 +573,62 @@ What each does:
 
 A profile that extends another gets its parent's denied paths with its own added, keeps a
 parent's `allowPublic: false` whatever it says, and can only lower a parent's caps.
+
+## 10. The App from a repository
+
+On a plane in `gitops` mode ([profiles-and-policy.md §6](profiles-and-policy.md#6-provisioning-direct-or-from-a-repository))
+the App's settings are a repository's too: one `GitHubApp` resource, named `github`, in the
+plane's namespace, which the plane reads at every pass as it reads the profiles and the
+triggers:
+
+```yaml
+apiVersion: troupe.dev/v1alpha1
+kind: GitHubApp
+metadata:
+  name: github
+  namespace: troupe-system
+spec:
+  appId: 123456
+  apiUrl: https://api.github.com            # GitHub's own where absent
+  installations:
+    - owner: example-org
+      installationId: 7890123
+  teams:
+    platform:
+      repositories: [example-org/widgets, example-org/docs]
+      maxPushes: 10
+      maxRuns: 2
+      maxAttempts: 1
+```
+
+- **What it holds**: the App ID, the API URL and the installations, and each team's
+  repositories and caps under `teams`, by the team's name. The resource is the whole of it:
+  a field it leaves out is that field's default, and **a team it does not name lists no
+  repository**. A team it names that the plane does not have is reported (`unknown_teams`)
+  and its entry is used once the team is enabled.
+- **What it never holds**: the private key and the webhook secret. They go into OpenBao's
+  transit engine through the console's **Integrations** screen or `admin.github.put`, as in
+  [step 4](#4-give-the-plane-the-app), on a `gitops` plane as on any other, and nothing
+  reads them back. A key in the resource (`privateKey`, say) is refused as a field the kind
+  does not have, and the resource is not used.
+- **Checked as the console checks it**: an App ID, an API URL that is GitHub's, an
+  Enterprise Cloud's or an Enterprise Server's, one installation per owner, repositories as
+  `owner/name` or `owner/*`, caps from 1 to 1000. One that fails is reported `refused`, with
+  every reason, and the App stays as the last version that passed.
+- **Locked elsewhere**: the console shows the App's settings and every team's **GitHub** tab
+  locked, with where they come from; `admin.github.put` refuses `app_id`, `api_url` and
+  `installations`, and `admin.team.update` refuses `github`, as `managed_by_gitops`.
+  `admin.github.get` says where they come from (`gitops`: the resource, the generation it was
+  read at, and any problem).
+- **Gone**: when the resource leaves the cluster, the App's settings and every team's
+  repositories go with it; its key and webhook secret stay in OpenBao for the App the
+  repository names next.
+- **Switching**: `admin.profiles.export` writes the App's manifest beside the profiles' and
+  the triggers' (`github/github.yaml`). Until it is committed, an App set through the
+  console is reported `missing` and goes on as it was.
+
+The plane's role reads `githubapps` in `gitops` mode, as it reads `triggers`; the chart
+installs the CRD (`charts/troupe/crds/githubapp.yaml`).
 
 ## Rotating the key, and taking the App away
 

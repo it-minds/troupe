@@ -155,6 +155,36 @@ defmodule Troupe.Worker.AuthTest do
       assert refused == []
     end
 
+    # The pickers of both clients list a pod session's agents with its own token (#594):
+    # named by the session and no path, the agents are its own, its bundle's. Named by a
+    # path they are the pod's, and another session's are another session's.
+    test "reads its own session's agents, and no path's", %{guard: guard} do
+      for method <- ~w(agents.list agents.get agents.validate) do
+        own = %{"session_id" => @mine, "name" => "build", "source" => "x"}
+        assert guard.(session_token(), method, own) == :ok, method
+
+        assert {:error, %{message: "forbidden"}} =
+                 guard.(session_token(), method, Map.put(own, "workspace", "/elsewhere"))
+
+        assert {:error, %{message: "forbidden"}} =
+                 guard.(session_token(), method, Map.delete(own, "session_id"))
+
+        assert {:error, %{message: "forbidden"}} =
+                 guard.(session_token(), method, %{own | "session_id" => "20260923T101112-other0"})
+      end
+    end
+
+    # Its own configuration, what is in force in it; the pod's settings stay the pod's.
+    test "has config.get naming its session, and no other's", %{guard: guard} do
+      assert guard.(session_token(), "config.get", %{"session_id" => @mine}) == :ok
+
+      assert {:error, %{message: "forbidden", data: %{field: "session_id"}}} =
+               guard.(session_token(), "config.get", %{"session_id" => "20260923T101112-zz9_Bq"})
+
+      assert {:error, %{message: "forbidden", data: %{method: "config.get"}}} =
+               guard.(session_token(), "config.get", %{})
+    end
+
     # The dispatcher answers `method_not_found` to everybody for a method the server does
     # not have, and nothing runs; saying `forbidden` instead would tell a client that a
     # method exists which does not.

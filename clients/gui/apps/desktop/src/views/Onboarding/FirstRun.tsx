@@ -1,7 +1,11 @@
 // A fresh machine's first run: how Troupe looks, then the daemon's questions, ending on
-// the session list with the first session started (troupe Decision 705). The theme
+// the session list with the first session started. The theme
 // comes first because it is the one question with no wrong answer, and it is
 // pre-answered; everything after it is the daemon's flow, one screen per step.
+//
+// The flow is held from the first screen, not from the questions: a socket that opens
+// again while the theme is being picked is asked where the run stands too, and a run the
+// daemon has finished meanwhile (in the terminal client, say) ends this one.
 
 import { useState } from "react";
 import type { JSX } from "react";
@@ -9,19 +13,24 @@ import type { DaemonClient } from "@troupe/client";
 import { DEFAULT_MODE, DEFAULT_THEME, THEMES } from "../../theme";
 import { ModeChoice, ThemeCards } from "../Appearance";
 import type { Appearance } from "../Appearance";
-import { SetupSteps } from "./Setup";
+import { useSetupFlow } from "./hooks";
+import { outcomeOf, SetupFlowView } from "./Setup";
 import type { SetupOutcome } from "./Setup";
 
 export function FirstRun({
   client,
+  opened = 0,
   appearance,
   onDone,
 }: {
   client: DaemonClient;
+  /** How many times the daemon's socket has opened again. */
+  opened?: number;
   appearance: Appearance;
   onDone: (outcome: SetupOutcome) => void;
 }): JSX.Element {
   const [stage, setStage] = useState<"appearance" | "setup">("appearance");
+  const setup = useSetupFlow(client, { opened, onFinished: (flow) => onDone(outcomeOf(flow)) });
 
   return (
     <main className="onboarding" aria-label="First run">
@@ -63,7 +72,7 @@ export function FirstRun({
           </footer>
         </>
       ) : (
-        <SetupSteps client={client} onDone={onDone} />
+        <SetupFlowView client={client} setup={setup} onDone={onDone} />
       )}
     </main>
   );

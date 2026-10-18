@@ -1,5 +1,6 @@
-import type { AgentDefinition, ProfileSwitch } from "./agents.js";
+import type { AgentDefinition, AgentRow, AgentSkippedFile, ProfileSwitch } from "./agents.js";
 import type { TroupeConnection } from "./connection.js";
+import type { SessionConfig } from "./config.js";
 import type { GateAnswer } from "./transcript.js";
 import type {
   BlobResponse,
@@ -266,6 +267,17 @@ export class SessionView {
     return this.conn.call<AgentDefinition>("agents.get", { name, session_id: this.sessionId });
   }
 
+  /**
+   * Every primary agent this session can pick (`agents.list` with the session named and no
+   * path, troupe #594): on this computer the workspace's, read from their files as a switch
+   * reads them; on a pod its bundle's, the built-ins and its working copy's. Each row says
+   * where it comes from, what it stands in for and whether it may be changed here: the one
+   * list a picker reads.
+   */
+  agents(): Promise<{ agents: AgentRow[]; skipped?: AgentSkippedFile[] }> {
+    return this.conn.call("agents.list", { session_id: this.sessionId });
+  }
+
   async editTodo(action: "add" | "cancel" | "complete", params: { id?: string; content?: string }): Promise<void> {
     await this.conn.call("todo.edit", {
       command_id: this.conn.nextCommandId(),
@@ -286,6 +298,16 @@ export class SessionView {
    */
   commands(): Promise<CommandsList> {
     return this.conn.call<CommandsList>("commands.list", { session_id: this.sessionId });
+  }
+
+  /**
+   * `config.get` naming the session: what is in force in it, each key and rule with where
+   * it came from. A pod answers it over the session's own connection, with its worker
+   * profile's settings and rules, the platform's, the session's terms and its repository's.
+   * Wakes nothing; a session not running where it is asked is `not_found`.
+   */
+  config(): Promise<SessionConfig> {
+    return this.conn.call<SessionConfig>("config.get", { session_id: this.sessionId });
   }
 
   /**

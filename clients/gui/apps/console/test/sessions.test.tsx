@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, render, says, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -88,9 +88,9 @@ describe("sessions", () => {
     await waitFor(() => says("What will happen") && says("s-7f3a9c25"), "the preview, with the fork that survives");
     await sees("1 fork survives");
     await sees("Its key is destroyed");
-    expect(button("Erase s-7f3a9c22")!.disabled).toBe(true);
+    expect((await seesButton("Erase s-7f3a9c22")).disabled).toBe(true);
     type(field("Type s-7f3a9c22 to confirm")!, "s-7f3a9c2");
-    expect(button("Erase s-7f3a9c22")!.disabled).toBe(true);
+    expect((await seesButton("Erase s-7f3a9c22")).disabled).toBe(true);
     type(field("Type s-7f3a9c22 to confirm")!, "s-7f3a9c22");
     await waitFor(() => !button("Erase s-7f3a9c22")!.disabled, "the confirmation");
     expect(fake.admin.sessions.find((s) => s.id === "s-7f3a9c22")!.state).toBe("dormant");
@@ -99,7 +99,7 @@ describe("sessions", () => {
     await waitFor(() => says("Recorded in the audit as session.erase on s-7f3a9c22"), "the audit's note");
     expect(fake.admin.sessions.find((s) => s.id === "s-7f3a9c22")!.state).toBe("erased");
     await waitFor(() => row("s-7f3a9c22") === null, "the list without it");
-    expect(row("s-7f3a9c25")).not.toBeNull();
+    await waitFor(() => row("s-7f3a9c25"), "the session left in the list");
   });
 
   it("pages through more sessions than one page holds", async () => {

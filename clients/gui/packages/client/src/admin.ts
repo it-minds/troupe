@@ -13,6 +13,8 @@
 //   * `forbidden` carries `data.required_role`, and `not_found` is what a team admin
 //     gets for a team that is not theirs — whether it exists is itself privileged.
 
+import type { AgentCheck } from "./agents.js";
+
 /**
  * A session as `admin.sessions.list` describes it: who owns it, where it runs, what state
  * it is in and what it holds, and nothing it said. The plane's answer names no team and
@@ -362,6 +364,8 @@ export interface TeamGitHub {
   max_pushes: number | null;
   /** Runs on a repository its triggers may have going at once. */
   max_runs: number | null;
+  /** Runs a sweep may start on one issue that end without a fix before it leaves the issue for a person. */
+  max_attempts?: number | null;
 }
 
 export interface AdminTeam extends TeamSpend {
@@ -657,6 +661,8 @@ export interface TriggerRun {
   issue?: { number: number; url: string | null; title: string | null } | null;
   /** What its session did on GitHub: its branch, its draft pull request and the CI rounds on it. */
   github?: SessionGitHub | null;
+  /** Why a skipped run started nothing: the cap that said no. Absent from a plane older than the field. */
+  reason?: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
 }
@@ -781,6 +787,14 @@ export interface GitHubApp {
   /** Where GitHub sends the App's events, and whether the secret it signs them with is set: its version, never it. */
   webhook?: { path: string; secret: { set: boolean; transit_key: string; version: number | null } };
   permissions: Record<string, string>;
+  /** On a gitops plane, the generation of the `GitHubApp` resource its settings were read at. */
+  resource_generation?: number | null;
+  /**
+   * On a gitops plane: the `GitHubApp` resource its App ID, API URL, installations and the
+   * teams' repositories come from, and what the last pass made of it. Its key and webhook
+   * secret are never a resource's, and are still set here.
+   */
+  gitops?: { resource: string; generation: number | null; source: string | null; problem: string | null; reasons: string[] } | null;
   updated_by: string | null;
   updated_at: string | null;
   /** On a put or a delete: the audit's diff, the key as its fingerprint. */
@@ -795,6 +809,26 @@ export interface GitHubAppChange {
   private_key?: string;
   /** As typed into the App's webhook settings at GitHub; imported into OpenBao, never shown back. */
   webhook_secret?: string;
+}
+
+/** One version of the plane's signing key: its public half and fingerprint, and when transit made it. */
+export interface SigningKeyVersion {
+  algorithm: string;
+  public_key: string;
+  fingerprint: string;
+  version: number;
+  created_at: string | null;
+}
+
+/**
+ * The key the plane signs what it tells people's machines with (#657), as `admin.signing.get`
+ * answers it: the current version, and every version's, newest first. Never the key itself,
+ * which transit holds and nothing exports.
+ */
+export interface SigningKey extends SigningKeyVersion {
+  versions: SigningKeyVersion[];
+  /** On a rotation: the audit's diff, fingerprints and versions. */
+  changes?: AuditChanges;
 }
 
 /** One delivery the App's webhook took: GitHub's id, what it was, and what the plane did with it. Never its body. */
@@ -894,6 +928,8 @@ export interface ProfilesExport {
   profiles: Manifest[];
   policy: Manifest | null;
   triggers: Manifest[];
+  /** The GitHub App and the teams' repositories, as a `GitHubApp`; never its key. Absent from an older plane. */
+  github?: Manifest[];
   /** What no profile's manifest holds, because the plane or the cluster writes it. */
   left_out: string[];
 }
@@ -1075,6 +1111,16 @@ export class AdminApi {
     return this.rpc<GitHubApp>("admin.github.delete", { app_id: appId });
   }
 
+  /** The plane's signing key, made on first use. */
+  signing(): Promise<SigningKey> {
+    return this.rpc<SigningKey>("admin.signing.get", {});
+  }
+
+  /** A new version of the signing key. Destructive for every machine that pinned it: confirmed by the current key's fingerprint. */
+  rotateSigning(fingerprint: string): Promise<SigningKey> {
+    return this.rpc<SigningKey>("admin.signing.rotate", { fingerprint });
+  }
+
   teams(): Promise<AdminTeam[]> {
     return this.rpc<AdminTeam[]>("admin.teams.list", {});
   }
@@ -1184,6 +1230,15 @@ export class AdminApi {
 
   bundle(channel: string, version: number): Promise<BundleDetail> {
     return this.rpc<BundleDetail>("admin.bundle.get", { channel, version });
+  }
+
+  /**
+   * One agent's definition checked as a bundle's agent is, by the rules the daemon's
+   * `agents.validate` applies (troupe #594): each finding with its field, `ok` saying
+   * whether a bundle carrying it would publish. Writes nothing.
+   */
+  checkAgent(name: string | null, definition: string): Promise<AgentCheck> {
+    return this.rpc<AgentCheck>("admin.agent.check", name ? { name, definition } : { definition });
   }
 
   /** Answers `{ok: true}`, or refuses with `invalid_params` whose `data.errors` is a sentence each. */
@@ -1322,6 +1377,14 @@ export class AdminApi {
   }
 
   /** Fire a trigger now, by hand: a run whose source is `manual`, named after the caller and the minute. */
+  /**
+   * The console's "fix this": one run of a trigger on a GitHub repository on one of its
+   * issues, by its number or its link, read from GitHub and held to the trigger's policy.
+   */
+  fixIssue(team: string, name: string, issue: string): Promise<TriggerFired> {
+    return this.rpc<TriggerFired>("admin.trigger.fix", { team, name, issue });
+  }
+
   runTrigger(team: string, name: string): Promise<TriggerFired> {
     return this.rpc<TriggerFired>("admin.trigger.run", { team, name });
   }

@@ -317,20 +317,28 @@ defmodule Troupe.Config do
   built from — every file read, every value each one gave, and what was ignored.
 
   Options: `:trust` — `:never` for a session on a pod, which reads no gated key from a
-  project's file; `:user_path` — the user file, when not `user_path/0`.
+  project's file; `:user_path` — the user file, when not `user_path/0`; `:sources` — where
+  the overrides came from, for the layers to say: a map of an override's field to
+  `{layer, source}` (`{:cli, "command line"}` for one it does not name), and `:env` to the
+  `{layer, owner}` the environment's values are said to be from instead of `env`, as a
+  pod's are its worker profile's.
   """
   @spec resolve(Path.t() | nil, keyword(), keyword()) ::
           {:ok, t(), Layers.Result.t()} | {:error, Error.t()}
   def resolve(workspace_root, overrides \\ [], opts \\ []) do
-    layers = Layers.read(workspace_root, opts)
+    sources = Map.new(Keyword.get(opts, :sources, %{}))
+    layers = workspace_root |> Layers.read(opts) |> env_from(sources[:env])
 
     with [] <- layers.errors,
-         {:ok, config, layers} <- layers |> build() |> apply_overrides(overrides, layers) do
+         {:ok, config, layers} <- layers |> build() |> apply_overrides(overrides, layers, sources) do
       # What the organisation enforces is above the command line (Decision 869).
       {config, layers} = Org.hold(config, layers)
-      # Every file's rules, and a caller's beside them, never instead.
-      layers = %{layers | rules: Permissions.hold(layers.rules, config)}
-      config = %{config | permissions: Permissions.in_force(layers.rules) ++ List.wrap(overrides[:permissions])}
+      # Every file's rules, and a caller's beside them, never instead; the caller's are in
+      # the layers too, so what explains the configuration lists them with the files'.
+      held = Permissions.hold(layers.rules, config)
+      given = List.wrap(overrides[:permissions])
+      layers = %{layers | rules: held ++ given}
+      config = %{config | permissions: Permissions.in_force(held) ++ given}
       config = apply_catalog(config)
       {:ok, %{config | warnings: Enum.map(layers.warnings ++ layers.refusals, &Issue.format/1)}, layers}
     else
@@ -567,14 +575,14 @@ defmodule Troupe.Config do
   # a file's is — a client that sends `auto_approve: "no"` is refused, not taken at its
   # truthiness — and recorded in the ladder; the rest (the catalog, the attribution a
   # worker sets) is the caller's own and is put as it is.
-  defp apply_overrides(config, overrides, layers) do
+  defp apply_overrides(config, overrides, layers, sources) do
     Enum.reduce_while(overrides, {:ok, config, layers}, fn
       {_key, nil}, acc ->
         {:cont, acc}
 
       {key, value}, {:ok, config, layers} ->
         case override(config, key, value) do
-          {:ok, config} -> {:cont, {:ok, config, record_override(layers, key, value)}}
+          {:ok, config} -> {:cont, {:ok, config, record_override(layers, key, value, sources)}}
           :ignore -> {:cont, {:ok, config, layers}}
           {:error, message} -> {:halt, {:error, override_error(key, message)}}
         end
@@ -633,11 +641,32 @@ defmodule Troupe.Config do
   # Lists and maps arrive in the struct's own shape from a caller that built them.
   defp override_value(_type, value), do: {:ok, value}
 
-  defp record_override(layers, key, value) do
+  defp record_override(layers, key, value, sources) do
     case Schema.by_field(key) do
-      {path, _spec} -> record(layers, path, :cli, "command line", value)
-      nil -> layers
+      {path, _spec} ->
+        {layer, source} = Map.get(sources, key, {:cli, "command line"})
+        record(layers, path, layer, source, value)
+
+      nil ->
+        layers
     end
+  end
+
+  # The environment's values said to be someone's: a pod's are its worker profile's, which
+  # is what set them, and `env` would say only that a variable did.
+  defp env_from(layers, nil), do: layers
+
+  defp env_from(layers, {layer, owner}) do
+    ladder =
+      Map.new(layers.ladder, fn {path, entries} ->
+        {path,
+         Enum.map(entries, fn
+           %{layer: :env, source: var} = entry -> %{entry | layer: layer, source: "#{owner} (#{var})"}
+           entry -> entry
+         end)}
+      end)
+
+    %{layers | ladder: ladder}
   end
 
   # One more value on a key's ladder, from a layer that is not a file's.

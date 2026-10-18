@@ -443,14 +443,18 @@ defmodule Troupe.Plane.Gitops.Triggers do
     key_note(trigger) ++ name_note(trigger)
   end
 
-  defp key_note(%Trigger{key_hash: hash}) when is_binary(hash) do
+  defp key_note(%Trigger{key_hash: hash} = trigger) when is_binary(hash) do
+    if Triggers.keyed?(trigger), do: key_lines(), else: []
+  end
+
+  defp key_note(_trigger), do: []
+
+  defp key_lines do
     [
       "This trigger has a key of its own, which stays with the plane and is not in this file.",
       "It goes on working after the switch, as long as the trigger keeps its team and name."
     ]
   end
-
-  defp key_note(_trigger), do: []
 
   # A trigger's name may end in a dash and a Kubernetes name may not.
   defp name_note(trigger) do

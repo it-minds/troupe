@@ -50,6 +50,39 @@ export interface AgentRow {
   available?: boolean;
   /** Why a session could not run it here, when `available` is false. */
   reason?: string | null;
+  /**
+   * Where it comes from in the four words a person uses (troupe #594): `Shipped`, `Your
+   * organisation's`, `Yours` or `This repository's`. The fields after it came with it and
+   * are absent from a daemon before it; `originOf` says the words for one of those.
+   */
+  origin?: string;
+  /** The plane's profile a bundle's agent came with, where the session's pin names one. */
+  profile?: string | null;
+  /** Its file, as a person on the daemon's machine writes the path; null for one with none. */
+  path?: string | null;
+  /** Whether a person may change it here, and why not when not. */
+  editable?: boolean;
+  editable_reason?: string | null;
+  /** The files of the same name it stands in for, in lower layers, nearest first. */
+  overrides?: Array<{ layer: AgentLayer; origin?: string; path: string }>;
+}
+
+/** The four words, in the order a picker groups them. */
+export const AGENT_ORIGINS = ["Shipped", "Your organisation's", "Yours", "This repository's"] as const;
+
+/** Where a row's agent comes from in the four words, from a daemon before them by its layer. */
+export function originOf(row: Pick<AgentRow, "origin" | "layer" | "source">): string {
+  if (row.origin) return row.origin;
+  switch (layerOf(row)) {
+    case "builtin":
+      return "Shipped";
+    case "bundle":
+      return "Your organisation's";
+    case "user":
+      return "Yours";
+    case "project":
+      return "This repository's";
+  }
 }
 
 /** An agent file found and not read, with why (`agents.list`'s `skipped`). */

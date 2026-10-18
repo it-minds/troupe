@@ -15,6 +15,7 @@ defmodule Troupe.Agent.ValidateTest do
   alias Troupe.Agent.{Definitions, Validate}
   alias Troupe.Config
   alias Troupe.LLM.Catalog.Store
+  alias Troupe.Protocol.AgentCheck
   alias Troupe.Test.FakeGateway
 
   defp check(source, opts \\ []), do: Validate.check(source, opts)
@@ -31,6 +32,24 @@ defmodule Troupe.Agent.ValidateTest do
       result = check(File.read!(file), name: name)
       assert result.ok, "#{name}: #{inspect(result.errors)}"
     end
+  end
+
+  # The plane checks a bundle's agents with the protocol's rules and no harness (#594), so
+  # the tools it knows are the protocol's list: the harness's own, every one of them.
+  test "the protocol's list of the harness's tools is the harness's" do
+    assert AgentCheck.harness_tools() ==
+             Enum.map(Troupe.Tools.builtins(), &elem(&1, 0))
+  end
+
+  # The same text answers the same findings whichever app checks it, where the harness
+  # has nothing of its own to add: no model, no tool beyond its own.
+  test "the daemon's check and the plane's are one" do
+    text =
+      "---\ndescription: x\nmode: primary\ntools: [read_file, reed_file]\n" <>
+        "permissions:\n  shell: auto\n---\nYou.\n"
+
+    assert check(text, name: "Bad") == AgentCheck.check(text, name: "Bad")
+    refute check(text).ok
   end
 
   test "a key no agent has, a missing mode and a wrong one" do

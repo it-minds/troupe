@@ -22,7 +22,12 @@ defmodule Troupe.Config.PermissionsTest do
     managed = Path.join(base, "managed.yaml")
     cache = Path.join(base, "state/organisation.json")
     previous = Application.get_env(:troupe_core, :organisation)
-    Application.put_env(:troupe_core, :organisation, managed_path: managed, cache_path: cache)
+
+    Application.put_env(:troupe_core, :organisation,
+      managed_path: managed,
+      cache_path: cache,
+      keys_path: Path.join(base, "state/plane-keys.json")
+    )
 
     on_exit(fn ->
       if previous,

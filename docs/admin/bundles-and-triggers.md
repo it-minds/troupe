@@ -42,7 +42,14 @@ unique per kind. An agent's definition must parse as frontmatter plus prompt, ma
 skills the bundle has, and replaces an agent Troupe ships (`build`, `plan`, `general`,
 `explore`, `quick`, `answer`, `ask`, `reviewer`, `implementer`, `librarian`,
 `orchestrate`: every file in `troupe_core`'s `priv/agents/`) only with `override: true`;
-without it the bundle is refused, naming the agent. A skill
+without it the bundle is refused, naming the agent. A draft's agent is also held to every
+rule the daemon holds a person's or a repository's agent file to (its `agents.validate`:
+the keys an agent has, a `mode`, tools the harness has, permissions that can apply, and the
+rest), and refused in the same words, `agent <name>: <what is wrong>`; what only a session
+can know, a model's provider or an MCP server's tool, is not checked. A version already
+published is not checked again by these rules, so one an older plane published still runs.
+The console's agent builder edits a bundle's agents as fields and asks
+`admin.agent.check` for one at a time (#594). A skill
 needs `SKILL.md` (whose `name`, if present, must be its own), relative text files with no
 `..`, at most 512 KiB. An MCP `url` is `https://`, or `http://` to a `.svc` host, and its
 host must pass the policy's egress check. Publishing to a channel that a profile whose
@@ -184,8 +191,9 @@ rotating replaces it at once, and is how a webhook
 made another way (a resource in `gitops` mode, or a trigger changed to a webhook) gets one.
 Only a webhook that names no repository has a key: a schedule is fired by the plane, a
 manual trigger by a person or a principal, and a trigger on a GitHub repository by the
-App's signed deliveries, so rotating one of those is refused, and a key a trigger kept from
-before its source changed opens nothing. The key
+App's signed deliveries, so rotating one of those is refused, and a trigger whose source
+changes to one of those loses its key: changed back to a webhook, it has none until a
+rotation gives it one, and a listing's `has_key` is true only for a webhook that has. The key
 fires that one trigger and does
 nothing else, which makes it the credential to give a CI job or a provider's webhook, and
 a wrong key and an unknown id get the same `401`. An `Idempotency-Key` header names the

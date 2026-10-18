@@ -45,6 +45,7 @@ check. Authentik specifically: [authentik.md](authentik.md).
 | Piece | Requirement |
 |---|---|
 | **Transit** at `transit`, key `troupe-session-tokens`, `ecdsa-p256`, not exportable | the plane signs plane tokens with it and publishes every key version as its JWKS |
+| **Transit** key `troupe-plane-signing`, `ed25519`, made by the plane on first use | the plane signs the version policy and the organisation's document with it, served at `/.well-known/troupe-signing-key`; machines pin it at sign-in. The console's Integrations shows its fingerprint and rotates it |
 | **KV v2** at `secret` | per-session data keys at `troupe/teams/<team>/sessions/<id>`, and a private session's at `troupe/people/<name>/sessions/<id>`; erasure deletes the metadata path so every version goes |
 | **Kubernetes auth** at `kubernetes`, with a **reviewer JWT** (a ServiceAccount bound to `system:auth-delegator`) | without one every login is `permission denied` and nothing says why |
 | Role `troupe-worker` (ServiceAccount `troupe-worker`, any namespace, audience `troupe-kms`), or with `bao.workerRolePerProfile` one role `troupe-worker-<profile>` per profile, bound to its namespace | worker pods log in with their projected `kms-token` under the role in `TROUPE_BAO_ROLE`, cache the client token until shortly before its lease ends, retry a 403 once after a fresh login |

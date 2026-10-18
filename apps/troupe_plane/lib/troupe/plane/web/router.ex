@@ -7,6 +7,10 @@ defmodule Troupe.Plane.Web.Router do
       GET  /healthz                    liveness, for Kubernetes
       GET  /.well-known/troupe         where to log in, and what to call this plane
       GET  /.well-known/jwks.json      the keys workers verify session tokens against
+      GET  /.well-known/troupe-signing-key
+                                       the key this plane signs what it tells clients with
+      GET  /downloads/v<version>/<file>
+                                       a release's files, from the object store
       GET  /.well-known/oauth-protected-resource
                                        which provider an MCP client should authenticate to
       POST /rpc                        the harness JSON-RPC (§ Plane API)
@@ -27,15 +31,19 @@ defmodule Troupe.Plane.Web.Router do
 
   use Plug.Router
 
+  alias Troupe.ObjectStore
+
   alias Troupe.Plane.{
     Admin,
     Build,
+    ClientVersions,
     Harness,
     Identity,
     OIDC,
     Principals,
     SCIM,
     Settings,
+    Signing,
     Tokens,
     Triggers
   }
@@ -44,7 +52,7 @@ defmodule Troupe.Plane.Web.Router do
   alias Troupe.Plane.GitHub.Webhook, as: GitHubWebhook
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Web.{BodyLimit, Docs, Index, RawBody}
-  alias Troupe.Protocol.{Error, JSONRPC, Token}
+  alias Troupe.Protocol.{ClientUpdate, Error, JSONRPC, Token}
 
   require Logger
 
@@ -132,6 +140,8 @@ defmodule Troupe.Plane.Web.Router do
         "name" => config(:plane_name, "troupe"),
         "rpc" => "/rpc",
         "jwks" => "/.well-known/jwks.json",
+        # The key what it tells clients is signed with (#657), which they pin at sign-in.
+        "signing_key" => "/.well-known/troupe-signing-key",
         # Where the web app is, for `troupe-daemon open` (Decision 802): null without one.
         "app" => app_address(conn),
         "protocol_version" => Troupe.Protocol.version(),
@@ -159,6 +169,36 @@ defmodule Troupe.Plane.Web.Router do
     case Tokens.jwks() do
       {:ok, jwks} -> send_json(conn, 200, jwks)
       {:error, reason} -> send_json(conn, 503, %{"error" => inspect(reason)})
+    end
+  end
+
+  # The plane's own signing key, which a client pins at sign-in and holds every signed
+  # answer to after (`Signing`): its public half and fingerprint, made on first use.
+  get "/.well-known/troupe-signing-key" do
+    case Signing.published() do
+      {:ok, key} -> send_json(conn, 200, key)
+      {:error, reason} -> send_json(conn, 503, %{"error" => inspect(reason)})
+    end
+  end
+
+  # A release's files, for machines that cannot reach GitHub: the plane names
+  # `<this plane>/downloads` as where releases are (`client_release_url`), and the files are
+  # copied into its object store under `releases/v<version>/`. Answered with a short-lived
+  # presigned URL rather than the bytes, so the plane stays out of the path of a download as
+  # it is of a session's; anybody may fetch one, as from GitHub, because the release key's
+  # signature is the check. A version this plane serves to no client is not handed out.
+  get "/downloads/:tag/:file" do
+    with "v" <> version <- tag,
+         true <- ClientUpdate.version?(version),
+         true <- file =~ ~r/\A[A-Za-z0-9][A-Za-z0-9._+-]*\z/,
+         true <- ClientVersions.served?(version) do
+      url = ObjectStore.presign(ObjectStore.from_env(), :get, "releases/#{tag}/#{file}", ttl: 300)
+
+      conn
+      |> put_resp_header("location", url)
+      |> send_resp(302, "")
+    else
+      _refused -> send_json(conn, 404, %{"error" => "not found"})
     end
   end
 

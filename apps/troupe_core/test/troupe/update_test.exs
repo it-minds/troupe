@@ -262,6 +262,46 @@ defmodule Troupe.UpdateTest do
       assert Update.run(:update, opts(ctx, url, plane: plane(%{"blocked" => ["1.0.9"]}))) == 0
       assert File.read!(ctx.tui) == "troupe 1.1.0\n"
     end
+
+    # #657: a closed network's machines update from where the plane says releases are, each
+    # under `v<version>/`, and still only from what the release key signed.
+    test "the release comes from where the plane says releases are", ctx do
+      "file://" <> dir = release!(ctx, "1.1.0")
+      mirror = Path.join(ctx.root, "mirror-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(mirror)
+      File.rename!(dir, Path.join(mirror, "v1.1.0"))
+      plane = Map.put(plane(%{"recommended" => "1.1.0"}), :release_url, "file://" <> mirror)
+
+      assert Update.run(:update, opts(ctx, nil, plane: plane)) == 0
+      assert File.read!(ctx.tui) == "troupe 1.1.0\n"
+      assert Update.daemon_version(ctx.lib, false) == "1.1.0"
+    end
+
+    test "a plane's mirror with no version named or recommended asks for one", ctx do
+      plane = Map.put(plane(%{}), :release_url, "file://" <> ctx.root)
+
+      assert Update.run(:update, opts(ctx, nil, plane: plane)) == 1
+
+      assert Enum.any?(
+               lines(),
+               &(&1 =~ "recommends no version: name one with troupe update --version X")
+             )
+
+      assert_unchanged(ctx)
+    end
+
+    test "a mirror holding another release than the one named under its version is refused",
+         ctx do
+      "file://" <> dir = release!(ctx, "1.0.5")
+      mirror = Path.join(ctx.root, "mirror-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(mirror)
+      File.rename!(dir, Path.join(mirror, "v1.1.0"))
+      plane = Map.put(plane(%{"recommended" => "1.1.0"}), :release_url, "file://" <> mirror)
+
+      assert Update.run(:update, opts(ctx, nil, plane: plane)) == 1
+      assert Enum.any?(lines(), &(&1 =~ "is 1.0.5, not 1.1.0; nothing is installed"))
+      assert_unchanged(ctx)
+    end
   end
 
   test "a daemon that cannot be stopped between turns is nothing changed", ctx do

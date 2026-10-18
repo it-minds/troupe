@@ -390,6 +390,12 @@ defmodule Troupe.Worker.HarnessAuthTest do
       mine = context.session_id
       assert {:ok, %{"id" => ^mine}} = Client.call(client, "session.get", %{"session_id" => mine})
       assert {:ok, %{"servers" => _}} = Client.call(client, "mcp.status", %{"session_id" => mine})
+
+      # Its own agents, named by the session, are the session's to read (#594).
+      assert {:ok, %{"agents" => [_ | _] = agents}} =
+               Client.call(client, "agents.list", %{"session_id" => mine})
+
+      assert Enum.all?(agents, &is_binary(&1["origin"]))
     end
 
     # The palette a client opens on a remote session is this table, so reading it is the

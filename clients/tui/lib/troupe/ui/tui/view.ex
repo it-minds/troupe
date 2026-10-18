@@ -101,10 +101,16 @@ defmodule Troupe.UI.TUI.View do
       [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
-  # The agent chooser is a popup over the window it switches, as the palette is over the
-  # screen it was opened from (TUI Decision 156).
-  defp draw(%{focus: :switcher, switcher: %{for: {:window, path}} = chooser} = state, frame) do
-    behind = draw(%{state | focus: {:window, path}}, frame)
+  # The agent picker is a popup over what it was opened from, as the palette is: the
+  # window it switches, or command mode, where it starts.
+  defp draw(%{focus: :switcher, switcher: chooser} = state, frame) do
+    under =
+      case chooser.for do
+        {:window, path} when is_map_key(state.model.windows, path) -> {:window, path}
+        _start -> :command
+      end
+
+    behind = draw(%{state | focus: under}, frame)
     {_line, cmd_rect} = List.last(behind)
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
 
@@ -128,14 +134,6 @@ defmodule Troupe.UI.TUI.View do
 
     Enum.drop(behind, -1) ++
       [command_line(state, cmd_rect, cmd_rect.height)] ++ palette_popup(state, frame, cmd_rect)
-  end
-
-  # Choosing what to start, and on which agent (TUI Decision 155): the agents beside the
-  # selected one's instruction, then where it works.
-  defp draw(%{focus: :chooser} = state, frame) do
-    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
-    [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
-    chooser_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
   # With a window activated, its pane under the tray of tiles; with none, command mode's
@@ -1780,6 +1778,9 @@ defmodule Troupe.UI.TUI.View do
     {s.status || "", " choose a #{what} — ↑↓ move · Enter picks · Esc back "}
   end
 
+  defp settings_command_line(%{settings: %{editing: nil, view: %{pod?: true}} = s}),
+    do: {s.status || "", " settings in force on the pod — ↑↓ move · Esc back "}
+
   defp settings_command_line(%{settings: %{editing: nil} = s}) do
     hint =
       case Enum.at(Settings.fields(), s.cursor) do
@@ -1803,11 +1804,16 @@ defmodule Troupe.UI.TUI.View do
   defp settings_title(s) do
     field = Enum.at(Settings.fields(), s.cursor)
 
-    if Settings.enforced(s.view, field.key) do
-      "#{field.label} is set by your organisation"
-    else
-      scope = Settings.target(s.view, field.key, s.scope)
-      "a change goes to #{scope}: #{Map.get(s.view.files, scope, "config.yaml")}"
+    cond do
+      s.view[:pod?] ->
+        "in force in this session on its worker pod; nothing here changes it"
+
+      Settings.enforced(s.view, field.key) ->
+        "#{field.label} is set by your organisation"
+
+      true ->
+        scope = Settings.target(s.view, field.key, s.scope)
+        "a change goes to #{scope}: #{Map.get(s.view.files, scope, "config.yaml")}"
     end
   end
 
@@ -1826,6 +1832,11 @@ defmodule Troupe.UI.TUI.View do
 
       "org" ->
         "set by: your organisation's defaults (#{get_in(s.view.keys, [key, "source"])}); a change here wins over them"
+
+      # A pod's: its worker profile, and the terms the session was created with, which
+      # the source names.
+      layer when layer in ["profile", "session"] ->
+        "set by: #{get_in(s.view.keys, [key, "source"])}"
 
       layer ->
         "set by: #{layer} (#{get_in(s.view.keys, [key, "source"])})"
@@ -2121,63 +2132,20 @@ defmodule Troupe.UI.TUI.View do
   defp same_dir(path),
     do: path |> String.replace("\\", "/") |> String.trim_trailing("/") |> String.downcase()
 
-  ## Choosing an agent (TUI Decision 155)
+  ## The agent picker
 
-  defp chooser_page(%{chooser: c}, rect) do
-    [list_rect, text_rect] = Layout.split(rect, :horizontal, [{:fill, 2}, {:fill, 3}])
-    agent = Enum.at(c.agents, c.cursor)
+  # The command box under the picker: what it is open for, and the task a start is for.
+  defp picker_line(%{step: :where} = picker),
+    do: " where it works — w a worktree of its own · c the checkout · Esc back#{task_note(picker)} "
 
-    {items, selected, title} =
-      case c.step do
-        :agent ->
-          {Enum.map(c.agents, &"#{&1.name} — #{&1.description}"), c.cursor,
-           " choose the agent#{task_note(c)} "}
+  defp picker_line(%{for: {:window, path}}),
+    do: " the agent #{path} runs — ↑↓ choose · Enter switches · Esc keeps it "
 
-        :where ->
-          {["a worktree of its own", "the checkout"], c.where, " where #{agent.name} works "}
-      end
+  defp picker_line(picker),
+    do: " start an agent — ↑↓ choose · Enter starts it · Esc back#{task_note(picker)} "
 
-    list = %ExRatatui.Widgets.List{
-      items: items,
-      selected: selected,
-      highlight_symbol: "▸ ",
-      highlight_style: selected(),
-      block: %Block{title: title, borders: [:all], border_type: :double}
-    }
-
-    text = %Paragraph{
-      text: instruction_text(c, agent),
-      wrap: true,
-      scroll: {c.scroll, 0},
-      block: %Block{title: " #{agent.name} — its instruction (PgUp/PgDn) ", borders: [:all]}
-    }
-
-    [{list, list_rect}, {text, text_rect}]
-  end
-
-  defp chooser_footer(%{step: :agent}),
-    do: " agents — ↑↓ move · Enter takes it · PgUp/PgDn read its instruction · Esc back "
-
-  defp chooser_footer(%{step: :where}),
-    do: " where — w a worktree of its own · c the checkout · ↑↓ and Enter · Esc back to the agents "
-
-  defp task_note(%{prompt: ""}), do: ""
-  defp task_note(%{prompt: prompt}), do: " for: " <> clip(prompt, 40)
-
-  # The agent's own instruction, as `agents.get` reads it; a daemon from before it says
-  # the description only, and says so.
-  defp instruction_text(c, agent) do
-    case Map.get(c.shown, agent.name) do
-      %{prompt: prompt} when is_binary(prompt) and prompt != "" ->
-        prompt
-
-      %{error: reason} ->
-        "#{agent.description}\n\n(its instruction could not be read: #{reason})"
-
-      _ ->
-        agent.description
-    end
-  end
+  defp task_note(%{for: {:start, prompt}}) when prompt != "", do: " · for: " <> clip(prompt, 40)
+  defp task_note(_picker), do: ""
 
   ## Window strip
 
@@ -2966,9 +2934,6 @@ defmodule Troupe.UI.TUI.View do
         :observer ->
           {"", " agents — ↑↓ move · Enter opens the agent · Esc back "}
 
-        :chooser ->
-          {"", chooser_footer(state.chooser)}
-
         :sessions ->
           {"", " sessions — ↑↓ move · Enter resumes · r refreshes · Esc back "}
 
@@ -2985,7 +2950,7 @@ defmodule Troupe.UI.TUI.View do
           Agents.command_line(state.agents_page)
 
         :switcher ->
-          {"", " the agent this window runs — ↑↓ choose · Enter switches · Esc keeps it "}
+          {"", picker_line(state.switcher)}
 
         :memory ->
           {"", " memory — ↑↓ move · x forgets the fact · r reload · Esc back "}

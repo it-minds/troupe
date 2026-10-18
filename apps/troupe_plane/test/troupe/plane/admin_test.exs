@@ -22,7 +22,7 @@ defmodule Troupe.Plane.AdminTest do
   }
 
   alias Troupe.Plane.Fleet.Profile
-  alias Troupe.Protocol.ProviderTypes
+  alias Troupe.Protocol.{AgentCheck, ProviderTypes}
 
   @moduletag timeout: 60_000
 
@@ -690,6 +690,47 @@ defmodule Troupe.Plane.AdminTest do
 
       # A team admin cannot check, because they cannot publish.
       assert {:error, refused} = Admin.bundle_validate(context.lead, good)
+      assert refused.data.required_role == "platform_admin"
+    end
+
+    # One format, one validator, three writers (#594): a bundle's agent the daemon's
+    # `agents.validate` would refuse is refused here in the daemon's own words.
+    test "a draft's agent is held to the daemon's rules, in its words, and checked alone first",
+         context do
+      definition =
+        "---\ndescription: Reviews\nmode: primary\ncolour: blue\ntools: [read_file, reed_file]\n---\nYou review.\n"
+
+      daemon = AgentCheck.check(definition, name: "triager")
+      refute daemon.ok
+
+      assert {:ok, checked} = Admin.agent_check(context.root, "triager", definition)
+      assert checked == daemon
+      assert Enum.map(checked.errors, & &1.field) == ["colour", "tools"]
+      assert Enum.find(checked.errors, &(&1.field == "tools")).message =~ "reed_file is not a tool"
+
+      draft = %{"schema" => 1, "agents" => [%{"name" => "triager", "definition" => definition}]}
+
+      assert {:error, error} = Admin.bundle_validate(context.root, draft)
+      assert error.data.errors == Enum.map(daemon.errors, &"agent triager: #{&1.message}")
+      assert {:error, ^error} = Admin.bundle_preview(context.root, "stable", draft)
+      assert {:error, ^error} = Admin.bundle_publish(context.root, "stable", draft)
+      assert Admin.bundles_list(context.root, "stable") == {:ok, []}
+
+      # What only a session's harness knows is a warning here as there: a model, and an MCP
+      # server's tool.
+      fine =
+        "---\ndescription: Reviews\nmode: primary\nmodel: big\ntools: [read_file, mcp.jira.search]\n---\nYou review.\n"
+
+      assert {:ok, %{ok: true, warnings: warnings}} = Admin.agent_check(context.root, "triager", fine)
+      assert Enum.map(warnings, & &1.field) == ["tools", "model"]
+
+      assert {:ok, _} =
+               Admin.bundle_validate(context.root, %{
+                 "schema" => 1,
+                 "agents" => [%{"name" => "triager", "definition" => fine}]
+               })
+
+      assert {:error, refused} = Admin.agent_check(context.lead, "triager", fine)
       assert refused.data.required_role == "platform_admin"
     end
 

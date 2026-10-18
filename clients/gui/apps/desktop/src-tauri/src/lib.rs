@@ -16,10 +16,13 @@
 //   its own update         a release whose manifest the release key signed, checked
 //                          here, installed by Tauri's updater, with the daemon beside the
 //                          app swapped in first (src/update.rs, src/release.rs)
+//   an agent's file        a person's or a repository's, in the editor the system opens
+//                          Markdown with, and no other file (src/agent_file.rs)
 //
 // Each one is reached through `TroupeShell` in `src/shell.ts`, which the shell installs
 // on `window.troupe` at startup. Nothing else in the bundle knows this process exists.
 //
+mod agent_file;
 mod daemon;
 mod notify;
 mod release;
@@ -47,6 +50,7 @@ pub fn run() {
             secrets::secret_get,
             secrets::secret_set,
             secrets::secret_delete,
+            agent_file::agent_file_open,
             daemon::daemon_endpoint,
             daemon::daemon_start,
             notify::notify_show,

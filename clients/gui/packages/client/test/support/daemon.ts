@@ -559,6 +559,12 @@ export class FakeDaemon {
   subscribeDelayMs = 0;
   /** How long a method takes to answer, by its name: a busy machine, for any other method. */
   delayMs: Record<string, number> = {};
+  /**
+   * A method the daemon does, once, whose answer never reaches the client: `hold` keeps the
+   * socket open and says nothing, `drop` closes the socket in its place, as a daemon whose
+   * connection went in the middle of the call. What it did stays done.
+   */
+  loseReply: Record<string, "hold" | "drop"> = {};
   /** Whether sessions approve every tool call themselves, as `auto_approve: true` in the machine's config does. */
   autoApprove: boolean;
   /**
@@ -678,6 +684,11 @@ export class FakeDaemon {
     // The label is in `identity.json` and survives; the plane token was in memory.
     this.planeToken = null;
     await this.start();
+  }
+
+  /** Close every client's socket and stay up where it was: the next call dials again, to the same daemon. */
+  dropClients(): void {
+    for (const c of this.clients) c.ws.terminate();
   }
 
   /** What `daemon.json` says while it runs: the port and token a client finds it by. */
@@ -1074,7 +1085,6 @@ export class FakeDaemon {
   }
 
   private handle(client: Client, id: unknown, method: string, params: Record<string, unknown>): void {
-    const ws = client.ws;
     const sessionId = String(params["session_id"] ?? "");
     const session = this.sessions.get(sessionId);
     const delay = this.delayMs[method] ?? 0;
@@ -1082,6 +1092,9 @@ export class FakeDaemon {
       setTimeout(() => this.handle(client, id, method, { ...params, __delayed: true }), delay);
       return;
     }
+    const lose = this.loseReply[method];
+    if (lose) delete this.loseReply[method];
+    const ws = lose ? ({ send: () => lose === "drop" && client.ws.terminate() } as unknown as WebSocket) : client.ws;
 
     switch (method) {
       case "identity.get":
@@ -1102,6 +1115,16 @@ export class FakeDaemon {
           this.planeTokens.push(params["plane_token"]);
         }
         return reply(ws, id, this.identityJson());
+      }
+
+      // The person accepting the plane's new key, by the fingerprint they were shown (#657).
+      case "identity.accept_plane_key": {
+        const offered = this.planeKey?.offered;
+        if (!this.planeKey || !offered || offered.fingerprint !== params["fingerprint"]) {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: `the plane offers no key ${String(params["fingerprint"])}: nothing is accepted` } });
+        }
+        this.planeKey = { plane_url: this.planeKey.plane_url, ...offered };
+        return reply(ws, id, { plane_key: this.planeKey });
       }
 
       case "identity.unlink":
@@ -2020,7 +2043,7 @@ export class FakeDaemon {
     }
     const workspace = typeof params["workspace"] === "string" && params["workspace"] ? params["workspace"] : (named?.workspace ?? null);
     const models = this.servedModels();
-    const ctx = { worktree: workspace !== null && [...this.sessions.values()].some((s) => s.workspace === workspace && s.state === "active"), ...models };
+    const ctx = { worktree: workspace !== null && [...this.sessions.values()].some((s) => s.workspace === workspace && s.state === "active"), ...models, workspace };
     const name = params["name"];
 
     // The primaries, and with `subagents` the subagents after them (troupe Decision 852).
@@ -2199,14 +2222,23 @@ export class FakeDaemon {
     };
   }
 
+  /**
+   * The key the linked plane signs with, as this machine pinned it, and the one it offers
+   * instead where it changed (#657): what `identity.get` carries as `plane_key`. None, as a
+   * daemon from before it or one linked to a plane that signs nothing.
+   */
+  planeKey: { plane_url: string; algorithm: string; public_key: string; fingerprint: string; offered?: { algorithm: string; public_key: string; fingerprint: string } } | null = null;
+
   private identityJson(): Record<string, unknown> {
-    if (!this.linked) return { linked: false };
+    const key = this.planeKey ? { plane_key: this.planeKey } : {};
+    if (!this.linked) return { linked: false, ...key };
     return {
       linked: true,
       subject: this.linked.subject,
       display_name: this.linked.display_name ?? null,
       plane_url: this.linked.plane_url ?? null,
       linked_at: new Date().toISOString(),
+      ...key,
     };
   }
 
