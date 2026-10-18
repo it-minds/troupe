@@ -35,7 +35,20 @@ defmodule Troupe.Config.Layers do
   alias Troupe.LLM.ProviderType
   alias Troupe.Protocol.{Organisation, PermissionRule}
 
-  @type layer :: :default | :org | :user | :project | :local | :env | :cli | :enforced
+  # `:profile` and `:session` are a pod's: what its worker profile set, which is its
+  # environment, and the terms the session was created with (`Troupe.Config.resolve/3`'s
+  # `:sources`).
+  @type layer ::
+          :default
+          | :org
+          | :user
+          | :project
+          | :local
+          | :env
+          | :cli
+          | :enforced
+          | :profile
+          | :session
 
   @typedoc "One value one layer gave one key: the ladder `--explain` shows."
   @type entry :: %{

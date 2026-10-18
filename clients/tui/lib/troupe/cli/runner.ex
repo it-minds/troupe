@@ -99,6 +99,11 @@ defmodule Troupe.CLI.Runner do
           status -> status
         end
 
+      # A running session's is what is in force in it, which only where it runs can say:
+      # this machine's daemon, or its worker pod.
+      {:ok, %{mode: :config_explain, explain_session: sid} = args} when is_binary(sid) ->
+        print(Troupe.CLI.SessionConfig.explain(sid, args.key, json: args.json))
+
       # Read here, from the same files the daemon reads: the answers are about files, and
       # need no daemon to give them.
       {:ok, %{mode: :config_explain} = args} ->

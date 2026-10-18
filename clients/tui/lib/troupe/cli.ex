@@ -56,6 +56,7 @@ defmodule Troupe.CLI do
           all: boolean(),
           daemon_args: [String.t()],
           explain: boolean(),
+          explain_session: String.t() | nil,
           json: boolean(),
           bench: boolean(),
           write: boolean(),
@@ -95,6 +96,7 @@ defmodule Troupe.CLI do
     remote: :boolean,
     all: :boolean,
     explain: :boolean,
+    session: :string,
     json: :boolean,
     bench: :boolean,
     write: :boolean,
@@ -162,6 +164,13 @@ defmodule Troupe.CLI do
     {"troupe config --explain [KEY] [--json]",
      "every setting, or KEY's, and which file set it (secrets masked)",
      [["config", "--explain"], ["config", "--explain", "max_turns", "--json"]]},
+    {"troupe config --explain [KEY] [--json] --session SESSION_ID",
+     "what is in force in a running session, here or on a worker pod of the plane you are " <>
+       "signed in to, and where each part came from: its profile, the platform, its terms, its files",
+     [
+       ["config", "--explain", "--session", "id"],
+       ["config", "--explain", "max_turns", "--json", "--session", "id"]
+     ]},
     {"troupe config validate [PATH]", "check the config files, or one; exits 1 on any problem",
      [["config", "validate"]]},
     {"troupe config migrate [--write] [PATH]",
@@ -320,6 +329,8 @@ defmodule Troupe.CLI do
       all: Keyword.get(opts, :all, false),
       daemon_args: [],
       explain: Keyword.get(opts, :explain, false),
+      # `config --explain --session ID`: that running session's configuration, not the files'.
+      explain_session: Keyword.get(opts, :session),
       json: Keyword.get(opts, :json, false),
       bench: Keyword.get(opts, :bench, false),
       write: Keyword.get(opts, :write, false),

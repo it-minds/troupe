@@ -397,8 +397,32 @@ defmodule Troupe.Worker.Session.Restore do
       kind: :team,
       origin: Keyword.get(opts, :origin),
       fake: Keyword.get(opts, :fake),
-      config_overrides: overrides
+      config_overrides: overrides,
+      config_sources: sources(context.profile)
     )
+  end
+
+  # Where each part of a pod session's configuration came from, for what explains it: the
+  # environment is the worker profile's, which the operator writes from its `llm`; the
+  # platform's two switches are what the organisation enforces; the terms are the session's
+  # own, set when it was created; and what this pod sets of its own is the pod's.
+  defp sources(profile) do
+    owner = if profile, do: "the worker profile #{profile}", else: "the worker profile"
+    terms = {:session, "the session's terms"}
+    platform = {:enforced, "the plane's platform settings"}
+    pod = {:cli, "the worker pod"}
+
+    %{
+      env: {:profile, owner},
+      max_turns: terms,
+      wall_clock_ms: terms,
+      approvals: terms,
+      budget_asks: terms,
+      managed_permission_rules_only: platform,
+      managed_mcp_servers_only: platform,
+      state_dir: pod,
+      fs_events: pod
+    }
   end
 
   # The limits the terms set ride along by the budget's names, so a session whose terms

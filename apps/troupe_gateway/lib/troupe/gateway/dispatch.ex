@@ -1231,7 +1231,11 @@ defmodule Troupe.Gateway.Dispatch do
   #
   # The daemon's alone. A pod's provider is its profile's business and a pod has no user
   # file to edit, so on a worker these do not exist rather than answer about a file
-  # nobody reads.
+  # nobody reads. But for one session's own configuration, what is in force in it, which
+  # a pod's session has as a laptop's does.
+
+  defp handle("config.get" = method, %{"session_id" => id} = params, _context) when is_binary(id),
+    do: model_settings(method, params)
 
   defp handle("config." <> _ = method, params, _context) do
     if Process.whereis(Troupe.Gateway.Daemon),
@@ -1356,6 +1360,21 @@ defmodule Troupe.Gateway.Dispatch do
 
   # `config.get` is the model panel's fields, as before, and every key with where it came
   # from (#57); `config.set` and `config.import` answer the same after the write.
+  #
+  # With a `session_id`, the session's own: what was resolved as it started, which is
+  # what is in force in it, each value and rule with where it came from. That is the one
+  # a session's own token may ask a pod for; `explain` adds what `troupe config --explain`
+  # prints for it (`text`) or its JSON (`json`), for `key` when one is named.
+  defp model_settings("config.get", %{"session_id" => session_id} = params) when is_binary(session_id) do
+    with {:ok, explain} <- explain_param(params),
+         %{} = described <- Settings.describe_session(session_id) do
+      {:ok, Map.merge(described, explained(session_id, explain, params["key"]))}
+    else
+      {:error, _} = error -> error
+      nil -> {:error, Error.new(:not_found, %{session_id: session_id, reason: "the session is not running here"})}
+    end
+  end
+
   defp model_settings("config.get", params) do
     {:ok, settings(ModelSettings.describe(workspace_param(params)), workspace_param(params))}
   end
@@ -1448,6 +1467,22 @@ defmodule Troupe.Gateway.Dispatch do
   defp settings_result(error, _workspace), do: settings_result(error)
 
   defp settings(model_settings, workspace), do: Map.merge(model_settings, Settings.describe(workspace))
+
+  defp explain_param(%{"explain" => explain}) when explain in ["text", "json"], do: {:ok, explain}
+  defp explain_param(%{"explain" => nil}), do: {:ok, nil}
+
+  defp explain_param(%{"explain" => _other}),
+    do: {:error, Error.new(:invalid_params, %{field: "explain", reason: "text or json"})}
+
+  defp explain_param(_params), do: {:ok, nil}
+
+  defp explained(_session_id, nil, _key), do: %{}
+
+  defp explained(session_id, form, key) do
+    {output, status} = Troupe.Config.Explain.explain_session(session_id, key, json: form == "json")
+    explanation = if form == "json" and status == 0, do: Jason.decode!(output), else: output
+    %{"explain" => explanation, "explain_status" => status}
+  end
 
   # Every client attached hears that a file the daemon writes has changed, and which of
   # its keys did, so one client shows what another set (#57). The file is read before

@@ -25,8 +25,24 @@ defmodule Troupe.Session do
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
-    Supervisor.start_link(__MODULE__, opts, name: Registry.session(session_id))
+
+    resolved = %{
+      layers: Keyword.get(opts, :layers),
+      kind: Keyword.get(opts, :kind, :local),
+      workspace: Keyword.fetch!(opts, :workspace).root_real
+    }
+
+    Supervisor.start_link(__MODULE__, opts, name: Registry.session(session_id, resolved))
   end
+
+  @doc """
+  What a running session's configuration was resolved from: the layers, with where each
+  value and rule came from, its `kind` and its workspace; `nil` for a session not running
+  here. The configuration is resolved once, as the session starts, so this is what is in
+  force in it.
+  """
+  @spec resolved(String.t()) :: %{layers: Config.Layers.Result.t() | nil, kind: atom(), workspace: Path.t()} | nil
+  def resolved(session_id), do: Registry.value({:session, session_id})
 
   @doc "The root agent's path. Everything else hangs below it."
   @spec root_path() :: [String.t()]
@@ -198,7 +214,7 @@ defmodule Troupe.Session do
     bundle = Keyword.get(opts, :bundle)
 
     with {:ok, workspace} <- open_workspace(workspace_path, opts),
-         {:ok, config} <- config(workspace, opts),
+         {:ok, config, layers} <- config(workspace, opts),
          :ok <- known_provider(config) do
       # A workspace's own agents let a tool run unasked only once the workspace is
       # trusted, as its `config.yaml` may only then, and a pod trusts none (Decision 825);
@@ -271,7 +287,9 @@ defmodule Troupe.Session do
          # What the caller set over the files, kept for a branch the watcher starts, which
          # is started as this session was (Decision 844).
          config_overrides: Keyword.get(opts, :config_overrides, []),
-         hold_auto: Keyword.get(opts, :hold_auto, false)
+         config_sources: Keyword.get(opts, :config_sources, %{}),
+         hold_auto: Keyword.get(opts, :hold_auto, false),
+         layers: layers
        ]}
     end
   end
@@ -284,13 +302,19 @@ defmodule Troupe.Session do
   # A file Troupe refuses is an answer to `session.create`, naming the file, the key and
   # the fix. A session on a pod reads no gated key from the project's own file, whatever
   # the pod's user file says (Decision 686).
+  #
+  # The layers it was resolved from are kept with the session's name, so what explains a
+  # running session's configuration says what is in force in it, with where each part
+  # came from, rather than what its files say now. `:config_sources` names where the
+  # caller's overrides came from (`Troupe.Config.resolve/3`'s `:sources`).
   defp config(workspace, opts) do
     trust = if Keyword.get(opts, :kind, :local) == :team, do: [trust: :never], else: []
+    sources = [sources: Keyword.get(opts, :config_sources, %{})]
 
-    case Config.resolve(workspace.root_real, Keyword.get(opts, :config_overrides, []), trust) do
-      {:ok, config, _layers} ->
+    case Config.resolve(workspace.root_real, Keyword.get(opts, :config_overrides, []), trust ++ sources) do
+      {:ok, config, layers} ->
         Config.log_warnings(config)
-        {:ok, config}
+        {:ok, config, layers}
 
       {:error, error} ->
         {:error, error}

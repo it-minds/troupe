@@ -30,6 +30,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe setup` | set up the provider, its key, the models, a first project and the daemon at login, one screen at a time; Esc leaves with nothing written |
 | `troupe config` | show the resolved providers and models (keys masked); with none, set them up |
 | `troupe config --explain [KEY] [--json]` | every setting, or KEY's, and which file set it (secrets masked) |
+| `troupe config --explain [KEY] [--json] --session SESSION_ID` | what is in force in a running session, here or on a worker pod of the plane you are signed in to, and where each part came from: its profile, the platform, its terms, its files |
 | `troupe config validate [PATH]` | check the config files, or one; exits 1 on any problem |
 | `troupe config migrate [--write] [PATH]` | show, or make, the rewrite to the current spellings |
 | `troupe config trust [PATH]` | let a workspace's own files set the trusted keys; --list shows them |

@@ -878,6 +878,7 @@ troupe config --explain             # every key, its value and the layer that se
 troupe config --explain max_turns   # one key's ladder: each layer's value, and the one in effect
 troupe config --explain permissions # every per-tool rule, with its file, and those held back with why
 troupe config --explain --json      # the same for a program
+troupe config --explain --session SESSION_ID   # what is in force in a running session, here or on a pod
 troupe config validate              # every file a session here would read; exits 1 on any problem
 troupe config validate .troupe/config.yaml
 troupe config migrate [--write]
@@ -885,8 +886,19 @@ troupe config trust --list          # the workspaces whose own files set the tru
 troupe config pull                  # your organisation's defaults and limits, from the plane, now
 ```
 
+A running session's configuration was read as it started, so `--session` asks where it
+runs: this machine's daemon for one of its own, and for a session on your team's pod the
+pod itself, through the plane you are signed in to, without waking it. It reads the same
+way, with what a pod adds: `profile` for its worker profile's settings (the provider and
+models it gave the pod), `session` for the terms the session was created with, `enforced`
+for what the platform enforces, and the profile's per-tool rules, each named by the
+profile that wrote it. A repository's own files count as on any pod, no key marked trusted
+taken from them. The terminal UI's `/settings` shows the same in a pod session, and the
+desktop app's **Settings** pane beside a team session; neither changes any of it. A
+session that is asleep has nothing in force: open it, and ask again.
+
 Secrets are masked everywhere. `troupe-daemon config` takes the same arguments but
-`pull`, and one more: `import-opencode` copies opencode's providers and default model
+`pull` and `--session`, and one more: `import-opencode` copies opencode's providers and default model
 into `config.yaml` once, since Troupe does not read opencode's settings. A provider is
 copied only where its key would go to the host it was set up for: its SDK package is one
 Troupe has a type for (`@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/google`,

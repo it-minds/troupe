@@ -938,6 +938,69 @@ defmodule Troupe.FakeRemote do
   defp dispatch(state, :worker, "commands.list", _params, _pid),
     do: {{:ok, %{"commands" => Troupe.Commands.list([])}}, state}
 
+  # What is in force in the session on its pod, as a worker answers `config.get` naming
+  # it (the worker's `config_explain_test`): the profile's settings and rules, the
+  # platform's switch, the session's terms and its repository's file, nothing writable.
+  defp dispatch(state, :worker, "config.get", %{"session_id" => sid}, _pid) do
+    key = fn key, value, layer, source, extra ->
+      Map.merge(
+        %{
+          "key" => key,
+          "value" => value,
+          "layer" => layer,
+          "source" => source,
+          "scopes" => [],
+          "enforced" => nil
+        },
+        extra
+      )
+    end
+
+    answer = %{
+      "session_id" => sid,
+      "pod" => true,
+      "workspace" => "/state/workspaces/" <> sid,
+      "trusted" => false,
+      "files" => [
+        %{
+          "scope" => "project",
+          "path" => "/state/workspaces/#{sid}/.troupe/config.yaml",
+          "exists" => true
+        }
+      ],
+      "organisation" => [],
+      "keys" => [
+        key.(
+          "models.default",
+          "pod-model",
+          "profile",
+          "the worker profile fixing (TROUPE_MODEL)",
+          %{}
+        ),
+        key.("max_turns", 7, "session", "the session's terms", %{}),
+        key.("compact_at", 0.6, "project", "/state/workspaces/#{sid}/.troupe/config.yaml", %{}),
+        key.("managed_permission_rules_only", true, "enforced", "the plane's platform settings", %{
+          "enforced" => %{"value" => true, "source" => "the plane's platform settings"}
+        })
+      ],
+      "permissions" => [
+        %{
+          "action" => "deny",
+          "rule" => "shell(curl)",
+          "tool" => "shell",
+          "pattern" => "curl",
+          "scope" => "profile",
+          "source" => "standard",
+          "ignored" => nil
+        }
+      ],
+      "warnings" => [],
+      "errors" => []
+    }
+
+    {{:ok, answer}, state}
+  end
+
   # A pod's agents are its bundle's (root Decision 841): listed and read whole as a
   # worker's harness answers them, and never written there.
   defp dispatch(state, :worker, "agents.list", _params, _pid),
