@@ -50,20 +50,7 @@ defmodule Troupe.Config.Settings do
   def describe(workspace \\ nil) do
     case Config.resolve(workspace) do
       {:ok, _config, layers} ->
-        {org, files} = Enum.split_with(layers.files, &(&1.layer == :org))
-
-        %{
-          "workspace" => workspace,
-          "trusted" => layers.trusted?,
-          "files" => Enum.map(files, &file_json/1),
-          "organisation" => Enum.map(org, &file_json/1),
-          "keys" =>
-            layers |> Explain.rows() |> Enum.map(&key_json(&1, workspace, layers.trusted?)),
-          # Every file's per-tool rules, with where each came from: shown, not set here.
-          "permissions" => Enum.map(layers.rules, &Permissions.to_json/1),
-          "warnings" => Enum.map(layers.warnings ++ layers.refusals, &Issue.format/1),
-          "errors" => []
-        }
+        described(layers, workspace, &scopes(&1, workspace, layers.trusted?))
 
       {:error, error} ->
         %{
@@ -77,6 +64,46 @@ defmodule Troupe.Config.Settings do
           "errors" => Enum.map(error.issues, &Issue.format/1)
         }
     end
+  end
+
+  @doc """
+  A running session's configuration, as `describe/1` answers a workspace's, with its
+  `session_id`: what was resolved as the session started, which is what is in force in it
+  (`Troupe.Session.resolved/1`), every value and rule with where it came from. On a pod
+  that is its worker profile's settings (`profile`) and rules, what the platform enforces
+  (`enforced`), the terms the session was created with (`session`) and its repository's
+  files, and no key has a scope: none of it is a client's to write there. `nil` for a
+  session not running here.
+  """
+  @spec describe_session(String.t()) :: %{String.t() => term()} | nil
+  def describe_session(session_id) do
+    case Troupe.Session.resolved(session_id) do
+      %{layers: %Layers.Result{} = layers, kind: kind, workspace: workspace} ->
+        scopes = if kind == :team, do: fn _path -> [] end, else: &scopes(&1, workspace, layers.trusted?)
+
+        layers
+        |> described(workspace, scopes)
+        |> Map.merge(%{"session_id" => session_id, "pod" => kind == :team})
+
+      _ ->
+        nil
+    end
+  end
+
+  defp described(layers, workspace, scopes) do
+    {org, files} = Enum.split_with(layers.files, &(&1.layer == :org))
+
+    %{
+      "workspace" => workspace,
+      "trusted" => layers.trusted?,
+      "files" => Enum.map(files, &file_json/1),
+      "organisation" => Enum.map(org, &file_json/1),
+      "keys" => layers |> Explain.rows() |> Enum.map(&key_json(&1, scopes)),
+      # Every file's per-tool rules, with where each came from: shown, not set here.
+      "permissions" => Enum.map(layers.rules, &Permissions.to_json/1),
+      "warnings" => Enum.map(layers.warnings ++ layers.refusals, &Issue.format/1),
+      "errors" => []
+    }
   end
 
   # The organisation's, which no client writes, are `organisation` rather than `files`:
@@ -98,7 +125,7 @@ defmodule Troupe.Config.Settings do
 
   # A key the organisation enforces is written to no scope: `config.set` refuses it, and
   # a settings page shows it as the organisation's (Decision 869).
-  defp key_json(row, workspace, trusted?) do
+  defp key_json(row, scopes) do
     path = String.split(row.key, ".")
     spec = Schema.at(path)
     secret? = spec != nil and spec.secret
@@ -110,7 +137,7 @@ defmodule Troupe.Config.Settings do
       "layer" => Atom.to_string(row.layer),
       "source" => source_json(row),
       "default" => spec && spec.default,
-      "scopes" => if(enforced, do: [], else: scopes(path, workspace, trusted?)),
+      "scopes" => if(enforced, do: [], else: scopes.(path)),
       "enforced" => enforced && %{"value" => enforced.value, "source" => shown(enforced.source)},
       "secret" => secret?,
       "label" => spec && spec.label,

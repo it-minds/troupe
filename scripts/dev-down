@@ -1,11 +1,65 @@
 #!/usr/bin/env bash
 # Stop the development services. `--purge` also removes their data.
+#
+# `--test-databases [DAYS]` stops nothing: it drops the plane's per-checkout test
+# databases (`troupe_plane_test_<hash>`) made more than DAYS days ago (7 unless given),
+# and says each one it dropped. One in use is kept, and said. Each checkout's suite makes
+# its own again when it next runs, so a database a checkout still uses costs it one
+# migration; the ones of removed worktrees otherwise stay until `--purge`.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-if [ "${1:-}" = "--purge" ]; then
-  docker compose --project-directory dev --file dev/docker-compose.yml down --volumes
-else
-  docker compose --project-directory dev --file dev/docker-compose.yml down
-fi
+compose=(docker compose --project-directory dev --file dev/docker-compose.yml)
+
+psql() {
+  "${compose[@]}" exec -T postgres psql -U troupe -d postgres -v ON_ERROR_STOP=1 -At "$@"
+}
+
+case "${1:-}" in
+  --purge)
+    "${compose[@]}" down --volumes
+    ;;
+
+  --test-databases)
+    days="${2:-7}"
+
+    if ! [[ "$days" =~ ^[0-9]+$ ]]; then
+      echo "dev-down: --test-databases takes a number of days, not '$days'" >&2
+      exit 2
+    fi
+
+    # Made then: a database's PG_VERSION file is written as it is created.
+    stale=$(psql -c "
+      SELECT datname FROM pg_database d
+       WHERE datname LIKE 'troupe\_plane\_test\_%'
+         AND (pg_stat_file('base/' || d.oid || '/PG_VERSION')).modification < now() - interval '$days days'
+       ORDER BY datname")
+
+    if [ -z "$stale" ]; then
+      echo "no plane test database is older than $days days"
+      exit 0
+    fi
+
+    dropped=0
+    for db in $stale; do
+      if psql -c "DROP DATABASE \"$db\"" >/dev/null 2>&1; then
+        echo "dropped $db"
+        dropped=$((dropped + 1))
+      else
+        echo "kept $db: it is in use"
+      fi
+    done
+
+    echo "$dropped plane test database(s) older than $days days dropped"
+    ;;
+
+  "")
+    "${compose[@]}" down
+    ;;
+
+  *)
+    echo "dev-down: unknown option '$1'; it takes --purge or --test-databases [DAYS]" >&2
+    exit 2
+    ;;
+esac

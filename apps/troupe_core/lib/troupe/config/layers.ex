@@ -35,7 +35,20 @@ defmodule Troupe.Config.Layers do
   alias Troupe.LLM.ProviderType
   alias Troupe.Protocol.{Organisation, PermissionRule}
 
-  @type layer :: :default | :org | :user | :project | :local | :env | :cli | :enforced
+  # `:profile` and `:session` are a pod's: what its worker profile set, which is its
+  # environment, and the terms the session was created with (`Troupe.Config.resolve/3`'s
+  # `:sources`).
+  @type layer ::
+          :default
+          | :org
+          | :user
+          | :project
+          | :local
+          | :env
+          | :cli
+          | :enforced
+          | :profile
+          | :session
 
   @typedoc "One value one layer gave one key: the ladder `--explain` shows."
   @type entry :: %{
@@ -65,6 +78,29 @@ defmodule Troupe.Config.Layers do
               errors: []
 
     @type t :: %__MODULE__{}
+
+    # Its values and ladder hold every key a file or the environment gave, a provider's
+    # among them, and a running session keeps it (`Troupe.Session.resolved/1`), so a crash
+    # report or a status that prints it prints which files it read and how much they set,
+    # never a value.
+    defimpl Inspect do
+      def inspect(result, opts) do
+        Inspect.Algebra.concat([
+          "#Troupe.Config.Layers.Result<",
+          Inspect.Algebra.to_doc(
+            [
+              workspace: result.workspace,
+              trusted?: result.trusted?,
+              files: Enum.map(result.files, & &1.path),
+              keys: map_size(result.ladder),
+              rules: length(result.rules)
+            ],
+            opts
+          ),
+          ", values redacted>"
+        ])
+      end
+    end
   end
 
   @env [

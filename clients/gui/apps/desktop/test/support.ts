@@ -172,6 +172,15 @@ export function button(label: string, within: ParentNode = document): HTMLButton
 }
 
 /**
+ * Wait for the button whose words begin with `label`, as `sees` waits for words, and answer
+ * it. `expect(button(…)).not.toBeNull()` and a read of a button found at once
+ * (`button(…)!.disabled`) are refused by `waits.test.tsx` unless marked `// at once: <why>`.
+ */
+export function seesButton(label: string, within: ParentNode = document): Promise<HTMLButtonElement> {
+  return waitFor(() => button(label, within), `the button "${label}"`);
+}
+
+/**
  * Start where a person who chose the list starts, rather than on the launcher (Decision
  * 709). For the suites about the list and what opens from it; `launcher.test.tsx` is the
  * one about the first screen. Call it after `localStorage.clear()`.

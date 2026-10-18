@@ -335,7 +335,10 @@ and the profile ("refused by the rule deny shell(curl), from the worker profile 
 and an asked one says so on its approval in the TUI and the desktop app. A `deny` for
 `shell` also refuses a command a person types with `!` in a session on these pods,
 answering `forbidden` with `setting: permissions`; an `ask` does not, since the person
-typing it is who it would ask.
+typing it is who it would ask. A person sees them, and the rest of what is in force in a
+session on these pods (the profile's provider and models, the platform's switches, the
+session's terms), with `troupe config --explain --session <id>`, the terminal UI's
+`/settings` in the session, or the desktop app's **Settings** pane beside it.
 
 `admin.profile.put` and the resource's reading refuse a rule the pods could not read, with
 the reader's sentence. Like `personalTools`, the rules ride the activation: a change

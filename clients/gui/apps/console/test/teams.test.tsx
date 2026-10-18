@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, render, says, sees, seesLink, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, render, says, sees, seesButton, seesLink, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -52,7 +52,7 @@ describe("the team list", () => {
     unmount = render(<App />).unmount;
     await waitFor(() => says("No teams yet"), "the empty state");
     await sees("Enable a group as a team to begin");
-    expect(button("Enable a group as a team")).not.toBeNull();
+    await seesButton("Enable a group as a team");
   });
 });
 
@@ -159,9 +159,9 @@ describe("a team", () => {
     type(await waitFor(() => field("Sessions erased after"), "the form"), "30");
     button("Preview")!.click();
     await waitFor(() => says("core's sessions older than 30 days are erased. Erasure cannot be undone."), "the preview");
-    expect(button("Apply")!.disabled).toBe(true);
+    expect((await seesButton("Apply")).disabled).toBe(true);
     type(field("Type core to confirm")!, "cor");
-    expect(button("Apply")!.disabled).toBe(true);
+    expect((await seesButton("Apply")).disabled).toBe(true);
     type(field("Type core to confirm")!, "core");
     await waitFor(() => !button("Apply")!.disabled, "the confirmation");
     button("Apply")!.click();
@@ -242,7 +242,7 @@ describe("a team's edits", () => {
     await waitFor(() => says("1 person loses core: hana@example.com"), "the unlink preview");
     await sees("1 keeps it through another group");
     await sees("Sessions do not move");
-    expect(button("Unlink grp-platform")!.disabled).toBe(true);
+    expect((await seesButton("Unlink grp-platform")).disabled).toBe(true);
     type(field("Type grp-platform to confirm")!, "grp-platform");
     await waitFor(() => !button("Unlink grp-platform")!.disabled, "the confirmation");
     button("Unlink grp-platform")!.click();
@@ -269,7 +269,7 @@ describe("a team's edits", () => {
     // The team is read again after the grant, so heavy can join the lines a moment after the warning.
     await waitFor(() => says("Every core session on dev turns read-only"), "the warning");
     await waitFor(() => says("grants: dev, ux, heavy") && says("grants: ux, heavy"), "the grants before and after");
-    expect(button("Revoke dev")!.disabled).toBe(true);
+    expect((await seesButton("Revoke dev")).disabled).toBe(true);
     type(field("Type dev to confirm")!, "dev");
     await waitFor(() => !button("Revoke dev")!.disabled, "the confirmation");
     button("Revoke dev")!.click();
@@ -335,7 +335,7 @@ describe("a team's edits", () => {
     await waitFor(() => (field("Team name") as HTMLInputElement).value === "platform-owners", "the name made from the group's");
     type(field("Team name")!, "core");
     await waitFor(() => says("There is already a team called core"), "the collision");
-    expect(button("Preview")!.disabled).toBe(true);
+    expect((await seesButton("Preview")).disabled).toBe(true);
     type(field("Team name")!, "platform");
     button("Preview")!.click();
     await waitFor(() => says("Platform owners becomes the team platform"), "the preview");

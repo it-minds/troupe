@@ -177,7 +177,40 @@ defmodule Troupe.E2E.Plane do
       end,
       timeout: 300_000,
       every: 5_000,
-      what: "#{profile} to finish replacing its pods"
+      what: "#{profile} to finish replacing its pods",
+      explain: fn -> pods_state(profile, namespace) end
+    )
+  end
+
+  # What a profile's replacement was stuck on, for the failure: the profile's conditions
+  # with their reasons, each worker pod's phase, readiness and why a container is not
+  # running, and the namespace's latest warnings.
+  defp pods_state(profile, namespace) do
+    conditions =
+      ~s|jsonpath={range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\\n"}{end}|
+
+    pods =
+      ~s|jsonpath={range .items[*]}{.metadata.name} {.status.phase} | <>
+        ~s|ready={.status.conditions[?(@.type=="Ready")].status} | <>
+        ~s|{range .status.containerStatuses[*]}{.name}: {.state}{" "}{end}{"\\n"}{end}|
+
+    workers = "app.kubernetes.io/name=troupe-worker"
+    warnings = ["--field-selector", "type=Warning", "--sort-by=.lastTimestamp"]
+
+    {said, _} =
+      World.kubectl(["get", "workerprofile", profile, "-n", World.namespace(), "-o", conditions])
+
+    {pods_said, _} = World.kubectl(["get", "pods", "-n", namespace, "-l", workers, "-o", pods])
+    {events, _} = World.kubectl(["get", "events", "-n", namespace | warnings])
+    latest = events |> String.split("\n", trim: true) |> Enum.take(-15) |> Enum.join("\n")
+
+    Enum.join(
+      [
+        "workerprofile #{profile}:\n" <> String.trim(said),
+        "pods in #{namespace}:\n" <> String.trim(pods_said),
+        "warnings in #{namespace}:\n" <> latest
+      ],
+      "\n"
     )
   end
 

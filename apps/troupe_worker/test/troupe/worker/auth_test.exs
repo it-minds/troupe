@@ -155,6 +155,17 @@ defmodule Troupe.Worker.AuthTest do
       assert refused == []
     end
 
+    # Its own configuration, what is in force in it; the pod's settings stay the pod's.
+    test "has config.get naming its session, and no other's", %{guard: guard} do
+      assert guard.(session_token(), "config.get", %{"session_id" => @mine}) == :ok
+
+      assert {:error, %{message: "forbidden", data: %{field: "session_id"}}} =
+               guard.(session_token(), "config.get", %{"session_id" => "20260923T101112-zz9_Bq"})
+
+      assert {:error, %{message: "forbidden", data: %{method: "config.get"}}} =
+               guard.(session_token(), "config.get", %{})
+    end
+
     # The dispatcher answers `method_not_found` to everybody for a method the server does
     # not have, and nothing runs; saying `forbidden` instead would tell a client that a
     # method exists which does not.

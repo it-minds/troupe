@@ -119,6 +119,7 @@ defmodule Troupe.Plane.Triggers do
       |> Repo.insert_or_update()
       |> case do
         {:ok, trigger} ->
+          trigger = drop_dead_key(trigger)
           # A revision is made here rather than at the next firing, so that the diff an
           # admin is shown and the audit row that records it can both name the hash
           # somebody will later see on a run. `revise/2` makes nothing when the document
@@ -154,6 +155,7 @@ defmodule Troupe.Plane.Triggers do
     |> Repo.insert_or_update()
     |> case do
       {:ok, trigger} ->
+        trigger = drop_dead_key(trigger)
         {:ok, revision} = revise(trigger, by)
         {:ok, trigger, revision}
 
@@ -313,6 +315,26 @@ defmodule Troupe.Plane.Triggers do
 
     {:ok, trigger, key}
   end
+
+  # A trigger that stops taking a key loses the one it had: it opened nothing any more, and
+  # kept, a listing said the trigger had a key. One changed back to a webhook is given a new
+  # key by a rotation, as any webhook made another way is.
+  defp drop_dead_key(%Trigger{key_hash: hash} = trigger) when is_binary(hash) do
+    if keyed?(trigger) do
+      trigger
+    else
+      trigger
+      |> Trigger.key_changeset(%{
+        key_hash: nil,
+        key_salt: nil,
+        key_rotated_at: nil,
+        key_rotated_by: nil
+      })
+      |> Repo.update!()
+    end
+  end
+
+  defp drop_dead_key(trigger), do: trigger
 
   @doc """
   The idempotency key for a firing whose caller supplied none.
@@ -1047,8 +1069,9 @@ defmodule Troupe.Plane.Triggers do
       "concurrency" => trigger.concurrency,
       # Whether there is a key and when it was last minted, never the key. A listing that
       # carried it would put a credential in every console, every audit row that quotes a
-      # listing, and every log line that logged a response.
-      "has_key" => is_binary(trigger.key_hash),
+      # listing, and every log line that logged a response. A key a trigger that takes none
+      # still holds opens nothing, and is no key.
+      "has_key" => keyed?(trigger) and is_binary(trigger.key_hash),
       "key_rotated_at" => trigger.key_rotated_at && DateTime.to_iso8601(trigger.key_rotated_at),
       "key_rotated_by" => trigger.key_rotated_by,
       "last_fired_at" => trigger.last_fired_at && DateTime.to_iso8601(trigger.last_fired_at),

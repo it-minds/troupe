@@ -9,7 +9,7 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { DaemonClient } from "@troupe/client";
 import { Servers } from "../src/views/Servers";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, render, says, type, waitFor } from "./support";
+import { button, render, says, seesButton, type, waitFor } from "./support";
 
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
 
@@ -178,7 +178,7 @@ describe("the servers and skills panel", () => {
     unmount = render(<Servers client={client} />).unmount;
     const row = await waitFor(() => [...document.querySelectorAll("tr")].find((r) => r.textContent?.includes("Signed in as ada@example.test")), "the server's row");
     expect(row.textContent).toContain("Wants notes.write");
-    expect(button("Sign in", row)).toBeTruthy();
+    await seesButton("Sign in", row);
 
     daemon.revocations["notes"] = { state: "failed", reason: "the provider did not answer in time" };
     button("Sign out", row)!.click();

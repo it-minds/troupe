@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, render, startOnTheList, waitFor } from "./support";
+import { button, render, seesButton, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -81,6 +81,6 @@ describe("a private session in the list", () => {
       "It was not claimed here. Another device sealed events this computer's copy does not have, so it stays with that device.",
     );
     expect(pills("/home/ada/letters")).toContain("On ada-laptop");
-    expect(button("Claim", entry("/home/ada/letters")!)).not.toBeNull();
+    await seesButton("Claim", entry("/home/ada/letters")!);
   });
 });

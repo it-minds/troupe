@@ -10,7 +10,18 @@ defmodule Troupe.Plane.ControlTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Bundles, Drain, Fleet, Identity, Placement, SCIM, Sessions, TeamBudget}
+  alias Troupe.Plane.{
+    Bundles,
+    Drain,
+    FakePod,
+    Fleet,
+    Identity,
+    Placement,
+    SCIM,
+    Sessions,
+    TeamBudget
+  }
+
   alias Troupe.Plane.Control.{Connection, Connections, Listener}
 
   @moduletag timeout: 60_000
@@ -24,31 +35,10 @@ defmodule Troupe.Plane.ControlTest do
 
     # Enrolment is a TokenReview in a pod. Here the verification is stubbed so the
     # channel itself can be tested without a cluster; `Troupe.Plane.EnrolmentTest`
-    # proves the real thing against a real API server.
-    verify = fn
-      "dev-token" ->
-        {:ok,
-         %{
-           profile: "dev",
-           namespace: "troupe-w-dev",
-           pod_name: nil,
-           service_account: "troupe-worker"
-         }}
-
-      "ux-token" ->
-        {:ok,
-         %{
-           profile: "ux",
-           namespace: "troupe-w-ux",
-           pod_name: nil,
-           service_account: "troupe-worker"
-         }}
-
-      _ ->
-        {:error, :unauthenticated}
-    end
-
-    start_supervised!({Listener, port: 0, verify: verify})
+    # proves the real thing against a real API server. Only a token with this VM's mark
+    # enrols, so a worker suite's link from another checkout that reaches this port is
+    # refused rather than taking the pod's name (`FakePod`).
+    start_supervised!({Listener, port: 0, verify: &FakePod.verify/1})
     %{port: Listener.port()}
   end
 
@@ -58,7 +48,7 @@ defmodule Troupe.Plane.ControlTest do
 
       assert {:ok, result} =
                call(worker, "enrol", %{
-                 "token" => "dev-token",
+                 "token" => FakePod.token("dev-token"),
                  "pod_name" => "troupe-w-dev-0",
                  "capacity" => 4,
                  "disk_total_bytes" => 1000
@@ -95,7 +85,10 @@ defmodule Troupe.Plane.ControlTest do
       worker = enrolled(port, "dev-token", "troupe-w-dev-0")
 
       assert {:error, error} =
-               call(worker, "enrol", %{"token" => "dev-token", "pod_name" => "troupe-w-dev-0"})
+               call(worker, "enrol", %{
+                 "token" => FakePod.token("dev-token"),
+                 "pod_name" => "troupe-w-dev-0"
+               })
 
       assert error["message"] == "invalid_request"
     end
@@ -719,7 +712,7 @@ defmodule Troupe.Plane.ControlTest do
 
     {:ok, _} =
       call(worker, "enrol", %{
-        "token" => token,
+        "token" => FakePod.token(token),
         "pod_name" => pod_name,
         "capacity" => 4,
         "disk_total_bytes" => 1000

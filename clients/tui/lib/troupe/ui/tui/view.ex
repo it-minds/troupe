@@ -1780,6 +1780,9 @@ defmodule Troupe.UI.TUI.View do
     {s.status || "", " choose a #{what} — ↑↓ move · Enter picks · Esc back "}
   end
 
+  defp settings_command_line(%{settings: %{editing: nil, view: %{pod?: true}} = s}),
+    do: {s.status || "", " settings in force on the pod — ↑↓ move · Esc back "}
+
   defp settings_command_line(%{settings: %{editing: nil} = s}) do
     hint =
       case Enum.at(Settings.fields(), s.cursor) do
@@ -1803,11 +1806,16 @@ defmodule Troupe.UI.TUI.View do
   defp settings_title(s) do
     field = Enum.at(Settings.fields(), s.cursor)
 
-    if Settings.enforced(s.view, field.key) do
-      "#{field.label} is set by your organisation"
-    else
-      scope = Settings.target(s.view, field.key, s.scope)
-      "a change goes to #{scope}: #{Map.get(s.view.files, scope, "config.yaml")}"
+    cond do
+      s.view[:pod?] ->
+        "in force in this session on its worker pod; nothing here changes it"
+
+      Settings.enforced(s.view, field.key) ->
+        "#{field.label} is set by your organisation"
+
+      true ->
+        scope = Settings.target(s.view, field.key, s.scope)
+        "a change goes to #{scope}: #{Map.get(s.view.files, scope, "config.yaml")}"
     end
   end
 
@@ -1826,6 +1834,11 @@ defmodule Troupe.UI.TUI.View do
 
       "org" ->
         "set by: your organisation's defaults (#{get_in(s.view.keys, [key, "source"])}); a change here wins over them"
+
+      # A pod's: its worker profile, and the terms the session was created with, which
+      # the source names.
+      layer when layer in ["profile", "session"] ->
+        "set by: #{get_in(s.view.keys, [key, "source"])}"
 
       layer ->
         "set by: #{layer} (#{get_in(s.view.keys, [key, "source"])})"

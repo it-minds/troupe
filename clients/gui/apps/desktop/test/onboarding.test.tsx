@@ -16,7 +16,7 @@ import { Provider } from "../src/views/Onboarding/Provider";
 import { Where } from "../src/views/Onboarding/Where";
 import { Workspace } from "../src/views/Onboarding/Workspace";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, nav, render, says, sees, startOnTheList, type, waitFor } from "./support";
+import { button, nav, render, says, sees, seesButton, startOnTheList, type, waitFor } from "./support";
 
 // jsdom lays nothing out, so it has nothing to scroll; the transcript asks anyway.
 Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -305,13 +305,13 @@ describe("each screen", () => {
     await shown("Which model provider?");
 
     expect(pressed("A working config.yaml (openai)")).toBe(true);
-    for (const kind of ["Anthropic", "OpenAI", "An OpenAI-compatible gateway", "A LiteLLM proxy"]) expect(button(kind)).not.toBeNull();
+    for (const kind of ["Anthropic", "OpenAI", "An OpenAI-compatible gateway", "A LiteLLM proxy"]) await seesButton(kind);
     button("Continue")!.click();
     expect(onAnswer).toHaveBeenLastCalledWith({ reuse: "config" });
 
     button("A LiteLLM proxy")!.click();
     const address = await waitFor(() => document.querySelector<HTMLInputElement>('[aria-label="Address"]'), "the address field");
-    expect(button("Continue")!.disabled).toBe(true);
+    expect((await seesButton("Continue")).disabled).toBe(true);
     type(address, "https://llm-gw.example/v1");
     await waitFor(() => !button("Continue")!.disabled || null, "Continue enabled");
     button("Continue")!.click();
@@ -334,7 +334,7 @@ describe("each screen", () => {
 
     button("Paste it")!.click();
     const key = await waitFor(() => document.querySelector<HTMLInputElement>('[aria-label="API key"]'), "the key field");
-    expect(button("Check the key and continue")!.disabled).toBe(true);
+    expect((await seesButton("Check the key and continue")).disabled).toBe(true);
     type(key, " sk-typed ");
     await waitFor(() => !button("Check the key and continue")!.disabled || null, "the check enabled");
     button("Check the key and continue")!.click();
@@ -367,7 +367,7 @@ describe("each screen", () => {
     const unlisted = flowAt("models", { check: { state: "unknown", reason: "404: no model listing at that URL; check the base URL" } });
     unmount = render(<PickModels flow={unlisted} {...idle} onAnswer={onAnswer} />).unmount;
     await shown("The key could not be confirmed: 404: no model listing at that URL; check the base URL. You can go on and type a model id.");
-    expect(button("Save these models and continue")!.disabled).toBe(true);
+    expect((await seesButton("Save these models and continue")).disabled).toBe(true);
     type(field("Main model"), "qwen3");
     await waitFor(() => !button("Save these models and continue")!.disabled || null, "saving enabled");
     button("Save these models and continue")!.click();
@@ -383,7 +383,7 @@ describe("each screen", () => {
     expect(pressed("Ask me first")).toBe(true);
     await sees("The agent reads freely, and asks before it writes a file or runs a command.");
     await sees("Every write and every command runs as soon as the agent asks for it.");
-    expect(button("Continue")!.disabled).toBe(true);
+    expect((await seesButton("Continue")).disabled).toBe(true);
     const chip = await waitFor(() => button("/home/ada/repo"), "the recent workspace");
     chip.click();
     button("Run everything without asking")!.click();
@@ -426,7 +426,7 @@ describe("each screen", () => {
     const missing = flowAt("daemon", { daemon: { at_login: false, kind: "launch_agent", path: "/Users/ada/Library/LaunchAgents/x.plist", command: null } });
     unmount = render(<Daemon flow={missing} {...idle} onAnswer={onAnswer} />).unmount;
     await shown("troupe-daemon is not on this computer's PATH");
-    expect(button("Start it when I log in")!.disabled).toBe(true);
+    expect((await seesButton("Start it when I log in")).disabled).toBe(true);
   });
 
   it("Finish: what was set up, the suggested prompt, starting or not, and the plane's way out", async () => {

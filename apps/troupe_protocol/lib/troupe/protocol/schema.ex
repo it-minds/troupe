@@ -957,13 +957,21 @@ defmodule Troupe.Protocol.Schema do
         "fingerprint" => required(:string),
         "plane_url" => optional(:string)
       },
-      # The machine's settings — the daemon's only; a worker answers `method_not_found`.
+      # The machine's settings — the daemon's; a worker refuses a session's token them.
       # The key goes in through `config.models` and `config.set` and never comes back out:
       # `config.get` reports `api_key_set`, and a secret key's value as `****`. `config.set`
       # takes the model panel's fields (`provider` and the rest), or one key by name (`key`,
       # or `path` for a name with a dot in it) with its `value` and the `scope` to write
-      # (#57); `config.changed` then goes to every client.
-      "config.get" => %{"workspace" => optional(:string)},
+      # (#57); `config.changed` then goes to every client. With a `session_id`,
+      # `config.get` is that running session's configuration instead, what is in force in it,
+      # which a pod answers its session's own token too; `explain` (`text` or `json`, for
+      # `key` when one is named) adds what `troupe config --explain` says of it.
+      "config.get" => %{
+        "workspace" => optional(:string),
+        "session_id" => optional(:string),
+        "explain" => optional(:string),
+        "key" => optional(:string)
+      },
       "config.models" => %{
         "provider" => optional(:string),
         "base_url" => optional({:nullable, :string}),
