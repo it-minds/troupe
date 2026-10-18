@@ -1604,12 +1604,7 @@ defmodule Troupe.UI.TUI.Server do
 
   # `/steer on` with nobody named offers the session for its person alone, from their
   # other devices; each email named may steer it, `email:observe` only follow it.
-  defp remote_on(sid, people) do
-    case Troupe.Client.Steering.share(people) do
-      {:ok, share} -> notice_of(Client.remote_steering(sid, {:offer, share}))
-      {:error, sentence} -> {:error, sentence}
-    end
-  end
+  defp remote_on(sid, people), do: notice_of(Client.remote_steering(sid, {:offer, people}))
 
   ## The session's goal
 

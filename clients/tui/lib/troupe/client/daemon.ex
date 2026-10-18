@@ -843,13 +843,15 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
-  def remote_steering(sid, {:offer, share}) do
-    params = %{session_id: sid, share: share, command_id: Troupe.Remote.RPC.command_id()}
+  def remote_steering(sid, {:offer, people}) do
+    with {:ok, share} <- Troupe.Client.Steering.share(people) do
+      params = %{session_id: sid, share: share, command_id: Troupe.Remote.RPC.command_id()}
 
-    case Link.call("remote.offer", params) do
-      {:ok, %{"remote" => remote}} -> {:ok, Troupe.Client.Steering.offered(remote)}
-      {:ok, _older} -> {:error, "this daemon does not offer sessions to the plane: update it"}
-      {:error, reason} -> {:error, refusal(reason)}
+      case Link.call("remote.offer", params) do
+        {:ok, %{"remote" => remote}} -> {:ok, Troupe.Client.Steering.offered(remote)}
+        {:ok, _older} -> {:error, "this daemon does not offer sessions to the plane: update it"}
+        {:error, reason} -> {:error, refusal(reason)}
+      end
     end
   end
 

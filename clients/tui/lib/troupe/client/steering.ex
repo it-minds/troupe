@@ -35,9 +35,16 @@ defmodule Troupe.Client.Steering do
     |> String.split([",", " "], trim: true)
     |> Enum.reduce_while({:ok, []}, fn word, {:ok, acc} ->
       case String.split(word, ":", parts: 2) do
-        [person] -> {:cont, {:ok, acc ++ [%{"person" => person, "role" => "control"}]}}
-        [person, role] when role in ["observe", "control"] and person != "" -> {:cont, {:ok, acc ++ [%{"person" => person, "role" => role}]}}
-        _ -> {:halt, {:error, "#{word}: name a person as an email, and add :observe for one who only follows it"}}
+        [person] ->
+          {:cont, {:ok, acc ++ [%{"person" => person, "role" => "control"}]}}
+
+        [person, role] when role in ["observe", "control"] and person != "" ->
+          {:cont, {:ok, acc ++ [%{"person" => person, "role" => role}]}}
+
+        _ ->
+          {:halt,
+           {:error,
+            "#{word}: name a person as an email, and add :observe for one who only follows it"}}
       end
     end)
   end
