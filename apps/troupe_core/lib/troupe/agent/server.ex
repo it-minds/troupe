@@ -127,10 +127,13 @@ defmodule Troupe.Agent.Server do
   def command_id,
     do: "in-" <> (8 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
 
-  @doc "Cancel whatever is in flight and return to `:idle`. Valid from every state."
-  @spec cancel(pid()) :: :ok
-  def cancel(pid) do
-    send(pid, :cancel)
+  @doc """
+  Cancel whatever is in flight and return to `:idle`. Valid from every state. `actor` is
+  who asked, written on the `cancelled` event; nil is the system.
+  """
+  @spec cancel(pid(), Troupe.Protocol.Event.Actor.t() | nil) :: :ok
+  def cancel(pid, actor \\ nil) do
+    send(pid, {:cancel, actor})
     :ok
   end
 
@@ -1131,6 +1134,10 @@ defmodule Troupe.Agent.Server do
   end
 
   defp common(:info, {:loop, loop_id}, _state_name, state), do: {:keep_state, %{state | loop: loop_id}}
+
+  # A cancel says who asked; the state it arrives in carries it out as it always did.
+  defp common(:info, {:cancel, actor}, _state_name, state),
+    do: {:keep_state, %{state | cancelled_by: actor}, [{:next_event, :info, :cancel}]}
 
   # Only a turn the loop started is cancelled with it: a person's own turn, in flight
   # while the loop's next iteration waited behind it, is theirs to finish.
@@ -3856,9 +3863,15 @@ defmodule Troupe.Agent.Server do
     state = kill_budget_ask(state)
 
     state = close_cancelled_calls(state)
-    log(state, :cancelled, put_stopped(%{"turn" => Spend.to_json(state.turn)}, stopped))
 
-    state = let_go(Map.merge(state, %{turn_mode: nil, turn: %Spend{}}))
+    log(
+      state,
+      :cancelled,
+      put_stopped(%{"turn" => Spend.to_json(state.turn)}, stopped),
+      state.cancelled_by
+    )
+
+    state = let_go(Map.merge(state, %{turn_mode: nil, turn: %Spend{}, cancelled_by: nil}))
 
     publish_state(state, :idle)
     {:next_state, :idle, state}

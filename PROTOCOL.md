@@ -886,7 +886,8 @@ person's own commands never ask, and neither does a workspace on `trusted_worksp
 Each tool call the cancel stops is closed before `cancelled` is written: a
 `tool_call_completed` with `ok: false`, then the turn's `tool_results`. A restart takes
 up nothing a cancel stopped: no call runs again, no approval is asked for again, and no
-model call is made for the cancelled turn.
+model call is made for the cancelled turn. `cancelled` carries who asked as its `actor`,
+as an input does.
 
 #### `shell.run`
 ```json

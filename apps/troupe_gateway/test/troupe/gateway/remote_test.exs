@@ -127,7 +127,7 @@ defmodule Troupe.Gateway.RemoteTest do
   describe "steering from another device" do
     test "the owner, remote, sends a prompt the transcript writes as theirs through the plane, and cancels",
          ctx do
-      %{session: session} = start_session(ctx, default: {:text, "done"}, delay_ms: 300)
+      %{session: session} = start_session(ctx, default: {:text, "done"}, delay_ms: 2_000)
       {:ok, _} = offer(ctx, session.id)
       assert_receive {:relay, "relay.offer", _}, 5_000
 
@@ -159,6 +159,11 @@ defmodule Troupe.Gateway.RemoteTest do
 
       assert %{"result" => %{"accepted" => true}} =
                ask(ctx, "v-own", 3, "turn.cancel", %{"command_id" => "c-x", "session_id" => session.id})
+
+      # Stopping the turn is written as theirs too.
+      cancelled = await_event("v-own", "cancelled")
+      assert cancelled["actor"]["subject"] == @ada
+      assert cancelled["actor"]["via"] == "plane"
     end
 
     test "a person shared at control answers an approval once, and may not allow for the session", ctx do
@@ -275,7 +280,11 @@ defmodule Troupe.Gateway.RemoteTest do
   describe "withdrawn and offline" do
     test "withdrawing ends every remote view of the session at once", ctx do
       %{session: session} = start_session(ctx, default: {:text, "ok"})
+      # Another offered, so the one connection stays up for what the plane relays after.
+      %{session: other} = start_session(ctx, default: {:text, "ok"})
+      {:ok, _} = offer(ctx, other.id)
       {:ok, _} = offer(ctx, session.id, [%{"person" => @bea, "role" => "control"}])
+      assert_receive {:relay, "relay.offer", _}, 5_000
       assert_receive {:relay, "relay.offer", _}, 5_000
       viewer(ctx, "v-own", session.id, @ada, "control")
       viewer(ctx, "v-bea", session.id, @bea, "control")

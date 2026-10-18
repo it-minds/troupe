@@ -87,6 +87,9 @@ defmodule Troupe.Agent.State do
     # The `/loop` whose iterations this agent takes (Decision 679), as the loop process
     # last said. Not folded: that process says it again whenever either of them restarts.
     loop: nil,
+    # Who asked for the cancel being carried out, written on its `cancelled` event; set by
+    # each cancel as it arrives, so one nobody named is the system's. Not folded.
+    cancelled_by: nil,
     # The instruction files and the brief the last prompt was read from (Decision 706),
     # as `Troupe.Instructions.load/3` gave them: read again as each turn begins and held
     # for the rest of it (Decision 798), and the digest in here is what says whether that
@@ -226,6 +229,7 @@ defmodule Troupe.Agent.State do
           prompt_todos: [Troupe.Todo.t()],
           goal: String.t() | nil,
           loop: String.t() | nil,
+          cancelled_by: Troupe.Protocol.Event.Actor.t() | nil,
           turn_tools: [Troupe.Tool.handle()] | nil,
           turn_skills: Troupe.Skills.found() | nil,
           hold_written: Troupe.Agent.Hold.json() | nil,

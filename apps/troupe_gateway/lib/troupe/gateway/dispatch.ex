@@ -673,7 +673,8 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("turn.cancel", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          :ok <- activate(session_id, context) do
-      Troupe.cancel(session_id)
+      # Who stopped the turn is written with it, as every other steering command is.
+      Troupe.cancel(session_id, actor(context))
       {:ok, %{"accepted" => true}}
     end
   end

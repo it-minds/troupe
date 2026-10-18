@@ -20,6 +20,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/web/router.ex
   - apps/troupe_plane/priv/repo/migrations/20261018000921_remote_sessions.exs
   - apps/troupe_core/lib/troupe/commands.ex
+  - apps/troupe_core/lib/troupe/agent/server.ex
   - clients/tui/lib/troupe/client/steering.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/gui/packages/client/src/remote.ts
@@ -80,7 +81,9 @@ So a remote prompt goes through the same dispatcher, the same session and the sa
 one typed at the laptop: the enforced layer, the per-tool rules (Decision 907) and the
 approvals apply inside the session whichever connection sent the input, and nothing about the
 connection can widen them. Its principal is the person the plane named, with `via: "plane"`,
-and `initialize` says `capabilities.relayed`.
+and `initialize` says `capabilities.relayed`. Every steering command writes its author: an
+input, an answer, a switch, and now a cancel, whose `cancelled` event carried the system as
+its actor before and carries who asked, local or remote, from this change.
 
 ## Who may steer, and checked at both ends
 
