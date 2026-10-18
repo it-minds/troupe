@@ -1,6 +1,6 @@
 export * from "./types.js";
-export { TroupeConnection, TroupeRpcError, TroupeConnectionClosed } from "./connection.js";
-export type { ConnectOptions, ConnectionHooks } from "./connection.js";
+export { TroupeConnection, TroupeRpcError, TroupeConnectionClosed, TroupeCallTimedOut, callTimeout, callTimeouts, waitWords } from "./connection.js";
+export type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
 export { PlaneClient, PlaneHttpError, normalizeEndpoint } from "./plane.js";
 export type {
   Discovery,

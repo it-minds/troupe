@@ -103,6 +103,11 @@ export interface ConfigKey {
   label: string | null;
   /** What it does, from the one key table both clients and the docs read. */
   doc: string | null;
+  /**
+   * A session's provider address or state directory, asked for by someone who may only
+   * watch it: `value` then says who set it ("set by the profile") instead of what it is.
+   */
+  withheld?: boolean;
 }
 
 /**

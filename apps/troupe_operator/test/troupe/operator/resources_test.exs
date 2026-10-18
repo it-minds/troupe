@@ -256,6 +256,25 @@ defmodule Troupe.Operator.ResourcesTest do
     test "the pod is told no OpenBao role where every pod shares one", %{resources: resources} do
       refute Enum.find(container(resources)["env"], &(&1["name"] == "TROUPE_BAO_ROLE"))
     end
+
+    # The mount it logs in at is the installation's, as the plane's is: named where it is
+    # not `kubernetes`, and otherwise the pod template is the one it had.
+    test "the pod logs in at the installation's Kubernetes-auth mount", %{
+      profile: profile,
+      policy: policy
+    } do
+      env =
+        profile
+        |> Resources.for_profile(policy, %Settings{bao_auth_path: "kubernetes-eu"})
+        |> container()
+        |> Map.fetch!("env")
+
+      assert %{"name" => "TROUPE_BAO_AUTH_PATH", "value" => "kubernetes-eu"} in env
+    end
+
+    test "the pod is told no mount where it is the default", %{resources: resources} do
+      refute Enum.find(container(resources)["env"], &(&1["name"] == "TROUPE_BAO_AUTH_PATH"))
+    end
   end
 
   describe "volumes" do

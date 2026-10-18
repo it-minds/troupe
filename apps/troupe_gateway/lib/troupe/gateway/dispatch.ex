@@ -1258,8 +1258,10 @@ defmodule Troupe.Gateway.Dispatch do
   # nobody reads. But for one session's own configuration, what is in force in it, which
   # a pod's session has as a laptop's does.
 
-  defp handle("config.get" = method, %{"session_id" => id} = params, _context) when is_binary(id),
-    do: model_settings(method, params)
+  # Someone who may only watch the session is not shown what it runs on: the provider's
+  # address and the state directory read as set by the profile (`Explain.withhold/2`).
+  defp handle("config.get", %{"session_id" => id} = params, context) when is_binary(id),
+    do: session_settings(params, withhold: :control not in context.scopes)
 
   defp handle("config." <> _ = method, params, _context) do
     if Process.whereis(Troupe.Gateway.Daemon),
@@ -1389,10 +1391,10 @@ defmodule Troupe.Gateway.Dispatch do
   # what is in force in it, each value and rule with where it came from. That is the one
   # a session's own token may ask a pod for; `explain` adds what `troupe config --explain`
   # prints for it (`text`) or its JSON (`json`), for `key` when one is named.
-  defp model_settings("config.get", %{"session_id" => session_id} = params) when is_binary(session_id) do
+  defp session_settings(%{"session_id" => session_id} = params, opts) do
     with {:ok, explain} <- explain_param(params),
-         %{} = described <- Settings.describe_session(session_id) do
-      {:ok, Map.merge(described, explained(session_id, explain, params["key"]))}
+         %{} = described <- Settings.describe_session(session_id, opts) do
+      {:ok, Map.merge(described, explained(session_id, explain, params["key"], opts))}
     else
       {:error, _} = error -> error
       nil -> {:error, Error.new(:not_found, %{session_id: session_id, reason: "the session is not running here"})}
@@ -1545,10 +1547,10 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp explain_param(_params), do: {:ok, nil}
 
-  defp explained(_session_id, nil, _key), do: %{}
+  defp explained(_session_id, nil, _key, _opts), do: %{}
 
-  defp explained(session_id, form, key) do
-    {output, status} = Explain.explain_session(session_id, key, json: form == "json")
+  defp explained(session_id, form, key, opts) do
+    {output, status} = Explain.explain_session(session_id, key, [json: form == "json"] ++ opts)
     explanation = if form == "json" and status == 0, do: Jason.decode!(output), else: output
     %{"explain" => explanation, "explain_status" => status}
   end

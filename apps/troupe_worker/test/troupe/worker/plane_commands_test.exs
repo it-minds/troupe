@@ -21,3 +21,37 @@ defmodule Troupe.Worker.PlaneCommandsTest do
     end
   end
 end
+
+defmodule Troupe.Worker.PlaneCommandsDrainingTest do
+  @moduledoc """
+  A draining pod takes no new session (D40): one placed in the moments after the drain
+  began would be in no list of what the drain puts to sleep, and go down with the pod. The
+  plane hears `unavailable`, gives the slot back and places it again.
+
+  `async: false`: whether the pod drains is the VM's (`Drain` keeps it in
+  `:persistent_term`).
+  """
+
+  use ExUnit.Case, async: false
+
+  alias Troupe.Worker.Drain
+  alias Troupe.Worker.Plane.Commands
+
+  setup do
+    # Where the pod's awake sessions are named; none is, here.
+    unless Process.whereis(Troupe.Worker.Session.Registry),
+      do: start_supervised!({Registry, keys: :unique, name: Troupe.Worker.Session.Registry})
+
+    Drain.reset()
+    on_exit(&Drain.reset/0)
+  end
+
+  test "session.activate on a draining pod is refused, saying so" do
+    :persistent_term.put({Drain, :draining?}, true)
+    params = %{"session_id" => Troupe.Session.generate_id(), "team" => "team-a", "epoch" => 1}
+
+    assert {:error, error} = Commands.handle("session.activate", params)
+    assert error.message == "unavailable"
+    assert error.data.reason == "draining"
+  end
+end

@@ -61,6 +61,52 @@ defmodule Troupe.Tools.OutputTest do
     end
   end
 
+  # A cut result names `read_output` only to an agent that can call it (D66): `explore`,
+  # `answer`, `ask` and the librarian are offered no such call.
+  describe "cap/3 and cap_tail/3" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "troupe-cap-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      on_exit(fn -> File.rm_rf!(root) end)
+      on_exit(fn -> File.rm_rf!(root <> "-state") end)
+      {:ok, workspace} = Workspace.new(root)
+
+      ctx = %Ctx{
+        session_id: "s-#{System.unique_integer([:positive])}",
+        agent_path: ["root"],
+        workspace: workspace,
+        call_id: "",
+        agent_pid: self(),
+        config: %Troupe.Config{state_dir: root <> "-state"}
+      }
+
+      %{ctx: ctx, text: Enum.map_join(1..50, "\n", &"line #{&1}")}
+    end
+
+    test "name read_output to an agent that has it", %{ctx: ctx, text: text} do
+      build = %Troupe.Agent.Definition{name: "build", mode: :primary, prompt: "", tools: :all}
+      assert Output.cap(text, 40, %{ctx | definition: build}) =~ "read_output(id:"
+      assert Output.cap_tail(text, 40, %{ctx | definition: build}) =~ "read_output(id:"
+    end
+
+    test "say what was cut, and name no call, to one that has not", %{ctx: ctx, text: text} do
+      explore = %Troupe.Agent.Definition{
+        name: "explore",
+        mode: :subagent,
+        prompt: "",
+        tools: ["grep", "read_file"]
+      }
+
+      capped = Output.cap(text, 40, %{ctx | definition: explore})
+      refute capped =~ "read_output"
+      assert capped =~ ~r/\[truncated: \d+ more bytes\. Narrow the request/
+
+      tail = Output.cap_tail(text, 40, %{ctx | definition: explore})
+      refute tail =~ "read_output"
+      assert tail =~ @tail_marker
+    end
+  end
+
   # Decision 771: what a compaction left behind is sent as one line, and `read_output`
   # returns it. The agent's side, which messages are behind, is `CompactionTest`'s.
   describe "stub_behind/3" do

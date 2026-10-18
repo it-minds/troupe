@@ -252,7 +252,13 @@ defmodule Troupe.KMS.OpenBao do
   # A token from configuration outside a pod; inside one, the token Kubernetes auth
   # exchanged the ServiceAccount token for, under the role the pod was given
   # (`TROUPE_BAO_ROLE`), and kept by `Login` until shortly before its lease ends.
-  defp static_token(opts), do: config(opts)[:token] || System.get_env("TROUPE_BAO_TOKEN")
+  # An empty one is none, so a pod given `TROUPE_BAO_TOKEN=""` logs in.
+  defp static_token(opts) do
+    case config(opts)[:token] || System.get_env("TROUPE_BAO_TOKEN") do
+      "" -> nil
+      token -> token
+    end
+  end
 
   defp kubernetes_token(opts, rejected) do
     login = %{

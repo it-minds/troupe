@@ -50,6 +50,67 @@ export class TroupeRpcError extends Error {
   }
 }
 
+/**
+ * How long a call waits for its answer before it gives up, in milliseconds. A reply can
+ * be lost (a socket that went, a daemon that took the call and never said so), and a
+ * button that waits on one reply then waits for good. `defaultMs` is every call's; a
+ * method known to take longer has its own here, and a caller may name another for one
+ * call (`call(method, params, { timeoutMs })`). Exported so a screen can say how long it
+ * waited, and so a test can shorten it.
+ */
+export const callTimeouts: { defaultMs: number; byMethod: Record<string, number> } = {
+  defaultMs: 60_000,
+  byMethod: {
+    // A session started from nothing, a fork of a long one, or a private one claimed
+    // from the plane: on a slow machine the first can take minutes.
+    "session.create": 180_000,
+    "session.fork": 180_000,
+    "session.claim": 180_000,
+    // A large erasure deletes every object of the session before it answers.
+    "session.erase": 300_000,
+    // Each asks providers or servers somewhere else, each with its own timeouts.
+    "config.models": 120_000,
+    "mcp.check": 120_000,
+    "mcp.tools": 120_000,
+    "mcp.call": 120_000,
+    "worktree.merge": 120_000,
+    "fs.upload": 120_000,
+  },
+};
+
+/** How long `method` waits for its answer, unless the call names another. */
+export function callTimeout(method: string): number {
+  return callTimeouts.byMethod[method] ?? callTimeouts.defaultMs;
+}
+
+export interface CallOptions {
+  /** Milliseconds to wait for the answer; `callTimeout(method)` when absent. */
+  timeoutMs?: number | undefined;
+}
+
+/** A wait in words: "20 seconds", "2 minutes". */
+export function waitWords(ms: number): string {
+  if (ms >= 120_000 && ms % 60_000 === 0) return `${ms / 60_000} minutes`;
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  return seconds === 1 ? "1 second" : `${seconds} seconds`;
+}
+
+/**
+ * Thrown when a call's answer did not come in time. The server may still do what was
+ * asked, so a screen says so and offers the control again; an answer that comes later is
+ * not taken.
+ */
+export class TroupeCallTimedOut extends Error {
+  readonly method: string;
+  readonly timeoutMs: number;
+  constructor(method: string, timeoutMs: number) {
+    super(`No answer to ${method} in ${waitWords(timeoutMs)}. It may still have been done; look again before trying once more.`);
+    this.name = "TroupeCallTimedOut";
+    this.method = method;
+    this.timeoutMs = timeoutMs;
+  }
+}
+
 export class TroupeConnectionClosed extends Error {
   readonly reason: string;
   constructor(reason: string) {
@@ -238,8 +299,11 @@ export class TroupeConnection {
     return `c-${this.commandPrefix}-${this.commandCounter}`;
   }
 
-  /** Send a request and await its `result`. */
-  call<T = unknown>(method: string, params?: unknown): Promise<T> {
+  /**
+   * Send a request and await its `result`: at most `callTimeout(method)`, or the call's
+   * own `timeoutMs`, after which it rejects with `TroupeCallTimedOut`.
+   */
+  call<T = unknown>(method: string, params?: unknown, opts: CallOptions = {}): Promise<T> {
     if (this.closedReason !== null) {
       return Promise.reject(new TroupeConnectionClosed(this.closedReason));
     }
@@ -247,8 +311,18 @@ export class TroupeConnection {
     const req: JsonRpcRequest = { jsonrpc: "2.0", id, method };
     if (params !== undefined) req.params = params;
     const text = JSON.stringify(req);
+    const timeoutMs = opts.timeoutMs ?? callTimeout(method);
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { method, resolve: resolve as (v: unknown) => void, reject });
+      const timer = setTimeout(() => {
+        if (this.pending.delete(id)) reject(new TroupeCallTimedOut(method, timeoutMs));
+      }, timeoutMs);
+      const settle =
+        <V>(f: (v: V) => void) =>
+        (v: V): void => {
+          clearTimeout(timer);
+          f(v);
+        };
+      this.pending.set(id, { method, resolve: settle(resolve as (v: unknown) => void), reject: settle(reject) });
       this.hooks.onFrame?.("out", text);
       this.ws.send(text);
     });
