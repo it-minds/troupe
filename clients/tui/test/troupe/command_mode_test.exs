@@ -361,10 +361,16 @@ defmodule Troupe.CommandModeTest do
       assert Enum.any?(notices(pid), &(&1 =~ "runs build from its next turn"))
 
       eventually(fn ->
-        Enum.any?(FakeRemote.calls(remote), &match?({"profile.switch", %{"profile" => "build"}}, &1))
+        Enum.any?(
+          FakeRemote.calls(remote),
+          &match?({"profile.switch", %{"profile" => "build"}}, &1)
+        )
       end)
 
-      assert Enum.any?(FakeRemote.calls(remote), &match?({"agents.list", %{"session_id" => "s-cm"}}, &1))
+      assert Enum.any?(
+               FakeRemote.calls(remote),
+               &match?({"agents.list", %{"session_id" => "s-cm"}}, &1)
+             )
 
       GenServer.stop(pid, :normal)
     end

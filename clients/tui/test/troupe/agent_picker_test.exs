@@ -108,7 +108,10 @@ defmodule Troupe.AgentPickerTest do
       update_in(server.user_state.switcher.rows, fn rows ->
         Enum.map(rows, fn
           %{"name" => "careful"} = row ->
-            Map.merge(row, %{"available" => false, "reason" => "its model, x, is not one the provider serves"})
+            Map.merge(row, %{
+              "available" => false,
+              "reason" => "its model, x, is not one the provider serves"
+            })
 
           row ->
             row
@@ -154,7 +157,10 @@ defmodule Troupe.AgentPickerTest do
     end)
 
     assert {:agent, %{"name" => "careful"}} =
-             Enum.at(Agents.entries(user_state(pid).agents_page), user_state(pid).agents_page.cursor)
+             Enum.at(
+               Agents.entries(user_state(pid).agents_page),
+               user_state(pid).agents_page.cursor
+             )
 
     press(pid, "esc")
     press(pid, "1")

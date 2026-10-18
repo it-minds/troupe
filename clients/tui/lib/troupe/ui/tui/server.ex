@@ -2734,7 +2734,13 @@ defmodule Troupe.UI.TUI.Server do
 
       {:edit, name} ->
         page = Agents.open(state.session_id, name)
-        agents_key(%Key{code: "e"}, %{put_cmd(state, "") | focus: :agents, agents_page: page, switcher: nil})
+
+        agents_key(%Key{code: "e"}, %{
+          put_cmd(state, "")
+          | focus: :agents,
+            agents_page: page,
+            switcher: nil
+        })
     end
   end
 

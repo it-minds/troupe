@@ -2128,7 +2128,8 @@ defmodule Troupe.UI.TUI.View do
   defp picker_line(%{for: {:window, path}}),
     do: " the agent #{path} runs — ↑↓ choose · Enter switches · Esc keeps it "
 
-  defp picker_line(picker), do: " start an agent — ↑↓ choose · Enter starts it · Esc back#{task_note(picker)} "
+  defp picker_line(picker),
+    do: " start an agent — ↑↓ choose · Enter starts it · Esc back#{task_note(picker)} "
 
   defp task_note(%{for: {:start, prompt}}) when prompt != "", do: " · for: " <> clip(prompt, 40)
   defp task_note(_picker), do: ""

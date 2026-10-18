@@ -198,7 +198,8 @@ defmodule Troupe.UI.TUI.AgentChooser do
          %{
            chooser
            | status:
-               row["editable_reason"] || "#{name} comes from the profile's bundle; change it in the console"
+               row["editable_reason"] ||
+                 "#{name} comes from the profile's bundle; change it in the console"
          }}
 
       %{"name" => name} ->
