@@ -22,6 +22,7 @@
     "commands/fs.list.json",
     "commands/fs.read.json",
     "commands/fs.upload.json",
+    "commands/identity.accept_plane_key.json",
     "commands/identity.get.json",
     "commands/identity.link.json",
     "commands/identity.sign_out.json",

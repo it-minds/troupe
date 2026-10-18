@@ -797,6 +797,26 @@ export interface GitHubAppChange {
   webhook_secret?: string;
 }
 
+/** One version of the plane's signing key: its public half and fingerprint, and when transit made it. */
+export interface SigningKeyVersion {
+  algorithm: string;
+  public_key: string;
+  fingerprint: string;
+  version: number;
+  created_at: string | null;
+}
+
+/**
+ * The key the plane signs what it tells people's machines with (#657), as `admin.signing.get`
+ * answers it: the current version, and every version's, newest first. Never the key itself,
+ * which transit holds and nothing exports.
+ */
+export interface SigningKey extends SigningKeyVersion {
+  versions: SigningKeyVersion[];
+  /** On a rotation: the audit's diff, fingerprints and versions. */
+  changes?: AuditChanges;
+}
+
 /** One delivery the App's webhook took: GitHub's id, what it was, and what the plane did with it. Never its body. */
 export interface GitHubDelivery {
   id: string;
@@ -1073,6 +1093,16 @@ export class AdminApi {
   /** Forget the App. Destructive: confirmed by its App ID. */
   deleteGithub(appId: number): Promise<GitHubApp> {
     return this.rpc<GitHubApp>("admin.github.delete", { app_id: appId });
+  }
+
+  /** The plane's signing key, made on first use. */
+  signing(): Promise<SigningKey> {
+    return this.rpc<SigningKey>("admin.signing.get", {});
+  }
+
+  /** A new version of the signing key. Destructive for every machine that pinned it: confirmed by the current key's fingerprint. */
+  rotateSigning(fingerprint: string): Promise<SigningKey> {
+    return this.rpc<SigningKey>("admin.signing.rotate", { fingerprint });
   }
 
   teams(): Promise<AdminTeam[]> {

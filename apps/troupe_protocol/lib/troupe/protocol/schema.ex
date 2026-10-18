@@ -951,6 +951,12 @@ defmodule Troupe.Protocol.Schema do
         "plane_url" => required(:string),
         "subject" => optional(:string)
       },
+      # The plane's new signing key, accepted by the fingerprint its person was shown (#657).
+      "identity.accept_plane_key" => %{
+        "command_id" => required(:string),
+        "fingerprint" => required(:string),
+        "plane_url" => optional(:string)
+      },
       # The machine's settings — the daemon's only; a worker answers `method_not_found`.
       # The key goes in through `config.models` and `config.set` and never comes back out:
       # `config.get` reports `api_key_set`, and a secret key's value as `****`. `config.set`

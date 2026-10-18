@@ -47,7 +47,8 @@ defmodule Troupe.Plane.Admin do
     Gitops,
     Identity,
     Ledger,
-    ProfileBudget
+    ProfileBudget,
+    Signing
   }
 
   alias Troupe.Plane.Control.TLS
@@ -2246,6 +2247,62 @@ defmodule Troupe.Plane.Admin do
   def client_policy_keys, do: ClientVersions.keys()
 
   defp policy_fields(policy), do: Map.take(policy, [:recommended, :minimum, :blocked])
+
+  # -- the plane's own signing key --------------------------------------------
+
+  @doc """
+  The key this plane signs what it tells people's machines with (`Signing`): its public
+  half, fingerprint and when it was made, and every version's. Made on first use.
+
+  Readable by a team admin, whose people are asked to check the fingerprint; rotated only
+  by a platform admin, since every machine signed in to the plane is then asked to accept
+  the new one.
+  """
+  @spec signing_get(actor()) :: result()
+  def signing_get(actor) do
+    with :ok <- require_admin(actor), do: signing_key(Signing.key())
+  end
+
+  @doc """
+  A new version of the signing key, which signs from then on. Every machine that pinned the
+  old one refuses what the new one signs until its person accepts it, with its fingerprint
+  shown, so it is confirmed by the current key's fingerprint, typed back. Audited with the
+  fingerprints and versions, before and after.
+  """
+  @spec signing_rotate(actor(), String.t() | nil) :: result()
+  def signing_rotate(actor, fingerprint) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, current} <- signing_key(Signing.key()),
+         :ok <- confirm_fingerprint(current, fingerprint),
+         {:ok, %{before: before, now: now}} <- signing_key(Signing.rotate()) do
+      changes = Audit.diff(signing_fields(before), signing_fields(now))
+      {:ok, _} = Audit.record(actor.subject, "signing.rotate", Signing.name(), changes)
+      {:ok, Map.put(now, "changes", changes)}
+    end
+  end
+
+  defp signing_key({:ok, key}), do: {:ok, key}
+
+  defp signing_key({:error, reason}),
+    do:
+      {:error,
+       Error.new(:unavailable, %{
+         reason:
+           "OpenBao's transit engine did not answer for the plane's signing key: " <>
+             inspect(reason)
+       })}
+
+  defp confirm_fingerprint(%{"fingerprint" => fingerprint}, fingerprint), do: :ok
+
+  defp confirm_fingerprint(%{"fingerprint" => expected}, _given) do
+    {:error,
+     Error.new(:invalid_params, %{
+       reason: "the fingerprint to confirm with is the current key's, #{expected}",
+       fingerprint: expected
+     })}
+  end
+
+  defp signing_fields(key), do: %{fingerprint: key["fingerprint"], version: key["version"]}
 
   # -- the plane's GitHub App -------------------------------------------------
 

@@ -161,6 +161,12 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :whoami} = args} ->
         Troupe.CLI.Remote.whoami(args.plane_url)
 
+      {:ok, %{mode: :plane_key} = args} ->
+        Troupe.CLI.Remote.plane_key(args.plane_url)
+
+      {:ok, %{mode: :plane_key_accept} = args} ->
+        Troupe.CLI.Remote.accept_plane_key(args.key, args.plane_url)
+
       {:ok, %{mode: :daemon} = args} ->
         Troupe.CLI.Daemon.run(args.daemon_args)
 
@@ -236,7 +242,20 @@ defmodule Troupe.CLI.Runner do
   def interruptible?({:ok, %{mode: mode} = args}) when mode in [:run, :resume], do: args.headless
 
   def interruptible?({:ok, %{mode: mode}}),
-    do: mode in [:daemon, :login, :logout, :whoami, :models, :doctor, :bench, :config_pull, :update]
+    do:
+      mode in [
+        :daemon,
+        :login,
+        :logout,
+        :whoami,
+        :plane_key,
+        :plane_key_accept,
+        :models,
+        :doctor,
+        :bench,
+        :config_pull,
+        :update
+      ]
 
   def interruptible?(_parsed), do: false
 

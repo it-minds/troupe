@@ -100,6 +100,10 @@ export class FakePlane {
   private url = "";
   private tokens = new Map<string, { subject: string; name: string; exp: number }>();
   private counter = 0;
+  /** The plane's own signing key, once `sign()` gives it one (#657). */
+  private signing: { publicKey: string; privateKey: CryptoKey; fingerprint: string } | null = null;
+  /** Where the plane says releases are, in the version policy it signs. */
+  releaseUrl: string | null = null;
 
   private constructor(opts: PlaneOptions) {
     this.opts = opts;
@@ -117,6 +121,45 @@ export class FakePlane {
 
   get baseUrl(): string {
     return this.url;
+  }
+
+  /**
+   * Sign the version policy from now on with a key of the plane's own, a new one each call
+   * (a rotation), served at `/.well-known/troupe-signing-key`, as the plane does (#657).
+   * Answers the key as a client pins it.
+   */
+  async sign(): Promise<{ algorithm: string; public_key: string; fingerprint: string }> {
+    const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])) as CryptoKeyPair;
+    const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+    const publicKey = Buffer.from(raw).toString("base64");
+    const digest = Buffer.from(await crypto.subtle.digest("SHA-256", raw)).toString("base64").replace(/=+$/, "");
+    this.signing = { publicKey, privateKey: pair.privateKey, fingerprint: `SHA256:${digest}` };
+    return { algorithm: "ed25519", public_key: publicKey, fingerprint: this.signing.fingerprint };
+  }
+
+  // As `Troupe.Protocol.PlaneSignature` lays it out: canonical JSON of the kind, the plane,
+  // the window and the body, signed as it is.
+  private async signed(kind: string, answer: Record<string, unknown>, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.signing) return answer;
+    const canonical = (v: unknown): string =>
+      Array.isArray(v)
+        ? `[${v.map(canonical).join(",")}]`
+        : v && typeof v === "object"
+          ? `{${Object.keys(v as object)
+              .sort()
+              .map((k) => `${JSON.stringify(k)}:${canonical((v as Record<string, unknown>)[k])}`)
+              .join(",")}}`
+          : JSON.stringify(v ?? null);
+    const now = new Date();
+    const document = canonical({
+      kind,
+      plane: this.url,
+      signed_at: now.toISOString().replace(/\.\d+Z$/, "Z"),
+      expires_at: new Date(now.getTime() + 7 * 24 * 3600 * 1000).toISOString().replace(/\.\d+Z$/, "Z"),
+      body,
+    });
+    const signature = Buffer.from(await crypto.subtle.sign({ name: "Ed25519" }, this.signing.privateKey, new TextEncoder().encode(document))).toString("base64");
+    return { ...answer, signed: { algorithm: "ed25519", fingerprint: this.signing.fingerprint, document, signature } };
   }
 
   async stop(): Promise<void> {
@@ -198,6 +241,11 @@ export class FakePlane {
       });
     }
 
+    if (path === "/.well-known/troupe-signing-key") {
+      if (!this.signing) return json(404, { error: "not_found" });
+      return json(200, { algorithm: "ed25519", public_key: this.signing.publicKey, fingerprint: this.signing.fingerprint, version: 1 });
+    }
+
     const body = await readBody(req);
 
     if (path === "/auth/exchange") {
@@ -223,10 +271,16 @@ export class FakePlane {
       if (!held || held.exp * 1000 <= Date.now()) return json(401, { error: "unauthenticated" });
       const request = JSON.parse(body || "{}") as { id?: number; method?: string; params?: Record<string, unknown> };
       const method = request.method ?? "";
-      const answer =
+      let answer =
         this.opts.admin && method.startsWith("admin.")
           ? await this.opts.admin.call(held.subject, method, request.params ?? {})
           : this.rpc(held.subject, held.name, method, request.params ?? {});
+      // The version policy, with where releases are, signed where the plane has a key.
+      if (method === "me.client_versions" && "result" in answer && (this.signing || this.releaseUrl)) {
+        const versions = answer.result as Record<string, unknown>;
+        const release = { url: this.releaseUrl };
+        answer = { result: await this.signed("client_versions", { ...versions, release }, { versions, release }) };
+      }
       return json(200, { jsonrpc: "2.0", id: request.id ?? null, ...answer });
     }
 

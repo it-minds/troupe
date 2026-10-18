@@ -54,6 +54,51 @@ describe("the plane's word on the desktop app's version", () => {
     assert.deepEqual(await askPlane(auth, "0.14.0-beta"), { state: "unknown" });
   });
 
+  // #657: the policy is the plane's word only as its own key signed it.
+  it("a signed policy is taken as the pinned key signed it, with where releases are", async () => {
+    h = await startHarness({ plane: { clientVersions: { desktop: { recommended: "0.22.0-beta" } } } });
+    const pinned = await h.plane.sign();
+    h.plane.releaseUrl = "https://mirror.example.test/troupe";
+    const auth = await h.signIn();
+
+    const word = await askPlane(auth, "0.21.0-beta", pinned);
+    assert.ok(word.state === "served");
+    assert.deepEqual(word.signature, { state: "signed" });
+    assert.equal(word.versions?.["desktop"]?.recommended, "0.22.0-beta");
+    assert.equal(word.versions?.["release"], undefined);
+    assert.equal(word.releaseUrl, "https://mirror.example.test/troupe");
+  });
+
+  it("a policy signed by another key is not acted on, and says which key signed it", async () => {
+    h = await startHarness({ plane: { clientVersions: { desktop: { recommended: "0.22.0-beta" } } } });
+    const pinned = await h.plane.sign();
+    const rotated = await h.plane.sign();
+    const auth = await h.signIn();
+
+    const word = await askPlane(auth, "0.21.0-beta", pinned);
+    assert.ok(word.state === "served");
+    assert.equal(word.versions, null);
+    assert.ok(word.signature?.state === "refused");
+    assert.match(word.signature.sentence, new RegExp(`is signed by the key ${rotated.fingerprint.replace(/[+/]/g, "\\$&")}, not by`));
+  });
+
+  it("a plane that signs nothing is taken at its word, and that said; one with a key and none pinned here is unchecked", async () => {
+    h = await startHarness({ plane: { clientVersions: { desktop: { recommended: "0.22.0-beta" } } } });
+    const auth = await h.signIn();
+
+    const unsigned = await askPlane(auth, "0.21.0-beta", null);
+    assert.ok(unsigned.state === "served");
+    assert.equal(unsigned.versions?.["desktop"]?.recommended, "0.22.0-beta");
+    assert.ok(unsigned.signature?.state === "unsigned");
+    assert.match(unsigned.signature.line, /signs nothing it tells clients/);
+
+    await h.plane.sign();
+    const unchecked = await askPlane(auth, "0.21.0-beta", null);
+    assert.ok(unchecked.state === "served");
+    assert.deepEqual(unchecked.signature, { state: "unchecked" });
+    assert.equal(unchecked.versions?.["signed"], undefined);
+  });
+
   it("a refusal from a plane that sent only a reason is that reason", () => {
     assert.equal(updateRequiredSentence({ reason: "Ask your administrator." }), "Ask your administrator.");
     assert.equal(updateRequiredSentence(undefined), "This plane needs a newer version of this client: update it now.");

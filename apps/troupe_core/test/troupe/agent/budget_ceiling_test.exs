@@ -21,7 +21,8 @@ defmodule Troupe.Agent.BudgetCeilingTest do
 
     Application.put_env(:troupe_core, :organisation,
       managed_path: managed,
-      cache_path: Path.join(context.base, "organisation.json")
+      cache_path: Path.join(context.base, "organisation.json"),
+      keys_path: Path.join(context.base, "plane-keys.json")
     )
 
     on_exit(fn -> Application.put_env(:troupe_core, :organisation, previous) end)

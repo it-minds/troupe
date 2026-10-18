@@ -38,6 +38,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Memory.Facts
   alias Troupe.Mounts
   alias Troupe.Onboard.Start, as: Onboarding
+  alias Troupe.PlaneKeys
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
@@ -167,6 +168,9 @@ defmodule Troupe.Gateway.Dispatch do
     "identity.unlink" => :admin,
     # Taking back the plane token a client handed over stops the sealing it was for.
     "identity.sign_out" => :admin,
+    # Trusting a plane's new signing key decides whose word on versions and limits this
+    # machine takes, so it is the person's, as linking is (#657).
+    "identity.accept_plane_key" => :admin,
     # The machine's own settings (#57). Reading them says nothing secret — the key is
     # reported as set or not, a secret's value as `****` — but trying a provider sends a
     # key to a URL, and saving changes what every later session on the machine does.
@@ -1169,12 +1173,32 @@ defmodule Troupe.Gateway.Dispatch do
 
   # With the plane's refusal of this daemon's version, when there is one: the sentence a
   # client shows, saying what to run (Decision 868).
+  #
+  # And the key the plane linked to signs with, as this machine pinned it (#657), with the
+  # key it offers instead where it has changed, for a client to show its fingerprint and
+  # ask its person to accept it.
   defp handle("identity.get", _params, _context) do
-    identity = Identity.to_json(Identity.get())
+    identity =
+      Identity.get()
+      |> Identity.to_json()
+      |> put_plane_key(Plane.url())
 
     case Plane.refusal() do
       nil -> {:ok, identity}
       sentence -> {:ok, Map.put(identity, "update_required", sentence)}
+    end
+  end
+
+  # The person accepting the plane's new signing key, by the fingerprint they were shown,
+  # which must be the key the plane serves now (#657). Then the organisation's document is
+  # fetched again, which the old key's pin refused.
+  defp handle("identity.accept_plane_key", params, _context) do
+    with {:ok, fingerprint} <- fetch(params, "fingerprint"),
+         {:ok, url} <- linked_plane(params["plane_url"]),
+         {:ok, served} <- served_key(url),
+         {:ok, _fingerprint} <- accepted(PlaneKeys.accept(url, fingerprint, served: served)) do
+      Task.start(&refresh_organisation/0)
+      {:ok, put_plane_key(%{}, url)}
     end
   end
 
@@ -1413,10 +1437,17 @@ defmodule Troupe.Gateway.Dispatch do
 
   # One writer for both ways a plane's document arrives, and every client hears which of
   # its keys changed, as a file's are announced.
+  #
+  # Kept only as the plane signed it (#657): checked against the key this machine pinned
+  # for the plane, and saved with the signature, which is checked again whenever the copy
+  # is read. One the pin refuses leaves the copy before it, and says why. A plane that
+  # signs nothing has its document kept as it always was, and that said in the log.
   defp keep_organisation(plane_url, document) do
     before = organisation()
 
-    with {:ok, kept} <- Org.save(plane_url, document) do
+    with {:ok, body, signed?} <- PlaneKeys.check(plane_url, document, "client_defaults"),
+         :ok <- unsigned_line(plane_url, signed?),
+         {:ok, kept} <- Org.save(plane_url, body, Org.cache_path(), signature(signed?, document)) do
       now = organisation()
 
       keys =
@@ -1432,12 +1463,50 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  defp unsigned_line(plane_url, :unsigned) do
+    Logger.info("troupe-daemon: " <> PlaneKeys.unsigned_line(plane_url, "client_defaults"))
+  end
+
+  defp unsigned_line(_plane_url, :signed), do: :ok
+
+  defp signature(:signed, document), do: document["signed"]
+  defp signature(:unsigned, _document), do: nil
+
   defp organisation do
     case Org.read_cache() do
       {:ok, cached} -> %{"defaults" => cached["defaults"] || %{}, "enforced" => cached["enforced"] || %{}}
       _none -> %{"defaults" => %{}, "enforced" => %{}}
     end
   end
+
+  defp put_plane_key(json, url) when is_binary(url) do
+    case PlaneKeys.pinned(url) do
+      nil -> json
+      held -> Map.put(json, "plane_key", Map.put(held, "plane_url", PlaneKeys.plane(url)))
+    end
+  end
+
+  defp put_plane_key(json, _url), do: json
+
+  defp linked_plane(url) when is_binary(url) and url != "", do: {:ok, url}
+
+  defp linked_plane(_url) do
+    case Plane.url() do
+      nil -> {:error, Error.new(:invalid_params, %{reason: "this daemon is linked to no plane"})}
+      url -> {:ok, url}
+    end
+  end
+
+  defp served_key(url) do
+    case PlaneKeys.fetch(url) do
+      {:ok, served} -> {:ok, served}
+      :unsigned -> {:error, Error.new(:invalid_params, %{reason: "#{url} signs nothing: no key to accept"})}
+      {:error, why} -> {:error, Error.new(:unavailable, %{reason: why})}
+    end
+  end
+
+  defp accepted({:ok, fingerprint}), do: {:ok, fingerprint}
+  defp accepted({:error, why}), do: {:error, Error.new(:invalid_params, %{reason: why})}
 
   defp settings_result({:ok, result}), do: {:ok, result}
 
@@ -1551,6 +1620,8 @@ defmodule Troupe.Gateway.Dispatch do
   # Then the organisation's document (Decision 869), kept for every later session: a client
   # links whenever it connects, so this is at sign-in and at the first connection after a
   # restart. A plane that does not answer leaves the copy as it was.
+  # Before the document, the key it is signed with (#657): pinned where this machine has
+  # none for the plane, and a changed one kept as offered and logged, for a person to accept.
   defp erasures(%{"plane_token" => token}) when is_binary(token) and token != "" do
     Task.start(fn ->
       case Plane.handshake() do
@@ -1558,6 +1629,7 @@ defmodule Troupe.Gateway.Dispatch do
           :ok
 
         _served_or_unknown ->
+          see_plane_key()
           refresh_organisation()
           Private.apply_erasures()
           Private.resume()
@@ -1566,6 +1638,32 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   defp erasures(_params), do: :ok
+
+  defp see_plane_key do
+    with url when is_binary(url) <- Plane.url(),
+         {:ok, served} <- PlaneKeys.fetch(url),
+         {:ok, seen} <- PlaneKeys.see(url, served) do
+      case seen do
+        {:pinned, fingerprint} ->
+          Logger.info("troupe-daemon: #{PlaneKeys.plane(url)} signs with #{fingerprint}; pinned")
+
+        {:same, _fingerprint} ->
+          :ok
+
+        {:changed, pinned, offered} ->
+          Logger.warning(
+            "troupe-daemon: #{PlaneKeys.plane(url)} now signs with the key #{offered}, " <>
+              "not #{pinned}, the one this machine pinned: nothing it signs is taken " <>
+              "until you accept the new key (troupe plane-key accept #{offered}, " <>
+              "or in the desktop app)"
+          )
+      end
+    else
+      :unsigned -> :ok
+      nil -> :ok
+      {:error, why} -> Logger.info("troupe-daemon: the plane's key was not checked: #{why}")
+    end
+  end
 
   defp refresh_organisation do
     with url when is_binary(url) <- Plane.url(),

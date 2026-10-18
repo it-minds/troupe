@@ -137,6 +137,17 @@ defmodule Troupe.FakeRemote do
   @doc "Gives the plane a version policy from now on (Decision 868), or takes it away with `nil`."
   def client_versions(remote, versions), do: GenServer.call(remote, {:client_versions, versions})
 
+  @doc """
+  Signs from now on with a key of the plane's own, a new one each time, served at
+  `/.well-known/troupe-signing-key` (#657). Answers its fingerprint.
+  """
+  @spec sign(pid()) :: String.t()
+  def sign(remote), do: GenServer.call(remote, :sign)
+
+  @doc "Where the plane says releases are, in its version policy (#657)."
+  @spec release_url(pid(), String.t() | nil) :: :ok
+  def release_url(remote, url), do: GenServer.call(remote, {:release_url, url})
+
   @doc "Sets a session's state (`active`, `dormant`, `read_only`, `erased`)."
   @spec state(pid(), String.t(), String.t()) :: :ok
   def state(remote, session_id, state), do: GenServer.call(remote, {:state, session_id, state})
@@ -249,6 +260,9 @@ defmodule Troupe.FakeRemote do
       # `/rpc` then answers `initialize` and `me.client_versions` as such a plane does.
       # Unset, `/rpc` has neither, as a plane from before it.
       client_versions: Keyword.get(opts, :client_versions),
+      # The plane's own signing key, once `sign/1` gives it one, and where its releases are.
+      signing: nil,
+      release_url: nil,
       exchange?: Keyword.get(opts, :exchange, true),
       plane_tokens: MapSet.new(),
       # Seconds a plane token from `/auth/exchange` is good for.
@@ -375,6 +389,15 @@ defmodule Troupe.FakeRemote do
 
   def handle_call({:client_versions, versions}, _from, state),
     do: {:reply, :ok, %{state | client_versions: versions}}
+
+  def handle_call(:sign, _from, state) do
+    {public, secret} = :crypto.generate_key(:eddsa, :ed25519)
+
+    {:reply, Troupe.Protocol.PlaneSignature.fingerprint(public),
+     %{state | signing: %{public: public, secret: secret}}}
+  end
+
+  def handle_call({:release_url, url}, _from, state), do: {:reply, :ok, %{state | release_url: url}}
 
   def handle_call({:state, session_id, session_state}, _from, state),
     do: {:reply, :ok, put_in(state.sessions[session_id][:state], session_state)}
@@ -609,7 +632,13 @@ defmodule Troupe.FakeRemote do
   defp dispatch(%{client_versions: %{} = versions} = state, _kind, "me.client_versions", _, _) do
     empty = %{"recommended" => nil, "minimum" => nil, "blocked" => []}
     answer = Map.new(~w(tui daemon desktop), &{&1, Map.merge(empty, versions[&1] || %{})})
-    {{:ok, answer}, state}
+    release = %{"url" => state.release_url}
+
+    {{:ok,
+      signed(state, answer |> Map.put("release", release), %{
+        "versions" => answer,
+        "release" => release
+      })}, state}
   end
 
   # The worker compares `protocol_version` as a string, and so does this: an integer
@@ -1273,6 +1302,21 @@ defmodule Troupe.FakeRemote do
 
   defp http(state, method, path, _headers, body), do: http(state, method, path, body)
 
+  # As the plane signs its version policy (#657), where `sign/1` gave it a key.
+  defp signed(%{signing: nil}, answer, _body), do: answer
+
+  defp signed(%{signing: %{public: public, secret: secret}}, answer, body) do
+    alias Troupe.Protocol.PlaneSignature
+    document = PlaneSignature.document("client_versions", body)
+    signature = :crypto.sign(:eddsa, :none, document, [secret, :ed25519])
+
+    Map.put(
+      answer,
+      "signed",
+      PlaneSignature.envelope(document, signature, PlaneSignature.fingerprint(public))
+    )
+  end
+
   defp plane_token?(state, headers) do
     case Map.get(headers, "authorization", "") do
       "Bearer " <> token -> MapSet.member?(state.plane_tokens, token)
@@ -1301,6 +1345,12 @@ defmodule Troupe.FakeRemote do
 
     {:reply, {200, body}, state}
   end
+
+  defp http(%{signing: nil} = state, "GET", "/.well-known/troupe-signing-key", _body),
+    do: {:reply, {404, %{"error" => "not found"}}, state}
+
+  defp http(state, "GET", "/.well-known/troupe-signing-key", _body),
+    do: {:reply, {200, Troupe.Protocol.PlaneSignature.key_json(state.signing.public)}, state}
 
   defp http(state, "GET", "/oidc/.well-known/openid-configuration", _body) do
     base = "http://127.0.0.1:#{state.port}"

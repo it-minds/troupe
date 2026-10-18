@@ -100,6 +100,8 @@ defmodule Troupe.Plane.Admin.Console do
     github_check: {:area, :integrations},
     github_deliveries: {:area, :integrations},
     github_delete: {:area, :integrations},
+    signing_get: {:area, :integrations},
+    signing_rotate: {:area, :integrations},
 
     # -- Operate -------------------------------------------------------------
     pod_drain: {:area, :pods},

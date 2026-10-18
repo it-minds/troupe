@@ -128,6 +128,39 @@ unreachable. Sessions on this machine are not affected. A `troupe-daemon` the pl
 says the same in its log and in `identity.get`, and stops syncing private sessions until it
 is updated and linked again.
 
+### The plane's word is signed
+
+The plane signs what it tells your machine, its version policy and your organisation's
+settings, with a key of its own. `troupe login` pins that key, as SSH pins a host key, and
+says its fingerprint:
+
+```text
+the plane signs what it tells clients with the key SHA256:/oEsEvOrTOasXbaaw1L5BssbEe9D+zPiUu9/9VImOIk; pinned
+```
+
+From then on a policy the pinned key did not sign, one changed after it was signed or one
+past its time is refused in a sentence, and `troupe update` goes on as without a plane. If
+the plane's administrators rotate the key, your machine says so and trusts the new one for
+nothing until you accept it. Check the fingerprint with them first (their console shows it
+under Integrations), then:
+
+```text
+troupe plane-key                        # the key pinned, and the one the plane offers now
+troupe plane-key accept SHA256:...      # trust the new one
+```
+
+The desktop app asks the same in its banner. A plane from before 0.22 signs nothing, and
+its word is taken as it always was, said in a line.
+
+### Updating from the plane
+
+Where the plane says releases are (its administrators set it, under Policy), `troupe update`
+installs from there rather than from GitHub, so a machine on a closed network updates without
+reaching it. That may be the plane itself, which hands out the release files its
+administrators copied into its object store. The files are checked against the release key
+exactly as they are from GitHub: the plane can serve a release or not, and cannot change one.
+With no recommended version there, name one: `troupe update --version 0.22.0-beta`.
+
 ## What the signature proves, and what it does not
 
 Each release's `manifest.json` is signed with Troupe's release key, an Ed25519 key in

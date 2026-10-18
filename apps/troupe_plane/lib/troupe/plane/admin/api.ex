@@ -1313,6 +1313,30 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.signing.get",
+      function: :signing_get,
+      summary:
+        "The key this plane signs what it tells people's machines with (the version policy, the organisation's defaults and limits): an Ed25519 key in OpenBao transit that cannot be exported, its public half, its fingerprint (SHA256:...) and when it was made, and every version's. Machines pin it at sign-in; a person checks the fingerprint against this. Made on first use.",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
+      name: "admin.signing.rotate",
+      function: :signing_rotate,
+      summary:
+        "Make a new version of the plane's signing key, which signs from then on. Every machine that pinned the old one refuses what the new one signs until its person accepts the new fingerprint. Confirmed by the current key's fingerprint.",
+      risk: :destructive,
+      confirm: "fingerprint",
+      arguments: [
+        %Argument{
+          name: "fingerprint",
+          type: :string,
+          required: true,
+          description: "The current key's fingerprint, SHA256:..., typed back to confirm."
+        }
+      ]
+    },
+    %Method{
       name: "admin.github.get",
       function: :github_get,
       summary:
