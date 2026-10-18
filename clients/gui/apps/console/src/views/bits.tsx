@@ -125,6 +125,7 @@ export function Preview({
   typeToConfirm,
   onConfirm,
   onCancel,
+  body,
 }: {
   title: string;
   lines: DiffLine[];
@@ -133,6 +134,8 @@ export function Preview({
   typeToConfirm?: string | null;
   onConfirm: () => Promise<void>;
   onCancel: () => void;
+  /** What a document's change is shown as, line by line, in place of the fields' diff; `lines` still says whether anything changes. */
+  body?: ReactNode;
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -149,7 +152,7 @@ export function Preview({
     <section className="preview" aria-label="What will happen" ref={here} tabIndex={-1}>
       <Region tone="waiting">What will happen</Region>
       <div className="box">
-        <Diff title={title} lines={lines} />
+        {body ?? <Diff title={title} lines={lines} />}
         {effects.length > 0 && (
           <ul className="effects">
             {effects.map((e) => (
@@ -218,6 +221,24 @@ export function Diff({ title, lines }: { title: string; lines: DiffLine[] }): JS
           <div className="add">
             <span aria-hidden="true">+</span> {l.field}: {show(l.to)}
           </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A text's change, line by line, in the diff's own shape: a hunk header, then each line as
+ * it stays, goes or comes. What a memory document's preview and its versions show.
+ */
+export function TextDiff({ title, lines }: { title: string; lines: Array<{ op: "same" | "del" | "add"; text: string }> }): JSX.Element {
+  return (
+    <div className="diff mono" aria-label={title}>
+      <div className="hunk">@@ {title} @@</div>
+      {lines.length === 0 && <div className="ctx">nothing changes</div>}
+      {lines.map((l, i) => (
+        <div key={i} className={l.op === "same" ? "ctx" : l.op}>
+          <span aria-hidden="true">{l.op === "del" ? "−" : l.op === "add" ? "+" : " "}</span> {l.text}
         </div>
       ))}
     </div>

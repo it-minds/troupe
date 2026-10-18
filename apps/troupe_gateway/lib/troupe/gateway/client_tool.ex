@@ -38,10 +38,19 @@ defmodule Troupe.Gateway.ClientTool do
       {:ok, result} -> {:ok, content(result)}
       {:error, :disconnected} -> park(connection, name, args, ctx, started)
       {:error, :timeout} -> {:error, {:timeout, ctx.timeout_ms}}
-      {:error, %{message: message}} -> {:error, "#{name} failed on the client: #{message}"}
+      {:error, %{message: _message} = error} -> {:error, "#{name} failed on the client: #{why(error)}"}
       {:error, reason} -> {:error, "#{name} failed on the client: #{inspect(reason)}"}
     end
   end
+
+  # An error's word names a kind of failure; the client says which in `reason` and
+  # `detail`, which is what the model can act on.
+  defp why(%{message: message, data: %{} = data}) do
+    said = for key <- ["reason", "detail"], do: data[key] || data[String.to_existing_atom(key)]
+    Enum.join([message | Enum.filter(said, &(is_binary(&1) and &1 != ""))], ": ")
+  end
+
+  defp why(%{message: message}), do: message
 
   # The registrant left mid-call. Wait for a client to offer the tool again, for the grace
   # or for what is left of the call's timeout, whichever is shorter, and run the call

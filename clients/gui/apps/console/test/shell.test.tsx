@@ -73,20 +73,19 @@ describe("the shell", () => {
     expect(css.slice(0, css.indexOf("@media (max-width: 760px)"))).toMatch(/\.rail \.menu\s*\{[^}]*display:\s*none/);
   });
 
-  it("says how an area it does not draw yet is done meanwhile, and points at no other console", async () => {
+  it("opens company memory, the last area it drew, and points at no other console", async () => {
     await open();
     link("Company memory", rail())!.click();
     await waitFor(() => heading() === "Company memory", "the area");
-    await sees("Not in this console yet");
-    await sees("troupe admin");
+    await sees("The organisation's memory");
     // The plane's pages under /admin are its break-glass page: nothing here leads there.
     expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);
   });
 
-  it("draws every area the plane places a method on, leaving only company memory", async () => {
+  it("draws every area the plane places a method on", async () => {
     await open();
     const later = [...rail().querySelectorAll("a.later")].map((a) => (a.textContent ?? "").replace(/\s*○.*$/, "").trim());
-    expect(later).toEqual(["Company memory"]);
+    expect(later).toEqual([]);
   });
 
   it("opens straight at a deep link, a team's tab included, and keeps it across a reload", async () => {

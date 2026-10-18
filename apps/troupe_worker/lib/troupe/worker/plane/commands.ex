@@ -51,6 +51,7 @@ defmodule Troupe.Worker.Plane.Commands do
     session_id = params["session_id"]
 
     with :ok <- shaped(session_id),
+         :ok <- taking_work(session_id),
          {:ok, inherited} <- forked(params),
          {:ok, bundle} <- bundle_of(narrow(params, inherited)) do
       from_plane =
@@ -67,6 +68,9 @@ defmodule Troupe.Worker.Plane.Commands do
             personal_tools: params["personal_tools"],
             # The worker profile's per-tool rules, each with the profile that wrote it.
             permission_rules: params["permission_rules"],
+            # The organisation's, the team's and the profile's memory documents, which the
+            # session reads as instructions before every file.
+            memory: params["memory"],
             # The GitHub repository a session was created with, which its first
             # activation clones. A name, never a credential: that the pod asks for.
             repository: params["repository"],
@@ -309,6 +313,20 @@ defmodule Troupe.Worker.Plane.Commands do
       do: :ok,
       else:
         {:error, Error.new(:invalid_params, %{field: "session_id", reason: "not a session id"})}
+  end
+
+  # A draining pod takes no new session: one placed in the moments after the drain began
+  # is in no list of what it puts to sleep, and would go down with the pod. One already
+  # awake here is confirmed, as activation always is.
+  defp taking_work(session_id) do
+    if Drain.draining?() and Sessions.whereis(session_id) == nil,
+      do:
+        {:error,
+         Error.new(:unavailable, %{
+           reason: "draining",
+           detail: "this pod is draining and takes no new session"
+         })},
+      else: :ok
   end
 
   # -- shares ------------------------------------------------------------------

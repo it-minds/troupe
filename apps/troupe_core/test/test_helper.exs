@@ -50,8 +50,12 @@ System.at_exit(fn _ -> File.rm_rf!(login_home) end)
 
 # Logger output is noise here: the suite asserts on events and telemetry, never on
 # log lines, and the crashing-agent tests would otherwise print stacktraces that
-# look like failures.
+# look like failures. The level is the VM's, though, and one `mix test` naming files of
+# core and of another app runs both suites in one VM, so it is put back as core's suite
+# ends: the next app's `capture_log` hears what that app logs.
+level = Logger.level()
 Logger.configure(level: :critical)
+ExUnit.after_suite(fn _result -> Logger.configure(level: level) end)
 
 # Loaded now rather than by the first test to call each one, which then waits on the read
 # behind every other test's: on a slow disk that wait is past the suite's timeouts.

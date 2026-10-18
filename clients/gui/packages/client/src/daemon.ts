@@ -13,7 +13,7 @@
 
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
-import type { ConnectOptions, ConnectionHooks } from "./connection.js";
+import type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
 import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { remoteOffer, syncState } from "./fleet.js";
@@ -602,14 +602,14 @@ export class DaemonClient {
     this.conn = null;
   }
 
-  private async call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  private async call<T>(method: string, params: Record<string, unknown> = {}, opts: CallOptions = {}): Promise<T> {
     const conn = await this.connection();
-    return conn.call<T>(method, params);
+    return conn.call<T>(method, params, opts);
   }
 
-  private async command<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  private async command<T>(method: string, params: Record<string, unknown> = {}, opts: CallOptions = {}): Promise<T> {
     const conn = await this.connection();
-    return conn.call<T>(method, { command_id: conn.nextCommandId(), ...params });
+    return conn.call<T>(method, { command_id: conn.nextCommandId(), ...params }, opts);
   }
 
   identity(): Promise<DaemonIdentity> {
@@ -628,8 +628,8 @@ export class DaemonClient {
    * in memory and in no answer, so a client signed in hands it over again when its token
    * is renewed and when the daemon has restarted (issue #365).
    */
-  linkIdentity(identity: { subject: string; display_name?: string; plane_url?: string; plane_token?: string }): Promise<DaemonIdentity> {
-    return this.command<DaemonIdentity>("identity.link", { ...identity });
+  linkIdentity(identity: { subject: string; display_name?: string; plane_url?: string; plane_token?: string }, opts: CallOptions = {}): Promise<DaemonIdentity> {
+    return this.command<DaemonIdentity>("identity.link", { ...identity }, opts);
   }
 
   unlinkIdentity(): Promise<DaemonIdentity> {
@@ -667,8 +667,8 @@ export class DaemonClient {
     return this.call("session.list", { filter });
   }
 
-  createSession(params: CreateLocalParams): Promise<SessionCreateResult> {
-    return this.command<SessionCreateResult>("session.create", { ...params });
+  createSession(params: CreateLocalParams, opts: CallOptions = {}): Promise<SessionCreateResult> {
+    return this.command<SessionCreateResult>("session.create", { ...params }, opts);
   }
 
   archiveSession(sessionId: string): Promise<unknown> {
@@ -754,13 +754,13 @@ export class DaemonClient {
    * A query rather than a command — nothing changes — but it is `admin` all the same,
    * because it spends the key it is handed on a request to somebody else's server.
    */
-  discoverModels(params: ModelsParams = {}): Promise<ModelDiscovery> {
-    return this.call<ModelDiscovery>("config.models", { ...params });
+  discoverModels(params: ModelsParams = {}, opts: CallOptions = {}): Promise<ModelDiscovery> {
+    return this.call<ModelDiscovery>("config.models", { ...params }, opts);
   }
 
   /** Write the model settings. The next session reads them; nothing has to restart. */
-  setModelConfig(params: ConfigSetParams): Promise<ModelConfig> {
-    return this.command<ModelConfig>("config.set", { ...params });
+  setModelConfig(params: ConfigSetParams, opts: CallOptions = {}): Promise<ModelConfig> {
+    return this.command<ModelConfig>("config.set", { ...params }, opts);
   }
 
   /**
@@ -769,8 +769,8 @@ export class DaemonClient {
    * key out of that file. The daemon refuses a key that scope may not set. Ask only a
    * daemon that `servesKeys`: an older one would read this as the model panel's save.
    */
-  setSetting(key: string, value: unknown, scope: ConfigScope = "user", workspace?: string): Promise<ModelConfig> {
-    return this.command<ModelConfig>("config.set", { key, value, scope, ...(workspace ? { workspace } : {}) });
+  setSetting(key: string, value: unknown, scope: ConfigScope = "user", workspace?: string, opts: CallOptions = {}): Promise<ModelConfig> {
+    return this.command<ModelConfig>("config.set", { key, value, scope, ...(workspace ? { workspace } : {}) }, opts);
   }
 
   /**
@@ -790,13 +790,13 @@ export class DaemonClient {
    * still there, and the key typed at one step is written at a later one without ever
    * coming back here.
    */
-  setup(): Promise<SetupFlow> {
-    return this.call<SetupFlow>("setup.get");
+  setup(opts: CallOptions = {}): Promise<SetupFlow> {
+    return this.call<SetupFlow>("setup.get", {}, opts);
   }
 
   /** Answer one step; the answer is the flow one step on. `admin`: it may send a key to a provider and write the settings. */
-  answerSetup(step: SetupStepName, answer: SetupAnswer): Promise<SetupFlow> {
-    return this.command<SetupFlow>("setup.answer", { step, answer });
+  answerSetup(step: SetupStepName, answer: SetupAnswer, opts: CallOptions = {}): Promise<SetupFlow> {
+    return this.command<SetupFlow>("setup.answer", { step, answer }, opts);
   }
 
   /**
@@ -806,12 +806,13 @@ export class DaemonClient {
    * put a tool in front of an agent until a person has confirmed the exact words it
    * sends back. Registering is `control`, because it is steering the session.
    */
-  registerTools(sessionId: string, tools: unknown[], consent?: string): Promise<unknown> {
+  registerTools(sessionId: string, tools: unknown[], consent?: { challenge: string; confirmed_by?: string }): Promise<unknown> {
     return this.command("tools.register", { session_id: sessionId, tools, ...(consent ? { consent } : {}) });
   }
 
-  unregisterTools(sessionId: string, names: string[]): Promise<unknown> {
-    return this.command("tools.unregister", { session_id: sessionId, names });
+  /** Take back the tools named, by the names they were offered under; all of this client's when none are named. */
+  unregisterTools(sessionId: string, names?: string[]): Promise<unknown> {
+    return this.command("tools.unregister", { session_id: sessionId, ...(names ? { tools: names } : {}) });
   }
 
   /**

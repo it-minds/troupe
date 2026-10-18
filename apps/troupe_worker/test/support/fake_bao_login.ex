@@ -62,7 +62,7 @@ defmodule Troupe.Worker.FakeBaoLogin do
   def init(agent), do: agent
 
   @impl Plug
-  def call(%Plug.Conn{method: "POST", path_info: ["v1", "auth", _mount, "login"]} = conn, agent) do
+  def call(%Plug.Conn{method: "POST", path_info: ["v1", "auth", mount, "login"]} = conn, agent) do
     {:ok, body, conn} = read_body(conn)
     %{"role" => role, "jwt" => jwt} = Jason.decode!(body)
     state = Agent.get(agent, & &1)
@@ -73,7 +73,7 @@ defmodule Troupe.Worker.FakeBaoLogin do
 
         send(
           state.test,
-          {:fake_bao, :login, %{role: role, jwt: jwt, token: auth["client_token"]}}
+          {:fake_bao, :login, %{role: role, jwt: jwt, token: auth["client_token"], mount: mount}}
         )
 
         answer(conn, 200, %{"auth" => auth})

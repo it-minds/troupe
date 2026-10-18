@@ -701,6 +701,57 @@ export interface AuditEntry {
 
 const refuse = (code: number, message: string, data?: unknown): Refusal => ({ error: { code, message, ...(data === undefined ? {} : { data }) } });
 
+/** The bytes one memory document may hold, as the plane's `Troupe.Protocol.Memory` says. */
+export const MEMORY_LIMIT = 8192;
+
+/** A memory document's text as the plane keeps it: line endings plain, nothing trailing. */
+function normaliseMemory(text: unknown): string {
+  return typeof text === "string" ? text.replace(/\r\n/g, "\n").replace(/\s+$/u, "") : "";
+}
+
+function memoryHash(text: string): string {
+  // Not the plane's SHA-256: a stand-in that differs whenever the text does.
+  let h = 0;
+  for (const c of text) h = (h * 31 + c.codePointAt(0)!) >>> 0;
+  return `sha256:${h.toString(16).padStart(8, "0")}`;
+}
+
+function memorySummary(v: { version: number; text: string; changed_by: string; changed_at: string }): Record<string, unknown> {
+  return { version: v.version, hash: memoryHash(v.text), bytes: new TextEncoder().encode(v.text).length, changed_by: v.changed_by, changed_at: v.changed_at };
+}
+
+function memoryEffect(scope: unknown, name: unknown): string {
+  if (scope === "team") return `The sessions of ${String(name)} read it from their next activation, and the machines of ${String(name)}'s members once their daemon next signs in; no other team's session reads it.`;
+  if (scope === "profile") return `Every session on ${String(name)}'s pods reads it from its next activation.`;
+  return "Every session on this plane's pods reads it from its next activation, and every signed-in machine's sessions once its daemon next signs in, before the team's and the profile's and as instructions from the organisation, read-only to agents.";
+}
+
+/** What changes between two texts, line by line, as the plane's `Memory.diff/2` answers it: a longest common subsequence. */
+export function lineDiff(before: string, now: string): Array<{ op: "same" | "del" | "add"; text: string }> {
+  const a = before === "" ? [] : before.split("\n");
+  const b = now === "" ? [] : now.split("\n");
+  const lcs: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+    }
+  }
+  const out: Array<{ op: "same" | "del" | "add"; text: string }> = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      out.push({ op: "same", text: a[i]! });
+      i++;
+      j++;
+    } else if (lcs[i + 1]![j]! >= lcs[i]![j + 1]!) out.push({ op: "del", text: a[i++]! });
+    else out.push({ op: "add", text: b[j++]! });
+  }
+  while (i < a.length) out.push({ op: "del", text: a[i++]! });
+  while (j < b.length) out.push({ op: "add", text: b[j++]! });
+  return out;
+}
+
 /** The diff the plane's audit records: a dotted path per field that moved, maps walked. */
 export function diff(before: Record<string, unknown>, now: Record<string, unknown>, path: string[] = []): Changes {
   const out: Changes = {};
@@ -768,6 +819,8 @@ export class FakeAdmin {
   githubKnows: { app_id: number; slug: string; fingerprint: string; installations: Array<{ owner: string; installation_id: number }> } | null = null;
   /** The machines registered to profiles. */
   readonly hostRows: FakeHost[] = [];
+  /** Every version of every memory document, oldest first, by subject: `organisation`, `team/<name>`, `profile/<name>`. */
+  readonly memory = new Map<string, Array<{ version: number; text: string; changed_by: string; changed_at: string }>>();
   /** Service principals beyond their subjects, by subject. */
   readonly principalRows = new Map<string, FakePrincipal>();
   /** People who look held twice, as `Identity.lookalikes/0` would set them out. */
@@ -1529,6 +1582,91 @@ export class FakeAdmin {
         return { result: { ...now, changes } };
       }
 
+      case "admin.memory.list": {
+        if (!admin) return notAdmin;
+        const platform = role === "platform_admin";
+        return {
+          result: {
+            limit: MEMORY_LIMIT,
+            organisation: this.memoryRow("organisation", null, platform),
+            teams: this.visible(subject).map((t) => this.memoryRow("team", t.name, true)),
+            profiles: platform ? this.profiles.map((p) => this.memoryRow("profile", p.name, true)) : [],
+          },
+        };
+      }
+
+      case "admin.memory.get": {
+        const found = this.memoryOwner(subject, params["scope"], params["name"]);
+        if ("error" in found) return found;
+        const versions = this.memory.get(found.subject) ?? [];
+        const asked = typeof params["version"] === "number" ? params["version"] : null;
+        const shown = asked === null ? versions.at(-1) ?? null : versions.find((v) => v.version === asked) ?? null;
+        if (asked !== null && !shown) return refuse(NOT_FOUND, "not_found", { version: asked });
+        const before = shown ? versions.find((v) => v.version === shown.version - 1) ?? null : null;
+        return {
+          result: {
+            scope: params["scope"],
+            name: params["scope"] === "organisation" ? null : params["name"],
+            subject: found.subject,
+            limit: MEMORY_LIMIT,
+            editable: found.editable,
+            version: shown?.version ?? null,
+            text: shown?.text ?? "",
+            shown: shown ? memorySummary(shown) : null,
+            diff: lineDiff(before?.text ?? "", shown?.text ?? ""),
+            versions: [...versions].reverse().map(memorySummary),
+          },
+        };
+      }
+
+      case "admin.memory.preview": {
+        const found = this.memoryOwner(subject, params["scope"], params["name"]);
+        if ("error" in found) return found;
+        if (!found.editable) return notPlatform;
+        const text = normaliseMemory(params["text"]);
+        if (new TextEncoder().encode(text).length > MEMORY_LIMIT) {
+          return refuse(INVALID_PARAMS, "invalid_params", { field: "text", reason: `a memory document holds at most ${MEMORY_LIMIT} bytes` });
+        }
+        const current = (this.memory.get(found.subject) ?? []).at(-1) ?? null;
+        return {
+          result: {
+            subject: found.subject,
+            version: current?.version ?? null,
+            bytes: new TextEncoder().encode(text).length,
+            limit: MEMORY_LIMIT,
+            unchanged: (current?.text ?? "") === text,
+            diff: lineDiff(current?.text ?? "", text),
+            effect: memoryEffect(params["scope"], params["name"]),
+          },
+        };
+      }
+
+      case "admin.memory.put": {
+        const found = this.memoryOwner(subject, params["scope"], params["name"]);
+        if ("error" in found) return found;
+        if (!found.editable) return notPlatform;
+        const text = normaliseMemory(params["text"]);
+        if (new TextEncoder().encode(text).length > MEMORY_LIMIT) {
+          return refuse(INVALID_PARAMS, "invalid_params", { field: "text", reason: `a memory document holds at most ${MEMORY_LIMIT} bytes` });
+        }
+        const versions = this.memory.get(found.subject) ?? [];
+        const current = versions.at(-1) ?? null;
+        const base = params["version"];
+        if (typeof base === "number" && base !== (current?.version ?? 0)) {
+          return refuse(CONFLICT, "conflict", {
+            reason: `${found.subject} was saved by somebody else since version ${base}; version ${current?.version ?? 0} is in force now`,
+            version: current?.version ?? 0,
+          });
+        }
+        if (current && current.text === text) return { result: { document: memorySummary(current), changes: {} } };
+        const now = { version: (current?.version ?? 0) + 1, text, changed_by: subject, changed_at: new Date().toISOString() };
+        this.memory.set(found.subject, [...versions, now]);
+        const fields = (v: typeof now | null) => ({ version: v?.version ?? 0, bytes: v ? new TextEncoder().encode(v.text).length : 0, hash: v ? memoryHash(v.text) : null });
+        const changes = diff(fields(current), fields(now));
+        this.record(subject, "memory.put", found.subject, changes);
+        return { result: { document: memorySummary(now), changes } };
+      }
+
       case "admin.provisioners.list":
         return admin ? { result: PROVISIONERS } : notAdmin;
 
@@ -1967,6 +2105,33 @@ export class FakeAdmin {
   }
 
   // -- teams ---------------------------------------------------------------------------
+
+  // -- memory ----------------------------------------------------------------------------
+
+  /** Which document, and whether the subject may change it, as the plane decides: the organisation's any admin reads and a platform admin changes; a team's is its admins'; a profile's a platform admin's. */
+  private memoryOwner(subject: string, scope: unknown, name: unknown): { subject: string; editable: boolean } | Refusal {
+    const role = this.role(subject);
+    if (scope === "organisation") {
+      if (role === "none") return refuse(FORBIDDEN, "forbidden", { required_role: "team_admin" });
+      return { subject: "organisation", editable: role === "platform_admin" };
+    }
+    if (scope === "team") {
+      const found = this.fetchTeam(subject, name);
+      return "error" in found ? found : { subject: `team/${found.team.name}`, editable: true };
+    }
+    if (scope === "profile") {
+      if (role !== "platform_admin") return refuse(FORBIDDEN, "forbidden", { required_role: "platform_admin" });
+      if (!this.profiles.some((p) => p.name === name)) return refuse(NOT_FOUND, "not_found", { profile: name });
+      return { subject: `profile/${String(name)}`, editable: true };
+    }
+    return refuse(INVALID_PARAMS, "invalid_params", { field: "scope", reason: "scope is one of organisation, team, profile", scope });
+  }
+
+  private memoryRow(scope: "organisation" | "team" | "profile", name: string | null, editable: boolean): Record<string, unknown> {
+    const subject = scope === "organisation" ? "organisation" : `${scope}/${name}`;
+    const current = (this.memory.get(subject) ?? []).at(-1) ?? null;
+    return { scope, name, subject, editable, current: current ? memorySummary(current) : null };
+  }
 
   private fetchTeam(subject: string, name: unknown): { team: FakeTeam } | Refusal {
     const role = this.role(subject);
@@ -3461,5 +3626,10 @@ export function exampleAdmin(): FakeAdmin {
     { actor: "alice@example.com", action: "setting.put", subject_kind: "setting", subject_id: "client_model_default", detail: { client_model_default: { from: null, to: "glm-5.2" } }, occurred_at: "2026-10-10T08:05:00Z" },
     { actor: "alice@example.com", action: "clients.put", subject_kind: "clients", subject_id: "tui", detail: { minimum: { from: null, to: "0.14.0-beta" } }, occurred_at: "2026-10-11T09:30:00Z" },
   );
+  // The organisation's memory, two versions in, as a plane in use has it.
+  admin.memory.set("organisation", [
+    { version: 1, text: "We deploy on Tuesdays.", changed_by: "alice@example.com", changed_at: "2026-10-12T09:00:00Z" },
+    { version: 2, text: "We deploy on Tuesdays.\nThe on-call rota is in the wiki.", changed_by: "alice@example.com", changed_at: "2026-10-14T11:20:00Z" },
+  ]);
   return admin;
 }

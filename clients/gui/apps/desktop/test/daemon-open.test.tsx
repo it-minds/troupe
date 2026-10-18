@@ -64,6 +64,19 @@ describe("the address troupe-daemon open opens", () => {
     await waitFor(() => says("/home/ada/notes"), "the session again");
   });
 
+  it("is taken in a tab already open, when the address is put into it", async () => {
+    daemon.seed("/home/ada/notes");
+    load();
+    await waitFor(() => says("no daemon from a browser"), "nothing to connect to yet");
+
+    location.hash = `#daemon=${daemon.port}:${daemon.token}`;
+    globalThis.dispatchEvent(new HashChangeEvent("hashchange"));
+
+    await waitFor(() => says("daemon connected"), "connected without a reload");
+    await waitFor(() => says("/home/ada/notes"), "the session on this computer");
+    expect(location.href).not.toContain(daemon.token);
+  });
+
   it("is forgotten by Disconnect, and stays forgotten after a reload", async () => {
     arrive(daemon.port, daemon.token);
     await waitFor(() => says("daemon connected"), "connected");

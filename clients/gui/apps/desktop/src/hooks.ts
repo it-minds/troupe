@@ -24,7 +24,7 @@ import {
   TroupeRpcError,
 } from "@troupe/client";
 import { noticeEvent } from "./notify";
-import { daemonHint, forgetDaemon, rememberDaemon, shell } from "./shell";
+import { adoptFragment, daemonHint, forgetDaemon, rememberDaemon, shell } from "./shell";
 import type {
   AttachStatus,
   AuthSession,
@@ -233,6 +233,18 @@ export function useDaemon(auth: AuthSession | null = null): {
     if (shell()?.findDaemon) return;
     const hint = daemonHint();
     if (hint) setEndpoint(hint);
+  }, []);
+
+  // An address `troupe-daemon open` handed out, put into a tab already open: taken as at
+  // a load.
+  useEffect(() => {
+    if (shell()?.findDaemon) return;
+    const onHash = (): void => {
+      const told = adoptFragment();
+      if (told) setEndpoint(told);
+    };
+    globalThis.addEventListener?.("hashchange", onHash);
+    return () => globalThis.removeEventListener?.("hashchange", onHash);
   }, []);
 
   // The socket drops when the daemon goes, and the client dials again at the next call —

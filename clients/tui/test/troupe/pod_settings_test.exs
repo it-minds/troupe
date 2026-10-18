@@ -62,6 +62,26 @@ defmodule Troupe.PodSettingsTest do
 
       refute Enum.any?(FakeRemote.calls(remote), &match?({"config.set", _}, &1))
     end
+
+    # The pod withholds the provider's address and its state directory from someone who
+    # may only watch the session; the page lists neither key, and draws what it is given.
+    test "a viewer's page shows the pod's answer and not what the session runs on" do
+      session = FakeRemote.session(id: "s-pod-viewer", profile: "fixing", title: "on a pod")
+      {remote, url} = start_remote!(sessions: [session])
+      FakeRemote.scopes(remote, ["observe"])
+      sid = attach!(connect!(remote, url), "s-pod-viewer")
+      {pid, session} = start_tui(sid)
+      eventually(fn -> user_state(pid).commands != [] end)
+
+      type(pid, "/settings")
+      press(pid, "enter")
+      eventually(fn -> user_state(pid).settings.view.pod? end)
+
+      assert user_state(pid).settings.view.keys["base_url"]["withheld"] == true
+      text = screen_text(pid, session)
+      assert text =~ ~r/max turns\s+7  · session/
+      refute text =~ "llm.example.test"
+    end
   end
 
   describe "troupe config --explain --session" do

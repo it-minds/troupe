@@ -68,7 +68,7 @@ export const NAV: Group[] = [
       { id: "clients", label: "Client versions", built: true, teamAdmin: true, lead: "" },
       { id: "organisation", label: "Organisation", built: true, teamAdmin: true, lead: "" },
       { id: "audit", label: "Audit", built: true, teamAdmin: true, lead: "Who changed what and when, field by field, and a check that the record is whole." },
-      { id: "memory", label: "Company memory", built: false, teamAdmin: true, lead: "What the troupe remembers about the organisation, its teams and its profiles." },
+      { id: "memory", label: "Company memory", built: true, teamAdmin: true, lead: "What the troupe remembers about the organisation, its teams and its profiles." },
     ],
   },
 ];

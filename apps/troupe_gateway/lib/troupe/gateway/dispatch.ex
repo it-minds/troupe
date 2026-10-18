@@ -40,6 +40,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Mounts
   alias Troupe.Onboard.Start, as: Onboarding
   alias Troupe.PlaneKeys
+  alias Troupe.PlaneMemory
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
@@ -1205,7 +1206,11 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, url} <- linked_plane(params["plane_url"]),
          {:ok, served} <- served_key(url),
          {:ok, _fingerprint} <- accepted(PlaneKeys.accept(url, fingerprint, served: served)) do
-      Task.start(&refresh_organisation/0)
+      Task.start(fn ->
+        refresh_organisation()
+        refresh_memory()
+      end)
+
       {:ok, put_plane_key(%{}, url)}
     end
   end
@@ -1290,8 +1295,10 @@ defmodule Troupe.Gateway.Dispatch do
   # nobody reads. But for one session's own configuration, what is in force in it, which
   # a pod's session has as a laptop's does.
 
-  defp handle("config.get" = method, %{"session_id" => id} = params, _context) when is_binary(id),
-    do: model_settings(method, params)
+  # Someone who may only watch the session is not shown what it runs on: the provider's
+  # address and the state directory read as set by the profile (`Explain.withhold/2`).
+  defp handle("config.get", %{"session_id" => id} = params, context) when is_binary(id),
+    do: session_settings(params, withhold: :control not in context.scopes)
 
   defp handle("config." <> _ = method, params, _context) do
     if Process.whereis(Troupe.Gateway.Daemon),
@@ -1421,10 +1428,10 @@ defmodule Troupe.Gateway.Dispatch do
   # what is in force in it, each value and rule with where it came from. That is the one
   # a session's own token may ask a pod for; `explain` adds what `troupe config --explain`
   # prints for it (`text`) or its JSON (`json`), for `key` when one is named.
-  defp model_settings("config.get", %{"session_id" => session_id} = params) when is_binary(session_id) do
+  defp session_settings(%{"session_id" => session_id} = params, opts) do
     with {:ok, explain} <- explain_param(params),
-         %{} = described <- Settings.describe_session(session_id) do
-      {:ok, Map.merge(described, explained(session_id, explain, params["key"]))}
+         %{} = described <- Settings.describe_session(session_id, opts) do
+      {:ok, Map.merge(described, explained(session_id, explain, params["key"], opts))}
     else
       {:error, _} = error -> error
       nil -> {:error, Error.new(:not_found, %{session_id: session_id, reason: "the session is not running here"})}
@@ -1577,10 +1584,10 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp explain_param(_params), do: {:ok, nil}
 
-  defp explained(_session_id, nil, _key), do: %{}
+  defp explained(_session_id, nil, _key, _opts), do: %{}
 
-  defp explained(session_id, form, key) do
-    {output, status} = Explain.explain_session(session_id, key, json: form == "json")
+  defp explained(session_id, form, key, opts) do
+    {output, status} = Explain.explain_session(session_id, key, [json: form == "json"] ++ opts)
     explanation = if form == "json" and status == 0, do: Jason.decode!(output), else: output
     %{"explain" => explanation, "explain_status" => status}
   end
@@ -1698,6 +1705,7 @@ defmodule Troupe.Gateway.Dispatch do
         _served_or_unknown ->
           see_plane_key()
           refresh_organisation()
+          refresh_memory()
           Private.apply_erasures()
           Private.resume()
       end
@@ -1745,6 +1753,31 @@ defmodule Troupe.Gateway.Dispatch do
         :ok
     end
   end
+
+  # The organisation's memory documents the person's sessions read (#55): the
+  # organisation's and their teams', from `me.memory`, kept as the plane signed them, as the
+  # organisation's document is, for every session started after. A plane from before them
+  # has no `me.memory`, and the copy stays as it was; so does one the pin refuses.
+  defp refresh_memory do
+    with url when is_binary(url) <- Plane.url(),
+         {:ok, answer} <- Plane.call("me.memory", %{}),
+         {:ok, body, signed?} <- PlaneKeys.check(url, answer, "memory"),
+         {:ok, _kept} <- PlaneMemory.save(url, body, PlaneMemory.cache_path(), signature(signed?, answer)) do
+      :ok
+    else
+      {:error, {:rpc, %{"code" => -32_601}}} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.info("troupe-daemon: the organisation's memory was not refreshed: #{format_reason(reason)}")
+
+      _no_plane ->
+        :ok
+    end
+  end
+
+  defp format_reason(reason) when is_binary(reason), do: reason
+  defp format_reason(reason), do: inspect(reason)
 
   # Somebody else linking over the person before stops that person's sealing first, as an
   # unlink would: a sealer seals with whatever token the daemon holds, and the one this link

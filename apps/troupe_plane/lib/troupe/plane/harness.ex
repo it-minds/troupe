@@ -36,6 +36,7 @@ defmodule Troupe.Plane.Harness do
     Fleet,
     GitHub,
     Identity,
+    Memory,
     Placement,
     Remote,
     Sessions,
@@ -107,6 +108,7 @@ defmodule Troupe.Plane.Harness do
     "me" => :observe,
     "me.client_defaults" => :observe,
     "me.client_versions" => :observe,
+    "me.memory" => :observe,
     "me.connections.list" => :observe,
     "me.connections.grant" => :control,
     "teams.list" => :observe,
@@ -343,6 +345,14 @@ defmodule Troupe.Plane.Harness do
     signed = Signing.signed("client_versions", %{"versions" => versions, "release" => release})
 
     {:ok, versions |> Map.put("release", release) |> Map.put("signed", signed["signed"])}
+  end
+
+  # The memory documents a person's own machine reads into every session on it: the
+  # organisation's and each of their teams' (`Memory.for_person/1`), none of another
+  # team's. Signed as the organisation's document is, since a machine takes them as
+  # instructions from the organisation and keeps a copy.
+  defp handle("me.memory", _params, %{user: user}) do
+    {:ok, Signing.signed("memory", %{"documents" => Memory.for_person(user)})}
   end
 
   defp handle("teams.list", _params, %{user: user}) do
@@ -1665,6 +1675,7 @@ defmodule Troupe.Plane.Harness do
         "entitlements" => entitlement_set(session, team)
       }
       |> Map.merge(bundle_params(session))
+      |> Map.merge(memory_params(session, team))
       |> Map.merge(session_terms(session))
       |> Map.merge(fork_params(session))
       |> Map.merge(repository_params(session))
@@ -1923,6 +1934,7 @@ defmodule Troupe.Plane.Harness do
         "entitlements" => entitlement_set(session, team_of(session))
       }
       |> Map.merge(bundle_params(session))
+      |> Map.merge(memory_params(session, team_of(session)))
       |> Map.merge(session_terms(session))
       |> Map.merge(repository_params(session))
 
@@ -2635,6 +2647,13 @@ defmodule Troupe.Plane.Harness do
       _ -> %{"bundle_version" => session.bundle_version}
     end
   end
+
+  # The memory documents the session reads (`Memory.for_session/2`): the organisation's, its
+  # team's and its worker profile's. Read again at every activation, as the profile's
+  # switches are, so a save reaches a session the next time it wakes and restarts no pod; an
+  # empty list takes away what was there.
+  defp memory_params(session, team),
+    do: %{"memory" => Memory.for_session(team, session.profile)}
 
   # Whether the profile lets a repository's agents and skills replace its bundle's and the
   # built-ins of the same name (Decision 826): `spec.repositoryOverridesBundle`, on only

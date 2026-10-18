@@ -47,6 +47,7 @@ defmodule Troupe.Plane.Admin do
     Gitops,
     Identity,
     Ledger,
+    Memory,
     ProfileBudget,
     Signing
   }
@@ -2315,6 +2316,217 @@ defmodule Troupe.Plane.Admin do
   end
 
   defp signing_fields(key), do: %{fingerprint: key["fingerprint"], version: key["version"]}
+
+  # -- the organisation's memory ----------------------------------------------
+
+  @doc """
+  Every memory document the actor may read (`Troupe.Plane.Memory`): the organisation's,
+  each team's they administer (every team's for a platform admin), and for a platform
+  admin each worker profile's; each with its version in force, who saved it and when, and
+  whether the actor may change it. With the limit a document is held to.
+
+  A team admin reads the organisation's and changes only their teams'; the organisation's
+  and the profiles' are a platform admin's to change.
+  """
+  @spec memory_list(actor()) :: result()
+  def memory_list(actor) do
+    with :ok <- require_admin(actor) do
+      platform? = actor.role == :platform_admin
+
+      profiles =
+        if platform?,
+          do: Enum.map(Fleet.list_profiles(), &memory_row(&1.name, "profile", &1.name, true)),
+          else: []
+
+      {:ok,
+       %{
+         limit: Troupe.Protocol.Memory.max_bytes(),
+         organisation: memory_row(:organisation, "organisation", nil, platform?),
+         teams: Enum.map(visible_teams(actor), &memory_row(&1, "team", &1.name, true)),
+         profiles: profiles
+       }}
+    end
+  end
+
+  defp memory_row(owner, scope, name, editable?) do
+    %{
+      scope: scope,
+      name: name,
+      subject: Memory.subject(owner),
+      editable: editable?,
+      current: owner |> Memory.current() |> then(&(&1 && Memory.summary(&1)))
+    }
+  end
+
+  @doc """
+  One memory document: a version's text (the one in force where none is named), every
+  version with who saved it and when, and what the version shown changed against the one
+  before it, line by line. `scope` is `organisation`, `team` or `profile`; `name` the
+  team's or the profile's.
+  """
+  @spec memory_get(actor(), String.t(), String.t() | nil, integer() | nil) :: result()
+  def memory_get(actor, scope, name, version) do
+    with {:ok, owner, editable?} <- memory_owner(actor, scope, name),
+         {:ok, shown} <- memory_version(owner, version) do
+      before = if shown && shown.version > 1, do: Memory.version(owner, shown.version - 1)
+
+      {:ok,
+       %{
+         scope: scope,
+         name: memory_name(owner),
+         subject: Memory.subject(owner),
+         limit: Troupe.Protocol.Memory.max_bytes(),
+         editable: editable?,
+         version: shown && shown.version,
+         text: (shown && shown.text) || "",
+         shown: shown && Memory.summary(shown),
+         diff: Memory.diff(before && before.text, shown && shown.text),
+         versions: owner |> Memory.versions() |> Enum.map(&Memory.summary/1)
+       }}
+    end
+  end
+
+  defp memory_version(owner, nil), do: {:ok, Memory.current(owner)}
+
+  defp memory_version(owner, number) when is_integer(number) do
+    case Memory.version(owner, number) do
+      nil -> {:error, Error.new(:not_found, %{version: number})}
+      found -> {:ok, found}
+    end
+  end
+
+  defp memory_version(_owner, _other),
+    do: {:error, Error.new(:invalid_params, %{reason: "version is a number"})}
+
+  @doc """
+  What saving `text` as a memory document would do, written nowhere: the lines it changes
+  against the version in force, its size against the limit, and which sessions read it and
+  when. Refused, as the save would be, for a text past the limit or for an actor who may
+  not change the document.
+  """
+  @spec memory_preview(actor(), String.t(), String.t() | nil, String.t() | nil) :: result()
+  def memory_preview(actor, scope, name, text) do
+    with {:ok, owner} <- memory_writer(actor, scope, name),
+         :ok <- memory_text(text) do
+      current = Memory.current(owner)
+      text = Troupe.Protocol.Memory.normalise(text)
+
+      {:ok,
+       %{
+         subject: Memory.subject(owner),
+         version: current && current.version,
+         bytes: byte_size(text),
+         limit: Troupe.Protocol.Memory.max_bytes(),
+         unchanged: (current && current.text) == text or (is_nil(current) and text == ""),
+         diff: Memory.diff(current && current.text, text),
+         effect: memory_effect(owner)
+       }}
+    end
+  end
+
+  @doc """
+  Save `text` as the next version of a memory document, over `version`, the version the
+  editor started from (`0` for a document never saved): somebody else's save since is
+  refused as a conflict, naming the version now in force. A text the same as the one in
+  force makes no version. Audited as `memory.put` with the version, size and hash, before
+  and after; every version's text is kept, so the audit names the versions to compare.
+  """
+  @spec memory_put(actor(), String.t(), String.t() | nil, String.t() | nil, integer() | nil) ::
+          result()
+  def memory_put(actor, scope, name, text, version) do
+    with {:ok, owner} <- memory_writer(actor, scope, name),
+         :ok <- memory_text(text) do
+      case Memory.put(owner, text, actor.subject, version) do
+        {:ok, :unchanged} ->
+          current = Memory.current(owner)
+          {:ok, %{document: current && Memory.summary(current), changes: %{}}}
+
+        {:ok, %{before: before, now: now}} ->
+          changes = Audit.diff(memory_fields(before), memory_fields(now))
+          {:ok, _} = Audit.record(actor.subject, "memory.put", Memory.subject(owner), changes)
+          {:ok, %{document: Memory.summary(now), changes: changes}}
+
+        {:error, {:conflict, current}} ->
+          {:error,
+           Error.new(:conflict, %{
+             reason:
+               "#{Memory.subject(owner)} was saved by somebody else since version #{version}; " <>
+                 "version #{current} is in force now",
+             version: current
+           })}
+
+        {:error, reason} ->
+          {:error, Error.new(:invalid_params, %{reason: reason})}
+      end
+    end
+  end
+
+  defp memory_fields(nil), do: %{version: 0, bytes: 0, hash: nil}
+
+  defp memory_fields(document),
+    do: %{version: document.version, bytes: byte_size(document.text), hash: document.hash}
+
+  defp memory_text(text) do
+    case Troupe.Protocol.Memory.check(text) do
+      :ok -> :ok
+      {:error, reason} -> {:error, Error.new(:invalid_params, %{field: "text", reason: reason})}
+    end
+  end
+
+  # Which document, and whether the actor may change it: the organisation's is readable by
+  # any admin and a platform admin's to change; a team's is its admins' (and a platform
+  # admin's), found as `fetch_team/2` finds a team, so another team's admin is told it does
+  # not exist; a profile's is a platform admin's, as the profile is.
+  defp memory_owner(actor, "organisation", _name) do
+    with :ok <- require_admin(actor), do: {:ok, :organisation, actor.role == :platform_admin}
+  end
+
+  defp memory_owner(actor, "team", name) do
+    with {:ok, team} <- fetch_team(actor, name), do: {:ok, team, true}
+  end
+
+  defp memory_owner(actor, "profile", name) do
+    with :ok <- require_platform_admin(actor) do
+      if Memory.profile?(name),
+        do: {:ok, name, true},
+        else: {:error, Error.new(:not_found, %{profile: name})}
+    end
+  end
+
+  defp memory_owner(_actor, scope, _name) do
+    {:error,
+     Error.new(:invalid_params, %{
+       field: "scope",
+       reason: "scope is one of #{Enum.join(Troupe.Protocol.Memory.scopes(), ", ")}",
+       scope: scope
+     })}
+  end
+
+  defp memory_writer(actor, scope, name) do
+    case memory_owner(actor, scope, name) do
+      {:ok, owner, true} -> {:ok, owner}
+      {:ok, _owner, false} -> require_platform_admin(actor)
+      error -> error
+    end
+  end
+
+  defp memory_name(:organisation), do: nil
+  defp memory_name(%Identity.Team{name: name}), do: name
+  defp memory_name(profile), do: profile
+
+  defp memory_effect(:organisation),
+    do:
+      "Every session on this plane's pods reads it from its next activation, and every " <>
+        "signed-in machine's sessions once its daemon next signs in, before the team's " <>
+        "and the profile's and as instructions from the organisation, read-only to agents."
+
+  defp memory_effect(%Identity.Team{name: name}),
+    do:
+      "The sessions of #{name} read it from their next activation, and the machines of " <>
+        "#{name}'s members once their daemon next signs in; no other team's session reads it."
+
+  defp memory_effect(profile),
+    do: "Every session on #{profile}'s pods reads it from its next activation."
 
   # -- the plane's GitHub App -------------------------------------------------
 

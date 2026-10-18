@@ -234,6 +234,16 @@ defmodule Troupe.CLI.ConfigSetup do
     1
   end
 
+  # The daemon's record says the run finished, and its answer, which named the session it
+  # started, never came.
+  defp ended(:finished, io) do
+    io.say.(
+      "Set up. The daemon's answer about the first session did not arrive; troupe resume opens it."
+    )
+
+    0
+  end
+
   # Signing in is the client's (root Decision 705): as `troupe config`'s plane choice does.
   defp ended({:plane, url}, io) when url in [nil, ""] do
     io.say.("Recorded. Sign in with troupe login <plane-url>, then troupe config pull.")
@@ -691,6 +701,8 @@ defmodule Troupe.CLI.ConfigSetup do
 
     opts = [
       call: &Link.call/2,
+      # Where the run stands, asked apart from a question that is out on the link.
+      status: fn -> Link.call_apart("setup.get", %{}) end,
       flow: flow,
       workspace: workspace,
       offer_fake: System.get_env("TROUPE_FAKE_SCRIPT") not in [nil, ""],

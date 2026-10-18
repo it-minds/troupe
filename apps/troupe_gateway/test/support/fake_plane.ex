@@ -98,6 +98,14 @@ defmodule Troupe.Gateway.FakePlane do
   def client_defaults_with(state, answer), do: Agent.update(state, &Map.put(&1, :client_defaults, answer))
 
   @doc """
+  What `me.memory` answers from now on: the organisation's memory documents a person's
+  sessions read (#55), signed as `memory` where the plane signs. Never set, the plane does
+  not answer it, as a plane from before them.
+  """
+  @spec memory_with(pid(), [map()]) :: :ok
+  def memory_with(state, documents), do: Agent.update(state, &Map.put(&1, :memory, documents))
+
+  @doc """
   Sign from now on with a key of the plane's own, a new one each time (a rotation), as
   `Troupe.Protocol.PlaneSignature` lays it out. Answers its fingerprint.
   """
@@ -371,6 +379,13 @@ defmodule Troupe.Gateway.FakePlane do
     case Agent.get(state, &Map.get(&1, :client_defaults)) do
       nil -> {:rpc_error, -32_601, "method_not_found", %{"method" => "me.client_defaults"}}
       answer -> {:ok, signed(state, "client_defaults", answer)}
+    end
+  end
+
+  defp dispatch(state, "me.memory", _params) do
+    case Agent.get(state, &Map.get(&1, :memory)) do
+      nil -> {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory"}}
+      documents -> {:ok, signed(state, "memory", %{"documents" => documents})}
     end
   end
 

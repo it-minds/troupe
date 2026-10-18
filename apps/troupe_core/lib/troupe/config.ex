@@ -178,6 +178,12 @@ defmodule Troupe.Config do
             # `spec.personalTools: forbid`, which the worker sets from the activation, so a
             # change reaches a session at its next wake. Never from a file.
             personal_tools_forbidden_by: nil,
+            # The organisation's memory documents a session reads (`Troupe.PlaneMemory`,
+            # #55): the organisation's, a team's and a worker profile's, in that order, as
+            # instructions before every other file. On a pod the worker sets the list from
+            # the activation; on a person's machine it is read from the daemon's signed copy
+            # as the configuration is resolved. Never from a file.
+            plane_memory: nil,
             # What happens to an `ask` tool when nobody is attached to answer. `:wait`
             # leaves the request in the log for a person to find; `:deny` answers no at
             # once, which is what an unattended session asks for. There is deliberately
@@ -340,6 +346,10 @@ defmodule Troupe.Config do
       layers = %{layers | rules: held ++ given}
       config = %{config | permissions: Permissions.in_force(held) ++ given}
       config = apply_catalog(config)
+      # The organisation's memory, read once here, so a session runs with what explains it.
+      {memory, memory_warnings} = Troupe.PlaneMemory.in_force(config.plane_memory, opts)
+      config = %{config | plane_memory: memory.documents}
+      layers = %{layers | memory: memory, warnings: layers.warnings ++ memory_warnings}
       {:ok, %{config | warnings: Enum.map(layers.warnings ++ layers.refusals, &Issue.format/1)}, layers}
     else
       [_ | _] = errors -> {:error, %Error{issues: errors}}
