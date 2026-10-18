@@ -956,6 +956,17 @@ defmodule Troupe.Protocol.Schema do
         "plane_url" => required(:string),
         "subject" => optional(:string)
       },
+      # A laptop's session offered to the plane for steering from another device, shared
+      # with `[{person, role}]`, and taken back (#58): the daemon's only.
+      "remote.offer" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "share" => optional({:array, :object})
+      },
+      "remote.withdraw" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string)
+      },
       # The plane's new signing key, accepted by the fingerprint its person was shown (#657).
       "identity.accept_plane_key" => %{
         "command_id" => required(:string),

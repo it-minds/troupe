@@ -102,6 +102,30 @@ defmodule Troupe.Gateway.Plane do
   def url(server \\ @name), do: GenServer.call(server, :url)
 
   @doc """
+  Where the plane is, the token held for it and whose it is, for the one other door to
+  the plane the daemon opens: the connection it keeps while a session is offered for
+  steering (`Troupe.Gateway.Remote`). `{:error, :unlinked}` where there is no token, and
+  `{:error, {:update_required, sentence}}` where the plane refuses this version.
+  """
+  @spec credentials(GenServer.server()) ::
+          {:ok, %{url: String.t(), token: String.t(), subject: String.t() | nil}}
+          | {:error, term()}
+  def credentials(server \\ @name) do
+    case GenServer.call(server, :state) do
+      {:ok, %__MODULE__{refused: refused}} when is_binary(refused) ->
+        {:error, {:update_required, refused}}
+
+      {:ok, %__MODULE__{} = state} ->
+        {:ok, %{url: state.url, token: state.token, subject: state.subject}}
+
+      error ->
+        error
+    end
+  catch
+    :exit, _not_running -> {:error, :unlinked}
+  end
+
+  @doc """
   One JSON-RPC call to the plane's `/rpc`.
 
   `{:error, :unlinked}` where nobody has signed in, which is a state and not a fault: a

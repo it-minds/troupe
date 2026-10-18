@@ -19,14 +19,20 @@ defmodule Troupe.Plane.Web.Router do
       POST /mcp                        the same admin methods, as MCP tools
       POST /mcp/session                four of them, for an agent already inside
       *    /scim/v2/...                users and groups, pushed by the identity provider
+      GET  /v1/relay                   a laptop's connection while it offers sessions
+      GET  /v1/relay/session           a person steering one of them from another device
 
   Everything a person's client does goes through `/rpc`, and everything `/rpc` does goes
   through `Troupe.Plane.Harness`. That is the "any client, including our own, uses
   nothing but public APIs" rule made structural: there is no second path into the plane
   for the TUI to take.
 
-  **No session content passes through here.** `/rpc` lists sessions and hands out
+  **No pod session's content passes through here.** `/rpc` lists sessions and hands out
   endpoints and tokens; the stream of what a session is doing goes straight to the pod.
+  The one exception is a laptop's session its person offered for steering from another
+  device: the laptop dials out and nothing can dial in, so the plane relays its messages
+  between the two sockets under `/v1/relay`, checks each, and keeps none
+  (`Troupe.Plane.Remote`).
   """
 
   use Plug.Router
@@ -41,6 +47,7 @@ defmodule Troupe.Plane.Web.Router do
     Identity,
     OIDC,
     Principals,
+    Remote,
     SCIM,
     Settings,
     Signing,
@@ -358,8 +365,62 @@ defmodule Troupe.Plane.Web.Router do
     end
   end
 
+  # A laptop's one connection while it offers sessions for steering from another device
+  # (#58). A daemon is not a browser and names no origin; a page that does is not a
+  # laptop, whatever token it holds.
+  get "/v1/relay" do
+    case Plug.Conn.get_req_header(conn, "origin") do
+      [] ->
+        conn
+        |> WebSockAdapter.upgrade(Remote.Laptop, [bearer: bearer_or_nil(conn)],
+          timeout: :timer.hours(24)
+        )
+        |> halt()
+
+      _browser ->
+        send_json(conn, 403, %{"error" => "origin not allowed"})
+    end
+  end
+
+  # A person steering an offered session, with the token `remote.open` gave them. A page
+  # is admitted from this plane's own origin, the desktop app's and those the CORS list
+  # names, as `/rpc` answers them; a client that is not a browser names none.
+  get "/v1/relay/session" do
+    if relay_origin_allowed?(conn) do
+      conn
+      |> WebSockAdapter.upgrade(Remote.Viewer, [bearer: bearer_or_nil(conn)],
+        timeout: :timer.hours(24)
+      )
+      |> halt()
+    else
+      send_json(conn, 403, %{"error" => "origin not allowed"})
+    end
+  end
+
   match _ do
     send_json(conn, 404, %{"error" => "not found"})
+  end
+
+  @desktop_origins ["tauri://localhost", "http://tauri.localhost"]
+
+  defp relay_origin_allowed?(conn) do
+    case Plug.Conn.get_req_header(conn, "origin") do
+      [] ->
+        true
+
+      [origin | _] ->
+        own = conn |> base_url() |> URI.parse() |> then(&"#{&1.scheme}://#{&1.authority}")
+
+        origin in [own | @desktop_origins] or
+          origin in Application.get_env(:troupe_plane, :cors_origins, [])
+    end
+  end
+
+  defp bearer_or_nil(conn) do
+    case bearer(conn) do
+      {:ok, token} -> token
+      _none -> nil
+    end
   end
 
   # -- the harness API --------------------------------------------------------

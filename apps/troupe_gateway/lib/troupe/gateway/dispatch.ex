@@ -27,6 +27,7 @@ defmodule Troupe.Gateway.Dispatch do
     Plane,
     Presence,
     Private,
+    Remote,
     Session,
     Setup,
     Worktrees
@@ -205,7 +206,11 @@ defmodule Troupe.Gateway.Dispatch do
     "skills.remove" => :admin,
     # Stopping the daemon between turns, so `troupe update` can replace its release
     # (Decision 865): the machine's own, and it ends every client's connection.
-    "daemon.stop" => :admin
+    "daemon.stop" => :admin,
+    # A session offered to the plane for steering from another device, and taken back
+    # (#58): the laptop person's, never a remote one's.
+    "remote.offer" => :admin,
+    "remote.withdraw" => :admin
   }
 
   # Every way a registration can fail for want of consent. All three answer with a fresh
@@ -1021,6 +1026,8 @@ defmodule Troupe.Gateway.Dispatch do
           erase_private(session)
 
         _local ->
+          # Nobody steers what is gone: an offer ends with the session.
+          Remote.withdraw(session_id)
           Troupe.erase_session(session_id)
           {:ok, %{"session_id" => session_id, "erased" => true, "state" => "erased"}}
       end
@@ -1216,6 +1223,7 @@ defmodule Troupe.Gateway.Dispatch do
           # daemon with only local sessions needs.
           :ok = Plane.link(Map.put(params, "subject", subject))
           erasures(params)
+          remote_link(linked, subject, params)
 
           # The connection that linked is relabelled where it stands; everything else
           # reads the file at its next handshake.
@@ -1234,6 +1242,7 @@ defmodule Troupe.Gateway.Dispatch do
     Identity.unlink()
     :ok = Plane.unlink()
     Private.suspend()
+    Remote.unlinked()
     user = System.get_env("USER") || System.get_env("USERNAME") || "local"
     send(context.connection, {:principal_changed, Identity.principal(user)})
     {:ok, Identity.to_json(nil)}
@@ -1247,7 +1256,29 @@ defmodule Troupe.Gateway.Dispatch do
     with {:ok, plane_url} <- fetch(params, "plane_url") do
       signed_out = Plane.sign_out(plane_url, params["subject"])
       if signed_out, do: Private.suspend()
+      if signed_out, do: Remote.unlinked()
       {:ok, %{"signed_out" => signed_out}}
+    end
+  end
+
+  # -- steering from another device -----------------------------------------------
+  #
+  # A laptop's session offered to the plane, so its person and those they share it with
+  # can steer it from another device (#58). The daemon's own; a connection relayed by the
+  # plane has no `admin` and cannot reach these. The answer is what the session's listing
+  # then says of it (`remote`).
+
+  defp handle("remote.offer", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, remote} <- Remote.offer(session_id, Map.get(params, "share"), subject(context)) do
+      {:ok, %{"session_id" => session_id, "remote" => remote}}
+    end
+  end
+
+  defp handle("remote.withdraw", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id") do
+      :ok = Remote.withdraw(session_id)
+      {:ok, %{"session_id" => session_id, "remote" => nil}}
     end
   end
 
@@ -2212,6 +2243,22 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp subject(%Context{principal: principal}), do: principal["subject"]
 
+  # The connection the offered sessions are steered over rides the token: a fresh one
+  # renews it, a link naming somebody else ends the one before, which was the other
+  # person's. A link with no token changes nothing about it.
+  defp remote_link(linked, subject, params) do
+    if linked not in [nil, subject], do: Remote.unlinked()
+
+    if is_binary(params["plane_token"]) and params["plane_token"] != "",
+      do: Remote.linked()
+  end
+
+  # A person steering from another device through the plane is written as such, so the
+  # transcript says who did what and from where.
+  defp actor(%Context{principal: %{"via" => "plane"} = principal}) do
+    Event.Actor.remote(principal["subject"], principal["display_name"])
+  end
+
   defp actor(%Context{principal: principal}) do
     Event.Actor.user(principal["subject"], principal["display_name"])
   end
@@ -2238,7 +2285,10 @@ defmodule Troupe.Gateway.Dispatch do
       "cost" => Map.get(session, :cost, 0.0),
       "created_at" => Map.get(session, :created_at),
       "last_active_at" => Map.get(session, :last_active_at),
-      "pinned" => Map.get(session, :pinned, false)
+      "pinned" => Map.get(session, :pinned, false),
+      # Offered to the plane for steering from another device: to whom, whether the plane
+      # has it now, and who is steering it from where (`Troupe.Gateway.Remote`).
+      "remote" => Remote.describe(session.id)
     }
     |> Map.merge(kept_json(session))
   end

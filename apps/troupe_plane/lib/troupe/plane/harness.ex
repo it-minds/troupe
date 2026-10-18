@@ -37,6 +37,7 @@ defmodule Troupe.Plane.Harness do
     GitHub,
     Identity,
     Placement,
+    Remote,
     Sessions,
     Signing
   }
@@ -136,7 +137,10 @@ defmodule Troupe.Plane.Harness do
     # Redeeming is the one method whose caller is not yet anybody in this session. They
     # are still somebody in the deployment — a link is not an account — and what the
     # capability carries was decided when it was minted, not here.
-    "session.redeem" => :observe
+    "session.redeem" => :observe,
+    # Laptop sessions offered for steering from another device (#58), and a token for one.
+    "remote.list" => :observe,
+    "remote.open" => :observe
   }
 
   @doc "Every method the plane answers, and the scope each needs."
@@ -437,6 +441,49 @@ defmodule Troupe.Plane.Harness do
 
     sessions = Sessions.visible_to(user, options)
     {:ok, %{"sessions" => Enum.map(sessions, &session_json(&1, user))}}
+  end
+
+  # Laptop sessions offered for steering from another device (#58): the caller's own, from
+  # any of their laptops, and those shared with them. Each says whether its laptop is there
+  # (`online`, or `offline` since when), and to its owner whom it is shared with.
+  defp handle("remote.list", _params, %{user: user}) do
+    rows = for {offer, role} <- Remote.visible(user), do: Remote.row(offer, role, user)
+    {:ok, %{"sessions" => rows}}
+  end
+
+  # What a client attaches with: the relay's address and a token for this session alone,
+  # at the caller's role, with the relay's audience, so it opens neither a pod nor `/rpc`.
+  # Asked again for a fresh token on the same view. A laptop that is not there is
+  # `unavailable` with `offline_since`, and nothing waits for it.
+  defp handle("remote.open", params, %{user: user}) do
+    with {:ok, offer, role} <- Remote.access(params["session_id"], user),
+         {:ok, _laptop} <- remote_online(offer) do
+      claims = %{
+        "sub" => user.subject,
+        "name" => user.display_name,
+        "session_id" => offer.session_id,
+        "role" => role,
+        "scopes" => Enum.map(Troupe.Protocol.Relay.scopes(role), &Atom.to_string/1)
+      }
+
+      case Tokens.mint(claims, audience: Remote.audience()) do
+        {:ok, token, payload} ->
+          {:ok,
+           %{
+             "session_id" => offer.session_id,
+             "kind" => "remote",
+             "state" => "active",
+             "endpoint" => relay_endpoint(),
+             "role" => if(role == "control", do: "collaborator", else: "viewer"),
+             "your_role" => if(offer.owner_subject == user.subject, do: "owner", else: role),
+             "token" => token,
+             "expires_at" => payload["exp"]
+           }}
+
+        {:error, reason} ->
+          {:error, Error.new(:unavailable, %{reason: "no token could be minted: #{inspect(reason)}"})}
+      end
+    end
   end
 
   defp handle("session.get", params, %{user: user}) do
@@ -1947,6 +1994,38 @@ defmodule Troupe.Plane.Harness do
       "token" => token,
       "expires_at" => expires_at
     }
+  end
+
+  # A relayed session's laptop, or when it was last there.
+  defp remote_online(offer) do
+    case Remote.laptop(offer.session_id) do
+      nil ->
+        {_state, since} = Remote.presence(offer)
+
+        {:error,
+         Error.new(:unavailable, %{
+           reason: "the laptop is offline",
+           offline_since: since && DateTime.to_iso8601(since)
+         })}
+
+      pid ->
+        {:ok, pid}
+    end
+  end
+
+  # Where a client attaches to a relayed session: under this plane's own address where
+  # the deployment names it, else the path, which a client takes against the plane it
+  # called.
+  defp relay_endpoint do
+    case Application.get_env(:troupe_plane, :base_url) do
+      base when is_binary(base) and base != "" ->
+        uri = URI.parse(String.trim_trailing(base, "/"))
+        scheme = if uri.scheme == "https", do: "wss", else: "ws"
+        URI.to_string(%{uri | scheme: scheme, path: (uri.path || "") <> "/v1/relay/session"})
+
+      _none ->
+        "/v1/relay/session"
+    end
   end
 
   # A parent that is erased, archived or read-only is not a parent: a sibling of a

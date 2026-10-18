@@ -147,6 +147,16 @@ defmodule Troupe.Protocol.Client do
     GenServer.cast(client, {:respond, {:error, id, Error.new(:internal_error, %{reason: reason})}})
   end
 
+  @doc """
+  Send a notification: a message that expects no answer. A daemon relaying a remote
+  person's messages through the plane sends each one this way (`relay.frame`), because
+  waiting on an acknowledgement per message would be a round trip per event.
+  """
+  @spec notify(pid(), String.t(), map()) :: :ok
+  def notify(client, method, params) when is_map(params) do
+    GenServer.cast(client, {:respond, {:notification, method, params}})
+  end
+
   @doc "A fresh command id. Reuse one only to retry the *same* command."
   @spec command_id() :: String.t()
   def command_id, do: "c-" <> (8 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))

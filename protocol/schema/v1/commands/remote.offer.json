@@ -1,0 +1,25 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/remote.offer.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "share": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "command_id",
+    "session_id"
+  ],
+  "title": "remote.offer",
+  "type": "object"
+}

@@ -16,7 +16,7 @@ defmodule Troupe.Protocol.Endpoint do
   defstruct [:kind, :path, :port, :token, :authenticator, :guard, :narrow, :activate]
 
   @type t :: %__MODULE__{
-          kind: :unix | :tcp | :remote,
+          kind: :unix | :tcp | :remote | :relay,
           path: Path.t() | nil,
           port: :inet.port_number() | nil,
           token: String.t() | nil,
@@ -81,6 +81,26 @@ defmodule Troupe.Protocol.Endpoint do
       # What an activating command finds the session's tree with. Locally that brings a
       # dormant session back from its log; on a pod only the plane does that, so a pod
       # gives its own answer, and never restores.
+      activate: Keyword.get(opts, :activate)
+    }
+  end
+
+  @doc """
+  One remote person's view of a laptop session, relayed by the plane.
+
+  Nothing listens for it: the laptop's daemon dialled the plane, and the plane relays
+  this person's messages over that connection. The plane decided who they are before it
+  relayed a word, so `authenticator` answers what the daemon made of that and of its own
+  record of the offer, and never sees a token; `guard` holds every command to the one
+  session, as a pod's token is held to its own.
+  """
+  @spec relay((map() -> {:ok, map(), [atom()]} | {:error, term()}), keyword()) :: t()
+  def relay(authenticator, opts \\ []) do
+    %__MODULE__{
+      kind: :relay,
+      authenticator: authenticator,
+      guard: Keyword.get(opts, :guard),
+      narrow: Keyword.get(opts, :narrow),
       activate: Keyword.get(opts, :activate)
     }
   end
