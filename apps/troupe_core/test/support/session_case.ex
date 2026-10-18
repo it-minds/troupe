@@ -57,11 +57,12 @@ defmodule Troupe.SessionCase do
          delay_ms: Keyword.get(opts, :delay_ms, 0),
          cache_read: Keyword.get(opts, :cache_read, 0),
          # A model that refuses a tool result without its call, as Anthropic's and
-         # OpenAI's APIs do.
-         strict_pairs: Keyword.get(opts, :strict_pairs, false),
+         # OpenAI's APIs do. Both checks are on unless a test turns one off: every request
+         # the harness sends should pass them.
+         strict_pairs: Keyword.get(opts, :strict_pairs, true),
          # And one that refuses a tool call or result in a request that defines no tools,
          # as Anthropic's does.
-         strict_tools: Keyword.get(opts, :strict_tools, false),
+         strict_tools: Keyword.get(opts, :strict_tools, true),
          # `nil` is a gateway that reports no cost, which is every gateway on a streamed
          # response.
          cost_micros: Keyword.get(opts, :cost_micros, :derived)},

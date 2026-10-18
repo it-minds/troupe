@@ -11,7 +11,7 @@ defmodule Troupe.SetupScreenTest do
   use ExUnit.Case, async: true
 
   import Troupe.TestHelpers, only: [eventually: 1, tmp_workspace: 0]
-  import Troupe.TUIHelpers, only: [press: 2, type: 2, screen: 2, screen_text: 2]
+  import Troupe.TUIHelpers, only: [press: 2, press: 3, type: 2, screen: 2, screen_text: 2]
 
   alias ExRatatui.CellSession
   alias Troupe.UI.Setup
@@ -219,16 +219,90 @@ defmodule Troupe.SetupScreenTest do
     assert step(pid) == {"workspace", :main}
   end
 
+  # The desktop app's first run hung on one reply that never came (#739); this screen asked
+  # the same way. The daemon's record decides now, and there is always a way out.
+  describe "an answer that never comes" do
+    test "a summary whose answer was lost ends as the daemon's record says: finished" do
+      {pid, session} = start(lose: {"finish", :drop})
+      walk_to_summary(pid, session)
+      press(pid, "enter")
+      assert_receive {:done, :finished}, 5_000
+    end
+
+    test "a summary whose answer is late has the daemon asked, and ends finished" do
+      {pid, session} = start(lose: {"finish", :hold}, patience_ms: 300)
+      walk_to_summary(pid, session)
+      press(pid, "enter")
+      assert_receive {:done, :finished}, 5_000
+    end
+
+    test "a plane's finish whose answer is late goes on to the sign-in" do
+      {pid, _session} = start(lose: {"finish", :hold}, patience_ms: 300)
+      press(pid, "down")
+      press(pid, "enter")
+      type(pid, "https://plane.example")
+      enter(pid)
+      press(pid, "enter")
+      assert_receive {:done, {:plane, "https://plane.example"}}, 5_000
+    end
+
+    test "an answer the daemon never gave is said to be late, the keys come back, and Esc leaves" do
+      {pid, session} = start(lose: {"key", :stuck}, patience_ms: 300)
+      enter(pid)
+      to_choice(pid, session, "Anthropic")
+      enter(pid)
+      type(pid, "sk-ant-x")
+      press(pid, "enter")
+
+      eventually(fn -> screen_text(pid, session) =~ "The daemon has not answered in 1 second." end)
+      assert :sys.get_state(pid).user_state.busy == nil
+      assert step(pid) == {"key", :main}
+
+      press(pid, "esc")
+      assert_receive {:done, {:left, false}}, 5_000
+    end
+
+    test "Ctrl-C leaves while a question is out" do
+      {pid, session} = start(lose: {"key", :stuck})
+      enter(pid)
+      to_choice(pid, session, "Anthropic")
+      enter(pid)
+      type(pid, "sk-ant-x")
+      press(pid, "enter")
+      eventually(fn -> :sys.get_state(pid).user_state.busy != nil end)
+
+      press(pid, "c", ["ctrl"])
+      assert_receive {:done, {:left, false}}, 5_000
+    end
+  end
+
   # -- a person and a daemon, played --------------------------------------------------
 
   defp start(opts \\ []) do
     test = self()
     {:ok, daemon} = Agent.start_link(fn -> Keyword.get(opts, :flow, flow()) end)
     refuse = Keyword.get(opts, :refuse)
+    # A step whose answer never reaches the screen: `:hold` keeps quiet after doing it,
+    # `:drop` fails as a lost connection does after doing it, `:stuck` does nothing and
+    # keeps quiet.
+    {lose_step, lose} = Keyword.get(opts, :lose, {nil, nil})
 
     call = fn method, params ->
       send(test, {:call, method, params})
-      Agent.get_and_update(daemon, &answer(&1, method, params, refuse))
+      lost? = method == "setup.answer" and params["step"] == lose_step
+
+      cond do
+        lost? and lose == :stuck ->
+          Process.sleep(:infinity)
+
+        lost? ->
+          Agent.get_and_update(daemon, &answer(&1, method, params, refuse))
+          if lose == :hold, do: Process.sleep(:infinity)
+          {:error, "the daemon did not answer setup.answer within 30 s"}
+
+        true ->
+          Agent.get_and_update(daemon, &answer(&1, method, params, refuse))
+      end
     end
 
     session = CellSession.new(120, 40)
@@ -241,6 +315,7 @@ defmodule Troupe.SetupScreenTest do
         call: call,
         workspace: Keyword.get(opts, :workspace, tmp_workspace()),
         offer_fake: Keyword.get(opts, :offer_fake, false),
+        patience_ms: Keyword.get(opts, :patience_ms, 20_000),
         on_done: fn outcome -> send(test, {:done, outcome}) end
       )
 
@@ -310,12 +385,21 @@ defmodule Troupe.SetupScreenTest do
     {{:ok, flow}, flow}
   end
 
-  # A finished flow is answered, and a fresh one takes its place.
+  # A finished flow is answered, and a fresh one takes its place: one the daemon no longer
+  # needs, with the record of the run.
   defp answer(flow, "setup.answer", %{"step" => "finish", "answer" => answer}, _refuse) do
     workspace = get_in(flow, ["answers", "workspace", "workspace"])
     session = if workspace, do: %{"session_id" => "s-1", "workspace" => workspace}
     answers = Map.put(flow["answers"], "finish", answer)
-    {{:ok, %{flow | "step" => "done", "answers" => answers, "session" => session}}, flow()}
+    choice = get_in(flow, ["answers", "where", "choice"])
+
+    fresh =
+      Map.merge(flow(), %{
+        "needed" => false,
+        "completed" => %{"completed_at" => "2026-10-18T10:00:00Z", "choice" => choice}
+      })
+
+    {{:ok, %{flow | "step" => "done", "answers" => answers, "session" => session}}, fresh}
   end
 
   defp answer(flow, "setup.answer", %{"step" => step, "answer" => answer}, _refuse) do

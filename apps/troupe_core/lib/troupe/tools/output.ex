@@ -17,6 +17,7 @@ defmodule Troupe.Tools.Output do
   `read_output` call that returns it, rather than again in full on every call.
   """
 
+  alias Troupe.Agent.Definition
   alias Troupe.LLM.{Message, ToolResult}
   alias Troupe.Session.Blobs
   alias Troupe.Tools.ReadOutput
@@ -48,11 +49,19 @@ defmodule Troupe.Tools.Output do
     capped = cap(text, limit)
     kept_lines = capped |> String.split("\n\n[truncated:") |> hd() |> count_lines()
 
-    case keep(ctx, text) do
+    case pages_back?(ctx) && keep(ctx, text) do
       {:ok, id} -> capped <> "\n" <> ReadOutput.marker(id, kept_lines + 1)
-      :error -> capped
+      _none -> capped
     end
   end
+
+  # The marker names a call the agent can make. One whose profile has no `read_output`
+  # (`explore`, `answer`, `ask`, the librarian) is told what was cut, and to narrow the
+  # request, as a result is that is cheap to ask for again.
+  defp pages_back?(%{definition: %Definition{} = definition}),
+    do: Definition.permission(definition, ReadOutput.name(), :allow) != :deny
+
+  defp pages_back?(_ctx), do: true
 
   @doc "Cap text taken from the *end* of a stream, such as shell output."
   @spec cap_tail(String.t(), pos_integer()) :: String.t()
@@ -77,9 +86,9 @@ defmodule Troupe.Tools.Output do
   def cap_tail(text, limit, _ctx) when byte_size(text) <= limit, do: text
 
   def cap_tail(text, limit, ctx) do
-    case keep(ctx, text) do
+    case pages_back?(ctx) && keep(ctx, text) do
       {:ok, id} -> ReadOutput.marker(id, 1) <> "\n" <> cap_tail(text, limit)
-      :error -> cap_tail(text, limit)
+      _none -> cap_tail(text, limit)
     end
   end
 

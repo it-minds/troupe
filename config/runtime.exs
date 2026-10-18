@@ -149,6 +149,7 @@ if config_env() == :prod do
       plane_ca_path: presence.(System.get_env("TROUPE_PLANE_CONTROL_CA")),
       bao_address: System.get_env("TROUPE_BAO_ADDR", "http://openbao.troupe-system.svc:8200"),
       bao_role_per_profile: System.get_env("TROUPE_BAO_WORKER_ROLE_PER_PROFILE") == "true",
+      bao_auth_path: presence.(System.get_env("TROUPE_BAO_AUTH_PATH")) || "kubernetes",
       object_store_endpoint:
         System.get_env("TROUPE_OBJECT_ENDPOINT", "http://minio.troupe-system.svc:9000"),
       object_store_bucket: System.get_env("TROUPE_OBJECT_BUCKET", "troupe-sessions"),
@@ -600,7 +601,10 @@ if config_env() == :prod do
         # The Kubernetes-auth role this pod logs in under (Decision 753): its profile's own
         # where the installation makes one per profile, which the operator then names here,
         # and otherwise `troupe-worker`, the one role every pod shares.
-        role: presence.(System.get_env("TROUPE_BAO_ROLE")) || "troupe-worker"
+        role: presence.(System.get_env("TROUPE_BAO_ROLE")) || "troupe-worker",
+        # The Kubernetes-auth mount, which the operator names where the installation's is
+        # not `kubernetes`, as the plane's own follows `bao.authPath`.
+        auth_path: presence.(System.get_env("TROUPE_BAO_AUTH_PATH")) || "kubernetes"
       ]
 
     if store = object_store.() do

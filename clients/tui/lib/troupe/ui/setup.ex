@@ -17,11 +17,20 @@ defmodule Troupe.UI.Setup do
   Shift-Tab goes back a step: on this screen for an answer held here, and on the daemon too
   (`{"back": true}`) for one it holds, which forgets what came after, the key included.
 
+  No answer is waited for without end. One that has not come in `patience_ms` (20 s) has
+  the daemon asked where the run stands (`status`, on a connection of its own, since the
+  daemon answers one connection's calls in turn), and so does a call that failed without
+  the daemon refusing it: the daemon's record decides, not the reply that would have
+  carried it. A run it finished meanwhile ends the screen as a finish would have; one it
+  did not gives the keys back, says the daemon has not answered, and still takes the
+  answer if it comes. Ctrl-C leaves at any moment.
+
   It holds no socket of its own: `call` is how it asks the daemon, which `troupe setup`
   gives it (`Troupe.CLI.ConfigSetup`) and a test plays. `on_done` is told how it ended:
-  `{:session, id, workspace}`, `{:no_session, reason}`, `{:plane, url}`, or `{:left,
+  `{:session, id, workspace}`, `{:no_session, reason}`, `{:plane, url}`, `{:left,
   wrote?}`, `wrote?` being whether a confirmed summary had written anything before a step
-  was refused.
+  was refused, or `:finished` for a run on this computer the daemon finished whose answer
+  never came, so the session it started is not known here.
   """
 
   use ExRatatui.App
@@ -34,6 +43,10 @@ defmodule Troupe.UI.Setup do
   alias Troupe.UI.TUI.{Input, Model, Theme}
 
   @steps ~w(where provider key models workspace daemon finish)
+
+  # How long an answer is waited for before the daemon is asked where the run stands, as
+  # the desktop app's first run waits.
+  @patience_ms 20_000
 
   # The desktop app's names for the steps (`Step.tsx`), for the row of steps on top.
   @words %{
@@ -60,6 +73,7 @@ defmodule Troupe.UI.Setup do
           | {:no_session, String.t()}
           | {:plane, String.t() | nil}
           | {:left, boolean()}
+          | :finished
 
   ## ExRatatui.App
 
@@ -69,6 +83,15 @@ defmodule Troupe.UI.Setup do
 
     state = %{
       call: call,
+      status: Keyword.get(opts, :status) || fn -> call.("setup.get", %{}) end,
+      patience_ms: Keyword.get(opts, :patience_ms, @patience_ms),
+      # The flow as the screen first heard it: a record newer than its `completed`, or a
+      # first run no longer wanted, is a run finished since.
+      began: nil,
+      # The question out to the daemon, so a late check is about that one, and the check
+      # of where the run stands that is out.
+      asking: nil,
+      checking: nil,
       on_done: Keyword.get(opts, :on_done, fn _outcome -> :ok end),
       # Where `troupe` was started: the first project it offers, and what a relative
       # directory is read from.
@@ -90,7 +113,7 @@ defmodule Troupe.UI.Setup do
     }
 
     case first_flow(call, Keyword.get(opts, :flow)) do
-      {:ok, flow} -> {:ok, enter(%{state | flow: flow}, flow["step"])}
+      {:ok, flow} -> {:ok, enter(%{state | flow: flow, began: flow}, flow["step"])}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -115,7 +138,13 @@ defmodule Troupe.UI.Setup do
   @impl true
   def handle_event(%Key{kind: "release"}, state), do: {:noreply, state, render?: false}
 
-  # A question is out to the daemon: nothing is taken until it answers.
+  # Leaving is there with a question out to the daemon too. What it was asked it may still
+  # do, so a summary being sent counts as having written something.
+  def handle_event(%Key{code: "c", modifiers: ["ctrl"]}, %{busy: busy} = state) when busy != nil,
+    do: done(state, {:left, state.wrote or match?({_ref, :confirm}, state.asking)})
+
+  # A question is out to the daemon: nothing else is taken until it answers, or until it
+  # is late (`patience_ms`).
   def handle_event(_event, %{busy: busy} = state) when busy != nil,
     do: {:noreply, state, render?: false}
 
@@ -135,7 +164,33 @@ defmodule Troupe.UI.Setup do
   def handle_event(_event, state), do: {:noreply, state}
 
   @impl true
-  def handle_info({__MODULE__, tag, result}, state), do: answered(tag, result, %{state | busy: nil})
+  # The answer late: the daemon is asked where the run stands.
+  def handle_info({:late, __MODULE__, ref}, %{asking: {ref, _tag}, busy: busy} = state)
+      when busy != nil,
+      do: {:noreply, standing(state, late_words(state))}
+
+  def handle_info({:late, __MODULE__, _ref}, state), do: {:noreply, state, render?: false}
+
+  def handle_info({:standing, __MODULE__, ref, result, otherwise}, %{checking: ref} = state) do
+    state = %{state | checking: nil}
+
+    case result do
+      {:ok, %{} = now} when is_map(state.began) ->
+        if finished_since?(state.began, now),
+          do: done(state, finished(state, now)),
+          else: {:noreply, %{state | busy: nil, error: otherwise}}
+
+      _other ->
+        {:noreply, %{state | busy: nil, error: otherwise}}
+    end
+  end
+
+  def handle_info({:standing, __MODULE__, _ref, _result, _otherwise}, state),
+    do: {:noreply, state, render?: false}
+
+  def handle_info({__MODULE__, tag, result}, state),
+    do: answered(tag, result, %{state | busy: nil, asking: nil})
+
   # A frame on demand, as the session's window draws one (`TUIHelpers.screen/2`).
   def handle_info(:force_render, state), do: {:noreply, state}
   def handle_info(_msg, state), do: {:noreply, state, render?: false}
@@ -382,7 +437,58 @@ defmodule Troupe.UI.Setup do
       send(me, {__MODULE__, tag, result})
     end)
 
-    %{state | busy: busy, error: nil}
+    ref = make_ref()
+    Process.send_after(me, {:late, __MODULE__, ref}, state.patience_ms)
+    %{state | busy: busy, error: nil, asking: {ref, tag}}
+  end
+
+  # Where the run stands, asked of the daemon apart from the question that is out: a run it
+  # finished ends the screen; otherwise the keys come back with `otherwise` said.
+  defp standing(state, otherwise) do
+    me = self()
+    ref = make_ref()
+    status = state.status
+
+    Task.start(fn ->
+      result =
+        try do
+          status.()
+        rescue
+          error -> {:error, Exception.message(error)}
+        catch
+          :exit, reason -> {:error, Exception.format_exit(reason)}
+        end
+
+      send(me, {:standing, __MODULE__, ref, result, otherwise})
+    end)
+
+    %{state | busy: "asking the daemon where the first run stands…", checking: ref}
+  end
+
+  defp late_words(state) do
+    seconds = div(state.patience_ms + 999, 1000)
+
+    "The daemon has not answered in #{seconds} #{if seconds == 1, do: "second", else: "seconds"}. " <>
+      "Its answer is still taken if it comes; Enter asks again, Esc leaves."
+  end
+
+  # A record newer than the one the screen began with, or a first run the daemon no
+  # longer wants: the run finished, whichever reply said so or did not.
+  defp finished_since?(began, now) do
+    completed = now["completed"]
+
+    (is_map(completed) and completed["completed_at"] != get_in(began, ["completed", "completed_at"])) or
+      (began["needed"] == true and now["needed"] == false)
+  end
+
+  # How a finish whose answer never came ends: at the sign-in for a plane, and for this
+  # computer with the session it started unknown here.
+  defp finished(state, now) do
+    case {get_in(state.flow, ["answers", "where"]), get_in(now, ["completed", "choice"])} do
+      {%{"choice" => "plane"} = where, _choice} -> {:plane, where["plane_url"]}
+      {nil, "plane"} -> {:plane, nil}
+      _local -> :finished
+    end
   end
 
   defp params(step, answer),
@@ -414,16 +520,26 @@ defmodule Troupe.UI.Setup do
 
   defp answered(:confirm, {:ok, flow, _sent}, state), do: done(state, outcome(flow))
 
+  # A step of the summary that failed: refused by the daemon, or an answer that went missing
+  # on the way. The flow the daemon has now came back with it, and its record says whether
+  # the run finished all the same.
   defp answered(:confirm, {:error, step, reason, flow, sent}, state) do
-    state = %{
-      state
-      | flow: flow || state.flow,
-        sent: Map.merge(state.sent, Map.new(sent)),
-        wrote: state.wrote or sent != []
-    }
+    if is_map(flow) and is_map(state.began) and finished_since?(state.began, flow) do
+      done(state, finished(state, flow))
+    else
+      state = %{
+        state
+        | flow: flow || state.flow,
+          sent: Map.merge(state.sent, Map.new(sent)),
+          wrote: state.wrote or sent != []
+      }
 
-    {:noreply, %{enter(state, step) | error: refusal(reason)}}
+      {:noreply, %{enter(state, step) | error: refusal(reason)}}
+    end
   end
+
+  # The asking itself failed: the daemon is asked where the run stands.
+  defp answered(:confirm, {:error, reason}, state), do: {:noreply, standing(state, refusal(reason))}
 
   defp answered(:leave, _result, state), do: done(state, {:left, state.wrote})
 

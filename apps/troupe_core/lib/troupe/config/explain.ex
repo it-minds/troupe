@@ -56,6 +56,7 @@ defmodule Troupe.Config.Explain do
   def explain_session(session_id, key \\ nil, opts \\ []) do
     case Troupe.Session.resolved(session_id) do
       %{layers: %Layers.Result{} = layers, kind: kind} ->
+        layers = if opts[:withhold], do: withhold(layers, kind), else: layers
         explained(layers, key, Keyword.put(opts, :session, %{id: session_id, kind: kind}))
 
       _ ->
@@ -82,6 +83,86 @@ defmodule Troupe.Config.Explain do
         as_run_by({message, 1}, opts)
     end
   end
+
+  @doc """
+  A session's layers as someone who may only watch it is shown them: every rule and every
+  key with where it came from, but the address of the model provider (`base_url`, a
+  provider's too) and the state directory read as set by whoever set them, the profile on
+  a pod. They name the machinery the session runs on, which steering it needs and
+  watching it does not.
+  """
+  @spec withhold(Layers.Result.t(), atom()) :: Layers.Result.t()
+  def withhold(%Layers.Result{} = layers, kind) do
+    sentence = if kind == :team, do: "set by the profile", else: "set by the session's owner"
+    # A pod's workspace and its files are under its state directory, so their paths
+    # name it from there.
+    veil = veil(layers)
+
+    ladder =
+      Map.new(layers.ladder, fn {path, entries} ->
+        entries = Enum.map(entries, &veiled(&1, [:source], veil))
+
+        if withheld_path?(path),
+          do: {path, Enum.map(entries, &withheld_entry(&1, sentence))},
+          else: {path, entries}
+      end)
+
+    issue = fn issue -> %{issue | source: veil.(issue.source), message: veil.(issue.message)} end
+
+    %{
+      layers
+      | ladder: ladder,
+        workspace: veil.(layers.workspace),
+        files: Enum.map(layers.files, &veiled(&1, [:path, :cache], veil)),
+        rules: Enum.map(layers.rules, &veiled(&1, [:source], veil)),
+        warnings: Enum.map(layers.warnings, issue),
+        refusals: Enum.map(layers.refusals, issue),
+        errors: Enum.map(layers.errors, issue)
+    }
+  end
+
+  defp veiled(map, keys, veil) do
+    Enum.reduce(keys, map, fn key, map ->
+      if Map.has_key?(map, key), do: Map.update!(map, key, veil), else: map
+    end)
+  end
+
+  @doc """
+  What `withhold/2` does to a path: the state directory the layers name, in it, reads
+  `<state directory>`.
+  """
+  @spec veil(Layers.Result.t()) :: (term() -> term())
+  def veil(layers) do
+    set = layers.ladder |> Map.get(["state_dir"], []) |> Enum.reject(&(&1.layer == :default))
+
+    case List.last(set) do
+      %{value: dir} when is_binary(dir) and dir != "" ->
+        dirs = Enum.uniq([dir, Path.expand(dir)])
+
+        fn
+          text when is_binary(text) ->
+            Enum.reduce(dirs, text, &String.replace(&2, &1, "<state directory>"))
+
+          other ->
+            other
+        end
+
+      _none ->
+        & &1
+    end
+  end
+
+  defp withheld_path?(["state_dir"]), do: true
+  defp withheld_path?(path), do: List.last(path) == "base_url"
+
+  # The default is the schema's, the same for everybody.
+  defp withheld_entry(%{layer: :default} = entry, _sentence), do: entry
+  defp withheld_entry(entry, sentence),
+    do: Map.merge(entry, %{value: {:withheld, sentence}, raw: nil})
+
+  @doc "Whether a row's value is one `withhold/2` took out."
+  @spec withheld?(row()) :: boolean()
+  def withheld?(row), do: match?({:withheld, _sentence}, row.value)
 
   defp as_run_by({text, code}, opts), do: {Config.as_run_by(text, command(opts)), code}
 
@@ -175,6 +256,7 @@ defmodule Troupe.Config.Explain do
   defp present?(values, [key]), do: is_map(values) and Map.has_key?(values, key)
   defp present?(values, [key | rest]), do: is_map(values) and present?(Map.get(values, key), rest)
 
+  defp shown(%{value: {:withheld, sentence}}, _spec), do: sentence
   defp shown(%{value: {:unset_env, var, raw}}, _spec), do: "#{raw} (#{var} is not set)"
   defp shown(%{value: nil}, _spec), do: "(unset)"
 
@@ -412,6 +494,7 @@ defmodule Troupe.Config.Explain do
     |> Map.merge(if file[:fetched_at], do: %{"fetched_at" => file.fetched_at, "cache" => file.cache}, else: %{})
   end
 
+  defp json_value(%{value: {:withheld, sentence}}, _spec), do: sentence
   defp json_value(%{value: {:unset_env, _var, raw}}, _spec), do: raw
   defp json_value(%{value: nil}, _spec), do: nil
   defp json_value(%{value: value}, %{secret: true}), do: Config.mask(value)
