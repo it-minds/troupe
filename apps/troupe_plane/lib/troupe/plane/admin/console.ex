@@ -92,6 +92,7 @@ defmodule Troupe.Plane.Admin.Console do
     trigger_put: {:area, :triggers},
     trigger_delete: {:area, :triggers},
     trigger_run: {:area, :triggers},
+    trigger_fix: {:area, :triggers},
     trigger_revisions: {:area, :triggers},
     trigger_key_rotate: {:area, :triggers},
     integrations: {:area, :integrations},

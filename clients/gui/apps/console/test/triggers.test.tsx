@@ -275,6 +275,85 @@ describe("a webhook's key and a trigger on a GitHub repository", () => {
   });
 });
 
+describe("a trigger on a GitHub repository", () => {
+  const onRepository = (): void => {
+    const t = trigger("core", "nightly-deps")!;
+    t.source = { kind: "webhook", provider: "github", repository: "example-org/widgets", label: "troupe-fix" };
+  };
+
+  it("fixes one issue by its number or its link, confirmed after saying what the plane checks first", async () => {
+    onRepository();
+    const before = fake.admin.runRows.length;
+    await open("#/triggers/core/nightly-deps");
+    type(await waitFor(() => field("Fix an issue"), "the fix this field"), "https://github.com/example-org/gadgets/issues/7");
+    button("Fix this")!.click();
+    await waitFor(() => says("The plane reads https://github.com/example-org/gadgets/issues/7 from GitHub first"), "the preview");
+    await sees("it must be an open issue of example-org/widgets, not a pull request");
+    expect(fake.admin.runRows.length).toBe(before);
+
+    // Another repository's issue is refused by the plane, saying so.
+    button("Fix https://github.com/example-org/gadgets/issues/7")!.click();
+    await waitFor(() => says("that issue is on example-org/gadgets, and this trigger works on example-org/widgets"), "the refusal");
+    expect(fake.admin.runRows.length).toBe(before);
+
+    button("Back to editing")!.click();
+    type(await waitFor(() => field("Fix an issue"), "the field again"), "7");
+    button("Fix this")!.click();
+    (await waitFor(() => button("Fix 7"), "the preview")).click();
+    await waitFor(() => says("Recorded in the audit as trigger.fix on core/nightly-deps"), "the audit's note");
+    const made = fake.admin.runRows.at(-1)!;
+    expect(made).toMatchObject({ trigger: "nightly-deps", source: "manual", fired_by: PEOPLE.alice.subject, repository: "example-org/widgets", state: "created" });
+    expect(made.issue?.number).toBe(7);
+    await waitFor(() => link("Its run, on Runs and review"), "the run's link");
+  });
+
+  it("says why a run it fired was skipped", async () => {
+    onRepository();
+    await open("#/triggers/core/nightly-deps");
+    for (const issue of ["7", "8"]) {
+      type(await waitFor(() => field("Fix an issue"), "the fix this field"), issue);
+      button("Fix this")!.click();
+      (await waitFor(() => button(`Fix ${issue}`), "the preview")).click();
+      await waitFor(() => says("Recorded in the audit as trigger.fix on core/nightly-deps") && !button(`Fix ${issue}`), "fired");
+    }
+    await sees("the run is recorded as skipped: nightly-deps allows 1 run at once (concurrency), and one is going.");
+    const skipped = fake.admin.runRows.at(-1)!;
+
+    visit(`#/runs/${skipped.id}`);
+    await waitFor(() => says("Why it was skipped"), "the run's page");
+    await sees("nightly-deps allows 1 run at once (concurrency), and one is going");
+  });
+
+  it("is not offered on a trigger that is not on a repository", async () => {
+    await open("#/triggers/core/nightly-deps");
+    await waitFor(() => button("Run nightly-deps now"), "nightly-deps");
+    expect(field("Fix an issue")).toBeNull();
+  });
+
+  it("sweeps on a schedule for its label, or for what a query finds", async () => {
+    await open("#/triggers/core");
+    (await waitFor(() => button("New trigger"), "core's triggers")).click();
+    type(await waitFor(() => field("Name"), "the form"), "sweeper");
+    const principal = await waitFor(() => (field("Runs as") as HTMLSelectElement | null)?.querySelector('option[value="svc:core/nightly"]') && field("Runs as"), "the principals");
+    type(principal, "svc:core/nightly");
+    type(field("Profile")!, "dev");
+    type(field("Fired by")!, "github");
+    type(await waitFor(() => field("Repository"), "the GitHub fields"), "example-org/widgets");
+    type(field("Sweep")!, "0 */6 * * *");
+    await waitFor(() => says("A sweep looks for the label, or for what a query finds: give one."), "a sweep with nothing to look for");
+    expect(button("Preview")!.disabled).toBe(true);
+    type(await waitFor(() => field("Sweep looks for"), "the query field"), "repo:other/thing label:bug");
+    await waitFor(() => says("The plane adds the repository and is:issue is:open itself."), "a query naming a repository");
+    type(field("Sweep looks for")!, "label:bug no:assignee");
+    await waitFor(() => !button("Preview")!.disabled, "the form complete");
+    button("Preview")!.click();
+    await waitFor(() => says("swept on a schedule, 0 */6 * * * (UTC), for open issues label:bug no:assignee finds"), "the preview");
+    button("Create sweeper")!.click();
+    await waitFor(() => says("Recorded in the audit as trigger.put on core/sweeper"), "the audit's note");
+    expect(trigger("core", "sweeper")!.source).toEqual({ kind: "webhook", provider: "github", repository: "example-org/widgets", sweep: "0 */6 * * *", query: "label:bug no:assignee" });
+  });
+});
+
 describe("a plane in gitops mode", () => {
   it("shows the triggers locked, with where they come from, and offers no change", async () => {
     fake.admin.mode = "gitops";

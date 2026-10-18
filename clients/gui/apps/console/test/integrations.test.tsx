@@ -118,6 +118,30 @@ describe("the GitHub App", () => {
     expect(fake.admin.github.key).toBeNull();
   });
 
+  // #653: on a gitops plane a `GitHubApp` resource holds the App's settings; its key and its
+  // webhook secret are no resource's, and are still set here.
+  it("is shown locked on a gitops plane, where only its key and webhook secret are set here", async () => {
+    fake.admin.mode = "gitops";
+    fake.admin.gitopsSource = "https://git.example.com/platform/troupe.git";
+    await open();
+    await waitFor(() => says("Held in a repository", card()) && says("GitHubApp/github", card()), "the locked App");
+    await sees("https://git.example.com/platform/troupe.git", card());
+    await sees("read at generation 1", card());
+    expect(button("Remove the App")).toBeNull();
+    expect(button("Change the App")).toBeNull();
+
+    (await waitFor(() => button("Set its key or webhook secret"), "the key's button")).click();
+    await waitFor(() => field("Private key"), "the form");
+    expect(field("App ID")).toBeNull();
+    expect(field("Installations")).toBeNull();
+    type(field("Private key")!, PEM);
+    button("Preview")!.click();
+    (await waitFor(() => button("Apply"), "the preview")).click();
+    await waitFor(() => says("Recorded in the audit as github.put on app"), "the audit's note");
+    expect(fake.admin.github.key!.version).toBe(2);
+    expect(fake.admin.github.app_id).toBe(4242);
+  });
+
   it("is read by a team admin, who is offered nothing to change or test", async () => {
     await open(PEOPLE.bob);
     await waitFor(() => says("The GitHub App") && says("4242"), "the App");

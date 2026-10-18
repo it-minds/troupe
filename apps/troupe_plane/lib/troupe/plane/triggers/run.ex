@@ -3,8 +3,9 @@ defmodule Troupe.Plane.Triggers.Run do
   One firing of a trigger: the record a person reads afterwards.
 
   The stored `state` is only what the plane decided at the moment of firing — `created`
-  when a session was made, `skipped` when the concurrency cap said no, `failed` when the
-  create itself failed. Everything after that is read from the session's status columns
+  when a session was made, `skipped` when a cap said no, `failed` when the create itself
+  failed. A skipped run says which cap in `reason`, so "why did my label do nothing" is
+  answered on the row and not only in the plane's log. Everything after that is read from the session's status columns
   rather than written here, because a run that had to be told its session finished would
   be a second copy of a fact the index already holds; `Triggers.state_of/2` is where the
   two are combined.
@@ -61,6 +62,7 @@ defmodule Troupe.Plane.Triggers.Run do
     field(:event, :map, default: %{})
     field(:payload_digest, :string)
     field(:state, :string, default: "created")
+    field(:reason, :string)
     field(:reviewed_by, :string)
     field(:reviewed_at, :utc_datetime_usec)
 
@@ -95,6 +97,7 @@ defmodule Troupe.Plane.Triggers.Run do
       :event,
       :payload_digest,
       :state,
+      :reason,
       :reviewed_by,
       :reviewed_at
     ])

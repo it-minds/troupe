@@ -22,7 +22,7 @@ import { TEAM_TABS, href } from "../route";
 import type { TeamTab } from "../route";
 import { recorded, show, useConsole, useLoad } from "../console";
 import type { Load } from "../console";
-import { AuditNote, Empty, Field, Loaded, Preview, Region, Status, changed, count, money, useChange } from "./bits";
+import { AuditNote, Empty, Field, Loaded, Locked, Preview, Region, Status, changed, count, money, useChange } from "./bits";
 import type { DiffLine, Done, FieldProps } from "./bits";
 import { Spend, Twice } from "./Teams";
 
@@ -817,18 +817,31 @@ const capWords = (cap: number | null | undefined, what: string): string => (cap 
  */
 function GitHub({ team, onApplied }: { team: AdminTeam; onApplied: () => void }): JSX.Element {
   const { admin, notify } = useConsole();
-  const github = team.github ?? { repositories: [], max_pushes: null, max_runs: null };
-  const [form, setForm] = useState<{ repositories: string; maxPushes: string; maxRuns: string } | null>(null);
+  const github = { max_attempts: null, ...(team.github ?? { repositories: [], max_pushes: null, max_runs: null }) };
+  const [form, setForm] = useState<{ repositories: string; maxPushes: string; maxRuns: string; maxAttempts: string } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [done, setDone] = useState<Done | null>(null);
+  // On a gitops plane a team's repositories are the `GitHubApp` resource's, as the App's settings are.
+  const [app] = useLoad(() => admin.github().catch(() => null), [admin]);
+  const gitops = app.state === "ready" ? (app.data?.gitops ?? null) : null;
 
   const cap = (text: string): number | string | null => (text.trim() === "" ? null : /^\d+$/.test(text.trim()) ? Number(text.trim()) : text.trim());
-  const asked = form ? { repositories: repositoryLines(form.repositories), max_pushes: cap(form.maxPushes), max_runs: cap(form.maxRuns) } : null;
+  // `max_attempts` only where it moved, so a plane older than the cap is not sent a key it refuses.
+  const attempts = form ? cap(form.maxAttempts) : null;
+  const asked = form
+    ? {
+        repositories: repositoryLines(form.repositories),
+        max_pushes: cap(form.maxPushes),
+        max_runs: cap(form.maxRuns),
+        ...(attempts !== (github.max_attempts ?? null) ? { max_attempts: attempts } : {}),
+      }
+    : null;
   const lines: DiffLine[] = asked
     ? [
         ...(asked.repositories.join("\n") !== github.repositories.join("\n") ? [{ field: "github.repositories", from: github.repositories.join(", ") || "none", to: asked.repositories.join(", ") || "none" }] : []),
         ...(asked.max_pushes !== github.max_pushes ? [{ field: "github.max_pushes", from: github.max_pushes, to: asked.max_pushes }] : []),
         ...(asked.max_runs !== github.max_runs ? [{ field: "github.max_runs", from: github.max_runs, to: asked.max_runs }] : []),
+        ...("max_attempts" in asked ? [{ field: "github.max_attempts", from: github.max_attempts ?? null, to: asked.max_attempts }] : []),
       ]
     : [];
   const dropped = asked ? github.repositories.filter((r) => !asked.repositories.includes(r)) : [];
@@ -839,6 +852,13 @@ function GitHub({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
         The GitHub repositories {team.name}'s sessions and triggers may name, through the plane's App, and how far its unattended runs may go. A repository not listed here is refused, a session at its creation and a push at
         its token. The App's installations bound every list: a team cannot list its way to an owner the App is not installed for.
       </p>
+      {gitops && (
+        <Locked things="teams' GitHub repositories and caps" source={gitops.source}>
+          <p className="note">
+            They come from the resource <code>GitHubApp/{gitops.resource}</code>, under <code>spec.teams.{team.name}</code>.
+          </p>
+        </Locked>
+      )}
       {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
       {!form && (
         <>
@@ -865,11 +885,30 @@ function GitHub({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
               <span className="name">Runs on a repository at once</span>
               <span className="value mono">{capWords(github.max_runs, "runs")}</span>
             </div>
+            <div className="limit">
+              <span className="name">Runs a sweep starts on one issue</span>
+              <span className="value mono">{github.max_attempts === null || github.max_attempts === undefined ? "no cap of the team's" : `${github.max_attempts} that end without a fix`}</span>
+            </div>
           </div>
-          <p className="note">A worker profile may set its own caps; the lower of the two holds. A run that asks for a push past its cap stops, with a comment on its draft pull request, as three red CI rounds stop it.</p>
-          <button type="button" onClick={() => setForm({ repositories: github.repositories.join("\n"), maxPushes: github.max_pushes === null ? "" : String(github.max_pushes), maxRuns: github.max_runs === null ? "" : String(github.max_runs) })}>
-            Change {team.name}'s repositories
-          </button>
+          <p className="note">
+            A worker profile may set its own caps; the lower of the two holds. A run that asks for a push past its cap stops, with a comment on its draft pull request, as three red CI rounds stop it. A sweep leaves an issue for a person once as many of its
+            runs as it may start have ended without a fix (one, where neither says); a person asks again with the label, the command or fix this.
+          </p>
+          {!gitops && (
+            <button
+              type="button"
+              onClick={() =>
+                setForm({
+                  repositories: github.repositories.join("\n"),
+                  maxPushes: github.max_pushes === null ? "" : String(github.max_pushes),
+                  maxRuns: github.max_runs === null ? "" : String(github.max_runs),
+                  maxAttempts: github.max_attempts === null || github.max_attempts === undefined ? "" : String(github.max_attempts),
+                })
+              }
+            >
+              Change {team.name}'s repositories
+            </button>
+          )}
         </>
       )}
       {form && !previewing && (
@@ -889,6 +928,9 @@ function GitHub({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
           </Field>
           <Field label="Runs on a repository at once" hint="1 to 1000, across the team's triggers; a firing over it is skipped. Empty is no cap of the team's.">
             {(p) => <input {...p} value={form.maxRuns} onChange={(e) => setForm({ ...form, maxRuns: e.target.value })} inputMode="numeric" />}
+          </Field>
+          <Field label="Runs a sweep starts on one issue" hint="1 to 1000 that end without a fix, before the sweep leaves the issue for a person. Empty is no cap of the team's (one, where the profile says none either).">
+            {(p) => <input {...p} value={form.maxAttempts} onChange={(e) => setForm({ ...form, maxAttempts: e.target.value })} inputMode="numeric" />}
           </Field>
           <div className="actions">
             <button type="submit" className="primary" disabled={lines.length === 0}>

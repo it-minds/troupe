@@ -26,7 +26,8 @@ defmodule Troupe.Plane.GitHub.Webhook do
     the repository whose label or command it is (`GitHub.Issue`). Each is a run of its
     own, keyed by the delivery and the trigger, so a redelivery fires none twice.
   - `pull_request_review` (`submitted`): resume the session whose draft pull request it
-    reviews (`GitHub.Review`).
+    reviews (`GitHub.Review`); and `issue_comment` (`created`) on a pull request's
+    conversation, the same with the comment.
   - `ping`, which GitHub sends when the webhook is set up: nothing.
   - Anything else: nothing. A delivery about a repository of no installation the plane
     lists does nothing either.
@@ -198,6 +199,11 @@ defmodule Troupe.Plane.GitHub.Webhook do
 
   defp act("ping", _delivery, _payload), do: %{"ping" => true}
 
+  # A comment on a pull request's conversation comes as an issue's comment too; it is about
+  # a run's draft, never a command that starts one.
+  defp act("issue_comment", delivery, %{"issue" => %{"pull_request" => %{}}} = payload),
+    do: Review.resume_comment(delivery, payload)
+
   defp act(event, delivery, payload) when event in ["issues", "issue_comment"] do
     if installed?(payload),
       do: fire(event, delivery, payload),
@@ -255,6 +261,7 @@ defmodule Troupe.Plane.GitHub.Webhook do
         )
 
         %{"trigger" => trigger.name, "run" => fired.run.id, "session_id" => fired.run.session_id}
+        |> then(&if(fired.run.reason, do: Map.put(&1, "skipped", fired.run.reason), else: &1))
 
       {:error, %Error{} = error} ->
         Logger.warning(

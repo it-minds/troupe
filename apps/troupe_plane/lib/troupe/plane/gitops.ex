@@ -36,7 +36,8 @@ defmodule Troupe.Plane.Gitops do
   engine lists, reads, reports and removes; the source knows what a row is, what its
   checks are and what writing one means. `Troupe.Plane.Gitops.Profiles` is the first and
   `Troupe.Plane.Gitops.Triggers` the second (Decision 737), in that order, so that a pass
-  reads a trigger after the profile it names.
+  reads a trigger after the profile it names. `Troupe.Plane.Gitops.GitHubApp` is the third:
+  the plane's GitHub App and the teams' repositories, never its key.
   """
 
   use GenServer
@@ -44,7 +45,7 @@ defmodule Troupe.Plane.Gitops do
   import Ecto.Query
 
   alias Troupe.Plane.{ClusterPolicy, Provision, Repo, Settings, Singleton}
-  alias Troupe.Plane.Gitops.{Profiles, Report, Triggers}
+  alias Troupe.Plane.Gitops.{GitHubApp, Profiles, Report, Triggers}
 
   require Logger
 
@@ -103,7 +104,7 @@ defmodule Troupe.Plane.Gitops do
 
   @doc "Every kind a pass reads."
   @spec sources() :: [module()]
-  def sources, do: [Profiles, Triggers]
+  def sources, do: [Profiles, Triggers, GitHubApp]
 
   @doc """
   Where the resources come from, as a person should read it: the repository and path the
@@ -327,7 +328,7 @@ defmodule Troupe.Plane.Gitops do
 
   @doc """
   The manifests a repository would hold, as they would be committed: every profile, the
-  cluster policy and every trigger (`admin.profiles.export`).
+  cluster policy, every trigger and the GitHub App (`admin.profiles.export`).
 
   Built from the plane's rows, which in direct mode are the truth and in GitOps mode are
   what the plane last read, and with nothing in them the plane or the cluster writes.
@@ -338,6 +339,7 @@ defmodule Troupe.Plane.Gitops do
       profiles: Profiles.export(),
       policy: ClusterPolicy.export(),
       triggers: Triggers.export(),
+      github: GitHubApp.export(),
       left_out: Profiles.left_out()
     }
   end

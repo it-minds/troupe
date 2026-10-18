@@ -150,7 +150,8 @@ defmodule Troupe.Plane.FakeCluster do
          %{"name" => "workerprofiles", "kind" => "WorkerProfile", "namespaced" => true},
          %{"name" => "workerprofiles/status", "kind" => "WorkerProfile", "namespaced" => true},
          %{"name" => "troupepolicies", "kind" => "TroupePolicy", "namespaced" => false},
-         %{"name" => "triggers", "kind" => "Trigger", "namespaced" => true}
+         %{"name" => "triggers", "kind" => "Trigger", "namespaced" => true},
+         %{"name" => "githubapps", "kind" => "GitHubApp", "namespaced" => true}
        ]
      }}
   end
@@ -176,30 +177,33 @@ defmodule Troupe.Plane.FakeCluster do
   @impl K8s.Client.Provider
   def websocket_stream_to(_uri, _headers, _opts, _stream_to), do: not_found()
 
+  # The namespaced kinds, by the plural a path names them with.
+  @namespaced %{
+    "workerprofiles" => "WorkerProfile",
+    "triggers" => "Trigger",
+    "githubapps" => "GitHubApp"
+  }
+
   defp target(path) do
     case String.split(path, "/", trim: true) do
-      ["apis", "troupe.dev", "v1alpha1", "namespaces", _ns, "workerprofiles"] ->
-        {:list, "WorkerProfile"}
-
-      ["apis", "troupe.dev", "v1alpha1", "namespaces", _ns, "workerprofiles", name] ->
-        {:one, "WorkerProfile", name}
-
       ["apis", "troupe.dev", "v1alpha1", "namespaces", _ns, "workerprofiles", name, "status"] ->
         {:status, "WorkerProfile", name}
 
+      ["apis", "troupe.dev", "v1alpha1", "namespaces", _ns, plural | rest]
+      when is_map_key(@namespaced, plural) ->
+        namespaced(@namespaced[plural], rest)
+
       ["apis", "troupe.dev", "v1alpha1", "troupepolicies", name] ->
         {:one, "TroupePolicy", name}
-
-      ["apis", "troupe.dev", "v1alpha1", "namespaces", _ns, "triggers"] ->
-        {:list, "Trigger"}
-
-      ["apis", "troupe.dev", "v1alpha1", "namespaces", _ns, "triggers", name] ->
-        {:one, "Trigger", name}
 
       _other ->
         :unknown
     end
   end
+
+  defp namespaced(kind, []), do: {:list, kind}
+  defp namespaced(kind, [name]), do: {:one, kind, name}
+  defp namespaced(_kind, _rest), do: :unknown
 
   defp answer(state, :get, {:list, kind}, _query, _body) do
     items =
@@ -457,7 +461,7 @@ defmodule Troupe.Plane.FakeCluster do
       )
     )
     |> then(fn resource ->
-      if resource["kind"] in ["WorkerProfile", "Trigger"],
+      if resource["kind"] in ["WorkerProfile", "Trigger", "GitHubApp"],
         do: update_in(resource, ["metadata"], &Map.put_new(&1, "namespace", @namespace)),
         else: resource
     end)

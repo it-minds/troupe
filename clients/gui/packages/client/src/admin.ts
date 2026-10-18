@@ -362,6 +362,8 @@ export interface TeamGitHub {
   max_pushes: number | null;
   /** Runs on a repository its triggers may have going at once. */
   max_runs: number | null;
+  /** Runs a sweep may start on one issue that end without a fix before it leaves the issue for a person. */
+  max_attempts?: number | null;
 }
 
 export interface AdminTeam extends TeamSpend {
@@ -657,6 +659,8 @@ export interface TriggerRun {
   issue?: { number: number; url: string | null; title: string | null } | null;
   /** What its session did on GitHub: its branch, its draft pull request and the CI rounds on it. */
   github?: SessionGitHub | null;
+  /** Why a skipped run started nothing: the cap that said no. Absent from a plane older than the field. */
+  reason?: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
 }
@@ -781,6 +785,14 @@ export interface GitHubApp {
   /** Where GitHub sends the App's events, and whether the secret it signs them with is set: its version, never it. */
   webhook?: { path: string; secret: { set: boolean; transit_key: string; version: number | null } };
   permissions: Record<string, string>;
+  /** On a gitops plane, the generation of the `GitHubApp` resource its settings were read at. */
+  resource_generation?: number | null;
+  /**
+   * On a gitops plane: the `GitHubApp` resource its App ID, API URL, installations and the
+   * teams' repositories come from, and what the last pass made of it. Its key and webhook
+   * secret are never a resource's, and are still set here.
+   */
+  gitops?: { resource: string; generation: number | null; source: string | null; problem: string | null; reasons: string[] } | null;
   updated_by: string | null;
   updated_at: string | null;
   /** On a put or a delete: the audit's diff, the key as its fingerprint. */
@@ -914,6 +926,8 @@ export interface ProfilesExport {
   profiles: Manifest[];
   policy: Manifest | null;
   triggers: Manifest[];
+  /** The GitHub App and the teams' repositories, as a `GitHubApp`; never its key. Absent from an older plane. */
+  github?: Manifest[];
   /** What no profile's manifest holds, because the plane or the cluster writes it. */
   left_out: string[];
 }
@@ -1352,6 +1366,14 @@ export class AdminApi {
   }
 
   /** Fire a trigger now, by hand: a run whose source is `manual`, named after the caller and the minute. */
+  /**
+   * The console's "fix this": one run of a trigger on a GitHub repository on one of its
+   * issues, by its number or its link, read from GitHub and held to the trigger's policy.
+   */
+  fixIssue(team: string, name: string, issue: string): Promise<TriggerFired> {
+    return this.rpc<TriggerFired>("admin.trigger.fix", { team, name, issue });
+  }
+
   runTrigger(team: string, name: string): Promise<TriggerFired> {
     return this.rpc<TriggerFired>("admin.trigger.run", { team, name });
   }

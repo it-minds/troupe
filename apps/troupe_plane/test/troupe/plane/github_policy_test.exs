@@ -79,6 +79,7 @@ defmodule Troupe.Plane.GitHubPolicyTest do
         {%{"denyPaths" => [7]}, "not a pattern"},
         {%{"maxPushes" => 0}, "github.maxPushes is a whole number from 1 to 1000"},
         {%{"maxRuns" => "3"}, "github.maxRuns is a whole number from 1 to 1000"},
+        {%{"maxAttempts" => 1001}, "github.maxAttempts is a whole number from 1 to 1000"},
         {%{"autonomy" => "merge"}, "not autonomy"}
       ]
 
@@ -93,8 +94,20 @@ defmodule Troupe.Plane.GitHubPolicyTest do
                  "allowPublic" => true,
                  "denyPaths" => ["secrets/", "*.tfstate"],
                  "maxPushes" => 5,
-                 "maxRuns" => 2
+                 "maxRuns" => 2,
+                 "maxAttempts" => 4
                })
+
+      # The lower of the profile's and the team's holds, and one where neither says.
+      assert GitHub.Policy.max_attempts("dev", context.team.id) == 4
+
+      {:ok, _} =
+        Identity.update_team(context.team, %{
+          github: %{"repositories" => ["example-org/widgets"], "max_attempts" => 2}
+        })
+
+      assert GitHub.Policy.max_attempts("dev", context.team.id) == 2
+      assert GitHub.Policy.max_attempts(nil, nil) == 1
     end
 
     test "is what the pod is handed with the fix loop's token, with the lower cap of the " <>
@@ -136,7 +149,8 @@ defmodule Troupe.Plane.GitHubPolicyTest do
             "allowPublic" => false,
             "denyPaths" => ["secrets/"],
             "maxPushes" => 3,
-            "maxRuns" => 2
+            "maxRuns" => 2,
+            "maxAttempts" => 2
           }
         }
       }
@@ -147,7 +161,8 @@ defmodule Troupe.Plane.GitHubPolicyTest do
             "allowPublic" => true,
             "denyPaths" => ["*.tfstate"],
             "maxPushes" => 10,
-            "maxRuns" => 1
+            "maxRuns" => 1,
+            "maxAttempts" => 5
           }
         }
       }
@@ -160,7 +175,8 @@ defmodule Troupe.Plane.GitHubPolicyTest do
                "allowPublic" => false,
                "denyPaths" => ["secrets/", "*.tfstate"],
                "maxPushes" => 3,
-               "maxRuns" => 1
+               "maxRuns" => 1,
+               "maxAttempts" => 2
              }
     end
   end
@@ -185,7 +201,8 @@ defmodule Troupe.Plane.GitHubPolicyTest do
       assert team.github == %{
                repositories: ["example-org/widgets", "Example-Org/*"],
                max_pushes: nil,
-               max_runs: 2
+               max_runs: 2,
+               max_attempts: nil
              }
 
       # Only the keys sent change.
