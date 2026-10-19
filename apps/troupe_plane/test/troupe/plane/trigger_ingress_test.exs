@@ -17,7 +17,7 @@ defmodule Troupe.Plane.TriggerIngressTest do
 
   alias Troupe.Plane.{Admin, FakePod, Fleet, Repo, Triggers}
   alias Troupe.Plane.Control.{Connections, Listener}
-  alias Troupe.Plane.Triggers.Trigger
+  alias Troupe.Plane.Triggers.{Run, Trigger}
   alias Troupe.Plane.Web.Router
 
   @moduletag timeout: 60_000
@@ -295,11 +295,6 @@ defmodule Troupe.Plane.TriggerIngressTest do
       trigger = trigger!(context, %{"name" => "triage"})
       {:ok, key} = Admin.trigger_key_rotate(context.actor, "engineering", "triage")
 
-      # The window the plane supplies is the minute, so two POSTs either side of :00 are
-      # two runs by design — and the second is then `skipped` under the cap, with no
-      # session. It happened once in a release's soak. Both have to land in one minute.
-      same_minute!()
-
       assert {:ok, first} = fire(context, trigger, key.key, %{"k" => "OPS-12"})
       assert {:ok, again} = fire(context, trigger, key.key, %{"k" => "OPS-12"})
 
@@ -308,6 +303,112 @@ defmodule Troupe.Plane.TriggerIngressTest do
       # after a timeout safe for an executor that cannot know whether the first arrived.
       assert first.body["session_id"] == again.body["session_id"]
       assert length(Triggers.runs(context.team)) == 1
+    end
+
+    # The window was the clock's minute, so a retry a second after a POST at :59 was a
+    # firing of its own, `skipped` under the cap with no session: the cluster suite's
+    # retry failed so on a release.
+    test "is the run already made for a retry on the other side of the minute's turn",
+         context do
+      trigger = trigger!(context, %{"name" => "triage"})
+      {:ok, key} = Admin.trigger_key_rotate(context.actor, "engineering", "triage")
+
+      assert {:ok, first} = fire(context, trigger, key.key, %{"k" => "OPS-12"})
+      assert is_binary(first.body["session_id"])
+
+      # As the first would be had it come in at the last moment of the minute before.
+      backdate!(first.body["run"], before_the_turn!())
+
+      assert {:ok, again} = fire(context, trigger, key.key, %{"k" => "OPS-12"})
+      assert again.status == 202
+      assert again.body["session_id"] == first.body["session_id"]
+      assert length(Triggers.runs(context.team)) == 1
+
+      # A minute on from the firing it would repeat, a POST is a firing of its own, which
+      # the cap the first still holds skips.
+      backdate!(first.body["run"], DateTime.add(DateTime.utc_now(), -61, :second))
+
+      assert {:ok, later} = fire(context, trigger, key.key, %{"k" => "OPS-12"})
+      assert later.status == 202
+      assert later.body["state"] == "skipped"
+      assert length(Triggers.runs(context.team)) == 2
+    end
+
+    test "is one run with one session however many blind retries race", context do
+      for n <- 1..4 do
+        trigger = trigger!(context, %{"name" => "triage-#{n}"})
+        {:ok, key} = Admin.trigger_key_rotate(context.actor, "engineering", "triage-#{n}")
+
+        answers =
+          1..3
+          |> Enum.map(fn _ ->
+            Task.async(fn -> fire(context, trigger, key.key, %{"k" => n}) end)
+          end)
+          |> Task.await_many(30_000)
+
+        assert [session_id] =
+                 answers
+                 |> Enum.map(fn {:ok, answer} -> answer.body["session_id"] end)
+                 |> Enum.uniq()
+
+        assert is_binary(session_id), "an answer without the session: #{inspect(answers)}"
+        assert length(Triggers.runs(context.team, trigger: "triage-#{n}")) == 1
+      end
+    end
+
+    test "is one run for two that race on either side of a minute's turn", context do
+      for n <- 1..4 do
+        trigger = trigger!(context, %{"name" => "triage-#{n}"})
+        turn = DateTime.utc_now() |> Map.merge(%{second: 0, microsecond: {0, 6}})
+
+        # The one read the clock later may take the lock first, and either order is one run.
+        answers =
+          [-1, 1]
+          |> Enum.shuffle()
+          |> Enum.map(fn ms ->
+            at = DateTime.add(turn, ms, :millisecond)
+
+            Task.async(fn ->
+              Triggers.fire_in_window(trigger, "webhook", %{"k" => n}, "trigger-key", at)
+            end)
+          end)
+          |> Task.await_many(30_000)
+
+        assert [{:ok, a}, {:ok, b}] = answers
+        assert is_binary(a.session.id)
+        assert a.session.id == b.session.id
+        assert a.run.id == b.run.id
+        assert length(Triggers.runs(context.team, trigger: "triage-#{n}")) == 1
+      end
+    end
+
+    test "a repeat that overtakes the firing still starting its session waits for it",
+         context do
+      trigger = trigger!(context, %{"name" => "triage"})
+      {:ok, key} = Admin.trigger_key_rotate(context.actor, "engineering", "triage")
+
+      assert {:ok, first} = fire(context, trigger, key.key, %{}, "delivery-1")
+      session_id = first.body["session_id"]
+
+      # The run as it is between its row being written and its session being made.
+      making =
+        Repo.update!(
+          Ecto.Changeset.change(Repo.get!(Run, first.body["run"]["id"]), session_id: nil)
+        )
+
+      repeat = Task.async(fn -> fire(context, trigger, key.key, %{}, "delivery-1") end)
+      Process.sleep(300)
+      run = Repo.update!(Ecto.Changeset.change(making, session_id: session_id))
+
+      assert {:ok, %{status: 202} = again} = Task.await(repeat, 30_000)
+      assert again.body["session_id"] == session_id
+
+      # One whose session never comes is a duplicate, and the answer names the run.
+      Repo.update!(Ecto.Changeset.change(run, session_id: nil))
+
+      assert {:ok, %{status: 409} = stuck} = fire(context, trigger, key.key, %{}, "delivery-1")
+      assert stuck.body["data"]["run"] == run.id
+      assert stuck.body["data"]["reason"] =~ "still starting its session"
     end
 
     test "fires twice when the caller says they are two", context do
@@ -375,10 +476,25 @@ defmodule Troupe.Plane.TriggerIngressTest do
     trigger
   end
 
-  # Waits out the last seconds of a minute, so a pair of requests made right after this
-  # cannot straddle the boundary the plane's idempotency window is drawn on.
-  defp same_minute! do
+  # The last tenth of a second of the minute before this one, which is less than a minute
+  # ago once the clock is short of :58; it waits for the next minute where it is not.
+  defp before_the_turn! do
     second = DateTime.utc_now().second
-    if second >= 55, do: Process.sleep((61 - second) * 1_000)
+    if second >= 58, do: Process.sleep((60 - second) * 1_000)
+
+    DateTime.utc_now()
+    |> Map.merge(%{second: 0, microsecond: {0, 6}})
+    |> DateTime.add(-100, :millisecond)
+  end
+
+  # A run moved back to `at`, under the key a firing without one was given then.
+  defp backdate!(%{"id" => id, "revision_hash" => hash, "trigger_id" => trigger_id}, at) do
+    Run
+    |> Repo.get!(id)
+    |> Ecto.Changeset.change(
+      fired_at: at,
+      idempotency_key: "webhook:#{trigger_id}:#{hash}:#{DateTime.to_iso8601(at)}"
+    )
+    |> Repo.update!()
   end
 end

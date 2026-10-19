@@ -848,12 +848,23 @@ defmodule Troupe.Plane.Web.Router do
     with {:ok, key} <- trigger_key(conn),
          {:ok, trigger} <- trigger_for(id, key),
          {:ok, event} <- webhook_event(conn.body_params) do
-      idempotency_key = idempotency_key(conn, trigger)
-
-      case Triggers.fire(trigger, "webhook", idempotency_key, event, "trigger-key") do
+      case fire_webhook(conn, trigger, event) do
         {:ok, fired} -> {:ok, Triggers.fired_json(fired)}
         {:error, %Error{} = error} -> {:error, error}
       end
+    end
+  end
+
+  # The caller's own key where it sends one, and the minute from the firing it repeats
+  # where it does not. An executor that retries a failed POST blindly gets the run it
+  # already made.
+  defp fire_webhook(conn, trigger, event) do
+    case get_req_header(conn, "idempotency-key") do
+      [key | _rest] when byte_size(key) > 0 ->
+        Triggers.fire(trigger, "webhook", "webhook:#{trigger.id}:#{key}", event, "trigger-key")
+
+      _none ->
+        Triggers.fire_in_window(trigger, "webhook", event, "trigger-key")
     end
   end
 
@@ -872,15 +883,6 @@ defmodule Troupe.Plane.Web.Router do
     case Triggers.by_key(id, key) do
       nil -> {:error, Error.new(:unauthenticated, %{reason: "no trigger answers that key"})}
       trigger -> {:ok, trigger}
-    end
-  end
-
-  # The caller's own key where it sends one, and the revision-plus-minute where it does
-  # not. An executor that retries a failed POST blindly gets the run it already made.
-  defp idempotency_key(conn, trigger) do
-    case get_req_header(conn, "idempotency-key") do
-      [key | _rest] when byte_size(key) > 0 -> "webhook:#{trigger.id}:#{key}"
-      _none -> Triggers.window_key(trigger)
     end
   end
 

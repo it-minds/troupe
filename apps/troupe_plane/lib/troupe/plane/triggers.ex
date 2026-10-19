@@ -386,22 +386,6 @@ defmodule Troupe.Plane.Triggers do
   defp drop_dead_key(trigger), do: trigger
 
   @doc """
-  The idempotency key for a firing whose caller supplied none.
-
-  The revision and the minute. An executor that retries a failed POST within the minute
-  gets the run it already made rather than a second session, which is the behaviour a
-  blind retry needs; an executor that means two firings sends its own key and gets two.
-  The revision is in it so that a firing which overlaps an edit is a new run: the second
-  POST is asking for something different from the first, whatever the clock says.
-  """
-  @spec window_key(Trigger.t()) :: String.t()
-  def window_key(%Trigger{} = trigger) do
-    {:ok, revision} = revise(trigger)
-    minute = %{DateTime.utc_now() | second: 0, microsecond: {0, 0}}
-    "webhook:#{trigger.id}:#{revision.hash}:#{DateTime.to_iso8601(minute)}"
-  end
-
-  @doc """
   The trigger this id and key name, or `nil`.
 
   One trigger, by id, and the key is checked against that row alone — there is no
@@ -513,6 +497,14 @@ defmodule Troupe.Plane.Triggers do
 
   # -- firing -----------------------------------------------------------------
 
+  # How long after a firing a POST without a key of its own is a retry of it.
+  @window_seconds 60
+
+  # How long a repeat waits for the session of a firing still making it. A create is a few
+  # writes and a placement, so one still going after five seconds is stuck.
+  @making_ms 5_000
+  @making_poll_ms 50
+
   @type fired :: %{
           trigger: Trigger.t(),
           revision: Revision.t(),
@@ -540,9 +532,8 @@ defmodule Troupe.Plane.Triggers do
   """
   @spec fire(Trigger.t(), String.t(), String.t(), map(), String.t()) ::
           {:ok, fired()} | {:error, Error.t()}
-  def fire(%Trigger{enabled: false} = trigger, _source, _key, _event, _by) do
-    {:error, Error.new(:forbidden, %{reason: "trigger is disabled", trigger: trigger.name})}
-  end
+  def fire(%Trigger{enabled: false} = trigger, _source, _key, _event, _by),
+    do: {:error, disabled(trigger)}
 
   def fire(%Trigger{} = trigger, source, key, event, by)
       when is_binary(source) and is_binary(key) and is_map(event) do
@@ -562,12 +553,109 @@ defmodule Troupe.Plane.Triggers do
     end
   end
 
+  @doc """
+  Fire a trigger for a caller that sent no idempotency key: a firing within a minute of
+  one before it, against the same revision, is that one's run, as `fire/5` with its key.
+
+  A minute from the firing it repeats, not the clock's minute, which split a POST at :59
+  from its retry a second later into two runs, the second skipped under the cap the
+  first held. An executor that retries a failed POST blindly gets the run it already
+  made; one that means two firings sends its own key and gets two. The revision is in
+  it so that a firing which overlaps an edit is a new run: the second POST is asking for
+  something different from the first, whatever the clock says.
+
+  Which run a firing is is decided under the trigger's row lock, so two that race, on
+  either side of a minute's turn or not, are one run. `now` is the firing's moment.
+  """
+  @spec fire_in_window(Trigger.t(), String.t(), map(), String.t(), DateTime.t()) ::
+          {:ok, fired()} | {:error, Error.t()}
+  def fire_in_window(trigger, source, event, by, now \\ DateTime.utc_now())
+
+  def fire_in_window(%Trigger{enabled: false} = trigger, _source, _event, _by, _now),
+    do: {:error, disabled(trigger)}
+
+  def fire_in_window(%Trigger{} = trigger, source, event, by, %DateTime{} = now)
+      when is_binary(source) and is_map(event) do
+    with :ok <- check_source(source),
+         :ok <- check_event(event) do
+      {:ok, revision} = revise(trigger)
+
+      case window_run(trigger, revision, source, event, by, now) do
+        {:ok, {:repeat, run}} ->
+          replay(trigger, run)
+
+        {:ok, {:new, run}} ->
+          start(trigger, revision, run)
+
+        {:error, changeset} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+      end
+    end
+  end
+
+  # Under the trigger's row, so the firing that comes second, by a moment or across a
+  # minute's turn, reads the run the first wrote.
+  defp window_run(trigger, revision, source, event, by, now) do
+    Repo.transaction(fn -> locked_window_run(trigger, revision, source, event, by, now) end)
+  end
+
+  defp locked_window_run(trigger, revision, source, event, by, now) do
+    _locked =
+      Repo.one(from(t in Trigger, where: t.id == ^trigger.id, select: t.id, lock: "FOR UPDATE"))
+
+    window = "#{source}:#{trigger.id}:#{revision.hash}:"
+
+    with nil <- in_window(trigger, window, now),
+         key = window <> DateTime.to_iso8601(now),
+         {:ok, run} <- insert_run(trigger, revision, source, key, event, by, now) do
+      {:new, run}
+    else
+      %Run{} = run -> {:repeat, run}
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+
+  # The latest firing of this trigger and revision without a key of its own, within a
+  # minute before `now` or after it: one that took the lock first may have read the clock
+  # after this one did. The window keys before these were the minute's, under the same
+  # prefix, so a firing from just before an upgrade is found as well.
+  defp in_window(trigger, window, now) do
+    since = DateTime.add(now, -@window_seconds, :second)
+
+    Repo.one(
+      from(r in Run,
+        where:
+          r.trigger_id == ^trigger.id and r.fired_at > ^since and
+            like(r.idempotency_key, ^(window <> "%")),
+        order_by: [desc: r.fired_at],
+        limit: 1
+      )
+    )
+  end
+
+  defp disabled(trigger),
+    do: Error.new(:forbidden, %{reason: "trigger is disabled", trigger: trigger.name})
+
   defp fire_new(trigger, revision, source, key, event, by) do
+    case insert_run(trigger, revision, source, key, event, by, DateTime.utc_now()) do
+      {:ok, run} ->
+        start(trigger, revision, run)
+
+      {:error, changeset} ->
+        # The unique key said somebody else fired first, between our lookup and our
+        # insert. Their run is the run.
+        if duplicate_key?(changeset),
+          do: replay(trigger, Repo.get_by!(Run, idempotency_key: key)),
+          else: {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+    end
+  end
+
+  defp insert_run(trigger, revision, source, key, event, by, fired_at) do
     attrs = %{
       trigger_id: trigger.id,
       revision_id: revision.id,
       idempotency_key: key,
-      fired_at: DateTime.utc_now(),
+      fired_at: fired_at,
       fired_by: by,
       source: source,
       event: event,
@@ -578,25 +666,19 @@ defmodule Troupe.Plane.Triggers do
       state: "created"
     }
 
-    case %Run{} |> Run.changeset(attrs) |> Repo.insert() do
-      {:ok, run} ->
-        cond do
-          live_runs(trigger, run) >= revision.concurrency ->
-            skip(trigger, revision, run, concurrency_reason(trigger, revision.concurrency))
+    %Run{} |> Run.changeset(attrs) |> Repo.insert()
+  end
 
-          over = over_repository_cap(trigger, revision, run) ->
-            skip(trigger, revision, run, over)
+  defp start(trigger, revision, run) do
+    cond do
+      live_runs(trigger, run) >= revision.concurrency ->
+        skip(trigger, revision, run, concurrency_reason(trigger, revision.concurrency))
 
-          true ->
-            create(trigger, revision, run)
-        end
+      over = over_repository_cap(trigger, revision, run) ->
+        skip(trigger, revision, run, over)
 
-      {:error, changeset} ->
-        # The unique key said somebody else fired first, between our lookup and our
-        # insert. Their run is the run.
-        if duplicate_key?(changeset),
-          do: replay(trigger, Repo.get_by!(Run, idempotency_key: key)),
-          else: {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+      true ->
+        create(trigger, revision, run)
     end
   end
 
@@ -716,8 +798,22 @@ defmodule Troupe.Plane.Triggers do
     create(trigger, revision, run)
   end
 
+  # Neither skipped nor failed and no session yet: the firing that wrote it is making its
+  # session, in another request, and this one overtook it. It is waited for, so a retry
+  # is answered with the session the first one gets; one still being made after that is
+  # a duplicate, and the answer names the run.
   defp replay(trigger, revision, %Run{session_id: nil} = run) do
-    {:ok, fired(trigger, revision, run, nil, nil)}
+    case made(run, @making_ms) do
+      %Run{state: "created", session_id: nil} ->
+        {:error,
+         Error.new(:conflict, %{
+           reason: "the run this firing repeats is still starting its session",
+           run: run.id
+         })}
+
+      settled ->
+        replay(trigger, revision, settled)
+    end
   end
 
   defp replay(trigger, revision, %Run{session_id: session_id} = run) do
@@ -725,6 +821,20 @@ defmodule Troupe.Plane.Triggers do
          {:ok, endpoint} <-
            Harness.call("token.mint", %{"session_id" => session_id}, context(user)) do
       {:ok, fired(trigger, revision, run, Sessions.get(session_id), endpoint)}
+    end
+  end
+
+  defp made(run, left) do
+    case Repo.get(Run, run.id) do
+      %Run{state: "created", session_id: nil} when left > 0 ->
+        Process.sleep(@making_poll_ms)
+        made(run, left - @making_poll_ms)
+
+      %Run{} = now ->
+        now
+
+      nil ->
+        run
     end
   end
 

@@ -159,7 +159,9 @@ minute is within the last 120 s.
 **Firing by hand or from outside.** `trigger.fire {trigger, idempotency_key, event}` on
 `/rpc`, by the trigger's principal or an admin of its team, writes the run row first, so
 two callers racing on one key get the same run: skipped stays skipped, failed is retried, a
-run with a session is handed it and a fresh token. `event` is capped at 16 KiB.
+run with a session is handed it and a fresh token, and one still making its session is waited
+for, up to five seconds, after which the answer is `409` naming the run. `event` is capped at
+16 KiB.
 `admin.trigger.run` fires one by hand, as the console's **Run now** on a trigger's page does;
 its key names the caller and the minute, so a second click or a retry within the same minute
 is the run the first one made.
@@ -168,8 +170,9 @@ is the run the first one made.
 `Authorization: Bearer <key>` and a JSON object as the body, which becomes the run's
 `event`. The key fires that one trigger and nothing else, which makes it the credential to
 give a CI job or a provider's webhook; a wrong key and an unknown id get the same `401`. An
-`Idempotency-Key` header names the run; without one, a retry in the same minute against the
-same revision gets the run it already made. The answer is `202` with the run and where its
+`Idempotency-Key` header names the run; without one, a retry within a minute of the firing it
+repeats, against the same revision, gets the run that firing made, whatever minute the clock
+has turned to between them. The answer is `202` with the run and where its
 session is, as from `trigger.fire`; a disabled trigger is `403`, an event over 16 KiB `413`
 and a team with no budget left `402`. `source.kind: webhook` says a trigger is meant to be
 fired from outside, this way or by an executor that calls `trigger.fire`.
