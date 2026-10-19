@@ -33,11 +33,10 @@ Arguments and their meanings are in the method table
    busy one sooner ([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)).
 
 **Upgrading to 0.17.0 from earlier, with workers running.** Workers before it ran under
-the runtime's default seccomp profile and with the runtime's masked `/proc`, which between
-them refuse bubblewrap its user namespace and its own `/proc`, so their pods refused every
+the runtime's default seccomp profile and masked `/proc`, so their pods refused every
 command. The chart now gives the worker container its own seccomp profile
-(`worker.seccomp`) and a DaemonSet to put it on the nodes, and runs each worker pod in a
-user namespace of its own with its `/proc` unmasked (`worker.userNamespaces`)
+(`worker.seccomp`), with a DaemonSet that puts it on the nodes, and runs each worker pod in
+a user namespace of its own with its `/proc` unmasked (`worker.userNamespaces`)
 ([installing.md](installing.md#the-workers-seccomp-profile)). Before upgrading:
 
 1. Run the cluster check in
@@ -58,26 +57,25 @@ in `CreateContainerError` until it has.
 
 **Upgrading to 0.19.0 from earlier, with workers running.** On nodes that enforce
 AppArmor (Ubuntu's), workers before it ran under the runtime's default AppArmor profile,
-which refuses bubblewrap's mounts ("Failed to make / slave"), so their pods refused every
-command there. The chart now gives the worker container an AppArmor profile of its own
-(`worker.appArmor`, on by default) and loads it into every node's kernel
-([installing.md](installing.md#the-workers-apparmor-profile)). The node sysctl
-`kernel.apparmor_restrict_unprivileged_userns` stays as the node has it. What changes:
+which refuses bubblewrap's mounts, so their pods refused every command there. The chart now
+gives the worker container an AppArmor profile of its own (`worker.appArmor`, on by
+default) and loads it into every node's kernel
+([installing.md](installing.md#the-workers-apparmor-profile)); the node's sysctl stays as
+it is. What changes:
 
 1. The DaemonSet is now `troupe-worker-profiles` (Helm removes `troupe-worker-seccomp` and
-   makes it), and it has a second container, `apparmor`, with **a new privilege**: root in
-   the node's user namespace with the `MAC_ADMIN` capability, no AppArmor profile of its own
-   (`Unconfined`), and the host's `/sys/kernel/security` mounted. `troupe-system` already
-   needs the `privileged` Pod Security level for the DaemonSet; nothing else is needed.
-2. The operator's image carries `apparmor_parser` for it, and the DaemonSet runs that image.
-3. Where the nodes run no AppArmor (most non-Ubuntu node images), set
-   `worker.appArmor.enabled: false`: the kubelet refuses a pod that asks for a profile on a
-   node without it ("Cannot enforce AppArmor"). Where something else loads the profile,
-   set `worker.appArmor.install.enabled: false` and `worker.appArmor.profile` to its name.
+   makes it), with a second container, `apparmor`, which has **a new privilege**: root in
+   the node's user namespace with `MAC_ADMIN`, unconfined by AppArmor, and the host's
+   `/sys/kernel/security`. It runs the operator's image, which carries `apparmor_parser`.
+   `troupe-system` already has the `privileged` Pod Security level it needs.
+2. Where the nodes run no AppArmor (most non-Ubuntu node images), set
+   `worker.appArmor.enabled: false`, or the kubelet refuses every worker pod ("Cannot
+   enforce AppArmor"). Where something else loads the profile, set
+   `worker.appArmor.install.enabled: false` and `worker.appArmor.profile` to its name.
 
-The setting changes every profile's pod template: each reports `UpgradePending` and its
-pods are replaced as they empty, under the profile. `kubectl -n troupe-system rollout status
-daemonset/troupe-worker-profiles` says every node has it.
+Each profile then reports `UpgradePending` and its pods are replaced as they empty;
+`kubectl -n troupe-system rollout status daemonset/troupe-worker-profiles` says every node
+has the profile.
 
 **Upgrading to 0.20.0 from earlier.** The control port now takes TLS only by default
 (`plane.controlTls.requireTls: true`): a worker that dials it in plaintext is closed
@@ -99,14 +97,11 @@ plaintext control connection", once a minute per address with the count of the r
 profile whose namespace has no `troupe-plane-ca` yet says so in its `PlaneCAMissing`
 condition.
 
-**Identity, from 0.20.0.** A sign-in or a SCIM push that finds nobody under its subject
-adopts the row SCIM gave that `externalId` only when the row's email or `userName` agrees
-with the token's or the push's. Otherwise the sign-in gets a row of its own, a push is
-refused (`409`, `uniqueness`), the refusal is audited as `person.adopt_refused`, and
-`admin.identity.duplicates` lists the pair ([§SCIM](#scim)). A SCIM `PUT` to
-`/Users/<id>` changes the person at that id, and a push under a `removed:` or `svc:`
-subject is refused. A person SCIM deletes comes off every trigger's `notify` list, and
-their spend stays with their tombstone.
+**Identity, from 0.20.0.** A sign-in or a SCIM push adopts the row SCIM gave its subject
+as `externalId` only when the email or `userName` agrees; otherwise a push is refused and
+the pair is listed, to be settled as in [SCIM](#scim). A `PUT` changes the person at its id,
+a `removed:` or `svc:` subject is refused, and a person SCIM deletes leaves every trigger's
+`notify` list ([integrations.md §8](integrations.md#8-scim)).
 
 A release publishes the chart and the images and deploys nothing; every deployment rolls
 it this way, from wherever it keeps its own values.
@@ -147,19 +142,16 @@ in the answer once. `admin.principal.rotate` (the old secret stops at once) and
 ## Drain, restart, scale
 
 `admin.profiles.list` names the pods; `admin.pod.drain {worker_id}` sends their sessions to
-dormancy, to be placed elsewhere. A pod on an older revision (`UpgradePending: True`, after
-a new image or env) needs nothing more: once it is drained, by you or by the plane when it
-holds no session, the operator replaces it, one at a time, with its volume kept
-([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)). **Follow a
-drain of any other pod with**
+dormancy, to be placed elsewhere. The operator replaces a drained pod on an older revision
+(`UpgradePending: True`) by itself. **Follow a drain of any other pod with**
 
 ```bash
 kubectl -n troupe-w-<profile> delete pod troupe-w-<profile>-<ordinal>
 ```
 
 because nothing else restarts a drained pod that is current. Scale with `max_sessions` and
-`warm_workers` on `admin.profile.put`; the plane computes replicas, and drains the pods a
-lower count removes before it removes them ([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)).
+`warm_workers` on `admin.profile.put`; the plane computes replicas
+([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)).
 
 ## Settings
 
@@ -193,13 +185,12 @@ Nothing set serves every version.
   version may not be blocked, and the minimum may not be newer than it.
 
 The desktop app follows the same policy (Decision 874). Signed in here, it calls the
-plane's `initialize` as `troupe-gui` with its version when it starts and once a day: on a
-blocked version or below `minimum` it says the refusal's sentence, keeps to the sessions
-on its own computer, and offers **Update now**; below `recommended` it offers the update
-quietly. It updates itself, and the troupe-daemon beside it, to the `desktop` component's
-recommended version (the latest release when there is none), never to a blocked one or one
-below the minimum, never backwards, and only from a release the release key signed. It
-asks the person before it restarts.
+plane's `initialize` as `troupe-gui` with its version at start and once a day: blocked or
+below `minimum`, it says the refusal's sentence, keeps to the sessions on its own computer
+and offers **Update now**; below `recommended`, it offers the update quietly. It updates
+itself and the troupe-daemon beside it to the `desktop` component's recommended version
+(the latest release when there is none), never to a blocked one, below the minimum or
+backwards, only from a release the release key signed, and asks before it restarts.
 
 Write versions as releases are numbered (`0.13.0-beta`): they are ordered as SemVer orders
 them, which puts `0.13.0-beta` before `0.13.0`. A client from before 0.13 does not say its
@@ -265,21 +256,16 @@ after the last pod runs on the new one.
 plane destroys the key first, then every object version goes; the owner is not told; spend
 stays in the ledger; the audit row keeps your name. The answer's `state` says whether the
 key went: `erased`, or `erasure_pending` when OpenBao refused or could not be reached,
-which also shows in the session list. Erase it again to retry; the plane also retries every
-five minutes (Decision 811). A team session's objects are deleted by a pod of its profile:
-with no healthy pod they wait until one enrols, and so do any the object store would not
-delete; the pod's log says how many were left and why (Decision 804).
+which the session list shows too. Erase it again to retry; the plane also retries every
+five minutes (Decision 811), and its first pass after an upgrade from before 0.9.0 destroys
+the keys earlier team-session erasures left, logging how many it could not.
 
-A team session's key is destroyed by the plane from 0.9.0 on, and keys left by earlier
-erasures are destroyed once on upgrade: the first erasure pass after the plane starts
-destroys the key of every team session with a tombstone, and its log line says how many it
-destroyed and how many it could not, which are tried again every five minutes.
-
-A person's private session has no pod. The plane destroys its key the same way, and the
-owner's daemon retries it too the next time it is signed in. Its objects go once the owner's
-daemon has connected and dropped its own copy; until then they are unreadable, because the
-key is gone (Decision 756). Any the object store refuses to delete are tried again at that
-daemon's next connection, and the plane's log says how many were left and why (Decision 804).
+A team session's objects are deleted by a pod of its profile: with no healthy pod they wait
+until one enrols. A private session has no pod: the owner's daemon retries the key too the
+next time it is signed in, and the objects go once it has connected and dropped its own
+copy, unreadable until then because the key is gone (Decision 756). Objects the store would
+not delete are tried again at the next enrolment or connection, and the log says how many
+were left and why (Decision 804).
 
 ## Decommission a profile
 

@@ -73,6 +73,11 @@ interface Session {
   device?: string | null;
   /** The session this one is a branch of. */
   parent?: string | null;
+  /**
+   * Offered to the plane for steering from another device (troupe #58), as
+   * `remote.offer` left it and `session.list` says it.
+   */
+  remote?: { owner: string | null; shares: Array<{ subject: string; role: string }>; state: string; since: string | null; steering: unknown[] } | null;
 }
 
 interface Client {
@@ -1193,6 +1198,29 @@ export class FakeDaemon {
         });
       }
 
+      // A session offered to the plane for steering from another device, and taken back
+      // (troupe #58): a private one is refused, as the daemon refuses it.
+      case "remote.offer": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        if (session.kind === "private") {
+          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: "a private session is never offered to the plane" } });
+        }
+        const share = Array.isArray(params["share"]) ? (params["share"] as Array<{ person: string; role?: string }>) : [];
+        session.remote = {
+          owner: this.linked?.subject ?? null,
+          shares: share.map((s) => ({ subject: s.person, display_name: s.person, email: s.person, role: s.role ?? "observe" })),
+          state: "online",
+          since: null,
+          steering: [],
+        };
+        return reply(ws, id, { session_id: sessionId, remote: session.remote });
+      }
+
+      case "remote.withdraw": {
+        if (session) session.remote = null;
+        return reply(ws, id, { session_id: sessionId, remote: null });
+      }
+
       // A private session another device holds, taken over here (troupe Decision 785).
       case "session.claim": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
@@ -2265,6 +2293,7 @@ export class FakeDaemon {
       unseen: this.unseenOf(s),
       failed: this.failedOf(s),
       config: { watch: s.watch },
+      remote: s.remote ?? null,
     };
   }
 }

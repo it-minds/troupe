@@ -10,7 +10,7 @@ defmodule Troupe.Plane.BundlesTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Bundles, FakePod, Fleet, Harness, Identity, Provision, Sessions}
+  alias Troupe.Plane.{Bundles, FakePod, Fleet, Harness, Identity, Memory, Provision, Sessions}
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.Fleet.Bundle
 
@@ -470,6 +470,32 @@ defmodule Troupe.Plane.BundlesTest do
       {:ok, _} = Fleet.put_profile(%{name: "dev", spec: spec})
 
       assert pushed(pod, later, user)["personal_tools"] == "forbid"
+    end
+
+    # Issue #55: the memory documents a session reads ride the same way, the organisation's,
+    # its team's and its profile's, none of another team's, so a save reaches a session at
+    # its next wake and restarts no pod.
+    test "the push carries the organisation's, the team's and the profile's memory", context do
+      {:ok, v1} = Bundles.publish("stable", %{"agents" => ["build"]}, announce: false)
+      pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+      user = granted_user()
+      before = dormant_session(user, "dev", v1.version)
+      later = dormant_session(user, "dev", v1.version)
+
+      assert pushed(pod, before, user)["memory"] == []
+
+      _design = team_with_grant("design", "dev", name: "design")
+      {:ok, _} = Memory.put(:organisation, "Everyone.", "root@example.test")
+      {:ok, _} = Memory.put(Identity.get_team("engineering"), "Engineering.", "root@example.test")
+      {:ok, _} = Memory.put(Identity.get_team("design"), "Design only.", "root@example.test")
+      {:ok, _} = Memory.put("dev", "On dev.", "root@example.test")
+
+      assert Enum.map(pushed(pod, later, user)["memory"], &{&1["scope"], &1["name"], &1["text"]}) ==
+               [
+                 {"organisation", nil, "Everyone."},
+                 {"team", "engineering", "Engineering."},
+                 {"profile", "dev", "On dev."}
+               ]
     end
 
     # Issue #724: the profile's per-tool rules ride the same way, each with the profile that

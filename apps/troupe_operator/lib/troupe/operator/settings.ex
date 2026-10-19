@@ -25,6 +25,9 @@ defmodule Troupe.Operator.Settings do
             # Then each profile's pods log in as `troupe-worker-<profile>`, the role its
             # own policy is bound to; otherwise every pod logs in as `troupe-worker`.
             bao_role_per_profile: false,
+            # The Kubernetes-auth mount pods log in at, as the plane's `bao.authPath` names
+            # it for the plane. A pod is told it only where it is not the default.
+            bao_auth_path: "kubernetes",
             object_store_endpoint: "http://minio.troupe-system.svc:9000",
             object_store_bucket: "troupe-sessions",
             # The region every signature over that bucket claims. It matters even

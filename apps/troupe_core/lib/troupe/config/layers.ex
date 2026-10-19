@@ -73,6 +73,9 @@ defmodule Troupe.Config.Layers do
               # Every file's per-tool rules, each with its layer and file
               # (`Troupe.Config.Permissions`): kept from every scope, not merged.
               rules: [],
+              # The organisation's memory documents in force, and where they came from
+              # (`Troupe.PlaneMemory`): set as the configuration is resolved.
+              memory: nil,
               warnings: [],
               refusals: [],
               errors: []

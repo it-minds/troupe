@@ -28,8 +28,10 @@ import { Policy } from "./Policy";
 import { Profile, Profiles } from "./Profiles";
 import { TriggerPage, Triggers } from "./Triggers";
 import { Organisation } from "./Organisation";
+import { Memory } from "./Memory";
 import { Overview } from "./Overview";
 import { RunPage, Runs } from "./Runs";
+import { RemoteSession } from "./Remote";
 import { Sessions } from "./Sessions";
 import { Team } from "./Team";
 import { Teams } from "./Teams";
@@ -149,12 +151,15 @@ function Screen({ route }: { route: Route }): JSX.Element {
   if (route.page === "teams" && route.team) return <Team name={route.team} tab={route.tab ?? "members"} />;
   if (route.page === "teams") return <Teams />;
   if (route.page === "overview") return <Overview />;
+  // A laptop's session offered to this person, steered from here.
+  if (route.page === "sessions" && first === "remote" && second) return <RemoteSession id={second} key={second} />;
   if (route.page === "sessions") return <Sessions query={first ?? ""} key={first ?? ""} />;
   if (route.page === "runs" && first) return <RunPage id={first} key={first} />;
   if (route.page === "runs") return <Runs />;
   if (route.page === "audit") return <Audit />;
   if (route.page === "clients") return <ClientVersions />;
   if (route.page === "organisation") return <Organisation />;
+  if (route.page === "memory") return <Memory />;
   if (route.page === "integrations") return <Integrations />;
   if (route.page === "identity") return <Identity />;
   if (route.page === "signin") return <IdentityProvider />;

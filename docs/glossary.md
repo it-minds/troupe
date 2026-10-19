@@ -60,8 +60,8 @@ open when none is running on its own.
 ### Gateway
 
 A proxy in front of model providers, such as LiteLLM or vLLM, reached with one URL and one
-key. Troupe talks to one as an OpenAI-compatible provider with a `base_url`, and records the
-cost a gateway reports for each call.
+key. Troupe talks to one as a provider of the API it speaks, usually `openai`, with a
+`base_url`, and records the cost a gateway reports for each call.
 
 ### Goal and loop
 
@@ -113,7 +113,7 @@ Every event in a log names the principal behind it.
 
 A kind of worker, written as a `WorkerProfile`: an image, a model, tools, storage and which
 bundle channel it follows. A remote session runs on one, and a team may use the profiles
-granted to it.
+granted to it; with only one, you never have to name it.
 
 ### Project brief
 
@@ -126,9 +126,10 @@ with `remember`; a `librarian` session surveys the repository and keeps them cur
 
 ### Provider
 
-Where the model is: Anthropic, OpenAI, or any endpoint that speaks the Anthropic or the
-OpenAI API. You bring
-the key; Troupe calls it and counts what each call used.
+Where the model is: Anthropic, OpenAI, Azure OpenAI, Gemini, OpenRouter, Ollama, or a
+gateway that speaks Anthropic's or OpenAI's API
+([provider types](user/configuration.md#provider-types)). You bring the key; Troupe calls
+it and counts what each call used.
 
 ### Service principal
 
@@ -164,7 +165,8 @@ review until somebody has looked.
 ### Worker
 
 A pod, or a machine the plane provisions, that runs the harness for the plane. A profile
-has as many as its sessions need, and none while it is idle; each holds many sessions, and a client reaches it directly over a WebSocket with a short-lived token.
+has as many as its sessions need, and none while it is idle; each holds many sessions, and
+a client reaches it directly over a WebSocket with a short-lived token.
 
 ### Workspace
 

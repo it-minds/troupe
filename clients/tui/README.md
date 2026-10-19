@@ -1,230 +1,56 @@
 # troupe, the terminal client
 
 `troupe` is the terminal client of the Troupe harness. Every session runs in the troupe
-daemon — the `troupe-daemon` on this machine, or, when none is running, the same daemon
-started inside `troupe` itself — or on a plane's worker pod, and the TUI speaks to all of
+daemon (the `troupe-daemon` on this machine, or, when none is running, the same daemon
+started inside `troupe` itself) or on a plane's worker pod, and the TUI speaks to all of
 them over [`PROTOCOL.md`](../../PROTOCOL.md): a remote session looks exactly like a local
 one. It ships as one self-contained executable per platform (Linux, macOS, Windows) built
 with [Burrito](https://github.com/burrito-elixir/burrito); users need no Erlang or Elixir
 installed.
 
-It lives at `clients/tui` in the Troupe repository, a Mix project of its own. The harness
-it runs — `troupe_core`, `troupe_gateway` and `troupe_protocol` — is not in this
-directory: it is the umbrella's own source in `../../apps`, a path dependency at the same
-commit, and the root [ARCHITECTURE.md](../../ARCHITECTURE.md) describes it.
-
 A session opens in **command mode**: not a chat with an agent, but one screen over
 everything the session has going. A line that does not start with `/` is work: Enter starts
-the default agent (`build`) on it in your checkout, as a **branch** — a session of its own
-— and returns control immediately; Ctrl-N chooses the agent instead, with its instruction
-on screen, and whether it works in a worktree of its own. `/plan look at the parser` or
-`/worktree add rate limiting` start one too. Every branch is a window in the TUI. Branches
-run concurrently; a window that needs you (an approval, a question) blinks; you activate
-it, answer, and go back to what you were doing. When nothing is running the harness is
-truly idle: zero LLM calls, zero tokens.
+the default agent (`build`) on it in your checkout, as a **branch** (a session of its own),
+and returns control at once; Ctrl-N chooses the agent instead, with its instruction on
+screen, and whether it works in a worktree of its own. `/plan look at the parser` or
+`/worktree add rate limiting` start one too. Every branch is a window. Branches run
+concurrently; a window that needs you (an approval, a question) blinks; you activate it,
+answer, and go back to what you were doing. When nothing is running the harness is truly
+idle: no model calls, no tokens.
 
 ## Install
 
-`troupe` is released with the rest of the repository: every release on this repository's
-GitHub releases page carries a binary per platform, `troupe-<version>-<target>` (`.exe` on
-Windows), beside `troupe-daemon-<version>-<target>.tar.gz` and one `SHA256SUMS`. The
-installers at the repository root put `troupe-daemon` on the machine, and `troupe`, the
-desktop app and the VS Code extension when asked (`--tui`, `--gui`, `--vscode`; `-Tui`,
-`-Gui`, `-VSCode` on Windows), and check them against `SHA256SUMS` before replacing
-anything:
+The installers put `troupe` on the machine with the daemon when asked (`--tui`, `-Tui` on
+Windows): the [quick start](../../docs/quick-start.md#1-install) has the two commands, and
+[the daemon's page](../../apps/troupe_daemon/README.md#install) every installer option.
+Every release carries a binary per platform, `troupe-<version>-<target>` (`.exe` on
+Windows). `scripts/build-local` builds one for this host and installs it as `troupe` in
+`~/.local/bin`. `troupe update` installs a newer release over `troupe` and `troupe-daemon`
+once its signature checks, replacing the daemon only between turns; `--check` says what it
+would do and `--rollback` puts the previous ones back ([updating](../../docs/user/updating.md)).
 
-```sh
-curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh
-sh install.sh --tui
-```
-
-```powershell
-irm https://github.com/it-minds/troupe/releases/latest/download/install.ps1 -OutFile install.ps1
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -Tui
-```
-
-The copy attached to a release installs that release, and `TROUPE_VERSION=0.15.0-beta`
-names another (with `minisign` installed, none from before 0.13, which were not signed). The daemon is always installed; in a terminal, with neither flag, they ask which
-clients to add, and `-y` / `-Yes` asks nothing. A private repository answers
-`/releases/latest` only to somebody signed in, so there the installers ask for
-`TROUPE_VERSION`, and `TROUPE_RELEASE_URL` names a mirror. To build a binary yourself,
-`scripts/build-local` builds one for this host and installs it as `troupe` in
-`~/.local/bin`.
-
-`troupe update` installs a newer release over `troupe` and `troupe-daemon` once its
-signature checks against the release key this build carries, replacing the daemon only
-between turns; `--check` says what it would do and `--rollback` puts the previous ones back
-([updating](../../docs/user/updating.md)).
-
-`troupe` uses the daemon already running on this machine, found through its
-`daemon.json` as every client finds it, and starts the same daemon inside itself when
-none is. `troupe daemon run` starts the standalone `troupe-daemon` instead — found through
-`TROUPE_DAEMON_COMMAND` or on the `PATH` — and `troupe daemon status` says whether one is
+`troupe` uses the daemon already running on this machine, found through its `daemon.json`
+as every client finds it, and starts the same daemon inside itself when none is.
+`troupe daemon run` starts the standalone `troupe-daemon` instead (found through
+`TROUPE_DAEMON_COMMAND` or on the `PATH`), and `troupe daemon status` says whether one is
 running. `troupe daemon login on` has the standalone one start every time you log in and
 stay up, `troupe daemon login off` takes that back, and a first run that saves settings
 asks the same question.
 
-### Unsigned binaries
-
-The binaries are not code-signed.
-
-* **macOS Gatekeeper**: downloads made with `curl` carry no quarantine
-  attribute and run directly. If you downloaded with a browser, either
-  right-click → Open once, or run `xattr -d com.apple.quarantine ~/.local/bin/troupe`.
-* **Windows SmartScreen**: the first run may show "Windows protected your PC".
-  Click *More info* → *Run anyway*. `Invoke-WebRequest` downloads do not carry
-  a Mark-of-the-Web, so the installer itself is unaffected.
-
 ## Configure a provider
 
-```yaml
-# ~/.config/troupe/config.yaml (Linux/macOS) or %APPDATA%\troupe\config.yaml
-provider: anthropic          # anthropic | openai | fake
-api_key: "{env:MY_ANTHROPIC_KEY}"   # a variable, or the key itself; or TROUPE_API_KEY
-models:
-  default: claude-opus-5     # expensive: editing
-  cheap: claude-haiku-4-5    # cheap: exploration, synthesis, /ask
-compact_at: 0.8              # summarise older turns at 80% of the context window
-read_roots:                  # extra directories the *read* tools may reach into
-  - ~/src/some-dependency
-```
+`troupe setup`, or plain `troupe` on a machine with no settings and no key, asks for a
+provider, a key and models, and writes `config.yaml`
+([the first run](../../docs/user/README.md#first-run)). The file, a complete one for each
+provider, and every key are in the [cookbook](../../docs/user/configuration/cookbook.md)
+and [configuration](../../docs/user/configuration.md); `troupe config --explain` shows
+where each value came from, and `troupe config validate` checks the files.
 
-`read_roots` widens only reading. `read_file`, `grep`, `list_files` and `glob`
-may look inside these directories as well as the workspace, which is what lets
-the agent read a dependency's source without shelling out; `write_file` and
-`edit_file` are unaffected and can never write outside the workspace root.
-Paths are compared after resolving symlinks, so a link out of the workspace
-counts as wherever it actually points.
-
-A project `.troupe/config.yaml`, then a git-ignored `.troupe/config.local.yaml`,
-override keys, merging maps by key; environment variables (`TROUPE_PROVIDER`,
-`TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_MODEL`) override the files. A
-project's files set the provider, keys, approvals, MCP servers and read roots only
-once the workspace is on `trusted_workspaces` in this file, which
-`troupe config trust` in the workspace does. `provider: openai`
-speaks Chat Completions against any `base_url` (LiteLLM, vLLM, Mistral, ...).
-Every key, which file wins, and what is checked:
-[docs/user/configuration.md](../../docs/user/configuration.md);
-`troupe config --explain` shows where each value came from, and
-`troupe config validate` checks the files.
-
-### Several providers, or copying opencode's
-
-Name providers and address models as `<provider>/<model>`, so the expensive and
-the cheap model can live on different gateways:
-
-```yaml
-providers:
-  portal:
-    type: openai                       # openai (default) | anthropic
-    base_url: https://llm-gw.example/v1
-    api_key: ...
-    models: {glm-5.2: {context: 100000}, qwen3.6-35b: {context: 100000}}
-  anthropic:
-    type: anthropic
-    api_key: sk-ant-...
-models:
-  default: anthropic/claude-opus-5
-  cheap: portal/qwen3.6-35b
-```
-
-### Behind a gateway
-
-A gateway usually renames the models, and one in front of Anthropic normally
-takes a bearer token instead of `x-api-key`. Both are declared per provider, and
-each model may carry the effort level and the output cap to ask for:
-
-```yaml
-providers:
-  lego-anthropic:
-    type: anthropic
-    base_url: https://api.genai.example.com/anthropic/v1   # /v1 is not doubled
-    api_key: "{env:GENAI_TOKEN}"
-    auth: bearer                       # Authorization: Bearer; api_key (the default) sends x-api-key
-    models:
-      claude-opus-5:                   # the name you address
-        id: eu.anthropic.claude-opus-5 # the name that goes on the wire
-        context: 400000
-        max_output: 64000
-        reasoning_effort: medium       # none | minimal | low | medium | high | xhigh | max, or tokens
-```
-
-`reasoning_effort` goes to an OpenAI-compatible provider verbatim (with
-`max_completion_tokens`, which is what a reasoning model wants); for Anthropic it
-becomes adaptive thinking at that level (a thinking budget, for a model before Opus 4.7),
-and raises the output cap to fit. The session-wide
-provider takes `auth: bearer` too, or `TROUPE_AUTH_TOKEN`.
-
-### MCP servers
-
-[MCP (Model Context Protocol)](https://modelcontextprotocol.io) servers extend
-the agent with extra tools — a filesystem, a database, a browser — without
-changing how Troupe works. Each server you configure connects at session start,
-advertises its tools, and the agent can call them with `y`/`n` approval, just
-like `shell` or `web_fetch`. Tools are namespaced `mcp.<server>.<tool>`, so
-they never collide with built-in tools.
-
-```yaml
-mcp:
-  filesystem:                       # stdio server: a subprocess Troupe talks to over stdin/stdout
-    command: npx
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
-    env: {FOO: bar}                 # optional
-    cd: /some/dir                   # optional working directory
-  remote:                           # a server over HTTP (streamable HTTP)
-    url: http://localhost:3001/mcp
-```
-
-`/mcp` in the TUI shows each server's state (✓ ready, … connecting, ✗ error)
-and its tools. A server that fails to start is marked, not fatal — the rest
-still work; so is one whose `{env:VAR}` is not set, which is never started. A
-project's own `mcp:` starts nothing until the workspace is trusted.
-
-Servers you already have for Claude Code, Claude Desktop, Cursor or VS Code come
-over as they are: `/mcp import <path>` copies a `.mcp.json` into your own
-`mcp.json` beside `config.yaml`, `/mcp link <path>` reads it in place, and
-`/skills import <dir>` or `link` does the same for a directory of skills such as
-`~/.claude/skills`. `--workspace` on any of them writes the workspace's
-`.troupe/mcp.json` or `.troupe/skills/` instead, for whoever opens the
-repository. The page lists every server and skill with the layer it came from
-(`[user]`, `[workspace]`, `[config]`); `c` checks a server (and starts one written
-after the session began), `d` disables or enables it, `x` removes it. A
-workspace's own servers are commands a cloned repository would run, so the
-session asks before starting them — `deny`, `once` or `allow`, the last
-remembered for that workspace — and asks again when a command changes.
-
-Troupe does not read opencode's settings for a session. An existing opencode setup's
-providers are copied into `config.yaml` once, when you say so: `troupe config` and
-`troupe setup` offer it on a machine with no settings yet. The copy takes
-`options.baseURL`, `options.apiKey`, `options.authToken`, and per model `id`,
-`limit.context`, `limit.output` and `options.reasoningEffort` from
-`~/.config/opencode/opencode.jsonc` (keys also from its `auth.json`), and opencode's
-`model` as the default when you have none; an `{env:VAR}` stays a reference. `variants`,
-`agent` and `permission` are not copied; agents are files (see below), and `troupe
-onboard` brings opencode's in. `troupe config` prints what was resolved with keys masked.
-
-On a machine with no `config.yaml`, `troupe config` in a terminal sets one up instead.
-With opencode there, it offers to copy opencode's providers into `config.yaml`, keys as
-opencode has them written. Otherwise, or if you say no, it offers three choices: set up a provider here
-(Anthropic first, then OpenAI or a gateway: provider, URL, key and a model from what the
-provider lists; Enter at every question is Anthropic, with
-`api_key: "{env:ANTHROPIC_API_KEY}"`), take your organisation's settings from a plane
-(`troupe login`, then `troupe config pull`), or not now. Without a terminal it prints
-those choices and asks nothing. A `config.yaml` through which no model can be asked gets the
-report and then the same choices, and plain `troupe` opens `troupe setup`'s screen before
-it opens a session on a machine with no settings and no key. The installers end with the same check.
-
-Whatever finds no key says so with one next step, `troupe config`: the report's last
-line, a headless run's model error, and the first turn in the TUI. A first run finished
-in the desktop app is recorded by the daemon, and plain `troupe` asks nothing then.
-
-`troupe doctor` checks the setup and prints one line per check: the config files load,
-the default model's provider has a key, the key is accepted (a real request, the
-provider's model listing), where the key is kept, that the helper every command runs
-under starts, whether a daemon is running,
-`troupe-daemon` and `troupe` on the PATH, and every plane you are logged in to. A line
-that says `FAIL` makes the exit status 1; `warn` does not. `troupe-daemon doctor` prints
-the same lines.
+`read_roots` widens only reading: `read_file`, `grep`, `list_files` and `glob` may look in
+those directories as well as the workspace, which lets the agent read a dependency's
+source without shelling out. `write_file` and `edit_file` can never write outside the
+workspace root. Paths are compared after resolving symlinks, so a link out of the
+workspace counts as wherever it points.
 
 ## Use
 
@@ -243,33 +69,24 @@ troupe run plan "how should we split billing" --worktree
 troupe resume [SESSION_ID]              # no id: reopen the last session here, picker open
 troupe resume latest                    # the newest session here, straight in (--private: the newest private one)
 troupe resume ID --headless "go on"     # one turn on that session, printed as run --headless, then exit
-troupe models [--refresh]               # every model, its window and its price
-troupe doctor                           # check the setup, one line per check; exits 1 on a failure
-troupe login PLANE_URL                  # sign in to a plane (device flow)
-troupe logout [PLANE_URL] [--all]       # forget a plane's credentials
-troupe whoami [PLANE_URL]               # who the plane says you are, and your teams
 troupe --remote [PLANE_URL]             # HQ: teams, profiles and sessions on a plane
-troupe --version
 ```
 
 In VS Code, the extension's **Troupe: Open** runs `troupe --workspace <folder>` in a
-terminal at the folder you are working in, by default a tab beside your files, and
-**Ask Troupe About This File** adds `--prompt` with the file's path
-([vscode.md](../../docs/user/vscode.md)).
+terminal at the folder you are working in ([vscode.md](../../docs/user/vscode.md)).
 
-`troupe run --headless` prints the transcript, one line per event prefixed with the agent
-that wrote it, the harness's notes among them as the window shows them (`done:` and the
-summary, a compaction, a reply cut or empty) and the line saying what each turn cost when
-it ends (`turn: 3 calls · ↑ 300 sent · ...`), and exits when the agent comes to rest: when
-its turn ends, whether or not the model called `finish`. Nobody is there to answer an approval, so it is refused; pass
-`--auto-approve` for a task that writes files or runs commands, or set `auto_approve` in
-the config, which `--auto-approve`, `--watch` and `--full-send` beat only when given. A
-headless run starts no librarian: the project brief is refreshed automatically only for
-a session a person opens, in a git repository, with a model to ask
-(`memory_auto_refresh`), and not again within `memory_max_age_days` of a librarian that
-built nothing. When such a session starts none for want of a model, because the daemon
-did not start it, or while a try is waited out, its window says so in one line. The exit
-code says how the run ended, for scripts and CI:
+`troupe run --headless` prints the transcript, a line per event prefixed with the agent
+that wrote it, the harness's notes among them (`done:` and the summary, a compaction, a
+reply cut or empty) and each turn's cost line (`turn: 3 calls · ↑ 300 sent · ...`), and
+exits when the agent comes to rest: when its turn ends, whether or not the model called
+`finish`. An approval is refused, since nobody is there to answer it: pass
+`--auto-approve` for a task that writes files or runs commands, or set `auto_approve`,
+which `--auto-approve`, `--watch` and `--full-send` beat only when given. A headless run
+starts no librarian: the project brief is refreshed by itself only for a session a person
+opens, in a git repository, with a model to ask (`memory_auto_refresh`), and not again
+within `memory_max_age_days` of a librarian that built nothing; a session that starts
+none, for want of a model, because the daemon did not start it, or while a try is waited
+out, says so in one line. The exit code says how the run ended:
 
 | code | the run |
 |---|---|
@@ -285,27 +102,25 @@ alone, its turn line included, and exits with the same codes. `troupe --resume` 
 `troupe resume`. A session another device holds (it sealed it last, and it is that
 device's until you claim it here), or one that is erased or being erased, is refused in a
 sentence that says so and suggests `/new`; a dormant one, asleep or archived, is opened,
-and the next line wakes it.
+and the next line wakes it. The terminal UI needs a terminal: `troupe`, `troupe resume`
+and `troupe run` without `--headless`, with standard output sent to a file or a pipe, say
+so in one line and exit `1` rather than draw into it.
 
-The terminal UI needs a terminal: `troupe`, `troupe resume` and `troupe run` without
-`--headless`, with standard output sent to a file or a pipe, say so in one line and exit
-`1` rather than draw into it.
-
-Inside the TUI, every command starts with `/`, and `!cmd` runs a shell command where the
-session runs (`!!cmd` keeps it from the agent). Every built-in command, what it does and what
-it needs, is in [the command reference](../../docs/user/cli-reference.md#inside-a-session),
-generated from the harness's table as `troupe --help` is, and `/help`, `/` on an empty line
-or Ctrl-K opens the same list as the [command palette](#command-palette). Besides those,
-each agent is a command, and so is each command you write:
+Inside the TUI every command starts with `/`, and `!cmd` runs a shell command where the
+session runs (`!!cmd` keeps it from the agent). Every built-in command is in
+[the command reference](../../docs/user/cli-reference.md#inside-a-session), generated
+from the harness's table as `troupe --help` is, and `/help`, `/` on an empty line or Ctrl-K
+opens the same list as the [command palette](#command-palette). Besides those, each agent
+is a command, and so is each command you write:
 
 | command | effect |
 |---|---|
 | `/build <prompt>` | edit in your checkout (all tools); `/worktree <prompt>` does the same in a worktree of its own, then `/merge` or `/discard` |
-| `/workflow <task>` | run the engineering pipeline in a worktree: `orchestrate` delegates every step to a subagent |
+| `/workflow <task>` | run the engineering pipeline in a worktree: `orchestrate` delegates every step to a subagent ([workflows](../../docs/user/agents.md#workflows)) |
 | `/workflow <name> <task>` | the same, with the steps from `.troupe/workflows/<name>.json` |
 | `/plan <prompt>` | investigate and write a task list; read-only |
 | `/ask <question>` | answer across finished branches with the cheap model |
-| `/<name> [arguments]` | a command you or the repository wrote as `<name>.md` in your config's `commands/` or the workspace's `.troupe/commands/`: sends its prompt, with what follows the name for `$ARGUMENTS` ([configuration](../../docs/user/configuration.md#your-own-commands)) |
+| `/<name> [arguments]` | a command you or the repository wrote as `<name>.md` in your config's `commands/` or the workspace's `.troupe/commands/` ([your own commands](../../docs/user/agents.md#your-own-commands)) |
 
 Command mode, the screen with no window activated, lists what waits on you first (the
 start's questions, a window's approval or question, in the reserved colour), then a row
@@ -321,43 +136,49 @@ worktree of its own or `c` the checkout); with nothing typed, Ctrl-N's choice wa
 task on the command line. On a session on a plane, which runs one agent, a line is said to
 it.
 
-Keys: `1`–`9`, Enter, or a mouse click on its row or tile activate a window; Esc returns to the command line;
-`y`/`n`/`a` answer an approval (allow / deny / allow for session); typing +
-Enter sends input or answers a question, and when a question offers options a
-digit picks one (with `multiple`, digits tick and untick and Enter sends the
-ticked set); Alt-Enter (or Ctrl-J) puts a newline in the box instead of
-sending; Tab chooses the agent the window runs, each with its instruction beside it
-(`/plan` → Tab, `build` → "go" is plan-then-build; the window's title says which agent it
-runs); `xx` (x twice) cancels and removes the window; Tab on the command line completes command names and the window paths for `/merge`, `/discard`, `/cancel`, `/dismiss`; `dd`
-dismisses a finished window, keeping its worktree; `e` opens the turn you are reading, every frame of it, and closes it again; Ctrl-Y copies the
-transcript you are reading to the clipboard; `@file` completes paths;
-Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q exit. `/todo complete <n>`, `/todo cancel <n>` (the task's
-number in the side panel) and `/todo add <text>` edit the activated branch's task list. Any other
-command typed into a window's box runs as it would on the command line, on that window where it
-takes one (`/copy`, `/merge`); a line that names no command (`/usr/bin is missing`) goes to the
-window's agent.
+### Keys
 
-`x` and `d` are double presses (`xx`, `dd`) because the window they act in is also where you type:
-the first press puts the letter in the input box and the box says what a second one would do, and
-anything else you type — a reply beginning "do it" or "drop that" — keeps the letter as text.
+- **Windows.** `1`–`9`, Enter, or a click on its row or tile activates a window; Esc
+  returns to the command line. `xx` (x twice) cancels and removes the window; `dd`
+  dismisses a finished one, keeping its worktree. Tab chooses the agent the window runs,
+  each with its instruction beside it (`/plan` → Tab, `build` → "go" is plan-then-build;
+  the title says which agent runs).
+- **Answering.** `y`/`n`/`a` answer an approval (allow / deny / allow for the session).
+  Typing and Enter sends input or answers a question; when a question offers options a
+  digit picks one (with `multiple`, digits tick and untick and Enter sends the ticked
+  set). Alt-Enter or Ctrl-J puts a newline in the box instead of sending.
+- **Completing.** Tab on the command line completes command names and the window paths
+  for `/merge`, `/discard`, `/cancel` and `/dismiss`; `@file` completes paths.
+- **Reading.** `e` opens the turn you are reading, every frame of it, and closes it again;
+  Ctrl-Y copies the transcript you are reading to the clipboard.
+- **The task list.** `/todo complete <n>`, `/todo cancel <n>` (the task's number in the
+  side panel) and `/todo add <text>` edit the activated branch's.
+- **Quitting.** Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q.
 
-Selecting text with the mouse: drag across the pane and Troupe highlights what you cover; releasing
-the button copies it to the clipboard, and `Ctrl-Y` copies the selection while one is up (Esc clears
-it). Troupe owns the selection because mouse reporting — the thing that makes tiles clickable and the
-wheel scroll — takes click-and-drag away from the terminal, and it copies the rows as you see them,
-rails and line numbers stripped. For the terminal's own selection (rectangular blocks, selecting from
-the tiles or the observer), most emulators let you hold a modifier to bypass mouse reporting (Option
-on iTerm2 and Terminal.app, Shift on GNOME Terminal, Konsole and most X11 terminals), or start with
-`troupe --no-mouse` / turn the `mouse` setting off in `/settings` — windows are still `1`–`9` and the
-pane still scrolls with PgUp/PgDn, ↑/↓ and End. With nothing selected, `Ctrl-Y` and `/copy` copy a
-whole transcript, which no drag across a scrolling pane can.
+Any other command typed into a window's box runs as it would on the command line, on that
+window where it takes one (`/copy`, `/merge`); a line that names no command (`/usr/bin is
+missing`) goes to the window's agent. `x` and `d` are double presses because the window
+they act in is also where you type: the first press puts the letter in the box, which says
+what a second would do, and anything else you type (a reply beginning "do it" or "drop
+that") keeps the letter as text.
 
-Reading a transcript: a turn shows its answer, not its working. Everything rendered from
-something is a frame — the model's prose, a code block, a diff, a tool call and what came
-back, reasoning, data — on a surface of its own, one step from the terminal's background,
-with a rail, `▎`, down its left; what you typed and the notes between turns are not on it.
-By default (`quiet`) a turn's reasoning, its calls and the prose between them are one
-line where they began, above the answer:
+**Selecting text with the mouse.** Drag across the pane to highlight; releasing the
+button copies it, rails and line numbers stripped, and Ctrl-Y copies the selection while
+one is up (Esc clears it). Troupe owns the selection because mouse reporting, which makes
+tiles clickable and the wheel scroll, takes click-and-drag from the terminal. For the
+terminal's own (rectangular blocks, the tiles or the observer), hold your emulator's
+modifier (Option on iTerm2 and Terminal.app, Shift on GNOME Terminal, Konsole and most X11
+terminals), or turn `mouse` off (`troupe --no-mouse`, or `/settings`); windows are still
+`1`–`9`, and the pane still scrolls with PgUp/PgDn, ↑/↓ and End. With nothing selected,
+Ctrl-Y and `/copy` copy a whole transcript, which no drag across a scrolling pane can.
+
+### Reading a transcript
+
+A turn shows its answer, not its working ([reading a transcript](../../docs/user/README.md#reading-a-transcript)
+says what is common to both clients). Everything rendered from something is a frame on a
+surface one step from the terminal's background, with a rail, `▎`, down its left; what you
+typed and the notes between turns are not on it. By default (`quiet`) a turn's reasoning,
+its calls and the prose between them are one line where they began, above the answer:
 
 ```
 > fix the failing test
@@ -368,84 +189,73 @@ line where they began, above the answer:
 ```
 
 `e` opens the turn you are reading (the last one while the pane follows the tail, the one
-at the top of the view when you have scrolled) with every frame in it, as `everything`
-draws it, and `e` again closes it. `/detail quiet`, `/detail tools` or
-`/detail everything` changes how much of every turn is open for this session's screen,
-and draws the whole history again: `tools` opens each call's frame under the strip and
-keeps reasoning to its header (`▸ thinking · 12s`), `everything` collapses nothing, which
-is what a bug report wants. The default for every session is the `transcript.detail`
-setting, in `/settings`. Nothing in the session's log changes either way. Whatever the
-level, a call that failed is open with its error, an approval or a question waits in the
-reserved colour, and everything after a budget ran out is open. A frame longer than 24
-lines shows its first 20 and `… 42 more lines`, and opening its turn shows the rest in
-place; a scratchpad document stays a card that `/scratch` opens.
+at the top of the view when you have scrolled) as `everything` draws it, and `e` again
+closes it. `/detail quiet`, `/detail tools` or `/detail everything` sets how much of every
+turn is open on this session's screen and draws the history again: `tools` opens each
+call's frame and keeps reasoning to its header (`▸ thinking · 12s`), `everything`
+collapses nothing. A frame longer than 24 lines shows its first 20 and `… 42 more lines`,
+and opening its turn shows the rest in place; a scratchpad document stays a card that
+`/scratch` opens.
 
-Replies are rendered rather than printed raw. Headings, lists (nested ones indented, each
-level its own marker, `•` `◦` `▪`), tables, quotes and rules read as such, `inline code`
-and **bold** keep their emphasis without their markers, and a fenced block is a frame of
-its own inside the reply: code with its language (and its path when the fence names one),
-a rail down its left and full syntax highlighting; a `diff` with its path and `+n −m`;
-`csv`, `tsv` or `json` as a table with its row count, or as written when it is not one. A
-file an agent read is shown as numbered source, its line numbers in their own column and
-its indentation intact. What the TUI does not draw it leaves as written: raw HTML, images,
-footnotes, and a table wider than 100 columns, under a line that says so. The same
+Replies are rendered as in the desktop app, with these of the terminal's own: nested lists
+are indented, each level its own marker (`•` `◦` `▪`); `inline code` and **bold** keep their
+emphasis without their markers; code has full syntax highlighting; a `csv`, `tsv` or
+`json` block that is not one is shown as written; a file an agent read is numbered source,
+its line numbers in their own column. Raw HTML, images, footnotes, and a
+table wider than 100 columns are left as written, under a line that says so. The same
 colours run through diffs and tool calls, by outcome.
 
 While a turn works, the line under it says what is running, how many and for how long,
 after a few words from the theatre: `◐ the actors are powdering their nose — thinking
-(00:12)`, `◐ reading the script — running 2 tools: read_file a.ex, list_files lib
-(00:06)`. The facts are always there; the words never repeat within a turn, and are not
-there at all when a turn waits on you, in a window's tile, or in `troupe run --headless`,
-`troupe bench` or anything `--json` prints. The design behind all of this, which the
-desktop app follows too, is [docs/design/frames.md](../../docs/design/frames.md).
+(00:12)`. The words never repeat within a turn, and are not there when a turn waits on
+you, in a window's tile, or in `troupe run --headless`, `troupe bench` or anything
+`--json` prints. The design, which the desktop app follows too, is
+[docs/design/frames.md](../../docs/design/frames.md).
 
-Colours are the GUI's themes, generated from the same design tokens: Afterglow by
-default, or Signal, Footlight or Limelight — the `theme` setting in `/settings`, which is
-the desktop app's appearance setting too, so a theme picked in either is the one both
-draw in, at once. In Afterglow cyan is the machine working, and pink is for one thing
-only, a window that needs you — its border and title (blinking, about once a second;
-the `blink` setting turns that off), the approval or question waiting in it, and the
-status line's count; each theme keeps its own reserved colour (Signal's magenta,
-Footlight's amber, Limelight's lime) for the same thing. Every window carries the mark in
-its top right corner, and at the start of its row in command mode: ◐ ◓ ◑ ◒ turning while
-its agent works, ◑ in the reserved colour while it needs you, ⏺ done and not yet read, ○ at
-rest or not yet asked anything, ✗ failed. Troupe uses as many
-colours as the terminal says it has: exact colours where `COLORTERM` is `truecolor` or
-`24bit` and in Windows Terminal, the nearest of 256 where `TERM` names `256color`, the
-terminal's own sixteen otherwise, and none under `NO_COLOR`. It paints no background but
-a frame's, one step from the terminal's own, with exact colours and 256 (with sixteen or
-none the rail alone marks a frame, in the same rows and columns), so it sits on whatever
-theme the terminal already has; a light background reported in `COLORFGBG` gets the light
-values. `TROUPE_COLORS` overrides what the
-terminal says: `truecolor`, `256`, `16` or `none`, and `light` or `dark`
-(`TROUPE_COLORS=256,light`).
+The activated pane follows the tail until you scroll (PgUp/PgDn, Home/End, ↑/↓ while
+nothing is typed, or the wheel); the title says where you are (`↕ 120–150/400 · 12 new`),
+and End, scrolling to the bottom, sending input or answering follows again. Tool output
+keeps its indentation, tabs included; a tool's header says what came back and how long it
+took (`· 300 lines`, `· +3 -1`, `· exit 1 (12 lines) · 4s`), and its frame holds the
+output, with the diff for an edit you were asked to approve. Whatever a branch is waiting
+on is the last thing in the transcript, diff and all, so it reads at any width. `←`/`→`
+switch between the branch's agents so a subagent's transcript can be read; input still
+goes to the branch root. With a pane open the window strip shrinks to a tray; clicking the
+active tile jumps back to the latest output.
 
-The activated pane follows the tail until you scroll —
-PgUp/PgDn, Home/End, ↑/↓ (while nothing is typed) or the mouse wheel; the
-title says where you are (`↕ 120–150/400 · 12 new`) and End (or scrolling to
-the bottom, sending input, answering) follows again. Tool output keeps its
-indentation, tabs included; a tool's header says what came back and how long it took
-(`· 300 lines`, `· +3 -1`, `· exit 1 (12 lines) · 4s`), and its frame holds the output,
-with the diff for an edit you were asked to approve. Whatever a branch is
-waiting on is the last thing in the transcript, diff and all, so it can be
-read at any width. `←`/`→` switch between the branch's agents so a subagent's
-transcript can be read; input still goes to the branch root. With a pane open
-the window strip shrinks to a tray; clicking the active tile jumps back to
-the latest output.
+### Colours
 
-Tokens are counted sent and received, not as one number: a tile reads
-`↑4.4k ↓3.1k`, and `↑` is what the provider billed at close to full price.
-Input it served from its prompt cache — most of a long conversation's prompt,
-at a fraction of the price — is reported separately, as `cached` in the
-activated pane's side panel and in the observer's detail. Budgets spend
-the billed part, so re-reading a cached prompt does not exhaust
-`max_input_tokens`.
+The themes are the desktop app's, from the same design tokens: Afterglow by default, or
+Signal, Footlight or Limelight, the `theme` setting in `/settings`, which is the desktop
+app's appearance setting too, so a theme picked in either is the one both draw in. In
+Afterglow cyan is the machine working, and pink is for one thing only, a window that needs
+you: its border and title (blinking about once a second; the `blink` setting turns that
+off), the approval or question waiting in it, and the status line's count. Each theme
+keeps its own reserved colour (Signal's magenta, Footlight's amber, Limelight's lime) for
+the same thing. Every window carries the mark in its top right corner, and at the start of
+its row in command mode: ◐ ◓ ◑ ◒ turning while its agent works, ◑ in the reserved colour
+while it needs you, ⏺ done and not yet read, ○ at rest or not yet asked anything, ✗
+failed.
 
-Those counts are the whole session's. What one turn cost is said when it
-ends, never as a running figure while it works, its subagents' calls included
-and `no price` when nothing prices the model. The side panel says it under
-`This turn`, with the session's totals under `Session` and, once a limit is
-near, how near:
+Troupe uses as many colours as the terminal says it has: exact colours where `COLORTERM`
+is `truecolor` or `24bit` and in Windows Terminal, the nearest of 256 where `TERM` names
+`256color`, the terminal's own sixteen otherwise, and none under `NO_COLOR`. It paints no
+background but a frame's, one step from the terminal's own, with exact colours and 256
+(with sixteen or none the rail alone marks a frame), so it sits on whatever theme the
+terminal has; a light background reported in `COLORFGBG` gets the light values.
+`TROUPE_COLORS` overrides what the terminal says: `truecolor`, `256`, `16` or `none`, and
+`light` or `dark` (`TROUPE_COLORS=256,light`).
+
+### Tokens and cost
+
+A tile reads `↑4.4k ↓3.1k`: tokens sent and received, the whole session's, `↑` what the
+provider billed at close to full price. Input served from its prompt cache is reported
+apart, as `cached` in the side panel and the observer's detail, and budgets spend the
+billed part, so re-reading a cached prompt does not exhaust `max_input_tokens`. What one
+turn cost is said when it ends, its subagents' calls included and `no price` when nothing
+prices the model ([what a call costs](../../docs/user/models.md#what-a-call-costs)). The
+side panel says it under `This turn`, with the session's totals under `Session` and, once
+a limit is near, how near:
 
 ```
 This turn:
@@ -459,133 +269,71 @@ Session:
   ⚠ 82% of input tokens
 ```
 
-While the next turn runs, `This turn` says `said when it ends`. Below 100 columns
-there is no side panel, and the turn's cost is a line in the transcript under the
-turn instead: `turn: 3 calls · ↑ 300 sent · 3.0k cached · ↓ 120 received · $0.04`.
+While the next turn runs, `This turn` says `said when it ends`. Below 100 columns there is
+no side panel, and the turn's cost is a line under the turn instead: `turn: 3 calls · ↑ 300
+sent · 3.0k cached · ↓ 120 received · $0.04`.
 
 ### Observer
 
-`/observer` is the overview across branches: every root agent with the
-subagents it delegated to, nested under it, each with what it is doing right
-now (`thinking`, the tool it is running, `needs you`), how long it has been at
-it and what it has spent. The panel beside the tree details the selected agent:
-its definition and depth, the branch it belongs to, whether that branch is in
-your checkout or a worktree (and which), the model it called, its task list,
-anything it is waiting on, and its recent tool calls. `↑`/`↓` moves, Enter opens
-that agent's branch window, Esc goes back.
-
-### Models
-
-Troupe detects every model it can address: the ones each provider declares in
-`config.yaml`, and whatever `models.default` and `models.cheap` already name. `troupe config` prints the list with each
-model's context window, where it came from, and whether a key was found.
-
-`troupe models` asks the providers themselves what they serve and caches the
-answer in `models.json` next to the config, so windows and prices are theirs
-rather than typed by hand. It says what it fetched, from where and when, and a
-model the config names that its provider does not serve is said loudly
-(root Decision 778). Any other model it does not serve says so where its window
-would be, and `--json` gives it a `context` of `null` (root Decision 799):
-
-```
-catalog: 4 models from openai at https://gateway.example.com/model_group/info, fetched just now
-models Troupe can address (use one as models.default; prices are $ per million tokens in/out):
-  gpt-oss-120b                                 131k ctx, $0.10/$0.50, from the provider
-  house-model                                  not served by openai, $0.50/$1.50 (models.prices), from your config
-  qwen3-235b                                   131k ctx, $0.22/$0.88, from the provider  <- cheap
-  qwen3.5                                      NOT SERVED by openai; it serves qwen3.6-35b, qwen3-235b, gpt-oss-120b  <- default
-  qwen3.6-35b                                  262k ctx, $0.20/$0.80, from the provider
-```
-
-A LiteLLM gateway reports windows and prices; Anthropic reports windows only
-(it has no pricing endpoint, and an unpriced model reads as unpriced, not free);
-a plain OpenAI-compatible server reports whatever it feels like. A window you
-wrote in `config.yaml` still wins. Each model says where its facts came from:
-the provider, asked just now; the cache of what it said before; or your config.
-
-The cache refreshes itself. `troupe models` asks first when it is stale, and
-`--refresh` always; a session that starts never waits for it, and has the daemon
-refresh it in the background instead: on the first run, when the provider or its
-base URL changed, when it is a day old, when a provider that did not answer is due
-another try (after an hour), and when a model the config names is not in it (after
-ten minutes). A provider that does not answer keeps what it listed before.
-`troupe doctor` checks `models.default`, `cheap` and `expensive` against what the
-provider lists, and fails on one it does not serve.
-
-`/models` opens that list as a menu in the TUI, with the model in use first;
-`↑`/`↓` move, Enter picks one and writes it to the config file that owns the
-setting, Esc goes back. The last entry types a model by hand for anything the
-config does not mention. The cheap model has the same menu on the settings page.
+`/observer` is the overview across branches: every root agent with the subagents it
+delegated to nested under it, each with what it is doing now (`thinking`, the tool it is
+running, `needs you`), how long it has been at it and what it has spent. The panel beside
+the tree details the selected agent: its definition and depth, its branch, whether that
+branch is in your checkout or a worktree (and which), the model it called, its task list,
+anything it is waiting on, and its recent tool calls. `↑`/`↓` moves, Enter opens that
+agent's branch window, Esc goes back.
 
 ### Command palette
 
-`/` on an empty command line, Ctrl-K with nothing typed, or `/help` opens a popup
-over the session listing every command in sections — Session, Navigate, Workspace,
-Setup, Agents (one entry per agent, with its description), Custom (the commands you and
-the repository wrote as markdown files, with the file each came from), Quit — each with
-a one-line description, and the selected one explained beside it with an example.
-Typing filters by name, alias or description (`mer` narrows to `/merge`); `↑`/`↓`
-and PgUp/PgDn move; Enter runs the command, or leaves it on the line when it needs an
-argument; Tab or Space leave it on the line too, so `/merge 2` types exactly as it
-always did; Esc goes back. A command that cannot run right now — one that acts on a
-window when none is activated, or a local one in a plane session — is shown greyed
-with the reason rather than hidden. The list is the daemon's (`commands.list`), so the
-desktop app shows the same one.
+`/` on an empty command line, Ctrl-K with nothing typed, or `/help` opens a popup listing
+every command in sections (Session, Navigate, Workspace, Setup, Agents, one entry per
+agent with its description, Custom, the commands you and the repository wrote, with the
+file each came from, and Quit), each with a one-line description, and the selected one
+explained beside it with an example. Typing filters by name, alias or description (`mer`
+narrows to `/merge`); `↑`/`↓` and PgUp/PgDn move; Enter runs the command, or leaves it on
+the line when it needs an argument; Tab or Space leave it on the line too, so `/merge 2`
+types as it always did; Esc goes back. A command that cannot run now (one that acts on a
+window when none is activated, or a local one in a plane session) is shown greyed with the
+reason. The list is the daemon's (`commands.list`), so the desktop app shows the same.
 
 ### Settings page
 
-`/settings` opens a page listing every tweakable setting with its
-current value and the file it came from, and a help text next to it: what the
-selected setting does, plus the commands, keys and concepts worth knowing. The
-settings, their names and their help are the ones the desktop app shows, from one
-key table (the reference in `docs/user/configuration.md`). `↑`/`↓` moves, Enter
-toggles a boolean, opens a menu (the models) or edits a value, `s` changes where a
-change goes, PgUp/PgDn or the wheel scrolls the help, Esc goes back.
+`/settings` lists every setting with its value and the file it came from, and help beside
+it: what the selected setting does, and the commands, keys and concepts worth knowing.
+`↑`/`↓` moves; Enter toggles a boolean, opens a menu (the models, and the provider, each
+type saying what else it needs) or edits a value; `s` changes which file a change goes to;
+PgUp/PgDn or the wheel scrolls the help; Esc goes back. The page and the desktop app read
+and write through the daemon, so they always agree
+([settings in both clients](../../docs/user/configuration.md#settings-in-the-desktop-app-and-the-terminal)).
+`/models` opens the model menu directly ([models](../../docs/user/models.md#the-models-troupe-can-address)).
 
-The daemon says what each setting is, and writes a change (`config.get` and
-`config.set`), so the page and the desktop app always agree; a change made in one
-shows on the other while it is open. Watch mode applies to the running session
-immediately, and so do the theme, blinking and `transcript detail` (`quiet`, `tools` or
-`everything`, typed), which this screen draws by at once unless `/detail` set this
-session's own; everything else to the sessions and branches started from then on. A
-change is written, under its current name (`models.default`, never the old
-`model`), to the file the value on screen came from — the project's
-`.troupe/config.yaml`, its `config.local.yaml`, or your own `config.yaml` — and a
-default to your own; the title says which, and `s` picks another of the files the
-setting may be written to. The daemon refuses a setting the file may not hold, such
-as `auto_approve` in the project's file of a workspace that is not trusted.
-Environment variables still win over every file, so a setting masked by
+Watch mode applies to the running session at once, and so do the theme, blinking and
+`transcript detail` (`quiet`, `tools` or `everything`, typed), which the screen draws by
+unless `/detail` set this session's own; everything else applies to sessions and branches
+started from then on. A change is written by its current name (`models.default`, never the
+old `model`). Environment variables still win over every file, so a setting masked by
 `TROUPE_MODEL` is saved but not in effect, and the status line says so.
 
 ### Watch mode
 
-Any comment ending in `AI!` is a change request and starts a `quick` branch;
-`AI?` is a question and starts an `answer` branch, which cannot edit; bare `AI`
-comments are collected as context. The branch works in the checkout the comment
-is in, its window opens as `quick-1` (and so on), and the line under the screen
-says which file and comment started it; the session's own agent is told nothing.
-Both agents run on the cheap model with few turns, because saving a comment is a
-cheap gesture and the branch it starts should be one too. For something heavier,
-redefine `quick` or `answer` in `.troupe/agents/` or your own `agents/`, which is
-what `/quick` starts too (root Decision 844).
+A comment ending in `AI!` is a change request and starts a `quick` branch; `AI?` is a
+question and starts an `answer` branch, which cannot edit; bare `AI` comments are
+collected as context. The branch works in the checkout the comment is in, its window opens
+as `quick-1` (and so on), and the line under the screen says which file and comment
+started it; the session's own agent is told nothing. Both agents run on the cheap model
+with few turns, since saving a comment is a cheap gesture and the branch it starts should
+be one too. For something heavier, redefine `quick` or `answer` in `.troupe/agents/` or
+your own `agents/`, which is what `/quick` starts too.
 
-Anything that writes a file can write a comment, so a branch a comment started
-asks before every write, edit and shell command, whatever `auto_approve` says,
-until you set `watch_auto_approve: true`. The status line says whether the
-workspace is watched, whichever client turned it on, and `/watch` turns it off.
-
-On Linux, native watching needs `inotifywait`; without it Troupe falls back to
-polling and says so.
+Anything that writes a file can write a comment, so a branch a comment started asks before
+every write, edit and shell command, whatever `auto_approve` says, until you set
+`watch_auto_approve: true`. The status line says whether the workspace is watched,
+whichever client turned it on, and `/watch` turns it off. On Linux, native watching needs
+`inotifywait`; without it Troupe falls back to polling and says so.
 
 ### Agents
 
-Agent definitions are markdown files with YAML frontmatter; the filename is
-the name and every `primary` one is a command. Project `.troupe/agents/`
-overrides the global `agents/` dir which overrides the built-ins (`build`, `plan`,
-`orchestrate`, `ask`, `librarian`, the watch-mode pair `quick` and `answer`, and the
-subagents `general`, `explore`, `implementer` and `reviewer`).
-
-`/agents` lists the primary ones with where each comes from, its model, its tools,
+`/agents` lists the primary agents with where each comes from, its model, its tools,
 whether it is read-only, its cap on turns and which windows run it; Enter reads one's
 whole instruction. `e` opens it in your editor (`VISUAL`, then `EDITOR`; Notepad or `vi`
 without either) and the daemon checks what you saved: refused, the errors are on the page
@@ -593,196 +341,94 @@ and your edit is kept for the next `e`; accepted, you pick where it goes, `r` th
 repository's `.troupe/agents/` or `m` your own `agents/`, after it says which tools it
 would run without asking, and asks again when the save adds one. `c` copies one into the
 repository in one key, `n` starts one from a template, `x` deletes a copy and says what
-answers to the name after. A bundle's agents, and every agent on a pod, are read-only
-here and say where they are changed (TUI Decision 156).
-
-A definition's `model:` is `default`, `cheap`, `expensive`, or a model named
-outright. How much thinking a model's turns are worth is the model's, not the agent's:
-`reasoning_effort` under the provider's entry for it
-(`providers.<name>.models.<model>.reasoning_effort`, as above).
-
-The tools a definition can list are `read_file`, `write_file`, `edit_file`,
-`list_files`, `glob`, `grep`, `git_read`, `read_output`, `shell`, `web_fetch`,
-`todo_write` / `todo_read`, `delegate`, `read_branch`, `stop_child`, `remember`,
-`recall`, `show`, `publish`, `import`, `onboard_write`, `ask_user` and `finish`
-(`tools: all` is all of them but `onboard_write`).
-With `tools: all` the task list's two are offered once a turn has made ten model
-calls, or while there is a list, so a small task spends no calls on one; a
-definition that names them, as `plan` and `orchestrate` do, has them on every call.
-`write_file`, `edit_file`, `shell`, `web_fetch`, `publish`, `import` and
-`onboard_write` ask before they run — `y` /
-`n` / `a` in the window, or `auto_approve` for the session — and the rest run
-unattended; a definition can change either with a `permissions:` block. A
-project's `.troupe/agents/` file setting a tool to `auto` is held back until the
-workspace is trusted (`troupe config trust`): until then the tool asks.
-`web_fetch` is a GET that returns a URL as text, HTML reduced to readable text
-with its links kept, so an agent can read the documentation it is pointed at
-instead of guessing; `plan` and `orchestrate` name it as well.
-
-### Workflows
-
-`/workflow <task>` runs an *orchestration* rather than one agent doing
-everything, on `orchestrate`, the one agent that orchestrates: `model: expensive`,
-and it cannot write a file, edit a file or run a command. What it does is decide:
-it writes the step list as its todo list, hands each step to the subagent that
-owns it, judges what comes back, and carries each result into the next step's
-brief. The steps run in its own git worktree, which is committed on `finish`
-and reviewed with `/merge` or `/discard`, exactly like `/worktree`. A workflow is
-`orchestrate` with its plan written down in advance; `/orchestrate <prompt>` is the
-same agent on your own words, with no step list (root Decision 888).
-
-Which to use: `build` for a change you would make yourself. `/workflow` when a
-repository has written down the steps a change goes through and wants each owned by
-a subagent, with a reviewer at the end. `orchestrate` when you want that shape for
-work nobody wrote steps for. On the live bench's three small tasks (a test fixed, a
-function renamed across three files, three steps from a file), five runs each on
-Claude Sonnet 5.5, both agents got every one done; `orchestrate` cost 2.5 to 3.1
-times as much ($0.027 to $0.039 a run against $0.010 to $0.013), made two to two and
-a half times the model calls and took 2.4 to 2.8 times as long. `build` is the default for that reason,
-and `troupe bench --live --scenario rename_symbol,rename_symbol_orchestrate` measures
-it on your own setup.
-
-The bundled pipeline is `understand` (`explore`), `plan` (the orchestrator
-itself), `implement`, `test` and `document` (`implementer`), then `verify`
-(`reviewer` — it runs the build, tests and lint, reads the diff and reports
-problems, but is not allowed to fix them). Those subagents delegate further
-themselves, up to `max_depth`; `/observer` shows the whole tree.
-
-A project defines its own pipelines as `.troupe/workflows/<name>.json`, and
-`/workflow <name> <task>` runs one:
-
-```json
-[
-  {"name": "research", "agent": "explore", "prompt": "Find every call site of ..."},
-  {"name": "decide", "prompt": "Pick the approach and write the todo list."},
-  {"name": "port", "agent": "implementer", "prompt": "Apply the change ...", "parallel": true},
-  {"name": "docs", "agent": "implementer", "prompt": "Update the guide ...", "parallel": true},
-  {"name": "verify", "agent": "reviewer", "prompt": "mix test && mix credo --strict"}
-]
-```
-
-`agent` is the subagent responsible for the step; leave it out and the
-orchestrator does that step itself. `parallel` marks steps that may be
-delegated in one turn, which runs them concurrently — only do that for steps
-that write disjoint files. A file that is missing or does not parse falls back
-to the bundled pipeline rather than failing the run.
-
-`models.expensive` is what `model: expensive` resolves to; unset, it is
-`models.default`, so the orchestrator still runs on a provider with no premium
-tier. Set it in `config.yaml`, on the settings page, or with
-`TROUPE_EXPENSIVE_MODEL`.
-
-```markdown
----
-description: Reviews a diff for security problems
-mode: primary
-model: cheap
-tools: [read_file, grep, list_files, finish]
----
-You are a security reviewer...
-```
+answers to the name after. A bundle's agents, and every agent on a pod, are read-only here
+and say where they are changed. What a definition holds, and the built-ins, are on
+[agents, commands and workflows](../../docs/user/agents.md).
 
 ## Remote sessions
 
-A session can run on a plane, a Troupe deployment, instead of this machine: a
-*plane* that knows who you are and hands out sessions, and *workers* that run
-them. Sign in once per plane:
+A session can run on a plane, a Troupe deployment, instead of this machine: a *plane* that
+knows who you are and hands out sessions, and *workers* that run them. Sign in once per
+plane:
 
 ```
 troupe login https://plane.example
 ```
 
-It reads the plane's `/.well-known/troupe`, runs the OAuth device flow against
-the issuer it names, and prints a code to enter in a browser. The refresh token
-lands in `~/.config/troupe/credentials.json` (`%APPDATA%\troupe` on Windows) as
-a file only your account can read — `0600` on unix, an ACL naming only you on
-Windows. `troupe whoami` says who you are and which teams you are in;
-`troupe logout` forgets one plane, `troupe logout --all` every one.
+It reads the plane's `/.well-known/troupe`, runs the OAuth device flow against the issuer
+it names, and prints a code to enter in a browser. The refresh token lands in
+`credentials.json` in your config directory ([where](../../docs/user/configuration/files.md)),
+readable by your account alone (`0600` on Unix, an ACL naming only you on Windows).
+`troupe whoami` says who you are and which teams you are in; `troupe logout` forgets one
+plane, `troupe logout --all` every one.
 
-Signed in, `troupe` links the daemon on this machine to you at that plane and hands it
-the plane token it holds, when it attaches, again a minute before the token runs out, and
-again after the daemon restarted, which leaves it with none. The daemon keeps the token in
-memory only, and seals a private session with it: `troupe --private` (or `troupe run
---private`) starts one, which runs here, is sealed under your own key and listed by the
-plane, and can be opened from another device. One started while the daemon has no token
-is sealed once it is handed one, from its first event. A daemon somebody else linked is
-left as it is.
+Signed in, `troupe` links the daemon on this machine to you at that plane and hands it the
+plane token, when it attaches, a minute before the token runs out and after the daemon
+restarted; the daemon keeps it in memory only and seals a
+[private session](../../docs/user/README.md#words-you-will-meet) with it (`troupe
+--private`, `troupe run --private`). A daemon somebody else linked is left as it is.
 
-```
-troupe --remote
-```
+`troupe --remote` opens HQ: the teams you are in, the profiles each can run with their
+health and free capacity, and the sessions on the plane, with this machine's own in the
+same list, labelled `local`. ↑↓ moves, ←/→ or Tab changes column, Enter opens a session,
+`n` creates one (profile, source, visibility, prompt) and attaches to it, `r` refreshes.
+An open remote session looks exactly like a local one: the same window, transcript,
+approvals and keys. What is different:
 
-opens HQ: the teams you are in, the profiles each can run with their health and
-free capacity, and the sessions on the plane — with this machine's own sessions
-in the same list, labelled `local`. ↑↓ moves, ←/→ or Tab changes column, Enter
-opens a session, `n` creates one (profile, source, visibility, prompt) and
-attaches to it, `r` refreshes. A remote session looks exactly like a local one
-once it is open: the same window, transcript, approvals and keys.
+* **Browsing never wakes anything.** Opening a dormant session reads it; the first thing
+  you do (input, an approval, a todo edit, a profile switch) activates it, once, and
+  follows the worker it is given.
+* **Your input appears before the server has seen it**, and is reconciled when the worker
+  accepts it. Someone else's appears when it is queued.
+* **What your token does not allow is disabled, with the reason on the input box**: a
+  read-only session, or a token with only the `observe` scope.
+* **If the plane goes down, attached sessions keep streaming.** HQ says that creating and
+  activating are unavailable, and still lists what it knows.
+* **`/files` and `/upload`** work against the worker's checkout over the session's mount,
+  and refresh themselves when the worker says files changed.
 
-What is different, and why:
-
-* **Browsing never wakes anything.** Opening a dormant session reads it; the
-  first thing you actually do (input, an approval, a todo edit, a profile
-  switch) activates it, once, and follows the worker it is given.
-* **Your input appears before the server has seen it**, and is reconciled when
-  the worker accepts it. Someone else's input appears when it is queued.
-* **What your token does not allow is disabled, with the reason on the input
-  box** — a read-only session, or a token with only the `observe` scope.
-* **If the plane goes down, attached sessions keep streaming.** HQ says that
-  creating and activating are unavailable, and still lists what it knows.
-* **`/files` and `/upload`** work against the worker's checkout over the
-  session's mount, and refresh themselves when the worker says files changed.
-
-TLS is verified against your operating system's trust store. For a deployment
-behind a private CA, `TROUPE_CA_FILE=/path/to/ca.pem` adds it — it is added to
-the trust store, never swapped for it.
-
-`mix troupe.remote.smoke` runs login, list, attach and one input against a real
+TLS is verified against your operating system's trust store. For a deployment behind a
+private CA, `TROUPE_CA_FILE=/path/to/ca.pem` adds it to the trust store, never in place of
+it. `mix troupe.remote.smoke` runs login, list, attach and one input against a real
 deployment when `TROUPE_REMOTE_URL` is set, and skips itself otherwise.
 
 ## Persistence
 
-Every session is an append-only JSONL event log under the platform state dir
-(`~/.local/state/troupe/sessions/<workspace-hash>/<session-id>/events.jsonl`,
-`%LOCALAPPDATA%\troupe` on Windows). Agent and window state are folds over
-that log, so crashes restart from it and `troupe resume` continues running
-branches. Tool calls that started but never completed are re-run on resume
-(at-least-once); completed calls are never executed twice.
+Every session is an append-only JSONL event log, `sessions/<workspace-hash>/<session-id>/events.jsonl`
+in the state directory ([where](../../docs/user/configuration/files.md#what-troupe-keeps-for-itself)).
+Agent and window state are folds over that log, so a crash restarts from it and `troupe
+resume` continues running branches. Tool calls that started but never completed are run
+again on resume (at least once); completed calls are never run twice.
 
 A remote session keeps a journal of the same shape under
-`.../remote/<plane-hash>/<session-id>/events.jsonl`: its transcript survives a
-restart, and the highest `seq` in it is the cursor the next subscription
-resumes from, so reattaching costs no replay and shows no line twice.
+`remote/<plane-hash>/<session-id>/events.jsonl`: its transcript survives a restart, and
+the highest `seq` in it is the cursor the next subscription resumes from, so reattaching
+costs no replay and shows no line twice.
 
-The directory decides what you can come back to: sessions are keyed by a hash
-of the workspace path, so `/resume` inside the TUI (or `troupe resume` with no
-id) lists what *this* directory has — each session that said something to a
-model or started a branch, when it was last touched, its branches and which of
-them need you or have stopped — and Enter replays the one you pick into the
-window you are already looking at.
+The directory decides what you can come back to: sessions are keyed by a hash of the
+workspace path, so `/resume` (or `troupe resume` with no id) lists what *this* directory
+has (each session that said something to a model or started a branch, when it was last
+touched, its branches and which of them need you or have stopped), and Enter replays the
+one you pick into the window you are looking at.
 
-`/new` starts another session in the same directory without leaving the TUI, and
-the one you were in carries on: it stays in `/resume`'s list, and `/back` returns
-to it (and `/back` again comes back, one step either way). `/new --private` makes
-a private session, `/new --remote PROFILE` one on that profile of the plane you
-are signed in to, and `/new --branch` a fork of the session on screen: a session
-of its own whose log starts as a copy of this one's, so its agent goes on from the
-conversation as it stands while the first carries on as it was. In command mode the
-conversations are the branches', so it is typed in the branch's window and forks that
-branch; on the command line it says which window to open. The new session's command
-line is where its first line goes.
+`/new` starts another session in the same directory without leaving the TUI, and the one
+you were in carries on: it stays in `/resume`'s list, and `/back` returns to it (and
+`/back` again comes back, one step either way). `/new --private` makes a private session,
+`/new --remote PROFILE` one on that profile of the plane you are signed in to, and
+`/new --branch` a fork of the session on screen: a session whose log starts as a copy of
+this one's, so its agent goes on from the conversation as it stands while the first
+carries on as it was. In command mode the conversations are the branches', so it is typed
+in the branch's window and forks that branch; on the command line it says which window to
+open. The new session's command line is where its first line goes.
 
-`troupe`'s own log is `troupe.log` in the same state directory, beside the
-daemon's `daemon.log`: `~/.local/state/troupe/troupe.log` (`$XDG_STATE_HOME/troupe`
-when that is set) on Linux and macOS, `%LOCALAPPDATA%\troupe\troupe.log` on
-Windows, and under `TROUPE_STATE_HOME` when that is set. `troupe daemon status`
-prints the directory as `state`. A daemon `troupe` starts inside itself, when none
-is running, logs there too.
+`troupe`'s own log is `troupe.log` in the same state directory, beside the daemon's
+`daemon.log`; `troupe daemon status` prints the directory as `state`. A daemon `troupe`
+starts inside itself logs there too.
 
 ## Development
 
-Pinned toolchain in `.tool-versions` / `mise.toml`: Erlang 28.5, Elixir
-1.20.4, Zig 0.16.0 (Burrito 1.6 requires exactly that Zig).
+The toolchain is pinned in `.tool-versions` / `mise.toml`: Erlang 28.5, Elixir 1.20.4, Zig
+0.16.0 (Burrito 1.6 requires exactly that Zig).
 
 ```sh
 mix deps.get              # the harness apps are path dependencies on ../../apps
@@ -793,12 +439,12 @@ TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT="$PWD/fixtures/fake_scripts/smoke.json" 
   troupe run build smoke --headless --auto-approve
 ```
 
-The harness itself — `troupe_core`, `troupe_gateway`, `troupe_protocol` — is a path
-dependency on `../../apps/`, the umbrella this project sits in, at the same commit: there
-is no pin to bump, and a change to the harness is made there, with `PROTOCOL.md` and a
-decision in `docs/decisions/`, in the same pull request as the TUI change that needs it. A package
+The harness (`troupe_core`, `troupe_gateway`, `troupe_protocol`) is a path dependency on
+`../../apps/`, the umbrella this project sits in, at the same commit: there is no pin to
+bump, and a change to the harness is made there, with `PROTOCOL.md` and a decision in
+`docs/decisions/`, in the same pull request as the TUI change that needs it. A package
 both this project and the umbrella lock must be at one version in both `mix.lock` files;
-`elixir scripts/locks-agree.exs` at the repository root checks the 25 they share, and CI
+`elixir scripts/locks-agree.exs` at the repository root checks the ones they share, and CI
 runs it. The version is the root `VERSION`. `troupe_core`'s compile cross-compiles the
 `reaper` helper for the host, and `TROUPE_REAPER_TARGETS=all` builds every target (the
 release does this). Every OS process a session starts runs under reaper, which kills the
@@ -814,8 +460,9 @@ specification.
 
 ## Out of scope (for now)
 
-Offering this machine's built-in tools (its files, its shell) to a remote session — a
-person's own signed-in MCP servers are offered (root Decision 748) — a GUI for the remote side (that is
-`clients/gui`, beside this directory), Web UI, multi-node distribution, a resident
-assistant or free-text routing at the dispatcher, auto-commit or undo in the user's checkout,
-auto-update, code signing and notarization, native Windows ARM builds.
+Offering this machine's built-in tools (its files, its shell) to a remote session (a
+person's own signed-in MCP servers are offered), a GUI for the remote side (that is
+`clients/gui`, beside this directory), a Web UI, multi-node distribution, a resident
+assistant or free-text routing at the dispatcher, auto-commit or undo in the user's
+checkout, updating itself unasked, code signing and notarisation, and native Windows ARM
+builds.

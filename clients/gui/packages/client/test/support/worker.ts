@@ -253,8 +253,21 @@ export class FakeWorker {
       if (!client) return;
       for (const t of client.expiryTimers) clearTimeout(t);
       for (const s of client.subs.values()) s.off();
-      // A registrant that disconnects takes its tools with it.
-      for (const [key, tool] of this.tools) if (tool.client === client) this.tools.delete(key);
+      // A registrant that disconnects takes its tools with it, and the session says whose
+      // they were, as the gateway logs it.
+      const gone = new Map<string, string[]>();
+      for (const [key, tool] of this.tools) {
+        if (tool.client !== client) continue;
+        this.tools.delete(key);
+        gone.set(tool.sessionId, [...(gone.get(tool.sessionId) ?? []), tool.name]);
+      }
+      for (const [sessionId, tools] of gone) {
+        this.sessions.get(sessionId)?.log.append(
+          "tools_unregistered",
+          { tools: tools.sort(), connection: "a socket", reason: "disconnected", actor: client.token.sub },
+          { kind: "user", subject: client.token.sub },
+        );
+      }
       for (const w of client.waiting.values()) w.reject(new Error("the client left"));
       this.clients.delete(client);
     });
@@ -515,6 +528,11 @@ export class FakeWorker {
         const key = (key: string, value: unknown, layer: string, source: string | null, enforced: unknown = null) => ({
           key, value, layer, source, default: null, scopes: [], enforced, secret: false, label: null, doc: null,
         });
+        // What the session runs on, which a pod shows only to someone who may steer it.
+        const machinery = (name: string, value: string, layer: string, source: string) =>
+          client.token.scopes.includes("control")
+            ? key(name, value, layer, source)
+            : { ...key(name, "set by the profile", layer, source), withheld: true };
         return reply(ws, id, {
           session_id: session.id,
           pod: true,
@@ -525,6 +543,7 @@ export class FakeWorker {
           keys: [
             key("models.default", "pod-model", "profile", `the worker profile ${session.profile} (TROUPE_MODEL)`),
             key("max_turns", 7, "session", "the session's terms"),
+            machinery("base_url", "http://llm.example.test/v1", "profile", `the worker profile ${session.profile} (TROUPE_BASE_URL)`),
             key("compact_at", 0.6, "project", `/state/workspaces/${session.id}/.troupe/config.yaml`),
             key("managed_permission_rules_only", true, "enforced", "the plane's platform settings", {
               value: true,

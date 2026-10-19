@@ -1,9 +1,8 @@
 # A tour for contributors
 
-For someone with the repository open who wants to change something. It covers the four
-things a first change needs: where things live, running the suite, adding a tool, and how
-the event log works. Each part stops where a page of this track takes over, and none of it
-is needed to run Troupe: operators have [their own track](../admin/README.md).
+For someone with the repository open who wants to change something: where things live,
+running the suite, adding a tool, and how the event log works. Each part stops where a
+page of this track takes over; operators have [their own track](../admin/README.md).
 
 ## 1. Where things live
 
@@ -51,14 +50,12 @@ mix test apps/troupe_core/test/troupe/tools/read_tools_test.exs    # one file
 (cd clients/gui && pnpm install && pnpm build && pnpm test)    # the GUI
 ```
 
-`mix check` is the gate a pull request is held to. The core, the gateway and the daemon
-need no services; the plane needs PostgreSQL, and the worker and parts of the protocol
-need OpenBao and MinIO too. A suite without what it needs says so in a `SKIPPED:` block
-naming the command that brings it up, rather than passing quietly
-([testing.md §2](testing.md#2-what-each-suite-needs)). No suite needs a model: the `fake`
-provider replays a script of steps, one per model call, and records every request, which
-is how the harness is tested end to end. [local-setup.md](local-setup.md) has the rest,
-including a whole plane on kind.
+`mix check` is the gate a pull request is held to. A suite without the services it needs
+says so in a `SKIPPED:` block naming the command that brings them up, rather than passing
+quietly ([testing.md §2](testing.md#2-what-each-suite-needs)). No suite needs a model: the
+`fake` provider replays a script of steps, one per model call, and records every request,
+which is how the harness is tested end to end. [local-setup.md](local-setup.md) has the
+rest, including a whole plane on kind.
 
 ## 3. Adding a tool
 
@@ -128,25 +125,21 @@ sequenceDiagram
 - **Append is a synchronous call, and the file is fsynced before it returns**, so an
   agent never acts on something that was not persisted. One process per session is what
   makes `seq` gapless and the order of the file the order of the session.
-- **Each event carries `prev_hash`**, the digest of the event before it in canonical JSON,
-  so anyone can check a log from its bytes alone: `Troupe.Protocol.Event.verify/1` in
-  Elixir, and the Python conformance client in a few lines of the standard library.
-- **Ephemerals** (`llm_delta`, `presence`, `agent_state`, …) have no `seq`, are never
-  written and may be dropped under load. Every completed model message is also a durable
-  `llm_response`, so nothing a client needs is only ephemeral.
-- **Replay.** A crashed agent is restarted by its `Agent.Node` and folds its own events
-  back into its state, finishing what it started without running a completed call again.
-  A dormant session has no processes at all; the next activating command starts its tree
-  and the fold brings it back. A client subscribes from a `seq` and gets the replay, then
-  the live events, with no gap and no duplicate.
-- **Old logs.** Every event carries a version, and `Troupe.Log.Upcast` brings an old one
-  up a step at a time. Logs recorded at a release sit in `test/fixtures/logs/<version>/`
-  (0.2.0 and 0.3.0 so far) with the hash of their fold; `fold_test.exs` replays every version and compares, so a fold
-  that quietly changed meaning fails CI. A moving hash is a bug to find, never a fixture
-  to re-record.
+- **Each event carries `prev_hash`**, so anyone can check a log from its bytes alone:
+  `Troupe.Protocol.Event.verify/1` in Elixir, and the Python conformance client in a few
+  lines of the standard library. Ephemerals (`llm_delta`, `presence`, `agent_state`, …)
+  are never written.
+- **Replay.** A crashed agent folds its own events back into its state; a dormant session
+  has no processes at all, and the next activating command starts its tree and the fold
+  brings it back ([ARCHITECTURE.md §2.2](../../ARCHITECTURE.md#22-the-agent)).
+- **Old logs.** `Troupe.Log.Upcast` brings an old event up a step at a time, and
+  `fold_test.exs` replays every recorded version in `test/fixtures/logs/` against the hash
+  of its fold, so a fold that quietly changed meaning fails CI. A moving hash is a bug to
+  find, never a fixture to re-record ([ARCHITECTURE.md §11](../../ARCHITECTURE.md#11-reading-old-logs)).
 
-Adding an event is a recipe in [conventions.md §6](conventions.md#6-recipes), and the
-whole wire, with what a client may rely on, is [PROTOCOL.md](../../PROTOCOL.md).
+Adding an event is a recipe in [conventions.md §6](conventions.md#6-recipes); the events,
+the hash chain and what a client may rely on are in [ARCHITECTURE.md §3](../../ARCHITECTURE.md#3-the-wire)
+and [PROTOCOL.md](../../PROTOCOL.md).
 
 ## Where next
 

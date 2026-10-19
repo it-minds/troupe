@@ -47,6 +47,8 @@
     "commands/presence.set.json",
     "commands/profile.switch.json",
     "commands/question.answer.json",
+    "commands/remote.offer.json",
+    "commands/remote.withdraw.json",
     "commands/scratch.list.json",
     "commands/session.archive.json",
     "commands/session.claim.json",

@@ -39,6 +39,8 @@ defmodule Troupe.Worker.ConfigExplainTest do
     # The profile's `llm`, which the operator writes into the pod's environment.
     previous = System.get_env("TROUPE_SMALL_MODEL")
     System.put_env("TROUPE_SMALL_MODEL", "profile-cheap-model")
+    previous_url = System.get_env("TROUPE_BASE_URL")
+    System.put_env("TROUPE_BASE_URL", "http://llm.example.test/v1")
 
     # The repository's own file: a key it may set, and one a pod never takes from it.
     File.mkdir_p!(Path.join(context.workspace, ".troupe"))
@@ -52,6 +54,10 @@ defmodule Troupe.Worker.ConfigExplainTest do
       if previous,
         do: System.put_env("TROUPE_SMALL_MODEL", previous),
         else: System.delete_env("TROUPE_SMALL_MODEL")
+
+      if previous_url,
+        do: System.put_env("TROUPE_BASE_URL", previous_url),
+        else: System.delete_env("TROUPE_BASE_URL")
 
       Application.delete_env(:troupe_worker, :session_defaults)
       quieten(context.session_id)
@@ -165,6 +171,67 @@ defmodule Troupe.Worker.ConfigExplainTest do
     assert Enum.any?(json["keys"], &(&1["key"] == "max_turns" and &1["layer"] == "session"))
   end
 
+  test "a viewer is not shown what the session runs on: the provider's address and the state directory",
+       context do
+    activate!(context)
+
+    {:ok, viewer} = connect(context, token(context, context.session_id))
+    on_exit(fn -> Client.close(viewer) end)
+
+    assert {:ok, answer} =
+             Client.call(viewer, "config.get", %{"session_id" => context.session_id})
+
+    keys = Map.new(answer["keys"], &{&1["key"], &1})
+
+    for key <- ["base_url", "state_dir"] do
+      assert %{"value" => "set by the profile", "withheld" => true} = keys[key]
+    end
+
+    # Where they came from is still said, and the rest is as a collaborator sees it.
+    assert keys["base_url"]["layer"] == "profile"
+    assert keys["models.cheap"]["value"] == "profile-cheap-model"
+    assert Enum.any?(answer["permissions"], &(&1["rule"] == "shell(curl)"))
+
+    for form <- ["text", "json"] do
+      assert {:ok, %{"explain" => explained}} =
+               Client.call(viewer, "config.get", %{
+                 "session_id" => context.session_id,
+                 "explain" => form
+               })
+
+      printed = if is_binary(explained), do: explained, else: Jason.encode!(explained)
+      refute printed =~ "llm.example.test"
+      refute printed =~ context.state_dir
+      assert printed =~ "set by the profile"
+    end
+
+    assert {:ok, %{"explain" => ladder}} =
+             Client.call(viewer, "config.get", %{
+               "session_id" => context.session_id,
+               "explain" => "text",
+               "key" => "base_url"
+             })
+
+    refute ladder =~ "llm.example.test"
+    assert ladder =~ "base_url = set by the profile"
+
+    # Someone who may steer it sees them.
+    {:ok, collaborator} = connect(context, token(context, context.session_id, "collaborator"))
+    on_exit(fn -> Client.close(collaborator) end)
+
+    assert {:ok, steering} =
+             Client.call(collaborator, "config.get", %{
+               "session_id" => context.session_id,
+               "explain" => "text"
+             })
+
+    keys = Map.new(steering["keys"], &{&1["key"], &1})
+    assert keys["base_url"]["value"] == "http://llm.example.test/v1"
+    refute Map.has_key?(keys["base_url"], "withheld")
+    assert keys["state_dir"]["value"] == context.state_dir
+    assert steering["explain"] =~ "llm.example.test"
+  end
+
   test "a session's token is refused the pod's own settings, and another session's", context do
     activate!(context)
     other = Troupe.Session.generate_id()
@@ -233,10 +300,10 @@ defmodule Troupe.Worker.ConfigExplainTest do
     )
   end
 
-  defp token(context, session_id) do
+  defp token(context, session_id, role \\ "viewer") do
     claims = %{
       "sub" => "owner@example.test",
-      "role" => "viewer",
+      "role" => role,
       "team" => context.team,
       "session_id" => session_id
     }

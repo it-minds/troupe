@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { awaitingYou } from "@troupe/client";
+import { awaitingYou, onThisComputer } from "@troupe/client";
 import type { AuthSession, FleetRow, SessionKind } from "@troupe/client";
 import { useAdmin, useDaemon, useFleet } from "./hooks";
 import { useUpdates } from "./updates";
@@ -54,7 +54,7 @@ const OFFLINE_RETRY_MS = 15_000;
 
 /** The workspace a session on this computer works in, for the agents manager it opens. */
 function workspaceOf(row: { kind: SessionKind; raw: unknown } | undefined): { workspace?: string } {
-  const workspace = row && row.kind !== "team" ? (row.raw as { workspace?: unknown } | null)?.workspace : undefined;
+  const workspace = row && onThisComputer(row.kind) ? (row.raw as { workspace?: unknown } | null)?.workspace : undefined;
   return typeof workspace === "string" && workspace ? { workspace } : {};
 }
 
@@ -248,7 +248,7 @@ export function App(): JSX.Element {
   const planeError = snapshot.sources["plane"]?.error ?? null;
   const row = where.screen === "session" ? snapshot.rows.find((r) => r.id === where.id) : undefined;
   const caps = capabilities();
-  const local = snapshot.rows.filter((r) => r.kind !== "team").length;
+  const local = snapshot.rows.filter((r) => onThisComputer(r.kind)).length;
 
   // The front of house: no rail, three tiles, and the same rows the list shows. The app
   // opens on it and the lockup in the rail opens it again; every tile leads into the shell.

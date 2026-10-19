@@ -64,7 +64,8 @@ daemon's address, what it remembers for you.
 
 In it: `sessions/`, the logs (`troupe.log`, `daemon.log`), `organisation.json` (your
 organisation's settings from its plane), `mcp-oauth.json` (your sign-ins to MCP servers),
-`setup.json` (that the first run is done) and `identity.json`. On Windows the running
+`command-trust.json` (a repository's commands you allowed), `onboard.json` (your answers
+about onboarding), `setup.json` (that the first run is done) and `identity.json`. On Windows the running
 daemon's port and token are in `%LOCALAPPDATA%\troupe\daemon.json`, whatever
 `TROUPE_STATE_HOME` says.
 

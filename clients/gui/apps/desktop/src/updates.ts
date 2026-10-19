@@ -20,7 +20,7 @@
 // window does, so it is not waited for.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { askPlane, suggestion, TroupeRpcError } from "@troupe/client";
+import { askPlane, onThisComputer, suggestion, TroupeRpcError } from "@troupe/client";
 import type { AuthSession, DaemonClient, FleetRow, PinnedPlaneKey, PlaneVersionWord } from "@troupe/client";
 import { shell } from "./shell";
 import type { UpdateOffer, UpdatePlane } from "./shell";
@@ -73,7 +73,7 @@ function message(e: unknown): string {
 
 /** A session on this computer with a turn at work, which a restart waits for. */
 function atWork(rows: FleetRow[]): FleetRow | undefined {
-  return rows.find((r) => r.kind !== "team" && r.status !== null && ["thinking", "acting", "compacting"].includes(r.status));
+  return rows.find((r) => onThisComputer(r.kind) && r.status !== null && ["thinking", "acting", "compacting"].includes(r.status));
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

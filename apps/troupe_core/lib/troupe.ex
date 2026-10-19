@@ -321,9 +321,12 @@ defmodule Troupe do
   @spec shell_cancel(String.t(), String.t()) :: :ok | {:error, :not_running}
   defdelegate shell_cancel(session_id, run_id), to: Troupe.Session.Shell, as: :cancel
 
-  @doc "Cancel whatever the root agent is doing. Valid from any state."
-  @spec cancel(String.t()) :: :ok | {:error, :no_session}
-  def cancel(session_id), do: with_root(session_id, &Agent.cancel/1)
+  @doc """
+  Cancel whatever the root agent is doing. Valid from any state. `actor`, who asked, is
+  written on the `cancelled` event; none is the system.
+  """
+  @spec cancel(String.t(), Troupe.Protocol.Event.Actor.t() | nil) :: :ok | {:error, :no_session}
+  def cancel(session_id, actor \\ nil), do: with_root(session_id, &Agent.cancel(&1, actor))
 
   @doc """
   Switch the root agent, a session's or a branch's (a branch is a session, Decision 646),

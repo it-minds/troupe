@@ -17,20 +17,17 @@ own, which pins a release and keeps its values (Decision 734).
 
 ## 2. A release publishes, and stops there
 
-`scripts/release <version>` opens the pull request that changes `VERSION`; merging it is
-the release (Decisions 669, 676). `release.yml` runs the full suite, builds the images at
-that version and pushes them to `ghcr.io`, tags `v<version>`, publishes the chart there
-and on the release page, and attaches the native builds (735). A deployment picks the
-release up from what was published. Nothing is released by pushing a tag. The workflows
-are in [ci.md](ci.md).
+Merging the pull request `scripts/release <version>` opens is the release (Decisions 669,
+676); nothing is released by pushing a tag, and what `release.yml` runs and publishes is
+[ci.md](ci.md#release-the-full-suite-then-everything). A deployment picks the release up
+from what was published (735).
 
-Rolling a release, by whatever does it, is: the chart's CRDs applied server-side (Helm
-never upgrades them), `helm upgrade --wait` rolling back on failure, the rollouts waited
-for, and `/.well-known/troupe` checked for the release's version and commit. Every pod's
-running digest is worth reading too: a tag that already exists with `imagePullPolicy:
-IfNotPresent` leaves the old image serving while Helm reports success, so CI never
-publishes a floating tag. The commands are in
-[routine-tasks.md](../admin/routine-tasks.md#upgrade).
+Rolling a release, by whatever does it, is: the chart's CRDs applied server-side,
+`helm upgrade --wait` rolling back on failure, the rollouts waited for, and
+`/.well-known/troupe` checked for the release's version and commit. Read every pod's
+running digest too: a tag that already exists with `imagePullPolicy: IfNotPresent` leaves
+the old image serving while Helm reports success, which is why CI never publishes a
+floating tag. The commands are in [routine-tasks.md](../admin/routine-tasks.md#upgrade).
 
 ## 3. What a roll does
 

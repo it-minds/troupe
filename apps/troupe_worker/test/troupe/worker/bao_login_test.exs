@@ -116,6 +116,42 @@ defmodule Troupe.Worker.BaoLoginTest do
       start_supervised!(Login)
 
       assert {:ok, _key} = OpenBao.create(context.team, context.session_id)
+      assert_received {:fake_bao, :login, %{role: "troupe-worker", mount: "kubernetes"}}
+    end
+  end
+
+  describe "the mount" do
+    # The installation's, as the plane's follows `bao.authPath`, which the operator names.
+    test "is the one the pod is given in TROUPE_BAO_AUTH_PATH", context do
+      context = requires_tier(context)
+      FakeBaoLogin.role(context.fake, "troupe-worker", [context.policy])
+
+      kms =
+        with_env(
+          %{
+            "TROUPE_WORKER_AUTOSTART" => "true",
+            "TROUPE_BAO_AUTH_PATH" => "kubernetes-eu",
+            "TROUPE_BAO_ADDR" => context.fake.address
+          },
+          fn -> runtime_config()[:troupe_worker][:kms] end
+        )
+
+      Application.put_env(:troupe_worker, :kms, kms)
+      start_supervised!(Login)
+
+      assert {:ok, _key} = OpenBao.create(context.team, context.session_id)
+      assert_received {:fake_bao, :login, %{mount: "kubernetes-eu"}}
+    end
+
+    # An empty static token is none: the pod logs in rather than sending an empty one.
+    test "is logged in at though TROUPE_BAO_TOKEN is set empty", context do
+      context = requires_tier(context)
+      FakeBaoLogin.role(context.fake, "troupe-worker", [context.policy])
+      System.put_env("TROUPE_BAO_TOKEN", "")
+      on_exit(fn -> System.delete_env("TROUPE_BAO_TOKEN") end)
+      start_supervised!(Login)
+
+      assert {:ok, _key} = OpenBao.create(context.team, context.session_id)
       assert_received {:fake_bao, :login, %{role: "troupe-worker"}}
     end
   end

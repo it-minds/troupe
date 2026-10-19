@@ -133,17 +133,19 @@ describe("a session's start and the librarian", () => {
 
   it("starts it once per start: not again when the session is left and opened again, nor for one opened from the list", async () => {
     daemon.memory[REPO] = { status: "absent" };
+    // As on a busy machine, where the screen is up before the session's entries are, on
+    // the first visit and the second: the line is drawn first, and drawn again where it
+    // belongs once they arrive, a new element. So it is found afresh on each look; one
+    // held from the first look was off the page by the time its neighbour was asked. And
+    // the start says it before the first visit's entries have arrived, which is how the
+    // full run timed out: the line stayed above the session's first for good.
+    daemon.subscribeDelayMs = 300;
     await startIn(REPO);
     await waitFor(() => daemon.librarians.length === 1, "the librarian");
     // The brief is missing again, as if that librarian had built nothing.
     daemon.memory[REPO] = { status: "absent" };
 
     button("← Sessions")!.click();
-    // As on a busy machine, where the screen is up before the session's entries are: the
-    // line is drawn first, and drawn again where it belongs once they arrive, a new
-    // element. So it is found afresh on each look; one held from the first look was off
-    // the page by the time its neighbour was asked, which is how the nightly timed out.
-    daemon.subscribeDelayMs = 300;
     await openFromList(REPO);
     const startLine = (): Element | undefined => [...document.querySelectorAll(".stream .start-note")].find((p) => p.textContent === WRITING);
     await waitFor(startLine, "the start's line, still there");

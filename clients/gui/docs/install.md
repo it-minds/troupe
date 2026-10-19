@@ -7,9 +7,9 @@ see *Turning signing on*, at the end.
 
 Until then every operating system will object, and the objection is correct. An unsigned
 installer carries no proof of who built it. The installers are attached to each release
-of this repository (the `desktop` job of the root `release.yml`), beside a `SHA256SUMS`
-over everything in the release: check the SHA-256 against it before you run one, and do
-not hand these to anyone outside the team.
+of this repository (the `desktop` job of `native.yml`, which the root `release.yml`
+calls), beside a `SHA256SUMS` over everything in the release: check the SHA-256 against it
+before you run one, and do not hand these to anyone outside the team.
 
 ```sh
 # what the release says it contains, against what you downloaded
@@ -102,37 +102,15 @@ updated once by its installer.
 
 Nothing in the build needs to change. `src-tauri/tauri.signing.conf.json` holds the
 signing configuration and is applied only when CI passes `--config` at it, which happens
-when the matching secret exists. Set the secrets and the next run is signed.
+when the matching secret exists: `AZURE_ENDPOINT` turns Windows signing on,
+`APPLE_CERTIFICATE` macOS's. What to buy, what each needs first, and every secret are in
+[code-signing.md](../../../docs/developer/code-signing.md). Expect SmartScreen to keep
+warning for the first signed releases: reputation accrues from downloads, not from a
+certificate.
 
-### Windows
-
-Buy one of:
-
-| | cost | catch |
-| --- | --- | --- |
-| Azure Artifact Signing (was Trusted Signing) | from $9.99/month | US, Canadian, EU or UK entities and self-employed individuals only; organisation validation wants three or more years of verifiable tax history, so a young entity does not qualify |
-| an EV certificate on a token or HSM | $300–700/year | you hold the hardware, and CI needs a cloud HSM to reach it |
-
-The repository assumes the first. `tauri.signing.conf.json` calls `trusted-signing-cli`,
-which CI installs; the secrets are `AZURE_ENDPOINT`, `AZURE_CODE_SIGNING_NAME`,
-`AZURE_CERT_PROFILE_NAME`, and a service principal's `AZURE_CLIENT_ID`,
-`AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`. Setting `AZURE_ENDPOINT` is what flips the
-workflow's `signed` flag.
-
-Expect SmartScreen to keep warning for the first releases regardless. Reputation is
-accrued from downloads, not bought with a certificate.
-
-### macOS
-
-Apple Developer Program, $99/year. Export the **Developer ID Application** certificate as
-a `.p12`, base64 it, and set `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD` and
-`APPLE_SIGNING_IDENTITY`. For notarisation use an App Store Connect API key rather than an
-Apple ID and app-specific password: `APPLE_API_ISSUER`, `APPLE_API_KEY`,
-`APPLE_API_KEY_PATH`. Setting `APPLE_CERTIFICATE` flips the flag.
-
-Signing turns on the hardened runtime and `entitlements.plist`, which gives WKWebView back
-the JIT the hardened runtime takes away. Nothing else is in that file, and nothing else
-should be.
+On macOS, signing turns on the hardened runtime and `entitlements.plist`, which gives
+WKWebView back the JIT the hardened runtime takes away. Nothing else is in that file, and
+nothing else should be.
 
 ### The updater
 

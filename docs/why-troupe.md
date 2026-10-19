@@ -26,10 +26,11 @@ If you use one of the agent CLIs today, most of what makes it useful is here too
 that reads, edits and runs commands in your checkout, and asks before it changes anything.
 Troupe reads `AGENTS.md` and `.agents/` as they are, and brings in once, into its own
 files, what you have written for those tools: `CLAUDE.md`, `GEMINI.md`, Copilot's and
-Cursor's rules, your agents and commands (`troupe onboard`); your MCP servers from an
-`.mcp.json`; your skills; an opencode setup's providers
-([configuration.md](user/configuration.md#onboarding-another-tools-files)). Any provider
-with an Anthropic or an OpenAI API will do, behind a gateway or not.
+Cursor's rules, your agents and commands
+([`troupe onboard`](user/instructions.md#onboarding-another-tools-files)); your MCP
+servers from an `.mcp.json` and your skills ([MCP servers and skills](user/mcp.md)); an
+opencode setup's providers ([from opencode](user/configuration/providers.md#from-opencode)).
+Any provider with an Anthropic or an OpenAI API will do, behind a gateway or not.
 
 What differs is where the work lives and what is kept of it:
 
@@ -93,14 +94,14 @@ guarantee it gives up.
 - **Nothing you do needs to outlive the terminal,** and the agent CLI you use does what you
   want. Troupe's differences are about where work lives and who can see it; if neither
   matters to you, switching buys little.
-- **You want a hosted service.** Troupe is not one. There is nothing to sign up for, and a
-  plane is yours to run.
+- **You want a hosted service.** There is nothing to sign up for, and a plane is yours to
+  run.
 - **You want a sandbox on your laptop.** On your machine an agent's commands run as you, in
   the directory you gave it, once you have approved them. Only a worker always runs them
   under bubblewrap (on a pod, behind a network policy as well); a laptop does so only for a
   session with mounts beyond its workspace.
 - **You need a stable 1.0.** Releases are betas, and the binaries are not code-signed
   (#656), though every release's manifest is signed with the release key and checked before
-  anything installs. The
-  protocol is versioned, and CI refuses a change to it that an older client could not
+  anything installs ([updating](user/updating.md#what-the-signature-proves-and-what-it-does-not)).
+  The protocol is versioned, and CI refuses a change to it that an older client could not
   survive, but the rest can still change between releases.

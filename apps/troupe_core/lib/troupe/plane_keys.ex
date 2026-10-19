@@ -255,6 +255,7 @@ defmodule Troupe.PlaneKeys do
 
   defp what("client_versions"), do: "the version policy"
   defp what("client_defaults"), do: "the organisation's document"
+  defp what("memory"), do: "the organisation's memory"
   defp what(_kind), do: "the plane's answer"
 
   # -- the file ---------------------------------------------------------------------

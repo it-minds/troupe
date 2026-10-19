@@ -1,6 +1,10 @@
 # The cluster tests kill the operator on purpose, so its crash reports are expected
-# output rather than a signal. They are captured and printed only with a failure.
+# output rather than a signal. They are captured and printed only with a failure. The
+# level is the VM's, which the next app's suite in the same `mix test` shares, so it is
+# put back as this one ends.
+level = Logger.level()
 Logger.configure(level: :warning)
+ExUnit.after_suite(fn _result -> Logger.configure(level: level) end)
 
 # The `:cluster` tests need a real API server. Without one they are *excluded* rather
 # than failed. `ClusterCase` has always said it skips them loudly, but announcing it in

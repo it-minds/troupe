@@ -20,6 +20,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
+import { onThisComputer } from "@troupe/client";
 import type { AgentRow, AuthSession, DaemonClient, SessionKind } from "@troupe/client";
 import type { SessionHandle } from "../hooks";
 import { AgentPicker } from "./AgentPicker";
@@ -30,7 +31,7 @@ function useRows(view: SessionHandle, daemon: DaemonClient | null, kind: Session
   const [rows, setRows] = useState<AgentRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState(0);
-  const local = kind !== "team" && daemon !== null;
+  const local = onThisComputer(kind) && daemon !== null;
 
   useEffect(() => (local ? daemon!.onAgentsChanged(() => setRound((n) => n + 1)) : undefined), [local, daemon]);
 
@@ -106,7 +107,9 @@ export function AgentSwitch({
     : "You can read this session, not change the agent it runs.";
 
   const start: PickerAction =
-    kind === "team"
+    kind === "remote"
+      ? "A session on somebody's laptop is started on that laptop."
+      : kind === "team"
       ? auth && planeProfile
         ? async (name) => {
             const created = await auth.rpc<{ session_id: string }>("session.create", { profile: planeProfile, agent: name });

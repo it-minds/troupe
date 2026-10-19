@@ -86,6 +86,32 @@ describe("your own servers in a team session", () => {
     expect(JSON.stringify(asked)).not.toContain(token);
   });
 
+  // troupe #592: everyone watching the session is told when somebody's own tools are offered,
+  // and when they go: whose, how many and why.
+  it("are said in the session when they are offered and when somebody's leave", async () => {
+    harness.plane.seed("alice@example.com", { id: "team-4", title: "Watch the tools", profile: "dev" });
+    await harness.signIn({ store: webTokenStore() });
+    localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
+    localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");
+    startOnTheList();
+
+    unmount = render(<App />).unmount;
+    const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("Watch the tools")), "the team session's row");
+    row.click();
+
+    const panel = await waitFor(() => document.querySelector<HTMLElement>('section[aria-label="Offer your servers"]'), "the session's question about your servers");
+    button("Offer them", panel)!.click();
+    await sees("alice@example.com offered tools that run on their own machine: client.notes.search");
+
+    // A teammate's client, whose two tools the session had, leaves.
+    harness.worker.sessions.get("team-4")!.log.append(
+      "tools_unregistered",
+      { tools: ["client.mail.read", "client.mail.send"], connection: "a socket", reason: "disconnected", actor: "bob@example.com" },
+      { kind: "user", subject: "bob@example.com" },
+    );
+    await sees("bob@example.com's 2 tools are no longer offered to the session, because their client left: client.mail.read, client.mail.send");
+  });
+
   it("are not registered when you say not now", async () => {
     harness.plane.seed("alice@example.com", { id: "team-2", title: "Not this one", profile: "dev" });
     await harness.signIn({ store: webTokenStore() });

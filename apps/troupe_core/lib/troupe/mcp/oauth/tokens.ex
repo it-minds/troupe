@@ -71,6 +71,17 @@ defmodule Troupe.MCP.OAuth.Tokens do
           {:ok, map() | nil} | {:error, String.t()}
   def take(binding), do: call({:take, binding})
 
+  @doc """
+  Keep a client Troupe registered with an authorization server, under
+  `Troupe.MCP.OAuth.client_key/2`, beside the sign-ins.
+  """
+  @spec keep_client(Path.t() | nil, String.t(), map()) :: :ok | {:error, String.t()}
+  def keep_client(state_dir, key, client), do: call({:keep_client, state_dir, key, client})
+
+  @doc "Forget a registered client the authorization server no longer knows: the next sign-in registers anew."
+  @spec forget_client(Path.t() | nil, String.t()) :: :ok | {:error, String.t()}
+  def forget_client(state_dir, key), do: call({:keep_client, state_dir, key, nil})
+
   @doc "Whether a kept sign-in can still be used: a token that has not run out, or a refresh token."
   @spec usable?(map()) :: boolean()
   def usable?(entry), do: is_binary(entry["refresh_token"]) or fresh?(entry, 0)
@@ -129,6 +140,7 @@ defmodule Troupe.MCP.OAuth.Tokens do
         "server" => binding.name,
         "url" => OAuth.resource(binding.url),
         "client_id" => binding.config.client_id,
+        "registered" => Map.get(binding.config, :registered),
         "issuer" => plan.issuer,
         "token_endpoint" => plan.token_endpoint,
         "revocation_endpoint" => Map.get(plan, :revocation_endpoint),
@@ -163,6 +175,9 @@ defmodule Troupe.MCP.OAuth.Tokens do
     {:reply, reply, state}
   end
 
+  def handle_call({:keep_client, state_dir, key, client}, _from, state),
+    do: {:reply, Store.put_client(state_dir, key, client), state}
+
   def handle_call({:take, binding}, _from, state) do
     entry = Store.get(binding.state_dir, binding.key)
 
@@ -191,6 +206,13 @@ defmodule Troupe.MCP.OAuth.Tokens do
         reject(binding, entry)
         {:error, :sign_in_required}
 
+      # The authorization server no longer knows the client: one Troupe registered goes
+      # too, and the next sign-in registers anew.
+      {:error, :invalid_client} ->
+        reject(binding, entry)
+        _ = forget_registered(binding.state_dir, entry)
+        {:error, :sign_in_required}
+
       {:error, why} ->
         {:error, why}
     end
@@ -203,6 +225,11 @@ defmodule Troupe.MCP.OAuth.Tokens do
     |> Map.put("rejected", true)
     |> then(&Store.put(binding.state_dir, binding.key, &1))
   end
+
+  defp forget_registered(state_dir, %{"registered" => key}) when is_binary(key),
+    do: Store.put_client(state_dir, key, nil)
+
+  defp forget_registered(_state_dir, _entry), do: :ok
 
   defp fresh?(entry, skew) do
     case entry["expires_at"] do

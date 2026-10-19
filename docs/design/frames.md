@@ -48,8 +48,8 @@ symbols: `1 row`, `2 rows`, `1 step`, `7 steps`. The minus in `+n −m` is U+221
   an error with `(n lines)` when it has more. The duration is said from one second up;
   under a second it says nothing a person reads for.
 - **reasoning**: `thinking · 12s`, from the first reasoning the model streamed to its
-  reply. Both clients draw reasoning live only: a transcript replayed from the log shows no
-  reasoning frame yet (#659).
+  reply. Both clients draw reasoning live only; a transcript replayed from the log shows no
+  reasoning frame yet (§9).
 - **data**: `csv · 4 rows`, the header row not counted; `json · 2 rows` for an array of
   flat objects, whose columns are the keys in the order they first appear.
 - **prose** has no header. It is the frame read most, and it is recognised by its surface.
@@ -70,7 +70,7 @@ Durations: `14s` under a minute, `4m 2s` from a minute.
 **The step.** Rendered output sits one step from the chat's background, and the step reads
 as rendered, not as important: nothing louder than a background and a hairline or a rail.
 In Afterglow dark `--bg-sunken` is the canvas's own colour, so there the hairline is the
-whole step (#659).
+whole step (§9).
 
 In the terminal the step is the `surface` role, the theme's `bg.hover` token: of the
 background tokens it is the one that moves away from both a dark terminal's black and a
@@ -114,12 +114,10 @@ prose is never cut short: it is the thing the turn was for.
 | `tools` | the strip open (`▾`), the prose between calls, each call's frame open with a long result cut short, reasoning as its header alone |
 | `everything` | nothing collapsed: reasoning open, every result whole — what a bug report wants |
 
-It is a key on the config ladder (`transcript.detail`, `quiet` by default), which a
-person's file, a project's and an organisation's defaults set like any other, and a client
-changes it for one session: `/detail quiet | tools | everything`, in either client (a
-settings control for it in the desktop app is #659). The
-view is a client's own business: switching re-draws the whole history at the new level,
-and nothing is written to the session's log.
+It is a key on the config ladder (`transcript.detail`, `quiet` by default), set like any
+other, and `/detail quiet | tools | everything` changes it for one session in either
+client. The view is a client's own business: switching re-draws the whole history at the
+new level, and nothing is written to the session's log.
 
 **One key opens the whole turn.** In the terminal, `e` opens every frame of the turn in
 view — the last one while the pane follows the tail, the one at the top of the view when
@@ -133,10 +131,9 @@ block inside prose is cut the same way; the prose around it is not. A person's o
 keeps its last 20 lines, `… 42 earlier lines`, because the end of a command's output is
 what a person ran it to read. At `everything` nothing is cut.
 
-**Past 500 lines** a frame is to be a card that opens the viewer (#61, the hand-off is
-#659's) instead of a body in the transcript, as a scratchpad document is already a card that
-opens the scratchpad (TUI Decision 159). Until the viewer exists, both clients cut such a
-frame as above.
+**Past 500 lines** a frame is to be a card that opens the viewer (§9) instead of a body in
+the transcript, as a scratchpad document is already a card that opens the scratchpad (TUI
+Decision 159). Until the viewer exists, both clients cut such a frame as above.
 
 ## 5. Never collapsed
 

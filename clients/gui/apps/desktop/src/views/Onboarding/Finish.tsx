@@ -1,14 +1,37 @@
 // Step 7: what was set up, in a few lines, and the first session — started by the
 // daemon in the chosen directory with a prompt suited to it. A plane's first run ends
 // on the sign-in screen instead, since signing in is not the daemon's to do; with the
-// plane's address given, that screen signs in to it without asking for it again.
+// plane's address given, that screen signs in to it without asking for it again. Both
+// end with a way to the documentation, so the first run never leaves someone guessing.
 
 import { useState } from "react";
 import type { JSX } from "react";
 import { setupKinds } from "@troupe/client";
 import type { SetupKind } from "@troupe/client";
+import { shell } from "../../shell";
 import { Actions, StepFrame } from "./Step";
 import type { StepProps } from "./Step";
+
+/** The documentation site, built from the repository's docs/ (mkdocs.yml's site_url). */
+const DOCS_URL = "https://it-minds.github.io/troupe/";
+
+/** The documentation, in the browser: a webview does nothing useful with a plain link. */
+function DocsLink(): JSX.Element {
+  const open = (): void => {
+    const external = shell()?.openExternal;
+    if (external) void external(DOCS_URL);
+    else globalThis.open?.(DOCS_URL, "_blank", "noopener,noreferrer");
+  };
+  return (
+    <p className="micro">
+      Everything else, from configuration to running Troupe for a team, is in{" "}
+      <button type="button" className="link" onClick={open}>
+        the documentation
+      </button>
+      .
+    </p>
+  );
+}
 
 /** A provider as the card the person pressed named it: a gateway is not "openai" to them. */
 function providerWords(provider: Record<string, unknown> | undefined, kinds: readonly SetupKind[]): string {
@@ -44,6 +67,7 @@ export function Finish({ flow, busy, error, onAnswer, onBack }: StepProps): JSX.
           <dt>Plane</dt>
           <dd className="mono micro">{url ?? "the address the sign-in screen asks for"}</dd>
         </dl>
+        <DocsLink />
         <Actions busy={busy} next="Finish and sign in" busyLabel="Finishing…" onBack={onBack} onNext={() => onAnswer({})} />
       </StepFrame>
     );
@@ -96,6 +120,8 @@ export function Finish({ flow, busy, error, onAnswer, onBack }: StepProps): JSX.
         What to ask first
         <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} aria-label="What to ask first" />
       </label>
+
+      <DocsLink />
 
       <Actions
         busy={busy}

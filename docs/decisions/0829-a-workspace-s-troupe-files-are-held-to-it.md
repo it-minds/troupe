@@ -22,6 +22,8 @@ paths:
   - apps/troupe_gateway/test/troupe/gateway/local_sources_test.exs
   - PROTOCOL.md
   - docs/user/configuration.md
+  - docs/user/agents.md
+  - docs/user/mcp.md
 symbols:
   - Troupe.Workspace.within?/2
   - Troupe.Workspace.files_within/3

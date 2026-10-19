@@ -88,9 +88,25 @@ export const GATEWAY_DEFAULTS = {
   models: { default: "glm-5.2", cheap: "qwen3.6-35b" },
 };
 
+/**
+ * A laptop's session offered to the plane for steering (troupe #58). The
+ * fake has no laptop: the worker stands in for it, so `remote.open` hands out the worker's
+ * endpoint and a token for it, and what a test steers it is the worker's session.
+ */
+interface Relayed {
+  id: string;
+  owner: string;
+  ownerName: string;
+  workspace: string;
+  shares: Array<{ subject: string; role: "observe" | "control" }>;
+  offlineSince: string | null;
+  offeredAt: string;
+}
+
 export class FakePlane {
   readonly server: Server;
   readonly rows = new Map<string, Row>();
+  readonly relayed = new Map<string, Relayed>();
   /** Every `client_info` an `initialize` over `/rpc` gave, in order. */
   readonly initialized: Array<{ name?: unknown; version?: unknown }> = [];
   corsOrigins: string[];
@@ -189,6 +205,35 @@ export class FakePlane {
     this.rows.set(id, row);
     this.opts.worker.createSession(id, { profile: row.profile });
     return row;
+  }
+
+  /** A laptop's session, offered by `owner` and shared as `shares` says, its laptop online. */
+  relay(owner: string, params: { id?: string; ownerName?: string; workspace?: string; shares?: Relayed["shares"] } = {}): Relayed {
+    const id = params.id ?? `s-laptop-${++this.counter}`;
+    const offer: Relayed = {
+      id,
+      owner,
+      ownerName: params.ownerName ?? owner,
+      workspace: params.workspace ?? "project",
+      shares: params.shares ?? [],
+      offlineSince: null,
+      offeredAt: new Date(Date.now() + this.counter).toISOString(),
+    };
+    this.relayed.set(id, offer);
+    this.opts.worker.createSession(id, { profile: "build" });
+    return offer;
+  }
+
+  /** The laptop went: offline since now, or `at`; `null` brings it back. */
+  offline(id: string, at: string | null = new Date().toISOString()): void {
+    const offer = this.relayed.get(id);
+    if (!offer) throw new Error(`no relayed session ${id}`);
+    offer.offlineSince = at;
+  }
+
+  private relayRole(offer: Relayed, subject: string): string | null {
+    if (offer.owner === subject) return "control";
+    return offer.shares.find((s) => s.subject === subject)?.role ?? null;
   }
 
   /**
@@ -420,6 +465,52 @@ export class FakePlane {
         if (!row) return { error: { code: -32005, message: "not_found" } };
         const role = row.owner === subject ? "owner" : "collaborator";
         return { result: this.attachment(row, subject, name, role, "activate") };
+      }
+
+      case "remote.list": {
+        const sessions = [...this.relayed.values()].flatMap((o) => {
+          const role = this.relayRole(o, subject);
+          if (!role) return [];
+          return [
+            {
+              id: o.id,
+              kind: "remote",
+              owner: o.owner,
+              owner_name: o.ownerName,
+              workspace: o.workspace,
+              state: o.offlineSince ? "offline" : "online",
+              offline_since: o.offlineSince,
+              offered_at: o.offeredAt,
+              your_role: o.owner === subject ? "owner" : role,
+              shares: o.owner === subject ? o.shares : null,
+            },
+          ];
+        });
+        return { result: { sessions } };
+      }
+
+      case "remote.open": {
+        const offer = this.relayed.get(String(params["session_id"] ?? ""));
+        const role = offer ? this.relayRole(offer, subject) : null;
+        if (!offer || !role) return { error: { code: -32005, message: "not_found" } };
+        if (offer.offlineSince) {
+          return { error: { code: -32010, message: "unavailable", data: { reason: "the laptop is offline", offline_since: offer.offlineSince } } };
+        }
+        const scopes = role === "control" ? ["observe", "control"] : ["observe"];
+        const exp = Math.floor(Date.now() / 1000) + this.podTokenLifetime;
+        const podRole = role === "control" ? "collaborator" : "viewer";
+        return {
+          result: {
+            session_id: offer.id,
+            kind: "remote",
+            state: "active",
+            endpoint: this.opts.worker.endpoint,
+            role: podRole,
+            your_role: offer.owner === subject ? "owner" : role,
+            token: encodeToken({ sub: subject, name, session_id: offer.id, role: podRole, scopes, aud: this.opts.worker.workerId, exp }),
+            expires_at: exp,
+          },
+        };
       }
 
       case "session.review": {

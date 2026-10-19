@@ -14,14 +14,17 @@ import {
   DaemonSource,
   FleetStore,
   isDurable,
+  onThisComputer,
+  openRemote,
   PlaneSource,
+  RemoteSource,
   ServerOffer,
   SessionAttachment,
   StartQuestions,
   TroupeRpcError,
 } from "@troupe/client";
 import { noticeEvent } from "./notify";
-import { daemonHint, forgetDaemon, rememberDaemon, shell } from "./shell";
+import { adoptFragment, daemonHint, forgetDaemon, rememberDaemon, shell } from "./shell";
 import type {
   AttachStatus,
   AuthSession,
@@ -65,6 +68,10 @@ export function useFleet(
     if (!store) return;
     if (auth) store.addSource(new PlaneSource(auth.plane, () => auth.token()));
     else store.removeSource("plane");
+    // Laptop sessions offered for steering from another device: the person's own from
+    // their other computers, and those shared with them.
+    if (auth) store.addSource(new RemoteSource(auth.plane, () => auth.token()));
+    else store.removeSource("remote");
     if (daemon) store.addSource(new DaemonSource(daemon));
     else store.removeSource("daemon");
     void store.refresh();
@@ -226,6 +233,18 @@ export function useDaemon(auth: AuthSession | null = null): {
     if (shell()?.findDaemon) return;
     const hint = daemonHint();
     if (hint) setEndpoint(hint);
+  }, []);
+
+  // An address `troupe-daemon open` handed out, put into a tab already open: taken as at
+  // a load.
+  useEffect(() => {
+    if (shell()?.findDaemon) return;
+    const onHash = (): void => {
+      const told = adoptFragment();
+      if (told) setEndpoint(told);
+    };
+    globalThis.addEventListener?.("hashchange", onHash);
+    return () => globalThis.removeEventListener?.("hashchange", onHash);
   }, []);
 
   // The socket drops when the daemon goes, and the client dials again at the next call —
@@ -445,7 +464,9 @@ export function useSessionView(
   const [offer, setOffer] = useState<OfferState>({ state: "none" });
   // The answer the offer's question waits for, until the person gives it.
   const answering = useRef<((allow: boolean) => void) | null>(null);
-  const local = kind !== "team";
+  const local = onThisComputer(kind);
+  // A laptop's session offered to the plane, steered from here through it.
+  const relayed = kind === "remote";
 
   useEffect(() => {
     if (!sessionId) return;
@@ -474,7 +495,7 @@ export function useSessionView(
     // daemon makes their calls with your sign-in, so only where there is one, and only from
     // the session's own screen, the one that activates it. The session asks you first.
     const offering =
-      !local && daemon && mode === "activate"
+      !local && !relayed && daemon && mode === "activate"
         ? new ServerOffer(daemon, {
             sessionId,
             confirmedBy: auth?.me?.subject,
@@ -509,8 +530,16 @@ export function useSessionView(
       : SessionAttachment.open({
           sessionId,
           mode,
-          open: (m) => auth!.rpc("session.open", { session_id: sessionId, mode: m }),
-          mint: () => auth!.rpc("token.mint", { session_id: sessionId }),
+          // A relayed session is opened, and its token renewed, with `remote.open`; the
+          // socket and everything on it are a pod's.
+          open: (m) =>
+            relayed
+              ? openRemote((method, params) => auth!.rpc(method, params), auth!.planeUrl, sessionId)
+              : auth!.rpc("session.open", { session_id: sessionId, mode: m }),
+          mint: () =>
+            relayed
+              ? openRemote((method, params) => auth!.rpc(method, params), auth!.planeUrl, sessionId)
+              : auth!.rpc("token.mint", { session_id: sessionId }),
           hooks: {
             onEvent: (e) => {
               if (!live) return;
@@ -555,7 +584,7 @@ export function useSessionView(
       if (a) void a.close();
       else if (local && daemon && held) void daemon.close(sessionId, listener);
     };
-  }, [auth, daemon, sessionId, mode, local, settle]);
+  }, [auth, daemon, sessionId, mode, local, relayed, settle]);
 
   const attached = useCallback((): Promise<SessionView> => {
     const v = ref.current;

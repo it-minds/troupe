@@ -577,6 +577,19 @@ defmodule Troupe.Gateway.Connection do
     }
   end
 
+  # A laptop session steered through the plane: one session of this daemon, and none of
+  # what is about the laptop, as `Troupe.Protocol.Relay` lists it.
+  defp capabilities(%{endpoint: %{kind: :relay}}) do
+    %{
+      "worktrees" => false,
+      "branches" => false,
+      "watch" => false,
+      "remote" => true,
+      "relayed" => true,
+      "private_sessions" => false
+    }
+  end
+
   defp capabilities(_state) do
     %{
       "worktrees" => true,
@@ -629,7 +642,8 @@ defmodule Troupe.Gateway.Connection do
     end
   end
 
-  defp authenticate(params, %{endpoint: %{kind: :remote, authenticator: authenticator}} = state) do
+  defp authenticate(params, %{endpoint: %{kind: kind, authenticator: authenticator}} = state)
+       when kind in [:remote, :relay] do
     case authenticator.(with_bearer(params, state)) do
       {:ok, principal, scopes} -> {:ok, principal, scopes, nil}
       {:ok, principal, scopes, auth} -> {:ok, principal, scopes, auth}

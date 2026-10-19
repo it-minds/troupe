@@ -985,6 +985,12 @@ defmodule Troupe.FakeRemote do
       )
     end
 
+    machinery = fn name, value, layer, source ->
+      if "control" in state.scopes,
+        do: key.(name, value, layer, source, %{}),
+        else: key.(name, "set by the profile", layer, source, %{"withheld" => true})
+    end
+
     answer = %{
       "session_id" => sid,
       "pod" => true,
@@ -1007,6 +1013,14 @@ defmodule Troupe.FakeRemote do
           %{}
         ),
         key.("max_turns", 7, "session", "the session's terms", %{}),
+        # What the session runs on, which a pod shows only to someone who may steer it.
+        machinery.(
+          "base_url",
+          "http://llm.example.test/v1",
+          "profile",
+          "the worker profile fixing (TROUPE_BASE_URL)"
+        ),
+        machinery.("state_dir", "/state", "cli", "the worker pod"),
         key.("compact_at", 0.6, "project", "/state/workspaces/#{sid}/.troupe/config.yaml", %{}),
         key.("managed_permission_rules_only", true, "enforced", "the plane's platform settings", %{
           "enforced" => %{"value" => true, "source" => "the plane's platform settings"}

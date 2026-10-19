@@ -36,7 +36,9 @@ defmodule Troupe.Plane.Harness do
     Fleet,
     GitHub,
     Identity,
+    Memory,
     Placement,
+    Remote,
     Sessions,
     Signing
   }
@@ -50,7 +52,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.{Tokens, Triggers}
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Protocol.Bundle, as: Document
-  alias Troupe.Protocol.{Canonical, ClientUpdate, Error, Origin, Principal, SessionId, Token}
+  alias Troupe.Protocol.{Canonical, ClientUpdate, Error, Origin, Principal, Relay, SessionId, Token}
   alias Troupe.Sessions.Fork
 
   require Logger
@@ -106,6 +108,7 @@ defmodule Troupe.Plane.Harness do
     "me" => :observe,
     "me.client_defaults" => :observe,
     "me.client_versions" => :observe,
+    "me.memory" => :observe,
     "me.connections.list" => :observe,
     "me.connections.grant" => :control,
     "teams.list" => :observe,
@@ -136,7 +139,10 @@ defmodule Troupe.Plane.Harness do
     # Redeeming is the one method whose caller is not yet anybody in this session. They
     # are still somebody in the deployment — a link is not an account — and what the
     # capability carries was decided when it was minted, not here.
-    "session.redeem" => :observe
+    "session.redeem" => :observe,
+    # Laptop sessions offered for steering from another device (#58), and a token for one.
+    "remote.list" => :observe,
+    "remote.open" => :observe
   }
 
   @doc "Every method the plane answers, and the scope each needs."
@@ -341,6 +347,14 @@ defmodule Troupe.Plane.Harness do
     {:ok, versions |> Map.put("release", release) |> Map.put("signed", signed["signed"])}
   end
 
+  # The memory documents a person's own machine reads into every session on it: the
+  # organisation's and each of their teams' (`Memory.for_person/1`), none of another
+  # team's. Signed as the organisation's document is, since a machine takes them as
+  # instructions from the organisation and keeps a copy.
+  defp handle("me.memory", _params, %{user: user}) do
+    {:ok, Signing.signed("memory", %{"documents" => Memory.for_person(user)})}
+  end
+
   defp handle("teams.list", _params, %{user: user}) do
     {:ok, %{"teams" => Enum.map(Identity.teams_for(user), &team_json/1)}}
   end
@@ -437,6 +451,49 @@ defmodule Troupe.Plane.Harness do
 
     sessions = Sessions.visible_to(user, options)
     {:ok, %{"sessions" => Enum.map(sessions, &session_json(&1, user))}}
+  end
+
+  # Laptop sessions offered for steering from another device (#58): the caller's own, from
+  # any of their laptops, and those shared with them. Each says whether its laptop is there
+  # (`online`, or `offline` since when), and to its owner whom it is shared with.
+  defp handle("remote.list", _params, %{user: user}) do
+    rows = for {offer, role} <- Remote.visible(user), do: Remote.row(offer, role, user)
+    {:ok, %{"sessions" => rows}}
+  end
+
+  # What a client attaches with: the relay's address and a token for this session alone,
+  # at the caller's role, with the relay's audience, so it opens neither a pod nor `/rpc`.
+  # Asked again for a fresh token on the same view. A laptop that is not there is
+  # `unavailable` with `offline_since`, and nothing waits for it.
+  defp handle("remote.open", params, %{user: user}) do
+    with {:ok, offer, role} <- Remote.access(params["session_id"], user),
+         {:ok, _laptop} <- remote_online(offer) do
+      claims = %{
+        "sub" => user.subject,
+        "name" => user.display_name,
+        "session_id" => offer.session_id,
+        "role" => role,
+        "scopes" => Enum.map(Relay.scopes(role), &Atom.to_string/1)
+      }
+
+      case Tokens.mint(claims, audience: Remote.audience()) do
+        {:ok, token, payload} ->
+          {:ok,
+           %{
+             "session_id" => offer.session_id,
+             "kind" => "remote",
+             "state" => "active",
+             "endpoint" => relay_endpoint(),
+             "role" => if(role == "control", do: "collaborator", else: "viewer"),
+             "your_role" => if(offer.owner_subject == user.subject, do: "owner", else: role),
+             "token" => token,
+             "expires_at" => payload["exp"]
+           }}
+
+        {:error, reason} ->
+          {:error, Error.new(:unavailable, %{reason: "no token could be minted: #{inspect(reason)}"})}
+      end
+    end
   end
 
   defp handle("session.get", params, %{user: user}) do
@@ -1618,6 +1675,7 @@ defmodule Troupe.Plane.Harness do
         "entitlements" => entitlement_set(session, team)
       }
       |> Map.merge(bundle_params(session))
+      |> Map.merge(memory_params(session, team))
       |> Map.merge(session_terms(session))
       |> Map.merge(fork_params(session))
       |> Map.merge(repository_params(session))
@@ -1876,6 +1934,7 @@ defmodule Troupe.Plane.Harness do
         "entitlements" => entitlement_set(session, team_of(session))
       }
       |> Map.merge(bundle_params(session))
+      |> Map.merge(memory_params(session, team_of(session)))
       |> Map.merge(session_terms(session))
       |> Map.merge(repository_params(session))
 
@@ -1947,6 +2006,38 @@ defmodule Troupe.Plane.Harness do
       "token" => token,
       "expires_at" => expires_at
     }
+  end
+
+  # A relayed session's laptop, or when it was last there.
+  defp remote_online(offer) do
+    case Remote.laptop(offer.session_id) do
+      nil ->
+        {_state, since} = Remote.presence(offer)
+
+        {:error,
+         Error.new(:unavailable, %{
+           reason: "the laptop is offline",
+           offline_since: since && DateTime.to_iso8601(since)
+         })}
+
+      pid ->
+        {:ok, pid}
+    end
+  end
+
+  # Where a client attaches to a relayed session: under this plane's own address where
+  # the deployment names it, else the path, which a client takes against the plane it
+  # called.
+  defp relay_endpoint do
+    case Application.get_env(:troupe_plane, :base_url) do
+      base when is_binary(base) and base != "" ->
+        uri = URI.parse(String.trim_trailing(base, "/"))
+        scheme = if uri.scheme == "https", do: "wss", else: "ws"
+        URI.to_string(%{uri | scheme: scheme, path: (uri.path || "") <> "/v1/relay/session"})
+
+      _none ->
+        "/v1/relay/session"
+    end
   end
 
   # A parent that is erased, archived or read-only is not a parent: a sibling of a
@@ -2556,6 +2647,13 @@ defmodule Troupe.Plane.Harness do
       _ -> %{"bundle_version" => session.bundle_version}
     end
   end
+
+  # The memory documents the session reads (`Memory.for_session/2`): the organisation's, its
+  # team's and its worker profile's. Read again at every activation, as the profile's
+  # switches are, so a save reaches a session the next time it wakes and restarts no pod; an
+  # empty list takes away what was there.
+  defp memory_params(session, team),
+    do: %{"memory" => Memory.for_session(team, session.profile)}
 
   # Whether the profile lets a repository's agents and skills replace its bundle's and the
   # built-ins of the same name (Decision 826): `spec.repositoryOverridesBundle`, on only

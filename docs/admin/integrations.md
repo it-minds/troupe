@@ -17,21 +17,17 @@ Troupe is a plain relying party. Of the provider it needs:
 | For MCP: a provider access token whose audience is the client id, `api://<client_id>` or `<base_url>/mcp`, and the scope `<base_url>/mcp/admin` (or `plane.oidc.mcpScope`) | an MCP client sends `https://<plane>/mcp` as RFC 8707's `resource`. On Entra that means `<base_url>/mcp` as an identifier URI beside `api://<client_id>`: it refused the older `api://<client-id>/admin` pairing (`AADSTS9010010`) |
 
 Default scopes are `openid profile email offline_access`; `offline_access` is what gets a
-client a refresh token. The person is the claim `subject_claim` names, `sub` by default,
-and SCIM's `externalId` has to carry the same value or the person SCIM creates and the
-person who signs in are two rows
-([authentik.md §0](authentik.md#0-one-string-is-the-person-and-it-cannot-be-fixed-afterwards)).
-Entra's `sub` is pairwise, a different string in every app registration and not one SCIM
-can push, so on Entra set `subject_claim` to `oid` and map SCIM's `externalId` from
-`objectId`; switching it on a plane that already has people moves each of them once, at
-their next sign-in ([configuration.md](configuration.md#which-claim-is-the-person)).
+client a refresh token. The person is the claim `subject_claim` names, `sub` by default
+and `oid` on Entra, and SCIM's `externalId` has to carry the same value or the person SCIM
+creates and the person who signs in are two rows
+([configuration.md](configuration.md#which-claim-is-the-person)).
 
 A sign-in that finds nobody under its subject takes over the row SCIM gave that value as
 `externalId` only when the row's email or `userName` agrees with the token's `email` or
 `preferred_username` (`upn` where there is none). On Entra, check that the provisioning
 mapping sends `objectId` as `externalId` and the UPN as `userName`, and that the token
 carries `email` or `preferred_username`; a pair it would not merge is listed by
-`admin.identity.duplicates`.
+`admin.identity.duplicates` and settled as in [routine-tasks.md](routine-tasks.md#scim).
 
 `admin.identity.check` runs four timed checks — discovery names the same issuer, the JWKS
 has keys, the configured endpoints match discovery, and how many known people carry the
@@ -58,12 +54,9 @@ the commands, in development shape, in `dev/kind/dependencies.yaml`. A plane wit
 a static token nor a readable projected token logs one error naming both and answers
 `/.well-known/jwks.json` with 503.
 
-**One replica** with Raft is enough. Without a KMS that OpenBao's seal can use, the seal
-is **Shamir** and something unseals it after a restart; a share kept in a Secret protects
-a stolen volume and not against a cluster admin
-([installing.md §6](installing.md#6-a-worked-example-on-managed-services)). Live sessions
-survive an OpenBao restart because a worker holds its key in memory; nothing can be
-*opened* until it is back. There are no Raft snapshots ([backup-restore.md](backup-restore.md)).
+**One replica** with Raft is enough; the seal, and what a restart costs, are in
+[installing.md §6](installing.md#6-a-worked-example-on-managed-services). There are no Raft
+snapshots ([backup-restore.md](backup-restore.md)).
 
 ## 3. PostgreSQL
 
@@ -99,15 +92,13 @@ endpoint, and, for models that endpoint does not price, `llm.prices`.
 - Per profile: `llm.endpoint`, `llm.provider`, `llm.model`, and `llm.secretRef` for the key
   ([profiles-and-policy.md §1](profiles-and-policy.md#1-what-an-administrator-sets)). The
   endpoint's host must be in `allowedEgress`.
-- `llm.provider` is one of the provider types a person's own machine takes
-  ([the table](../user/configuration.md#provider-types)): `anthropic`, `openai`, `ollama`,
-  `openrouter`, `azure_openai`, `gemini`, or `fake`. The plane and the resource's schema
-  refuse any other name. Every `llm` field needs `llm.endpoint` (for `azure_openai`, the
-  resource's own address): without one the pods are given none of them, so a profile that
-  sets one without an endpoint is refused. `ollama` takes no key, so its profile has no
-  `llm.secretRef`. The console's profile editor
-  offers them all (`admin.profile.choices`) and asks each only for what it needs, and the provider offered
-  to people's own machines (`client_provider`) takes the same names.
+- `llm.provider` is one of the [provider types](../user/configuration.md#provider-types) a
+  person's own machine takes (`anthropic`, `openai`, `ollama`, `openrouter`,
+  `azure_openai`, `gemini`, `fake`), and nothing else. For `azure_openai` the endpoint is the
+  resource's own address; `ollama` takes no key, so its profile has no `llm.secretRef`. The
+  console's profile editor offers them all (`admin.profile.choices`) and asks each only for
+  what it needs, and the provider offered to people's own machines (`client_provider`)
+  takes the same names.
 - `openai` posts to `<endpoint>/v1/chat/completions` with a bearer token and
   `stream_options.include_usage`; `anthropic` to `/v1/messages` with `x-api-key`. `/v1` is
   not doubled.
@@ -131,7 +122,7 @@ endpoint, and, for models that endpoint does not price, `llm.prices`.
 | ingress-nginx | 3600 s proxy timeouts and a 16m body ([installing.md §6](installing.md#6-a-worked-example-on-managed-services)); then label its namespace `troupe.dev/ingress=true` |
 | cert-manager | a ClusterIssuer, `letsencrypt` in the example: HTTP-01, one certificate per pod hostname, no wildcard |
 | Storage classes | a block class (`ReadWriteOnce`) for pod disks, a file-storage class (`ReadWriteMany`) for team volumes, and one for OpenBao's Raft volume; the policy lists what profiles may name |
-| Nodes | unprivileged user namespaces, for bubblewrap: every command on a pod runs in it, and a pod that cannot start it refuses every command (Decision 832); and the chart's seccomp profile, which its DaemonSet installs, since the runtime's default refuses bubblewrap its namespace; and user namespaces for pods (Kubernetes 1.33+, containerd 2.0+, Linux 6.3+, storage that takes idmapped mounts), since only a user-namespaced pod gets the unmasked `/proc` bubblewrap's own needs ([installing.md](installing.md#the-workers-user-namespaces), Decision 890) |
+| Nodes | what bubblewrap needs, since every command on a pod runs in it and a pod that cannot start it refuses every command (Decisions 832 and 890): unprivileged user namespaces, the chart's seccomp profile and, where nodes enforce AppArmor, its AppArmor profile, and user namespaces for pods (Kubernetes 1.33+, containerd 2.0+, Linux 6.3+, storage that takes idmapped mounts) ([installing.md §0](installing.md#0-before-the-first-command)) |
 
 ## 7. MCP
 

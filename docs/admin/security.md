@@ -36,9 +36,9 @@ discovery file or open its socket can drive every session on it
   session starts (`troupe-daemon models`).
 - **In a git repository, at a session's start**, asks whether to bring other tools' files
   (`CLAUDE.md`, Cursor's and Copilot's rules, opencode's agents) into Troupe's own, each
-  shown as a diff and written only on a yes (Decisions 823 and 835). Once that is answered
-  it runs the `librarian` agent, which reads the repository and writes the project brief
-  into its `.troupe/`. That costs model calls; `memory_auto_refresh: false` turns it off.
+  shown as a diff and written only on a yes (Decisions 823 and 835), then runs the
+  `librarian` agent, which writes the project brief into the repository's `.troupe/`. That
+  costs model calls; `memory_auto_refresh: false` turns it off.
 - **The desktop app looks for an update** when it starts and once a day: GitHub's latest
   release, or the version the plane recommends when the person is signed in. It installs
   only when the person says so (Decision 874). `troupe` and `troupe-daemon` look only when
@@ -77,12 +77,12 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   place (Decision 846).
 - **It never copies a secret** when it imports another tool's MCP servers: a value
   becomes `{env:<SERVER>_<NAME>}` (Decision 825).
-- **It never reaches a cloud's metadata service.** Decision 856's list, link-local
-  (`169.254.0.0/16`, `fe80::/10`), `169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`
-  and the unspecified address, is refused by a worker's network policy (856); for every
-  URL the daemon calls for a person's own MCP server and its sign-in, which is resolved,
-  checked and then called at the address checked (875); and for a trigger's `notify_url`,
-  which also refuses loopback and all of `100.64.0.0/10` (866).
+- **It never reaches a cloud's metadata service.** Link-local (`169.254.0.0/16`,
+  `fe80::/10`), `169.254.169.254`, `fd00:ec2::254`, `100.100.100.200` and the unspecified
+  address are refused by a worker's network policy (Decision 856), for every URL the daemon
+  calls for a person's own MCP server and its sign-in, resolved, checked and called at the
+  address checked (875), and for a trigger's `notify_url`, which also refuses loopback and
+  all of `100.64.0.0/10` (866).
 - **The plane never reads a session.** It holds who, which profile, which state and what it
   cost. The transcript is sealed under keys the plane's OpenBao policy cannot read
   ([section 4](#4-keys-and-tokens)), and no admin method returns what a session said
@@ -95,16 +95,14 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   token is mounted; two projected tokens are, one for enrolling with the plane and one for
   OpenBao.
 - **The pod runs in a user namespace of its own** (`hostUsers: false`, `worker.userNamespaces`,
-  Decision 890), so its root and every other user in it, uid 1000 included, are
-  unprivileged users on the node, mapped to a range no other pod has: a process that
-  escaped the container would be nobody there. Its worker container's `/proc` is unmasked
-  (`procMount: Unmasked`), because bubblewrap mounts a fresh `/proc` for the sandbox and
-  the kernel refuses that while paths in the container's own are masked over. Kubernetes
-  allows that only inside a pod's own user namespace, and the operator writes the two
-  together or neither; what the masks hid (`/proc/kcore`, `/proc/sys`, ...) is the pod's
-  user namespace's to see, where its root has no privilege over the node. The Pod Security
-  levels `baseline` and `restricted` refuse an unmasked `/proc` all the same, so worker
-  namespaces are `privileged`.
+  Decision 890), so every user in it, root and uid 1000 included, is an unprivileged user
+  on the node, mapped to a range no other pod has: a process that escaped the container
+  would be nobody there. Its worker container's `/proc` is unmasked (`procMount: Unmasked`)
+  so bubblewrap can mount the sandbox's own; Kubernetes allows that only inside a pod's own
+  user namespace, and the operator writes the two together or neither, so what the masks
+  hid (`/proc/kcore`, `/proc/sys`, ...) is visible only to a root with no privilege over
+  the node. The Pod Security levels `baseline` and `restricted` refuse an unmasked `/proc`
+  all the same, so worker namespaces are `privileged`.
 - **Every command runs in bubblewrap**, the shell's and every process Troupe starts there
   (git, ripgrep, a stdio MCP server), over the session's own directory. A pod that cannot
   start bubblewrap refuses the command with a sentence; it never runs one unconfined
@@ -126,13 +124,12 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
     `keyctl`, `perf_event_open`, io_uring and the new mount API stay refused as in the
     default.
 
-  What this adds is the kernel's user-namespace code, reachable from a worker container
-  and so from a command a session runs. That is the price of a sandbox built without
-  privileges, and less than the alternatives: `CAP_SYS_ADMIN` would let the default profile
-  allow all of this and mounting in the pod's own namespace besides, and `Unconfined`, which
-  the development cluster uses, removes the filter entirely. The pod as a whole keeps the
-  runtime's default; only the worker container has this one. `RuntimeDefault` remains a
-  choice, under which no command runs on a pod.
+  What this adds is the kernel's user-namespace code, reachable from a command a session
+  runs. That is the price of a sandbox built without privileges, and less than the
+  alternatives: `CAP_SYS_ADMIN` would allow all of this and mounting in the pod's own
+  namespace besides, and `Unconfined`, which the development cluster uses, removes the
+  filter. Only the worker container has this profile; the pod keeps the runtime's default.
+  `RuntimeDefault` remains a choice, under which no command runs on a pod.
 - **The worker container's AppArmor profile lets bubblewrap mount the sandbox, and no
   more** (`worker.appArmor`, Decision 898). Where a node enforces AppArmor, the runtime's
   default profile refuses every mount, and Ubuntu's restriction on unprivileged user
@@ -146,10 +143,10 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
     namespace it made itself, so these reach the sandbox's mounts, never the pod's;
   - a worker is confined by it, so the kernel's restriction on unprivileged user
     namespaces, which applies to unconfined processes, does not move it into a profile with
-    no capabilities. Whether it may make one is the profile's to say: it is written for the
-    AppArmor 3.0 policy ABI, which the parser that loads it speaks and which does not mediate
-    user namespaces, so a worker may. The node's sysctl is left as it is, so every other
-    process on the node keeps the restriction;
+    no capabilities. The profile is written for the AppArmor 3.0 policy ABI, which the
+    parser that loads it speaks and which does not mediate user namespaces, so a worker may
+    make one. The node's sysctl is left as it is, so every other process keeps the
+    restriction;
   - denied beyond the default: mounting sysfs, cgroup and cgroup2, mqueue, fuse, overlay,
     bpf, ramfs and binder filesystems even inside the sandbox; the capabilities that mean
     something only in the node's own namespace (`mac_admin`, `mac_override`, `sys_module`,
@@ -160,9 +157,9 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
 
   The loader is the one new privilege: a container per node, root in the node's user
   namespace with `MAC_ADMIN` alone, unconfined by AppArmor (the default profile would refuse
-  it `/sys/kernel/security`), with the host's `/sys/kernel/security` and nothing else of
-  the host. The worker container is never `Unconfined`, and on a node without AppArmor the
-  kubelet refuses a worker pod that asks for the profile rather than run it without.
+  it `/sys/kernel/security`, the only part of the host it mounts). The worker container is
+  never `Unconfined`, and on a node without AppArmor the kubelet refuses a worker pod that
+  asks for the profile rather than run it without.
 - **Network.** Each profile's namespace has a NetworkPolicy: ingress only from the
   namespace labelled `troupe.dev/ingress=true`, egress to DNS, the plane, OpenBao, object
   storage, the model, the MCP servers and the git hosts. **With Cilium** the profile's
@@ -189,37 +186,24 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   round. A pod enrols with its projected token, bound to the plane's audience and good for
   an hour, on the pod network, where the plane's NetworkPolicy admits the port from worker
   namespaces alone, over TLS against the CA the operator gives its namespace; the plane
-  closes a plaintext connection unless `plane.controlTls.requireTls` is turned off
-  (Decision 906). A machine registered outside the cluster
-  ([single-machine.md](single-machine.md)) enrols with a secret that lasts until it is
-  rotated, so it does so over TLS only: the port serves a certificate cert-manager issues
-  for the control Service, the machine is given that certificate's CA when it is registered
-  and trusts no other, and a worker holding a machine's secret and no CA does not dial. A
-  machine's secret sent in plaintext anyway is refused before it is looked at, with a
-  sentence saying to rotate it (Decision 893).
-- **A repository is cloned with a token the session never holds.** A session that names
-  a GitHub repository is cloned on its first activation with an installation token the
-  plane mints for that one repository, `contents: read`, for an hour. The pod's own git
-  takes it from its environment through a credential helper on its command line; the
-  workspace's `.git/config`, the agent's `shell` and every tool's output have no way to it,
-  and no log names it. Each token is an audit entry (Decision 885,
-  [github.md](github.md)).
-- **A session pushes only its own `troupe/*` branch, and never merges.** On a profile that
-  grants it (`spec.github.permissions`), a session pushes, opens a draft pull request,
-  comments on it and reads its CI through four tools the pod runs outside the sandbox,
-  with a token narrowed to the repository and to what the profile grants, which the
-  agent's shell never holds. A push is a commit GitHub makes and signs as the App's bot,
-  naming the session in a trailer; it goes only to the session's one `troupe/*` branch,
-  never with force, and no tool merges, approves or marks a pull request ready. After
-  three red CI rounds the session's tokens can no longer push. Each push, pull request, CI
-  round and stop is an audit entry (Decision 891, [github.md](github.md#7-the-fix-loop)).
-- **A run pushes only where it is allowed, and nothing that looks like a credential.** A
-  session names only a repository its team lists; a push or a pull request to a repository
-  GitHub reports as public is refused unless the profile allows public ones; a push that
-  would carry `.env`, a key file, a path the profile denies or a copy of what the pod mounts
-  from a secret is refused before anything is sent; a run has caps on its pushes and on how
-  many run at once; and a session's tokens are revoked at GitHub when it goes dormant or
-  stops (Decision 911, [github.md](github.md#9-how-far-a-run-may-go)).
+  closes a plaintext connection unless `plane.controlTls.requireTls` is off (Decision 906).
+  A machine registered outside the cluster ([single-machine.md](single-machine.md)) enrols
+  with a secret that lasts until rotated, so over TLS only: it is given the control
+  certificate's CA at registration and trusts no other, does not dial without it, and a
+  secret sent in plaintext anyway is refused unread, with a sentence saying to rotate it
+  (Decision 893).
+- **GitHub: a token the session never holds, its own branch, never a merge.** A session
+  that names a repository is cloned with an installation token for that one repository,
+  `contents: read`, for an hour, which the pod's own git takes through a credential helper;
+  `.git/config`, the agent's `shell` and every tool's output have no way to it. On a
+  profile that grants it, four tools the pod runs outside the sandbox push the session's
+  one `troupe/*` branch as a commit the App's bot signs, never with force, open a draft
+  pull request and read its CI; no tool merges or approves, and three red CI rounds close
+  its pushes. A push goes only to a repository the team lists, private unless the profile
+  allows public ones, and never carries `.env`, a key file, a denied path or a copy of a
+  mounted secret; tokens are revoked when the session goes dormant. Every token, push and
+  stop is an audit entry (Decisions 885, 891 and 911; [github.md](github.md#7-the-fix-loop),
+  [§9](github.md#9-how-far-a-run-may-go)).
 - **One OpenBao role for every profile, by default.** Every worker logs in as
   `troupe-worker`. `bao.workerRolePerProfile` gives each profile a role of its own, so one
   profile's pods cannot read another's session keys
@@ -249,14 +233,17 @@ per object and the session's id as associated data, so an object moved to anothe
 session's prefix fails to decrypt (`Troupe.Sessions.Cipher`). Only its manifest, ids and no
 content, is plaintext.
 
-**On a person's machine** nothing is in an OS keychain except the desktop app's sign-in:
+**On a person's machine** nothing is in an OS keychain except the desktop app's sign-in.
+*Owner only* below is mode 0600, or on Windows an ACL naming the user alone
+(`Troupe.OwnerOnly`); for the model key and the daemon's token it is set before the file is
+put in place:
 
 | What | Where | How it is held |
 |---|---|---|
-| The model key | `config.yaml`, or an environment variable it names (`{env:VAR}`) | readable by its owner only, and its `.previous` copy too: mode 0600, or on Windows an ACL naming the user alone, set before the file is put in place (`Troupe.OwnerOnly`, through `Troupe.Config.Migrate`) |
-| A plane sign-in | `<config>/credentials.json` | readable by its owner only: mode 0600, or on Windows an ACL naming the user alone (`Troupe.Remote.Credentials`, through `Troupe.OwnerOnly`) |
-| The daemon's loopback port and token | `daemon.json` | readable by its owner only: mode 0600, or on Windows an ACL naming the user alone, set before the token is written (`Troupe.OwnerOnly`); a new token each time the daemon starts (`Troupe.Protocol.Endpoint`) |
-| Sign-ins to the person's own MCP servers | `<state>/mcp-oauth.json` | as above (`Troupe.MCP.OAuth.Store`); the tokens never leave the machine (Decision 741) |
+| The model key | `config.yaml`, or an environment variable it names (`{env:VAR}`) | owner only, and its `.previous` copy too (through `Troupe.Config.Migrate`) |
+| A plane sign-in | `<config>/credentials.json` | owner only (`Troupe.Remote.Credentials`) |
+| The daemon's loopback port and token | `daemon.json` | owner only; a new token each time the daemon starts (`Troupe.Protocol.Endpoint`) |
+| Sign-ins to the person's own MCP servers | `<state>/mcp-oauth.json` | owner only (`Troupe.MCP.OAuth.Store`); the tokens never leave the machine (Decision 741) |
 | The plane token a client hands the daemon | the daemon's memory | never written (`Troupe.Gateway.Plane`) |
 | The desktop app's sign-in | the OS credential store | Credential Manager, the Keychain or the Secret Service |
 
@@ -346,14 +333,12 @@ it past (#622).
 
 They hold against a mistake, not against the person. The daemon runs as the person, and a
 plane's settings reach it as `organisation.json` in their own state directory, which they
-can edit or delete. The strong form is the **managed file** at a fixed path only an
-administrator can write: `C:\ProgramData\troupe\managed.yaml` on Windows (on the drive
-the registry says Windows is on, never from `%ProgramData%`, which a person can set),
-`/Library/Application Support/troupe/managed.yaml` on macOS, `/etc/troupe/managed.yaml`
-elsewhere. In a release neither path can be moved by a
-variable or a flag (`Troupe.Config.Org`). Where both speak, the stricter limit holds. A
-person who runs a build of their own is bound by neither. #657 is the plan to sign what the
-plane sends, so that an edited copy is refused.
+can edit or delete. The strong form is the **managed file**, at a fixed path only an
+administrator can write, which in a release no variable or flag moves (`Troupe.Config.Org`;
+on Windows it is found from the registry, never from `%ProgramData%`, which a person can
+set). Where both speak, the stricter limit holds. A person who runs a build of their own is
+bound by neither. #657 is the plan to sign what the plane sends, so that an edited copy is
+refused.
 
 ## 8. A person's own tools on a team's pods
 
@@ -363,11 +348,9 @@ schemas, the arguments and the results, never the token (Decision 748). The pod 
 person to consent before it takes them, and marks the session `session_tainted`, which
 every participant sees ([PROTOCOL.md §8](../../PROTOCOL.md#8-client-hosted-tools)).
 
-A worker profile with `personalTools: forbid` takes none: its pods refuse the offer before
-anything is asked of the person, log the refusal, and a client stops offering for that
-attachment. The setting reaches a session the next time it is activated (Decisions 862 and
-879). The platform's `managed_mcp_servers_only` refuses the offer on every profile at once
-([profiles-and-policy.md](profiles-and-policy.md)).
+A worker profile with `personalTools: forbid` takes none, and the platform's
+`managed_mcp_servers_only` refuses the offer on every profile at once (Decisions 862 and
+879; [profiles-and-policy.md](profiles-and-policy.md#a-persons-own-tools-on-a-pod)).
 
 ## 9. What is logged, and how a session is erased or kept private
 
@@ -388,11 +371,10 @@ keyed, so it does not prove anything against someone who can rewrite the whole t
 
 **Erasing.** The owner erases a session with `session.erase`, an administrator with
 `admin.session.erase`. On a machine that deletes its directory. On a plane the plane
-destroys the session's key itself, and the session reads `erasure_pending` until it has; a
-pass every five minutes retries what OpenBao refused (Decision 811). Bucket versioning must
-be on, because erasure destroys earlier versions too ([installing.md](installing.md#1-what-troupe-does-not-run-for-you)).
-A team's retention period (`erase_after_days`) is recorded and shown, and nothing yet
-erases a session when it passes (#635).
+destroys the session's key first, then every object version, which needs bucket
+versioning on ([routine-tasks.md](routine-tasks.md#erase-a-session), Decision 811). A
+team's retention period (`erase_after_days`) is recorded and shown, and nothing yet erases
+a session when it passes (#635).
 
 **A private session** runs on the person's machine and nowhere else, sealed under a key in
 their own part of OpenBao that no pod can reach. The plane learns that it exists and how

@@ -688,7 +688,7 @@
             ],
             "properties": {
               "client_id": {
-                "description": "A client registered in advance with the server's authorization server.",
+                "description": "A client registered in advance with the server's authorization server. Unset: Troupe registers itself, or presents its client metadata document, where that server takes either.",
                 "type": [
                   "string",
                   "null"

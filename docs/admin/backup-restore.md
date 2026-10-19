@@ -12,7 +12,7 @@ back, and what it does not.
 | **OpenBao** | per-session data keys (KV v2), a team's and a person's private ones; people's own MCP credentials (`troupe/people/<name>/`); the transit signing key, and the keys profiles sign MCP assertions with | no. Losing the KV keys makes every sealed segment unreadable forever; losing the transit key invalidates every outstanding token; losing the rest means people and profiles sign in to their MCP servers again |
 | **Worker volumes** `/var/lib/troupe` | working copies of live sessions, caches, materialised bundles, the unsealed tail of the log — at most 60 s or one root turn | yes, except that tail |
 | **Kubernetes** | `WorkerProfile`, `TeamVolume`, `TroupePolicy`, worker namespaces | in direct mode, profiles from the plane's rows (re-apply); the policy from your values; the rest by reconcile |
-| **A repository** (gitops mode) | the `WorkerProfile` and `Trigger` manifests, and the `TroupePolicy` or the values that make it | the primary copy: the applier puts them back in the cluster, and the plane reads its profiles from there at its first pass ([profiles-and-policy.md §6](profiles-and-policy.md#6-provisioning-direct-or-from-a-repository)). Grants, teams and the rest of the plane's rows are still only in PostgreSQL |
+| **A repository** (gitops mode) | the `WorkerProfile` and `Trigger` manifests, and the `TroupePolicy` or the values that make it | the primary copy: the applier puts them back in the cluster, and the plane reads its profiles from there at its first pass ([gitops.md](gitops.md)). Grants, teams and the rest of the plane's rows are still only in PostgreSQL |
 
 So a restored database plus object storage is a complete plane for sessions, and the
 database backup is the only copy of principals, settings, the audit trail, and triggers
@@ -22,18 +22,18 @@ only the database's).
 ## 2. What the repository provides
 
 **`scripts/pitr-drill`** is a restore drill against the docker-compose development
-PostgreSQL only (it has WAL archiving on for this). It takes a base backup and a named
+PostgreSQL only (which has WAL archiving on for it). It takes a base backup and a named
 restore point, writes a session after it, restores to the point as a second cluster,
 asserts the late row is gone, rebuilds the index from object storage, and asserts the
-session is back with the right epoch and head hash. Run it with `scripts/dev-up` then
-`scripts/pitr-drill` (`TROUPE_PG_CONTAINER`, `TROUPE_PITR_DB` override the container and
-database). It is not a disaster-recovery tool and nothing schedules it against a real
+session is back with the right epoch and head hash. Run `scripts/dev-up`, then
+`scripts/pitr-drill` (`TROUPE_PG_CONTAINER` and `TROUPE_PITR_DB` override the container and
+database). It is not a disaster-recovery tool, and nothing schedules it against a real
 instance.
 
 **`mix troupe.index.rebuild [--database-url URL]`** reconstructs the session index from
-object storage alone — manifests are plaintext and every segment's epoch, last sequence and
-head hash are in its key and metadata, so it needs no key. Safe on a populated index; a
-tombstoned session stays erased; prints `found`, `rebuilt`, `skipped`, `failed`. A release
+object storage alone, with no key: manifests are plaintext, and every segment's epoch, last
+sequence and head hash are in its key and metadata. It is safe on a populated index, keeps
+a tombstoned session erased, and prints `found`, `rebuilt`, `skipped`, `failed`. A release
 has no Mix, so in a cluster:
 
 ```bash
@@ -44,14 +44,11 @@ kubectl -n troupe-system exec deploy/troupe-plane -- /app/bin/troupe_plane eval 
 gateway and never repairs ([integrations.md §5](integrations.md#5-llm-gateway)).
 
 **Erasure is ordered so a restore cannot bring a session back**: a tombstone first (the
-session goes read-only), then the plane destroys the key's metadata — every version — and
-then a healthy pod of the profile deletes the objects. A pod that was offline applies
-pending erasures when it enrols. A private session has no pod: the plane deletes its objects
-when the owner's daemon next connects. Because the key goes first, old object versions and
-backup copies are unreadable. That holds only with **bucket versioning on**, and only once
-the key is gone: a session the key manager refused is `erasure_pending` until a retry
-destroys it (Decision 811), and keys left by team-session erasures before 0.9.0 are
-destroyed once on upgrade.
+session goes read-only), then the plane destroys the key's metadata, every version, and
+then the objects go ([routine-tasks.md](routine-tasks.md#erase-a-session) says by whom and
+when). Because the key goes first, old object versions and backup copies are unreadable.
+That holds only with **bucket versioning on**, and only once the key is gone: a session the
+key manager refused is `erasure_pending` until a retry destroys it (Decision 811).
 
 ## 3. What it does not provide
 

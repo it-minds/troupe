@@ -2,10 +2,11 @@
 
 Defects found in passing, while working on something else, and not fixed yet. Each has a
 place in the code, what goes wrong and who saw it. An entry leaves this page when an issue
-or a pull request takes it; the line that remains says which one. Every entry but D8 (the
-flaky tests, which have their own pass) was checked against the code of 0.15.0 on
-2026-10-12 (#422): what was fixed went to the table at the end, and what was said twice is
-said once.
+or a pull request takes it; the line that remains says which one. One that will not be
+fixed, or that turns out not to be a defect, moves to the sections at the end with the
+reason. Every entry but D8 (the flaky tests, which have their own pass) was checked
+against the code of 0.15.0 on 2026-10-12 (#422): what was fixed went to the table at the
+end, and what was said twice is said once.
 
 Fixers following [fixing-issues.md](fixing-issues.md) add their `noticed` defects here.
 Stale docs and style nits are not defects and do not belong here.
@@ -178,14 +179,11 @@ groups in PR #265.
 
 ### D40 - The plane's drains (medium)
 
-- A worker's `session.activate` doesn't refuse on a pod that is draining, so a session
-  placed in the few seconds after SIGTERM isn't in the shutdown drain's list.
 - `Drain.pod` waits for its push for the drain's timeout plus 30 s, while the pod makes
   sessions dormant one after another (up to 120 s each): several busy sessions can outlast
   it, and the plane gives up on them while the pod is still archiving (unconfirmed).
 - Bonny's `SkipObservedGenerations` skips metadata-only modify events, so the operator
-  acts on the plane's `troupe.dev/drained` annotation at the next resync (about 30 s);
-  the `touched/1` comment in `admin_cluster_test.exs` says sooner.
+  acts on the plane's `troupe.dev/drained` annotation at the next resync (about 30 s).
 
 Found by the #258 and #273 fixers (PRs #264, #274), 2026-09-29.
 
@@ -265,16 +263,6 @@ Found by the chunk 9 fixers, 2026-09-29.
 
 Found by the chunk 10 fixers, 2026-09-30.
 
-### D46 - The TUI and headless runs don't follow a restarted daemon (medium)
-
-For a daemon session, `Troupe.Remote.Worker` keeps the endpoint and token it was given at
-attach (`clients/tui/lib/troupe/client/daemon.ex`), while the daemon's loopback picks a new
-port and a random token on every start (`apps/troupe_gateway/lib/troupe/gateway/loopback.ex`,
-`bind/1`, `token/0`). A TUI window or a headless run therefore never reconnects after the
-daemon restarts, and a headless run ends 1 after 60 s, though the printer says a daemon
-that comes back within a minute costs a script nothing. Read in the code; the desktop app's
-half was fixed for #305. Found by the chunk 11 fixer of slot C1 (PR #306), 2026-10-01.
-
 ### D48 - A dormant session whose log its root can't replay can never be woken (medium)
 
 When the root's first start fails inside the session's own start (a log the replay can't
@@ -313,14 +301,6 @@ Found by the chunk 11 fixers, 2026-10-01.
 
 ### D50 - A person's servers offered to a pod session: the rough edges (medium)
 
-- `Troupe.Gateway.ClientTool.run/4` reads only an error answer's `message`, so a client's
-  failure reaches the pod's model as "failed on the client: internal_error" and the
-  answer's `data.detail` or `reason` is lost (the daemon being unreachable, for one).
-- `DaemonClient.registerTools` in `@troupe/client` sends `consent` as a string where the
-  server expects `{challenge, confirmed_by}`, and `unregisterTools` sends `names` where the
-  server reads `tools`. Neither is used yet; both are wrong.
-- PROTOCOL.md section 8's `tool.invoke` example names the tool `notes.search`; the gateway
-  sends `client.notes.search`.
 - The desktop app offers a person's servers once per attachment: a server signed in to
   while attached is not offered until the next one, and there is no per-server choice.
 - The daemon's `mcp.tools` and `mcp.call` hold no MCP session, so each call against a
@@ -370,16 +350,6 @@ Found by the chunk 12 fixers, 2026-10-01.
   Cilium path's `address_block` alike (a deprecated range; cosmetic).
 
 Found by the chunk 13 fixer of slot B13 (PR #338), 2026-10-02.
-
-### D55 - A worker's OpenBao login: what #336 left (medium)
-
-- The worker doesn't read `TROUPE_BAO_AUTH_PATH`: its auth mount is always `kubernetes`,
-  where the plane's follows `bao.authPath`.
-- `Troupe.KMS.OpenBao.static_token/1` takes `TROUPE_BAO_TOKEN` unfiltered, so an empty
-  value counts as a static token and no login is made (the operator never sets it on a
-  pod).
-
-Found by the chunk 13 fixer of slot C13 (PR #337), 2026-10-02.
 
 ### D56 - SCIM and the subject claim: small leftovers (low)
 
@@ -431,13 +401,6 @@ Found by the chunk 14 fixer of slot E14 (PR #359), 2026-10-03.
   pod).
 
 Found by the chunk 14 fixers of slots A14 and B14 (PRs #364, #363), 2026-10-03.
-
-### D61 - Private sessions after #365: what is left (medium)
-
-- A private session sealed before PR #373 lacks its first events (`session_created`): the
-  sealer subscribed after the session started.
-
-Found by the chunk 15 fixer of slot D15 (PR #373), 2026-10-04.
 
 ### D62 - Start at login: small leftovers (low)
 
@@ -494,21 +457,6 @@ Found by the chunk 16 fixers, 2026-10-04.
   parent restart in the middle of the turn loses what it reported; the delegation's own
   `tool_call_completed` could carry it. A background child is charged when it is stopped
   or cancelled (Decision 853), though not across its parent's restart (D118).
-- `Troupe.Bench.Model.measure/2` counts `request.system` only, so the offline bench's
-  `system_bytes` leaves out the task list the log counts; `Request.system_text/1` has both.
-
-Found by the chunk 17 fixers, 2026-10-04.
-
-### D66 - Compaction and cut tool output: small leftovers (medium)
-
-- The `explore`, `answer`, `ask` and `librarian` profiles don't offer `read_output`, but
-  `grep`, `git_read` and `web_fetch` cut long output with a marker naming a `read_output`
-  call: those agents are told to make a call they can't. #389's stubs are skipped for such
-  profiles (Decision 771); the markers are not. Cuts come sooner since the default limit
-  became 32 KiB (Decision 781).
-- `Troupe.SessionCase` could turn the stand-in provider's strict tool-call pairing on by
-  default, and its refusal of tool blocks in a request without tools too: the whole core
-  suite passes with both (Decisions 774 and 779).
 
 Found by the chunk 17 fixers, 2026-10-04.
 
@@ -657,15 +605,6 @@ Found by the #437 fixer, 2026-10-06.
   counts as a try and holds the next off for `memory_max_age_days`.
 
 Found by the #123 fixer, 2026-10-06.
-
-### D79 - `troupe-daemon open` and the loopback: what #449 left (medium)
-
-- The GUI reads `#daemon=` only when the page loads; a fragment set in an open tab is not
-  taken (`open` always opens a new one).
-- The loopback admits an upgrade that carries no `Origin` header (the token is still
-  required).
-
-Found by the #449 fixer, 2026-10-06.
 
 ### D80 - Small leftovers from the 0.8.6 work (low)
 
@@ -1469,9 +1408,7 @@ Found by the chunk 37 fixers, 2026-10-17.
 ### D131 - First run, GitHub sweeps, the signed plane and the agent picker after chunk 38 (low)
 
 - **The desktop's first run and sign-in** (Decision 916).
-  - The cause of a lost `setup.answer` reply on a real daemon wasn't found; the app now recovers from one, but the daemon side was only reproduced with the fake.
-  - `DaemonClient` has no per-call timeout, so other buttons that wait on one reply can hang the same way.
-  - The TUI's first-run finish has the same one-reply shape and wasn't checked.
+  - The cause of a lost `setup.answer` reply on a real daemon wasn't found; both clients now recover from one, but the daemon side was only reproduced with the fake.
   - The desktop asks its updater about a recommended version older than itself; harmless, but it shows a fetch error when the release URL is unreachable.
 - **GitHub sweeps and the App from GitOps** (Decision 917).
   - A sweep reads at most 50 issues and the first 100 open pull requests per run, and reuses the trigger's `last_fired_at`.
@@ -1479,7 +1416,6 @@ Found by the chunk 37 fixers, 2026-10-17.
   - The GUI's fake admin refuses `admin.github.delete` in every GitOps case, including `missing`, which the plane allows.
   - #653 still owes naming the person in each commit (`Requested-By:`) and the console's test token for a chosen repository.
 - **A pod session's config** (Decision 918).
-  - On a pod, `config.get` for a session needs only `observe`, so a viewer sees the profile's LLM `base_url`, models, prices and the pod's state directory (never the key).
   - A session reports what it resolved when it started; a laptop's plain `/settings` reads the files as they are now.
   - About 65 `expect(button(…)).toBeNull()` checks after async steps stay unchecked; they can't flake, but some may pass before the thing could have been drawn.
 - **The signed plane** (Decision 919).
@@ -1493,11 +1429,43 @@ Found by the chunk 37 fixers, 2026-10-17.
   - The console's `recordCalls()` swaps `fetch` after the admin client is built, so `bundles.test`'s "publishes nothing" passes without checking.
   - The GUI's fake `checkAgent` lacks `delegation` and has a shorter tool list than the harness.
   - #594 still owes `/agents` and `/new` onto the TUI picker, new-from-template, the desktop's agent manager on the picker, and the builder's profile-first view.
-- **Tests.**
-  - The gateway's `Loopback`, `PlaneVersion` and `Private` tests fail when run in one VM after `daemon_test`, and pass alone.
-  - Core's test helper sets the Logger level to `:critical`, so one `mix test` naming files from core and another app leaves the second app's `capture_log` empty.
 
 Found by the chunk 38 fixers, 2026-10-18.
+
+### D132 - Steering, company memory, MCP sign-in and the docs after chunk 39 (low)
+
+- **Steering a laptop's session** (Decision 921).
+  - The relay rides the laptop client's 15-minute plane token. With no client signed in on the laptop, an offer goes offline when it runs out; whether the daemon renews its own sign-in is undecided.
+  - The daemon's idle watch doesn't count the relay link, so a daemon whose offer has nobody attached can idle out.
+  - The console signs in admins only, so a person who isn't one steers only from the desktop app.
+  - There's no per-team admin switch to forbid offering.
+  - The TUI can't list or steer other laptops' sessions.
+  - Who is steering is polled in the desktop app, and shown only on `/steer` in the TUI.
+  - `Troupe.Protocol.Client.Transport.ws_connect` swallows every mailbox message during the upgrade, so a GenServer that dials from its own process loses its calls.
+- **Company memory** (Decision 922).
+  - `troupe config pull` doesn't fetch memory, and a running laptop session keeps the copy it started with; there's no `config.changed` for a refreshed one.
+  - A child profile doesn't read its parent's memory.
+  - A deleted profile's memory stays under its name, so a profile recreated under that name finds the old document in force.
+  - The desktop app has no instructions view.
+  - `memory.json` is kept after sign-out, as `organisation.json` is.
+- **The criticals sweep** (Decision 923).
+  - A viewer still sees a pod session's models, prices and the environment variable's name in the source column.
+  - The daemon stamps `completed_at` in whole seconds, so a setup re-run in the same second looks like the old record.
+  - Left with reasons: D5, D40's annotation latency, D48, D54 (needs a decision on `host:port`), D65's subagent spend, D71 and D92.
+- **Offered tools and MCP sign-in** (Decision 924).
+  - A URL-only server entry that answers 401 still needs `"oauth": {}`; signing in to a server that publishes RFC 9728 metadata by default would follow.
+  - Troupe's client ID metadata document is at `https://it-minds.github.io/troupe/oauth/client.json`: moving the docs site breaks every provider that knows Troupe by that id.
+  - A provider that registers Troupe only as a confidential client is refused.
+  - Neither client's MCP view says which client a sign-in used, and the desktop app still draws nothing for `tools_registered`.
+- **The docs** (#76, #189, #422).
+  - Eight pages are over 400 lines: `ARCHITECTURE.md`, the prompt-prefix page, `admin/github.md`, `profiles-and-policy.md`, `user/configuration.md`, the TUI README, `admin/configuration.md` and `admin/installing.md`.
+  - TUI decision tui/15 names `TROUPE_STATE_DIR` and `TROUPE_CONFIG_DIR`, where the code uses `*_HOME`.
+  - `installing.md` and `security.md` show stale example versions.
+  - The repository's homepage link isn't set, and the docs site has no domain of its own.
+  - D75: a decision's `symbols:` is still not checked against the code.
+- **Tests.** `ClientTest`'s test server times out on accept under load.
+
+Found by the chunk 39 fixers, 2026-10-19.
 
 ## Taken
 
@@ -1628,8 +1596,23 @@ Found by the chunk 38 fixers, 2026-10-18.
 | D122's two plane-check items - a connected client isn't judged again when the policy changes, and the plane doesn't record client versions | #657 |
 | D123's guardrail item - an organisation's enforced set is a guardrail, not a lock | #657 |
 | D124's three frames items - reasoning on replay, Afterglow dark's `--bg-sunken`, no desktop control for `transcript.detail` | #659 |
+| D46 - the TUI and headless runs didn't follow a restarted daemon; D55 - a worker's OpenBao mount and an empty static token; D66 - `read_output` named to agents without it, the lax stand-in provider; D40's activation on a draining pod and its test comment; D50's first three items; D65's bench item; D79's open-tab fragment; D131's per-call timeout, TUI first run, viewers' config and the two test-order items | chunk 39's criticals sweep (Decision 923) |
+
+## Won't fix
+
+- **A private session sealed before PR #373 lacks its first events.** This was D61: the
+  sealer subscribed after the session started, so `session_created` and what came before
+  it were never sealed. The fix holds for every session since; the events of the older
+  ones were never written to the sealed log, and nothing can restore them. Judged in
+  chunk 39's criticals sweep, 2026-10-18.
 
 ## Checked and not a defect
+
+- **The daemon's loopback admits a WebSocket upgrade with no `Origin`.** This was D79.
+  A browser always names the page in `Origin` on an upgrade, and `origin_allowed?` in
+  `apps/troupe_gateway/lib/troupe/gateway/web.ex` refuses a page whose origin is not
+  listed; an upgrade without one comes from a program (the TUI, the VS Code extension, a
+  script), which still needs the daemon's token. Checked in chunk 39, 2026-10-18.
 
 - **The Authentik provider is Confidential, but the clients are public.** This was D4.
   Checked on 2026-09-23 against the live plane: the GUI's code exchange (PKCE, no

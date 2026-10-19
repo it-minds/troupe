@@ -250,7 +250,11 @@ defmodule Troupe.Gateway.LocalSources do
     do: {:ok, server}
 
   defp may_sign_in(%{name: name}, _trust),
-    do: invalid("#{name} takes no sign-in: give its entry an oauth.client_id to sign in to it")
+    do:
+      invalid(
+        "#{name} takes no sign-in: give its entry an oauth to sign in to it, {} where its " <>
+          "authorization server registers clients, or with oauth.client_id"
+      )
 
   defp sign_in_of(server),
     do: OAuth.binding(server.name, server.config.url, server.config.oauth, nil)

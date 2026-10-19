@@ -196,6 +196,50 @@ describe("switching local-only off and on", () => {
     expect(refreshTokenFor(plane)).not.toBe(kept);
     expect(localStorage.getItem("troupe.pref.localOnly")).toBe("no");
   });
+
+  it("refuses what was already on its way to the plane when the switch went", async () => {
+    harness = await startHarness();
+    const plane = harness.plane.baseUrl;
+    harness.plane.seed("alice@example.com", { id: "team-1", title: "Rewrite the placement loop", profile: "dev" });
+    await harness.signIn({ store: webTokenStore() });
+    localStorage.setItem("troupe.pref.planeUrl", plane);
+    localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");
+    startOnTheList();
+
+    net = recordNetwork();
+    // The plane's answer to the version question's first half, held until the switch has
+    // gone: its second half, `me.client_versions`, is then due after it, as it was on a
+    // loaded machine where the daemon was slow to say which key it pinned.
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let held = 0;
+    const recorded = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const answer = await recorded(input, init);
+      if (String(init?.body ?? "").includes('"method":"initialize"')) {
+        held += 1;
+        await released;
+      }
+      return answer;
+    }) as typeof fetch;
+    unmount = render(<App />).unmount;
+
+    await waitFor(() => says("Rewrite the placement loop") && says("/home/ada/notes"), "the team's session and this computer's");
+    await waitFor(() => held > 0, "the version question on its way");
+    nav("This computer")!.click();
+    const toggle = await waitFor(
+      () => [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find((i) => i.parentElement?.textContent?.includes("never contact a plane")),
+      "the local-only switch",
+    );
+    toggle.click();
+    await waitFor(() => document.querySelector(".me .name")?.textContent === "This computer", "local mode");
+    net.clear();
+    release();
+
+    await sleep(4_500);
+    expect(notTheDaemon()).toEqual([]);
+    expect(refreshTokenFor(plane)).toBeTruthy();
+  });
 });
 
 describe("a plane that does not answer", () => {

@@ -23,6 +23,7 @@ import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { AuthSession, PlaneUnreachableError } from "@troupe/client";
 import type { DeviceAuthorization, Discovery } from "@troupe/client";
+import { throughTheGate } from "../mode";
 import { capabilities, likelyPlaneUrl, prefs, redirectUri, shell, tokenStore } from "../shell";
 import { Wordmark } from "./brand";
 
@@ -30,13 +31,14 @@ import { Wordmark } from "./brand";
  * An `AuthSession` for this host. The shell, when there is one, supplies the credential
  * store, HTTP from outside the webview, and which sign-in it can actually complete —
  * a webview looks like a browser to the inference and has no redirect to come back to.
+ * Every request it makes goes through the local-only gate (`mode.ts`).
  */
 export function newSession(planeUrl: string): AuthSession {
   const host = shell();
   return new AuthSession({
     planeUrl,
     store: tokenStore(),
-    ...(host?.fetchImpl ? { fetchImpl: host.fetchImpl } : {}),
+    fetchImpl: throughTheGate(host?.fetchImpl ?? globalThis.fetch),
     ...(host?.signInFlow ? { flow: host.signInFlow } : {}),
   });
 }

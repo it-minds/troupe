@@ -1,6 +1,6 @@
 export * from "./types.js";
-export { TroupeConnection, TroupeRpcError, TroupeConnectionClosed } from "./connection.js";
-export type { ConnectOptions, ConnectionHooks } from "./connection.js";
+export { TroupeConnection, TroupeRpcError, TroupeConnectionClosed, TroupeCallTimedOut, callTimeout, callTimeouts, waitWords } from "./connection.js";
+export type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
 export { PlaneClient, PlaneHttpError, normalizeEndpoint } from "./plane.js";
 export type {
   Discovery,
@@ -114,8 +114,22 @@ export {
   syncState,
   syncWords,
   claimable,
+  RemoteSource,
+  rowFromRemote,
+  remoteOffer,
+  onThisComputer,
 } from "./fleet.js";
-export type { FleetRow, FleetSource, FleetFilter, FleetSnapshot, SessionKind, SyncState } from "./fleet.js";
+export type {
+  FleetRow,
+  FleetSource,
+  FleetFilter,
+  FleetSnapshot,
+  SessionKind,
+  SyncState,
+  RemoteOffer,
+  RemotePerson,
+} from "./fleet.js";
+export { openRemote, remoteRefusal, when as remoteWhen } from "./remote.js";
 export { AdminApi, bundleErrors, requiredRole } from "./admin.js";
 export type {
   AdminFilter,
@@ -184,6 +198,14 @@ export type {
   GitHubDelivery,
   SigningKey,
   SigningKeyVersion,
+  MemoryDocument,
+  MemoryLine,
+  MemoryListing,
+  MemoryPreview,
+  MemoryRow,
+  MemorySaved,
+  MemoryScope,
+  MemoryVersion,
   Host,
   IdentityAdopted,
   IdentityDuplicates,

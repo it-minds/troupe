@@ -103,6 +103,9 @@ spec:
             # installation has made, rather than all as `troupe-worker`.
             - name: TROUPE_BAO_WORKER_ROLE_PER_PROFILE
               value: {{ .Values.bao.workerRolePerProfile | quote }}
+            # The Kubernetes-auth mount worker pods log in at, the plane's own.
+            - name: TROUPE_BAO_AUTH_PATH
+              value: {{ .Values.bao.authPath | quote }}
             - name: TROUPE_OBJECT_ENDPOINT
               value: {{ .Values.objectStore.endpoint | quote }}
             - name: TROUPE_OBJECT_BUCKET

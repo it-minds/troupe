@@ -20,7 +20,7 @@ Plus [`nightly.yml`](../../.github/workflows/nightly.yml) — the full suite, th
 | the chart | `oci://ghcr.io/it-minds/charts/troupe`, and `troupe-<version>.tgz` on the release page | the version, for a release, and for a pre-release that built its images |
 | `troupe`, `troupe-daemon`, the desktop installers, `install.sh`, `install.ps1` | the release page | — |
 
-The packages are public, so a cluster pulls them with no credential. They are pushed with the workflow's own `GITHUB_TOKEN` (`packages: write`), which can push to its own owner's packages and nowhere else, so a fork publishes to its own `ghcr.io/<owner>`. There is no registry to configure: a deployment that wants its images in a registry of its own copies them from here. The chart's `values.yaml` names these images, and its image tags default to the chart's version.
+The packages are public, so a cluster pulls them with no credential. They are pushed with the workflow's own `GITHUB_TOKEN` (`packages: write`), which reaches its own owner's packages alone, so a fork publishes to its own `ghcr.io/<owner>`. There is no registry to configure; a deployment that wants its images in its own registry copies them from here. The chart's `values.yaml` names these images, with tags defaulting to the chart's version.
 
 ## Focused CI: what a change runs
 
@@ -79,7 +79,7 @@ flowchart LR
   ok -->|push to main, changed an image| images[images · sha-&lt;short&gt;]
 ```
 
-`ci-ok` is the one required check: it fails if any job that ran failed, and a job skipped because its part of the repository did not change counts as passing. A push to `main` publishes the images once `ci-ok` has passed. The soak is not in focused runs; it belongs to the nightly and to releases. The cluster suite is in them only where a pull request changes what it deploys (below).
+`ci-ok` is the one required check: it fails if any job that ran failed, and a job skipped because its part of the repository did not change counts as passing. A push to `main` publishes the images once `ci-ok` has passed. The soak belongs to the nightly and releases, not focused runs; the cluster suite is in focused runs only where a pull request changes what it deploys (below).
 
 ## The suite that needs a cluster
 
@@ -89,11 +89,12 @@ cluster (Decision 889). It runs:
 - on a **pull request** that changes what the cluster runs: `charts/` (the CRDs and the
   admission policy among it), `docker/`, `dev/kind/`, `scripts/kind-up`,
   `scripts/remote-up`, `scripts/build-images`, `apps/troupe_operator/` (the operator and
-  the suite itself), `cluster.yml`, or what the images are built from that lives elsewhere:
-  the GUI's `clients/gui/Dockerfile` and the repository's `.dockerignore`. Into `main` through `ci.yml`, after `lint`, the
-  test legs and `chart` have passed or been skipped; into a `development-*` chunk through
-  `dev-check.yml`, after its compile, because a fixer's machine may have no cluster and
-  the chunk's own pull request into `main` comes only once every fix is in;
+  the suite itself), `cluster.yml`, or what the images are built from that lives elsewhere
+  (`clients/gui/Dockerfile`, the repository's `.dockerignore`). Into `main` through
+  `ci.yml`, after `lint`, the test legs and `chart` have passed or been skipped; into a
+  `development-*` chunk through `dev-check.yml`, after its compile, because a fixer's
+  machine may have no cluster and the chunk's own pull request into `main` comes only once
+  every fix is in;
 - in the **nightly** and every **release**, whatever changed.
 
 Not on a push to `main`, whose pull request ran it, and not for a change to the workflows
@@ -190,17 +191,17 @@ The full suite and the native builds on `main` at 02:17 UTC, publishing nothing 
 
 ### The live check
 
-[`live.yml`](../../.github/workflows/live.yml), in the same run: the harness against a real model, through the LiteLLM gateway. Everything else here uses the scripted `fake` model, which does as it is told; the sessions that ran away with real money did so on a real one. `scripts/install-local --tui` builds `troupe-daemon` and `troupe` from the commit, as a person building from source would, and [`scripts/live-check`](../../scripts/live-check) makes three `troupe run build … --headless` runs, each in an empty workspace with its own daemon, its own config and a five-minute timeout:
+[`live.yml`](../../.github/workflows/live.yml), in the same run: the harness against a real model, through the LiteLLM gateway. Everything else here uses the scripted `fake` model, which does as it is told; the sessions that ran away with real money did so on a real one. `scripts/install-local --tui` builds `troupe-daemon` and `troupe` from the commit, as a person building from source would, and [`scripts/live-check`](../../scripts/live-check) makes three `troupe run build … --headless` runs, each in an empty workspace with its own daemon and config and a five-minute timeout:
 
 | run | passes when | a failure means |
 |---|---|---|
 | **a headless task**: write `hello.txt` with one given line, then stop | exit 0, the file holds the line, the log has a `turn_ended` | the headless runner does not exit when a real model ends its turn in prose (#127), or the task was not done |
 | **a delegation**: find a fact in `notes/` through one `explore` subagent | exit 0, and a `delegate` call whose result is the subagent's summary or its honest note that it was cut short (#130) | the delegation never happened, failed, or came back empty. The fact missing from the final answer is a warning, not a failure |
-| **a failing tool loop**: read a file that is never there, and keep retrying | the failure guard stops the turn after three failed reads: `turn_ended` with `reason: tool_failures`, exit 1 | a budget stopped the loop and the guard did not (#117), or the job's own timeout did and nothing in the harness had. *Inconclusive* means the model gave up by itself before the third failure, so the guard was not reached |
+| **a failing tool loop**: read a file that is never there, and keep retrying | the failure guard, set to three here, stops the turn after three failed reads: `turn_ended` with `reason: tool_failures`, exit 1 | a budget stopped the loop and the guard did not (#117), or the job's own timeout did and nothing in the harness had. *Inconclusive* means the model gave up by itself before the third failure, so the guard was not reached |
 
 A failure is a harness regression until shown otherwise: the step prints the run's output and, on failure, the session's log (one event a line) and the daemon's. A warning is about what the model said and needs nothing unless it repeats.
 
-**What it may spend.** Each run's user config limits an agent to 12 model calls, 200,000 input tokens, 24,000 output tokens and four minutes, and a spent budget stops rather than asks (`budget_asks: false`). The project brief's automatic refresh is off (`memory_auto_refresh: false`), so no librarian starts. The job stops at 20 minutes whatever happens, and the key itself is capped at the gateway at about $2 a day, so a night that runs away costs that at most. The job summary lists each run's model calls and tokens, and what they cost: the gateway's price where it gives one, and where it does not, the harness's own from `TROUPE_NIGHTLY_MODEL_PRICES`, marked *priced here* (#160). The gateway prices no streamed call, so for `qwen3-235b` the column says *not reported* until that variable holds the gateway's rates for the model. A night that goes as it should is some tens of thousands of input tokens.
+**What it may spend.** Each run's user config limits an agent to 12 model calls, 200,000 input tokens, 24,000 output tokens and four minutes, and a spent budget stops rather than asks (`budget_asks: false`). The brief's automatic refresh is off (`memory_auto_refresh: false`), so no librarian starts. The job stops at 20 minutes whatever happens, and the key is capped at the gateway at about $2 a day, the most a runaway night costs. The job summary lists each run's model calls, tokens and cost: the gateway's price where it gives one, else the harness's own from `TROUPE_NIGHTLY_MODEL_PRICES`, marked *priced here* (#160). The gateway prices no streamed call, so for `qwen3-235b` the column says *not reported* until that variable holds the gateway's rates. A night that goes as it should is some tens of thousands of input tokens.
 
 **By hand**, alone: `gh workflow run nightly.yml -f only=live`, with `--ref <branch>` to try a branch before it merges, or `Actions → nightly → Run workflow` with *only* set to `live`. `all` is the whole nightly, about seventy minutes. GitHub offers a dispatch only for a workflow `main` has, and the run then uses the branch's copy of it.
 

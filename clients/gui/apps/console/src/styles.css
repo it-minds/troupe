@@ -857,23 +857,46 @@ ul.plain li {
   overflow-x: auto;
 }
 .preview .hunk,
-.preview .ctx {
+.preview .ctx,
+.memory-version .hunk,
+.memory-version .ctx {
   color: var(--diff-hunk);
 }
 .preview .del,
-.preview .add {
+.preview .add,
+.memory-version .del,
+.memory-version .add {
   padding-left: var(--space-2);
   border-left: var(--bw-marker) solid transparent;
 }
-.preview .del {
+.preview .del,
+.memory-version .del {
   background: var(--diff-del-bg);
   color: var(--diff-del-fg);
   border-left-color: var(--diff-del-mark);
 }
-.preview .add {
+.preview .add,
+.memory-version .add {
   background: var(--diff-add-bg);
   color: var(--diff-add-fg);
   border-left-color: var(--diff-add-mark);
+}
+/* A memory document's change keeps its lines as written, and a version's opens below it. */
+.preview .diff .ctx,
+.preview .diff .del,
+.preview .diff .add,
+.memory-version .diff div {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.memory-version .diff {
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-sunken);
+}
+.memory.card {
+  margin-bottom: var(--space-5);
 }
 .preview .effects,
 .card .effects {

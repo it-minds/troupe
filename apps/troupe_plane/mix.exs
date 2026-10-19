@@ -42,6 +42,8 @@ defmodule Troupe.Plane.MixProject do
       # What `Phoenix.LiveViewTest` parses rendered pages with.
       {:lazy_html, ">= 0.1.0", only: :test},
       {:bandit, "~> 1.12"},
+      # The two sockets a laptop's offered session is relayed over (#58).
+      {:websock_adapter, "~> 0.6"},
       # The plane's HTTP surface is a handful of routes, so it is `Plug.Router` rather
       # than Phoenix. Stage 3's admin panel is what brings Phoenix in.
       {:plug, "~> 1.16"},

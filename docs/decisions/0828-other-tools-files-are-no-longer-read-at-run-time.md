@@ -16,6 +16,7 @@ paths:
   - install.sh
   - install.ps1
   - docs/user/configuration.md
+  - docs/user/instructions.md
   - apps/troupe_core/test/troupe/instructions_test.exs
   - apps/troupe_core/test/troupe/instructions_prompt_test.exs
   - apps/troupe_core/test/troupe/instructions_check_test.exs
