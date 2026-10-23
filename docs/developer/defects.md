@@ -1452,6 +1452,38 @@ Found by the chunk 38 fixers, 2026-10-18.
 
 Found by the chunk 39 fixers, 2026-10-19.
 
+### D133 - Offers, memory refresh, the signed policy and the picker after chunk 40 (low)
+
+- **Offered sessions** (Decision 928).
+  - A grant whose release never reached the plane stays in `remote_grants` until the 30-day idle limit refuses it; nothing deletes it, and the console doesn't list a person's laptop grants.
+  - The TUI still offers "allow for the session" on a relayed approval; the laptop refuses it with a sentence.
+  - An offer doesn't come back after a reboot unless the person has `troupe-daemon login on`.
+  - The macOS and Linux credential stores (`security`, `secret-tool`) weren't exercised; Linux CI checks only the "store unavailable" answer.
+  - The gateway's `OrganisationTest` sees a late `config.changed` inside a 300 ms refute, under load.
+- **Company memory** (Decision 929).
+  - A change to a profile's `extends` reaches its running sessions only at their next activation.
+  - A laptop session resumed after going dormant reads the current copy with no `memory_changed` line.
+  - `organisation.json` stays after sign-out, where `memory.json` is dropped.
+  - `PROTOCOL.md` has no section for the plane-to-pod pushes (`session.activate`, `session.memory`).
+- **The signed policy and releases** (Decision 931).
+  - There's no `admin.releases.remove`, and a failed mirror shows only in the audit and the log.
+  - A mirror holds one file in memory at a time, up to about 100 MB.
+  - The TUI's own HQ connection doesn't act on a `versions` change.
+  - Re-resolving a running session for an organisation change also picks up the person's own config edits since it started.
+  - `policy.revision` is unsigned; a forged one can only cause or suppress a fetch.
+  - Gateway tests that wait 5 s on a link's background task fail under load.
+- **The sweep** (Decision 930).
+  - The GUI's fake admin still keys manual runs on the minute.
+  - `pnpm audit` reports one high-severity advisory in `source-map-js`, pulled in only by the console's test runner.
+- **The picker and the App** (Decision 932, tui/0166).
+  - The plane's bundle preview diffs names only (`Bundle.summary/1`), so a changed definition with unchanged names previews nothing there; the builder adds its own lines. (medium)
+  - The admin API's flat `profile` argument receives the params map when absent; `profile_choices` guards for it.
+  - The desktop's `AgentEditor` doesn't show `delegation`.
+  - `Ledger.models_run` has no time bound.
+  - The model picker offers only the models the plane knows; the plane never asks a provider for its list.
+
+Found by the chunk 40 fixers, 2026-10-24.
+
 ## Taken
 
 | Defect | Taken by |
