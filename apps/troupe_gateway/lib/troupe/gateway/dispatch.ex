@@ -24,6 +24,7 @@ defmodule Troupe.Gateway.Dispatch do
     Connections,
     Idle,
     LocalSources,
+    Memory,
     Plane,
     Policy,
     Presence,
@@ -41,7 +42,6 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Mounts
   alias Troupe.Onboard.Start, as: Onboarding
   alias Troupe.PlaneKeys
-  alias Troupe.PlaneMemory
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
@@ -184,6 +184,9 @@ defmodule Troupe.Gateway.Dispatch do
     # A plane's organisation document, kept as this machine's copy (Decision 869): what
     # every later session's defaults and limits are.
     "config.organisation" => :admin,
+    # The plane's memory documents, kept as this machine's copy (#55): what every session
+    # here reads first.
+    "config.memory" => :admin,
     # A first run's questions (Decision 705): reading where it stands says nothing
     # secret; answering sends a key to a provider, writes the settings and starts a
     # session, so it takes what `config.set` takes.
@@ -503,7 +506,11 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, session} <- lookup(session_id),
          workspace = Path.expand(session.workspace),
          {:ok, config} <- workspace_config(workspace) do
-      {:ok, Troupe.Instructions.provenance(workspace, config, instruction_focus(session_id))}
+      {documents, from} = session_memory(session_id, config.plane_memory)
+      config = %{config | plane_memory: documents}
+
+      provenance = Troupe.Instructions.provenance(workspace, config, instruction_focus(session_id))
+      {:ok, if(from, do: Map.put(provenance, "memory_from", from), else: provenance)}
     end
   end
 
@@ -1250,6 +1257,7 @@ defmodule Troupe.Gateway.Dispatch do
     :ok = Plane.unlink()
     Private.suspend()
     Remote.unlinked()
+    _dropped = Memory.forget(nil)
     user = System.get_env("USER") || System.get_env("USERNAME") || "local"
     send(context.connection, {:principal_changed, Identity.principal(user)})
     {:ok, Identity.to_json(nil)}
@@ -1257,14 +1265,20 @@ defmodule Troupe.Gateway.Dispatch do
 
   # The person signed out at a client (issue #381). The token goes, if it is for that plane
   # and that person, and the sealing it was for stops until a client links with one again;
-  # the label stays, so that link is the same one and carries each session on. A token for
-  # somebody else, or for another plane, is not this client's to take back.
+  # the label stays, so that link is the same one and carries each session on. So does the
+  # daemon's own sign-in for steering, which outlives a client's token but not the person
+  # signing out: released at the plane, out of the credential store, the relay closed. A
+  # token for somebody else, or for another plane, is not this client's to take back. The
+  # copy of that plane's memory goes whether or not a token was held (a daemon restarted
+  # since the sign-in holds none): the organisation's words are for its signed-in members,
+  # and the sessions here read none of them from their next turn. The key pinned for it stays.
   defp handle("identity.sign_out", params, _context) do
     with {:ok, plane_url} <- fetch(params, "plane_url") do
       signed_out = Plane.sign_out(plane_url, params["subject"])
+      _dropped = Memory.forget(plane_url)
       if signed_out, do: Private.suspend()
-      if signed_out, do: Remote.unlinked()
-      {:ok, %{"signed_out" => signed_out}}
+      steering = Remote.signed_out(plane_url, params["subject"])
+      {:ok, %{"signed_out" => signed_out or steering}}
     end
   end
 
@@ -1491,6 +1505,19 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # A plane's `me.memory` answer, which a client signed in to the plane fetched beside the
+  # organisation's document (`troupe config pull`), kept by the writer the daemon's own
+  # refresh uses (`Troupe.Gateway.Memory`): checked against the pinned key, announced, and
+  # given to the sessions running here for their next turn.
+  defp model_settings("config.memory", params) do
+    with {:ok, plane_url} <- fetch(params, "plane_url") do
+      case Memory.keep(plane_url, params["document"]) do
+        {:ok, kept} -> {:ok, kept}
+        {:error, reason} -> settings_result({:error, format_reason(reason)})
+      end
+    end
+  end
+
   defp keep_document(plane_url, document) when is_map(document), do: keep_organisation(plane_url, document)
   defp keep_document(_plane_url, _other), do: {:error, "document must be the plane's me.client_defaults answer, an object"}
 
@@ -1498,9 +1525,6 @@ defmodule Troupe.Gateway.Dispatch do
   # (`Policy`): kept as the plane signed it, every client told which keys changed, and every
   # session running here given them for its next turn.
   defp keep_organisation(plane_url, document), do: Policy.keep_organisation(plane_url, document)
-
-  defp signature(:signed, document), do: document["signed"]
-  defp signature(:unsigned, _document), do: nil
 
   defp put_plane_key(json, url) when is_binary(url) do
     case PlaneKeys.pinned(url) do
@@ -1709,22 +1733,16 @@ defmodule Troupe.Gateway.Dispatch do
 
   # The organisation's memory documents the person's sessions read (#55): the
   # organisation's and their teams', from `me.memory`, kept as the plane signed them, as the
-  # organisation's document is, for every session started after. A plane from before them
-  # has no `me.memory`, and the copy stays as it was; so does one the pin refuses.
+  # organisation's document is, and given to the sessions running here for their next turn
+  # where they changed (`Troupe.Gateway.Memory`, which also asks every few minutes while a
+  # token is held). A plane from before them has no `me.memory`, and the copy stays as it
+  # was; so does one the pin refuses.
   defp refresh_memory do
-    with url when is_binary(url) <- Plane.url(),
-         {:ok, answer} <- Plane.call("me.memory", %{}),
-         {:ok, body, signed?} <- PlaneKeys.check(url, answer, "memory"),
-         {:ok, _kept} <- PlaneMemory.save(url, body, PlaneMemory.cache_path(), signature(signed?, answer)) do
-      :ok
-    else
-      {:error, {:rpc, %{"code" => -32_601}}} ->
-        :ok
-
+    case Memory.refresh() do
       {:error, reason} ->
         Logger.info("troupe-daemon: the organisation's memory was not refreshed: #{format_reason(reason)}")
 
-      _no_plane ->
+      _kept_or_nothing ->
         :ok
     end
   end
@@ -1873,6 +1891,24 @@ defmodule Troupe.Gateway.Dispatch do
     end
   catch
     :exit, _reason -> []
+  end
+
+  # The organisation's memory the session's next turn reads, which is its own: on a pod the
+  # activation's, which no file here has, and anywhere what a save since gave it. A session
+  # whose layers say nothing reads what this machine's copy holds. With where they came
+  # from: the plane's URL and when this machine fetched them, or the activation on a pod;
+  # nothing where no plane gave any.
+  defp session_memory(session_id, from_copy) do
+    case Troupe.Session.resolved(session_id) do
+      %{layers: %{memory: %{documents: documents, source: nil}}} when is_list(documents) ->
+        {documents, nil}
+
+      %{layers: %{memory: %{documents: documents} = memory}} when is_list(documents) ->
+        {documents, %{"source" => memory.source, "fetched_at" => memory.fetched_at}}
+
+      _unknown ->
+        {from_copy, nil}
+    end
   end
 
   defp workspace_config(workspace) do

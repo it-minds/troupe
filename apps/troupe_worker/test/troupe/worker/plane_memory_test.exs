@@ -79,6 +79,60 @@ defmodule Troupe.Worker.PlaneMemoryTest do
     assert text =~ "  memory   the worker profile fixing's memory, version 1"
   end
 
+  # A save on the plane while the session runs here: the plane says `session.memory`, and
+  # the session's next turn reads the new documents and says what changed.
+  test "a save told to the pod reaches the running session at its next turn", context do
+    fake =
+      start_supervised!(
+        Supervisor.child_spec({Fake, steps: [{:text, "one"}, {:text, "two"}], default: {:text, "done"}},
+          id: {Fake, System.unique_integer([:positive])}
+        )
+      )
+
+    defaults = activation(context, fake: fake, config_overrides: [system_prompt: "per_turn"])
+    Application.put_env(:troupe_worker, :session_defaults, defaults)
+
+    push = Map.put(push(context), "memory", @memory)
+    assert {:ok, %{"activated" => true}} = Commands.handle("session.activate", push)
+
+    Troupe.subscribe(context.session_id)
+    Troupe.send_input(context.session_id, "go")
+    await_turn(context.session_id)
+
+    saved = [%{"scope" => "organisation", "name" => nil, "version" => 8, "hash" => "sha256:o8", "text" => "Org: deploy on Thursdays."}]
+    told = %{"session_id" => context.session_id, "epoch" => 1, "memory" => saved}
+
+    # A pod the session moved on from takes nothing for it.
+    assert {:error, %{data: %{reason: "stale epoch"}}} = Commands.handle("session.memory", %{told | "epoch" => 2})
+    assert {:ok, %{"memory" => 1}} = Commands.handle("session.memory", told)
+
+    Troupe.send_input(context.session_id, "again")
+    await_turn(context.session_id)
+
+    [_first, second] = Fake.requests(fake)
+    assert second.system =~ "Org: deploy on Thursdays."
+    refute second.system =~ "Tuesdays"
+    refute second.system =~ "Team: use the design tokens."
+
+    events = Troupe.events(context.session_id)
+    assert [changed] = Enum.filter(events, &(&1.type == "memory_changed"))
+
+    assert changed.data["changes"] == [
+             %{"scope" => "organisation", "name" => nil, "from" => 7, "to" => 8},
+             %{"scope" => "team", "name" => "design", "from" => 3, "to" => nil},
+             %{"scope" => "profile", "name" => "fixing", "from" => 1, "to" => nil}
+           ]
+
+    {text, 0} = Explain.explain_session(context.session_id)
+    assert text =~ "the organisation's memory, version 8"
+    refute text =~ "the team design's memory"
+  end
+
+  test "a session not up on the pod is said to be so", context do
+    told = %{"session_id" => context.session_id, "epoch" => 1, "memory" => []}
+    assert {:error, %{data: %{reason: "the session is not up on this pod"}}} = Commands.handle("session.memory", told)
+  end
+
   test "an activation with none gives the session none", context do
     defaults = activation(context, config_overrides: [system_prompt: "per_turn"])
     Application.put_env(:troupe_worker, :session_defaults, defaults)

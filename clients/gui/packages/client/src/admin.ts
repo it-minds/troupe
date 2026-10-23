@@ -378,6 +378,8 @@ export interface AdminTeam extends TeamSpend {
   volume_size: string | null;
   /** A platform admin's to set; whether the team may be granted a profile nothing is enforced on. */
   allow_unenforced_workers?: boolean | null;
+  /** Whether the team's people may offer a laptop session for steering from another device (#58). Absent from a plane older than the field. */
+  remote_offering_allowed?: boolean | null;
   /**
    * What the team's sessions may do on GitHub: the repositories they may name (`owner/name`,
    * or `owner/*`; none listed names none) and the fix loop's caps. Its own administrators'.
@@ -896,6 +898,17 @@ export interface MemoryDocument {
   shown: MemoryVersion | null;
   diff: MemoryLine[];
   versions: MemoryVersion[];
+  /**
+   * A profile's: the documents of the profiles it extends, which its sessions read before
+   * its own, the one that extends nothing first. Absent from a plane from before them.
+   */
+  inherited?: MemoryInherited[];
+}
+
+/** A document a profile has from a profile it extends: that profile, and the version in force. */
+export interface MemoryInherited extends MemoryVersion {
+  profile: string;
+  text: string;
 }
 
 /** What saving a text would do, written nowhere. */

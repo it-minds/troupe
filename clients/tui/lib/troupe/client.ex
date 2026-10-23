@@ -681,4 +681,9 @@ defmodule Troupe.Client do
   @spec client_defaults(origin()) :: {:ok, map()} | {:error, term()}
   def client_defaults({:remote, _plane} = origin), do: Remote.client_defaults(origin)
   def client_defaults(_origin), do: {:error, :unsupported}
+
+  @doc "The organisation's memory documents this person's machine reads, signed; never a key."
+  @spec memory(origin()) :: {:ok, map()} | {:error, term()}
+  def memory({:remote, _plane} = origin), do: Remote.memory(origin)
+  def memory(_origin), do: {:error, :unsupported}
 end

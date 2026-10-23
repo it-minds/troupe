@@ -18,6 +18,7 @@ defmodule Troupe.Gateway.Daemon do
       ├── Listener      accepts on the transport and hands sockets to Connections
       ├── Loopback      a WebSocket on 127.0.0.1, which is the only door a browser has
       ├── Idle          shuts the daemon down after a quiet period
+      ├── Memory        the organisation's memory, asked for again while a token is held
       └── Policy        the plane's word on this machine, asked for again while a token is held
 
   `Troupe.Sessions` and the session trees themselves live in `troupe_core`'s own
@@ -33,11 +34,13 @@ defmodule Troupe.Gateway.Daemon do
     Idle,
     Listener,
     Loopback,
+    Memory,
     Plane,
     Policy,
     Remote,
     Setup
   }
+
   alias Troupe.Gateway.Private
 
   @spec start_link(keyword()) :: Supervisor.on_start()
@@ -94,8 +97,10 @@ defmodule Troupe.Gateway.Daemon do
       # the Listener ever restarts and rewrites the discovery file underneath it.
       {Loopback, Keyword.get(opts, :loopback, [])},
       {Idle, opts},
-      # Last, so a poll that fails restarts nothing a client is using: the plane's version
-      # policy and organisation's document, asked for again while a token is held.
+      # Last, so a poll that fails restarts nothing a client is using: the copy of the
+      # organisation's memory, asked for again every few minutes while a token is held,
+      # and the plane's version policy and organisation's document, every half minute.
+      {Memory, Keyword.get(opts, :memory, [])},
       {Policy, Keyword.get(opts, :policy, [])}
     ]
 

@@ -155,6 +155,14 @@ defmodule Troupe.FakeRemote do
   @spec release_url(pid(), String.t() | nil) :: :ok
   def release_url(remote, url), do: GenServer.call(remote, {:release_url, url})
 
+  @doc """
+  Laptops' sessions offered to the person for steering (root #58): the rows `remote.list`
+  answers, and `open`, a function of a session id answering `{endpoint, token}`, for
+  `remote.open`. A row whose `state` is `offline` is `unavailable` to open.
+  """
+  @spec offer(pid(), [map()], (String.t() -> {String.t(), String.t()})) :: :ok
+  def offer(remote, rows, open), do: GenServer.call(remote, {:offer, rows, open})
+
   @doc "Sets a session's state (`active`, `dormant`, `read_only`, `erased`)."
   @spec state(pid(), String.t(), String.t()) :: :ok
   def state(remote, session_id, state), do: GenServer.call(remote, {:state, session_id, state})
@@ -344,6 +352,10 @@ defmodule Troupe.FakeRemote do
   end
 
   def handle_call(:calls, _from, state), do: {:reply, Enum.reverse(state.calls), state}
+
+  def handle_call({:offer, rows, open}, _from, state),
+    do: {:reply, :ok, state |> Map.put(:offered, rows) |> Map.put(:opener, open)}
+
   def handle_call(:registered, _from, state), do: {:reply, state.private, state}
 
   def handle_call({:hold, session_id, attrs}, _from, state) do
@@ -1086,6 +1098,36 @@ defmodule Troupe.FakeRemote do
   defp dispatch(state, _kind, method, _params, _pid)
        when method in ["turn.cancel", "approval.respond", "todo.edit", "profile.switch"],
        do: {{:ok, %{"accepted" => true}}, state}
+
+  # Laptops' sessions offered for steering (root #58), as `offer/3` set them.
+  defp dispatch(state, _kind, "remote.list", _params, _pid),
+    do: {{:ok, %{"sessions" => Map.get(state, :offered, [])}}, state}
+
+  defp dispatch(state, _kind, "remote.open", params, _pid) do
+    sid = params["session_id"]
+
+    case Enum.find(Map.get(state, :offered, []), &(&1["id"] == sid)) do
+      nil ->
+        {{:error, -32_005, "not_found", %{"kind" => "session", "id" => sid}}, state}
+
+      %{"state" => "offline"} = row ->
+        {{:error, -32_010, "unavailable", %{"offline_since" => row["offline_since"]}}, state}
+
+      _row ->
+        {endpoint, token} = state.opener.(sid)
+
+        {{:ok,
+          %{
+            "session_id" => sid,
+            "kind" => "remote",
+            "state" => "active",
+            "endpoint" => endpoint,
+            "role" => "collaborator",
+            "token" => token,
+            "expires_at" => System.system_time(:second) + 900
+          }}, state}
+    end
+  end
 
   defp dispatch(state, _kind, _method, _params, _pid),
     do: {{:error, -32_601, "method not found"}, state}

@@ -76,7 +76,7 @@ defmodule Troupe.Agent.Server do
 
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
-  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions, Shell}
+  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Organisation, Questions, Shell}
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Tools.{Delegate, Finish, Output, Patch, ReadFile, ReadOutput, Show}
@@ -1421,6 +1421,7 @@ defmodule Troupe.Agent.Server do
           |> fold_shell()
           |> fold_child_reports()
           |> take_organisation()
+          |> take_memory()
           |> load_instructions()
           |> hold_turn_tools()
 
@@ -1551,20 +1552,22 @@ defmodule Troupe.Agent.Server do
   # agent last took one (`Troupe.Session.Organisation`), taken by the root as a turn begins
   # and never during one, and said in a line. Its children are started with the root's
   # configuration, so they follow. The budget's use so far is kept, and its limits held to
-  # what the organisation now enforces; a looser limit is had by asking, as before.
+  # what the organisation now enforces; a looser limit is had by asking, as before. The
+  # organisation's memory is not taken here but by `take_memory/1`, which says so and reads
+  # the instructions again.
   defp take_organisation(%State{agent_path: ["root"]} = state) do
-    case Troupe.Session.Organisation.given(state.session_id) do
+    case Organisation.given(state.session_id) do
       %{revision: revision, config: config} = given when revision != state.organisation_taken ->
         log(state, :config_note, %{
           "key" => "organisation",
-          "message" => Troupe.Session.Organisation.line(given)
+          "message" => Organisation.line(given)
         })
 
         {:ok, provider} = Provider.adapter(config.provider)
 
         %{
           state
-          | config: config,
+          | config: %{config | plane_memory: state.config.plane_memory},
             provider: provider,
             budget: held_budget(state.budget, config.ceilings),
             organisation_taken: revision
@@ -1933,6 +1936,24 @@ defmodule Troupe.Agent.Server do
   end
 
   defp instructions_due(%State{} = state), do: %{state | instructions_due: true}
+
+  # The organisation's memory a save on the plane gave the session since this agent's
+  # configuration was resolved (`Troupe.Session.PlaneMemory`), taken as a turn begins and
+  # never during one, said in the log with the versions from and to, and read into the
+  # instructions this turn. The same versions again change nothing and say nothing.
+  defp take_memory(%State{} = state) do
+    with %{documents: documents} <- Troupe.Session.PlaneMemory.given(state.session_id),
+         [_ | _] = changes <- Troupe.PlaneMemory.changes(state.config.plane_memory, documents) do
+      log(state, :memory_changed, %{
+        "changes" => changes,
+        "message" => Troupe.PlaneMemory.change_line(changes)
+      })
+
+      instructions_due(%{state | config: %{state.config | plane_memory: documents}})
+    else
+      _same -> state
+    end
+  end
 
   defp environment_section(state) do
     """

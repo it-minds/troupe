@@ -142,7 +142,9 @@ defmodule Troupe.Plane.Harness do
     "session.redeem" => :observe,
     # Laptop sessions offered for steering from another device (#58), and a token for one.
     "remote.list" => :observe,
-    "remote.open" => :observe
+    "remote.open" => :observe,
+    # The laptop's daemon's own sign-in, asked with its person's token at its first offer.
+    "remote.grant" => :control
   }
 
   @doc "Every method the plane answers, and the scope each needs."
@@ -431,6 +433,14 @@ defmodule Troupe.Plane.Harness do
   defp handle("remote.list", _params, %{user: user}) do
     rows = for {offer, role} <- Remote.visible(user), do: Remote.row(offer, role, user)
     {:ok, %{"sessions" => rows}}
+  end
+
+  # A laptop's daemon at its first offer, with the token its person's client handed it: a
+  # grant of its own for that person and device, which it keeps in its operating system's
+  # credential store and exchanges at `/auth/relay` for the laptop's door alone, so an offer
+  # outlasts the client that made it. Refused where a team of the person's forbids offering.
+  defp handle("remote.grant", params, %{user: user}) do
+    Remote.grant(user, params["device"])
   end
 
   # What a client attaches with: the relay's address and a token for this session alone,

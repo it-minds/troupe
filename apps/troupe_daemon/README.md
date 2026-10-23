@@ -153,7 +153,7 @@ has one clock, and the three modules that keep them (`Troupe.Session.ClientTools
 | a session sleeps, read | never, while a client is subscribed to it by name: a session is not stopped under the person looking at it, and the clocks below start when they leave | | |
 | a session sleeps, watched | idle or waiting on a person, with somebody following it but not reading it — a `fleet` subscriber, watch mode | `TROUPE_SESSION_IDLE_MINUTES` (`:troupe_core, :session_idle_ms`) | 30 min |
 | a session sleeps, unwatched | the same, with nobody watching it | `TROUPE_SESSION_DETACHED_MINUTES` (`:troupe_core, :detached_idle_ms`) | 2 min |
-| the daemon exits | no client connected and no session awake; never for one started at login ([above](#start-at-login)) | `TROUPE_DAEMON_IDLE_MINUTES` (`:troupe_daemon, :idle_shutdown_ms`) | 10 min |
+| the daemon exits | no client connected, no session awake and none offered for steering from another device; never for one started at login ([above](#start-at-login)) | `TROUPE_DAEMON_IDLE_MINUTES` (`:troupe_daemon, :idle_shutdown_ms`) | 10 min |
 
 `0` means never on the minute clocks. A session that sleeps stops its tree and keeps its
 log: the next command that acts on it — input, an answer, an approval — brings it back,

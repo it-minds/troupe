@@ -18,7 +18,7 @@ defmodule Troupe.Session do
   alias Troupe.{Config, Mounts, Registry, Skills, Workspace}
   alias Troupe.LLM.Fake
   alias Troupe.LLM.Provider
-  alias Troupe.Session.Organisation
+  alias Troupe.Session.{Organisation, PlaneMemory}
   alias Troupe.Watch.Branch
 
   @root_path ["root"]
@@ -42,15 +42,25 @@ defmodule Troupe.Session do
   What a running session's configuration was resolved from: the layers, with where each
   value and rule came from, its `kind` and its workspace; `nil` for a session not running
   here. The configuration is resolved once, as the session starts, so this is what is in
-  force in it, but for a change to the organisation's document since: that resolves it
-  again (`Troupe.Session.Organisation`), and the layers are the ones its agent runs with
-  from its next turn.
+  force in it, but for two things given it since: a change to the organisation's document
+  resolves it again (`Troupe.Session.Organisation`), and a save of the organisation's
+  memory on the plane reaches it (`Troupe.Session.PlaneMemory`). The layers are then the
+  ones, and name the documents, its agents run with from their next turn.
   """
   @spec resolved(String.t()) :: %{layers: Config.Layers.Result.t() | nil, kind: atom(), workspace: Path.t()} | nil
   def resolved(session_id) do
-    case {Registry.value({:session, session_id}), Organisation.given(session_id)} do
-      {%{} = resolved, %{layers: layers}} -> %{resolved | layers: layers}
-      {resolved, _nothing_since} -> resolved
+    resolved =
+      case {Registry.value({:session, session_id}), Organisation.given(session_id)} do
+        {%{} = resolved, %{layers: layers}} -> %{resolved | layers: layers}
+        {resolved, _nothing_since} -> resolved
+      end
+
+    case {resolved, PlaneMemory.given(session_id)} do
+      {%{layers: %Config.Layers.Result{} = layers} = resolved, %{} = memory} ->
+        %{resolved | layers: %{layers | memory: memory}}
+
+      {resolved, _nothing_since} ->
+        resolved
     end
   end
 
@@ -107,6 +117,9 @@ defmodule Troupe.Session do
          session_id: session_id,
          workspace: workspace,
          resolve: Keyword.take(opts, [:config_overrides, :config_sources, :kind, :hold_auto])},
+        # The organisation's memory a save on the plane gave the session after it started,
+        # above the agent so a restarted one still reads it at its next turn.
+        {PlaneMemory, session_id: session_id},
         # Above the agent on purpose: a client's registration must survive an agent
         # restart, because the connection that made it has not gone anywhere and would
         # have no way of knowing it needed to offer its tools again.

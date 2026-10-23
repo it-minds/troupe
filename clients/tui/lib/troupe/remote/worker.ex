@@ -291,6 +291,9 @@ defmodule Troupe.Remote.Worker do
       # asked before each attempt after a failure. A daemon that restarted listens on a new
       # port with a new token, so the pair given at the attach names nothing once it has.
       relocate: Keyword.get(opts, :relocate),
+      # A laptop's session steered through the plane: a fresh token for the open socket,
+      # `{:ok, token}`, asked when the plane says the one held is about to run out.
+      renew: Keyword.get(opts, :renew),
       workspace: Keyword.get(opts, :workspace),
       # `{parent_session_id, window}` when this session is a branch shown inside another
       # session's screen: what it publishes is renamed for that screen (`Troupe.Remote.Branch`).
@@ -856,6 +859,10 @@ defmodule Troupe.Remote.Worker do
       {{{:internal, {:offer, tries}}, _method, _params}, pending} ->
         refused(%{state | pending: pending}, tries, error)
 
+      # Nor is a refusal of its presence topic: the session streams on without it.
+      {{{:internal, :presence}, _method, _params}, pending} ->
+        %{state | pending: pending}
+
       {{{:internal, _step}, _method, _params}, pending} ->
         %{state | pending: pending}
         |> put_error({:rpc, RPC.describe(error)})
@@ -1039,8 +1046,18 @@ defmodule Troupe.Remote.Worker do
         send_request(acc, from, method, params)
       end)
 
-    offer(state)
+    state |> presence() |> offer()
   end
+
+  # Who else is here (root #58): the session's presence topic, beside its own and after
+  # it, so this connection's own arrival is not news to it. A branch shown inside another
+  # session's screen has its parent's. A server that refuses the topic costs nothing.
+  defp presence(%{as: nil} = state) do
+    params = %{topic: "presence:" <> state.session_id}
+    send_request(state, {:internal, :presence}, "subscribe", params)
+  end
+
+  defp presence(state), do: state
 
   ## The person's own servers (root Decision 748)
 
@@ -1342,6 +1359,25 @@ defmodule Troupe.Remote.Worker do
 
   # `auth.expiring` is answered on the same connection: mint through the plane,
   # send `auth.refresh`, keep streaming. Reconnecting would cost a replay.
+  # A laptop's session steered through the plane (root #58) is renewed as it was opened,
+  # with `remote.open` again (`:renew`); the plane answers the renewal itself.
+  defp refresh_auth(%{plane_url: nil, renew: renew} = state) when is_function(renew, 0) do
+    case renew.() do
+      {:ok, token} ->
+        send_request(%{state | token: token}, {:internal, :auth}, "auth.refresh", %{
+          auth: %{token: token}
+        })
+
+      {:error, reason} ->
+        publish_note(
+          state,
+          "the plane did not renew this session's token (#{inspect(reason)}); it reconnects"
+        )
+
+        state
+    end
+  end
+
   defp refresh_auth(%{plane_url: nil} = state), do: state
 
   defp refresh_auth(state) do

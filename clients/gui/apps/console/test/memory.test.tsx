@@ -45,7 +45,7 @@ describe("company memory", () => {
     await sees("What will happen", org);
     await sees("Freeze on the last week of December.", org);
     await sees("organisation v2 → v3", org);
-    await sees("Every session on this plane's pods reads it from its next activation", org);
+    await sees("Every session on this plane's pods reads it from its next turn", org);
     // Nothing is written until it is confirmed.
     expect(fake.admin.memory.get("organisation")!.length).toBe(2);
 
@@ -136,10 +136,30 @@ describe("company memory", () => {
     (await seesButton("Change the dev profile's memory", dev()!)).click();
     type(await seesField("The dev profile's memory", dev()!), "Fix one issue at a time.");
     button("Preview", dev()!)!.click();
-    await sees("Every session on dev's pods reads it from its next activation.", dev);
+    await sees("Every session on dev's pods, and on the pods of every profile that extends it, reads it from its next turn.", dev);
     (await seesButton("Save", dev()!)).click();
     await sees("Recorded in the audit as memory.put on profile/dev", dev);
     await sees("Fix one issue at a time.", dev);
     expect(fake.admin.memory.get("profile/dev")!.map((v) => v.text)).toEqual(["Fix one issue at a time."]);
+  });
+
+  // Slice 2: a profile that extends another shows, above its own, the memory its sessions
+  // read first from the profiles it extends, each saying which profile it is from.
+  it("shows on a profile's page the memory it has from the profile it extends, and where it came from", async () => {
+    const dev = fake.admin.profiles.find((p) => p.name === "dev")!;
+    fake.admin.profiles.push({ ...dev, name: "base", extends: null });
+    dev.extends = "base";
+    fake.admin.memory.set("profile/base", [{ version: 2, text: "Every pod: sign every commit.", changed_by: "root@example.test", changed_at: "2026-10-20T09:00:00Z" }]);
+
+    visit("#/profiles/dev");
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+
+    const card_ = () => card("The dev profile's memory");
+    await waitFor(card_, "the dev profile's memory");
+    await sees("From the base profile: version 2", card_);
+    await sees("Every pod: sign every commit.", card_);
+    await sees("Changed on base's page.", card_);
+    await sees("Nothing written yet", card_);
   });
 });

@@ -201,6 +201,7 @@ export type {
   PlaneRelease,
   PlaneReleases,
   MemoryDocument,
+  MemoryInherited,
   MemoryLine,
   MemoryListing,
   MemoryPreview,
@@ -324,6 +325,8 @@ export type {
   SessionConfig,
 } from "./config.js";
 export { PATH_TOOLS, RULE_ACTIONS, checkRuleSet, parseRule, ruleKind, ruleParts } from "./rules.js";
+export { instructionLayers } from "./instructions.js";
+export type { InstructionFile, InstructionLayer, InstructionRow, InstructionsContext } from "./instructions.js";
 export type { ReadRule, RuleAction, RuleKind, RuleSet } from "./rules.js";
 export {
   APPROVAL_CHOICES,

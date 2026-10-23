@@ -4,7 +4,8 @@ defmodule Troupe.Gateway.Idle do
 
   A daemon that clients spawn on demand has to go away on its own, or every invocation
   that starts one leaves a process behind forever. It stops only when there is nothing
-  to lose: no clients attached and no session running. Sessions that are merely
+  to lose: no clients attached, no session running and none offered for steering from
+  another device (#58). Sessions that are merely
   dormant do not hold it open — they are durable in their logs and come back on the
   next activating command. Nor, for long, does one that is idle or waiting on a person:
   `Troupe.Sessions.Index` puts it to sleep, minutes after the last client has gone, since
@@ -18,7 +19,7 @@ defmodule Troupe.Gateway.Idle do
 
   use GenServer
 
-  alias Troupe.Gateway.Connections
+  alias Troupe.Gateway.{Connections, Remote}
 
   require Logger
 
@@ -28,9 +29,16 @@ defmodule Troupe.Gateway.Idle do
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
-  @doc "Whether the daemon currently has a reason to stay up."
+  @doc """
+  Whether the daemon currently has a reason to stay up: a client attached, a session
+  running, or a session offered for steering from another device with the daemon's own
+  sign-in to keep it offered (`Troupe.Gateway.Remote.offering?/0`). A remote person
+  steering is a connection like any other; the offer itself, with nobody attached yet, is
+  a promise the daemon keeps by being there.
+  """
   @spec busy?() :: boolean()
-  def busy?, do: Connections.count() > 0 or Troupe.any_active_sessions?()
+  def busy?,
+    do: Connections.count() > 0 or Troupe.any_active_sessions?() or Remote.offering?()
 
   @doc """
   Stop the daemon now, for `daemon.stop` (Decision 865), when it was started to be

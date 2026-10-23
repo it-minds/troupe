@@ -1434,19 +1434,9 @@ Found by the chunk 38 fixers, 2026-10-18.
 
 ### D132 - Steering, company memory, MCP sign-in and the docs after chunk 39 (low)
 
-- **Steering a laptop's session** (Decision 921).
-  - The relay rides the laptop client's 15-minute plane token. With no client signed in on the laptop, an offer goes offline when it runs out; whether the daemon renews its own sign-in is undecided.
-  - The daemon's idle watch doesn't count the relay link, so a daemon whose offer has nobody attached can idle out.
-  - The console signs in admins only, so a person who isn't one steers only from the desktop app.
-  - There's no per-team admin switch to forbid offering.
-  - The TUI can't list or steer other laptops' sessions.
-  - Who is steering is polled in the desktop app, and shown only on `/steer` in the TUI.
-- **Company memory** (Decision 922).
-  - `troupe config pull` doesn't fetch memory, and a running laptop session keeps the copy it started with; there's no `config.changed` for a refreshed one.
-  - A child profile doesn't read its parent's memory.
-  - A deleted profile's memory stays under its name, so a profile recreated under that name finds the old document in force.
-  - The desktop app has no instructions view.
-  - `memory.json` is kept after sign-out, as `organisation.json` is.
+- **Steering a laptop's session** (Decisions 921 and 928).
+  - The console signs in admins only, so a person who isn't one steers only from the desktop app or the TUI.
+  - Who is steering is polled in the desktop app.
 - **The criticals sweep** (Decision 923).
   - A viewer still sees a pod session's models and prices.
   - Left with reasons: D5, D40's annotation latency, D48, D54 (needs a decision on `host:port`), D65's subagent spend, D71 and D92.

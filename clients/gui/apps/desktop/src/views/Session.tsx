@@ -52,6 +52,7 @@ import { PodConfig } from "./PodConfig";
 import { Curtain, ProseFrame, ReasoningFrame, StripLine, ToolFrame, useNow } from "./Frames";
 import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
+import { Instructions } from "./Instructions";
 import { MemoryPane } from "./Memory";
 import type { MemoryAsk } from "./Memory";
 import { OfferLine, OfferPanel } from "./Offer";
@@ -60,10 +61,10 @@ import { RemoteLine, RemoteOfferControl } from "./Remote";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
 
 /**
- * A backstage pane: the running order, the files, the repository's memory, or for a team
- * session what is in force in it on its pod.
+ * A backstage pane: the running order, the files, what the instructions are read from, the
+ * repository's memory, or for a team session what is in force in it on its pod.
  */
-type Pane = "tasks" | "files" | "memory" | "settings";
+type Pane = "tasks" | "files" | "instructions" | "memory" | "settings";
 
 /** A line this app says in the transcript, after the event it was said at. */
 interface Note {
@@ -1123,6 +1124,9 @@ function Backstage({
           <button className="tab" aria-selected={shown === "files"} onClick={() => onPane("files")}>
             Files
           </button>
+          <button className="tab" aria-selected={shown === "instructions"} onClick={() => onPane("instructions")}>
+            Instructions
+          </button>
           {memory && (
             <button className="tab" aria-selected={shown === "memory"} onClick={() => onPane("memory")}>
               Memory
@@ -1140,6 +1144,11 @@ function Backstage({
         <section>
           <h3>Settings</h3>
           <PodConfig view={view.view} />
+        </section>
+      ) : shown === "instructions" ? (
+        <section>
+          <h3>Instructions</h3>
+          <Instructions view={view.view} daemon={team ? null : daemon} />
         </section>
       ) : shown === "memory" && memory ? (
         <section>

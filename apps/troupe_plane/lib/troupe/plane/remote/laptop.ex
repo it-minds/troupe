@@ -53,8 +53,8 @@ defmodule Troupe.Plane.Remote.Laptop do
     token = get_in(params, ["auth", "token"]) || state.bearer
     device = get_in(params, ["capabilities", "device"])
 
-    with {:ok, user, claims} <- Auth.person(token),
-         {:ok, device} <- device(device) do
+    with {:ok, device} <- device(device),
+         {:ok, user, claims} <- Auth.laptop(token, device) do
       state = expiry(%{state | user: user, device: device}, claims["exp"])
 
       result = %{
@@ -76,7 +76,7 @@ defmodule Troupe.Plane.Remote.Laptop do
   end
 
   defp handle_message({:request, id, "auth.refresh", params}, state) do
-    with {:ok, user, claims} <- Auth.person(get_in(params, ["auth", "token"])),
+    with {:ok, user, claims} <- Auth.laptop(get_in(params, ["auth", "token"]), state.device),
          true <- user.subject == state.user.subject do
       state = expiry(%{state | user: user}, claims["exp"])
       {:push, frame({:result, id, %{"auth" => %{"expires_at" => claims["exp"]}}}), state}
