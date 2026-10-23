@@ -10,7 +10,7 @@ defmodule Troupe.Plane.BundlesTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Bundles, FakePod, Fleet, Harness, Identity, Memory, Provision, Sessions}
+  alias Troupe.Plane.{Admin, Bundles, FakePod, Fleet, Harness, Identity, Memory, Provision, Sessions}
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.Fleet.Bundle
 
@@ -496,6 +496,53 @@ defmodule Troupe.Plane.BundlesTest do
                  {"team", "engineering", "Engineering."},
                  {"profile", "dev", "On dev."}
                ]
+    end
+
+    # Issue #55, slice 2: a save while a session runs reaches it without waiting for its next
+    # activation. The pod holding it is told `session.memory` with every document the
+    # session now reads, and a save a session's scope does not cover tells it nothing.
+    test "a save tells the pod holding a running session in its scope, with what it now reads",
+         context do
+      Application.put_env(:troupe_plane, :platform_admin_group, "platform")
+      on_exit(fn -> Application.delete_env(:troupe_plane, :platform_admin_group) end)
+      {:ok, group} = Identity.upsert_group(%{external_id: "platform", display_name: "platform"})
+      {:ok, _team} = Identity.enable_team(group, %{name: "platform"})
+      root = Admin.actor_for(person("root@example.test", ["platform"]))
+
+      {:ok, v1} = Bundles.publish("stable", %{"agents" => ["build"]}, announce: false)
+      pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+      user = granted_user()
+      _design = team_with_grant("design", "dev", name: "design")
+      session = dormant_session(user, "dev", v1.version)
+      id = session.id
+      assert pushed(pod, session, user)["memory"] == []
+
+      {:ok, _} = Admin.memory_put(root, "organisation", nil, "Everyone.", 0)
+
+      assert_receive {:pushed, ^pod, "session.memory", %{"session_id" => ^id} = told}, 5_000
+      assert told["epoch"] == Sessions.get(id).epoch
+      assert Enum.map(told["memory"], &{&1["scope"], &1["text"]}) == [{"organisation", "Everyone."}]
+
+      # Another team's save is not this session's.
+      {:ok, _} = Admin.memory_put(root, "team", "design", "Design only.", 0)
+      refute_receive {:pushed, ^pod, "session.memory", %{"session_id" => ^id}}, 500
+
+      # A profile's reaches the sessions of every profile that extends it, read before the
+      # child's own.
+      {:ok, _} = Fleet.put_profile(%{name: "standard", image: "ghcr.io/troupe/worker:1"})
+      dev = Fleet.get_profile("dev")
+      {:ok, _} = Fleet.put_profile(%{name: "dev", extends: "standard", own: %{}, spec: dev.spec})
+      {:ok, _} = Admin.memory_put(root, "profile", "dev", "On dev.", 0)
+      assert_receive {:pushed, ^pod, "session.memory", %{"session_id" => ^id}}, 5_000
+      {:ok, _} = Admin.memory_put(root, "profile", "standard", "On every standard pod.", 0)
+
+      assert_receive {:pushed, ^pod, "session.memory", %{"session_id" => ^id} = told}, 5_000
+
+      assert Enum.map(told["memory"], &{&1["scope"], &1["name"], &1["text"]}) == [
+               {"organisation", nil, "Everyone."},
+               {"profile", "standard", "On every standard pod."},
+               {"profile", "dev", "On dev."}
+             ]
     end
 
     # Issue #724: the profile's per-tool rules ride the same way, each with the profile that

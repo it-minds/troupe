@@ -21,6 +21,8 @@ defmodule Troupe.Plane.Web.Router do
       *    /scim/v2/...                users and groups, pushed by the identity provider
       GET  /v1/relay                   a laptop's connection while it offers sessions
       GET  /v1/relay/session           a person steering one of them from another device
+      POST /auth/relay                 a laptop daemon's own grant, for that connection's token
+      POST /auth/relay/release         the daemon letting the grant go
 
   Everything a person's client does goes through `/rpc`, and everything `/rpc` does goes
   through `Troupe.Plane.Harness`. That is the "any client, including our own, uses
@@ -42,7 +44,6 @@ defmodule Troupe.Plane.Web.Router do
   alias Troupe.Plane.{
     Admin,
     Build,
-    ClientVersions,
     Harness,
     Identity,
     OIDC,
@@ -190,22 +191,28 @@ defmodule Troupe.Plane.Web.Router do
 
   # A release's files, for machines that cannot reach GitHub: the plane names
   # `<this plane>/downloads` as where releases are (`client_release_url`), and the files are
-  # copied into its object store under `releases/v<version>/`. Answered with a short-lived
-  # presigned URL rather than the bytes, so the plane stays out of the path of a download as
-  # it is of a session's; anybody may fetch one, as from GitHub, because the release key's
-  # signature is the check. A version this plane serves to no client is not handed out.
+  # copied into its object store under `releases/v<version>/` (`Releases.mirror/2`).
+  # Answered with a short-lived presigned URL rather than the bytes, so the plane stays out
+  # of the path of a download as it is of a session's; anybody may fetch one, as from
+  # GitHub, because the release key's signature is the check.
+  #
+  # A file that is there is handed out and anything else is a bare 404, whatever the version
+  # policy says of it: a 404 that differed for a blocked version would tell anybody without
+  # a sign-in which versions are refused, which only the signed, signed-in answer says. A
+  # client never installs a version the policy it holds refuses.
   get "/downloads/:tag/:file" do
+    key = "releases/#{tag}/#{file}"
+    store = ObjectStore.from_env()
+
     with "v" <> version <- tag,
          true <- ClientUpdate.version?(version),
          true <- file =~ ~r/\A[A-Za-z0-9][A-Za-z0-9._+-]*\z/,
-         true <- ClientVersions.served?(version) do
-      url = ObjectStore.presign(ObjectStore.from_env(), :get, "releases/#{tag}/#{file}", ttl: 300)
-
+         true <- ObjectStore.exists?(store, key) do
       conn
-      |> put_resp_header("location", url)
+      |> put_resp_header("location", ObjectStore.presign(store, :get, key, ttl: 300))
       |> send_resp(302, "")
     else
-      _refused -> send_json(conn, 404, %{"error" => "not found"})
+      _not_here -> send_resp(conn, 404, "")
     end
   end
 
@@ -229,6 +236,33 @@ defmodule Troupe.Plane.Web.Router do
           "reason" => to_string(inspect(reason))
         })
     end
+  end
+
+  # A laptop's daemon's own sign-in for steering (#58): the grant `remote.grant` gave it,
+  # for a token of the laptop's door alone, `/v1/relay`. A grant the plane does not hold,
+  # one released or idle too long, is 401; one whose person's team forbids offering, 403.
+  post "/auth/relay" do
+    case Remote.redeem(conn.body_params["grant"]) do
+      {:ok, answer} ->
+        send_json(conn, 200, answer)
+
+      {:error, %Error{message: message, data: data}} ->
+        status =
+          case message do
+            "forbidden" -> 403
+            "unavailable" -> 503
+            _unauthenticated -> 401
+          end
+
+        send_json(conn, status, %{"error" => message, "reason" => (data || %{})[:reason]})
+    end
+  end
+
+  # The daemon lets its grant go. Always 204: a grant the plane does not hold has nothing
+  # left to release, and saying which would answer whether a guess was a grant.
+  post "/auth/relay/release" do
+    :ok = Remote.release(conn.body_params["grant"])
+    send_resp(conn, 204, "")
   end
 
   post "/rpc" do

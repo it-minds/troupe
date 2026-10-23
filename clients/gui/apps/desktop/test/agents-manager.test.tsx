@@ -52,9 +52,16 @@ function labelled<T extends Element>(label: string, within: ParentNode = documen
   return found;
 }
 
-/** The manager's row for an agent. */
-function agentRow(name: string): HTMLTableRowElement | undefined {
-  return [...document.querySelectorAll<HTMLTableRowElement>("tr")].find((r) => r.querySelector("th")?.firstChild?.textContent === name);
+/** The manager's row for an agent: the one picker's, in the manager's density (troupe #594). */
+function agentRow(name: string): HTMLButtonElement | undefined {
+  return [...document.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="Agent"] [role="option"]')].find(
+    (o) => o.querySelector(".name")?.textContent?.replace(" ●", "") === name,
+  );
+}
+
+/** Where the manager says a listed agent comes from: the group its row is in. */
+function originOfRow(name: string): string | null {
+  return agentRow(name)?.closest('[role="group"]')?.getAttribute("aria-label") ?? null;
 }
 
 /** The manager, on the workspace the sessions here have used. */
@@ -76,17 +83,19 @@ describe("the agents manager", () => {
 
     // The list says what decides: where it comes from, its model, its tools, read-only.
     const plan = agentRow("plan")!;
-    expect(plan.textContent).toContain("built in");
-    expect(plan.textContent).toContain("the session's");
-    expect(plan.textContent).toContain("13");
-    expect(plan.textContent).toContain("Read only");
-    expect(agentRow("build")!.textContent).not.toContain("Read only");
+    expect(originOfRow("plan")).toBe("Shipped");
+    expect(plan.textContent).toContain("primary");
+    expect(plan.textContent).toContain("the session's model");
+    expect(plan.textContent).toContain("13 tools");
+    expect(plan.textContent).toContain("read only");
+    expect(agentRow("build")!.textContent).not.toContain("read only");
+    expect(agentRow("explore")!.textContent).toContain("subagent");
     // A session in the workspace runs build: the window is named on its row.
     const session = [...daemon.sessions.values()][0]!;
     expect(agentRow("build")!.textContent).toContain(session.id);
 
     // Opened, the whole instruction is there to read, and a built-in says how it is changed.
-    button("plan", plan)!.click();
+    plan.click();
     const detail = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="The agent plan"]'), "plan, whole");
     expect(labelled("The instruction of plan", detail).textContent).toBe("You plan. Read what you need, write the task list, and never change a file.");
     expect(detail.textContent).toContain("plan is built in: a copy of it in your agents or the repository's");
@@ -98,7 +107,8 @@ describe("the agents manager", () => {
     await waitFor(() => says(`Saved plan in this repository's .troupe/agents: ${REPO}/.troupe/agents/plan.md.`), "the copy saved");
     expect(puts()).toHaveLength(1);
     expect(puts()[0]).toMatchObject({ name: "plan", scope: "project", workspace: REPO });
-    await waitFor(() => agentRow("plan")?.textContent?.includes("this repository's"), "the copy listed");
+    await waitFor(() => originOfRow("plan") === "This repository's", "the copy listed");
+    expect(agentRow("plan")!.textContent).toContain("stands in for Shipped");
 
     // Edited: the form's tools list takes a tool that does not exist, and the save is refused
     // at the field, on the tab that has it, with nothing written.
@@ -176,7 +186,7 @@ describe("the agents manager", () => {
     daemon.agents.files.push({ name: "plan", layer: "project", workspace: REPO, text: builtin.text });
     await openManager();
 
-    button("plan", agentRow("plan")!)!.click();
+    agentRow("plan")!.click();
     const detail = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="The agent plan"]'), "plan, whole");
     await waitFor(() => detail.textContent?.includes("Hides"), "the built-in it hides");
     button("Delete from this repository's .troupe/agents", detail)!.click();
@@ -187,7 +197,7 @@ describe("the agents manager", () => {
     button("Delete it from", confirm)!.click();
     await waitFor(() => says(`Deleted ${REPO}/.troupe/agents/plan.md. plan is built in again here.`), "the deletion");
     expect(daemon.calls.find((c) => c.method === "agents.delete")?.params).toMatchObject({ name: "plan", scope: "project", workspace: REPO });
-    await waitFor(() => agentRow("plan")?.textContent?.includes("built in"), "the built-in listed again");
+    await waitFor(() => originOfRow("plan") === "Shipped", "the built-in listed again");
   });
 
   it("says a bundle's agent is not changed here, and follows what another client saves", async () => {
@@ -195,8 +205,8 @@ describe("the agents manager", () => {
     daemon.agents.files.push({ name: "deploy", layer: "bundle", text: "---\ndescription: Ships it.\nmode: primary\n---\nYou deploy.\n" });
     await openManager();
 
-    expect(agentRow("deploy")!.textContent).toContain("the profile's bundle");
-    button("deploy", agentRow("deploy")!)!.click();
+    expect(originOfRow("deploy")).toBe("Your organisation's");
+    agentRow("deploy")!.click();
     const detail = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="The agent deploy"]'), "deploy, whole");
     expect(detail.textContent).toContain("deploy comes from the profile's bundle; change it in the console");
     expect(button("Edit", detail)).toBeNull();
@@ -209,6 +219,40 @@ describe("the agents manager", () => {
     other.disconnect();
   });
 
+  it("makes a new agent from a built-in as a template, and starts a session on it once it is saved", async () => {
+    daemon.seed(REPO);
+    await openManager();
+
+    // A subagent is listed, and is not started: an agent delegates to it.
+    agentRow("explore")!.click();
+    const explore = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="The agent explore"]'), "explore, whole");
+    expect(explore.textContent).toContain("From: Shipped");
+    (await waitFor(() => button("Start a session on explore", explore), "Start on explore")).click();
+    await waitFor(() => says("explore is a subagent: an agent delegates to it"), "the start refused");
+    // Switch is a session's, and the manager says where it is done.
+    button("Switch to explore", explore)!.click();
+    await waitFor(() => says("Switch is a session's"), "the switch refused");
+
+    // New from a template: build's text, under a name of its own, into the repository.
+    agentRow("build")!.click();
+    const build = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="The agent build"]'), "build, whole");
+    (await waitFor(() => button("New agent from this", build), "New agent from this")).click();
+    const editor = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="New agent from build"]'), "the editor");
+    type(labelled<HTMLInputElement>("Name", editor), "shipper");
+    button("Save to this repository's", editor)!.click();
+    await waitFor(() => says(`Saved shipper in this repository's .troupe/agents: ${REPO}/.troupe/agents/shipper.md.`), "the new agent saved");
+    expect(puts().at(-1)).toMatchObject({ name: "shipper", scope: "project", workspace: REPO });
+    expect(String(puts().at(-1)!["source"])).toContain("You are the build agent.");
+    await waitFor(() => originOfRow("shipper") === "This repository's", "the new agent listed");
+
+    // Saved, then started: one press, a session on it in the workspace, open.
+    const started = await waitFor(() => button("Start a session on shipper"), "the offer to start on it");
+    started.click();
+    await waitFor(() => daemon.calls.some((c) => c.method === "session.create" && c.params["profile"] === "shipper"), "a session on shipper");
+    expect(daemon.calls.find((c) => c.method === "session.create" && c.params["profile"] === "shipper")?.params).toMatchObject({ workspace: REPO });
+    await waitFor(() => document.querySelector('.session-head button[aria-label="Agent"]')?.textContent === "Agent shipper", "the new session open, on shipper");
+  });
+
   it("says what to do when the daemon is older than the manager", async () => {
     await daemon.stop();
     daemon = new FakeDaemon({ osUser: "ada", agentsApi: false });
@@ -216,7 +260,7 @@ describe("the agents manager", () => {
     location.hash = `#daemon=${daemon.port}:${daemon.token}`;
     daemon.seed(REPO);
     await openManager();
-    button("plan", agentRow("plan")!)!.click();
+    agentRow("plan")!.click();
     await waitFor(() => says("This daemon is older than the agents manager"), "the older daemon said");
   });
 });

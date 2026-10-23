@@ -8,7 +8,7 @@ paths:
   - .github/workflows/release.yml
   - .github/workflows/native.yml
   - scripts/release-desktop-update.exs
-  - apps/troupe_core/lib/troupe/release/manifest.ex
+  - apps/troupe_protocol/lib/troupe/release/manifest.ex
   - apps/troupe_protocol/lib/troupe/protocol/client_update.ex
   - clients/gui/apps/desktop/src-tauri/src/release.rs
   - clients/gui/apps/desktop/src-tauri/src/update.rs

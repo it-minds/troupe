@@ -57,6 +57,7 @@ import { describeError, recorded, show, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, count, linesOf, modeOf, money, useChange } from "./bits";
 import type { DiffLine, Done } from "./bits";
 import { MemoryEditor } from "./Memory";
+import { ProfileAgentsList } from "./ProfileAgents";
 import { STATES, profileState } from "./Overview";
 import { RuleListsEditor, draftInvalid, draftOfRules, ruleSetOf, rulesIn, rulesOfDraft } from "./RuleLists";
 import type { ActionWords, RuleDraft, RuleLists } from "./RuleLists";
@@ -225,6 +226,7 @@ export function Profile({ name }: { name: string }): JSX.Element {
               )}
               {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
               {!editing && <ProfileReading detail={detail} granted={granted} />}
+              {!busy && <ProfileAgentsList name={name} />}
               {!busy && !locked && (
                 <div className="actions">
                   <button type="button" onClick={() => setEditing(true)}>

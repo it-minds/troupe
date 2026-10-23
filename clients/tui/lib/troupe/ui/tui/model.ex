@@ -208,7 +208,10 @@ defmodule Troupe.UI.TUI.Model do
             files_version: 0,
             # Bumped by each `scratch_updated`: an open `/scratch` lists again from it.
             scratch_version: 0,
-            mcp: %{}
+            mcp: %{},
+            # Who else is attached to the session now, from presence (root #58): by
+            # `{subject, via}`, so a person here and on another device are two.
+            present: %{}
 
   @type t :: %__MODULE__{mcp: %{optional(String.t()) => map()}}
 
@@ -282,6 +285,11 @@ defmodule Troupe.UI.TUI.Model do
 
       :notice ->
         %{m | notices: Enum.take([e.data.text | m.notices], 3)}
+
+      # Somebody joined or left (root #58): a line in the session's own window, and who is
+      # here now for the status line. Focusing and typing are not news.
+      :presence ->
+        presence(m, e.data)
 
       # What the daemon says of watch, whoever turned it on or off (root Decision 844).
       :watch_changed ->
@@ -1096,6 +1104,42 @@ defmodule Troupe.UI.TUI.Model do
 
   defp push_entry(w, path, entry),
     do: update_agent(w, path, fn a -> %{a | transcript: a.transcript ++ [entry]} end)
+
+  defp presence(m, %{state: state, subject: subject} = d) when state in ["joined", "left"] do
+    key = {subject, d[:via]}
+    who = d[:name] || subject || "somebody"
+    from = if d[:via] == "plane", do: " from another device", else: ""
+
+    {present, line} =
+      case state do
+        "joined" -> {Map.put(m.present, key, %{name: who, via: d[:via]}), "#{who} joined#{from}"}
+        "left" -> {Map.delete(m.present, key), "#{who} left#{from}"}
+      end
+
+    m = %{m | present: present}
+
+    case m.order do
+      [own | _] -> update_window(m, own, &push(ensure_agent(&1, own), own, {:system, line}))
+      [] -> m
+    end
+  end
+
+  defp presence(m, _data), do: m
+
+  @doc """
+  Who else is attached to the session now, as the status line names them: each person,
+  `(another device)` after one steering from elsewhere.
+  """
+  @spec present(t()) :: [String.t()]
+  def present(%__MODULE__{present: present}) do
+    present
+    |> Map.values()
+    |> Enum.map(fn
+      %{name: name, via: "plane"} -> "#{name} (another device)"
+      %{name: name} -> name
+    end)
+    |> Enum.sort()
+  end
 
   defp update_window(m, path, fun) do
     case Map.get(m.windows, path) do

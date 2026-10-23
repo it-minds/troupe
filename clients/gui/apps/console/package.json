@@ -1,6 +1,6 @@
 {
   "name": "@troupe/console",
-  "version": "0.23.0-beta",
+  "version": "0.24.0-beta",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -26,7 +26,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "jsdom": "^30.1.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.1",
+    "vite": "^8.3.3",
     "vitest": "^5.0.2"
   }
 }

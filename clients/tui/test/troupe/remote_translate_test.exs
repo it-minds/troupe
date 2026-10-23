@@ -618,6 +618,24 @@ defmodule Troupe.RemoteTranslateTest do
     assert {:system, message} in folded([note]).transcript
   end
 
+  # Root issue #55: a save on the plane reached the running session, and its turn read the
+  # new version: the harness's sentence, as a line in the transcript.
+  test "the organisation's memory changing is the harness's sentence, as a line" do
+    message =
+      "The organisation's memory changed: the team design's memory is now version 6 (it was 5). " <>
+        "Read from this turn on."
+
+    data = %{
+      "changes" => [%{"scope" => "team", "name" => "design", "from" => 5, "to" => 6}],
+      "message" => message
+    }
+
+    [note] = translate(durable("memory_changed", data))
+    assert note.type == :remote_note
+    assert note.data.text == message
+    assert {:system, message} in folded([note]).transcript
+  end
+
   # troupe issue #668: a person's own tools offered to the session, as
   # `Troupe.Session.ClientTools` writes it. It was matched by a type nobody writes, so it
   # was drawn as the raw event and logged as one this client did not know.

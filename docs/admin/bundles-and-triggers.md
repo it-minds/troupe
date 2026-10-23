@@ -45,7 +45,17 @@ harness has, permissions that can apply, and the rest), refused in the same word
 `agent <name>: <what is wrong>`; what only a session can know, a model's provider or an MCP
 server's tool, is not checked. A version already published is not checked again, so one an
 older plane published still runs. The console's agent builder edits a bundle's agents as
-fields and asks `admin.agent.check` for one at a time (#594). A skill needs `SKILL.md`
+fields and asks `admin.agent.check` for one at a time (#594). It starts from the profile:
+a profile's page lists its agents as its bundle in effect has them (`admin.profile.agents`),
+each with its mode, model, who it hands work to, its cap on turns, what it runs without
+asking and which of the profile's teams may run it (a grant that allows other agents, or
+denies this one, says no), and opens the builder on the channel the agent came from. The
+builder edits the subagents beneath their primary and its delegations, per-tool
+permissions, `max_turns`, skills and a model picked from the ones the plane knows the
+provider serves (`admin.profile.choices` with the profile: its own model, the
+organisation's models for people's machines, the models its sessions have run on, and the
+ones its bundle names; the plane never asks a provider for its list). **Copy** starts a new
+agent from one Troupe ships or one already published. A skill needs `SKILL.md`
 (whose `name`, if present, must be its own), relative text files with no `..`, at most
 512 KiB. An MCP `url` is `https://`, or `http://` to a `.svc` host, and its host must pass
 the policy's egress check. Publishing to a channel a pod profile follows also refuses a
@@ -158,13 +168,14 @@ minute is within the last 120 s.
 
 **Firing by hand or from outside.** `trigger.fire {trigger, idempotency_key, event}` on
 `/rpc`, by the trigger's principal or an admin of its team, writes the run row first, so
-two callers racing on one key get the same run: skipped stays skipped, failed is retried, a
+two callers racing on one key get the same run: skipped stays skipped, failed is retried
+under the caps as a new firing is, a
 run with a session is handed it and a fresh token, and one still making its session is waited
 for, up to five seconds, after which the answer is `409` naming the run. `event` is capped at
 16 KiB.
 `admin.trigger.run` fires one by hand, as the console's **Run now** on a trigger's page does;
-its key names the caller and the minute, so a second click or a retry within the same minute
-is the run the first one made.
+a second click or a retry by the same person less than a minute after the first is the run
+the first one made, whatever minute the clock has turned to between them.
 
 **A trigger's own URL.** A trigger with a key is fired by `POST /trigger/<id>` with
 `Authorization: Bearer <key>` and a JSON object as the body, which becomes the run's
@@ -191,7 +202,12 @@ to one of those loses its key (changed back, it has none until a rotation; a lis
 **Runs** store only what the plane decided — `created`, `skipped`, `failed` — and read the
 rest from the session: `running`, `waiting` (on an approval), `done`, `failed`. A turn the
 harness stopped is `failed` with its `failed_reason`: `tool_failures`, a tool that kept
-failing, or `agent_failed`, an agent that kept crashing. `admin.runs.list` and
+failing, or `agent_failed`, an agent that kept crashing. A run that has had no session for
+ten minutes, because the request that fired it ended before it made one, is ended `failed`
+by the scheduler with the reason on the run and a `trigger.run.end` audit entry, so it no
+longer holds a place against the caps. Firings that race are counted one after another,
+under the trigger's row and, for a trigger on a repository, under one lock for every
+repository cap, so a concurrency of 1 starts one of them. `admin.runs.list` and
 `admin.run.review` are the inbox, which the console's **Runs and review** screen draws for
 a platform admin and a team admin alike ([console.md](console.md#what-it-does)). A
 `notify_url` is posted `{trigger, run, source, session_id, fired_at, state,

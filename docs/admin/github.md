@@ -72,7 +72,11 @@ nothing on the plane changes.
 ## 4. Give the plane the App
 
 As a platform admin, set it on the console's **Integrations** screen, which also tests it
-against GitHub (`admin.github.check`) and removes it (`admin.github.delete`); or call
+against GitHub (`admin.github.check`) and removes it (`admin.github.delete`). Give the
+test a repository (`owner/name`) and it also mints a token for that repository with what
+the App's installation may do there, reads the repository with it and revokes it, and
+shows what the token could do (contents, pull requests, checks and the rest), never the
+token; the token is in the audit trail as `github.token`, "for the App's test". Or call
 `admin.github.put` over `/rpc` with a plane token, or the `admin_github_put` tool on `/mcp`:
 
 ```json
@@ -220,9 +224,14 @@ can:
 - **The App's bot's commits, with the session named.** A push is made through GitHub's API
   with no author given, so the commit is the App's bot's (`example-org-troupe[bot]`) and
   GitHub signs it: it shows as verified. Its message ends with a `Troupe-Session: <id>`
-  trailer, which a reviewer follows to the session and its audit; one the agent wrote
-  itself is taken out. Whatever the agent committed locally, under whatever name, stays on
-  the pod.
+  trailer, which a reviewer follows to the session and its audit, and a `Requested-By:`
+  naming who the run is for, as the plane's own records say: the person who started it
+  (`Ada Lovelace <ada@example.com>`), the GitHub login of the person whose label fired it
+  (`octocat on GitHub (trigger fix-label, team core)`), or for a sweep or a schedule the
+  trigger and its team (`trigger nightly-fix, team core`). Either trailer the agent wrote
+  itself is taken out, so an issue that talks the agent into writing one names nobody; a
+  ruleset or a CI check can require both. Whatever the agent committed locally, under
+  whatever name, stays on the pod.
 - **Three red CI rounds, then stop.** A round is CI on a commit the session pushed to its
   pull request. A push waits until CI on the last one has finished, so no round goes
   uncounted. After the third red round the session's pushes are closed: its next token
@@ -427,8 +436,8 @@ number or its link (pasted from GitHub, and on the trigger's repository) and sta
 on it, after a confirm that says what the plane checks first: an open issue, not a pull
 request, on a repository the team lists, private or internal unless the profile allows
 public ones. Or `admin.trigger.fix` with `{team, name, issue}`. The run is `manual`, by the
-person, under the same caps as any run of the trigger, and a second click in the same
-minute is the run the first one made. A skipped run says why there and on its page.
+person, under the same caps as any run of the trigger, and a second click by the same
+person on the same issue less than a minute after the first is the run the first one made. A skipped run says why there and on its page.
 
 Every run, from a delivery, a sweep or "fix this", is listed on the console's **Runs and
 review** with its repository, issue, state, draft pull request, CI rounds and spend, and a

@@ -1153,6 +1153,11 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     case "config_note":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: str(d.data["message"], "a setting was held") }] };
 
+    // The organisation's memory changed while the session ran (troupe #55): a save on the
+    // plane reached it, and this turn read the new versions. The harness's own sentence.
+    case "memory_changed":
+      return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: str(d.data["message"], "the organisation's memory changed") }] };
+
     // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
     case "truncated":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: truncatedText(d) }] };

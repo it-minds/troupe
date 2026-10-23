@@ -552,7 +552,7 @@ function Admins({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
 
 // -- limits ------------------------------------------------------------------------------
 
-type LimitKey = "budget_micros" | "budget_period" | "idle_timeout_seconds" | "cache_eviction_days" | "erase_after_days" | "members_may_control" | "pins_allowed" | "volume_size" | "volume_storage_class" | "allow_unenforced_workers";
+type LimitKey = "budget_micros" | "budget_period" | "idle_timeout_seconds" | "cache_eviction_days" | "erase_after_days" | "members_may_control" | "pins_allowed" | "volume_size" | "volume_storage_class" | "allow_unenforced_workers" | "remote_offering_allowed";
 
 interface Limit {
   field: LimitKey;
@@ -569,6 +569,7 @@ const LIMITS: Limit[] = [
   { field: "erase_after_days", label: "Sessions erased after", kind: "days" },
   { field: "members_may_control", label: "Members may steer team sessions", kind: "switch" },
   { field: "pins_allowed", label: "Members may pin a session", kind: "switch" },
+  { field: "remote_offering_allowed", label: "Members may offer a laptop session for steering", kind: "switch" },
   { field: "volume_size", label: "Team volume size", kind: "text" },
   { field: "volume_storage_class", label: "Team volume storage class", kind: "text" },
   { field: "allow_unenforced_workers", label: "May use workers nothing is enforced on", kind: "switch", platformOnly: true },
@@ -792,6 +793,10 @@ function consequence(team: string, line: DiffLine, laddered: LadderValue | undef
       return to ? `${team}'s members may steer a team session.` : `${team}'s members may watch a team session and no longer steer it, from their next request.`;
     case "pins_allowed":
       return to ? `${team}'s members may pin a session against eviction.` : `${team}'s members may no longer pin a session.`;
+    case "remote_offering_allowed":
+      return to
+        ? `${team}'s members may offer a session on their laptop, to steer it from another device.`
+        : `${team}'s members may no longer offer a laptop session: each new offer is refused, saying the team does not allow it, and one already offered can no longer be opened.`;
     case "volume_size":
     case "volume_storage_class":
       return `${team}'s team volume asks for ${show(to)}; one that exists already changes only as its storage class allows.`;

@@ -116,7 +116,7 @@ defmodule Troupe.UI.TUI.View do
 
     Enum.drop(behind, -1) ++
       [command_line(state, cmd_rect, cmd_rect.height)] ++
-      AgentChooser.render(chooser, area, cmd_rect.y)
+      AgentChooser.render(chooser, area, cmd_rect.y, Agents.running(state))
   end
 
   defp draw(%{focus: :memory} = state, frame) do
@@ -2741,7 +2741,7 @@ defmodule Troupe.UI.TUI.View do
       end
 
     text =
-      "#{goal_note(state.model)}#{loop_note(state.model)}" <>
+      "#{goal_note(state.model)}#{loop_note(state.model)}#{present_note(state.model)}" <>
         " · #{watch}#{mcp}" <>
         " · #{state.session_id}" <>
         remote_note(state) <>
@@ -2771,6 +2771,15 @@ defmodule Troupe.UI.TUI.View do
       |> Line.new()
 
     {%Paragraph{text: [line], style: Theme.style(:muted)}, rect}
+  end
+
+  # Who else is here, live from presence (root #58): somebody steering from another device
+  # is named as they arrive and dropped as they go, not only when `/steer` is asked.
+  defp present_note(model) do
+    case Model.present(model) do
+      [] -> ""
+      names -> " · with " <> Enum.join(names, ", ")
+    end
   end
 
   # The session's goal, for as long as it has one, near the front of the line where a

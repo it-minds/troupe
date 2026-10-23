@@ -22,6 +22,9 @@ defmodule Troupe.Gateway.Presence do
     data =
       %{"subject" => subject(principal), "state" => presence_state}
       |> put_unless_nil("display_name", principal && principal["display_name"])
+      # `plane` for somebody steering a laptop's session from another device (#58), so a
+      # client there can say who is here from elsewhere and not take them for itself.
+      |> put_unless_nil("via", principal && principal["via"])
       |> put_unless_nil("agent", agent)
 
     Troupe.Events.publish_ephemeral(session_id, "presence", agent, data)

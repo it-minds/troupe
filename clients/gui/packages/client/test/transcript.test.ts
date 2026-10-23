@@ -654,6 +654,18 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.equal((state.entries[0] as Extract<Entry, { kind: "system" }>).text, message);
   });
 
+  it("says the organisation's memory changed under a running session as the harness's sentence (troupe #55)", () => {
+    seq = 0;
+    const message = "The organisation's memory changed: the team design's memory is now version 6 (it was 5). Read from this turn on.";
+    const state = foldAll([durable("memory_changed", { changes: [{ scope: "team", name: "design", from: 5, to: 6 }], message })]);
+
+    assert.deepEqual(
+      state.entries.map((e) => e.kind),
+      ["system"],
+    );
+    assert.equal((state.entries[0] as Extract<Entry, { kind: "system" }>).text, message);
+  });
+
   it("streams the daemon's reasoning into the thinking pane, and a waiting agent needs you", () => {
     seq = 0;
     const state = foldAll([ephemeral("llm_delta", { kind: "reasoning", text: "let me " }), ephemeral("llm_delta", { kind: "reasoning", text: "think" })]);

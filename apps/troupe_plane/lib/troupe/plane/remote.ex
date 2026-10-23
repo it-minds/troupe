@@ -17,21 +17,189 @@ defmodule Troupe.Plane.Remote do
 
   **The laptop decides.** The plane holds a person to what the row says, and the laptop
   holds them again to its own record: a share the plane invented reaches nobody.
+
+  **The laptop keeps its own sign-in while it offers** (slice 2). At its first offer the
+  daemon asks `remote.grant` with the token its person's client handed it, and keeps the
+  answer, a grant for that person and device, in its operating system's credential
+  store. It exchanges the grant at `/auth/relay` for a token that opens the laptop's door
+  and nothing else, so the offer stays up after the client that made it has closed or its
+  token has lapsed. Withdrawing the last offer, signing out or `troupe logout` releases
+  it (`/auth/relay/release`). Both are in the audit trail, as `remote.grant` and
+  `remote.release`, with the device.
+
+  **A team's administrators may forbid offering** (`teams.remote_offering_allowed`): a
+  person in a team that does not allow it is refused a grant, an offer and an attach to
+  one they made earlier, with the team named.
   """
 
   import Ecto.Query
 
-  alias Troupe.Plane.Identity
+  alias Troupe.Plane.{Audit, Identity, Tokens}
   alias Troupe.Plane.Identity.User
-  alias Troupe.Plane.Remote.Offer
+  alias Troupe.Plane.Remote.{Grant, Offer}
   alias Troupe.Plane.Repo
   alias Troupe.Protocol.{Error, Relay, SessionId}
 
   @audience "troupe-relay"
+  @laptop_audience "troupe-relay-laptop"
+  # A grant nobody has exchanged for this long is refused: a laptop away that long signs
+  # in again at its next offer.
+  @grant_idle_days 30
 
   @doc "The audience of a token for a relayed session, which no pod and no plane call takes."
   @spec audience() :: String.t()
   def audience, do: @audience
+
+  @doc """
+  The audience of the token a daemon's own grant is exchanged for: the laptop's door,
+  `/v1/relay`, and nothing else, neither `/rpc` nor a pod nor a viewer's door.
+  """
+  @spec laptop_audience() :: String.t()
+  def laptop_audience, do: @laptop_audience
+
+  # -- the team's switch --------------------------------------------------------
+
+  @doc """
+  `:ok` where `user` may offer a laptop session, and `forbidden` naming the team where a
+  team they are in does not allow it. The strictest of a person's teams holds.
+  """
+  @spec offering_allowed(User.t()) :: :ok | {:error, Error.t()}
+  def offering_allowed(%User{} = user) do
+    case Enum.find(Identity.teams_for(user), &(&1.remote_offering_allowed == false)) do
+      nil ->
+        :ok
+
+      team ->
+        {:error,
+         Error.new(:forbidden, %{
+           team: team.name,
+           reason:
+             "#{team.name}'s administrators do not allow offering a laptop session " <>
+               "for steering from another device"
+         })}
+    end
+  end
+
+  # -- the laptop's own sign-in -------------------------------------------------
+
+  @doc """
+  A grant for `user`'s daemon on `device`, asked with the person's own plane token at the
+  daemon's first offer. One per person and device: a new one replaces the last. Answers
+  the grant, `rg_<id>.<secret>`, which the plane keeps only the hash of.
+  """
+  @spec grant(User.t(), String.t() | nil) :: {:ok, map()} | {:error, Error.t()}
+  def grant(%User{} = user, device) do
+    with {:ok, device} <- device(device),
+         :ok <- offering_allowed(user) do
+      secret = 32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+
+      Repo.delete_all(from(g in Grant, where: g.subject == ^user.subject and g.device == ^device))
+
+      attrs = %{subject: user.subject, device: device, secret_hash: hash(secret)}
+
+      case %Grant{} |> Grant.changeset(attrs) |> Repo.insert() do
+        {:ok, grant} ->
+          {:ok, _} = Audit.record(user.subject, "remote.grant", device, %{"device" => device})
+          {:ok, %{"grant" => "rg_#{grant.id}.#{secret}", "device" => device}}
+
+        {:error, changeset} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+      end
+    end
+  end
+
+  @doc """
+  A grant exchanged for a token of the laptop's door, for fifteen minutes, naming the
+  person and the device. `unauthenticated` for a grant the plane does not hold, one
+  released, one idle too long, or a person no longer active.
+  """
+  @spec redeem(String.t() | nil) :: {:ok, map()} | {:error, Error.t()}
+  def redeem(presented) do
+    with {:ok, grant} <- find_grant(presented),
+         :ok <- not_idle(grant),
+         %User{active: true} = user <- Identity.get_user(grant.subject),
+         :ok <- offering_allowed(user) do
+      claims = %{
+        "sub" => user.subject,
+        "name" => user.display_name,
+        "email" => user.email,
+        "device" => grant.device,
+        "via" => "daemon",
+        "scopes" => []
+      }
+
+      case Tokens.mint(claims, audience: @laptop_audience) do
+        {:ok, token, payload} ->
+          grant |> Ecto.Changeset.change(used_at: DateTime.utc_now()) |> Repo.update!()
+
+          {:ok,
+           %{
+             "token" => token,
+             "expires_at" => payload["exp"],
+             "subject" => user.subject,
+             "device" => grant.device
+           }}
+
+        {:error, reason} ->
+          {:error, Error.new(:unavailable, %{reason: "no token could be minted: #{inspect(reason)}"})}
+      end
+    else
+      %User{} -> {:error, Error.new(:forbidden, %{reason: "account deactivated"})}
+      nil -> {:error, Error.new(:unauthenticated, %{reason: "no such user"})}
+      {:error, %Error{} = error} -> {:error, error}
+    end
+  end
+
+  @doc """
+  The daemon lets its grant go: the last offer withdrawn, its person signed out. Gone from
+  the plane, and the laptop's connection, if it is open, carries on until its token ends.
+  `:ok` for one the plane does not hold too, since there is nothing left to release.
+  """
+  @spec release(String.t() | nil) :: :ok
+  def release(presented) do
+    case find_grant(presented) do
+      {:ok, grant} ->
+        Repo.delete!(grant)
+
+        {:ok, _} =
+          Audit.record(grant.subject, "remote.release", grant.device, %{"device" => grant.device})
+
+        :ok
+
+      {:error, _unknown} ->
+        :ok
+    end
+  end
+
+  defp find_grant("rg_" <> rest) do
+    with [id, secret] <- String.split(rest, ".", parts: 2),
+         {:ok, id} <- Ecto.UUID.cast(id),
+         %Grant{} = grant <- Repo.get(Grant, id),
+         presented = hash(secret),
+         true <- :crypto.hash_equals(presented, grant.secret_hash) do
+      {:ok, grant}
+    else
+      _ -> {:error, Error.new(:unauthenticated, %{reason: "not a grant this plane holds"})}
+    end
+  end
+
+  defp find_grant(_presented),
+    do: {:error, Error.new(:unauthenticated, %{reason: "not a grant this plane holds"})}
+
+  defp not_idle(%Grant{used_at: used, inserted_at: made}) do
+    last = used || made
+
+    if DateTime.diff(DateTime.utc_now(), last, :day) < @grant_idle_days,
+      do: :ok,
+      else: {:error, Error.new(:unauthenticated, %{reason: "the grant was not used for #{@grant_idle_days} days"})}
+  end
+
+  defp hash(secret), do: :crypto.hash(:sha256, secret)
+
+  defp device(device) when is_binary(device) and byte_size(device) in 1..128, do: {:ok, device}
+
+  defp device(_device),
+    do: {:error, Error.new(:invalid_params, %{field: "device", reason: "a laptop names its device"})}
 
   @doc "The `:global` name the connection offering `session_id` holds."
   @spec name(String.t()) :: term()
@@ -55,7 +223,8 @@ defmodule Troupe.Plane.Remote do
   """
   @spec offer(User.t(), String.t(), map()) :: {:ok, Offer.t()} | {:error, Error.t()}
   def offer(%User{} = user, device, params) do
-    with {:ok, session_id} <- session_id(params["session_id"]),
+    with :ok <- offering_allowed(user),
+         {:ok, session_id} <- session_id(params["session_id"]),
          {:ok, people} <- resolve(params["share"], user),
          :ok <- not_anothers(session_id, user) do
       now = DateTime.utc_now()
@@ -150,14 +319,24 @@ defmodule Troupe.Plane.Remote do
   @spec access(String.t() | nil, User.t()) :: {:ok, Offer.t(), String.t()} | {:error, Error.t()}
   def access(session_id, %User{} = user) when is_binary(session_id) do
     with %Offer{} = offer <- Repo.get(Offer, session_id),
-         role when is_binary(role) <- role(offer, user) do
+         role when is_binary(role) <- role(offer, user),
+         :ok <- owner_allowed(offer) do
       {:ok, offer, role}
     else
+      {:error, %Error{} = error} -> {:error, error}
       _ -> {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
     end
   end
 
   def access(_session_id, _user), do: {:error, Error.new(:invalid_params, %{field: "session_id"})}
+
+  # An offer made before its owner's team turned offering off is not steered after it.
+  defp owner_allowed(%Offer{owner_subject: subject}) do
+    case Identity.get_user(subject) do
+      %User{} = owner -> offering_allowed(owner)
+      nil -> :ok
+    end
+  end
 
   @doc "The role a person holds on an offer, or `nil`."
   @spec role(Offer.t(), User.t()) :: String.t() | nil

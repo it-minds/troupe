@@ -76,7 +76,7 @@ defmodule Troupe.Agent.Server do
 
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
-  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions, Shell}
+  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Organisation, Questions, Shell}
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Tools.{Delegate, Finish, Output, Patch, ReadFile, ReadOutput, Show}
@@ -1420,6 +1420,8 @@ defmodule Troupe.Agent.Server do
           state
           |> fold_shell()
           |> fold_child_reports()
+          |> take_organisation()
+          |> take_memory()
           |> load_instructions()
           |> hold_turn_tools()
 
@@ -1545,6 +1547,49 @@ defmodule Troupe.Agent.Server do
 
   # A turn's hold let go of, as the turn ends or an input is taken: the next call takes it.
   defp let_go(state), do: %{state | turn_tools: nil, turn_skills: nil}
+
+  # The configuration a change to the organisation's document gave the session since this
+  # agent last took one (`Troupe.Session.Organisation`), taken by the root as a turn begins
+  # and never during one, and said in a line. Its children are started with the root's
+  # configuration, so they follow. The budget's use so far is kept, and its limits held to
+  # what the organisation now enforces; a looser limit is had by asking, as before. The
+  # organisation's memory is not taken here but by `take_memory/1`, which says so and reads
+  # the instructions again.
+  defp take_organisation(%State{agent_path: ["root"]} = state) do
+    case Organisation.given(state.session_id) do
+      %{revision: revision, config: config} = given when revision != state.organisation_taken ->
+        log(state, :config_note, %{
+          "key" => "organisation",
+          "message" => Organisation.line(given)
+        })
+
+        {:ok, provider} = Provider.adapter(config.provider)
+
+        %{
+          state
+          | config: %{config | plane_memory: state.config.plane_memory},
+            provider: provider,
+            budget: held_budget(state.budget, config.ceilings),
+            organisation_taken: revision
+        }
+
+      _nothing_new ->
+        state
+    end
+  end
+
+  defp take_organisation(state), do: state
+
+  defp held_budget(budget, ceilings) do
+    Enum.reduce(ceilings, budget, fn
+      {dimension, %{limit: limit}}, budget when dimension in [:max_turns, :wall_clock] ->
+        field = Troupe.Budget.field(dimension)
+        Map.update!(budget, field, &min(&1, limit))
+
+      _other, budget ->
+        budget
+    end)
+  end
 
   # The tools are offered knowing whether the model they go to binds its thinking to them:
   # one that does is offered the same on every call (Decisions 867 and 871).
@@ -1891,6 +1936,24 @@ defmodule Troupe.Agent.Server do
   end
 
   defp instructions_due(%State{} = state), do: %{state | instructions_due: true}
+
+  # The organisation's memory a save on the plane gave the session since this agent's
+  # configuration was resolved (`Troupe.Session.PlaneMemory`), taken as a turn begins and
+  # never during one, said in the log with the versions from and to, and read into the
+  # instructions this turn. The same versions again change nothing and say nothing.
+  defp take_memory(%State{} = state) do
+    with %{documents: documents} <- Troupe.Session.PlaneMemory.given(state.session_id),
+         [_ | _] = changes <- Troupe.PlaneMemory.changes(state.config.plane_memory, documents) do
+      log(state, :memory_changed, %{
+        "changes" => changes,
+        "message" => Troupe.PlaneMemory.change_line(changes)
+      })
+
+      instructions_due(%{state | config: %{state.config | plane_memory: documents}})
+    else
+      _same -> state
+    end
+  end
 
   defp environment_section(state) do
     """

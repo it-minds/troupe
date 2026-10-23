@@ -5,13 +5,29 @@ defmodule Troupe.Gateway.Remote do
 
   ## One connection, dialled from here
 
-  Nothing listens on the laptop for this. While at least one session is offered and a
-  client has handed the daemon a plane token (`Troupe.Gateway.Plane`), the daemon keeps
-  one WebSocket open to the plane's `/v1/relay`, authenticated with that token and renewed
-  on it (`auth.refresh`) each time a client links again with a fresh one. Over it the
-  daemon tells the plane what it offers (`relay.sync`, `relay.offer`, `relay.withdraw`),
-  and the plane relays each remote person's protocol messages to it and back
-  (`relay.open`, `relay.frame`, `relay.close`), one viewer at a time.
+  Nothing listens on the laptop for this. While at least one session is offered, the
+  daemon keeps one WebSocket open to the plane's `/v1/relay`. Over it the daemon tells the
+  plane what it offers (`relay.sync`, `relay.offer`, `relay.withdraw`), and the plane
+  relays each remote person's protocol messages to it and back (`relay.open`,
+  `relay.frame`, `relay.close`), one viewer at a time.
+
+  ## Its own sign-in, while anything is offered
+
+  A client's plane token (`Troupe.Gateway.Plane`) lives fifteen minutes and is renewed only
+  while that client runs, so an offer that rode on it went offline when the client closed.
+  So at the first offer the daemon asks the plane for a grant of its own (`remote.grant`,
+  with the client's token, naming this device), and keeps it in the operating system's
+  credential store (`Troupe.Keyring`), never a file. It exchanges the grant at the plane's
+  `/auth/relay` for a token of the laptop's door alone, dials with that, and exchanges it
+  again before each token runs out, renewing on the open socket (`auth.refresh`). A
+  daemon that restarts with something offered reads the grant back and dials again with
+  no client at all.
+
+  Withdrawing the last offer, signing out (`identity.sign_out` for this plane and person,
+  which a client's sign-out and `troupe logout` send) and unlinking the daemon release the
+  grant at the plane, take it out of the store and close the connection. The record is
+  kept, so the next link with a token offers the same sessions again. A machine with no
+  store keeps the grant in memory and says so: the offer then lasts as long as the daemon.
 
   ## Each remote person is a connection like any other
 
@@ -45,6 +61,7 @@ defmodule Troupe.Gateway.Remote do
   use GenServer
 
   alias Troupe.Gateway.{Plane, Remote.Viewer}
+  alias Troupe.Keyring.Steering
   alias Troupe.Protocol.{Client, Endpoint, Error, Relay}
 
   require Logger
@@ -55,6 +72,11 @@ defmodule Troupe.Gateway.Remote do
   @version 1
   @min_backoff_ms 1_000
   @max_backoff_ms 60_000
+  # The daemon's own token is exchanged again this long before it runs out, and a renewal
+  # the plane did not answer is tried again after the second.
+  @renew_before_s 120
+  @renew_retry_ms 30_000
+  @http_timeout_ms 15_000
 
   defstruct offers: %{},
             device: nil,
@@ -68,7 +90,14 @@ defmodule Troupe.Gateway.Remote do
             backoff: @min_backoff_ms,
             retry: nil,
             since: nil,
-            relay_url: nil
+            relay_url: nil,
+            # The daemon's own sign-in: `%{url, subject, grant, token, expires_at}`, the
+            # grant as the credential store keeps it and the token it was last exchanged for.
+            sign_in: nil,
+            keyring: nil,
+            renew: nil,
+            renewing: nil,
+            refused: nil
 
   # -- api --------------------------------------------------------------------
 
@@ -100,9 +129,49 @@ defmodule Troupe.Gateway.Remote do
   @spec linked() :: :ok
   def linked, do: if(Process.whereis(@name), do: GenServer.cast(@name, :linked), else: :ok)
 
-  @doc "The plane token was taken back: close the connection, keep the record."
+  @doc """
+  The daemon was unlinked, or linked to somebody else: its own sign-in is released and
+  the connection closed. The record is kept.
+  """
   @spec unlinked() :: :ok
-  def unlinked, do: if(Process.whereis(@name), do: GenServer.cast(@name, :unlinked), else: :ok)
+  def unlinked do
+    GenServer.call(@name, :unlinked, 30_000)
+  catch
+    :exit, {:noproc, _} -> :ok
+  end
+
+  @doc """
+  The person signed out (`identity.sign_out`): where the daemon's own sign-in is for this
+  plane and this person (`subject` nil is whoever it is for), it is released, taken out of
+  the credential store and the connection closed. Answers whether there was one.
+  """
+  @spec signed_out(String.t(), String.t() | nil) :: boolean()
+  def signed_out(plane_url, subject) do
+    GenServer.call(@name, {:signed_out, plane_url, subject}, 30_000)
+  catch
+    :exit, {:noproc, _} -> false
+  end
+
+  @doc """
+  Whether the daemon is keeping a session offered now: something offered and its own
+  sign-in to offer it with. The idle watch stays up for it. Read from a table, so the
+  watch never waits on this process.
+  """
+  @spec offering?() :: boolean()
+  def offering? do
+    case :ets.whereis(@table) do
+      :undefined -> false
+      table -> match?([{:offering, true}], :ets.lookup(table, :offering))
+    end
+  end
+
+  @doc """
+  The name the daemon's own sign-in is kept under in the credential store
+  (`Troupe.Keyring.Steering`): one per state directory, so a second daemon with homes of
+  its own keeps a sign-in of its own.
+  """
+  @spec keyring_name(Path.t()) :: String.t()
+  def keyring_name(state_dir \\ Troupe.Paths.state_dir()), do: Steering.name(state_dir)
 
   @doc """
   What a session's listing says of its offer: `nil` for one not offered, or its shares,
@@ -152,21 +221,27 @@ defmodule Troupe.Gateway.Remote do
       device: device,
       path: path,
       since: now(),
-      relay_url: Keyword.get(opts, :relay_url)
+      relay_url: Keyword.get(opts, :relay_url),
+      keyring: Keyword.get_lazy(opts, :keyring, fn -> keyring_name(Path.dirname(path)) end)
     }
 
     {:ok, publish(state), {:continue, :dial}}
   end
 
+  # The credential store is read here rather than in `init/1`, which a slow store would hold
+  # the daemon's start on, and only when something is offered: nothing else needs it.
   @impl GenServer
-  def handle_continue(:dial, state), do: {:noreply, maybe_dial(state)}
+  def handle_continue(:dial, state) do
+    state = if state.offers != %{}, do: %{state | sign_in: stored(state)}, else: state
+    {:noreply, publish(maybe_dial(state))}
+  end
 
   @impl GenServer
   def handle_call({:offer, session_id, share, subject}, from, state) do
-    with {:ok, session} <- offerable(session_id, subject),
+    with {:ok, session} <- offerable(state, session_id, subject),
          {:ok, share} <- share_param(share) do
       request = {:offer, from, session_id, workspace_label(session), share, subject}
-      {:noreply, when_online(state, request)}
+      {:noreply, publish(when_online(%{state | refused: nil}, request))}
     else
       {:error, %Error{} = error} -> {:reply, {:error, error}, state}
     end
@@ -177,45 +252,108 @@ defmodule Troupe.Gateway.Remote do
     had? = Map.has_key?(state.offers, session_id)
     state = %{state | offers: Map.delete(state.offers, session_id)}
     persist(state)
+    last? = owned_offers(state) == %{}
 
-    if had? and state.status == :online,
-      do: call_plane(state, "relay.withdraw", %{"session_id" => session_id}, :ignore)
+    cond do
+      had? and state.status == :online and last? ->
+        # Said before the connection closes, so the plane does not show it offline instead.
+        withdraw_now(state, session_id)
 
-    state = if map_size(state.offers) == 0, do: hang_up(state), else: state
+      had? and state.status == :online ->
+        call_plane(state, "relay.withdraw", %{"session_id" => session_id}, :ignore)
+
+      true ->
+        :ok
+    end
+
+    state = if last?, do: state |> cancel_retry() |> hang_up() |> release(), else: state
     {:reply, :ok, publish(state)}
   end
 
-  @impl GenServer
-  def handle_cast(:linked, %{status: :online} = state) do
-    case Plane.credentials() do
-      {:ok, %{token: token}} ->
-        call_plane(state, "auth.refresh", %{"auth" => %{"token" => token}}, :refreshed)
-        {:noreply, state}
+  def handle_call(:unlinked, _from, state) do
+    state = state |> cancel_retry() |> hang_up() |> release()
+    {:reply, :ok, publish(state)}
+  end
 
-      _none ->
-        {:noreply, state}
+  def handle_call({:signed_out, url, subject}, _from, %{sign_in: %{} = sign_in} = state) do
+    if same_plane?(sign_in.url, url) and subject in [nil, sign_in.subject] do
+      state = state |> cancel_retry() |> hang_up() |> release()
+      {:reply, true, publish(state)}
+    else
+      {:reply, false, state}
     end
   end
 
-  def handle_cast(:linked, state), do: {:noreply, maybe_dial(%{state | backoff: @min_backoff_ms})}
-
-  def handle_cast(:unlinked, state) do
-    state = state |> cancel_retry() |> hang_up()
-    {:noreply, publish(state)}
+  def handle_call({:signed_out, _url, _subject}, _from, state) do
+    {:reply, false, publish(state |> cancel_retry() |> hang_up())}
   end
 
+  # A client linked with a token: what is offered and waited for a sign-in is offered now.
+  # A connection up on the daemon's own sign-in needs nothing from the client's token.
   @impl GenServer
+  def handle_cast(:linked, %{status: :online} = state), do: {:noreply, state}
+
+  def handle_cast(:linked, state),
+    do: {:noreply, publish(maybe_dial(%{state | backoff: @min_backoff_ms, refused: nil}))}
+
+  @impl GenServer
+  # The grant, asked in a task so that this process answers while it waits.
+  def handle_info({:granted, ref, result}, %{connecting: ref} = state) do
+    state = %{state | connecting: nil}
+
+    case result do
+      {:ok, sign_in} ->
+        if sign_in.stored != :ok do
+          Logger.warning(
+            "troupe-daemon: the operating system's credential store did not take the sign-in for " <>
+              "steering (#{inspect(sign_in.stored)}); it is kept in memory, and an offer ends with the daemon"
+          )
+        end
+
+        Logger.info("troupe-daemon: signed in to #{sign_in.url} for steering, as this device")
+        {:noreply, publish(dial(%{state | sign_in: Map.delete(sign_in, :stored)}))}
+
+      {:error, reason} ->
+        Logger.warning("troupe-daemon: the plane gave no sign-in for steering: #{describe_reason(reason)}")
+        state = fail_waiting(%{state | status: :offline, since: now()}, reason)
+        state = if refusal?(reason), do: %{state | refused: reason}, else: schedule_retry(state)
+        {:noreply, publish(state)}
+    end
+  end
+
+  # A sign-in that arrives after the person signed out or withdrew is let go at once.
+  def handle_info({:granted, _stale, {:ok, sign_in}}, %{sign_in: nil} = state) do
+    {:noreply, release(%{state | sign_in: Map.delete(sign_in, :stored)})}
+  end
+
+  def handle_info({:granted, _stale, _result}, state), do: {:noreply, state}
+
   # The dial, done in a task so that this process answers while it waits.
   def handle_info({:dialled, ref, result}, %{connecting: ref} = state) do
     state = %{state | connecting: nil}
 
     case result do
-      {:ok, client} ->
+      {:ok, client, auth} ->
         monitor = Process.monitor(client)
-        state = %{state | link: client, monitor: monitor, status: :online, backoff: @min_backoff_ms}
+
+        state = %{
+          state
+          | link: client,
+            monitor: monitor,
+            status: :online,
+            backoff: @min_backoff_ms,
+            sign_in: Map.merge(state.sign_in, auth)
+        }
+
         Logger.info("troupe-daemon: connected to the plane's relay to offer sessions for steering")
-        state = sync(state)
+        state = state |> schedule_renew() |> sync()
         {:noreply, publish(drain_waiting(state))}
+
+      {:error, {:grant_refused, status, reason} = refused} ->
+        Logger.warning("troupe-daemon: the plane refused this device's sign-in for steering (#{status}): #{reason}")
+        state = fail_waiting(%{forget(state) | status: :offline, since: now()}, refused)
+        state = if status == 403, do: %{state | refused: refused}, else: schedule_retry(state)
+        {:noreply, publish(state)}
 
       {:error, reason} ->
         Logger.warning("troupe-daemon: the plane's relay could not be reached: #{inspect(reason)}")
@@ -224,12 +362,40 @@ defmodule Troupe.Gateway.Remote do
     end
   end
 
-  def handle_info({:dialled, _stale, {:ok, client}}, state) do
+  def handle_info({:dialled, _stale, {:ok, client, _auth}}, state) do
     Client.close(client)
     {:noreply, state}
   end
 
   def handle_info({:dialled, _stale, _result}, state), do: {:noreply, state}
+
+  # The daemon's own token, exchanged again before it runs out and renewed on the open
+  # socket; the plane's warning two minutes before asks for the same.
+  def handle_info(:renew, state), do: {:noreply, renew(%{state | renew: nil})}
+
+  def handle_info({:troupe_notification, "auth.expiring", _params}, state), do: {:noreply, renew(state)}
+
+  def handle_info({:renewed, ref, result}, %{renewing: ref} = state) do
+    state = %{state | renewing: nil}
+
+    case result do
+      {:ok, auth} ->
+        call_plane(state, "auth.refresh", %{"auth" => %{"token" => auth.token}}, :ignore)
+        {:noreply, schedule_renew(%{state | sign_in: Map.merge(state.sign_in, auth)})}
+
+      {:error, {:grant_refused, status, reason} = refused} ->
+        Logger.warning("troupe-daemon: the plane refused this device's sign-in for steering (#{status}): #{reason}")
+        state = state |> hang_up() |> forget()
+        state = if status == 403, do: %{state | refused: refused}, else: schedule_retry(state)
+        {:noreply, publish(state)}
+
+      {:error, reason} ->
+        Logger.info("troupe-daemon: the sign-in for steering was not renewed yet: #{inspect(reason)}")
+        {:noreply, %{state | renew: Process.send_after(self(), :renew, @renew_retry_ms)}}
+    end
+  end
+
+  def handle_info({:renewed, _stale, _result}, state), do: {:noreply, state}
 
   def handle_info({:answered, :offer, from, session_id, subject, result}, state) do
     case result do
@@ -344,11 +510,11 @@ defmodule Troupe.Gateway.Remote do
 
   # The session is here, is not private, and is the linked person's: one made while
   # somebody else was linked is theirs to offer at their next link. And there is a plane
-  # to offer it to.
-  defp offerable(session_id, subject) do
+  # to offer it to: a client's token, or the daemon's own sign-in for this person.
+  defp offerable(state, session_id, subject) do
     with {:ok, session} <- session(session_id),
          :ok <- not_private(session),
-         :ok <- linked(subject),
+         :ok <- linked(state, subject),
          :ok <- owned(session, subject) do
       {:ok, session}
     end
@@ -372,7 +538,9 @@ defmodule Troupe.Gateway.Remote do
 
   defp not_private(_session), do: :ok
 
-  defp linked(subject) do
+  defp linked(%{sign_in: %{subject: subject}}, subject) when is_binary(subject), do: :ok
+
+  defp linked(_state, subject) do
     case Plane.credentials() do
       {:ok, %{subject: ^subject}} when is_binary(subject) ->
         :ok
@@ -426,26 +594,50 @@ defmodule Troupe.Gateway.Remote do
   # -- the connection ---------------------------------------------------------
 
   defp when_online(%{status: :online} = state, request), do: run(state, request)
-
-  defp when_online(state, request) do
-    state = %{state | waiting: state.waiting ++ [request]}
-    dial(state)
-  end
+  defp when_online(state, request), do: connect(%{state | waiting: state.waiting ++ [request]})
 
   defp drain_waiting(state) do
     Enum.reduce(state.waiting, %{state | waiting: []}, &run(&2, &1))
   end
 
   defp fail_waiting(state, reason) do
+    error = waiting_error(reason)
+
     Enum.each(state.waiting, fn {:offer, from, _id, _label, _share, _subject} ->
-      GenServer.reply(
-        from,
-        {:error, Error.new(:unavailable, %{reason: "the plane could not be reached: #{describe_reason(reason)}"})}
-      )
+      GenServer.reply(from, {:error, error})
     end)
 
     %{state | waiting: []}
   end
+
+  # What an offer that could not be made is answered: the plane's own refusal where it
+  # refused, which names the team that does not allow offering, or why it was not reached.
+  defp waiting_error({:rpc, %{"code" => code, "message" => message} = error}),
+    do: %Error{code: code, message: message, data: error["data"]}
+
+  defp waiting_error({:grant_refused, 403, reason}), do: Error.new(:forbidden, %{reason: reason})
+
+  defp waiting_error({:grant_refused, _status, reason}) do
+    Error.new(:unavailable, %{
+      reason: "the plane no longer takes this device's sign-in (#{reason}); offer it again to sign in again"
+    })
+  end
+
+  defp waiting_error({:update_required, sentence}), do: Error.new(:unavailable, %{reason: sentence})
+
+  defp waiting_error(:unlinked) do
+    Error.new(:unavailable, %{
+      reason: "sign in to a plane first: a session is offered to the plane you are signed in to"
+    })
+  end
+
+  defp waiting_error(reason),
+    do: Error.new(:unavailable, %{reason: "the plane could not be reached: #{describe_reason(reason)}"})
+
+  # A refusal the plane will give again whenever it is asked: a team that does not allow
+  # offering. Asked again at the next offer or link, and not on a timer.
+  defp refusal?({:rpc, %{"code" => -32_004}}), do: true
+  defp refusal?(_reason), do: false
 
   defp run(state, {:offer, from, session_id, label, share, subject}) do
     params = %{"session_id" => session_id, "workspace" => label, "share" => share}
@@ -453,54 +645,217 @@ defmodule Troupe.Gateway.Remote do
     state
   end
 
-  # A dial with something to offer and a token to offer it with.
+  # A dial with something to offer and a sign-in to offer it with: the daemon's own, or a
+  # client's token to ask the plane for one.
   defp maybe_dial(state) do
-    if state.offers != %{} and owned_offers(state) != %{}, do: dial(state), else: state
+    if owned_offers(state) != %{} and state.refused == nil and (state.sign_in != nil or client_linked?()),
+      do: connect(state),
+      else: state
   end
 
-  defp dial(%{status: :online} = state), do: state
-  defp dial(%{connecting: ref} = state) when is_reference(ref), do: state
+  defp connect(%{status: :online} = state), do: state
+  defp connect(%{connecting: ref} = state) when is_reference(ref), do: state
+  defp connect(%{sign_in: nil} = state), do: grant(state)
+  defp connect(state), do: dial(state)
 
-  defp dial(state) do
+  # The daemon's own sign-in, asked of the plane with the token a client handed it, naming
+  # this device, and written to the credential store before it is used, so a daemon that
+  # stops with something offered finds it again.
+  defp grant(state) do
     case Plane.credentials() do
-      {:ok, %{url: url, token: token}} ->
+      {:ok, %{url: url, subject: subject}} when is_binary(subject) ->
         ref = make_ref()
         owner = self()
-        # The plane's own `/v1/relay`, unless something stands in for it (a test's).
-        relay =
-          state.relay_url || Application.get_env(:troupe_gateway, :relay_url) || relay_url(url)
+        device = state.device
+        keyring = state.keyring
 
-        Task.start(fn ->
-          result =
-            Client.connect(
-              url: relay,
-              token: token,
-              owner: owner,
-              client_info: %{"name" => "troupe-daemon", "version" => version()},
-              capabilities: %{"relay" => true, "device" => state.device}
-            )
-
-          send(owner, {:dialled, ref, result})
-        end)
-
+        Task.start(fn -> send(owner, {:granted, ref, ask_grant(url, subject, device, keyring)}) end)
         %{state | connecting: ref, status: :connecting}
+
+      {:ok, _no_subject} ->
+        fail_waiting(%{state | status: :offline}, :unlinked)
 
       {:error, reason} ->
         fail_waiting(%{state | status: :offline}, reason)
     end
   end
 
+  defp ask_grant(url, subject, device, keyring) do
+    case Plane.call("remote.grant", %{"device" => device}) do
+      {:ok, %{"grant" => grant}} when is_binary(grant) ->
+        sign_in = %{url: url, subject: subject, grant: grant}
+        {:ok, Map.put(sign_in, :stored, store(keyring, sign_in))}
+
+      {:ok, other} ->
+        {:error, {:unexpected, other}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp dial(state) do
+    ref = make_ref()
+    owner = self()
+    sign_in = state.sign_in
+    device = state.device
+
+    # The plane's own `/v1/relay`, unless something stands in for it (a test's).
+    relay =
+      state.relay_url || Application.get_env(:troupe_gateway, :relay_url) || relay_url(sign_in.url)
+
+    Task.start(fn ->
+      result =
+        with {:ok, auth} <- exchange(sign_in),
+             {:ok, client} <-
+               Client.connect(
+                 url: relay,
+                 token: auth.token,
+                 owner: owner,
+                 client_info: %{"name" => "troupe-daemon", "version" => version()},
+                 capabilities: %{"relay" => true, "device" => device}
+               ) do
+          {:ok, client, auth}
+        end
+
+      send(owner, {:dialled, ref, result})
+    end)
+
+    %{state | connecting: ref, status: :connecting}
+  end
+
+  # The grant for a token of the laptop's door, `POST <plane>/auth/relay`. A plane that no
+  # longer holds the grant says 401, and one whose person's team forbids offering 403: the
+  # sign-in is over either way.
+  defp exchange(%{url: url, grant: grant}) do
+    case Req.post(String.trim_trailing(url, "/") <> "/auth/relay",
+           json: %{"grant" => grant},
+           retry: false,
+           receive_timeout: @http_timeout_ms
+         ) do
+      {:ok, %{status: 200, body: %{"token" => token} = body}} when is_binary(token) ->
+        {:ok, %{token: token, expires_at: body["expires_at"]}}
+
+      {:ok, %{status: status, body: body}} when status in [401, 403] ->
+        {:error, {:grant_refused, status, refusal_text(body)}}
+
+      {:ok, %{status: status}} ->
+        {:error, {:unexpected_status, status}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp refusal_text(%{"reason" => reason}) when is_binary(reason), do: reason
+  defp refusal_text(%{"error" => error}) when is_binary(error), do: error
+  defp refusal_text(body) when is_binary(body) and body != "", do: body
+  defp refusal_text(_body), do: "refused"
+
+  defp renew(%{status: :online, renewing: nil, sign_in: %{} = sign_in} = state) do
+    ref = make_ref()
+    owner = self()
+    Task.start(fn -> send(owner, {:renewed, ref, exchange(sign_in)}) end)
+    %{cancel_renew(state) | renewing: ref}
+  end
+
+  defp renew(state), do: state
+
+  defp schedule_renew(%{sign_in: %{expires_at: exp}} = state) when is_integer(exp) do
+    state = cancel_renew(state)
+    ms = max((exp - @renew_before_s - System.system_time(:second)) * 1000, 0)
+    %{state | renew: Process.send_after(self(), :renew, ms)}
+  end
+
+  defp schedule_renew(state), do: state
+
+  defp cancel_renew(%{renew: nil} = state), do: state
+
+  defp cancel_renew(state) do
+    Process.cancel_timer(state.renew)
+    %{state | renew: nil}
+  end
+
+  # The grant goes: out of the credential store now, and from the plane as soon as it
+  # answers, which is the plane's record that this device no longer speaks for its person.
+  defp release(%{sign_in: nil} = state), do: state
+
+  defp release(%{sign_in: sign_in} = state) do
+    Task.start(fn ->
+      Req.post(String.trim_trailing(sign_in.url, "/") <> "/auth/relay/release",
+        json: %{"grant" => sign_in.grant},
+        retry: false,
+        receive_timeout: @http_timeout_ms
+      )
+    end)
+
+    forget(state)
+  end
+
+  defp forget(state) do
+    case Steering.delete(state.keyring) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "troupe-daemon: the sign-in for steering could not be taken out of the credential store: " <>
+            inspect(reason)
+        )
+    end
+
+    %{cancel_renew(state) | sign_in: nil, renewing: nil}
+  end
+
+  # The sign-in the credential store holds for this daemon, or nil.
+  defp stored(state) do
+    case Steering.read(state.keyring) do
+      {:ok, sign_in} ->
+        sign_in
+
+      :none ->
+        nil
+
+      {:error, reason} ->
+        Logger.warning(
+          "troupe-daemon: the credential store could not be read for the sign-in for steering: " <>
+            inspect(reason)
+        )
+
+        nil
+    end
+  end
+
+  defp store(keyring, sign_in), do: Steering.write(keyring, sign_in)
+
+  # Said and answered before the connection goes, so the plane drops the row rather than
+  # showing a laptop that withdrew as one that is away.
+  defp withdraw_now(%{link: link}, session_id) do
+    Client.call(link, "relay.withdraw", %{"session_id" => session_id}, 5_000)
+  catch
+    :exit, _reason -> :ok
+  end
+
   defp hang_up(state) do
     state = close_all_viewers(state, "the laptop stopped offering")
     if state.monitor, do: Process.demonitor(state.monitor, [:flush])
     if state.link, do: Client.close(state.link)
-    %{state | link: nil, monitor: nil, status: :offline, since: now(), connecting: nil}
+
+    %{
+      cancel_renew(state)
+      | link: nil,
+        monitor: nil,
+        status: :offline,
+        since: now(),
+        connecting: nil,
+        renewing: nil
+    }
   end
 
   defp schedule_retry(state) do
     state = cancel_retry(state)
 
-    if owned_offers(state) != %{} and match?({:ok, _}, Plane.credentials()) do
+    if owned_offers(state) != %{} and state.refused == nil and (state.sign_in != nil or client_linked?()) do
       retry = Process.send_after(self(), :retry, state.backoff)
       %{state | retry: retry, backoff: min(state.backoff * 2, @max_backoff_ms)}
     else
@@ -535,12 +890,35 @@ defmodule Troupe.Gateway.Remote do
     state
   end
 
+  # The offers the connection carries: the daemon's own sign-in's person's, or before it
+  # has one, those of the person a client linked.
   defp owned_offers(state) do
-    case Plane.credentials() do
-      {:ok, %{subject: subject}} -> Map.filter(state.offers, fn {_id, o} -> o["owner"] == subject end)
-      _none -> %{}
+    case person(state) do
+      nil -> %{}
+      subject -> Map.filter(state.offers, fn {_id, o} -> o["owner"] == subject end)
     end
   end
+
+  defp person(%{sign_in: %{subject: subject}}), do: subject
+
+  defp person(_state) do
+    case Plane.credentials() do
+      {:ok, %{subject: subject}} -> subject
+      _none -> nil
+    end
+  end
+
+  defp client_linked? do
+    case Plane.credentials() do
+      {:ok, %{subject: subject}} when is_binary(subject) -> true
+      _none -> false
+    end
+  end
+
+  defp same_plane?(a, b) when is_binary(a) and is_binary(b),
+    do: String.trim_trailing(a, "/") == String.trim_trailing(b, "/")
+
+  defp same_plane?(_a, _b), do: false
 
   # A request to the plane, answered to this process, so it never waits on the network.
   defp call_plane(%{link: link}, method, params, tag) when is_pid(link) do
@@ -556,7 +934,6 @@ defmodule Troupe.Gateway.Remote do
 
       case tag do
         :ignore -> :ok
-        :refreshed -> :ok
         {:offer, from, id, subject} -> send(owner, {:answered, :offer, from, id, subject, result})
         :sync -> send(owner, {:answered, :sync, nil, nil, nil, result})
       end
@@ -698,6 +1075,7 @@ defmodule Troupe.Gateway.Remote do
       :ets.insert(@table, {id, described})
     end)
 
+    :ets.insert(@table, {:offering, state.sign_in != nil and owned_offers(state) != %{}})
     state
   end
 

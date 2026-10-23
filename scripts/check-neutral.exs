@@ -1,7 +1,8 @@
 # No file in this repository names one deployment of Troupe: not its cloud, its cluster,
 # its domain, its registry, its identity tenant or the account it deploys as. Nor does it
 # use the maintaining organisation's internal names: its short name, which its company
-# domain, its internal hosts and its directory's group names all carry. The project's own
+# domain, its internal hosts and its directory's group names all carry; nor does an
+# example borrow a real company's name for its provider or gateway. The project's own
 # public address on GitHub is not one of those, and stays.
 #
 #     elixir scripts/check-neutral.exs                  # every file git knows about
@@ -54,7 +55,9 @@ defmodule CheckNeutral do
     # Checked as a word, so its domain, a host under it, and a group or bucket name that
     # starts with it are all caught.
     "e74cd1e4ea601f45dbb8caa21b7ddd2a91ff3be1116b473b7da8dd37c23f989c" =>
-      "the maintaining organisation's internal short name"
+      "the maintaining organisation's internal short name",
+    # A word too, so a provider or gateway an example names after it is caught.
+    "42ee150e0f7c475178a78cf34795a4398eb968dc28e104f857240538f860a54f" => "a company's name"
   }
 
   # path => why it keeps a name for now, and what ends that. Empty, and best left so.

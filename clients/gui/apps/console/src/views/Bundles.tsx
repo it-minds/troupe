@@ -23,14 +23,14 @@
 // A team admin reads the channels their teams' profiles follow, as the plane lets them;
 // publishing and retiring are a platform admin's.
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { JSX } from "react";
 import { agentTemplate, bundleErrors, parseAgent, withBody, withFields } from "@troupe/client";
 import type { AdminProfile, AgentFinding, BundleDetail, BundlePreview, BundleSummary } from "@troupe/client";
 import { go, href } from "../route";
 import { describeError, recorded, show, useConsole, useLoad } from "../console";
 import { AuditNote, Diff, Empty, Field, Fields, Loaded, Preview, Region, Status, count, linesOf, useChange, when } from "./bits";
-import type { Done } from "./bits";
+import type { DiffLine, Done } from "./bits";
 
 /** The channels worth listing: every one a profile follows, and stable, which a profile naming none follows. */
 function channelsOf(profiles: AdminProfile[]): string[] {
@@ -118,12 +118,27 @@ export function Bundles(): JSX.Element {
 
 // -- a channel ---------------------------------------------------------------------------
 
-export function Channel({ channel }: { channel: string }): JSX.Element {
+/**
+ * A channel, and its next version. Opened from a profile's page on one of its agents (or on
+ * a copy of one Troupe ships), the editor opens at once on the current version's document,
+ * with that agent in the builder.
+ */
+export function Channel({ channel, opening = null }: { channel: string; opening?: Opening | null }): JSX.Element {
   const { admin, role } = useConsole();
   const platform = role === "platform_admin";
   const [load, reload] = useLoad(() => Promise.all([admin.bundles(channel), admin.profiles()]), [admin, channel]);
   const [publishing, setPublishing] = useState<Record<string, unknown> | null>(null);
+  const [opened, setOpened] = useState<Opening | null>(null);
+  const [openError, setOpenError] = useState<unknown>(null);
   const { done, apply } = useChange(reload);
+
+  useEffect(() => {
+    if (!opening || !platform || (opened?.kind === opening.kind && opened.name === opening.name) || load.state !== "ready") return;
+    setOpened(opening);
+    const current = currentOf(load.data[0]);
+    if (!current) setPublishing(BLANK);
+    else admin.bundle(channel, current.version).then((b) => setPublishing(b.content), setOpenError);
+  }, [opening, platform, opened, load, admin, channel]);
 
   return (
     <div className="page">
@@ -186,11 +201,17 @@ export function Channel({ channel }: { channel: string }): JSX.Element {
                 </button>
               )}
               {platform && publishing === null && current && <PublishFrom channel={channel} version={current.version} onOpen={setPublishing} />}
+              {openError !== null && (
+                <p className="field-error" role="alert">
+                  {describeError(openError)}
+                </p>
+              )}
               {publishing !== null && (
                 <BundleEditor
                   channel={channel}
                   initial={publishing}
                   profiles={following.map((p) => p.name)}
+                  opening={opened}
                   onCancel={() => setPublishing(null)}
                   onPublish={async (content) => {
                     await apply("bundle.publish", channel, () => admin.publishBundle(channel, content), `A new version of ${channel} is published.`);
@@ -527,34 +548,147 @@ function draftOf(rest: Record<string, unknown>, agents: DraftAgent[], had: boole
   return { ...rest, agents: agents.map((a) => ({ name: a.name, definition: a.definition, ...a.rest })) };
 }
 
+/** Whether a definition is a subagent's, by its frontmatter. */
+function isSubagent(definition: string): boolean {
+  return parseAgent(definition).fields?.mode === "subagent";
+}
+
+/** Whether a primary agent can delegate: it holds the `delegate` tool, which every tool includes. */
+function delegates(definition: string): boolean {
+  const fields = parseAgent(definition).fields;
+  if (!fields || fields.mode === "subagent") return false;
+  return fields.tools === "all" || fields.tools.includes("delegate");
+}
+
+/** The skill names the rest of the document carries, read from its JSON as it is typed. */
+function skillNamesOf(text: string): string[] {
+  try {
+    const rest: unknown = JSON.parse(text);
+    const skills = typeof rest === "object" && rest !== null && Array.isArray((rest as Record<string, unknown>)["skills"]) ? ((rest as Record<string, unknown>)["skills"] as unknown[]) : [];
+    return skills.map((s) => (typeof s === "object" && s !== null ? String((s as Record<string, unknown>)["name"] ?? "") : "")).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** An agent to start a new one from: one Troupe ships, or one a profile's bundle publishes. */
+interface CopySource {
+  key: string;
+  label: string;
+  name: string;
+  definition: string;
+}
+
+/** Who may run each agent of the draft, on the profiles that follow the channel. */
+type Grants = Map<string, Array<{ profile: string; team: string; may: boolean }>>;
+
+/**
+ * What the builder reads beside the draft, from the profiles that follow the channel: each
+ * agent's team grants, the agents to copy from, and the models the plane knows their
+ * provider by. A platform admin's; empty where no profile follows the channel yet.
+ */
+function useSources(profiles: string[]): { grants: Grants; copies: CopySource[]; models: Array<{ name: string; why: string }> | null; loaded: boolean } {
+  const { admin } = useConsole();
+  const [load] = useLoad(async () => {
+    const answers = await Promise.all(profiles.map((p) => Promise.all([admin.profileAgents(p).catch(() => null), admin.profileChoices(p).catch(() => null)])));
+    return answers;
+  }, [admin, profiles.join(",")]);
+  return useMemo(() => {
+    const grants: Grants = new Map();
+    const copies: CopySource[] = [];
+    let models: Array<{ name: string; why: string }> | null = null;
+    if (load.state !== "ready") return { grants, copies, models, loaded: load.state === "error" };
+    const seen = new Set<string>();
+    for (const [agents, choices] of load.data) {
+      for (const a of agents?.agents ?? []) {
+        grants.set(a.name, [...(grants.get(a.name) ?? []), ...a.teams.map((t) => ({ profile: agents!.profile, team: t.team, may: t.may }))]);
+        const key = `published:${a.channel ?? ""}:${a.name}`;
+        if (!a.builtin && !seen.has(key)) {
+          seen.add(key);
+          copies.push({ key, label: `${a.name}, published on ${a.channel ?? "?"}`, name: a.name, definition: a.definition });
+        }
+      }
+      for (const b of agents?.builtins ?? []) {
+        const key = `builtin:${b.name}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          copies.push({ key, label: `${b.name}, shipped with Troupe`, name: b.name, definition: b.definition });
+        }
+      }
+      if (choices?.models) {
+        const merged: Map<string, string> = new Map<string, string>((models ?? []).map((m): [string, string] => [m.name, m.why]));
+        for (const m of choices.models) if (!merged.has(m.name)) merged.set(m.name, m.why);
+        models = [...merged.entries()].map(([name, why]) => ({ name, why })).sort((x, y) => x.name.localeCompare(y.name));
+      }
+    }
+    copies.sort((x, y) => (x.key.startsWith("builtin") === y.key.startsWith("builtin") ? x.name.localeCompare(y.name) : x.key.startsWith("builtin") ? 1 : -1));
+    return { grants, copies, models, loaded: true };
+  }, [load]);
+}
+
+/** What the editor opens on, from a profile's page: one of the draft's agents, or a copy of one. */
+export interface Opening {
+  kind: "agent" | "copy";
+  name: string;
+}
+
+type Editing = number | "new" | { copy: CopySource } | null;
+
 function BundleEditor({
   channel,
   initial,
   profiles,
+  opening,
   onCancel,
   onPublish,
 }: {
   channel: string;
   initial: Record<string, unknown>;
   profiles: string[];
+  opening?: Opening | null;
   onCancel: () => void;
   onPublish: (content: Record<string, unknown>) => Promise<void>;
 }): JSX.Element {
   const { admin } = useConsole();
   const had = Array.isArray(initial["agents"]);
   const [agents, setAgents] = useState<DraftAgent[]>(() => agentsOf(initial));
-  const [editing, setEditing] = useState<number | "new" | null>(null);
+  const [editing, setEditing] = useState<Editing>(() => {
+    if (opening?.kind !== "agent") return null;
+    const at = agentsOf(initial).findIndex((a) => a.name === opening.name);
+    return at < 0 ? null : at;
+  });
   const [text, setText] = useState(() => JSON.stringify(withoutAgents(initial), null, 2));
   const [problems, setProblems] = useState<string[] | null>(null);
   const [checked, setChecked] = useState<{ content: Record<string, unknown>; preview: BundlePreview } | null>(null);
   const [asking, setAsking] = useState(false);
+  const [copying, setCopying] = useState<string | null>(null);
+  const sources = useSources(profiles);
+  const [opened, setOpened] = useState(false);
+
+  // A copy asked for from a profile's page opens once what there is to copy from is read.
+  useEffect(() => {
+    if (opened || opening?.kind !== "copy" || !sources.loaded) return;
+    setOpened(true);
+    const source = sources.copies.find((c) => c.name === opening.name && c.key.startsWith("builtin")) ?? sources.copies.find((c) => c.name === opening.name);
+    if (source) setEditing({ copy: source });
+    else setProblems([`There is no agent called ${opening.name} to copy here.`]);
+  }, [opened, opening, sources]);
 
   if (checked) {
     const { preview, content } = checked;
+    // The plane's diff is of names: an agent whose file the builder changed, or a skill or
+    // server changed in the JSON, is a change too, and is said as one.
+    const before = agentsOf(initial);
+    const edited: DiffLine[] = [
+      ...agents
+        .filter((a) => before.some((b) => b.name === a.name && (b.definition !== a.definition || JSON.stringify(b.rest) !== JSON.stringify(a.rest))))
+        .map((a) => ({ field: `agent ${a.name}`, from: "its file as it was", to: "its file as the builder made it" })),
+      ...(JSON.stringify(withoutAgents(content)) !== JSON.stringify(withoutAgents(initial)) ? [{ field: "skills and MCP servers", from: "as they were", to: "as edited here" }] : []),
+    ];
     return (
       <Preview
         title={`bundle/${channel} ${preview.from === null ? "(first version)" : `v${preview.from} → next`}`}
-        lines={linesOf(preview.changes)}
+        lines={[...linesOf(preview.changes), ...edited]}
         effects={publishWords(channel, preview, profiles)}
         verb={`Publish to ${channel}`}
         typeToConfirm={preview.losers.length ? channel : null}
@@ -564,11 +698,34 @@ function BundleEditor({
     );
   }
 
-  const keep = (index: number | "new", agent: DraftAgent): void => {
-    setAgents((list) => (index === "new" ? [...list, agent] : list.map((a, i) => (i === index ? agent : a))));
+  const keep = (index: Editing, agent: DraftAgent): void => {
+    setAgents((list) => (typeof index === "number" ? list.map((a, i) => (i === index ? agent : a)) : [...list, agent]));
     setEditing(null);
     setProblems(null);
   };
+
+  const indexed = agents.map((a, i) => ({ a, i }));
+  const primaries = indexed.filter(({ a }) => !isSubagent(a.definition));
+  const subagents = indexed.filter(({ a }) => isSubagent(a.definition));
+  const subagentNames = subagents.map(({ a }) => a.name);
+  const callers = primaries.filter(({ a }) => delegates(a.definition)).map(({ a }) => a.name);
+  const skillNames = skillNamesOf(text);
+  const editingAgent = typeof editing === "number" ? agents[editing]! : null;
+
+  const row = ({ a, i }: { a: DraftAgent; i: number }, cells: JSX.Element[]): JSX.Element => (
+    <tr key={`${a.name}-${i}`}>
+      <td className="mono">{a.name}</td>
+      {cells}
+      <td className="actions">
+        <button type="button" onClick={() => setEditing(i)} disabled={editing !== null}>
+          Edit {a.name}
+        </button>
+        <button type="button" onClick={() => setAgents((list) => list.filter((_, j) => j !== i))} disabled={editing !== null}>
+          Remove {a.name}
+        </button>
+      </td>
+    </tr>
+  );
 
   return (
     <form
@@ -620,53 +777,120 @@ function BundleEditor({
       {agents.length === 0 ? (
         <Empty title="No agent">A session on this channel runs the agents Troupe ships.</Empty>
       ) : (
-        <div className="scroll">
-          <table className="draft-agents">
-            <thead>
-              <tr>
-                <th>Agent</th>
-                <th>Mode</th>
-                <th>What it is for</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {agents.map((a, i) => {
-                const fields = parseAgent(a.definition).fields;
-                return (
-                  <tr key={`${a.name}-${i}`}>
-                    <td className="mono">{a.name}</td>
-                    <td>{show(fields?.mode || null)}</td>
-                    <td>{show(fields?.description || null)}</td>
-                    <td className="actions">
-                      <button type="button" onClick={() => setEditing(i)} disabled={editing !== null}>
-                        Edit {a.name}
-                      </button>
-                      <button type="button" onClick={() => setAgents((list) => list.filter((_, j) => j !== i))} disabled={editing !== null}>
-                        Remove {a.name}
-                      </button>
-                    </td>
+        <>
+          {primaries.length > 0 && (
+            <div className="scroll">
+              <table className="draft-agents" aria-label="Primary agents">
+                <thead>
+                  <tr>
+                    <th>Agent</th>
+                    <th>Mode</th>
+                    <th>What it is for</th>
+                    <th>Delegates to</th>
+                    <th />
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {primaries.map((entry) =>
+                    row(entry, [
+                      <td key="mode">primary</td>,
+                      <td key="for">{show(parseAgent(entry.a.definition).fields?.description || null)}</td>,
+                      <td key="delegates">{delegates(entry.a.definition) ? subagentNames.join(", ") || "no subagent in this draft" : <span className="muted">nothing: it has no delegate tool</span>}</td>,
+                    ]),
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {subagents.length > 0 && (
+            <>
+              <h3 className="sub">Its subagents</h3>
+              <div className="scroll">
+                <table className="draft-agents" aria-label="Subagents">
+                  <thead>
+                    <tr>
+                      <th>Agent</th>
+                      <th>Mode</th>
+                      <th>What it is for</th>
+                      <th>Called by</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {subagents.map((entry) => {
+                      const fields = parseAgent(entry.a.definition).fields;
+                      return row(entry, [
+                        <td key="mode">subagent</td>,
+                        <td key="for">{show(fields?.description || null)}</td>,
+                        <td key="callers">
+                          {callers.join(", ") || <span className="muted">no primary here delegates</span>}
+                          <span className="hint">{fields?.delegation === "ask" ? " · asks the person first" : " · runs at once"}</span>
+                        </td>,
+                      ]);
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </>
       )}
       {editing === null ? (
         <div className="actions">
           <button type="button" onClick={() => setEditing("new")}>
             Add an agent
           </button>
+          {sources.copies.length > 0 && copying === null && (
+            <button type="button" onClick={() => setCopying(sources.copies[0]!.key)}>
+              Copy an agent
+            </button>
+          )}
         </div>
       ) : (
         <AgentBuilder
-          key={String(editing)}
-          initial={editing === "new" ? null : agents[editing]!}
+          key={typeof editing === "object" ? `copy:${editing.copy.key}` : String(editing)}
+          initial={editingAgent}
+          seed={typeof editing === "object" ? editing.copy : null}
           taken={agents.filter((_, i) => i !== editing).map((a) => a.name)}
+          subagents={subagentNames.filter((n) => n !== editingAgent?.name)}
+          callers={callers.filter((n) => n !== editingAgent?.name)}
+          skills={skillNames}
+          models={sources.models}
+          grants={editingAgent ? (sources.grants.get(editingAgent.name) ?? null) : null}
+          profiles={profiles}
           onKeep={(agent) => keep(editing, agent)}
           onCancel={() => setEditing(null)}
         />
+      )}
+      {editing === null && copying !== null && (
+        <div className="copy-from" role="group" aria-label="Copy an agent">
+          <Field label="Copy from" hint="One Troupe ships, or one a profile's bundle publishes: it opens as a new agent of this draft, to be named and changed.">
+            {(p) => (
+              <select {...p} value={copying} onChange={(e) => setCopying(e.target.value)}>
+                {sources.copies.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+          <div className="actions">
+            <button
+              type="button"
+              onClick={() => {
+                const source = sources.copies.find((c) => c.key === copying);
+                setCopying(null);
+                if (source) setEditing({ copy: source });
+              }}
+            >
+              Copy it
+            </button>
+            <button type="button" onClick={() => setCopying(null)}>
+              Cancel the copy
+            </button>
+          </div>
+        </div>
       )}
 
       <Region>The rest of the bundle</Region>
@@ -697,35 +921,68 @@ function BundleEditor({
 }
 
 /** What the builder's fields are called where a finding names them. */
-const BUILDER_FIELDS = ["name", "mode", "description", "model", "tools", "prompt"] as const;
+const BUILDER_FIELDS = ["name", "mode", "description", "model", "tools", "prompt", "permissions", "max_turns", "skills", "delegation"] as const;
+
+/** A permission as the builder edits it: a tool, or `*` for every tool, and what a call of it does. */
+const PERMISSION_WORDS: Record<string, string> = {
+  auto: "auto: runs without asking",
+  ask: "ask: asks the person first",
+  deny: "deny: never runs",
+};
 
 /**
  * One agent of the draft as fields (troupe #594): its name, whether it is a primary agent
- * or a subagent, what it is for, its model, its tools and its instruction. The definition
- * it makes is shown as the file it is, every line the fields do not edit kept as the
- * definition had it, and it is checked by the plane with the rules the daemon's
+ * or a subagent, what it is for, its model (picked from the models the plane knows the
+ * profile's provider by, the session's own being no model at all), its tools, what each tool
+ * may do without asking, its cap on turns, its skills, and for a subagent whether a
+ * delegation to it asks the person first; for a primary, the subagents it delegates to. The
+ * teams that may run it are shown beside it, since a team's grant narrows a bundle. The
+ * definition it makes is shown as the file it is, every line the fields do not edit kept as
+ * the definition had it, and it is checked by the plane with the rules the daemon's
  * `agents.validate` applies before it is kept, each finding at its field in the daemon's
  * words. A definition the fields cannot read is edited as its text.
  */
 function AgentBuilder({
   initial,
+  seed,
   taken,
+  subagents,
+  callers,
+  skills: skillChoices,
+  models,
+  grants,
+  profiles,
   onKeep,
   onCancel,
 }: {
   initial: DraftAgent | null;
+  /** An agent to copy: the new one starts from its definition, under a name of its own. */
+  seed: CopySource | null;
   taken: string[];
+  /** The draft's other subagents, which a primary with the delegate tool may call. */
+  subagents: string[];
+  /** The draft's primaries that delegate, which may call a subagent. */
+  callers: string[];
+  /** The skills the rest of the document carries. */
+  skills: string[];
+  models: Array<{ name: string; why: string }> | null;
+  grants: Array<{ profile: string; team: string; may: boolean }> | null;
+  profiles: string[];
   onKeep: (agent: DraftAgent) => void;
   onCancel: () => void;
 }): JSX.Element {
   const { admin } = useConsole();
-  const base = initial?.definition || agentTemplate();
+  const base = initial?.definition || seed?.definition || agentTemplate();
   const parsed = parseAgent(base);
   const [name, setName] = useState(initial?.name ?? "");
   const [mode, setMode] = useState(parsed.fields?.mode || "primary");
   const [description, setDescription] = useState(parsed.fields?.description ?? "");
   const [model, setModel] = useState(parsed.fields?.model ?? "");
   const [tools, setTools] = useState(parsed.fields && parsed.fields.tools !== "all" ? parsed.fields.tools.join("\n") : "");
+  const [permissions, setPermissions] = useState<Array<[string, string]>>(() => Object.entries(parsed.fields?.permissions ?? {}));
+  const [maxTurns, setMaxTurns] = useState(parsed.fields?.max_turns ?? "");
+  const [skills, setSkills] = useState<"all" | string[]>(parsed.fields?.skills ?? []);
+  const [delegation, setDelegation] = useState(parsed.fields?.delegation ?? "");
   const [prompt, setPrompt] = useState(parsed.body);
   const [raw, setRaw] = useState(base);
   const [findings, setFindings] = useState<AgentFinding[] | null>(null);
@@ -737,12 +994,30 @@ function AgentBuilder({
     .split(/[\n,]/)
     .map((t) => t.trim())
     .filter(Boolean);
-  const definition = formed ? withBody(withFields(base, { mode, description, model, tools: listed.length ? listed : "all" }), prompt) : raw;
+  const permissionMap = Object.fromEntries(permissions.filter(([tool]) => tool.trim() !== "").map(([tool, p]) => [tool.trim(), p]));
+  const definition = formed
+    ? withBody(
+        withFields(base, {
+          mode,
+          description,
+          model,
+          tools: listed.length ? listed : "all",
+          permissions: permissionMap,
+          max_turns: maxTurns,
+          skills,
+          delegation: mode === "subagent" ? delegation : "",
+        }),
+        prompt,
+      )
+    : raw;
   const at = (field: string): string | null => {
-    const found = (findings ?? []).filter((f) => f.field === field);
+    const found = (findings ?? []).filter((f) => f.field === field || f.field.startsWith(`${field}.`));
     return found.length ? found.map((f) => f.message).join(" ") : null;
   };
-  const elsewhere = (findings ?? []).filter((f) => !(BUILDER_FIELDS as readonly string[]).includes(f.field) || !formed);
+  const elsewhere = (findings ?? []).filter((f) => !(BUILDER_FIELDS as readonly string[]).some((k) => f.field === k || f.field.startsWith(`${k}.`)) || !formed);
+  const canDelegate = listed.length === 0 || listed.includes("delegate");
+  const knownModel = models?.some((m) => m.name === model) ?? false;
+  const skillsOffered = [...new Set([...skillChoices, ...(skills === "all" ? [] : skills)])].sort();
 
   const check = async (): Promise<void> => {
     if (taken.includes(name)) {
@@ -762,8 +1037,16 @@ function AgentBuilder({
     }
   };
 
+  const label = initial ? `Edit ${initial.name}` : seed ? `A copy of ${seed.name}` : "A new agent";
+
   return (
-    <div className="agent-builder" role="group" aria-label={initial ? `Edit ${initial.name}` : "A new agent"}>
+    <div className="agent-builder" role="group" aria-label={label}>
+      {seed && (
+        <p className="note">
+          A new agent of this draft, from {seed.label}. Give it a name of its own: one with the name of an agent Troupe ships replaces that one only where its file says
+          override: true.
+        </p>
+      )}
       <Field label="Name" hint="Lowercase letters, digits and dashes: what a session and a grant name it by." error={at("name")}>
         {(p) => <input {...p} value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" spellCheck={false} />}
       </Field>
@@ -780,12 +1063,129 @@ function AgentBuilder({
           <Field label="Description" hint="One line, which a picker shows beside the name." error={at("description")}>
             {(p) => <input {...p} value={description} onChange={(e) => setDescription(e.target.value)} />}
           </Field>
-          <Field label="Model" hint="A model the profile's provider serves, or empty for the session's own." error={at("model")}>
-            {(p) => <input {...p} value={model} onChange={(e) => setModel(e.target.value)} autoComplete="off" spellCheck={false} />}
-          </Field>
+          {models && models.length > 0 ? (
+            <Field label="Model" hint={`The models this plane knows ${profiles.length ? `${profiles.join(", ")}'s` : "the"} provider by, or the session's own.`} error={at("model")}>
+              {(p) => (
+                <select {...p} value={model} onChange={(e) => setModel(e.target.value)}>
+                  <option value="">the session's model</option>
+                  {models.map((m) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name}: {m.why}
+                    </option>
+                  ))}
+                  {model !== "" && !knownModel && <option value={model}>{model}: not one this plane has seen</option>}
+                </select>
+              )}
+            </Field>
+          ) : (
+            <Field label="Model" hint="A model the profile's provider serves, or empty for the session's own." error={at("model")}>
+              {(p) => <input {...p} value={model} onChange={(e) => setModel(e.target.value)} autoComplete="off" spellCheck={false} />}
+            </Field>
+          )}
           <Field label="Tools" hint="One per line; empty is every tool the harness has." error={at("tools")}>
             {(p) => <textarea {...p} className="mono" value={tools} onChange={(e) => setTools(e.target.value)} rows={4} spellCheck={false} />}
           </Field>
+
+          <div className="permissions-editor" role="group" aria-label="Permissions">
+            <p className="label">Permissions</p>
+            <p className="hint">
+              What a call of each tool does: auto runs it without asking anyone, ask asks the person first, deny never runs it. A tool not named keeps Troupe's own, and * is every
+              tool. The organisation's, the profile's and a person's rules apply as well, and the strictest that matches a call holds.
+            </p>
+            {permissions.map(([tool, p], i) => (
+              <div className="row" key={i}>
+                <input
+                  aria-label={`Permission ${i + 1} tool`}
+                  className="mono"
+                  value={tool}
+                  onChange={(e) => setPermissions((list) => list.map((x, j) => (j === i ? [e.target.value, x[1]] : x)))}
+                  spellCheck={false}
+                />
+                <select aria-label={`Permission for ${tool || `row ${i + 1}`}`} value={p} onChange={(e) => setPermissions((list) => list.map((x, j) => (j === i ? [x[0], e.target.value] : x)))}>
+                  {Object.entries(PERMISSION_WORDS).map(([value, words]) => (
+                    <option key={value} value={value}>
+                      {words}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" onClick={() => setPermissions((list) => list.filter((_, j) => j !== i))}>
+                  Remove {tool || "it"}
+                </button>
+              </div>
+            ))}
+            {at("permissions") && <p className="field-error">{at("permissions")}</p>}
+            <button type="button" onClick={() => setPermissions((list) => [...list, ["", "ask"]])}>
+              Add a permission
+            </button>
+            {Object.entries(permissionMap).some(([, p]) => p === "auto") && (
+              <p className="note">
+                Without asking anyone it runs:{" "}
+                {Object.entries(permissionMap)
+                  .filter(([, p]) => p === "auto")
+                  .map(([t]) => t)
+                  .join(", ")}
+                .
+              </p>
+            )}
+          </div>
+
+          <Field label="Max turns" hint="A cap of its own on the turns a session on it takes; empty is none." error={at("max_turns")}>
+            {(p) => <input {...p} value={maxTurns} onChange={(e) => setMaxTurns(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" autoComplete="off" />}
+          </Field>
+
+          <div className="skills-editor" role="group" aria-label="Skills">
+            <p className="label">Skills</p>
+            <label className="inline">
+              <input type="checkbox" checked={skills === "all"} onChange={(e) => setSkills(e.target.checked ? "all" : [])} /> Every skill the bundle carries
+            </label>
+            {skills !== "all" &&
+              (skillsOffered.length === 0 ? (
+                <p className="hint">The rest of the bundle carries no skill yet.</p>
+              ) : (
+                skillsOffered.map((s) => (
+                  <label className="inline" key={s}>
+                    <input
+                      type="checkbox"
+                      checked={skills.includes(s)}
+                      onChange={(e) => setSkills((list) => (list === "all" ? list : e.target.checked ? [...list, s] : list.filter((x) => x !== s)))}
+                    />{" "}
+                    {s}
+                    {!skillChoices.includes(s) && <span className="hint"> (the bundle does not carry it)</span>}
+                  </label>
+                ))
+              ))}
+            {at("skills") && <p className="field-error">{at("skills")}</p>}
+          </div>
+
+          {mode === "subagent" ? (
+            <>
+              <Field label="Delegation" hint="Whether a delegation to it runs at once or asks the person first." error={at("delegation")}>
+                {(p) => (
+                  <select {...p} value={delegation === "ask" ? "ask" : ""} onChange={(e) => setDelegation(e.target.value)}>
+                    <option value="">auto: a delegation to it runs at once</option>
+                    <option value="ask">ask: the person is asked first</option>
+                  </select>
+                )}
+              </Field>
+              <p className="note">{callers.length ? `Called by ${callers.join(", ")}, which hold the delegate tool.` : "No primary agent of this draft delegates: give one the delegate tool."}</p>
+            </>
+          ) : (
+            <div role="group" aria-label="Delegates to">
+              <label className="inline">
+                <input
+                  type="checkbox"
+                  checked={canDelegate}
+                  disabled={listed.length === 0}
+                  onChange={(e) => setTools((t) => (e.target.checked ? `${t.replace(/\s+$/, "")}\ndelegate`.replace(/^\n/, "") : t.split(/\n/).filter((x) => x.trim() !== "delegate").join("\n")))}
+                />{" "}
+                It delegates (the delegate tool){listed.length === 0 ? ": every tool, delegate among them" : ""}
+              </label>
+              <p className="note">
+                {canDelegate ? (subagents.length ? `It may delegate to ${subagents.join(", ")}.` : "There is no subagent in this draft to delegate to.") : "It delegates to nobody."}
+              </p>
+            </div>
+          )}
+
           <Field label="Instruction" hint="What it is told: the definition's body." error={at("prompt")}>
             {(p) => <textarea {...p} value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={8} />}
           </Field>
@@ -795,6 +1195,21 @@ function AgentBuilder({
           {(p) => <textarea {...p} className="mono source" value={raw} onChange={(e) => setRaw(e.target.value)} rows={12} spellCheck={false} />}
         </Field>
       )}
+      <div role="group" aria-label="Who may run it">
+        <p className="label">Who may run it</p>
+        {grants === null || grants.length === 0 ? (
+          <p className="hint">{profiles.length ? "Every team granted the profile, once it is published: no grant narrows it yet." : "No profile follows this channel yet, so no team runs it."}</p>
+        ) : (
+          <ul className="plain">
+            {grants.map((g) => (
+              <li key={`${g.profile}:${g.team}`}>
+                {g.team} on {g.profile}: {g.may ? "may run it" : "may not: its grant narrows the bundle"}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="hint">A team's grant narrows what a bundle gives it; grants are changed on Teams.</p>
+      </div>
       {elsewhere.length > 0 && (
         <ul className="effects" role="alert">
           {elsewhere.map((f) => (

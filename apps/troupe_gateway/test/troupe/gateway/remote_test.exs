@@ -8,7 +8,9 @@ defmodule Troupe.Gateway.RemoteTest do
 
   use Troupe.Gateway.HarnessCase, async: false
 
-  alias Troupe.Gateway.{FakePlane, FakeRelay}
+  alias Troupe.Gateway.{Connections, FakePlane, FakeRelay, Idle, Plane, Remote}
+  alias Troupe.Keyring
+  alias Troupe.Keyring.Memory
 
   @ada "ada@example.test"
   @bea "bea@example.test"
@@ -354,23 +356,192 @@ defmodule Troupe.Gateway.RemoteTest do
       end)
     end
 
-    test "a fresh token from a client renews the connection where it stands", ctx do
+    test "the daemon renews its own token on the open socket before it runs out, and when warned", ctx do
+      # A token that lives two minutes and five seconds is renewed five seconds in.
+      FakePlane.laptop_lifetime(ctx.plane.state, 125)
+      %{session: session} = start_session(ctx, default: {:text, "ok"})
+      {:ok, _} = offer(ctx, session.id)
+      assert_receive {:relay, "initialize", %{"auth" => %{"token" => first}}}, 5_000
+      assert_receive {:relay, "relay.offer", _}, 5_000
+
+      assert_receive {:relay, "auth.refresh", %{"auth" => %{"token" => "laptop:" <> _ = renewed}}}, 15_000
+      assert renewed != first
+
+      # The plane's warning two minutes before asks for the same.
+      FakePlane.laptop_lifetime(ctx.plane.state, 900)
+      :ok = FakeRelay.expiring(ctx.relay)
+      assert_receive {:relay, "auth.refresh", %{"auth" => %{"token" => "laptop:" <> _ = again}}}, 5_000
+      assert again != renewed
+    end
+  end
+
+  describe "the daemon's own sign-in (slice 2)" do
+    test "the first offer asks the plane for a grant of its own, keeps it in the credential store, and dials with it",
+         ctx do
+      %{session: session} = start_session(ctx, default: {:text, "ok"})
+      {:ok, %{"remote" => %{"state" => "online"}}} = offer(ctx, session.id)
+
+      assert_receive {:relay, "initialize", hello}, 5_000
+      assert "laptop:" <> _ = hello["auth"]["token"], "the relay rode on the client's token"
+      device = hello["capabilities"]["device"]
+
+      assert {"remote.grant", %{"device" => ^device}} =
+               Enum.find(FakePlane.calls(ctx.plane.state), &match?({"remote.grant", _}, &1))
+
+      [grant] = Map.keys(FakePlane.grants(ctx.plane.state))
+      stored = stored(ctx)
+      assert stored["grant"] == grant
+      assert stored["subject"] == @ada
+      assert stored["plane_url"] == ctx.plane.url
+      refute inspect(stored) =~ "plane-token", "the client's token went into the store"
+
+      # Nothing of it is in the daemon's files.
+      for file <- Path.wildcard(Path.join(ctx.state_dir, "**/*"), match_dot: true), File.regular?(file) do
+        refute File.read!(file) =~ grant, "#{file} holds the grant"
+      end
+
+      # A second offer rides the same sign-in.
+      %{session: other} = start_session(ctx, default: {:text, "ok"})
+      {:ok, _} = offer(ctx, other.id)
+      assert Enum.count(FakePlane.calls(ctx.plane.state), &match?({"remote.grant", _}, &1)) == 1
+    end
+
+    test "the offer stays online and steerable after the client that made it has closed", ctx do
+      %{session: session} = start_session(ctx, default: {:text, "ok"})
+      {:ok, _} = offer(ctx, session.id, [%{"person" => @bea, "role" => "control"}])
+      assert_receive {:relay, "relay.offer", _}, 5_000
+
+      Client.close(ctx.ada)
+
+      hello = viewer(ctx, "v-bea", session.id, @bea, "control")
+      assert hello["principal"]["subject"] == @bea
+
+      assert %{"result" => %{"id" => id}} = ask(ctx, "v-bea", 1, "session.get", %{"session_id" => session.id})
+      assert id == session.id
+      assert Remote.describe(session.id)["state"] == "online"
+    end
+
+    test "a daemon that restarts with something offered comes back online from the store, with no client",
+         ctx do
       %{session: session} = start_session(ctx, default: {:text, "ok"})
       {:ok, _} = offer(ctx, session.id)
       assert_receive {:relay, "relay.offer", _}, 5_000
+      grants = Enum.count(FakePlane.calls(ctx.plane.state), &match?({"remote.grant", _}, &1))
 
-      FakePlane.renew(ctx.plane.state, "plane-token-2")
-      FakeRelay.renew(ctx.relay, "plane-token-2")
+      # No client holds a token here any more, and the steering process starts again.
+      :ok = Plane.unlink()
+      Process.exit(Process.whereis(Remote), :kill)
 
+      assert_receive {:relay, "initialize", %{"auth" => %{"token" => "laptop:" <> _}}}, 10_000
+      assert_receive {:relay, "relay.sync", %{"offers" => [%{"session_id" => id}]}}, 5_000
+      assert id == session.id
+
+      assert Enum.count(FakePlane.calls(ctx.plane.state), &match?({"remote.grant", _}, &1)) == grants,
+             "it asked for a new grant rather than using the one it kept"
+
+      eventually(fn -> Remote.describe(session.id)["state"] == "online" end)
+    end
+
+    test "withdrawing the last offer releases the sign-in, takes it out of the store and closes the relay",
+         ctx do
+      %{session: session} = start_session(ctx, default: {:text, "ok"})
+      %{session: other} = start_session(ctx, default: {:text, "ok"})
+      {:ok, _} = offer(ctx, session.id)
+      {:ok, _} = offer(ctx, other.id)
+      assert_receive {:relay, "relay.offer", _}, 5_000
+      assert_receive {:relay, "relay.offer", _}, 5_000
+      [grant] = Map.keys(FakePlane.grants(ctx.plane.state))
+
+      {:ok, _} = withdraw(ctx, other.id)
+      assert stored(ctx)["grant"] == grant, "one offer still stands"
+      assert FakeRelay.connected?(ctx.relay)
+
+      {:ok, _} = withdraw(ctx, session.id)
+      assert_receive {:relay, "relay.withdraw", _}, 5_000
+      assert stored(ctx) == nil
+      eventually(fn -> not FakeRelay.connected?(ctx.relay) end)
+      eventually(fn -> FakePlane.released(ctx.plane.state) == [grant] end)
+      refute Remote.offering?()
+    end
+
+    test "signing out releases it, takes it out of the store and closes the relay, and keeps the record", ctx do
+      %{session: session} = start_session(ctx, default: {:text, "ok"})
+      {:ok, _} = offer(ctx, session.id)
+      assert_receive {:relay, "relay.offer", _}, 5_000
+      [grant] = Map.keys(FakePlane.grants(ctx.plane.state))
+
+      {:ok, %{"signed_out" => true}} =
+        Client.call(ctx.ada, "identity.sign_out", %{
+          "command_id" => Client.command_id(),
+          "plane_url" => ctx.plane.url,
+          "subject" => @ada
+        })
+
+      assert stored(ctx) == nil
+      eventually(fn -> not FakeRelay.connected?(ctx.relay) end)
+      eventually(fn -> FakePlane.released(ctx.plane.state) == [grant] end)
+      assert Remote.describe(session.id)["state"] == "offline"
+
+      # Signed in again, the same session is offered again on a new sign-in.
       {:ok, _} =
         Client.call(ctx.ada, "identity.link", %{
           "command_id" => Client.command_id(),
           "subject" => @ada,
           "plane_url" => ctx.plane.url,
-          "plane_token" => "plane-token-2"
+          "plane_token" => "plane-token"
         })
 
-      assert_receive {:relay, "auth.refresh", %{"auth" => %{"token" => "plane-token-2"}}}, 5_000
+      assert_receive {:relay, "relay.sync", %{"offers" => [%{"session_id" => id}]}}, 10_000
+      assert id == session.id
+      assert stored(ctx)["grant"] != grant
+    end
+
+    test "a team that forbids offering is refused by the plane, and the refusal says so", ctx do
+      FakePlane.refuse_grants(
+        ctx.plane.state,
+        {-32_004, "forbidden",
+         %{"team" => "eng", "reason" => "eng's administrators do not allow offering a laptop session"}}
+      )
+
+      %{session: session} = start_session(ctx, default: {:text, "ok"})
+
+      assert {:error, %{code: -32_004, data: %{"team" => "eng", "reason" => reason}}} = offer(ctx, session.id)
+      assert reason =~ "eng's administrators do not allow offering"
+      assert stored(ctx) == nil
+      refute FakeRelay.connected?(ctx.relay)
+      refute Remote.offering?()
+    end
+
+    test "the idle watch stays up for an offer with nobody attached, and not once it is withdrawn", ctx do
+      %{session: session} = start_session(ctx, default: {:text, "ok"})
+      {:ok, _} = offer(ctx, session.id)
+      assert_receive {:relay, "relay.offer", _}, 5_000
+
+      # Nothing running and nobody attached: only the offer keeps the daemon up.
+      Troupe.stop_session(session.id)
+      Client.close(ctx.ada)
+      eventually(fn -> Connections.count() == 0 and not Troupe.any_active_sessions?() end)
+
+      assert Remote.offering?()
+      assert Idle.busy?()
+
+      :ok = Remote.withdraw(session.id)
+      refute Remote.offering?()
+      refute Idle.busy?()
+    end
+  end
+
+  defp withdraw(ctx, session_id) do
+    Client.call(ctx.ada, "remote.withdraw", %{"command_id" => Client.command_id(), "session_id" => session_id})
+  end
+
+  # What the credential store holds for this daemon's sign-in, decoded, or nil.
+  defp stored(ctx) do
+    name = Keyring.entry(Remote.keyring_name(ctx.state_dir))
+
+    case Memory.get(name) do
+      {:ok, text} -> text |> Base.url_decode64!(padding: false) |> Jason.decode!()
+      :none -> nil
     end
   end
 

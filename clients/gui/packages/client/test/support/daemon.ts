@@ -595,6 +595,8 @@ export class FakeDaemon {
   readonly repositories = new Set<string>(["/home/ada/project", "/home/ada/repo"]);
   /** The config's `memory` and `memory_auto_refresh`, as `config.get` reports them; both default on. */
   memoryOn = true;
+  /** What `context.get` answers for every session; null for the repository's AGENTS.md alone. */
+  instructions: Record<string, unknown> | null = null;
   memoryAutoRefresh = true;
   /** The agent files of every layer (troupe Decision 841): the built-ins, the person's and each workspace's. */
   readonly agents: FakeAgents;
@@ -641,6 +643,14 @@ export class FakeDaemon {
     if (keys.length === 0 || !this.servesKeys) return;
     const changed = { scope: "user", path: String(this.configJson()["path"]), keys };
     for (const c of this.clients) notify(c.ws, "config.changed", changed);
+  }
+
+  /**
+   * What the daemon says when its poll finds the plane's version policy changed (#657):
+   * `config.changed` with scope `versions` to every client attached.
+   */
+  announceVersions(planeUrl: string, keys: string[]): void {
+    for (const c of this.clients) notify(c.ws, "config.changed", { scope: "versions", path: planeUrl, keys });
   }
 
   get principal(): { subject: string; display_name: string; kind: string } {
@@ -1440,6 +1450,24 @@ export class FakeDaemon {
         const workspace = String(params["workspace"] ?? "");
         const watching = [...this.sessions.values()].find((s) => s.watch && s.workspace === workspace);
         return reply(ws, id, { enabled: Boolean(watching), backend: watching ? "poll" : "off", session_id: watching?.id ?? null });
+      }
+
+      // What a session's next prompt is read from (troupe #55): what a test set, or the
+      // repository's AGENTS.md alone.
+      case "context.get": {
+        const session = this.sessions.get(String(params["session_id"] ?? ""));
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { session_id: params["session_id"] } });
+        return reply(
+          ws,
+          id,
+          this.instructions ?? {
+            budget: 16000,
+            used: 20,
+            searched: [session.workspace],
+            files: [{ scope: "root", path: `${session.workspace}/AGENTS.md`, size: 20, chars: 20, budget: 16000, status: "whole", hash: "sha256:00000000" }],
+            memory_from: null,
+          },
+        );
       }
 
       case "config.get":

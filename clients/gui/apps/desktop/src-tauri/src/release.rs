@@ -317,9 +317,11 @@ pub fn wanted(from: &str, to: &str) -> bool {
 }
 
 /// A plane's policy for one kind of client (Decision 868): what may be installed. Its
-/// recommended version is the page's to ask for; here only the limits are read.
-#[derive(Clone, Debug, Default, Deserialize)]
+/// recommended version is what an update asks for, read from the plane's signed answer.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct Policy {
+    #[serde(default)]
+    pub recommended: Option<String>,
     #[serde(default)]
     pub minimum: Option<String>,
     #[serde(default)]
@@ -511,6 +513,7 @@ mod tests {
         let policy = Policy {
             minimum: Some("0.14.0-beta".into()),
             blocked: vec!["0.14.1-beta".into()],
+            ..Policy::default()
         };
         assert_eq!(judge(&policy, "0.14.1-beta"), Judgement::Blocked);
         assert_eq!(judge(&policy, "0.13.9"), Judgement::BelowMinimum);

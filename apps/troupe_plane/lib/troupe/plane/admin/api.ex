@@ -248,6 +248,12 @@ defmodule Troupe.Plane.Admin.API do
       description: "Whether members may pin a session against eviction."
     },
     %Argument{
+      name: "remote_offering_allowed",
+      type: :boolean,
+      description:
+        "Whether the team's people may offer a laptop session for steering from another device. False refuses each new offer, and each attach to one already made, saying the team does not allow it."
+    },
+    %Argument{
       name: "volume_size",
       type: :string,
       description: "The team volume's size, as a Kubernetes quantity such as 10Gi."
@@ -520,8 +526,31 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.choices",
       function: :profile_choices,
       summary:
-        "What a profile's fields may be: every provider type llm.provider may name, with what each asks for (where it is, whether it needs a key), and every size class with how many sessions share a worker and what it is for. The lists the plane checks a profile against, so a form offers no choice it would refuse.",
-      risk: :read
+        "What a profile's fields may be: every provider type llm.provider may name, with what each asks for (where it is, whether it needs a key), and every size class with how many sessions share a worker and what it is for. The lists the plane checks a profile against, so a form offers no choice it would refuse. And models, each {name, why}: the models this plane knows a provider serves, from the profile's own model, the models the organisation gives people's machines, the models sessions (the profile's, with profile) have run on, and the models its bundle's agents name; the plane does not ask a provider for its list.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "profile",
+          type: :string,
+          description:
+            "A profile's name: its own model, its sessions' and its bundle's are in models. Without it, the organisation's and every session's."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.profile.agents",
+      function: :profile_agents,
+      summary:
+        "A profile's agents, as its bundle in effect has them (composed through what it extends), for the console's builder: each with its mode, description, model, delegate (the subagents it may hand work to: its bundle's, when it holds the delegate tool), max_turns, skills, permissions, from (the profile whose channel gave it) and channel, builtin (a primary Troupe ships that the profile offers because its bundle has none of that name), its definition, and teams, each team granted the profile with may (whether its grant lets it run the agent). Beside them channel, the one the profile follows in effect, builtins, every agent Troupe ships with its definition, to copy from, and teams. A platform admin's, as editing a bundle is.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "name",
+          type: :string,
+          required: true,
+          description: "The profile's name."
+        }
+      ]
     },
     %Method{
       name: "admin.profiles.export",
@@ -1400,6 +1429,30 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.releases.list",
+      function: :releases_list,
+      summary:
+        "The releases kept in this plane's object store, which people's machines update from at <plane>/downloads with no way to GitHub: each version mirrored, newest first, with how many files it holds, any whose copy is under way, where releases are mirrored from (source) and where machines are told to get them (release_url, null for GitHub's).",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
+      name: "admin.releases.mirror",
+      function: :releases_mirror,
+      summary:
+        "Copy a release into this plane's object store from where releases are published, for people's machines to update from. Its manifest is checked against the release keys first: one they did not sign, or one naming another version, is refused and nothing is copied. The files are then copied in the background, each held to the manifest, and the release is listed as mirrored once its manifest is written, last. Machines check every file against the release key again before installing it.",
+      risk: :write,
+      arguments: [
+        %Argument{
+          name: "version",
+          type: :string,
+          required: true,
+          description:
+            "The release's version, as it is numbered: 0.24.0-beta (a leading v is taken off)."
+        }
+      ]
+    },
+    %Method{
       name: "admin.memory.list",
       function: :memory_list,
       summary:
@@ -1411,7 +1464,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.memory.get",
       function: :memory_get,
       summary:
-        "One memory document: a version's text (the one in force where no version is named), every version with who saved it and when, and what the version shown changed against the one before it, line by line (op same, del or add).",
+        "One memory document: a version's text (the one in force where no version is named), every version with who saved it and when, and what the version shown changed against the one before it, line by line (op same, del or add). A profile's has inherited: the documents of the profiles it extends, which its sessions read before its own, each with the profile it is from.",
       risk: :read,
       arguments: @memory_document ++
         [
@@ -1434,7 +1487,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.memory.put",
       function: :memory_put,
       summary:
-        "Save a text as the next version of a memory document. The organisation's and a profile's are a platform admin's to change, a team's its team admins'. version names the version the text was edited from (0 for a document never saved): a save by somebody else since is refused as conflict, naming the version in force. An empty text clears the document; the same text as the one in force makes no version. Sessions read it from their next activation, and signed-in machines once their daemon next signs in. Audited as memory.put.",
+        "Save a text as the next version of a memory document. The organisation's and a profile's are a platform admin's to change, a team's its team admins'. version names the version the text was edited from (0 for a document never saved): a save by somebody else since is refused as conflict, naming the version in force. An empty text clears the document; the same text as the one in force makes no version. Running sessions read it from their next turn, and signed-in machines within five minutes. Audited as memory.put.",
       risk: :write,
       arguments:
         @memory_document ++
@@ -1476,9 +1529,16 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.github.check",
       function: :github_check,
       summary:
-        "Test the plane's GitHub App without changing it: an App ID is set, OpenBao transit signs with its key, GitHub knows the App by the JWT that key signs, and every installation set here is one GitHub lists for it. Four named checks, each with what it found, and GitHub's slug and name for the App once GitHub has answered.",
+        "Test the plane's GitHub App without changing it: an App ID is set, OpenBao transit signs with its key, GitHub knows the App by the JWT that key signs, and every installation set here is one GitHub lists for it. Four named checks, each with what it found, and GitHub's slug and name for the App once GitHub has answered. With a repository, a fifth (Repository): a token for it is minted with what the App's installation may do there, the repository is read with it, and it is revoked; the answer's repository is {name, installation_id, permissions, revoked}, GitHub's list of what the token could do, and never the token.",
       risk: :read,
-      arguments: []
+      arguments: [
+        %Argument{
+          name: "repository",
+          type: :string,
+          description:
+            "owner/name: a repository of one of the App's installations, to mint, use and revoke a token for."
+        }
+      ]
     },
     %Method{
       name: "admin.github.deliveries",
@@ -1711,7 +1771,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.trigger.fix",
       function: :trigger_fix,
       summary:
-        "Start one run of a trigger on a GitHub repository on one of its issues, by hand: the console's fix this. The issue is read from GitHub first and must be an open issue of the trigger's repository, not a pull request; the repository must be one the team lists, and private or internal unless the profile allows public ones. Fired as manual, under the trigger's concurrency, the profile's and team's caps and the budget, with the issue given to the session fenced as data. A second call in the same minute is the run the first made. It starts a real session and spends real money. Works on a gitops plane too.",
+        "Start one run of a trigger on a GitHub repository on one of its issues, by hand: the console's fix this. The issue is read from GitHub first and must be an open issue of the trigger's repository, not a pull request; the repository must be one the team lists, and private or internal unless the profile allows public ones. Fired as manual, under the trigger's concurrency, the profile's and team's caps and the budget, with the issue given to the session fenced as data. A second call less than a minute after the first, by the same person on the same issue, is the run the first made. It starts a real session and spends real money. Works on a gitops plane too.",
       risk: :write,
       arguments: [
         %Argument{name: "team", type: :string, required: true, description: "The team's name."},

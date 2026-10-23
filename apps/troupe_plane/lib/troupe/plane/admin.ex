@@ -49,6 +49,7 @@ defmodule Troupe.Plane.Admin do
     Ledger,
     Memory,
     ProfileBudget,
+    Releases,
     Signing
   }
 
@@ -64,6 +65,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision, Trigger}
+  alias Troupe.Protocol.AgentDefinition
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.ProviderTypes
@@ -760,11 +762,204 @@ defmodule Troupe.Plane.Admin do
   So a console offers the choices rather than a text field, and offers none the plane
   would refuse.
   """
-  @spec profile_choices(actor()) :: result()
-  def profile_choices(actor) do
-    with :ok <- require_admin(actor) do
-      {:ok, %{provider_types: ProviderTypes.wire(), size_classes: size_class_summaries()}}
+  #
+  # And `models`, for an agent's model picked rather than typed: what the plane knows a
+  # provider serves, each with why. The plane never asks a provider for its list (its key is
+  # the pods'), so these are the models it has been told of or seen run: the profile's own,
+  # the ones the organisation gives people's machines, the ones sessions have been charged
+  # for (the profile's, with one) and the ones its bundle's agents name.
+  @spec profile_choices(actor(), String.t() | map() | nil) :: result()
+  def profile_choices(actor, profile \\ nil) do
+    with :ok <- require_admin(actor),
+         {:ok, models} <- known_models(profile) do
+      {:ok,
+       %{
+         provider_types: ProviderTypes.wire(),
+         size_classes: size_class_summaries(),
+         models: models
+       }}
     end
+  end
+
+  @machines_model "a model the organisation gives people's machines"
+
+  # Not a name (the API hands a method with no `profile` its params), not a profile.
+  defp known_models(profile) when not is_binary(profile) or profile == "" do
+    {:ok,
+     models_with_why([
+       {organisation_models(), @machines_model},
+       {Ledger.models_run(nil), "a model this plane's sessions have run on"}
+     ])}
+  end
+
+  defp known_models(name) do
+    with {:ok, _profile} <- fetch_profile(name) do
+      {own, bundle} =
+        case Extends.resolve(name) do
+          {:ok, resolved} ->
+            own = get_in(resolved.attrs, ["spec", "llm", "model"])
+            {List.wrap(own), resolved.bundle.layers |> effective_agents() |> Enum.map(& &1.model)}
+
+          {:error, _reason} ->
+            {[], []}
+        end
+
+      {:ok,
+       models_with_why([
+         {own, "the profile's model"},
+         {organisation_models(), @machines_model},
+         {Ledger.models_run(name), "a model this profile's sessions have run on"},
+         {bundle, "a model an agent of its bundle names"}
+       ])}
+    end
+  end
+
+  defp organisation_models do
+    for key <- ~w(client_model_default client_model_cheap client_model_expensive),
+        value = Settings.get(key),
+        is_binary(value),
+        String.trim(value) != "",
+        do: String.trim(value)
+  end
+
+  # Each name once, with the first reason it was found for, sorted by name.
+  defp models_with_why(sources) do
+    sources
+    |> Enum.flat_map(fn {names, why} ->
+      for name <- names, is_binary(name), name != "", do: {name, why}
+    end)
+    |> Enum.uniq_by(&elem(&1, 0))
+    |> Enum.sort()
+    |> Enum.map(fn {name, why} -> %{name: name, why: why} end)
+  end
+
+  @doc """
+  A profile's agents as its bundle in effect has them, composed through what it extends,
+  for the console's builder: each with the fields the builder edits, where it came from,
+  its definition, and which of the teams granted the profile may run it. A built-in
+  primary the profile offers because its bundle has none of that name is a row too, to
+  copy rather than edit; and every agent Troupe ships is beside them, to start one from.
+
+  `delegate` is the subagents an agent can hand work to: its bundle's, when it holds the
+  `delegate` tool, which is how the harness decides; `nil` when it cannot delegate. `may`
+  is the team's grant resolved as a session of the team's would be, so a grant that allows
+  other agents, or denies this one, says false.
+
+  A platform admin's, as editing a bundle is.
+  """
+  @spec profile_agents(actor(), String.t()) :: result()
+  def profile_agents(actor, name) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, _profile} <- fetch_profile(name) do
+      layers =
+        case Extends.resolve(name) do
+          {:ok, resolved} -> resolved.bundle.layers
+          {:error, _reason} -> []
+        end
+
+      agents = effective_agents(layers)
+      grants = Identity.grants_for_profile(name)
+      subagents = for %{mode: "subagent", name: sub} <- agents, do: sub
+
+      offered =
+        for builtin <- Bundles.builtin_primaries(),
+            not Enum.any?(agents, &(&1.name == builtin)),
+            text = Bundles.builtin_definitions()[builtin],
+            is_binary(text),
+            row = agent_row(builtin, text, %{builtin: true}),
+            not is_nil(row),
+            do: row
+
+      rows =
+        for agent <- agents ++ offered do
+          agent
+          |> Map.put(:delegate, delegates(agent, subagents))
+          |> Map.put(:teams, agent_teams(agent.name, name, grants))
+          |> Map.delete(:tools)
+        end
+
+      builtins =
+        for {builtin, text} <- Enum.sort(Bundles.builtin_definitions()),
+            row = agent_row(builtin, text, %{builtin: true}),
+            not is_nil(row),
+            do: Map.take(row, [:name, :mode, :description, :definition])
+
+      {:ok,
+       %{
+         profile: name,
+         channel: layers |> Bundles.Effective.channels() |> List.last(),
+         agents: rows,
+         builtins: builtins,
+         teams: grants |> Enum.map(& &1.team.name) |> Enum.sort()
+       }}
+    end
+  end
+
+  # The agents of a chain's bundle in effect, each read as the harness reads its file, with
+  # the profile and channel it came from. One that does not parse is left out: the bundle's
+  # own check says so where it is published.
+  defp effective_agents([]), do: []
+
+  defp effective_agents(layers) do
+    composed = Bundles.Effective.compose(layers)
+    from = for %{kind: "agents"} = entry <- composed.entries, into: %{}, do: {entry.name, entry}
+
+    for %{"name" => agent, "definition" => text} <- List.wrap((composed.content || %{})["agents"]),
+        is_binary(agent) and is_binary(text),
+        source = Map.get(from, agent, %{}),
+        row =
+          agent_row(agent, text, %{
+            builtin: false,
+            from: Map.get(source, :from),
+            channel: Map.get(source, :channel)
+          }),
+        not is_nil(row),
+        do: row
+  end
+
+  defp agent_row(name, text, extra) do
+    case AgentDefinition.parse(name, text) do
+      {:ok, parsed} ->
+        Map.merge(
+          %{
+            name: name,
+            mode: Atom.to_string(parsed.mode),
+            description: blank_nil(parsed.description),
+            model: parsed.model,
+            max_turns: parsed.max_turns,
+            skills: parsed.skills,
+            permissions:
+              Map.new(parsed.permissions, fn {tool, p} -> {tool, Atom.to_string(p)} end),
+            tools: parsed.tools,
+            from: nil,
+            channel: nil,
+            definition: text
+          },
+          extra
+        )
+
+      {:error, _reason} ->
+        nil
+    end
+  end
+
+  defp blank_nil(text) when is_binary(text), do: if(String.trim(text) == "", do: nil, else: text)
+  defp blank_nil(_text), do: nil
+
+  defp delegates(%{mode: "primary", tools: tools}, subagents) do
+    if tools == :all or "delegate" in List.wrap(tools), do: subagents, else: nil
+  end
+
+  defp delegates(_agent, _subagents), do: nil
+
+  defp agent_teams(agent, profile, grants) do
+    grants
+    |> Enum.map(fn grant ->
+      rows = Identity.entitlements_for(grant.team, profile)
+      kept = Identity.Entitlement.resolve([agent], Identity.Entitlement.of_kind(rows, "agent"))
+      %{team: grant.team.name, may: kept == [agent]}
+    end)
+    |> Enum.sort_by(& &1.team)
   end
 
   @doc "Each size class with what it is for, as the console and a model both read it."
@@ -1062,7 +1257,7 @@ defmodule Troupe.Plane.Admin do
   # read by `GitHub.Policy.read_team/2` over what the team has, key by key.
   @team_keys ~w(budget_micros budget_period idle_timeout_seconds cache_eviction_days) ++
                ~w(erase_after_days members_may_control pins_allowed volume_size) ++
-               ~w(volume_storage_class allow_unenforced_workers github)
+               ~w(volume_storage_class allow_unenforced_workers github remote_offering_allowed)
 
   @doc "The fields of a team `admin.team.update` sets, as its schema declares them."
   @spec team_keys() :: [String.t()]
@@ -2294,6 +2489,77 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # -- releases kept on the plane --------------------------------------------
+
+  @doc """
+  The releases kept in the plane's object store for `/downloads` (`Releases`): each version
+  mirrored, newest first, with how many files it holds, those a copy is under way for, and
+  where releases are fetched from and handed out. Readable by either admin, whose people
+  update from them.
+  """
+  @spec releases_list(actor()) :: result()
+  def releases_list(actor) do
+    with :ok <- require_admin(actor) do
+      case Releases.list() do
+        {:ok, releases} ->
+          {:ok,
+           %{
+             "releases" => releases,
+             "source" => Releases.source(),
+             "release_url" => ClientVersions.release_url()
+           }}
+
+        {:error, reason} ->
+          {:error, Error.new(:unavailable, %{reason: reason})}
+      end
+    end
+  end
+
+  @doc """
+  Mirror a release into the plane's object store, from where releases are published: its
+  manifest is checked against the release keys first, and one they did not sign, or one
+  naming another version, is refused with nothing copied. The files are then copied in the
+  background, each held to the manifest; the release counts as mirrored once its manifest
+  is written, last. Audited as `release.mirror`, and its outcome as `release.mirrored` or
+  `release.mirror_failed`. A platform admin's: it is what every machine updating from the
+  plane installs.
+  """
+  @spec releases_mirror(actor(), String.t() | nil) :: result()
+  def releases_mirror(actor, version) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, version} <- release_version(version),
+         {:ok, manifest} <-
+           mirror_started(Releases.start(version, then: &mirrored(actor.subject, version, &1))) do
+      files = length(manifest.artifacts)
+      {:ok, _} = Audit.record(actor.subject, "release.mirror", "v#{version}", %{"files" => files})
+      {:ok, %{"version" => version, "state" => "mirroring", "files" => files}}
+    end
+  end
+
+  # The copy's outcome, which ends after `releases_mirror/2` has answered.
+  defp mirrored(subject, version, {:ok, copied}),
+    do:
+      Audit.record(subject, "release.mirrored", "v#{version}", %{
+        "files" => copied.files,
+        "bytes" => copied.bytes
+      })
+
+  defp mirrored(subject, version, {:error, why}) do
+    Logger.warning("troupe plane: release #{version} was not mirrored: #{why}")
+    Audit.record(subject, "release.mirror_failed", "v#{version}", %{"reason" => why})
+  end
+
+  defp release_version(version) when is_binary(version) and version != "",
+    do: {:ok, version |> String.trim() |> String.trim_leading("v")}
+
+  defp release_version(_version),
+    do: {:error, Error.new(:invalid_params, %{field: "version", reason: "a release's version, as 0.24.0-beta"})}
+
+  defp mirror_started({:ok, manifest}), do: {:ok, manifest}
+
+  defp mirror_started({:error, why}),
+    do: {:error, Error.new(:invalid_params, %{reason: why})}
+
   defp signing_key({:ok, key}), do: {:ok, key}
 
   defp signing_key({:error, reason}),
@@ -2362,7 +2628,9 @@ defmodule Troupe.Plane.Admin do
   One memory document: a version's text (the one in force where none is named), every
   version with who saved it and when, and what the version shown changed against the one
   before it, line by line. `scope` is `organisation`, `team` or `profile`; `name` the
-  team's or the profile's.
+  team's or the profile's. A profile's has `inherited` besides: the documents of the
+  profiles it extends, which its sessions read before its own, the one that extends nothing
+  first, each with the profile it is from and the version in force.
   """
   @spec memory_get(actor(), String.t(), String.t() | nil, integer() | nil) :: result()
   def memory_get(actor, scope, name, version) do
@@ -2381,10 +2649,23 @@ defmodule Troupe.Plane.Admin do
          text: (shown && shown.text) || "",
          shown: shown && Memory.summary(shown),
          diff: Memory.diff(before && before.text, shown && shown.text),
-         versions: owner |> Memory.versions() |> Enum.map(&Memory.summary/1)
+         versions: owner |> Memory.versions() |> Enum.map(&Memory.summary/1),
+         inherited: memory_inherited(scope, owner)
        }}
     end
   end
+
+  # What a profile's sessions read before its own: the documents of the profiles it
+  # extends, the one that extends nothing first, each with where it came from.
+  defp memory_inherited("profile", profile) do
+    profile
+    |> Memory.inherited()
+    |> Enum.map(fn {parent, document} ->
+      document |> Memory.summary() |> Map.merge(%{"profile" => parent, "text" => document.text})
+    end)
+  end
+
+  defp memory_inherited(_scope, _owner), do: []
 
   defp memory_version(owner, nil), do: {:ok, Memory.current(owner)}
 
@@ -2444,6 +2725,8 @@ defmodule Troupe.Plane.Admin do
         {:ok, %{before: before, now: now}} ->
           changes = Audit.diff(memory_fields(before), memory_fields(now))
           {:ok, _} = Audit.record(actor.subject, "memory.put", Memory.subject(owner), changes)
+          # The sessions running now read it from their next turn.
+          _told = Memory.announce(owner)
           {:ok, %{document: Memory.summary(now), changes: changes}}
 
         {:error, {:conflict, current}} ->
@@ -2516,17 +2799,19 @@ defmodule Troupe.Plane.Admin do
 
   defp memory_effect(:organisation),
     do:
-      "Every session on this plane's pods reads it from its next activation, and every " <>
-        "signed-in machine's sessions once its daemon next signs in, before the team's " <>
-        "and the profile's and as instructions from the organisation, read-only to agents."
+      "Every session on this plane's pods reads it from its next turn, and every " <>
+        "signed-in machine's sessions within five minutes, before the team's and the " <>
+        "profile's and as instructions from the organisation, read-only to agents."
 
   defp memory_effect(%Identity.Team{name: name}),
     do:
-      "The sessions of #{name} read it from their next activation, and the machines of " <>
-        "#{name}'s members once their daemon next signs in; no other team's session reads it."
+      "The sessions of #{name} read it from their next turn, and the machines of " <>
+        "#{name}'s members within five minutes; no other team's session reads it."
 
   defp memory_effect(profile),
-    do: "Every session on #{profile}'s pods reads it from its next activation."
+    do:
+      "Every session on #{profile}'s pods, and on the pods of every profile that extends " <>
+        "it, reads it from its next turn."
 
   # -- the plane's GitHub App -------------------------------------------------
 
@@ -2608,9 +2893,16 @@ defmodule Troupe.Plane.Admin do
   A platform admin's, like changing the App: it is the question somebody asks before and
   after they do, and it signs with the App's key to ask it.
   """
-  @spec github_check(actor()) :: result()
-  def github_check(actor) do
-    with :ok <- require_platform_admin(actor), do: {:ok, GitHub.check()}
+  #
+  # With a repository, a token for it is minted, used once and revoked, and the answer says
+  # what it could do there: the question "can the App work on this repository" asked of
+  # GitHub itself.
+  @spec github_check(actor(), String.t() | nil) :: result()
+  def github_check(actor, repository \\ nil) do
+    with :ok <- require_platform_admin(actor) do
+      opts = if repository in [nil, ""], do: [], else: [repository: repository]
+      {:ok, GitHub.check(opts)}
+    end
   end
 
   @doc """
@@ -3855,11 +4147,12 @@ defmodule Troupe.Plane.Admin do
   @doc """
   Fire a trigger now, by hand.
 
-  The same `fire/5` a schedule or an executor reaches, with an idempotency key that
-  names the person and the minute, as a webhook's window and a schedule's tick are drawn
-  on the minute too: a second click, or a retry of a call whose answer was lost, within
-  the same minute is the run the first one made, and a click in a later minute is a
-  second run. On the second, a retry that crossed one boundary made a second session.
+  Fired as a webhook's blind retry is, in a window that names the person
+  (`Triggers.fire_by_hand/5`): a second click, or a retry of a call whose answer was lost,
+  less than a minute after the first is the run the first one made, on either side of the
+  clock's minute, and a click a minute on is a second run. On the second, a retry that
+  crossed one boundary made a second session; on the clock's minute, a click at :59 and
+  its retry a second later were two runs.
 
   The source is `manual` and the console is the only door that may say so: a person's
   hand is the one thing about a run that cannot be inferred afterwards.
@@ -3872,15 +4165,15 @@ defmodule Troupe.Plane.Admin do
   def trigger_run(actor, team_name, name) do
     with {:ok, team} <- fetch_team(actor, team_name),
          {:ok, trigger} <- fetch_trigger(team, name) do
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
-      minute = %{now | second: 0}
-      key = "manual:#{trigger.id}:#{actor.subject}:#{DateTime.to_iso8601(minute)}"
-      event = %{"kind" => "manual", "by" => actor.subject, "at" => DateTime.to_iso8601(now)}
+      now = DateTime.utc_now()
+      window = "manual:#{trigger.id}:#{actor.subject}:"
+      at = now |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+      event = %{"kind" => "manual", "by" => actor.subject, "at" => at}
 
       {:ok, _} =
-        Audit.record(actor.subject, "trigger.run", "#{team.name}/#{name}", %{"run" => key})
+        Audit.record(actor.subject, "trigger.run", "#{team.name}/#{name}", %{"window" => window})
 
-      case Triggers.fire(trigger, "manual", key, event, actor.subject) do
+      case Triggers.fire_by_hand(trigger, window, event, actor.subject, now) do
         {:ok, fired} -> {:ok, Triggers.fired_json(fired)}
         {:error, %Error{} = error} -> {:error, error}
       end
@@ -3897,7 +4190,8 @@ defmodule Troupe.Plane.Admin do
   unless the profile allows public ones, it is an open issue and not a pull request. Then
   fired `manual`, by the person, under the trigger's concurrency, the profile's and the
   team's caps of runs and the budget, with the issue fenced as data as a delivery's is. A
-  second click in the same minute is the run the first made. Works on a GitOps plane too,
+  second click less than a minute after the first is the run the first made, across the
+  clock's minute too. Works on a GitOps plane too,
   as running a trigger by hand does.
   """
   @spec trigger_fix(actor(), String.t(), String.t(), term()) :: result()
@@ -4442,6 +4736,8 @@ defmodule Troupe.Plane.Admin do
       volume_storage_class: team.volume_storage_class,
       volume_size: team.volume_size,
       allow_unenforced_workers: team.allow_unenforced_workers,
+      # Whether its people may offer a laptop session for steering from another device.
+      remote_offering_allowed: team.remote_offering_allowed,
       # The repositories its sessions may name, and its fix loop's caps: an empty list
       # names none.
       github: %{
@@ -4602,7 +4898,8 @@ defmodule Troupe.Plane.Admin do
       :pins_allowed,
       :volume_storage_class,
       :volume_size,
-      :github
+      :github,
+      :remote_offering_allowed
     ])
   end
 

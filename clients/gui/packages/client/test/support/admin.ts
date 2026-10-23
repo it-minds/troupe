@@ -9,8 +9,9 @@
 // records it. A console that is right against this is right against the plane's rules,
 // which `apps/troupe_plane/test` holds the plane to.
 
+import { parseAgent } from "../../src/agents.js";
 import { checkRuleSet } from "../../src/rules.js";
-import { checkAgent } from "./agents.js";
+import { BUILTIN_AGENTS, checkAgent } from "./agents.js";
 import { older } from "./plane.js";
 import { PROVIDER_TYPES } from "./provider-types.js";
 import { MAX_DEPTH, WRITTEN_KEYS, composeBundle, empty as emptyResolved, fieldsOf, merge as mergeExtends, rowOf } from "./extends.js";
@@ -27,6 +28,8 @@ const NOT_FOUND = -32005;
 const INVALID_PARAMS = -32602;
 const METHOD_NOT_FOUND = -32601;
 const MANAGED_BY_GITOPS = -32015;
+// Where the plane mirrors releases from, unless the deployment names another source.
+const RELEASE_SOURCE = "https://github.com/it-minds/troupe/releases/download";
 const CONFLICT = -32006;
 
 /** The size classes, with what each is for, as `Fleet.SizeClass` says. */
@@ -256,6 +259,8 @@ export interface FakeTeam {
   volume_storage_class: string | null;
   volume_size: string | null;
   allow_unenforced_workers: boolean;
+  /** Whether its people may offer a laptop session for steering from another device (#58). */
+  remote_offering_allowed: boolean;
   /** The repositories its sessions may name and the fix loop's caps, as the plane answers them. */
   github: { repositories: string[]; max_pushes: number | null; max_runs: number | null; max_attempts?: number | null };
   admins: string[];
@@ -618,6 +623,7 @@ const TEAM_KEYS = [
   "volume_storage_class",
   "allow_unenforced_workers",
   "github",
+  "remote_offering_allowed",
 ];
 const INTEGER_KEYS = ["budget_micros", "idle_timeout_seconds", "cache_eviction_days", "erase_after_days"];
 
@@ -650,7 +656,7 @@ function readTeamGitHub(current: TeamGitHubFake, sent: unknown): { github: TeamG
   }
   return { github };
 }
-const BOOLEAN_KEYS = ["members_may_control", "pins_allowed", "allow_unenforced_workers"];
+const BOOLEAN_KEYS = ["members_may_control", "pins_allowed", "allow_unenforced_workers", "remote_offering_allowed"];
 
 /** A team's name, as `Identity.Team` holds it to. */
 const TEAM_NAME = /^[a-z0-9]([a-z0-9-]{0,56}[a-z0-9])?$/;
@@ -721,9 +727,9 @@ function memorySummary(v: { version: number; text: string; changed_by: string; c
 }
 
 function memoryEffect(scope: unknown, name: unknown): string {
-  if (scope === "team") return `The sessions of ${String(name)} read it from their next activation, and the machines of ${String(name)}'s members once their daemon next signs in; no other team's session reads it.`;
-  if (scope === "profile") return `Every session on ${String(name)}'s pods reads it from its next activation.`;
-  return "Every session on this plane's pods reads it from its next activation, and every signed-in machine's sessions once its daemon next signs in, before the team's and the profile's and as instructions from the organisation, read-only to agents.";
+  if (scope === "team") return `The sessions of ${String(name)} read it from their next turn, and the machines of ${String(name)}'s members within five minutes; no other team's session reads it.`;
+  if (scope === "profile") return `Every session on ${String(name)}'s pods, and on the pods of every profile that extends it, reads it from its next turn.`;
+  return "Every session on this plane's pods reads it from its next turn, and every signed-in machine's sessions within five minutes, before the team's and the profile's and as instructions from the organisation, read-only to agents.";
 }
 
 /** What changes between two texts, line by line, as the plane's `Memory.diff/2` answers it: a longest common subsequence. */
@@ -1547,7 +1553,7 @@ export class FakeAdmin {
       }
 
       case "admin.github.check":
-        return role === "platform_admin" ? { result: this.githubCheck() } : notPlatform;
+        return role === "platform_admin" ? { result: this.githubCheck(typeof params["repository"] === "string" ? params["repository"] : null) } : notPlatform;
 
       case "admin.github.delete": {
         if (role !== "platform_admin") return notPlatform;
@@ -1580,6 +1586,24 @@ export class FakeAdmin {
         const changes = diff({ fingerprint: current.fingerprint, version: current.version }, { fingerprint: now.fingerprint, version: now.version });
         this.record(subject, "signing.rotate", "troupe-plane-signing", changes);
         return { result: { ...now, changes } };
+      }
+
+      // The releases kept in the plane's object store (#657): mirrored by a platform admin,
+      // refused where the manifest is not the release key's, as the plane says it.
+      case "admin.releases.list":
+        return admin ? { result: { releases: this.releases, source: RELEASE_SOURCE, release_url: this.releaseUrl } } : notAdmin;
+
+      case "admin.releases.mirror": {
+        if (role !== "platform_admin") return notPlatform;
+        const version = String(params["version"] ?? "").replace(/^v/, "");
+        if (this.unsignedReleases.has(version)) {
+          return refuse(INVALID_PARAMS, "invalid_params", {
+            reason: `the manifest of the release at ${RELEASE_SOURCE}/v${version} is signed by key 0123456789ABCDEF, which this build does not trust (it trusts 513B504E4D472FED): it is not the release key's, and nothing is mirrored`,
+          });
+        }
+        this.releases = [{ version, state: "mirroring", files: 0 }, ...this.releases.filter((r) => r.version !== version)];
+        this.record(subject, "release.mirror", `v${version}`, { files: 4 });
+        return { result: { version, state: "mirroring", files: 4 } };
       }
 
       case "admin.memory.list": {
@@ -1615,6 +1639,7 @@ export class FakeAdmin {
             shown: shown ? memorySummary(shown) : null,
             diff: lineDiff(before?.text ?? "", shown?.text ?? ""),
             versions: [...versions].reverse().map(memorySummary),
+            inherited: params["scope"] === "profile" ? this.memoryInherited(String(params["name"])) : [],
           },
         };
       }
@@ -1670,8 +1695,19 @@ export class FakeAdmin {
       case "admin.provisioners.list":
         return admin ? { result: PROVISIONERS } : notAdmin;
 
-      case "admin.profile.choices":
-        return admin ? { result: { provider_types: PROVIDER_TYPES, size_classes: SIZE_CLASS_CHOICES } } : notAdmin;
+      case "admin.profile.choices": {
+        if (!admin) return notAdmin;
+        const named = typeof params["profile"] === "string" ? params["profile"] : null;
+        if (named !== null && !this.profiles.some((p) => p.name === named)) return refuse(NOT_FOUND, "not_found", { profile: named });
+        return { result: { provider_types: PROVIDER_TYPES, size_classes: SIZE_CLASS_CHOICES, models: this.modelsKnown(named) } };
+      }
+
+      case "admin.profile.agents": {
+        if (role !== "platform_admin") return notPlatform;
+        const p = this.profiles.find((x) => x.name === params["name"]);
+        if (!p) return refuse(NOT_FOUND, "not_found", { profile: params["name"] });
+        return { result: this.profileAgents(p) };
+      }
 
       case "admin.hosts.list": {
         if (role !== "platform_admin") return notPlatform;
@@ -2125,6 +2161,21 @@ export class FakeAdmin {
       return { subject: `profile/${String(name)}`, editable: true };
     }
     return refuse(INVALID_PARAMS, "invalid_params", { field: "scope", reason: "scope is one of organisation, team, profile", scope });
+  }
+
+  /** What a profile's sessions read before its own: the documents of the profiles it extends, the one that extends nothing first. */
+  private memoryInherited(name: string): Array<Record<string, unknown>> {
+    const chain: string[] = [];
+    let at = this.profiles.find((p) => p.name === name)?.extends ?? null;
+    while (at && !chain.includes(at) && chain.length < MAX_DEPTH) {
+      const parent: string = at;
+      chain.unshift(parent);
+      at = this.profiles.find((p) => p.name === parent)?.extends ?? null;
+    }
+    return chain.flatMap((parent) => {
+      const current = (this.memory.get(`profile/${parent}`) ?? []).at(-1);
+      return current && current.text !== "" ? [{ ...memorySummary(current), profile: parent, text: current.text }] : [];
+    });
   }
 
   private memoryRow(scope: "organisation" | "team" | "profile", name: string | null, editable: boolean): Record<string, unknown> {
@@ -2961,6 +3012,13 @@ export class FakeAdmin {
   /** How many versions the plane's signing key has: one, made on first use, and one more a rotation. */
   signingVersions = 1;
 
+  /** The releases in the plane's object store, newest first, as `admin.releases.list` answers them. */
+  releases: Array<{ version: string; state: "mirrored" | "mirroring"; files: number }> = [];
+  /** Versions whose manifest the release keys did not sign: mirroring one is refused. */
+  readonly unsignedReleases = new Set<string>();
+  /** The `client_release_url` setting. */
+  releaseUrl: string | null = null;
+
   private signingJson(): { algorithm: string; public_key: string; fingerprint: string; version: number; created_at: string; versions: unknown[] } {
     const versions = Array.from({ length: this.signingVersions }, (_v, i) => this.signingVersions - i).map((version) => ({
       algorithm: "ed25519",
@@ -3045,7 +3103,110 @@ export class FakeAdmin {
   }
 
   /** `GitHub.check/1`: four checks, each after the one before it passed. */
-  private githubCheck(): Record<string, unknown> {
+  /**
+   * The check, and asked about a repository the fifth, as the plane makes it: a token minted
+   * there through the owner's installation, its permissions as GitHub granted them, revoked.
+   * Not tried where a check before it failed.
+   */
+  private githubCheck(repository: string | null = null): Record<string, unknown> {
+    const answer = this.githubAppCheck();
+    if (repository === null) return answer;
+    const checks = answer["checks"] as Array<{ name: string; ok: boolean; detail: string; took_ms: number }>;
+    const failed = checks.find((c) => !c.ok);
+    const said = (ok: boolean, detail: string, tested: Record<string, unknown> | null) => ({
+      ...answer,
+      ok: Boolean(answer["ok"]) && ok,
+      checks: [...checks, { name: "Repository", ok, detail, took_ms: ok ? 140 : 0 }],
+      repository: tested,
+    });
+    if (failed) return said(false, `Not tried: ${failed.name} did not pass.`, null);
+    const [owner, name, ...rest] = repository.split("/");
+    if (!owner || !name || rest.length > 0) return said(false, "a repository is owner/name", null);
+    const installation = this.github.installations.find((i) => i.owner.toLowerCase() === owner.toLowerCase());
+    if (!installation) {
+      return said(false, `The App has no installation for ${owner}: it is installed for ${this.github.installations.map((i) => i.owner).join(", ") || "nobody"}.`, null);
+    }
+    return said(true, `A token for ${owner}/${name} was minted and revoked.`, {
+      name: `${owner}/${name}`,
+      installation_id: installation.installation_id,
+      permissions: { ...this.githubTokenPermissions },
+      revoked: true,
+    });
+  }
+
+  /** The agents of a profile's bundle in effect, each with its channel and who may run it; and every built-in, to copy from. */
+  private profileAgents(p: FakeProfile): Record<string, unknown> {
+    const resolved = this.resolveProfile(p.name, {});
+    const chain = typeof resolved === "string" ? [[p.name, p.channel ?? "stable"] as [string, string]] : resolved.channels;
+    const seen = new Set<string>();
+    const found: Array<{ name: string; definition: string; from: string | null; channel: string | null; builtin: boolean }> = [];
+    for (const [profile, channel] of chain) {
+      if (seen.has(channel)) continue;
+      seen.add(channel);
+      for (const a of (this.current(channel)?.content["agents"] as Array<Record<string, unknown>> | undefined) ?? []) {
+        const entry = { name: String(a["name"]), definition: String(a["definition"] ?? ""), from: profile, channel, builtin: false };
+        const at = found.findIndex((f) => f.name === entry.name);
+        if (at < 0) found.push(entry);
+        else if (a["override"] === true || /\noverride:\s*true\s*\n/.test(entry.definition)) found[at] = entry;
+      }
+    }
+    const fields = (text: string) => parseAgent(text).fields;
+    for (const b of BUILTIN_AGENTS.filter((x) => ["build", "plan"].includes(x.name))) {
+      if (!found.some((f) => f.name === b.name && fields(f.definition)?.mode === "primary")) found.push({ name: b.name, definition: b.text, from: null, channel: null, builtin: true });
+    }
+    const teams = [...this.teams.values()].filter((t) => t.grants.some((g) => g.profile === p.name)).map((t) => t.name).sort();
+    const may = (team: string, agent: string): boolean => {
+      const rows = this.entitlements.filter((e) => e.team === team && e.profile === p.name && e.kind === "agent");
+      if (rows.some((r) => r.mode === "deny" && r.name === agent)) return false;
+      const allowed = rows.filter((r) => r.mode === "allow");
+      return allowed.length === 0 || allowed.some((r) => r.name === agent);
+    };
+    const subagents = found.filter((f) => fields(f.definition)?.mode === "subagent").map((f) => f.name);
+    return {
+      profile: p.name,
+      channel: chain.at(-1)?.[1] ?? null,
+      agents: found.map((f) => {
+        const read = fields(f.definition);
+        const mode = read?.mode === "subagent" ? "subagent" : "primary";
+        const tools = read?.tools ?? "all";
+        const delegates = mode === "primary" && (tools === "all" || tools.includes("delegate"));
+        return {
+          ...f,
+          mode,
+          description: read?.description || null,
+          model: read?.model || null,
+          delegate: delegates ? subagents : null,
+          max_turns: read?.max_turns ? Number(read.max_turns) : null,
+          skills: read ? read.skills : null,
+          permissions: read?.permissions ?? {},
+          teams: teams.map((team) => ({ team, may: may(team, f.name) })),
+        };
+      }),
+      builtins: BUILTIN_AGENTS.map((b) => ({ name: b.name, mode: fields(b.text)?.mode === "subagent" ? "subagent" : "primary", description: fields(b.text)?.description || null, definition: b.text })),
+      teams,
+    };
+  }
+
+  /** The models the plane knows a profile's provider by, as `admin.profile.choices` lists them: each once, with the first reason. */
+  private modelsKnown(profile: string | null): Array<{ name: string; why: string }> {
+    const out = new Map<string, string>();
+    const add = (name: unknown, why: string) => {
+      if (typeof name === "string" && name !== "" && !out.has(name)) out.set(name, why);
+    };
+    const p = profile ? this.profiles.find((x) => x.name === profile) : null;
+    const llm = (p?.spec?.["llm"] ?? {}) as Record<string, unknown>;
+    add(llm["model"], "the profile's model");
+    add(llm["smallModel"], "the profile's model");
+    for (const key of ["client_model_default", "client_model_cheap", "client_model_expensive"]) add(this.stored.get(key) ?? this.deployed[key], "a model the organisation gives people's machines");
+    for (const t of this.teams.values()) if (!p || t.grants.some((g) => g.profile === p.name)) for (const s of t.spend_by_model ?? []) add(s["model"], "a model this profile's sessions have run on");
+    if (p) for (const a of (this.profileAgents(p)["agents"] as Array<{ model: string | null }>)) add(a.model, "a model an agent of its bundle names");
+    return [...out.entries()].map(([name, why]) => ({ name, why })).sort((x, y) => x.name.localeCompare(y.name));
+  }
+
+  /** What GitHub grants an installation token on a repository here, for the repository test. */
+  githubTokenPermissions: Record<string, string> = { contents: "write", metadata: "read", pull_requests: "write", checks: "read", issues: "read" };
+
+  private githubAppCheck(): Record<string, unknown> {
     const g = this.github;
     const known = this.githubKnows;
     const notTried = (name: string, after: string) => ({ name, ok: false, detail: `Not tried: ${after} did not pass.`, took_ms: 0 });
@@ -3142,6 +3303,7 @@ export function team(name: string, fields: Partial<FakeTeam> = {}): FakeTeam {
     volume_storage_class: null,
     volume_size: null,
     allow_unenforced_workers: false,
+    remote_offering_allowed: true,
     github: { repositories: [], max_pushes: null, max_runs: null },
     admins: [],
     grants: [],

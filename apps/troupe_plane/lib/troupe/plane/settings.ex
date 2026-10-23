@@ -459,8 +459,8 @@ defmodule Troupe.Plane.Settings do
           "The keys it may hold: " <> Enum.join(Troupe.Protocol.Organisation.keys(), ", ") <> ".",
       consequence:
         "A number is a ceiling a machine may lower and not raise; approvals and the two managed switches may be " <>
-          "tightened and not loosened; a provider or URL is fixed. A machine takes it at its next sign-in or " <>
-          "troupe config pull, and holds to its last copy offline. Any other key is refused.",
+          "tightened and not loosened; a provider or URL is fixed. A signed-in machine takes it within a minute, " <>
+          "a running session at its next turn, and holds to its last copy offline. Any other key is refused.",
       effect: :immediate
     },
     # Where people's machines download releases from (#657): what the plane's signed
@@ -471,11 +471,11 @@ defmodule Troupe.Plane.Settings do
       type: :string,
       summary:
         "Where people's machines download releases from, each at <url>/v<version>/ as GitHub lays them out: " <>
-          "this plane's own /downloads (the release files copied into its object store under releases/), " <>
+          "this plane's own /downloads (the releases mirrored into its object store, on Integrations), " <>
           "a mirror, or empty for GitHub's.",
       consequence:
-        "troupe update installs from here, and only what the release key signed: a mirror cannot change a release, " <>
-          "only fail to serve it. Empty means GitHub, which a closed network cannot reach.",
+        "troupe update and the desktop app install from here, and only what the release key signed: a mirror " <>
+          "cannot change a release, only fail to serve it. Empty means GitHub, which a closed network cannot reach.",
       effect: :immediate
     }
   ]

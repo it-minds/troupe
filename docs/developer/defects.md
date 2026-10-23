@@ -1434,23 +1434,11 @@ Found by the chunk 38 fixers, 2026-10-18.
 
 ### D132 - Steering, company memory, MCP sign-in and the docs after chunk 39 (low)
 
-- **Steering a laptop's session** (Decision 921).
-  - The relay rides the laptop client's 15-minute plane token. With no client signed in on the laptop, an offer goes offline when it runs out; whether the daemon renews its own sign-in is undecided.
-  - The daemon's idle watch doesn't count the relay link, so a daemon whose offer has nobody attached can idle out.
-  - The console signs in admins only, so a person who isn't one steers only from the desktop app.
-  - There's no per-team admin switch to forbid offering.
-  - The TUI can't list or steer other laptops' sessions.
-  - Who is steering is polled in the desktop app, and shown only on `/steer` in the TUI.
-  - `Troupe.Protocol.Client.Transport.ws_connect` swallows every mailbox message during the upgrade, so a GenServer that dials from its own process loses its calls.
-- **Company memory** (Decision 922).
-  - `troupe config pull` doesn't fetch memory, and a running laptop session keeps the copy it started with; there's no `config.changed` for a refreshed one.
-  - A child profile doesn't read its parent's memory.
-  - A deleted profile's memory stays under its name, so a profile recreated under that name finds the old document in force.
-  - The desktop app has no instructions view.
-  - `memory.json` is kept after sign-out, as `organisation.json` is.
+- **Steering a laptop's session** (Decisions 921 and 928).
+  - The console signs in admins only, so a person who isn't one steers only from the desktop app or the TUI.
+  - Who is steering is polled in the desktop app.
 - **The criticals sweep** (Decision 923).
-  - A viewer still sees a pod session's models, prices and the environment variable's name in the source column.
-  - The daemon stamps `completed_at` in whole seconds, so a setup re-run in the same second looks like the old record.
+  - A viewer still sees a pod session's models and prices.
   - Left with reasons: D5, D40's annotation latency, D48, D54 (needs a decision on `host:port`), D65's subagent spend, D71 and D92.
 - **Offered tools and MCP sign-in** (Decision 924).
   - A URL-only server entry that answers 401 still needs `"oauth": {}`; signing in to a server that publishes RFC 9728 metadata by default would follow.
@@ -1459,13 +1447,42 @@ Found by the chunk 38 fixers, 2026-10-18.
   - Neither client's MCP view says which client a sign-in used, and the desktop app still draws nothing for `tools_registered`.
 - **The docs** (#76, #189, #422).
   - Eight pages are over 400 lines: `ARCHITECTURE.md`, the prompt-prefix page, `admin/github.md`, `profiles-and-policy.md`, `user/configuration.md`, the TUI README, `admin/configuration.md` and `admin/installing.md`.
-  - TUI decision tui/15 names `TROUPE_STATE_DIR` and `TROUPE_CONFIG_DIR`, where the code uses `*_HOME`.
-  - `installing.md` and `security.md` show stale example versions.
   - The repository's homepage link isn't set, and the docs site has no domain of its own.
   - D75: a decision's `symbols:` is still not checked against the code.
-- **Tests.** `ClientTest`'s test server times out on accept under load.
 
 Found by the chunk 39 fixers, 2026-10-19.
+
+### D133 - Offers, memory refresh, the signed policy and the picker after chunk 40 (low)
+
+- **Offered sessions** (Decision 928).
+  - A grant whose release never reached the plane stays in `remote_grants` until the 30-day idle limit refuses it; nothing deletes it, and the console doesn't list a person's laptop grants.
+  - The TUI still offers "allow for the session" on a relayed approval; the laptop refuses it with a sentence.
+  - An offer doesn't come back after a reboot unless the person has `troupe-daemon login on`.
+  - The macOS and Linux credential stores (`security`, `secret-tool`) weren't exercised; Linux CI checks only the "store unavailable" answer.
+  - The gateway's `OrganisationTest` sees a late `config.changed` inside a 300 ms refute, under load.
+- **Company memory** (Decision 929).
+  - A change to a profile's `extends` reaches its running sessions only at their next activation.
+  - A laptop session resumed after going dormant reads the current copy with no `memory_changed` line.
+  - `organisation.json` stays after sign-out, where `memory.json` is dropped.
+  - `PROTOCOL.md` has no section for the plane-to-pod pushes (`session.activate`, `session.memory`).
+- **The signed policy and releases** (Decision 931).
+  - There's no `admin.releases.remove`, and a failed mirror shows only in the audit and the log.
+  - A mirror holds one file in memory at a time, up to about 100 MB.
+  - The TUI's own HQ connection doesn't act on a `versions` change.
+  - Re-resolving a running session for an organisation change also picks up the person's own config edits since it started.
+  - `policy.revision` is unsigned; a forged one can only cause or suppress a fetch.
+  - Gateway tests that wait 5 s on a link's background task fail under load.
+- **The sweep** (Decision 930).
+  - The GUI's fake admin still keys manual runs on the minute.
+  - `pnpm audit` reports one high-severity advisory in `source-map-js`, pulled in only by the console's test runner.
+- **The picker and the App** (Decision 932, tui/0166).
+  - The plane's bundle preview diffs names only (`Bundle.summary/1`), so a changed definition with unchanged names previews nothing there; the builder adds its own lines. (medium)
+  - The admin API's flat `profile` argument receives the params map when absent; `profile_choices` guards for it.
+  - The desktop's `AgentEditor` doesn't show `delegation`.
+  - `Ledger.models_run` has no time bound.
+  - The model picker offers only the models the plane knows; the plane never asks a provider for its list.
+
+Found by the chunk 40 fixers, 2026-10-24.
 
 ## Taken
 

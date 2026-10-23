@@ -200,25 +200,39 @@ defmodule Troupe.Plane.TriggerSourcesTest do
       assert pushed["origin"]["source"] == "manual"
     end
 
-    # The caller and the minute, as PROTOCOL.md says and a webhook's own window is drawn: a
-    # second click, or a retry of a call whose answer was lost a second or two later, is
-    # the run the first one made rather than a second session.
-    test "the console's run is one run per person per minute", context do
-      trigger!(context, %{"name" => "triage", "concurrency" => 2})
+    # The caller and a minute, as a webhook's own window is drawn: a second click, or a
+    # retry of a call whose answer was lost a second or two later, is the run the first one
+    # made rather than a second session, on either side of the clock's minute. It was the
+    # clock's minute, so a click at :59 and one a second later were two runs.
+    test "the console's run is the run of the person's click less than a minute before",
+         context do
+      trigger = trigger!(context, %{"name" => "triage", "concurrency" => 2})
       actor = platform_admin()
-
-      second = DateTime.utc_now().second
-      if second >= 55, do: Process.sleep((61 - second) * 1_000)
 
       assert {:ok, first} = Admin.trigger_run(actor, "engineering", "triage")
       assert_receive {:pushed, "session.activate", _pushed}, 5_000
-      Process.sleep(1_100)
-      assert {:ok, again} = Admin.trigger_run(actor, "engineering", "triage")
 
+      # As the first would be had it come at the last moment of the minute before, under
+      # the key the release before gave it.
+      backdate_run!(first["run"], "manual:#{trigger.id}:#{actor.subject}:", before_minute_turn!())
+
+      assert {:ok, again} = Admin.trigger_run(actor, "engineering", "triage")
       assert again["run"]["id"] == first["run"]["id"]
       assert again["session_id"] == first["session_id"]
       assert [_one] = Triggers.runs(context.team)
       refute_receive {:pushed, "session.activate", _pushed}, 200
+
+      # A minute on, a click is a run of its own.
+      backdate_run!(
+        first["run"],
+        "manual:#{trigger.id}:#{actor.subject}:",
+        DateTime.add(DateTime.utc_now(), -61, :second)
+      )
+
+      assert {:ok, later} = Admin.trigger_run(actor, "engineering", "triage")
+      refute later["run"]["id"] == first["run"]["id"]
+      assert is_binary(later["session_id"])
+      assert length(Triggers.runs(context.team)) == 2
     end
   end
 

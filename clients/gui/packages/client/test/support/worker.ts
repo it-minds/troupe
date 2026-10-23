@@ -520,6 +520,29 @@ export class FakeWorker {
         return reply(ws, id, { agents, skipped: [] });
       }
 
+      // What the session's next prompt is read from on this pod (troupe #55): the
+      // organisation's, the team's and the worker profile's memory from its activation, then
+      // its repository's AGENTS.md.
+      case "context.get": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { session_id: sessionId } });
+        const memory = (scope: string, name: string | null, version: number, label: string) => ({
+          scope, path: name ? `memory:${scope}/${name}` : `memory:${scope}`, size: 30, chars: 30, budget: 8192, status: "whole",
+          hash: `sha256:${scope}${version}`, version, name, label,
+        });
+        return reply(ws, id, {
+          budget: 16000,
+          used: 20,
+          searched: [`/state/workspaces/${session.id}`],
+          files: [
+            memory("organisation", null, 3, "the organisation's memory"),
+            memory("team", "engineering", 2, "the team engineering's memory"),
+            memory("profile", session.profile, 1, `the worker profile ${session.profile}'s memory`),
+            { scope: "root", path: `/state/workspaces/${session.id}/AGENTS.md`, size: 20, chars: 20, budget: 16000, status: "whole", hash: "sha256:abcdef0123" },
+          ],
+          memory_from: { source: "the plane, with the session's activation", fetched_at: null },
+        });
+      }
+
       // What is in force in the session on this pod, as a worker answers `config.get`
       // naming it (the worker's `config_explain_test`): the profile's settings and rules,
       // the platform's switch, the session's terms and its repository's file.

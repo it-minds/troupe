@@ -158,7 +158,7 @@ defmodule Troupe.Setup do
     file = path(state_dir)
 
     record = %{
-      "completed_at" => DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
+      "completed_at" => state_dir |> completed() |> stamp() |> DateTime.to_iso8601(),
       "choice" => attrs["choice"] || "local",
       "subject" => attrs["subject"]
     }
@@ -171,6 +171,21 @@ defmodule Troupe.Setup do
     else
       {:error, reason} ->
         {:error, "could not write #{Troupe.Paths.display(file)}: #{:file.format_error(reason)}"}
+    end
+  end
+
+  # In microseconds, and after the record it replaces whatever the clock says: a client
+  # knows a run has finished by a record newer than the one it began with, so a re-run in
+  # the same instant, or under a clock that stepped back, must not carry the old stamp.
+  defp stamp(before) do
+    now = DateTime.utc_now()
+
+    with %{"completed_at" => at} <- before,
+         {:ok, then, _offset} <- DateTime.from_iso8601(at),
+         :lt <- DateTime.compare(now, DateTime.add(then, 1, :microsecond)) do
+      DateTime.add(then, 1, :microsecond)
+    else
+      _later -> now
     end
   end
 

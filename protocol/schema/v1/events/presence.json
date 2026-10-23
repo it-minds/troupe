@@ -17,6 +17,9 @@
     },
     "subject": {
       "type": "string"
+    },
+    "via": {
+      "type": "string"
     }
   },
   "required": [

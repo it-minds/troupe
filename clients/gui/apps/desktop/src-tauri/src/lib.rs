@@ -15,7 +15,9 @@
 //                          Windows a click on one opens its session (src/notify.rs)
 //   its own update         a release whose manifest the release key signed, checked
 //                          here, installed by Tauri's updater, with the daemon beside the
-//                          app swapped in first (src/update.rs, src/release.rs)
+//                          app swapped in first (src/update.rs, src/release.rs), from
+//                          where a plane says releases are only as its pinned key signed
+//                          it (src/plane_word.rs)
 //   an agent's file        a person's or a repository's, in the editor the system opens
 //                          Markdown with, and no other file (src/agent_file.rs)
 //
@@ -25,6 +27,7 @@
 mod agent_file;
 mod daemon;
 mod notify;
+mod plane_word;
 mod release;
 mod secrets;
 mod update;

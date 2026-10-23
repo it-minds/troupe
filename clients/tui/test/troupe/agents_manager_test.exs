@@ -43,30 +43,54 @@ defmodule Troupe.AgentsManagerTest do
     {pid, session}
   end
 
+  # `/agents` is the one agent picker at the manager's density (#594); what its keys do to
+  # an agent is the manager's page, which comes back to it.
   defp open_page(pid) do
     type(pid, "/agents")
     press(pid, "enter")
-    assert user_state(pid).focus == :agents
+    assert user_state(pid).focus == :switcher
+    assert picker(pid).density == :manager
   end
 
+  defp picker(pid), do: user_state(pid).switcher
   defp page(pid), do: user_state(pid).agents_page
 
+  # The cursor onto an agent: the picker's, or the page's while an action has it open.
   defp select(pid, name) do
     press(pid, "home")
 
     Enum.reduce_while(1..30, nil, fn _, _ ->
-      case Enum.at(Agents.entries(page(pid)), page(pid).cursor) do
-        {:agent, %{"name" => ^name}} ->
-          {:halt, :ok}
-
-        _ ->
-          press(pid, "down")
-          {:cont, nil}
+      if selected_name(pid) == name do
+        {:halt, :ok}
+      else
+        press(pid, "down")
+        {:cont, nil}
       end
     end)
     |> case do
       :ok -> :ok
       nil -> flunk("no agent #{name} on the page")
+    end
+  end
+
+  defp selected_name(pid) do
+    case user_state(pid).focus do
+      :agents ->
+        case Enum.at(Agents.entries(page(pid)), page(pid).cursor) do
+          {:agent, %{"name" => name}} -> name
+          _other -> nil
+        end
+
+      _picker ->
+        (Enum.at(picker(pid).rows, picker(pid).cursor) || %{})["name"]
+    end
+  end
+
+  # The line of news where the person is: the page's while it is open, else the picker's.
+  defp status(pid) do
+    case user_state(pid).focus do
+      :agents -> page(pid).status
+      _picker -> picker(pid) && picker(pid).status
     end
   end
 
@@ -84,11 +108,11 @@ defmodule Troupe.AgentsManagerTest do
   end
 
   defp await_status(pid, pattern) do
-    eventually(fn -> is_binary(page(pid).status) and page(pid).status =~ pattern end)
-    page(pid).status
+    eventually(fn -> is_binary(status(pid)) and status(pid) =~ pattern end)
+    status(pid)
   end
 
-  test "/agents opens a manager that lists each agent with what decides it" do
+  test "/agents opens the picker at the manager's density, each agent with what decides it" do
     ws = tmp_workspace(%{".troupe/agents/careful.md" => @careful})
     {sid, _, _} = start_session!(workspace: ws, script: [{:text, "done"}])
     {pid, session} = ready(sid)
@@ -97,13 +121,13 @@ defmodule Troupe.AgentsManagerTest do
     open_page(pid)
     text = screen_text(pid, session)
 
-    # Built-ins and the repository's own, each with its layer; `worktree` is a command, not
-    # an agent (D107).
-    assert text =~ ~r/build\s+built-in/
-    assert text =~ ~r/plan\s+built-in/
-    assert text =~ ~r/careful\s+repository/
-    refute text =~ ~r/worktree\s+built-in/
-    refute Enum.any?(page(pid).rows, &(&1["name"] == "worktree"))
+    # Built-ins and the repository's own, each with where it comes from in the four words;
+    # `worktree` is a command, not an agent (D107).
+    assert text =~ ~r/build +(● *)?Shipped +· primary/u
+    assert text =~ ~r/plan +Shipped +· primary/
+    assert text =~ ~r/careful +This repository's +· primary/
+    refute text =~ ~r/worktree +Shipped/
+    refute Enum.any?(picker(pid).rows, &(&1["name"] == "worktree"))
 
     # The model, the tool count, the read-only badge and the cap on turns.
     assert text =~ ~r/careful .*fake-model/
@@ -154,13 +178,13 @@ defmodule Troupe.AgentsManagerTest do
     {pid, session} = ready(sid)
     open_page(pid)
     select(pid, "plan")
-    builtin = page(pid).details["plan"]["text"]
+    builtin = picker(pid).details["plan"]["text"]
 
     press(pid, "c")
     status = await_status(pid, "plan")
     assert status =~ "created plan in this repository"
     assert File.read!(Path.join(ws, ".troupe/agents/plan.md")) == builtin
-    assert screen_text(pid, session) =~ ~r/plan\s+repository/
+    assert screen_text(pid, session) =~ ~r/plan +This repository's/
 
     # The palette's row says so too: its rows are read again after a write.
     assert user_state(pid).agent_rows["plan"]["layer"] == "project"
@@ -181,7 +205,7 @@ defmodule Troupe.AgentsManagerTest do
     assert status =~ "deleted plan from this repository"
     assert status =~ "plan now answers from the built-ins"
     refute File.exists?(Path.join(ws, ".troupe/agents/plan.md"))
-    assert screen_text(pid, session) =~ ~r/plan\s+built-in/
+    assert screen_text(pid, session) =~ ~r/plan +Shipped/
   end
 
   test "an edit the daemon refuses is shown at once and kept; the fixed edit is saved" do
@@ -220,7 +244,10 @@ defmodule Troupe.AgentsManagerTest do
     status = await_status(pid, "replaced")
     assert status =~ "replaced careful in this repository"
     assert File.read!(Path.join(ws, ".troupe/agents/careful.md")) == @careful
-    refute Map.has_key?(page(pid).kept, "careful")
+
+    # Saved, the picker is back, on the agent saved.
+    assert user_state(pid).focus == :switcher
+    assert Enum.at(picker(pid).rows, picker(pid).cursor)["name"] == "careful"
   end
 
   test "a save that adds an auto says so and asks once; one that moves it out of trust's reach too" do
@@ -268,25 +295,29 @@ defmodule Troupe.AgentsManagerTest do
     assert File.read!(user_file) =~ "shell: auto"
   end
 
-  test "n starts a new agent from a template, saved where the person picks" do
+  # New from a template (#594): `n` on the agent selected, a built-in here, copies its file
+  # under a new name into the layer the person picks, and the picker comes back on it,
+  # Enter or b starting on it.
+  test "n makes a new agent from the one selected, saved where the person picks, then started on" do
     {sid, _, _} = start_session!(script: [])
-    {pid, _session} = ready(sid)
+    {pid, session} = ready(sid)
     open_page(pid)
+    select(pid, "plan")
+    plan = picker(pid).details["plan"]["text"]
 
     user_file = Path.join([System.get_env("TROUPE_CONFIG_HOME"), "agents", "scribe.md"])
     on_exit(fn -> File.rm(user_file) end)
 
-    editor(
-      &String.replace(&1, "What scribe is for, in one line; the palette shows it.", "Writes notes.")
-    )
+    editor(&String.replace(&1, ~r/^description: .*$/m, "description: Writes notes.", global: false))
 
     press(pid, "n")
-    assert user_state(pid).agents_page.ask.kind == :name
+    assert %{kind: :name, from: "plan"} = page(pid).ask
+    assert screen_text(pid, session) =~ "new agent from plan"
     type(pid, "scribe")
     press(pid, "enter")
 
-    assert_receive {:editor_opened, template}, 5_000
-    assert template == Agents.template("scribe")
+    # The editor opens on plan's own file, to be made what the new one is for.
+    assert_receive {:editor_opened, ^plan}, 5_000
     eventually(fn -> match?(%{kind: :save, name: "scribe"}, page(pid).ask) end)
 
     # A new agent has no layer yet: Enter waits for one to be picked.
@@ -294,15 +325,44 @@ defmodule Troupe.AgentsManagerTest do
     assert match?(%{kind: :save}, page(pid).ask)
     press(pid, "m")
 
-    await_status(pid, "created scribe in your agents")
+    status = await_status(pid, "created scribe in your agents")
+    assert status =~ "b starts a branch on scribe"
     assert File.read!(user_file) =~ "description: Writes notes."
-    assert Enum.any?(page(pid).rows, &(&1["name"] == "scribe" and &1["layer"] == "user"))
+    assert File.read!(user_file) =~ "You are Troupe's plan agent"
 
-    # The palette has it as an agent row at once.
+    # Back on the picker, on the new agent, which the palette has as an agent row at once.
+    assert user_state(pid).focus == :switcher
+    assert %{"name" => "scribe", "layer" => "user"} = Enum.at(picker(pid).rows, picker(pid).cursor)
+
     assert Enum.any?(
              user_state(pid).commands,
              &(&1["name"] == "scribe" and &1["source"] == "agent")
            )
+
+    # Saved, then started: b, then where it works.
+    press(pid, "b")
+    press(pid, "c")
+    assert user_state(pid).focus == :command
+    assert %{agent: "scribe", where: :checkout} = user_state(pid).choice
+  end
+
+  test "n on a file left unchanged still saves the copy: a copy of one that works is an agent" do
+    ws = tmp_workspace(%{".troupe/agents/careful.md" => @careful})
+    {sid, _, _} = start_session!(workspace: ws, script: [])
+    {pid, _session} = ready(sid)
+    open_page(pid)
+    select(pid, "careful")
+
+    editor(& &1)
+    press(pid, "n")
+    type(pid, "wary")
+    press(pid, "enter")
+    assert_receive {:editor_opened, @careful}, 5_000
+    eventually(fn -> match?(%{kind: :save, name: "wary"}, page(pid).ask) end)
+    press(pid, "r")
+
+    await_status(pid, "created wary in this repository")
+    assert File.read!(Path.join(ws, ".troupe/agents/wary.md")) == @careful
   end
 
   test "an editor that leaves the file as it was saves nothing" do
@@ -353,14 +413,15 @@ defmodule Troupe.AgentsManagerTest do
 
       open_page(pid)
       text = screen_text(pid, session)
-      assert text =~ ~r/build\s+bundle/
+      assert text =~ ~r/build +(● *)?Your organisation's/u
       assert text =~ "read-only here"
       assert text =~ "On a pod the agents come from the profile's bundle"
 
       for code <- ["e", "c", "x", "n"] do
         press(pid, code)
-        assert page(pid).status =~ "On a pod the agents come from the profile's bundle"
-        assert page(pid).ask == nil
+        assert picker(pid).status =~ "On a pod the agents come from the profile's bundle"
+        assert user_state(pid).focus == :switcher
+        assert page(pid) == nil
       end
 
       refute Enum.any?(FakeRemote.calls(remote), &match?({"agents.put", _}, &1))

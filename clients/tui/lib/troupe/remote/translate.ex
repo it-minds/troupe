@@ -120,7 +120,19 @@ defmodule Troupe.Remote.Translate do
       "watch_notice" ->
         {[transient(session_id, agent, :notice, %{text: to_string(data["message"] || "")})], memory}
 
-      type when type in ["presence", "summary_diff"] ->
+      # Who joined and who left, and from where (root #58): `via` is `plane` for somebody
+      # steering a laptop's session from another device.
+      "presence" ->
+        {[
+           transient(session_id, agent, :presence, %{
+             subject: data["subject"],
+             name: data["display_name"] || data["subject"],
+             state: data["state"],
+             via: data["via"]
+           })
+         ], memory}
+
+      "summary_diff" ->
         {[], memory}
 
       other ->
@@ -427,6 +439,15 @@ defmodule Troupe.Remote.Translate do
       # organisation's output ceiling shortened the thinking): the harness's sentence.
       "config_note" ->
         {[emit.(:remote_note, %{text: to_string(data["message"] || "a setting was held")})], memory}
+
+      # The organisation's memory changed while the session ran (root issue #55): a save on
+      # the plane reached it, and this turn read the new versions. The harness's sentence.
+      "memory_changed" ->
+        {[
+           emit.(:remote_note, %{
+             text: to_string(data["message"] || "the organisation's memory changed")
+           })
+         ], memory}
 
       # A saved `AI!` or `AI?` comment started a branch of this session (root Decision 844):
       # the branch's session, its agent, and the comments, as the daemon wrote them.

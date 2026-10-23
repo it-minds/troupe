@@ -55,6 +55,34 @@ describe("the GitHub App", () => {
     await sees("Not tried: GitHub did not pass.");
   });
 
+  // #653: the App tested for a chosen repository: what an installation token there can do,
+  // minted and revoked by the plane, with no token anywhere on the page.
+  it("is tested for a chosen repository, showing what a token there can do and never the token", async () => {
+    await open();
+    type(await waitFor(() => field("Repository"), "the repository field"), "example-org/widgets");
+    button("Test it")!.click();
+    await waitFor(() => says("A token for example-org/widgets was minted and revoked."), "the repository's check");
+    const table = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="What a token for example-org/widgets can do"]'), "what the token can do");
+    const rows = [...table.querySelectorAll<HTMLTableRowElement>("tbody tr")].map((r) => `${r.cells[0]?.textContent ?? ""}: ${r.cells[1]?.textContent ?? ""}`);
+    expect(rows.slice(0, 3)).toEqual(["Contents: write", "Pull requests: write", "Checks: read"]);
+    expect(rows).toContain("issues: read");
+    await sees("(installation 77001) was minted and revoked at once", table);
+    expect(says("ghs_")).toBe(false);
+    expect(fake.admin.audit.some((a) => a.action.startsWith("github."))).toBe(false);
+
+    // An owner the App is not installed for: the fifth check says so, and nothing was minted.
+    type(field("Repository")!, "elsewhere/widgets");
+    button("Test it")!.click();
+    await waitFor(() => says("The App has no installation for elsewhere: it is installed for example-org."), "the refusal");
+    expect(document.querySelector('[aria-label^="What a token for"]')).toBeNull();
+
+    // With a check before it failing, it is not tried.
+    fake.admin.githubKnows!.fingerprint = "SHA256:another";
+    button("Test it")!.click();
+    await waitFor(() => says("Not tried: GitHub did not pass."), "the earlier failure");
+    await waitFor(() => [...document.querySelectorAll(".checks li")].some((li) => li.textContent?.includes("Repository") && li.textContent.includes("Not tried")), "the repository not tried");
+  });
+
   it("is changed behind a preview, the key pasted once and kept nowhere, and shown as the audit recorded it", async () => {
     await open();
     (await waitFor(() => button("Change the App"), "the App")).click();
@@ -179,6 +207,46 @@ describe("the plane's signing key (#657)", () => {
     await waitFor(() => says("SHA256:fake-plane-key-1"), "the key");
     expect(button("Rotate the key")).toBeNull();
     await sees("Only a platform admin rotates the key");
+  });
+});
+
+describe("the releases kept on this plane (#657)", () => {
+  const releases = (): HTMLElement => document.querySelector<HTMLElement>('[aria-label="Releases kept on this plane"]')!;
+  const row = (version: string) => [...releases().querySelectorAll("tr")].find((r) => r.cells[0]?.textContent === version) ?? null;
+
+  it("lists what is mirrored, and a platform admin mirrors a release by its version, audited", async () => {
+    fake.admin.releases = [{ version: "0.23.0-beta", state: "mirrored", files: 14 }];
+    fake.admin.releaseUrl = "https://plane.example.test/downloads";
+    await open();
+    await waitFor(() => row("0.23.0-beta"), "the mirrored release");
+    await sees("Mirrored", () => row("0.23.0-beta"));
+    await sees("https://github.com/it-minds/troupe/releases/download", releases());
+    await sees("https://plane.example.test/downloads", releases());
+
+    type(field("Release to mirror")!, "v0.24.0-beta");
+    button("Mirror the release", releases())!.click();
+    await waitFor(() => says("Recorded in the audit as release.mirror on v0.24.0-beta"), "the audit's note");
+    await waitFor(() => row("0.24.0-beta"), "the release being copied");
+    await sees("Being copied", () => row("0.24.0-beta"));
+    expect(fake.admin.audit.some((a) => a.action === "release.mirror")).toBe(true);
+  });
+
+  it("says the plane's sentence for a manifest the release keys did not sign, and mirrors nothing", async () => {
+    fake.admin.unsignedReleases.add("0.24.0-beta");
+    await open();
+    await waitFor(() => field("Release to mirror"), "the form");
+    type(field("Release to mirror")!, "0.24.0-beta");
+    button("Mirror the release", releases())!.click();
+    await waitFor(() => says("it is not the release key's, and nothing is mirrored"), "the refusal");
+    expect(row("0.24.0-beta")).toBeNull();
+    expect(fake.admin.audit.some((a) => a.action === "release.mirror")).toBe(false);
+  });
+
+  it("is read by a team admin, who cannot mirror one", async () => {
+    await open(PEOPLE.bob);
+    await waitFor(() => says("No release is in this plane's object store yet."), "the releases");
+    expect(field("Release to mirror")).toBeNull();
+    await sees("Only a platform admin mirrors a release");
   });
 });
 
