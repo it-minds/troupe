@@ -428,6 +428,57 @@ defmodule Troupe.Plane.TriggerIngressTest do
       assert length(Triggers.runs(context.team)) == 2
     end
 
+    # A run whose request ended between its row and its session counted as live for good,
+    # so the cap it held was never given back.
+    test "a run left with no session is ended by the plane, said why and audited", context do
+      trigger = trigger!(context, %{"name" => "triage"})
+      {:ok, key} = Admin.trigger_key_rotate(context.actor, "engineering", "triage")
+
+      assert {:ok, first} = fire(context, trigger, key.key, %{}, "delivery-1")
+      long_ago = DateTime.add(DateTime.utc_now(), -11 * 60, :second)
+
+      stuck =
+        Repo.update!(
+          Ecto.Changeset.change(Repo.get!(Run, first.body["run"]["id"]),
+            session_id: nil,
+            updated_at: long_ago
+          )
+        )
+
+      assert {:ok, %{status: 202, body: %{"state" => "skipped"}}} =
+               fire(context, trigger, key.key, %{}, "delivery-2")
+
+      # One still making its session a moment ago is left to make it.
+      assert {:ok, making} = fire(context, trigger, key.key, %{}, "delivery-3")
+
+      making =
+        Repo.update!(
+          Ecto.Changeset.change(Repo.get!(Run, making.body["run"]["id"]),
+            state: "created",
+            session_id: nil
+          )
+        )
+
+      assert [ended] = Triggers.end_unmade()
+      assert ended.id == stuck.id
+      assert %Run{state: "failed", reason: reason} = Repo.get!(Run, stuck.id)
+      assert reason =~ "no session"
+      assert %Run{state: "created", session_id: nil} = Repo.get!(Run, making.id)
+
+      assert [entry] =
+               Troupe.Plane.Audit.list(actor: "scheduler")
+               |> Enum.filter(&(&1.action == "trigger.run.end"))
+
+      assert entry.subject_id == "engineering/triage"
+      assert entry.detail["run"] == stuck.id
+
+      # It holds no place now, and a retry of it is a firing the cap counts.
+      Repo.delete!(Repo.get!(Run, making.id))
+      assert {:ok, %{status: 202} = again} = fire(context, trigger, key.key, %{}, "delivery-1")
+      assert again.body["run"]["id"] == stuck.id
+      assert is_binary(again.body["session_id"])
+    end
+
     test "refuses a disabled trigger, and a body too large to be a record", context do
       trigger = trigger!(context, %{"name" => "triage"})
       {:ok, key} = Admin.trigger_key_rotate(context.actor, "engineering", "triage")
@@ -439,6 +490,45 @@ defmodule Troupe.Plane.TriggerIngressTest do
       assert {:ok, %{status: 403}} = fire(context, trigger, key.key, %{})
 
       assert Triggers.runs(context.team) == []
+    end
+  end
+
+  describe "the cap" do
+    # Each counted the others' runs before any had decided, so all of them were skipped.
+    test "starts one of the firings with keys of their own that race on a concurrency of one",
+         context do
+      for n <- 1..4 do
+        trigger = trigger!(context, %{"name" => "triage-#{n}"})
+
+        answers =
+          1..3
+          |> Enum.map(fn i ->
+            Task.async(fn -> Triggers.fire(trigger, "api", "k-#{n}-#{i}", %{"i" => i}, "ci") end)
+          end)
+          |> Task.await_many(30_000)
+
+        started = for {:ok, %{run: %Run{session_id: id}}} when is_binary(id) <- answers, do: id
+        assert length(started) == 1, "started #{length(started)}: #{inspect(answers)}"
+        assert length(Triggers.runs(context.team, trigger: "triage-#{n}")) == 3
+      end
+    end
+
+    # A failed create's retry made its session without counting, beside the run that
+    # had taken the place since.
+    test "counts the retry of a run whose create failed", context do
+      trigger = trigger!(context, %{"name" => "triage"})
+
+      assert {:ok, first} = Triggers.fire(trigger, "api", "k-1", %{}, "ci")
+      Repo.update!(Ecto.Changeset.change(first.run, state: "failed", session_id: nil))
+
+      assert {:ok, second} = Triggers.fire(trigger, "api", "k-2", %{}, "ci")
+      assert is_binary(second.run.session_id)
+
+      assert {:ok, retried} = Triggers.fire(trigger, "api", "k-1", %{}, "ci")
+      assert retried.run.id == first.run.id
+      assert retried.run.state == "skipped"
+      assert retried.run.reason =~ "concurrency"
+      assert is_nil(retried.run.session_id)
     end
   end
 

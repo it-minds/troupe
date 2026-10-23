@@ -26,7 +26,7 @@ defmodule Troupe.Plane.Triggers do
 
   alias Troupe.Plane.GitHub.Issue
   alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
-  alias Troupe.Plane.{Harness, Identity, Principals, Repo, Sessions}
+  alias Troupe.Plane.{Audit, Harness, Identity, Principals, Repo, Sessions}
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Plane.Triggers.{Notify, Revision, Run, Template, Trigger}
@@ -505,6 +505,16 @@ defmodule Troupe.Plane.Triggers do
   @making_ms 5_000
   @making_poll_ms 50
 
+  # The transaction lock every decision on a run on a GitHub repository is counted under:
+  # its profile's and its team's caps are across triggers, which no one trigger's row
+  # covers. An arbitrary constant, named rather than inlined.
+  @repository_runs_lock 7_461_933_012
+
+  # How long a run may sit with no session before the plane ends it (`end_unmade/1`). A
+  # create is a few writes and a placement, seconds; a run with none after ten minutes is
+  # one whose request ended between its row and its session.
+  @unmade_seconds 600
+
   @type fired :: %{
           trigger: Trigger.t(),
           revision: Revision.t(),
@@ -569,18 +579,35 @@ defmodule Troupe.Plane.Triggers do
   """
   @spec fire_in_window(Trigger.t(), String.t(), map(), String.t(), DateTime.t()) ::
           {:ok, fired()} | {:error, Error.t()}
-  def fire_in_window(trigger, source, event, by, now \\ DateTime.utc_now())
+  def fire_in_window(trigger, source, event, by, now \\ DateTime.utc_now()),
+    do: windowed(trigger, source, nil, event, by, now)
 
-  def fire_in_window(%Trigger{enabled: false} = trigger, _source, _event, _by, _now),
+  @doc """
+  Fire a trigger by a person's hand: a firing within a minute of one before it under the
+  same `window` is that one's run, as for a webhook's retry in `fire_in_window/5`.
+
+  `window` names the person and what they asked for: the trigger for a run by hand
+  (`manual:<trigger>:<subject>:`), the trigger and the issue for the console's "fix this"
+  (`fix:<trigger>:<issue>:<subject>:`). A new run's key is the window and the instant it
+  fired. A second click, or a retry of a call whose answer was lost, is the run the first
+  made on either side of the clock's minute, and a click a minute on is a run of its own.
+  """
+  @spec fire_by_hand(Trigger.t(), String.t(), map(), String.t(), DateTime.t()) ::
+          {:ok, fired()} | {:error, Error.t()}
+  def fire_by_hand(trigger, window, event, by, now \\ DateTime.utc_now()) when is_binary(window),
+    do: windowed(trigger, "manual", window, event, by, now)
+
+  defp windowed(%Trigger{enabled: false} = trigger, _source, _window, _event, _by, _now),
     do: {:error, disabled(trigger)}
 
-  def fire_in_window(%Trigger{} = trigger, source, event, by, %DateTime{} = now)
-      when is_binary(source) and is_map(event) do
+  defp windowed(%Trigger{} = trigger, source, window, event, by, %DateTime{} = now)
+       when is_binary(source) and is_map(event) do
     with :ok <- check_source(source),
          :ok <- check_event(event) do
       {:ok, revision} = revise(trigger)
+      window = window || "#{source}:#{trigger.id}:#{revision.hash}:"
 
-      case window_run(trigger, revision, source, event, by, now) do
+      case window_run(trigger, revision, source, window, event, by, now) do
         {:ok, {:repeat, run}} ->
           replay(trigger, run)
 
@@ -595,43 +622,49 @@ defmodule Troupe.Plane.Triggers do
 
   # Under the trigger's row, so the firing that comes second, by a moment or across a
   # minute's turn, reads the run the first wrote.
-  defp window_run(trigger, revision, source, event, by, now) do
-    Repo.transaction(fn -> locked_window_run(trigger, revision, source, event, by, now) end)
+  defp window_run(trigger, revision, source, window, event, by, now) do
+    Repo.transaction(fn ->
+      lock(trigger)
+
+      with nil <- in_window(trigger, window, now),
+           key = window <> DateTime.to_iso8601(now),
+           {:ok, run} <- insert_run(trigger, revision, source, key, event, by, now) do
+        {:new, run}
+      else
+        %Run{} = run -> {:repeat, run}
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
   end
 
-  defp locked_window_run(trigger, revision, source, event, by, now) do
+  defp lock(trigger) do
     _locked =
       Repo.one(from(t in Trigger, where: t.id == ^trigger.id, select: t.id, lock: "FOR UPDATE"))
 
-    window = "#{source}:#{trigger.id}:#{revision.hash}:"
-
-    with nil <- in_window(trigger, window, now),
-         key = window <> DateTime.to_iso8601(now),
-         {:ok, run} <- insert_run(trigger, revision, source, key, event, by, now) do
-      {:new, run}
-    else
-      %Run{} = run -> {:repeat, run}
-      {:error, changeset} -> Repo.rollback(changeset)
-    end
+    :ok
   end
 
-  # The latest firing of this trigger and revision without a key of its own, within a
-  # minute before `now` or after it: one that took the lock first may have read the clock
-  # after this one did. The window keys before these were the minute's, under the same
-  # prefix, so a firing from just before an upgrade is found as well.
+  # The latest firing of this trigger under the window, within a minute before `now` or
+  # after it: one that took the lock first may have read the clock after this one did. The
+  # window keys before these were the minute's, under the same prefix, so a firing from just
+  # before an upgrade is found as well. What follows the prefix is an instant, so a person
+  # whose subject is another's and more (`ab` and `ab:c`) has a window of their own.
   defp in_window(trigger, window, now) do
     since = DateTime.add(now, -@window_seconds, :second)
 
-    Repo.one(
-      from(r in Run,
-        where:
-          r.trigger_id == ^trigger.id and r.fired_at > ^since and
-            like(r.idempotency_key, ^(window <> "%")),
-        order_by: [desc: r.fired_at],
-        limit: 1
-      )
+    from(r in Run,
+      where:
+        r.trigger_id == ^trigger.id and r.fired_at > ^since and
+          like(r.idempotency_key, ^(like_escaped(window) <> "%")),
+      order_by: [desc: r.fired_at]
     )
+    |> Repo.all()
+    |> Enum.find(&instant?(String.replace_prefix(&1.idempotency_key, window, "")))
   end
+
+  defp like_escaped(text), do: String.replace(text, ["\\", "%", "_"], &("\\" <> &1))
+
+  defp instant?(text), do: match?({:ok, _at, _offset}, DateTime.from_iso8601(text))
 
   defp disabled(trigger),
     do: Error.new(:forbidden, %{reason: "trigger is disabled", trigger: trigger.name})
@@ -670,16 +703,39 @@ defmodule Troupe.Plane.Triggers do
   end
 
   defp start(trigger, revision, run) do
-    cond do
-      live_runs(trigger, run) >= revision.concurrency ->
-        skip(trigger, revision, run, concurrency_reason(trigger, revision.concurrency))
-
-      over = over_repository_cap(trigger, revision, run) ->
-        skip(trigger, revision, run, over)
-
-      true ->
-        create(trigger, revision, run)
+    case admit(trigger, revision, run) do
+      {:ok, %Run{} = run} -> create(trigger, revision, run)
+      {:ok, {:skipped, run, why}} -> skipped(trigger, revision, run, why)
     end
+  end
+
+  # Counted under the trigger's row, and a run on a repository under the lock its caps are
+  # counted under across triggers as well, so firings that race are decided one after the
+  # other: each counts the runs of the others still deciding as live, and one decided
+  # skipped as not. Counted apart, each could count the others and none would start. A run
+  # admitted is live from here until its session is made or its create fails, the retry
+  # of a failed one included.
+  defp admit(trigger, revision, run) do
+    Repo.transaction(fn ->
+      lock(trigger)
+
+      if Issue.repository?(trigger.source),
+        do: Repo.query!("SELECT pg_advisory_xact_lock($1)", [@repository_runs_lock])
+
+      cond do
+        live_runs(trigger, run) >= revision.concurrency ->
+          skip(run, concurrency_reason(trigger, revision.concurrency))
+
+        over = over_repository_cap(trigger, revision, run) ->
+          skip(run, over)
+
+        run.state == "created" ->
+          run
+
+        true ->
+          run |> Run.changeset(%{state: "created"}) |> Repo.update!()
+      end
+    end)
   end
 
   # Live is created, running or waiting: a session still to start, one thinking or
@@ -741,8 +797,11 @@ defmodule Troupe.Plane.Triggers do
 
   # The run keeps why it started nothing, so the Runs screen and a delivery's outcome can
   # say it, and not only the plane's log.
-  defp skip(trigger, revision, run, why) do
-    {:ok, run} = run |> Run.changeset(%{state: "skipped", reason: why}) |> Repo.update()
+  defp skip(run, why) do
+    {:skipped, run |> Run.changeset(%{state: "skipped", reason: why}) |> Repo.update!(), why}
+  end
+
+  defp skipped(trigger, revision, run, why) do
     Logger.info("troupe plane: trigger #{trigger.name} fired over a cap (#{why}); skipped")
     {:ok, fired(trigger, revision, run, nil, nil)}
   end
@@ -781,7 +840,8 @@ defmodule Troupe.Plane.Triggers do
     end
   end
 
-  # The same key again. A skipped run stays skipped; a failed one is retried; a run with
+  # The same key again. A skipped run stays skipped; a failed one is retried, counted
+  # against the caps as a firing is, so its session is not one past them; a run with
   # a session is handed that session and a token minted now, because the one minted the
   # first time has almost certainly expired.
   #
@@ -795,7 +855,7 @@ defmodule Troupe.Plane.Triggers do
   end
 
   defp replay(trigger, revision, %Run{state: "failed", session_id: nil} = run) do
-    create(trigger, revision, run)
+    start(trigger, revision, run)
   end
 
   # Neither skipped nor failed and no session yet: the firing that wrote it is making its
@@ -836,6 +896,51 @@ defmodule Troupe.Plane.Triggers do
       nil ->
         run
     end
+  end
+
+  @doc """
+  End every run that has had no session for ten minutes. Its request ended between the
+  run's row and its session, a crash or a replica going down, and nothing else would end
+  it: it held a place against its trigger's cap for good, and a repeat of it was told it
+  was still starting its session. Ended `failed`, the reason on the row, and audited; the
+  next call with its key makes its session, as after any create that failed. The
+  scheduler's tick runs this. Answers the runs it ended.
+  """
+  @spec end_unmade(DateTime.t()) :: [Run.t()]
+  def end_unmade(now \\ DateTime.utc_now()) do
+    since = DateTime.add(now, -@unmade_seconds, :second)
+
+    reason =
+      "no session was made for it in #{div(@unmade_seconds, 60)} minutes: the request that " <>
+        "fired it ended first, and the plane ended the run"
+
+    from(r in Run,
+      where: r.state == "created" and is_nil(r.session_id) and r.updated_at < ^since,
+      preload: [trigger: :team]
+    )
+    |> Repo.all()
+    # Only where it is still so: a create that finished late has made its session.
+    |> Enum.filter(fn run ->
+      {ended, _} =
+        Repo.update_all(
+          from(r in Run,
+            where: r.id == ^run.id and r.state == "created" and is_nil(r.session_id)
+          ),
+          set: [state: "failed", reason: reason, updated_at: now]
+        )
+
+      ended == 1
+    end)
+    |> Enum.map(fn %Run{trigger: trigger} = run ->
+      {:ok, _} =
+        Audit.record("scheduler", "trigger.run.end", "#{trigger.team.name}/#{trigger.name}", %{
+          "run" => run.id,
+          "reason" => reason
+        })
+
+      Logger.warning("troupe plane: trigger #{trigger.name}'s run #{run.id} ended: #{reason}")
+      %{run | state: "failed", reason: reason}
+    end)
   end
 
   defp fired(trigger, revision, run, session, endpoint) do
