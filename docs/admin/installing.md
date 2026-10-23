@@ -46,7 +46,7 @@ Create the Secrets the chart expects before installing ([configuration.md Part D
 ## 2. CRDs, then the chart
 
 ```bash
-version=0.15.0-beta     # a release: https://github.com/it-minds/troupe/releases
+version=X.Y.Z-beta     # the release you install: https://github.com/it-minds/troupe/releases
 chart=oci://ghcr.io/it-minds/charts/troupe
 helm show crds "$chart" --version "$version" | kubectl apply --server-side -f -
 helm upgrade --install troupe "$chart" --version "$version" \
@@ -236,7 +236,7 @@ spec:
   securityContext: {runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000}
   containers:
     - name: worker
-      image: ghcr.io/it-minds/troupe-worker:0.17.0-beta   # the release you install
+      image: ghcr.io/it-minds/troupe-worker:X.Y.Z-beta   # the release you install
       command: ["sleep", "600"]
       securityContext:
         allowPrivilegeEscalation: false
