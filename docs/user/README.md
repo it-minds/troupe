@@ -150,9 +150,15 @@ bea@example.com`), or only follow it (`cy@example.com:observe`). Your machine ke
 connection to the plane while it is offered and nothing listens on it; your rules and
 approvals hold for every prompt, and an approval answered from elsewhere is for that one
 call. Elsewhere it is listed as *Remote*, with *Offline since …* while your machine is
-away. `/steer off`, or *Withdraw*, ends every remote view at once. The connection rides
-your client's sign-in, so with no client signed in on your machine it goes offline when
-that sign-in runs out. A private session is never offered.
+away; in the terminal, HQ (`/remote`) lists the sessions offered to you beside the plane's,
+as `laptop` rows, and opens one to steer it. Who joins and leaves is said in the session's
+window, and the status line names who is there. At your first offer the daemon signs in
+for itself and keeps that sign-in in your computer's credential store, so the offer stays
+online after you close the terminal or the app, and the daemon does not stop while
+something is offered. `/steer off`, or *Withdraw*, ends every remote view at once; with
+the last one withdrawn, signing out or `troupe logout`, the daemon lets its sign-in go.
+Your team's administrators may turn offering off for the team. A private session is never
+offered.
 
 **Agent.** A session starts with `build`, or `plan` for a proposal first, which may
 delegate to others, waiting for each or letting it work in the background while it goes

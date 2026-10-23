@@ -45,6 +45,7 @@ defmodule Mix.Tasks.Troupe.Xref do
       Troupe.Protocol.PlaneSignature                what a plane signs, and how a signed answer reads
       Troupe.OwnerOnly                              a file its owner alone may read, as the daemon's own are
       Troupe.Protocol.ProviderTypes                 the provider types a person picks from, and what each asks
+      Troupe.Keyring.Steering                       the daemon's sign-in for steering, forgotten at a logout with no daemon
 
   A new call into, say, the agent tree or the session log fails here, and the way to add
   one is to put it in the protocol. What the import table cannot see is a module named as
@@ -91,7 +92,8 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.PlaneKeys,
     Troupe.Protocol.PlaneSignature,
     Troupe.OwnerOnly,
-    Troupe.Protocol.ProviderTypes
+    Troupe.Protocol.ProviderTypes,
+    Troupe.Keyring.Steering
   ]
 
   @impl true
