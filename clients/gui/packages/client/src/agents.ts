@@ -270,9 +270,11 @@ export interface AgentFields {
   budget_share: string;
   /** `all`, or the names; empty is none, which is what no `skills:` means. */
   skills: "all" | string[];
+  /** A subagent's: `ask` asks the person before a delegation to it runs; empty is `auto`, which runs it at once. */
+  delegation: string;
 }
 
-const FIELD_ORDER: Array<keyof AgentFields> = ["description", "mode", "model", "tools", "permissions", "max_turns", "budget_share", "skills"];
+const FIELD_ORDER: Array<keyof AgentFields> = ["description", "mode", "model", "tools", "permissions", "max_turns", "budget_share", "skills", "delegation"];
 
 /** One top-level key of the frontmatter and its lines as the file has them; `key` is empty for what comes before the first. */
 interface Entry {
@@ -390,7 +392,7 @@ function valueOf(entry: Entry): Read<string | string[] | Record<string, string> 
   return { ok: false };
 }
 
-const EMPTY: AgentFields = { description: "", mode: "", model: "", tools: "all", permissions: {}, max_turns: "", budget_share: "", skills: [] };
+const EMPTY: AgentFields = { description: "", mode: "", model: "", tools: "all", permissions: {}, max_turns: "", budget_share: "", skills: [], delegation: "" };
 
 /** Read a definition's text into the form's fields, and say what the form cannot read. */
 export function parseAgent(text: string): AgentSource {

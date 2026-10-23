@@ -43,30 +43,55 @@ defmodule Troupe.AgentsMendTest do
     {pid, session}
   end
 
+  # `/agents` is the agent picker at the manager's density (#594), the files not read
+  # after the agents; what its keys do to one is the manager's page, which comes back.
   defp open_page(pid) do
     type(pid, "/agents")
     press(pid, "enter")
-    assert user_state(pid).focus == :agents
+    assert user_state(pid).focus == :switcher
   end
 
+  defp picker(pid), do: user_state(pid).switcher
   defp page(pid), do: user_state(pid).agents_page
 
   defp select(pid, kind, name) do
     press(pid, "home")
 
     Enum.reduce_while(1..40, nil, fn _, _ ->
-      case Enum.at(Agents.entries(page(pid)), page(pid).cursor) do
-        {^kind, %{"name" => ^name}} ->
-          {:halt, :ok}
-
-        _ ->
-          press(pid, "down")
-          {:cont, nil}
+      if selected(pid) == {kind, name} do
+        {:halt, :ok}
+      else
+        press(pid, "down")
+        {:cont, nil}
       end
     end)
     |> case do
       :ok -> :ok
       nil -> flunk("no #{kind} #{name} on the page")
+    end
+  end
+
+  defp selected(pid) do
+    case user_state(pid).focus do
+      :agents ->
+        case Enum.at(Agents.entries(page(pid)), page(pid).cursor) do
+          {kind, %{"name" => name}} -> {kind, name}
+          _other -> nil
+        end
+
+      _picker ->
+        case Enum.at(picker(pid).rows, picker(pid).cursor) do
+          %{"skipped" => true, "name" => name} -> {:skipped, name}
+          %{"name" => name} -> {:agent, name}
+          _other -> nil
+        end
+    end
+  end
+
+  defp status(pid) do
+    case user_state(pid).focus do
+      :agents -> page(pid).status
+      _picker -> picker(pid) && picker(pid).status
     end
   end
 
@@ -82,8 +107,8 @@ defmodule Troupe.AgentsMendTest do
   end
 
   defp await_status(pid, pattern) do
-    eventually(fn -> is_binary(page(pid).status) and page(pid).status =~ pattern end)
-    page(pid).status
+    eventually(fn -> is_binary(status(pid)) and status(pid) =~ pattern end)
+    status(pid)
   end
 
   test "/agents lists the subagents too, each saying so, and one is copied into the repository" do
@@ -93,12 +118,18 @@ defmodule Troupe.AgentsMendTest do
     open_page(pid)
 
     for name <- ~w(explore general implementer reviewer) do
-      assert Enum.any?(page(pid).rows, &(&1["name"] == name and &1["mode"] == "subagent")),
+      assert Enum.any?(picker(pid).rows, &(&1["name"] == name and &1["mode"] == "subagent")),
              "#{name} is not listed"
     end
 
     text = screen_text(pid, session)
-    assert text =~ ~r/explore\s+built-in\s+subagent/
+    assert text =~ ~r/explore +Shipped +· subagent/
+
+    # Nothing starts a subagent: an agent hands work to it.
+    select(pid, :agent, "explore")
+    press(pid, "b")
+    assert picker(pid).status =~ "explore is a subagent"
+    assert picker(pid).step == :agent
 
     select(pid, :agent, "explore")
     assert screen_text(pid, session) =~ "subagent: an agent delegates to it"
@@ -106,7 +137,7 @@ defmodule Troupe.AgentsMendTest do
     press(pid, "c")
     assert await_status(pid, "explore") =~ "created explore in this repository"
     assert File.exists?(Path.join(ws, ".troupe/agents/explore.md"))
-    assert screen_text(pid, session) =~ ~r/explore\s+repository\s+subagent/
+    assert screen_text(pid, session) =~ ~r/explore +This repository's +· subagent/
   end
 
   test "a save over a file another client saved meanwhile is warned of, refused, then replaces it" do
@@ -178,8 +209,8 @@ defmodule Troupe.AgentsMendTest do
 
     assert await_status(pid, "review") =~ "replaced review in this repository"
     assert File.read!(file) == @mended
-    assert page(pid).skipped == []
-    assert Enum.any?(page(pid).rows, &(&1["name"] == "review"))
+    refute Enum.any?(picker(pid).rows, & &1["skipped"])
+    assert Enum.any?(picker(pid).rows, &(&1["name"] == "review" and &1["mode"] == "primary"))
   end
 
   test "a headless run prints the line the screen shows for a watch trigger" do

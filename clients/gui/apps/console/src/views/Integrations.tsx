@@ -24,7 +24,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { GitHubApp, GitHubAppChange, GitHubCheck, GitHubDelivery, IntegrationServer, Integrations as IntegrationsAnswer, SigningKey } from "@troupe/client";
+import type { GitHubApp, GitHubAppChange, GitHubCheck, GitHubDelivery, GitHubRepositoryTest, IntegrationServer, Integrations as IntegrationsAnswer, SigningKey } from "@troupe/client";
 import { describeError, show, useConsole, useLoad } from "../console";
 import { AuditNote, Checks, DetailList, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, changed, useChange, when } from "./bits";
 import type { DiffLine } from "./bits";
@@ -105,6 +105,42 @@ function changeOf(app: GitHubApp, form: AppForm): GitHubAppChange | null {
   return change;
 }
 
+// What the fix loop needs first, then whatever else the installation was given there.
+const FIRST_PERMISSIONS = ["contents", "pull_requests", "checks"];
+const PERMISSION_WORDS: Record<string, string> = { contents: "Contents", pull_requests: "Pull requests", checks: "Checks" };
+
+/**
+ * What an installation token minted for one repository could do there, as GitHub granted it.
+ * The token itself was revoked by the plane and is in no answer: nothing of it is shown.
+ */
+function TokenPermissions({ test }: { test: GitHubRepositoryTest }): JSX.Element {
+  const keys = [...FIRST_PERMISSIONS, ...Object.keys(test.permissions).filter((k) => !FIRST_PERMISSIONS.includes(k)).sort()];
+  return (
+    <div aria-label={`What a token for ${test.name} can do`}>
+      <p className="note">
+        A token for <span className="mono">{test.name}</span> (installation {test.installation_id}) was minted
+        {test.revoked ? " and revoked at once" : ", and GitHub did not confirm it revoked: it expires within the hour"}. It is never shown.
+      </p>
+      <table className="permissions">
+        <thead>
+          <tr>
+            <th scope="col">Permission</th>
+            <th scope="col">There</th>
+          </tr>
+        </thead>
+        <tbody>
+          {keys.map((k) => (
+            <tr key={k}>
+              <th scope="row">{PERMISSION_WORDS[k] ?? k.replace(/_/g, " ")}</th>
+              <td>{test.permissions[k] ?? "none"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function GitHubCard({ app, onApplied }: { app: GitHubApp; onApplied: () => void }): JSX.Element {
   const { admin, role } = useConsole();
   const platform = role === "platform_admin";
@@ -129,9 +165,10 @@ function GitHubCard({ app, onApplied }: { app: GitHubApp; onApplied: () => void 
   // On a gitops plane the App's ID, API URL and installations are a `GitHubApp` resource's.
   const locked = Boolean(app.gitops);
 
+  const [repository, setRepository] = useState("");
   const test = () => {
     setCheck({ state: "asking" });
-    admin.checkGithub().then(
+    admin.checkGithub(repository.trim() || undefined).then(
       (answer) => setCheck({ state: "done", answer }),
       (error: unknown) => setCheck({ state: "failed", error }),
     );
@@ -204,6 +241,17 @@ function GitHubCard({ app, onApplied }: { app: GitHubApp; onApplied: () => void 
       />
       {platform && !busy && (
         <div className="actions">
+          <label className="inline">
+            Repository <span className="hint">optional: owner/name, to see what a token there can do</span>
+            <input
+              value={repository}
+              onChange={(e) => setRepository(e.target.value)}
+              placeholder="acme/widgets"
+              spellCheck={false}
+              aria-label="Repository to test"
+              className="mono"
+            />
+          </label>
           <button type="button" onClick={test} disabled={check?.state === "asking"}>
             {check?.state === "asking" ? "Asking GitHub…" : "Test it"}
           </button>
@@ -222,6 +270,7 @@ function GitHubCard({ app, onApplied }: { app: GitHubApp; onApplied: () => void 
         <div className="check" role="status" aria-label="What GitHub said">
           <p>{check.answer.ok ? `GitHub knows the App${check.answer.app?.slug ? ` as ${check.answer.app.slug}` : ""}, and every installation set here.` : "The App does not work as set:"}</p>
           <Checks checks={check.answer.checks} />
+          {check.answer.repository && <TokenPermissions test={check.answer.repository} />}
         </div>
       )}
       {check?.state === "failed" && (

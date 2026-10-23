@@ -45,7 +45,17 @@ harness has, permissions that can apply, and the rest), refused in the same word
 `agent <name>: <what is wrong>`; what only a session can know, a model's provider or an MCP
 server's tool, is not checked. A version already published is not checked again, so one an
 older plane published still runs. The console's agent builder edits a bundle's agents as
-fields and asks `admin.agent.check` for one at a time (#594). A skill needs `SKILL.md`
+fields and asks `admin.agent.check` for one at a time (#594). It starts from the profile:
+a profile's page lists its agents as its bundle in effect has them (`admin.profile.agents`),
+each with its mode, model, who it hands work to, its cap on turns, what it runs without
+asking and which of the profile's teams may run it (a grant that allows other agents, or
+denies this one, says no), and opens the builder on the channel the agent came from. The
+builder edits the subagents beneath their primary and its delegations, per-tool
+permissions, `max_turns`, skills and a model picked from the ones the plane knows the
+provider serves (`admin.profile.choices` with the profile: its own model, the
+organisation's models for people's machines, the models its sessions have run on, and the
+ones its bundle names; the plane never asks a provider for its list). **Copy** starts a new
+agent from one Troupe ships or one already published. A skill needs `SKILL.md`
 (whose `name`, if present, must be its own), relative text files with no `..`, at most
 512 KiB. An MCP `url` is `https://`, or `http://` to a `.svc` host, and its host must pass
 the policy's egress check. Publishing to a channel a pod profile follows also refuses a

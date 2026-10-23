@@ -55,6 +55,34 @@ describe("the GitHub App", () => {
     await sees("Not tried: GitHub did not pass.");
   });
 
+  // #653: the App tested for a chosen repository: what an installation token there can do,
+  // minted and revoked by the plane, with no token anywhere on the page.
+  it("is tested for a chosen repository, showing what a token there can do and never the token", async () => {
+    await open();
+    type(await waitFor(() => field("Repository"), "the repository field"), "example-org/widgets");
+    button("Test it")!.click();
+    await waitFor(() => says("A token for example-org/widgets was minted and revoked."), "the repository's check");
+    const table = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="What a token for example-org/widgets can do"]'), "what the token can do");
+    const rows = [...table.querySelectorAll<HTMLTableRowElement>("tbody tr")].map((r) => `${r.cells[0]?.textContent ?? ""}: ${r.cells[1]?.textContent ?? ""}`);
+    expect(rows.slice(0, 3)).toEqual(["Contents: write", "Pull requests: write", "Checks: read"]);
+    expect(rows).toContain("issues: read");
+    await sees("(installation 77001) was minted and revoked at once", table);
+    expect(says("ghs_")).toBe(false);
+    expect(fake.admin.audit.some((a) => a.action.startsWith("github."))).toBe(false);
+
+    // An owner the App is not installed for: the fifth check says so, and nothing was minted.
+    type(field("Repository")!, "elsewhere/widgets");
+    button("Test it")!.click();
+    await waitFor(() => says("The App has no installation for elsewhere: it is installed for example-org."), "the refusal");
+    expect(document.querySelector('[aria-label^="What a token for"]')).toBeNull();
+
+    // With a check before it failing, it is not tried.
+    fake.admin.githubKnows!.fingerprint = "SHA256:another";
+    button("Test it")!.click();
+    await waitFor(() => says("Not tried: GitHub did not pass."), "the earlier failure");
+    await waitFor(() => [...document.querySelectorAll(".checks li")].some((li) => li.textContent?.includes("Repository") && li.textContent.includes("Not tried")), "the repository not tried");
+  });
+
   it("is changed behind a preview, the key pasted once and kept nowhere, and shown as the audit recorded it", async () => {
     await open();
     (await waitFor(() => button("Change the App"), "the App")).click();

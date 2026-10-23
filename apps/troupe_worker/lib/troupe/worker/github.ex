@@ -20,7 +20,8 @@ defmodule Troupe.Worker.GitHub do
     person has pushed to since is left as it is.
   - **The App's bot's commits, with the session named.** The commit is made through
     GitHub's API with no author given, so it is the App's bot's and GitHub signs it; its
-    message ends with a `Troupe-Session:` trailer, and one the agent wrote is taken out.
+    message ends with a `Troupe-Session:` trailer and a `Requested-By:` naming who the run
+    is for, as the plane says, and either one the agent wrote is taken out.
   - **A draft, and never a merge or an approval.** `pr_open` opens a draft or nothing;
     nothing here can merge, approve, mark ready, close or delete a branch.
   - **Three red rounds, then stop.** A round is the CI of a commit the session pushed to
@@ -146,8 +147,8 @@ defmodule Troupe.Worker.GitHub do
   def push(session_id, root, message, branch, opts \\ []) do
     one_at_a_time(session_id, fn ->
       with {:ok, _repository} <- repository(session_id),
-           {:ok, message} <- commit_message(message, session_id),
-           {:ok, %{"github" => record}} <- record(session_id, %{}, opts),
+           {:ok, %{"github" => record} = answer} <- record(session_id, %{}, opts),
+           {:ok, message} <- commit_message(message, session_id, answer["requested_by"]),
            :ok <- open_for_pushes(record),
            {:ok, record} <- with_base(session_id, record, root, opts),
            {:ok, branch} <- branch_for(branch, record, session_id),
@@ -189,21 +190,39 @@ defmodule Troupe.Worker.GitHub do
     end)
   end
 
-  defp commit_message(message, session_id) when is_binary(message) do
+  # The trailers are the plane's: who the session's commits are made for comes from the
+  # plane's rows (`requested_by`), and a line the agent wrote that looks like either
+  # trailer is taken out, so an issue that talked the agent into writing one names nobody.
+  defp commit_message(message, session_id, requested_by) when is_binary(message) do
     kept =
       message
       |> String.split(~r/\r?\n/)
-      |> Enum.reject(&Regex.match?(~r/\A\s*troupe-session\s*:/i, &1))
+      |> Enum.reject(&Regex.match?(~r/\A\s*(troupe-session|requested-by)\s*:/i, &1))
       |> Enum.join("\n")
       |> String.trim()
 
+    trailers =
+      ["Troupe-Session: " <> session_id] ++
+        case requested_by(requested_by) do
+          nil -> []
+          by -> ["Requested-By: " <> by]
+        end
+
     if kept == "",
       do: {:error, "a push needs a commit message saying what it changes"},
-      else: {:ok, kept <> "\n\nTroupe-Session: " <> session_id <> "\n"}
+      else: {:ok, kept <> "\n\n" <> Enum.join(trailers, "\n") <> "\n"}
   end
 
-  defp commit_message(_message, _session_id),
+  defp commit_message(_message, _session_id, _requested_by),
     do: {:error, "a push needs a commit message saying what it changes"}
+
+  # One line of printable text, as the plane sends it; anything else names nobody.
+  defp requested_by(by) when is_binary(by) do
+    by = String.trim(by)
+    if by == "" or Regex.match?(~r/[\x00-\x1f\x7f\x{2028}\x{2029}]/u, by), do: nil, else: by
+  end
+
+  defp requested_by(_by), do: nil
 
   defp open_for_pushes(record) do
     if stopped?(record),

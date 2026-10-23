@@ -170,6 +170,35 @@ defmodule Troupe.Plane.Ledger do
   end
 
   @doc """
+  The models sessions have been charged for, the latest first, at most `limit`: a session's
+  of `profile`, or anybody's with `nil`. What a provider has served here, which is the
+  nearest the plane comes to the provider's own list.
+  """
+  @spec models_run(String.t() | nil, pos_integer()) :: [String.t()]
+  def models_run(profile, limit \\ 50) do
+    query =
+      from(u in UsageRecord,
+        where: not is_nil(u.model) and u.model != "" and u.model != "unknown",
+        group_by: u.model,
+        order_by: [desc: max(u.occurred_at)],
+        limit: ^limit,
+        select: u.model
+      )
+
+    query =
+      if is_binary(profile),
+        do:
+          from(u in query,
+            join: s in Troupe.Plane.Sessions.Session,
+            on: s.id == u.session_id,
+            where: s.profile == ^profile
+          ),
+        else: query
+
+    Repo.all(query)
+  end
+
+  @doc """
   What one session cost.
 
   Read from the ledger rather than from the session row's `cost_micros`, which is the

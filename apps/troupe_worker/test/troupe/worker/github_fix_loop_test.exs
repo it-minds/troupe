@@ -176,6 +176,14 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
     FakeGitHub.ci(context.fake, "example-org/widgets", [[check("test", "success")]])
     fake = model(context)
 
+    # The person the session is for, as the plane knows them.
+    {:ok, _} =
+      Identity.upsert_user(%{
+        subject: @owner,
+        email: "ada@example.test",
+        display_name: "Ada Lovelace"
+      })
+
     log =
       capture_log([level: :debug], fn ->
         {:ok, _} =
@@ -199,7 +207,9 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
                  {"git_push",
                   %{
                     "branch" => "troupe/fix-widgets",
-                    "message" => "Fix the widgets\n\nTroupe-Session: someone-else"
+                    "message" =>
+                      "Fix the widgets\n\nTroupe-Session: someone-else\n" <>
+                        "requested-by: Mallory <mallory@example.test>"
                   }}
                ]},
               {:tools, [{"pr_open", %{"title" => "Fix the widgets", "body" => "It works now."}}]},
@@ -247,8 +257,12 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
     assert parent == String.trim(main)
     message = Enum.join(message, "\n")
     assert message =~ "Fix the widgets"
-    assert message =~ "Troupe-Session: #{context.session_id}"
+
+    assert message =~
+             "Troupe-Session: #{context.session_id}\nRequested-By: Ada Lovelace <ada@example.test>"
+
     refute message =~ "someone-else"
+    refute message =~ "Mallory"
     {files, 0} = git(context.upstream, ["show", "--format=", "--name-only", branch])
     assert String.split(files, "\n", trim: true) == ["FIX.md"]
 

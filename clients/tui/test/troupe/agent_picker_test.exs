@@ -162,8 +162,12 @@ defmodule Troupe.AgentPickerTest do
                user_state(pid).agents_page.cursor
              )
 
+    # Esc goes back to the picker, the selection kept, and Esc again to the window.
     press(pid, "esc")
-    press(pid, "1")
+    assert user_state(pid).focus == :switcher
+    assert Enum.at(picker(pid).rows, picker(pid).cursor)["name"] == "careful"
+    press(pid, "esc")
+    assert user_state(pid).focus == {:window, "build-1"}
 
     # `b`: a branch on the agent, where it works chosen next; with nothing typed the choice
     # waits on the command line for the task.
@@ -185,5 +189,73 @@ defmodule Troupe.AgentPickerTest do
     assert user_state(pid).focus == {:window, "build-1"}
     assert hd(user_state(pid).model.notices) =~ "build-1 runs plan from its next turn"
     eventually(fn -> user_state(pid).model.windows["build-1"].profile == "plan" end)
+  end
+
+  # `/new` takes its agent from the picker (#594): starting a session and choosing who
+  # runs it are one action.
+  test "/new opens the picker, and Enter starts a session on the agent chosen" do
+    ws = tmp_workspace(%{".troupe/agents/careful.md" => @careful})
+    {sid, _, _} = start_session!(workspace: ws, script: [])
+    {pid, session} = ready(sid)
+
+    type(pid, "/new")
+    press(pid, "enter")
+    assert user_state(pid).focus == :switcher
+    assert screen_text(pid, session) =~ "a new session on"
+
+    # The picker's density: the primaries, which are what a session starts on.
+    refute Enum.any?(picker(pid).rows, &(&1["mode"] == "subagent"))
+
+    to_row(pid, "careful")
+    press(pid, "enter")
+    eventually(fn -> user_state(pid).session_id != sid end)
+    fresh = user_state(pid).session_id
+    on_exit(fn -> Client.stop_session(fresh) end)
+
+    assert user_state(pid).focus == :command
+    assert user_state(pid).back == sid
+    assert %{agent: "careful", where: :checkout} = user_state(pid).choice
+    assert hd(user_state(pid).model.notices) =~ "new session #{fresh} on careful"
+
+    {:ok, rows} = Client.sessions({:local, ws})
+    assert %{profile: "careful"} = Enum.find(rows, &(&1.id == fresh))
+  end
+
+  # New from a template, then save -> start: `n` copies a built-in under a new name into
+  # the layer picked, the picker comes back on it, and Enter starts the session on it.
+  test "/new's n makes an agent from a built-in, and Enter starts a session on it once saved" do
+    ws = tmp_workspace()
+    {sid, _, ^ws} = start_session!(workspace: ws, script: [])
+    {pid, _session} = ready(sid)
+
+    type(pid, "/new")
+    press(pid, "enter")
+    to_row(pid, "plan")
+
+    editor(
+      &String.replace(&1, ~r/^description: .*$/m, "description: Plans our way.", global: false)
+    )
+
+    press(pid, "n")
+    assert user_state(pid).focus == :agents
+    type(pid, "planner")
+    press(pid, "enter")
+    assert_receive {:editor_opened, opened}, 5_000
+    assert opened =~ "You are Troupe's plan agent"
+
+    eventually(fn -> match?(%{kind: :save, name: "planner"}, user_state(pid).agents_page.ask) end)
+    press(pid, "r")
+
+    eventually(fn -> user_state(pid).focus == :switcher end)
+    assert picker(pid).status =~ "created planner in this repository"
+    assert picker(pid).status =~ "Enter starts a new session on planner"
+    assert Enum.at(picker(pid).rows, picker(pid).cursor)["name"] == "planner"
+    assert File.read!(Path.join(ws, ".troupe/agents/planner.md")) =~ "description: Plans our way."
+
+    press(pid, "enter")
+    eventually(fn -> user_state(pid).session_id != sid end)
+    fresh = user_state(pid).session_id
+    on_exit(fn -> Client.stop_session(fresh) end)
+    assert %{agent: "planner"} = user_state(pid).choice
   end
 end

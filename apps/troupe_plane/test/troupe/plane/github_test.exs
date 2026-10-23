@@ -282,6 +282,57 @@ defmodule Troupe.Plane.GitHubTest do
       assert installations.detail =~ "other-org (9)"
     end
 
+    test "for a repository, mints a token with what the installation may do there, uses it " <>
+           "and revokes it, and shows what it could do but never the token",
+         context do
+      configure(context)
+      FakeGitHub.repo(context.fake, "example-org/widgets", System.tmp_dir!())
+
+      assert {:ok, check} =
+               API.call("admin.github.check", %{"repository" => "example-org/widgets"}, @root)
+
+      assert check.ok, inspect(check.checks)
+      assert List.last(check.checks).name == "Repository"
+      assert List.last(check.checks).detail =~ "example-org/widgets was minted"
+
+      assert %{name: "example-org/widgets", installation_id: @installation, revoked: true} =
+               check.repository
+
+      assert check.repository.permissions["contents"] == "write"
+      assert check.repository.permissions["pull_requests"] == "write"
+      assert check.repository.permissions["checks"] == "read"
+
+      # Asked for with no permissions named, which is the installation's own; and revoked.
+      assert [%{repositories: ["widgets"], permissions: nil}] = FakeGitHub.requests(context.fake)
+      [token] = FakeGitHub.tokens(context.fake)
+      assert FakeGitHub.revoked(context.fake) == [token]
+      refute inspect(check) =~ token
+
+      [audit | _] = Audit.list(kind: "github")
+      assert audit.action == "github.token"
+      assert audit.detail["for"] == "the App's test"
+      refute inspect(audit.detail) =~ token
+    end
+
+    test "for a repository of no installation, or after a check that failed, says why",
+         context do
+      assert {:ok, %{ok: false, checks: checks, repository: nil}} =
+               Admin.github_check(@root, "example-org/widgets")
+
+      assert List.last(checks).detail == "Not tried: App did not pass."
+
+      configure(context)
+
+      assert {:ok, %{ok: false, checks: checks, repository: nil}} =
+               Admin.github_check(@root, "other-org/widgets")
+
+      assert List.last(checks).detail =~ "other-org"
+      assert FakeGitHub.tokens(context.fake) == []
+
+      assert {:ok, %{ok: false, checks: checks}} = Admin.github_check(@root, "not a repository")
+      assert List.last(checks).detail =~ "owner/name"
+    end
+
     test "is a platform admin's", context do
       assert {:error, refused} = API.call("admin.github.check", %{}, @lead)
       assert refused.data.required_role == "platform_admin"

@@ -1183,16 +1183,7 @@ defmodule Troupe.UI.TUI.Server do
     prompt =
       if String.starts_with?(state.cmd_text, ["/", "!"]), do: "", else: String.trim(state.cmd_text)
 
-    {current, window, start} =
-      if state.branches? do
-        {state.default_agent, nil, nil}
-      else
-        # A pod session's one window, however the translation named it.
-        own = Model.session_window(state.model) || List.first(Model.windows(state.model))
-
-        {own && own.profile, (own && own.path) || "root",
-         "a remote session runs one profile; create another session from HQ"}
-      end
+    {current, window, start} = picker_context(state)
 
     case AgentChooser.open(state.session_id, current,
            title: " start an agent ",
@@ -1202,6 +1193,21 @@ defmodule Troupe.UI.TUI.Server do
          ) do
       {:ok, picker} -> %{state | focus: :switcher, switcher: picker}
       {:error, reason} -> notice(state, "the agents could not be listed: " <> to_message(reason))
+    end
+  end
+
+  # The agent command mode's picker starts from, the window its `s` switches and why a
+  # start is refused: on this computer the default agent, no window and none; on a pod,
+  # which starts no branches, the session's own agent in its one window.
+  defp picker_context(state) do
+    if state.branches? do
+      {state.default_agent, nil, nil}
+    else
+      # A pod session's one window, however the translation named it.
+      own = Model.session_window(state.model) || List.first(Model.windows(state.model))
+
+      {own && own.profile, (own && own.path) || "root",
+       "a remote session runs one profile; create another session from HQ"}
     end
   end
 
@@ -1922,13 +1928,51 @@ defmodule Troupe.UI.TUI.Server do
   # `/new` (root Decision 812, TUI Decision 151): a fresh session takes the screen, and the
   # one that was on it carries on in the daemon, in the picker, and behind `/back`. Its
   # command line is where its first line is typed.
+  #
+  # A session here takes its agent from the one picker first (#594), so starting a session
+  # and choosing who runs it are one action. Not with a pod's session on screen, whose
+  # listing is the pod's, not what a session here could run; nor for a fork, which keeps
+  # the agent of what it forks, or a plane's profile, which names its own.
   defp new_session(state, args) do
-    with {:ok, kind} <- new_kind(String.split(args)),
-         {:ok, sid} <- open_new(state, kind) do
-      adopt(state, sid, "new session #{sid}; /back returns to #{state.session_id}")
-    else
-      :usage -> notice(state, "usage: /new [--private | --remote PROFILE | --branch]")
-      {:error, reason} -> notice(state, "no new session: " <> to_message(reason))
+    case new_kind(String.split(args)) do
+      {:ok, kind} when kind in [:local, :private] ->
+        if Client.remote?(state.session_id),
+          do: open_kind(state, kind, nil),
+          else: pick_new(state, kind)
+
+      {:ok, kind} ->
+        open_kind(state, kind, nil)
+
+      :usage ->
+        notice(state, "usage: /new [--private | --remote PROFILE | --branch]")
+    end
+  end
+
+  defp pick_new(state, kind) do
+    case AgentChooser.open(state.session_id, state.default_agent,
+           title:
+             if(kind == :private, do: " a new private session on ", else: " a new session on "),
+           for: {:new, kind}
+         ) do
+      {:ok, picker} -> %{put_cmd(state, "") | focus: :switcher, switcher: picker}
+      {:error, _reason} -> open_kind(state, kind, nil)
+    end
+  end
+
+  # The session made and on screen; on an agent chosen, the first line typed starts it.
+  defp open_kind(state, kind, agent) do
+    case open_new(state, kind, agent) do
+      {:ok, sid} ->
+        said =
+          if agent,
+            do: "new session #{sid} on #{agent}: a line typed here starts #{agent}; ",
+            else: "new session #{sid}; "
+
+        state = adopt(state, sid, said <> "/back returns to #{state.session_id}")
+        if agent, do: %{state | choice: %{agent: agent, where: :checkout}}, else: state
+
+      {:error, reason} ->
+        notice(%{state | focus: :command, switcher: nil}, "no new session: " <> to_message(reason))
     end
   end
 
@@ -1941,14 +1985,14 @@ defmodule Troupe.UI.TUI.Server do
   # Here: the session on screen's directory, or with a plane's on screen the one this
   # window was opened in, which is also the directory the picker lists. A branch is a fork
   # of the work on screen, wherever it is.
-  defp open_new(state, :local), do: create_here(state, false)
-  defp open_new(state, :private), do: create_here(state, true)
+  defp open_new(state, :local, agent), do: create_here(state, false, agent)
+  defp open_new(state, :private, agent), do: create_here(state, true, agent)
 
-  defp open_new(state, :branch) do
+  defp open_new(state, :branch, _agent) do
     with {:ok, sid} <- fork_of(state), do: Client.fork_session(sid)
   end
 
-  defp open_new(_state, {:remote, profile}) do
+  defp open_new(_state, {:remote, profile}, _agent) do
     case ensure_plane(Client.default_plane()) do
       nil -> {:error, "no plane; run troupe login <plane-url> first"}
       origin -> Client.create_session(origin, %{profile: profile})
@@ -1995,8 +2039,13 @@ defmodule Troupe.UI.TUI.Server do
     "the window of the one to fork (#{named})"
   end
 
-  defp create_here(state, private?),
-    do: Client.create_session({:local, here(state)}, %{worktree: "never", private: private?})
+  defp create_here(state, private?, agent),
+    do:
+      Client.create_session({:local, here(state)}, %{
+        worktree: "never",
+        private: private?,
+        profile: agent
+      })
 
   defp here(state), do: if(Client.remote?(state.session_id), do: state.home, else: state.workspace)
 
@@ -2639,19 +2688,38 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  defp open_agents(state),
-    do: %{put_cmd(state, "") | focus: :agents, agents_page: Agents.open(state.session_id)}
+  # `/agents` is the one picker at the manager's density (#594): every agent, the
+  # subagents too, with the manager's keys. What they do to an agent is done on the
+  # manager's page, which comes back to the picker.
+  defp open_agents(state) do
+    {current, window, start} = picker_context(state)
 
+    case AgentChooser.open(state.session_id, current,
+           title: " agents ",
+           for: :manage,
+           density: :manager,
+           window: window,
+           start: start
+         ) do
+      {:ok, picker} -> %{put_cmd(state, "") | focus: :switcher, switcher: picker}
+      {:error, reason} -> notice(state, "the agents could not be listed: " <> to_message(reason))
+    end
+  end
+
+  # The manager's page, opened from the picker, goes back to it: Esc with the selection
+  # kept, and a save with the cursor on what was saved, so making an agent and starting on
+  # it are one step.
   defp agents_key(key, %{agents_page: page} = state) do
     case Agents.key(page, key, state.session_id) do
       {:ok, page} ->
         %{state | agents_page: page}
 
       {:close, _page} ->
-        %{state | focus: :command, agents_page: nil}
+        back_to_picker(state, nil, nil)
 
       {:changed, page} ->
-        agents_changed(%{state | agents_page: page})
+        state = agents_changed(%{state | agents_page: page})
+        back_to_picker(state, Map.get(page, :saved), page.status)
 
       # The frame that says the editor is open is drawn before it opens.
       {:edit, page, request} ->
@@ -2663,6 +2731,17 @@ defmodule Troupe.UI.TUI.Server do
         }
     end
   end
+
+  defp back_to_picker(%{switcher: %{} = picker} = state, select, status) do
+    %{
+      state
+      | focus: :switcher,
+        agents_page: nil,
+        switcher: AgentChooser.reload(picker, state.session_id, select, status)
+    }
+  end
+
+  defp back_to_picker(state, _select, _status), do: %{state | focus: :command, agents_page: nil}
 
   defp write_temp(path, text) do
     case File.write(path, text, [:exclusive]) do
@@ -2723,8 +2802,9 @@ defmodule Troupe.UI.TUI.Server do
   # The picker's three actions. A switch keeps the window's conversation; the agent picked
   # runs it from its next turn, and the switch is in its transcript once the daemon has
   # made it (root Decision 841). A start is command mode's branch, on the task typed before
-  # Ctrl-N or the one typed next. An edit is `/agents`' editor on the agent's file, the
-  # manager open on it.
+  # Ctrl-N or the one typed next. A new session is `/new`'s, on the agent. An edit, a copy,
+  # a delete and a new agent made from one are the manager's page on the agent, which
+  # comes back here.
   defp switcher_key(key, %{switcher: chooser} = state) do
     case AgentChooser.key(chooser, key, state.session_id) do
       {:ok, chooser} ->
@@ -2753,15 +2833,18 @@ defmodule Troupe.UI.TUI.Server do
 
         chosen(state, name, where, prompt)
 
-      {:edit, name} ->
-        page = Agents.open(state.session_id, name)
+      {:new, name} ->
+        {:new, kind} = chooser.for
+        open_kind(%{state | focus: :command, switcher: nil}, kind, name)
 
-        agents_key(%Key{code: "e"}, %{
-          put_cmd(state, "")
-          | focus: :agents,
-            agents_page: page,
-            switcher: nil
-        })
+      # The manager's page on the agent, given the key; the picker stays behind it.
+      {:manage, name, code} ->
+        page = Agents.open(state.session_id, name)
+        agents_key(%Key{code: code}, %{put_cmd(state, "") | focus: :agents, agents_page: page})
+
+      {:new_from, name} ->
+        page = state.session_id |> Agents.open(name) |> Agents.new_from(state.session_id, name)
+        %{put_cmd(state, "") | focus: :agents, agents_page: page}
     end
   end
 

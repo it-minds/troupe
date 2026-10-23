@@ -78,6 +78,7 @@ defmodule Troupe.Plane.Admin.Console do
     preview: {:area, :profiles},
     profile_delete: {:area, :profiles},
     profile_choices: {:area, :profiles},
+    profile_agents: {:area, :profiles},
     provisioning_mode: {:area, :profiles},
     # Checking one host is a question the profile editor asks while somebody is editing a
     # profile; Integrations answers it for every host at once, which is a different question.

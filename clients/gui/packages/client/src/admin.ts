@@ -910,11 +910,27 @@ export interface GitHubDelivery {
   outcome: Record<string, unknown> | null;
 }
 
-/** What `admin.github.check` answers: four named checks, and GitHub's name for the App once it answered. */
+/**
+ * What `admin.github.check` answers: four named checks, and GitHub's name for the App once it
+ * answered. Asked about a repository, a fifth (`Repository`), and what an installation token
+ * minted there could do: GitHub's own list of its permissions, the token revoked at once and
+ * never in the answer. `null` where none was minted.
+ */
 export interface GitHubCheck {
   ok: boolean;
   checks: IdentityCheck[];
   app: { slug: string | null; name: string | null } | null;
+  repository?: GitHubRepositoryTest | null;
+}
+
+/** An installation token minted for one repository by `admin.github.check`, and revoked. */
+export interface GitHubRepositoryTest {
+  /** `owner/name`. */
+  name: string;
+  installation_id: number;
+  /** What the token could do there, as GitHub granted it: `contents: write`, and so on. */
+  permissions: Record<string, string>;
+  revoked: boolean;
 }
 
 /** A person in a set that looks like one held twice, with where the row came from. */
@@ -1046,6 +1062,46 @@ export interface ProviderTypeChoice {
 export interface ProfileChoices {
   provider_types: ProviderTypeChoice[];
   size_classes: Array<{ name: string; sessions_per_worker: number; summary: string }>;
+  /**
+   * The models the plane knows the provider by, each once with the first reason it knows it
+   * (the profile's own model, the organisation's for people's machines, one its sessions ran
+   * on, one its bundle names), sorted by name. Absent from a plane before it.
+   */
+  models?: Array<{ name: string; why: string }>;
+}
+
+/** One agent of a profile's bundle in effect, as `admin.profile.agents` answers it. */
+export interface ProfileAgent {
+  name: string;
+  mode: "primary" | "subagent";
+  description: string | null;
+  model: string | null;
+  /** The subagents it may delegate to; null where it cannot delegate. */
+  delegate: string[] | null;
+  max_turns: number | null;
+  skills: string[] | "all" | null;
+  permissions: Record<string, "auto" | "ask" | "deny">;
+  /** The profile whose channel gave it; null for a built-in. */
+  from: string | null;
+  /** The channel it was published on, where the builder changes it; null for a built-in. */
+  channel: string | null;
+  /** A built-in primary the profile offers because its bundle has none of that name. */
+  builtin: boolean;
+  /** The Markdown-with-frontmatter text. */
+  definition: string;
+  /** Every team granted the profile, and whether its grant lets it run this agent. */
+  teams: Array<{ team: string; may: boolean }>;
+}
+
+/** What `admin.profile.agents` answers. */
+export interface ProfileAgents {
+  profile: string;
+  /** The channel the profile follows in effect, where its own agents are published; null where it follows none. */
+  channel: string | null;
+  agents: ProfileAgent[];
+  /** Every agent Troupe ships, to copy from. */
+  builtins: Array<{ name: string; mode: "primary" | "subagent"; description: string | null; definition: string }>;
+  teams: string[];
 }
 
 export interface AdminFilter {
@@ -1111,9 +1167,22 @@ export class AdminApi {
     return this.rpc("admin.mcp.check", { url });
   }
 
-  /** The provider types and size classes a profile may be: what its editor offers. */
-  profileChoices(): Promise<ProfileChoices> {
-    return this.rpc<ProfileChoices>("admin.profile.choices", {});
+  /**
+   * The provider types and size classes a profile may be: what its editor offers. With a
+   * profile, `models` are the ones the plane knows that profile's provider by, for an agent's
+   * model to be picked from.
+   */
+  profileChoices(profile?: string): Promise<ProfileChoices> {
+    return this.rpc<ProfileChoices>("admin.profile.choices", profile ? { profile } : {});
+  }
+
+  /**
+   * A profile's agents, from the bundle it has in effect: each with the channel it was
+   * published on, its definition and which of the profile's teams may run it; and the agents
+   * Troupe ships, to copy from. A platform admin's.
+   */
+  profileAgents(name: string): Promise<ProfileAgents> {
+    return this.rpc<ProfileAgents>("admin.profile.agents", { name });
   }
 
   /** Every profile, the cluster policy and every trigger as a repository would hold them. A platform admin's. */
@@ -1166,9 +1235,12 @@ export class AdminApi {
     return this.rpc<GitHubApp>("admin.github.put", { app });
   }
 
-  /** Ask GitHub whether the App works, writing nothing. */
-  checkGithub(): Promise<GitHubCheck> {
-    return this.rpc<GitHubCheck>("admin.github.check", {});
+  /**
+   * Ask GitHub whether the App works, writing nothing. With a repository (`owner/name`), also
+   * what an installation token there can do: one is minted and revoked, and never answered.
+   */
+  checkGithub(repository?: string): Promise<GitHubCheck> {
+    return this.rpc<GitHubCheck>("admin.github.check", repository ? { repository } : {});
   }
 
   /** The deliveries the App's webhook took, newest first. A platform admin's. */

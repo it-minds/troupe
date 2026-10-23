@@ -282,7 +282,9 @@ defmodule Troupe.Commands do
         args: [arg("flags", false, "text")],
         detail:
           "Opens a new session in this workspace and takes the screen; the one you left " <>
-            "keeps running, stays in /sessions, and /back returns to it. --private makes " <>
+            "keeps running, stays in /sessions, and /back returns to it. The agent picker " <>
+            "opens first, and Enter starts the session on the agent chosen (n there makes " <>
+            "a new agent from one, which you save and then start on). --private makes " <>
             "it a private session, --remote PROFILE starts it on that profile of the plane " <>
             "you are signed in to, and --branch forks the one on screen: a session of its " <>
             "own that starts from this conversation as it stands. Type its first line on " <>
@@ -506,13 +508,16 @@ defmodule Troupe.Commands do
       entry("agents", "agents", "Read, copy, create, edit and delete the agents",
         usage: "/agents",
         detail:
-          "The primary agents, each with where it comes from (built in, a bundle, yours or " <>
-            "the repository's), its model, its tools, whether it is read-only and which " <>
-            "windows run it; Enter reads its whole instruction. An edit opens your editor " <>
-            "and is checked and saved by the daemon into your agents/ or the repository's " <>
-            ".troupe/agents/; c copies one into the repository, n starts a new one, x " <>
-            "deletes a copy. Each is a command of its own, below, and Tab in a window " <>
-            "switches the agent it runs."
+          "The agent picker that Ctrl-N and Tab open, with every agent, subagents too, " <>
+            "each with where it comes from (Shipped, Your organisation's, Yours or This " <>
+            "repository's), its mode, model and tools, whether it is read-only and what " <>
+            "it stands in for; Enter reads its whole instruction and b starts a branch on " <>
+            "it. An edit (e) opens your editor and is checked and saved by the daemon into " <>
+            "your agents/ or the repository's .troupe/agents/; c copies one into a layer, " <>
+            "n makes a new agent from the one selected (a built-in or your organisation's " <>
+            "too), x deletes a copy. A save comes back to the picker on what was saved. " <>
+            "Each is a command of its own, below, and Tab in a window switches the agent " <>
+            "it runs."
       ),
       entry("worktree", "agents", "Run the default agent on a branch in a worktree of its own",
         usage: "/worktree [name:] <prompt>",

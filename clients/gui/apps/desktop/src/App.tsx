@@ -414,6 +414,10 @@ export function App(): JSX.Element {
             agent={where.agent}
             planeUrl={planeAuth?.planeUrl ?? null}
             onOpenSession={(id) => setWhere({ screen: "session", id })}
+            onStarted={(id, kind, workspace) => {
+              refresh();
+              setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
+            }}
           />
         )}
 

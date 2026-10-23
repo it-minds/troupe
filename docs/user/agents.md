@@ -44,15 +44,19 @@ written. A built-in is changed by saving a copy of it, under its name or another
 edited by hand that does not load is not read, and is listed with why in `agents.list` and
 the session's log.
 
-In the desktop app, **Agents** in the rail lists a workspace's agents with where each
-comes from, its model, its tools, whether it can write and the windows running it; opens
-one whole; and saves a new one, a copy (a built-in into the repository is one press) or an
-edit into the layer you choose, with what the daemon finds shown at the field. Before a
+In the desktop app, **Agents** in the rail lists a workspace's agents in the agent
+picker's rows, grouped by where each comes from, with its mode, model, tools, whether it
+can write, what it stands in for and the windows running it; opens one whole; starts a
+session on one; and saves a new one (from a built-in or the organisation's as a template),
+a copy (a built-in into the repository is one press) or an edit into the layer you choose,
+with what the daemon finds shown at the field. A new agent saved offers to start a session
+on it at once. Before a
 save it names every `auto`, and asks once when the save lets a tool run unasked that did
 not before: an `auto` in your own agents applies in every workspace, with no trust asked.
 A profile bundle's agent is changed in the console. A session's head shows the agent it
 runs and switches it from the next turn, the conversation kept, and the transcript records
-the switch. The TUI's `/agents` page does the same
+the switch. The TUI's `/agents` does the same, as the agent picker Ctrl-N and Tab open, at
+the manager's density, and `/new` starts a session on the agent picked there
 ([the terminal client](../../clients/tui/README.md#agents)).
 
 ### Seeing a delegation before it runs

@@ -358,11 +358,152 @@ defmodule Troupe.Plane.GitHub do
   tried because one before it failed says so. Answers `%{ok, checks, app}`, where `app`
   is GitHub's slug and name for it once GitHub has answered.
   """
-  @spec check(keyword()) :: %{ok: boolean(), checks: [map()], app: map() | nil}
+  #
+  # With `repository: "owner/name"`, a fifth check: a token for that repository is minted
+  # with whatever the App's installation for its owner may do there, the repository is read
+  # with it, and it is revoked before the answer. The answer's `repository` says what the
+  # token could do (GitHub's own list, as the installation grants it), never the token.
+  @spec check(keyword()) :: %{
+          required(:ok) => boolean(),
+          required(:checks) => [map()],
+          required(:app) => map() | nil,
+          optional(:repository) => map() | nil
+        }
   def check(opts \\ []) do
     row = stored() || %App{id: App.id()}
     {checks, app} = check_steps(row, opts)
-    %{ok: Enum.all?(checks, & &1.ok), checks: checks, app: app}
+
+    case Keyword.get(opts, :repository) do
+      nil ->
+        %{ok: Enum.all?(checks, & &1.ok), checks: checks, app: app}
+
+      given ->
+        {check, tried} = repository_check(row, given, checks, opts)
+        checks = checks ++ [check]
+        %{ok: Enum.all?(checks, & &1.ok), checks: checks, app: app, repository: tried}
+    end
+  end
+
+  # Tried only once every check before it has passed, since each is what it needs.
+  defp repository_check(row, given, checks, opts) do
+    case Enum.find(checks, &(not &1.ok)) do
+      nil ->
+        {answer, took} = timed(fn -> try_repository(row, given, opts) end)
+
+        case answer do
+          {:ok, tried} ->
+            {result(
+               "Repository",
+               true,
+               "A token for #{tried.name} was minted with what the installation may do " <>
+                 "there, read the repository, and was revoked.",
+               took
+             ), tried}
+
+          {:error, reason, tried} ->
+            {result("Repository", false, explain(reason), took), tried}
+        end
+
+      failed ->
+        {not_tried("Repository", failed.name), nil}
+    end
+  end
+
+  defp try_repository(row, given, opts) do
+    with {:ok, owner, name} <- full_name(given),
+         {:ok, installation} <- installation_for(row, owner),
+         {:ok, jwt} <- jwt(row, opts),
+         {:ok, token, granted} <- exchange_all(row, installation, name, jwt) do
+      read = read(api_url(row) <> "/repos/#{owner}/#{name}", [], token, owner, name)
+
+      tried = %{
+        name: "#{owner}/#{name}",
+        installation_id: installation["installation_id"],
+        permissions: granted,
+        revoked: revoke(row, token)
+      }
+
+      {:ok, _} =
+        Audit.record("github", "github.token", tried.name, %{
+          "for" => "the App's test",
+          "permissions" => granted,
+          "revoked" => tried.revoked
+        })
+
+      case read do
+        {:ok, _repository} when tried.revoked -> {:ok, tried}
+        {:ok, _repository} -> {:error, "the token was minted and GitHub did not revoke it", tried}
+        {:error, reason} -> {:error, reason, tried}
+      end
+    else
+      {:error, reason} -> {:error, reason, nil}
+    end
+  end
+
+  defp full_name(given) when is_binary(given) do
+    with [owner, name] <- String.split(String.trim(given), "/"),
+         {:ok, owner} <- owner(owner),
+         {:ok, name} <- name(name) do
+      {:ok, owner, name}
+    else
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, "a repository is owner/name"}
+    end
+  end
+
+  defp full_name(_given), do: {:error, "a repository is owner/name"}
+
+  # A token asked for with no permissions named is one with all the installation's own on
+  # the repository, which is the question the test asks. It is used for one read and
+  # revoked at once.
+  defp exchange_all(app, installation, name, jwt) do
+    url = "#{api_url(app)}/app/installations/#{installation["installation_id"]}/access_tokens"
+
+    case Req.request(
+           method: :post,
+           url: url,
+           json: %{"repositories" => [name]},
+           headers: github_headers(jwt),
+           redirect: false,
+           retry: false,
+           receive_timeout: 15_000
+         ) do
+      {:ok, %{status: 201, body: %{"token" => token} = body}} when is_binary(token) ->
+        {:ok, token, Map.get(body, "permissions") || %{}}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, {:github, status, message(body), installation["owner"], name}}
+
+      {:error, %{reason: reason}} ->
+        {:error, {:github_unreachable, URI.parse(url).host, reason}}
+
+      {:error, reason} ->
+        {:error, {:github_unreachable, URI.parse(url).host, reason}}
+    end
+  end
+
+  # Whether GitHub took the token back: `204`, or `401` for one it no longer takes.
+  defp revoke(app, token) do
+    case Req.request(
+           method: :delete,
+           url: api_url(app) <> "/installation/token",
+           headers: github_headers(token),
+           redirect: false,
+           retry: false,
+           receive_timeout: 15_000
+         ) do
+      {:ok, %{status: status}} when status in [204, 401] -> true
+      _other -> false
+    end
+  end
+
+  defp github_headers(bearer) do
+    [
+      {"authorization", "Bearer " <> bearer},
+      {"accept", "application/vnd.github+json"},
+      {"x-github-api-version", "2022-11-28"},
+      {"user-agent", "troupe-plane"}
+    ]
   end
 
   defp check_steps(%App{app_id: nil}, _opts) do
@@ -1164,6 +1305,70 @@ defmodule Troupe.Plane.GitHub do
   end
 
   defp review_comment(_other), do: %{"body" => nil}
+
+  # -- who asked for it -------------------------------------------------------
+
+  @doc """
+  Who a session's commits are made for, as their `Requested-By:` trailer names it: the
+  person who started the run, by name and email as this plane knows them; for a run a
+  person's label fired, their GitHub login; for a sweep or a schedule, the trigger and its
+  team; and for a session nobody's trigger made, its owner. Read from the plane's own rows
+  every time, never from anything the issue, the pod or the agent says, and one line: a
+  name with a line break in it could otherwise write a trailer of its own.
+  """
+  @spec requested_by(Session.t()) :: String.t() | nil
+  def requested_by(%Session{} = session) do
+    case Repo.one(
+           from(r in Troupe.Plane.Triggers.Run,
+             where: r.session_id == ^session.id,
+             order_by: [desc: r.fired_at],
+             limit: 1,
+             preload: [trigger: :team]
+           )
+         ) do
+      nil -> person(session.owner_subject)
+      run -> fired_by(run)
+    end
+    |> one_line()
+  end
+
+  defp fired_by(%{fired_by: "github:" <> login} = run),
+    do: "#{login} on GitHub (#{trigger_words(run.trigger)})"
+
+  defp fired_by(%{fired_by: by} = run) when by in ["scheduler", "trigger-key", nil],
+    do: trigger_words(run.trigger)
+
+  defp fired_by(%{fired_by: subject}), do: person(subject)
+
+  defp trigger_words(%{name: name, team: %{name: team}}), do: "trigger #{name}, team #{team}"
+  defp trigger_words(%{name: name}), do: "trigger #{name}"
+  defp trigger_words(_trigger), do: "a trigger"
+
+  defp person(nil), do: nil
+
+  defp person(subject) do
+    case Repo.get_by(Troupe.Plane.Identity.User, subject: subject) do
+      %{display_name: name, email: email}
+      when is_binary(name) and name != "" and is_binary(email) ->
+        "#{name} <#{email}>"
+
+      %{email: email} when is_binary(email) and email != "" ->
+        email
+
+      _unknown ->
+        subject
+    end
+  end
+
+  # Printable characters only, and not too many of them.
+  defp one_line(nil), do: nil
+
+  defp one_line(text) do
+    text
+    |> String.replace(~r/[\x00-\x1f\x7f\x{2028}\x{2029}]+/u, " ")
+    |> String.trim()
+    |> String.slice(0, 200)
+  end
 
   # -- what a session did there -----------------------------------------------
 

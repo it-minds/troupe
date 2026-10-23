@@ -64,6 +64,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision, Trigger}
+  alias Troupe.Protocol.AgentDefinition
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.ProviderTypes
@@ -760,11 +761,204 @@ defmodule Troupe.Plane.Admin do
   So a console offers the choices rather than a text field, and offers none the plane
   would refuse.
   """
-  @spec profile_choices(actor()) :: result()
-  def profile_choices(actor) do
-    with :ok <- require_admin(actor) do
-      {:ok, %{provider_types: ProviderTypes.wire(), size_classes: size_class_summaries()}}
+  #
+  # And `models`, for an agent's model picked rather than typed: what the plane knows a
+  # provider serves, each with why. The plane never asks a provider for its list (its key is
+  # the pods'), so these are the models it has been told of or seen run: the profile's own,
+  # the ones the organisation gives people's machines, the ones sessions have been charged
+  # for (the profile's, with one) and the ones its bundle's agents name.
+  @spec profile_choices(actor(), String.t() | map() | nil) :: result()
+  def profile_choices(actor, profile \\ nil) do
+    with :ok <- require_admin(actor),
+         {:ok, models} <- known_models(profile) do
+      {:ok,
+       %{
+         provider_types: ProviderTypes.wire(),
+         size_classes: size_class_summaries(),
+         models: models
+       }}
     end
+  end
+
+  @machines_model "a model the organisation gives people's machines"
+
+  # Not a name (the API hands a method with no `profile` its params), not a profile.
+  defp known_models(profile) when not is_binary(profile) or profile == "" do
+    {:ok,
+     models_with_why([
+       {organisation_models(), @machines_model},
+       {Ledger.models_run(nil), "a model this plane's sessions have run on"}
+     ])}
+  end
+
+  defp known_models(name) do
+    with {:ok, _profile} <- fetch_profile(name) do
+      {own, bundle} =
+        case Extends.resolve(name) do
+          {:ok, resolved} ->
+            own = get_in(resolved.attrs, ["spec", "llm", "model"])
+            {List.wrap(own), resolved.bundle.layers |> effective_agents() |> Enum.map(& &1.model)}
+
+          {:error, _reason} ->
+            {[], []}
+        end
+
+      {:ok,
+       models_with_why([
+         {own, "the profile's model"},
+         {organisation_models(), @machines_model},
+         {Ledger.models_run(name), "a model this profile's sessions have run on"},
+         {bundle, "a model an agent of its bundle names"}
+       ])}
+    end
+  end
+
+  defp organisation_models do
+    for key <- ~w(client_model_default client_model_cheap client_model_expensive),
+        value = Settings.get(key),
+        is_binary(value),
+        String.trim(value) != "",
+        do: String.trim(value)
+  end
+
+  # Each name once, with the first reason it was found for, sorted by name.
+  defp models_with_why(sources) do
+    sources
+    |> Enum.flat_map(fn {names, why} ->
+      for name <- names, is_binary(name), name != "", do: {name, why}
+    end)
+    |> Enum.uniq_by(&elem(&1, 0))
+    |> Enum.sort()
+    |> Enum.map(fn {name, why} -> %{name: name, why: why} end)
+  end
+
+  @doc """
+  A profile's agents as its bundle in effect has them, composed through what it extends,
+  for the console's builder: each with the fields the builder edits, where it came from,
+  its definition, and which of the teams granted the profile may run it. A built-in
+  primary the profile offers because its bundle has none of that name is a row too, to
+  copy rather than edit; and every agent Troupe ships is beside them, to start one from.
+
+  `delegate` is the subagents an agent can hand work to: its bundle's, when it holds the
+  `delegate` tool, which is how the harness decides; `nil` when it cannot delegate. `may`
+  is the team's grant resolved as a session of the team's would be, so a grant that allows
+  other agents, or denies this one, says false.
+
+  A platform admin's, as editing a bundle is.
+  """
+  @spec profile_agents(actor(), String.t()) :: result()
+  def profile_agents(actor, name) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, _profile} <- fetch_profile(name) do
+      layers =
+        case Extends.resolve(name) do
+          {:ok, resolved} -> resolved.bundle.layers
+          {:error, _reason} -> []
+        end
+
+      agents = effective_agents(layers)
+      grants = Identity.grants_for_profile(name)
+      subagents = for %{mode: "subagent", name: sub} <- agents, do: sub
+
+      offered =
+        for builtin <- Bundles.builtin_primaries(),
+            not Enum.any?(agents, &(&1.name == builtin)),
+            text = Bundles.builtin_definitions()[builtin],
+            is_binary(text),
+            row = agent_row(builtin, text, %{builtin: true}),
+            not is_nil(row),
+            do: row
+
+      rows =
+        for agent <- agents ++ offered do
+          agent
+          |> Map.put(:delegate, delegates(agent, subagents))
+          |> Map.put(:teams, agent_teams(agent.name, name, grants))
+          |> Map.delete(:tools)
+        end
+
+      builtins =
+        for {builtin, text} <- Enum.sort(Bundles.builtin_definitions()),
+            row = agent_row(builtin, text, %{builtin: true}),
+            not is_nil(row),
+            do: Map.take(row, [:name, :mode, :description, :definition])
+
+      {:ok,
+       %{
+         profile: name,
+         channel: layers |> Bundles.Effective.channels() |> List.last(),
+         agents: rows,
+         builtins: builtins,
+         teams: grants |> Enum.map(& &1.team.name) |> Enum.sort()
+       }}
+    end
+  end
+
+  # The agents of a chain's bundle in effect, each read as the harness reads its file, with
+  # the profile and channel it came from. One that does not parse is left out: the bundle's
+  # own check says so where it is published.
+  defp effective_agents([]), do: []
+
+  defp effective_agents(layers) do
+    composed = Bundles.Effective.compose(layers)
+    from = for %{kind: "agents"} = entry <- composed.entries, into: %{}, do: {entry.name, entry}
+
+    for %{"name" => agent, "definition" => text} <- List.wrap((composed.content || %{})["agents"]),
+        is_binary(agent) and is_binary(text),
+        source = Map.get(from, agent, %{}),
+        row =
+          agent_row(agent, text, %{
+            builtin: false,
+            from: Map.get(source, :from),
+            channel: Map.get(source, :channel)
+          }),
+        not is_nil(row),
+        do: row
+  end
+
+  defp agent_row(name, text, extra) do
+    case AgentDefinition.parse(name, text) do
+      {:ok, parsed} ->
+        Map.merge(
+          %{
+            name: name,
+            mode: Atom.to_string(parsed.mode),
+            description: blank_nil(parsed.description),
+            model: parsed.model,
+            max_turns: parsed.max_turns,
+            skills: parsed.skills,
+            permissions:
+              Map.new(parsed.permissions, fn {tool, p} -> {tool, Atom.to_string(p)} end),
+            tools: parsed.tools,
+            from: nil,
+            channel: nil,
+            definition: text
+          },
+          extra
+        )
+
+      {:error, _reason} ->
+        nil
+    end
+  end
+
+  defp blank_nil(text) when is_binary(text), do: if(String.trim(text) == "", do: nil, else: text)
+  defp blank_nil(_text), do: nil
+
+  defp delegates(%{mode: "primary", tools: tools}, subagents) do
+    if tools == :all or "delegate" in List.wrap(tools), do: subagents, else: nil
+  end
+
+  defp delegates(_agent, _subagents), do: nil
+
+  defp agent_teams(agent, profile, grants) do
+    grants
+    |> Enum.map(fn grant ->
+      rows = Identity.entitlements_for(grant.team, profile)
+      kept = Identity.Entitlement.resolve([agent], Identity.Entitlement.of_kind(rows, "agent"))
+      %{team: grant.team.name, may: kept == [agent]}
+    end)
+    |> Enum.sort_by(& &1.team)
   end
 
   @doc "Each size class with what it is for, as the console and a model both read it."
@@ -2608,9 +2802,16 @@ defmodule Troupe.Plane.Admin do
   A platform admin's, like changing the App: it is the question somebody asks before and
   after they do, and it signs with the App's key to ask it.
   """
-  @spec github_check(actor()) :: result()
-  def github_check(actor) do
-    with :ok <- require_platform_admin(actor), do: {:ok, GitHub.check()}
+  #
+  # With a repository, a token for it is minted, used once and revoked, and the answer says
+  # what it could do there: the question "can the App work on this repository" asked of
+  # GitHub itself.
+  @spec github_check(actor(), String.t() | nil) :: result()
+  def github_check(actor, repository \\ nil) do
+    with :ok <- require_platform_admin(actor) do
+      opts = if repository in [nil, ""], do: [], else: [repository: repository]
+      {:ok, GitHub.check(opts)}
+    end
   end
 
   @doc """

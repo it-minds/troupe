@@ -645,6 +645,8 @@ defmodule Troupe.Plane.Control.Connection do
   # only; the plane checks it against the session's own repository and branch, keeps it on
   # the row and audits it, and answers the record as it now is. Asked with no change, it
   # answers the record, which is how a pod that has just activated the session learns it.
+  # Beside it, who the session's commits are made for (`requested_by`), from the plane's
+  # rows, which the pod's push names in a trailer.
   defp dispatch("github.record", params, state) do
     case session_of(params["session_id"], state.worker) do
       %Session{repository: %{}} = session ->
@@ -652,7 +654,12 @@ defmodule Troupe.Plane.Control.Connection do
 
         case GitHub.record(session, changes, "worker:#{state.worker.pod_name}") do
           {:ok, %{github: github, stopped_now: stopped_now}} ->
-            {:ok, %{"github" => github, "stopped_now" => stopped_now}, state}
+            {:ok,
+             %{
+               "github" => github,
+               "stopped_now" => stopped_now,
+               "requested_by" => GitHub.requested_by(session)
+             }, state}
 
           {:error, reason} ->
             {:error, Error.new(:invalid_params, %{reason: GitHub.explain(reason)}), state}
