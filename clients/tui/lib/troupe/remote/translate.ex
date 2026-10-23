@@ -120,7 +120,19 @@ defmodule Troupe.Remote.Translate do
       "watch_notice" ->
         {[transient(session_id, agent, :notice, %{text: to_string(data["message"] || "")})], memory}
 
-      type when type in ["presence", "summary_diff"] ->
+      # Who joined and who left, and from where (root #58): `via` is `plane` for somebody
+      # steering a laptop's session from another device.
+      "presence" ->
+        {[
+           transient(session_id, agent, :presence, %{
+             subject: data["subject"],
+             name: data["display_name"] || data["subject"],
+             state: data["state"],
+             via: data["via"]
+           })
+         ], memory}
+
+      "summary_diff" ->
         {[], memory}
 
       other ->

@@ -1264,18 +1264,20 @@ defmodule Troupe.Gateway.Dispatch do
 
   # The person signed out at a client (issue #381). The token goes, if it is for that plane
   # and that person, and the sealing it was for stops until a client links with one again;
-  # the label stays, so that link is the same one and carries each session on. A token for
-  # somebody else, or for another plane, is not this client's to take back. The copy of
-  # that plane's memory goes whether or not a token was held (a daemon restarted since the
-  # sign-in holds none): the organisation's words are for its signed-in members, and the
-  # sessions here read none of them from their next turn. The key pinned for it stays.
+  # the label stays, so that link is the same one and carries each session on. So does the
+  # daemon's own sign-in for steering, which outlives a client's token but not the person
+  # signing out: released at the plane, out of the credential store, the relay closed. A
+  # token for somebody else, or for another plane, is not this client's to take back. The
+  # copy of that plane's memory goes whether or not a token was held (a daemon restarted
+  # since the sign-in holds none): the organisation's words are for its signed-in members,
+  # and the sessions here read none of them from their next turn. The key pinned for it stays.
   defp handle("identity.sign_out", params, _context) do
     with {:ok, plane_url} <- fetch(params, "plane_url") do
       signed_out = Plane.sign_out(plane_url, params["subject"])
       _dropped = Memory.forget(plane_url)
       if signed_out, do: Private.suspend()
-      if signed_out, do: Remote.unlinked()
-      {:ok, %{"signed_out" => signed_out}}
+      steering = Remote.signed_out(plane_url, params["subject"])
+      {:ok, %{"signed_out" => signed_out or steering}}
     end
   end
 

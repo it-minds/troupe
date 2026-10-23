@@ -14,6 +14,10 @@ if Mix.env() == :test do
   # carry a key and no base URL, which is a real provider's own endpoint. A test of the
   # refresh turns it on and points it at a stand-in.
   config :troupe_core, catalog_refresh: false
+
+  # Nothing a test does reaches the person's own credential store (#58): the daemon's sign-in
+  # for steering is kept in the VM. `Troupe.KeyringTest` asks the real one, by a test name.
+  config :troupe_protocol, keyring: Troupe.Keyring.Memory
 end
 
 # Bonny reads a handful of things from application configuration rather than from the

@@ -647,6 +647,7 @@ defmodule Troupe.Protocol.Schema do
         "subject" => required(:string),
         "state" => required(:string),
         "display_name" => optional(:string),
+        "via" => optional(:string),
         "agent" => optional({:array, :string})
       },
       "summary_diff" => %{"changed" => required(:object)},

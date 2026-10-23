@@ -256,6 +256,8 @@ export interface FakeTeam {
   volume_storage_class: string | null;
   volume_size: string | null;
   allow_unenforced_workers: boolean;
+  /** Whether its people may offer a laptop session for steering from another device (#58). */
+  remote_offering_allowed: boolean;
   /** The repositories its sessions may name and the fix loop's caps, as the plane answers them. */
   github: { repositories: string[]; max_pushes: number | null; max_runs: number | null; max_attempts?: number | null };
   admins: string[];
@@ -618,6 +620,7 @@ const TEAM_KEYS = [
   "volume_storage_class",
   "allow_unenforced_workers",
   "github",
+  "remote_offering_allowed",
 ];
 const INTEGER_KEYS = ["budget_micros", "idle_timeout_seconds", "cache_eviction_days", "erase_after_days"];
 
@@ -650,7 +653,7 @@ function readTeamGitHub(current: TeamGitHubFake, sent: unknown): { github: TeamG
   }
   return { github };
 }
-const BOOLEAN_KEYS = ["members_may_control", "pins_allowed", "allow_unenforced_workers"];
+const BOOLEAN_KEYS = ["members_may_control", "pins_allowed", "allow_unenforced_workers", "remote_offering_allowed"];
 
 /** A team's name, as `Identity.Team` holds it to. */
 const TEAM_NAME = /^[a-z0-9]([a-z0-9-]{0,56}[a-z0-9])?$/;
@@ -3158,6 +3161,7 @@ export function team(name: string, fields: Partial<FakeTeam> = {}): FakeTeam {
     volume_storage_class: null,
     volume_size: null,
     allow_unenforced_workers: false,
+    remote_offering_allowed: true,
     github: { repositories: [], max_pushes: null, max_runs: null },
     admins: [],
     grants: [],

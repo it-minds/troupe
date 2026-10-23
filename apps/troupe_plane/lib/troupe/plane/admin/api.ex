@@ -248,6 +248,12 @@ defmodule Troupe.Plane.Admin.API do
       description: "Whether members may pin a session against eviction."
     },
     %Argument{
+      name: "remote_offering_allowed",
+      type: :boolean,
+      description:
+        "Whether the team's people may offer a laptop session for steering from another device. False refuses each new offer, and each attach to one already made, saying the team does not allow it."
+    },
+    %Argument{
       name: "volume_size",
       type: :string,
       description: "The team volume's size, as a Kubernetes quantity such as 10Gi."

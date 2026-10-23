@@ -389,7 +389,71 @@ defmodule Troupe.Gateway.FakePlane do
     end
   end
 
+  # A laptop's own sign-in for steering (#58 slice 2): a grant for the device, kept here
+  # until it is released, exchanged at `/auth/relay` for a token of the laptop's door
+  # (`laptop:` and a number, which `FakeRelay` takes), unless `refuse_grants/2` said no.
+  defp dispatch(state, "remote.grant", params) do
+    case Agent.get(state, &Map.get(&1, :refuse_grants)) do
+      nil ->
+        grant = "rg_fake." <> Integer.to_string(System.unique_integer([:positive]))
+
+        Agent.update(state, fn s ->
+          Map.update(s, :grants, %{grant => params["device"]}, &Map.put(&1, grant, params["device"]))
+        end)
+
+        {:ok, %{"grant" => grant, "device" => params["device"]}}
+
+      {code, message, data} ->
+        {:rpc_error, code, message, data}
+    end
+  end
+
   defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
+
+  @doc "Refuse every `remote.grant` from now on with this error, as a team that forbids offering."
+  @spec refuse_grants(pid(), {integer(), String.t(), map()} | nil) :: :ok
+  def refuse_grants(state, error), do: Agent.update(state, &Map.put(&1, :refuse_grants, error))
+
+  @doc "The grants this plane holds now, each with its device."
+  @spec grants(pid()) :: %{String.t() => String.t()}
+  def grants(state), do: Agent.get(state, &Map.get(&1, :grants, %{}))
+
+  @doc "Every grant released so far, oldest first."
+  @spec released(pid()) :: [String.t()]
+  def released(state), do: state |> Agent.get(&Map.get(&1, :released, [])) |> Enum.reverse()
+
+  @doc "Forget a grant, as a plane whose administrators took it back."
+  @spec revoke(pid(), String.t()) :: :ok
+  def revoke(state, grant), do: Agent.update(state, &Map.update(&1, :grants, %{}, fn g -> Map.delete(g, grant) end))
+
+  @doc false
+  @spec redeem(pid(), String.t() | nil) :: {:ok, map()} | :error
+  def redeem(state, grant) do
+    case Map.fetch(grants(state), grant) do
+      {:ok, device} ->
+        token = "laptop:" <> Integer.to_string(System.unique_integer([:positive]))
+        exp = System.system_time(:second) + Agent.get(state, &Map.get(&1, :laptop_lifetime, 900))
+        Agent.update(state, fn s -> %{s | calls: [{"/auth/relay", %{"grant" => grant}} | s.calls]} end)
+        {:ok, %{"token" => token, "expires_at" => exp, "device" => device}}
+
+      :error ->
+        :error
+    end
+  end
+
+  @doc false
+  @spec release(pid(), String.t() | nil) :: :ok
+  def release(state, grant) do
+    Agent.update(state, fn s ->
+      s
+      |> Map.update(:grants, %{}, &Map.delete(&1, grant))
+      |> Map.update(:released, [grant], &[grant | &1])
+    end)
+  end
+
+  @doc "How long, in seconds, a laptop token minted from now on lives."
+  @spec laptop_lifetime(pid(), pos_integer()) :: :ok
+  def laptop_lifetime(state, seconds), do: Agent.update(state, &Map.put(&1, :laptop_lifetime, seconds))
 
   # The device is recorded once every version is gone, and told again otherwise, as the
   # plane's is (Decision 804); this one deletes within the call.
@@ -488,6 +552,21 @@ defmodule Troupe.Gateway.FakePlane do
       else
         send_resp(conn, 401, "")
       end
+    end
+
+    def call(%{request_path: "/auth/relay"} = conn, opts) do
+      {:ok, body, conn} = read_body(conn)
+
+      case FakePlane.redeem(opts[:state], Jason.decode!(body)["grant"]) do
+        {:ok, answer} -> json(conn, answer)
+        :error -> send_resp(conn, 401, ~s({"error":"unauthenticated"}))
+      end
+    end
+
+    def call(%{request_path: "/auth/relay/release"} = conn, opts) do
+      {:ok, body, conn} = read_body(conn)
+      :ok = FakePlane.release(opts[:state], Jason.decode!(body)["grant"])
+      send_resp(conn, 204, "")
     end
 
     def call(%{request_path: "/.well-known/troupe-signing-key"} = conn, opts) do

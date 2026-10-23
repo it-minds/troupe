@@ -326,8 +326,8 @@ defmodule Troupe.UI.HQ do
 
     [
       marker,
-      String.pad_trailing(label(session.origin), 8),
-      String.pad_trailing(state_word(session.state), 10),
+      String.pad_trailing(label(session), 8),
+      String.pad_trailing(state_word(session), 10),
       String.pad_trailing(to_string(session.profile || "—"), 10),
       String.pad_trailing(to_string(session.team || session.owner || ""), 10),
       kept_title(session)
@@ -342,12 +342,17 @@ defmodule Troupe.UI.HQ do
     end)
   end
 
-  defp label({:remote, _plane}), do: "remote"
-  defp label(_origin), do: "local"
+  # A laptop's session offered for steering (root #58) is on a laptop, not the plane.
+  defp label(%{kind: "remote"}), do: "laptop"
+  defp label(%{origin: {:remote, _plane}}), do: "remote"
+  defp label(_session), do: "local"
 
   # `erasure_pending` (root Decision 756) in the column's width; its title says it whole.
-  defp state_word(:erasure_pending), do: "erasing"
-  defp state_word(state), do: to_string(state)
+  # A laptop's says whether the laptop is there.
+  defp state_word(%{kind: "remote", status: "online"}), do: "online"
+  defp state_word(%{kind: "remote"}), do: "offline"
+  defp state_word(%{state: :erasure_pending}), do: "erasing"
+  defp state_word(%{state: state}), do: to_string(state)
 
   # A private session says so before its title, as the session picker does.
   defp kept_title(session) do
@@ -527,8 +532,9 @@ defmodule Troupe.UI.HQ do
 
       session ->
         # Browsing is always mode `read`: opening a dormant session must not
-        # wake it, and the first activating action is what does.
-        case Client.open_session(session.origin, session.id, :read) do
+        # wake it, and the first activating action is what does. A laptop's session
+        # offered for steering (root #58) is opened through the relay, by its kind.
+        case Client.open_session(session.origin, session.id, :read, kind: session.kind) do
           {:ok, session_id} -> {:open, %{hq | error: nil}, session_id}
           {:error, reason} -> {:ok, %{hq | error: message(reason)}}
         end

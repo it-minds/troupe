@@ -365,6 +365,7 @@ defmodule Troupe.CLI.Remote do
         end
 
       {:error, :not_running} ->
+        Enum.each(planes, &forget_steering(&1, say))
         if servers?, do: servers_kept(say, "it is not running")
         :ok
 
@@ -376,6 +377,34 @@ defmodule Troupe.CLI.Remote do
         end
 
         if servers?, do: servers_kept(say, "it could not be reached: #{inspect(reason)}")
+    end
+  end
+
+  # The daemon's own sign-in for steering a session from another device (root #58) lives in
+  # the operating system's credential store, so it outlasts a daemon that is not running;
+  # one that started later would offer again for somebody who signed out. Taken out here,
+  # where it is for this plane and person, and let go at the plane as far as it answers.
+  defp forget_steering({url, subject}, say) do
+    case Troupe.Keyring.Steering.forget(url, subject) do
+      {:ok, sign_in} ->
+        _ =
+          HTTP.post_json(String.trim_trailing(sign_in.url, "/") <> "/auth/relay/release", %{
+            grant: sign_in.grant
+          })
+
+        say.(
+          "the daemon on this machine no longer keeps a session of yours offered at #{url}; " <>
+            "its sign-in is gone from this computer's credential store"
+        )
+
+      :none ->
+        :ok
+
+      {:error, reason} ->
+        say.(
+          "the daemon's sign-in for steering could not be taken out of the credential store: " <>
+            inspect(reason)
+        )
     end
   end
 

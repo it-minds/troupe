@@ -1061,9 +1061,19 @@ A person offers one of their sessions on this computer to the plane they are sig
 so they, from any of their other devices, and the people they name can steer it: follow its
 transcript, answer its approvals and questions, send it prompts, cancel a turn and switch
 its agent (Decision 921). Nothing listens on the laptop: while a session is offered the
-daemon keeps one WebSocket open to the plane's `/v1/relay`, with the plane token a client
-handed it (`identity.link`), and the plane relays each remote person's protocol messages
-over it ([Relayed connections](#relayed-connections)).
+daemon keeps one WebSocket open to the plane's `/v1/relay`, and the plane relays each
+remote person's protocol messages over it ([Relayed connections](#relayed-connections)).
+
+**The daemon's own sign-in** (Decision 928). At the first offer the daemon asks the plane's
+`remote.grant {device}` with the plane token a client handed it (`identity.link`), keeps
+the grant in the operating system's credential store (Credential Manager, the macOS
+keychain, the Secret Service), never in a file, and exchanges it at `POST /auth/relay` for a
+token of the laptop's door alone, renewed on the open socket before it runs out. So the offer
+stays up after the client that made it closes, and after a restart of the daemon. Withdrawing
+the last offer, `identity.sign_out` for that plane and person (a client's sign-out, `troupe
+logout`) and `identity.unlink` release it at the plane, take it out of the store and close
+the connection; the offers are kept, and offered again at the next link with a token. A
+daemon with something offered does not stop at its quiet period.
 
 #### `remote.offer`
 ```json
@@ -1081,6 +1091,8 @@ nothing is recorded; one that cannot be reached is `unavailable`. A private sess
 `forbidden` with a sentence: it is sealed under its person's key, and steering it elsewhere
 is claiming it there (`session.claim`). A daemon with no plane token is `unavailable`, "sign
 in to a plane first", and a session another person made while linked here is `forbidden`.
+A person in a team whose administrators do not allow offering is `forbidden` with `data.team`
+and a sentence naming it, as the plane says it.
 
 The daemon keeps the offer and its share (`<state>/remote.json`) and dials the plane again,
 backing off, whenever the connection drops: on connecting it says exactly what it still
@@ -2723,7 +2735,8 @@ under the `call_id` the earlier connection was asked with.
 ```
 
 An ephemeral event on the session's `presence:<id>` topic (§5); `display_name` and `agent`
-are there when known. Ephemeral, always. Presence is published through a path that has no access to the durable
+are there when known, and `via: "plane"` for somebody attached through the plane's relay,
+steering a laptop's session from another device. Ephemeral, always. Presence is published through a path that has no access to the durable
 log, so it cannot end up there by accident.
 
 ---
@@ -2913,10 +2926,18 @@ than an admin uses them:
 | `session.erased` | control | anybody, for their own erased private sessions | `{session_id, device}` → `{session_id, device, deleting, objects_deleted}`: this device has stopped sealing the session and erased its copy, and the plane deletes every version of every object under `sessions/<session_id>/` and records the device once none is left. `deleting: false` with how many went when that is done within the call; `deleting: true` and no count when it takes longer than the call waits (five seconds), and the plane carries on and records the device when it is done. `unavailable` with `objects_deleted` and `objects_left` where the object store refused or failed some: the device is not recorded, and `session.erasures` names the session to it again, which tries again (Decision 804). `not_found` for a session that is not the caller's, not private or not erased: saying a session is erased does not erase it |
 
 | `remote.list` | observe | anybody | `{}` → `{sessions: [{id, kind: "remote", owner, owner_name, workspace, state, offline_since, offered_at, your_role, shares}]}`: laptop sessions offered for steering from another device that are the caller's own or shared with them ([Relayed connections](#relayed-connections)). `state` is `online` while the laptop's connection is up, else `offline` since `offline_since`; `your_role` is `owner`, `control` or `observe`; `shares` only for the owner. `workspace` is the last name of its folder, never a path; nothing a session says is kept |
-| `remote.open` | observe | the owner, or a person the session is shared with | `{session_id}` → `{session_id, kind: "remote", endpoint, role, your_role, token, expires_at}`: where to attach, and a token for that session alone at the caller's role, audience `troupe-relay`, at most fifteen minutes. Asked again for a fresh one. `not_found` for anybody else; `unavailable` with `offline_since` for a laptop that is away |
+| `remote.open` | observe | the owner, or a person the session is shared with | `{session_id}` → `{session_id, kind: "remote", endpoint, role, your_role, token, expires_at}`: where to attach, and a token for that session alone at the caller's role, audience `troupe-relay`, at most fifteen minutes. Asked again for a fresh one. `not_found` for anybody else; `unavailable` with `offline_since` for a laptop that is away; `forbidden` with `data.team` where a team of the owner's does not allow offering |
+| `remote.grant` | control | anybody | `{device}` → `{grant, device}`: a laptop daemon's own sign-in for steering, asked at its first offer (Decision 928). One per person and device, a new one replacing the last; the plane keeps its hash, and records `remote.grant` in the audit with the device. `forbidden` with `data.team` where a team of the caller's does not allow offering (`teams.remote_offering_allowed`) |
 
-The laptop's own half is the WebSocket at `/v1/relay`, which a daemon dials with its
-person's plane token and which a page that names an `Origin` cannot open: `initialize` with
+A daemon exchanges its grant at `POST /auth/relay {grant}` → `{token, expires_at, subject,
+device}`: a fifteen-minute token whose audience is `troupe-relay-laptop` and which names the
+device, taken by `/v1/relay` for that device and by nothing else, neither `/rpc` nor a pod
+nor a viewer's door. 401 for a grant the plane does not hold, one released, or one unused for
+thirty days; 403 where the person is deactivated or a team of theirs forbids offering. `POST
+/auth/relay/release {grant}` is always 204, and records `remote.release`.
+
+The laptop's own half is the WebSocket at `/v1/relay`, which a daemon dials with that
+token, or a plane token, and which a page that names an `Origin` cannot open: `initialize` with
 `capabilities.device`, then `relay.sync {offers: [{session_id, workspace, share}]}` → `{offers:
 [{session_id, shares}], refused}` (every other offer of that person's from that device is
 dropped), `relay.offer {session_id, workspace, share}` → `{shares}`, `relay.withdraw

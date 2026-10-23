@@ -380,13 +380,61 @@ defmodule Troupe.Client.Remote do
       params(%{team: filter[:team] || filter["team"], state: filter[:state] || filter["state"]})
 
     case call(plane, "sessions.list", params) do
-      {:ok, list} -> {:ok, list |> unwrap("sessions") |> Enum.map(&summary(&1, origin))}
-      {:error, :plane_down} -> {:ok, attached(origin)}
-      {:error, reason} -> {:error, message(reason)}
+      {:ok, list} ->
+        {:ok, Enum.map(unwrap(list, "sessions"), &summary(&1, origin)) ++ offered(plane, origin)}
+
+      {:error, :plane_down} ->
+        {:ok, attached(origin)}
+
+      {:error, reason} ->
+        {:error, message(reason)}
     end
   end
 
   def sessions(_origin, _filter), do: {:error, :unsupported}
+
+  # Laptops' sessions offered to this person for steering from another device (root #58):
+  # their own from another of their laptops, and those shared with them, after the plane's
+  # own. A plane from before them has no `remote.list`, and lists none.
+  defp offered(plane, origin) do
+    case call(plane, "remote.list", %{}) do
+      {:ok, list} -> list |> unwrap("sessions") |> Enum.map(&offered_summary(&1, origin))
+      {:error, _none} -> []
+    end
+  end
+
+  defp offered_summary(row, origin) do
+    owner = row["owner_name"] || row["owner"]
+    online? = row["state"] == "online"
+
+    where =
+      [owner && "#{owner}'s laptop", row["workspace"]]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join(" · ")
+
+    %{
+      id: row["id"],
+      title: if(where == "", do: row["id"], else: where),
+      owner: row["owner"],
+      team: nil,
+      profile: nil,
+      state: if(online?, do: :active, else: :dormant),
+      status: if(online?, do: "online", else: offline(row["offline_since"])),
+      tokens: nil,
+      cost: nil,
+      updated_at: updated_at(row["offered_at"]),
+      origin: origin,
+      branches: [],
+      parent: nil,
+      workspace: row["workspace"],
+      kind: "remote",
+      sync: nil,
+      device: nil
+    }
+  end
+
+  defp offline(since) when is_binary(since), do: "offline since #{since}"
+  defp offline(_since), do: "offline"
 
   @impl true
   def get_session({:remote, _plane} = origin, sid) do
@@ -435,8 +483,19 @@ defmodule Troupe.Client.Remote do
 
   # Browsing uses mode `read`, which never wakes a dormant session; the first
   # activating action is what opens it with mode `activate`, from the worker.
+  # A laptop's session offered for steering (root #58, `kind: "remote"`): attached with
+  # the token `remote.open` mints, at the relay's address, where the laptop answers it as
+  # its own daemon would. Asked again for the next token, and again where it went.
   @impl true
-  def open_session({:remote, plane} = origin, sid, mode, _opts) do
+  def open_session({:remote, plane} = origin, sid, mode, opts) do
+    if Keyword.get(opts, :kind) == "remote",
+      do: open_offered(plane, sid),
+      else: open_pod(plane, origin, sid, mode)
+  end
+
+  def open_session(_origin, _sid, _mode, _opts), do: {:error, :unsupported}
+
+  defp open_pod(plane, origin, sid, mode) do
     case call(plane, "session.open", %{session_id: sid, mode: to_string(mode)}) do
       {:ok, %{} = result} ->
         attach(origin, sid, %{
@@ -453,7 +512,64 @@ defmodule Troupe.Client.Remote do
     end
   end
 
-  def open_session(_origin, _sid, _mode, _opts), do: {:error, :unsupported}
+  defp open_offered(plane, sid) do
+    case relay(plane, sid) do
+      {:ok, %{endpoint: endpoint, token: token}} ->
+        with {:ok, _journal} <- start_journal(plane, sid, %{}),
+             {:ok, _worker} <-
+               start_session_child({Worker,
+                [
+                  session_id: sid,
+                  # Nothing for this client's plane to mint or reopen: the laptop's daemon
+                  # holds the session, and `remote.open` is asked for the next token.
+                  plane_url: nil,
+                  endpoint: endpoint,
+                  token: token,
+                  relocate: fn -> relay(plane, sid) end,
+                  renew: fn ->
+                    with {:ok, %{token: token}} <- relay(plane, sid), do: {:ok, token}
+                  end,
+                  impl: __MODULE__,
+                  state: :active,
+                  isolation: :remote
+                ]}) do
+          {:ok, sid}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp start_session_child(spec) do
+    case DynamicSupervisor.start_child(Troupe.Remote.Sessions, spec) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, {:already_started, pid}} -> {:ok, pid}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # `remote.open`: the relay's address, on this plane, and a token for this session alone.
+  # A laptop away is `unavailable`, with since when.
+  defp relay(plane, sid) do
+    case call(plane, "remote.open", %{session_id: sid}) do
+      {:ok, %{"token" => token} = result} when is_binary(token) ->
+        {:ok, %{endpoint: relay_endpoint(plane, result["endpoint"]), token: token}}
+
+      {:ok, other} ->
+        {:error, "unexpected remote.open answer: #{inspect(other)}"}
+
+      {:error, %{code: _code} = error} ->
+        {:error, RPC.describe(error)}
+
+      {:error, reason} ->
+        {:error, message(reason)}
+    end
+  end
+
+  defp relay_endpoint(plane, "/" <> _ = path), do: String.trim_trailing(plane, "/") <> path
+  defp relay_endpoint(_plane, endpoint) when is_binary(endpoint), do: endpoint
+  defp relay_endpoint(plane, _none), do: String.trim_trailing(plane, "/") <> "/v1/relay/session"
 
   # A private session is claimed by the daemon that would seal it, not through a plane.
   @impl true
