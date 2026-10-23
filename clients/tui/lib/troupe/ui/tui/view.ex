@@ -116,7 +116,7 @@ defmodule Troupe.UI.TUI.View do
 
     Enum.drop(behind, -1) ++
       [command_line(state, cmd_rect, cmd_rect.height)] ++
-      AgentChooser.render(chooser, area, cmd_rect.y)
+      AgentChooser.render(chooser, area, cmd_rect.y, Agents.running(state))
   end
 
   defp draw(%{focus: :memory} = state, frame) do

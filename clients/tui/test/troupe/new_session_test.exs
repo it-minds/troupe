@@ -25,6 +25,9 @@ defmodule Troupe.NewSessionTest do
 
     type(pid, "/new")
     press(pid, "enter")
+    # The agent picker first: Enter starts the session on the one marked.
+    assert user_state(pid).focus == :switcher
+    press(pid, "enter")
     eventually(fn -> user_state(pid).session_id != first end)
     fresh = user_state(pid).session_id
     on_exit(fn -> Client.stop_session(fresh) end)
@@ -112,6 +115,9 @@ defmodule Troupe.NewSessionTest do
 
     type(pid, "/new --private")
     press(pid, "enter")
+    # The agent picker first: Enter starts the session on the one marked.
+    assert user_state(pid).focus == :switcher
+    press(pid, "enter")
     eventually(fn -> user_state(pid).session_id != first end)
     private = user_state(pid).session_id
     on_exit(fn -> Client.stop_session(private) end)
@@ -177,6 +183,9 @@ defmodule Troupe.NewSessionTest do
     rested(first)
 
     type(pid, "/new")
+    press(pid, "enter")
+    # The agent picker first: Enter starts the session on the one marked.
+    assert user_state(pid).focus == :switcher
     press(pid, "enter")
     eventually(fn -> user_state(pid).session_id != first end)
     fresh = user_state(pid).session_id

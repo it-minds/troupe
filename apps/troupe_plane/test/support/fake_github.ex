@@ -10,7 +10,8 @@ defmodule Troupe.Plane.FakeGitHub do
     request carrying an App JWT that verifies, RS256, against the public half of the key
     the test registered for that App, with `iss` the App's id, not expired and at most ten
     minutes long. The token is narrowed to the `repositories` and `permissions` asked for,
-    which must be within the installation's, and lives `ttl` seconds (an hour unless told);
+    which must be within the installation's (all of them where none are named), and lives
+    `ttl` seconds (an hour unless told);
   - **a smart-HTTP clone** of a test repository (`GET .../info/refs?service=git-upload-pack`
     and `POST .../git-upload-pack`, served by the real `git upload-pack`), for Basic
     credentials whose password is a token this issued, unexpired, whose installation is
@@ -961,6 +962,10 @@ defmodule Troupe.Plane.FakeGitHub do
       do: {:ok, asked},
       else: {:error, 422, "The permissions requested are not granted to this installation."}
   end
+
+  # None named is all the installation's own, as GitHub gives them.
+  defp permissions(nil),
+    do: {:ok, Map.new(@granted, fn {name, levels} -> {name, List.last(levels)} end)}
 
   defp permissions(_asked),
     do: {:error, 422, "The permissions requested are not granted to this installation."}

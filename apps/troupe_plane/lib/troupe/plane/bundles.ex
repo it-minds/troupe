@@ -61,11 +61,19 @@ defmodule Troupe.Plane.Bundles do
 
   @builtin_primaries ~w(build plan)
 
+  # Their files as shipped, for the console's builder to copy from: a new agent is better
+  # started from one that works than from a blank page.
+  @builtin_definitions Map.new(@builtin_files, &{Path.basename(&1, ".md"), File.read!(&1)})
+
   @type projection :: %{String.t() => map()}
 
   @doc "The agent names a bundle may not replace without `override: true`."
   @spec builtin_agents() :: [String.t()]
   def builtin_agents, do: @builtin_agents
+
+  @doc "Each agent Troupe ships, by name, with its file's text."
+  @spec builtin_definitions() :: %{String.t() => String.t()}
+  def builtin_definitions, do: @builtin_definitions
 
   @doc "The primaries a session may start as when the bundle defines none of its own."
   @spec builtin_primaries() :: [String.t()]

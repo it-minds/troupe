@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, render, says, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -159,8 +159,7 @@ describe("publishing", () => {
     await open("#/bundles/stable");
     (await waitFor(() => button("Publish a new version"), "stable")).click();
     const source = await waitFor(() => field("Skills and MCP servers"), "the document");
-    const { calls, restore } = recordCalls();
-    try {
+    {
       type(source, "{ not json");
       button("Check and preview")!.click();
       await waitFor(() => says("That is not JSON"), "the parse error");
@@ -178,11 +177,10 @@ describe("publishing", () => {
       type(source, JSON.stringify({ schema: 1, skills: [], mcp_servers: [{ name: "tools", url: "http://tools.example.com/mcp" }] }));
       button("Check and preview")!.click();
       await waitFor(() => says("mcp server tools: its url is https://"), "the plane's sentences");
-      expect(calls.some((c) => c.method === "admin.bundle.publish")).toBe(false);
-    } finally {
-      restore();
     }
+    // Read from the plane, which is what was asked: nothing was published, and nothing audited as one.
     expect(fake.admin.bundles.get("stable")!.length).toBe(2);
+    expect(fake.admin.audit.some((a) => a.action === "bundle.publish")).toBe(false);
   });
 
   it("opens a channel nothing follows yet, and publishes its first version", async () => {
@@ -205,6 +203,87 @@ describe("publishing", () => {
     await waitFor(() => says("Recorded in the audit as bundle.publish on nightly"), "the audit's note");
     expect(fake.admin.bundles.get("nightly")!.length).toBe(1);
     expect((fake.admin.bundles.get("nightly")![0]!.content["agents"] as Array<{ definition: string }>)[0]!.definition).toContain("mode: subagent");
+  });
+});
+
+describe("the builder, profile first (#594)", () => {
+  const profileRow = (agent: string): HTMLTableRowElement | null =>
+    [...document.querySelectorAll<HTMLTableRowElement>("table.profile-agents tbody tr")].find((r) => r.cells[0]?.querySelector(".mono")?.textContent === agent) ?? null;
+
+  it("lists a profile's agents from its bundle in effect, and opens the builder on one with the fields it lacked", async () => {
+    await open("#/profiles/dev");
+    await waitFor(() => profileRow("pr-reviewer") && profileRow("docs-writer"), "dev's agents");
+    await sees("delegates to docs-writer", () => profileRow("pr-reviewer"));
+    // core's grant allows pr-reviewer alone: the rest are narrowed away for it.
+    expect(profileRow("pr-reviewer")!.textContent).toContain("core");
+    expect(profileRow("docs-writer")!.textContent).toContain("not core: a grant narrows it");
+    // Troupe's own primaries, which dev offers since its bundle has neither, are copied, not edited.
+    expect(profileRow("build")!.textContent).toContain("Shipped with Troupe");
+    await waitFor(() => link("Copy build into stable", profileRow("build")!), "the copy offered for build");
+
+    link("Open pr-reviewer in the builder", profileRow("pr-reviewer")!)!.click();
+    const form = await builder("Edit pr-reviewer");
+    await sees("core on dev: may run it", form);
+    await sees("It may delegate to docs-writer.", form);
+
+    // The model is picked from the ones the plane knows dev's provider by.
+    const model = await waitFor(() => (field("Model", form) instanceof HTMLSelectElement ? (field("Model", form) as HTMLSelectElement) : null), "the model picker");
+    expect([...model.options].map((o) => o.textContent)).toContain("glm-5.2: the profile's model");
+    type(model, "glm-5.2");
+    button("Add a permission", form)!.click();
+    type(await waitFor(() => form.querySelector<HTMLInputElement>('[aria-label="Permission 1 tool"]'), "a permission row"), "shell");
+    type(await waitFor(() => form.querySelector<HTMLSelectElement>('[aria-label="Permission for shell"]'), "its permission"), "deny");
+    type(field("Max turns", form)!, "30");
+    const skill = await waitFor(() => [...form.querySelectorAll<HTMLLabelElement>('[aria-label="Skills"] label')].find((l) => l.textContent?.includes("review-checklist"))?.querySelector("input"), "the bundle's skill");
+    skill.click();
+    await waitFor(() => form.querySelector('[aria-label="The definition"]')?.textContent?.includes("max_turns: 30"), "the file it makes");
+
+    button("Check and keep pr-reviewer", form)!.click();
+    await waitFor(() => !document.querySelector('[role="group"][aria-label="Edit pr-reviewer"]'), "kept");
+    button("Check and preview")!.click();
+    // The plane's diff is of names, which did not change: the changed file is said as a change.
+    await waitFor(() => says("What will happen") && says("agent pr-reviewer"), "the preview naming the changed agent");
+    (await waitFor(() => button("Publish to stable"), "the preview")).click();
+    await waitFor(() => says("Recorded in the audit as bundle.publish on stable"), "the audit's note");
+    const published = (fake.admin.bundles.get("stable")!.at(-1)!.content["agents"] as Array<{ name: string; definition: string }>).find((a) => a.name === "pr-reviewer")!;
+    expect(published.definition).toBe(
+      "---\nmode: primary\ndescription: Reviews a pull request against the checklist.\nmodel: glm-5.2\npermissions:\n  shell: deny\nmax_turns: 30\nskills:\n  - review-checklist\n---\nYou review pull requests.",
+    );
+  });
+
+  it("copies a built-in into the profile's channel as a new agent, and makes a subagent ask before it is delegated to", async () => {
+    await open("#/profiles/dev");
+    link("Copy build into stable", await waitFor(() => profileRow("build"), "dev's agents"))!.click();
+    const form = await builder("A copy of build");
+    await sees("from build, shipped with Troupe", form);
+    expect(form.querySelector('[aria-label="The definition"]')!.textContent).toContain("You are the build agent.");
+    type(field("Name", form)!, "builder");
+    button("Check and add it", form)!.click();
+    await waitFor(() => rowOf("draft-agents", "builder"), "the copy in the draft");
+
+    // A subagent of the draft, made to ask the person first.
+    button("Edit docs-writer")!.click();
+    const sub = await builder("Edit docs-writer");
+    await sees("Called by pr-reviewer, builder", sub);
+    type(field("Delegation", sub)!, "ask");
+    button("Check and keep docs-writer", sub)!.click();
+    await sees("asks the person first", () => rowOf("draft-agents", "docs-writer"));
+
+    // And Copy from the editor itself: a published agent, under a new name.
+    button("Copy an agent")!.click();
+    type(await waitFor(() => field("Copy from"), "the sources"), "published:stable:pr-reviewer");
+    button("Copy it")!.click();
+    const copy = await builder("A copy of pr-reviewer");
+    type(field("Name", copy)!, "second-reviewer");
+    button("Check and add it", copy)!.click();
+    await waitFor(() => rowOf("draft-agents", "second-reviewer"), "the second copy in the draft");
+
+    button("Check and preview")!.click();
+    (await waitFor(() => button("Publish to stable"), "the preview")).click();
+    await waitFor(() => says("Recorded in the audit as bundle.publish on stable"), "the audit's note");
+    const agents = fake.admin.bundles.get("stable")!.at(-1)!.content["agents"] as Array<{ name: string; definition: string }>;
+    expect(agents.map((a) => a.name)).toEqual(["pr-reviewer", "docs-writer", "builder", "second-reviewer"]);
+    expect(agents.find((a) => a.name === "docs-writer")!.definition).toContain("\ndelegation: ask\n");
   });
 });
 

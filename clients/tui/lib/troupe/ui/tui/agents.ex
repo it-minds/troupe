@@ -1,6 +1,9 @@
 defmodule Troupe.UI.TUI.Agents do
   @moduledoc """
-  `/agents`, the manager (issue #503, TUI Decision 156): every agent the session's
+  The manager's page (issue #503, TUI Decision 156), which `/agents` and the agent picker
+  open on an agent for what they do to it: `/agents` itself is the picker at the manager's
+  density (`Troupe.UI.TUI.AgentChooser`), and its edit, copy, new and delete are done here
+  and come back to it. Every agent the session's
   workspace has, with what decides whether a person wants one — where it comes from,
   its model, how many tools it holds, whether it is read-only, its cap on turns and which
   windows run it now — and each one's whole instruction. An agent is copied, created,
@@ -45,7 +48,8 @@ defmodule Troupe.UI.TUI.Agents do
   nothing here may be written, on a pod), the cursor, each agent read whole as the cursor
   reaches it (`details`), the instruction being read (`view`), the edits not saved yet
   with what was wrong with them and the file each was opened from (`kept`, `errors`,
-  `bases`), the question open (`ask`) and the page's own line of news (`status`).
+  `bases`), the agent last saved (`saved`, which the picker comes back to), the question
+  open (`ask`) and the page's own line of news (`status`).
   """
   @type page :: %{
           required(:rows) => [map()],
@@ -57,6 +61,7 @@ defmodule Troupe.UI.TUI.Agents do
           required(:kept) => %{optional(String.t()) => String.t()},
           required(:errors) => %{optional(String.t()) => [map()]},
           optional(:bases) => %{optional(String.t()) => base()},
+          optional(:saved) => String.t() | nil,
           required(:ask) => map() | nil,
           required(:status) => String.t() | nil
         }
@@ -69,7 +74,8 @@ defmodule Troupe.UI.TUI.Agents do
 
   @typedoc """
   An edit for the server to run: the agent's name, the text the editor opens on and the
-  file it came from; `mend?` for a file that does not parse, saved back where it is.
+  file it came from; `mend?` for a file that does not parse, saved back where it is;
+  `from`, the agent a new one is made from.
   """
   @type request :: %{
           required(:name) => String.t(),
@@ -77,7 +83,8 @@ defmodule Troupe.UI.TUI.Agents do
           required(:kept?) => boolean(),
           required(:new?) => boolean(),
           optional(:base) => base(),
-          optional(:mend?) => boolean()
+          optional(:mend?) => boolean(),
+          optional(:from) => String.t()
         }
 
   ## Opening and reading
@@ -355,7 +362,9 @@ defmodule Troupe.UI.TUI.Agents do
   def edited(page, _sid, _request, {:error, reason}),
     do: %{page | status: "the editor: " <> reason}
 
-  def edited(page, _sid, %{text: text, kept?: false} = request, {:ok, text}) do
+  # A new agent made from another is saved unchanged too: the copy is what was asked for.
+  def edited(page, _sid, %{text: text, kept?: false} = request, {:ok, text})
+      when not is_map_key(request, :from) do
     what = if request.new?, do: "the new agent #{request.name}", else: request.name
     %{page | status: "#{what}: nothing changed, so nothing is saved"}
   end
@@ -462,24 +471,12 @@ defmodule Troupe.UI.TUI.Agents do
 
   defp save_key(page, _key, _sid), do: {:ok, page}
 
-  defp picked(page, sid, scope) do
-    case choose(page, sid, scope) do
-      %{ask: nil} = page -> {:changed, page}
-      page -> {:ok, page}
-    end
-  end
-
   # A layer picked: saved at once when it adds no `auto`, asked once more when it does.
-  defp choose(%{ask: ask} = page, sid, scope) do
+  # Only a save that wrote is `:changed`: one refused keeps the edit on the page.
+  defp picked(%{ask: ask} = page, sid, scope) do
     case widened(ask, scope) do
-      [] ->
-        case put(page, sid, scope) do
-          {:changed, page} -> page
-          {:ok, page} -> page
-        end
-
-      _tools ->
-        %{page | ask: %{ask | confirm: scope}}
+      [] -> put(page, sid, scope)
+      _tools -> {:ok, %{page | ask: %{ask | confirm: scope}}}
     end
   end
 
@@ -519,7 +516,8 @@ defmodule Troupe.UI.TUI.Agents do
             ask: nil,
             kept: Map.delete(page.kept, ask.name),
             errors: Map.delete(page.errors, ask.name),
-            bases: Map.delete(bases(page), ask.name)
+            bases: Map.delete(bases(page), ask.name),
+            saved: ask.name
           })
 
         page = reload(page, sid, ask.name)
@@ -647,6 +645,67 @@ defmodule Troupe.UI.TUI.Agents do
   @spec template(String.t()) :: String.t()
   def template(name), do: String.replace(@template, "NAME", name)
 
+  @doc """
+  The page asking for the name of a new agent made from `source`, which the picker's `n`
+  opens (#594): the copy is the source's file as it is, a built-in's or the
+  organisation's as well as a person's own, opened in the editor under the name typed and
+  saved, like any new agent, into the layer the person picks. Unchanged, it is still saved:
+  a copy of an agent that works is a new agent. Refused, with the listing's sentence, where
+  nothing is written (a pod).
+  """
+  @spec new_from(page(), String.t(), String.t()) :: page()
+  def new_from(%{read_only: reason} = page, _sid, _source) when is_binary(reason),
+    do: %{page | status: reason}
+
+  def new_from(page, sid, source) do
+    page = %{page | view: nil, ask: %{kind: :name, text: "", from: source}, status: nil}
+
+    case get_in(page.details, [source, "text"]) do
+      text when is_binary(text) ->
+        page
+
+      _none ->
+        case Client.agents(sid, "agents.get", %{name: source}) do
+          {:ok, whole} -> %{page | details: Map.put(page.details, source, whole)}
+          {:error, reason} -> %{page | ask: nil, status: "agents.get #{source}: #{message(reason)}"}
+        end
+    end
+  end
+
+  # The source's file, or one made from its fields where the daemon read it from nowhere it
+  # gives back (an older daemon's bundle agent).
+  defp source_text(page, source) do
+    whole = Map.get(page.details, source, %{})
+
+    case whole["text"] do
+      text when is_binary(text) -> text
+      _none -> written(whole)
+    end
+  end
+
+  defp written(whole) do
+    front =
+      [
+        {"description", whole["description"]},
+        {"mode", whole["mode"] || "primary"},
+        {"model", whole["model"]},
+        {"max_turns", whole["max_turns"]}
+      ]
+      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+      |> Enum.map(fn {key, value} -> "#{key}: #{yaml_value(value)}" end)
+
+    tools =
+      case whole["tools"] do
+        [_ | _] = tools -> ["tools:" | Enum.map(tools, &"  - #{&1}")]
+        _all -> []
+      end
+
+    Enum.join(["---"] ++ front ++ tools ++ ["---", to_string(whole["prompt"])], "\n") <> "\n"
+  end
+
+  defp yaml_value(value) when is_binary(value), do: Jason.encode!(value)
+  defp yaml_value(value), do: to_string(value)
+
   defp name_key(page, %Key{code: "esc"}, _sid), do: {:ok, %{page | ask: nil}}
 
   defp name_key(%{ask: %{text: text}} = page, %Key{code: "backspace"}, _sid),
@@ -663,11 +722,19 @@ defmodule Troupe.UI.TUI.Agents do
         {:ok, %{page | status: "#{name} is an agent already: e edits it, c copies it"}}
 
       true ->
+        from = page.ask[:from]
         page = %{page | ask: nil}
 
-        case Map.fetch(page.kept, name) do
-          {:ok, kept} -> {:edit, page, %{name: name, text: kept, kept?: true, new?: true}}
-          :error -> {:edit, page, %{name: name, text: template(name), kept?: false, new?: true}}
+        case {Map.fetch(page.kept, name), from} do
+          {{:ok, kept}, _from} ->
+            {:edit, page, %{name: name, text: kept, kept?: true, new?: true}}
+
+          {:error, nil} ->
+            {:edit, page, %{name: name, text: template(name), kept?: false, new?: true}}
+
+          {:error, from} ->
+            {:edit, page,
+             %{name: name, text: source_text(page, from), kept?: false, new?: true, from: from}}
         end
     end
   end
@@ -932,21 +999,9 @@ defmodule Troupe.UI.TUI.Agents do
       [
         String.trim(to_string(whole["description"] || "")),
         "",
-        field("from", layer_word(whole["layer"]) <> path_words(whole)),
-        field("mode", mode_words(whole["mode"])),
-        field("model", whole["model"] || "the session's"),
-        field("tools", tools_words(whole)),
-        field("may", permission_words(whole["permissions"])),
-        field("max turns", whole["max_turns"] || "no cap of its own"),
-        field("runs in", windows_words(Map.get(running, name, []))),
-        field(
-          "worktree",
-          if(whole["worktree"] == true,
-            do: "a session on it gets its own",
-            else: "it works in this checkout"
-          )
-        )
+        field("from", layer_word(whole["layer"]) <> path_words(whole))
       ] ++
+        fields(whole, Map.get(running, name, [])) ++
         hides(whole) ++
         notes(whole) ++
         not_editable(page, whole) ++
@@ -966,6 +1021,31 @@ defmodule Troupe.UI.TUI.Agents do
       end
 
     Enum.join(head ++ ["", "instruction:"] ++ shown ++ more, "\n")
+  end
+
+  @doc """
+  What decides whether a person wants an agent, a line each, as the manager has always
+  shown them: its mode, model, tools, what it may do, its cap on turns, the windows that
+  run it and whether a session on it gets a worktree. The picker's manager density shows
+  the same lines.
+  """
+  @spec fields(map(), [String.t()]) :: [String.t()]
+  def fields(whole, windows) do
+    [
+      field("mode", mode_words(whole["mode"])),
+      field("model", whole["model"] || "the session's"),
+      field("tools", tools_words(whole)),
+      field("may", permission_words(whole["permissions"])),
+      field("max turns", whole["max_turns"] || "no cap of its own"),
+      field("runs in", windows_words(windows)),
+      field(
+        "worktree",
+        if(whole["worktree"] == true,
+          do: "a session on it gets its own",
+          else: "it works in this checkout"
+        )
+      )
+    ]
   end
 
   defp rows(text, width),
@@ -1106,6 +1186,11 @@ defmodule Troupe.UI.TUI.Agents do
 
   @doc "The command box under the page: the name being typed, or the keys."
   @spec command_line(page()) :: {term(), String.t()}
+  def command_line(%{ask: %{kind: :name, text: text, from: from}}),
+    do:
+      {{:edit, {text, String.length(text)}},
+       " new agent from #{from} — its name, then Enter opens your editor on a copy · Esc back "}
+
   def command_line(%{ask: %{kind: :name, text: text}}),
     do:
       {{:edit, {text, String.length(text)}},

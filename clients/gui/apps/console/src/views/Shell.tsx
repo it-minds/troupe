@@ -132,7 +132,7 @@ export function Shell(): JSX.Element {
 function titleWithin(page: string, path: string[]): string | null {
   const [first, second] = path;
   if (!first) return null;
-  if (page === "bundles") return second ? `${first} v${second}` : first;
+  if (page === "bundles") return second && /^\d+$/.test(second) ? `${first} v${second}` : first;
   if (page === "triggers") return second ?? null;
   if (page === "runs") return "A run";
   if (page === "sessions") return null;
@@ -144,6 +144,8 @@ function Screen({ route }: { route: Route }): JSX.Element {
   const [first, second] = route.path ?? [];
   if (route.page === "profiles") return first && role === "platform_admin" ? <Profile name={first} key={first} /> : <Profiles />;
   if (route.page === "bundles" && first && second && /^\d+$/.test(second)) return <Version channel={first} version={Number(second)} key={`${first}/${second}`} />;
+  if (route.page === "bundles" && first && (second === "agent" || second === "copy") && route.path?.[2])
+    return <Channel channel={first} opening={{ kind: second, name: route.path[2] }} key={`${first}/${second}/${route.path[2]}`} />;
   if (route.page === "bundles" && first) return <Channel channel={first} key={first} />;
   if (route.page === "bundles") return <Bundles />;
   if (route.page === "triggers" && first && second) return <TriggerPage team={first} name={second} key={`${first}/${second}`} />;

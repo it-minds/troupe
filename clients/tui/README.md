@@ -333,15 +333,20 @@ whichever client turned it on, and `/watch` turns it off. On Linux, native watch
 
 ### Agents
 
-`/agents` lists the primary agents with where each comes from, its model, its tools,
-whether it is read-only, its cap on turns and which windows run it; Enter reads one's
-whole instruction. `e` opens it in your editor (`VISUAL`, then `EDITOR`; Notepad or `vi`
+`/agents` is the agent picker Ctrl-N and Tab open, at the manager's density: every agent,
+the subagents too, each with where it comes from in the four words (Shipped, Your
+organisation's, Yours, This repository's), its mode, model and tools, whether it is
+read-only, its cap on turns, what it stands in for and which windows run it, and the files
+that could not be read after them; Enter reads one's whole instruction and `b` starts a
+branch on it. `e` opens it in your editor (`VISUAL`, then `EDITOR`; Notepad or `vi`
 without either) and the daemon checks what you saved: refused, the errors are on the page
 and your edit is kept for the next `e`; accepted, you pick where it goes, `r` the
 repository's `.troupe/agents/` or `m` your own `agents/`, after it says which tools it
 would run without asking, and asks again when the save adds one. `c` copies one into the
-repository in one key, `n` starts one from a template, `x` deletes a copy and says what
-answers to the name after. A bundle's agents, and every agent on a pod, are read-only here
+repository in one key, `n` makes a new agent from the one selected (one Troupe ships or
+your organisation's as well as your own) under a name you type, `x` deletes a copy and
+says what answers to the name after. `n` is the picker's everywhere it opens. A save comes
+back to the picker on what was saved, so Enter, or `b`, starts on it at once. A bundle's agents, and every agent on a pod, are read-only here
 and say where they are changed. What a definition holds, and the built-ins, are on
 [agents, commands and workflows](../../docs/user/agents.md).
 
@@ -417,7 +422,10 @@ you were in carries on: it stays in `/resume`'s list, and `/back` returns to it 
 `/new --remote PROFILE` one on that profile of the plane you are signed in to, and
 `/new --branch` a fork of the session on screen: a session whose log starts as a copy of
 this one's, so its agent goes on from the conversation as it stands while the first
-carries on as it was. In command mode the conversations are the branches', so it is typed
+carries on as it was. `/new` and `/new --private` open the agent picker first: Enter starts
+the session on the agent chosen, and the first line typed on its command line starts that
+agent (`n` there makes a new agent first, and the save comes back to start on it). In
+command mode the conversations are the branches', so `--branch` is typed
 in the branch's window and forks that branch; on the command line it says which window to
 open. The new session's command line is where its first line goes.
 

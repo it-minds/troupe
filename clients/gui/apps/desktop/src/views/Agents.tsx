@@ -19,16 +19,28 @@
 // way; a save names the hash of the file it was opened from, so one over a file somebody
 // else saved meanwhile is refused and said, as is another client's save of the agent open
 // in the editor; and a file that does not parse opens to be mended (troupe Decision 852).
+//
+// Its list is the one agent picker's rows (troupe #594), in the manager's density: grouped
+// by where each agent comes from in the four words, each with its mode, model, tools, cap on
+// turns, what it stands in for and the sessions here running it. The picker's actions are
+// on the one chosen (Start a session on it; Switch is a session's, so it is refused here
+// with where it is done), beside the manager's own: edit, copy into a layer, a new agent
+// from it as a template, and delete. A new agent or a copy, once saved, offers to start a
+// session on it at once, so making one and using it are one step.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import { agentConflict, agentRefusal, agentTemplate, layerOf, layerWords, onThisComputer, permissionsOf, widenedAutos } from "@troupe/client";
-import type { AgentDefinition, AgentLayer, AgentRow, AgentScope, AgentSkippedFile, DaemonClient, FleetRow } from "@troupe/client";
+import type { AgentDefinition, AgentLayer, AgentRow, AgentScope, AgentSkippedFile, DaemonClient, FleetRow, SessionKind } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import { shell } from "../shell";
 import { AgentEditor, permissionWords, scopeWords } from "./AgentEditor";
 import type { Editing } from "./AgentEditor";
-import { Confirm, Failed, Loading, Pill, Table } from "./bits";
+import { AgentRows, fromWords, runAgent } from "./AgentPicker";
+import { Confirm, Failed, Loading, Table } from "./bits";
+
+/** Switch is a session's: the manager has none, and says where it is done. */
+const NO_SWITCH = "Switch is a session's: open the session and choose the agent in its head, or start a session on this one here.";
 
 /** The sessions of this workspace running an agent now: the sessions in it and the branches made from them. */
 function runningIn(rows: FleetRow[], workspace: string, name: string): FleetRow[] {
@@ -71,6 +83,7 @@ export function Agents({
   agent,
   planeUrl,
   onOpenSession,
+  onStarted,
 }: {
   client: DaemonClient | null;
   /** The one list's rows, for the windows running each agent. */
@@ -82,6 +95,8 @@ export function Agents({
   /** The plane this app is signed in to, for the console a bundle's agents are changed in. */
   planeUrl: string | null;
   onOpenSession: (id: string) => void;
+  /** A session started here on an agent, with the workspace the daemon started it in. */
+  onStarted?: (id: string, kind: SessionKind, workspace?: string) => void;
 }): JSX.Element {
   if (!client) {
     return (
@@ -99,7 +114,17 @@ export function Agents({
       </>
     );
   }
-  return <Manager client={client} rows={rows} given={given} agent={agent} planeUrl={planeUrl} onOpenSession={onOpenSession} />;
+  return (
+    <Manager
+      client={client}
+      rows={rows}
+      given={given}
+      agent={agent}
+      planeUrl={planeUrl}
+      onOpenSession={onOpenSession}
+      onStarted={onStarted ?? ((id) => onOpenSession(id))}
+    />
+  );
 }
 
 function Head(): JSX.Element {
@@ -122,6 +147,7 @@ function Manager({
   agent,
   planeUrl,
   onOpenSession,
+  onStarted,
 }: {
   client: DaemonClient;
   rows: FleetRow[];
@@ -129,6 +155,7 @@ function Manager({
   agent: string | undefined;
   planeUrl: string | null;
   onOpenSession: (id: string) => void;
+  onStarted: (id: string, kind: SessionKind, workspace?: string) => void;
 }): JSX.Element {
   const [workspace, setWorkspace] = useState(given ?? "");
   const [recent, setRecent] = useState<string[]>([]);
@@ -140,6 +167,8 @@ function Manager({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
+  // A new agent or a copy just saved, offered to start a session on (save, then start).
+  const [startable, setStartable] = useState<string | null>(null);
   // A save of this screen's own is under way: its `agents.changed` is not news to the editor.
   const saving = useRef(false);
   const ws = workspace.trim();
@@ -188,8 +217,21 @@ function Manager({
   const { data, loading, error: readError } = useAdminQuery(load, [load, round]);
 
   const detail = useAgent(client, selected, ws, round);
-  const primaries = (data?.agents ?? []).filter((a) => a.mode !== "subagent");
   const subagents = (data?.agents ?? []).filter((a) => a.mode === "subagent");
+
+  // A session on the agent, in the workspace the list is for, as the start screen makes one.
+  const start = async (name: string): Promise<void> => {
+    const row = data?.agents.find((a) => a.name === name) ?? { name, description: "", source: "" };
+    setBusy(true);
+    setError(null);
+    const refused = await runAgent(row, async (as) => {
+      if (!ws) throw new Error("Name a workspace first: a session starts in one.");
+      const created = await client.createSession({ workspace: ws, profile: as });
+      onStarted(created.session_id, "local", created.workspace);
+    });
+    if (refused) setError(refused);
+    setBusy(false);
+  };
 
   const save = async (target: SaveTarget): Promise<void> => {
     setBusy(true);
@@ -206,6 +248,8 @@ function Manager({
       });
       const warned = written.warnings.length ? ` ${written.warnings.map((w) => w.message).join("; ")}.` : "";
       setOutcome(`${written.action === "created" ? "Saved" : "Replaced"} ${written.name} in ${scopeWords(written.scope)}: ${written.path}.${warned}`);
+      // A new agent, or a copy, is offered at once to start on; a subagent is delegated to, not started.
+      setStartable(written.action === "created" && !/^mode:\s*["']?subagent/m.test(target.text) ? written.name : null);
       setEditing(null);
       setSelected(written.name);
       setRound((n) => n + 1);
@@ -313,13 +357,27 @@ function Manager({
           {outcome && <p className="note">{outcome}</p>}
           {!ws && <p className="note">Name a workspace to see what a session there could run.</p>}
           {ws && loading && !data && <Loading what="Reading the agents…" />}
-          {primaries.length > 0 && <AgentTable agents={primaries} rows={rows} workspace={ws} selected={selected} onSelect={setSelected} onOpenSession={onOpenSession} />}
-          {subagents.length > 0 && (
-            <>
-              <h4 className="instruction-head">Subagents</h4>
-              <p className="note">What an agent delegates to: nothing a person types starts one. Each is read, copied and edited as any other.</p>
-              <AgentTable agents={subagents} rows={rows} workspace={ws} selected={selected} onSelect={setSelected} onOpenSession={onOpenSession} />
-            </>
+          {(data?.agents ?? []).length > 0 && (
+            <AgentRows
+              rows={data?.agents ?? []}
+              current={null}
+              picked={selected}
+              onChoose={(name) => {
+                setSelected(name);
+                setStartable(null);
+                setError(null);
+              }}
+              density="manager"
+              running={(name) => runningIn(rows, ws, name).map((r) => r.id)}
+            />
+          )}
+          {subagents.length > 0 && <p className="note">Subagents are what an agent delegates to: nothing a person types starts one. Each is read, copied and edited as any other.</p>}
+          {startable && (
+            <div className="actions start-actions">
+              <button className="primary" disabled={busy} onClick={() => void start(startable)}>
+                Start a session on {startable}
+              </button>
+            </div>
           )}
           {ws && (
             <div className="actions start-actions">
@@ -382,6 +440,8 @@ function Manager({
             onNewFrom={(def) => setEditing({ kind: "new", name: "", scope: "project", text: def.text ?? "", original: def, findings: null, checked: false })}
             onCopy={copy}
             onDelete={setDeleting}
+            onStart={(name) => void start(name)}
+            onSwitch={() => setError(NO_SWITCH)}
           />
         )}
       </div>
@@ -439,71 +499,6 @@ function useAgent(client: DaemonClient, name: string | null, workspace: string, 
   return state;
 }
 
-function AgentTable({
-  agents,
-  rows,
-  workspace,
-  selected,
-  onSelect,
-  onOpenSession,
-}: {
-  agents: AgentRow[];
-  rows: FleetRow[];
-  workspace: string;
-  selected: string | null;
-  onSelect: (name: string) => void;
-  onOpenSession: (id: string) => void;
-}): JSX.Element {
-  return (
-    <Table head={["Agent", "Layer", "Model", "Tools", "Max turns", "Running here"]}>
-      {agents.map((a) => {
-        const running = runningIn(rows, workspace, a.name);
-        return (
-          <tr key={a.name} aria-selected={a.name === selected || undefined}>
-            <th scope="row" title={a.description}>
-              <button className="link agent-name" onClick={() => onSelect(a.name)} aria-label={`Open ${a.name}`}>
-                {a.name}
-              </button>
-              <span className="micro muted agent-description">{a.description}</span>
-            </th>
-            <td>
-              <LayerWord layer={layerOf(a)} />
-            </td>
-            <td className="mono micro">{a.model ?? "the session's"}</td>
-            <td>
-              {a.tool_count ?? "—"}
-              {a.read_only && (
-                <>
-                  {" "}
-                  <Pill status="readonly">Read only</Pill>
-                </>
-              )}
-              {a.available === false && (
-                <>
-                  {" "}
-                  <Pill status="error" title={a.reason ?? undefined}>
-                    Cannot run here
-                  </Pill>
-                </>
-              )}
-            </td>
-            <td>{a.max_turns ?? "—"}</td>
-            <td>
-              {running.length === 0
-                ? "—"
-                : running.map((r) => (
-                    <button key={r.id} className="link mono session-id" onClick={() => onOpenSession(r.id)} title={`Open ${r.id}`}>
-                      {r.id}
-                    </button>
-                  ))}
-            </td>
-          </tr>
-        );
-      })}
-    </Table>
-  );
-}
-
 function LayerWord({ layer }: { layer: AgentLayer }): JSX.Element {
   return <span className={`chip layer-${layer}`}>{layerWords(layer)}</span>;
 }
@@ -520,6 +515,8 @@ function AgentDetail({
   onNewFrom,
   onCopy,
   onDelete,
+  onStart,
+  onSwitch,
 }: {
   name: string;
   detail: { def: AgentDefinition | null; error: string | null };
@@ -532,6 +529,8 @@ function AgentDetail({
   onNewFrom: (def: AgentDefinition) => void;
   onCopy: (def: AgentDefinition, scope: AgentScope) => void;
   onDelete: (def: AgentDefinition) => void;
+  onStart: (name: string) => void;
+  onSwitch: () => void;
 }): JSX.Element {
   const def = detail.def?.name === name ? detail.def : null;
   const running = useMemo(() => (def ? runningIn(rows, workspace, def.name) : []), [rows, workspace, def]);
@@ -555,6 +554,15 @@ function AgentDetail({
     <section className="group agent-detail" aria-label={`The agent ${def.name}`}>
       <h3>{def.name}</h3>
       <p className="copy">{def.description || "No description."}</p>
+      <p className="note">{fromWords(def)}</p>
+      <div className="actions start-actions">
+        <button className="primary" onClick={() => onStart(def.name)} disabled={busy || !workspace}>
+          Start a session on {def.name}
+        </button>
+        <button onClick={onSwitch} disabled={busy}>
+          Switch to {def.name}
+        </button>
+      </div>
       <dl className="facts wide">
         <dt>Layer</dt>
         <dd>

@@ -18,6 +18,7 @@ defmodule Troupe.Plane.AdminTest do
     Identity,
     Ledger,
     Sessions,
+    Settings,
     Triggers
   }
 
@@ -732,6 +733,117 @@ defmodule Troupe.Plane.AdminTest do
 
       assert {:error, refused} = Admin.agent_check(context.lead, "triager", fine)
       assert refused.data.required_role == "platform_admin"
+    end
+
+    # The builder's profile-first view (#594): a profile's agents as its bundle in effect
+    # has them, with the fields the builder edits, and which teams may run each.
+    test "a profile's agents are its bundle's in effect, with their fields, definitions and " <>
+           "the teams that may run each",
+         context do
+      triager =
+        "---\ndescription: Triages\nmode: primary\nmodel: big\nmax_turns: 7\n" <>
+          "tools: [read_file, delegate, finish]\npermissions:\n  shell: deny\n---\nYou triage.\n"
+
+      digger = "---\ndescription: Digs\nmode: subagent\ntools: [read_file, grep]\n---\nYou dig.\n"
+
+      assert {:ok, _} =
+               Admin.bundle_publish(context.root, "stable", %{
+                 "schema" => 1,
+                 "agents" => [
+                   %{"name" => "triager", "definition" => triager},
+                   %{"name" => "digger", "definition" => digger}
+                 ]
+               })
+
+      # The design team is granted dev too, narrowed to another agent.
+      {:ok, grant} = Identity.grant(context.design, "dev")
+      {:ok, _} = Identity.put_entitlements(grant, [%{kind: "agent", name: "other"}])
+
+      assert {:ok, view} = Admin.profile_agents(context.root, "dev")
+      assert view.profile == "dev"
+      assert view.channel == "stable"
+      assert view.teams == ["design", "engineering"]
+
+      assert %{
+               mode: "primary",
+               description: "Triages",
+               model: "big",
+               max_turns: 7,
+               permissions: %{"shell" => "deny"},
+               delegate: ["digger"],
+               from: "dev",
+               channel: "stable",
+               builtin: false,
+               definition: ^triager
+             } = row = Enum.find(view.agents, &(&1.name == "triager"))
+
+      assert row.teams == [%{team: "design", may: false}, %{team: "engineering", may: true}]
+      assert %{mode: "subagent", delegate: nil} = Enum.find(view.agents, &(&1.name == "digger"))
+
+      # The built-in primaries the profile offers beside its own, to copy rather than edit,
+      # and every agent Troupe ships, with its file.
+      assert %{builtin: true, channel: nil} = Enum.find(view.agents, &(&1.name == "build"))
+      assert Enum.map(view.builtins, & &1.name) == Bundles.builtin_agents()
+      assert Enum.all?(view.builtins, &String.starts_with?(&1.definition, "---"))
+
+      assert {:error, %{message: "not_found"}} = Admin.profile_agents(context.root, "nope")
+      assert {:error, refused} = Admin.profile_agents(context.lead, "dev")
+      assert refused.data.required_role == "platform_admin"
+    end
+
+    test "a model is picked from the ones the plane knows a provider serves, each with why",
+         context do
+      {:ok, _} =
+        Fleet.put_profile(%{
+          name: "dev",
+          replicas: 2,
+          sessions_per_pod: 4,
+          spec: %{
+            "llm" => %{
+              "provider" => "anthropic",
+              "model" => "claude-own",
+              "endpoint" => "https://llm.example.test"
+            }
+          }
+        })
+
+      Settings.put("client_model_cheap", "claude-cheap", "root@example.test")
+
+      assert {:ok, _} =
+               Admin.bundle_publish(context.root, "stable", %{
+                 "schema" => 1,
+                 "agents" => [
+                   %{
+                     "name" => "triager",
+                     "definition" => "---\nmode: primary\nmodel: claude-named\n---\nGo.\n"
+                   }
+                 ]
+               })
+
+      session = session!("s-model", context.engineering, "dev")
+
+      {:ok, _} =
+        Ledger.record(%{
+          session_id: session.id,
+          team_id: context.engineering.id,
+          owner_subject: "member@example.test",
+          model: "claude-ran",
+          cost_micros: 1,
+          gateway_request_id: "s-model-1"
+        })
+
+      assert {:ok, %{models: models}} = Admin.profile_choices(context.lead, "dev")
+
+      assert models == [
+               %{name: "claude-cheap", why: "a model the organisation gives people's machines"},
+               %{name: "claude-named", why: "a model an agent of its bundle names"},
+               %{name: "claude-own", why: "the profile's model"},
+               %{name: "claude-ran", why: "a model this profile's sessions have run on"}
+             ]
+
+      assert {:ok, %{models: plane}} = Admin.profile_choices(context.lead)
+      assert Enum.map(plane, & &1.name) == ["claude-cheap", "claude-ran"]
+      assert {:error, %{message: "not_found"}} = Admin.profile_choices(context.lead, "nope")
     end
 
     test "one version comes back in full, with its summary and who has it", context do

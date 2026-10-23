@@ -9,8 +9,9 @@
 // records it. A console that is right against this is right against the plane's rules,
 // which `apps/troupe_plane/test` holds the plane to.
 
+import { parseAgent } from "../../src/agents.js";
 import { checkRuleSet } from "../../src/rules.js";
-import { checkAgent } from "./agents.js";
+import { BUILTIN_AGENTS, checkAgent } from "./agents.js";
 import { older } from "./plane.js";
 import { PROVIDER_TYPES } from "./provider-types.js";
 import { MAX_DEPTH, WRITTEN_KEYS, composeBundle, empty as emptyResolved, fieldsOf, merge as mergeExtends, rowOf } from "./extends.js";
@@ -1552,7 +1553,7 @@ export class FakeAdmin {
       }
 
       case "admin.github.check":
-        return role === "platform_admin" ? { result: this.githubCheck() } : notPlatform;
+        return role === "platform_admin" ? { result: this.githubCheck(typeof params["repository"] === "string" ? params["repository"] : null) } : notPlatform;
 
       case "admin.github.delete": {
         if (role !== "platform_admin") return notPlatform;
@@ -1694,8 +1695,19 @@ export class FakeAdmin {
       case "admin.provisioners.list":
         return admin ? { result: PROVISIONERS } : notAdmin;
 
-      case "admin.profile.choices":
-        return admin ? { result: { provider_types: PROVIDER_TYPES, size_classes: SIZE_CLASS_CHOICES } } : notAdmin;
+      case "admin.profile.choices": {
+        if (!admin) return notAdmin;
+        const named = typeof params["profile"] === "string" ? params["profile"] : null;
+        if (named !== null && !this.profiles.some((p) => p.name === named)) return refuse(NOT_FOUND, "not_found", { profile: named });
+        return { result: { provider_types: PROVIDER_TYPES, size_classes: SIZE_CLASS_CHOICES, models: this.modelsKnown(named) } };
+      }
+
+      case "admin.profile.agents": {
+        if (role !== "platform_admin") return notPlatform;
+        const p = this.profiles.find((x) => x.name === params["name"]);
+        if (!p) return refuse(NOT_FOUND, "not_found", { profile: params["name"] });
+        return { result: this.profileAgents(p) };
+      }
 
       case "admin.hosts.list": {
         if (role !== "platform_admin") return notPlatform;
@@ -3091,7 +3103,110 @@ export class FakeAdmin {
   }
 
   /** `GitHub.check/1`: four checks, each after the one before it passed. */
-  private githubCheck(): Record<string, unknown> {
+  /**
+   * The check, and asked about a repository the fifth, as the plane makes it: a token minted
+   * there through the owner's installation, its permissions as GitHub granted them, revoked.
+   * Not tried where a check before it failed.
+   */
+  private githubCheck(repository: string | null = null): Record<string, unknown> {
+    const answer = this.githubAppCheck();
+    if (repository === null) return answer;
+    const checks = answer["checks"] as Array<{ name: string; ok: boolean; detail: string; took_ms: number }>;
+    const failed = checks.find((c) => !c.ok);
+    const said = (ok: boolean, detail: string, tested: Record<string, unknown> | null) => ({
+      ...answer,
+      ok: Boolean(answer["ok"]) && ok,
+      checks: [...checks, { name: "Repository", ok, detail, took_ms: ok ? 140 : 0 }],
+      repository: tested,
+    });
+    if (failed) return said(false, `Not tried: ${failed.name} did not pass.`, null);
+    const [owner, name, ...rest] = repository.split("/");
+    if (!owner || !name || rest.length > 0) return said(false, "a repository is owner/name", null);
+    const installation = this.github.installations.find((i) => i.owner.toLowerCase() === owner.toLowerCase());
+    if (!installation) {
+      return said(false, `The App has no installation for ${owner}: it is installed for ${this.github.installations.map((i) => i.owner).join(", ") || "nobody"}.`, null);
+    }
+    return said(true, `A token for ${owner}/${name} was minted and revoked.`, {
+      name: `${owner}/${name}`,
+      installation_id: installation.installation_id,
+      permissions: { ...this.githubTokenPermissions },
+      revoked: true,
+    });
+  }
+
+  /** The agents of a profile's bundle in effect, each with its channel and who may run it; and every built-in, to copy from. */
+  private profileAgents(p: FakeProfile): Record<string, unknown> {
+    const resolved = this.resolveProfile(p.name, {});
+    const chain = typeof resolved === "string" ? [[p.name, p.channel ?? "stable"] as [string, string]] : resolved.channels;
+    const seen = new Set<string>();
+    const found: Array<{ name: string; definition: string; from: string | null; channel: string | null; builtin: boolean }> = [];
+    for (const [profile, channel] of chain) {
+      if (seen.has(channel)) continue;
+      seen.add(channel);
+      for (const a of (this.current(channel)?.content["agents"] as Array<Record<string, unknown>> | undefined) ?? []) {
+        const entry = { name: String(a["name"]), definition: String(a["definition"] ?? ""), from: profile, channel, builtin: false };
+        const at = found.findIndex((f) => f.name === entry.name);
+        if (at < 0) found.push(entry);
+        else if (a["override"] === true || /\noverride:\s*true\s*\n/.test(entry.definition)) found[at] = entry;
+      }
+    }
+    const fields = (text: string) => parseAgent(text).fields;
+    for (const b of BUILTIN_AGENTS.filter((x) => ["build", "plan"].includes(x.name))) {
+      if (!found.some((f) => f.name === b.name && fields(f.definition)?.mode === "primary")) found.push({ name: b.name, definition: b.text, from: null, channel: null, builtin: true });
+    }
+    const teams = [...this.teams.values()].filter((t) => t.grants.some((g) => g.profile === p.name)).map((t) => t.name).sort();
+    const may = (team: string, agent: string): boolean => {
+      const rows = this.entitlements.filter((e) => e.team === team && e.profile === p.name && e.kind === "agent");
+      if (rows.some((r) => r.mode === "deny" && r.name === agent)) return false;
+      const allowed = rows.filter((r) => r.mode === "allow");
+      return allowed.length === 0 || allowed.some((r) => r.name === agent);
+    };
+    const subagents = found.filter((f) => fields(f.definition)?.mode === "subagent").map((f) => f.name);
+    return {
+      profile: p.name,
+      channel: chain.at(-1)?.[1] ?? null,
+      agents: found.map((f) => {
+        const read = fields(f.definition);
+        const mode = read?.mode === "subagent" ? "subagent" : "primary";
+        const tools = read?.tools ?? "all";
+        const delegates = mode === "primary" && (tools === "all" || tools.includes("delegate"));
+        return {
+          ...f,
+          mode,
+          description: read?.description || null,
+          model: read?.model || null,
+          delegate: delegates ? subagents : null,
+          max_turns: read?.max_turns ? Number(read.max_turns) : null,
+          skills: read ? read.skills : null,
+          permissions: read?.permissions ?? {},
+          teams: teams.map((team) => ({ team, may: may(team, f.name) })),
+        };
+      }),
+      builtins: BUILTIN_AGENTS.map((b) => ({ name: b.name, mode: fields(b.text)?.mode === "subagent" ? "subagent" : "primary", description: fields(b.text)?.description || null, definition: b.text })),
+      teams,
+    };
+  }
+
+  /** The models the plane knows a profile's provider by, as `admin.profile.choices` lists them: each once, with the first reason. */
+  private modelsKnown(profile: string | null): Array<{ name: string; why: string }> {
+    const out = new Map<string, string>();
+    const add = (name: unknown, why: string) => {
+      if (typeof name === "string" && name !== "" && !out.has(name)) out.set(name, why);
+    };
+    const p = profile ? this.profiles.find((x) => x.name === profile) : null;
+    const llm = (p?.spec?.["llm"] ?? {}) as Record<string, unknown>;
+    add(llm["model"], "the profile's model");
+    add(llm["smallModel"], "the profile's model");
+    for (const key of ["client_model_default", "client_model_cheap", "client_model_expensive"]) add(this.stored.get(key) ?? this.deployed[key], "a model the organisation gives people's machines");
+    for (const t of this.teams.values()) if (!p || t.grants.some((g) => g.profile === p.name)) for (const s of t.spend_by_model ?? []) add(s["model"], "a model this profile's sessions have run on");
+    if (p) for (const a of (this.profileAgents(p)["agents"] as Array<{ model: string | null }>)) add(a.model, "a model an agent of its bundle names");
+    return [...out.entries()].map(([name, why]) => ({ name, why })).sort((x, y) => x.name.localeCompare(y.name));
+  }
+
+  /** What GitHub grants an installation token on a repository here, for the repository test. */
+  githubTokenPermissions: Record<string, string> = { contents: "write", metadata: "read", pull_requests: "write", checks: "read", issues: "read" };
+
+  private githubAppCheck(): Record<string, unknown> {
     const g = this.github;
     const known = this.githubKnows;
     const notTried = (name: string, after: string) => ({ name, ok: false, detail: `Not tried: ${after} did not pass.`, took_ms: 0 });

@@ -44,8 +44,11 @@ function labelled<T extends Element>(label: string, within: ParentNode = documen
   return found;
 }
 
-function agentRow(name: string): HTMLTableRowElement | undefined {
-  return [...document.querySelectorAll<HTMLTableRowElement>("tr")].find((r) => r.querySelector("th")?.firstChild?.textContent === name);
+/** The manager's row for an agent: the one picker's, in the manager's density (troupe #594). */
+function agentRow(name: string): HTMLButtonElement | undefined {
+  return [...document.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="Agent"] [role="option"]')].find(
+    (o) => o.querySelector(".name")?.textContent?.replace(" ●", "") === name,
+  );
 }
 
 async function openManager(): Promise<void> {
@@ -132,10 +135,11 @@ describe("the agents manager after #503 (D107, D112)", () => {
 
     await waitFor(() => agentRow("explore"), "the subagents listed");
     for (const name of ["explore", "general", "implementer", "reviewer"]) expect(agentRow(name), name).toBeTruthy();
-    await sees("Subagents");
+    await sees("Subagents are what an agent delegates to");
+    expect(agentRow("explore")!.textContent).toContain("subagent");
     expect(daemon.calls.find((c) => c.method === "agents.list")?.params).toMatchObject({ workspace: REPO, subagents: true });
 
-    button("explore", agentRow("explore")!)!.click();
+    agentRow("explore")!.click();
     const detail = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="The agent explore"]'), "explore, whole");
     expect(detail.textContent).toContain("subagent: an agent delegates to it");
     button("Copy into this repository", detail)!.click();
@@ -159,7 +163,7 @@ describe("the agents manager after #503 (D107, D112)", () => {
     daemon.agents.files.push({ name: "careful", layer: "project", workspace: REPO, text: careful });
     await openManager();
 
-    button("careful", (await waitFor(() => agentRow("careful"), "careful listed"))!)!.click();
+    (await waitFor(() => agentRow("careful"), "careful listed")).click();
     const detail = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="The agent careful"]'), "careful, whole");
     button("Edit", detail)!.click();
     const editor = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="Edit careful"]'), "the editor");

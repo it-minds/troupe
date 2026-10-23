@@ -526,8 +526,31 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.choices",
       function: :profile_choices,
       summary:
-        "What a profile's fields may be: every provider type llm.provider may name, with what each asks for (where it is, whether it needs a key), and every size class with how many sessions share a worker and what it is for. The lists the plane checks a profile against, so a form offers no choice it would refuse.",
-      risk: :read
+        "What a profile's fields may be: every provider type llm.provider may name, with what each asks for (where it is, whether it needs a key), and every size class with how many sessions share a worker and what it is for. The lists the plane checks a profile against, so a form offers no choice it would refuse. And models, each {name, why}: the models this plane knows a provider serves, from the profile's own model, the models the organisation gives people's machines, the models sessions (the profile's, with profile) have run on, and the models its bundle's agents name; the plane does not ask a provider for its list.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "profile",
+          type: :string,
+          description:
+            "A profile's name: its own model, its sessions' and its bundle's are in models. Without it, the organisation's and every session's."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.profile.agents",
+      function: :profile_agents,
+      summary:
+        "A profile's agents, as its bundle in effect has them (composed through what it extends), for the console's builder: each with its mode, description, model, delegate (the subagents it may hand work to: its bundle's, when it holds the delegate tool), max_turns, skills, permissions, from (the profile whose channel gave it) and channel, builtin (a primary Troupe ships that the profile offers because its bundle has none of that name), its definition, and teams, each team granted the profile with may (whether its grant lets it run the agent). Beside them channel, the one the profile follows in effect, builtins, every agent Troupe ships with its definition, to copy from, and teams. A platform admin's, as editing a bundle is.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "name",
+          type: :string,
+          required: true,
+          description: "The profile's name."
+        }
+      ]
     },
     %Method{
       name: "admin.profiles.export",
@@ -1506,9 +1529,16 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.github.check",
       function: :github_check,
       summary:
-        "Test the plane's GitHub App without changing it: an App ID is set, OpenBao transit signs with its key, GitHub knows the App by the JWT that key signs, and every installation set here is one GitHub lists for it. Four named checks, each with what it found, and GitHub's slug and name for the App once GitHub has answered.",
+        "Test the plane's GitHub App without changing it: an App ID is set, OpenBao transit signs with its key, GitHub knows the App by the JWT that key signs, and every installation set here is one GitHub lists for it. Four named checks, each with what it found, and GitHub's slug and name for the App once GitHub has answered. With a repository, a fifth (Repository): a token for it is minted with what the App's installation may do there, the repository is read with it, and it is revoked; the answer's repository is {name, installation_id, permissions, revoked}, GitHub's list of what the token could do, and never the token.",
       risk: :read,
-      arguments: []
+      arguments: [
+        %Argument{
+          name: "repository",
+          type: :string,
+          description:
+            "owner/name: a repository of one of the App's installations, to mint, use and revoke a token for."
+        }
+      ]
     },
     %Method{
       name: "admin.github.deliveries",
