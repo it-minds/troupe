@@ -1400,6 +1400,30 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.releases.list",
+      function: :releases_list,
+      summary:
+        "The releases kept in this plane's object store, which people's machines update from at <plane>/downloads with no way to GitHub: each version mirrored, newest first, with how many files it holds, any whose copy is under way, where releases are mirrored from (source) and where machines are told to get them (release_url, null for GitHub's).",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
+      name: "admin.releases.mirror",
+      function: :releases_mirror,
+      summary:
+        "Copy a release into this plane's object store from where releases are published, for people's machines to update from. Its manifest is checked against the release keys first: one they did not sign, or one naming another version, is refused and nothing is copied. The files are then copied in the background, each held to the manifest, and the release is listed as mirrored once its manifest is written, last. Machines check every file against the release key again before installing it.",
+      risk: :write,
+      arguments: [
+        %Argument{
+          name: "version",
+          type: :string,
+          required: true,
+          description:
+            "The release's version, as it is numbered: 0.24.0-beta (a leading v is taken off)."
+        }
+      ]
+    },
+    %Method{
       name: "admin.memory.list",
       function: :memory_list,
       summary:

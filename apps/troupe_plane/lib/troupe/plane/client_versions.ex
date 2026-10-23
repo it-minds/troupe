@@ -95,15 +95,6 @@ defmodule Troupe.Plane.ClientVersions do
     end
   end
 
-  @doc """
-  Whether this plane serves `version` to some kind of client: what its `/downloads` hands
-  out. A version every component blocks, or that is below every component's minimum, is
-  served to nobody, and so its files are not either.
-  """
-  @spec served?(String.t()) :: boolean()
-  def served?(version) do
-    Enum.any?(components(), &match?({:ok, _}, ClientUpdate.judge(policy(&1), version)))
-  end
 
   @doc """
   Change one component's policy.

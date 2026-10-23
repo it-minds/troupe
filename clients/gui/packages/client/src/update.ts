@@ -12,7 +12,8 @@
 // that most needs it is the one `initialize` refuses: it is what an update chooses the
 // version by. The plane signs it with a key of its own (#657), and it is taken only as
 // signed by the key this machine pinned for the plane; a plane that signs nothing is taken
-// at its word, and that said.
+// at its word, and that said. A refusal of this version is signed too, for this client and
+// version, and is not acted on where the pinned key did not sign it.
 
 import { TroupeRpcError } from "./connection.js";
 import { ErrorCodes } from "./types.js";
@@ -69,6 +70,8 @@ export type PlaneVersionWord =
       versions: Record<string, VersionPolicy> | null;
       /** Where the plane says releases are, each under `v<version>/`; null for GitHub's. */
       releaseUrl?: string | null;
+      /** The policy's `signed` as it came, where the pinned key held for it: the shell checks it again itself. */
+      signed?: SignedAnswer | null;
       signature?: SignatureWord;
     }
   | {
@@ -77,6 +80,7 @@ export type PlaneVersionWord =
       sentence: string;
       versions: Record<string, VersionPolicy> | null;
       releaseUrl?: string | null;
+      signed?: SignedAnswer | null;
       signature?: SignatureWord;
     }
   /** A plane from before the policy: no word either way. */
@@ -119,6 +123,7 @@ function isMethodNotFound(e: unknown): boolean {
 interface VersionsAnswer {
   versions: Record<string, VersionPolicy> | null;
   releaseUrl: string | null;
+  signed?: SignedAnswer | null;
   signature?: SignatureWord;
 }
 
@@ -155,7 +160,7 @@ async function clientVersions(auth: AuthSession, pinned: PlaneKey | null | undef
     if (!checked.ok) {
       return { versions: null, releaseUrl: null, signature: { state: "refused", sentence: `${refusalSentence(checked, plane, "the version policy", pinned.fingerprint)}.` } };
     }
-    return { versions: checked.body.versions ?? {}, releaseUrl: releaseOf(checked.body), signature: { state: "signed" } };
+    return { versions: checked.body.versions ?? {}, releaseUrl: releaseOf(checked.body), signed: answer.signed ?? null, signature: { state: "signed" } };
   }
   if (!answer.signed) {
     return {
@@ -186,10 +191,37 @@ export async function askPlane(auth: AuthSession, version: string, pinned?: Plan
   } catch (e) {
     if (isMethodNotFound(e)) return { state: "unknown" };
     if (e instanceof TroupeRpcError && e.code === ErrorCodes.update_required) {
-      const refusal = (e.data ?? {}) as UpdateRequired;
-      return { state: "required", refusal, sentence: updateRequiredSentence(refusal), ...(await clientVersions(auth, pinned)) };
+      const held = await heldRefusal(auth, (e.data ?? {}) as UpdateRequired & { signed?: SignedAnswer }, version, pinned);
+      const versions = await clientVersions(auth, pinned);
+      if ("notTaken" in held) {
+        return { state: "served", clientUpdate: null, ...versions, signature: { state: "refused", sentence: held.notTaken } };
+      }
+      return { state: "required", refusal: held.refusal, sentence: updateRequiredSentence(held.refusal), ...versions };
     }
     throw e;
   }
   return { state: "served", clientUpdate, ...(await clientVersions(auth, pinned)) };
+}
+
+/**
+ * A refusal of this version as the plane signed it, `update_required` for the desktop app
+ * and this version, checked against the pinned key; from a plane nothing is pinned for, as
+ * it came. Otherwise why it is not taken: the app then goes on as with a plane that could
+ * not be asked, told to update by nothing it cannot check.
+ */
+async function heldRefusal(
+  auth: AuthSession,
+  data: UpdateRequired & { signed?: SignedAnswer },
+  version: string,
+  pinned: PlaneKey | null | undefined,
+): Promise<{ refusal: UpdateRequired } | { notTaken: string }> {
+  const { signed, ...refusal } = data;
+  if (!pinned) return { refusal };
+  const plane = auth.planeUrl.replace(/\/+$/, "");
+  const checked = await verifySigned<UpdateRequired>(signed, pinned, "update_required");
+  if (!checked.ok) return { notTaken: `${refusalSentence(checked, plane, "the plane's refusal of this version", pinned.fingerprint)}.` };
+  if (checked.body.component !== "desktop" || checked.body.version !== version) {
+    return { notTaken: `${plane} signed a refusal of another client or version than this one: it is not taken.` };
+  }
+  return { refusal: checked.body };
 }

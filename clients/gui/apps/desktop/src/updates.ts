@@ -11,7 +11,13 @@
 // The policy is the plane's word only as its own key signed it (#657): the key this
 // computer pinned at sign-in, which the daemon keeps. A policy that key did not sign is
 // not acted on, and said; where the plane now signs with another key, its fingerprint is
-// shown beside the pinned one and the person may accept it, as an SSH host key is.
+// shown beside the pinned one and the person may accept it, as an SSH host key is. The
+// signed policy goes to the shell as it came, and the shell checks it again itself before
+// it takes a version or where releases are from it: this file hands it no URL.
+//
+// When the plane's policy changes, the daemon hears it within a minute and says so
+// (`config.changed`, scope `versions`), and both questions are asked again then, not only
+// at the next day's round.
 //
 // Nothing is downloaded until the person asks, and nothing restarts until they say so
 // again. Then the app waits for a turn on this computer to end, asks the daemon to stop
@@ -125,6 +131,14 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
     return () => clearInterval(timer);
   }, []);
 
+  // And whenever the daemon says the plane's version policy changed.
+  useEffect(() => {
+    if (!daemon || !auth) return;
+    return daemon.onConfigChanged((changed) => {
+      if (changed.scope === "versions") setRound((n) => n + 1);
+    });
+  }, [daemon, auth]);
+
   // The plane's word on this version, for as long as somebody is signed in.
   useEffect(() => {
     if (!auth) {
@@ -160,7 +174,8 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
   const params = useCallback((): { version: string | null; plane: UpdatePlane | null } => {
     const versions = word && word.state !== "unknown" ? word.versions : null;
     if (!auth || !versions) return { version: null, plane: null };
-    return { version: versions["desktop"]?.recommended ?? null, plane: { url: auth.planeUrl, versions } };
+    const signed = word && word.state !== "unknown" ? (word.signed ?? null) : null;
+    return { version: versions["desktop"]?.recommended ?? null, plane: { url: auth.planeUrl, versions, signed } };
   }, [auth, word]);
 
   /** Ask the shell for a release; the offer, or null where there is nothing to move to. */

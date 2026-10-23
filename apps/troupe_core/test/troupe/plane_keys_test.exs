@@ -125,6 +125,53 @@ defmodule Troupe.PlaneKeysTest do
     assert PlaneKeys.pinned(@plane, path)["fingerprint"] == key.fingerprint
   end
 
+  test "a refusal of this version is taken as the pinned key signed it, for this client, and not otherwise",
+       %{path: path} do
+    key = keypair()
+    other = keypair()
+    {:ok, _} = PlaneKeys.see(@plane, key.served, path)
+
+    refusal =
+      Troupe.Protocol.ClientUpdate.refusal(
+        "daemon",
+        "0.21.0-beta",
+        %{"minimum" => "0.22.0-beta"},
+        :below_minimum
+      )
+
+    held = &PlaneKeys.held_refusal(@plane, &1, "daemon", "0.21.0-beta", path: path)
+
+    assert {:refused, sentence} = held.(signed(key, "update_required", refusal))
+    assert sentence =~ "needs troupe-daemon 0.22.0-beta or later, and this is 0.21.0-beta"
+
+    # Unsigned, by another key, edited, or another version's: not the plane's word.
+    assert {:not_taken, why} = held.(refusal)
+    assert why =~ "the plane's refusal of this version from #{@plane} is not signed"
+
+    assert {:not_taken, why} = held.(signed(other, "update_required", refusal))
+    assert why =~ "is signed by the key #{other.fingerprint}"
+
+    edited = put_in(signed(key, "update_required", refusal), ["signed", "document"], "{}")
+    assert {:not_taken, _why} = held.(edited)
+
+    assert {:not_taken, why} =
+             held.(signed(key, "update_required", %{refusal | "version" => "0.20.0-beta"}))
+
+    assert why =~ "another client or version"
+
+    # One copied off the wire past its hour.
+    an_hour_ago = DateTime.add(DateTime.utc_now(), -3601, :second)
+
+    assert {:not_taken, why} = held.(signed(key, "update_required", refusal, now: an_hour_ago))
+    assert why =~ "was the plane's word until"
+
+    # A plane nothing is pinned for, which signs nothing: taken as it always was.
+    assert {:refused, ^sentence} =
+             PlaneKeys.held_refusal("https://old.example.test", refusal, "daemon", "0.21.0-beta",
+               path: path
+             )
+  end
+
   test "a plane with no key path signs nothing", %{path: _path} do
     assert :unsigned = PlaneKeys.fetch(@plane, get: fn _url -> :not_found end)
 

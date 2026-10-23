@@ -27,6 +27,8 @@ const NOT_FOUND = -32005;
 const INVALID_PARAMS = -32602;
 const METHOD_NOT_FOUND = -32601;
 const MANAGED_BY_GITOPS = -32015;
+// Where the plane mirrors releases from, unless the deployment names another source.
+const RELEASE_SOURCE = "https://github.com/it-minds/troupe/releases/download";
 const CONFLICT = -32006;
 
 /** The size classes, with what each is for, as `Fleet.SizeClass` says. */
@@ -1582,6 +1584,24 @@ export class FakeAdmin {
         return { result: { ...now, changes } };
       }
 
+      // The releases kept in the plane's object store (#657): mirrored by a platform admin,
+      // refused where the manifest is not the release key's, as the plane says it.
+      case "admin.releases.list":
+        return admin ? { result: { releases: this.releases, source: RELEASE_SOURCE, release_url: this.releaseUrl } } : notAdmin;
+
+      case "admin.releases.mirror": {
+        if (role !== "platform_admin") return notPlatform;
+        const version = String(params["version"] ?? "").replace(/^v/, "");
+        if (this.unsignedReleases.has(version)) {
+          return refuse(INVALID_PARAMS, "invalid_params", {
+            reason: `the manifest of the release at ${RELEASE_SOURCE}/v${version} is signed by key 0123456789ABCDEF, which this build does not trust (it trusts 513B504E4D472FED): it is not the release key's, and nothing is mirrored`,
+          });
+        }
+        this.releases = [{ version, state: "mirroring", files: 0 }, ...this.releases.filter((r) => r.version !== version)];
+        this.record(subject, "release.mirror", `v${version}`, { files: 4 });
+        return { result: { version, state: "mirroring", files: 4 } };
+      }
+
       case "admin.memory.list": {
         if (!admin) return notAdmin;
         const platform = role === "platform_admin";
@@ -2960,6 +2980,13 @@ export class FakeAdmin {
 
   /** How many versions the plane's signing key has: one, made on first use, and one more a rotation. */
   signingVersions = 1;
+
+  /** The releases in the plane's object store, newest first, as `admin.releases.list` answers them. */
+  releases: Array<{ version: string; state: "mirrored" | "mirroring"; files: number }> = [];
+  /** Versions whose manifest the release keys did not sign: mirroring one is refused. */
+  readonly unsignedReleases = new Set<string>();
+  /** The `client_release_url` setting. */
+  releaseUrl: string | null = null;
 
   private signingJson(): { algorithm: string; public_key: string; fingerprint: string; version: number; created_at: string; versions: unknown[] } {
     const versions = Array.from({ length: this.signingVersions }, (_v, i) => this.signingVersions - i).map((version) => ({

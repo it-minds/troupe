@@ -24,7 +24,8 @@ defmodule Troupe.Protocol.PlaneSignature do
   bytes it was sent and parses them afterwards, so no two encoders ever have to agree. It is
   canonical JSON (`Troupe.Protocol.Canonical`) of
 
-      {"kind": "client_versions" | "client_defaults" | "memory", "plane": URL or null,
+      {"kind": "client_versions" | "client_defaults" | "memory" | "update_required",
+       "plane": URL or null,
        "signed_at": ISO 8601, "expires_at": ISO 8601, "body": the answer}
 
   and the signature is plain Ed25519 over it (RFC 8032), which is what transit's `ed25519`
@@ -40,13 +41,19 @@ defmodule Troupe.Protocol.PlaneSignature do
   alias Troupe.Protocol.Canonical
 
   # And the memory documents a person's sessions read (`me.memory`): instructions from the
-  # organisation, which a machine takes only as the plane signed them.
-  @kinds ~w(client_versions client_defaults memory)
+  # organisation, which a machine takes only as the plane signed them. And `initialize`'s
+  # refusal of a client's version (`update_required`), which a client acts on only as the
+  # plane signed it, for the component and version it is.
+  @kinds ~w(client_versions client_defaults memory update_required)
   @algorithm "ed25519"
 
   # A week: long enough for a laptop that is not signed in every day, short enough that an
   # answer copied out of a cache is not the plane's word for long.
   @lifetime_seconds 7 * 24 * 60 * 60
+
+  # A refusal is the plane's word on one handshake, asked again at the next: an hour, so one
+  # copied off the wire is not a refusal for long, with room for a laptop's clock.
+  @lifetimes %{"update_required" => 60 * 60}
 
   @type kind :: String.t()
   @type key :: %{public_key: <<_::256>>, fingerprint: String.t()}
@@ -66,9 +73,9 @@ defmodule Troupe.Protocol.PlaneSignature do
   @spec algorithm() :: String.t()
   def algorithm, do: @algorithm
 
-  @doc "How long a signed answer is the plane's word, in seconds."
-  @spec lifetime_seconds() :: pos_integer()
-  def lifetime_seconds, do: @lifetime_seconds
+  @doc "How long a signed answer of `kind` is the plane's word, in seconds: a week but for a refusal."
+  @spec lifetime_seconds(kind() | nil) :: pos_integer()
+  def lifetime_seconds(kind \\ nil), do: Map.get(@lifetimes, kind, @lifetime_seconds)
 
   @doc "A public key's fingerprint, `SHA256:<unpadded base64>`."
   @spec fingerprint(binary()) :: String.t()
@@ -111,7 +118,8 @@ defmodule Troupe.Protocol.PlaneSignature do
       "kind" => kind,
       "plane" => opts[:plane],
       "signed_at" => DateTime.to_iso8601(now),
-      "expires_at" => now |> DateTime.add(@lifetime_seconds, :second) |> DateTime.to_iso8601(),
+      "expires_at" =>
+        now |> DateTime.add(lifetime_seconds(kind), :second) |> DateTime.to_iso8601(),
       "body" => body
     })
   end

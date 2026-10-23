@@ -25,6 +25,7 @@ defmodule Troupe.Gateway.Dispatch do
     Idle,
     LocalSources,
     Plane,
+    Policy,
     Presence,
     Private,
     Remote,
@@ -1493,49 +1494,13 @@ defmodule Troupe.Gateway.Dispatch do
   defp keep_document(plane_url, document) when is_map(document), do: keep_organisation(plane_url, document)
   defp keep_document(_plane_url, _other), do: {:error, "document must be the plane's me.client_defaults answer, an object"}
 
-  # One writer for both ways a plane's document arrives, and every client hears which of
-  # its keys changed, as a file's are announced.
-  #
-  # Kept only as the plane signed it (#657): checked against the key this machine pinned
-  # for the plane, and saved with the signature, which is checked again whenever the copy
-  # is read. One the pin refuses leaves the copy before it, and says why. A plane that
-  # signs nothing has its document kept as it always was, and that said in the log.
-  defp keep_organisation(plane_url, document) do
-    before = organisation()
-
-    with {:ok, body, signed?} <- PlaneKeys.check(plane_url, document, "client_defaults"),
-         :ok <- unsigned_line(plane_url, signed?),
-         {:ok, kept} <- Org.save(plane_url, body, Org.cache_path(), signature(signed?, document)) do
-      now = organisation()
-
-      keys =
-        Enum.uniq(
-          Settings.changed(before["defaults"], now["defaults"]) ++
-            Settings.changed(before["enforced"], now["enforced"])
-        )
-
-      if keys != [],
-        do: Connections.broadcast("config.changed", %{"scope" => "org", "path" => kept["plane_url"], "keys" => keys})
-
-      {:ok, Map.update!(kept, "path", &Troupe.Paths.display/1)}
-    end
-  end
-
-  defp unsigned_line(plane_url, :unsigned) do
-    Logger.info("troupe-daemon: " <> PlaneKeys.unsigned_line(plane_url, "client_defaults"))
-  end
-
-  defp unsigned_line(_plane_url, :signed), do: :ok
+  # One writer for both ways a plane's document arrives and the poll that asks for it again
+  # (`Policy`): kept as the plane signed it, every client told which keys changed, and every
+  # session running here given them for its next turn.
+  defp keep_organisation(plane_url, document), do: Policy.keep_organisation(plane_url, document)
 
   defp signature(:signed, document), do: document["signed"]
   defp signature(:unsigned, _document), do: nil
-
-  defp organisation do
-    case Org.read_cache() do
-      {:ok, cached} -> %{"defaults" => cached["defaults"] || %{}, "enforced" => cached["enforced"] || %{}}
-      _none -> %{"defaults" => %{}, "enforced" => %{}}
-    end
-  end
 
   defp put_plane_key(json, url) when is_binary(url) do
     case PlaneKeys.pinned(url) do
@@ -1740,19 +1705,7 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  defp refresh_organisation do
-    with url when is_binary(url) <- Plane.url(),
-         {:ok, answer} <- Plane.call("me.client_defaults", %{}),
-         {:ok, _kept} <- keep_organisation(url, answer) do
-      :ok
-    else
-      {:error, reason} ->
-        Logger.info("troupe-daemon: the organisation's document was not refreshed: #{inspect(reason)}")
-
-      _no_plane ->
-        :ok
-    end
-  end
+  defp refresh_organisation, do: Policy.refresh_organisation()
 
   # The organisation's memory documents the person's sessions read (#55): the
   # organisation's and their teams', from `me.memory`, kept as the plane signed them, as the

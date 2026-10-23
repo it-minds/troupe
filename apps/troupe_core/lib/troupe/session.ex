@@ -18,6 +18,7 @@ defmodule Troupe.Session do
   alias Troupe.{Config, Mounts, Registry, Skills, Workspace}
   alias Troupe.LLM.Fake
   alias Troupe.LLM.Provider
+  alias Troupe.Session.Organisation
   alias Troupe.Watch.Branch
 
   @root_path ["root"]
@@ -41,10 +42,17 @@ defmodule Troupe.Session do
   What a running session's configuration was resolved from: the layers, with where each
   value and rule came from, its `kind` and its workspace; `nil` for a session not running
   here. The configuration is resolved once, as the session starts, so this is what is in
-  force in it.
+  force in it, but for a change to the organisation's document since: that resolves it
+  again (`Troupe.Session.Organisation`), and the layers are the ones its agent runs with
+  from its next turn.
   """
   @spec resolved(String.t()) :: %{layers: Config.Layers.Result.t() | nil, kind: atom(), workspace: Path.t()} | nil
-  def resolved(session_id), do: Registry.value({:session, session_id})
+  def resolved(session_id) do
+    case {Registry.value({:session, session_id}), Organisation.given(session_id)} do
+      {%{} = resolved, %{layers: layers}} -> %{resolved | layers: layers}
+      {resolved, _nothing_since} -> resolved
+    end
+  end
 
   @doc "The root agent's path. Everything else hangs below it."
   @spec root_path() :: [String.t()]
@@ -92,6 +100,13 @@ defmodule Troupe.Session do
         # The other half of the gate: what the agent asks a person, and the answers.
         # Unattended in the same mode as approvals, since the same nobody is there.
         {Troupe.Session.Questions, session_id: session_id, mode: config.approvals},
+        # The configuration a change to the organisation's document gives the session after
+        # it started, resolved again as `build_opts/1` resolved it. Above the agent, so a
+        # restarted one takes it at its next turn.
+        {Organisation,
+         session_id: session_id,
+         workspace: workspace,
+         resolve: Keyword.take(opts, [:config_overrides, :config_sources, :kind, :hold_auto])},
         # Above the agent on purpose: a client's registration must survive an agent
         # restart, because the connection that made it has not gone anywhere and would
         # have no way of knowing it needed to offer its tools again.
@@ -216,35 +231,8 @@ defmodule Troupe.Session do
     bundle = Keyword.get(opts, :bundle)
 
     with {:ok, workspace} <- open_workspace(workspace_path, opts),
-         {:ok, config, layers} <- config(workspace, opts),
+         {:ok, config, layers, trusted?} <- configured(workspace, opts),
          :ok <- known_provider(config) do
-      # A workspace's own agents let a tool run unasked only once the workspace is
-      # trusted, as its `config.yaml` may only then, and a pod trusts none (Decision 825);
-      # what its `skills.json` links from outside the repository waits for the same
-      # (Decision 829). Stamped on the workspace, which every agent and tool carries.
-      trusted? =
-        Keyword.get(opts, :kind, :local) == :local and
-          Config.Trust.trusted?(workspace.root_real, config.trusted_workspaces)
-
-      # The files beside a person's own skills are read where they are (Decision 700):
-      # the user's skills directory and every linked root become read roots, the
-      # workspace's own `.troupe/skills` being inside the workspace already, and so does a
-      # worktree's main checkout's, whose committed skills it reads (Decision 826). A
-      # workspace's link out of the repository only once it is trusted (Decision 829).
-      config = %{
-        config
-        | read_roots:
-            Enum.uniq(config.read_roots ++ Skills.roots(workspace.root_real, trusted: trusted?))
-      }
-
-      # A branch a saved comment started lets nothing run unasked that would ask, since any
-      # process that writes a file can write a comment: a per-tool `allow` is held there as
-      # an agent's own `auto` is.
-      config =
-        if Keyword.get(opts, :hold_auto, false),
-          do: %{config | permissions: Config.Permissions.without_allow(config.permissions)},
-          else: config
-
       # A local session has only `session:/` and this is exactly what `Workspace.new/1`
       # already gave it. A session on a pod arrives with its team volume and possibly
       # the org volume, resolved by the plane from the team's grant — and, when its
@@ -293,6 +281,52 @@ defmodule Troupe.Session do
          hold_auto: Keyword.get(opts, :hold_auto, false),
          layers: layers
        ]}
+    end
+  end
+
+  @doc """
+  A running session's configuration resolved again, as `build_opts/1` resolved it when the
+  session started, from the same workspace and the same overrides, over the files and the
+  organisation's document as they are now: what `Troupe.Session.Organisation` gives a
+  session whose organisation's document changed (#657).
+  """
+  @spec reconfigure(Workspace.t(), keyword()) ::
+          {:ok, Config.t(), Config.Layers.Result.t()} | {:error, term()}
+  def reconfigure(%Workspace{} = workspace, opts) do
+    with {:ok, config, layers, _trusted?} <- configured(workspace, opts),
+         do: {:ok, config, layers}
+  end
+
+  defp configured(workspace, opts) do
+    with {:ok, config, layers} <- config(workspace, opts) do
+      # A workspace's own agents let a tool run unasked only once the workspace is
+      # trusted, as its `config.yaml` may only then, and a pod trusts none; what its
+      # `skills.json` links from outside the repository waits for the same. Stamped on the
+      # workspace, which every agent and tool carries.
+      trusted? =
+        Keyword.get(opts, :kind, :local) == :local and
+          Config.Trust.trusted?(workspace.root_real, config.trusted_workspaces)
+
+      # The files beside a person's own skills are read where they are: the user's skills
+      # directory and every linked root become read roots, the workspace's own
+      # `.troupe/skills` being inside the workspace already, and so does a worktree's main
+      # checkout's, whose committed skills it reads. A workspace's link out of the
+      # repository only once it is trusted.
+      config = %{
+        config
+        | read_roots:
+            Enum.uniq(config.read_roots ++ Skills.roots(workspace.root_real, trusted: trusted?))
+      }
+
+      # A branch a saved comment started lets nothing run unasked that would ask, since any
+      # process that writes a file can write a comment: a per-tool `allow` is held there as
+      # an agent's own `auto` is.
+      config =
+        if Keyword.get(opts, :hold_auto, false),
+          do: %{config | permissions: Config.Permissions.without_allow(config.permissions)},
+          else: config
+
+      {:ok, config, layers, trusted?}
     end
   end
 

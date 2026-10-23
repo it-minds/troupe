@@ -98,6 +98,15 @@ defmodule Troupe.Gateway.FakePlane do
   def client_defaults_with(state, answer), do: Agent.update(state, &Map.put(&1, :client_defaults, answer))
 
   @doc """
+  What `me.client_versions` answers from now on: each component's policy and where
+  releases are, `%{"versions" => ..., "release" => %{"url" => ...}}`, signed as
+  `client_versions` where the plane signs. Never set, the plane does not answer it.
+  """
+  @spec client_versions_with(pid(), map()) :: :ok
+  def client_versions_with(state, body),
+    do: Agent.update(state, &Map.put(&1, :client_versions, body))
+
+  @doc """
   What `me.memory` answers from now on: the organisation's memory documents a person's
   sessions read (#55), signed as `memory` where the plane signs. Never set, the plane does
   not answer it, as a plane from before them.
@@ -362,16 +371,34 @@ defmodule Troupe.Gateway.FakePlane do
 
   # The handshake (Decision 868): what `initialize_with/2` said, and otherwise the method a
   # plane from before the version policy does not have.
+  #
+  # A served handshake names `policy.revision`, a digest of the two answers below, as the
+  # plane's does (#657); a refusal is signed as `update_required` where this plane signs,
+  # and `{:refuse_unsigned, data}` refuses with no signature even then.
   defp dispatch(state, "initialize", _params) do
     case Agent.get(state, &Map.get(&1, :initialize)) do
       {:ok, result} ->
-        {:ok, result}
+        {:ok, Map.put_new(result, "policy", %{"revision" => revision(state)})}
 
       {:refuse, data} ->
+        {:rpc_error, -32_016, "update_required", signed(state, "update_required", data)}
+
+      {:refuse_unsigned, data} ->
         {:rpc_error, -32_016, "update_required", data}
 
       nil ->
         {:rpc_error, -32_601, "method_not_found", %{"method" => "initialize"}}
+    end
+  end
+
+  defp dispatch(state, "me.client_versions", _params) do
+    case Agent.get(state, &Map.get(&1, :client_versions)) do
+      nil ->
+        {:rpc_error, -32_601, "method_not_found", %{"method" => "me.client_versions"}}
+
+      %{"versions" => versions, "release" => release} = body ->
+        signed = signed(state, "client_versions", body)
+        {:ok, versions |> Map.put("release", release) |> put_signed(signed["signed"])}
     end
   end
 
@@ -390,6 +417,15 @@ defmodule Troupe.Gateway.FakePlane do
   end
 
   defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
+
+  defp put_signed(answer, nil), do: answer
+  defp put_signed(answer, signed), do: Map.put(answer, "signed", signed)
+
+  # What the two signed answers say now, as one digest.
+  defp revision(state) do
+    answers = Agent.get(state, &Map.take(&1, [:client_defaults, :client_versions]))
+    :sha256 |> :crypto.hash(:erlang.term_to_binary(answers)) |> Base.encode16(case: :lower)
+  end
 
   # The device is recorded once every version is gone, and told again otherwise, as the
   # plane's is (Decision 804); this one deletes within the call.

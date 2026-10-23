@@ -213,6 +213,36 @@ defmodule Troupe.PlaneVersionTest do
                Troupe.CLI.Remote.client_versions(say: say)
     end
 
+    test "a refusal of this version is taken as the pinned key signed it, and an unsigned one is not" do
+      {remote, url} = start_remote!(transport: :http)
+      FakeRemote.sign(remote)
+      login!(remote, url)
+
+      FakeRemote.client_versions(remote, %{
+        "tui" => %{"minimum" => "99.0.0", "recommended" => "99.0.1"}
+      })
+
+      detach_all()
+      {:ok, origin} = Client.connect_plane(url)
+      eventually(fn -> is_binary(Client.fleet_status(origin).update_required) end)
+
+      assert Client.fleet_status(origin).update_required =~
+               "This plane needs troupe 99.0.0 or later"
+
+      # The same refusal, unsigned, from a plane whose key this machine pinned: not the
+      # plane's word, so nothing says to update, and the plane is not up either.
+      FakeRemote.unsigned_refusals(remote)
+      detach_all()
+      {:ok, origin} = Client.connect_plane(url)
+
+      eventually(fn -> match?({:initialize, _why}, Client.fleet_status(origin).error) end)
+      status = Client.fleet_status(origin)
+      {:initialize, why} = status.error
+      assert why =~ "the plane's refusal of this version from #{url} is not signed"
+      assert status.update_required == nil
+      refute status.up?
+    end
+
     test "a plane that signs nothing is said so at sign-in, and its policy taken as it is" do
       {remote, url} = start_remote!(transport: :http)
       lines = login!(remote, url)

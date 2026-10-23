@@ -1420,6 +1420,7 @@ defmodule Troupe.Agent.Server do
           state
           |> fold_shell()
           |> fold_child_reports()
+          |> take_organisation()
           |> load_instructions()
           |> hold_turn_tools()
 
@@ -1545,6 +1546,47 @@ defmodule Troupe.Agent.Server do
 
   # A turn's hold let go of, as the turn ends or an input is taken: the next call takes it.
   defp let_go(state), do: %{state | turn_tools: nil, turn_skills: nil}
+
+  # The configuration a change to the organisation's document gave the session since this
+  # agent last took one (`Troupe.Session.Organisation`), taken by the root as a turn begins
+  # and never during one, and said in a line. Its children are started with the root's
+  # configuration, so they follow. The budget's use so far is kept, and its limits held to
+  # what the organisation now enforces; a looser limit is had by asking, as before.
+  defp take_organisation(%State{agent_path: ["root"]} = state) do
+    case Troupe.Session.Organisation.given(state.session_id) do
+      %{revision: revision, config: config} = given when revision != state.organisation_taken ->
+        log(state, :config_note, %{
+          "key" => "organisation",
+          "message" => Troupe.Session.Organisation.line(given)
+        })
+
+        {:ok, provider} = Provider.adapter(config.provider)
+
+        %{
+          state
+          | config: config,
+            provider: provider,
+            budget: held_budget(state.budget, config.ceilings),
+            organisation_taken: revision
+        }
+
+      _nothing_new ->
+        state
+    end
+  end
+
+  defp take_organisation(state), do: state
+
+  defp held_budget(budget, ceilings) do
+    Enum.reduce(ceilings, budget, fn
+      {dimension, %{limit: limit}}, budget when dimension in [:max_turns, :wall_clock] ->
+        field = Troupe.Budget.field(dimension)
+        Map.update!(budget, field, &min(&1, limit))
+
+      _other, budget ->
+        budget
+    end)
+  end
 
   # The tools are offered knowing whether the model they go to binds its thinking to them:
   # one that does is offered the same on every call (Decisions 867 and 871).

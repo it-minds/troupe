@@ -17,7 +17,8 @@ defmodule Troupe.Gateway.Daemon do
       ├── Connections   DynamicSupervisor, one process per attached client
       ├── Listener      accepts on the transport and hands sockets to Connections
       ├── Loopback      a WebSocket on 127.0.0.1, which is the only door a browser has
-      └── Idle          shuts the daemon down after a quiet period
+      ├── Idle          shuts the daemon down after a quiet period
+      └── Policy        the plane's word on this machine, asked for again while a token is held
 
   `Troupe.Sessions` and the session trees themselves live in `troupe_core`'s own
   supervision tree, so the daemon can restart its listener without disturbing a
@@ -26,7 +27,17 @@ defmodule Troupe.Gateway.Daemon do
 
   use Supervisor
 
-  alias Troupe.Gateway.{Commands, Connections, Idle, Listener, Loopback, Plane, Remote, Setup}
+  alias Troupe.Gateway.{
+    Commands,
+    Connections,
+    Idle,
+    Listener,
+    Loopback,
+    Plane,
+    Policy,
+    Remote,
+    Setup
+  }
   alias Troupe.Gateway.Private
 
   @spec start_link(keyword()) :: Supervisor.on_start()
@@ -82,7 +93,10 @@ defmodule Troupe.Gateway.Daemon do
       # After the Listener, so that `rest_for_one` republishes the WebSocket entry if
       # the Listener ever restarts and rewrites the discovery file underneath it.
       {Loopback, Keyword.get(opts, :loopback, [])},
-      {Idle, opts}
+      {Idle, opts},
+      # Last, so a poll that fails restarts nothing a client is using: the plane's version
+      # policy and organisation's document, asked for again while a token is held.
+      {Policy, Keyword.get(opts, :policy, [])}
     ]
 
     # rest_for_one: the Listener hands sockets to Connections and the Idle watcher

@@ -4872,6 +4872,7 @@ dependencies = [
  "flate2",
  "keyring",
  "minisign-verify",
+ "ring",
  "semver",
  "serde",
  "serde_json",

@@ -28,6 +28,7 @@ use tauri_plugin_http::reqwest;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::daemon;
+use crate::plane_word::{self, Signed};
 use crate::release::{self, Artifact, Judgement, Manifest, Platform, Policy, TrustedKey};
 
 /// Where releases are published, unless `TROUPE_REPO` or `TROUPE_RELEASE_URL` says otherwise.
@@ -57,6 +58,11 @@ struct DaemonStep {
 
 /// What the page passes to a check: the version a plane recommends, and the plane's policy
 /// for each kind of client, as `me.client_versions` answers it.
+///
+/// With the plane's `signed` answer beside it (#657), the shell reads the policy, the
+/// version and where releases are from that alone, once the key this computer pinned for
+/// the plane, which it asks the daemon for itself, holds for it: the page's `version` and
+/// `versions` are then not read, and no field of the page's is a URL.
 #[derive(Default, Deserialize)]
 pub struct CheckParams {
     #[serde(default)]
@@ -65,11 +71,16 @@ pub struct CheckParams {
     plane: Option<PlaneWord>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct PlaneWord {
     url: String,
     #[serde(default)]
     versions: HashMap<String, Policy>,
+    #[serde(default)]
+    signed: Option<Signed>,
+    /// Where releases are, from a policy the pinned key signed: never the page's.
+    #[serde(skip)]
+    release: Option<String>,
 }
 
 impl PlaneWord {
@@ -148,9 +159,45 @@ struct Source {
     tag: Option<String>,
 }
 
-async fn source(version: Option<&str>) -> Result<Source, String> {
+/// The plane's word as the check reads it: from its signed answer, checked against the key
+/// the daemon pinned for the plane, where the page passed one; otherwise the page's policy,
+/// which can only hold an update back, with releases where they are without a plane.
+async fn plane_word(plane: &PlaneWord) -> Result<PlaneWord, String> {
+    let Some(signed) = &plane.signed else {
+        return Ok(PlaneWord { signed: None, release: None, ..plane.clone() });
+    };
+    let identity = tauri::async_runtime::spawn_blocking(|| {
+        let endpoint = daemon::read_endpoint().ok_or("no daemon is running on this computer to say which key it pinned")?;
+        daemon::identity(&endpoint)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    signed_word(plane, signed, identity, std::time::SystemTime::now())
+}
+
+fn signed_word(plane: &PlaneWord, signed: &Signed, identity: Result<serde_json::Value, String>, now: std::time::SystemTime) -> Result<PlaneWord, String> {
+    let refused = |why: String| format!("the version policy from {} is not checked ({why}): the update does not follow it; nothing is installed", plane.url.trim_end_matches('/'));
+    let identity = identity.map_err(refused)?;
+    let pinned = plane_word::pinned_for(&identity, &plane.url)?;
+    let word = plane_word::verify(signed, &pinned, &plane.url, now)?;
+    Ok(PlaneWord { url: plane.url.clone(), versions: word.versions, signed: Some(signed.clone()), release: word.release_url })
+}
+
+/// Where the release is: `TROUPE_RELEASE_URL`, the person's own, first; then where a plane's
+/// signed policy says releases are, each under `v<version>/`, which has no "latest", so a
+/// version must be named; then GitHub's.
+async fn source(version: Option<&str>, plane_release: Option<&str>) -> Result<Source, String> {
     if let Some(url) = env("TROUPE_RELEASE_URL") {
         return Ok(Source { base: url.trim_end_matches('/').to_string(), asked: version.map(Into::into), tag: None });
+    }
+    if let Some(url) = plane_release {
+        let version = version.ok_or_else(|| {
+            format!(
+                "the plane says releases are at {url} and recommends no version of the desktop app, and a release \
+                 there is found by its version: nothing is offered"
+            )
+        })?;
+        return Ok(Source { base: format!("{url}/v{version}"), asked: Some(version.to_string()), tag: None });
     }
     let repo = env("TROUPE_REPO").unwrap_or_else(|| REPO.to_string());
     if let Some(v) = version {
@@ -427,15 +474,24 @@ pub async fn update_check(app: AppHandle, updates: State<'_, Updates>, params: O
     let platform = Platform::this();
     let client = client(true)?;
 
-    let source = source(params.version.as_deref()).await?;
+    let plane = match &params.plane {
+        Some(word) => Some(plane_word(word).await?),
+        None => None,
+    };
+    // A signed policy says which version to ask for; without one, the page's word does.
+    let asked = match &plane {
+        Some(word) if word.signed.is_some() => word.policy("desktop").recommended,
+        _ => params.version.clone(),
+    };
+    let source = source(asked.as_deref(), plane.as_ref().and_then(|p| p.release.as_deref())).await?;
     let manifest = signed_manifest(&client, &source, &keys).await?;
     let version = manifest.version.clone();
-    if let Some(plane) = &params.plane {
+    if let Some(plane) = &plane {
         served(plane, "desktop", &version)?;
     }
     if !release::wanted(&current, &version) {
-        // Blocked here, and pointed at something older: said, never done (Decision 868).
-        if let Some(plane) = params.plane.as_ref().filter(|p| p.policy("desktop").blocked.contains(&current)) {
+        // Blocked here, and pointed at something older: said, never done.
+        if let Some(plane) = plane.as_ref().filter(|p| p.policy("desktop").blocked.contains(&current)) {
             if release::older(&version, &current) {
                 return Err(format!(
                     "the plane at {} blocks the desktop app {current}, and the version it recommends, {version}, is older: \
@@ -453,7 +509,7 @@ pub async fn update_check(app: AppHandle, updates: State<'_, Updates>, params: O
     })?;
     let (signature, key) = signature_of(&client, &source.base, &manifest, &artifact, &keys).await?;
     let update = tauri_update(&app, &source.base, &version, &key, &artifact.file, signature).await?;
-    let (daemon, daemon_offer, daemon_note) = daemon_step(&manifest, &platform, params.plane.as_ref(), lib_dir());
+    let (daemon, daemon_offer, daemon_note) = daemon_step(&manifest, &platform, plane.as_ref(), lib_dir());
 
     let offer = Offer { version, current, source: source.base.clone(), daemon: daemon_offer, daemon_note };
     *updates.0.lock().unwrap() = Some(Pending { base: source.base, update, app: artifact, daemon, bytes: None });
@@ -588,7 +644,12 @@ mod tests {
     }
 
     fn plane(daemon: Policy) -> PlaneWord {
-        PlaneWord { url: "https://plane.example.test".into(), versions: HashMap::from([("daemon".to_string(), daemon)]) }
+        PlaneWord {
+            url: "https://plane.example.test".into(),
+            versions: HashMap::from([("daemon".to_string(), daemon)]),
+            signed: None,
+            release: None,
+        }
     }
 
     #[test]
@@ -682,8 +743,10 @@ mod tests {
             url: "https://plane.example.test".into(),
             versions: HashMap::from([(
                 "desktop".to_string(),
-                Policy { minimum: Some("0.15.0-beta".into()), blocked: vec!["0.15.1-beta".into()] },
+                Policy { minimum: Some("0.15.0-beta".into()), blocked: vec!["0.15.1-beta".into()], ..Policy::default() },
             )]),
+            signed: None,
+            release: None,
         };
         assert!(served(&word, "desktop", "0.15.1-beta").unwrap_err().contains("blocks the desktop app 0.15.1-beta"));
         assert!(served(&word, "desktop", "0.14.0-beta").unwrap_err().contains("needs the desktop app 0.15.0-beta or later"));
@@ -749,6 +812,88 @@ mod tests {
         assert!(check(at("signed", None), vec![other]).unwrap_err().contains("does not trust"));
         assert!(check(at("changed", None), vec![current.clone()]).unwrap_err().contains("changed after it was signed"));
         assert!(check(at("missing", None), vec![current]).unwrap_err().contains("has no manifest.json"));
+    }
+
+    /// A plane's version policy signed by the key from a seed of `seed`s, naming `release`
+    /// as where releases are, and the daemon's `identity.get` pinning the key of `pinned`.
+    fn signed_policy(seed: u8, pinned: u8, release: &str) -> (Signed, serde_json::Value) {
+        use base64::Engine;
+        use ring::signature::{Ed25519KeyPair, KeyPair};
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let pair = |s: u8| Ed25519KeyPair::from_seed_unchecked(&[s; 32]).unwrap();
+        let signer = pair(seed);
+        let held = pair(pinned);
+
+        let document = format!(
+            r#"{{"body":{{"release":{{"url":"{release}"}},"versions":{{"desktop":{{"blocked":[],"minimum":"0.20.0-beta","recommended":"9.9.9-test"}}}}}},"expires_at":"2999-01-01T00:00:00Z","kind":"client_versions","plane":"https://plane.example.test","signed_at":"2026-10-23T12:00:00Z"}}"#
+        );
+        let signed = Signed {
+            algorithm: "ed25519".into(),
+            fingerprint: Some(plane_word::fingerprint(signer.public_key().as_ref())),
+            document: document.clone(),
+            signature: b64.encode(signer.sign(document.as_bytes()).as_ref()),
+        };
+        let identity = serde_json::json!({ "plane_key": {
+            "public_key": b64.encode(held.public_key().as_ref()),
+            "fingerprint": plane_word::fingerprint(held.public_key().as_ref()),
+            "plane_url": "https://plane.example.test/"
+        }});
+        (signed, identity)
+    }
+
+    fn page(signed: Signed) -> PlaneWord {
+        // What the page says beside the signed answer is not read.
+        let page_says = Policy { recommended: Some("0.1.0".into()), ..Policy::default() };
+        PlaneWord {
+            url: "https://plane.example.test".into(),
+            versions: HashMap::from([("desktop".to_string(), page_says)]),
+            signed: Some(signed),
+            release: None,
+        }
+    }
+
+    // The plane names where releases are in what it signed; the shell reads it there, and
+    // the release found is still held to the manifest the release key signed.
+    #[test]
+    fn a_release_url_is_taken_only_from_a_policy_the_pinned_key_signed() {
+        let current = release::parse_public_key(&String::from_utf8(vector("keys/current.pub")).unwrap()).unwrap();
+        let base = serve(vec![
+            ("downloads/v9.9.9-test/manifest.json", vector("manifest.json")),
+            ("downloads/v9.9.9-test/manifest.json.minisig", vector("signatures/current.minisig")),
+        ]);
+        let now = std::time::SystemTime::now();
+
+        let (signed, identity) = signed_policy(7, 7, &format!("{base}/downloads"));
+        let word = signed_word(&page(signed.clone()), &signed, Ok(identity), now).unwrap();
+        assert_eq!(word.release.as_deref(), Some(format!("{base}/downloads").as_str()));
+        assert_eq!(word.policy("desktop").recommended.as_deref(), Some("9.9.9-test"));
+        assert_eq!(word.policy("desktop").minimum.as_deref(), Some("0.20.0-beta"));
+
+        let found = tauri::async_runtime::block_on(source(word.policy("desktop").recommended.as_deref(), word.release.as_deref())).unwrap();
+        assert_eq!(found.base, format!("{base}/downloads/v9.9.9-test"));
+        let manifest = tauri::async_runtime::block_on(signed_manifest(&client(true).unwrap(), &found, &[current])).unwrap();
+        assert_eq!(manifest.version, "9.9.9-test");
+
+        // Signed by another key than the one the daemon pinned: refused, with the sentence,
+        // before anything is fetched from the URL it names.
+        let (forged, pinned_elsewhere) = signed_policy(9, 7, "https://mirror.example.test");
+        let why = signed_word(&page(forged.clone()), &forged, Ok(pinned_elsewhere), now).unwrap_err();
+        assert!(why.starts_with("the version policy from https://plane.example.test is signed by the key"), "{why}");
+        assert!(why.ends_with("nothing is installed"), "{why}");
+
+        // No daemon to ask, or none that pinned a key for this plane: refused too.
+        assert!(signed_word(&page(forged.clone()), &forged, Err("no daemon".into()), now).unwrap_err().contains("is not checked (no daemon)"));
+        let why = signed_word(&page(forged.clone()), &forged, Ok(serde_json::json!({ "linked": true })), now).unwrap_err();
+        assert!(why.contains("holds no key for that plane"), "{why}");
+    }
+
+    #[test]
+    fn a_plane_s_release_url_needs_a_version_and_the_person_s_own_url_wins() {
+        let found = tauri::async_runtime::block_on(source(Some("0.24.0-beta"), Some("https://plane.example.test/downloads"))).unwrap();
+        assert_eq!(found, Source { base: "https://plane.example.test/downloads/v0.24.0-beta".into(), asked: Some("0.24.0-beta".into()), tag: None });
+
+        let why = tauri::async_runtime::block_on(source(None, Some("https://plane.example.test/downloads"))).unwrap_err();
+        assert!(why.contains("recommends no version of the desktop app"), "{why}");
     }
 
     #[test]

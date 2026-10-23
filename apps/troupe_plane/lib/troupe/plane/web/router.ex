@@ -42,7 +42,6 @@ defmodule Troupe.Plane.Web.Router do
   alias Troupe.Plane.{
     Admin,
     Build,
-    ClientVersions,
     Harness,
     Identity,
     OIDC,
@@ -190,22 +189,28 @@ defmodule Troupe.Plane.Web.Router do
 
   # A release's files, for machines that cannot reach GitHub: the plane names
   # `<this plane>/downloads` as where releases are (`client_release_url`), and the files are
-  # copied into its object store under `releases/v<version>/`. Answered with a short-lived
-  # presigned URL rather than the bytes, so the plane stays out of the path of a download as
-  # it is of a session's; anybody may fetch one, as from GitHub, because the release key's
-  # signature is the check. A version this plane serves to no client is not handed out.
+  # copied into its object store under `releases/v<version>/` (`Releases.mirror/2`).
+  # Answered with a short-lived presigned URL rather than the bytes, so the plane stays out
+  # of the path of a download as it is of a session's; anybody may fetch one, as from
+  # GitHub, because the release key's signature is the check.
+  #
+  # A file that is there is handed out and anything else is a bare 404, whatever the version
+  # policy says of it: a 404 that differed for a blocked version would tell anybody without
+  # a sign-in which versions are refused, which only the signed, signed-in answer says. A
+  # client never installs a version the policy it holds refuses.
   get "/downloads/:tag/:file" do
+    key = "releases/#{tag}/#{file}"
+    store = ObjectStore.from_env()
+
     with "v" <> version <- tag,
          true <- ClientUpdate.version?(version),
          true <- file =~ ~r/\A[A-Za-z0-9][A-Za-z0-9._+-]*\z/,
-         true <- ClientVersions.served?(version) do
-      url = ObjectStore.presign(ObjectStore.from_env(), :get, "releases/#{tag}/#{file}", ttl: 300)
-
+         true <- ObjectStore.exists?(store, key) do
       conn
-      |> put_resp_header("location", url)
+      |> put_resp_header("location", ObjectStore.presign(store, :get, key, ttl: 300))
       |> send_resp(302, "")
     else
-      _refused -> send_json(conn, 404, %{"error" => "not found"})
+      _not_here -> send_resp(conn, 404, "")
     end
   end
 

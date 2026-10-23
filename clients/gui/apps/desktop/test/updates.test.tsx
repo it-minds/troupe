@@ -290,6 +290,22 @@ describe("the plane's signing key", () => {
     const asked = updater.checks.find((c) => c.version === "99.0.1")!;
     expect(asked.plane?.versions["desktop"]?.minimum).toBe("1.0.0");
     expect(asked.plane?.versions["signed"]).toBeUndefined();
+    // The signed answer goes to the shell as it came, which checks it against the pin itself.
+    expect(asked.plane?.signed?.fingerprint).toBe(pinned.fingerprint);
+    expect(asked.plane?.signed?.document).toContain('"kind":"client_versions"');
+    expect(Object.keys(asked.plane ?? {}).sort()).toEqual(["signed", "url", "versions"]);
+  });
+
+  it("a version policy the daemon says changed on the plane is asked for again then, not only the next day", async () => {
+    harness = await startHarness({ plane: { clientVersions: { desktop: { recommended: "99.0.1" } } } });
+    const pinned = await harness.plane.sign();
+    const updater = new Updater();
+    daemon = await signedInWithDaemon(harness, updater, { plane_url: harness.plane.baseUrl, ...pinned });
+    await waitFor(() => updater.checks.some((c) => c.version === "99.0.1"), "the first check");
+
+    harness.plane.setClientVersions({ desktop: { recommended: "99.0.2" } });
+    daemon.announceVersions(harness.plane.baseUrl, ["versions.desktop.recommended"]);
+    await waitFor(() => updater.checks.some((c) => c.version === "99.0.2"), "a check for the newly recommended version");
   });
 
   it("a key changed since sign-in is shown beside the pinned one, nothing it signs followed until the person accepts it", async () => {

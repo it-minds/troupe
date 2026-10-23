@@ -257,6 +257,11 @@ defmodule Troupe.Plane.Harness do
   # of client this is (Decision 868): the policy as `client_update`, or `update_required`
   # for a client below the minimum or on a blocked version, with what to run. A client the
   # plane cannot place — no name it knows, as a script's — is held to no policy.
+  #
+  # And `policy.revision`, a digest of what the two signed answers would say now, so a
+  # client that asks again every little while fetches them only when they changed (#657).
+  # It is no word of the plane's on anything: a forged one makes a client ask, or not ask,
+  # and what it then acts on is signed.
   defp handle("initialize", params, context) do
     info = if is_map(params["client_info"]), do: params["client_info"], else: %{}
     component = ClientUpdate.component(info["name"])
@@ -268,7 +273,8 @@ defmodule Troupe.Plane.Harness do
          "protocol_version" => Troupe.Protocol.version(),
          "server_info" => %{"name" => "troupe-plane", "version" => Build.version()},
          "principal" => me,
-         "client_update" => client_update
+         "client_update" => client_update,
+         "policy" => %{"revision" => policy_revision()}
        }}
     end
   end
@@ -293,31 +299,9 @@ defmodule Troupe.Plane.Harness do
   # what a machine reads below its person's own file, and `enforced`, what it holds every
   # layer to. Beside the fields a client from before it reads, which stay as they were.
   defp handle("me.client_defaults", _params, _context) do
-    provider = Settings.get("client_provider")
-
-    models = %{
-      "default" => blank_to_nil(Settings.get("client_model_default")),
-      "cheap" => blank_to_nil(Settings.get("client_model_cheap")),
-      "expensive" => blank_to_nil(Settings.get("client_model_expensive"))
-    }
-
-    old = %{
-      "configured" => not is_nil(provider),
-      "provider" => provider && to_string(provider),
-      "base_url" => blank_to_nil(Settings.get("client_base_url")),
-      "auth" => provider && to_string(Settings.get("client_auth")),
-      "models" => models
-    }
-
-    answer =
-      Map.merge(old, %{
-        "defaults" => client_defaults(old, models),
-        "enforced" => Settings.get("client_enforced") || %{}
-      })
-
     # Signed by the plane's own key (`Signing`), so a machine holds to the copy it keeps
     # only while it is the plane's word, and an edited one is refused.
-    {:ok, Signing.signed("client_defaults", answer)}
+    {:ok, Signing.signed("client_defaults", client_defaults_answer())}
   end
 
   # Each component's version policy, for `troupe update` to choose what to install by:
@@ -329,20 +313,8 @@ defmodule Troupe.Plane.Harness do
   # it as `v<version>/`. Every component's policy stays at the top, as clients from before
   # read it; the signed body has them under `versions`, with `release` beside them.
   defp handle("me.client_versions", _params, _context) do
-    versions =
-      Map.new(ClientVersions.components(), fn component ->
-        policy = ClientVersions.policy(component)
-
-        {component,
-         %{
-           "recommended" => policy.recommended,
-           "minimum" => policy.minimum,
-           "blocked" => policy.blocked
-         }}
-      end)
-
-    release = %{"url" => ClientVersions.release_url()}
-    signed = Signing.signed("client_versions", %{"versions" => versions, "release" => release})
+    %{"versions" => versions, "release" => release} = body = client_versions_body()
+    signed = Signing.signed("client_versions", body)
 
     {:ok, versions |> Map.put("release", release) |> Map.put("signed", signed["signed"])}
   end
@@ -2707,6 +2679,56 @@ defmodule Troupe.Plane.Harness do
 
   defp blank_to_nil(_value), do: nil
 
+  # `me.client_defaults`'s answer: the fields a client from before the document reads, and
+  # the document, `defaults` and `enforced`, beside them.
+  defp client_defaults_answer do
+    provider = Settings.get("client_provider")
+
+    models = %{
+      "default" => blank_to_nil(Settings.get("client_model_default")),
+      "cheap" => blank_to_nil(Settings.get("client_model_cheap")),
+      "expensive" => blank_to_nil(Settings.get("client_model_expensive"))
+    }
+
+    old = %{
+      "configured" => not is_nil(provider),
+      "provider" => provider && to_string(provider),
+      "base_url" => blank_to_nil(Settings.get("client_base_url")),
+      "auth" => provider && to_string(Settings.get("client_auth")),
+      "models" => models
+    }
+
+    Map.merge(old, %{
+      "defaults" => client_defaults(old, models),
+      "enforced" => Settings.get("client_enforced") || %{}
+    })
+  end
+
+  # `me.client_versions`'s signed body: each component's policy, and where releases are.
+  defp client_versions_body do
+    versions =
+      Map.new(ClientVersions.components(), fn component ->
+        policy = ClientVersions.policy(component)
+
+        {component,
+         %{
+           "recommended" => policy.recommended,
+           "minimum" => policy.minimum,
+           "blocked" => policy.blocked
+         }}
+      end)
+
+    %{"versions" => versions, "release" => %{"url" => ClientVersions.release_url()}}
+  end
+
+  # What the two signed answers would say now, as one digest: it changes when either does.
+  defp policy_revision do
+    %{"versions" => client_versions_body(), "defaults" => client_defaults_answer()}
+    |> Canonical.encode()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
+
   # The organisation's defaults for `me.client_defaults` (Decision 869): only what is set,
   # since a key left out is the machine's own to decide.
   defp client_defaults(old, models) do
@@ -2732,9 +2754,11 @@ defmodule Troupe.Plane.Harness do
       {:ok, action} ->
         {:ok, ClientUpdate.client_update(component, policy, action)}
 
+      # Signed as the policy is (#657): a client that pinned this plane's key acts on a
+      # refusal only as the plane signed it, for the component and version it is.
       {:refuse, why} ->
-        {:error,
-         Error.new(:update_required, ClientUpdate.refusal(component, version, policy, why))}
+        refusal = ClientUpdate.refusal(component, version, policy, why)
+        {:error, Error.new(:update_required, Signing.signed("update_required", refusal))}
     end
   end
 
