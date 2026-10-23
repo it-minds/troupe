@@ -100,4 +100,33 @@ defmodule Troupe.Plane.DataCase do
     {:ok, _} = Identity.grant(team, profile, Map.new(Keyword.take(opts, [:volume_mode])))
     team
   end
+
+  @doc """
+  The last tenth of a second of the minute before this one: less than a minute ago once
+  the clock is short of :58, and it waits for the next minute where it is not. A run moved
+  there is one that a firing a moment from now meets across the minute's turn.
+  """
+  @spec before_minute_turn!() :: DateTime.t()
+  def before_minute_turn! do
+    second = DateTime.utc_now().second
+    if second >= 58, do: Process.sleep((60 - second) * 1_000)
+
+    DateTime.utc_now()
+    |> Map.merge(%{second: 0, microsecond: {0, 6}})
+    |> DateTime.add(-100, :millisecond)
+  end
+
+  @doc """
+  A trigger's run, as `Triggers.run_json/2` answers it, moved back to `at` under the key
+  `prefix` and `at`'s minute: as the release before keyed a firing by hand.
+  """
+  @spec backdate_run!(map(), String.t(), DateTime.t()) :: struct()
+  def backdate_run!(%{"id" => id}, prefix, at) do
+    minute = at |> DateTime.truncate(:second) |> Map.put(:second, 0)
+
+    Troupe.Plane.Triggers.Run
+    |> Repo.get!(id)
+    |> Ecto.Changeset.change(fired_at: at, idempotency_key: prefix <> DateTime.to_iso8601(minute))
+    |> Repo.update!()
+  end
 end

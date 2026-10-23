@@ -427,8 +427,8 @@ number or its link (pasted from GitHub, and on the trigger's repository) and sta
 on it, after a confirm that says what the plane checks first: an open issue, not a pull
 request, on a repository the team lists, private or internal unless the profile allows
 public ones. Or `admin.trigger.fix` with `{team, name, issue}`. The run is `manual`, by the
-person, under the same caps as any run of the trigger, and a second click in the same
-minute is the run the first one made. A skipped run says why there and on its page.
+person, under the same caps as any run of the trigger, and a second click by the same
+person on the same issue less than a minute after the first is the run the first one made. A skipped run says why there and on its page.
 
 Every run, from a delivery, a sweep or "fix this", is listed on the console's **Runs and
 review** with its repository, issue, state, draft pull request, CI rounds and spend, and a

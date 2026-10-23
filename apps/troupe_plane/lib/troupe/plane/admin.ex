@@ -3874,11 +3874,12 @@ defmodule Troupe.Plane.Admin do
   @doc """
   Fire a trigger now, by hand.
 
-  The same `fire/5` a schedule or an executor reaches, with an idempotency key that
-  names the person and the minute, as a webhook's window and a schedule's tick are drawn
-  on the minute too: a second click, or a retry of a call whose answer was lost, within
-  the same minute is the run the first one made, and a click in a later minute is a
-  second run. On the second, a retry that crossed one boundary made a second session.
+  Fired as a webhook's blind retry is, in a window that names the person
+  (`Triggers.fire_by_hand/5`): a second click, or a retry of a call whose answer was lost,
+  less than a minute after the first is the run the first one made, on either side of the
+  clock's minute, and a click a minute on is a second run. On the second, a retry that
+  crossed one boundary made a second session; on the clock's minute, a click at :59 and
+  its retry a second later were two runs.
 
   The source is `manual` and the console is the only door that may say so: a person's
   hand is the one thing about a run that cannot be inferred afterwards.
@@ -3891,15 +3892,15 @@ defmodule Troupe.Plane.Admin do
   def trigger_run(actor, team_name, name) do
     with {:ok, team} <- fetch_team(actor, team_name),
          {:ok, trigger} <- fetch_trigger(team, name) do
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
-      minute = %{now | second: 0}
-      key = "manual:#{trigger.id}:#{actor.subject}:#{DateTime.to_iso8601(minute)}"
-      event = %{"kind" => "manual", "by" => actor.subject, "at" => DateTime.to_iso8601(now)}
+      now = DateTime.utc_now()
+      window = "manual:#{trigger.id}:#{actor.subject}:"
+      at = now |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+      event = %{"kind" => "manual", "by" => actor.subject, "at" => at}
 
       {:ok, _} =
-        Audit.record(actor.subject, "trigger.run", "#{team.name}/#{name}", %{"run" => key})
+        Audit.record(actor.subject, "trigger.run", "#{team.name}/#{name}", %{"window" => window})
 
-      case Triggers.fire(trigger, "manual", key, event, actor.subject) do
+      case Triggers.fire_by_hand(trigger, window, event, actor.subject, now) do
         {:ok, fired} -> {:ok, Triggers.fired_json(fired)}
         {:error, %Error{} = error} -> {:error, error}
       end
@@ -3916,7 +3917,8 @@ defmodule Troupe.Plane.Admin do
   unless the profile allows public ones, it is an open issue and not a pull request. Then
   fired `manual`, by the person, under the trigger's concurrency, the profile's and the
   team's caps of runs and the budget, with the issue fenced as data as a delivery's is. A
-  second click in the same minute is the run the first made. Works on a GitOps plane too,
+  second click less than a minute after the first is the run the first made, across the
+  clock's minute too. Works on a GitOps plane too,
   as running a trigger by hand does.
   """
   @spec trigger_fix(actor(), String.t(), String.t(), term()) :: result()

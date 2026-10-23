@@ -187,8 +187,10 @@ defmodule Troupe.Worker.ConfigExplainTest do
       assert %{"value" => "set by the profile", "withheld" => true} = keys[key]
     end
 
-    # Where they came from is still said, and the rest is as a collaborator sees it.
+    # Where they came from is still said, as who set them and not by the variable the
+    # profile set them in, and the rest is as a collaborator sees it.
     assert keys["base_url"]["layer"] == "profile"
+    assert keys["base_url"]["source"] == "the profile"
     assert keys["models.cheap"]["value"] == "profile-cheap-model"
     assert Enum.any?(answer["permissions"], &(&1["rule"] == "shell(curl)"))
 
@@ -202,6 +204,7 @@ defmodule Troupe.Worker.ConfigExplainTest do
       printed = if is_binary(explained), do: explained, else: Jason.encode!(explained)
       refute printed =~ "llm.example.test"
       refute printed =~ context.state_dir
+      refute printed =~ "TROUPE_BASE_URL"
       assert printed =~ "set by the profile"
     end
 

@@ -1711,7 +1711,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.trigger.fix",
       function: :trigger_fix,
       summary:
-        "Start one run of a trigger on a GitHub repository on one of its issues, by hand: the console's fix this. The issue is read from GitHub first and must be an open issue of the trigger's repository, not a pull request; the repository must be one the team lists, and private or internal unless the profile allows public ones. Fired as manual, under the trigger's concurrency, the profile's and team's caps and the budget, with the issue given to the session fenced as data. A second call in the same minute is the run the first made. It starts a real session and spends real money. Works on a gitops plane too.",
+        "Start one run of a trigger on a GitHub repository on one of its issues, by hand: the console's fix this. The issue is read from GitHub first and must be an open issue of the trigger's repository, not a pull request; the repository must be one the team lists, and private or internal unless the profile allows public ones. Fired as manual, under the trigger's concurrency, the profile's and team's caps and the budget, with the issue given to the session fenced as data. A second call less than a minute after the first, by the same person on the same issue, is the run the first made. It starts a real session and spends real money. Works on a gitops plane too.",
       risk: :write,
       arguments: [
         %Argument{name: "team", type: :string, required: true, description: "The team's name."},
