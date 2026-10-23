@@ -53,6 +53,45 @@ defmodule Troupe.ModelConfigTest do
     refute Map.has_key?(params, "api_key")
   end
 
+  # Root issue #55: the organisation's memory comes with the pull, handed to the daemon's
+  # `config.memory` as the plane signed it, and what this machine now reads said.
+  test "config pull hands the plane's memory to the daemon, signature and all, and says what is kept" do
+    answer = %{
+      "documents" => [%{"scope" => "organisation", "name" => nil, "version" => 2, "text" => "Deploy on Tuesdays."}],
+      "signed" => %{"fingerprint" => "SHA256:abc"}
+    }
+
+    test = self()
+
+    call = fn method, params ->
+      send(test, {:called, method, params})
+
+      {:ok,
+       %{
+         "plane_url" => params["plane_url"],
+         "path" => "~/.local/state/troupe/memory.json",
+         "documents" => [
+           %{"scope" => "organisation", "name" => nil, "version" => 2},
+           %{"scope" => "team", "name" => "design", "version" => 5}
+         ],
+         "changed" => [%{"scope" => "organisation", "name" => nil, "from" => 1, "to" => 2}]
+       }}
+    end
+
+    say = fn line -> send(test, {:said, line}) end
+
+    assert ModelConfig.keep_memory("https://plane.example", answer, say, call) == 0
+    assert_received {:called, "config.memory", %{"plane_url" => "https://plane.example", "document" => ^answer}}
+    assert_received {:said, "https://plane.example's memory for this machine's sessions, kept in ~/.local/state/troupe/memory.json:"}
+    assert_received {:said, "  the organisation's memory, version 2"}
+    assert_received {:said, "  the team design's memory, version 5"}
+    assert_received {:said, "the sessions running here read it from their next turn"}
+
+    refused = fn _method, _params -> {:error, "the plane's signature does not match"} end
+    assert ModelConfig.keep_memory("https://plane.example", answer, say, refused) == 1
+    assert_received {:said, "could not keep the organisation's memory: the plane's signature does not match"}
+  end
+
   describe "a model error" do
     test "arrives from the daemon as its own event, with the reason" do
       wire = %{

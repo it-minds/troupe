@@ -18,6 +18,7 @@ defmodule Troupe.Session do
   alias Troupe.{Config, Mounts, Registry, Skills, Workspace}
   alias Troupe.LLM.Fake
   alias Troupe.LLM.Provider
+  alias Troupe.Session.PlaneMemory
   alias Troupe.Watch.Branch
 
   @root_path ["root"]
@@ -41,10 +42,20 @@ defmodule Troupe.Session do
   What a running session's configuration was resolved from: the layers, with where each
   value and rule came from, its `kind` and its workspace; `nil` for a session not running
   here. The configuration is resolved once, as the session starts, so this is what is in
-  force in it.
+  force in it, but for the organisation's memory: a save on the plane since reaches a
+  running session (`Troupe.Session.PlaneMemory`), and the layers name the documents its
+  agents read from their next turn.
   """
   @spec resolved(String.t()) :: %{layers: Config.Layers.Result.t() | nil, kind: atom(), workspace: Path.t()} | nil
-  def resolved(session_id), do: Registry.value({:session, session_id})
+  def resolved(session_id) do
+    case {Registry.value({:session, session_id}), PlaneMemory.given(session_id)} do
+      {%{layers: %Config.Layers.Result{} = layers} = resolved, %{} = memory} ->
+        %{resolved | layers: %{layers | memory: memory}}
+
+      {resolved, _nothing_since} ->
+        resolved
+    end
+  end
 
   @doc "The root agent's path. Everything else hangs below it."
   @spec root_path() :: [String.t()]
@@ -92,6 +103,9 @@ defmodule Troupe.Session do
         # The other half of the gate: what the agent asks a person, and the answers.
         # Unattended in the same mode as approvals, since the same nobody is there.
         {Troupe.Session.Questions, session_id: session_id, mode: config.approvals},
+        # The organisation's memory a save on the plane gave the session after it started,
+        # above the agent so a restarted one still reads it at its next turn.
+        {PlaneMemory, session_id: session_id},
         # Above the agent on purpose: a client's registration must survive an agent
         # restart, because the connection that made it has not gone anywhere and would
         # have no way of knowing it needed to offer its tools again.

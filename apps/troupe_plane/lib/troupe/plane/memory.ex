@@ -23,7 +23,9 @@ defmodule Troupe.Plane.Memory do
 
   import Ecto.Query
 
-  alias Troupe.Plane.{Fleet, Identity, Repo}
+  alias Troupe.Plane.Control.Router
+  alias Troupe.Plane.{Fleet, Identity, Repo, Sessions}
+  alias Troupe.Plane.Fleet.Extends
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Memory.Document
   alias Troupe.Protocol.Memory, as: Shape
@@ -145,14 +147,108 @@ defmodule Troupe.Plane.Memory do
   # -- what reaches a session -------------------------------------------------
 
   @doc """
-  The documents a session on a pod reads: the organisation's, its team's and its worker
-  profile's, in that order, each that has text. A session of no team reads no team's.
+  The documents a session on a pod reads: the organisation's, its team's, then its worker
+  profile's chain, the profile it extends before its own, as the profile's rules and
+  bundle are composed from the chain; each that has text. A session of no team reads no
+  team's.
   """
   @spec for_session(Team.t() | nil, String.t() | nil) :: [Shape.document()]
   def for_session(team, profile) do
-    [{:organisation, nil}, {team, team && team.name}, {profile, profile}]
+    ([{:organisation, nil}, {team, team && team.name}] ++ Enum.map(chain(profile), &{&1, &1}))
     |> Enum.reject(fn {owner, _name} -> is_nil(owner) end)
     |> Enum.flat_map(fn {owner, name} -> reaching(current(owner), name) end)
+  end
+
+  @doc """
+  The profiles whose documents a session on `profile` reads, the one that extends nothing
+  first and `profile` last. A chain that cannot be read (a profile in it gone) is the
+  profile alone, as its rules are then.
+  """
+  @spec chain(String.t() | nil) :: [String.t()]
+  def chain(nil), do: []
+
+  def chain(profile) when is_binary(profile) do
+    case Extends.chain(profile) do
+      {:ok, chain} -> Enum.map(chain, &elem(&1, 0))
+      {:error, _reason} -> [profile]
+    end
+  end
+
+  @doc """
+  The documents a profile has from the profiles it extends, nearest last: each with the
+  version in force, for the console to show above the profile's own.
+  """
+  @spec inherited(String.t()) :: [{String.t(), Document.t()}]
+  def inherited(profile) do
+    profile
+    |> chain()
+    |> Enum.reject(&(&1 == profile))
+    |> Enum.flat_map(fn parent ->
+      case current(parent) do
+        %Document{text: text} = document when text != "" -> [{parent, document}]
+        _none -> []
+      end
+    end)
+  end
+
+  @doc """
+  Tell the pods holding a running session a document reaches that it was saved again, each
+  session with every document it now reads (`session.memory`), so the session reads the
+  new version from its next turn rather than its next activation. A notification, as a
+  bundle's is: a pod that does not hear it has the documents with the session's next
+  activation anyway, and a save never waits on the slowest pod. Answers how many sessions
+  were told.
+
+  The organisation's reaches every running session of a team, a team's that team's, and a
+  profile's the sessions of that profile and of every profile that extends it.
+  """
+  @spec announce(owner()) :: non_neg_integer()
+  def announce(owner) do
+    sessions = Repo.all(reached(owner))
+    teams = sessions |> Enum.map(& &1.team_id) |> Enum.uniq() |> Map.new(&{&1, &1 && Identity.fetch_team(&1)})
+    workers = sessions |> Enum.map(& &1.worker_id) |> Enum.uniq() |> Map.new(&{&1, Fleet.get_worker(&1)})
+
+    Enum.count(sessions, fn session ->
+      case workers[session.worker_id] do
+        nil ->
+          false
+
+        worker ->
+          Router.notify(worker, "session.memory", %{
+            "session_id" => session.id,
+            "epoch" => session.epoch,
+            "memory" => for_session(teams[session.team_id], session.profile)
+          })
+
+          true
+      end
+    end)
+  end
+
+  defp reached(owner) do
+    running =
+      from(s in Sessions.Session,
+        where: s.state == "active" and not is_nil(s.worker_id) and s.kind == "team",
+        order_by: s.id
+      )
+
+    case owner do
+      :organisation -> running
+      %Team{id: id} -> where(running, [s], s.team_id == ^id)
+      profile when is_binary(profile) -> where(running, [s], s.profile in ^[profile | Extends.descendants(profile)])
+    end
+  end
+
+  @doc """
+  Take a profile's document away with the profile: every version, so a profile made again
+  under the name starts with none. What the audit has of it stays, as the record of each
+  save does: its version, size and hash, who and when, never the text. Answers how many
+  versions went.
+  """
+  @spec forget(String.t()) :: non_neg_integer()
+  def forget(profile) when is_binary(profile) do
+    {count, _} = Repo.delete_all(from(d in Document, where: d.scope == "profile" and d.owner == ^profile))
+    count
   end
 
   @doc """

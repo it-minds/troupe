@@ -11,6 +11,7 @@ defmodule Troupe.Plane.Fleet do
   import Ecto.Query
 
   alias Troupe.Plane.Fleet.{Profile, Worker}
+  alias Troupe.Plane.Memory
   alias Troupe.Plane.Repo
   alias Troupe.Plane.Sessions.Session
 
@@ -53,10 +54,19 @@ defmodule Troupe.Plane.Fleet do
   @spec list_profiles() :: [Profile.t()]
   def list_profiles, do: Repo.all(from p in Profile, order_by: p.name)
 
-  @doc "Remove a profile's record. The custom resource is the operator's business."
+  @doc """
+  Remove a profile's record, and its memory document with it, so a profile made again under
+  the name starts with none. The custom resource is the operator's business.
+  """
   @spec delete_profile(String.t()) :: :ok
   def delete_profile(name) do
-    Repo.delete_all(from p in Profile, where: p.name == ^name)
+    {:ok, :ok} =
+      Repo.transaction(fn ->
+        Memory.forget(name)
+        Repo.delete_all(from p in Profile, where: p.name == ^name)
+        :ok
+      end)
+
     :ok
   end
 

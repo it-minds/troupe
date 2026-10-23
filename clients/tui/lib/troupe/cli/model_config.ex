@@ -11,6 +11,11 @@ defmodule Troupe.CLI.ModelConfig do
   organisation's defaults and never be updated again. The daemon fetches the same
   document itself whenever a client signed in to the plane connects; this is the way to
   have it now.
+
+  The organisation's memory documents come with it (`me.memory`, root issue #55): the
+  organisation's and the person's teams', which every session here reads first. The answer
+  goes to the daemon's `config.memory` as the plane signed it, and the sessions running
+  now read it from their next turn.
   """
 
   alias Troupe.Client
@@ -18,19 +23,73 @@ defmodule Troupe.CLI.ModelConfig do
   alias Troupe.Protocol.Client, as: Protocol
   alias Troupe.Remote.Credentials
 
-  @doc "Fetch a plane's document into this machine's organisation layer; returns the exit status."
+  @doc """
+  Fetch a plane's document into this machine's organisation layer, and the organisation's
+  memory documents beside it (root issue #55); returns the exit status.
+  """
   @spec pull(String.t() | nil, (String.t() -> any())) :: non_neg_integer()
   def pull(plane_url, say \\ &IO.puts/1) do
     with {:ok, url} <- plane(plane_url),
          {:ok, origin} <- Client.connect_plane(url),
          {:ok, answer} <- Client.client_defaults(origin) do
-      keep(url, answer, say)
+      settings = keep(url, answer, say)
+
+      memory =
+        case Client.memory(origin) do
+          {:ok, memory} ->
+            keep_memory(url, memory, say)
+
+          # A plane from before memory has none to give.
+          {:error, :unsupported} ->
+            0
+
+          {:error, reason} ->
+            say.("could not pull the organisation's memory: " <> describe(reason))
+            1
+        end
+
+      max(settings, memory)
     else
       {:error, reason} ->
         say.("could not pull the organisation's settings: " <> describe(reason))
         1
     end
   end
+
+  @doc """
+  Hand a plane's `me.memory` answer to the daemon to keep (`config.memory`), signature and
+  all: the daemon checks it against the key this machine pinned, keeps it as the copy
+  every session here reads first, and gives it to the sessions running now for their next
+  turn. Says which documents this machine now reads. Returns the exit status.
+  """
+  @spec keep_memory(String.t(), map(), (String.t() -> any()), (String.t(), map() ->
+                                                                 {:ok, map()} | {:error, term()})) ::
+          non_neg_integer()
+  def keep_memory(url, answer, say, call \\ &Link.call/2) do
+    case call.("config.memory", %{"command_id" => Protocol.command_id(), "plane_url" => url, "document" => answer}) do
+      {:ok, kept} ->
+        report_memory(kept, say)
+        0
+
+      {:error, reason} ->
+        say.("could not keep the organisation's memory: " <> describe(reason))
+        1
+    end
+  end
+
+  defp report_memory(%{"documents" => []} = kept, say),
+    do: say.("#{kept["plane_url"]} has no memory documents for this machine's sessions")
+
+  defp report_memory(kept, say) do
+    say.("#{kept["plane_url"]}'s memory for this machine's sessions, kept in #{kept["path"]}:")
+    Enum.each(kept["documents"] || [], &say.("  #{memory_label(&1)}, version #{&1["version"]}"))
+
+    if (kept["changed"] || []) != [],
+      do: say.("the sessions running here read it from their next turn")
+  end
+
+  defp memory_label(%{"scope" => "organisation"}), do: "the organisation's memory"
+  defp memory_label(%{"scope" => scope, "name" => name}), do: "the #{scope} #{name}'s memory"
 
   @doc """
   Hand a plane's answer to the daemon to keep, through `call` (the daemon's, by default),

@@ -1,0 +1,19 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/memory_changed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "changes": {
+      "type": "array"
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "changes",
+    "message"
+  ],
+  "title": "memory_changed",
+  "type": "object"
+}

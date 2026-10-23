@@ -227,6 +227,14 @@ defmodule Troupe.Protocol.Schema do
         "files" => required(:array),
         "searched" => optional({:array, :string})
       },
+      # The organisation's memory documents an agent reads changed while the session ran
+      # (#55): a save on the plane reached it, and its next turn read the new ones. Each
+      # change is `scope`, `name`, `from` and `to`, the versions, `null` for none; `message`
+      # is the sentence a client shows as it is.
+      "memory_changed" => %{
+        "changes" => required(:array),
+        "message" => required(:string)
+      },
       # The session's goal, written by the root agent under whoever set or cleared it, and
       # carrying the `command_id` of the `session.goal.*` call that asked.
       "goal_set" => %{"text" => required(:string), "command_id" => optional(:string)},
@@ -1020,6 +1028,14 @@ defmodule Troupe.Protocol.Schema do
         "plane_url" => required(:string),
         "document" => required(:object),
         "workspace" => optional(:string)
+      },
+      # A plane's `me.memory` answer, fetched beside it by a client signed in to the plane,
+      # kept as this machine's copy of the organisation's memory (#55) and given to the
+      # sessions running here for their next turn.
+      "config.memory" => %{
+        "command_id" => required(:string),
+        "plane_url" => required(:string),
+        "document" => required(:object)
       },
       # A first run's questions (Decision 705) — the daemon's only, like the settings
       # they write; a worker answers `method_not_found`. `answer` is the named step's
