@@ -41,18 +41,26 @@ defmodule Troupe.Gateway.Plane do
   A plane that serves this version is then asked for the organisation's document
   (`me.client_defaults`), which the daemon keeps for every later session's defaults and
   limits (Decision 869, `Troupe.Gateway.Dispatch`).
+
+  A refusal is taken only as the plane signed it (#657): signed by the key this machine
+  pinned for the plane, as `update_required`, for `troupe-daemon` and this version. One
+  that is not is logged and not acted on, as a plane that could not be asked is not; a
+  plane nothing is pinned for, which signs nothing, is taken at its word as before. The
+  handshake is asked again while a token is held (`Troupe.Gateway.Policy`), so a policy
+  changed on the plane judges this daemon again within a minute; its `policy.revision` is
+  kept (`revision/1`), for the same process to know when the signed answers changed.
   """
 
   use GenServer
 
-  alias Troupe.Protocol.ClientUpdate
+  alias Troupe.PlaneKeys
 
   require Logger
 
   @name __MODULE__
   @timeout 15_000
 
-  defstruct [:url, :token, :subject, :expires_at, :refused]
+  defstruct [:url, :token, :subject, :expires_at, :refused, :revision, :not_taken]
 
   @type link :: %{url: String.t(), token: String.t(), subject: String.t()}
 
@@ -164,21 +172,51 @@ defmodule Troupe.Gateway.Plane do
       }
 
       case request(state, "initialize", hello) do
-        {:ok, _answer} ->
-          GenServer.call(server, {:refused, nil})
+        {:ok, answer} ->
+          GenServer.call(server, {:served, revision_of(answer)})
 
         {:error, {:rpc, %{"code" => -32_601}}} ->
-          GenServer.call(server, {:refused, nil})
+          GenServer.call(server, {:served, nil})
 
         {:error, {:rpc, %{"code" => -32_016} = error}} ->
-          sentence = ClientUpdate.sentence(error["data"])
-          :ok = GenServer.call(server, {:refused, sentence})
-          {:error, {:update_required, sentence}}
+          refused(server, state.url, error["data"], version)
 
         {:error, reason} ->
           {:error, reason}
       end
     end
+  end
+
+  # The plane's refusal, as it signed it: one this machine cannot hold to the key it pinned
+  # is said in the log and leaves things as a plane that did not answer would.
+  defp refused(server, url, data, version) do
+    data = if is_map(data), do: data, else: %{}
+
+    case PlaneKeys.held_refusal(url, data, "daemon", version) do
+      {:refused, sentence} ->
+        :ok = GenServer.call(server, {:refused, sentence})
+        {:error, {:update_required, sentence}}
+
+      {:not_taken, why} ->
+        :ok = GenServer.call(server, {:not_taken, why})
+        {:error, {:refusal_not_taken, why}}
+    end
+  end
+
+  defp revision_of(%{"policy" => %{"revision" => revision}}) when is_binary(revision),
+    do: revision
+
+  defp revision_of(_answer), do: nil
+
+  @doc """
+  The `policy.revision` the plane's last served handshake named: a digest of its signed
+  answers, which moves when either does. `nil` before one, or from a plane from before it.
+  """
+  @spec revision(GenServer.server()) :: String.t() | nil
+  def revision(server \\ @name) do
+    GenServer.call(server, :revision)
+  catch
+    :exit, _not_running -> nil
   end
 
   @doc """
@@ -232,7 +270,17 @@ defmodule Troupe.Gateway.Plane do
     {:reply, :ok, %{state | refused: sentence}}
   end
 
+  def handle_call({:served, revision}, _from, state),
+    do: {:reply, :ok, %{state | refused: nil, revision: revision, not_taken: nil}}
+
+  # Said once, not at every poll that hears it again.
+  def handle_call({:not_taken, why}, _from, state) do
+    if why != state.not_taken, do: Logger.warning("troupe-daemon: #{why}")
+    {:reply, :ok, %{state | not_taken: why}}
+  end
+
   def handle_call(:refusal, _from, state), do: {:reply, state.refused, state}
+  def handle_call(:revision, _from, state), do: {:reply, state.revision, state}
 
   def handle_call({:sign_out, url, subject}, _from, %__MODULE__{token: token} = state)
       when is_binary(token) do

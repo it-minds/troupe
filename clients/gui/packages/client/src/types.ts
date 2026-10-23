@@ -185,10 +185,12 @@ export interface AuthExpiring {
 /**
  * `config.changed`: a settings file the daemon writes has changed, whoever changed it
  * (troupe #57). `keys` names what changed in it; a client reads `config.get` again for
- * the values.
+ * the values. `org` is the copy of the organisation's document, and `versions` the
+ * plane's version policy, which the daemon asks the plane for again while signed in
+ * (#657); `path` is then the plane's URL.
  */
 export interface ConfigChanged {
-  scope: "user" | "project" | "local";
+  scope: "user" | "project" | "local" | "org" | "versions";
   path: string;
   keys: string[];
   workspace?: string;

@@ -16,6 +16,11 @@
 // every version. A platform admin rotates it, typed by the current fingerprint: every machine
 // that pinned the old one then asks its person to accept the new one.
 //
+// Then the releases kept in the plane's object store, which machines update from with no way
+// to GitHub: each version mirrored, and one being copied. A platform admin mirrors a release
+// by its version; the plane checks its manifest against the release keys before it copies
+// anything, and a manifest they did not sign is refused with the plane's sentence.
+//
 // Then three lists `admin.integrations.list` answers, read-only on purpose: the MCP servers
 // more than one profile carries (the organisation's, and the blast radius of retiring one),
 // every host anything dials against the same policy the pods' NetworkPolicy is made from,
@@ -24,7 +29,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { GitHubApp, GitHubAppChange, GitHubCheck, GitHubDelivery, GitHubRepositoryTest, IntegrationServer, Integrations as IntegrationsAnswer, SigningKey } from "@troupe/client";
+import type { GitHubApp, GitHubAppChange, GitHubCheck, GitHubDelivery, GitHubRepositoryTest, IntegrationServer, Integrations as IntegrationsAnswer, PlaneReleases, SigningKey } from "@troupe/client";
 import { describeError, show, useConsole, useLoad } from "../console";
 import { AuditNote, Checks, DetailList, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, changed, useChange, when } from "./bits";
 import type { DiffLine } from "./bits";
@@ -41,6 +46,7 @@ export function Integrations(): JSX.Element {
             <GitHubCard app={app} onApplied={reload} />
             <Deliveries />
             <SigningCard />
+            <ReleasesCard />
             <Servers answer={answer} />
             <Egress answer={answer} />
             <Notify answer={answer} />
@@ -471,6 +477,106 @@ function SigningCard(): JSX.Element {
                   setRotating(false);
                 }}
               />
+            )}
+          </>
+        )}
+      </Loaded>
+    </section>
+  );
+}
+
+// -- the releases kept here ---------------------------------------------------------------
+
+function ReleasesCard(): JSX.Element {
+  const { admin, role } = useConsole();
+  const platform = role === "platform_admin";
+  const [load, reload] = useLoad(() => admin.releases(), [admin]);
+  const { done, apply } = useChange(reload);
+  const [version, setVersion] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const mirror = async (): Promise<void> => {
+    const wanted = version.trim().replace(/^v/, "");
+    if (!wanted) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apply(
+        "release.mirror",
+        `v${wanted}`,
+        () => admin.mirrorRelease(wanted),
+        `Release ${wanted} is being copied. It is listed as mirrored once its manifest is written, last.`,
+      );
+      setVersion("");
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="card" aria-label="Releases kept on this plane">
+      <header>
+        <h2>Releases kept on this plane</h2>
+      </header>
+      <p>
+        People's machines update from here, with no way to GitHub, once <em>Where people's machines get releases</em> on the Policy page names this plane's{" "}
+        <code>/downloads</code>. A release is copied with its signed manifest, which the plane checks against the release keys before it copies anything; every
+        machine checks each file against the release key again before it installs it.
+      </p>
+      {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
+      <Loaded load={load} what="the releases kept here" retry={reload}>
+        {(answer: PlaneReleases) => (
+          <>
+            <Fields
+              rows={[
+                ["Copied from", <span className="mono">{answer.source}</span>],
+                ["Machines get releases from", answer.release_url ? <span className="mono">{answer.release_url}</span> : "GitHub's release pages (the setting is empty)"],
+              ]}
+            />
+            {answer.releases.length === 0 ? (
+              <Empty title="No release kept here">No release is in this plane's object store yet.</Empty>
+            ) : (
+              <div className="scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Version</th>
+                      <th>State</th>
+                      <th>Files</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {answer.releases.map((r) => (
+                      <tr key={r.version}>
+                        <td className="mono">{r.version}</td>
+                        <td>{r.state === "mirrored" ? "Mirrored" : "Being copied"}</td>
+                        <td>{r.files}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {platform ? (
+              <form
+                className="actions"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void mirror();
+                }}
+              >
+                <Field label="Release to mirror" hint="Its version, as it is numbered: 0.24.0-beta." error={error}>
+                  {(props) => <input {...props} value={version} onChange={(e) => setVersion(e.target.value)} placeholder="0.24.0-beta" />}
+                </Field>
+                <button type="submit" disabled={busy || version.trim() === ""}>
+                  Mirror the release
+                </button>
+              </form>
+            ) : (
+              <p className="note">Only a platform admin mirrors a release: it is what every machine updating from this plane installs.</p>
             )}
           </>
         )}

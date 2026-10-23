@@ -1892,7 +1892,11 @@ client that made the change included, so a screen in one client shows what anoth
 `keys` are the keys whose values differ in that file, read before and after the write; a
 save that changed nothing sends nothing. `workspace` is there for `project` and `local`.
 When the daemon keeps a new copy of the organisation's document (below), `scope` is `org`,
-`path` the plane's URL, and `keys` the keys its defaults or its enforced set changed.
+`path` the plane's URL, and `keys` the keys its defaults or its enforced set changed; every
+session running on the machine takes the change at its next turn, and says so in a
+`config_note` with key `organisation`. When its poll finds the plane's version policy
+changed, `scope` is `versions`, `path` the plane's URL and `keys` the policy's that changed,
+as `versions.desktop.recommended` (§9, Client versions).
 When its copy of the organisation's memory changes (`config.memory` below, its own poll, or
 a sign-out that drops it, #55), `scope` is `memory`, `path` the copy's, and `keys` the
 documents whose version changed, as `context.get` names them (`memory:organisation`,
@@ -2785,6 +2789,8 @@ that team.
 | `admin.clients.put` | platform | `{component, policy: {recommended?, minimum?, blocked?}}` → the component's policy as it now stands, with `changes`. Only the keys sent change, `null` clears one, `blocked` is the whole list; `invalid_params` with `data.field` and `data.reason` for a version SemVer cannot read, a `minimum` newer than `recommended`, or a `recommended` that is blocked. Audited as `clients.put` |
 | `admin.signing.get` | either | the plane's signing key: `{algorithm, public_key, fingerprint, version, created_at, versions: [...]}`, every version's newest first; made on first use, and never the key itself, which transit holds and nothing exports ([The plane's signing key](#the-planes-signing-key)) |
 | `admin.signing.rotate` | platform | `{fingerprint}`, the current key's, typed back to confirm → the key as it now stands, a new version, with `changes`. Every machine that pinned the old one refuses what the new one signs until its person accepts it. `invalid_params` naming the current fingerprint for any other. Audited as `signing.rotate` with the fingerprints and versions |
+| `admin.releases.list` | either | `{releases, source, release_url}`: each release in the plane's object store for `/downloads`, newest first, `{version, state, files}` with `state` `mirrored` (its manifest is there, written last) or `mirroring` (a copy under way on this replica); `source`, where releases are mirrored from; `release_url`, the `client_release_url` setting ([Client versions](#client-versions)) |
+| `admin.releases.mirror` | platform | `{version}` → `{version, state: "mirroring", files}`: the release's manifest fetched from `source` and checked against the release keys this plane was built with, then each file it names copied in the background, held to its size and sha256, and the manifest last. `invalid_params` with the sentence for a manifest the keys did not sign, one naming another version, or none. Audited as `release.mirror`, and the copy's end as `release.mirrored` or `release.mirror_failed` |
 | `admin.memory.list` | team | `{}` → `{limit, organisation, teams, profiles}`: every memory document the caller may read (#55, Decision 922), each `{scope, name, subject, editable, current}`, `current` the version in force (`{version, hash, bytes, changed_by, changed_at}`) or null. A team admin's `teams` are theirs and their `profiles` empty; the organisation's is `editable` for a platform admin only. `limit` is the bytes a document holds, 8192 |
 | `admin.memory.get` | team | `{scope, name, version?}` → `{scope, name, subject, limit, editable, version, text, shown, diff, versions}`: one document at a version (the one in force where none is named), `diff` what that version changed against the one before, line by line (`[{op: same/del/add, text}]`), and every version newest first; a profile's has `inherited` besides, the documents of the profiles it extends that its sessions read before its own, the one that extends nothing first, each `{profile, version, hash, bytes, changed_by, changed_at, text}`. `scope` is `organisation`, `team` (its admins and a platform admin; another team's is `not_found`) or `profile` (a platform admin's). A deleted profile's document goes with it, every version |
 | `admin.memory.preview` | as the put | `{scope, name, text}` → `{subject, version, bytes, limit, unchanged, diff, effect}`, written nowhere: the lines the text changes against the version in force, its size, and which sessions read it and when. Refused as the put would be |
@@ -2913,7 +2919,7 @@ than an admin uses them:
 | `trigger.fire` | control | the trigger's principal, or an admin of its team | `{trigger (name, `team/name` or id), idempotency_key, event}` → the run and, when a session was made, the same `{session_id, endpoint, token}` `session.create` returns. The run names the `revision` and `revision_hash` it ran. The same key returns the same run, the same revision and a fresh token; over the trigger's `concurrency` the run is `skipped` and has no session |
 | `session.grant` | control | the session's owner, or an admin of its team | `{session_id, subject, role}` (`owner`, `collaborator`, `viewer`; default collaborator) → mirrored in the plane's ACL and pushed to the pod holding the session as `acl.changed` |
 | `session.review` | control | anybody who can see the session | `{session_id}` → sets `reviewed_by`/`reviewed_at` on the session and its run, audited as `session.review` |
-| `initialize` | observe | anybody | `{protocol_version, client_info: {name, version}, capabilities}` → `{protocol_version, server_info: {name: "troupe-plane", version}, principal, client_update}`: the handshake over `/rpc`, where `principal` is what `me` answers and `client_update` is this plane's word on the client's version, or `update_required` ([Client versions](#client-versions)) |
+| `initialize` | observe | anybody | `{protocol_version, client_info: {name, version}, capabilities}` → `{protocol_version, server_info: {name: "troupe-plane", version}, principal, client_update, policy: {revision}}`: the handshake over `/rpc`, where `principal` is what `me` answers, `client_update` is this plane's word on the client's version, or `update_required` signed as such, and `policy.revision` a digest of the two signed answers ([Client versions](#client-versions)) |
 | `me.client_versions` | observe | anybody | `{}` → `{tui, daemon, desktop}`, each `{recommended, minimum, blocked}`: what `troupe update` installs by, asked on its own because the client that most needs it is the one `initialize` refuses; with `release: {url}`, where releases are (null for GitHub's), and `signed`, the same as `{versions, release}` signed by the plane's key ([The plane's signing key](#the-planes-signing-key)) |
 | `me.client_defaults` | observe | anybody | `{}` → `{configured, provider, base_url, auth, models: {default, cheap, expensive}, defaults, enforced}` — what an administrator says people's own machines should talk to (the *Client defaults* settings), for a client to pre-fill its model settings with. **Never a key**: anybody signed in may ask, so each person supplies their own. `configured` is false, and the rest null, until a provider is set. `defaults` is the same in a config file's shape, only what is set, and `enforced` the `client_enforced` setting, `{}` when unset, per-tool `permissions` among what it may hold (Decision 907): the organisation's document a machine reads below its person's file and holds every layer to (Decision 869, `config.organisation`). A plane from before them answers without the two, and a client reads its old fields as the defaults. With `signed`: the whole answer signed by the plane's key ([The plane's signing key](#the-planes-signing-key)) |
 | `me.memory` | observe | anybody | `{}` → `{documents: [{scope, name, version, hash, updated_at, text}]}`: the organisation's memory documents a person's own machine reads into every session on it (#55, Decision 922), the organisation's and then each of the caller's teams', by name; never another team's, and never a profile's, since no laptop session runs on one. Instructions from the organisation, read-only to agents, each at most 8192 bytes. With `signed`, as `memory` ([The plane's signing key](#the-planes-signing-key)); the daemon keeps the answer as `<state>/memory.json` after every link that brings a token and every five minutes while it holds one, gives a changed one to the sessions running there, and drops it when the person signs out (`config.memory`). A plane from before it has no `me.memory`, and a machine keeps the copy it had |
@@ -2998,19 +3004,29 @@ makes it when it connects. The component is read from `client_info.name` — `tr
 judged by `client_info.version`:
 
 - **on a blocked version, or below `minimum`**: refused with `update_required`. The
-  client says so in a sentence and does not go on; `data.reason` is that sentence:
+  client says so in a sentence and does not go on; `data.reason` is that sentence, and
+  `data.signed` the refusal signed by the plane's key as `update_required`, for an hour
+  ([The plane's signing key](#the-planes-signing-key)):
 
   ```json
   {"code": -32016, "message": "update_required", "data": {
     "component": "tui", "version": "0.12.0-beta", "minimum": "0.13.0-beta",
     "recommended": "0.13.1-beta", "blocked": false, "run": "troupe update",
-    "reason": "This plane needs troupe 0.13.0-beta or later, and this is 0.12.0-beta: run troupe update, which installs 0.13.1-beta."}}
+    "reason": "This plane needs troupe 0.13.0-beta or later, and this is 0.12.0-beta: run troupe update, which installs 0.13.1-beta.",
+    "signed": {"algorithm": "ed25519", "fingerprint": "SHA256:...", "document": "...", "signature": "..."}}}
   ```
+
+  A client that pinned the plane's key acts on the refusal only as that key signed it,
+  for its own component and version: an unsigned one, one another key signed, or one
+  for another version, is said as why and not acted on.
 
 - **otherwise**: served, and the answer carries the policy with what it means for that
   version: `"client_update": {"component": "tui", "recommended": "0.13.1-beta",
   "minimum": "0.13.0-beta", "blocked": [], "action": "suggest"}`, where `action` is
-  `suggest` below `recommended` and `none` at it or past it.
+  `suggest` below `recommended` and `none` at it or past it; and `"policy": {"revision":
+  "<sha256 hex>"}`, a digest of what `me.client_versions` and `me.client_defaults` would
+  say now, which moves when either does. It is no word of the plane's on anything: a
+  client that asks again every little while fetches the signed answers only when it moved.
 
 A client the plane cannot place — no `client_info`, or a name it does not know, as a
 script's — is held to nothing and gets `client_update: null`. So is a client from before
@@ -3023,22 +3039,39 @@ version, never a blocked one and never one below `minimum`, moves backwards only
 person names the version, and is still held to the release key: the plane can hold a
 version back or name one, and cannot make a client install anything the key did not sign. The daemon makes the same `initialize` when a client
 links it with a token (`identity.link`); refused, it asks the plane nothing more until the
-next link, and `identity.get` carries the sentence as `update_required`.
+next handshake, and `identity.get` carries the sentence as `update_required`.
+
+**A policy changed on the plane reaches the clients already connected** (#657). While it
+holds a token the daemon makes the handshake again every thirty seconds: its version is
+judged again, and where `policy.revision` moved it fetches `me.client_defaults` and
+`me.client_versions`, checked against the pinned key. A changed organisation's document is
+kept, told to every client as `config.changed` (scope `org`, the keys that changed), and
+given to every session running on the machine, which takes it as its next turn begins and
+says so in a line (`config_note`, key `organisation`); a changed version policy is told as
+`config.changed` with scope `versions`, `path` the plane's URL and the keys that changed,
+and the desktop app asks again what to update to.
 
 The desktop app makes it too, as `troupe-gui`, when it is signed in: at start and once a
 day (Decision 874). Refused, it keeps to the sessions on its own computer and offers to
 update itself, which is why `data.run` is `null` for it; served with `action: "suggest"`,
 it offers the update quietly, as the terminal says it in a line. Its update is the
 `desktop` component's `recommended` version from `me.client_versions`, held to the same
-`minimum` and `blocked` list, and to the release key.
+`minimum` and `blocked` list, and to the release key. The page hands the policy's `signed`
+to the app's shell as it came, and the shell checks it itself against the key the daemon
+pinned (`identity.get`'s `plane_key`) before it takes the version, the limits or
+`release.url` from it; it takes no URL from the page.
 
 Where releases are is the plane's too: `me.client_versions` names `release.url` (the
 `client_release_url` setting), each release at `<url>/v<version>/` as GitHub lays them out,
-or null for GitHub's. `troupe update` installs from there. The plane can serve them itself:
-`GET /downloads/v<version>/<file>` answers a short-lived presigned URL (302) for the file
-copied into its object store under `releases/v<version>/`, for a version it serves to some
-kind of client, and 404 otherwise; anybody may fetch one, since the release key's signature
-on the manifest is the check, as it is on GitHub.
+or null for GitHub's. `troupe update` and the desktop app install from there. The plane can
+serve them itself: `GET /downloads/v<version>/<file>` answers a short-lived presigned URL
+(302) for a file in its object store under `releases/v<version>/`, and a bare 404 with no
+body for anything else, whatever the policy says of the version: which versions are refused
+is said only by the signed, signed-in `me.client_versions`. Anybody may fetch one, since the
+release key's signature on the manifest is the check, as it is on GitHub, and no client
+installs a version the policy it holds refuses. `admin.releases.mirror` copies a release
+there from where releases are published, its manifest checked against the release keys
+first; `admin.releases.list` says which are kept.
 
 ### The plane's signing key
 
@@ -3065,7 +3098,9 @@ neither, and signs nothing; its answers are taken as they always were, said in a
 
 `document` is the text that was signed: canonical JSON (section 4's rules) of `kind`
 (`client_versions`, `client_defaults` or `memory`), `plane`, `signed_at`, `expires_at` (a week
-after) and `body`, the answer. `signature` is plain Ed25519 (RFC 8032) over its bytes. A
+after) and `body`, the answer. `initialize`'s `update_required` carries one in its `data` too,
+of kind `update_required`, its body the refusal's fields, and `expires_at` an hour after.
+`signature` is plain Ed25519 (RFC 8032) over its bytes. A
 client checks the bytes it was sent, then parses them, and takes the body from there:
 
 - **At sign-in** it pins the key the plane serves, per plane, as SSH pins a host key.

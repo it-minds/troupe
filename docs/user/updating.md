@@ -53,8 +53,11 @@ The desktop app updates itself, and the `troupe-daemon` the installers put besid
 the same signed releases. It looks when it starts and once a day after:
 
 - **What it looks for.** Signed in to a plane, the version the plane recommends for the
-  desktop app; otherwise the latest release. `TROUPE_RELEASE_URL` points it at a mirror, as
-  it points `troupe update`, over `https`.
+  desktop app, from where the plane says releases are (GitHub's unless it names another);
+  otherwise the latest release. The app checks the plane's signature on that itself, against
+  the key this computer pinned, before it fetches anything: a policy that key did not sign
+  is said in a sentence and not followed. `TROUPE_RELEASE_URL` points it at a mirror, as it
+  points `troupe update`, over `https`, and wins over the plane's.
 - **What it checks.** The release's `manifest.json` and its signature, against the release
   keys the app was built with, before anything else; then the update itself, which Tauri's
   updater holds to its own signature by the same key, and the app holds to the size and
@@ -126,7 +129,16 @@ This plane needs troupe 0.13.0-beta or later, and this is 0.12.0-beta: run troup
 HQ, `troupe whoami` and the plane's commands say that rather than that the plane is
 unreachable. Sessions on this machine are not affected. A `troupe-daemon` the plane refuses
 says the same in its log and in `identity.get`, and stops syncing private sessions until it
-is updated and linked again.
+is updated, or the plane serves it again. A refusal is the plane's word only as its key
+signed it, for that client and that version: one it did not sign is said in a line and not
+acted on.
+
+**A change on the plane reaches you within a minute**, without signing in again. While you
+are signed in, `troupe-daemon` asks the plane again every thirty seconds whether its version
+policy or your organisation's settings changed. A changed setting is applied to your running
+sessions as their next turn begins, with a line saying which (`Your organisation's settings
+changed: max_turns holds from this turn.`); a changed version policy is passed to the
+desktop app, which looks for its update again.
 
 ### The plane's word is signed
 
@@ -155,11 +167,13 @@ its word is taken as it always was, said in a line.
 ### Updating from the plane
 
 Where the plane says releases are (its administrators set it, under Policy), `troupe update`
-installs from there rather than from GitHub, so a machine on a closed network updates without
-reaching it. That may be the plane itself, which hands out the release files its
-administrators copied into its object store. The files are checked against the release key
-exactly as they are from GitHub: the plane can serve a release or not, and cannot change one.
-With no recommended version there, name one: `troupe update --version 0.22.0-beta`.
+and the desktop app install from there rather than from GitHub, so a machine on a closed
+network updates without reaching it. That may be the plane itself, which hands out the
+releases its administrators mirrored into its object store (the console's Integrations
+page). The files are checked against the release key exactly as they are from GitHub: the
+plane can serve a release or not, and cannot change one. With no recommended version there,
+name one: `troupe update --version 0.22.0-beta`; the desktop app needs the plane to
+recommend one.
 
 ## What the signature proves, and what it does not
 

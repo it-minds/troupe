@@ -11,7 +11,7 @@
 //    `troupe-daemon open` puts them on the address it opens, or a person types them.
 
 import { memoryTokenStore, webTokenStore } from "@troupe/client";
-import type { TokenStore } from "@troupe/client";
+import type { SignedAnswer, TokenStore } from "@troupe/client";
 
 export interface DaemonEndpoint {
   transport: "ws";
@@ -81,6 +81,12 @@ export interface TroupeShell {
 export interface UpdatePlane {
   url: string;
   versions: Record<string, { recommended?: string | null; minimum?: string | null; blocked?: string[] }>;
+  /**
+   * The plane's signed version policy as it came (#657). With it, the shell checks the
+   * signature itself against the key the daemon pinned for the plane, and reads the
+   * versions and where releases are from it alone; `versions` is then not read.
+   */
+  signed?: SignedAnswer | null;
 }
 
 /** An update the shell found, checked, and can install. */

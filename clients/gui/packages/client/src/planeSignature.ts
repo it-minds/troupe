@@ -26,8 +26,8 @@ export interface SignedAnswer {
   signature: string;
 }
 
-/** What a plane signs. */
-export type SignedKind = "client_versions" | "client_defaults";
+/** What a plane signs: and `initialize`'s refusal of a client's version, signed for an hour. */
+export type SignedKind = "client_versions" | "client_defaults" | "update_required";
 
 export type SignatureRefusal =
   | { reason: "unsigned" }

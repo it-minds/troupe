@@ -201,6 +201,8 @@ export type {
   ProfileAgents,
   SigningKey,
   SigningKeyVersion,
+  PlaneRelease,
+  PlaneReleases,
   MemoryDocument,
   MemoryInherited,
   MemoryLine,

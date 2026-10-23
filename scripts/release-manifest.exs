@@ -20,7 +20,7 @@
 root = Path.expand("..", __DIR__)
 
 for file <- ~w(minisign.ex manifest.ex) do
-  Code.require_file(Path.join(root, "apps/troupe_core/lib/troupe/release/#{file}"))
+  Code.require_file(Path.join(root, "apps/troupe_protocol/lib/troupe/release/#{file}"))
 end
 
 alias Troupe.Release.{Manifest, Minisign}

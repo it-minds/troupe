@@ -27,6 +27,10 @@ Application.put_env(:troupe_core, :organisation,
   keys_path: Path.join(config_home, "org/plane-keys.json")
 )
 
+# The daemon asks its plane again every little while (`Troupe.Gateway.Policy`): not in a
+# test, which polls when it means to.
+Application.put_env(:troupe_gateway, :policy_poll_ms, 0)
+
 # The first run's `daemon` step writes a login entry (Decision 762): into a scratch home
 # here, never the developer's own login items.
 login_home =

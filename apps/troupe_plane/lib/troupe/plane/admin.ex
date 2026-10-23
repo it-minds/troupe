@@ -49,6 +49,7 @@ defmodule Troupe.Plane.Admin do
     Ledger,
     Memory,
     ProfileBudget,
+    Releases,
     Signing
   }
 
@@ -2487,6 +2488,77 @@ defmodule Troupe.Plane.Admin do
       {:ok, Map.put(now, "changes", changes)}
     end
   end
+
+  # -- releases kept on the plane --------------------------------------------
+
+  @doc """
+  The releases kept in the plane's object store for `/downloads` (`Releases`): each version
+  mirrored, newest first, with how many files it holds, those a copy is under way for, and
+  where releases are fetched from and handed out. Readable by either admin, whose people
+  update from them.
+  """
+  @spec releases_list(actor()) :: result()
+  def releases_list(actor) do
+    with :ok <- require_admin(actor) do
+      case Releases.list() do
+        {:ok, releases} ->
+          {:ok,
+           %{
+             "releases" => releases,
+             "source" => Releases.source(),
+             "release_url" => ClientVersions.release_url()
+           }}
+
+        {:error, reason} ->
+          {:error, Error.new(:unavailable, %{reason: reason})}
+      end
+    end
+  end
+
+  @doc """
+  Mirror a release into the plane's object store, from where releases are published: its
+  manifest is checked against the release keys first, and one they did not sign, or one
+  naming another version, is refused with nothing copied. The files are then copied in the
+  background, each held to the manifest; the release counts as mirrored once its manifest
+  is written, last. Audited as `release.mirror`, and its outcome as `release.mirrored` or
+  `release.mirror_failed`. A platform admin's: it is what every machine updating from the
+  plane installs.
+  """
+  @spec releases_mirror(actor(), String.t() | nil) :: result()
+  def releases_mirror(actor, version) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, version} <- release_version(version),
+         {:ok, manifest} <-
+           mirror_started(Releases.start(version, then: &mirrored(actor.subject, version, &1))) do
+      files = length(manifest.artifacts)
+      {:ok, _} = Audit.record(actor.subject, "release.mirror", "v#{version}", %{"files" => files})
+      {:ok, %{"version" => version, "state" => "mirroring", "files" => files}}
+    end
+  end
+
+  # The copy's outcome, which ends after `releases_mirror/2` has answered.
+  defp mirrored(subject, version, {:ok, copied}),
+    do:
+      Audit.record(subject, "release.mirrored", "v#{version}", %{
+        "files" => copied.files,
+        "bytes" => copied.bytes
+      })
+
+  defp mirrored(subject, version, {:error, why}) do
+    Logger.warning("troupe plane: release #{version} was not mirrored: #{why}")
+    Audit.record(subject, "release.mirror_failed", "v#{version}", %{"reason" => why})
+  end
+
+  defp release_version(version) when is_binary(version) and version != "",
+    do: {:ok, version |> String.trim() |> String.trim_leading("v")}
+
+  defp release_version(_version),
+    do: {:error, Error.new(:invalid_params, %{field: "version", reason: "a release's version, as 0.24.0-beta"})}
+
+  defp mirror_started({:ok, manifest}), do: {:ok, manifest}
+
+  defp mirror_started({:error, why}),
+    do: {:error, Error.new(:invalid_params, %{reason: why})}
 
   defp signing_key({:ok, key}), do: {:ok, key}
 

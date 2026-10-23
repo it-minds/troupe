@@ -833,6 +833,23 @@ export interface SigningKey extends SigningKeyVersion {
   changes?: AuditChanges;
 }
 
+/** A release kept in the plane's object store (#657): mirrored once its manifest is there, or a copy under way. */
+export interface PlaneRelease {
+  version: string;
+  state: "mirrored" | "mirroring";
+  /** How many of its files are in the store. */
+  files: number;
+}
+
+/** What `admin.releases.list` answers: the releases kept here, where they are mirrored from, and where machines are told to get them. */
+export interface PlaneReleases {
+  releases: PlaneRelease[];
+  /** Where a mirror copies releases from: GitHub's release downloads unless the deployment names another. */
+  source: string;
+  /** The `client_release_url` setting: where machines get releases; null for GitHub's. */
+  release_url: string | null;
+}
+
 /** Whose memory document (#55): the organisation's, a team's, or a worker profile's. */
 export type MemoryScope = "organisation" | "team" | "profile";
 
@@ -1272,6 +1289,16 @@ export class AdminApi {
   /** A new version of the signing key. Destructive for every machine that pinned it: confirmed by the current key's fingerprint. */
   rotateSigning(fingerprint: string): Promise<SigningKey> {
     return this.rpc<SigningKey>("admin.signing.rotate", { fingerprint });
+  }
+
+  /** The releases kept in the plane's object store, for machines that update from the plane. */
+  releases(): Promise<PlaneReleases> {
+    return this.rpc<PlaneReleases>("admin.releases.list", {});
+  }
+
+  /** Copy a release into the plane's object store, once its manifest checks against the release keys. */
+  mirrorRelease(version: string): Promise<{ version: string; state: "mirroring"; files: number }> {
+    return this.rpc<{ version: string; state: "mirroring"; files: number }>("admin.releases.mirror", { version });
   }
 
   /** Every memory document you may read: the organisation's, your teams', and for a platform admin each profile's. */

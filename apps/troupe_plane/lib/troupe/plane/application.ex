@@ -71,6 +71,11 @@ defmodule Troupe.Plane.Application do
       # team sessions' keys earlier releases left (Decision 811). A `:global` singleton
       # with a keeper, for the scheduler's reasons; after the credential it destroys with.
       Troupe.Plane.Erasure.Retry.Keeper,
+      # A release being mirrored into the object store, copied after `admin.releases.mirror`
+      # has answered (`Releases`), and which copies are under way. Before the endpoint,
+      # which is where that call arrives.
+      {Task.Supervisor, name: Troupe.Plane.Releases.Tasks},
+      {Registry, keys: :unique, name: Troupe.Plane.Releases.Copies},
       Troupe.Plane.Web.Endpoint
     ] ++ cluster()
   end
