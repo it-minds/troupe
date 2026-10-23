@@ -725,9 +725,9 @@ function memorySummary(v: { version: number; text: string; changed_by: string; c
 }
 
 function memoryEffect(scope: unknown, name: unknown): string {
-  if (scope === "team") return `The sessions of ${String(name)} read it from their next activation, and the machines of ${String(name)}'s members once their daemon next signs in; no other team's session reads it.`;
-  if (scope === "profile") return `Every session on ${String(name)}'s pods reads it from its next activation.`;
-  return "Every session on this plane's pods reads it from its next activation, and every signed-in machine's sessions once its daemon next signs in, before the team's and the profile's and as instructions from the organisation, read-only to agents.";
+  if (scope === "team") return `The sessions of ${String(name)} read it from their next turn, and the machines of ${String(name)}'s members within five minutes; no other team's session reads it.`;
+  if (scope === "profile") return `Every session on ${String(name)}'s pods, and on the pods of every profile that extends it, reads it from its next turn.`;
+  return "Every session on this plane's pods reads it from its next turn, and every signed-in machine's sessions within five minutes, before the team's and the profile's and as instructions from the organisation, read-only to agents.";
 }
 
 /** What changes between two texts, line by line, as the plane's `Memory.diff/2` answers it: a longest common subsequence. */
@@ -1619,6 +1619,7 @@ export class FakeAdmin {
             shown: shown ? memorySummary(shown) : null,
             diff: lineDiff(before?.text ?? "", shown?.text ?? ""),
             versions: [...versions].reverse().map(memorySummary),
+            inherited: params["scope"] === "profile" ? this.memoryInherited(String(params["name"])) : [],
           },
         };
       }
@@ -2140,6 +2141,21 @@ export class FakeAdmin {
       return { subject: `profile/${String(name)}`, editable: true };
     }
     return refuse(INVALID_PARAMS, "invalid_params", { field: "scope", reason: "scope is one of organisation, team, profile", scope });
+  }
+
+  /** What a profile's sessions read before its own: the documents of the profiles it extends, the one that extends nothing first. */
+  private memoryInherited(name: string): Array<Record<string, unknown>> {
+    const chain: string[] = [];
+    let at = this.profiles.find((p) => p.name === name)?.extends ?? null;
+    while (at && !chain.includes(at) && chain.length < MAX_DEPTH) {
+      const parent: string = at;
+      chain.unshift(parent);
+      at = this.profiles.find((p) => p.name === parent)?.extends ?? null;
+    }
+    return chain.flatMap((parent) => {
+      const current = (this.memory.get(`profile/${parent}`) ?? []).at(-1);
+      return current && current.text !== "" ? [{ ...memorySummary(current), profile: parent, text: current.text }] : [];
+    });
   }
 
   private memoryRow(scope: "organisation" | "team" | "profile", name: string | null, editable: boolean): Record<string, unknown> {

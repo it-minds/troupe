@@ -1,0 +1,23 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/config.memory.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "document": {
+      "type": "object"
+    },
+    "plane_url": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "document",
+    "plane_url"
+  ],
+  "title": "config.memory",
+  "type": "object"
+}

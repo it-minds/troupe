@@ -10,7 +10,7 @@ defmodule Troupe.Plane.MemoryTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Fleet, Harness, Identity, Memory, Signing}
+  alias Troupe.Plane.{Admin, Audit, Fleet, Harness, Identity, Memory, Signing}
   alias Troupe.Protocol.PlaneSignature
 
   @moduletag timeout: 60_000
@@ -212,6 +212,60 @@ defmodule Troupe.Plane.MemoryTest do
       {:ok, _} = Admin.memory_put(context.root, "organisation", nil, "", 1)
 
       assert Memory.for_session(context.engineering, "dev") == []
+    end
+
+    # Slice 2: a child profile reads its parent's memory before its own, in chain order, as
+    # its rules and bundle are composed; the profile's page shows what it inherits and from
+    # where.
+    test "a child profile reads the chain's memory, the one that extends nothing first", context do
+      {:ok, _} = Fleet.put_profile(%{name: "base", image: "ghcr.io/troupe/worker:1"})
+      {:ok, _} = Fleet.put_profile(%{name: "standard", extends: "base", own: %{}})
+      {:ok, _} = Fleet.put_profile(%{name: "dev", extends: "standard", own: %{}, replicas: 1})
+
+      {:ok, _} = Admin.memory_put(context.root, "profile", "dev", "On dev.", 0)
+      {:ok, _} = Admin.memory_put(context.root, "profile", "base", "On every pod.", 0)
+      {:ok, _} = Admin.memory_put(context.root, "profile", "standard", "On standard pods.", 0)
+      {:ok, _} = Admin.memory_put(context.root, "profile", "standard", "On standard pods, v2.", 1)
+      {:ok, _} = Admin.memory_put(context.root, "organisation", nil, "Everyone.", 0)
+
+      assert Enum.map(Memory.for_session(context.engineering, "dev"), &{&1["scope"], &1["name"], &1["version"]}) ==
+               [
+                 {"organisation", nil, 1},
+                 {"profile", "base", 1},
+                 {"profile", "standard", 2},
+                 {"profile", "dev", 1}
+               ]
+
+      assert {:ok, shown} = Admin.memory_get(context.root, "profile", "dev", nil)
+      assert shown.text == "On dev."
+
+      assert Enum.map(shown.inherited, &{&1["profile"], &1["version"], &1["text"], &1["changed_by"]}) == [
+               {"base", 1, "On every pod.", "root@example.test"},
+               {"standard", 2, "On standard pods, v2.", "root@example.test"}
+             ]
+
+      assert {:ok, %{inherited: []}} = Admin.memory_get(context.root, "profile", "base", nil)
+      assert {:ok, %{inherited: []}} = Admin.memory_get(context.root, "organisation", nil, nil)
+    end
+
+    test "a deleted profile's memory goes with it, so one made again under the name starts empty",
+         context do
+      {:ok, _} = Fleet.put_profile(%{name: "gone", replicas: 1})
+      {:ok, _} = Admin.memory_put(context.root, "profile", "gone", "Old instructions.", 0)
+      {:ok, _} = Admin.memory_put(context.root, "profile", "gone", "Newer instructions.", 1)
+
+      :ok = Fleet.delete_profile("gone")
+      {:ok, _} = Fleet.put_profile(%{name: "gone", replicas: 1})
+
+      assert Memory.current("gone") == nil
+      assert Memory.versions("gone") == []
+      assert Memory.for_session(context.engineering, "gone") == []
+      assert {:ok, %{version: nil, text: "", versions: []}} = Admin.memory_get(context.root, "profile", "gone", nil)
+
+      # The audit keeps what it always had of each save, never the text.
+      saves = Enum.filter(Audit.list(), &(&1.action == "memory.put" and &1.subject_id =~ "gone"))
+      assert length(saves) == 2
+      refute inspect(saves) =~ "instructions"
     end
   end
 

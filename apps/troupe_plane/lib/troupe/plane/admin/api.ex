@@ -1440,7 +1440,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.memory.get",
       function: :memory_get,
       summary:
-        "One memory document: a version's text (the one in force where no version is named), every version with who saved it and when, and what the version shown changed against the one before it, line by line (op same, del or add).",
+        "One memory document: a version's text (the one in force where no version is named), every version with who saved it and when, and what the version shown changed against the one before it, line by line (op same, del or add). A profile's has inherited: the documents of the profiles it extends, which its sessions read before its own, each with the profile it is from.",
       risk: :read,
       arguments: @memory_document ++
         [
@@ -1463,7 +1463,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.memory.put",
       function: :memory_put,
       summary:
-        "Save a text as the next version of a memory document. The organisation's and a profile's are a platform admin's to change, a team's its team admins'. version names the version the text was edited from (0 for a document never saved): a save by somebody else since is refused as conflict, naming the version in force. An empty text clears the document; the same text as the one in force makes no version. Sessions read it from their next activation, and signed-in machines once their daemon next signs in. Audited as memory.put.",
+        "Save a text as the next version of a memory document. The organisation's and a profile's are a platform admin's to change, a team's its team admins'. version names the version the text was edited from (0 for a document never saved): a save by somebody else since is refused as conflict, naming the version in force. An empty text clears the document; the same text as the one in force makes no version. Running sessions read it from their next turn, and signed-in machines within five minutes. Audited as memory.put.",
       risk: :write,
       arguments:
         @memory_document ++

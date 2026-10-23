@@ -6,11 +6,11 @@
 // Every save is a new version, kept with who saved it; a save shows what it changes line by
 // line before it is made, and the audit's record after. The organisation's and a profile's
 // are a platform admin's to change, a team's its team admins'. A profile's is edited on the
-// profile's own page, through the same editor.
+// profile's own page, through the same editor, below what it has from the profiles it extends.
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { MemoryDocument, MemoryPreview, MemoryScope, MemorySaved } from "@troupe/client";
+import type { MemoryDocument, MemoryInherited, MemoryPreview, MemoryScope, MemorySaved } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Loaded, Preview, Region, TextDiff, count, useChange, when } from "./bits";
 
@@ -66,7 +66,7 @@ export function MemoryEditor({ scope, name, title }: { scope: MemoryScope; name:
                 "memory.put",
                 doc.subject,
                 () => admin.memoryPut(scope, name, text, doc.version ?? 0),
-                `${title} is saved; sessions read it from their next activation.`,
+                `${title} is saved; running sessions read it from their next turn.`,
                 (answer) => (answer as MemorySaved).changes,
               )
             }
@@ -88,6 +88,7 @@ function Document({ doc, title, onSave, onEdit }: { doc: MemoryDocument; title: 
   return (
     <>
       <h3>{title}</h3>
+      {(doc.inherited ?? []).length > 0 && <Inherited docs={doc.inherited ?? []} />}
       {doc.shown ? (
         <p className="note">
           Version {doc.shown.version}, saved {when(doc.shown.changed_at)} by {doc.shown.changed_by} · {count(doc.shown.bytes, "byte")}
@@ -158,6 +159,27 @@ function Document({ doc, title, onSave, onEdit }: { doc: MemoryDocument; title: 
 
       {doc.versions.length > 0 && <Versions doc={doc} />}
     </>
+  );
+}
+
+/**
+ * What a profile's sessions read before its own: the documents of the profiles it extends,
+ * the one that extends nothing first, each saying which profile it is from. Changed on that
+ * profile's page, not here.
+ */
+function Inherited({ docs }: { docs: MemoryInherited[] }): JSX.Element {
+  return (
+    <section className="inherited" aria-label="Inherited memory">
+      <p className="note">Its sessions read these first, from the profiles it extends, then its own below:</p>
+      {docs.map((d) => (
+        <div key={d.profile}>
+          <p className="note">
+            From the {d.profile} profile: version {d.version}, saved {when(d.changed_at)} by {d.changed_by} · {count(d.bytes, "byte")}. Changed on {d.profile}'s page.
+          </p>
+          <pre className="prompt">{d.text}</pre>
+        </div>
+      ))}
+    </section>
   );
 }
 

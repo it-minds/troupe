@@ -82,6 +82,9 @@ defmodule Troupe.Worker.Plane.Commands do
 
       case Sessions.activate(session_id, Keyword.merge(defaults(), from_plane)) do
         {:ok, summary} ->
+          # A session already up here keeps the configuration it started with, but for
+          # the organisation's memory, which it reads from its next turn.
+          :ok = give_memory(session_id, params["memory"])
           {:ok, %{"session_id" => session_id, "epoch" => summary.epoch, "activated" => true}}
 
         {:error, {:stale_epoch, stored, ours}} ->
@@ -154,6 +157,27 @@ defmodule Troupe.Worker.Plane.Commands do
 
         {:error, :no_session} ->
           {:error, Error.new(:not_found, %{reason: "the session is not up here"})}
+      end
+    end
+  end
+
+  # The organisation's memory documents a session reads, saved again on the plane while the
+  # session runs here: the organisation's, its team's and its worker profile's chain, as an
+  # activation carries them. Given to the session, whose agents read them at their next
+  # turn and say what changed; never input, and nothing else of the session moves. Best
+  # effort, as a share's news is: a session that is not up here reads them at its next
+  # activation, which carries them anyway.
+  defp dispatch("session.memory", params) do
+    session_id = params["session_id"]
+
+    with :ok <- shaped(session_id),
+         {:ok, documents} <- memory_of(params["memory"]),
+         {:ok, _tree} <- running_at(session_id, params["epoch"]) do
+      {memory, _warnings} = Troupe.PlaneMemory.in_force(documents)
+
+      case Troupe.Session.PlaneMemory.put(session_id, memory) do
+        :ok -> {:ok, %{"session_id" => session_id, "memory" => length(memory.documents)}}
+        {:error, :no_session} -> {:error, Error.new(:not_found, %{reason: "the session is not up here"})}
       end
     end
   end
@@ -461,6 +485,22 @@ defmodule Troupe.Worker.Plane.Commands do
          field: "input",
          reason: "an input is {id, text}, the text at most #{@max_input_bytes} bytes"
        })}
+
+  defp give_memory(session_id, documents) when is_list(documents) do
+    {memory, _warnings} = Troupe.PlaneMemory.in_force(documents)
+
+    case Troupe.Session.PlaneMemory.put(session_id, memory) do
+      :ok -> :ok
+      {:error, :no_session} -> :ok
+    end
+  end
+
+  defp give_memory(_session_id, _none), do: :ok
+
+  defp memory_of(documents) when is_list(documents), do: {:ok, documents}
+
+  defp memory_of(_other),
+    do: {:error, Error.new(:invalid_params, %{field: "memory", reason: "memory is a list of documents"})}
 
   # Up here, and at the epoch the plane names: a pod the session has since moved on from
   # takes nothing for it.

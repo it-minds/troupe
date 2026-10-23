@@ -2556,7 +2556,9 @@ defmodule Troupe.Plane.Admin do
   One memory document: a version's text (the one in force where none is named), every
   version with who saved it and when, and what the version shown changed against the one
   before it, line by line. `scope` is `organisation`, `team` or `profile`; `name` the
-  team's or the profile's.
+  team's or the profile's. A profile's has `inherited` besides: the documents of the
+  profiles it extends, which its sessions read before its own, the one that extends nothing
+  first, each with the profile it is from and the version in force.
   """
   @spec memory_get(actor(), String.t(), String.t() | nil, integer() | nil) :: result()
   def memory_get(actor, scope, name, version) do
@@ -2575,10 +2577,23 @@ defmodule Troupe.Plane.Admin do
          text: (shown && shown.text) || "",
          shown: shown && Memory.summary(shown),
          diff: Memory.diff(before && before.text, shown && shown.text),
-         versions: owner |> Memory.versions() |> Enum.map(&Memory.summary/1)
+         versions: owner |> Memory.versions() |> Enum.map(&Memory.summary/1),
+         inherited: memory_inherited(scope, owner)
        }}
     end
   end
+
+  # What a profile's sessions read before its own: the documents of the profiles it
+  # extends, the one that extends nothing first, each with where it came from.
+  defp memory_inherited("profile", profile) do
+    profile
+    |> Memory.inherited()
+    |> Enum.map(fn {parent, document} ->
+      document |> Memory.summary() |> Map.merge(%{"profile" => parent, "text" => document.text})
+    end)
+  end
+
+  defp memory_inherited(_scope, _owner), do: []
 
   defp memory_version(owner, nil), do: {:ok, Memory.current(owner)}
 
@@ -2638,6 +2653,8 @@ defmodule Troupe.Plane.Admin do
         {:ok, %{before: before, now: now}} ->
           changes = Audit.diff(memory_fields(before), memory_fields(now))
           {:ok, _} = Audit.record(actor.subject, "memory.put", Memory.subject(owner), changes)
+          # The sessions running now read it from their next turn.
+          _told = Memory.announce(owner)
           {:ok, %{document: Memory.summary(now), changes: changes}}
 
         {:error, {:conflict, current}} ->
@@ -2710,17 +2727,19 @@ defmodule Troupe.Plane.Admin do
 
   defp memory_effect(:organisation),
     do:
-      "Every session on this plane's pods reads it from its next activation, and every " <>
-        "signed-in machine's sessions once its daemon next signs in, before the team's " <>
-        "and the profile's and as instructions from the organisation, read-only to agents."
+      "Every session on this plane's pods reads it from its next turn, and every " <>
+        "signed-in machine's sessions within five minutes, before the team's and the " <>
+        "profile's and as instructions from the organisation, read-only to agents."
 
   defp memory_effect(%Identity.Team{name: name}),
     do:
-      "The sessions of #{name} read it from their next activation, and the machines of " <>
-        "#{name}'s members once their daemon next signs in; no other team's session reads it."
+      "The sessions of #{name} read it from their next turn, and the machines of " <>
+        "#{name}'s members within five minutes; no other team's session reads it."
 
   defp memory_effect(profile),
-    do: "Every session on #{profile}'s pods reads it from its next activation."
+    do:
+      "Every session on #{profile}'s pods, and on the pods of every profile that extends " <>
+        "it, reads it from its next turn."
 
   # -- the plane's GitHub App -------------------------------------------------
 
