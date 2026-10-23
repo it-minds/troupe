@@ -601,6 +601,21 @@ defmodule Troupe.Client.Remote do
     end
   end
 
+  @doc """
+  The organisation's memory documents this person's machine reads (`me.memory`, root
+  issue #55), signed as the plane signs them, for the daemon to check and keep.
+  `{:error, :unsupported}` from a plane from before memory.
+  """
+  @spec memory(Troupe.Client.origin()) :: {:ok, map()} | {:error, term()}
+  def memory({:remote, plane}) do
+    case call(plane, "me.memory") do
+      {:ok, %{} = answer} -> {:ok, answer}
+      {:ok, other} -> {:error, {:unexpected, other}}
+      {:error, %{code: -32_601}} -> {:error, :unsupported}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
   @impl true
   def fleet_status({:remote, plane} = origin) do
     status = Plane.status(plane)

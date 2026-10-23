@@ -1,6 +1,7 @@
 import type { AgentDefinition, AgentRow, AgentSkippedFile, ProfileSwitch } from "./agents.js";
 import type { TroupeConnection } from "./connection.js";
 import type { SessionConfig } from "./config.js";
+import type { InstructionsContext } from "./instructions.js";
 import type { GateAnswer } from "./transcript.js";
 import type {
   BlobResponse,
@@ -308,6 +309,16 @@ export class SessionView {
    */
   config(): Promise<SessionConfig> {
     return this.conn.call<SessionConfig>("config.get", { session_id: this.sessionId });
+  }
+
+  /**
+   * `context.get`: every layer the session's next prompt is read from, in order — the
+   * organisation's, a team's and a worker profile's memory, each with its version, then the
+   * person's own instruction file, the repository's files and its brief (troupe #55). A
+   * pod answers it with its session's own memory. Wakes nothing.
+   */
+  context(): Promise<InstructionsContext> {
+    return this.conn.call<InstructionsContext>("context.get", { session_id: this.sessionId });
   }
 
   /**

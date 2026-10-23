@@ -19,8 +19,10 @@ defmodule Troupe.PlaneMemory do
   and so is an unsigned copy of a plane whose key is pinned; one past its time still holds,
   as the plane's word does not lapse because a laptop was offline.
 
-  A session reads them once, as it starts (`Troupe.Config.resolve/3`), so what it runs
-  with is what `troupe config --explain` names for it.
+  A session reads them as it starts (`Troupe.Config.resolve/3`), so what it runs with is
+  what `troupe config --explain` names for it. A save after that reaches it as it runs:
+  given to the session (`Troupe.Session.PlaneMemory`), read by each of its agents as its
+  next turn begins, and said in its log with the versions from and to (`changes/2`).
   """
 
   alias Troupe.Config.{Issue, Org}
@@ -234,6 +236,52 @@ defmodule Troupe.PlaneMemory do
         File.rm(temporary)
         {:error, "#{Troupe.Paths.display(path)} could not be written: #{:file.format_error(reason)}"}
     end
+  end
+
+  # -- a running session's ----------------------------------------------------------
+
+  @doc """
+  What changed between the documents a session read and the ones it is given: one entry a
+  document, with `scope`, `name`, the version it had (`from`, `nil` for none) and the one
+  it has now (`to`, `nil` for taken away). Empty where the two are the same versions of the
+  same documents.
+  """
+  @spec changes([Shape.document()] | nil, [Shape.document()] | nil) :: [map()]
+  def changes(before, now) do
+    was = Map.new(List.wrap(before), &{identity(&1), &1})
+    is = Map.new(List.wrap(now), &{identity(&1), &1})
+    order = Enum.uniq(Enum.map(List.wrap(now), &identity/1) ++ Enum.map(List.wrap(before), &identity/1))
+
+    Enum.flat_map(order, fn {scope, name} = id ->
+      from = was[id]
+      to = is[id]
+
+      if from && to && from["version"] == to["version"] && from["hash"] == to["hash"],
+        do: [],
+        else: [%{"scope" => scope, "name" => name, "from" => from && from["version"], "to" => to && to["version"]}]
+    end)
+  end
+
+  defp identity(document), do: {document["scope"], document["name"]}
+
+  @doc """
+  The line a session's log and its transcript say a change with: each document, what it
+  became. `the team design's memory is now version 6 (it was 5)`.
+  """
+  @spec change_line([map()]) :: String.t()
+  def change_line(changes) do
+    said =
+      Enum.map(changes, fn change ->
+        label = label(change)
+
+        case change do
+          %{"from" => nil, "to" => to} -> "#{label} is new, version #{to}"
+          %{"to" => nil, "from" => from} -> "#{label} (version #{from}) was taken away"
+          %{"from" => from, "to" => to} -> "#{label} is now version #{to} (it was #{from})"
+        end
+      end)
+
+    "The organisation's memory changed: " <> Enum.join(said, "; ") <> ". Read from this turn on."
   end
 
   @doc "One line per document in force, as `troupe config --explain` names them."

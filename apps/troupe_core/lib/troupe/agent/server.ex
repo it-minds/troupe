@@ -1420,6 +1420,7 @@ defmodule Troupe.Agent.Server do
           state
           |> fold_shell()
           |> fold_child_reports()
+          |> take_memory()
           |> load_instructions()
           |> hold_turn_tools()
 
@@ -1891,6 +1892,24 @@ defmodule Troupe.Agent.Server do
   end
 
   defp instructions_due(%State{} = state), do: %{state | instructions_due: true}
+
+  # The organisation's memory a save on the plane gave the session since this agent's
+  # configuration was resolved (`Troupe.Session.PlaneMemory`), taken as a turn begins and
+  # never during one, said in the log with the versions from and to, and read into the
+  # instructions this turn. The same versions again change nothing and say nothing.
+  defp take_memory(%State{} = state) do
+    with %{documents: documents} <- Troupe.Session.PlaneMemory.given(state.session_id),
+         [_ | _] = changes <- Troupe.PlaneMemory.changes(state.config.plane_memory, documents) do
+      log(state, :memory_changed, %{
+        "changes" => changes,
+        "message" => Troupe.PlaneMemory.change_line(changes)
+      })
+
+      instructions_due(%{state | config: %{state.config | plane_memory: documents}})
+    else
+      _same -> state
+    end
+  end
 
   defp environment_section(state) do
     """
