@@ -1932,7 +1932,9 @@ at a later one, without ever travelling back to a client.
 "suggested_prompt", "daemon", "session"}`. `needed` says whether a client should offer the
 questions: nothing recorded, no `config.yaml`, and no model that can be asked.
 `completed` is `null` or `{"completed_at", "choice", "subject"}`, recorded once for every
-client in the daemon's state directory. `step` is the step to answer next — `where`,
+client in the daemon's state directory; `completed_at` is an instant in microseconds, later
+than that of the record it replaced, so a client tells a re-run that finished from the record
+it began with. `step` is the step to answer next — `where`,
 `provider`, `key`, `models`, `workspace`, `daemon`, `finish`, and `done` once `finish` is
 answered — and `steps` the ones this path
 takes, since a plane finishes at once, reused settings skip the key and the models, and a
