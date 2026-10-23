@@ -57,7 +57,9 @@ defmodule Troupe.ModelConfigTest do
   # `config.memory` as the plane signed it, and what this machine now reads said.
   test "config pull hands the plane's memory to the daemon, signature and all, and says what is kept" do
     answer = %{
-      "documents" => [%{"scope" => "organisation", "name" => nil, "version" => 2, "text" => "Deploy on Tuesdays."}],
+      "documents" => [
+        %{"scope" => "organisation", "name" => nil, "version" => 2, "text" => "Deploy on Tuesdays."}
+      ],
       "signed" => %{"fingerprint" => "SHA256:abc"}
     }
 
@@ -81,15 +83,22 @@ defmodule Troupe.ModelConfigTest do
     say = fn line -> send(test, {:said, line}) end
 
     assert ModelConfig.keep_memory("https://plane.example", answer, say, call) == 0
-    assert_received {:called, "config.memory", %{"plane_url" => "https://plane.example", "document" => ^answer}}
-    assert_received {:said, "https://plane.example's memory for this machine's sessions, kept in ~/.local/state/troupe/memory.json:"}
+
+    assert_received {:called, "config.memory",
+                     %{"plane_url" => "https://plane.example", "document" => ^answer}}
+
+    assert_received {:said,
+                     "https://plane.example's memory for this machine's sessions, kept in ~/.local/state/troupe/memory.json:"}
+
     assert_received {:said, "  the organisation's memory, version 2"}
     assert_received {:said, "  the team design's memory, version 5"}
     assert_received {:said, "the sessions running here read it from their next turn"}
 
     refused = fn _method, _params -> {:error, "the plane's signature does not match"} end
     assert ModelConfig.keep_memory("https://plane.example", answer, say, refused) == 1
-    assert_received {:said, "could not keep the organisation's memory: the plane's signature does not match"}
+
+    assert_received {:said,
+                     "could not keep the organisation's memory: the plane's signature does not match"}
   end
 
   describe "a model error" do

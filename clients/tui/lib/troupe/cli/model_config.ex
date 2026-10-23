@@ -66,7 +66,11 @@ defmodule Troupe.CLI.ModelConfig do
                                                                  {:ok, map()} | {:error, term()})) ::
           non_neg_integer()
   def keep_memory(url, answer, say, call \\ &Link.call/2) do
-    case call.("config.memory", %{"command_id" => Protocol.command_id(), "plane_url" => url, "document" => answer}) do
+    case call.("config.memory", %{
+           "command_id" => Protocol.command_id(),
+           "plane_url" => url,
+           "document" => answer
+         }) do
       {:ok, kept} ->
         report_memory(kept, say)
         0

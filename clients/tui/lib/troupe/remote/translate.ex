@@ -431,8 +431,11 @@ defmodule Troupe.Remote.Translate do
       # The organisation's memory changed while the session ran (root issue #55): a save on
       # the plane reached it, and this turn read the new versions. The harness's sentence.
       "memory_changed" ->
-        {[emit.(:remote_note, %{text: to_string(data["message"] || "the organisation's memory changed")})],
-         memory}
+        {[
+           emit.(:remote_note, %{
+             text: to_string(data["message"] || "the organisation's memory changed")
+           })
+         ], memory}
 
       # A saved `AI!` or `AI?` comment started a branch of this session (root Decision 844):
       # the branch's session, its agent, and the comments, as the daemon wrote them.
