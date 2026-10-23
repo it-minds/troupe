@@ -12,6 +12,7 @@ defmodule Troupe.Gateway.PolicyTest do
 
   alias Troupe.Config.Org
   alias Troupe.Gateway.{Daemon, FakePlane, Plane, Policy}
+  alias Troupe.LLM.Fake
   alias Troupe.Protocol.{Client, Endpoint}
 
   @vars ~w(TROUPE_CONFIG_HOME TROUPE_STATE_HOME TROUPE_OPENCODE_CONFIG TROUPE_OPENCODE_AUTH TROUPE_API_KEY
@@ -92,8 +93,8 @@ defmodule Troupe.Gateway.PolicyTest do
        ctx do
     fake =
       start_supervised!(
-        {Troupe.LLM.Fake, [steps: [{:text, "one"}, {:text, "two"}]]},
-        id: {Troupe.LLM.Fake, System.unique_integer([:positive])}
+        {Fake, [steps: [{:text, "one"}, {:text, "two"}]]},
+        id: {Fake, System.unique_integer([:positive])}
       )
 
     {:ok, session} =
@@ -106,7 +107,7 @@ defmodule Troupe.Gateway.PolicyTest do
     on_exit(fn -> Troupe.stop_session(session.id) end)
     :ok = Troupe.subscribe(session.id)
     turn(session.id, "first")
-    assert [%{max_tokens: 4000}] = Troupe.LLM.Fake.requests(fake)
+    assert [%{max_tokens: 4000}] = Fake.requests(fake)
 
     FakePlane.client_defaults_with(ctx.plane.state, document(1000))
     assert :org in Policy.poll()
@@ -116,7 +117,7 @@ defmodule Troupe.Gateway.PolicyTest do
                    5_000
 
     turn(session.id, "second")
-    assert [_first, %{max_tokens: 1000}] = Troupe.LLM.Fake.requests(fake)
+    assert [_first, %{max_tokens: 1000}] = Fake.requests(fake)
 
     assert [%{data: %{"key" => "organisation", "message" => message}}] =
              session.id |> Troupe.events() |> Enum.filter(&(&1.type == "config_note"))

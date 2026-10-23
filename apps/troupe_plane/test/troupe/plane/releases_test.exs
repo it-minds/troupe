@@ -15,8 +15,8 @@ defmodule Troupe.Plane.ReleasesTest do
   import Phoenix.ConnTest
 
   alias Troupe.ObjectStore
-  alias Troupe.Plane.{Audit, Releases}
   alias Troupe.Plane.Admin.API
+  alias Troupe.Plane.{Audit, Releases}
   alias Troupe.Release.Minisign
 
   @endpoint Troupe.Plane.Web.Endpoint

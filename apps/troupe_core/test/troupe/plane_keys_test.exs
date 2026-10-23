@@ -8,7 +8,7 @@ defmodule Troupe.PlaneKeysTest do
   use ExUnit.Case, async: true
 
   alias Troupe.PlaneKeys
-  alias Troupe.Protocol.PlaneSignature
+  alias Troupe.Protocol.{ClientUpdate, PlaneSignature}
 
   @plane "https://plane.example.test"
 
@@ -132,12 +132,7 @@ defmodule Troupe.PlaneKeysTest do
     {:ok, _} = PlaneKeys.see(@plane, key.served, path)
 
     refusal =
-      Troupe.Protocol.ClientUpdate.refusal(
-        "daemon",
-        "0.21.0-beta",
-        %{"minimum" => "0.22.0-beta"},
-        :below_minimum
-      )
+      ClientUpdate.refusal("daemon", "0.21.0-beta", %{"minimum" => "0.22.0-beta"}, :below_minimum)
 
     held = &PlaneKeys.held_refusal(@plane, &1, "daemon", "0.21.0-beta", path: path)
 

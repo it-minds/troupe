@@ -95,7 +95,6 @@ defmodule Troupe.Plane.ClientVersions do
     end
   end
 
-
   @doc """
   Change one component's policy.
 

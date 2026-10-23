@@ -47,7 +47,6 @@ defmodule Troupe.Plane.Releases do
   @tasks Troupe.Plane.Releases.Tasks
   @registry Troupe.Plane.Releases.Copies
 
-
   @doc """
   Where releases are fetched from, each under `v<version>/`: GitHub's release downloads,
   or the deployment's `:releases` `source`.
@@ -128,17 +127,20 @@ defmodule Troupe.Plane.Releases do
       ref = make_ref()
 
       {:ok, _pid} =
-        Task.Supervisor.start_child(@tasks, fn ->
-          registered = Registry.register(@registry, version, DateTime.utc_now())
-          send(parent, {ref, registered})
-          if match?({:ok, _owner}, registered), do: then.(copy(checked, opts))
-        end)
+        Task.Supervisor.start_child(@tasks, fn -> copying(checked, opts, then, {parent, ref}) end)
 
       receive do
         {^ref, {:ok, _owner}} -> {:ok, checked.manifest}
         {^ref, {:error, {:already_registered, _pid}}} -> not_under_way(version)
       end
     end
+  end
+
+  # The copy, registered under its version first, so one replica copies a version once.
+  defp copying(%{manifest: manifest} = checked, opts, then, {parent, ref}) do
+    registered = Registry.register(@registry, manifest.version, DateTime.utc_now())
+    send(parent, {ref, registered})
+    if match?({:ok, _owner}, registered), do: then.(copy(checked, opts))
   end
 
   defp not_under_way(version) do

@@ -32,6 +32,7 @@ defmodule Troupe.Gateway.Policy do
   alias Troupe.Config.Settings
   alias Troupe.Gateway.{Connections, Plane}
   alias Troupe.PlaneKeys
+  alias Troupe.Session.Organisation
 
   require Logger
 
@@ -71,7 +72,7 @@ defmodule Troupe.Gateway.Policy do
           "keys" => keys
         })
 
-        Troupe.Session.Organisation.reconfigure_all()
+        Organisation.reconfigure_all()
       end
 
       {:ok, Map.update!(kept, "path", &Troupe.Paths.display/1)}
