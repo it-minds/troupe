@@ -85,6 +85,57 @@ pub(crate) fn alive(endpoint: &DaemonEndpoint) -> bool {
 /// The probe behind `alive`, each read and write given `wait`. `Ok(false)` for something
 /// that answered as no Troupe daemon with this token would.
 fn probe(endpoint: &DaemonEndpoint, wait: Duration) -> std::io::Result<bool> {
+    match open(endpoint, wait)? {
+        Some((mut stream, _reader)) => {
+            let _ = stream.write_all(&frame(0x8, &[]));
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+/// What the daemon says to `identity.get`: who is linked, to which plane, and the key this
+/// computer pinned for that plane (`plane_key`), which the shell checks a plane's signed
+/// answer against itself rather than take the page's word for it (#657).
+pub(crate) fn identity(endpoint: &DaemonEndpoint) -> Result<serde_json::Value, String> {
+    let unreadable = |e: std::io::Error| format!("the daemon on this computer could not be asked who is signed in: {e}");
+    let (mut stream, mut reader) = open(endpoint, Duration::from_secs(5))
+        .map_err(unreadable)?
+        .ok_or("the daemon on this computer did not answer as a Troupe daemon")?;
+    let ask = serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "identity.get", "params": {} });
+    stream.write_all(&frame(0x1, ask.to_string().as_bytes())).map_err(unreadable)?;
+
+    let answer = answer_to(&mut reader, 2).map_err(unreadable)?;
+    let _ = stream.write_all(&frame(0x8, &[]));
+    match answer {
+        Some(message) => match (message.get("result"), message.get("error")) {
+            (Some(result), _) => Ok(result.clone()),
+            (None, Some(error)) => Err(format!("the daemon on this computer refused identity.get: {error}")),
+            (None, None) => Err("the daemon on this computer answered identity.get with nothing".into()),
+        },
+        None => Err("the daemon on this computer closed the connection before it answered".into()),
+    }
+}
+
+/// The answer to the request numbered `id`, past what the daemon says before it; `None`
+/// where it closes first. A few frames at most.
+fn answer_to(reader: &mut impl Read, id: u64) -> std::io::Result<Option<serde_json::Value>> {
+    for _ in 0..16 {
+        let (opcode, payload) = read_frame(reader)?;
+        if opcode == 0x8 {
+            return Ok(None);
+        }
+        let Ok(message) = serde_json::from_slice::<serde_json::Value>(&payload) else { continue };
+        if message.get("id") == Some(&serde_json::json!(id)) {
+            return Ok(Some(message));
+        }
+    }
+    Ok(None)
+}
+
+/// A connection to the daemon, upgraded and past `initialize` with the file's token, ready
+/// for a request; `None` for something that answered as no Troupe daemon with it would.
+fn open(endpoint: &DaemonEndpoint, wait: Duration) -> std::io::Result<Option<(TcpStream, BufReader<TcpStream>)>> {
     let addr = SocketAddr::from(([127, 0, 0, 1], endpoint.port));
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(300))?;
     stream.set_read_timeout(Some(wait))?;
@@ -104,12 +155,12 @@ fn probe(endpoint: &DaemonEndpoint, wait: Duration) -> std::io::Result<bool> {
     let mut status = String::new();
     reader.read_line(&mut status)?;
     if !status.starts_with("HTTP/1.1 101") {
-        return Ok(false);
+        return Ok(None);
     }
     loop {
         let mut header = String::new();
         if reader.read_line(&mut header)? == 0 {
-            return Ok(false);
+            return Ok(None);
         }
         if header == "\r\n" {
             break;
@@ -129,22 +180,16 @@ fn probe(endpoint: &DaemonEndpoint, wait: Duration) -> std::io::Result<bool> {
     });
     stream.write_all(&frame(0x1, initialize.to_string().as_bytes()))?;
 
-    // What the daemon says before its answer is not the answer; a few frames at most.
-    let mut answered = false;
-    for _ in 0..16 {
-        let (opcode, payload) = read_frame(&mut reader)?;
-        if opcode == 0x8 {
-            break;
-        }
-        let Ok(message) = serde_json::from_slice::<serde_json::Value>(&payload) else { continue };
-        if message.get("id") == Some(&serde_json::json!(1)) {
-            answered = message.get("result").and_then(|r| r.get("protocol_version")).is_some();
-            break;
-        }
-    }
+    // What the daemon says before its answer is not the answer.
+    let answered = answer_to(&mut reader, 1)?
+        .is_some_and(|message| message.get("result").and_then(|r| r.get("protocol_version")).is_some());
 
-    let _ = stream.write_all(&frame(0x8, &[]));
-    Ok(answered)
+    if answered {
+        Ok(Some((stream, reader)))
+    } else {
+        let _ = stream.write_all(&frame(0x8, &[]));
+        Ok(None)
+    }
 }
 
 /// One frame from a client: final, masked, as RFC 6455 has a client send every frame.
@@ -365,19 +410,35 @@ mod tests {
     /// `initialize` answered with a result for its token and refused for any other. On a
     /// thread of its own for as long as the test runs; its port is where it listens.
     fn fake_daemon(token: &str) -> u16 {
+        fake_daemon_with(token, serde_json::json!({ "linked": false }))
+    }
+
+    /// The same, answering `identity.get` after `initialize` with `identity`.
+    fn fake_daemon_with(token: &str, identity: serde_json::Value) -> u16 {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let token = token.to_string();
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(stream) = stream else { continue };
-                let _ = answer_as_daemon(stream, &token);
+                let _ = answer_as_daemon(stream, &token, &identity);
             }
         });
         port
     }
 
-    fn answer_as_daemon(mut stream: TcpStream, token: &str) -> std::io::Result<()> {
+    fn send_text(stream: &mut TcpStream, text: serde_json::Value) -> std::io::Result<()> {
+        let bytes = text.to_string().into_bytes();
+        let mut frame = vec![0x81, bytes.len() as u8];
+        if bytes.len() >= 126 {
+            frame = vec![0x81, 126];
+            frame.extend_from_slice(&(bytes.len() as u16).to_be_bytes());
+        }
+        frame.extend_from_slice(&bytes);
+        stream.write_all(&frame)
+    }
+
+    fn answer_as_daemon(mut stream: TcpStream, token: &str, identity: &serde_json::Value) -> std::io::Result<()> {
         let mut reader = BufReader::new(stream.try_clone()?);
         let mut request = String::new();
         reader.read_line(&mut request)?;
@@ -401,14 +462,16 @@ mod tests {
         };
         // A notification first, as a daemon may send one before it answers.
         for text in [serde_json::json!({ "jsonrpc": "2.0", "method": "hello" }), answer] {
-            let bytes = text.to_string().into_bytes();
-            let mut frame = vec![0x81, bytes.len() as u8];
-            if bytes.len() >= 126 {
-                frame = vec![0x81, 126];
-                frame.extend_from_slice(&(bytes.len() as u16).to_be_bytes());
+            send_text(&mut stream, text)?;
+        }
+
+        // Then `identity.get`, where the client asks it.
+        let (opcode, payload) = read_frame(&mut reader)?;
+        if opcode == 0x1 {
+            let asked: serde_json::Value = serde_json::from_slice(&payload)?;
+            if asked["method"] == "identity.get" {
+                send_text(&mut stream, serde_json::json!({ "jsonrpc": "2.0", "id": asked["id"], "result": identity }))?;
             }
-            frame.extend_from_slice(&bytes);
-            stream.write_all(&frame)?;
         }
         Ok(())
     }
@@ -481,6 +544,16 @@ mod tests {
         assert_eq!(Some(found.port), *daemon.borrow());
         assert_ne!(found.port, taken);
         assert_eq!(found.token, "the-new-token");
+    }
+
+    #[test]
+    fn identity_get_is_asked_of_the_daemon_over_its_socket() {
+        let identity = serde_json::json!({ "linked": true, "plane_key": { "fingerprint": "SHA256:x" } });
+        let port = fake_daemon_with("the-token", identity.clone());
+        let at = |token: &str| DaemonEndpoint { transport: "ws".into(), port, token: token.into() };
+
+        assert_eq!(super::identity(&at("the-token")).unwrap(), identity);
+        assert!(super::identity(&at("another-token")).unwrap_err().contains("did not answer as a Troupe daemon"));
     }
 
     #[test]

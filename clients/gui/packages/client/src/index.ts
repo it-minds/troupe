@@ -198,6 +198,8 @@ export type {
   GitHubDelivery,
   SigningKey,
   SigningKeyVersion,
+  PlaneRelease,
+  PlaneReleases,
   MemoryDocument,
   MemoryInherited,
   MemoryLine,

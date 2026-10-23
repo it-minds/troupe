@@ -156,6 +156,53 @@ defmodule Troupe.Plane.SigningTest do
       assert DateTime.diff(expires, DateTime.utc_now()) > 6 * 24 * 3600
     end
 
+    test "initialize's refusal of a version is signed as update_required, for that client and version, for an hour",
+         context do
+      {:ok, _} = Admin.clients_put(@root, "daemon", %{"minimum" => "0.22.0-beta"})
+
+      error =
+        rpc(context.ada, "initialize", %{
+          "protocol_version" => "1",
+          "client_info" => %{"name" => "troupe-daemon", "version" => "0.21.0-beta"}
+        })["error"]
+
+      assert error["code"] == -32_016
+      assert error["data"]["minimum"] == "0.22.0-beta"
+
+      assert {:ok, %{body: body, signed_at: signed_at, expires_at: expires_at}} =
+               PlaneSignature.verify(error["data"]["signed"], key!(), "update_required")
+
+      assert body == Map.delete(error["data"], "signed")
+      assert %{"component" => "daemon", "version" => "0.21.0-beta"} = body
+      {:ok, signed, _} = DateTime.from_iso8601(signed_at)
+      {:ok, expires, _} = DateTime.from_iso8601(expires_at)
+      assert DateTime.diff(expires, signed) == 3600
+
+      # Not something to pass off as the policy.
+      assert {:error, {:wrong_kind, "update_required"}} =
+               PlaneSignature.verify(error["data"]["signed"], key!(), "client_versions")
+    end
+
+    test "initialize names a revision of the two signed answers, which moves when either does",
+         context do
+      hello = %{
+        "protocol_version" => "1",
+        "client_info" => %{"name" => "troupe-daemon", "version" => "0.22.0-beta"}
+      }
+
+      revision = fn -> rpc(context.ada, "initialize", hello)["result"]["policy"]["revision"] end
+      first = revision.()
+      assert first =~ ~r/\A[0-9a-f]{64}\z/
+      assert revision.() == first
+
+      {:ok, _} = Admin.clients_put(@root, "desktop", %{"recommended" => "0.23.0-beta"})
+      second = revision.()
+      assert second != first
+
+      {:ok, _} = Settings.put("client_enforced", ~s({"max_turns": 12}), "root@example.test")
+      assert revision.() not in [first, second]
+    end
+
     test "an answer the plane cannot sign goes out unsigned, and says so in its log", context do
       # A key transit holds that is not an Ed25519 one: the session-token key.
       Application.put_env(
@@ -223,6 +270,12 @@ defmodule Troupe.Plane.SigningTest do
   end
 
   describe "/downloads" do
+    setup do
+      store = ObjectStore.from_env()
+      prefixes = ["releases/v0.21.0-beta/", "releases/v0.22.0-beta/"]
+      on_exit(fn -> Enum.each(prefixes, &ObjectStore.delete_prefix(store, &1)) end)
+    end
+
     test "hands out a release's file for a version the plane serves, as a presigned URL",
          _context do
       store = ObjectStore.from_env()
@@ -245,24 +298,35 @@ defmodule Troupe.Plane.SigningTest do
       assert body == ~s({"version":"0.22.0-beta"})
     end
 
-    test "refuses a version every component blocks or is below, and anything that is not a release's file",
+    # A 404 that differed for a version the policy refuses would tell anybody, signed in or
+    # not, which versions are refused; only the signed, signed-in answer says that.
+    test "answers a bare 404 for what is not there, the same whatever the policy says, and hands out what is",
          _context do
+      store = ObjectStore.from_env()
+      {:ok, _} = ObjectStore.put(store, "releases/v0.21.0-beta/manifest.json", ~s({}))
+
       for component <- ["tui", "daemon", "desktop"] do
         {:ok, _} =
           Admin.clients_put(@root, component, %{
             "minimum" => "0.20.0-beta",
-            "blocked" => ["0.21.0-beta"]
+            "blocked" => ["0.21.0-beta", "0.21.1-beta"]
           })
       end
 
+      # Blocked and kept here: handed out, as GitHub hands it out. A client never installs
+      # what the policy it holds refuses.
       assert build_conn() |> get("/downloads/v0.21.0-beta/manifest.json") |> Map.fetch!(:status) ==
-               404
-
-      assert build_conn() |> get("/downloads/v0.19.0-beta/manifest.json") |> Map.fetch!(:status) ==
-               404
-
-      assert build_conn() |> get("/downloads/v0.22.0-beta/manifest.json") |> Map.fetch!(:status) ==
                302
+
+      # Blocked, below the minimum, and served: none of them is here, and each 404 is the
+      # same empty answer.
+      answers =
+        for version <- ["0.21.1-beta", "0.19.0-beta", "0.23.9-beta"] do
+          conn = build_conn() |> get("/downloads/v#{version}/manifest.json")
+          {conn.status, conn.resp_body, Plug.Conn.get_resp_header(conn, "content-type")}
+        end
+
+      assert [{404, "", _same_headers}] = Enum.uniq(answers)
 
       for path <- [
             "/downloads/0.22.0-beta/manifest.json",
@@ -270,7 +334,8 @@ defmodule Troupe.Plane.SigningTest do
             "/downloads/v0.22.0-beta/..%2Fsecret",
             "/downloads/v0.22.0-beta/.hidden"
           ] do
-        assert build_conn() |> get(path) |> Map.fetch!(:status) == 404, path
+        conn = build_conn() |> get(path)
+        assert {conn.status, conn.resp_body} == {404, ""}, path
       end
     end
 

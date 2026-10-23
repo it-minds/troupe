@@ -23,6 +23,7 @@ defmodule Troupe.Remote.Plane do
 
   use GenServer
 
+  alias Troupe.PlaneKeys
   alias Troupe.Remote.{Backoff, Discovery, HTTP, RPC, Socket, Tokens}
 
   require Logger
@@ -528,15 +529,29 @@ defmodule Troupe.Remote.Plane do
 
   # The plane does not serve this version: the sentence that says what to run is the error
   # from here on, and every call waiting on the handshake gets it rather than "down".
+  #
+  # Only as the plane signed it (#657): a refusal the key this machine pinned for the plane
+  # did not sign, for this client and version, is not the plane's word, and the handshake
+  # is a failure like any other, said as why, and tried again.
   defp refuse(state, error) do
-    # Debug, as every other handshake failure here: it is asked again at every reconnect,
-    # and the person reads it on screen.
-    refusal = {:update_required, RPC.describe(error)}
-    Logger.debug("plane #{state.plane_url}: #{elem(refusal, 1)}")
+    data = if is_map(error[:data]), do: error[:data], else: %{}
+    version = to_string(Application.spec(:troupe, :vsn))
 
-    for {from, _method, _params, _timeout} <- state.waiting, do: reply(from, {:error, refusal})
+    case PlaneKeys.held_refusal(state.plane_url, data, "tui", version) do
+      {:refused, sentence} ->
+        # Debug, as every other handshake failure here: it is asked again at every
+        # reconnect, and the person reads it on screen.
+        refusal = {:update_required, sentence}
+        Logger.debug("plane #{state.plane_url}: #{sentence}")
 
-    %{state | error: refusal, waiting: [], status: :down}
+        for {from, _method, _params, _timeout} <- state.waiting,
+            do: reply(from, {:error, refusal})
+
+        %{state | error: refusal, waiting: [], status: :down}
+
+      {:not_taken, why} ->
+        put_error(%{state | status: :down}, {:initialize, why})
+    end
   end
 
   # Why a call made while the plane is down fails: a refusal of this version says so, and

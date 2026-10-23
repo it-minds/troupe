@@ -29,7 +29,7 @@ defmodule Troupe.PlaneKeys do
   """
 
   alias Troupe.Config.Org
-  alias Troupe.Protocol.PlaneSignature
+  alias Troupe.Protocol.{ClientUpdate, PlaneSignature}
 
   @version 1
   @well_known "/.well-known/troupe-signing-key"
@@ -231,6 +231,36 @@ defmodule Troupe.PlaneKeys do
       {:error,
        "#{plane(url)} signed its answer, and its key could not be fetched to check it: #{why}"}
 
+  @doc """
+  A plane's `update_required`, the `data` its `initialize` refused this client's version
+  with, checked against the key pinned for the plane (#657):
+
+    * `{:refused, sentence}`: the plane's word, signed by the pinned key as
+      `update_required` for this `component` and `version` and not past its hour; or, from
+      a plane nothing is pinned for, taken as it always was;
+    * `{:not_taken, line}`: not the plane's signed word, and why. The client then goes on
+      as with a plane that could not be asked: it is told to update by nothing it cannot
+      check.
+  """
+  @spec held_refusal(String.t(), map(), String.t(), String.t(), keyword()) ::
+          {:refused, String.t()} | {:not_taken, String.t()}
+  def held_refusal(url, data, component, version, opts \\ []) when is_map(data) do
+    case check(url, data, "update_required", opts) do
+      {:ok, %{"component" => ^component, "version" => ^version} = body, :signed} ->
+        {:refused, ClientUpdate.sentence(body)}
+
+      {:ok, _other, :signed} ->
+        {:not_taken,
+         "#{plane(url)} signed a refusal of another client or version than this one: it is not taken"}
+
+      {:ok, answer, :unsigned} ->
+        {:refused, ClientUpdate.sentence(answer)}
+
+      {:error, sentence} ->
+        {:not_taken, sentence}
+    end
+  end
+
   @doc "What a refusal of `kind` from `url` says, the key pinned being `pinned`."
   @spec refusal(PlaneSignature.reason(), String.t(), String.t(), String.t()) :: String.t()
   def refusal(reason, url, kind, pinned) do
@@ -256,6 +286,7 @@ defmodule Troupe.PlaneKeys do
   defp what("client_versions"), do: "the version policy"
   defp what("client_defaults"), do: "the organisation's document"
   defp what("memory"), do: "the organisation's memory"
+  defp what("update_required"), do: "the plane's refusal of this version"
   defp what(_kind), do: "the plane's answer"
 
   # -- the file ---------------------------------------------------------------------

@@ -25,7 +25,7 @@
 # checks with the clients' own verifier against the list. `--keys` names another list, for
 # the test that runs this with a throwaway key.
 root = Path.expand("..", __DIR__)
-Code.require_file(Path.join(root, "apps/troupe_core/lib/troupe/release/minisign.ex"))
+Code.require_file(Path.join(root, "apps/troupe_protocol/lib/troupe/release/minisign.ex"))
 
 alias Troupe.Release.Minisign
 

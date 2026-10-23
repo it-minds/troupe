@@ -99,6 +99,54 @@ describe("the plane's word on the desktop app's version", () => {
     assert.equal(unchecked.versions?.["signed"], undefined);
   });
 
+  it("keeps the signed policy as it came, for the shell to check again itself", async () => {
+    h = await startHarness({ plane: { clientVersions: { desktop: { recommended: "0.22.0-beta" } } } });
+    const pinned = await h.plane.sign();
+    h.plane.releaseUrl = "https://mirror.example.test/troupe";
+    const auth = await h.signIn();
+
+    const word = await askPlane(auth, "0.21.0-beta", pinned);
+    assert.ok(word.state === "served");
+    assert.equal(word.signed?.fingerprint, pinned.fingerprint);
+    assert.match(word.signed?.document ?? "", /"kind":"client_versions"/);
+
+    // With no key pinned to check it by, there is nothing to hand on.
+    const unchecked = await askPlane(auth, "0.21.0-beta", null);
+    assert.ok(unchecked.state === "served");
+    assert.equal(unchecked.signed, undefined);
+  });
+
+  it("a refusal of this version is acted on as the pinned key signed it, and not otherwise", async () => {
+    h = await startHarness({ plane: { clientVersions: { desktop: { recommended: "0.15.0-beta", minimum: "0.15.0-beta" } } } });
+    const pinned = await h.plane.sign();
+    const auth = await h.signIn();
+
+    const signed = await askPlane(auth, "0.14.0-beta", pinned);
+    assert.ok(signed.state === "required");
+    assert.equal(signed.sentence, "This plane needs the desktop app 0.15.0-beta or later, and this is 0.14.0-beta: update it now, which installs 0.15.0-beta.");
+    assert.equal((signed.refusal as Record<string, unknown>)["signed"], undefined);
+
+    // The same refusal unsigned, from a plane whose key is pinned here: not its word.
+    h.plane.unsignedRefusals = true;
+    const unsigned = await askPlane(auth, "0.14.0-beta", pinned);
+    assert.ok(unsigned.state === "served");
+    assert.equal(unsigned.clientUpdate, null);
+    assert.ok(unsigned.signature?.state === "refused");
+    assert.match(unsigned.signature.sentence, /^the plane's refusal of this version from .* is not signed, and this machine holds the plane's signing key/);
+
+    // Signed by another key than the one pinned: not its word either.
+    h.plane.unsignedRefusals = false;
+    await h.plane.sign();
+    const rotated = await askPlane(auth, "0.14.0-beta", pinned);
+    assert.ok(rotated.state === "served");
+    assert.ok(rotated.signature?.state === "refused");
+
+    // A plane nothing is pinned for is taken at its word, as before.
+    h.plane.unsignedRefusals = true;
+    const unpinned = await askPlane(auth, "0.14.0-beta", null);
+    assert.ok(unpinned.state === "required");
+  });
+
   it("a refusal from a plane that sent only a reason is that reason", () => {
     assert.equal(updateRequiredSentence({ reason: "Ask your administrator." }), "Ask your administrator.");
     assert.equal(updateRequiredSentence(undefined), "This plane needs a newer version of this client: update it now.");

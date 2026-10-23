@@ -645,6 +645,14 @@ export class FakeDaemon {
     for (const c of this.clients) notify(c.ws, "config.changed", changed);
   }
 
+  /**
+   * What the daemon says when its poll finds the plane's version policy changed (#657):
+   * `config.changed` with scope `versions` to every client attached.
+   */
+  announceVersions(planeUrl: string, keys: string[]): void {
+    for (const c of this.clients) notify(c.ws, "config.changed", { scope: "versions", path: planeUrl, keys });
+  }
+
   get principal(): { subject: string; display_name: string; kind: string } {
     return this.linked
       ? { subject: this.linked.subject, display_name: this.linked.display_name ?? this.linked.subject, kind: "user" }

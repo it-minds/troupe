@@ -112,6 +112,10 @@ defmodule Troupe.Agent.State do
     # The last hold this agent wrote whole on an `llm_request` (`Troupe.Agent.Hold`), which
     # a later one that is the same names by its digest alone. Folded.
     hold_written: nil,
+    # Which configuration a change to the organisation's document gave the session this
+    # agent took, as its `revision` (`Troupe.Session.Organisation`), taken at a turn's start;
+    # 0 for none. Not folded: a restarted agent takes what was given at its next turn.
+    organisation_taken: 0,
     # Digests of the system prompt and the tools this agent's last call sent, which its
     # next call's `llm_request` is compared with (issue #465, Decision 815). Not folded: an
     # agent restarted says nothing about its first call.

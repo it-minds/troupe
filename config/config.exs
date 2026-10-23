@@ -15,6 +15,10 @@ if Mix.env() == :test do
   # refresh turns it on and points it at a stand-in.
   config :troupe_core, catalog_refresh: false
 
+  # A test may hand the plane's release mirror its own keys and a stand-in for GitHub
+  # (`Troupe.Plane.Releases`); a build for anything else cannot.
+  config :troupe_plane, release_stand_ins: true
+
   # Nothing a test does reaches the person's own credential store (#58): the daemon's sign-in
   # for steering is kept in the VM. `Troupe.KeyringTest` asks the real one, by a test name.
   config :troupe_protocol, keyring: Troupe.Keyring.Memory

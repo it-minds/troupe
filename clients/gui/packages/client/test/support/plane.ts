@@ -120,6 +120,8 @@ export class FakePlane {
   private signing: { publicKey: string; privateKey: CryptoKey; fingerprint: string } | null = null;
   /** Where the plane says releases are, in the version policy it signs. */
   releaseUrl: string | null = null;
+  /** Refuse a version without signing the refusal, though the plane signs (#657). */
+  unsignedRefusals = false;
 
   private constructor(opts: PlaneOptions) {
     this.opts = opts;
@@ -137,6 +139,11 @@ export class FakePlane {
 
   get baseUrl(): string {
     return this.url;
+  }
+
+  /** Change the version policy from now on, as an administrator does on the console. */
+  setClientVersions(versions: NonNullable<PlaneOptions["clientVersions"]>): void {
+    this.opts.clientVersions = versions;
   }
 
   /**
@@ -171,7 +178,7 @@ export class FakePlane {
       kind,
       plane: this.url,
       signed_at: now.toISOString().replace(/\.\d+Z$/, "Z"),
-      expires_at: new Date(now.getTime() + 7 * 24 * 3600 * 1000).toISOString().replace(/\.\d+Z$/, "Z"),
+      expires_at: new Date(now.getTime() + (kind === "update_required" ? 3600 : 7 * 24 * 3600) * 1000).toISOString().replace(/\.\d+Z$/, "Z"),
       body,
     });
     const signature = Buffer.from(await crypto.subtle.sign({ name: "Ed25519" }, this.signing.privateKey, new TextEncoder().encode(document))).toString("base64");
@@ -325,6 +332,11 @@ export class FakePlane {
         const versions = answer.result as Record<string, unknown>;
         const release = { url: this.releaseUrl };
         answer = { result: await this.signed("client_versions", { ...versions, release }, { versions, release }) };
+      }
+      // A refusal of a version, signed as `update_required` where the plane has a key.
+      if ("error" in answer && answer.error.code === -32016 && !this.unsignedRefusals) {
+        const data = answer.error.data as Record<string, unknown>;
+        answer = { error: { ...answer.error, data: await this.signed("update_required", data, data) } };
       }
       return json(200, { jsonrpc: "2.0", id: request.id ?? null, ...answer });
     }

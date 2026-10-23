@@ -144,6 +144,13 @@ defmodule Troupe.FakeRemote do
   @spec sign(pid()) :: String.t()
   def sign(remote), do: GenServer.call(remote, :sign)
 
+  @doc """
+  Refuse a version from now on without signing the refusal, though the plane signs: what a
+  refusal the pinned key did not sign looks like to a client (#657).
+  """
+  @spec unsigned_refusals(pid()) :: :ok
+  def unsigned_refusals(remote), do: GenServer.call(remote, :unsigned_refusals)
+
   @doc "Where the plane says releases are, in its version policy (#657)."
   @spec release_url(pid(), String.t() | nil) :: :ok
   def release_url(remote, url), do: GenServer.call(remote, {:release_url, url})
@@ -270,6 +277,7 @@ defmodule Troupe.FakeRemote do
       client_versions: Keyword.get(opts, :client_versions),
       # The plane's own signing key, once `sign/1` gives it one, and where its releases are.
       signing: nil,
+      unsigned_refusals: false,
       release_url: nil,
       exchange?: Keyword.get(opts, :exchange, true),
       plane_tokens: MapSet.new(),
@@ -410,6 +418,9 @@ defmodule Troupe.FakeRemote do
   end
 
   def handle_call({:release_url, url}, _from, state), do: {:reply, :ok, %{state | release_url: url}}
+
+  def handle_call(:unsigned_refusals, _from, state),
+    do: {:reply, :ok, %{state | unsigned_refusals: true}}
 
   def handle_call({:state, session_id, session_state}, _from, state),
     do: {:reply, :ok, put_in(state.sessions[session_id][:state], session_state)}
@@ -620,8 +631,13 @@ defmodule Troupe.FakeRemote do
     {{:ok, me}, state} = dispatch(state, :plane, "me", %{}, pid)
 
     case component && ClientUpdate.judge(policy, info["version"]) do
+      # Signed as `update_required` where the plane signs, as the plane's is (#657).
       {:refuse, why} ->
         data = ClientUpdate.refusal(component, info["version"], policy, why)
+
+        data =
+          if state.unsigned_refusals, do: data, else: signed(state, data, data, "update_required")
+
         {{:error, -32_016, "update_required", data}, state}
 
       verdict ->
@@ -1430,11 +1446,13 @@ defmodule Troupe.FakeRemote do
   defp http(state, method, path, _headers, body), do: http(state, method, path, body)
 
   # As the plane signs its version policy (#657), where `sign/1` gave it a key.
-  defp signed(%{signing: nil}, answer, _body), do: answer
+  defp signed(state, answer, body, kind \\ "client_versions")
 
-  defp signed(%{signing: %{public: public, secret: secret}}, answer, body) do
+  defp signed(%{signing: nil}, answer, _body, _kind), do: answer
+
+  defp signed(%{signing: %{public: public, secret: secret}}, answer, body, kind) do
     alias Troupe.Protocol.PlaneSignature
-    document = PlaneSignature.document("client_versions", body)
+    document = PlaneSignature.document(kind, body)
     signature = :crypto.sign(:eddsa, :none, document, [secret, :ed25519])
 
     Map.put(

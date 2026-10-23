@@ -197,6 +197,32 @@ them, which puts `0.13.0-beta` before `0.13.0`. A client from before 0.13 does n
 version and is not held to any of this, and neither is a desktop app from before 0.15;
 nor is anything that calls `/rpc` without saying which client it is.
 
+A change here reaches machines already signed in within a minute: their `troupe-daemon`
+asks the plane again every thirty seconds while it holds a token, is judged again, and
+passes a changed policy to the desktop app; a changed organisation's document reaches their
+running sessions at the next turn. Each refusal is signed by the plane's key, and a machine
+acts on one only as that key signed it.
+
+### Machines that cannot reach GitHub
+
+Mirror releases into the plane and point machines at it:
+
+1. On the console's **Integrations** page, under *Releases kept on this plane*, type the
+   version and press **Mirror the release** (`admin.releases.mirror {version}`, a platform
+   admin's). The plane fetches the release's `manifest.json` and its signature from GitHub's
+   release downloads, checks them against the release keys it was built with, and refuses a
+   manifest they did not sign with nothing copied; then it copies every file the manifest
+   names into its object store under `releases/v<version>/`, each held to the manifest's size
+   and sha256, and the manifest last. The release is listed as mirrored once its manifest is
+   there. Audited as `release.mirror`, then `release.mirrored` or `release.mirror_failed`.
+   The plane needs to reach GitHub for this; the machines do not.
+2. Under **Policy**, set *Where people's machines get releases* (`client_release_url`) to
+   this plane's `https://<plane>/downloads`, and recommend the mirrored version here.
+
+`/downloads` hands out what is mirrored to anybody, as GitHub does, and answers a bare 404
+for anything else, so it says nothing about which versions are blocked. Every machine
+checks each file against the release key again before installing it.
+
 ## Locked out of the console
 
 Nobody is a platform admin because `platform_admin_group` or `groups_claim` is wrong:
