@@ -93,7 +93,8 @@ defmodule Troupe.Config.Explain do
   """
   @spec withhold(Layers.Result.t(), atom()) :: Layers.Result.t()
   def withhold(%Layers.Result{} = layers, kind) do
-    sentence = if kind == :team, do: "set by the profile", else: "set by the session's owner"
+    who = if kind == :team, do: "the profile", else: "the session's owner"
+    sentence = "set by " <> who
     # A pod's workspace and its files are under its state directory, so their paths
     # name it from there.
     veil = veil(layers)
@@ -103,7 +104,7 @@ defmodule Troupe.Config.Explain do
         entries = Enum.map(entries, &veiled(&1, [:source], veil))
 
         if withheld_path?(path),
-          do: {path, Enum.map(entries, &withheld_entry(&1, sentence))},
+          do: {path, Enum.map(entries, &withheld_entry(&1, sentence, who))},
           else: {path, entries}
       end)
 
@@ -155,10 +156,13 @@ defmodule Troupe.Config.Explain do
   defp withheld_path?(["state_dir"]), do: true
   defp withheld_path?(path), do: List.last(path) == "base_url"
 
-  # The default is the schema's, the same for everybody.
-  defp withheld_entry(%{layer: :default} = entry, _sentence), do: entry
-  defp withheld_entry(entry, sentence),
-    do: Map.merge(entry, %{value: {:withheld, sentence}, raw: nil})
+  # The default is the schema's, the same for everybody. Where the rest came from is said
+  # as who set it: the environment variable a pod's profile set it in, or the owner's own
+  # file on a laptop, names the machinery as the value does.
+  defp withheld_entry(%{layer: :default} = entry, _sentence, _who), do: entry
+
+  defp withheld_entry(entry, sentence, who),
+    do: Map.merge(entry, %{value: {:withheld, sentence}, raw: nil, source: who})
 
   @doc "Whether a row's value is one `withhold/2` took out."
   @spec withheld?(row()) :: boolean()

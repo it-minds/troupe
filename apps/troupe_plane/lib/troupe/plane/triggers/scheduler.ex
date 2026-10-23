@@ -23,7 +23,9 @@ defmodule Troupe.Plane.Triggers.Scheduler do
   run Hatchet beside a larger plane.
 
   It also runs the sweeps of triggers on a GitHub repository (`source.sweep`), each at its
-  own cron's minutes and with the same once-a-minute mark (`GitHub.Issues.sweep/2`).
+  own cron's minutes and with the same once-a-minute mark (`GitHub.Issues.sweep/2`), and
+  at every tick ends the runs that have had no session for ten minutes
+  (`Triggers.end_unmade/1`).
   """
 
   use GenServer
@@ -153,6 +155,9 @@ defmodule Troupe.Plane.Triggers.Scheduler do
   def handle_info(:tick, state) do
     try do
       tick()
+      # A run whose request ended before it made its session holds a place against its
+      # cap until something ends it, and this is the plane's periodic work.
+      Triggers.end_unmade()
     rescue
       # A tick that raises — a database that went away mid-query — must not take the
       # scheduler with it; the next tick is thirty seconds away and will see the same

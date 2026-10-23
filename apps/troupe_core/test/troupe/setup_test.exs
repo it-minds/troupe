@@ -76,6 +76,23 @@ defmodule Troupe.SetupTest do
       Setup.forget()
       assert Setup.needed?()
     end
+
+    # Stamped in whole seconds, a re-run that finished in the second of the record before
+    # it carried the same stamp, and a client waiting for a newer record took it for the old.
+    test "a record made straight after another is told from it by its stamp" do
+      stamps =
+        for choice <- ["local", "plane", "local"] do
+          assert :ok = Setup.record_completed(%{"choice" => choice})
+          Setup.completed()["completed_at"]
+        end
+
+      assert Enum.uniq(stamps) == stamps
+
+      assert stamps ==
+               Enum.sort_by(stamps, &elem(DateTime.from_iso8601(&1), 1), DateTime)
+
+      Setup.forget()
+    end
   end
 
   describe "the local path" do

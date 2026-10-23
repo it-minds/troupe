@@ -429,6 +429,31 @@ defmodule Troupe.Plane.GitHubIssuesTest do
       assert error.data.reason =~ "admin.trigger.run"
     end
 
+    # It was keyed on the clock's minute, so a second click a second after one at :59 was
+    # a run of its own, skipped under the cap the first held.
+    test "a second click on the issue less than a minute after the first is its run, across " <>
+           "a minute's turn",
+         context do
+      FakeGitHub.issue(context.fake, @repository, %{number: 7})
+      trigger = trigger!(context, %{"label" => "troupe-fix"})
+
+      assert {:ok, first} = Admin.trigger_fix(@root, "engineering", "fix-issues", "7")
+      assert is_binary(first["session_id"])
+
+      prefix = "fix:#{trigger.id}:7:#{@root.subject}:"
+      backdate_run!(first["run"], prefix, before_minute_turn!())
+
+      assert {:ok, again} = Admin.trigger_fix(@root, "engineering", "fix-issues", "7")
+      assert again["run"]["id"] == first["run"]["id"]
+      assert again["session_id"] == first["session_id"]
+
+      # The same issue a minute on is a firing of its own.
+      backdate_run!(first["run"], prefix, DateTime.add(DateTime.utc_now(), -61, :second))
+      assert {:ok, later} = Admin.trigger_fix(@root, "engineering", "fix-issues", "7")
+      refute later["run"]["id"] == first["run"]["id"]
+      assert length(Triggers.runs(context.team)) == 2
+    end
+
     test "is held to the trigger's caps, and says why it was skipped", context do
       FakeGitHub.issue(context.fake, @repository, %{number: 7})
       FakeGitHub.issue(context.fake, @repository, %{number: 8})

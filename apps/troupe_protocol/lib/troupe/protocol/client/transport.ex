@@ -171,31 +171,42 @@ defmodule Troupe.Protocol.Client.Transport do
     end
   end
 
+  # Only this connection's socket's messages are taken: a process that dials from its own
+  # mailbox, a GenServer with calls or timers queued, keeps the rest for itself.
   defp await_upgrade(conn, ref, deadline, status \\ nil, resp_headers \\ []) do
     remaining = deadline - System.monotonic_time(:millisecond)
+    socket = Mint.HTTP.get_socket(conn)
 
     if remaining <= 0 do
       Mint.HTTP.close(conn)
       {:error, :timeout}
     else
       receive do
-        message ->
-          case Mint.WebSocket.stream(conn, message) do
-            {:ok, conn, responses} ->
-              apply_upgrade(conn, ref, deadline, status, resp_headers, responses)
+        {tag, ^socket, _data_or_reason} = message
+        when tag in [:tcp, :ssl, :tcp_error, :ssl_error] ->
+          upgrade_message(conn, ref, deadline, status, resp_headers, message)
 
-            {:error, conn, reason, _responses} ->
-              Mint.HTTP.close(conn)
-              {:error, reason}
-
-            :unknown ->
-              await_upgrade(conn, ref, deadline, status, resp_headers)
-          end
+        {tag, ^socket} = message when tag in [:tcp_closed, :ssl_closed] ->
+          upgrade_message(conn, ref, deadline, status, resp_headers, message)
       after
         remaining ->
           Mint.HTTP.close(conn)
           {:error, :timeout}
       end
+    end
+  end
+
+  defp upgrade_message(conn, ref, deadline, status, resp_headers, message) do
+    case Mint.WebSocket.stream(conn, message) do
+      {:ok, conn, responses} ->
+        apply_upgrade(conn, ref, deadline, status, resp_headers, responses)
+
+      {:error, conn, reason, _responses} ->
+        Mint.HTTP.close(conn)
+        {:error, reason}
+
+      :unknown ->
+        await_upgrade(conn, ref, deadline, status, resp_headers)
     end
   end
 
