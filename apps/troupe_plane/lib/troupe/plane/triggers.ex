@@ -24,9 +24,10 @@ defmodule Troupe.Plane.Triggers do
 
   import Ecto.Query
 
+  alias Troupe.Plane.Audit
   alias Troupe.Plane.GitHub.Issue
   alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
-  alias Troupe.Plane.{Audit, Harness, Identity, Principals, Repo, Sessions}
+  alias Troupe.Plane.{Harness, Identity, Principals, Repo, Sessions}
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Plane.Triggers.{Notify, Revision, Run, Template, Trigger}

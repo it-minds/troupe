@@ -15,7 +15,7 @@ defmodule Troupe.Plane.TriggerIngressTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, FakePod, Fleet, Repo, Triggers}
+  alias Troupe.Plane.{Admin, Audit, FakePod, Fleet, Repo, Triggers}
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.Triggers.{Run, Trigger}
   alias Troupe.Plane.Web.Router
@@ -466,7 +466,7 @@ defmodule Troupe.Plane.TriggerIngressTest do
       assert %Run{state: "created", session_id: nil} = Repo.get!(Run, making.id)
 
       assert [entry] =
-               Troupe.Plane.Audit.list(actor: "scheduler")
+               Audit.list(actor: "scheduler")
                |> Enum.filter(&(&1.action == "trigger.run.end"))
 
       assert entry.subject_id == "engineering/triage"
