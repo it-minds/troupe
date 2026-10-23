@@ -303,7 +303,7 @@ shows "Windows protected your PC": **More info**, then **Run anyway**. Or, after
 the file, clear the mark first:
 
 ```powershell
-Unblock-File .\Troupe_0.15.0_x64-setup.exe
+Unblock-File .\Troupe_X.Y.Z_x64-setup.exe   # X.Y.Z: the release you downloaded
 ```
 
 **Why that is safe.** An operating system's signature says who built a file; the release
@@ -312,7 +312,7 @@ signed manifest yourself, with the key from `apps/troupe_core/priv/release-keys.
 
 ```sh
 minisign -Vm manifest.json -P <the release key>   # beside manifest.json.minisig
-sha256sum Troupe_0.15.0_x64-setup.exe             # the same as its line in manifest.json
+sha256sum Troupe_X.Y.Z_x64-setup.exe             # the same as its line in manifest.json
 ```
 
 `shasum -a 256` on macOS, `Get-FileHash` in PowerShell.

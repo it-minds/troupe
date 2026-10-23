@@ -13,7 +13,7 @@ defmodule Troupe.Plane.GitHub.Issues do
   so that a run which could never push is never started. The issue is read with a token of
   the plane's own, narrowed to the repository and to reading (`GitHub.reader/5`), audited,
   and it reaches the session as a delivery's issue does: fenced and marked as data
-  (`GitHub.Issue.prompt/2`). Each start is `Triggers.fire/5`, so the trigger's concurrency,
+  (`GitHub.Issue.prompt/2`). Each start is `Triggers.fire/5` (a click, `fire_by_hand/5`), so the trigger's concurrency,
   the profile's and the team's caps of runs on a repository, and the budget hold as they do
   for any run.
 
@@ -39,8 +39,9 @@ defmodule Troupe.Plane.GitHub.Issues do
   ## "Fix this"
 
   One issue, by its number or its link, which must be on the trigger's repository: an
-  open issue, not a pull request. Fired `manual`, by the person, with the key of the
-  person, the issue and the minute, so a second click is the run the first made.
+  open issue, not a pull request. Fired `manual`, by the person, in a window of the person
+  and the issue (`Triggers.fire_by_hand/5`), so a second click less than a minute after the
+  first is the run the first made, on either side of the clock's minute.
   """
 
   alias Troupe.Plane.{Fleet, GitHub, Principals, Repo, Triggers}
@@ -203,7 +204,7 @@ defmodule Troupe.Plane.GitHub.Issues do
   @doc """
   Start one run of a trigger on one issue of its repository, for a person: `issue` its
   number, or its link on the App's host. Read from GitHub first: an open issue, not a pull
-  request. Answers what `Triggers.fire/5` does, or a refusal that says why.
+  request. Answers what `Triggers.fire_by_hand/5` does, or a refusal that says why.
   """
   @spec fix(Trigger.t(), term(), String.t()) :: {:ok, Triggers.fired()} | {:error, Error.t()}
   def fix(%Trigger{} = trigger, issue, by) when is_binary(by) do
@@ -215,10 +216,8 @@ defmodule Troupe.Plane.GitHub.Issues do
          {:ok, reader} <- GitHub.reader(owner, name, %{"issues" => "read"}, audit, by),
          :ok <- private_or_allowed(reader, trigger),
          {:ok, found} <- open_issue(reader, number) do
-      minute = DateTime.utc_now() |> DateTime.truncate(:second) |> Map.put(:second, 0)
-      key = "fix:#{trigger.id}:#{number}:#{by}:#{DateTime.to_iso8601(minute)}"
       event = Issue.found("fix", found, reader.repository, by)
-      Triggers.fire(trigger, "manual", key, event, by)
+      Triggers.fire_by_hand(trigger, "fix:#{trigger.id}:#{number}:#{by}:", event, by)
     else
       {:error, %Error{} = error} -> {:error, error}
       {:error, reason} -> {:error, refused(reason)}

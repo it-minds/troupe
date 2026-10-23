@@ -94,6 +94,23 @@ defmodule Troupe.Config.ExplainTest do
       assert hd(tl(keys["api_key"]["ladder"]))["from"] == "{env:TROUPE_TEST_EXPLAIN_KEY}"
       refute json =~ "sk-from-the-environment-123456"
     end
+
+    # What a viewer is shown of a session: the source of a withheld value said where it was
+    # set, the environment variable's name on a pod and the owner's own file on a laptop.
+    test "a withheld value's source says who set it, not the variable or the file", ctx do
+      File.write!(ctx.user, "base_url: http://llm.example.test/v1\n", [:append])
+      {:ok, _config, layers} = Config.resolve(ctx.ws, [], ctx.opts)
+
+      for {kind, who} <- [team: "the profile", laptop: "the session's owner"] do
+        rows = layers |> Config.Explain.withhold(kind) |> Config.Explain.rows()
+        row = Enum.find(rows, &(&1.key == "base_url"))
+
+        assert row.source == who
+        assert Enum.all?(tl(row.ladder), &(&1.source == who))
+        refute inspect(row) =~ "llm.example.test"
+        refute inspect(row) =~ ctx.user
+      end
+    end
   end
 
   describe "validate" do

@@ -1437,7 +1437,6 @@ Found by the chunk 38 fixers, 2026-10-18.
 - **Steering a laptop's session** (Decisions 921 and 928).
   - The console signs in admins only, so a person who isn't one steers only from the desktop app or the TUI.
   - Who is steering is polled in the desktop app.
-  - `Troupe.Protocol.Client.Transport.ws_connect` swallows every mailbox message during the upgrade, so a GenServer that dials from its own process loses its calls.
 - **Company memory** (Decision 922).
   - `troupe config pull` doesn't fetch memory, and a running laptop session keeps the copy it started with; there's no `config.changed` for a refreshed one.
   - A child profile doesn't read its parent's memory.
@@ -1445,8 +1444,7 @@ Found by the chunk 38 fixers, 2026-10-18.
   - The desktop app has no instructions view.
   - `memory.json` is kept after sign-out, as `organisation.json` is.
 - **The criticals sweep** (Decision 923).
-  - A viewer still sees a pod session's models, prices and the environment variable's name in the source column.
-  - The daemon stamps `completed_at` in whole seconds, so a setup re-run in the same second looks like the old record.
+  - A viewer still sees a pod session's models and prices.
   - Left with reasons: D5, D40's annotation latency, D48, D54 (needs a decision on `host:port`), D65's subagent spend, D71 and D92.
 - **Offered tools and MCP sign-in** (Decision 924).
   - A URL-only server entry that answers 401 still needs `"oauth": {}`; signing in to a server that publishes RFC 9728 metadata by default would follow.
@@ -1455,11 +1453,8 @@ Found by the chunk 38 fixers, 2026-10-18.
   - Neither client's MCP view says which client a sign-in used, and the desktop app still draws nothing for `tools_registered`.
 - **The docs** (#76, #189, #422).
   - Eight pages are over 400 lines: `ARCHITECTURE.md`, the prompt-prefix page, `admin/github.md`, `profiles-and-policy.md`, `user/configuration.md`, the TUI README, `admin/configuration.md` and `admin/installing.md`.
-  - TUI decision tui/15 names `TROUPE_STATE_DIR` and `TROUPE_CONFIG_DIR`, where the code uses `*_HOME`.
-  - `installing.md` and `security.md` show stale example versions.
   - The repository's homepage link isn't set, and the docs site has no domain of its own.
   - D75: a decision's `symbols:` is still not checked against the code.
-- **Tests.** `ClientTest`'s test server times out on accept under load.
 
 Found by the chunk 39 fixers, 2026-10-19.
 
