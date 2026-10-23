@@ -232,6 +232,29 @@ describe("a team", () => {
     expect(button("Change core's repositories")).toBeNull();
   });
 
+  it("forbids offering laptop sessions for the team's people behind a preview in words, and the audit records it", async () => {
+    await signedInAs(fake, PEOPLE.alice);
+    visit("#/teams/core/limits");
+    unmount = render(<App />).unmount;
+    const offering = "Members may offer a laptop session for steering";
+    await waitFor(() => limit(offering) !== null && says("yes", limit(offering)!), "the switch, on");
+    (await waitFor(() => button("Change core's limits"), "the limits")).click();
+    type(await waitFor(() => field(offering), "the form"), "false");
+    button("Preview")!.click();
+
+    await waitFor(() => says("What will happen"), "the preview");
+    await sees("remote_offering_allowed: yes");
+    await sees("remote_offering_allowed: no");
+    await sees("core's members may no longer offer a laptop session: each new offer is refused, saying the team does not allow it");
+    expect(fake.admin.teams.get("core")!.remote_offering_allowed).toBe(true);
+
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as team.update on core"), "the audit's note");
+    expect(fake.admin.teams.get("core")!.remote_offering_allowed).toBe(false);
+    expect(fake.admin.audit.at(-1)).toMatchObject({ action: "team.update", subject_id: "core", detail: { remote_offering_allowed: { from: true, to: false } } });
+    await waitFor(() => says("no", limit(offering) ?? document.body), "the switch as it now is");
+  });
+
   it("lets a team admin change their team's limits but not whether it may use unenforced workers", async () => {
     await signedInAs(fake, PEOPLE.bob);
     visit("#/teams/design/limits");

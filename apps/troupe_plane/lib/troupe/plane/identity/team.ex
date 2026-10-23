@@ -79,6 +79,11 @@ defmodule Troupe.Plane.Identity.Team do
     # nothing, and a team that lists nothing names no repository.
     field :github, :map
 
+    # Whether the team's people may offer a laptop session for steering from another
+    # device (#58). Its administrators'; a person in several teams may offer only when
+    # every one of them allows it.
+    field :remote_offering_allowed, :boolean, default: true
+
     has_many :grants, Troupe.Plane.Identity.Grant
 
     timestamps(type: :utc_datetime_usec)
@@ -101,7 +106,8 @@ defmodule Troupe.Plane.Identity.Team do
     :volume_storage_class,
     :volume_size,
     :allow_unenforced_workers,
-    :github
+    :github,
+    :remote_offering_allowed
   ]
 
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()

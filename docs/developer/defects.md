@@ -1434,13 +1434,9 @@ Found by the chunk 38 fixers, 2026-10-18.
 
 ### D132 - Steering, company memory, MCP sign-in and the docs after chunk 39 (low)
 
-- **Steering a laptop's session** (Decision 921).
-  - The relay rides the laptop client's 15-minute plane token. With no client signed in on the laptop, an offer goes offline when it runs out; whether the daemon renews its own sign-in is undecided.
-  - The daemon's idle watch doesn't count the relay link, so a daemon whose offer has nobody attached can idle out.
-  - The console signs in admins only, so a person who isn't one steers only from the desktop app.
-  - There's no per-team admin switch to forbid offering.
-  - The TUI can't list or steer other laptops' sessions.
-  - Who is steering is polled in the desktop app, and shown only on `/steer` in the TUI.
+- **Steering a laptop's session** (Decisions 921 and 928).
+  - The console signs in admins only, so a person who isn't one steers only from the desktop app or the TUI.
+  - Who is steering is polled in the desktop app.
 - **Company memory** (Decision 922).
   - `troupe config pull` doesn't fetch memory, and a running laptop session keeps the copy it started with; there's no `config.changed` for a refreshed one.
   - A child profile doesn't read its parent's memory.

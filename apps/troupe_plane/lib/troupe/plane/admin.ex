@@ -1062,7 +1062,7 @@ defmodule Troupe.Plane.Admin do
   # read by `GitHub.Policy.read_team/2` over what the team has, key by key.
   @team_keys ~w(budget_micros budget_period idle_timeout_seconds cache_eviction_days) ++
                ~w(erase_after_days members_may_control pins_allowed volume_size) ++
-               ~w(volume_storage_class allow_unenforced_workers github)
+               ~w(volume_storage_class allow_unenforced_workers github remote_offering_allowed)
 
   @doc "The fields of a team `admin.team.update` sets, as its schema declares them."
   @spec team_keys() :: [String.t()]
@@ -4444,6 +4444,8 @@ defmodule Troupe.Plane.Admin do
       volume_storage_class: team.volume_storage_class,
       volume_size: team.volume_size,
       allow_unenforced_workers: team.allow_unenforced_workers,
+      # Whether its people may offer a laptop session for steering from another device.
+      remote_offering_allowed: team.remote_offering_allowed,
       # The repositories its sessions may name, and its fix loop's caps: an empty list
       # names none.
       github: %{
@@ -4604,7 +4606,8 @@ defmodule Troupe.Plane.Admin do
       :pins_allowed,
       :volume_storage_class,
       :volume_size,
-      :github
+      :github,
+      :remote_offering_allowed
     ])
   end
 

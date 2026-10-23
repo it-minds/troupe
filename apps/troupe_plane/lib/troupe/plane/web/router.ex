@@ -21,6 +21,8 @@ defmodule Troupe.Plane.Web.Router do
       *    /scim/v2/...                users and groups, pushed by the identity provider
       GET  /v1/relay                   a laptop's connection while it offers sessions
       GET  /v1/relay/session           a person steering one of them from another device
+      POST /auth/relay                 a laptop daemon's own grant, for that connection's token
+      POST /auth/relay/release         the daemon letting the grant go
 
   Everything a person's client does goes through `/rpc`, and everything `/rpc` does goes
   through `Troupe.Plane.Harness`. That is the "any client, including our own, uses
@@ -229,6 +231,33 @@ defmodule Troupe.Plane.Web.Router do
           "reason" => to_string(inspect(reason))
         })
     end
+  end
+
+  # A laptop's daemon's own sign-in for steering (#58): the grant `remote.grant` gave it,
+  # for a token of the laptop's door alone, `/v1/relay`. A grant the plane does not hold,
+  # one released or idle too long, is 401; one whose person's team forbids offering, 403.
+  post "/auth/relay" do
+    case Remote.redeem(conn.body_params["grant"]) do
+      {:ok, answer} ->
+        send_json(conn, 200, answer)
+
+      {:error, %Error{message: message, data: data}} ->
+        status =
+          case message do
+            "forbidden" -> 403
+            "unavailable" -> 503
+            _unauthenticated -> 401
+          end
+
+        send_json(conn, status, %{"error" => message, "reason" => (data || %{})[:reason]})
+    end
+  end
+
+  # The daemon lets its grant go. Always 204: a grant the plane does not hold has nothing
+  # left to release, and saying which would answer whether a guess was a grant.
+  post "/auth/relay/release" do
+    :ok = Remote.release(conn.body_params["grant"])
+    send_resp(conn, 204, "")
   end
 
   post "/rpc" do

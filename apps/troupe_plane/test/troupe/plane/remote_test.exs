@@ -11,6 +11,7 @@ defmodule Troupe.Plane.RemoteTest do
 
   use Troupe.Plane.DataCase, async: false
 
+  alias Troupe.Plane.{Admin, Audit, Identity, Repo}
   alias Troupe.Plane.Web.Router
   alias Troupe.Protocol.{Client, SessionId}
 
@@ -204,19 +205,163 @@ defmodule Troupe.Plane.RemoteTest do
     end
   end
 
+  describe "the laptop's own sign-in (slice 2)" do
+    test "a grant asked with the person's token is exchanged for the laptop's door alone, for its device",
+         ctx do
+      {:ok, %{"grant" => "rg_" <> _ = grant, "device" => "d-ada"}} =
+        rpc(ctx, @ada, "remote.grant", %{"device" => "d-ada"})
+
+      assert {:ok, %{status: 200, body: redeemed}} = redeem(ctx, grant)
+      assert redeemed["subject"] == @ada
+      assert redeemed["device"] == "d-ada"
+      assert is_integer(redeemed["expires_at"])
+      token = redeemed["token"]
+
+      # The laptop's door takes it, for that device, and the offer is found.
+      laptop = laptop!(ctx, token, "d-ada")
+      {:ok, _} = sync(laptop, ctx.session_id, [%{"person" => @bea, "role" => "control"}])
+      {:ok, %{"sessions" => [row]}} = rpc(ctx, @bea, "remote.list", %{})
+      assert row["state"] == "online"
+
+      # Renewed on the open socket with the next exchange, as a client's token is.
+      {:ok, %{status: 200, body: again}} = redeem(ctx, grant)
+
+      assert {:ok, %{"auth" => %{"expires_at" => _}}} =
+               Client.call(laptop, "auth.refresh", %{"auth" => %{"token" => again["token"]}})
+
+      # No other door takes it: not `/rpc`, not a viewer's, not the laptop's for another device.
+      assert {:ok, %{status: 401}} =
+               Req.request(
+                 method: :post,
+                 url: ctx.url <> "/rpc",
+                 json: %{"jsonrpc" => "2.0", "id" => 1, "method" => "remote.list", "params" => %{}},
+                 headers: [{"authorization", "Bearer " <> token}],
+                 retry: false
+               )
+
+      assert {:error, %{message: "unauthenticated"}} =
+               Client.connect(url: ctx.ws <> "/v1/relay/session", token: token)
+
+      assert {:error, %{message: "unauthenticated"}} =
+               Client.connect(
+                 url: ctx.ws <> "/v1/relay",
+                 token: token,
+                 capabilities: %{"relay" => true, "device" => "d-somewhere-else"}
+               )
+
+      # The audit trail says the device signed in, and nothing of the grant.
+      [granted] = Enum.filter(Audit.list(), &(&1.action == "remote.grant"))
+      assert granted.actor == @ada
+      assert granted.subject_id == "d-ada"
+      refute inspect(granted.detail) =~ grant
+    end
+
+    test "a released grant, a forged one and one for a deactivated person are refused", ctx do
+      {:ok, %{"grant" => grant}} = rpc(ctx, @ada, "remote.grant", %{"device" => "d-ada"})
+
+      assert {:ok, %{status: 401}} = redeem(ctx, grant <> "x")
+      assert {:ok, %{status: 401}} = redeem(ctx, "rg_00000000-0000-0000-0000-000000000000.nope")
+      assert {:ok, %{status: 401}} = redeem(ctx, "anything")
+
+      assert {:ok, %{status: 204}} = release(ctx, grant)
+      assert {:ok, %{status: 401}} = redeem(ctx, grant)
+      assert {:ok, %{status: 204}} = release(ctx, grant), "a release of nothing is still 204"
+
+      released = Enum.filter(Audit.list(), &(&1.action == "remote.release"))
+      assert [%{actor: @ada, subject_id: "d-ada"}] = released
+
+      {:ok, %{"grant" => again}} = rpc(ctx, @bea, "remote.grant", %{"device" => "d-bea"})
+      {:ok, _} = Identity.get_user(@bea) |> Ecto.Changeset.change(active: false) |> Repo.update()
+      assert {:ok, %{status: 403}} = redeem(ctx, again)
+    end
+
+    test "a second grant for the same device replaces the first", ctx do
+      {:ok, %{"grant" => first}} = rpc(ctx, @ada, "remote.grant", %{"device" => "d-ada"})
+      {:ok, %{"grant" => second}} = rpc(ctx, @ada, "remote.grant", %{"device" => "d-ada"})
+
+      assert {:ok, %{status: 401}} = redeem(ctx, first)
+      assert {:ok, %{status: 200}} = redeem(ctx, second)
+    end
+  end
+
+  describe "a team's administrators may forbid offering" do
+    setup ctx do
+      Application.put_env(:troupe_plane, :platform_admin_group, "platform")
+      on_exit(fn -> Application.delete_env(:troupe_plane, :platform_admin_group) end)
+
+      {:ok, group} = Identity.upsert_group(%{external_id: "g-eng", display_name: "eng"})
+      {:ok, team} = Identity.enable_team(group, %{name: "eng"})
+      {:ok, _} = Identity.set_memberships(Identity.get_user(@ada), ["g-eng"])
+      root = person("root@example.test", ["platform"])
+
+      Map.merge(ctx, %{team: team, root: Admin.actor_for(root)})
+    end
+
+    test "switched off in the team, its people are refused a grant, an offer and an attach, naming the team",
+         ctx do
+      # An offer made while the team allowed it.
+      laptop = laptop!(ctx, @ada)
+      {:ok, _} = sync(laptop, ctx.session_id, [%{"person" => @bea, "role" => "control"}])
+
+      {:ok, %{changes: changes}} =
+        Admin.team_update(ctx.root, "eng", %{"remote_offering_allowed" => false})
+
+      assert changes["remote_offering_allowed"] == %{"from" => true, "to" => false}
+
+      [update] = Enum.filter(Audit.list(), &(&1.action == "team.update"))
+      assert update.actor == "root@example.test"
+      assert update.detail["remote_offering_allowed"]["to"] == false
+
+      assert {:error, %{"message" => "forbidden", "data" => %{"team" => "eng", "reason" => reason}}} =
+               rpc(ctx, @ada, "remote.grant", %{"device" => "d-ada"})
+
+      assert reason =~ "eng's administrators do not allow offering"
+
+      assert {:error, %{message: "forbidden", data: %{"team" => "eng"}}} =
+               Client.call(laptop, "relay.offer", %{"session_id" => SessionId.generate(), "share" => []})
+
+      assert {:error, %{"message" => "forbidden", "data" => %{"team" => "eng"}}} =
+               rpc(ctx, @bea, "remote.open", %{"session_id" => ctx.session_id})
+
+      # Somebody in no such team offers as before.
+      bea = laptop!(ctx, @bea, "d-bea")
+      assert {:ok, _} = Client.call(bea, "relay.offer", %{"session_id" => SessionId.generate(), "share" => []})
+
+      # On again, Ada offers again.
+      {:ok, _} = Admin.team_update(ctx.root, "eng", %{"remote_offering_allowed" => true})
+      assert {:ok, %{"grant" => _}} = rpc(ctx, @ada, "remote.grant", %{"device" => "d-ada"})
+    end
+
+    test "a grant made before the switch is refused at its next exchange", ctx do
+      {:ok, %{"grant" => grant}} = rpc(ctx, @ada, "remote.grant", %{"device" => "d-ada"})
+      {:ok, _} = Admin.team_update(ctx.root, "eng", %{"remote_offering_allowed" => false})
+
+      assert {:ok, %{status: 403, body: %{"reason" => reason}}} = redeem(ctx, grant)
+      assert reason =~ "eng's administrators"
+    end
+  end
+
   # -- the laptop ---------------------------------------------------------------
 
-  defp laptop!(ctx, subject, device \\ "d-ada") do
+  defp laptop!(ctx, subject_or_token, device \\ "d-ada") do
     {:ok, laptop} =
       Client.connect(
         url: ctx.ws <> "/v1/relay",
-        token: ctx.tokens[subject],
+        token: ctx.tokens[subject_or_token] || subject_or_token,
         client_info: %{"name" => "troupe-daemon", "version" => "1"},
         capabilities: %{"relay" => true, "device" => device}
       )
 
     on_exit(fn -> Client.close(laptop) end)
     laptop
+  end
+
+  defp redeem(ctx, grant) do
+    Req.request(method: :post, url: ctx.url <> "/auth/relay", json: %{"grant" => grant}, retry: false)
+  end
+
+  defp release(ctx, grant) do
+    Req.request(method: :post, url: ctx.url <> "/auth/relay/release", json: %{"grant" => grant}, retry: false)
   end
 
   defp sync(laptop, session_id, share) do

@@ -79,6 +79,17 @@ defmodule Troupe.Gateway.FakeRelay do
     :ok
   end
 
+  @doc "Tell the laptop its token is about to run out, as the plane does two minutes before."
+  @spec expiring(map()) :: :ok
+  def expiring(relay) do
+    case socket(relay) do
+      nil -> :ok
+      pid -> send(pid, :expiring)
+    end
+
+    :ok
+  end
+
   @doc "Whether a laptop is connected now."
   @spec connected?(map()) :: boolean()
   def connected?(relay), do: socket(relay) != nil
@@ -160,12 +171,18 @@ defmodule Troupe.Gateway.FakeRelay do
     end
 
     def handle_info(:drop, s), do: {:stop, :normal, 1001, s}
+
+    def handle_info(:expiring, s) do
+      {:push, {:text, Jason.encode!(%{"jsonrpc" => "2.0", "method" => "auth.expiring", "params" => %{}})}, s}
+    end
     def handle_info(_message, s), do: {:ok, s}
 
     defp answer(s, id, "initialize", params) do
       token = get_in(params, ["auth", "token"]) || s.bearer
 
-      if token == Agent.get(s.state, & &1.token) do
+      # The person's plane token, or one a daemon's own grant was exchanged for at the
+      # fake plane's `/auth/relay`.
+      if token == Agent.get(s.state, & &1.token) or String.starts_with?(token || "", "laptop:") do
         reply(s, id, %{"protocol_version" => "1", "server_info" => %{"name" => "troupe-plane"}, "scopes" => []})
       else
         error = %{"code" => -32_003, "message" => "unauthenticated"}
