@@ -780,7 +780,11 @@ defmodule Troupe.Remote.Worker do
       # tools this client hosts, and says so.
       send_request(state, {:internal, :initialize}, "initialize", %{
         protocol_version: Troupe.Remote.Discovery.wire_version(),
-        client_info: %{name: "troupe", version: to_string(Application.spec(:troupe, :vsn))},
+        client_info: %{
+          name: "troupe",
+          version: to_string(Application.spec(:troupe, :vsn)),
+          platform: Troupe.Client.Daemon.Link.platform()
+        },
         capabilities: if(state.plane_url, do: %{tools: true}, else: %{}),
         auth: %{token: token}
       })
