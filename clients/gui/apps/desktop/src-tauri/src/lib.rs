@@ -59,8 +59,32 @@ pub fn run() {
             notify::notify_show,
             update::update_check,
             update::update_download,
-            update::update_install
+            update::update_install,
+            shell_platform
         ])
         .run(tauri::generate_context!())
         .expect("the Troupe desktop shell failed to start");
+}
+
+/// Where the app runs, in the daemon's words (`windows/x86_64`, `macos/aarch64`,
+/// `linux/x86_64`): what the page's `initialize` to a plane gives as
+/// `client_info.platform`, as the daemon's own does. Takes nothing and reads nothing.
+#[tauri::command]
+fn shell_platform() -> String {
+    platform()
+}
+
+fn platform() -> String {
+    format!("{}/{}", std::env::consts::OS, std::env::consts::ARCH)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_platform_is_said_as_the_daemon_says_it() {
+        let platform = super::platform();
+        let (os, arch) = platform.split_once('/').expect("an os and an arch");
+        assert!(["windows", "macos", "linux"].contains(&os), "{platform}");
+        assert!(!arch.is_empty() && !arch.contains('/'), "{platform}");
+    }
 }

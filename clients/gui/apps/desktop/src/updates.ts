@@ -149,7 +149,7 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
     void (async () => {
       const key = await pinnedFor(daemon, auth.planeUrl);
       if (live) setHeld(key);
-      await askPlane(auth, __TROUPE_VERSION__, key)
+      await askPlane(auth, __TROUPE_VERSION__, key, shell()?.platform)
         .then((w) => {
           if (w.state !== "unknown" && w.signature?.state === "unsigned") console.info(w.signature.line);
           if (live) setWord(w);
