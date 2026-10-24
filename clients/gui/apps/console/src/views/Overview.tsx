@@ -5,7 +5,9 @@
 //
 // "Needs attention" is everything that is not healthy, worst first, each with where it is
 // fixed: a pod that is broken, has never reported or is draining; a profile with fewer
-// pods than it asked for; a team at or near its ceiling; runs started with nobody watching
+// pods than it asked for, or a Secret its pods mount missing from its namespace; no
+// namespace the ingress controller may reach the workers from; a team at or near its
+// ceiling; runs started with nobody watching
 // that nobody has looked at since. An empty list says so in a sentence, because an empty
 // region and one that has not loaded look the same. Clients behind the recommended version
 // are one line there, linked to Client versions, where there are any (#657). Read again
@@ -272,6 +274,18 @@ function attention(overview: FleetOverview, unread: number, platform: boolean, c
         action: `Look at ${profile.name}`,
       });
     }
+    // A Secret its pods mount that its namespace has no copy of: the operator says which,
+    // where it looked, and the line that lets it copy one kept beside the plane.
+    const secrets = held(profile, "SecretMissing");
+    if (secrets) {
+      items.push({ state: "broken", what: `${profile.name}: ${secrets}.`, where: workers, action: `Look at ${profile.name}` });
+    }
+  }
+  // Whether the ingress controller may reach a worker is the cluster's, not a profile's, so
+  // it is one line however many profiles report it, with the `kubectl label` line in it.
+  const ingress = new Set(overview.profiles.map((p) => held(p, "IngressNamespaceMissing")).filter((m): m is string => !!m));
+  for (const what of ingress) {
+    items.push({ state: "broken", what: `${what}.`, action: "kubectl, outside the console" });
   }
   for (const team of overview.teams) {
     const state = budgetState(team);
@@ -306,6 +320,12 @@ function attention(overview: FleetOverview, unread: number, platform: boolean, c
     });
   }
   return items.sort((a, b) => STATES[a.state].rank - STATES[b.state].rank);
+}
+
+/** The message of a condition the operator reports as holding on a profile, or null. */
+function held(profile: AdminProfile, type: string): string | null {
+  const condition = (profile.conditions ?? []).find((c) => c.type === type && c.status === "True");
+  return condition ? (condition.message ?? type) : null;
 }
 
 function budgetState(team: TeamSpend): State {

@@ -87,7 +87,8 @@ On publish the plane projects each server onto the profile's resource. A `profil
 server with a `credential_ref` gets `secretRef: {name: "troupe-mcp-<server>", key: "token"}`,
 and the operator injects it as the `credential_ref` variable from an optional
 `secretKeyRef`. So for every such server, **create `troupe-mcp-<server>` with key `token`
-in every `troupe-w-<profile>` whose profile follows the channel**, and put its host in
+in `troupe-system`, labelled `troupe.dev/worker-secret=true`**: the operator copies it into
+every `troupe-w-<profile>` whose profile follows the channel. Put its host in
 `allowedEgress`. A `person` server is projected with its slot and a `client_credentials`
 one with its mode alone; neither needs a Secret.
 

@@ -220,9 +220,12 @@ one list, with links to where each part is set.
 
 ## 4. Keys and tokens
 
-**On a plane**, Troupe creates no Kubernetes Secret and no component of it can read one:
-the model key, the object store's credentials and an MCP server's credential are Secrets
-you create in each worker namespace ([configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects)).
+**On a plane**, the chart makes no Kubernetes Secret and the plane can read none: the model
+key, the object store's credentials and an MCP server's credential are Secrets you create
+in `troupe-system`. The operator reads those by name and copies them into the worker
+namespaces that mount them; it may not list Secrets, and copies one a profile names only
+where the Secret is labelled `troupe.dev/worker-secret=true`, so a profile the plane
+wrote cannot name its way to the plane's own ([configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects)).
 OpenBao holds the rest, under policies rendered by `Troupe.KMS.Policy`. An OpenBao
 administrator writes the plane's ([openbao.md](openbao.md), generated from the same code);
 the plane can write none, and checks what its role holds when it starts and on the
@@ -311,23 +314,19 @@ xattr -d com.apple.quarantine ~/.local/bin/troupe
 **On Windows.** `install.ps1` downloads with `Invoke-WebRequest`, which marks nothing as
 coming from the internet, so SmartScreen rarely asks; the installer says it may, the first
 time something runs. For the desktop app's setup downloaded in a browser, SmartScreen
-shows "Windows protected your PC": **More info**, then **Run anyway**. Or, after checking
-the file, clear the mark first:
+shows "Windows protected your PC": **More info**, then **Run anyway**. Or clear the mark:
 
 ```powershell
-Unblock-File .\Troupe_X.Y.Z_x64-setup.exe   # X.Y.Z: the release you downloaded
+Unblock-File .\Troupe_X.Y.Z_x64-setup.exe   # X.Y.Z: the release you downloaded; check the file first
 ```
 
-**Why that is safe.** An operating system's signature says who built a file; the release
-key says it is the file the release workflow built. Check the first download against the
-signed manifest yourself, with the key from `apps/troupe_core/priv/release-keys.txt`:
+**Why that is safe.** An OS signature says who built a file; the release key says it is the
+file the workflow built. Check the first download yourself, with the key from `apps/troupe_core/priv/release-keys.txt`:
 
 ```sh
 minisign -Vm manifest.json -P <the release key>   # beside manifest.json.minisig
-sha256sum Troupe_X.Y.Z_x64-setup.exe             # the same as its line in manifest.json
+sha256sum Troupe_X.Y.Z_x64-setup.exe   # its line in manifest.json; shasum -a 256 on macOS, Get-FileHash in PowerShell
 ```
-
-`shasum -a 256` on macOS, `Get-FileHash` in PowerShell.
 
 From then on Troupe checks every update itself, against the key it was built with
 ([section 5](#5-releases-signed-and-verified)). [Installing the desktop app](../../clients/gui/docs/install.md)

@@ -47,10 +47,9 @@ defmodule Troupe.E2E.CapacityTest do
 
     {:ok, _} = Plane.grant(world.team, name)
 
-    # The operator makes the namespace; what goes in it is somebody else's job on purpose,
-    # and a profile created through the console arrives with an empty one. Waited for,
-    # because the namespace is the operator's answer to the profile and the two are
-    # separate events.
+    # The operator makes the namespace, and copies the Secrets its pods mount into it from
+    # the plane's: nobody puts anything there by hand. Waited for, because the namespace
+    # is the operator's answer to the profile and the two are separate events.
     namespace = World.worker_namespace(name)
 
     World.eventually(fn -> World.kubectl(["get", "ns", namespace]) |> elem(1) == 0 end,
@@ -58,8 +57,6 @@ defmodule Troupe.E2E.CapacityTest do
       every: 2_000,
       what: "the operator to make #{namespace}"
     )
-
-    World.secrets!(namespace)
 
     on_exit(fn ->
       Plane.call("admin.team.revoke", %{
