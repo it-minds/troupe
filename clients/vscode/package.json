@@ -254,6 +254,11 @@
     "test:vscode": "tsc -p . && node out/test/vscode/run.js",
     "package": "tsc -p . && node -e \"for (const f of ['LICENSE', 'NOTICE']) require('fs').copyFileSync('../../' + f, f)\" && vsce package --no-dependencies --out troupe.vsix"
   },
+  "pnpm": {
+    "overrides": {
+      "@azure/msal-node": "^7.1.0"
+    }
+  },
   "devDependencies": {
     "@types/node": "^20.19.0",
     "@types/vscode": "~1.93.0",

@@ -168,6 +168,41 @@ function bundleSummaryOf(content: Record<string, unknown>): Record<string, unkno
   };
 }
 
+/**
+ * Each entry's definition by name, field by field, as `Troupe.Protocol.Bundle.definitions/1`
+ * says: an agent's frontmatter fields that are set and its `prompt`, a skill's description
+ * and files, a server's and an ACP agent's settings.
+ */
+function definitionsOf(content: Record<string, unknown>): Record<Section, Record<string, Record<string, unknown>>> {
+  const by = (section: Section, f: (e: Record<string, unknown>) => Record<string, unknown>): Record<string, Record<string, unknown>> =>
+    Object.fromEntries(entries(content, section).map((e) => [String(e["name"]), f(e)]));
+  const unset = (key: string, v: unknown): boolean =>
+    v === "" || (key === "tools" && v === "all") || (Array.isArray(v) && v.length === 0) || (typeof v === "object" && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
+  const rest = ({ name: _name, ...others }: Record<string, unknown>): Record<string, unknown> => others;
+  return {
+    agents: by("agents", (a) => {
+      const read = parseAgent(typeof a["definition"] === "string" ? a["definition"] : "");
+      return { ...Object.fromEntries(Object.entries(read.fields ?? {}).filter(([k, v]) => !unset(k, v))), prompt: read.body };
+    }),
+    skills: by("skills", (s) => ({ description: s["description"] ?? "", files: s["files"] ?? {} })),
+    mcp_servers: by("mcp_servers", rest),
+    acp_agents: by("acp_agents", rest),
+  };
+}
+
+/** What changed inside the entries both documents carry, one line per field, as the plane's preview says it. */
+function fieldsChanged(before: Record<string, unknown>, after: Record<string, unknown>): Changes {
+  const was = definitionsOf(before);
+  const now = definitionsOf(after);
+  const both = (a: Record<string, Record<string, unknown>>, b: Record<string, Record<string, unknown>>): Record<string, Record<string, unknown>> =>
+    Object.fromEntries(Object.entries(a).filter(([name]) => name in b));
+  const sections = Object.keys(SECTIONS) as Section[];
+  return diff(
+    Object.fromEntries(sections.map((s) => [s, both(was[s], now[s])])),
+    Object.fromEntries(sections.map((s) => [s, both(now[s], was[s])])),
+  );
+}
+
 /** Everything a version carries but its files' text, as `Bundles.describe/1` reads it. */
 function describeBundle(content: Record<string, unknown>): Record<string, unknown> {
   const front = (definition: unknown, key: string): string | null => {
@@ -1325,7 +1360,8 @@ export class FakeAdmin {
           .filter((e) => e.mode === "allow" && removed.some((r) => r.kind === e.kind && r.name === e.name))
           .filter((e) => this.profiles.some((p) => p.name === e.profile && p.channel === channel))
           .map(({ team, profile, kind, name }) => ({ team, profile, kind, name }));
-        return { result: { channel, from: base?.version ?? null, hash: hashOf(params["content"]), changes: diff(was ?? {}, now), removed, losers } };
+        const changes = { ...diff(was ?? {}, now), ...(base ? fieldsChanged(base.content, params["content"] as Record<string, unknown>) : {}) };
+        return { result: { channel, from: base?.version ?? null, hash: hashOf(params["content"]), changes, removed, losers } };
       }
 
       case "admin.bundle.publish": {
@@ -1945,12 +1981,12 @@ export class FakeAdmin {
           this.record(subject, "trigger.key.rotate", `${row.team}/${row.name}`, { had_key: had });
           return { result: { team: row.team, name: row.name, url: `/trigger/${row.id}`, key, rotated_at: now } };
         }
-        // The caller and the minute: a second click within it is the run already made.
+        // The caller, and a minute from the click before: a second click within it is the run already made.
         const at = `${now.slice(0, 19)}Z`;
-        const key = `manual:${row.id}:${subject}:${now.slice(0, 16)}:00Z`;
-        this.record(subject, "trigger.run", `${row.team}/${row.name}`, { run: key });
+        const window = `manual:${row.id}:${subject}:`;
+        this.record(subject, "trigger.run", `${row.team}/${row.name}`, { run: `${window}${now}` });
         if (!row.enabled) return refuse(FORBIDDEN, "forbidden", { reason: "trigger is disabled", trigger: row.name });
-        return { result: this.byHand(row, subject, key, { kind: "manual", by: subject, at }, {}) };
+        return { result: this.byHand(row, subject, window, { kind: "manual", by: subject, at }, {}) };
       }
 
       // `Admin.trigger_fix/4`, the console's "fix this": one run of a trigger on a GitHub
@@ -1975,11 +2011,10 @@ export class FakeAdmin {
         if (!Number.isInteger(number) || number <= 0) {
           return refuse(INVALID_PARAMS, "invalid_params", { field: "issue", reason: `an issue is its number, or its link, such as https://github.com/${repository}/issues/7` });
         }
-        const now = new Date().toISOString();
-        const key = `fix:${row.id}:${number}:${subject}:${now.slice(0, 16)}:00Z`;
+        const window = `fix:${row.id}:${number}:${subject}:`;
         const issue = { number, url: `https://github.com/${repository}/issues/${number}`, title: `Issue ${number}` };
         const event = { github: { event: "fix", action: null, delivery: null }, repository, sender: subject, issue };
-        return { result: this.byHand(row, subject, key, event, { repository, issue }) };
+        return { result: this.byHand(row, subject, window, event, { repository, issue }) };
       }
 
       case "admin.runs.list": {
@@ -2544,12 +2579,17 @@ export class FakeAdmin {
   }
 
   /**
-   * A run fired by hand, `admin.trigger.run`'s or `admin.trigger.fix`'s, or the one a second
-   * click in the same minute already made; skipped, saying why, over the trigger's cap.
+   * A run fired by hand, `admin.trigger.run`'s or `admin.trigger.fix`'s, or the one a click
+   * under the same `window` less than a minute before already made, on either side of the
+   * clock's minute, as `Triggers.fire_by_hand/5` keys it; skipped, saying why, over the
+   * trigger's cap.
    */
-  private byHand(row: FakeTrigger, subject: string, key: string, event: Record<string, unknown>, extra: Partial<FakeRun>): Record<string, unknown> {
+  private byHand(row: FakeTrigger, subject: string, window: string, event: Record<string, unknown>, extra: Partial<FakeRun>): Record<string, unknown> {
     const now = new Date().toISOString();
-    const again = this.runRows.find((r) => r.idempotency_key === key);
+    const key = `${window}${now}`;
+    const again = this.runRows
+      .filter((r) => r.idempotency_key.startsWith(window) && Math.abs(Date.parse(r.fired_at) - Date.parse(now)) < 60_000)
+      .at(-1);
     const live = this.runRows.filter((r) => r.trigger_id === row.id && ["created", "running", "waiting"].includes(r.state)).length;
     const last = row.revisions.at(-1);
     const id = `run-${row.name}-manual-${this.runRows.length + 1}`;

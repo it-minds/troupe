@@ -30,7 +30,7 @@ import type { AdminProfile, AgentFinding, BundleDetail, BundlePreview, BundleSum
 import { go, href } from "../route";
 import { describeError, recorded, show, useConsole, useLoad } from "../console";
 import { AuditNote, Diff, Empty, Field, Fields, Loaded, Preview, Region, Status, count, linesOf, useChange, when } from "./bits";
-import type { DiffLine, Done } from "./bits";
+import type { Done } from "./bits";
 
 /** The channels worth listing: every one a profile follows, and stable, which a profile naming none follows. */
 function channelsOf(profiles: AdminProfile[]): string[] {
@@ -676,19 +676,12 @@ function BundleEditor({
 
   if (checked) {
     const { preview, content } = checked;
-    // The plane's diff is of names: an agent whose file the builder changed, or a skill or
-    // server changed in the JSON, is a change too, and is said as one.
-    const before = agentsOf(initial);
-    const edited: DiffLine[] = [
-      ...agents
-        .filter((a) => before.some((b) => b.name === a.name && (b.definition !== a.definition || JSON.stringify(b.rest) !== JSON.stringify(a.rest))))
-        .map((a) => ({ field: `agent ${a.name}`, from: "its file as it was", to: "its file as the builder made it" })),
-      ...(JSON.stringify(withoutAgents(content)) !== JSON.stringify(withoutAgents(initial)) ? [{ field: "skills and MCP servers", from: "as they were", to: "as edited here" }] : []),
-    ];
+    // The plane's diff names each field of a definition that changed, under its entry
+    // (`agents.pr-reviewer.model`), beside the names that came and went.
     return (
       <Preview
         title={`bundle/${channel} ${preview.from === null ? "(first version)" : `v${preview.from} → next`}`}
-        lines={[...linesOf(preview.changes), ...edited]}
+        lines={linesOf(preview.changes)}
         effects={publishWords(channel, preview, profiles)}
         verb={`Publish to ${channel}`}
         typeToConfirm={preview.losers.length ? channel : null}

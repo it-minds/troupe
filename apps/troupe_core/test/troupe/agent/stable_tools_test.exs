@@ -188,11 +188,11 @@ defmodule Troupe.Agent.StableToolsTest do
 
   # What the change at the boundary costs on an account that enforces the binding, against
   # the stand-in as Claude Sonnet 5.5 with `thinking_binding: error`: the turn it came in
-  # goes on unrefused, and from the next turn every call carries a block made under the
-  # tools before, so each is refused once and sent again without its thinking, for the
-  # rest of the session (Decision 805) or until a compaction.
+  # goes on unrefused, and the next turn's first call carries blocks made under the tools
+  # before, so it is refused once and sent again without its thinking (Decision 805); the
+  # conversation lets those blocks go then, and no later call is refused for them.
   describe "a tool that comes in the middle of a turn, on an enforced account" do
-    test "costs nothing in its turn, and a refusal on every call after it", context do
+    test "costs nothing in its turn, and one refusal after it", context do
       write_file(context, "notes/1.txt", "one\n")
       write_file(context, "notes/2.txt", "two\n")
 
@@ -236,10 +236,10 @@ defmodule Troupe.Agent.StableToolsTest do
 
       {turn_one, after_it} = FakeOpenAI.requests(stand_in) |> Enum.split(first)
       assert length(turn_one) == 3 and Enum.all?(turn_one, &(&1.status == 200))
-      assert Enum.count(after_it, &(&1.status == 400)) == 3
+      assert [400] = after_it |> Enum.map(& &1.status) |> Enum.reject(&(&1 == 200))
       assert Enum.all?(after_it, &(&1.status == 200 or &1.mismatch =~ "tools_changed"))
 
-      assert %{"model_calls" => 6, "tools_changes" => 1, "thinking_resent" => 3} =
+      assert %{"model_calls" => 6, "tools_changes" => 1, "thinking_resent" => 1} =
                Prefix.count(Troupe.events(sid))
     end
   end

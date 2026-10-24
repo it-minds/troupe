@@ -23,6 +23,11 @@
     "calls_after_cancel": 0,
     "tasks_left_running": 0
   },
+  "prefix_change": {
+    "model_calls": 13,
+    "prefix_changes": 1,
+    "thinking_resent": 1
+  },
   "onboard_claude_code": {
     "instruction_bytes": 570,
     "files_written": 3,

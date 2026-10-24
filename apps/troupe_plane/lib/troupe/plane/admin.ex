@@ -3449,11 +3449,37 @@ defmodule Troupe.Plane.Admin do
          channel: channel,
          from: before && before.version,
          hash: Bundle.hash(content),
-         changes: Audit.diff(before_summary || %{}, after_summary),
+         changes:
+           Map.merge(
+             Audit.diff(before_summary || %{}, after_summary),
+             fields_changed(before && before.parsed, parsed)
+           ),
          removed: removed_entries(before_summary, after_summary),
          losers: losers(channel, removed_entries(before_summary, after_summary))
        }}
     end
+  end
+
+  # What changed inside the entries both versions carry, one line per field, keyed as the
+  # names' diff is (`agents.triager.model`): an entry that comes or goes is the names'
+  # line already, and said again field by field it would bury the change it is.
+  defp fields_changed(nil, _parsed), do: %{}
+
+  defp fields_changed(before, parsed) do
+    was = Document.definitions(before)
+    now = Document.definitions(parsed)
+
+    kept =
+      for {section, entries} <- now, into: %{} do
+        {section, Map.take(entries, Map.keys(Map.get(was, section, %{})))}
+      end
+
+    was =
+      for {section, entries} <- was, into: %{} do
+        {section, Map.take(entries, Map.keys(Map.get(now, section, %{})))}
+      end
+
+    Audit.diff(was, kept)
   end
 
   # The version this is measured against: one named, or the channel's current. A channel

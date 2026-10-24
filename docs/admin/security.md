@@ -35,8 +35,9 @@ discovery file or open its socket can drive every session on it
 - **Asks the providers for their model lists** when the cached list is stale, as a local
   session starts (`troupe-daemon models`).
 - **In a git repository, at a session's start**, asks whether to bring other tools' files
-  (`CLAUDE.md`, Cursor's and Copilot's rules, opencode's agents) into Troupe's own, each
-  shown as a diff and written only on a yes (Decisions 823 and 835), then runs the
+  (`CLAUDE.md`, Cursor's and Copilot's rules, opencode's agents) into Troupe's own: one
+  question naming the files, each shown as a diff on request (`r`, or `troupe onboard`),
+  and written only on a yes (Decisions 823 and 835), then runs the
   `librarian` agent, which writes the project brief into the repository's `.troupe/`. That
   costs model calls; `memory_auto_refresh: false` turns it off.
 - **The desktop app looks for an update** when it starts and once a day: GitHub's latest

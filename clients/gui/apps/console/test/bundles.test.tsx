@@ -241,8 +241,10 @@ describe("the builder, profile first (#594)", () => {
     button("Check and keep pr-reviewer", form)!.click();
     await waitFor(() => !document.querySelector('[role="group"][aria-label="Edit pr-reviewer"]'), "kept");
     button("Check and preview")!.click();
-    // The plane's diff is of names, which did not change: the changed file is said as a change.
-    await waitFor(() => says("What will happen") && says("agent pr-reviewer"), "the preview naming the changed agent");
+    // The names did not change; the plane's diff says each field of the file that did.
+    await waitFor(() => says("What will happen") && says("agents.pr-reviewer.model: glm-5.2"), "the preview naming the changed field");
+    await sees("agents.pr-reviewer.max_turns: 30");
+    expect(says("agents: ")).toBe(false);
     (await waitFor(() => button("Publish to stable"), "the preview")).click();
     await waitFor(() => says("Recorded in the audit as bundle.publish on stable"), "the audit's note");
     const published = (fake.admin.bundles.get("stable")!.at(-1)!.content["agents"] as Array<{ name: string; definition: string }>).find((a) => a.name === "pr-reviewer")!;
