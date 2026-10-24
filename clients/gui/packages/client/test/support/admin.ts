@@ -734,6 +734,30 @@ interface Policy {
   updated_at: string | null;
 }
 
+/** One person's client of one kind, as the plane recorded it at `initialize`. */
+export interface SeenClient {
+  subject: string;
+  display_name: string | null;
+  component: string;
+  version: string;
+  platform: string | null;
+  since: string;
+  seen_at: string;
+}
+
+/** How a version stands against a policy, as `Troupe.Protocol.ClientUpdate.judge` puts it. */
+function standing(policy: Pick<Policy, "recommended" | "minimum" | "blocked">, version: string): "current" | "behind" | "refused" {
+  if (policy.blocked.includes(version)) return "refused";
+  if (policy.minimum && older(version, policy.minimum)) return "refused";
+  if (policy.recommended && older(version, policy.recommended)) return "behind";
+  return "current";
+}
+
+function counts(standings: string[]): { current: number; behind: number; refused: number } {
+  const n = (s: string) => standings.filter((x) => x === s).length;
+  return { current: n("current"), behind: n("behind"), refused: n("refused") };
+}
+
 export interface AuditEntry {
   actor: string;
   action: string;
@@ -825,6 +849,8 @@ export class FakeAdmin {
   /** What the plane was deployed with, by key; a key absent here is unset. */
   readonly deployed: Record<string, unknown>;
   readonly policies: Record<string, Policy>;
+  /** Which version each person's client of each kind last gave at `initialize`, as the plane records it (#657). */
+  readonly seen: SeenClient[] = [];
   readonly audit: AuditEntry[] = [];
   /** Answer this method with this error instead: how a test sees a screen's error state. */
   readonly failing = new Map<string, { code: number; message: string; data?: unknown }>();
@@ -2137,8 +2163,20 @@ export class FakeAdmin {
         return { result: { ...this.effective(key, team), team: team?.name ?? null } };
       }
 
-      case "admin.clients.get":
-        return admin ? { result: { clients: Object.fromEntries(COMPONENTS.map((c) => [c, { component: c, ...this.policies[c] }])) } } : notAdmin;
+      case "admin.clients.get": {
+        if (!admin) return notAdmin;
+        // A team admin's fleet is their teams' people; a platform admin's, everybody's.
+        const people = role === "platform_admin" ? null : new Set(this.visible(subject).flatMap((t) => t.members.map((m) => m.subject)));
+        const fleet = Object.fromEntries(
+          COMPONENTS.map((c) => {
+            const rows = this.seen
+              .filter((s) => s.component === c && (!people || people.has(s.subject)))
+              .map(({ component: _component, ...s }) => ({ ...s, standing: standing(this.policies[c]!, s.version) }));
+            return [c, { ...counts(rows.map((r) => r.standing)), people: rows }];
+          }),
+        );
+        return { result: { clients: Object.fromEntries(COMPONENTS.map((c) => [c, { component: c, ...this.policies[c] }])), fleet } };
+      }
 
       case "admin.clients.put": {
         if (role !== "platform_admin") return notPlatform;
@@ -2179,8 +2217,9 @@ export class FakeAdmin {
         const fields = (p: Policy) => ({ recommended: p.recommended, minimum: p.minimum, blocked: p.blocked });
         const changes = diff(fields(current), fields(next));
         this.policies[component] = { ...next, updated_by: subject, updated_at: new Date().toISOString() };
-        this.record(subject, "clients.put", component, changes);
-        return { result: { component, ...this.policies[component], changes } };
+        const affected = counts(this.seen.filter((s) => s.component === component).map((s) => standing(next, s.version)));
+        this.record(subject, "clients.put", component, { ...changes, affected });
+        return { result: { component, ...this.policies[component], changes, affected } };
       }
 
       case "admin.audit.list": {
@@ -3811,6 +3850,24 @@ export function exampleAdmin(): FakeAdmin {
   admin.stored.set("client_enforced", { approvals: "wait", max_turns: 200 });
   admin.stored.set("default_erase_after_days", 180);
   admin.policies["tui"] = { recommended: "0.16.0-beta", minimum: "0.14.0-beta", blocked: ["0.15.0-beta"], updated_by: "alice@example.com", updated_at: "2026-10-11T09:30:00Z" };
+  // Which version each person's clients last ran: one current, one behind, one blocked and
+  // one below the minimum in the terminal; one daemon, current.
+  const seen = (subject: string, display_name: string, component: string, version: string, since: string, platform: string | null = null): SeenClient => ({
+    subject,
+    display_name,
+    component,
+    version,
+    platform,
+    since,
+    seen_at: "2026-10-13T08:55:00Z",
+  });
+  admin.seen.push(
+    seen("alice@example.com", "Alice", "tui", "0.16.0-beta", "2026-10-11T10:00:00Z", "macos/aarch64"),
+    seen("erin@example.com", "Erin", "tui", "0.14.2-beta", "2026-10-02T14:00:00Z", "linux/x86_64"),
+    seen("dan@example.com", "Dan", "tui", "0.15.0-beta", "2026-10-09T09:00:00Z"),
+    seen("fay@example.com", "Fay", "tui", "0.13.0-beta", "2026-09-30T16:20:00Z", "windows/x86_64"),
+    seen("bob@example.com", "Bob", "daemon", "0.16.0-beta", "2026-10-12T11:00:00Z"),
+  );
   // The GitHub App, set and installed on one organisation, which GitHub knows by the same key.
   Object.assign(admin.github, {
     app_id: 4242,

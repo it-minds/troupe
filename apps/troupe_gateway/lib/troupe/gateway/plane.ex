@@ -53,6 +53,7 @@ defmodule Troupe.Gateway.Plane do
 
   use GenServer
 
+  alias Troupe.LLM.Identify
   alias Troupe.PlaneKeys
 
   require Logger
@@ -165,9 +166,15 @@ defmodule Troupe.Gateway.Plane do
   @spec handshake(GenServer.server(), String.t()) :: :ok | {:error, term()}
   def handshake(server \\ @name, version \\ version()) do
     with {:ok, %__MODULE__{} = state} <- GenServer.call(server, :state) do
+      # The platform beside the version, so the plane's record of who runs what says
+      # where (#657).
       hello = %{
         "protocol_version" => Troupe.Protocol.version(),
-        "client_info" => %{"name" => "troupe-daemon", "version" => version},
+        "client_info" => %{
+          "name" => "troupe-daemon",
+          "version" => version,
+          "platform" => Identify.platform()
+        },
         "capabilities" => %{}
       }
 

@@ -343,7 +343,7 @@ Durable:
 | `share_revoked` | `id`, `reason` |
 | `tools_registered` | `tools`, `connection`, `consent` — a client offered tools of its own (§8) |
 | `tools_unregistered` | `tools`, `connection`, `reason` (`disconnected`: the client left; `unregistered`: it took them back), `actor` — whose they were, the subject the registration was made for, also the event's `actor`; a log written before it has neither |
-| `session_tainted` | `kind` (`personal_connector`), `tools`, `actor` — a person's own tools were offered to the session, which says so from then on (§8) |
+| `session_tainted` | `kind` (`personal_connector`), `tools`, `actor` (the subject), `display_name` (their name, where the sign-in gave one) — a person's own tools were offered to the session, which says so from then on (§8) |
 
 A spent budget is a question, not a stop (Decision 660): the agent's `agent_state` is
 `waiting` until the answer, input queues meanwhile, and the answer says how much more and
@@ -2670,7 +2670,11 @@ The grace comes out of the call's own timeout, so a dropped laptop is never a hu
 
 **The session is tainted, visibly.** `session_tainted` is durable and appears in every
 participant's summary, because a tool running on somebody's laptop is something the others
-are entitled to know about.
+are entitled to know about. It names the person twice: `actor`, the identity's subject, and
+`display_name`, their name as their sign-in gave it (on a pod the plane's, on a laptop the
+daemon's from `me`), absent where there is none. A provider's subject may be an opaque
+identifier, so a client says the name: "Ada Lovelace offered tools that run on their own
+machine: client.notes.search", and the subject where the event has no name.
 
 ### `tools.register`
 
@@ -2785,8 +2789,8 @@ that team.
 | `admin.settings.list` | either | every platform setting with its value, where that value came from (`stored`, `deployed`, `unset`), what changing it does and when it takes effect; a secret is reported as set and never returned |
 | `admin.setting.put` | platform | `{key, value}` — parsed against the setting's declared type and refused if it does not fit, or if the deployment owns it |
 | `admin.setting.reset` | platform | `{key}` — drops the stored value, so the setting goes back to what the plane was deployed with |
-| `admin.clients.get` | either | `{clients: {tui, daemon, desktop}}`, each `{component, recommended, minimum, blocked, updated_by, updated_at}`: which versions of its clients this plane serves ([Client versions](#client-versions)) |
-| `admin.clients.put` | platform | `{component, policy: {recommended?, minimum?, blocked?}}` → the component's policy as it now stands, with `changes`. Only the keys sent change, `null` clears one, `blocked` is the whole list; `invalid_params` with `data.field` and `data.reason` for a version SemVer cannot read, a `minimum` newer than `recommended`, or a `recommended` that is blocked. Audited as `clients.put` |
+| `admin.clients.get` | either | `{clients: {tui, daemon, desktop}, fleet: {tui, daemon, desktop}}`: each policy `{component, recommended, minimum, blocked, updated_by, updated_at}`, which versions of its clients this plane serves; and each component's clients last seen `{current, behind, refused, people: [{subject, display_name, version, platform, since, seen_at, standing}]}`, counted against the policy as it is now (`standing` is `current`, `behind` the recommended version, or `refused` at the next `initialize`). A team admin's `fleet` is their teams' people ([Client versions](#client-versions)) |
+| `admin.clients.put` | platform | `{component, policy: {recommended?, minimum?, blocked?}}` → the component's policy as it now stands, with `changes` and `affected` (`{current, behind, refused}`: its clients last seen, against the new policy). Only the keys sent change, `null` clears one, `blocked` is the whole list; `invalid_params` with `data.field` and `data.reason` for a version SemVer cannot read, a `minimum` newer than `recommended`, or a `recommended` that is blocked. Audited as `clients.put`, with `affected` |
 | `admin.signing.get` | either | the plane's signing key: `{algorithm, public_key, fingerprint, version, created_at, versions: [...]}`, every version's newest first; made on first use, and never the key itself, which transit holds and nothing exports ([The plane's signing key](#the-planes-signing-key)) |
 | `admin.signing.rotate` | platform | `{fingerprint}`, the current key's, typed back to confirm → the key as it now stands, a new version, with `changes`. Every machine that pinned the old one refuses what the new one signs until its person accepts it. `invalid_params` naming the current fingerprint for any other. Audited as `signing.rotate` with the fingerprints and versions |
 | `admin.releases.list` | either | `{releases, source, release_url}`: each release in the plane's object store for `/downloads`, newest first, `{version, state, files}` with `state` `mirrored` (its manifest is there, written last) or `mirroring` (a copy under way on this replica); `source`, where releases are mirrored from; `release_url`, the `client_release_url` setting ([Client versions](#client-versions)) |
@@ -2919,7 +2923,7 @@ than an admin uses them:
 | `trigger.fire` | control | the trigger's principal, or an admin of its team | `{trigger (name, `team/name` or id), idempotency_key, event}` → the run and, when a session was made, the same `{session_id, endpoint, token}` `session.create` returns. The run names the `revision` and `revision_hash` it ran. The same key returns the same run, the same revision and a fresh token; over the trigger's `concurrency` the run is `skipped` and has no session |
 | `session.grant` | control | the session's owner, or an admin of its team | `{session_id, subject, role}` (`owner`, `collaborator`, `viewer`; default collaborator) → mirrored in the plane's ACL and pushed to the pod holding the session as `acl.changed` |
 | `session.review` | control | anybody who can see the session | `{session_id}` → sets `reviewed_by`/`reviewed_at` on the session and its run, audited as `session.review` |
-| `initialize` | observe | anybody | `{protocol_version, client_info: {name, version}, capabilities}` → `{protocol_version, server_info: {name: "troupe-plane", version}, principal, client_update, policy: {revision}}`: the handshake over `/rpc`, where `principal` is what `me` answers, `client_update` is this plane's word on the client's version, or `update_required` signed as such, and `policy.revision` a digest of the two signed answers ([Client versions](#client-versions)) |
+| `initialize` | observe | anybody | `{protocol_version, client_info: {name, version, platform?}, capabilities}` → `{protocol_version, server_info: {name: "troupe-plane", version}, principal, client_update, policy: {revision}}`: the handshake over `/rpc`, where `principal` is what `me` answers, `client_update` is this plane's word on the client's version, or `update_required` signed as such, and `policy.revision` a digest of the two signed answers ([Client versions](#client-versions)) |
 | `me.client_versions` | observe | anybody | `{}` → `{tui, daemon, desktop}`, each `{recommended, minimum, blocked}`: what `troupe update` installs by, asked on its own because the client that most needs it is the one `initialize` refuses; with `release: {url}`, where releases are (null for GitHub's), and `signed`, the same as `{versions, release}` signed by the plane's key ([The plane's signing key](#the-planes-signing-key)) |
 | `me.client_defaults` | observe | anybody | `{}` → `{configured, provider, base_url, auth, models: {default, cheap, expensive}, defaults, enforced}` — what an administrator says people's own machines should talk to (the *Client defaults* settings), for a client to pre-fill its model settings with. **Never a key**: anybody signed in may ask, so each person supplies their own. `configured` is false, and the rest null, until a provider is set. `defaults` is the same in a config file's shape, only what is set, and `enforced` the `client_enforced` setting, `{}` when unset, per-tool `permissions` among what it may hold (Decision 907): the organisation's document a machine reads below its person's file and holds every layer to (Decision 869, `config.organisation`). A plane from before them answers without the two, and a client reads its old fields as the defaults. With `signed`: the whole answer signed by the plane's key ([The plane's signing key](#the-planes-signing-key)) |
 | `me.memory` | observe | anybody | `{}` → `{documents: [{scope, name, version, hash, updated_at, text}]}`: the organisation's memory documents a person's own machine reads into every session on it (#55, Decision 922), the organisation's and then each of the caller's teams', by name; never another team's, and never a profile's, since no laptop session runs on one. Instructions from the organisation, read-only to agents, each at most 8192 bytes. With `signed`, as `memory` ([The plane's signing key](#the-planes-signing-key)); the daemon keeps the answer as `<state>/memory.json` after every link that brings a token and every five minutes while it holds one, gives a changed one to the sessions running there, and drops it when the person signs out (`config.memory`). A plane from before it has no `me.memory`, and a machine keeps the copy it had |
@@ -3033,6 +3037,16 @@ script's — is held to nothing and gets `client_update: null`. So is a client f
 this, which sends no `initialize` to `/rpc` at all: the policy reaches the clients that
 ask. The version is the client's word; the refusal is a service to the person, telling
 them what they need, and not a way to keep anybody out.
+
+**The plane records which version each person's clients run** (#657). A client it served
+is recorded per person and component: `client_info.version`, `client_info.platform` where
+the client gives one (a short label such as `linux/x86_64`, at most 64 characters), when
+that version was first seen from them and when they were last seen. One record per person
+and component, moved on by each `initialize` and never a history; a refused client, one
+the plane cannot place, and a service principal are not recorded, and a person's records
+go with them. Nothing in a person's own answer changes: the records are for administrators,
+whose `admin.clients.get` answers them beside the policy as `fleet`, and whose
+`admin.clients.put` says how many clients a change holds (`affected`).
 
 `troupe update`, signed in, asks `me.client_versions` and installs the `recommended`
 version, never a blocked one and never one below `minimum`, moves backwards only when the

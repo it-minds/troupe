@@ -267,7 +267,7 @@ export function Session({
           ))}
 
           {/* The session's question about your own servers, before it takes their tools. */}
-          {view.offer.state === "asking" && <OfferPanel ask={view.offer.ask} onAnswer={view.answerOffer} />}
+          {view.offer.state === "asking" && <OfferPanel key={view.offer.ask.tools.join(" ")} ask={view.offer.ask} onAnswer={view.answerOffer} />}
 
           {/* What the start found due on this computer: onboarding, then the brief. */}
           {start.state && <StartPanel state={start.state} onAnswer={start.answer} />}

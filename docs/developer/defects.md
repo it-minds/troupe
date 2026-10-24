@@ -284,8 +284,6 @@ Found by the chunk 11 fixers, 2026-10-01.
 
 ### D50 - A person's servers offered to a pod session: the rough edges (medium)
 
-- The desktop app offers a person's servers once per attachment: a server signed in to
-  while attached is not offered until the next one, and there is no per-server choice.
 - The daemon's `mcp.tools` and `mcp.call` hold no MCP session, so each call against a
   stateful server is its own session: `initialize`, the request and a `DELETE`.
 
@@ -1433,7 +1431,6 @@ Found by the chunk 39 fixers, 2026-10-19.
   - A grant whose release never reached the plane stays in `remote_grants` until the 30-day idle limit refuses it; nothing deletes it, and the console doesn't list a person's laptop grants.
   - The TUI still offers "allow for the session" on a relayed approval; the laptop refuses it with a sentence.
   - An offer doesn't come back after a reboot unless the person has `troupe-daemon login on`.
-  - The macOS and Linux credential stores (`security`, `secret-tool`) weren't exercised; Linux CI checks only the "store unavailable" answer.
   - The gateway's `OrganisationTest` sees a late `config.changed` inside a 300 ms refute, under load.
 - **Company memory** (Decision 929).
   - A change to a profile's `extends` reaches its running sessions only at their next activation.

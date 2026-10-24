@@ -7,12 +7,13 @@
 // fixed: a pod that is broken, has never reported or is draining; a profile with fewer
 // pods than it asked for; a team at or near its ceiling; runs started with nobody watching
 // that nobody has looked at since. An empty list says so in a sentence, because an empty
-// region and one that has not loaded look the same. Read again every few seconds, keeping
-// what is on the screen until the new answer replaces it.
+// region and one that has not loaded look the same. Clients behind the recommended version
+// are one line there, linked to Client versions, where there are any (#657). Read again
+// every few seconds, keeping what is on the screen until the new answer replaces it.
 
 import { useEffect } from "react";
 import type { JSX, ReactNode } from "react";
-import type { AdminPod, AdminProfile, FleetOverview, OpenBaoCheck, TeamSpend } from "@troupe/client";
+import type { AdminPod, AdminProfile, ClientVersions, FleetOverview, OpenBaoCheck, TeamSpend } from "@troupe/client";
 import { href } from "../route";
 import { useConsole, useLoad } from "../console";
 import { Checks, Empty, Loaded, Region, Status, count, money } from "./bits";
@@ -24,7 +25,7 @@ const REFRESH_MS = 10_000;
 /** Where a team stops being comfortable and starts being worth mentioning. */
 const NEAR_BUDGET = 0.8;
 
-type State = "broken" | "unknown" | "degraded" | "draining" | "over" | "near" | "waiting" | "healthy";
+type State = "broken" | "unknown" | "degraded" | "draining" | "over" | "near" | "waiting" | "behind" | "healthy";
 
 export const STATES: Record<State, { kind: StatusKind; glyph: string; word: string; rank: number }> = {
   broken: { kind: "denied", glyph: "✕", word: "broken", rank: 0 },
@@ -34,6 +35,7 @@ export const STATES: Record<State, { kind: StatusKind; glyph: string; word: stri
   degraded: { kind: "local", glyph: "◐", word: "degraded", rank: 3 },
   near: { kind: "local", glyph: "◐", word: "near ceiling", rank: 3 },
   draining: { kind: "dormant", glyph: "◑", word: "draining", rank: 4 },
+  behind: { kind: "local", glyph: "◐", word: "behind", rank: 5 },
   healthy: { kind: "running", glyph: "●", word: "healthy", rank: 9 },
 };
 
@@ -53,6 +55,8 @@ export function Overview(): JSX.Element {
         admin.overview(),
         // The runs a person still has to read; their absence takes nothing else away.
         admin.sessions({ needs_review: true }).catch(() => null),
+        // Which clients are behind; a plane that cannot say takes nothing else away.
+        admin.clients().catch(() => null),
       ]),
     [admin],
   );
@@ -65,8 +69,8 @@ export function Overview(): JSX.Element {
   return (
     <div className="page">
       <Loaded load={load} what="the overview" retry={reload}>
-        {([overview, unread]) => {
-          const items = attention(overview, unread?.length ?? 0, role === "platform_admin");
+        {([overview, unread, clients]) => {
+          const items = attention(overview, unread?.length ?? 0, role === "platform_admin", clients);
           const pods = overview.profiles.flatMap((p) => p.pods);
           const healthy = pods.filter((p) => podState(p) === "healthy").length;
           const spent = overview.teams.reduce((n, t) => n + t.spent_micros, 0);
@@ -245,7 +249,7 @@ export function profileState(profile: AdminProfile): State {
 
 // A pod is looked at where its pods are, which is a platform admin's area; a team admin is
 // sent to the profile instead.
-function attention(overview: FleetOverview, unread: number, platform: boolean): Item[] {
+function attention(overview: FleetOverview, unread: number, platform: boolean, clients: ClientVersions | null): Item[] {
   const items: Item[] = [];
   for (const profile of overview.profiles) {
     const workers = platform ? href({ page: "pods" }) : href({ page: "profiles", path: [profile.name] });
@@ -288,6 +292,17 @@ function attention(overview: FleetOverview, unread: number, platform: boolean): 
       what: `${count(unread, "session")} an unattended run started ${unread === 1 ? "is" : "are"} waiting for a person to look at ${unread === 1 ? "it" : "them"}.`,
       where: href({ page: "runs" }),
       action: "Runs and review",
+    });
+  }
+  const fleet = Object.values(clients?.fleet ?? {});
+  const behind = fleet.reduce((n, f) => n + f.behind + f.refused, 0);
+  if (behind > 0) {
+    const refused = fleet.reduce((n, f) => n + f.refused, 0);
+    items.push({
+      state: "behind",
+      what: `${count(behind, "client")} behind the recommended version${refused > 0 ? `, ${refused} of them refused when ${refused === 1 ? "it next connects" : "they next connect"}` : ""}.`,
+      where: href({ page: "clients" }),
+      action: "Client versions",
     });
   }
   return items.sort((a, b) => STATES[a.state].rank - STATES[b.state].rank);

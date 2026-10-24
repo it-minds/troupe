@@ -55,7 +55,8 @@ Arrows point at what an app depends on; a change flows back along them. So:
 | `apps/troupe_protocol`, `config/`, `mix.lock` | all eight | TUI, protocol, GUI-e2e |
 | `charts/`, `docker/` | — | chart (lint, render, kubeconform), GUI-e2e, the cluster suite (pull request) |
 | `dev/kind/`, `scripts/kind-up`, `scripts/remote-up`, `scripts/build-images`, `scripts/kind-upgrade-check` | — | chart, the cluster suite (pull request) |
-| `PROTOCOL.md`, `protocol/`, `VERSION`, `.tool-versions`, `.github/workflows/` | everything | but the native builds, unless `native.yml` changed, and the cluster suite, unless `cluster.yml` or `VERSION` changed |
+| `apps/troupe_protocol/lib/troupe/keyring*`, the desktop's `secrets.rs` | as their app | [the credential stores](#the-credential-stores) on a macOS keychain and a Secret Service |
+| `PROTOCOL.md`, `protocol/`, `VERSION`, `.tool-versions`, `.github/workflows/` | everything | but the native builds, unless `native.yml` changed, the cluster suite, unless `cluster.yml` or `VERSION` changed, and the credential stores, unless `keyring.yml` changed |
 | anything else (docs) | — | only `versions` |
 
 `versions` runs whatever changed, because a moved file can break any of what it checks:
@@ -74,8 +75,9 @@ flowchart LR
   changes --> test["test &lt;app&gt; × N"]
   changes --> chart & protocol[schema + Python client] & tui[TUI] & gui[GUI] & e2e[GUI vs a plane] & desktop[desktop crate · cargo test] & vscode[VS Code extension] & native[native builds · PR only]
   lint & test & chart --> cluster[cluster suite · PR, if it deploys what changed]
+  changes --> keyring[credential stores · macOS and Linux, if their code changed]
   versions[versions agree] --> ok
-  lint & test & chart & protocol & tui & gui & e2e & desktop & vscode & native & cluster --> ok{{ci-ok}}
+  lint & test & chart & protocol & tui & gui & e2e & desktop & vscode & native & cluster & keyring --> ok{{ci-ok}}
   ok -->|push to main, changed an image| images[images · sha-&lt;short&gt;]
 ```
 
@@ -174,6 +176,21 @@ builds, a second cluster, the seed and the check, each with a worker pod to star
 already put a Troupe on the cluster; it refuses to upgrade one it did not install) under
 the plane lock. The suite runs in the toolbox container, as `scripts/e2e` runs it; the
 times of each step are printed at the end.
+
+## The credential stores
+
+[`keyring.yml`](../../.github/workflows/keyring.yml) runs `Troupe.Keyring`'s own store
+(`apps/troupe_protocol/test/troupe/keyring_test.exs`) against a macOS keychain on a
+`macos-14` runner and a Secret Service on Linux (`gnome-keyring` on a session bus of the
+step's own, its login keyring made and unlocked with a password of the job's own), and the desktop crate's
+`secrets.rs` tests against the same keychain: a value stored, read, replaced, four
+kilobytes of it whole, and deleted. Every other suite runs the store in the VM, and a
+Windows laptop has only Credential Manager. It runs on a pull request that changes
+`apps/troupe_protocol/lib/troupe/keyring*`, its test, the desktop's `secrets.rs` or
+`keyring.yml`: into `main` through `ci.yml`, into a `development-*` chunk through
+`dev-check.yml`, after its compile; and in the nightly and every release. Both tests skip,
+saying so, on a machine with no store; the job sets `TROUPE_KEYRING_REQUIRE=1`, so a store
+that did not come up fails it.
 
 ## Pre-release: a build to try, now
 

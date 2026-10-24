@@ -37,6 +37,7 @@ defmodule Troupe.Plane.Admin do
     Breakglass,
     Budget,
     Bundles,
+    ClientsSeen,
     ClientVersions,
     ClusterPolicy,
     Connections,
@@ -2439,10 +2440,26 @@ defmodule Troupe.Plane.Admin do
 
   Readable by a team admin, because "why is my team's terminal refused" is their question;
   changing it is a platform admin's, since it holds every team's clients alike.
+
+  Beside it the fleet (#657): per component, how many clients last seen are current,
+  behind the recommended version, or refused at their next `initialize`, and who they are
+  with the version each last ran and since when. A team admin's is their teams' people.
   """
   @spec clients_get(actor()) :: result()
   def clients_get(actor) do
-    with :ok <- require_admin(actor), do: {:ok, %{clients: ClientVersions.all()}}
+    with :ok <- require_admin(actor) do
+      {:ok, %{clients: ClientVersions.all(), fleet: ClientsSeen.fleet(people_seen_by(actor))}}
+    end
+  end
+
+  defp people_seen_by(%{role: :platform_admin}), do: :all
+
+  defp people_seen_by(actor) do
+    actor
+    |> visible_teams()
+    |> Enum.flat_map(&Identity.members_of_team/1)
+    |> Enum.map(& &1.id)
+    |> Enum.uniq()
   end
 
   @doc """
@@ -2451,7 +2468,8 @@ defmodule Troupe.Plane.Admin do
   Partial: the keys sent change, a key sent as `null` is cleared, and `blocked` is the whole
   list. Refused, with nothing written, for a version SemVer cannot read, a minimum newer
   than the recommended version, or a recommended version that is blocked. Audited with the
-  diff. A client is held to it at its next `initialize`.
+  diff, and with how many of the component's clients last seen the policy now finds
+  current, behind and refused (`affected`). A client is held to it at its next `initialize`.
   """
   @spec clients_put(actor(), String.t(), map()) :: result()
   def clients_put(actor, component, policy) do
@@ -2459,8 +2477,10 @@ defmodule Troupe.Plane.Admin do
       case ClientVersions.put(component, policy || %{}, actor.subject) do
         {:ok, %{before: before, now: now}} ->
           changes = Audit.diff(policy_fields(before), policy_fields(now))
-          {:ok, _} = Audit.record(actor.subject, "clients.put", component, changes)
-          {:ok, Map.put(now, :changes, changes)}
+          affected = ClientsSeen.affected(component, policy_fields(now))
+          detail = Map.put(changes, "affected", affected)
+          {:ok, _} = Audit.record(actor.subject, "clients.put", component, detail)
+          {:ok, now |> Map.put(:changes, changes) |> Map.put(:affected, affected)}
 
         {:error, why} ->
           {:error, Error.new(:invalid_params, why)}

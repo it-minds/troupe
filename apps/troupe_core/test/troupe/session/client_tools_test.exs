@@ -110,9 +110,29 @@ defmodule Troupe.Session.ClientToolsTest do
       assert tainted = Enum.find(events, &(&1.type == "session_tainted"))
       assert tainted.data["kind"] == "personal_connector"
       assert tainted.data["actor"] == "ada@example.test"
+      assert tainted.data["display_name"] == "Ada"
       assert tainted.data["tools"] == ["client.notes.search"]
 
       assert [%{"kind" => "personal_connector"}] = ClientTools.taint(session.id)
+    end
+
+    # A plane whose subject claim is opaque names somebody by an identifier; the name is
+    # what a person reads. Where the actor has none, the event says only the subject.
+    test "the taint carries the person's name beside their subject, where there is one",
+         %{session: session} do
+      actor = Event.Actor.user("00u1a2b3c4", nil)
+      consent = consent!(session.id, self(), "00u1a2b3c4", ["notes.search"])
+
+      {:ok, _} =
+        ClientTools.register(session.id, self(), consent,
+          specs: [spec()],
+          subject: "00u1a2b3c4",
+          actor: actor
+        )
+
+      tainted = session.id |> Log.replay() |> Enum.find(&(&1.type == "session_tainted"))
+      assert tainted.data["actor"] == "00u1a2b3c4"
+      refute Map.has_key?(tainted.data, "display_name")
     end
 
     test "the taint reaches the summary projection", %{session: session} do
