@@ -6,6 +6,9 @@
     "actor": {
       "type": "string"
     },
+    "display_name": {
+      "type": "string"
+    },
     "kind": {
       "type": "string"
     },

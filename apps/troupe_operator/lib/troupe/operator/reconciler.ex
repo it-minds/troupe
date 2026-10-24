@@ -138,7 +138,7 @@ defmodule Troupe.Operator.Reconciler do
     desired = Resources.for_profile(profile, policy, settings)
     namespace = namespace_of(desired)
     missing = missing_secrets(conn, profile, settings, namespace)
-    upgrade = upgrade(conn, policy, profile, Profile.drained(resource))
+    upgrade = upgrade(conn, policy, profile, Profile.drained(resource), settings)
 
     # The namespace first and on its own: nothing else in the list can be created
     # before it exists. Everything after that is independent and goes out together.
@@ -381,6 +381,7 @@ defmodule Troupe.Operator.Reconciler do
   defp stage(pod, upgrade) do
     cond do
       replacing?(pod, upgrade) -> "is being replaced"
+      stranded?(pod, upgrade.settings) -> "dials in plaintext and waits its turn"
       drained?(pod, upgrade.drained) and not ready?(pod) -> "is drained and waits its turn"
       not ready?(pod) -> "is draining"
       true -> "waits to be drained"
@@ -405,7 +406,7 @@ defmodule Troupe.Operator.Reconciler do
   # which `OnDelete` does not do, so it says nothing about the pods: a template put back
   # to the revision the StatefulSet still calls current makes the two equal while every
   # pod runs a later one.
-  defp upgrade(conn, policy, profile, drained) do
+  defp upgrade(conn, policy, profile, drained, settings) do
     namespace = Names.namespace(policy.namespace_prefix, profile.name)
     name = Names.workload(policy.namespace_prefix, profile.name)
     operation = K8s.Client.get("apps/v1", "StatefulSet", namespace: namespace, name: name)
@@ -415,10 +416,11 @@ defmodule Troupe.Operator.Reconciler do
          %{} = selector <- get_in(set, ["spec", "selector", "matchLabels"]),
          {:ok, pods} <- set_pods(conn, namespace, selector) do
       behind = Enum.reject(pods, &(revision(&1) == wanted))
-      replaced = replace(conn, namespace, pods, behind, drained, get_in(set, ["spec", "replicas"]))
-      %{behind: behind, drained: drained, replaced: replaced}
+      replicas = get_in(set, ["spec", "replicas"])
+      replaced = replace(conn, namespace, pods, behind, {drained, settings}, replicas)
+      %{behind: behind, drained: drained, replaced: replaced, settings: settings}
     else
-      _ -> %{behind: [], drained: drained, replaced: nil}
+      _ -> %{behind: [], drained: drained, replaced: nil, settings: settings}
     end
   end
 
@@ -450,17 +452,24 @@ defmodule Troupe.Operator.Reconciler do
   # profile never has more than one pod missing; the highest ordinal first, as a
   # StatefulSet takes them. The disruption budget is not asked, because the pods deleted
   # here hold nothing it protects.
-  defp replace(conn, namespace, pods, behind, drained, replicas) do
+  #
+  # One more pod goes without a drain: one that dials the control port in plaintext, made
+  # before its namespace had a CA to dial with, where the plane takes TLS only and the
+  # current revision dials with TLS. The plane closes its connection, so it can neither
+  # enrol nor be drained, and waiting for a drain would keep it, and every session on it,
+  # cut off for good. Deleted, it puts its own sessions to sleep before it stops, as any
+  # pod does that something other than the plane stops.
+  defp replace(conn, namespace, pods, behind, {drained, settings}, replicas) do
     settled? = not Enum.any?(pods, &terminating?/1) and length(pods) >= (replicas || 0)
 
     candidate =
       behind
-      |> Enum.filter(&(drained?(&1, drained) and not ready?(&1)))
+      |> Enum.filter(&(stranded?(&1, settings) or (drained?(&1, drained) and not ready?(&1))))
       |> Enum.max_by(&ordinal/1, fn -> nil end)
 
     if settled? and candidate do
       name = name_of(candidate)
-      Logger.info("troupe operator: replacing #{namespace}/#{name}, drained on #{revision(candidate)}")
+      Logger.info("troupe operator: replacing #{namespace}/#{name}, #{why(candidate, settings)}")
 
       case K8s.Client.run(conn, K8s.Client.delete("v1", "Pod", namespace: namespace, name: name)) do
         {:ok, _deleted} ->
@@ -477,6 +486,30 @@ defmodule Troupe.Operator.Reconciler do
     revision = revision(pod)
     is_binary(revision) and Map.get(drained, name_of(pod)) == revision
   end
+
+  defp why(pod, settings) do
+    if stranded?(pod, settings),
+      do: "dialling the plane in plaintext, which it refuses, on #{revision(pod)}",
+      else: "drained on #{revision(pod)}"
+  end
+
+  # A pod is told where the CA is (`TROUPE_PLANE_CA_PATH`) exactly when it dials with TLS.
+  defp stranded?(pod, %Settings{plane_require_tls: true, plane_ca_path: path})
+       when is_binary(path) do
+    pod
+    |> get_in(["spec", "containers"])
+    |> List.wrap()
+    |> Enum.find(&(&1["name"] == "worker"))
+    |> case do
+      nil ->
+        false
+
+      container ->
+        not Enum.any?(List.wrap(container["env"]), &(&1["name"] == "TROUPE_PLANE_CA_PATH"))
+    end
+  end
+
+  defp stranded?(_pod, _settings), do: false
 
   defp ready?(pod) do
     pod

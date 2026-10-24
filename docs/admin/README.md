@@ -14,9 +14,11 @@ and backups on top.
 | [gitops.md](gitops.md) | Profiles held in a repository: what the plane reads, the manifests, and switching a running plane |
 | [bundles-and-triggers.md](bundles-and-triggers.md) | Config bundles and MCP servers, triggers and the scheduler, unattended terms, budgets |
 | [integrations.md](integrations.md) | What the identity provider, OpenBao, PostgreSQL, object storage, the LLM gateway, Kubernetes, MCP, SCIM and the GUI require |
+| [openbao.md](openbao.md) | What OpenBao must grant the plane, generated from the code that checks it at start and on the Overview, and the lines an OpenBao administrator runs |
 | [github.md](github.md) | The plane's GitHub App: registering and installing it, giving the plane its key, the read-only token a session clones its repository with, and the fix loop: a `troupe/*` branch, a draft pull request and its CI, never a merge |
 | [authentik.md](authentik.md) | Connecting a plane's sign-in and provisioning to Authentik, in order |
 | [single-machine.md](single-machine.md) | A worker on a machine you already have, and what it gives up |
+| [upgrading.md](upgrading.md) | From one release to the next: the backup, the CRDs, the chart and its migration, what to watch, what the plane checks, going back, and the restore |
 | [backup-restore.md](backup-restore.md) | Where state lives, what can be rebuilt, restore procedures |
 | [monitoring.md](monitoring.md) | Health endpoints, signals, the audit log, logs worth alerting on, a troubleshooting table |
 | [routine-tasks.md](routine-tasks.md) | Step lists: upgrades, teams, principals, bundles, drains, settings, lock-outs, SCIM, rotations, erasure |

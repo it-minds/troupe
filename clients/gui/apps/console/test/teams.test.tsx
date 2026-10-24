@@ -418,6 +418,35 @@ describe("a team's edits", () => {
     await waitFor(() => !says("looks held twice:"), "the flag going with the other group");
   });
 
+  // A group the provider started sending arrives under an identifier nobody would guess; the
+  // plane lists it with when it was last seen in a sign-in, so linking it is choosing it.
+  it("lists the groups seen in sign-ins that no team draws on, and makes one a team from there", async () => {
+    await signedInAs(fake, PEOPLE.alice);
+    visit("#/teams");
+    unmount = render(<App />).unmount;
+    const unlinked = (): HTMLElement | null => document.querySelector<HTMLElement>('section[aria-label="Groups no team draws on"]');
+    await waitFor(() => unlinked(), "the groups no team draws on");
+    await sees("grp-research", unlinked);
+    await sees("2026-09-19 16:05 UTC", unlinked);
+    // Linked groups are not news, and one only SCIM pushed was never in a sign-in.
+    expect(says("grp-core", unlinked()!)).toBe(false);
+    expect(says("grp-platform", unlinked()!)).toBe(false);
+    await sees("Nothing is granted", unlinked);
+
+    button("Make it a team")!.click();
+    await waitFor(() => (field("Group") as HTMLSelectElement | null)?.value === "grp-research", "the form, on the group chosen");
+    // The research team already has the name the group's would make.
+    await waitFor(() => (field("Team name") as HTMLInputElement).value === "research", "the name made from the group's");
+    await sees("There is already a team called research");
+    type(field("Team name")!, "researchers");
+    button("Preview")!.click();
+    await waitFor(() => says("Research becomes the team researchers"), "the preview");
+    button("Enable")!.click();
+    await waitFor(() => says("Recorded in the audit as team.enable on researchers"), "the audit's note");
+    expect(fake.admin.teams.get("researchers")!.groups.map((g) => g.external_id)).toEqual(["grp-research"]);
+    await waitFor(() => unlinked() === null, "the list, with nothing left that no team draws on");
+  });
+
   it("offers a team admin none of a platform admin's edits", async () => {
     await signedInAs(fake, PEOPLE.bob);
     visit("#/teams/design/members");

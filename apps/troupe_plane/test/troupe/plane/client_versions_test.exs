@@ -11,7 +11,7 @@ defmodule Troupe.Plane.ClientVersionsTest do
 
   import Phoenix.ConnTest
 
-  alias Troupe.Plane.{Admin, Audit, Harness, Identity, OIDC, Tokens}
+  alias Troupe.Plane.{Admin, Audit, ClientsSeen, Harness, Identity, OIDC, Tokens}
   alias Troupe.Protocol.Token
 
   @endpoint Troupe.Plane.Web.Endpoint
@@ -238,6 +238,112 @@ defmodule Troupe.Plane.ClientVersionsTest do
     end
   end
 
+  # #657: which version each person's clients last ran, one row per person and component,
+  # so an administrator can see who a policy holds back before and after changing it.
+  describe "what the plane records of each client" do
+    test "initialize records the version a person's client gave, one row per component",
+         context do
+      assert %{"result" => first} =
+               rpc(context.ada, "initialize", hello("troupe-daemon", "0.23.0-beta", "linux/x86_64"))
+
+      refute Map.has_key?(first, "fleet"), "a person's own answer carries nothing new"
+      rpc(context.ada, "initialize", hello("troupe", "0.24.0-beta"))
+
+      assert [daemon, tui] = ClientsSeen.list() |> Enum.sort_by(& &1.component)
+      assert %{component: "daemon", version: "0.23.0-beta", platform: "linux/x86_64"} = daemon
+      assert %{component: "tui", version: "0.24.0-beta", platform: nil} = tui
+      assert daemon.subject == "ada@example.test"
+      first_seen = daemon.since
+
+      # A newer daemon is the same row, moved on; never a second one.
+      rpc(context.ada, "initialize", hello("troupe-daemon", "0.24.0-beta", "linux/x86_64"))
+
+      assert [%{version: "0.24.0-beta"} = moved] =
+               Enum.filter(ClientsSeen.list(), &(&1.component == "daemon"))
+
+      assert DateTime.compare(moved.since, first_seen) in [:gt, :eq]
+      assert length(ClientsSeen.list()) == 2
+    end
+
+    test "a refused client, or one the plane cannot place, is not recorded", context do
+      put!(context.root, "tui", %{"minimum" => "0.24.0-beta"})
+
+      assert %{"error" => %{"message" => "update_required"}} =
+               rpc(context.ada, "initialize", hello("troupe", "0.23.0-beta"))
+
+      rpc(context.ada, "initialize", hello("somebody-elses-client", "1.0.0"))
+      rpc(context.ada, "initialize", %{"protocol_version" => "1"})
+
+      assert ClientsSeen.list() == []
+    end
+
+    test "admin.clients.get counts each component's clients against its policy", context do
+      eve = person("eve@example.test", ["sales"])
+      team_with_grant("sales", "dev", name: "sales")
+
+      rpc(context.ada, "initialize", hello("troupe", "0.23.0-beta"))
+      rpc(context.lead, "initialize", hello("troupe", "0.24.0-beta"))
+      rpc(eve, "initialize", hello("troupe", "0.22.0-beta"))
+      rpc(eve, "initialize", hello("troupe-daemon", "0.24.0-beta"))
+
+      put!(context.root, "tui", %{"recommended" => "0.24.0-beta", "minimum" => "0.23.0-beta"})
+
+      assert %{"result" => %{"clients" => _policy, "fleet" => fleet}} =
+               rpc(context.root, "admin.clients.get", %{})
+
+      # Eve's terminal is below the minimum now, and so refused at its next initialize.
+      assert %{"current" => 1, "behind" => 1, "refused" => 1, "people" => people} = fleet["tui"]
+      assert %{"current" => 1, "behind" => 0, "refused" => 0} = fleet["daemon"]
+      assert %{"current" => 0, "behind" => 0, "refused" => 0, "people" => []} = fleet["desktop"]
+
+      assert Enum.map(people, &{&1["subject"], &1["version"], &1["standing"]}) |> Enum.sort() ==
+               [
+                 {"ada@example.test", "0.23.0-beta", "behind"},
+                 {"eve@example.test", "0.22.0-beta", "refused"},
+                 {"lead@example.test", "0.24.0-beta", "current"}
+               ]
+
+      ada = Enum.find(people, &(&1["subject"] == "ada@example.test"))
+      assert ada["display_name"] == "ada@example.test"
+      assert is_binary(ada["since"]) and is_binary(ada["seen_at"])
+
+      # A team admin sees their own teams' people, and counts only them.
+      assert %{"result" => %{"fleet" => %{"tui" => theirs}}} =
+               rpc(context.lead, "admin.clients.get", %{})
+
+      assert %{"current" => 1, "behind" => 1, "refused" => 0} = theirs
+
+      assert theirs["people"] |> Enum.map(& &1["subject"]) |> Enum.sort() ==
+               ["ada@example.test", "lead@example.test"]
+    end
+
+    test "admin.clients.put's audit row says how many clients the change holds", context do
+      rpc(context.ada, "initialize", hello("troupe", "0.23.0-beta"))
+      rpc(context.lead, "initialize", hello("troupe", "0.22.0-beta"))
+      rpc(context.root, "initialize", hello("troupe", "0.24.0-beta"))
+
+      assert %{"result" => put} =
+               rpc(context.root, "admin.clients.put", %{
+                 "component" => "tui",
+                 "policy" => %{"recommended" => "0.24.0-beta", "minimum" => "0.23.0-beta"}
+               })
+
+      assert put["affected"] == %{"current" => 1, "behind" => 1, "refused" => 1}
+
+      assert [%{action: "clients.put", detail: detail}] = Audit.list(kind: "clients")
+      assert detail["affected"] == %{"current" => 1, "behind" => 1, "refused" => 1}
+    end
+
+    test "a person removed takes their rows with them", context do
+      rpc(context.ada, "initialize", hello("troupe", "0.23.0-beta"))
+      assert [_row] = ClientsSeen.list()
+
+      {:ok, _tombstone, _effect} = Identity.remove_user(context.ada, context.root.subject)
+
+      assert ClientsSeen.list() == []
+    end
+  end
+
   describe "me.client_versions" do
     test "tells anybody signed in each component's policy, for troupe update", context do
       put!(context.root, "tui", %{"recommended" => "0.13.1-beta", "blocked" => ["0.13.0-beta"]})
@@ -270,6 +376,9 @@ defmodule Troupe.Plane.ClientVersionsTest do
       "capabilities" => %{}
     }
   end
+
+  defp hello(name, version, platform),
+    do: put_in(hello(name, version), ["client_info", "platform"], platform)
 
   defp rpc(user, method, params) do
     {:ok, token, _payload} =

@@ -74,7 +74,16 @@ spec:
             # every pass, so a renewed CA reaches the namespaces at the next.
             - name: TROUPE_PLANE_CONTROL_CA
               value: /etc/troupe/plane-control-ca/ca.crt
+            # Whether the plane takes TLS only there. A pod that dials in plaintext, made
+            # before its namespace had the CA, then cannot enrol to be drained, and the
+            # operator replaces it rather than wait on a drain that cannot come.
+            - name: TROUPE_PLANE_CONTROL_REQUIRE_TLS
+              value: {{ ternary "true" "false" .Values.plane.controlTls.requireTls | quote }}
             {{- end }}
+            # The Pod Security labels on every worker namespace (`podSecurity.labels`): the
+            # lowest level that admits the pods the settings below make.
+            - name: TROUPE_POD_SECURITY_LABELS
+              value: {{ .Values.podSecurity.labels | quote }}
             - name: TROUPE_OBJECT_SECRET_NAME
               value: {{ .Values.objectStore.secretName | quote }}
             - name: TROUPE_MAX_PORTS

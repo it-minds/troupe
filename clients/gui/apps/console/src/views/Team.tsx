@@ -22,7 +22,7 @@ import { TEAM_TABS, href } from "../route";
 import type { TeamTab } from "../route";
 import { recorded, show, useConsole, useLoad } from "../console";
 import type { Load } from "../console";
-import { AuditNote, Empty, Field, Loaded, Locked, Preview, Region, Status, changed, count, money, useChange } from "./bits";
+import { AuditNote, Empty, Field, Loaded, Locked, Preview, Region, Status, changed, count, money, useChange, when } from "./bits";
 import type { DiffLine, Done, FieldProps } from "./bits";
 import { Spend, Twice } from "./Teams";
 
@@ -181,6 +181,7 @@ function Members({ team, onApplied }: { team: AdminTeam; onApplied: () => void }
                       {offered.map((g) => (
                         <option key={g.external_id} value={g.external_id}>
                           {g.display_name ? `${g.display_name} (${g.external_id})` : g.external_id}
+                          {g.linked === false && g.last_seen_at ? ` · no team yet, last seen ${when(g.last_seen_at)}` : ""}
                           {g.looks_duplicated ? " · looks held twice" : ""}
                         </option>
                       ))}

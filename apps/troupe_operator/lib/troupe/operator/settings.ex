@@ -20,6 +20,11 @@ defmodule Troupe.Operator.Settings do
             # What that file holds, read again on every pass (`with_plane_ca/1`), so a CA
             # cert-manager renews reaches the worker namespaces at the next one.
             plane_ca: nil,
+            # Whether the plane closes a plaintext connection on the control port (the
+            # chart's `plane.controlTls.requireTls`). A pod made before its namespace had a
+            # CA to dial with cannot enrol on such a plane, so the plane can never drain it,
+            # and the operator replaces it without waiting for a drain that cannot come.
+            plane_require_tls: false,
             bao_address: "http://openbao.troupe-system.svc:8200",
             # Whether the installation made an OpenBao role per profile (Decision 753).
             # Then each profile's pods log in as `troupe-worker-<profile>`, the role its
@@ -100,6 +105,13 @@ defmodule Troupe.Operator.Settings do
             # the node. The chart turns it on; off, a pod refuses every command, as it
             # always did.
             worker_user_namespaces: false,
+            # Whether every worker namespace carries the Pod Security labels its pods need
+            # (`pod_security_level/1`), for enforce, audit and warn alike (the chart's
+            # `podSecurity.labels`). A cluster whose default level is higher than that
+            # refuses every worker pod at creation, in an event on its StatefulSet, unless
+            # the namespace says otherwise. Off, the operator writes no such label and
+            # removes none somebody else wrote.
+            pod_security_labels: false,
             cilium_available: false,
             drain_timeout_seconds: 300
 
@@ -172,4 +184,18 @@ defmodule Troupe.Operator.Settings do
       do: %{"type" => "Localhost", "localhostProfile" => name}
 
   def worker_apparmor(%__MODULE__{}), do: nil
+
+  @doc """
+  The lowest Pod Security level that admits a worker pod these settings make.
+
+  `privileged` where the pod is in a user namespace of its own: its worker container's
+  `/proc` is unmasked, which `baseline` and `restricted` refuse even with `hostUsers:
+  false`. And where the container's seccomp profile is `Unconfined`, which both refuse
+  too. Otherwise `restricted`: no capability, no privilege escalation, a non-root user, a
+  seccomp profile and a Localhost AppArmor one, and only volumes `restricted` allows.
+  """
+  @spec pod_security_level(t()) :: String.t()
+  def pod_security_level(%__MODULE__{worker_user_namespaces: true}), do: "privileged"
+  def pod_security_level(%__MODULE__{worker_seccomp_type: "Unconfined"}), do: "privileged"
+  def pod_security_level(%__MODULE__{}), do: "restricted"
 end

@@ -12,6 +12,27 @@ namespace: troupe-system
 # namespace in the cluster already says keep.
 createNamespace: true
 
+# Pod Security admission labels (`pod-security.kubernetes.io/enforce`, `audit` and `warn`),
+# so a cluster whose default level is higher than what Troupe's pods need admits them
+# without anybody labelling a namespace by hand. With `labels: true`:
+#
+# - the operator labels every worker namespace it makes, at every pass, with the lowest level
+#   its worker pods need: `privileged` with `worker.userNamespaces` (their `/proc` is unmasked,
+#   which `baseline` and `restricted` refuse even in a user namespace) or with
+#   `worker.seccomp.type: Unconfined`, `restricted` otherwise. A namespace made before this
+#   is labelled at the operator's next pass.
+# - the chart labels the namespace above, when it makes it, with `level`; empty is the lowest
+#   the chart's own pods there need: `privileged` while the DaemonSet that puts the workers'
+#   profiles on the nodes runs (`worker.seccomp.install`, `worker.appArmor.install`), which
+#   mounts a host directory and runs as root, and `restricted` otherwise. Name a level here
+#   where something else shares the namespace, such as an OpenBao beside the plane, and needs
+#   more. Where `createNamespace` is false, whoever makes the namespace labels it.
+#
+# `false`: no label is written, and none somebody else wrote is removed.
+podSecurity:
+  labels: true
+  level: ""
+
 # CRDs live under `charts/troupe/crds/`, which Helm installs before anything else and
 # never upgrades or deletes. That ordering is what lets the default TroupePolicy be an
 # ordinary template, and the not-deleting is a safety property: removing a CRD removes
@@ -143,11 +164,17 @@ plane:
     enabled: true
     # Refuse plaintext on the control port, a pod's included: a plaintext connection is
     # closed once its first byte says what it is, with a line in the plane's log (once a
-    # minute per address). On by default from 0.20; every pod a 0.19 operator made dials
-    # with TLS. Before upgrading from 0.19, check that the plane's log has no enrolment
-    # "in plaintext"; one that does is a pod still to be replaced, and `false` keeps it
-    # enrolling meanwhile. Needs `enabled`: an installation that turns that off sets this
-    # to `false` too, or the chart refuses to render.
+    # minute per address). `true` is where every plane ends up, and the default.
+    #
+    # `false` is for the plane that has to take plaintext for a while: a workload of your
+    # own that dials the port without TLS, or a moment you want an old pod to keep
+    # enrolling. It is not needed for an upgrade. Every pod an operator from 0.19 on made
+    # dials with TLS, and a pod that dials in plaintext, made before its namespace had the
+    # CA (by an older operator, or with `enabled` off), is replaced by the operator once
+    # this is on: it cannot enrol to be drained, so it is deleted, and it puts its own
+    # sessions to sleep as it stops. Turning this from `false` to `true` needs nothing else.
+    # Needs `enabled`: an installation that turns that off sets this to `false` too, or the
+    # chart refuses to render.
     requireTls: true
     # cert-manager issues the control Service's certificate, as a `Certificate` this chart
     # renders. Needs cert-manager's CRDs. `false`: the Secret below must hold `tls.crt`,
@@ -289,8 +316,9 @@ worker:
   # Kubernetes 1.33 or later, containerd 2.0 and runc 1.2 or later, Linux 6.3 or later on
   # the nodes, storage whose filesystems take idmapped mounts, and the `privileged` Pod
   # Security level in the worker namespaces, since `baseline` and `restricted` refuse an
-  # unmasked `/proc` (docs/admin/installing.md). `false` keeps the node's users and the
-  # masked `/proc`: workers start and refuse every command.
+  # unmasked `/proc`; the operator labels them so (`podSecurity` above,
+  # docs/admin/installing.md). `false` keeps the node's users and the masked `/proc`:
+  # workers start and refuse every command.
   userNamespaces: true
   seccomp:
     type: Localhost

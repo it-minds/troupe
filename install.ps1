@@ -779,5 +779,5 @@ if ($Tui) {
 if ($Gui) { Write-Item "Troupe            the desktop app, in the Start menu" }
 if ($VSCode) { Write-Item "VS Code           Troupe: Open, or the mask in the activity bar (a window open already: Developer: Reload Window)" }
 Write-Item "the desktop app starts the daemon when it needs one; so does troupe"
-Write-Item "the release is unsigned: SmartScreen may ask the first time something runs"
+Write-Item "the programs carry no Microsoft signature: SmartScreen may ask the first time one runs"
 Write-Item "install.ps1 -Uninstall removes it again (-Purge: config and state too)"

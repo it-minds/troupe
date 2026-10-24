@@ -18,7 +18,7 @@ is a worked example.
 | An ingress controller | how a client reaches a worker | sessions are created and cannot be attached to from outside |
 | Nodes that allow unprivileged user namespaces, and the chart's seccomp profile on them | every command on a pod runs in bubblewrap, which builds its sandbox from a user namespace ([below](#the-workers-seccomp-profile)) | a pod refuses every command, saying bubblewrap could not start |
 | Where nodes enforce AppArmor (Ubuntu's), the chart's AppArmor profile loaded on them | the runtime's default AppArmor profile, and Ubuntu's restriction on unprivileged user namespaces, stop bubblewrap ([below](#the-workers-apparmor-profile)) | a pod refuses every command, saying bubblewrap could not start; on nodes without AppArmor, `worker.appArmor.enabled: false` |
-| Kubernetes ≥ 1.33, containerd ≥ 2.0 (runc ≥ 1.2), Linux ≥ 6.3, storage that takes idmapped mounts, `privileged` Pod Security in worker namespaces | each worker pod runs in a user namespace of its own with its `/proc` unmasked, which bubblewrap's own `/proc` needs ([below](#the-workers-user-namespaces)) | a worker pod is refused or does not start; with `worker.userNamespaces: false` it starts and refuses every command |
+| Kubernetes ≥ 1.33, containerd ≥ 2.0 (runc ≥ 1.2), Linux ≥ 6.3, storage that takes idmapped mounts | each worker pod runs in a user namespace of its own with its `/proc` unmasked, which bubblewrap's own `/proc` needs; the operator labels each worker namespace with the Pod Security level that takes ([below](#the-workers-user-namespaces)) | a worker pod is refused or does not start; with `worker.userNamespaces: false` it starts and refuses every command |
 
 Label the ingress controller's namespace, or every worker drops its traffic:
 
@@ -36,7 +36,10 @@ read it as a worked example, not a production install.
 - **An object store**: one bucket, **with versioning on** — the one requirement here that
   is not a preference, because erasure destroys prior versions.
 - **OpenBao** (or Vault): a transit mount for signing, a KV v2 mount, and a Kubernetes
-  auth role or a token. A plane with neither fails to sign and says so.
+  auth role or a token, carrying the policies in [openbao.md](openbao.md). The plane cannot
+  write a policy itself; it checks what its role holds when it starts and on the console's
+  Overview, look-only, and prints the lines for a grant it lacks. A plane with neither a
+  role nor a token says so the same way.
 - **An identity provider**: any OIDC provider that issues a group claim and the device
   grant. Troupe assigns no roles of its own; a platform admin is a member of a group you
   name. Requirements in detail: [integrations.md](integrations.md).
@@ -121,8 +124,9 @@ worker:
   The `seccomp` container of the chart's DaemonSet `troupe-worker-profiles`, one per node,
   copies it there from a ConfigMap and waits, ready while the file is in place. It mounts
   that one host directory (`/var/lib/kubelet/seccomp/troupe`) and runs as root with every
-  capability dropped, because the directory is root's, so **`troupe-system` needs the
-  `privileged` Pod Security level**. Where the kubelet runs with another `--root-dir`, set
+  capability dropped, because the directory is root's, so `troupe-system` needs the
+  `privileged` Pod Security level, which the chart labels it with while the DaemonSet runs
+  (`podSecurity`). Where the kubelet runs with another `--root-dir`, set
   `kubeletSeccompDir` to `<root-dir>/seccomp`. A worker pod that reaches a node before the
   file waits in `CreateContainerError` ("cannot load seccomp profile") and starts once it
   is there: `kubectl -n troupe-system rollout status daemonset/troupe-worker-profiles`.
@@ -201,7 +205,7 @@ What the cluster needs for it:
 | Container runtime | containerd 2.0 or later with runc 1.2 or later (CRI-O 1.25 or later with crun or runc should do; not tried) |
 | Nodes | Linux 6.3 or later: the projected tokens and ConfigMaps are tmpfs, and idmapped tmpfs came in 6.3 |
 | Storage | filesystems that take idmapped mounts. A block volume with ext4 or xfs does, and so do kind's and `local-path`'s directories. **NFS does not, and most RWX file storage is NFS**: a team volume there is expected to keep its pod in `ContainerCreating` or `CreateContainerError`, with the idmapped mount refused in the pod's events (not tried here) |
-| Pod Security | `privileged` in the worker namespaces: `baseline` and `restricted` refuse `procMount: Unmasked` even in a user namespace, and every worker pod is then refused at creation, in a `FailedCreate` event on its StatefulSet. The operator labels no worker namespace, so they have the cluster's default level; label each `troupe-w-<profile>` where that default is higher |
+| Pod Security | nothing to do: `privileged` in the worker namespaces, since `baseline` and `restricted` refuse `procMount: Unmasked` even in a user namespace, and the operator labels each `troupe-w-<profile>` so (enforce, audit and warn), at every pass, a namespace made before it included. With `worker.userNamespaces: false` and a seccomp profile other than `Unconfined` the level is `restricted`. `podSecurity.labels: false` leaves the labels to you; a worker pod is then refused at creation where the cluster's default is higher, in a `FailedCreate` event on its StatefulSet |
 
 A cluster that cannot have them sets `worker.userNamespaces: false`. Its workers start and
 refuse every command, with bubblewrap's `/proc` sentence, until it can: a pod never runs a
@@ -218,7 +222,7 @@ with the check first and come back:
 kubectl version | grep Server                    # 1.33 or later
 kubectl get nodes -o custom-columns=NODE:.metadata.name,KERNEL:.status.nodeInfo.kernelVersion,RUNTIME:.status.nodeInfo.containerRuntimeVersion
 kubectl create namespace troupe-check
-kubectl label namespace troupe-check pod-security.kubernetes.io/enforce=privileged
+kubectl label namespace troupe-check pod-security.kubernetes.io/enforce=privileged   # as the operator labels a worker namespace
 kubectl apply -n troupe-check -f - <<'YAML'
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -401,8 +405,10 @@ in memory. Without a KMS it can use, the seal is Shamir and something unseals it
 every restart: a person, or a share kept in a Secret, which protects a stolen volume and
 not against a cluster admin. Set `server.enableServiceLinks: false` in its chart, so the
 `<SERVICE>_PORT` variables Kubernetes injects cannot collide with its own. Then set up what
-[integrations.md §2](integrations.md#2-openbao) lists; `dev/kind/dependencies.yaml` has it
-as working commands, in development shape.
+[integrations.md §2](integrations.md#2-openbao) lists, with the plane's role and policies
+as [openbao.md](openbao.md) writes them; the plane says on its Overview which grant its
+role still lacks, with the lines that add it. `dev/kind/dependencies.yaml` has the rest as
+working commands, in development shape.
 
 **Every worker namespace** the operator creates needs its own copies of the Secrets
 [configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects) lists for
@@ -417,7 +423,7 @@ token, the ACL and the NetworkPolicy; a load-balancer ACL or a VPN in front of `
 deserves a look before production. The PITR drill (`scripts/pitr-drill`) is a script, not
 a schedule.
 
-After the first install, an upgrade is [routine-tasks.md](routine-tasks.md#upgrade).
+After the first install, an upgrade is [upgrading.md](upgrading.md), one release at a time.
 
 ## 7. Uninstalling
 

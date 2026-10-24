@@ -9,6 +9,7 @@
 // records it. A console that is right against this is right against the plane's rules,
 // which `apps/troupe_plane/test` holds the plane to.
 
+import type { OpenBaoCheck } from "../../src/admin.js";
 import { parseAgent } from "../../src/agents.js";
 import { checkRuleSet } from "../../src/rules.js";
 import { BUILTIN_AGENTS, checkAgent } from "./agents.js";
@@ -22,6 +23,8 @@ type IdentityCheckRow = { name: string; ok: boolean; detail: string; took_ms: nu
 type Answer = { result: unknown } | Refusal;
 type Role = "platform_admin" | "team_admin" | "none";
 type Changes = Record<string, { from: unknown; to: unknown }>;
+/** A group the identity provider has told the plane about, and when it last arrived in a sign-in (`null`: only SCIM pushed it). */
+type FakeGroup = { external_id: string; display_name: string | null; looks_duplicated?: { others: string[]; likely: string } | null; last_seen_at?: string | null };
 
 const FORBIDDEN = -32004;
 const NOT_FOUND = -32005;
@@ -163,6 +166,41 @@ function bundleSummaryOf(content: Record<string, unknown>): Record<string, unkno
     mcp_servers: entries(content, "mcp_servers").map((e) => e["name"]),
     acp_agents: entries(content, "acp_agents").map((e) => e["name"]),
   };
+}
+
+/**
+ * Each entry's definition by name, field by field, as `Troupe.Protocol.Bundle.definitions/1`
+ * says: an agent's frontmatter fields that are set and its `prompt`, a skill's description
+ * and files, a server's and an ACP agent's settings.
+ */
+function definitionsOf(content: Record<string, unknown>): Record<Section, Record<string, Record<string, unknown>>> {
+  const by = (section: Section, f: (e: Record<string, unknown>) => Record<string, unknown>): Record<string, Record<string, unknown>> =>
+    Object.fromEntries(entries(content, section).map((e) => [String(e["name"]), f(e)]));
+  const unset = (key: string, v: unknown): boolean =>
+    v === "" || (key === "tools" && v === "all") || (Array.isArray(v) && v.length === 0) || (typeof v === "object" && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
+  const rest = ({ name: _name, ...others }: Record<string, unknown>): Record<string, unknown> => others;
+  return {
+    agents: by("agents", (a) => {
+      const read = parseAgent(typeof a["definition"] === "string" ? a["definition"] : "");
+      return { ...Object.fromEntries(Object.entries(read.fields ?? {}).filter(([k, v]) => !unset(k, v))), prompt: read.body };
+    }),
+    skills: by("skills", (s) => ({ description: s["description"] ?? "", files: s["files"] ?? {} })),
+    mcp_servers: by("mcp_servers", rest),
+    acp_agents: by("acp_agents", rest),
+  };
+}
+
+/** What changed inside the entries both documents carry, one line per field, as the plane's preview says it. */
+function fieldsChanged(before: Record<string, unknown>, after: Record<string, unknown>): Changes {
+  const was = definitionsOf(before);
+  const now = definitionsOf(after);
+  const both = (a: Record<string, Record<string, unknown>>, b: Record<string, Record<string, unknown>>): Record<string, Record<string, unknown>> =>
+    Object.fromEntries(Object.entries(a).filter(([name]) => name in b));
+  const sections = Object.keys(SECTIONS) as Section[];
+  return diff(
+    Object.fromEntries(sections.map((s) => [s, both(was[s], now[s])])),
+    Object.fromEntries(sections.map((s) => [s, both(now[s], was[s])])),
+  );
 }
 
 /** Everything a version carries but its files' text, as `Bundles.describe/1` reads it. */
@@ -696,6 +734,30 @@ interface Policy {
   updated_at: string | null;
 }
 
+/** One person's client of one kind, as the plane recorded it at `initialize`. */
+export interface SeenClient {
+  subject: string;
+  display_name: string | null;
+  component: string;
+  version: string;
+  platform: string | null;
+  since: string;
+  seen_at: string;
+}
+
+/** How a version stands against a policy, as `Troupe.Protocol.ClientUpdate.judge` puts it. */
+function standing(policy: Pick<Policy, "recommended" | "minimum" | "blocked">, version: string): "current" | "behind" | "refused" {
+  if (policy.blocked.includes(version)) return "refused";
+  if (policy.minimum && older(version, policy.minimum)) return "refused";
+  if (policy.recommended && older(version, policy.recommended)) return "behind";
+  return "current";
+}
+
+function counts(standings: string[]): { current: number; behind: number; refused: number } {
+  const n = (s: string) => standings.filter((x) => x === s).length;
+  return { current: n("current"), behind: n("behind"), refused: n("refused") };
+}
+
 export interface AuditEntry {
   actor: string;
   action: string;
@@ -775,7 +837,7 @@ export function diff(before: Record<string, unknown>, now: Record<string, unknow
 export class FakeAdmin {
   readonly platformAdmins: Set<string>;
   readonly teams = new Map<string, FakeTeam>();
-  readonly groups: Array<{ external_id: string; display_name: string | null; looks_duplicated?: { others: string[]; likely: string } | null }>;
+  readonly groups: FakeGroup[];
   /** Who is in each group, by its external id, as the identity provider says: membership is never the plane's. */
   readonly memberships: Record<string, string[]>;
   /** People's display names, by subject, for a member a link brings in. */
@@ -787,6 +849,8 @@ export class FakeAdmin {
   /** What the plane was deployed with, by key; a key absent here is unset. */
   readonly deployed: Record<string, unknown>;
   readonly policies: Record<string, Policy>;
+  /** Which version each person's client of each kind last gave at `initialize`, as the plane records it (#657). */
+  readonly seen: SeenClient[] = [];
   readonly audit: AuditEntry[] = [];
   /** Answer this method with this error instead: how a test sees a screen's error state. */
   readonly failing = new Map<string, { code: number; message: string; data?: unknown }>();
@@ -846,11 +910,24 @@ export class FakeAdmin {
     teams_from_groups: false,
   };
 
+  /** What `admin.overview` says the plane's OpenBao role may do; a test takes a grant away. */
+  openbao: OpenBaoCheck = {
+    ok: true,
+    error: null,
+    fix: null,
+    grants: [
+      { id: "session-tokens", policy: "troupe-plane-session-tokens", required: true, ok: true, detail: "The plane may sign session tokens.", missing: [], fix: null },
+      { id: "plane-signing", policy: "troupe-plane-signing", required: true, ok: true, detail: "The plane may sign with its own key.", missing: [], fix: null },
+      { id: "erasure", policy: "troupe-plane", required: true, ok: true, detail: "The plane may destroy an erased session's key.", missing: [], fix: null },
+      { id: "github-app", policy: "troupe-plane-github", required: false, ok: true, detail: "The plane may use the GitHub App's keys.", missing: [], fix: null },
+    ],
+  };
+
   constructor(
     opts: {
       platformAdmins?: string[];
       teams?: FakeTeam[];
-      groups?: Array<{ external_id: string; display_name: string | null; looks_duplicated?: { others: string[]; likely: string } | null }>;
+      groups?: FakeGroup[];
       memberships?: Record<string, string[]>;
       names?: Record<string, string>;
       profiles?: FakeProfile[];
@@ -894,7 +971,15 @@ export class FakeAdmin {
         return admin ? { result: this.visible(subject).map((t) => this.teamJson(t)) } : notAdmin;
 
       case "admin.groups.list":
-        return admin ? { result: this.groups } : notAdmin;
+        return admin
+          ? {
+              result: this.groups.map((g) => ({
+                ...g,
+                linked: [...this.teams.values()].some((t) => t.groups.some((x) => x.external_id === g.external_id)),
+                last_seen_at: g.last_seen_at ?? null,
+              })),
+            }
+          : notAdmin;
 
       case "admin.team.update": {
         const found = this.fetchTeam(subject, params["name"]);
@@ -1084,6 +1169,8 @@ export class FakeAdmin {
               reserved_micros: t.reserved_micros,
             })),
             sessions: { active: count("active"), dormant: count("dormant"), read_only: count("read_only") },
+            // The key manager is the platform's: a team admin's overview says nothing of it.
+            ...(role === "platform_admin" ? { openbao: this.openbao } : {}),
           },
         };
       }
@@ -1299,7 +1386,8 @@ export class FakeAdmin {
           .filter((e) => e.mode === "allow" && removed.some((r) => r.kind === e.kind && r.name === e.name))
           .filter((e) => this.profiles.some((p) => p.name === e.profile && p.channel === channel))
           .map(({ team, profile, kind, name }) => ({ team, profile, kind, name }));
-        return { result: { channel, from: base?.version ?? null, hash: hashOf(params["content"]), changes: diff(was ?? {}, now), removed, losers } };
+        const changes = { ...diff(was ?? {}, now), ...(base ? fieldsChanged(base.content, params["content"] as Record<string, unknown>) : {}) };
+        return { result: { channel, from: base?.version ?? null, hash: hashOf(params["content"]), changes, removed, losers } };
       }
 
       case "admin.bundle.publish": {
@@ -1919,12 +2007,12 @@ export class FakeAdmin {
           this.record(subject, "trigger.key.rotate", `${row.team}/${row.name}`, { had_key: had });
           return { result: { team: row.team, name: row.name, url: `/trigger/${row.id}`, key, rotated_at: now } };
         }
-        // The caller and the minute: a second click within it is the run already made.
+        // The caller, and a minute from the click before: a second click within it is the run already made.
         const at = `${now.slice(0, 19)}Z`;
-        const key = `manual:${row.id}:${subject}:${now.slice(0, 16)}:00Z`;
-        this.record(subject, "trigger.run", `${row.team}/${row.name}`, { run: key });
+        const window = `manual:${row.id}:${subject}:`;
+        this.record(subject, "trigger.run", `${row.team}/${row.name}`, { run: `${window}${now}` });
         if (!row.enabled) return refuse(FORBIDDEN, "forbidden", { reason: "trigger is disabled", trigger: row.name });
-        return { result: this.byHand(row, subject, key, { kind: "manual", by: subject, at }, {}) };
+        return { result: this.byHand(row, subject, window, { kind: "manual", by: subject, at }, {}) };
       }
 
       // `Admin.trigger_fix/4`, the console's "fix this": one run of a trigger on a GitHub
@@ -1949,11 +2037,10 @@ export class FakeAdmin {
         if (!Number.isInteger(number) || number <= 0) {
           return refuse(INVALID_PARAMS, "invalid_params", { field: "issue", reason: `an issue is its number, or its link, such as https://github.com/${repository}/issues/7` });
         }
-        const now = new Date().toISOString();
-        const key = `fix:${row.id}:${number}:${subject}:${now.slice(0, 16)}:00Z`;
+        const window = `fix:${row.id}:${number}:${subject}:`;
         const issue = { number, url: `https://github.com/${repository}/issues/${number}`, title: `Issue ${number}` };
         const event = { github: { event: "fix", action: null, delivery: null }, repository, sender: subject, issue };
-        return { result: this.byHand(row, subject, key, event, { repository, issue }) };
+        return { result: this.byHand(row, subject, window, event, { repository, issue }) };
       }
 
       case "admin.runs.list": {
@@ -2076,8 +2163,20 @@ export class FakeAdmin {
         return { result: { ...this.effective(key, team), team: team?.name ?? null } };
       }
 
-      case "admin.clients.get":
-        return admin ? { result: { clients: Object.fromEntries(COMPONENTS.map((c) => [c, { component: c, ...this.policies[c] }])) } } : notAdmin;
+      case "admin.clients.get": {
+        if (!admin) return notAdmin;
+        // A team admin's fleet is their teams' people; a platform admin's, everybody's.
+        const people = role === "platform_admin" ? null : new Set(this.visible(subject).flatMap((t) => t.members.map((m) => m.subject)));
+        const fleet = Object.fromEntries(
+          COMPONENTS.map((c) => {
+            const rows = this.seen
+              .filter((s) => s.component === c && (!people || people.has(s.subject)))
+              .map(({ component: _component, ...s }) => ({ ...s, standing: standing(this.policies[c]!, s.version) }));
+            return [c, { ...counts(rows.map((r) => r.standing)), people: rows }];
+          }),
+        );
+        return { result: { clients: Object.fromEntries(COMPONENTS.map((c) => [c, { component: c, ...this.policies[c] }])), fleet } };
+      }
 
       case "admin.clients.put": {
         if (role !== "platform_admin") return notPlatform;
@@ -2118,8 +2217,9 @@ export class FakeAdmin {
         const fields = (p: Policy) => ({ recommended: p.recommended, minimum: p.minimum, blocked: p.blocked });
         const changes = diff(fields(current), fields(next));
         this.policies[component] = { ...next, updated_by: subject, updated_at: new Date().toISOString() };
-        this.record(subject, "clients.put", component, changes);
-        return { result: { component, ...this.policies[component], changes } };
+        const affected = counts(this.seen.filter((s) => s.component === component).map((s) => standing(next, s.version)));
+        this.record(subject, "clients.put", component, { ...changes, affected });
+        return { result: { component, ...this.policies[component], changes, affected } };
       }
 
       case "admin.audit.list": {
@@ -2518,12 +2618,17 @@ export class FakeAdmin {
   }
 
   /**
-   * A run fired by hand, `admin.trigger.run`'s or `admin.trigger.fix`'s, or the one a second
-   * click in the same minute already made; skipped, saying why, over the trigger's cap.
+   * A run fired by hand, `admin.trigger.run`'s or `admin.trigger.fix`'s, or the one a click
+   * under the same `window` less than a minute before already made, on either side of the
+   * clock's minute, as `Triggers.fire_by_hand/5` keys it; skipped, saying why, over the
+   * trigger's cap.
    */
-  private byHand(row: FakeTrigger, subject: string, key: string, event: Record<string, unknown>, extra: Partial<FakeRun>): Record<string, unknown> {
+  private byHand(row: FakeTrigger, subject: string, window: string, event: Record<string, unknown>, extra: Partial<FakeRun>): Record<string, unknown> {
     const now = new Date().toISOString();
-    const again = this.runRows.find((r) => r.idempotency_key === key);
+    const key = `${window}${now}`;
+    const again = this.runRows
+      .filter((r) => r.idempotency_key.startsWith(window) && Math.abs(Date.parse(r.fired_at) - Date.parse(now)) < 60_000)
+      .at(-1);
     const live = this.runRows.filter((r) => r.trigger_id === row.id && ["created", "running", "waiting"].includes(r.state)).length;
     const last = row.revisions.at(-1);
     const id = `run-${row.name}-manual-${this.runRows.length + 1}`;
@@ -2886,7 +2991,7 @@ export class FakeAdmin {
 
   /** Groups sharing a display name under different ids, as `Identity.group_lookalikes/0` sets them out. */
   private groupsAlike(): Array<Record<string, unknown>> {
-    const by = new Map<string, Array<{ external_id: string; display_name: string | null; looks_duplicated?: { others: string[]; likely: string } | null }>>();
+    const by = new Map<string, FakeGroup[]>();
     for (const g of this.groups) {
       if (!g.display_name) continue;
       const key = g.display_name.toLowerCase();
@@ -3374,10 +3479,12 @@ export function exampleAdmin(): FakeAdmin {
   const admin = new FakeAdmin({
     platformAdmins: ["alice@example.com"],
     groups: [
-      { external_id: "grp-core", display_name: "Core engineering" },
-      { external_id: "grp-design", display_name: "Design" },
-      { external_id: "grp-research", display_name: "Research" },
-      { external_id: "grp-platform", display_name: "Platform owners" },
+      { external_id: "grp-core", display_name: "Core engineering", last_seen_at: "2026-09-20T09:12:00Z" },
+      { external_id: "grp-design", display_name: "Design", last_seen_at: "2026-09-20T08:40:00Z" },
+      // Seen in a sign-in and drawn on by no team: the group a platform admin links next.
+      { external_id: "grp-research", display_name: "Research", last_seen_at: "2026-09-19T16:05:00Z" },
+      // Pushed by SCIM and never in a sign-in.
+      { external_id: "grp-platform", display_name: "Platform owners", last_seen_at: null },
     ],
     memberships: {
       "grp-core": ["alice@example.com", "dan@example.com", "erin@example.com"],
@@ -3743,6 +3850,24 @@ export function exampleAdmin(): FakeAdmin {
   admin.stored.set("client_enforced", { approvals: "wait", max_turns: 200 });
   admin.stored.set("default_erase_after_days", 180);
   admin.policies["tui"] = { recommended: "0.16.0-beta", minimum: "0.14.0-beta", blocked: ["0.15.0-beta"], updated_by: "alice@example.com", updated_at: "2026-10-11T09:30:00Z" };
+  // Which version each person's clients last ran: one current, one behind, one blocked and
+  // one below the minimum in the terminal; one daemon, current.
+  const seen = (subject: string, display_name: string, component: string, version: string, since: string, platform: string | null = null): SeenClient => ({
+    subject,
+    display_name,
+    component,
+    version,
+    platform,
+    since,
+    seen_at: "2026-10-13T08:55:00Z",
+  });
+  admin.seen.push(
+    seen("alice@example.com", "Alice", "tui", "0.16.0-beta", "2026-10-11T10:00:00Z", "macos/aarch64"),
+    seen("erin@example.com", "Erin", "tui", "0.14.2-beta", "2026-10-02T14:00:00Z", "linux/x86_64"),
+    seen("dan@example.com", "Dan", "tui", "0.15.0-beta", "2026-10-09T09:00:00Z"),
+    seen("fay@example.com", "Fay", "tui", "0.13.0-beta", "2026-09-30T16:20:00Z", "windows/x86_64"),
+    seen("bob@example.com", "Bob", "daemon", "0.16.0-beta", "2026-10-12T11:00:00Z"),
+  );
   // The GitHub App, set and installed on one organisation, which GitHub knows by the same key.
   Object.assign(admin.github, {
     app_id: 4242,

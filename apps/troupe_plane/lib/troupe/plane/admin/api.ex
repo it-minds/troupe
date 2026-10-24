@@ -512,7 +512,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.overview",
       function: :overview,
       summary:
-        "Fleet health, active sessions and spend per team, scoped to what the caller administers. The first call to make.",
+        "Fleet health, active sessions and spend per team, scoped to what the caller administers. The first call to make. A platform admin's carries `openbao`: each grant the plane's OpenBao role needs, checked look-only, and for one it lacks a sentence and the `bao` lines an OpenBao administrator runs to grant it.",
       risk: :read
     },
     %Method{
@@ -798,7 +798,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.groups.list",
       function: :groups_list,
       summary:
-        "Every identity-provider group this plane knows about, which is what a team links to. A group that looks like another one held twice carries `looks_duplicated`: the other group's identifier and the mismatch it most likely comes from.",
+        "Every identity-provider group this plane knows about, which is what a team links to. Each carries `linked` (whether a team draws on it) and `last_seen_at` (when it last arrived in a sign-in; empty for one only SCIM pushed), so a group no team links yet is chosen by name. A group that looks like another one held twice carries `looks_duplicated`: the other group's identifier and the mismatch it most likely comes from.",
       risk: :read
     },
     %Method{
@@ -1376,7 +1376,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.clients.get",
       function: :clients_get,
       summary:
-        "Which versions of its clients this plane serves, per component (tui, daemon, desktop): the recommended version, the minimum, the blocked list, and who set them last. A client below the minimum or on a blocked version is refused at initialize with update_required.",
+        "Which versions of its clients this plane serves, per component (tui, daemon, desktop): the recommended version, the minimum, the blocked list, and who set them last. A client below the minimum or on a blocked version is refused at initialize with update_required. Beside it, the fleet: per component how many clients last seen are current, behind the recommended version, or refused at their next initialize, and who, with the version each last ran and since when; a team admin's are their teams' people.",
       risk: :read,
       arguments: []
     },
@@ -1384,7 +1384,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.clients.put",
       function: :clients_put,
       summary:
-        "Change one component's version policy. Only the keys sent change, null clears one, and blocked is the whole list. Versions are written as releases are numbered (0.13.0-beta). A client is held to it at its next initialize: raising the minimum turns away every older client of that component.",
+        "Change one component's version policy. Only the keys sent change, null clears one, and blocked is the whole list. Versions are written as releases are numbered (0.13.0-beta). A client is held to it at its next initialize: raising the minimum turns away every older client of that component. Answers, and audits, how many of the component's clients last seen the new policy finds current, behind and refused (affected).",
       risk: :write,
       arguments: [
         %Argument{

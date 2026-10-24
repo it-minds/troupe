@@ -3,23 +3,28 @@
 // platform made a team of; its people are the provider's, its grants, budget and limits
 // the plane's. A platform admin enables a group as a team here.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import type { AdminGroup, AdminTeam } from "@troupe/client";
 import { href } from "../route";
 import { recorded, useConsole, useLoad } from "../console";
-import { AuditNote, Empty, Field, Loaded, Preview, Status, money } from "./bits";
+import { AuditNote, Empty, Field, Loaded, Preview, Region, Status, money, when } from "./bits";
 
 export function Teams(): JSX.Element {
   const { admin, role } = useConsole();
   const [load, reload] = useLoad(() => admin.teams(), [admin]);
   const [query, setQuery] = useState("");
+  const [pick, setPick] = useState<AdminGroup | null>(null);
   const platform = role === "platform_admin";
 
   return (
     <div className="page">
       {/* Outside the read's states, so what was just enabled stays on the screen while the list is read again. */}
-      {platform && load.state === "ready" && <Enable teams={load.data} onApplied={reload} />}
+      {platform && load.state === "ready" && (
+        <Enable teams={load.data} pick={pick} onApplied={reload} />
+      )}
+      {/* A copy each time, so choosing the same group again after a cancel opens it again. */}
+      {platform && load.state === "ready" && <Unlinked teams={load.data} onPick={(g) => setPick({ ...g })} />}
       <Loaded load={load} what="the teams" retry={reload}>
         {(teams) => {
           if (teams.length === 0) {
@@ -131,16 +136,74 @@ export function Twice({ group }: { group: AdminGroup | undefined }): JSX.Element
 }
 
 /**
+ * The groups that have arrived in somebody's sign-in and that no team draws on, newest
+ * first, with when each was last seen: so a group the provider has started sending, under
+ * an identifier nobody would guess, is a name to choose. Listing one grants nothing; its
+ * people reach nothing until a team links it and is granted a profile. A group only SCIM
+ * pushed is left out, as it is not news from a sign-in.
+ */
+function Unlinked({ teams, onPick }: { teams: AdminTeam[]; onPick: (group: AdminGroup) => void }): JSX.Element | null {
+  const { admin } = useConsole();
+  // Read again whenever the teams are, so a group just linked leaves this list.
+  const [groups] = useLoad(() => admin.groups(), [admin, teams]);
+  if (groups.state !== "ready") return null;
+  const unlinked = groups.data
+    .filter((g) => g.linked === false && g.last_seen_at)
+    .sort((a, b) => (b.last_seen_at ?? "").localeCompare(a.last_seen_at ?? ""));
+  if (unlinked.length === 0) return null;
+  return (
+    <section className="unlinked" aria-label="Groups no team draws on">
+      <Region>Seen in sign-ins · no team draws on them</Region>
+      <p className="hint">Listed so a new group is chosen by name. Nothing is granted: its people reach nothing until a team draws on it and has a profile.</p>
+      <div className="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Group</th>
+              <th>Id at the provider</th>
+              <th>Last seen</th>
+              <th aria-label="Actions" />
+            </tr>
+          </thead>
+          <tbody>
+            {unlinked.map((g) => (
+              <tr key={g.external_id}>
+                <td>{g.display_name ?? g.external_id}</td>
+                <td className="mono">{g.external_id}</td>
+                <td>{when(g.last_seen_at)}</td>
+                <td className="row-actions">
+                  <button type="button" onClick={() => onPick(g)}>
+                    Make it a team
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+/**
  * Make a group a team. The plane keys a team on its name and, given a name that is
  * already a team's, links the group into that team and changes it rather than making a
- * new one; so a name already taken is refused here, before anything is sent.
+ * new one; so a name already taken is refused here, before anything is sent. `pick` opens
+ * it on a group chosen from the list of those no team draws on.
  */
-function Enable({ teams, onApplied }: { teams: AdminTeam[]; onApplied: () => void }): JSX.Element {
+function Enable({ teams, pick, onApplied }: { teams: AdminTeam[]; pick: AdminGroup | null; onApplied: () => void }): JSX.Element {
   const { admin, me, notify } = useConsole();
   const [form, setForm] = useState<{ group: string; name: string; named: boolean } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [done, setDone] = useState<{ name: string; detail: Record<string, unknown> | null } | null>(null);
   const [groups, reloadGroups] = useLoad(() => (form !== null ? admin.groups() : Promise.resolve([])), [admin, form !== null]);
+
+  useEffect(() => {
+    if (!pick) return;
+    setDone(null);
+    setPreviewing(false);
+    setForm({ group: pick.external_id, name: nameFrom(pick), named: false });
+  }, [pick]);
   const taken = form ? teams.some((t) => t.name === form.name) : false;
   const malformed = form ? form.name !== "" && !TEAM_NAME.test(form.name) : false;
   const groupOf = (id: string) => (groups.state === "ready" ? groups.data.find((g) => g.external_id === id) : undefined);

@@ -787,7 +787,7 @@ install() {
   if [ "$OS" = Darwin ]; then
     for f in "$TUI" "$MAC_APP"; do
       if [ -e "$f" ] && xattr -p com.apple.quarantine "$f" >/dev/null 2>&1; then
-        say "note: the release is unsigned and quarantined; if Gatekeeper blocks it: xattr -dr com.apple.quarantine $LIB_DIR $TUI $MAC_APP"
+        say "note: the programs carry no Apple signature and are quarantined; if Gatekeeper blocks them: xattr -dr com.apple.quarantine $LIB_DIR $TUI $MAC_APP"
         break
       fi
     done

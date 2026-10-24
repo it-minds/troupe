@@ -1,0 +1,339 @@
+#!/usr/bin/env bash
+# Upgrades the kind cluster goes through with no hand step. Two of them:
+#
+#   scripts/kind-upgrade-check                      # from the newest release below VERSION
+#   scripts/kind-upgrade-check --from 0.24.0-beta   # from a release you name
+#   scripts/kind-upgrade-check --recreate           # delete the kind cluster first
+#   scripts/kind-upgrade-check require-tls [chart]  # a plane without control TLS, to TLS only
+#
+# The default is the release before this one, installed from the registry, upgraded to
+# this tree; `require-tls` is the one case it is not (below, at `require_tls`).
+#
+# What CI's cluster job runs beside the fresh install (`.github/workflows/cluster.yml`),
+# and the same steps a deployment takes (docs/admin/upgrading.md):
+#
+#   1. the previous release's chart from `oci://ghcr.io/it-minds/charts/troupe`, its CRDs
+#      and its images, on a kind cluster with nothing of Troupe on it, by `remote-up`;
+#   2. what a running organisation has, seeded through the protocol
+#      (apps/troupe_operator/test/upgrade/seed_test.exs);
+#   3. the images of this tree, built and loaded;
+#   4. this tree's CRDs, applied as the upgrade page says, then `helm upgrade` to this
+#      tree's chart, its migrate hook first; nothing else;
+#   5. what was seeded, asked of the new release (test/upgrade/check_test.exs).
+#
+# A hook that fails, a CRD the API server refuses, a rollout that does not finish or a
+# seeded thing lost fails it, and the migration Job's, the plane's and the operator's logs
+# are left in `.e2e/upgrade/logs/`. The step that needs a person is the failure: the only
+# hands here are the two the upgrade page names.
+#
+# The previous release is the newest `v*` tag at or below VERSION that is not this commit:
+# on a chunk branch the release it was cut from, on a release commit the one before. Say
+# another with `--from` or `TROUPE_UPGRADE_FROM`. N-1 to N only: a skipped release is
+# tested nowhere.
+#
+# Starts from a cluster with no Troupe on it, and refuses one that has: an upgrade from a
+# release to itself, or from this tree to an older one, proves nothing. `--recreate` runs
+# `scripts/kind-down` first. On a laptop the suite runs in the toolbox container
+# (`scripts/e2e`); on CI (`CI` set) `mix troupe.e2e` runs directly.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# Git Bash on Windows would rewrite `/kind` and the like in `docker exec` arguments.
+export MSYS_NO_PATHCONV=1
+
+cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
+context="kind-${cluster}"
+namespace="troupe-system"
+registry_chart="${TROUPE_UPGRADE_CHART:-oci://ghcr.io/it-minds/charts/troupe}"
+logs=".e2e/upgrade/logs"
+from="${TROUPE_UPGRADE_FROM:-}"
+recreate=false
+
+kc() { kubectl --context "$context" "$@"; }
+
+# -- require-tls ----------------------------------------------------------------
+#
+# A plane that ran without TLS on its control port, a worker pod made then (which dials in
+# plaintext), and an upgrade to `plane.controlTls.enabled` and `requireTls`. The plane
+# closes the pod's plaintext connection, so the pod can neither enrol nor be drained; the
+# operator replaces it, and its successor enrols over TLS. Passes when that happens within
+# `TROUPE_UPGRADE_TIMEOUT` seconds (300), with nobody deleting a pod. Against
+# `scripts/remote-up`'s cluster and its profile (`TROUPE_PROFILE_NAME`, `dev`); `chart` is
+# the chart to upgrade to, `charts/troupe` unless named, and the release's other values are
+# kept (`--reuse-values`).
+#
+# Not idempotent by accident: it leaves the cluster as `requireTls: true`, as a plane ends
+# up. It deletes the profile's pod once, while setting the case up: that is the pod made
+# "before its namespace had the CA", and what the check is about is everything after it.
+require_tls() {
+  local chart="${1:-charts/troupe}"
+  local profile="${TROUPE_PROFILE_NAME:-dev}"
+  local workers="troupe-w-${profile}"
+  local timeout="${TROUPE_UPGRADE_TIMEOUT:-300}"
+  local before now deadline
+
+  # Whether the profile's pod is told where the plane's CA is, which it is exactly when it
+  # dials the control port with TLS.
+  dials_tls() {
+    kc -n "$workers" get pod "${workers}-0" \
+      -o jsonpath='{range .spec.containers[0].env[*]}{.name}{"\n"}{end}' | grep -qx TROUPE_PLANE_CA_PATH
+  }
+
+  echo "==> a plane without TLS on its control port, and a pod made then"
+  helm --kube-context "$context" upgrade troupe "$chart" -n "$namespace" --reuse-values \
+    --set plane.controlTls.enabled=false --set plane.controlTls.requireTls=false --wait --timeout 5m
+  kc -n "$namespace" rollout status deployment/troupe-operator --timeout=180s
+  kc -n "$namespace" rollout status deployment/troupe-plane --timeout=180s
+  # Setup only: wait for the operator to have written the template without the CA.
+  sleep 20
+  kc -n "$workers" delete pod "${workers}-0"
+  kc -n "$workers" wait --for=condition=Ready "pod/${workers}-0" --timeout=300s
+  if dials_tls; then
+    echo "kind-upgrade-check: the pod made without control TLS dials with TLS; nothing to check" >&2
+    exit 1
+  fi
+  before=$(kc -n "$workers" get pod "${workers}-0" -o jsonpath='{.metadata.uid}')
+
+  echo "==> the upgrade to requireTls: true"
+  helm --kube-context "$context" upgrade troupe "$chart" -n "$namespace" --reuse-values \
+    --set plane.controlTls.enabled=true --set plane.controlTls.requireTls=true --wait --timeout 5m
+  kc -n "$namespace" rollout status deployment/troupe-operator --timeout=180s
+  kc -n "$namespace" rollout status deployment/troupe-plane --timeout=180s
+
+  echo "==> waiting up to ${timeout}s for the operator to replace the plaintext pod"
+  deadline=$((SECONDS + timeout))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    now=$(kc -n "$workers" get pod "${workers}-0" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
+    if [ -n "$now" ] && [ "$now" != "$before" ] && dials_tls &&
+        kc -n "$workers" wait --for=condition=Ready "pod/${workers}-0" --timeout=10s >/dev/null 2>&1; then
+      echo "kind-upgrade-check: require-tls: the pod was replaced and its successor dials with TLS"
+      kc -n "$namespace" get wp "$profile" \
+        -o jsonpath='{range .status.conditions[?(@.type=="UpgradePending")]}{.type}={.status} {.message}{"\n"}{end}'
+      return 0
+    fi
+    sleep 5
+  done
+
+  echo "kind-upgrade-check: require-tls: the plaintext pod is still there after ${timeout}s" >&2
+  kc -n "$namespace" get wp "$profile" \
+    -o jsonpath='{range .status.conditions[?(@.type=="UpgradePending")]}{.type}={.status} {.message}{"\n"}{end}' >&2
+  exit 1
+}
+
+if [ "${1:-}" = require-tls ]; then
+  shift
+  require_tls "$@"
+  exit 0
+fi
+
+# -- the previous release, upgraded to this tree --------------------------------
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --from) from="${2:?--from needs a version}"; shift 2 ;;
+    --from=*) from="${1#--from=}"; shift ;;
+    --recreate) recreate=true; shift ;;
+    -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 0 ;;
+    *) echo "kind-upgrade-check: unknown argument $1" >&2; exit 2 ;;
+  esac
+done
+
+for tool in kind kubectl helm docker git; do
+  command -v "$tool" >/dev/null || { echo "kind-upgrade-check: $tool is required" >&2; exit 1; }
+done
+
+started=$(date +%s)
+mark=$started
+times=()
+step() {
+  local now
+  now=$(date +%s)
+  if [ -n "${current:-}" ]; then times+=("$(printf '%-44s %4ds' "$current" $((now - mark)))"); fi
+  current="$1"
+  mark=$now
+  echo
+  echo "==> $1"
+}
+
+# -- which release ------------------------------------------------------------
+
+# A version as `sort -V` orders releases: `1.0.0-rc.1` before `1.0.0`, because a tilde
+# sorts before everything, the end of the string included.
+order_key() { printf '%s\n' "$1" | sed 's/-/~/'; }
+
+# Every release tag as "<version> <commit>", the commit an annotated tag points at.
+release_tags() {
+  local listed
+  if listed=$(git ls-remote --tags origin 'refs/tags/v*' 2>/dev/null) && [ -n "$listed" ]; then
+    printf '%s\n' "$listed" | awk '{
+      ref = $2; sub("^refs/tags/v", "", ref)
+      if (ref ~ /\^\{\}$/) { sub(/\^\{\}$/, "", ref); peeled[ref] = $1 } else { plain[ref] = $1 }
+    } END { for (r in plain) print r, ((r in peeled) ? peeled[r] : plain[r]) }'
+  else
+    git tag -l 'v*' --format='%(refname:strip=2) %(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end)' |
+      sed 's/^v//'
+  fi
+}
+
+previous_release() {
+  local version head ceiling
+  version="$(tr -d '[:space:]' < VERSION)"
+  head="$(git rev-parse HEAD)"
+  ceiling="$(order_key "$version")"
+  release_tags |
+    awk -v head="$head" '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ && $2 != head { print $1 }' |
+    while read -r candidate; do
+      key="$(order_key "$candidate")"
+      if [ "$(printf '%s\n%s\n' "$key" "$ceiling" | sort -V | tail -1)" = "$ceiling" ]; then
+        echo "$key"
+      fi
+    done |
+    sort -V | tail -1 | sed 's/~/-/'
+}
+
+if [ -z "$from" ]; then
+  from="$(previous_release)"
+fi
+if [ -z "$from" ]; then
+  echo "kind-upgrade-check: no release at or below $(cat VERSION) to upgrade from; say one with --from" >&2
+  exit 1
+fi
+expect_commit="$(git rev-parse HEAD)"
+
+echo "kind-upgrade-check: from ${from} (the registry's chart and images) to this tree at ${expect_commit:0:12}"
+
+rm -rf "$logs" .e2e/upgrade/seed.json
+mkdir -p "$logs"
+
+# What a failure leaves to read: the migration Job (a failed hook is kept for its log), the
+# plane, the operator, the release's history and what the cluster said.
+collect() {
+  local status=$?
+  if [ "$status" -ne 0 ]; then
+    echo
+    echo "kind-upgrade-check: failed in '${current:-setup}'; the logs are in $logs/" >&2
+    {
+      kc get jobs,pods -n "$namespace" -o wide
+      kc describe job -n "$namespace" troupe-plane-migrate
+    } > "$logs/migrate-job.txt" 2>&1 || true
+    kc logs -n "$namespace" job/troupe-plane-migrate --all-containers > "$logs/migrate.log" 2>&1 || true
+    kc logs -n "$namespace" deployment/troupe-plane --tail=100000 > "$logs/plane.log" 2>&1 || true
+    kc logs -n "$namespace" deployment/troupe-plane --previous --tail=20000 > "$logs/plane-previous.log" 2>&1 || true
+    kc logs -n "$namespace" deployment/troupe-operator --tail=20000 > "$logs/operator.log" 2>&1 || true
+    kc logs -n "$namespace" deployment/troupe-operator --previous --tail=20000 > "$logs/operator-previous.log" 2>&1 || true
+    helm --kube-context "$context" history troupe -n "$namespace" > "$logs/helm-history.txt" 2>&1 || true
+    kc get workerprofiles -A -o yaml > "$logs/workerprofiles.yaml" 2>&1 || true
+    kc get pods -A -o wide > "$logs/pods.txt" 2>&1 || true
+    kc get events -A --sort-by=.lastTimestamp > "$logs/events.txt" 2>&1 || true
+    for ns in $(kc get namespaces -o name 2>/dev/null | sed -n 's|^namespace/\(troupe-w-.*\)|\1|p'); do
+      kc logs -n "$ns" -l app.kubernetes.io/name=troupe-worker --all-containers --tail=5000 \
+        > "$logs/worker-${ns}.log" 2>&1 || true
+    done
+  fi
+  step "done"
+  echo
+  printf '  %s\n' "${times[@]}"
+  printf '  %-44s %4ds\n' "total" $(( $(date +%s) - started ))
+  exit "$status"
+}
+trap collect EXIT
+
+# -- 0. a cluster with nothing of Troupe on it ----------------------------------
+
+step "0. A cluster with no Troupe on it"
+if [ "$recreate" = true ] && kind get clusters 2>/dev/null | grep -qx "$cluster"; then
+  scripts/kind-down
+fi
+if kind get clusters 2>/dev/null | grep -qx "$cluster" &&
+    helm --kube-context "$context" status troupe -n "$namespace" >/dev/null 2>&1; then
+  echo "kind-upgrade-check: $cluster already runs a Troupe; this starts from none." >&2
+  echo "Run it with --recreate, or scripts/kind-down first." >&2
+  exit 1
+fi
+
+# The previous release's own kind values: the chart it was published with renders those,
+# and a value added since would be refused by its schema or mean nothing to it.
+tag="v${from}"
+if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+  git fetch --quiet --depth 1 origin "refs/tags/${tag}:refs/tags/${tag}"
+fi
+git show "${tag}:dev/kind/values.yaml" > "$logs/values-${from}.yaml"
+
+# The services beside the chart (PostgreSQL, the object store, OpenBao, the identity
+# provider) are a deployment's own and are not upgraded with Troupe, so this tree's run
+# under both releases. Where they differ from the previous release's, the difference is a
+# precondition the upgrade page has to name, and it is said here.
+if ! git show "${tag}:dev/kind/dependencies.yaml" | diff -q - dev/kind/dependencies.yaml >/dev/null; then
+  echo "kind-upgrade-check: dev/kind/dependencies.yaml differs from ${tag}'s; this tree's runs under both."
+  git show "${tag}:dev/kind/dependencies.yaml" | diff - dev/kind/dependencies.yaml > "$logs/dependencies.diff" || true
+fi
+
+# -- 1. the previous release, from the registry ---------------------------------
+
+step "1. ${from}, from the registry"
+TROUPE_CHART="$registry_chart" \
+  TROUPE_CHART_VERSION="$from" \
+  TROUPE_KIND_VALUES="$logs/values-${from}.yaml" \
+  TROUPE_IMAGE_TAG="$from" \
+  TROUPE_IMAGES=pull \
+  TROUPE_PROFILE_NAME=upgrade \
+  scripts/remote-up 2>&1 | tee "$logs/remote-up-${from}.log"
+
+# The suite's own runner: the toolbox container on a laptop, `mix` on CI's runner.
+e2e() {
+  if [ -n "${CI:-}" ]; then
+    mix troupe.e2e "$@"
+  else
+    scripts/e2e "$@"
+  fi
+}
+export TROUPE_PROFILE_NAME=upgrade
+export TROUPE_UPGRADE_FROM="$from"
+export TROUPE_UPGRADE_EXPECT_COMMIT="$expect_commit"
+
+# -- 2. what a running organisation has -----------------------------------------
+
+step "2. Seeding ${from}"
+e2e test/upgrade/seed_test.exs 2>&1 | tee "$logs/seed.log"
+
+# -- 3. this tree's images ------------------------------------------------------
+
+step "3. This tree's images"
+scripts/build-images 2>&1 | tee "$logs/build-images.log"
+for image in troupe-operator troupe-plane troupe-worker troupe-a2a troupe-gui; do
+  docker image inspect "ghcr.io/it-minds/${image}:dev" >/dev/null
+done
+
+# -- 4. the upgrade, as the upgrade page has it ---------------------------------
+
+step "4. The CRDs, then helm upgrade"
+helm show crds charts/troupe | kc apply --server-side --force-conflicts -f - 2>&1 | tee "$logs/crds.log"
+
+# The workers' AppArmor profile and the Pod Security level as `remote-up` decided them for
+# the release before: properties of the node, which the upgrade does not change.
+apparmor=false
+if docker exec "${cluster}-control-plane" sh -c \
+    '[ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" = Y ] && command -v apparmor_parser' >/dev/null 2>&1; then
+  apparmor=true
+fi
+pod_security=baseline
+if [ "$apparmor" = true ]; then pod_security=privileged; fi
+
+helm --kube-context "$context" upgrade troupe charts/troupe \
+  --namespace "$namespace" \
+  --values dev/kind/values.yaml \
+  --set "worker.appArmor.enabled=${apparmor}" \
+  --set "podSecurity.level=${pod_security}" \
+  --wait --timeout 10m 2>&1 | tee "$logs/helm-upgrade.log"
+
+kc rollout status -n "$namespace" deployment/troupe-plane --timeout=300s
+kc rollout status -n "$namespace" deployment/troupe-operator --timeout=300s
+
+# -- 5. what was seeded, asked of the new release -------------------------------
+
+step "5. Checking what ${from} left"
+e2e test/upgrade/check_test.exs 2>&1 | tee "$logs/check.log"
+
+echo
+echo "kind-upgrade-check: ${from} upgraded to ${expect_commit:0:12} with nothing done by hand, and kept what it held."
