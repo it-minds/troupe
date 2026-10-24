@@ -109,10 +109,11 @@ Now have it fixed, in the terminal UI:
 troupe
 ```
 
-Type `fix add.py` and press Enter. Reading is automatic; editing a file and running a
-command are not. The agent stops at each and the window asks for an
-[approval](glossary.md#approval): `y` allows it, `n` denies it, `a` allows that tool for the
-rest of the session. Ctrl-D quits.
+Type `fix add.py` and press Enter: the `build` agent takes it, in a window of its own.
+Reading is automatic; editing a file and running a command are not. The agent stops at
+each and its window asks for an [approval](glossary.md#approval): press the window's number
+(or Enter) to open it, then `y` allows it, `n` denies it, `a` allows that tool for the rest
+of the session. Ctrl-D quits.
 
 ![The terminal UI: the agent has read add.py, found the subtraction, and waits for approval of its one-line edit](assets/tui-session.png)
 
@@ -130,7 +131,9 @@ Every model call's tokens are in the session's log. The terminal UI shows each w
 tokens sent and received (`↑5.2k ↓184`), and the desktop app shows each session's cost. The
 log is JSON, a line an event, under `~/.local/state/troupe/sessions/`
 (`%LOCALAPPDATA%\troupe\sessions\` on Windows), and it answers the question by itself. With
-`jq`, for every session on this machine, which after this page is two:
+`jq`, for every session on this machine, which after this page is three (the `plan` run,
+the terminal UI's session, and the window `fix add.py` opened, which is a session of its
+own):
 
 <!-- quick-start: sh -->
 ```sh
