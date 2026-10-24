@@ -417,7 +417,7 @@ token, the ACL and the NetworkPolicy; a load-balancer ACL or a VPN in front of `
 deserves a look before production. The PITR drill (`scripts/pitr-drill`) is a script, not
 a schedule.
 
-After the first install, an upgrade is [routine-tasks.md](routine-tasks.md#upgrade).
+After the first install, an upgrade is [upgrading.md](upgrading.md), one release at a time.
 
 ## 7. Uninstalling
 

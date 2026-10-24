@@ -47,15 +47,15 @@ Arrows point at what an app depends on; a change flows back along them. So:
 | `clients/vscode/**` | — | the VS Code extension: typecheck, unit tests, its suite inside a real VS Code on Linux and Windows (and macOS in a full run), and the `.vsix` as the run's artifact |
 | `docs/user/cli-reference.md` | — | TUI `mix check`, which holds it to the command tables |
 | `apps/troupe_daemon` | daemon | native builds (PR) |
-| `apps/troupe_plane` | plane, worker | GUI-e2e |
+| `apps/troupe_plane` | plane, worker | GUI-e2e; the cluster suite (pull request) if its migrations |
 | `apps/troupe_operator` | operator | the cluster suite (pull request) |
 | `apps/troupe_a2a` | a2a | — |
 | `apps/troupe_core` | core, gateway, daemon, worker | TUI, protocol, GUI-e2e |
 | `apps/troupe_gateway` | gateway, daemon, worker | TUI, protocol, GUI-e2e |
 | `apps/troupe_protocol`, `config/`, `mix.lock` | all eight | TUI, protocol, GUI-e2e |
 | `charts/`, `docker/` | — | chart (lint, render, kubeconform), GUI-e2e, the cluster suite (pull request) |
-| `dev/kind/`, `scripts/kind-up`, `scripts/remote-up`, `scripts/build-images` | — | chart, the cluster suite (pull request) |
-| `PROTOCOL.md`, `protocol/`, `VERSION`, `.tool-versions`, `.github/workflows/` | everything | but the native builds, unless `native.yml` changed, and the cluster suite, unless `cluster.yml` changed |
+| `dev/kind/`, `scripts/kind-up`, `scripts/remote-up`, `scripts/build-images`, `scripts/kind-upgrade-check` | — | chart, the cluster suite (pull request) |
+| `PROTOCOL.md`, `protocol/`, `VERSION`, `.tool-versions`, `.github/workflows/` | everything | but the native builds, unless `native.yml` changed, and the cluster suite, unless `cluster.yml` or `VERSION` changed |
 | anything else (docs) | — | only `versions` |
 
 `versions` runs whatever changed, because a moved file can break any of what it checks:
@@ -83,14 +83,19 @@ flowchart LR
 
 ## The suite that needs a cluster
 
-[`cluster.yml`](../../.github/workflows/cluster.yml) is one job, `mix troupe.e2e` on a kind
-cluster (Decision 889). It runs:
+[`cluster.yml`](../../.github/workflows/cluster.yml) is two jobs side by side, each on a
+kind cluster of its own (Decision 889): `kind`, the chart installed fresh and `mix
+troupe.e2e`, and `upgrade`, the release before this one installed from the registry and
+upgraded to this tree ([below](#the-upgrade-from-the-previous-release), Decision 936). They
+run:
 
 - on a **pull request** that changes what the cluster runs: `charts/` (the CRDs and the
   admission policy among it), `docker/`, `dev/kind/`, `scripts/kind-up`,
-  `scripts/remote-up`, `scripts/build-images`, `apps/troupe_operator/` (the operator and
-  the suite itself), `cluster.yml`, or what the images are built from that lives elsewhere
-  (`clients/gui/Dockerfile`, the repository's `.dockerignore`). Into `main` through
+  `scripts/remote-up`, `scripts/build-images`, `scripts/kind-upgrade-check`,
+  `apps/troupe_operator/` (the operator and the suite itself), `cluster.yml`, the plane's
+  migrations (`apps/troupe_plane/priv/repo/migrations/`), `VERSION`, or what the images are
+  built from that lives elsewhere (`clients/gui/Dockerfile`, the repository's
+  `.dockerignore`). Into `main` through
   `ci.yml`, after `lint`, the test legs and `chart` have passed or been skipped; into a
   `development-*` chunk through `dev-check.yml`, after its compile, because a fixer's
   machine may have no cluster and the chunk's own pull request into `main` comes only once
@@ -119,6 +124,56 @@ operator; a change elsewhere does not run it.
 troupe.e2e` with kind, kubectl and helm on the machine). The metadata test says it skipped
 the connection where nothing answers at that address; CI sets
 `TROUPE_E2E_METADATA_STAND_IN=1`, so there a missing stand-in fails it.
+
+### The upgrade from the previous release
+
+`upgrade` runs `scripts/kind-upgrade-check`, which is what a deployment does with every
+release ([../admin/upgrading.md](../admin/upgrading.md)) with an organisation in it:
+
+1. **The previous release**: the newest `v*` tag at or below `VERSION` that is not this
+   commit (on a chunk branch the release it was cut from, on a release commit the one
+   before), or `--from <version>` / `TROUPE_UPGRADE_FROM`. Its chart from
+   `oci://ghcr.io/it-minds/charts/troupe` (`TROUPE_UPGRADE_CHART` names another, a `.tgz`
+   or a directory, for a machine that cannot reach the registry), its CRDs, its images
+   pulled from `ghcr.io/it-minds`, and its own tag's `dev/kind/values.yaml`, by
+   `scripts/remote-up` on a kind cluster with no Troupe on it.
+2. **A seed** through the protocol (`apps/troupe_operator/test/upgrade/seed_test.exs`): a
+   team with a profile granted, the profile following the release with the scripted `fake`
+   model, a session that ran a turn and went dormant, the organisation's memory, a client
+   version policy and the signing key a client pins, a webhook trigger with its key that
+   fired once, and the audit rows all of that wrote.
+3. **This tree's images**, built and loaded (`scripts/build-images`).
+4. **The upgrade, and nothing else**: this tree's CRDs (`helm show crds charts/troupe |
+   kubectl apply --server-side --force-conflicts -f -`), then `helm upgrade` to
+   `charts/troupe`, its migrate hook first, and the rollout.
+5. **The check** (`test/upgrade/check_test.exs`): `/.well-known/troupe` reports this
+   commit; the audit chain verifies and still has the seeded rows; the team and the profile
+   are there; the client policy is served and verifies under the key pinned before; the
+   profile is Ready with its pods replaced on the new release by themselves; the dormant
+   session wakes there, its log read back, and answers a turn; the memory reaches a new
+   session; the trigger fires on its old key.
+
+A hook that fails, a CRD the API server refuses, a rollout that does not finish or a seeded
+thing lost fails the job, and `.e2e/upgrade/logs/` (the migration Job's log, the plane's,
+the operator's, the workers', the release's history, the pods and events) is its artifact.
+A step that needed a person is the failure: there is no step for one.
+
+The services beside the chart (PostgreSQL, MinIO, OpenBao, Dex in `dev/kind/dependencies.yaml`)
+are a deployment's own and are this tree's under both releases; where they changed since
+the previous release, the script says so and writes the diff beside the logs, since that is
+a precondition the upgrade page has to name.
+
+N−1 to N only. A release skipped on the way is tested nowhere, and the upgrade page says
+so.
+
+**What it costs.** About as long as the fresh job, on a runner of its own: the five image
+builds, a second cluster, the seed and the check, each with a worker pod to start. Beside
+`kind`, so a pull request waits for the longer of the two rather than their sum.
+
+**On a laptop**, `scripts/kind-upgrade-check` (with `--recreate` where `scripts/remote-up`
+already put a Troupe on the cluster; it refuses to upgrade one it did not install) under
+the plane lock. The suite runs in the toolbox container, as `scripts/e2e` runs it; the
+times of each step are printed at the end.
 
 ## Pre-release: a build to try, now
 

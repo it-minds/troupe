@@ -108,8 +108,19 @@ Decision 915 is the long form.
 
 - `mix troupe.e2e` (operator): the cluster suite, against `scripts/remote-up`'s kind
   cluster; CI's `cluster` job.
+- `scripts/kind-upgrade-check [--from <version>] [--recreate]`: the release before this
+  one from the registry, an organisation seeded through the protocol, this tree's CRDs and
+  `helm upgrade`, and every seeded thing asked for again; CI's `upgrade` job, and what a
+  fixer runs under the plane lock before pushing a change to the chart, the operator or a
+  migration ([ci.md](ci.md#the-upgrade-from-the-previous-release)).
 - `scripts/pitr-drill`: restores the compose PostgreSQL to a point, rebuilds the index and
   asserts the lost session came back ([../admin/backup-restore.md](../admin/backup-restore.md)).
+- `scripts/dev-restore-rehearsal [--keep]`: a database and a bucket of its own on the dev
+  stack, seeded through the plane's modules, dumped (`pg_dump`, `mc mirror`), dropped,
+  restored, and asked whether every table, the audit chain, the memory, an object's bytes
+  and the index rebuilt from the bucket came back; prints each step's time. Run where
+  `scripts/dev-up` and `mix` run (on Windows, under WSL). The restore the
+  admin pages outline is this one ([../admin/upgrading.md](../admin/upgrading.md#7-restore)).
 - The TUI's suite (`mix check` in `clients/tui`) and the GUI's (`pnpm test`), whose
   `test/support` is a protocol-accurate identity provider, plane, worker and daemon; the
   GUI's plane end-to-end suite runs in CI against a plane built from the same commit

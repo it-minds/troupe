@@ -4,7 +4,12 @@
 # nightly and a release); `dev-check.yml` on a pull request into a `development-*` chunk.
 # Either calls it only when the change touches what the cluster runs: the chart and its
 # CRDs and admission policy, the operator and its suite, the images, the kind cluster and
-# the scripts that bring it up, and this file. `docs/developer/ci.md` has the picture.
+# the scripts that bring it up, the plane's migrations, VERSION, and this file.
+# `docs/developer/ci.md` has the picture.
+#
+# Two jobs, side by side: the fresh install and its suite (`kind`), and the release before
+# this one upgraded to this one (`upgrade`), which is what a deployment does with every
+# release and what nothing else tests.
 #
 # About twenty-five minutes, most of it building the five images and the suite itself. So
 # the CRDs and the admission policy go to the API server first, before anything is built:
@@ -290,3 +295,53 @@ jobs:
         with:
           name: cluster-logs
           path: cluster-logs/
+
+  # The release before this one, from the registry, upgraded to this tree: its chart, its
+  # CRDs and its images on a cluster of its own, an organisation seeded through the
+  # protocol, then this tree's CRDs and `helm upgrade` and nothing else, and every seeded
+  # thing asked for again (`scripts/kind-upgrade-check`, which a developer runs the same
+  # way). Beside the fresh install rather than after it: each builds the images and brings
+  # a cluster up, and one after the other would be an hour.
+  upgrade:
+    name: kind, the previous release upgraded to this one
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+
+      - uses: azure/setup-helm@v5
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-cluster-24.04-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-cluster-24.04-mix-
+
+      - run: mix deps.get
+
+      # Compiled before the cluster is, so the seed does not spend the cluster's time on it.
+      - run: MIX_ENV=test mix compile
+
+      # The previous release is the newest tag at or below VERSION that is not this commit;
+      # the script says which, and the log names it.
+      - name: Upgrade the previous release to this one
+        run: scripts/kind-upgrade-check
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: upgrade-logs
+          path: .e2e/upgrade/logs/

@@ -54,8 +54,16 @@ node_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{
 profile="${TROUPE_PROFILE_NAME:-dev}"
 [ -n "$node_ip" ] || { echo "e2e: could not find $node on the kind network" >&2; exit 1; }
 
+# What the suite reads from the environment and the container would not otherwise have:
+# the profile it runs on, and what `scripts/kind-upgrade-check` tells its two halves.
+passed=(--env "TROUPE_PROFILE_NAME=${profile}")
+for name in TROUPE_UPGRADE_FROM TROUPE_UPGRADE_EXPECT_COMMIT; do
+  if [ -n "${!name:-}" ]; then passed+=(--env "${name}=${!name}"); fi
+done
+
 exec docker run --rm --interactive $([ -t 0 ] && echo --tty) \
   --network kind \
+  "${passed[@]}" \
   --add-host "plane.localtest.me:${node_ip}" \
   --add-host "dex.localtest.me:${node_ip}" \
   --add-host "a2a.localtest.me:${node_ip}" \

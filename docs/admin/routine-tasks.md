@@ -10,6 +10,9 @@ Arguments and their meanings are in the method table
 
 ## Upgrade
 
+The whole of it, with the backup before, what to watch, going back and the restore, is
+[upgrading.md](upgrading.md); one release at a time. In short:
+
 1. `helm show crds "$chart" --version "$version" | kubectl apply --server-side
    --force-conflicts -f -`, with `$chart` and `$version` as in
    [installing.md §2](installing.md#2-crds-then-the-chart) — Helm never upgrades CRDs,
