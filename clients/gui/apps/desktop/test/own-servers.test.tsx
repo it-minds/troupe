@@ -101,7 +101,7 @@ describe("your own servers in a team session", () => {
 
     const panel = await waitFor(() => document.querySelector<HTMLElement>('section[aria-label="Offer your servers"]'), "the session's question about your servers");
     button("Offer them", panel)!.click();
-    await sees("alice@example.com offered tools that run on their own machine: client.notes.search");
+    await sees("Alice offered tools that run on their own machine: client.notes.search");
 
     // A teammate's client, whose two tools the session had, leaves.
     harness.worker.sessions.get("team-4")!.log.append(
@@ -110,6 +110,45 @@ describe("your own servers in a team session", () => {
       { kind: "user", subject: "bob@example.com" },
     );
     await sees("bob@example.com's 2 tools are no longer offered to the session, because their client left: client.mail.read, client.mail.send");
+  });
+
+  // D50: a server signed in to while the session is open was offered only at the next
+  // attachment, and every signed-in server went or none did.
+  it("asks again about a server signed in to while the session is open, and offers only the ones you tick", async () => {
+    harness.plane.seed("alice@example.com", { id: "team-5", title: "Two servers", profile: "dev" });
+    await harness.signIn({ store: webTokenStore() });
+    localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
+    localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");
+    startOnTheList();
+
+    unmount = render(<App />).unmount;
+    const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("Two servers")), "the team session's row");
+    row.click();
+
+    // One server: nothing to pick, as before.
+    const first = await waitFor(() => document.querySelector<HTMLElement>('section[aria-label="Offer your servers"]'), "the session's question about your servers");
+    expect(first.querySelector('fieldset[aria-label="Which servers to offer"]')).toBeNull();
+    button("Offer them", first)!.click();
+    await waitFor(() => says("Your servers are offered to this session: notes, 1 tool."), "the line saying what is offered");
+
+    // Signed in to another while the session is open; the window comes back to the front.
+    daemon.servers.push({ name: "wiki", layer: "user", source: "/home/ada/.config/troupe/mcp.json", url: "https://mcp.example.test/wiki", oauth: { client_id: "troupe-test-client" } });
+    daemon.finishSignIn("wiki");
+    window.dispatchEvent(new Event("focus"));
+
+    const again = await waitFor(() => document.querySelector<HTMLElement>('section[aria-label="Offer your servers"]'), "the question about both servers");
+    const boxes = await waitFor(() => {
+      const found = [...again.querySelectorAll<HTMLInputElement>('fieldset[aria-label="Which servers to offer"] input[type="checkbox"]')];
+      return found.length === 2 ? found : null;
+    }, "a box for each server");
+    expect(boxes.map((b) => b.checked)).toEqual([true, true]);
+    expect(again.textContent).toContain("notes · 1 tool");
+
+    boxes[0]!.click();
+    (await waitFor(() => button("Offer wiki", again), "the button naming what is ticked")).click();
+    await waitFor(() => says("Your servers are offered to this session: wiki, 1 tool."), "the line saying what is offered now");
+    await waitFor(() => harness.worker.tools.size === 1, "notes taken back");
+    expect([...harness.worker.tools.keys()]).toEqual(["team-5/client.wiki.search"]);
   });
 
   it("are not registered when you say not now", async () => {

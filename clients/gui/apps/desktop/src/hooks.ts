@@ -32,6 +32,7 @@ import type {
   DaemonIdentity,
   FleetSnapshot,
   GateAnswer,
+  OfferAnswer,
   OfferState,
   OnboardingSuggested,
   Principal,
@@ -418,8 +419,8 @@ export interface SessionHandle {
    * `none` where there is nothing to offer, or no daemon to make the calls.
    */
   offer: OfferState;
-  /** Answer the session's question about your servers. */
-  answerOffer(allow: boolean): void;
+  /** Answer the session's question about your servers: yes to those ticked, no, or the servers picked. */
+  answerOffer(allow: OfferAnswer): void;
   error: string | null;
 }
 
@@ -433,6 +434,9 @@ export interface SessionHandle {
  */
 /** How long a send made before the session's view has attached waits for it. */
 const ATTACH_WAIT_MS = 15_000;
+
+/** How often an open team session looks for a server of yours signed in to since it asked. */
+const OFFER_REFRESH_MS = 30_000;
 
 export function useSessionView(
   auth: AuthSession | null,
@@ -463,7 +467,7 @@ export function useSessionView(
   const [view, setView] = useState<SessionView | null>(null);
   const [offer, setOffer] = useState<OfferState>({ state: "none" });
   // The answer the offer's question waits for, until the person gives it.
-  const answering = useRef<((allow: boolean) => void) | null>(null);
+  const answering = useRef<((allow: OfferAnswer) => void) | null>(null);
   const local = onThisComputer(kind);
   // A laptop's session offered to the plane, steered from here through it.
   const relayed = kind === "remote";
@@ -499,10 +503,16 @@ export function useSessionView(
         ? new ServerOffer(daemon, {
             sessionId,
             confirmedBy: auth?.me?.subject,
-            confirm: () => new Promise<boolean>((resolve) => (answering.current = resolve)),
+            confirm: () => new Promise<OfferAnswer>((resolve) => (answering.current = resolve)),
             onState: (s) => live && setOffer(s),
           })
         : null;
+    // A server signed in to while this is open is offered then, not at the next attachment:
+    // looked for when the window comes back to the front, which is where a person returns
+    // from the browser that signed them in, and every little while for one signed in elsewhere.
+    const lookAgain = (): void => void offering?.refresh().catch(() => undefined);
+    if (offering) globalThis.addEventListener("focus", lookAgain);
+    const looking = offering ? setInterval(lookAgain, OFFER_REFRESH_MS) : null;
 
     // Two ways in, one view out. A session on this computer is reached over the socket
     // the daemon already has — there is no token to expire and nothing to reconnect
@@ -575,6 +585,8 @@ export function useSessionView(
     return () => {
       live = false;
       settle(null);
+      if (offering) globalThis.removeEventListener("focus", lookAgain);
+      if (looking) clearInterval(looking);
       answering.current?.(false);
       answering.current = null;
       const a = attachment.current;
@@ -678,7 +690,7 @@ export function useSessionView(
     return v.blobText(blob);
   }, []);
 
-  const answerOffer = useCallback((allow: boolean) => {
+  const answerOffer = useCallback((allow: OfferAnswer) => {
     const resolve = answering.current;
     answering.current = null;
     resolve?.(allow);

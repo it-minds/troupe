@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DaemonClient, ServerOffer, SessionAttachment } from "../src/index.js";
-import type { Attachment, OfferAsk, OfferState } from "../src/index.js";
+import type { Attachment, OfferAnswer, OfferAsk, OfferState } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 import { FakeWorker, encodeToken } from "./support/worker.js";
 
@@ -39,6 +39,7 @@ let daemon: FakeDaemon;
 let client: DaemonClient;
 let attachment: SessionAttachment | null = null;
 let asks: OfferAsk[];
+let offer: ServerOffer;
 let states: OfferState[];
 
 beforeEach(async () => {
@@ -65,13 +66,13 @@ afterEach(async () => {
   await worker.stop();
 });
 
-async function attach(opts: { allow?: boolean; scopes?: string[] } = {}): Promise<SessionAttachment> {
-  const offer = new ServerOffer(client, {
+async function attach(opts: { allow?: OfferAnswer | ((ask: OfferAsk) => OfferAnswer); scopes?: string[] } = {}): Promise<SessionAttachment> {
+  offer = new ServerOffer(client, {
     sessionId: SESSION,
     confirmedBy: "alice@example.com",
     confirm: async (ask) => {
       asks.push(ask);
-      return opts.allow ?? true;
+      return typeof opts.allow === "function" ? opts.allow(ask) : (opts.allow ?? true);
     },
     onState: (s) => states.push(s),
   });
@@ -179,6 +180,80 @@ describe("the person's own servers, offered to a pod session", () => {
     assert.equal(asks.length, 0);
     assert.equal(worker.calls.filter((c) => c.method === "tools.register").length, 1, "the next socket offered them again");
     assert.equal(daemon.calls.filter((c) => c.method === "mcp.list").length, listed, "the next socket listed the servers again");
+  });
+
+  // D50: a server signed in to while attached was offered only on the next attachment.
+  it("asks again about a server signed in to while attached, with what was offered still ticked", async () => {
+    await attach();
+    await until("the offer", settled("offered"));
+    assert.equal(asks.length, 1);
+
+    // Nothing new: a refresh asks nobody and registers nothing.
+    const registrations = () => worker.calls.filter((c) => c.method === "tools.register").length;
+    const before = registrations();
+    await offer.refresh();
+    assert.equal(asks.length, 1);
+    assert.equal(registrations(), before);
+
+    daemon.finishSignIn("wiki");
+    await offer.refresh();
+    await until("the offer of both", settled("offered", 2));
+    assert.equal(asks.length, 2);
+    assert.deepEqual(asks[1]!.servers, ["notes", "wiki"]);
+    assert.deepEqual(asks[1]!.chosen, ["notes", "wiki"]);
+    assert.deepEqual([...worker.tools.keys()].sort(), [`${SESSION}/client.notes.search`, `${SESSION}/client.wiki.search`]);
+    assert.deepEqual(states.at(-1), { state: "offered", tools: ["notes.search", "wiki.search"], servers: ["notes", "wiki"] });
+  });
+
+  it("offers only the servers the person picks, asking the session for those alone", async () => {
+    daemon.finishSignIn("wiki");
+    await attach({ allow: ["wiki"] });
+    await until("the offer", settled("offered"));
+
+    assert.deepEqual(asks[0]!.servers, ["notes", "wiki"]);
+    assert.deepEqual(asks[0]!.chosen, ["notes", "wiki"], "every server is ticked to begin with");
+    assert.deepEqual([...worker.tools.keys()], [`${SESSION}/client.wiki.search`]);
+    const registration = worker.calls.filter((c) => c.method === "tools.register").at(-1)!;
+    assert.deepEqual((registration.params["tools"] as Array<{ name: string }>).map((t) => t.name), ["wiki.search"]);
+    assert.deepEqual(states.at(-1), { state: "offered", tools: ["wiki.search"], servers: ["wiki"] });
+
+    // A server left out is not offered on the next socket, and nobody is asked.
+    await drop(attachment!);
+    await until("the offer on the new socket", settled("offered", 2));
+    assert.equal(asks.length, 1);
+    assert.deepEqual([...worker.tools.keys()], [`${SESSION}/client.wiki.search`]);
+  });
+
+  it("takes back a server the person unticks when they are asked again", async () => {
+    let answer: OfferAnswer = true;
+    await attach({ allow: () => answer });
+    await until("the offer", settled("offered"));
+
+    daemon.finishSignIn("wiki");
+    answer = ["wiki"];
+    await offer.refresh();
+    await until("the second offer", settled("offered", 2));
+    assert.deepEqual([...worker.tools.keys()], [`${SESSION}/client.wiki.search`]);
+    const unregister = worker.calls.filter((c) => c.method === "tools.unregister").at(-1)!;
+    assert.deepEqual(unregister.params["tools"], ["notes.search"]);
+  });
+
+  it("keeps what was offered when the person says not now to a server signed in to later", async () => {
+    let answer: OfferAnswer = true;
+    await attach({ allow: () => answer });
+    await until("the offer", settled("offered"));
+
+    daemon.finishSignIn("wiki");
+    answer = false;
+    await offer.refresh();
+    await until("the second answer", () => asks.length === 2 && states.filter((s) => s.state === "offered").length >= 2);
+    assert.deepEqual([...worker.tools.keys()], [`${SESSION}/client.notes.search`]);
+    assert.deepEqual(states.at(-1), { state: "offered", tools: ["notes.search"], servers: ["notes"] });
+    assert.equal(worker.calls.filter((c) => c.method === "tools.unregister").length, 0);
+
+    // Not asked about again until another server is signed in to.
+    await offer.refresh();
+    assert.equal(asks.length, 2);
   });
 
   it("are not offered by somebody who may only read the session", async () => {

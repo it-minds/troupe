@@ -29,6 +29,7 @@ defmodule Troupe.Plane.Harness do
     Budget,
     Build,
     Bundles,
+    ClientsSeen,
     ClientVersions,
     Connections,
     Drain,
@@ -270,6 +271,10 @@ defmodule Troupe.Plane.Harness do
 
     with {:ok, me} <- handle("me", %{}, context),
          {:ok, client_update} <- client_update(component, info["version"]) do
+      # Which version this person's client of this kind runs, for the administrators
+      # (#657); a client refused above is not recorded.
+      :ok = ClientsSeen.record(context.user, component, info)
+
       {:ok,
        %{
          "protocol_version" => Troupe.Protocol.version(),

@@ -95,6 +95,7 @@ jobs:
       native: ${{ steps.plan.outputs.native }}
       images: ${{ steps.plan.outputs.images }}
       cluster: ${{ steps.plan.outputs.cluster }}
+      keyring: ${{ steps.plan.outputs.keyring }}
     steps:
       - uses: actions/checkout@v7
 
@@ -181,6 +182,14 @@ jobs:
               # The images it builds: the GUI's, and what every image build's context leaves out.
               - clients/gui/Dockerfile
               - .dockerignore
+            # The code that keeps a secret in the OS's credential store, run against a real
+            # macOS keychain and Secret Service. `dev-check.yml` has the same list.
+            keyring:
+              - apps/troupe_protocol/lib/troupe/keyring.ex
+              - apps/troupe_protocol/lib/troupe/keyring/**
+              - apps/troupe_protocol/test/troupe/keyring_test.exs
+              - clients/gui/apps/desktop/src-tauri/src/secrets.rs
+              - .github/workflows/keyring.yml
 
       # Which umbrella apps to test follows the dependency graph, read from the apps' own
       # `mix.exs` rather than written down here, so it cannot drift: a change to an app
@@ -245,6 +254,9 @@ jobs:
           # changes what it deploys. Not for a change to the workflows in general, which
           # runs everything else, and not on a push to `main`, whose pull request ran it.
           cluster=$(flag eval '[ "$CLUSTER" = true ] || { [ "$FULL" = false ] && [ "$EVENT" = pull_request ] && on cluster; }')
+          # The credential stores: in a full run, and when their code changed. Not for a
+          # change to the workflows in general, since a macOS runner costs about ten Linux ones.
+          keyring=$(flag eval 'on keyring')
 
           {
             echo "apps=$json"
@@ -259,6 +271,7 @@ jobs:
             echo "native=$native"
             echo "images=$images"
             echo "cluster=$cluster"
+            echo "keyring=$keyring"
           } | tee -a "$GITHUB_OUTPUT"
 
           {
@@ -267,7 +280,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| umbrella apps | \`$json\` |"
-            for k in chart protocol tui gui gui_e2e desktop vscode native images cluster; do echo "| $k | ${!k} |"; done
+            for k in chart protocol tui gui gui_e2e desktop vscode native images cluster keyring; do echo "| $k | ${!k} |"; done
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Compile, format, credo, generated assets and boundaries: once, for the whole
@@ -1026,10 +1039,20 @@ jobs:
   # The one required check. Every job a run can have is under it, and it fails when any
   # of them failed or was cancelled; a job skipped because its part of the repository
   # did not change counts as passing, which is the point of skipping it.
+  # A real macOS keychain and a real Secret Service, for the code that keeps a secret in
+  # one (`keyring.yml`).
+  keyring:
+    name: the credential stores
+    needs: [changes]
+    if: needs.changes.outputs.keyring == 'true'
+    uses: ./.github/workflows/keyring.yml
+    permissions:
+      contents: read
+
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, desktop, vscode, native, cluster]
+    needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, desktop, vscode, native, cluster, keyring]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
