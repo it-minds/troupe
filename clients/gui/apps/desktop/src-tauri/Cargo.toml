@@ -55,7 +55,7 @@ sha2 = "0.10"
 # A plane's signed version policy (#657): plain Ed25519 over the document's bytes, which
 # minisign-verify does not check on its own. Already in the lock through rustls.
 ring = "0.17"
-base64 = "0.22"
+base64 = "0.23"
 semver = "1"
 tar = "0.4"
 flate2 = "1"
