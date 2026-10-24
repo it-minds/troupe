@@ -1465,14 +1465,7 @@ Found by the chunk 40 fixers, 2026-10-24.
   - On Linux with `TROUPE_INSTALL_DIR` set, output redirected with a plain `>` is overwritten by
     Burrito's `[i]` lines, which reach the file through a description of their own.
 - **The chart and the operator** (Decision 934).
-  - Still by hand on a cluster: copying the worker Secrets into each new worker namespace, and
-    the `troupe.dev/ingress=true` label.
-  - `SecretMissing=True` shows on a freshly installed profile right after the install although
-    the Secrets exist.
-  - The kind plane holds OpenBao's root token, so the cluster suite never exercises the grant
-    check with a narrow role; the GitHub grant is always reported optional, an App configured or not.
-  - `scripts/kind-up` under Git Bash needs `MSYS_NO_PATHCONV=1` (`chmod /kind` is
-    path-converted); `kind-upgrade-check` sets it, `kind-up` does not.
+  - The GitHub grant is always reported optional, an App configured or not.
   - The e2e `enrolment_test` depends on an earlier test writing the profile row;
     `Troupe.Plane.ClusterTest` times out starting its replica on a loaded machine.
 - **The mediums** (Decision 935).

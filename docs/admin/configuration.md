@@ -39,8 +39,9 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_OBJECT_ENDPOINT` | `http://minio.troupe-system.svc:9000` | copied into worker pods; same rules | `objectStore.endpoint` |
 | `TROUPE_OBJECT_BUCKET` | `troupe-sessions` | copied into worker pods | `objectStore.bucket` |
 | `TROUPE_OBJECT_REGION` | `us-east-1` | copied into worker pods, which sign for it | `objectStore.region` |
-| `TROUPE_OBJECT_SECRET_NAME` | `troupe-object-store` | Secret in each worker namespace with `access-key-id` and `secret-access-key` | `objectStore.secretName` |
+| `TROUPE_OBJECT_SECRET_NAME` | `troupe-object-store` | Secret with `access-key-id` and `secret-access-key`, copied from `troupe-system` into each worker namespace ([Part D](#part-d--secrets-the-chart-expects)) | `objectStore.secretName` |
 | `TROUPE_INGRESS_CLASS` | `nginx` | class of every per-pod Ingress; nginx annotations only for `nginx` | `operator.ingressClassName` |
+| `TROUPE_INGRESS_NAMESPACE`, `TROUPE_INGRESS_NAMESPACE_LABEL` | unset, `true` | the ingress controller's namespace, which the operator labels `troupe.dev/ingress=true` at every pass unless the second is `false`; unset, every profile checks that some namespace carrying the label runs a pod (`IngressNamespaceMissing`) | `operator.ingressNamespace`, `operator.labelIngressNamespace` |
 | `TROUPE_WORKERS_TLS_SECRET` | unset | one TLS Secret shared by every pod Ingress; ignored when a cert issuer is set | `operator.tlsSecretName` |
 | `TROUPE_WORKERS_CERT_ISSUER` | unset | cert-manager ClusterIssuer per pod Ingress, secret `<profile>-<ordinal>-tls` | `operator.certIssuer` |
 | `TROUPE_CILIUM_AVAILABLE` | false | writes a `CiliumNetworkPolicy` with FQDN rules per profile, and drops the public 443/80 rule from the worker NetworkPolicy ([Part E](#part-e--ports-and-network-policy)); each profile's `EgressByHostname` condition says whether it applied | `operator.ciliumAvailable` |
@@ -50,7 +51,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_WORKER_APPARMOR_PROFILE` | unset | the AppArmor profile, loaded on the nodes, every worker container runs under (`appArmorProfile: Localhost`); unset leaves the runtime's default, which refuses bubblewrap's mounts where a node enforces AppArmor. Never `Unconfined`. A name that is not letters, digits, `.`, `_` and `-` stops the operator at boot ([installing.md](installing.md#the-workers-apparmor-profile)) | `worker.appArmor.enabled`, `worker.appArmor.profile` (chart default on, `troupe-worker`) |
 | `TROUPE_WORKER_USER_NAMESPACES` | false | `true` gives every worker pod `hostUsers: false` and its worker container `procMount: Unmasked`, always together; off, a pod refuses every command ([installing.md](installing.md#the-workers-user-namespaces)) | `worker.userNamespaces` (chart default `true`; a non-boolean is refused) |
 | `TROUPE_DRAIN_TIMEOUT_SECONDS` | `300` | worker `terminationGracePeriodSeconds`; **not** put in the pod's env, so the worker's own drain wait stays 300. Keep it at 300 or more ([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)) | `operator.drainTimeoutSeconds` |
-| `TROUPE_IMAGE_PULL_SECRETS` | none | comma-separated pull secrets for worker pods | `imagePullSecrets` |
+| `TROUPE_IMAGE_PULL_SECRETS` | none | comma-separated pull secrets for worker pods, copied from `troupe-system` into each worker namespace | `imagePullSecrets` |
 | `TROUPE_WORKER_ALLOWED_ORIGINS` | none | browser origins, written to pods as `TROUPE_ALLOWED_ORIGINS`; the chart adds the plane's own origin when it serves the GUI | `operator.workerAllowedOrigins` |
 | `TROUPE_POLICY_NAME` | `default` | which `TroupePolicy` is read | none — keep `policy.name` at `default` |
 | `TROUPE_KUBE_CONTEXT`, `KUBECONFIG` | unset, `~/.kube/config` | outside a pod only; in a pod the ServiceAccount wins | none |
@@ -288,26 +289,53 @@ and arrive as new people, so pick the claim before people sign in where you can.
 
 ## Part D — Secrets the chart expects
 
-Troupe creates no Secrets. Each must exist before the pod that references it starts.
+The chart makes no Secret: each is yours to make in `troupe-system` (by hand, or with
+External Secrets Operator) before the pod that references it starts. A worker namespace's
+are the operator's copies of those ([below](#a-worker-namespaces-secrets)).
 
 | Secret | Namespace | Keys | Needed |
 |---|---|---|---|
 | `troupe-plane-database` | `troupe-system` | `url` | always |
 | `troupe-plane-secret-key-base` | `troupe-system` | `value` (≥ 64 bytes) | always |
 | `troupe-plane-oidc` | `troupe-system` | `client-secret` | console sign-in, unless the client secret is saved on the console's **Sign-in** screen instead (both copyable overlays leave `plane.oidc.secretName` empty) |
-| `troupe-object-store` | `troupe-system` **and every** `troupe-w-<profile>` | `access-key-id`, `secret-access-key` | the plane's index rebuild and private sessions; every session on a worker |
+| `troupe-object-store` | `troupe-system`, copied into every `troupe-w-<profile>` | `access-key-id`, `secret-access-key` | the plane's index rebuild and private sessions; every session on a worker |
 | break-glass (your name) | `troupe-system` | `token` | only when the door is wanted |
 | `troupe-plane-scim` | `troupe-system` | `token` | the deployment's SCIM token, with `plane.scim.enabled` |
 | `troupe-bao-token` | `troupe-system` | `token` | development only |
-| the profile's `llm.secretRef` | `troupe-w-<profile>` | `api-key` by default | every profile with a model key |
-| `troupe-mcp-<server>` | `troupe-w-<profile>` | `token` | every bundle MCP server with a `credential_ref` |
-| pull secrets | `troupe-system` and every worker namespace | `.dockerconfigjson` | private registries |
+| the profile's `llm.secretRef` | `troupe-system`, labelled `troupe.dev/worker-secret=true`, copied into `troupe-w-<profile>` | `api-key` by default | every profile with a model key |
+| `troupe-mcp-<server>` | `troupe-system`, labelled `troupe.dev/worker-secret=true`, copied into `troupe-w-<profile>` | `token` | every bundle MCP server with a `credential_ref` |
+| pull secrets | `troupe-system`, copied into every worker namespace | `.dockerconfigjson` | private registries |
 | `troupe-plane-tls`, the A2A TLS secret, worker TLS | their namespaces | `tls.crt`, `tls.key` | per-pod worker certificates are written by cert-manager when `operator.certIssuer` is set |
 | `troupe-plane-control-tls` | `troupe-system` | `tls.crt`, `tls.key`, `ca.crt` | written by cert-manager from the chart's `Certificate`; yours to provide with `plane.controlTls.certManager: false`. Mounted optionally: until it is there the plane registers no machine and says why, and the operator, given `ca.crt` alone, gives pods no CA yet |
 
-The operator's `SecretMissing` condition looks in the worker namespace, but its ClusterRole
-grants no verb on `secrets`, so the check cannot see a Secret that is there. Put the
-Secrets where the pods read them and do not rely on the condition.
+### A worker namespace's Secrets
+
+A pod mounts Secrets from its own namespace only, so at every pass the operator copies the
+ones a profile's pods mount there from `troupe-system`, by name and never by pattern: a
+rotation in `troupe-system` reaches the copies within a resync (half a minute) and the
+pods at their next start. Two kinds of name, trusted differently:
+
+- **The installation's** (`objectStore.secretName`, `imagePullSecrets`, and
+  `operator.tlsSecretName` where there is no `certIssuer`) come from the chart and are
+  copied as they are.
+- **A profile's** (`llm.secretRef`, an MCP server's `troupe-mcp-<server>`) come from the
+  profile, which the plane writes, and are copied only from a Secret labelled
+  `troupe.dev/worker-secret=true`, and where it is also annotated
+  `troupe.dev/worker-secret-profiles: <profile>,<profile>`, only to those profiles. So no
+  profile can name its way to the plane's own Secrets.
+
+A copy carries `troupe.dev/managed=operator` and `troupe.dev/copied-from:
+troupe-system/<name>`, goes with the namespace, and is deleted when the profile stops
+naming it or its source loses the label. Where `troupe-system` has no Secret of the name,
+one already in the worker namespace (yours, or External Secrets Operator's) is used as it
+is. The profile's `SecretMissing` condition, and the console's Overview, name any Secret
+found in neither, with where it was looked for, and the `kubectl label` line for one that
+lacks the label.
+
+```bash
+kubectl -n troupe-system create secret generic llm-credentials --from-literal=api-key=...
+kubectl -n troupe-system label secret llm-credentials troupe.dev/worker-secret=true
+```
 
 ---
 
@@ -323,9 +351,12 @@ Secrets where the pods read them and do not rely on the condition.
 | 4369, 9100 | epmd and Erlang distribution on plane pods, when clustered | pod to pod only |
 | 8080 | the GUI and the console | Service `troupe-gui` → Ingresses at `gui.basePath` and `console.basePath` on `plane.host` |
 
-**Namespace labels.** `troupe.dev/ingress=true` goes on the ingress controller's namespace
-(Helm cannot label a namespace it did not create): the plane, A2A and every worker admit
-HTTP only from it, and without it a worker Ingress answers 503. `troupe.dev/workers=true`
+**Namespace labels.** `troupe.dev/ingress=true` goes on the ingress controller's namespace:
+the plane, A2A and every worker admit HTTP only from it, and without it a worker Ingress
+answers 503. Named in `operator.ingressNamespace`, the operator puts it there at every pass
+(`operator.labelIngressNamespace: false` leaves it to you); unnamed, it is yours, and each
+profile's `IngressNamespaceMissing` condition and the console's Overview say, with the
+`kubectl label namespace` line, when no namespace that runs a pod carries it. `troupe.dev/workers=true`
 is put on every worker namespace by the operator; the plane admits the control port only
 from those and from operator pods.
 

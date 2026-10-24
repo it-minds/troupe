@@ -23,10 +23,18 @@ rules:
     resources: ["namespaces", "serviceaccounts", "services", "persistentvolumeclaims", "persistentvolumes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # A profile's mcpIdentities, as the file its pods read (Decision 747). ConfigMaps and
-  # not Secrets: nothing in them is secret, and the operator still has no verb on secrets.
+  # not Secrets: nothing in them is secret.
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The Secrets a worker namespace needs, copied from this namespace by name: the object
+  # store's, the pull secrets, the workers' TLS Secret and those a profile names. By name
+  # only, with no list or watch, so the operator reads a Secret something names and cannot
+  # go looking for others. It adds no reach: a StatefulSet the operator makes may mount any
+  # Secret of its namespace already.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "delete"]
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch", "delete"]

@@ -1,8 +1,8 @@
 # The chart, sized for one laptop.
 #
 # Every difference from the defaults is a development choice and is a reason not to run
-# this anywhere else: one replica each, no TLS, a static OpenBao token, and an identity
-# provider with a password in a ConfigMap.
+# this anywhere else: one replica each, no TLS on the HTTP side, OpenBao in dev mode, and an
+# identity provider with a password in a ConfigMap.
 
 # `troupe-system` here also runs the development dependencies (`dependencies.yaml`), which
 # `baseline` admits and `restricted` does not, so the chart is told the level rather than
@@ -19,6 +19,9 @@ operator:
     requests: {cpu: 100m, memory: 128Mi}
     limits: {cpu: "1", memory: 512Mi}
   ingressClassName: nginx
+  # ingress-nginx's kind manifest runs the controller here, and the operator labels the
+  # namespace `troupe.dev/ingress=true`, as it does where a deployment names its own.
+  ingressNamespace: ingress-nginx
   tlsSecretName: ""
   # `scripts/remote-up` installs Cilium, because kind's default CNI enforces no policy at
   # all — so without this the operator would write a CIDR rule where the cluster can
@@ -93,9 +96,13 @@ worker:
 
 bao:
   address: http://openbao.troupe-system.svc:8200
-  # Dev mode, so a root token rather than Kubernetes auth.
-  tokenSecretName: troupe-bao-token
-  tokenSecretKey: token
+  # Kubernetes auth, as a deployment has it: the plane logs in as its ServiceAccount under
+  # the role `troupe-plane`, which `dependencies.yaml` makes with the policies
+  # `docs/admin/openbao.md` lists and nothing more, so the plane's check of its grants
+  # (`Troupe.Plane.KMSCheck`) meets the role a deployment gives it rather than a root token
+  # that holds everything. OpenBao is in dev mode all the same, and its root token is the
+  # cluster suite's own, for its setup.
+  tokenSecretName: ""
 
 objectStore:
   endpoint: http://minio.troupe-system.svc:9000

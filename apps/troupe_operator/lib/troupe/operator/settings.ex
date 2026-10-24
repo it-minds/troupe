@@ -43,6 +43,14 @@ defmodule Troupe.Operator.Settings do
             # plane ever does, were left on the default.
             object_store_region: "us-east-1",
             ingress_class_name: "nginx",
+            # The namespace the ingress controller runs in, where the installation names it
+            # (the chart's `operator.ingressNamespace`). Named, the operator labels it
+            # `troupe.dev/ingress=true` at every pass while `label_ingress_namespace` holds,
+            # since every worker admits HTTP from such namespaces alone; unnamed, some
+            # namespace carrying the label and running a pod is a precondition each profile
+            # checks (`Troupe.Operator.IngressCheck`).
+            ingress_namespace: nil,
+            label_ingress_namespace: true,
             tls_secret_name: nil,
             # A cert-manager ClusterIssuer, where the deployment has one. Then every pod
             # gets its own certificate for its own hostname over HTTP-01, and
@@ -63,16 +71,17 @@ defmodule Troupe.Operator.Settings do
             # otherwise, and a container runtime's default makes that 1.5GB.
             max_ports: 65_536,
             # The secret a pod reads its object-store credentials from, in the pod's own
-            # namespace. Troupe creates no secrets; this names the one somebody else put
-            # there, the same way a profile names its LLM secret.
+            # namespace. Kept in the plane's namespace and copied into every worker
+            # namespace by the operator (`Troupe.Operator.WorkerSecrets`), as the Secret a
+            # profile names for its model key is.
             object_store_secret_name: "troupe-object-store",
             workers_scheme: "wss",
             workers_port: nil,
             # The pull secrets, by name, put on every worker pod. The same names the chart
             # puts on the plane and the operator: a registry that needs a credential to
-            # pull one image needs it for all three, and the secret has to exist in each
-            # worker namespace, which — like the object-store secret — is somebody else's
-            # job on purpose.
+            # pull one image needs it for all three, and the operator copies each from the
+            # plane's namespace into every worker namespace, as it does the object-store
+            # secret.
             image_pull_secrets: [],
             # The browser origins a worker admits on its WebSocket, passed to every pod
             # as `TROUPE_ALLOWED_ORIGINS`. Empty admits every origin — the token is what

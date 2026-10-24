@@ -41,7 +41,7 @@ gitops mode a manifest names its image, and a release reaches the workers with a
 | `spec` field | Meaning |
 |---|---|
 | `llm.endpoint`, `.provider`, `.model` | the worker's `TROUPE_BASE_URL`, `TROUPE_PROVIDER` (one of the [provider types](../user/configuration.md#provider-types); absent is `openai`, Chat Completions, which a gateway serves) and `TROUPE_MODEL`. The endpoint's host is an egress destination. Every other `llm` field needs `llm.endpoint`, because the pods are given the `llm` settings only with one: the plane and the resource's schema refuse a profile that sets any without it, naming them |
-| `llm.secretRef.{name,key}` | the Secret in the worker namespace injected as `TROUPE_API_KEY` (key `api-key`); not optional |
+| `llm.secretRef.{name,key}` | the Secret injected as `TROUPE_API_KEY` (key `api-key`); not optional. Kept in `troupe-system` labelled `troupe.dev/worker-secret=true`, it is copied into the worker namespace ([configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects)) |
 | `llm.prices` | dollars per million tokens by model, `{"qwen3-235b": {"input": …, "output": …}}` with optional `cacheRead` and `cacheWrite`, injected as `TROUPE_MODEL_PRICES`, for models the gateway does not price (with LiteLLM, every streamed call). An unpriced call costs nothing on the ledger and no money budget applies to it; the gateway's price wins where it gives one. Set through the API: the console's editor keeps it but does not show it |
 | `egress.fqdns`, `egress.gitHosts` | extra hosts the pods may reach, each matching a policy pattern. A wildcard is one leading label (`*.example.com`) and passes only a policy holding that same wildcard; any other star, a bare `*` included, is refused by name ([§4](#4-troupepolicy)) |
 | `storage.storageClassName` | the class a worker's disk comes from, one `allowedStorageClasses` names; absent is the cluster's default |
@@ -346,7 +346,9 @@ Cilium is available; a PodDisruptionBudget (`maxUnavailable: 1`); and a Stateful
 volume per pod. A profile with `mcpIdentities` also gets the ConfigMap
 `troupe-mcp-identities`, mounted as a directory at `/etc/troupe/mcp-identities` and named in
 `TROUPE_MCP_IDENTITIES_PATH`: the kubelet replaces the file in place when the profile
-changes, so a new identity or a rotation reaches running pods without a new revision.
+changes, so a new identity or a rotation reaches running pods without a new revision. And
+the Secrets its pods mount, copied from `troupe-system` by `Troupe.Operator.WorkerSecrets`
+([configuration.md](configuration.md#a-worker-namespaces-secrets)).
 
 The pod runs as non-root uid 1000 with seccomp `RuntimeDefault`, by default in a user
 namespace of its own (`hostUsers: false`); its worker container has the installation's
@@ -394,7 +396,8 @@ A summary; the detail is where each part is set.
 | `Ready` | every manifest applied; `False` with `PolicyViolation`, `NoPolicy`, `ApplyFailed` or `AwaitingPlane` |
 | `Resolved` | only on a profile that extends another: the operator runs the profile in effect the plane wrote into `status.effective`, and the message names the chain. `False` with `AwaitingPlane` while the plane has written none: **nothing is created**, rather than pods made from what differs from the parent alone ([gitops.md](gitops.md#a-manifest-that-extends-another)) |
 | `PolicyViolation` | the profile exceeds the policy, or no policy could be read; **nothing is created** |
-| `SecretMissing` | a referenced Secret was not found in the worker namespace. The operator has no RBAC on Secrets, so do not rely on it |
+| `SecretMissing` | a Secret the pods mount is in the worker namespace neither as the operator's copy from `troupe-system` nor as one of yours; the message names each, where it was looked for, and the `kubectl label` line for one the operator may not copy yet ([configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects)) |
+| `IngressNamespaceMissing` | no namespace that runs a pod carries `troupe.dev/ingress=true`, or the one `operator.ingressNamespace` names does not, so no ingress controller may reach a worker; the message gives the `kubectl label namespace` line |
 | `MCPIdentityMissing` | a server the bundle calls with client credentials has no identity in `mcpIdentities`, or an incomplete one; the message says which ([above](#calling-an-mcp-server-as-the-profile)) |
 | `UpgradePending` | the StatefulSet has a newer revision than the named pods run; each keeps its revision until the plane has drained it and the operator replaced it, and the message says how far each has got ([§3](#3-upgrades-and-drains)) |
 | `EgressByHostname` | the `CiliumNetworkPolicy` was written and applied, so a worker reaches its allowlist and the installation's own OpenBao and object store by name, and nothing else outside the cluster; `False` with `NoCilium` or `CiliumPolicyNotApplied` ([§4](#4-troupepolicy)) |

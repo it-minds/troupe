@@ -17,6 +17,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Git Bash on Windows rewrites an argument that looks like a path, `/kind` in a `docker
+# exec` or `/CN=...` for openssl, into one under its own install directory. Nothing here
+# passes a Windows path, so the rewriting is off for the whole script.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' ;;
+esac
+
 cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
 context="kind-${cluster}"
 namespace="troupe-system"
@@ -57,6 +64,14 @@ chart_version="${TROUPE_CHART_VERSION:-}"
 kind_values="${TROUPE_KIND_VALUES:-dev/kind/values.yaml}"
 image_tag="${TROUPE_IMAGE_TAG:-dev}"
 images="${TROUPE_IMAGES:-build}"
+
+# A published release's chart, which `scripts/kind-upgrade-check` installs as the release
+# before this one. Releases before 0.26.0 left two steps to a person, which this script
+# then takes for them: labelling the ingress controller's namespace and copying the
+# Secrets into the profile's namespace. This tree's operator does both itself, and the
+# script does neither, so a fresh install proves it.
+published=false
+if [ ! -d "$chart" ]; then published=true; fi
 
 step() { echo; echo "==> $*"; }
 
@@ -121,10 +136,13 @@ else
   kc apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.14.1/deploy/static/provider/kind/deploy.yaml
 fi
 
-# A worker's NetworkPolicy admits traffic only from namespaces carrying this label. It
-# is how "only the ingress may reach a pod" is said, and labelling whichever namespace
-# runs the controller is the cluster admin's half of it.
-kc label namespace ingress-nginx troupe.dev/ingress=true --overwrite >/dev/null
+# A worker's NetworkPolicy admits traffic only from namespaces carrying
+# `troupe.dev/ingress=true`. It is how "only the ingress may reach a pod" is said, and the
+# operator labels the controller's namespace, which the kind values name
+# (`operator.ingressNamespace`). A published release from before that is labelled here.
+if [ "$published" = true ]; then
+  kc label namespace ingress-nginx troupe.dev/ingress=true --overwrite >/dev/null
+fi
 
 kc wait --namespace ingress-nginx \
   --for=condition=ready pod \
@@ -200,19 +218,26 @@ retry_apply() {
 # change to a setup Job refused the new one ("field is immutable") five times and stopped
 # here. Both run again harmlessly: each step is idempotent.
 kc delete job -n "$namespace" minio-setup openbao-setup --ignore-not-found
+# The plane's OpenBao policies, which the OpenBao setup Job mounts.
+retry_apply dev/kind/openbao-plane.yaml
 retry_apply dev/kind/dependencies.yaml
 
 # The gateway key is the one secret that is never written to a file in this repository.
 #
 # The secret itself is created either way. A worker mounts it as an environment variable,
 # and a pod whose secret is absent does not start at all — `CreateContainerConfigError`,
-# which is not "cannot reach a model", it is "cannot run". The line below has claimed for
-# some time that a worker starts without a key; now it does.
+# which is not "cannot reach a model", it is "cannot run". Made here, in the plane's
+# namespace, where the operator copies it from into the profile's.
+#
+# Labelled for workers: the profile names it, and the operator copies a Secret a profile
+# names only when it carries `troupe.dev/worker-secret=true`.
 llm_secret() {
   kc create secret generic llm-credentials \
     --namespace "$1" \
     --from-literal=api-key="${TROUPE_GATEWAY_KEY:-}" \
-    --dry-run=client -o yaml | kc apply -f -
+    --dry-run=client -o yaml |
+    kc label --local -f - troupe.dev/worker-secret=true -o yaml |
+    kc apply -f -
 }
 
 llm_secret "$namespace"
@@ -399,19 +424,17 @@ if [ "$reconciled" != true ]; then
   exit 1
 fi
 
-# A profile's pods run in their own namespace and Troupe creates no secrets, so the
-# gateway credential has to be put there by whoever owns it — External Secrets Operator
-# in a real cluster, and this line here. The operator makes the namespace; the secret in
-# it is somebody else's job on purpose.
-llm_secret "troupe-w-${profile}"
-
-# The object store is the same story: a pod reads sealed segments and writes them back,
-# and the credentials for that live in its own namespace.
-kc create secret generic troupe-object-store \
-  --namespace "troupe-w-${profile}" \
-  --from-literal=access-key-id=troupe \
-  --from-literal=secret-access-key=troupe-secret \
-  --dry-run=client -o yaml | kc apply -f -
+# A profile's pods mount the gateway credential and the object store's from their own
+# namespace, and the operator copies both there from this one, at every pass. A published
+# release from before that has them copied here, as a person copied them then.
+if [ "$published" = true ]; then
+  llm_secret "troupe-w-${profile}"
+  kc create secret generic troupe-object-store \
+    --namespace "troupe-w-${profile}" \
+    --from-literal=access-key-id=troupe \
+    --from-literal=secret-access-key=troupe-secret \
+    --dry-run=client -o yaml | kc apply -f -
+fi
 
 # Not `kubectl rollout status`: a worker's StatefulSet is `OnDelete`, because a rollout
 # that evicted a pod holding a session would end the session, and `rollout status` has

@@ -158,6 +158,11 @@ if config_env() == :prod do
       object_store_bucket: System.get_env("TROUPE_OBJECT_BUCKET", "troupe-sessions"),
       object_store_region: System.get_env("TROUPE_OBJECT_REGION", "us-east-1"),
       ingress_class_name: System.get_env("TROUPE_INGRESS_CLASS", "nginx"),
+      # The ingress controller's namespace (`operator.ingressNamespace`), which the operator
+      # labels `troupe.dev/ingress=true` unless told not to; unset, some namespace carrying
+      # the label is a precondition each profile checks.
+      ingress_namespace: presence.(System.get_env("TROUPE_INGRESS_NAMESPACE")),
+      label_ingress_namespace: System.get_env("TROUPE_INGRESS_NAMESPACE_LABEL") != "false",
       tls_secret_name: presence.(System.get_env("TROUPE_WORKERS_TLS_SECRET")),
       cert_issuer: presence.(System.get_env("TROUPE_WORKERS_CERT_ISSUER")),
       cilium_available: System.get_env("TROUPE_CILIUM_AVAILABLE") == "true",
