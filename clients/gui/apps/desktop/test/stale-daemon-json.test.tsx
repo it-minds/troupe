@@ -38,6 +38,7 @@ const invoke = vi.hoisted(() => async (command: string): Promise<unknown> => {
     return machine.file;
   }
   if (command === "update_check") return { state: "current", version: "0.0.0-test", current: "0.0.0-test" };
+  if (command === "shell_platform") return "linux/x86_64";
   throw new Error(`no command ${command} in this test`);
 });
 
@@ -72,6 +73,9 @@ beforeEach(async () => {
   await machine.start();
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = { invoke };
   await installShell();
+  // What the shell asked of itself as it was installed (where it runs) is not the daemon's.
+  expect(window.troupe?.platform).toBe("linux/x86_64");
+  machine.calls = [];
 });
 
 afterEach(async () => {

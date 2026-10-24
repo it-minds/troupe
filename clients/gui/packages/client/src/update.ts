@@ -178,14 +178,15 @@ async function clientVersions(auth: AuthSession, pinned: PlaneKey | null | undef
  * name and the version as releases are numbered, then the policy an update chooses by,
  * checked against `pinned`, the key this machine holds for the plane, where there is one.
  * Throws where the plane could not be asked at all; a plane from before the policy is
- * `unknown`, which is no reason to do anything.
+ * `unknown`, which is no reason to do anything. `platform`, where the shell says one
+ * (`windows/x86_64`), goes beside the version, as the daemon's own handshake gives it.
  */
-export async function askPlane(auth: AuthSession, version: string, pinned?: PlaneKey | null): Promise<PlaneVersionWord> {
+export async function askPlane(auth: AuthSession, version: string, pinned?: PlaneKey | null, platform?: string | null): Promise<PlaneVersionWord> {
   let clientUpdate: ClientUpdate | null;
   try {
     const hello = await auth.rpc<{ client_update?: ClientUpdate | null }>("initialize", {
       protocol_version: "1",
-      client_info: { name: DESKTOP_CLIENT, version },
+      client_info: { name: DESKTOP_CLIENT, version, ...(platform ? { platform } : {}) },
     });
     clientUpdate = hello?.client_update ?? null;
   } catch (e) {

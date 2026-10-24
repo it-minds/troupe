@@ -125,7 +125,7 @@ defmodule Troupe.CLI.ModelConfig do
     if defaults == %{} and enforced == %{} do
       say.(
         "#{kept["plane_url"]} sets no defaults or limits for people's own machines; an administrator sets them " <>
-          "under Policy → What people's own machines talk to"
+          "on the console's Govern → Policy and settings, in the panel What people's own machines talk to"
       )
     else
       say.("#{kept["plane_url"]}'s settings for this machine, kept in #{kept["path"]}:")

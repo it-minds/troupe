@@ -91,6 +91,49 @@ defmodule Troupe.PrivateLinkTest do
     refute daemon_token()
   end
 
+  # D71: a second person on the same login takes the daemon over from the terminal.
+  describe "/unlink" do
+    test "takes the daemon from the person it was linked to, and links whoever is signed in here" do
+      {remote, url} = start_remote!(transport: :http)
+      {:ok, _} = Link.call("identity.unlink", %{command_id: RPC.command_id()})
+
+      {:ok, _} =
+        Link.call("identity.link", %{
+          command_id: RPC.command_id(),
+          subject: "bob",
+          display_name: "Bob",
+          plane_url: url,
+          plane_token: "bobs-token"
+        })
+
+      login!(remote, url)
+      reattach()
+      Process.sleep(500)
+      assert {:ok, %{"subject" => "bob"}} = Link.call("identity.get", %{})
+
+      assert {:ok, %{"subject" => "bob", "display_name" => "Bob"}} = Troupe.Client.unlink()
+
+      identity = eventually(fn -> linked(url) end)
+      assert identity["subject"] == "alice"
+      token = eventually(fn -> daemon_token() end)
+      assert token != "bobs-token"
+      assert token in FakeRemote.plane_tokens(remote)
+    end
+
+    test "leaves the daemon unlinked when it was linked to whoever is signed in here" do
+      {remote, url} = start_remote!(transport: :http)
+      login!(remote, url)
+      reattach()
+      eventually(fn -> linked(url) end)
+
+      assert {:ok, %{"subject" => "alice"}} = Troupe.Client.unlink()
+      Process.sleep(500)
+
+      assert {:ok, %{"linked" => false}} = Link.call("identity.get", %{})
+      refute daemon_token()
+    end
+  end
+
   # Issue #381: signing out takes the token back. The daemon lets go of it where it is
   # linked to the person signing out at that plane, keeps the label, and registers and seals
   # nothing until somebody signs in again.

@@ -481,6 +481,20 @@ defmodule Troupe.Commands do
         usage: "/models",
         detail: "The settings page opened on the default model, with its menu up."
       ),
+      entry("unlink", "setup", "Stop using your account here: unlink this computer's daemon",
+        usage: "/unlink [yes]",
+        args: [arg("confirm", false, "text")],
+        detail:
+          "Sessions started here are recorded under the account the daemon is linked to. " <>
+            "/unlink says who that is and what unlinking drops: the link, the platform's " <>
+            "token and the daemon's own sign-in, and its copy of your organisation's " <>
+            "memory; private sessions stop being sealed until their owner links again. " <>
+            "The sessions stay, and so does the key this computer trusts the platform's " <>
+            "word by. /unlink yes does it, and whoever this terminal is signed in as, if " <>
+            "somebody else, is linked instead: how a second person on this login takes " <>
+            "the daemon over.",
+        example: "/unlink yes"
+      ),
       entry("mcp", "setup", "Your MCP servers: each one's layer, state, tools and errors",
         usage: "/mcp [import|link|remove|check <target>] [--workspace]",
         args: [arg("verb", false, "text"), arg("target", false, "path")],

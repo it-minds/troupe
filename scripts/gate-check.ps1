@@ -167,6 +167,10 @@ function Write-Text($path, $text) {
 
 foreach ($k in $Scratch.Keys) { Set-Var $k $Scratch[$k] }
 Write-Host "gate-check: $Troupe, scratch homes in $Work"
+# Where the troupe under test makes its temporary directories, the offline bench's
+# workspaces among them: a failure that names a repository's files is read with it.
+$TempDir = if ($env:TMPDIR) { $env:TMPDIR } elseif ($env:TEMP) { $env:TEMP } elseif ($env:TMP) { $env:TMP } else { [IO.Path]::GetTempPath() }
+Write-Host "gate-check: temporary directory $TempDir"
 try {
   # The user file every check starts from: no librarian, no budget question, and an
   # unattended call that asks is denied rather than left waiting.

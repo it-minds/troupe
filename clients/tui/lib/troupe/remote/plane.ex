@@ -350,10 +350,15 @@ defmodule Troupe.Remote.Plane do
     end
   end
 
+  # The platform beside the version, so the plane's record of who runs what says where.
   defp handshake_params do
     %{
       protocol_version: Discovery.wire_version(),
-      client_info: %{name: "troupe", version: to_string(Application.spec(:troupe, :vsn))},
+      client_info: %{
+        name: "troupe",
+        version: to_string(Application.spec(:troupe, :vsn)),
+        platform: Troupe.Client.Daemon.Link.platform()
+      },
       capabilities: %{}
     }
   end

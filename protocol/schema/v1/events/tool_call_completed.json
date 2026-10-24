@@ -21,6 +21,9 @@
     "ok": {
       "type": "boolean"
     },
+    "spent": {
+      "type": "object"
+    },
     "timed_out": {
       "type": "boolean"
     }

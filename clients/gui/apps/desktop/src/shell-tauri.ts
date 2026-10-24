@@ -184,9 +184,15 @@ export async function installShell(): Promise<void> {
     import("@tauri-apps/plugin-opener"),
   ]);
 
+  // Where the app runs, as the daemon's own handshake with a plane says it.
+  const platform = await import("@tauri-apps/api/core")
+    .then(({ invoke }) => invoke<string>("shell_platform"))
+    .catch(() => null);
+
   const shell: TroupeShell = {
     name: "Troupe Desktop",
     version: await getVersion().catch(() => "0.0.0"),
+    ...(platform ? { platform } : {}),
     secretStore: keychainStore(),
     openExternal: (url) => openUrl(url),
     fetchImpl: rustFetch as typeof fetch,

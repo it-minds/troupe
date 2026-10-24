@@ -85,6 +85,10 @@ updates:
       # here holds for security updates as well as version updates. Revisit on the next
       # Tauri major rather than on the next advisory; the alert stays open until then.
       - dependency-name: glib
+      # sha2 0.11: wry and tauri-codegen are still on 0.10, so a bump here is a second
+      # copy in the lock for nothing; it moves when they do (#775).
+      - dependency-name: sha2
+        versions: [">= 0.11"]
     commit-message:
       prefix: deps
 

@@ -108,7 +108,7 @@ export class FakePlane {
   readonly rows = new Map<string, Row>();
   readonly relayed = new Map<string, Relayed>();
   /** Every `client_info` an `initialize` over `/rpc` gave, in order. */
-  readonly initialized: Array<{ name?: unknown; version?: unknown }> = [];
+  readonly initialized: Array<{ name?: unknown; version?: unknown; platform?: unknown }> = [];
   corsOrigins: string[];
   podTokenLifetime: number;
 
@@ -364,7 +364,7 @@ export class FakePlane {
       // minimum.
       case "initialize": {
         if (this.opts.beforePolicy) return { error: { code: -32601, message: "method_not_found", data: { method } } };
-        const info = (params["client_info"] ?? {}) as { name?: unknown; version?: unknown };
+        const info = (params["client_info"] ?? {}) as { name?: unknown; version?: unknown; platform?: unknown };
         this.initialized.push(info);
         const component = COMPONENTS[String(info.name)];
         const version = typeof info.version === "string" ? info.version : null;

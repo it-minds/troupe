@@ -105,6 +105,8 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
   detail: ({ detail }, args) => detail(args),
   settings: ({ go }) => void go("local"),
   models: ({ go }) => void go("local"),
+  // "Stop using my account here" is on This computer, under who it records.
+  unlink: ({ go }) => void go("local"),
   agents: ({ agents }) =>
     agents ? void agents() : "a session on the platform runs its profile bundle's agents, which are changed in the console; the header switches between them",
   copy: async ({ transcript }) => {

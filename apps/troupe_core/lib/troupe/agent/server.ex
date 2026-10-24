@@ -258,8 +258,8 @@ defmodule Troupe.Agent.Server do
     catch
       kind, reason ->
         # The last start the Node allows, and it failed: a root says why before its
-        # session goes down (Decision 727). Supervision still does the rest.
-        if last_start?(start, limit) and not is_pid(Keyword.get(opts, :parent)),
+        # session goes down. Supervision still does the rest.
+        if last_start?(start, limit, opts) and not is_pid(Keyword.get(opts, :parent)),
           do: crash_ended(session_id, agent_path, crash_detail(kind, reason, __STACKTRACE__))
 
         :erlang.raise(kind, reason, __STACKTRACE__)
@@ -424,6 +424,11 @@ defmodule Troupe.Agent.Server do
   # nothing (Decision 769) and takes its tools afresh (Decision 876).
   defp fold_event(%Event{type: "cancelled", data: data}, state),
     do: let_go(%{fold_stopped(state, data) | turn: %Spend{}})
+
+  # A delegation that came back, with what its subagent spent: the turn's and the budget's,
+  # as it was live. One written before it was carried, and any other call, adds nothing.
+  defp fold_event(%Event{type: "tool_call_completed", data: %{"spent" => %{} = spent}}, state),
+    do: charge_child(state, Spend.from_json(spent))
 
   defp fold_event(%Event{type: type, data: data}, state) do
     case type do
@@ -3583,14 +3588,14 @@ defmodule Troupe.Agent.Server do
     end)
   end
 
-  defp child_result_to_result(call, {:ok, summary, _usage}) do
-    Result.ok(call.id, call.name, noted(call, summary))
+  defp child_result_to_result(call, {:ok, summary, spent}) do
+    Result.ok(call.id, call.name, noted(call, summary), spent_fields(spent))
   end
 
   # Partial work still comes back as a successful tool result: the content says it was
   # cut short, and an error result would throw the findings away.
-  defp child_result_to_result(call, {:partial, summary, _usage}) do
-    Result.ok(call.id, call.name, noted(call, summary))
+  defp child_result_to_result(call, {:partial, summary, spent}) do
+    Result.ok(call.id, call.name, noted(call, summary), spent_fields(spent))
   end
 
   defp child_result_to_result(call, {:error, reason}) do
@@ -3599,6 +3604,12 @@ defmodule Troupe.Agent.Server do
 
   defp noted(%Call{note: nil}, summary), do: summary
   defp noted(%Call{note: note}, summary), do: note <> "\n\n" <> summary
+
+  # What the subagent reported it spent, on its delegation's `tool_call_completed`, so a
+  # replay adds it to the turn as the live call did: a parent restarted, or cancelled
+  # after a restart, mid-turn keeps it. An ACP agent's usage alone is no spend of a turn.
+  defp spent_fields(%Spend{} = spent), do: %{fields: %{"spent" => Spend.to_json(spent)}}
+  defp spent_fields(_other), do: %{}
 
   defp charge_child_usage(state, {kind, _summary, spent}) when kind in [:ok, :partial],
     do: charge_child(state, spent)
@@ -4355,9 +4366,11 @@ defmodule Troupe.Agent.Server do
   end
 
   # A start after as many others as the Node allows in the window: if this one fails too,
-  # the Node gives up.
-  defp last_start?({:warm, n}, {max_restarts, _window}), do: n >= max_restarts
-  defp last_start?(:cold, _limit), do: false
+  # the Node gives up. And a session on this machine's first start of its root, which is
+  # inside the session's own start: a failure there fails that start, and nothing starts
+  # it again. A pod's session is woken as its plane says, and says so its own way.
+  defp last_start?({:warm, n}, {max_restarts, _window}, _opts), do: n >= max_restarts
+  defp last_start?(:cold, _limit, opts), do: Keyword.get(opts, :kind, :local) == :local
 
   # The root's last word when it has crashed as often as its Node allows (Decision 727):
   # its turn is over and its session goes down. Straight to the log, since a start that
