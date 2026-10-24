@@ -142,6 +142,20 @@ defmodule Troupe.MCPLocalTest do
       assert Trust.approved(context.state_dir, context.workspace) == %{}
     end
 
+    # A branch command mode starts is a session of its own on the same workspace (D134): a
+    # client that keys answers by call id must not take the root's answer for its question.
+    test "each session asks under a call id of its own", context do
+      %{session: first} = with_workspace_file(context)
+      %{session: second} = start_session(context, config_overrides: [trusted_workspaces: []])
+
+      [asked_first] = wait_for_question(first.id)
+      [asked_second] = wait_for_question(second.id)
+
+      assert asked_first.call_id =~ "mcp-trust-"
+      assert asked_second.call_id =~ "mcp-trust-"
+      refute asked_first.call_id == asked_second.call_id
+    end
+
     test "a trusted workspace is not asked", context do
       write_file(
         context,

@@ -33,7 +33,15 @@ defmodule Troupe.PlaneVersionTest do
     assert Enum.any?(
              FakeRemote.calls(remote),
              &match?(
-               {"initialize", %{"client_info" => %{"name" => "troupe", "version" => @version}}},
+               {"initialize",
+                %{
+                  "client_info" => %{
+                    "name" => "troupe",
+                    "version" => @version,
+                    # Where it runs, as the daemon's own handshake says it (D134).
+                    "platform" => "" <> _
+                  }
+                }},
                &1
              )
            )

@@ -59,7 +59,7 @@ import type { MemoryAsk } from "./Memory";
 import { OfferLine, OfferPanel } from "./Offer";
 import { StartLine, StartPanel } from "./Onboard";
 import { RemoteLine, RemoteOfferControl } from "./Remote";
-import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
+import { Cost, initials, Loading, personColour, Pill, Sync, When, Where } from "./bits";
 
 /**
  * A backstage pane: the running order, the files, what the instructions are read from, the
@@ -504,6 +504,8 @@ function Header({
           {row && (
             <>
               <Where kind={row.kind} />
+              {/* How a private session's sealing stands here, as its row in the list says. */}
+              <Sync state={row.sync} device={row.device} />
               <span className="sep" aria-hidden="true">
                 /
               </span>

@@ -68,6 +68,25 @@ describe("a private session in the list", () => {
     expect(button("Claim", entry("/home/ada/letters")!)).toBeNull();
   });
 
+  // D71: the session's own head says it as well, not only the list.
+  it("says in the session's head how its sealing stands, as its row does", async () => {
+    daemon.seed("/home/ada/letters", { kind: "private", sync: "elsewhere", device: "ada-laptop" });
+
+    unmount = render(<App />).unmount;
+    const row = await waitFor(
+      () => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("/home/ada/letters")),
+      "the session in the list",
+    );
+    row.click();
+
+    const head = await waitFor(() => document.querySelector<HTMLElement>(".session-head"), "the session");
+    const sealed = await waitFor(
+      () => [...head.querySelectorAll<HTMLElement>(".pill")].find((p) => p.textContent?.trim() === "On ada-laptop"),
+      "how its sealing stands, in the head",
+    );
+    expect(sealed.title).toBe("ada-laptop sealed it last; claim it to seal it from this computer");
+  });
+
   it("says why a claim was refused, and leaves the row as it was", async () => {
     daemon.claimsDiverge = true;
     daemon.seed("/home/ada/letters", { kind: "private", sync: "elsewhere", device: "ada-laptop" });

@@ -628,6 +628,17 @@ defmodule Troupe.Client do
 
   ## Helpers the UI would otherwise reach into the harness for
 
+  @doc "Who this computer's daemon records its sessions as, linked or not."
+  @spec identity() :: {:ok, map()} | {:error, term()}
+  def identity, do: Daemon.identity()
+
+  @doc """
+  Unlink this computer's daemon from the person it records sessions as, answering who that
+  was; the person this terminal is signed in as, if somebody else, takes it.
+  """
+  @spec unlink() :: {:ok, map()} | {:error, term()}
+  def unlink, do: Daemon.unlink()
+
   @doc "The worktrees `/worktree <Tab>` offers: checked out, and Troupe-managed."
   @spec worktrees(String.t()) :: {[map()], [String.t()]}
   def worktrees(workspace), do: Daemon.worktrees(workspace)

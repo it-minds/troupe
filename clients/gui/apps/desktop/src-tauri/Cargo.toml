@@ -23,9 +23,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # The HTTP client that runs outside the webview: no preflight, no Origin, so a plane
-# needs no CORS entry for the desktop app. `~2.6` because 2.7's JavaScript half wants
-# @tauri-apps/api 2.12, which goes with tauri 2.12, and the Tauri CLI refuses a build
-# whose two halves of a plugin differ in their minor (Decision 717).
+# needs no CORS entry for the desktop app. `~2.8`, the minor of its JavaScript half in
+# package.json: the Tauri CLI refuses a build whose two halves of a plugin differ in
+# their minor.
 tauri-plugin-http = "~2.8"
 # `target="_blank"` does nothing in a webview and the device grant needs a real browser.
 tauri-plugin-opener = "2"
@@ -34,17 +34,17 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 # A notification when a session finishes or asks something while nobody is looking. The
 # page's own `Notification` is refused in WebView2, which denies the permission unless
-# the host answers for it, and wry answers only the clipboard's. `~2.4` because 2.5 wants
-# tauri 2.12, and tauri moves with the rest of its group, not behind a plugin.
+# the host answers for it, and wry answers only the clipboard's. `~2.7`, the minor of its
+# JavaScript half in package.json, which moves with tauri in the one group, not behind it.
 tauri-plugin-notification = "~2.7"
 # One copy of the app: a second launch, from the Start menu or from a click on a
-# notification, hands its arguments to the one running and exits. `~2.4` because 2.5
-# wants tauri 2.12 (Decision 717); it has no JavaScript half.
+# notification, hands its arguments to the one running and exits. `~2.5`, the minor that
+# goes with tauri 2.12; it has no JavaScript half.
 tauri-plugin-single-instance = "~2.5"
-# The app's own update (#66, Decision 874): Tauri's updater installs a release's setup
+# The app's own update (#66): Tauri's updater installs a release's setup
 # (Windows), app archive (macOS) or AppImage (Linux) once src/update.rs has checked the
-# release's signed manifest. `~2.13` because 2.13 is the minor that wants tauri 2.12; it
-# is driven from Rust alone, so it has no JavaScript half to keep in step (Decision 717).
+# release's signed manifest. `~2.14`, the minor that goes with tauri 2.12; it is driven
+# from Rust alone, so it has no JavaScript half to keep in step.
 tauri-plugin-updater = "~2.14"
 # The manifest's check: minisign's format, the one the updater itself verifies with, and
 # sha256 for each file it names; versions as SemVer orders them. The daemon's release is a

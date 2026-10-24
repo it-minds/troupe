@@ -78,6 +78,35 @@ describe("signing in to a plane", () => {
     await waitFor(launcher, "the launcher");
   });
 
+  // D134: the window said nothing of a sign-in the credential store refused; only the
+  // console did.
+  it("says in the window that a sign-in the credential store refused will be asked for again", async () => {
+    window.troupe = {
+      name: "Test shell",
+      version: "0",
+      signInFlow: "device",
+      secretStore: {
+        read: async () => null,
+        write: async () => {
+          throw new Error("the credential store is locked");
+        },
+        clear: async () => undefined,
+      },
+    };
+    localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
+    unmount = render(<App />).unmount;
+    (await waitFor(() => button("Sign in"), "the sign-in screen")).click();
+    await approveTheCode();
+    await waitFor(() => says("Welcome, Ada."), "the first sign-in's theme");
+    button("Continue")!.click();
+    await waitFor(launcher, "the launcher");
+
+    const notice = await waitFor(() => document.querySelector<HTMLElement>(".banner[role=status]"), "the notice");
+    expect(notice.textContent).toBe(
+      "This sign-in could not be kept in the credential store, so the next launch will ask you to sign in again: the credential store is locked",
+    );
+  });
+
   it("with an address kept from before, fills it in and waits to be asked", async () => {
     localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
     unmount = render(<App />).unmount;

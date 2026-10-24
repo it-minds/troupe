@@ -52,6 +52,27 @@ type Where =
 /** How often an app working offline asks whether the plane is back. */
 const OFFLINE_RETRY_MS = 15_000;
 
+/**
+ * A sign-in or a renewal the credential store would not keep, said in the window: the
+ * session goes on, and the next launch asks for a sign-in again, which nobody would
+ * otherwise know until it did. Read again at every token the session takes, so a later
+ * renewal that was kept takes it away.
+ */
+function NotKept({ auth }: { auth: AuthSession | null }): JSX.Element | null {
+  const [sentence, setSentence] = useState<string | null>(auth?.notKept ?? null);
+  useEffect(() => {
+    setSentence(auth?.notKept ?? null);
+    if (!auth) return;
+    return auth.onCredential(() => setSentence(auth.notKept));
+  }, [auth]);
+  if (!sentence) return null;
+  return (
+    <div className="banner offline" role="status">
+      <p>{sentence}</p>
+    </div>
+  );
+}
+
 /** The workspace a session on this computer works in, for the agents manager it opens. */
 function workspaceOf(row: { kind: SessionKind; raw: unknown } | undefined): { workspace?: string } {
   const workspace = row && onThisComputer(row.kind) ? (row.raw as { workspace?: unknown } | null)?.workspace : undefined;
@@ -261,7 +282,12 @@ export function App(): JSX.Element {
         planeUrl={planeUrl}
         offline={offline}
         localOnly={localOnly}
-        notice={<UpdateBanner updates={updates} />}
+        notice={
+          <>
+            <UpdateBanner updates={updates} />
+            <NotKept auth={planeAuth} />
+          </>
+        }
         onNew={() => setWhere({ screen: "new" })}
         onSessions={() => setWhere({ screen: "sessions" })}
         onApprovals={() => setWhere({ screen: "approvals" })}
@@ -344,6 +370,7 @@ export function App(): JSX.Element {
 
       <main>
         <UpdateBanner updates={updates} />
+        <NotKept auth={planeAuth} />
         {offline && (
           <div className="banner offline">
             <p>

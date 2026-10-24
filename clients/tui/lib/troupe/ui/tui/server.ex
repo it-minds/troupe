@@ -997,7 +997,7 @@ defmodule Troupe.UI.TUI.Server do
   # than being dispatched as an agent.
   @builtins ~w(new cancel dismiss merge discard goal loop steer sessions back hq observer files
                scratch upload copy memory context watch settings models mcp skills help agents
-               worktree workflow detail quit)
+               worktree workflow detail unlink quit)
 
   @doc false
   @spec builtins() :: [String.t()]
@@ -1375,6 +1375,55 @@ defmodule Troupe.UI.TUI.Server do
   # own: a branch the client starts, as `/worktree`'s is.
   defp builtin("workflow", args, state, _target),
     do: Client.dispatch(state.session_id, "workflow", args)
+
+  defp builtin("unlink", args, _state, _target), do: unlink_command(String.trim(args))
+
+  ## Unlinking this computer's daemon
+
+  # Asked once, in the desktop app's words ("Stop using my account here"): `/unlink` says
+  # who the daemon records sessions as and what unlinking drops and keeps, and `/unlink
+  # yes` does it. Whoever this terminal is signed in as, if somebody else, is linked next.
+  defp unlink_command(""), do: unlink_question(Client.identity())
+
+  defp unlink_command("yes") do
+    case Client.unlink() do
+      {:ok, %{"linked" => true} = was} ->
+        {:notice,
+         "unlinked from #{who(was)}: this computer's daemon has no sign-in, no platform token " <>
+           "and no copy of your organisation's memory now; its sessions stay. The person " <>
+           "this terminal is signed in as (troupe login), if somebody else, is linked instead"}
+
+      {:ok, _nobody} ->
+        {:notice, "this computer's daemon was linked to nobody; nothing changed"}
+
+      {:error, reason} ->
+        {:error, "the daemon could not be unlinked: " <> to_message(reason)}
+    end
+  end
+
+  defp unlink_command(_other), do: {:notice, "/unlink says what it does; /unlink yes does it"}
+
+  defp unlink_question({:ok, %{"linked" => true} = identity}) do
+    {:notice,
+     "sessions started here are recorded as #{who(identity)}. /unlink yes stops using that " <>
+       "account here: it drops the link, the platform's token and the daemon's own sign-in, " <>
+       "and its copy of your organisation's memory, and private sessions are not sealed " <>
+       "until their owner links again; the sessions stay"}
+  end
+
+  defp unlink_question({:ok, _nobody}) do
+    {:notice,
+     "this computer's daemon is linked to nobody: sessions started here are recorded under " <>
+       "this computer's login"}
+  end
+
+  defp unlink_question({:error, reason}),
+    do: {:error, "the daemon could not say who it records: " <> to_message(reason)}
+
+  defp who(identity) do
+    name = identity["display_name"] || identity["subject"]
+    if identity["plane_url"], do: "#{name} at #{identity["plane_url"]}", else: name
+  end
 
   ## Command palette
 

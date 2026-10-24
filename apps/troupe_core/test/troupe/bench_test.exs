@@ -11,7 +11,7 @@ defmodule Troupe.BenchTest do
   use ExUnit.Case, async: false
 
   alias Troupe.Bench
-  alias Troupe.Bench.Scenario
+  alias Troupe.Bench.{Runner, Scenario}
 
   # The whole suite once for the module; the tests read the one report.
   setup_all do
@@ -111,6 +111,26 @@ defmodule Troupe.BenchTest do
     end
 
     assert {:ok, _decoded} = Jason.decode(Bench.json(report))
+  end
+
+  # #767: a temporary directory inside a repository (a CI runner's workspace, a build
+  # sandbox) put that repository's instruction files in every scenario's prompt.
+  @tag :tmp_dir
+  test "a scenario reads no instruction file of a repository its temporary directory is in",
+       %{tmp_dir: dir} do
+    {_, 0} = System.cmd("git", ["init", "--quiet", dir])
+    File.write!(Path.join(dir, "AGENTS.md"), String.duplicate("A rule of the outer repository.\n", 100))
+    temp = Path.join(dir, "tmp")
+    File.mkdir_p!(temp)
+
+    report =
+      Runner.with_env(%{"TMPDIR" => temp, "TEMP" => temp, "TMP" => temp}, fn ->
+        assert String.starts_with?(System.tmp_dir!(), temp)
+        Bench.run()
+      end)
+
+    assert Bench.passed?(report), Bench.markdown(report)
+    assert length(report["scenarios"]) == length(Bench.scenarios())
   end
 
   @tag :tmp_dir

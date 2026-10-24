@@ -115,7 +115,7 @@ export class FakePlane {
   readonly rows = new Map<string, Row>();
   readonly relayed = new Map<string, Relayed>();
   /** Every `client_info` an `initialize` over `/rpc` gave, in order. */
-  readonly initialized: Array<{ name?: unknown; version?: unknown }> = [];
+  readonly initialized: Array<{ name?: unknown; version?: unknown; platform?: unknown }> = [];
   /** Every `/rpc` method asked, in order: what a test counts to tell a push from a poll. */
   readonly asked: string[] = [];
   /** The people's watches open now (`/v1/relay/watch`), with the list each was last sent. */
@@ -486,7 +486,7 @@ export class FakePlane {
       // minimum.
       case "initialize": {
         if (this.opts.beforePolicy) return { error: { code: -32601, message: "method_not_found", data: { method } } };
-        const info = (params["client_info"] ?? {}) as { name?: unknown; version?: unknown };
+        const info = (params["client_info"] ?? {}) as { name?: unknown; version?: unknown; platform?: unknown };
         this.initialized.push(info);
         const component = COMPONENTS[String(info.name)];
         const version = typeof info.version === "string" ? info.version : null;

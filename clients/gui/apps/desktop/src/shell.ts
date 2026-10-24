@@ -23,6 +23,12 @@ export interface DaemonEndpoint {
 export interface TroupeShell {
   readonly name: string;
   readonly version: string;
+  /**
+   * Where the app runs, in the daemon's words (`windows/x86_64`, `macos/aarch64`,
+   * `linux/x86_64`): what its `initialize` to a plane gives as `client_info.platform`, so
+   * the plane's record of who runs which version says where. A browser has none to say.
+   */
+  readonly platform?: string;
   /** A store backed by the OS keychain. */
   secretStore?: TokenStore;
   /**
