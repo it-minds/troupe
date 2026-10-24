@@ -112,4 +112,5 @@ jobs:
       - name: A web bundle to embed
         run: mkdir -p ../dist && echo '<!doctype html><title>Troupe</title>' > ../dist/index.html
 
-      - run: cargo test --locked secrets:: -- --nocapture
+      - name: The secrets tests, the keychain round trip among them
+        run: "cargo test --locked secrets:: -- --nocapture"
