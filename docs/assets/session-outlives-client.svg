@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 320" role="img" aria-labelledby="t d">
+  <title id="t">A session outlives its client</title>
+  <desc id="d">Three clients, a terminal, the desktop app and a script, attach to one session held by troupe-daemon or a worker pod. The terminal has been closed and the session carries on. On a pod, a session nobody uses sleeps in object storage and wakes when it is next opened.</desc>
+  <style>
+    .bg { fill: #f6f7f9; stroke: #d5d8de; }
+    .box { fill: #ffffff; stroke: #9aa1ab; stroke-width: 1.5; }
+    .gone { fill: none; stroke: #9aa1ab; stroke-width: 1.5; stroke-dasharray: 5 4; }
+    .host { fill: #eef0fb; stroke: #4051b5; stroke-width: 1.5; }
+    .session { fill: #ffffff; stroke: #4051b5; stroke-width: 2; }
+    .ev { fill: #4051b5; }
+    .store { fill: #ffffff; stroke: #9aa1ab; stroke-width: 1.5; }
+    .line { stroke: #4051b5; stroke-width: 2; fill: none; }
+    .cut { stroke: #9aa1ab; stroke-width: 2; fill: none; stroke-dasharray: 5 4; }
+    text { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; fill: #1f2328; font-size: 15px; }
+    .small { font-size: 13px; fill: #59636e; }
+    .strong { font-weight: 600; }
+    .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 14px; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #1f222b; stroke: #3a3f4b; }
+      .box, .session, .store { fill: #272b35; }
+      .box, .gone, .store { stroke: #8a919c; }
+      .cut { stroke: #8a919c; }
+      .host { fill: #262c48; stroke: #8c9eff; }
+      .session { stroke: #8c9eff; }
+      .ev { fill: #8c9eff; }
+      .line { stroke: #8c9eff; }
+      text { fill: #e6e8eb; }
+      .small { fill: #a4abb6; }
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="719" height="319" rx="12"/>
+
+  <rect class="gone" x="24" y="32" width="196" height="52" rx="8"/>
+  <text x="40" y="56" class="mono">troupe</text>
+  <text x="40" y="74" class="small">the terminal, closed</text>
+  <rect class="box" x="24" y="104" width="196" height="52" rx="8"/>
+  <text x="40" y="128">the desktop app</text>
+  <text x="40" y="146" class="small">on the same machine</text>
+  <rect class="box" x="24" y="176" width="196" height="52" rx="8"/>
+  <text x="40" y="200">your script</text>
+  <text x="40" y="218" class="small">troupe resume … --headless</text>
+
+  <path class="cut" d="M220 58 C 270 58, 280 110, 330 112"/>
+  <path class="line" d="M220 130 L 330 130"/>
+  <path class="line" d="M220 202 C 270 202, 280 150, 330 148"/>
+
+  <rect class="host" x="330" y="24" width="366" height="196" rx="10"/>
+  <text x="348" y="50" class="mono">troupe-daemon</text>
+  <text x="482" y="50" class="small">or a worker pod</text>
+  <rect class="session" x="348" y="66" width="330" height="134" rx="8"/>
+  <text x="366" y="92" class="strong">one session</text>
+  <text x="366" y="112" class="small">the agent keeps working; every client</text>
+  <text x="366" y="129" class="small">sees the same events in the same order</text>
+  <rect class="ev" x="366" y="150" width="34" height="30" rx="4"/>
+  <rect class="ev" x="406" y="150" width="34" height="30" rx="4"/>
+  <rect class="ev" x="446" y="150" width="34" height="30" rx="4"/>
+  <rect class="ev" x="486" y="150" width="34" height="30" rx="4"/>
+  <rect class="ev" x="526" y="150" width="34" height="30" rx="4" opacity="0.6"/>
+  <text x="572" y="170" class="small">its log</text>
+
+  <path class="line" d="M513 220 L 513 246"/>
+  <rect class="store" x="330" y="246" width="366" height="56" rx="8"/>
+  <text x="348" y="268" class="small">on a pod, a session nobody uses sleeps in</text>
+  <text x="348" y="288" class="small">object storage and wakes when it is next opened</text>
+</svg>

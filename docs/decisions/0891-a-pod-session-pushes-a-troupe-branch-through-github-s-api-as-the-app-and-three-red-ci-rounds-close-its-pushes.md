@@ -25,6 +25,7 @@ paths:
   - charts/troupe/crds/workerprofile.yaml
   - config/runtime.exs
   - docs/admin/github.md
+  - docs/admin/github-runs.md
 symbols:
   - Troupe.Worker.GitHub.push/5
   - Troupe.Worker.GitHub.open_pull_request/4

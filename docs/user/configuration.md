@@ -1,11 +1,12 @@
 # Configuration
 
 Troupe reads its settings from a few YAML files and the environment, checks them against
-one key table, and merges them. This page says which file wins, what is checked, and how
-to see what is in effect; the last section lists every key, generated from the table the
-loader checks against (`Troupe.Config.Schema`), so it cannot say something the loader
-does not do. Where each file is on disk is on [Where your files are](configuration/files.md),
-and complete files are in the [cookbook](configuration/cookbook.md).
+one key table, and merges them. This page says what the files are and how they merge,
+[which file wins](configuration-layers.md) and [seeing and changing
+settings](configuration-settings.md) the rest; its last section lists every key, generated
+from the table the loader checks against (`Troupe.Config.Schema`), so it cannot say
+something the loader does not do. Where each file is on disk is on [Where your files
+are](configuration/files.md), and complete files are in the [cookbook](configuration/cookbook.md).
 
 ## The files
 
@@ -27,52 +28,9 @@ user file's directory, holds every other file of your own too (`mcp.json`, `agen
 
 ## Your organisation's defaults and limits
 
-An organisation speaks at both ends of the ladder. Its **defaults** sit below your own
-file: they are what a machine starts with, and anything you set wins over them. What it
-**enforces** sits above everything, the command line included. That is a guardrail, not a
-lock: a plane's copy is a file in your own state directory, and only the managed file is
-out of your reach ([security](../admin/security.md#7-an-organisations-limits-are-a-guardrail-not-a-lock)).
-
-Only these keys can be enforced, and each but the rules is a ceiling:
-
-| Key | Enforced, it means |
-|---|---|
-| `max_tokens`, `max_turns`, `wall_clock_ms`, `max_depth` | the most it may be: you may set a lower number, not a higher one |
-| `approvals` | `deny` may not be loosened to `wait` |
-| `managed_mcp_servers_only`, `managed_permission_rules_only` | on may not be turned off |
-| `provider`, `base_url` | what it is; a named provider at another URL, or of another type, is refused too |
-| `permissions` | its [per-tool rules](#per-tool-permission-rules) are added to yours, and none of yours loosens one of them |
-
-A file, a variable or a flag that tries to go past an enforced value is held to it, with
-one warning naming the file, the key and the organisation's value, and `config.set`
-refuses it from either client. When a session reaches an enforced `max_turns` or
-`wall_clock_ms`, the question whether to go on offers only what stays under it, says the
-limit is your organisation's and where it came from, and turns away a larger amount,
-`no limit` and an `allow` past it. A model entry's own `max_output` can lower an enforced `max_tokens` for
-its model, not raise it. An enforced `max_tokens` bounds the whole of every model call, a
-compaction's summary and a model's thinking included
-([how thinking is fitted under it](models.md#how-hard-a-model-thinks)).
-
-`troupe config --explain KEY` shows both ends with where they came from:
-
-```text
-max_turns = 25
-  default  40
-  user     80                             /home/me/.config/troupe/config.yaml
-           ignored: held to 25 by your organisation (https://plane.example.com)
-  enforced 25                             https://plane.example.com  <- in effect
-```
-
-The organisation's word comes from two places. Signed in to a plane (`troupe login`), the
-daemon fetches its document whenever a client connects and keeps a copy, used as it is
-when the plane cannot be reached; `troupe config pull` fetches it now, and writes nothing
-into `config.yaml`. What a pull before 0.14 wrote there is your own setting and wins over
-the organisation's defaults; `pull` names those keys, and taking the lines out follows the
-organisation again. Without a plane, an administrator writes a managed file. Where both
-say something, the plane's defaults win over the file's, the stricter of two limits holds,
-and a provider or URL both fix is the managed file's. The format, and how an administrator
-sets either, is on the administrator's
-[configuration page](../admin/configuration.md#defaults-and-limits-for-peoples-machines).
+What your organisation suggests sits below your own file, and what it enforces above
+everything; which keys it can enforce, and where its word comes from, are on
+[which file wins](configuration-layers.md#your-organisations-defaults-and-limits).
 
 ## How the layers merge
 
@@ -107,21 +65,9 @@ cheap one is local.
 
 ## What is checked
 
-A file is refused, and no session starts, when it is not YAML, when a value has the wrong
-type, when an enum has a value nobody knows (`approvals`, `auth`, `provider`, a provider's
-`type`, an MCP server's `permission`), when it spells one setting two ways, or when its
-`version` is newer than this Troupe reads. The message names the file, the line when it
-can, the key, and what to write instead.
-
-A key Troupe does not know is ignored with a warning that names it and the key it probably
-meant: `max_tokns` is `max_tokens`. Keys that start with `x-` are left alone, for notes and
-for other tools. `troupe config validate` exits non-zero on any warning, so CI can run it
-on a repository's `.troupe/`.
-
-`yes`, `no`, `on` and `off` are words in the YAML Troupe reads, not booleans. For a
-boolean key they are read as the boolean they mean, with a warning, so `auto_approve: no`
-is off; write `true` or `false`. A file without `version` is version 1, the only one there
-is.
+A file that is not YAML, has a value of the wrong type or spells one setting two ways
+is refused; an unknown key is ignored with a warning:
+[what is checked](configuration-settings.md#what-is-checked).
 
 ## Secrets from the environment
 
@@ -142,53 +88,9 @@ vendor's own endpoint. A gateway configured without a key is sent none.
 
 ## Trusted workspaces
 
-A repository's files come from whoever wrote the repository. The keys that decide what a
-session may do without asking, where requests go and with which key, what runs on this
-machine and what may be read are read from a workspace's own files only once you trust
-the workspace:
-
-- approvals: `auto_approve`, `approvals`, `delegation`, `managed_permission_rules_only`, `managed_mcp_servers_only`, `watch`, `watch_auto_approve`
-- endpoints and credentials: `provider`, `base_url`, `api_key`, `auth`, `providers`, `identify`
-- commands to run: `mcp`
-- paths: `read_roots`, `state_dir`, `fake_script`
-
-Until then they are ignored with a warning that names the command to run, and the rest of
-the file applies. Trusting a workspace is a line in the user file, and
-`trusted_workspaces` is read only from there:
-
-```yaml
-trusted_workspaces:
-  - ~/src/my-service
-  - ~/src/work            # a directory trusts everything under it
-```
-
-```sh
-troupe config trust [PATH]     # add the workspace (default: this directory)
-troupe config untrust [PATH]   # remove it
-troupe config trust --list     # what is on the list
-```
-
-`trust` and `untrust` change that one list, keep the rest of the file and its comments,
-and keep the file as it was beside it as `config.yaml.previous`; a list written in
-brackets is written out one item a line. A git worktree of a trusted checkout is trusted
-too, which is where a branch session works, and `trust` in a worktree adds the checkout.
-`untrust` does not remove a directory above the workspace, which trusts other workspaces
-too; it says which one still does. A session on a team's pod never reads these keys from a
-project's file, trusted or not: its provider and key come from its profile.
-
-A workspace's agents and MCP servers wait for the same answer. A `.troupe/agents/<name>.md`
-whose `permissions:` sets a tool to `auto` runs it unasked only once the workspace is
-trusted; until then the tool asks as it would without the file, and `agents.list` gives
-the agent a note naming the command. Its `ask` and `deny` apply either way, and your own
-`<config>/agents/` and the built-ins are not the workspace's. Its servers' `auto`, and
-what its `mcp.json` or `skills.json` includes from outside the repository, wait too
-([MCP servers and skills](mcp.md#a-workspaces-servers-wait-for-you)).
-
-Trusted or not, a workspace's `.troupe/agents`, `commands`, `workflows` and `skills` are
-read only where they really are inside it: a file there, or the whole directory, that
-links elsewhere on the machine is not read, and is listed with why in `agents.list`,
-`skills.list` and the session's log. Reaching outside the repository is what a trusted
-`skills.json` is for.
+The keys that decide what a session may do unasked, where requests go, what runs and
+what may be read come from a workspace's own files only once you trust it, with
+`troupe config trust`: [which keys, and how](configuration-layers.md#trusted-workspaces).
 
 ## Agents, MCP servers and instructions
 
@@ -235,158 +137,34 @@ permissions:
 
 ## Every file Troupe reads
 
-In the order each kind is read, and what happens when two say different things:
-
-| File | Layer | What it is for | On conflict |
-|---|---|---|---|
-| the organisation's `defaults:` (the managed file, then the plane's `organisation.json`), `<config>/config.yaml`, `<workspace>/.troupe/config.yaml`, `.troupe/config.local.yaml`, the environment, the command line, the organisation's `enforced:` | settings | every key below | later beats earlier; maps merge by key, `null` removes, a list replaces; trusted keys come from a workspace's files only once it is trusted |
-| `<config>/mcp.json`, then `<workspace>/.troupe/mcp.json` | MCP servers | your servers, then the workspace's, over `mcp:` in `config.yaml` | the same name merges key by key, the workspace's file last; a workspace's servers run only once you allow them |
-| a profile's bundle, `~/.agents/skills/`, each `.agents/skills/` from the repository root down to the workspace, `<config>/skills/<name>/SKILL.md`, `<workspace>/.troupe/skills/` | skills | what a skill tool may read | one name, the highest on [the ladder](#which-one-wins); the others listed as skipped |
-| Troupe's built-in agents, a profile's bundle, `<config>/agents/*.md`, `<workspace>/.troupe/agents/*.md` | agents | the agents a session may run | a file at a higher layer replaces the same name below it |
-| `<config>/commands/*.md`, `<workspace>/.troupe/commands/*.md` | commands | the slash commands you and the repository define | one name, the workspace's; a built-in's or an agent's name is theirs |
-| `<workspace>/.troupe/workflows/<name>.json` | workflows | the steps `workflows.list` offers | one name, one file |
-| `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace and to each file the conversation worked on, each directory's `.agents/AGENTS.md` before its own and its `.troupe/rules/*.md` after it, and the files each imports with `@path` | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out. Other tools' files are not read: `troupe onboard` brings them in once ([instruction files](instructions.md)) |
-| `<workspace>/.troupe/memory/facts.jsonl`, and its view `.troupe/memory.md` | instructions | the project brief Troupe's agents write, as facts | its commands and conventions read after the instruction files, the rest through `recall`; never authoritative, `read_file` and `grep` are; an edit to the view is read back as facts |
+Settings, MCP servers, skills, agents, commands, workflows, instruction files and the
+project brief, each in the order it is read: [the table](configuration-layers.md#every-file-troupe-reads).
 
 ## Which one wins
 
-Where two places say different things, Troupe takes it from the one higher on this
-ladder, lowest first:
-
-1. **Troupe's built-ins**: the agents that ship with it.
-2. **A profile's bundle**, on a team's pod. There the bundle's agents and skills beat the
-   repository's `.agents/` and `.troupe/` unless the profile allows the repository's.
-3. **`.agents/`**: `~/.agents/skills`, then each `.agents/skills` from the repository root
-   down to where the session was started, the nearest highest; and each directory's
-   `.agents/AGENTS.md`.
-4. **`AGENTS.md`**: the repository root's, then each directory's on the way to the work,
-   the nearest highest.
-5. **Your `<config>/`**: `config.yaml`, `mcp.json`, `skills/`, `agents/`, `commands/`.
-6. **The repository's `.troupe/`**: the same files, `rules/` and `memory.md`.
-
-The last two are Troupe's own files, so they beat what a convention shared with other
-tools says. What has a name (an agent, a skill, a command, an MCP server) comes from the
-highest step that has the name, and the ones below it are not used: `skills.list` lists
-each skill a higher one hid as `skipped`, naming the one that is used. Instruction files
-have no name to lose: every one applies, and the higher comes later in the prompt, wins
-where two disagree, and is kept whole first when the budget runs out. Your own
-`<config>/AGENTS.md` is the exception, read first and so below the repository's files: it
-is about every repository, and theirs is about this one.
-
-Beside the ladder, a built-in command's name, or an agent's, stays theirs whatever a file
-says, and `config.yaml`'s settings have the layers of [the files](#the-files) above and
-below them.
+Where two places say different things, the higher on a ladder of six wins, from
+Troupe's built-ins to the repository's `.troupe/`:
+[the ladder](configuration-layers.md#which-one-wins).
 
 ## Old spellings
 
-Each setting has one name. The old ones still load until version 2, each with a warning
-that names the new one, and a file that uses both spellings of one setting is refused.
-
-| Old | New |
-|---|---|
-| `model` | `models.default` |
-| `small_model`, `models.small` | `models.cheap` |
-| `expensive_model` | `models.expensive` |
-| `windows` | `models.windows` |
-| `auth_token: KEY` | `api_key: KEY` with `auth: bearer`, top level or in a provider |
-
-Loading never rewrites a file, because a rewrite drops its comments. `troupe config
-migrate` prints, for each file, the rewrite that stops the warnings, and `--write` makes
-it, keeping the file as it was beside it as `config.yaml.previous`. The settings pages
-and a budget raised for a workspace do not rewrite a file either: they change the lines
-of the settings they set, by the new names, leave every other line as it was, and keep
-`config.yaml.previous` all the same.
+Each setting has one name; the old ones load with a warning until version 2, and
+`troupe config migrate` rewrites them: [the table](configuration-settings.md#old-spellings).
 
 ## Seeing what is in effect
 
-```sh
-troupe config                       # the providers and models, and any warnings
-troupe config --explain             # every key, its value and the layer that set it
-troupe config --explain max_turns   # one key's ladder: each layer's value, and the one in effect
-troupe config --explain permissions # every per-tool rule, with its file, and those held back with why
-troupe config --explain --json      # the same for a program
-troupe config --explain --session SESSION_ID   # what is in force in a running session, here or on a pod
-troupe config validate              # every file a session here would read; exits 1 on any problem
-troupe config validate .troupe/config.yaml
-troupe config migrate [--write]
-troupe config trust --list          # the workspaces whose own files set the trusted keys
-troupe config pull                  # your organisation's defaults and limits, from the plane, now
-```
-
-A running session's configuration was read as it started, so `--session` asks where it
-runs: this machine's daemon, or for a session on your team's pod the pod itself, through
-the plane you are signed in to, without waking it. A pod adds `profile` (the provider and
-models its worker profile gave it), `session` (the terms the session was created with),
-`enforced` (what the platform enforces) and the profile's per-tool rules, each named by its
-profile; a repository's own files count as on any pod, no trusted key taken from them. The
-TUI's `/settings` in a pod session, and the desktop app's **Settings** pane beside a team
-session, show the same and change none of it. A session that is asleep has nothing in
-force: open it, and ask again.
-
-Secrets are masked everywhere. `troupe-daemon config` takes the same arguments but `pull`
-and `--session`, and one more: `import-opencode` copies opencode's providers and default
-model into `config.yaml` once, since Troupe does not read opencode's settings
-([from opencode](configuration/providers.md#from-opencode)).
+`troupe config --explain` shows every key, its value and the layer that set it, here or
+in a running session: [the commands](configuration-settings.md#seeing-what-is-in-effect).
 
 ## Settings in the desktop app and the terminal
 
-The desktop app and the TUI show and change the same settings, and neither has a settings
-file of its own: a setting is a key of the files above. The daemon serves both
-(`config.get`, `config.set` and `config.changed` in the protocol), so a change made in one
-shows in the other at once, and the next session either starts reads it.
-
-- **What each shows.** Every key as a session in that workspace would read it: its value,
-  and the layer and file that set it (the TUI shows the layer beside each value that is
-  not a default; the desktop app does not show where a setting came from yet). Secrets
-  are never shown. A key's name on the page is the `Shown as` column of the reference
-  below, and its help the `What it does` there. The terminal leaves out `ui.mode` and
-  `ui.notifications`, which only the desktop app acts on.
-- **Where a change goes.** The desktop app's model settings, theme, light or dark and
-  notifications go into your own `config.yaml`. The TUI's page writes the file the value
-  on screen came from, and a default into your own; its title says which, and `s` picks
-  another. A key a file may not hold is refused rather than written where it would be
-  ignored: `trusted_workspaces` outside your own file, and a key marked trusted in the
-  project or local file of a workspace that is not trusted, such as `auto_approve`. Only
-  the key's own line changes.
-- **Your organisation's.** A value from its defaults is shown as the organisation's, and
-  a change you make wins over it. A key it enforces is shown as set by your organisation,
-  with where from, and is not changed.
-- **What follows you.** The `ui` keys: the theme both clients draw in (`ui.theme`), the
-  desktop app's light or dark (`ui.mode`) and notifications (`ui.notifications`), and
-  whether the terminal blinks what waits on you (`ui.blink`). The daemon keeps them and
-  acts on none, as with `mouse` and `transcript.detail`. What belongs to one window (its
-  size, the plane the desktop app last used, whether it opens on Home) stays there.
-- **The provider.** Every place you pick one offers the same [provider types](#provider-types),
-  from one list the daemon serves: `troupe setup`, `troupe config`, the TUI's `/settings`,
-  the desktop app's first run and its **Models** panel. Each asks only what its type
-  needs: no key for Ollama, whose address may be left to its default, and the resource's
-  own address for Azure OpenAI. On a plane, a profile's `llm.provider` and the provider
-  people's own machines are offered take the same names.
-- **Edited by hand.** A file you edit is read at the next session and the next time a
-  settings screen asks; a screen already open does not hear of it.
-
-```yaml
-version: 1
-models:
-  default: gateway/glm-5.2
-ui:
-  theme: signal
-  mode: dark
-  notifications: false
-```
+Both clients show and change the same keys through the daemon, so a change in one shows
+in the other: [what each shows, and where a change goes](configuration-settings.md#settings-in-the-desktop-app-and-the-terminal).
 
 ## Editors
 
-The schema is `protocol/schema/config/v1.json` in the repository. Files Troupe writes
-start with a comment an editor with a YAML language server reads:
-
-```yaml
-# yaml-language-server: $schema=https://troupe.dev/schema/config/v1.json
-version: 1
-```
-
-That URL is the schema's id. Until it is served, point the comment at the file in a
-checkout, or at its raw URL on GitHub.
+The schema an editor with a YAML language server reads:
+[the comment to start a file with](configuration-settings.md#editors).
 
 ## Examples
 

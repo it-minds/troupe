@@ -40,10 +40,10 @@ the runtime's default seccomp profile and masked `/proc`, so their pods refused 
 command. The chart now gives the worker container its own seccomp profile
 (`worker.seccomp`), with a DaemonSet that puts it on the nodes, and runs each worker pod in
 a user namespace of its own with its `/proc` unmasked (`worker.userNamespaces`)
-([installing.md](installing.md#the-workers-seccomp-profile)). Before upgrading:
+([worker-sandbox.md](worker-sandbox.md#the-workers-seccomp-profile)). Before upgrading:
 
 1. Run the cluster check in
-   [installing.md](installing.md#the-workers-user-namespaces): Kubernetes 1.33 or later,
+   [worker-sandbox.md](worker-sandbox.md#the-workers-user-namespaces): Kubernetes 1.33 or later,
    containerd 2.0 or later, Linux 6.3 or later, and storage, team volumes' included, that
    takes idmapped mounts. A cluster that cannot sets `worker.userNamespaces: false`, and
    its workers go on refusing commands.
@@ -65,7 +65,7 @@ AppArmor (Ubuntu's), workers before it ran under the runtime's default AppArmor 
 which refuses bubblewrap's mounts, so their pods refused every command there. The chart now
 gives the worker container an AppArmor profile of its own (`worker.appArmor`, on by
 default) and loads it into every node's kernel
-([installing.md](installing.md#the-workers-apparmor-profile)); the node's sysctl stays as
+([worker-sandbox.md](worker-sandbox.md#the-workers-apparmor-profile)); the node's sysctl stays as
 it is. What changes:
 
 1. The DaemonSet is now `troupe-worker-profiles` (Helm removes `troupe-worker-seccomp` and
@@ -182,7 +182,7 @@ visible on the writing replica at once and everywhere within 5 s. Before changin
 `platform_admin_group`, `admin.identity.check {group}` with the candidate; the console will
 not save it otherwise. What people's own machines start from and may not go past is the
 `client_*` settings and `client_enforced`
-([configuration.md](configuration.md#defaults-and-limits-for-peoples-machines)). Whether
+([client-config.md](client-config.md#defaults-and-limits-for-peoples-machines)). Whether
 people may offer their own signed-in tools to a profile's pods is the profile's
 `personalTools` (`admin.profile.put`, or the profile editor's switch).
 

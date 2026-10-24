@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 316" role="img" aria-labelledby="t d">
+  <title id="t">One protocol, and no other way in</title>
+  <desc id="d">The terminal client, the desktop app and a program of your own all speak the same protocol, JSON-RPC 2.0 over a socket, a WebSocket or the plane's POST /rpc, to troupe-daemon, to a worker pod and to the plane. On the plane the console, the admin methods and the MCP server are three renderings of one module, so nothing the console does is out of a program's reach.</desc>
+  <style>
+    .bg { fill: #f6f7f9; stroke: #d5d8de; }
+    .box { fill: #ffffff; stroke: #9aa1ab; stroke-width: 1.5; }
+    .yours { fill: #ffffff; stroke: #4051b5; stroke-width: 2; }
+    .bar { fill: #4051b5; }
+    .line { stroke: #4051b5; stroke-width: 2; fill: none; }
+    text { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; fill: #1f2328; font-size: 15px; }
+    .small { font-size: 13px; fill: #59636e; }
+    .on-bar { fill: #ffffff; font-weight: 600; }
+    .on-bar-small { fill: #e3e6fa; font-size: 13px; }
+    .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 14px; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #1f222b; stroke: #3a3f4b; }
+      .box, .yours { fill: #272b35; }
+      .box { stroke: #8a919c; }
+      .yours { stroke: #8c9eff; }
+      .bar { fill: #3d4a9e; }
+      .line { stroke: #8c9eff; }
+      text { fill: #e6e8eb; }
+      .small { fill: #a4abb6; }
+      .on-bar-small { fill: #d4d9fb; }
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="719" height="315" rx="12"/>
+
+  <rect class="box" x="24" y="24" width="212" height="56" rx="8"/>
+  <text x="40" y="49" class="mono">troupe</text>
+  <text x="40" y="68" class="small">the terminal client</text>
+  <rect class="box" x="254" y="24" width="212" height="56" rx="8"/>
+  <text x="270" y="49">the desktop app</text>
+  <text x="270" y="68" class="small">Linux, macOS, Windows</text>
+  <rect class="yours" x="484" y="24" width="212" height="56" rx="8"/>
+  <text x="500" y="49">your program</text>
+  <text x="500" y="68" class="small">in any language</text>
+
+  <path class="line" d="M130 80 L 130 116"/>
+  <path class="line" d="M360 80 L 360 116"/>
+  <path class="line" d="M590 80 L 590 116"/>
+
+  <rect class="bar" x="24" y="116" width="672" height="60" rx="8"/>
+  <text x="44" y="142" class="on-bar">PROTOCOL.md</text>
+  <text x="44" y="162" class="on-bar-small">JSON-RPC 2.0, over a socket, a WebSocket or POST /rpc: the same for every client</text>
+
+  <path class="line" d="M130 176 L 130 212"/>
+  <path class="line" d="M360 176 L 360 212"/>
+  <path class="line" d="M590 176 L 590 212"/>
+
+  <rect class="box" x="24" y="212" width="212" height="80" rx="8"/>
+  <text x="40" y="238" class="mono">troupe-daemon</text>
+  <text x="40" y="258" class="small">sessions on your machine</text>
+  <rect class="box" x="254" y="212" width="212" height="80" rx="8"/>
+  <text x="270" y="238">a worker pod</text>
+  <text x="270" y="258" class="small">a team's sessions</text>
+  <rect class="box" x="484" y="212" width="212" height="80" rx="8"/>
+  <text x="500" y="238">the plane</text>
+  <text x="500" y="258" class="small">the console, admin.* and /mcp:</text>
+  <text x="500" y="276" class="small">three views of one module</text>
+</svg>

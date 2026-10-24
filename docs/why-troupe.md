@@ -36,7 +36,7 @@ What differs is where the work lives and what is kept of it:
 
 | | on your laptop | with a plane |
 |---|---|---|
-| **Where a session runs** | in the daemon, outside any window ([ARCHITECTURE.md §2](../ARCHITECTURE.md#2-the-harness)) | on a [worker](glossary.md#worker) pod, so every laptop can be closed ([§6.2](../ARCHITECTURE.md#62-a-worker-pod)) |
+| **Where a session runs** | in the daemon, outside any window ([ARCHITECTURE.md §2](../ARCHITECTURE.md#2-the-harness)) | on a [worker](glossary.md#worker) pod, so every laptop can be closed ([§6.2](developer/architecture-remote.md#62-a-worker-pod)) |
 | **Who can look** | every client on the machine, together: the TUI, the desktop app, a script | the same from any machine, and a colleague you share the session with |
 | **What is kept** | the session's [log](glossary.md#log): append-only, hash-chained, and the session itself. Every view, restart and cost is read back from it | the same, sealed to object storage under keys the plane cannot use |
 | **What it may spend** | limits on each agent's model calls, tokens and time, which ask before going further ([quick start](quick-start.md#5-cap-the-next-one)) | as well, money budgets per team, per person and for the platform, reserved before a session starts |
@@ -62,7 +62,7 @@ adds, and where each part is described:
   ([profiles-and-policy.md](admin/profiles-and-policy.md)).
 - **Sessions that survive the client.** A session on a pod keeps going with no client
   attached, sleeps when idle and wakes when opened, on the same pod or another
-  ([ARCHITECTURE.md §6.2](../ARCHITECTURE.md#62-a-worker-pod)).
+  ([ARCHITECTURE.md §6.2](developer/architecture-remote.md#62-a-worker-pod)).
 - **Work nobody starts by hand.** A [trigger](glossary.md#trigger) starts a session on a
   schedule or from outside, as a [service principal](glossary.md#service-principal), on
   terms of its own, and flags it for review
@@ -70,7 +70,7 @@ adds, and where each part is described:
 - **One protocol, with no private door.** The clients use PROTOCOL.md like anyone's; the
   [console](glossary.md#console) calls the same admin methods the API and the MCP tools
   offer, and a test fails if an admin method has no screen and no written reason why not
-  ([ARCHITECTURE.md §1](../ARCHITECTURE.md#1-shape), [§6.4](../ARCHITECTURE.md#64-the-admin-surface)).
+  ([ARCHITECTURE.md §1](../ARCHITECTURE.md#1-shape), [§6.4](developer/architecture-remote.md#64-the-admin-surface)).
 - **A plane that cannot read your work.** It knows who, which profile, which state and what
   it cost, and no administrative method returns what a session said
   ([what Troupe never does](user/README.md#what-troupe-never-does)).

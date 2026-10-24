@@ -172,6 +172,10 @@ jobs:
       # change that adds a decision number to code fails, in any part of the repository.
       - name: No change adds a decision number to code
         run: elixir scripts/decision-citations.exs --base HEAD^1
+      # Here too because a chunk's pull requests are where pages grow and defects are
+      # added: no hand-written page past 400 lines, and the known defects only open ones.
+      - name: Every page is the size a stranger reads
+        run: elixir scripts/doc-size.exs
 
   tui:
     name: the TUI - compile

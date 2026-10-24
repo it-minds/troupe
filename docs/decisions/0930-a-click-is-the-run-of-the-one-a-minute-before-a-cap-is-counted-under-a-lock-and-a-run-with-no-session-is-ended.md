@@ -14,6 +14,7 @@ paths:
   - apps/troupe_plane/test/troupe/plane/github_issues_test.exs
   - docs/admin/bundles-and-triggers.md
   - docs/admin/github.md
+  - docs/admin/github-runs.md
 symbols:
   - fire_by_hand
   - end_unmade

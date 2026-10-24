@@ -72,7 +72,7 @@ your organisation's `allow` rules apply.
 
 **On a team's pods.** A session on a plane's pods also obeys the rules of the worker
 profile it runs on, which a platform administrator sets
-([profiles](../../admin/profiles-and-policy.md#per-tool-rules-on-a-profile)). They are a
+([profiles](../../admin/profile-options.md#per-tool-rules-on-a-profile)). They are a
 scope of their own and the same rule holds: the strictest wins, so nothing in a repository
 loosens them. A call one refuses or asks about names "the worker profile" and its name, in
 the transcript and on the approval. A `deny` for `shell` there refuses a command you type

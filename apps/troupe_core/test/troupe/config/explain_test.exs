@@ -239,7 +239,15 @@ defmodule Troupe.Config.ExplainTest do
     end
 
     test "every example in the documentation is a valid config file", ctx do
-      for doc <- ["docs/user/configuration.md", "clients/tui/README.md", "apps/troupe_daemon/README.md"],
+      docs = [
+        "docs/user/configuration.md",
+        "docs/user/configuration-layers.md",
+        "docs/user/configuration-settings.md",
+        "clients/tui/README.md",
+        "apps/troupe_daemon/README.md"
+      ]
+
+      for doc <- docs,
           {block, n} <- doc |> then(&File.read!(Path.join(@root, &1))) |> yaml_blocks() |> Enum.with_index(1) do
         path = Path.join(ctx.base, "example-#{n}.yaml")
         File.write!(path, block)

@@ -32,6 +32,7 @@ paths:
   - docs/user/configuration/permissions.md
   - docs/user/configuration.md
   - docs/admin/configuration.md
+  - docs/admin/client-config.md
 symbols:
   - Troupe.Protocol.PermissionRule.parse/1
   - Troupe.Config.Permissions.decide/4

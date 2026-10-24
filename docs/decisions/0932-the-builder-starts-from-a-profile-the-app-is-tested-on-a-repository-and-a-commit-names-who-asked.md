@@ -28,6 +28,7 @@ paths:
   - PROTOCOL.md
   - docs/admin/github.md
   - docs/admin/bundles-and-triggers.md
+  - docs/admin/github-runs.md
 symbols:
   - Troupe.Plane.Admin.profile_agents/2
   - Troupe.Plane.Admin.profile_choices/2
