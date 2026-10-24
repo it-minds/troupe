@@ -20,23 +20,6 @@ Stale docs and style nits are not defects and do not belong here.
 
 ## Open
 
-### D5 - On Windows a refresh token over 1280 characters can't be stored, and the desktop sign-in fails (medium)
-
-`secret_set` (`clients/gui/apps/desktop/src-tauri/src/secrets.rs`) stores the refresh
-token with keyring 3.6.3's `Entry::set_password`, which writes it to Windows Credential
-Manager as UTF-16 and refuses more than 1280 UTF-16 units (the 2560-byte
-`CRED_MAX_CREDENTIAL_BLOB_SIZE`) before writing anything: "Attribute 'password encoded
-as UTF-16' is longer than platform limit of 2560 chars" (`validate_attributes` in the
-crate's `windows.rs`). It is worse than a token left unsaved: `AuthSession.adopt`
-(`clients/gui/packages/client/src/auth.ts`) writes the token before the exchange and
-does not catch, so that sign-in fails, and so does a refresh that rotates to such a
-token. Authentik's are 128 characters. Entra's are opaque and vary; other projects
-report them over 1280 in tenants with many claims, which is still unmeasured here (no
-Entra tenant). `set_secret` with UTF-8 would hold 2560 and needs a read path for entries
-written as UTF-16; splitting the token across entries has no limit. Either wants a
-renamed desktop build to test. Found by the #53 fixer (PR #84), 2026-09-22; the limit
-and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
-
 ### D8 - Test hygiene (low)
 
 - The root `.formatter.exs` has no `subdirectories`, so `mix format --check-formatted`
@@ -816,14 +799,6 @@ Found by the #371 fixer, 2026-10-08.
 
 ### D92 - Thinking blocks and the prompt prefix, what #465's measurement found (medium)
 
-- Today's resend (Decision 805) and the `drop_block` beta both leave the stale thinking
-  blocks in Troupe's history, so on an enforced account every later call of the session
-  meets the mismatch again until a compaction: two requests a call today, or every block
-  dropped on every call with `drop_block`. Once a call is refused or reports drops,
-  sending the leading run of pre-change blocks no more would end it (Anthropic accepts a
-  leading run removed oldest first). Since Decision 871 a tool that comes or goes changes
-  the prefix only at a turn boundary, but each change there (D124's turn's tools) still
-  costs every later call one refusal.
 - On a model that does not bind its thinking, Decision 793 still offers the todo tools once
   a list exists or after 10 calls, which changes `tools` mid-turn and costs a cache write
   (`llm_request.tools_changed` counts it). A model that binds has them from the first call,
@@ -1472,11 +1447,7 @@ Found by the chunk 39 fixers, 2026-10-19.
   - Re-resolving a running session for an organisation change also picks up the person's own config edits since it started.
   - `policy.revision` is unsigned; a forged one can only cause or suppress a fetch.
   - Gateway tests that wait 5 s on a link's background task fail under load.
-- **The sweep** (Decision 930).
-  - The GUI's fake admin still keys manual runs on the minute.
-  - `pnpm audit` reports one high-severity advisory in `source-map-js`, pulled in only by the console's test runner.
 - **The picker and the App** (Decision 932, tui/0166).
-  - The plane's bundle preview diffs names only (`Bundle.summary/1`), so a changed definition with unchanged names previews nothing there; the builder adds its own lines. (medium)
   - The admin API's flat `profile` argument receives the params map when absent; `profile_choices` guards for it.
   - The desktop's `AgentEditor` doesn't show `delegation`.
   - `Ledger.models_run` has no time bound.

@@ -881,6 +881,57 @@ defmodule Troupe.Plane.AdminTest do
       assert missing.message == "not_found"
     end
 
+    # A preview says what a definition changes, not only which names come and go: a model
+    # changed under the same names is a line of its own, and the same document is nothing.
+    test "a preview diffs the definitions, field by field, under unchanged names", context do
+      agent = fn model ->
+        "---\ndescription: Triages\nmode: primary\nmodel: #{model}\n---\nYou triage.\n"
+      end
+
+      document = fn model, url, skill_text ->
+        %{
+          "schema" => 1,
+          "agents" => [%{"name" => "triager", "definition" => agent.(model)}],
+          "skills" => [
+            %{
+              "name" => "notes",
+              "files" => %{"SKILL.md" => "---\nname: notes\n---\n" <> skill_text}
+            }
+          ],
+          "mcp_servers" => [%{"name" => "jira", "url" => url}]
+        }
+      end
+
+      published = document.("big", "https://mcp.jira.example/mcp", "Take notes.")
+      assert {:ok, _} = Admin.bundle_publish(context.root, "stable", published)
+
+      assert {:ok, same} = Admin.bundle_preview(context.root, "stable", published)
+      assert same.changes == %{}
+
+      draft = document.("small", "https://mcp.jira.example/v2", "Take short notes.")
+      assert {:ok, preview} = Admin.bundle_preview(context.root, "stable", draft)
+
+      assert preview.changes == %{
+               "agents.triager.model" => %{"from" => "big", "to" => "small"},
+               "mcp_servers.jira.url" => %{
+                 "from" => "https://mcp.jira.example/mcp",
+                 "to" => "https://mcp.jira.example/v2"
+               },
+               "skills.notes.files.SKILL.md" => %{
+                 "from" => "---\nname: notes\n---\nTake notes.",
+                 "to" => "---\nname: notes\n---\nTake short notes."
+               }
+             }
+
+      assert preview.removed == []
+
+      # A name that comes or goes is said as it was, and not again field by field.
+      renamed = %{draft | "agents" => [%{"name" => "sorter", "definition" => agent.("big")}]}
+      assert {:ok, moved} = Admin.bundle_preview(context.root, "stable", renamed)
+      assert moved.changes["agents"] == %{"from" => ["triager"], "to" => ["sorter"]}
+      refute Enum.any?(Map.keys(moved.changes), &String.starts_with?(&1, "agents."))
+    end
+
     test "an MCP host is checked against the same policy publishing uses", context do
       Application.put_env(:troupe_plane, :egress_allowed, fn host ->
         host == "mcp.jira.example"

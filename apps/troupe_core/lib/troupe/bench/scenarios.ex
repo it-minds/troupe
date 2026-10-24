@@ -13,7 +13,7 @@ defmodule Troupe.Bench.Scenarios do
   `priv/bench/budgets.json`.
   """
 
-  alias Troupe.Bench.{Memory, Model, Onboarding, Runner, Scenario}
+  alias Troupe.Bench.{Memory, Model, Onboarding, Prefix, Runner, Scenario}
   alias Troupe.LLM.Message
   alias Troupe.Log.Fold
   alias Troupe.Protocol.Event
@@ -23,7 +23,7 @@ defmodule Troupe.Bench.Scenarios do
   @spec all() :: [Scenario.t()]
   def all,
     do:
-      [tool_calls(), cut_output(), compaction(), cancel(), replay()] ++
+      [tool_calls(), cut_output(), compaction(), cancel(), replay(), prefix_change()] ++
         Onboarding.all() ++ Memory.all()
 
   # -- a turn of thirty tool calls --------------------------------------------------
@@ -350,6 +350,69 @@ defmodule Troupe.Bench.Scenarios do
        {"same_fold", "the file folds as the running log does", ctx.marks.same_fold},
        {"chained", "every event names the hash of the one before", ctx.marks.chained},
        {"once", "a client replaying from the start sees each event once", ctx.marks.once},
+       {"resumed", "the resumed agent has the conversation it had", ctx.marks.resumed}
+     ]}
+  end
+
+  # -- thinking after a prefix change ------------------------------------------------
+
+  @reads 12
+
+  # D92: a model that binds its thinking to the prompt it was made under, as Anthropic's
+  # newest do for an enforced account, refuses a block sent back after the tools changed,
+  # and the call goes again without its thinking. The fake model is not one that binds, so
+  # the task list's tools come at a turn's eleventh call, as they do on any such model:
+  # every call from there carried the first ten calls' blocks, and each was refused, until
+  # the conversation let them go at the first. One refusal for the one change; then the
+  # session, stopped and resumed, comes back with the conversation it had, the blocks it
+  # let go still gone.
+  defp prefix_change do
+    %Scenario{
+      name: "prefix_change",
+      title: "thinking made before a prefix change is refused once, not on every call after",
+      prompt: "Read each file in notes/ with read_file, one at a time, then say that you have.",
+      files: Map.new(1..@reads, &{"notes/#{pad(&1)}.txt", note(&1)}),
+      script:
+        Enum.map(
+          1..@reads,
+          &{:bound, {:tools, [{"read_file", %{"path" => "notes/#{pad(&1)}.txt"}}]}}
+        ) ++
+          [{:bound, {:text, "I have read all #{@reads} notes."}}],
+      drive: &drive_prefix_change/1,
+      measure: &measure_prefix_change/1
+    }
+  end
+
+  defp drive_prefix_change(ctx) do
+    ctx = Runner.type_and_wait(ctx)
+    sid = ctx.session_id
+    before = conversation(sid)
+    :ok = Troupe.stop_session(sid)
+
+    {:ok, _session} =
+      Troupe.resume(sid,
+        workspace: ctx.workspace,
+        fake: ctx.model,
+        config_overrides: ctx.overrides
+      )
+
+    %{ctx | marks: %{resumed: conversation(sid) == before}}
+  end
+
+  defp measure_prefix_change(ctx) do
+    prefix = Prefix.count(ctx.events)
+
+    {[
+       {"model_calls", "model calls in the turn", "calls", length(ctx.calls)},
+       {"prefix_changes", "calls whose system prompt or tools changed", "calls",
+        prefix["system_changes"] + prefix["tools_changes"]},
+       {"thinking_resent", "calls refused for thinking made before a change and sent again",
+        "calls", prefix["thinking_resent"]}
+     ],
+     [
+       {"ended", "the turn ended with the answer", ended?(ctx)},
+       {"once_a_change", "no more calls were sent again than the prompt changed",
+        prefix["thinking_resent"] <= prefix["system_changes"] + prefix["tools_changes"]},
        {"resumed", "the resumed agent has the conversation it had", ctx.marks.resumed}
      ]}
   end

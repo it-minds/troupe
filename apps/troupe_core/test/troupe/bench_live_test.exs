@@ -412,15 +412,17 @@ defmodule Troupe.BenchLiveTest do
       report = Bench.live(plan)
       assert Bench.passed?(report), Bench.markdown(report)
       [run] = scenario(report, "follow_up")["runs"]
-      assert %{"system_changes" => 1, "thinking_resent" => 2} = run["prefix"]
+      # Refused once for the change, and not again: the call sent again without its
+      # thinking let the blocks from before the change go from the conversation.
+      assert %{"system_changes" => 1, "thinking_resent" => 1} = run["prefix"]
 
       requests = FakeOpenAI.requests(fake)
-      assert [200, 200, 200, 400, 200, 400, 200] = Enum.map(requests, & &1.status)
+      assert [200, 200, 200, 400, 200, 200] = Enum.map(requests, & &1.status)
 
       # Each request that may hand thinking back asks for the refusal; the call sent again
       # without its thinking has nothing to bind.
       assert Enum.map(requests, & &1.binding) ==
-               ["error", "error", "error", "error", nil, "error", nil]
+               ["error", "error", "error", "error", nil, "error"]
 
       # The refusal's header, on the answer the call ended with, and nothing else of it.
       responses =
@@ -432,7 +434,7 @@ defmodule Troupe.BenchLiveTest do
         |> Enum.filter(&(&1["type"] == "llm_response"))
 
       mismatched = Enum.filter(responses, & &1["data"]["prefix_mismatch"])
-      assert length(mismatched) == 2
+      assert length(mismatched) == 1
       assert Enum.all?(mismatched, & &1["data"]["thinking_resent"])
 
       assert Enum.uniq(Enum.map(mismatched, & &1["data"]["prefix_mismatch"])) == [
@@ -460,7 +462,7 @@ defmodule Troupe.BenchLiveTest do
       assert Enum.any?(requests, &(&1.binding == "error"))
     end
 
-    test "with system_prompt: per_turn the second turn's calls are each refused once and sent again without thinking",
+    test "with system_prompt: per_turn the second turn's first call is refused once and sent again without thinking, and the rest are not",
          %{tmp_dir: dir} do
       fake = start_fake()
       keep = Path.join(dir, "kept")
@@ -489,15 +491,16 @@ defmodule Troupe.BenchLiveTest do
                "system_changes" => 1,
                "tools_changes" => 0,
                "inferred" => 0,
-               "thinking_resent" => 2,
+               "thinking_resent" => 1,
                "thinking_dropped" => 0,
                "turn_contexts" => 0
              } = run["prefix"]
 
-      assert report["summary"]["prefix"]["thinking_resent"] == 2
+      assert report["summary"]["prefix"]["thinking_resent"] == 1
 
-      # Two refusals, each followed by the same call with no thinking in it.
-      assert [200, 200, 200, 400, 200, 400, 200] =
+      # One refusal, followed by the same call with no thinking in it; the call after it
+      # carries only the thinking made since, and is not refused.
+      assert [200, 200, 200, 400, 200, 200] =
                Enum.map(FakeOpenAI.requests(fake), & &1.status)
 
       # The counter over the kept session log says what the run's record says.
@@ -522,24 +525,24 @@ defmodule Troupe.BenchLiveTest do
       report = Bench.live(plan)
       assert Bench.passed?(report), Bench.markdown(report)
 
-      # The second turn's first call drops the first turn's three blocks, and its second
-      # those and the one the first made: a block after a dropped one goes too.
+      # The second turn's first call drops the first turn's three blocks, and the
+      # conversation lets them go: its second carries only the one the first made, kept.
       [run] = scenario(report, "follow_up")["runs"]
 
       assert %{
                "system_changes" => 1,
                "thinking_resent" => 0,
-               "thinking_dropped" => 7,
-               "calls_dropping" => 2
+               "thinking_dropped" => 3,
+               "calls_dropping" => 1
              } = run["prefix"]
 
       requests = FakeOpenAI.requests(fake)
       assert Enum.all?(requests, &(&1.status == 200))
       assert Enum.all?(requests, &(&1.beta == "thinking-binding-controls-2026-08-01"))
       thinking = Enum.map(requests, & &1.thinking)
-      assert thinking == [:kept, :kept, :kept, {:dropped, 3}, {:dropped, 4}]
+      assert thinking == [:kept, :kept, :kept, {:dropped, 3}, :kept]
 
-      assert [nil, nil, nil, "kind=system_changed" <> _, "kind=system_changed" <> _] =
+      assert [nil, nil, nil, "kind=system_changed" <> _, nil] =
                Enum.map(requests, & &1[:mismatch])
     end
 
@@ -602,15 +605,16 @@ defmodule Troupe.BenchLiveTest do
         end
 
       # Six answers. By default the second and third turns each begin with a system prompt
-      # holding the list the turn before left, and each of their four calls carries the
-      # first turn's block: refused, and sent again without thinking.
+      # holding the list the turn before left, so each turn's first call carries blocks made
+      # under the old one: refused, and sent again without thinking, once a change; the
+      # conversation lets those blocks go, and the turn's second call is not refused.
       {per_turn, requests} = runs["per_turn"]
       assert per_turn["model_calls"] == 6
 
-      assert %{"system_changes" => 2, "thinking_resent" => 4, "turn_contexts" => 0} =
+      assert %{"system_changes" => 2, "thinking_resent" => 2, "turn_contexts" => 0} =
                per_turn["prefix"]
 
-      assert [200, 200, 400, 200, 400, 200, 400, 200, 400, 200] =
+      assert [200, 200, 400, 200, 200, 400, 200, 200] =
                Enum.map(requests, & &1.status)
 
       # Stable, the list goes with the turn, and nothing in front of what was sent changes.
@@ -660,7 +664,7 @@ defmodule Troupe.BenchLiveTest do
   # model that binds its thinking, `goal_complete` is offered on both, so the person's turn
   # changes nothing in front of the loop's thinking; where it was offered on the loop's turn
   # alone (Decision 679, kept for a model that does not bind), the person's turn changed the
-  # tools and each of its calls was refused once. The stand-in binds every model's thinking,
+  # tools and its first call was refused once. The stand-in binds every model's thinking,
   # Claude Opus 5's too, which is how that case is shown.
   describe "issue #606's loop turn" do
     test "a loop's turn and a person's with thinking_binding: error: no tools change, nothing refused" do
@@ -696,9 +700,10 @@ defmodule Troupe.BenchLiveTest do
       [run] = plan |> Bench.live() |> scenario("loop_turn") |> Map.fetch!("runs")
       assert run["succeeded"] and run["model_calls"] == 6
 
-      # Each of the person's turn's three calls.
-      assert %{"tools_changes" => 1, "thinking_resent" => 3} = run["prefix"]
-      assert length(FakeOpenAI.requests(fake)) == 9
+      # The person's turn's first call, once: the conversation lets the loop's blocks go
+      # then, and the turn's other two calls are not refused.
+      assert %{"tools_changes" => 1, "thinking_resent" => 1} = run["prefix"]
+      assert length(FakeOpenAI.requests(fake)) == 7
     end
   end
 

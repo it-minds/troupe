@@ -17,6 +17,10 @@ defmodule Troupe.Bench.Model do
     * **A request with no tools is the summariser's**, and is answered with a summary
       whatever step is next, so a script does not have to know which call compaction
       will make.
+    * **A `{:bound, step}` answers as a model that binds its thinking does**: after a
+      thinking block bound to the system prompt and the tools it was made under, and,
+      where the request hands back one bound to others, as a call refused for it and sent
+      again without thinking (`thinking_resent`).
     * **Every request is kept with the task that made it**, so a scenario can tell
       whether a cancelled call's task is still running, and an observer is told of each
       one as it arrives.
@@ -27,12 +31,23 @@ defmodule Troupe.Bench.Model do
 
   use GenServer
 
-  alias Troupe.LLM.{Gateway, Message, Request, Response, Text, ToolResult, ToolUse, Usage}
+  alias Troupe.LLM.{
+    Gateway,
+    Message,
+    Reasoning,
+    Request,
+    Response,
+    Text,
+    ToolResult,
+    ToolUse,
+    Usage
+  }
 
   @type step ::
           {:text, String.t()}
           | {:tools, [{String.t(), map()}]}
           | {:delay, non_neg_integer(), step()}
+          | {:bound, step()}
           | (Request.t() -> step())
 
   @summary "Summary of the work so far: the files were read and nothing is left to do."
@@ -203,6 +218,27 @@ defmodule Troupe.Bench.Model do
     {{:ok, response, ms}, state}
   end
 
+  defp render({:bound, step}, request, state) do
+    {{:ok, response, delay}, state} = render(step, request, state)
+    signature = bound_to(request)
+
+    # Sent back under a prompt that changed since it was made: refused, and the call sent
+    # again without its thinking, which is what the Anthropic adapter answers the refusal
+    # with. The answer says so, as that adapter's does.
+    stale? =
+      Enum.any?(request.messages, fn %Message{content: content} ->
+        Enum.any?(
+          content,
+          &match?(%Reasoning{provider: :anthropic, signature: s} when s != signature, &1)
+        )
+      end)
+
+    thought = %Reasoning{provider: :anthropic, text: "", signature: signature}
+
+    {{:ok, %{response | content: [thought | response.content], thinking_resent: stale?}, delay},
+     state}
+  end
+
   defp render({:text, text}, request, state) do
     {{:ok, response([%Text{text: text}], :end_turn, request, text, state), 0}, state}
   end
@@ -230,6 +266,14 @@ defmodule Troupe.Bench.Model do
       model: request.model,
       gateway: %Gateway{request_id: "bench_#{state.n}"}
     }
+  end
+
+  # What a thinking block of a model that binds its thinking is bound to, as far as the
+  # bench changes it: the system prompt and the tools, as a set.
+  defp bound_to(%Request{} = request) do
+    names = request.tools |> Enum.map(& &1.name) |> Enum.sort()
+    prefix = [Request.system_text(request), names]
+    :crypto.hash(:sha256, :erlang.term_to_binary(prefix)) |> Base.encode16(case: :lower)
   end
 
   @doc "Tokens for a number of bytes, as this model counts them: four bytes each, rounded up."

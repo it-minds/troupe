@@ -201,6 +201,46 @@ defmodule Troupe.Protocol.Bundle do
   end
 
   @doc """
+  Each entry's definition by name, field by field, for a preview to say which field of an
+  entry changed and not only which names came and went: an agent's frontmatter keys and
+  its `prompt`, the text after them; a skill's description and files; an MCP server's and
+  an ACP agent's settings as checked.
+  """
+  @spec definitions(t()) :: %{String.t() => %{String.t() => map()}}
+  def definitions(%{agents: agents, skills: skills, mcp_servers: servers} = bundle) do
+    %{
+      "agents" => Map.new(agents, &{&1.name, agent_fields(&1.definition)}),
+      "skills" =>
+        Map.new(skills, &{&1.name, %{"description" => &1.description, "files" => &1.files}}),
+      "mcp_servers" => Map.new(servers, &{&1.name, fields(&1)}),
+      "acp_agents" => bundle |> Map.get(:acp_agents, []) |> Map.new(&{&1.name, fields(&1)})
+    }
+  end
+
+  defp agent_fields(text) do
+    {frontmatter, body} = AgentDefinition.split_frontmatter(text)
+
+    front =
+      case YamlElixir.read_from_string(frontmatter) do
+        {:ok, %{} = map} -> map
+        _none -> %{}
+      end
+
+    Map.put(front, "prompt", body)
+  end
+
+  defp fields(entry) do
+    for {key, value} <- Map.delete(entry, :name),
+        into: %{},
+        do: {Atom.to_string(key), word(value)}
+  end
+
+  defp word(value) when is_atom(value) and value not in [nil, true, false],
+    do: Atom.to_string(value)
+
+  defp word(value), do: value
+
+  @doc """
   The MCP servers in the wire shape `Troupe.MCP.Server.from_config/1` reads.
 
   `permission` and `tools` ride along; the worker applies them after discovery.
