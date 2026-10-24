@@ -1452,6 +1452,55 @@ Found by the chunk 39 fixers, 2026-10-19.
 
 Found by the chunk 40 fixers, 2026-10-24.
 
+### D134 - The gate's desk walk, the chart's hand steps, the upgrade test and the seam after chunk 41 (low)
+
+- **The gate** (Decision 933). Walked at a desk on the installed 0.24.0-beta; the live rows are
+  walked on 0.25.0-beta (`Stage 1 gate: v0.25.0-beta`).
+  - Not walked at the desk: the desktop app on the trap repository (row 1 step 4) and on a real
+    repository (row 3 step 5), the installer's own questions and its PATH change, and `cost_usd`
+    against a provider that reports no price.
+  - A branch started from command mode asks the workspace's MCP question again, with the same
+    `call_id` as the root's (`mcp-trust-<fingerprint>`); a client that keys answers by `call_id`
+    can treat it as answered.
+  - On Linux with `TROUPE_INSTALL_DIR` set, output redirected with a plain `>` is overwritten by
+    Burrito's `[i]` lines, which reach the file through a description of their own.
+- **The chart and the operator** (Decision 934).
+  - Still by hand on a cluster: copying the worker Secrets into each new worker namespace, and
+    the `troupe.dev/ingress=true` label.
+  - `SecretMissing=True` shows on a freshly installed profile right after the install although
+    the Secrets exist.
+  - The kind plane holds OpenBao's root token, so the cluster suite never exercises the grant
+    check with a narrow role; the GitHub grant is always reported optional, an App configured or not.
+  - `scripts/kind-up` under Git Bash needs `MSYS_NO_PATHCONV=1` (`chmod /kind` is
+    path-converted); `kind-upgrade-check` sets it, `kind-up` does not.
+  - The e2e `enrolment_test` depends on an earlier test writing the profile row;
+    `Troupe.Plane.ClusterTest` times out starting its replica on a loaded machine.
+- **The mediums** (Decision 935).
+  - `pnpm audit` in `clients/gui` reports `undici` below 8.12.2 through `jsdom` (test-only).
+  - The desktop window does not show `AuthSession.notKept`; it reaches `console.warn` only.
+  - No CI job runs the desktop crate's `cargo test` or the protocol keyring test on Windows, so
+    the Windows half of the parts layout is checked on a developer's machine only.
+  - After a renewal whose store write failed, the rotated-away token stays stored; the next
+    launch's refresh is refused once and clears it.
+  - Windows PowerShell 5.1 caps an environment value near 32 KB, so a keyring value of that
+    size fails at the helper's hand-off, not at Credential Manager.
+- **The upgrade** (Decision 936).
+  - `helm rollback` is tested nowhere; `upgrading.md` says so.
+  - `scripts/e2e` never runs `deps.get` in the toolbox; a stale shared deps volume fails the
+    first seed.
+  - The kind scripts need bash (arrays); `sh -n` under dash refuses them, as `remote-up`
+    already did.
+- **The seam** (Decision 937).
+  - The desktop app's and the TUI's `initialize` send no `client_info.platform`; the daemon's does.
+  - The Linux desktop `cargo test` job starts no Secret Service, so `secrets.rs`'s Linux
+    round trip skips there.
+  - The 4096-byte line `security -i` takes is Apple's documented limit, not measured here; the
+    daemon uses the parts layout past it on macOS.
+  - The umbrella `.formatter.exs` covers the root's `config`, `lib` and `test` only, so the
+    format check does not cover `apps/`.
+
+Found by the chunk 41 fixers, 2026-10-24.
+
 ## Taken
 
 | Defect | Taken by |
