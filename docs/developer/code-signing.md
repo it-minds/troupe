@@ -3,7 +3,7 @@
 For the people who provision accounts for the organisation that releases Troupe: what to
 buy so that macOS and Windows recognise the apps as that organisation's, what each purchase
 needs first, what it costs, how long each step takes, and which secrets go into the
-repository's `release` environment. When they are there, #656 wires them into the release.
+repository's `release` environment. When they are there, the next release is signed with no other change: the workflows, the scripts and the docs are ready ([section 6](#6-the-day-the-certificates-exist)).
 
 Troupe's own check does not depend on any of this. Every release is signed with the release
 key, and every client verifies that signature before it installs anything
@@ -146,11 +146,10 @@ standalone binary**: for `troupe` and `troupe-daemon` Gatekeeper finds the ticke
 | `APPLE_API_KEY` | the key's Key ID |
 | `APPLE_API_PRIVATE_KEY` | the text of the `.p8` file |
 
-`native.yml` already passes the first five to the desktop build. It also reads a secret
-named `APPLE_API_KEY_PATH`, which tauri-action takes as **the path of the `.p8` file**, not
-its contents ([Tauri, macOS signing](https://v2.tauri.app/distribute/sign/macos/)); a secret
+tauri-action takes the key as `APPLE_API_KEY_PATH`, **the path of the `.p8` file**, not its
+contents ([Tauri, macOS signing](https://v2.tauri.app/distribute/sign/macos/)), and a secret
 cannot be a file on the runner. So the key's text goes in as `APPLE_API_PRIVATE_KEY`, and
-#656 writes it to a file in the job and points `APPLE_API_KEY_PATH` at it.
+`native.yml` writes it to a file only the job reads; there is no `APPLE_API_KEY_PATH` secret.
 
 ## 3. Windows: three ways to get a signature
 
@@ -230,8 +229,8 @@ and the [FAQ](https://learn.microsoft.com/en-us/azure/artifact-signing/faq):
    it. The signing tool Tauri uses reads exactly these
    ([artifact-signing-cli](https://github.com/levminer/trusted-signing-cli)). Microsoft's own
    GitHub Action can instead sign in with OpenID Connect and no client secret
-   ([artifact-signing-action](https://github.com/Azure/artifact-signing-action)); #656 can
-   use that for the files it signs outside Tauri's build.
+   ([artifact-signing-action](https://github.com/Azure/artifact-signing-action)); `native.yml`
+   signs everything with `artifact-signing-cli` and the client secret today.
 
 The identity validation is renewed before it expires; Azure starts reminding 60 days
 before, and signing stops if it lapses
@@ -248,9 +247,11 @@ before, and signing stops if it lapses
 | `AZURE_CODE_SIGNING_NAME` | the Artifact Signing account's name |
 | `AZURE_CERT_PROFILE_NAME` | the certificate profile's name |
 
-These are the names `native.yml` already reads; setting `AZURE_ENDPOINT` is what turns its
-Windows signing on. With the OV fallback the names are the CA's instead: its signing API's
-user, password or key, and the credential's ID.
+These are the names `native.yml` reads; setting `AZURE_ENDPOINT` is what turns its Windows
+signing on, and the other five must be set with it. With the OV fallback the names are the
+CA's instead (its signing API's user, password or key, and the credential's ID), and
+`scripts/signing/sign-windows.ps1` needs a third `TROUPE_SIGN_TOOL` beside `artifact-signing`
+and `signtool`.
 
 ## 4. The `release` environment
 
@@ -259,10 +260,12 @@ The secrets above go into the repository's **`release` environment**, beside
 from `main` only and has no required reviewers. Environment secrets reach only the jobs that
 name the environment, and only once its rules pass
 ([GitHub, managing environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)).
-That has a consequence #656 has to deal with: the native builds run in `native.yml`, called
-by `release.yml` with `secrets: inherit`, and none of its jobs names `release`, so **the
-signing secrets do not reach them as the workflows stand**, even though `native.yml` reads
-them.
+So `release.yml` calls `native.yml` with `sign: release`, and only then do its macOS and
+Windows builds, and the small job that sees which secrets are set, name `release`. The
+nightly (on `main`), a pre-release (from any branch, which the environment would refuse)
+and a pull request call it without `sign`: they build unsigned, never ask for the
+environment, and read no secret. Keep the main-only rule: it is what keeps the
+certificates to the release workflow on `main`.
 
 Someone with admin rights on the repository adds them, under **Settings → Environments →
 release → Environment secrets**. Nobody else needs to see the values, and nothing in the
@@ -279,55 +282,164 @@ repository prints them.
 | 5 | Create the Developer ID Application certificate and export the `.p12`; create the team API key | the Account Holder; an Admin for the key | an hour |
 | 6 | Create the certificate profile, the app registration and its role | an Azure administrator | an hour, once validation is complete |
 | 7 | Put the twelve secrets into the `release` environment | a repository admin | minutes |
-| 8 | #656: sign in the release workflow (next section) | a developer | a chunk slot |
+| 8 | Nothing: the release workflow is wired and tested ([next section](#6-the-day-the-certificates-exist)) | — | — |
 | 9 | The first signed release; open it on a fresh Mac and a fresh Windows machine | the maintainer | a release |
 
 Steps 2 to 4 are the long ones and run in parallel: by the figures above, from about a week
 to four or more, most of it waiting on others. Nothing in steps 1 to 7 changes the
 repository.
 
-## 6. What #656 then does
+## 6. The day the certificates exist
 
-#656 is done when the desktop app and the `troupe` and `troupe-daemon` binaries are
-code-signed on Windows, signed and notarised on macOS, a fresh machine opens each with no
-warning, and the install docs drop the workaround. The release key's signature stays the
-check Troupe makes.
+Everything but the certificates is in the repository and runs on every change to it
+([Decision 938](../decisions/0938-os-signing-is-wired-off-until-the-secrets-exist-and-signs-everything-a-payload-unpacks.md)).
+On the day, a repository admin puts the twelve secrets below into the `release`
+environment, and the next release is signed. No workflow, script or document changes
+first; afterwards one paragraph of the docs does ([below](#after-the-first-signed-release)).
 
-| job (`native.yml`) | what it signs, and how | where it is checked |
+### What signs what
+
+`release.yml` calls `native.yml` with `sign: release`. Each macOS and Windows build then
+signs every executable and library its artifact holds or unpacks, because Gatekeeper and
+Smart App Control check each one, then signs the artifact, then checks what it made.
+
+| `native.yml` job | what is signed, and how | checked in the job by |
 | --- | --- | --- |
-| `desktop`, macOS | the `.app` and `.dmg`: tauri-action signs with `APPLE_CERTIFICATE`, turns on the hardened runtime with `entitlements.plist` (`tauri.signing.conf.json`), notarises with the API key and staples. The `.app.tar.gz` the updater reads is packed afterwards, from the stapled app | `codesign --verify --deep --strict`, `spctl --assess --type execute`, `xcrun stapler validate` |
-| `desktop`, Windows | the app's executable, the NSIS setup and the MSI, through `bundle.windows.signCommand` while Tauri builds, so the executable inside each installer is signed too | `signtool verify /pa /v`, or `Get-AuthenticodeSignature` |
-| `daemon`, macOS | every Mach-O in the release (the ERTS executables, `beam.smp`, the NIF libraries), each with the hardened runtime, a timestamp and the entitlements the BEAM needs; then the release zipped for `notarytool submit --wait`, and the `.tar.gz` made as today | the notary log has no issues; `codesign --verify` on each file |
-| `daemon`, Windows | every `.exe` and `.dll` in the release, before it is packed | `signtool verify` on each |
-| `tui`, macOS and Windows | the files in Burrito's payload, before Burrito packs it, and then the finished `troupe` binary; on macOS the binary zipped and notarised | as above, on the binary and on what it unpacks |
+| `daemon`, macOS | every Mach-O in the release (the ERTS programs, `beam.smp`, every NIF), with the hardened runtime, a secure timestamp and [`beam.entitlements`](../../scripts/signing/beam.entitlements), by `Troupe.Release.OSSigning` before `:tar` packs it; then the tree is notarised | `sign-macos.sh --verify` on the unpacked archive; the smoke test runs the signed files |
+| `daemon`, Windows | every PE file in the release, before `:tar`, with `artifact-signing-cli` | `sign-windows.ps1 -Verify` on the unpacked archive |
+| `tui`, macOS and Windows | every Mach-O or PE file in Burrito's payload, after Burrito's patch phase puts the target's ERTS in it and before it is packed; then the `troupe` binary; on macOS it is notarised | the same, on the binary and on the payload it unpacks on its first run |
+| `desktop`, macOS | Tauri: the app with the hardened runtime and `entitlements.plist`, notarised and stapled; the updater's `.app.tar.gz` is packed afterwards, from the stapled app | `codesign --verify --deep --strict`, `spctl --assess`, `xcrun stapler validate` |
+| `desktop`, Windows | Tauri, through the sign command in `tauri.signing.conf.json`, which is `sign-windows.ps1`: the app's executable, the NSIS setup and its uninstaller, the MSI | `sign-windows.ps1 -Verify`; what the setup unpacks is listed beside it |
 | Linux targets | nothing: Linux has no OS signature to add | — |
 
-And around those:
+The scripts are in `scripts/signing/`. The order around them
+does not change: `publish` writes `manifest.json`, the desktop update's `.sig` files and
+`SHA256SUMS` over what `native.yml` attached, which is the OS-signed files, and the release
+key signs the manifest
+([Decision 865](../decisions/0865-releases-are-signed-and-troupe-update-installs-only-what-the-release-key-signed.md)).
+OS signing is in addition to the release key, and Troupe's own check is still the release
+key's.
 
-- **The secrets reach the signing jobs.** Section 4: either the signing runs in jobs that
-  name `environment: release` only when `release.yml` calls them (nightly runs on `main` and
-  would sign too; `prerelease.yml` runs on any branch, which the environment refuses), or
-  the release builds get a job of their own. Which works is the slot's to prove.
-- **OS signing happens before the release key signs.** A signature and a staple change the
-  file's bytes. They are made in `native.yml`, before `publish` writes `manifest.json`, the
-  desktop update's `.sig` files and `SHA256SUMS` over what is attached
-  ([Decision 874](../decisions/0874-the-desktop-app-updates-itself-from-a-release-the-release-key-signed.md)),
-  so the release key signs the OS-signed files and nothing in the manifest flow changes.
-- **The BEAM under the hardened runtime.** Erlang's JIT writes executable memory, and the
-  NIFs are libraries the runtime loads. Livebook's desktop app, which bundles ERTS, declares
-  `com.apple.security.cs.allow-jit`, `allow-unsigned-executable-memory` and
-  `disable-library-validation`
-  ([Livebook's entitlements](https://github.com/livebook-dev/livebook/blob/main/rel/app/src-tauri/App.entitlements));
-  the slot proves which of them `troupe-daemon` and `troupe` need, and no more. The desktop
-  app's own `entitlements.plist` stays as it is: it says why it takes only `allow-jit`.
-- **The Windows signing tool was renamed.** `native.yml` installs `trusted-signing-cli`,
-  which now says "DEPRECATED - Please migrate to artifact-signing-cli"
-  ([crates.io](https://crates.io/crates/trusted-signing-cli)); Tauri's guide uses
-  `artifact-signing-cli` ([Tauri, Windows signing](https://v2.tauri.app/distribute/sign/windows/)).
-- **The docs.** [security.md §6](../admin/security.md#6-the-apps-are-not-os-code-signed),
-  [installing.md](../admin/installing.md#the-clients-people-install),
-  [installing the desktop app](../../clients/gui/docs/install.md) and the quick start lose
-  the workaround, and say what a signed app shows instead.
+Until the secrets exist, a release builds unsigned and its run's summary says so, one line
+per artifact (`troupe-daemon macos_aarch64: unsigned: APPLE_CERTIFICATE not set`); it never
+fails for that. A platform whose first secret is set and another is not fails the release,
+naming what is missing, so half a set is fixed rather than shipped unsigned. To release one
+platform signed and the other not, leave the other's first secret out.
+
+### How it is tested without Apple or Microsoft
+
+[`signing.yml`](../../.github/workflows/signing.yml) runs `native.yml` with `sign:
+self-signed` on a pull request that changes the signing scripts, `Troupe.Release.OSSigning`,
+`tauri.signing.conf.json` or `native.yml`: the daemon, the TUI and the desktop app on one
+Mac and on Windows, through exactly the release's steps, with a certificate made in the job
+(`macos-keychain.sh self-signed`, `test-certificate.ps1`), `codesign` and `signtool` in place
+of the services, and no notarisation. Every check above runs. Then the manifest a release
+would publish is made over those files with a throwaway release key and held to what each
+build recorded it signed (`scripts/signing/check-manifest.exs`). Two things only the first
+real release proves: notarisation, and that the BEAM runs under the hardened runtime with
+`beam.entitlements` alone (the test adds `disable-library-validation`, because its
+certificate has no Apple team).
+
+### The secrets
+
+Each goes into **Settings → Environments → release → Environment secrets**, beside
+`RELEASE_MINISIGN_KEY`, never into repository secrets.
+
+| secret | what goes in it | where it comes from |
+| --- | --- | --- |
+| `APPLE_CERTIFICATE` | the base64 of the Developer ID Application `.p12`; turns macOS signing on | [section 2](#the-certificate), steps 1 to 3 |
+| `APPLE_CERTIFICATE_PASSWORD` | the `.p12`'s export password | the same export |
+| `APPLE_SIGNING_IDENTITY` | `Developer ID Application: <legal name> (<team id>)` | `security find-identity -v -p codesigning` |
+| `APPLE_API_ISSUER` | the Issuer ID above the Team Keys table | [section 2](#notarisation): App Store Connect, Users and Access, Integrations |
+| `APPLE_API_KEY` | the team key's Key ID | the same page |
+| `APPLE_API_PRIVATE_KEY` | the text of the key's `.p8` file, which downloads once | the same page |
+| `AZURE_ENDPOINT` | the Artifact Signing account's regional endpoint, such as `https://weu.codesigning.azure.net`; turns Windows signing on | [section 3](#setting-up-artifact-signing), step 3 |
+| `AZURE_CODE_SIGNING_NAME` | the Artifact Signing account's name | step 3 |
+| `AZURE_CERT_PROFILE_NAME` | the Public Trust certificate profile's name | step 5 |
+| `AZURE_TENANT_ID` | the Entra tenant's ID | step 1 |
+| `AZURE_CLIENT_ID` | the app registration's client ID | step 6 |
+| `AZURE_CLIENT_SECRET` | the app registration's client secret | step 6 |
+
+### Once, before the first signed release
+
+- **Apple:** the organisation's Developer ID Application certificate exported with its key
+  ([section 2](#the-certificate)), and a team API key with the Developer access
+  ([notarisation](#notarisation)). Nothing on a runner: each macOS job makes a keychain of
+  its own from the `.p12` (`scripts/signing/macos-keychain.sh release`) and removes it at
+  the end.
+- **Microsoft:** the Artifact Signing account, a completed identity validation, the
+  certificate profile, and the app registration with the **Artifact Signing Certificate
+  Profile Signer** role and a client secret ([section 3](#setting-up-artifact-signing)).
+  The Windows jobs install `artifact-signing-cli` themselves.
+- **GitHub:** the twelve secrets, in the `release` environment, which keeps its main-only
+  rule.
+
+### Checking the first signed release
+
+1. **The run.** Its summary has a line per artifact with the number of files signed and
+   by whom, and "notarised" for each macOS one. A build that signed nothing, or a file
+   left out, fails its job, and the release stays a draft.
+2. **A Mac that has never seen Troupe.** Download the `.dmg` in a browser, so that it is
+   quarantined, and install as a person would. It opens after the usual question about an
+   app from the internet. Then:
+
+   ```sh
+   spctl --assess --type execute --verbose=4 /Applications/Troupe.app   # accepted, source=Notarized Developer ID
+   xcrun stapler validate /Applications/Troupe.app
+   codesign -dv --verbose=4 ~/.local/bin/troupe 2>&1 | grep Authority   # Developer ID Application: <legal name>
+   spctl --assess --type execute --verbose=4 ~/.local/bin/troupe
+   ```
+
+3. **A fresh Windows 11 virtual machine with Smart App Control on** (it is on only on a
+   clean install). Download the setup in a browser and run it, then `install.ps1` for the
+   daemon and the TUI, and run `troupe --version` and `troupe-daemon version`. Nothing is
+   blocked. Then:
+
+   ```powershell
+   Get-AuthenticodeSignature $env:LOCALAPPDATA\Programs\troupe\troupe.exe,
+     (Get-ChildItem $env:LOCALAPPDATA\Programs\troupe-daemon -Recurse -Include *.exe, *.dll),
+     (Get-ChildItem $env:APPDATA\.burrito -Recurse -Include *.exe, *.dll) |
+     Group-Object Status   # every one Valid, signed by the organisation
+   ```
+
+   SmartScreen may still warn about the setup for the first signed releases: its reputation
+   grows from downloads, not from the certificate.
+
+### After the first signed release
+
+[security.md §6](../admin/security.md#6-the-apps-are-not-os-code-signed) says, in one
+place, from which release on the apps are signed. Put that release's version there, and
+drop the workaround paragraphs it points at: security.md §6's own, the "while it is
+unsigned" parts of [the desktop app's install page](../../clients/gui/docs/install.md), and
+the unsigned note in [installing.md](../admin/installing.md#the-clients-people-install). The
+installers need no change: they print their note only for a program that carries no
+signature.
+
+### When notarisation is rejected
+
+The job fails with Apple's log of the submission (`notarytool log`), and the release stays
+a draft: `publish` never runs.
+
+- **What the log says** is per file. A file without the hardened runtime or a secure
+  timestamp, or one not signed at all, is a file the signing missed: the job's `--verify`
+  step should have failed first, so add the case to `sign-macos.sh` and its check. A
+  `get-task-allow` entitlement is a debug build; none of ours carry one.
+- **An invalid or revoked certificate, or an expired API key,** is fixed in the
+  environment's secrets. Then re-run the failed jobs of the same run: the tag and the draft
+  release are already there, and the build is the same commit.
+- **A fix in the repository** is a new release, since the tag of this one is cut. Delete
+  the draft release and its tag first, or leave the draft and release the next version.
+- **The BEAM does not start once signed** (the smoke test after signing fails, often with a
+  library refused or a JIT mapping denied): the entitlement it needs goes into
+  `beam.entitlements`, `disable-library-validation` or `allow-unsigned-executable-memory`,
+  one at a time and only as the smoke test proves it; say why in that file.
+- **Apple's service itself** is slow or down: `xcrun notarytool history` with the same key
+  shows the submissions; `submit --wait` gives up after 30 minutes, and a re-run of the
+  failed jobs resubmits.
+
+On Windows the same holds for a signing failure: `artifact-signing-cli` names the cause (a
+role missing on the profile, an identity validation that lapsed, the endpoint of another
+region), the fix is in Azure or in the secrets, and the failed jobs are re-run.
 
 ## Sources
 

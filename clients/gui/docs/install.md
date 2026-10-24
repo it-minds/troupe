@@ -101,12 +101,16 @@ updated once by its installer.
 ## Turning signing on
 
 Nothing in the build needs to change. `src-tauri/tauri.signing.conf.json` holds the
-signing configuration and is applied only when CI passes `--config` at it, which happens
-when the matching secret exists: `AZURE_ENDPOINT` turns Windows signing on,
-`APPLE_CERTIFICATE` macOS's. What to buy, what each needs first, and every secret are in
-[code-signing.md](../../../docs/developer/code-signing.md). Expect SmartScreen to keep
-warning for the first signed releases: reputation accrues from downloads, not from a
-certificate.
+signing configuration and is applied only when CI passes `--config` at it: in a release
+(`native.yml` with `sign: release`) where the matching secret exists in the `release`
+environment, `AZURE_ENDPOINT` turning Windows signing on and `APPLE_CERTIFICATE` macOS's,
+and in the self-signed test of it (`signing.yml`). On Windows its sign command is
+`scripts/signing/sign-windows.ps1`. What to buy, what each needs first, every secret and
+the day's runbook are in [code-signing.md](../../../docs/developer/code-signing.md). Which
+releases are signed is said in one place,
+[security.md §6](../../../docs/admin/security.md#6-the-apps-are-not-os-code-signed). Expect
+SmartScreen to keep warning for the first signed releases: reputation accrues from
+downloads, not from a certificate.
 
 On macOS, signing turns on the hardened runtime and `entitlements.plist`, which gives
 WKWebView back the JIT the hardened runtime takes away. Nothing else is in that file, and

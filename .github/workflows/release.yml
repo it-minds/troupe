@@ -198,6 +198,11 @@ jobs:
           gh release create "$TAG" "${flags[@]}" dist/troupe-*.tgz dist/install.sh dist/install.ps1 dist/troupe.vsix \
             LICENSE NOTICE THIRD-PARTY-NOTICES.txt
 
+  # Signed by the operating systems' rules where the `release` environment holds the
+  # certificates, and unsigned, saying so, where it does not: `sign: release` runs the
+  # macOS and Windows builds in that environment, whose secrets reach only the jobs that
+  # name it. Before `publish`, so the manifest the release key signs is over the OS-signed
+  # files.
   native:
     name: native builds
     needs: [version, cut]
@@ -206,6 +211,7 @@ jobs:
       contents: write
     with:
       tag: ${{ needs.version.outputs.tag }}
+      sign: release
     secrets: inherit
 
   # Published once everything is attached and signed, with one SHA256SUMS over all of it,

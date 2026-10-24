@@ -99,7 +99,11 @@ defmodule Troupe.MixProject do
             macos_x86_64: [os: :darwin, cpu: :x86_64] ++ custom_erts(),
             macos_aarch64: [os: :darwin, cpu: :aarch64] ++ custom_erts(),
             windows_x86_64: [os: :windows, cpu: :x86_64] ++ custom_erts()
-          ]
+          ],
+          # The OS's signature on every executable and library in the payload, once the
+          # target's ERTS is in it and before it is packed; a build that native.yml does
+          # not sign skips it.
+          extra_steps: [patch: [post: [Troupe.Release.OSSigning]]]
         ]
       ]
     ]

@@ -779,5 +779,9 @@ if ($Tui) {
 if ($Gui) { Write-Item "Troupe            the desktop app, in the Start menu" }
 if ($VSCode) { Write-Item "VS Code           Troupe: Open, or the mask in the activity bar (a window open already: Developer: Reload Window)" }
 Write-Item "the desktop app starts the daemon when it needs one; so does troupe"
-Write-Item "the programs carry no Microsoft signature: SmartScreen may ask the first time one runs"
+# Said only when a program installed carries no valid signature: a release signed by
+# Microsoft's rules runs without the question, and one from before does not.
+$Programs = @($TuiExe) + @(Get-ChildItem -Path (Join-Path $LibDir "erts-*\bin\erl.exe") -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+$Unsigned = @($Programs | Where-Object { (Test-Path -LiteralPath $_) -and (Get-AuthenticodeSignature -LiteralPath $_).Status -ne "Valid" })
+if ($Unsigned.Count -gt 0) { Write-Item "the programs carry no Microsoft signature: SmartScreen may ask the first time one runs" }
 Write-Item "install.ps1 -Uninstall removes it again (-Purge: config and state too)"

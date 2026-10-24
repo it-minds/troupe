@@ -293,6 +293,12 @@ The desktop app and the `troupe` and `troupe-daemon` binaries carry no Apple or 
 signature. macOS and Windows therefore cannot say who built them, and say so the first time
 one runs. #656 adds that signing on top of the release key.
 
+**Which releases are signed.** None yet. The release workflow signs, on macOS and
+Windows, from the first release made once the organisation's certificates are in its
+`release` environment ([code-signing.md](../developer/code-signing.md#6-the-day-the-certificates-exist)),
+and that release's notes will say so. Releases from that version on are signed; before
+that, what follows applies. This is the one place the docs say it.
+
 **On macOS.** `install.sh` downloads with `curl`, which sets no quarantine flag, so
 Gatekeeper does not stop what it installs; when it finds the flag, it prints the command
 below. For a desktop app downloaded in a browser, open it once, then go to **System
