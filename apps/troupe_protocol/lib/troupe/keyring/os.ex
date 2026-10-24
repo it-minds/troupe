@@ -7,6 +7,10 @@ defmodule Troupe.Keyring.OS do
 
   - **Windows**: Credential Manager, a generic credential persisted on this machine,
     through `CredWriteW`, `CredReadW` and `CredDeleteW`, called from Windows PowerShell.
+    One entry holds at most 2560 bytes, here of UTF-8, so a longer value is kept in
+    parts, as the desktop app keeps one: `<entry>/0`, `<entry>/1`, ... hold its pieces in
+    order and `<entry>` holds `troupe-parts:<n>`, their count. A value that fits, and does
+    not begin with that marker, is one entry as before; deleting takes every part.
   - **macOS**: the login keychain, through `security -i`, given its command on a pipe.
   - **Linux and the other unixes**: the Secret Service, through `secret-tool`, given the
     secret on its standard input. No `secret-tool`, or no agent answering it, is
@@ -42,6 +46,7 @@ defmodule Troupe.Keyring.OS do
   try {
     Add-Type -TypeDefinition @'
   using System;
+  using System.Collections.Generic;
   using System.Runtime.InteropServices;
   using System.Text;
   public static class TroupeKeyring {
@@ -61,7 +66,8 @@ defmodule Troupe.Keyring.OS do
     [DllImport("advapi32.dll")]
     static extern void CredFree(IntPtr credential);
     const int Generic = 1; const int LocalMachine = 2; const int NotFound = 1168;
-    public static void Put(string target, string secret) {
+    const int MaxBlob = 2560; const string Index = "troupe-parts:";
+    static void Write(string target, string secret) {
       byte[] blob = Encoding.UTF8.GetBytes(secret);
       CREDENTIAL c = new CREDENTIAL();
       c.Type = Generic; c.TargetName = target; c.UserName = "troupe"; c.Persist = LocalMachine;
@@ -71,7 +77,7 @@ defmodule Troupe.Keyring.OS do
         if (!CredWriteW(ref c, 0)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
       } finally { Marshal.FreeHGlobal(c.CredentialBlob); }
     }
-    public static string Get(string target) {
+    static string Read(string target) {
       IntPtr p;
       if (!CredReadW(target, Generic, 0, out p)) {
         int e = Marshal.GetLastWin32Error();
@@ -85,11 +91,56 @@ defmodule Troupe.Keyring.OS do
         return Encoding.UTF8.GetString(blob);
       } finally { CredFree(p); }
     }
-    public static void Delete(string target) {
+    static void Remove(string target) {
       if (!CredDeleteW(target, Generic, 0)) {
         int e = Marshal.GetLastWin32Error();
         if (e != NotFound) throw new System.ComponentModel.Win32Exception(e);
       }
+    }
+    static int PartsOf(string value) {
+      int n;
+      if (value != null && value.StartsWith(Index, StringComparison.Ordinal) &&
+          int.TryParse(value.Substring(Index.Length), System.Globalization.NumberStyles.None, null, out n)) return n;
+      return -1;
+    }
+    static List<string> Split(string secret) {
+      List<string> parts = new List<string>();
+      StringBuilder part = new StringBuilder();
+      int used = 0;
+      for (int i = 0; i < secret.Length; i++) {
+        int width = char.IsHighSurrogate(secret[i]) && i + 1 < secret.Length ? 2 : 1;
+        string ch = secret.Substring(i, width);
+        int bytes = Encoding.UTF8.GetByteCount(ch);
+        if (used + bytes > MaxBlob) { parts.Add(part.ToString()); part.Clear(); used = 0; }
+        part.Append(ch); used += bytes; i += width - 1;
+      }
+      parts.Add(part.ToString());
+      return parts;
+    }
+    public static void Put(string target, string secret) {
+      int had = Math.Max(PartsOf(Read(target)), 0);
+      bool fits = Encoding.UTF8.GetByteCount(secret) <= MaxBlob && !secret.StartsWith(Index, StringComparison.Ordinal);
+      List<string> parts = fits ? new List<string>() : Split(secret);
+      for (int i = 0; i < parts.Count; i++) Write(target + "/" + i, parts[i]);
+      Write(target, fits ? secret : Index + parts.Count);
+      for (int i = parts.Count; i < had; i++) Remove(target + "/" + i);
+    }
+    public static string Get(string target) {
+      string value = Read(target);
+      int n = PartsOf(value);
+      if (n < 0) return value;
+      StringBuilder joined = new StringBuilder();
+      for (int i = 0; i < n; i++) {
+        string part = Read(target + "/" + i);
+        if (part == null) throw new Exception("part " + i + " of " + n + " is missing");
+        joined.Append(part);
+      }
+      return joined.ToString();
+    }
+    public static void Delete(string target) {
+      int n = PartsOf(Read(target));
+      for (int i = 0; i < n; i++) Remove(target + "/" + i);
+      Remove(target);
     }
   }
   '@
