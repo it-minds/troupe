@@ -21,6 +21,7 @@ paths:
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - charts/troupe/crds/workerprofile.yaml
   - docs/admin/profiles-and-policy.md
+  - docs/admin/profile-options.md
 symbols:
   - Troupe.Agent.Definitions.bundle_wins?/1
   - Troupe.Agent.Definitions.load/2

@@ -121,7 +121,7 @@ copied from `kubectl get -o yaml` also carries `metadata.managedFields`, `resour
 `uid`, `generation` and `creationTimestamp`; the export leaves those out too.
 `spec.mcpIdentities` is the repository's like the rest of the spec, so git says which
 profile has which identity
-([profiles-and-policy.md](profiles-and-policy.md#calling-an-mcp-server-as-the-profile)).
+([profile-options.md](profile-options.md#calling-an-mcp-server-as-the-profile)).
 
 The policy is the chart's `policy.*` values, which are then the repository's already, or a
 `TroupePolicy` manifest in the repository with `policy.install: false`; the export gives
@@ -130,7 +130,7 @@ one.
 ## A manifest that extends another
 
 A manifest may name one profile it extends and say only what differs, by the rules of
-[profiles-and-policy.md](profiles-and-policy.md#a-profile-that-extends-another) (Decision 913, #655):
+[profile-options.md](profile-options.md#a-profile-that-extends-another) (Decision 913, #655):
 
 ```yaml
 # profiles/data-team.yaml

@@ -8,10 +8,10 @@
 # What it cannot run, the page says too: a real model (`TROUPE_PROVIDER=fake` answers from
 # a script, so every command runs and only the model's reply is canned), the terminal UI
 # (it needs a person at a terminal), macOS (`native.yml` smoke-tests those builds), and a
-# plane. It also checks that the README's quick start is the page's, word for word, and
-# that the README's protocol badge names PROTOCOL.md's version.
+# plane. It also checks that the README's quick start, and the site's front page's, is the
+# page's, word for word, and that the README's protocol badge names PROTOCOL.md's version.
 #
-# A pull request that changes the page, the README or this file runs it; so does every
+# A pull request that changes the page, either README or this file runs it; so does every
 # night, because what can break it without a change here is a release. By hand, `version`
 # installs another release instead of the latest, a pre-release included.
 name: quick-start
@@ -20,6 +20,7 @@ on:
   pull_request:
     paths:
       - README.md
+      - docs/README.md
       - PROTOCOL.md
       - docs/quick-start.md
       - scripts/quick-start-blocks
@@ -56,18 +57,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: The README's quick start is the page's, and its protocol badge is PROTOCOL.md's
+      - name: The READMEs' quick start is the page's, and the protocol badge is PROTOCOL.md's
         run: |
-          for shell in sh powershell; do
-            page=$(sh scripts/quick-start-blocks docs/quick-start.md "$shell")
-            readme=$(sh scripts/quick-start-blocks README.md "$shell")
-            if [ -z "$page" ] || [ -z "$readme" ]; then
-              echo "::error::docs/quick-start.md and README.md must each mark a block for $shell"; exit 1
-            fi
-            case "$page" in
-              *"$readme"*) ;;
-              *) echo "::error file=README.md::the README's $shell block is not the quick start's, word for word"; exit 1 ;;
-            esac
+          # The repository's front page and the site's (docs/README.md) both show the install.
+          for front in README.md docs/README.md; do
+            for shell in sh powershell; do
+              page=$(sh scripts/quick-start-blocks docs/quick-start.md "$shell")
+              readme=$(sh scripts/quick-start-blocks "$front" "$shell")
+              if [ -z "$page" ] || [ -z "$readme" ]; then
+                echo "::error::docs/quick-start.md and $front must each mark a block for $shell"; exit 1
+              fi
+              case "$page" in
+                *"$readme"*) ;;
+                *) echo "::error file=$front::$front's $shell block is not the quick start's, word for word"; exit 1 ;;
+              esac
+            done
           done
           version=$(sed -n '1s/^# The Troupe protocol, version \([0-9][0-9]*\)$/\1/p' PROTOCOL.md)
           if [ -z "$version" ] || ! grep -qF "badge/protocol-v$version-" README.md; then

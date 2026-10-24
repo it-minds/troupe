@@ -25,6 +25,7 @@ paths:
   - clients/gui/apps/console/src/views/Runs.tsx
   - clients/gui/apps/console/src/views/Triggers.tsx
   - docs/admin/github.md
+  - docs/admin/github-runs.md
 symbols:
   - Troupe.Plane.GitHub.Webhook.take/2
   - Troupe.Plane.GitHub.WebhookSecret.check/3

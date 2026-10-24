@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 316" role="img" aria-labelledby="t d">
+  <title id="t">Every session is an event log</title>
+  <desc id="d">Some of a session's events, in the order its log holds them: session_created, user_input, llm_response, approval_requested, approval_decided, tool_call_completed and turn_ended, each carrying the hash of the one before it. A client that attaches replays the log and then follows it live; an audit checks the chain.</desc>
+  <style>
+    .bg { fill: #f6f7f9; stroke: #d5d8de; }
+    .row { fill: #ffffff; stroke: #9aa1ab; stroke-width: 1.2; }
+    .ask { fill: #eef0fb; stroke: #4051b5; stroke-width: 1.5; }
+    .line { stroke: #4051b5; stroke-width: 2; fill: none; }
+    .chain { stroke: #9aa1ab; stroke-width: 1.5; fill: none; }
+    text { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; fill: #1f2328; font-size: 15px; }
+    .small { font-size: 13px; fill: #59636e; }
+    .strong { font-weight: 600; }
+    .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 13px; }
+    .seq { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 13px; fill: #59636e; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #1f222b; stroke: #3a3f4b; }
+      .row { fill: #272b35; stroke: #8a919c; }
+      .ask { fill: #262c48; stroke: #8c9eff; }
+      .line { stroke: #8c9eff; }
+      .chain { stroke: #8a919c; }
+      text { fill: #e6e8eb; }
+      .small, .seq { fill: #a4abb6; }
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="719" height="315" rx="12"/>
+
+  <g>
+    <rect class="row" x="24" y="20" width="360" height="32" rx="6"/>
+    <text x="44" y="41" class="mono">session_created</text>
+    <rect class="row" x="24" y="60" width="360" height="32" rx="6"/>
+    <text x="44" y="81" class="mono">user_input</text>
+    <rect class="row" x="24" y="100" width="360" height="32" rx="6"/>
+    <text x="44" y="121" class="mono">llm_response</text>
+    <rect class="ask" x="24" y="140" width="360" height="32" rx="6"/>
+    <text x="44" y="161" class="mono">approval_requested</text>
+    <rect class="ask" x="24" y="180" width="360" height="32" rx="6"/>
+    <text x="44" y="201" class="mono">approval_decided</text>
+    <rect class="row" x="24" y="220" width="360" height="32" rx="6"/>
+    <text x="44" y="241" class="mono">tool_call_completed</text>
+    <rect class="row" x="24" y="260" width="360" height="32" rx="6"/>
+    <text x="44" y="281" class="mono">turn_ended</text>
+  </g>
+
+  <g>
+    <path class="chain" d="M376 52 L 376 60"/>
+    <path class="chain" d="M376 92 L 376 100"/>
+    <path class="chain" d="M376 132 L 376 140"/>
+    <path class="chain" d="M376 172 L 376 180"/>
+    <path class="chain" d="M376 212 L 376 220"/>
+    <path class="chain" d="M376 252 L 376 260"/>
+  </g>
+
+  <path class="line" d="M404 56 L 430 56"/>
+  <text x="440" y="50" class="strong">a client attaches</text>
+  <text x="440" y="70" class="small">replays the log from the start,</text>
+  <text x="440" y="88" class="small">then follows it live</text>
+
+  <path class="line" d="M404 156 L 430 156"/>
+  <text x="440" y="150" class="strong">a person decides</text>
+  <text x="440" y="170" class="small">the approval is an event, with who</text>
+  <text x="440" y="188" class="small">gave it, like the call it allowed</text>
+
+  <path class="line" d="M404 256 L 430 256"/>
+  <text x="440" y="250" class="strong">anyone checks it</text>
+  <text x="440" y="270" class="small">each event carries the hash of the</text>
+  <text x="440" y="288" class="small">one before, so a changed one shows</text>
+</svg>

@@ -22,7 +22,7 @@ Skills are also read in place from `.agents/skills`, the directory other tools s
 `.agents/skills/` in the directory a session starts in and in each directory above it up
 to the repository root. Troupe never writes there. Of two skills with one name the nearer
 `.agents/skills` wins, and one in `<config>/skills` or `.troupe/skills` beats any of them
-([which one wins](configuration.md#which-one-wins)). An `.agents/skills`, or a skill in
+([which one wins](configuration-layers.md#which-one-wins)). An `.agents/skills`, or a skill in
 it, that is a link outside the repository (outside `~/.agents`, for yours) is not read.
 Nothing else under `.agents/` is read but `.agents/AGENTS.md`
 ([instruction files](instructions.md)).
@@ -83,7 +83,7 @@ A workspace's servers are commands a cloned repository would run, so a session s
 them only after asking you: `deny`, `once` or `allow`. `allow` holds for the workspace, is
 kept in Troupe's state directory and never in the repository, and is asked again when a
 server's command changes. A workspace on `trusted_workspaces` is not asked
-([trusted workspaces](configuration.md#trusted-workspaces)).
+([trusted workspaces](configuration-layers.md#trusted-workspaces)).
 
 The answer starts them and no more. Until the workspace is trusted:
 

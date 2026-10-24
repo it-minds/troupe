@@ -1,0 +1,38 @@
+{#- The front page: docs/README.md, which hooks.py draws with this template and without the
+    nav and the table of contents beside it. Everything it says is in that page; this adds
+    only its title for a search result, what the page is to a search engine, and the
+    styles that make the page's own sections read as a front page. -#}
+{% extends "main.html" %}
+
+{% block htmltitle %}
+  <title>{{ config.site_name }}: coding agents on your machine and on your team's cluster</title>
+{% endblock %}
+
+{% block extrahead %}
+  {{ super() }}
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": {{ config.site_name | tojson }},
+      "description": {{ config.site_description | tojson }},
+      "url": {{ config.site_url | tojson }},
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Linux, macOS, Windows",
+      "softwareVersion": {{ config.extra.troupe_version | tojson }},
+      "license": "https://www.apache.org/licenses/LICENSE-2.0",
+      "downloadUrl": {{ (config.repo_url ~ "/releases/latest") | tojson }}
+    }
+  </script>
+{% endblock %}
+
+{% block styles %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ 'assets/landing.css' | url }}">
+{% endblock %}
+
+{% block content %}
+  <div class="tx-landing">
+    {{ super() }}
+  </div>
+{% endblock %}

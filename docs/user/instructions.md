@@ -30,7 +30,7 @@ disagree the directory's own wins; `/context` names it with its directory's scop
 (`.agents/AGENTS.md (root)`). Your own `<config>` has none.
 
 Every file applies. A file below the root is about the work under its directory, and where
-two disagree the nearer wins ([which one wins](configuration.md#which-one-wins)).
+two disagree the nearer wins ([which one wins](configuration-layers.md#which-one-wins)).
 
 The brief is the repository's, kept in its checkout, and a worktree or a folder of the
 repository reads it. Which folders are the repository's follows git: one it tracks, or

@@ -22,6 +22,7 @@ paths:
   - scripts/remote-up
   - .github/workflows/cluster.yml
   - docs/admin/installing.md
+  - docs/admin/worker-sandbox.md
 symbols:
   - Troupe.Operator.Settings.worker_apparmor/1
 gist: "worker.appArmor: Localhost troupe-worker (containerd default + mount/pivot_root, abi 3.0, more denials), loaded by the DaemonSet's MAC_ADMIN container; never Unconfined; sysctl untouched"

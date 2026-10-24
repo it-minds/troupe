@@ -36,6 +36,7 @@ paths:
   - clients/gui/apps/console/src/views/Team.tsx
   - clients/gui/apps/console/src/views/Runs.tsx
   - docs/admin/github.md
+  - docs/admin/github-runs.md
 symbols:
   - Troupe.Plane.GitHub.Issues.sweep/2
   - Troupe.Plane.GitHub.Issues.fix/3
