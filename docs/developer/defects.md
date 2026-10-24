@@ -4,8 +4,8 @@ Defects found in passing, while working on something else, and not fixed yet. Ea
 place in the code, what goes wrong and who saw it. This page lists every one still open;
 the entries themselves are on the pages under `defects/`, by number, a few hundred lines
 each. Every entry but D8 (the flaky tests, which have their own pass) was checked against
-the code of 0.15.0 on 2026-10-12 (#422): what was fixed went to the
-[closed defects](../history/defects-closed.md), and what was said twice is said once.
+the code of 0.15.0 on 2026-10-12 (#422): what was fixed was deleted, and what was said
+twice is said once.
 
 Fixers following [fixing-issues.md](fixing-issues.md) add their `noticed` defects: a new
 entry goes at the end of the [last page](defects/d130.md), under the next number, with a
@@ -15,9 +15,8 @@ row in the table below. Stale docs and style nits are not defects and do not bel
 `### D<n> - <what> (<severity>)`, then one item for each thing still wrong, a line that
 starts `- `, then who found it. A fixer who fixes an item, or whose issue or pull request
 takes it, deletes the item, and the entry's last line says which one took it. An entry with
-no item left is closed: it leaves its page and this table, and a line for it goes to the
-[closed defects](../history/defects-closed.md), under **Taken**, **Won't fix** or
-**Checked and not a defect**, with the reason. `elixir scripts/doc-size.exs`, which CI
+no item left is closed and is deleted from its page and this table, the commit saying why:
+taken by which issue or pull request, not to be fixed, or not a defect. `elixir scripts/doc-size.exs`, which CI
 runs, fails on an entry with no item, on a row here with no entry or an entry with no
 row, and on a page past 400 lines; a full page is closed and the next one,
 `defects/d<its first number>.md`, started.
@@ -123,5 +122,7 @@ The pages: [D8 to D62](defects/d008.md), [D63 to D89](defects/d063.md),
 ## Closed
 
 Defects that an issue or a pull request took, that will not be fixed, or that turned out
-not to be defects are in [docs/history/defects-closed.md](../history/defects-closed.md),
-kept as they were written so that a `D` number cited elsewhere still says where it went.
+not to be defects are deleted; git history is the archive. The **Taken**, **Won't fix** and
+**Checked and not a defect** tables this page carried until the commit that introduced the
+table above, which say where each closed `D` number went, are in
+`git log -p -- docs/developer/defects.md`.

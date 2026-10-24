@@ -22,8 +22,8 @@ live, and the maintainer chose on 2026-10-11 (Decision 863):
   account, so it can be measured without a patched build (#591).
 
 Below: what each does and costs, and the gateway question. The numbers, offline and
-live, with the commands that produce them, are [a record of their own](../history/prompt-prefix-measurements.md), kept as
-they were measured.
+live, with the commands that produce them, are in this page's git history as they were
+measured (`git log -p -- docs/developer/prompt-prefix.md`); each section below says when.
 
 ## What changes in front of a prompt
 
@@ -171,7 +171,7 @@ sent: the issue's "how often today".
 ## Offline numbers
 
 `follow_up` against the stand-in as Opus 5.5 on an enforced account, with each
-option and both, 2026-10-08: [the measurements](../history/prompt-prefix-measurements.md#offline-numbers).
+option and both, 2026-10-08, in this page's git history.
 
 ## The gateway question
 
@@ -200,17 +200,17 @@ LiteLLM, from its documentation and source as read on 2026-10-08, not tried:
 ## What was not confirmed without calling the API
 
 What was read in Anthropic's documentation on 2026-10-08 and not tried against the
-API: [the measurements](../history/prompt-prefix-measurements.md#what-was-not-confirmed-without-calling-the-api).
+API is in this page's git history.
 
 ## Live numbers with the new defaults
 
 `task_list` and `follow_up` on Sonnet 5.5 and Opus 5.5 with the stable default, asked
-for an enforced account's refusal and not, 2026-10-11: [the measurements](../history/prompt-prefix-measurements.md#live-numbers-with-the-new-defaults).
+for an enforced account's refusal and not, 2026-10-11, in this page's git history.
 
 ## Live numbers for the task list's tools (#590)
 
 `long_turn`, and four standard tasks, before and after the list's tools came from the
-first call on a binding model (Decision 867), 2026-10-11: [the measurements](../history/prompt-prefix-measurements.md#live-numbers-for-the-task-lists-tools-590).
+first call on a binding model (Decision 867), 2026-10-11, in this page's git history.
 
 ## What is left, and when (#606, #617)
 
@@ -342,4 +342,4 @@ whole document back (a `patch`, which #472 did not build).
 ## Live numbers before the stable default
 
 `follow_up` and the smoke suite on Opus 5.5 with each option, and the PowerShell that
-runs them again, 2026-10-08: [the measurements](../history/prompt-prefix-measurements.md#live-numbers-before-the-stable-default).
+runs them again, 2026-10-08, in this page's git history.

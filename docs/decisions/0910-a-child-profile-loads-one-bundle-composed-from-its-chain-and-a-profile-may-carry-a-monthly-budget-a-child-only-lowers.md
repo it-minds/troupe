@@ -32,6 +32,7 @@ paths:
   - clients/gui/packages/client/test/support/extends.ts
   - docs/admin/profiles-and-policy.md
   - docs/admin/bundles-and-triggers.md
+  - docs/admin/profile-options.md
 symbols:
   - Troupe.Plane.Bundles.Effective
   - Troupe.Plane.Bundles.publish_effective/2

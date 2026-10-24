@@ -181,8 +181,6 @@ nav:
           - The admin surface, as built: history/admin-surface.md
           - The console, as planned: history/control-panel.md
           - The command audit of 0.10.0: history/command-audit.md
-          - "The prompt prefix, measured (#465)": history/prompt-prefix-measurements.md
-          - Closed defects: history/defects-closed.md
   - Writing a client:
       - The protocol: PROTOCOL.md
       - The JSON Schema: https://github.com/it-minds/troupe/tree/main/protocol/schema/v1

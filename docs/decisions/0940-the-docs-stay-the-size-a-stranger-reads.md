@@ -1,6 +1,6 @@
 ---
 number: 940
-title: No hand-written page passes 400 lines, a page that would is split along its headings with its anchors kept, defects.md lists open defects only with their entries on pages of their own, history lives in docs/history/, and a check in CI holds all of it
+title: No hand-written page passes 400 lines, a page that would is split along its headings with its anchors kept, defects.md lists open defects only with their entries on pages of their own, what is closed is deleted, and a check in CI holds all of it
 date: 2026-10-24
 status: accepted
 issue: 422
@@ -9,7 +9,7 @@ paths:
   - mkdocs.yml
   - scripts/doc-size.exs
   - .github/workflows/quick-start.yml
-gist: Pages <= 400 lines (not PROTOCOL.md, generated, docs/history/), split by heading, anchors kept; defects.md indexes open entries; doc-size.exs checks
+gist: Pages <= 400 lines (not PROTOCOL.md, generated, docs/history/), split by heading, anchors kept; defects.md indexes open entries; closed is deleted
 ---
 
 **Why.** #422's done-when says no hand-written document passes about 400 lines but the
@@ -37,8 +37,9 @@ checks once a release is a rule that holds once a release.
   each moved `##` heading with a sentence or two and a link, and each moved `###` heading's
   anchor as an `<a id>`, so a link from an issue, a release note or a bookmark still lands
   on the right page. Links inside the repository are moved to the new page. A dated
-  measurement on an instruction page is history, and moves there
-  (`docs/history/prompt-prefix-measurements.md`). Not a redirect plugin: the anchors that
+  measurement on an instruction page is a record, not instruction, and is deleted with a
+  line saying it is in the page's git history (`prompt-prefix.md`'s live and offline
+  numbers). Not a redirect plugin: the anchors that
   matter are inside pages, which a page-level redirect cannot carry, and GitHub, where many
   readers meet these files, runs no plugin. Not a rewrite: the content is #422's sweep to
   judge, and a split keeps every claim where a reviewer can see it moved unchanged.
@@ -58,9 +59,12 @@ checks once a release is a rule that holds once a release.
   and an entry with none left is closed. The check fails on an entry with no item, a row
   naming an entry its page does not have, an entry without a row, and an entry or a
   closed-record section written into `defects.md` itself.
-- **What is closed is history.** The Taken, Won't fix and Checked and not a defect
-  sections are `docs/history/defects-closed.md`, so a `D` number cited in a decision or a
-  test still says where it went. The three decision logs this issue also asked about were
+- **What is closed is deleted; git history is the archive**, as
+  `docs/developer/fixing-issues.md` already has it for reports. The Taken, Won't fix and
+  Checked and not a defect sections are gone from `defects.md`, and `defects.md` says
+  where to find them (`git log -p -- docs/developer/defects.md`), which is where a `D`
+  number cited in a decision or a test is looked up. `docs/history/` keeps only the
+  records it held before, and stays exempt from the line while it has any. The three decision logs this issue also asked about were
   split into `docs/decisions/` by Decision 790 and are no longer in the repository; their
   text is in git's history, which `docs/decisions/README.md` names, so there is nothing
   left to mark as history on the site.

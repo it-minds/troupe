@@ -33,6 +33,7 @@ paths:
   - docs/admin/bundles-and-triggers.md
   - docs/admin/profiles-and-policy.md
   - docs/admin/roles-and-permissions.md
+  - docs/admin/profile-options.md
 gist: A worker calls an MCP server as its profile's own identity, by OAuth client credentials with an assertion signed through OpenBao transit
 ---
 

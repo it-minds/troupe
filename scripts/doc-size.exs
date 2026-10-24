@@ -15,9 +15,9 @@
 # And `docs/developer/defects.md` lists open defects only. Its entries live on the pages
 # of `docs/developer/defects/`, each a `### D<n> - <what> (<severity>)` heading followed by
 # an item (a line starting `- `) for each thing still wrong; a fixer deletes an item when
-# it is fixed or taken. An entry with no item is closed and belongs in
-# `docs/history/defects-closed.md`, so this fails on one, on a row of the defects table
-# naming an entry its page does not have, and on an entry the table has no row for.
+# it is fixed or taken. An entry with no item is closed and is deleted (git history is the
+# archive), so this fails on one, on a row of the defects table naming an entry its page
+# does not have, and on an entry the table has no row for.
 #
 # Exits non-zero naming every finding, as `file:line: what`.
 
@@ -71,7 +71,7 @@ defmodule DocSize do
       for {text, n} <- list,
           Regex.match?(~r/^### D\d+ - |^## (Taken|Won't fix|Checked and not a defect)\s*$/, text),
           do:
-            "#{@defects}:#{n}: entries go on the pages of #{@defect_pages}, closed ones in #{@history}defects-closed.md"
+            "#{@defects}:#{n}: entries go on the pages of #{@defect_pages}; a closed one is deleted"
 
     rows =
       if list != [] do
@@ -91,8 +91,7 @@ defmodule DocSize do
 
     closed =
       for {number, page, n, 0} <- entries,
-          do:
-            "#{page}:#{n}: D#{number} has no open item: it is closed, move it to #{@history}defects-closed.md"
+          do: "#{page}:#{n}: D#{number} has no open item: it is closed, delete it and its row"
 
     unlisted =
       for {number, page, n, _items} <- entries,

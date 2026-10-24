@@ -31,6 +31,7 @@ paths:
   - docs/admin/installing.md
   - docs/admin/security.md
   - docs/admin/routine-tasks.md
+  - docs/admin/worker-sandbox.md
 symbols:
   - Troupe.Operator.Settings.pod_security_level/1
   - Troupe.KMS.Policy.plane_grants/1
