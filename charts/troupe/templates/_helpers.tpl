@@ -122,3 +122,23 @@ Unconfined.
 {{- define "troupe.worker.seccomp.hostDir" -}}
 {{- printf "%s/%s" (trimSuffix "/" .Values.worker.seccomp.install.kubeletSeccompDir) (dir .Values.worker.seccomp.localhostProfile) -}}
 {{- end -}}
+
+{{/*
+The Pod Security level the chart labels its namespace with (`podSecurity`): the one named,
+or the lowest the chart's own pods there need. `privileged` while the DaemonSet that puts
+the worker's profiles on the nodes runs, since it mounts a host directory, runs as root and
+loads the AppArmor profile unconfined; `restricted` otherwise, which every other pod the
+chart makes there meets.
+*/}}
+{{- define "troupe.podSecurity.level" -}}
+{{- $seccomp := and (eq .Values.worker.seccomp.type "Localhost") .Values.worker.seccomp.install.enabled -}}
+{{- $apparmor := and .Values.worker.appArmor.enabled .Values.worker.appArmor.install.enabled -}}
+{{- $level := .Values.podSecurity.level | default (ternary "privileged" "restricted" (or $seccomp $apparmor)) -}}
+{{- if not (has $level (list "privileged" "baseline" "restricted")) -}}
+{{- fail (printf "podSecurity.level is %q, and a Pod Security level is privileged, baseline or restricted." $level) -}}
+{{- end -}}
+{{- if not (kindIs "bool" .Values.podSecurity.labels) -}}
+{{- fail (printf "podSecurity.labels is %v (%s), and it is true or false: a string such as \"false\" would read as on." .Values.podSecurity.labels (kindOf .Values.podSecurity.labels)) -}}
+{{- end -}}
+{{- $level -}}
+{{- end -}}

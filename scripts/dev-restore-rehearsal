@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# A plane's database and bucket backed up, dropped and restored, on the dev stack, timed.
+#
+#   scripts/dev-restore-rehearsal           # rehearse, then remove what it made
+#   scripts/dev-restore-rehearsal --keep    # leave the database, the bucket and the dumps
+#
+# The tested shape of the restore in docs/admin/backup-restore.md and
+# docs/admin/upgrading.md: a dump of PostgreSQL and a copy of the bucket taken off the
+# servers, both dropped, both put back, and the plane asked whether it has what it had.
+#
+#   1. a database and a bucket of the rehearsal's own, migrated as the plane migrates;
+#   2. what a backup has to bring back, written through the plane's own modules: audit
+#      rows on their hash chain, the organisation's memory, a session in object storage
+#      and its row in the index, and an object of random bytes;
+#   3. `pg_dump` of the database and `mc mirror` of the bucket, copied off the servers;
+#   4. both dropped;
+#   5. both restored from those copies;
+#   6. the plane's modules against the restored two: every table's rows, the audit chain,
+#      the memory in force, the object's bytes, the session's manifest, and the index
+#      rebuilt from the restored bucket alone (scripts/dev-restore-rehearsal.exs).
+#
+# It prints the time each step took. A real plane's numbers scale with its database and
+# its bucket, and these say where the time goes rather than how long yours will take.
+#
+# Only the dev stack (`scripts/dev-up`: PostgreSQL on 25432, MinIO on 29000), and only a
+# database and a bucket of its own: never the ones the suites use, which it refuses to
+# name. It reads no kubeconfig and talks to no cluster. `TROUPE_PG_CONTAINER`,
+# `TROUPE_MINIO_CONTAINER` and `TROUPE_DOCKER` name the containers and the engine that runs
+# them, where they are not the defaults. A bucket copied with `mc mirror`
+# has its current objects and none of their earlier versions, which is what a restore
+# needs and not what erasure leaves behind: see the backup page.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+PG="${TROUPE_PG_CONTAINER:-troupe-dev-postgres-1}"
+MINIO="${TROUPE_MINIO_CONTAINER:-troupe-dev-minio-1}"
+DB="${TROUPE_REHEARSAL_DB:-troupe_restore_rehearsal}"
+BUCKET="${TROUPE_REHEARSAL_BUCKET:-troupe-restore-rehearsal}"
+WORK="${TROUPE_REHEARSAL_DIR:-.e2e/restore-rehearsal}"
+keep=false
+
+case "${1:-}" in
+  --keep) keep=true ;;
+  "") ;;
+  -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
+  *) echo "dev-restore-rehearsal: unknown argument $1" >&2; exit 2 ;;
+esac
+
+case "$DB" in
+  troupe_plane_dev|troupe_plane_test*|postgres|template*)
+    echo "dev-restore-rehearsal: $DB is a database somebody else uses; name one of the rehearsal's own" >&2
+    exit 1 ;;
+esac
+if [ "$BUCKET" = troupe-sessions ]; then
+  echo "dev-restore-rehearsal: troupe-sessions is the suites' bucket; name one of the rehearsal's own" >&2
+  exit 1
+fi
+
+for container in "$PG" "$MINIO"; do
+  if ! docker ps --format '{{.Names}}' | grep -qx "$container"; then
+    echo "dev-restore-rehearsal: no container named $container; run scripts/dev-up" >&2
+    exit 1
+  fi
+done
+
+# The engine whose containers publish the ports above. On a machine with two (Docker
+# Desktop and another under WSL), `TROUPE_DOCKER=docker.exe` from WSL names Docker Desktop.
+docker() { command "${TROUPE_DOCKER:-docker}" "$@"; }
+psql() { docker exec -i "$PG" psql -U troupe -d postgres -v ON_ERROR_STOP=1 -tAc "$1"; }
+mc() { docker exec -i "$MINIO" mc "$@"; }
+plane() {
+  MIX_ENV=test TROUPE_PLANE_TEST_DB="$DB" TROUPE_REHEARSAL_BUCKET="$BUCKET" "$@"
+}
+
+# Milliseconds, from `%N` where `date` has it, whole seconds where it does not.
+now_ms() {
+  local ns
+  ns=$(date +%s%N)
+  case "$ns" in
+    *[!0-9]*) echo $(( $(date +%s) * 1000 )) ;;
+    *) echo $(( ns / 1000000 )) ;;
+  esac
+}
+started=$(now_ms)
+mark=$started
+current=""
+times=()
+step() {
+  local now
+  now=$(now_ms)
+  if [ -n "$current" ]; then
+    times+=("$(awk -v n="$current" -v ms=$((now - mark)) 'BEGIN { printf "%-38s %8.1f s", n, ms / 1000 }')")
+  fi
+  current="$1"
+  mark=$now
+  if [ "$1" != "done" ]; then printf '\n\033[1m==> %s\033[0m\n' "$1"; fi
+}
+
+drop() {
+  psql "DROP DATABASE IF EXISTS \"$DB\" WITH (FORCE)" >/dev/null
+  mc rb --force "rehearsal/$BUCKET" >/dev/null 2>&1 || true
+}
+
+finish() {
+  local status=$? failed_in="$current"
+  step "done"
+  if [ "$keep" = false ]; then
+    drop || true
+    docker exec "$PG" rm -f /tmp/rehearsal.dump || true
+    docker exec "$MINIO" rm -rf /tmp/rehearsal-bucket || true
+    rm -rf "$WORK/dump" "$WORK/bucket"
+  fi
+  if [ "${#times[@]}" -gt 0 ]; then
+    echo
+    printf '  %s\n' "${times[@]}"
+    awk -v ms=$(( $(now_ms) - started )) 'BEGIN { printf "  %-38s %8.1f s\n", "total", ms / 1000 }'
+  fi
+  if [ "$status" -ne 0 ]; then echo "dev-restore-rehearsal: failed in '$failed_in'" >&2; fi
+  exit "$status"
+}
+trap finish EXIT
+
+mkdir -p "$WORK"
+mc alias set rehearsal http://localhost:9000 troupe troupe-secret >/dev/null
+
+# -- 1 -----------------------------------------------------------------------------
+
+step "1. A database and a bucket"
+drop
+psql "CREATE DATABASE \"$DB\" OWNER troupe" >/dev/null
+if ! plane mix ecto.migrate -r Troupe.Plane.Repo --quiet > "$WORK/migrate.log" 2>&1; then
+  tail -20 "$WORK/migrate.log" >&2
+  echo "dev-restore-rehearsal: the plane could not migrate $DB on localhost:25432. If the database" >&2
+  echo "was made in another PostgreSQL than that one, $PG is not the container behind the port:" >&2
+  echo "name the engine that runs it with TROUPE_DOCKER, or the container with TROUPE_PG_CONTAINER." >&2
+  exit 1
+fi
+mc mb "rehearsal/$BUCKET" >/dev/null
+mc version enable "rehearsal/$BUCKET" >/dev/null
+echo "database $DB, bucket $BUCKET"
+
+# -- 2 -----------------------------------------------------------------------------
+
+step "2. What a plane holds"
+plane mix run --no-start scripts/dev-restore-rehearsal.exs seed "$WORK"
+
+# -- 3 -----------------------------------------------------------------------------
+
+step "3. Backup: pg_dump and the bucket"
+docker exec "$PG" pg_dump -U troupe -Fc -d "$DB" -f /tmp/rehearsal.dump
+docker exec "$MINIO" rm -rf /tmp/rehearsal-bucket
+mc mirror --quiet "rehearsal/$BUCKET" /tmp/rehearsal-bucket >/dev/null
+# Off the servers, as a backup is.
+rm -rf "$WORK/dump" "$WORK/bucket"
+mkdir -p "$WORK/dump"
+docker cp "$PG:/tmp/rehearsal.dump" "$WORK/dump/rehearsal.dump" >/dev/null
+docker cp "$MINIO:/tmp/rehearsal-bucket" "$WORK/bucket" >/dev/null
+docker exec "$PG" rm -f /tmp/rehearsal.dump
+docker exec "$MINIO" rm -rf /tmp/rehearsal-bucket
+echo "dump $(du -h "$WORK/dump/rehearsal.dump" | cut -f1), bucket $(find "$WORK/bucket" -type f | wc -l | tr -d ' ') objects in $(du -sh "$WORK/bucket" | cut -f1)"
+
+# -- 4 -----------------------------------------------------------------------------
+
+step "4. Both dropped"
+drop
+if [ "$(psql "SELECT count(*) FROM pg_database WHERE datname = '$DB'")" != 0 ]; then
+  echo "dev-restore-rehearsal: $DB is still there" >&2
+  exit 1
+fi
+if mc ls "rehearsal/$BUCKET" >/dev/null 2>&1; then
+  echo "dev-restore-rehearsal: $BUCKET is still there" >&2
+  exit 1
+fi
+echo "no database $DB, no bucket $BUCKET"
+
+# -- 5 -----------------------------------------------------------------------------
+
+step "5. Restore: pg_restore and the bucket"
+psql "CREATE DATABASE \"$DB\" OWNER troupe" >/dev/null
+docker cp "$WORK/dump/rehearsal.dump" "$PG:/tmp/rehearsal.dump" >/dev/null
+docker exec "$PG" pg_restore -U troupe --no-owner --exit-on-error -d "$DB" /tmp/rehearsal.dump
+mc mb "rehearsal/$BUCKET" >/dev/null
+mc version enable "rehearsal/$BUCKET" >/dev/null
+docker cp "$WORK/bucket" "$MINIO:/tmp/rehearsal-bucket" >/dev/null
+mc mirror --quiet /tmp/rehearsal-bucket "rehearsal/$BUCKET" >/dev/null
+echo "restored $DB and $BUCKET"
+
+# -- 6 -----------------------------------------------------------------------------
+
+step "6. The plane on the restored two"
+plane mix run --no-start scripts/dev-restore-rehearsal.exs check "$WORK"
+
+echo
+echo "dev-restore-rehearsal: dropped and restored, and the plane has what it had."

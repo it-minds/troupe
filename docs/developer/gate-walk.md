@@ -36,17 +36,38 @@ pass on one release.
 - **A clone of the repository** at the release's tag, `git clone --branch v<version>
   https://github.com/it-minds/troupe`, for `scripts/gate-check` and the docs. Cloning
   installs nothing.
-- **The record.** One issue, `Stage 1 gate: v<version>`, whose body is the table above with
-  a result column. Each walked row gets one comment: **PASS** or **FAIL**, the date, the
-  machine, what was run and what it printed, and the issue filed for each failure. A row
-  passes only on the release being tagged; a fix means a new release and the row walked
-  again. The repository is public: live-plane evidence goes in with host, cluster and
-  account names replaced by `example.com`, and the comment says the raw output and the
-  recording are kept in the live deployment's private records.
+- **The record.** One issue for the release, `Stage 1 gate: v<version>`, kept as
+  [below](#the-record).
 
 The order that wastes least: `gate-check` and rows 7 and 8 at a desk, rows 1 and 3 on the
 laptop, rows 5 and 6 with the console open, row 2, then row 4, which needs everything else
 working.
+
+## The record
+
+Each release has one issue, `Stage 1 gate: v<version>`, whose body is the table above with
+a result column for that release (Decision 933):
+
+- **A comment per row walked:** **PASS** or **FAIL**, the date, the machine and its
+  operating system, what was run and what it printed (`gate-check`'s whole output for the
+  rows it covers), and the issue filed for each failure. A failure is fixed or filed before
+  the record moves on, never left as known.
+- **A row is walked again only where a change touched it.** On a new release, a row that
+  passed on an earlier one is walked again when a pull request merged since then changes
+  what its steps run or what the decisions under its "Behind it" govern
+  (`mix troupe.decisions --for` on the files the pull requests changed), or fixes a failure
+  filed from it. Otherwise its comment says the result is carried and links the comment it
+  was walked in. `gate-check` runs on every release whatever is carried.
+- **A failure fixed is a new release, and that row walked again on it.** A row passes on a
+  release somebody installed, never on a fix that is only merged.
+- **Private evidence stays out.** The repository is public: live-plane output goes in with
+  host, cluster, account and identity-provider names replaced by `example.com`, and the
+  comment says the raw output and any recording are kept in the live deployment's private
+  records, without naming where. Nothing from a person's own home, keychain or settings
+  goes in.
+
+Stage 1 is tagged when every row's result for one release is a **PASS**, walked on it or
+carried to it.
 
 ## What runs locally: `scripts/gate-check`
 
@@ -262,7 +283,7 @@ from releases the release key signed, without anyone reinstalling.
 
 1. On the laptop, install the release before `<version>` with its own installer, sign in
    (`troupe login https://<plane>`), and open the desktop app signed in too.
-2. In the console, **Policy → Client versions**: `recommended` `<version>` for troupe,
+2. In the console, **Govern → Client versions**: `recommended` `<version>` for troupe,
    troupe-daemon and the desktop app; save.
 3. `troupe whoami`: "This plane recommends troupe `<version>`, and this is …: run troupe
    update." Then `troupe update --check`, then `troupe update`, with a session's turn
@@ -304,8 +325,10 @@ person's machine in one place; a machine follows them and cannot go past an enfo
 
 **Steps:**
 
-1. In the console, **Policy → What people's own machines talk to**: the provider, base URL
-   and models, and `client_enforced` `{"approvals": "deny", "max_turns": 25}`.
+1. In the console, **Govern → Policy and settings**, its panel **What people's own machines
+   talk to**: the provider, base URL and models, and `client_enforced` `{"approvals":
+   "deny", "max_turns": 25}`. **Govern → Organisation** then shows the document as people's
+   machines get it.
 2. On the laptop: `troupe config pull` prints the plane's defaults and limits. Put
    `max_turns: 80` in your own `config.yaml`, then `troupe config --explain max_turns`.
 3. The terminal client's settings page shows `max_turns` "set by your organisation" and

@@ -30,6 +30,14 @@ session is back with the right epoch and head hash. Run `scripts/dev-up`, then
 database). It is not a disaster-recovery tool, and nothing schedules it against a real
 instance.
 
+**`scripts/dev-restore-rehearsal`** is the restore of a database and a bucket rehearsed on
+the same development stack, with each step timed: a database and a bucket of its own,
+seeded through the plane's modules, dumped with `pg_dump` and copied with `mc mirror`,
+dropped, restored, and checked table by table, with the audit chain, the organisation's
+memory, an object's bytes and an index rebuilt from the restored bucket. The restore in
+[upgrading.md §7](upgrading.md#7-restore) follows its shape. A bucket copied that way has
+its current objects and not their earlier versions.
+
 **`mix troupe.index.rebuild [--database-url URL]`** reconstructs the session index from
 object storage alone, with no key: manifests are plaintext, and every segment's epoch, last
 sequence and head hash are in its key and metadata. It is safe on a populated index, keeps

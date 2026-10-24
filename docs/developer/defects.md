@@ -20,23 +20,6 @@ Stale docs and style nits are not defects and do not belong here.
 
 ## Open
 
-### D5 - On Windows a refresh token over 1280 characters can't be stored, and the desktop sign-in fails (medium)
-
-`secret_set` (`clients/gui/apps/desktop/src-tauri/src/secrets.rs`) stores the refresh
-token with keyring 3.6.3's `Entry::set_password`, which writes it to Windows Credential
-Manager as UTF-16 and refuses more than 1280 UTF-16 units (the 2560-byte
-`CRED_MAX_CREDENTIAL_BLOB_SIZE`) before writing anything: "Attribute 'password encoded
-as UTF-16' is longer than platform limit of 2560 chars" (`validate_attributes` in the
-crate's `windows.rs`). It is worse than a token left unsaved: `AuthSession.adopt`
-(`clients/gui/packages/client/src/auth.ts`) writes the token before the exchange and
-does not catch, so that sign-in fails, and so does a refresh that rotates to such a
-token. Authentik's are 128 characters. Entra's are opaque and vary; other projects
-report them over 1280 in tenants with many claims, which is still unmeasured here (no
-Entra tenant). `set_secret` with UTF-8 would hold 2560 and needs a read path for entries
-written as UTF-16; splitting the token across entries has no limit. Either wants a
-renamed desktop build to test. Found by the #53 fixer (PR #84), 2026-09-22; the limit
-and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
-
 ### D8 - Test hygiene (low)
 
 - The root `.formatter.exs` has no `subdirectories`, so `mix format --check-formatted`
@@ -301,8 +284,6 @@ Found by the chunk 11 fixers, 2026-10-01.
 
 ### D50 - A person's servers offered to a pod session: the rough edges (medium)
 
-- The desktop app offers a person's servers once per attachment: a server signed in to
-  while attached is not offered until the next one, and there is no per-server choice.
 - The daemon's `mcp.tools` and `mcp.call` hold no MCP session, so each call against a
   stateful server is its own session: `initialize`, the request and a `DELETE`.
 
@@ -816,14 +797,6 @@ Found by the #371 fixer, 2026-10-08.
 
 ### D92 - Thinking blocks and the prompt prefix, what #465's measurement found (medium)
 
-- Today's resend (Decision 805) and the `drop_block` beta both leave the stale thinking
-  blocks in Troupe's history, so on an enforced account every later call of the session
-  meets the mismatch again until a compaction: two requests a call today, or every block
-  dropped on every call with `drop_block`. Once a call is refused or reports drops,
-  sending the leading run of pre-change blocks no more would end it (Anthropic accepts a
-  leading run removed oldest first). Since Decision 871 a tool that comes or goes changes
-  the prefix only at a turn boundary, but each change there (D124's turn's tools) still
-  costs every later call one refusal.
 - On a model that does not bind its thinking, Decision 793 still offers the todo tools once
   a list exists or after 10 calls, which changes `tools` mid-turn and costs a cache write
   (`llm_request.tools_changed` counts it). A model that binds has them from the first call,
@@ -1458,7 +1431,6 @@ Found by the chunk 39 fixers, 2026-10-19.
   - A grant whose release never reached the plane stays in `remote_grants` until the 30-day idle limit refuses it; nothing deletes it, and the console doesn't list a person's laptop grants.
   - The TUI still offers "allow for the session" on a relayed approval; the laptop refuses it with a sentence.
   - An offer doesn't come back after a reboot unless the person has `troupe-daemon login on`.
-  - The macOS and Linux credential stores (`security`, `secret-tool`) weren't exercised; Linux CI checks only the "store unavailable" answer.
   - The gateway's `OrganisationTest` sees a late `config.changed` inside a 300 ms refute, under load.
 - **Company memory** (Decision 929).
   - A change to a profile's `extends` reaches its running sessions only at their next activation.
@@ -1472,17 +1444,62 @@ Found by the chunk 39 fixers, 2026-10-19.
   - Re-resolving a running session for an organisation change also picks up the person's own config edits since it started.
   - `policy.revision` is unsigned; a forged one can only cause or suppress a fetch.
   - Gateway tests that wait 5 s on a link's background task fail under load.
-- **The sweep** (Decision 930).
-  - The GUI's fake admin still keys manual runs on the minute.
-  - `pnpm audit` reports one high-severity advisory in `source-map-js`, pulled in only by the console's test runner.
 - **The picker and the App** (Decision 932, tui/0166).
-  - The plane's bundle preview diffs names only (`Bundle.summary/1`), so a changed definition with unchanged names previews nothing there; the builder adds its own lines. (medium)
   - The admin API's flat `profile` argument receives the params map when absent; `profile_choices` guards for it.
   - The desktop's `AgentEditor` doesn't show `delegation`.
   - `Ledger.models_run` has no time bound.
   - The model picker offers only the models the plane knows; the plane never asks a provider for its list.
 
 Found by the chunk 40 fixers, 2026-10-24.
+
+### D134 - The gate's desk walk, the chart's hand steps, the upgrade test and the seam after chunk 41 (low)
+
+- **The gate** (Decision 933). Walked at a desk on the installed 0.24.0-beta; the live rows are
+  walked on 0.25.0-beta (`Stage 1 gate: v0.25.0-beta`).
+  - Not walked at the desk: the desktop app on the trap repository (row 1 step 4) and on a real
+    repository (row 3 step 5), the installer's own questions and its PATH change, and `cost_usd`
+    against a provider that reports no price.
+  - A branch started from command mode asks the workspace's MCP question again, with the same
+    `call_id` as the root's (`mcp-trust-<fingerprint>`); a client that keys answers by `call_id`
+    can treat it as answered.
+  - On Linux with `TROUPE_INSTALL_DIR` set, output redirected with a plain `>` is overwritten by
+    Burrito's `[i]` lines, which reach the file through a description of their own.
+- **The chart and the operator** (Decision 934).
+  - Still by hand on a cluster: copying the worker Secrets into each new worker namespace, and
+    the `troupe.dev/ingress=true` label.
+  - `SecretMissing=True` shows on a freshly installed profile right after the install although
+    the Secrets exist.
+  - The kind plane holds OpenBao's root token, so the cluster suite never exercises the grant
+    check with a narrow role; the GitHub grant is always reported optional, an App configured or not.
+  - `scripts/kind-up` under Git Bash needs `MSYS_NO_PATHCONV=1` (`chmod /kind` is
+    path-converted); `kind-upgrade-check` sets it, `kind-up` does not.
+  - The e2e `enrolment_test` depends on an earlier test writing the profile row;
+    `Troupe.Plane.ClusterTest` times out starting its replica on a loaded machine.
+- **The mediums** (Decision 935).
+  - `pnpm audit` in `clients/gui` reports `undici` below 8.12.2 through `jsdom` (test-only).
+  - The desktop window does not show `AuthSession.notKept`; it reaches `console.warn` only.
+  - No CI job runs the desktop crate's `cargo test` or the protocol keyring test on Windows, so
+    the Windows half of the parts layout is checked on a developer's machine only.
+  - After a renewal whose store write failed, the rotated-away token stays stored; the next
+    launch's refresh is refused once and clears it.
+  - Windows PowerShell 5.1 caps an environment value near 32 KB, so a keyring value of that
+    size fails at the helper's hand-off, not at Credential Manager.
+- **The upgrade** (Decision 936).
+  - `helm rollback` is tested nowhere; `upgrading.md` says so.
+  - `scripts/e2e` never runs `deps.get` in the toolbox; a stale shared deps volume fails the
+    first seed.
+  - The kind scripts need bash (arrays); `sh -n` under dash refuses them, as `remote-up`
+    already did.
+- **The seam** (Decision 937).
+  - The desktop app's and the TUI's `initialize` send no `client_info.platform`; the daemon's does.
+  - The Linux desktop `cargo test` job starts no Secret Service, so `secrets.rs`'s Linux
+    round trip skips there.
+  - The 4096-byte line `security -i` takes is Apple's documented limit, not measured here; the
+    daemon uses the parts layout past it on macOS.
+  - The umbrella `.formatter.exs` covers the root's `config`, `lib` and `test` only, so the
+    format check does not cover `apps/`.
+
+Found by the chunk 41 fixers, 2026-10-24.
 
 ## Taken
 

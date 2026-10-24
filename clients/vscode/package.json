@@ -2,7 +2,7 @@
   "name": "troupe",
   "displayName": "Troupe",
   "description": "Opens Troupe's terminal client in VS Code's terminal, at the workspace folder.",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "publisher": "objective-mj",
   "license": "Apache-2.0",
   "private": true,
@@ -253,6 +253,11 @@
     "test": "tsc -p . && node --test \"out/test/unit/**/*.test.js\"",
     "test:vscode": "tsc -p . && node out/test/vscode/run.js",
     "package": "tsc -p . && node -e \"for (const f of ['LICENSE', 'NOTICE']) require('fs').copyFileSync('../../' + f, f)\" && vsce package --no-dependencies --out troupe.vsix"
+  },
+  "pnpm": {
+    "overrides": {
+      "@azure/msal-node": "^7.1.0"
+    }
   },
   "devDependencies": {
     "@types/node": "^20.19.0",

@@ -37,6 +37,7 @@ defmodule Troupe.Plane.Admin do
     Breakglass,
     Budget,
     Bundles,
+    ClientsSeen,
     ClientVersions,
     ClusterPolicy,
     Connections,
@@ -61,7 +62,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Gitops.GitHubApp, as: GitopsGitHubApp
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
-  alias Troupe.Plane.{OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
+  alias Troupe.Plane.{KMSCheck, OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision, Trigger}
@@ -163,7 +164,14 @@ defmodule Troupe.Plane.Admin do
 
   # -- overview ---------------------------------------------------------------
 
-  @doc "Fleet health, active sessions and spend per team, scoped to what the actor sees."
+  @doc """
+  Fleet health, active sessions and spend per team, scoped to what the actor sees.
+
+  A platform admin's also says what the plane's OpenBao role may do (`openbao`, from
+  `KMSCheck`): each grant the plane needs, checked look-only, and for one it lacks the
+  sentence and the lines an OpenBao administrator runs to grant it. A team admin's has
+  none, since the key manager is the platform's and nothing a team admin can change.
+  """
   @spec overview(actor()) :: result()
   def overview(actor) do
     with :ok <- require_admin(actor) do
@@ -178,7 +186,10 @@ defmodule Troupe.Plane.Admin do
            dormant: count_sessions(actor, "dormant"),
            read_only: count_sessions(actor, "read_only")
          }
-       }}
+       }
+       |> then(
+         &if(actor.role == :platform_admin, do: Map.put(&1, :openbao, KMSCheck.run()), else: &1)
+       )}
     end
   end
 
@@ -1560,18 +1571,26 @@ defmodule Troupe.Plane.Admin do
   What an administrator links a team to. Mirrored, never authored: this list is what SCIM
   pushed or what somebody's `groups` claim created at login, and a group absent from it is
   a group nobody from has signed in yet.
+
+  Each says whether a team draws on it (`linked`) and when it last arrived in a sign-in
+  (`last_seen_at`, empty for one only SCIM pushed), so a group the provider has started
+  sending is a name to choose from rather than an identifier to guess. Being listed grants
+  nothing: a group's people reach nothing until a team links it and is granted a profile.
   """
   @spec groups_list(actor()) :: result()
   def groups_list(actor) do
     with :ok <- require_admin(actor) do
       alike = groups_alike()
+      linked = Identity.linked_group_ids()
 
       {:ok,
        Enum.map(Identity.list_groups(), fn group ->
          %{
            external_id: group.external_id,
            display_name: group.display_name,
-           looks_duplicated: Map.get(alike, group.external_id)
+           looks_duplicated: Map.get(alike, group.external_id),
+           linked: MapSet.member?(linked, group.id),
+           last_seen_at: group.last_seen_at
          }
        end)}
     end
@@ -2421,10 +2440,26 @@ defmodule Troupe.Plane.Admin do
 
   Readable by a team admin, because "why is my team's terminal refused" is their question;
   changing it is a platform admin's, since it holds every team's clients alike.
+
+  Beside it the fleet (#657): per component, how many clients last seen are current,
+  behind the recommended version, or refused at their next `initialize`, and who they are
+  with the version each last ran and since when. A team admin's is their teams' people.
   """
   @spec clients_get(actor()) :: result()
   def clients_get(actor) do
-    with :ok <- require_admin(actor), do: {:ok, %{clients: ClientVersions.all()}}
+    with :ok <- require_admin(actor) do
+      {:ok, %{clients: ClientVersions.all(), fleet: ClientsSeen.fleet(people_seen_by(actor))}}
+    end
+  end
+
+  defp people_seen_by(%{role: :platform_admin}), do: :all
+
+  defp people_seen_by(actor) do
+    actor
+    |> visible_teams()
+    |> Enum.flat_map(&Identity.members_of_team/1)
+    |> Enum.map(& &1.id)
+    |> Enum.uniq()
   end
 
   @doc """
@@ -2433,7 +2468,8 @@ defmodule Troupe.Plane.Admin do
   Partial: the keys sent change, a key sent as `null` is cleared, and `blocked` is the whole
   list. Refused, with nothing written, for a version SemVer cannot read, a minimum newer
   than the recommended version, or a recommended version that is blocked. Audited with the
-  diff. A client is held to it at its next `initialize`.
+  diff, and with how many of the component's clients last seen the policy now finds
+  current, behind and refused (`affected`). A client is held to it at its next `initialize`.
   """
   @spec clients_put(actor(), String.t(), map()) :: result()
   def clients_put(actor, component, policy) do
@@ -2441,8 +2477,10 @@ defmodule Troupe.Plane.Admin do
       case ClientVersions.put(component, policy || %{}, actor.subject) do
         {:ok, %{before: before, now: now}} ->
           changes = Audit.diff(policy_fields(before), policy_fields(now))
-          {:ok, _} = Audit.record(actor.subject, "clients.put", component, changes)
-          {:ok, Map.put(now, :changes, changes)}
+          affected = ClientsSeen.affected(component, policy_fields(now))
+          detail = Map.put(changes, "affected", affected)
+          {:ok, _} = Audit.record(actor.subject, "clients.put", component, detail)
+          {:ok, now |> Map.put(:changes, changes) |> Map.put(:affected, affected)}
 
         {:error, why} ->
           {:error, Error.new(:invalid_params, why)}
@@ -3431,11 +3469,37 @@ defmodule Troupe.Plane.Admin do
          channel: channel,
          from: before && before.version,
          hash: Bundle.hash(content),
-         changes: Audit.diff(before_summary || %{}, after_summary),
+         changes:
+           Map.merge(
+             Audit.diff(before_summary || %{}, after_summary),
+             fields_changed(before && before.parsed, parsed)
+           ),
          removed: removed_entries(before_summary, after_summary),
          losers: losers(channel, removed_entries(before_summary, after_summary))
        }}
     end
+  end
+
+  # What changed inside the entries both versions carry, one line per field, keyed as the
+  # names' diff is (`agents.triager.model`): an entry that comes or goes is the names'
+  # line already, and said again field by field it would bury the change it is.
+  defp fields_changed(nil, _parsed), do: %{}
+
+  defp fields_changed(before, parsed) do
+    was = Document.definitions(before)
+    now = Document.definitions(parsed)
+
+    kept =
+      for {section, entries} <- now, into: %{} do
+        {section, Map.take(entries, Map.keys(Map.get(was, section, %{})))}
+      end
+
+    was =
+      for {section, entries} <- was, into: %{} do
+        {section, Map.take(entries, Map.keys(Map.get(now, section, %{})))}
+      end
+
+    Audit.diff(was, kept)
   end
 
   # The version this is measured against: one named, or the channel's current. A channel

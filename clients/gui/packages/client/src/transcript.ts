@@ -743,12 +743,15 @@ function subagentEndText(d: DurableEvent): string {
 
 /**
  * A person's own tools offered to the session (troupe PROTOCOL.md §8), as the terminal client
- * says it: who offered them (`actor`) and which, since everyone in the session is entitled to
- * know that a tool runs on somebody's machine.
+ * says it: who offered them and which, since everyone in the session is entitled to know that
+ * a tool runs on somebody's machine. Who is their `display_name` where the event carries one,
+ * since a provider's subject may be an opaque id, and the subject (`actor`) where not.
  */
 function taintedText(d: DurableEvent): string {
   const tools = Array.isArray(d.data["tools"]) ? d.data["tools"].filter((t): t is string => typeof t === "string") : [];
-  const said = `${str(d.data["actor"], "somebody")} offered tools that run on their own machine`;
+  const name = d.data["display_name"];
+  const who = typeof name === "string" && name !== "" ? name : str(d.data["actor"], "somebody");
+  const said = `${who} offered tools that run on their own machine`;
   return tools.length ? `${said}: ${tools.join(", ")}` : said;
 }
 

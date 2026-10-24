@@ -14,6 +14,7 @@ defmodule Troupe.Gateway.PlaneVersionTest do
   import ExUnit.CaptureLog
 
   alias Troupe.Gateway.{Daemon, FakePlane, Plane}
+  alias Troupe.LLM.Identify
   alias Troupe.Protocol.{Client, Endpoint}
 
   @refusal %{
@@ -74,7 +75,12 @@ defmodule Troupe.Gateway.PlaneVersionTest do
                Plane.call("session.erasures", %{"device" => "laptop"}, name)
 
       assert [{"initialize", hello}] = FakePlane.calls(plane.state)
-      assert hello["client_info"] == %{"name" => "troupe-daemon", "version" => "0.12.0-beta"}
+      # With the platform, for the plane's record of who runs what (#657).
+      assert hello["client_info"] == %{
+               "name" => "troupe-daemon",
+               "version" => "0.12.0-beta",
+               "platform" => Identify.platform()
+             }
     end
 
     test "a later handshake the plane answers lifts it", %{plane: plane, name: name} do

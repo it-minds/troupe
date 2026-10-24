@@ -78,19 +78,24 @@ updates:
       # Moved by the `tauri` group, at the top.
       - dependency-name: "tauri*"
       # `glib` 0.18 arrives through gtk3 and webkit2gtk, which is the stack Tauri 2 uses
-      # on Linux. There is no 0.18.x that answers the advisory and no 0.19 that Tauri
-      # will accept, so Dependabot cannot produce an update and errors out every time it
-      # tries. Ignored until Tauri's Linux backend moves; revisit on the next Tauri major
-      # rather than on the next advisory.
+      # on Linux. There is no 0.18.x that answers the advisory and the 0.20 that does is
+      # one Tauri will not accept, so Dependabot cannot produce an update and errors out
+      # every time it tries. Every version is ignored, not only 0.18.x: the security job
+      # aims at the fixed 0.20, which an ignore of 0.18.x left in reach, and an `ignore`
+      # here holds for security updates as well as version updates. Revisit on the next
+      # Tauri major rather than on the next advisory; the alert stays open until then.
       - dependency-name: glib
-        versions: ["0.18.x"]
     commit-message:
       prefix: deps
 
   # The VS Code extension's build and test tools, in one pull request a month. Its
   # `@types/vscode` is the API it promises (`engines.vscode`) and `@types/node` the Node
   # that version of VS Code runs, not the newest of either: they move by hand, with that
-  # line (Decision 765).
+  # line (Decision 765). `package.json` overrides `@azure/msal-node` to 7: it comes in
+  # through `@vscode/vsce`'s `@azure/identity`, whose newest still asks for 6, and the
+  # advisory against 6 is fixed only in 7.1. The extension's tests and `vsce package`
+  # pass on it; `vsce publish --azure-credential`, the only path that loads it, is not
+  # used here. The override goes when `@azure/identity` takes 7 itself.
   - package-ecosystem: npm
     directory: /clients/vscode
     schedule:

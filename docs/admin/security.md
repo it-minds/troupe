@@ -35,8 +35,9 @@ discovery file or open its socket can drive every session on it
 - **Asks the providers for their model lists** when the cached list is stale, as a local
   session starts (`troupe-daemon models`).
 - **In a git repository, at a session's start**, asks whether to bring other tools' files
-  (`CLAUDE.md`, Cursor's and Copilot's rules, opencode's agents) into Troupe's own, each
-  shown as a diff and written only on a yes (Decisions 823 and 835), then runs the
+  (`CLAUDE.md`, Cursor's and Copilot's rules, opencode's agents) into Troupe's own: one
+  question naming the files, each shown as a diff on request (`r`, or `troupe onboard`),
+  and written only on a yes (Decisions 823 and 835), then runs the
   `librarian` agent, which writes the project brief into the repository's `.troupe/`. That
   costs model calls; `memory_auto_refresh: false` turns it off.
 - **The desktop app looks for an update** when it starts and once a day: GitHub's latest
@@ -102,7 +103,9 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   user namespace, and the operator writes the two together or neither, so what the masks
   hid (`/proc/kcore`, `/proc/sys`, ...) is visible only to a root with no privilege over
   the node. The Pod Security levels `baseline` and `restricted` refuse an unmasked `/proc`
-  all the same, so worker namespaces are `privileged`.
+  all the same, so worker namespaces are `privileged`, and the operator labels each so
+  (`podSecurity`); with user namespaces off, the pod meets `restricted` and its namespace
+  says that instead.
 - **Every command runs in bubblewrap**, the shell's and every process Troupe starts there
   (git, ripgrep, a stdio MCP server), over the session's own directory. A pod that cannot
   start bubblewrap refuses the command with a sentence; it never runs one unconfined
@@ -187,6 +190,9 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   an hour, on the pod network, where the plane's NetworkPolicy admits the port from worker
   namespaces alone, over TLS against the CA the operator gives its namespace; the plane
   closes a plaintext connection unless `plane.controlTls.requireTls` is off (Decision 906).
+  A pod made before its namespace had the CA, which dials in plaintext and so can neither
+  enrol nor be drained, is replaced by the operator once TLS is required, and puts its
+  sessions to sleep as it stops.
   A machine registered outside the cluster ([single-machine.md](single-machine.md)) enrols
   with a secret that lasts until rotated, so over TLS only: it is given the control
   certificate's CA at registration and trusts no other, does not dial without it, and a
@@ -217,7 +223,10 @@ one list, with links to where each part is set.
 **On a plane**, Troupe creates no Kubernetes Secret and no component of it can read one:
 the model key, the object store's credentials and an MCP server's credential are Secrets
 you create in each worker namespace ([configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects)).
-OpenBao holds the rest, under policies rendered by `Troupe.KMS.Policy`:
+OpenBao holds the rest, under policies rendered by `Troupe.KMS.Policy`. An OpenBao
+administrator writes the plane's ([openbao.md](openbao.md), generated from the same code);
+the plane can write none, and checks what its role holds when it starts and on the
+console's Overview, look-only:
 
 | What | Where | Who can use it |
 |---|---|---|

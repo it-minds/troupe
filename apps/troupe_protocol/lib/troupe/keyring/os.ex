@@ -7,7 +7,13 @@ defmodule Troupe.Keyring.OS do
 
   - **Windows**: Credential Manager, a generic credential persisted on this machine,
     through `CredWriteW`, `CredReadW` and `CredDeleteW`, called from Windows PowerShell.
+    One entry holds at most 2560 bytes, here of UTF-8, so a longer value is kept in
+    parts, as the desktop app keeps one: `<entry>/0`, `<entry>/1`, ... hold its pieces in
+    order and `<entry>` holds `troupe-parts:<n>`, their count. A value that fits, and does
+    not begin with that marker, is one entry as before; deleting takes every part.
   - **macOS**: the login keychain, through `security -i`, given its command on a pipe.
+    It reads one command line of at most 4096 bytes, so a value whose command would be
+    longer is kept in parts, in the layout Windows keeps one in.
   - **Linux and the other unixes**: the Secret Service, through `secret-tool`, given the
     secret on its standard input. No `secret-tool`, or no agent answering it, is
     `{:error, :unavailable}`.
@@ -42,6 +48,7 @@ defmodule Troupe.Keyring.OS do
   try {
     Add-Type -TypeDefinition @'
   using System;
+  using System.Collections.Generic;
   using System.Runtime.InteropServices;
   using System.Text;
   public static class TroupeKeyring {
@@ -61,7 +68,8 @@ defmodule Troupe.Keyring.OS do
     [DllImport("advapi32.dll")]
     static extern void CredFree(IntPtr credential);
     const int Generic = 1; const int LocalMachine = 2; const int NotFound = 1168;
-    public static void Put(string target, string secret) {
+    const int MaxBlob = 2560; const string Index = "troupe-parts:";
+    static void Write(string target, string secret) {
       byte[] blob = Encoding.UTF8.GetBytes(secret);
       CREDENTIAL c = new CREDENTIAL();
       c.Type = Generic; c.TargetName = target; c.UserName = "troupe"; c.Persist = LocalMachine;
@@ -71,7 +79,7 @@ defmodule Troupe.Keyring.OS do
         if (!CredWriteW(ref c, 0)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
       } finally { Marshal.FreeHGlobal(c.CredentialBlob); }
     }
-    public static string Get(string target) {
+    static string Read(string target) {
       IntPtr p;
       if (!CredReadW(target, Generic, 0, out p)) {
         int e = Marshal.GetLastWin32Error();
@@ -85,11 +93,56 @@ defmodule Troupe.Keyring.OS do
         return Encoding.UTF8.GetString(blob);
       } finally { CredFree(p); }
     }
-    public static void Delete(string target) {
+    static void Remove(string target) {
       if (!CredDeleteW(target, Generic, 0)) {
         int e = Marshal.GetLastWin32Error();
         if (e != NotFound) throw new System.ComponentModel.Win32Exception(e);
       }
+    }
+    static int PartsOf(string value) {
+      int n;
+      if (value != null && value.StartsWith(Index, StringComparison.Ordinal) &&
+          int.TryParse(value.Substring(Index.Length), System.Globalization.NumberStyles.None, null, out n)) return n;
+      return -1;
+    }
+    static List<string> Split(string secret) {
+      List<string> parts = new List<string>();
+      StringBuilder part = new StringBuilder();
+      int used = 0;
+      for (int i = 0; i < secret.Length; i++) {
+        int width = char.IsHighSurrogate(secret[i]) && i + 1 < secret.Length ? 2 : 1;
+        string ch = secret.Substring(i, width);
+        int bytes = Encoding.UTF8.GetByteCount(ch);
+        if (used + bytes > MaxBlob) { parts.Add(part.ToString()); part.Clear(); used = 0; }
+        part.Append(ch); used += bytes; i += width - 1;
+      }
+      parts.Add(part.ToString());
+      return parts;
+    }
+    public static void Put(string target, string secret) {
+      int had = Math.Max(PartsOf(Read(target)), 0);
+      bool fits = Encoding.UTF8.GetByteCount(secret) <= MaxBlob && !secret.StartsWith(Index, StringComparison.Ordinal);
+      List<string> parts = fits ? new List<string>() : Split(secret);
+      for (int i = 0; i < parts.Count; i++) Write(target + "/" + i, parts[i]);
+      Write(target, fits ? secret : Index + parts.Count);
+      for (int i = parts.Count; i < had; i++) Remove(target + "/" + i);
+    }
+    public static string Get(string target) {
+      string value = Read(target);
+      int n = PartsOf(value);
+      if (n < 0) return value;
+      StringBuilder joined = new StringBuilder();
+      for (int i = 0; i < n; i++) {
+        string part = Read(target + "/" + i);
+        if (part == null) throw new Exception("part " + i + " of " + n + " is missing");
+        joined.Append(part);
+      }
+      return joined.ToString();
+    }
+    public static void Delete(string target) {
+      int n = PartsOf(Read(target));
+      for (int i = 0; i < n; i++) Remove(target + "/" + i);
+      Remove(target);
     }
   }
   '@
@@ -141,7 +194,116 @@ defmodule Troupe.Keyring.OS do
 
   # -- macOS ---------------------------------------------------------------------
 
-  defp mac(op, entry, value) do
+  # `security -i` reads each command as one line of at most 4096 bytes, so a value whose
+  # command would not fit is kept in parts, in the layout Windows keeps a long one in:
+  # `<entry>/0`, `<entry>/1`, ... hold its pieces and `<entry>` holds `troupe-parts:<n>`.
+  # A value that fits, and is not itself the marker, is one entry, as it always was.
+  @mac_line 4096
+  @mac_part 2048
+  @index "troupe-parts:"
+
+  defp mac(:get, entry, nil) do
+    with {:ok, value} <- mac_entry(:get, entry, nil) do
+      case parts_of(value) do
+        nil -> {:ok, value}
+        n -> mac_join(entry, n)
+      end
+    end
+  end
+
+  defp mac(:put, entry, value) do
+    had = mac_parts(entry)
+
+    parts =
+      if mac_fits?(entry, value) and not String.starts_with?(value, @index),
+        do: [],
+        else: chunks(value, @mac_part)
+
+    written =
+      parts
+      |> Enum.with_index()
+      |> Enum.reduce_while(:ok, fn {part, i}, :ok ->
+        case mac_entry(:put, "#{entry}/#{i}", part) do
+          :ok -> {:cont, :ok}
+          error -> {:halt, error}
+        end
+      end)
+
+    # The index after its parts, so a reader never finds it naming one not written yet.
+    head = if parts == [], do: value, else: @index <> "#{length(parts)}"
+
+    with :ok <- written, :ok <- mac_entry(:put, entry, head) do
+      mac_drop(entry, length(parts), had)
+    end
+  end
+
+  defp mac(:delete, entry, nil) do
+    with :ok <- mac_drop(entry, 0, mac_parts(entry)), do: mac_entry(:delete, entry, nil)
+  end
+
+  defp mac_fits?(entry, value) do
+    {service, account} = split(entry)
+    command = "add-generic-password -U -s #{service} -a #{account} -w #{value}\n"
+    byte_size(command) < @mac_line
+  end
+
+  # How many parts `<entry>` says it is in: 0 where it is one value, or none.
+  defp mac_parts(entry) do
+    case mac_entry(:get, entry, nil) do
+      {:ok, value} -> parts_of(value) || 0
+      _none -> 0
+    end
+  end
+
+  defp mac_join(entry, n) do
+    Enum.reduce_while(0..(n - 1)//1, {:ok, ""}, fn i, {:ok, joined} ->
+      case mac_entry(:get, "#{entry}/#{i}", nil) do
+        {:ok, part} -> {:cont, {:ok, joined <> part}}
+        :none -> {:halt, {:error, {:keyring, "part #{i} of #{n} is missing"}}}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp mac_drop(entry, from, had) do
+    Enum.reduce_while(from..(had - 1)//1, :ok, fn i, :ok ->
+      case mac_entry(:delete, "#{entry}/#{i}", nil) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp parts_of(@index <> count) do
+    case Integer.parse(count) do
+      {n, ""} when n >= 0 -> n
+      _other -> nil
+    end
+  end
+
+  defp parts_of(_value), do: nil
+
+  # Pieces of at most `bytes`, never splitting a character.
+  defp chunks(value, bytes) do
+    value
+    |> String.codepoints()
+    |> Enum.chunk_while(
+      {0, []},
+      fn char, {used, acc} ->
+        size = byte_size(char)
+
+        if used + size > bytes and acc != [],
+          do: {:cont, acc |> Enum.reverse() |> IO.iodata_to_binary(), {size, [char]}},
+          else: {:cont, {used + size, [char | acc]}}
+      end,
+      fn
+        {_used, []} -> {:cont, {0, []}}
+        {_used, acc} -> {:cont, acc |> Enum.reverse() |> IO.iodata_to_binary(), {0, []}}
+      end
+    )
+  end
+
+  defp mac_entry(op, entry, value) do
     {service, account} = split(entry)
     env = [{"TROUPE_KEYRING_SERVICE_NAME", service}, {"TROUPE_KEYRING_ACCOUNT", account}] ++ value_env(value)
 
@@ -198,8 +360,14 @@ defmodule Troupe.Keyring.OS do
     status_only(exec("sh", ["-c", script], env))
   end
 
-  defp secret_tool(:delete, env),
-    do: status_only(exec("sh", ["-c", "secret-tool clear " <> @attributes], env))
+  # `secret-tool clear` exits 1, saying nothing, where nothing matched: removing what is
+  # not there is not an error.
+  defp secret_tool(:delete, env) do
+    case exec("sh", ["-c", "secret-tool clear " <> @attributes], env) do
+      {:ok, "", 1} -> :ok
+      other -> status_only(other)
+    end
+  end
 
   # -- running the tool ---------------------------------------------------------------
 

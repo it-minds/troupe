@@ -1029,9 +1029,12 @@ defmodule Troupe.Remote.Translate do
 
   # A person's own tools offered to the session (PROTOCOL.md section 8): who offered them and
   # which, since everyone in the session is entitled to know a tool runs on somebody's
-  # machine. The desktop app says the same sentence.
+  # machine. Who is their name where the event carries one, since a provider's subject may
+  # be an opaque id, and the subject where not. The desktop app says the same sentence.
   defp tainted(data) do
-    who = if is_binary(data["actor"]), do: data["actor"], else: "somebody"
+    who =
+      Enum.find([data["display_name"], data["actor"]], "somebody", &(is_binary(&1) and &1 != ""))
+
     said = "#{who} offered tools that run on their own machine"
 
     case Enum.filter(List.wrap(data["tools"]), &is_binary/1) do

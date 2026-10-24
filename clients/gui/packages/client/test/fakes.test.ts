@@ -7,6 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { connect } from "node:net";
 import type { Socket } from "node:net";
+import { exampleAdmin } from "./support/admin.js";
 import { FakeDaemon } from "./support/daemon.js";
 import { FakeIdp } from "./support/idp.js";
 import { FakePlane } from "./support/plane.js";
@@ -31,6 +32,25 @@ async function stopsWithin(stop: () => Promise<void>, ms: number): Promise<boole
 }
 
 const portOf = (url: string): number => Number(new URL(url).port);
+
+// A second click is the run of the one before it when it comes less than a minute after,
+// on either side of the clock's minute, as the plane keys a run by hand; a click a minute
+// on is a run of its own.
+test("the fake admin keys a run by hand on a minute from the click before, not the clock's minute", async (t) => {
+  const admin = exampleAdmin();
+  const run = async (): Promise<string> => {
+    const answer = await admin.call("alice@example.com", "admin.trigger.run", { team: "core", name: "nightly-deps" });
+    assert.ok("result" in answer, JSON.stringify(answer));
+    return (answer.result as { run: { id: string } }).run.id;
+  };
+
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-24T10:00:59Z") });
+  const first = await run();
+  t.mock.timers.tick(2_000); // 10:01:01, past the clock's minute
+  assert.equal(await run(), first, "a click two seconds on made a second run");
+  t.mock.timers.tick(60_000);
+  assert.notEqual(await run(), first, "a click a minute on was the first run again");
+});
 
 test("every fake stops with a request still open to it", async () => {
   const idp = await FakeIdp.start();

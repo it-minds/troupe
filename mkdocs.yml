@@ -121,9 +121,11 @@ nav:
       - Profiles from a repository: admin/gitops.md
       - Bundles, triggers, budgets: admin/bundles-and-triggers.md
       - Integrations: admin/integrations.md
+      - What OpenBao must grant: admin/openbao.md
       - The GitHub App: admin/github.md
       - Authentik: admin/authentik.md
       - A worker on your own machine: admin/single-machine.md
+      - Upgrading: admin/upgrading.md
       - Backup and restore: admin/backup-restore.md
       - Monitoring: admin/monitoring.md
       - Routine tasks: admin/routine-tasks.md

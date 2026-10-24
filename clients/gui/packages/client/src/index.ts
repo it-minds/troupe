@@ -25,7 +25,7 @@ export type { BeginRedirectOptions, IdpMetadata, PkcePair, PendingRedirect, Redi
 export { SessionAttachment, waitOn } from "./attach.js";
 export type { AttachOptions, AttachStatus } from "./attach.js";
 export { ServerOffer, offeredName } from "./offer.js";
-export type { OfferAsk, OfferOptions, OfferState } from "./offer.js";
+export type { OfferAnswer, OfferAsk, OfferOptions, OfferState } from "./offer.js";
 export {
   LIBRARIAN_PROMPT,
   LIBRARIAN_REWRITING,
@@ -144,9 +144,13 @@ export type {
   AdminTeamMember,
   AuditChanges,
   AuditIntegrity,
+  ClientCounts,
+  ClientFleet,
   ClientPolicy,
   ClientPolicyChange,
   ClientPolicyPut,
+  ClientSeen,
+  ClientStanding,
   ClientVersions,
   EnforceableKey,
   LadderValue,
@@ -177,6 +181,8 @@ export type {
   TriggerPut,
   TriggerRevision,
   FleetOverview,
+  OpenBaoCheck,
+  OpenBaoGrant,
   IdentityCheck,
   IdentityCheckResult,
   ProviderCheck,

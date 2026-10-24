@@ -95,6 +95,7 @@ jobs:
       native: ${{ steps.plan.outputs.native }}
       images: ${{ steps.plan.outputs.images }}
       cluster: ${{ steps.plan.outputs.cluster }}
+      keyring: ${{ steps.plan.outputs.keyring }}
     steps:
       - uses: actions/checkout@v7
 
@@ -176,11 +177,24 @@ jobs:
               - scripts/kind-up
               - scripts/remote-up
               - scripts/build-images
+              - scripts/kind-upgrade-check
               - apps/troupe_operator/**
               - .github/workflows/cluster.yml
+              # What the upgrade from the previous release runs: the plane's migrations, and the
+              # version, which a release commit changes.
+              - apps/troupe_plane/priv/repo/migrations/**
+              - VERSION
               # The images it builds: the GUI's, and what every image build's context leaves out.
               - clients/gui/Dockerfile
               - .dockerignore
+            # The code that keeps a secret in the OS's credential store, run against a real
+            # macOS keychain and Secret Service. `dev-check.yml` has the same list.
+            keyring:
+              - apps/troupe_protocol/lib/troupe/keyring.ex
+              - apps/troupe_protocol/lib/troupe/keyring/**
+              - apps/troupe_protocol/test/troupe/keyring_test.exs
+              - clients/gui/apps/desktop/src-tauri/src/secrets.rs
+              - .github/workflows/keyring.yml
 
       # Which umbrella apps to test follows the dependency graph, read from the apps' own
       # `mix.exs` rather than written down here, so it cannot drift: a change to an app
@@ -245,6 +259,9 @@ jobs:
           # changes what it deploys. Not for a change to the workflows in general, which
           # runs everything else, and not on a push to `main`, whose pull request ran it.
           cluster=$(flag eval '[ "$CLUSTER" = true ] || { [ "$FULL" = false ] && [ "$EVENT" = pull_request ] && on cluster; }')
+          # The credential stores: in a full run, and when their code changed. Not for a
+          # change to the workflows in general, since a macOS runner costs about ten Linux ones.
+          keyring=$(flag eval 'on keyring')
 
           {
             echo "apps=$json"
@@ -259,6 +276,7 @@ jobs:
             echo "native=$native"
             echo "images=$images"
             echo "cluster=$cluster"
+            echo "keyring=$keyring"
           } | tee -a "$GITHUB_OUTPUT"
 
           {
@@ -267,7 +285,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| umbrella apps | \`$json\` |"
-            for k in chart protocol tui gui gui_e2e desktop vscode native images cluster; do echo "| $k | ${!k} |"; done
+            for k in chart protocol tui gui gui_e2e desktop vscode native images cluster keyring; do echo "| $k | ${!k} |"; done
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Compile, format, credo, generated assets and boundaries: once, for the whole
@@ -606,6 +624,38 @@ jobs:
             echo "createNamespace=false rendered a Namespace"
             exit 1
           fi
+
+      # The Pod Security labels: the chart's namespace at the lowest level its own pods need,
+      # `privileged` while the DaemonSet that puts the workers' profiles on the nodes runs and
+      # `restricted` without it, the level named when one is, none when they are off; and the
+      # operator told whether to label the worker namespaces and whether the plane takes TLS
+      # only, which decides whether it replaces a pod that dials in plaintext. The cluster
+      # job checks the levels against an API server.
+      - name: The chart labels its namespace with the Pod Security level its pods need
+        run: |
+          level() {
+            rendered=$(helm template troupe charts/troupe --show-only templates/namespace.yaml "$@")
+            grep -m1 'pod-security.kubernetes.io/enforce:' <<<"$rendered" | awk '{print $2}'
+          }
+          [ "$(level)" = privileged ] || { echo "the defaults label the namespace $(level)"; exit 1; }
+          [ "$(level --set worker.seccomp.install.enabled=false --set worker.appArmor.install.enabled=false)" = restricted ] \
+            || { echo "without the DaemonSet the namespace is not restricted"; exit 1; }
+          [ "$(level --set podSecurity.level=baseline)" = baseline ] || { echo "podSecurity.level is not used"; exit 1; }
+          [ -z "$(level --set podSecurity.labels=false)" ] || { echo "podSecurity.labels=false still labels"; exit 1; }
+          for bad in "--set podSecurity.level=lenient" "--set-string podSecurity.labels=false"; do
+            # shellcheck disable=SC2086
+            if helm template troupe charts/troupe $bad >/dev/null 2>&1; then
+              echo "$bad rendered; the chart must refuse it"
+              exit 1
+            fi
+          done
+          operator=$(helm template troupe charts/troupe --show-only templates/operator-deployment.yaml)
+          for env in TROUPE_POD_SECURITY_LABELS TROUPE_PLANE_CONTROL_REQUIRE_TLS; do
+            if ! grep -A1 "name: $env" <<<"$operator" | grep -q 'value: "true"'; then
+              echo "the operator is not told $env by default"
+              exit 1
+            fi
+          done
 
       # Rendered and checked against the Kubernetes API schemas, which is what catches a
       # misspelled field before a cluster does. The CRDs are included so a TroupePolicy
@@ -994,10 +1044,20 @@ jobs:
   # The one required check. Every job a run can have is under it, and it fails when any
   # of them failed or was cancelled; a job skipped because its part of the repository
   # did not change counts as passing, which is the point of skipping it.
+  # A real macOS keychain and a real Secret Service, for the code that keeps a secret in
+  # one (`keyring.yml`).
+  keyring:
+    name: the credential stores
+    needs: [changes]
+    if: needs.changes.outputs.keyring == 'true'
+    uses: ./.github/workflows/keyring.yml
+    permissions:
+      contents: read
+
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, desktop, vscode, native, cluster]
+    needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, desktop, vscode, native, cluster, keyring]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:

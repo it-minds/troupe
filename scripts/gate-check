@@ -93,16 +93,21 @@ scratch_env() {
 
 # run DIR [VAR=value ...] -- ARG...: the troupe under test in DIR, with the scratch homes and
 # the variables given. Its status in $code, its stdout in $W/out and both streams in $W/all.
-# Output goes to files, so a process it leaves behind cannot hold the check open.
+# Output goes to files, so a process it leaves behind cannot hold the check open. They are
+# opened for appending: on Linux the release's troupe writes Burrito's lines and its own
+# through descriptions of their own, and a file opened plainly has the second write over
+# the first, so `--version` read back "troupe 0.24.0-beta" with the tail of Burrito's line.
 run() {
   dir=$1; shift
+  : >"$W/out"
+  : >"$W/err"
   (
     cd "$dir" || exit 97
     scratch_env
     while [ $# -gt 0 ] && [ "$1" != "--" ]; do export "$1"; shift; done
     shift
     exec "$TROUPE" "$@"
-  ) <"$W/empty" >"$W/out" 2>"$W/err" &
+  ) <"$W/empty" >>"$W/out" 2>>"$W/err" &
   pid=$!
   waited=0
   while kill -0 "$pid" 2>/dev/null; do

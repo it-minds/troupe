@@ -7,15 +7,16 @@
 // fixed: a pod that is broken, has never reported or is draining; a profile with fewer
 // pods than it asked for; a team at or near its ceiling; runs started with nobody watching
 // that nobody has looked at since. An empty list says so in a sentence, because an empty
-// region and one that has not loaded look the same. Read again every few seconds, keeping
-// what is on the screen until the new answer replaces it.
+// region and one that has not loaded look the same. Clients behind the recommended version
+// are one line there, linked to Client versions, where there are any (#657). Read again
+// every few seconds, keeping what is on the screen until the new answer replaces it.
 
 import { useEffect } from "react";
 import type { JSX, ReactNode } from "react";
-import type { AdminPod, AdminProfile, FleetOverview, TeamSpend } from "@troupe/client";
+import type { AdminPod, AdminProfile, ClientVersions, FleetOverview, OpenBaoCheck, TeamSpend } from "@troupe/client";
 import { href } from "../route";
 import { useConsole, useLoad } from "../console";
-import { Empty, Loaded, Region, Status, count, money } from "./bits";
+import { Checks, Empty, Loaded, Region, Status, count, money } from "./bits";
 import type { StatusKind } from "./bits";
 import { Spend } from "./Teams";
 
@@ -24,7 +25,7 @@ const REFRESH_MS = 10_000;
 /** Where a team stops being comfortable and starts being worth mentioning. */
 const NEAR_BUDGET = 0.8;
 
-type State = "broken" | "unknown" | "degraded" | "draining" | "over" | "near" | "waiting" | "healthy";
+type State = "broken" | "unknown" | "degraded" | "draining" | "over" | "near" | "waiting" | "behind" | "healthy";
 
 export const STATES: Record<State, { kind: StatusKind; glyph: string; word: string; rank: number }> = {
   broken: { kind: "denied", glyph: "✕", word: "broken", rank: 0 },
@@ -34,13 +35,15 @@ export const STATES: Record<State, { kind: StatusKind; glyph: string; word: stri
   degraded: { kind: "local", glyph: "◐", word: "degraded", rank: 3 },
   near: { kind: "local", glyph: "◐", word: "near ceiling", rank: 3 },
   draining: { kind: "dormant", glyph: "◑", word: "draining", rank: 4 },
+  behind: { kind: "local", glyph: "◐", word: "behind", rank: 5 },
   healthy: { kind: "running", glyph: "●", word: "healthy", rank: 9 },
 };
 
 interface Item {
   state: State;
   what: string;
-  where: string;
+  /** Where it is fixed; none for what is fixed outside the console, said in `action`. */
+  where?: string;
   action: string;
 }
 
@@ -52,6 +55,8 @@ export function Overview(): JSX.Element {
         admin.overview(),
         // The runs a person still has to read; their absence takes nothing else away.
         admin.sessions({ needs_review: true }).catch(() => null),
+        // Which clients are behind; a plane that cannot say takes nothing else away.
+        admin.clients().catch(() => null),
       ]),
     [admin],
   );
@@ -64,8 +69,8 @@ export function Overview(): JSX.Element {
   return (
     <div className="page">
       <Loaded load={load} what="the overview" retry={reload}>
-        {([overview, unread]) => {
-          const items = attention(overview, unread?.length ?? 0, role === "platform_admin");
+        {([overview, unread, clients]) => {
+          const items = attention(overview, unread?.length ?? 0, role === "platform_admin", clients);
           const pods = overview.profiles.flatMap((p) => p.pods);
           const healthy = pods.filter((p) => podState(p) === "healthy").length;
           const spent = overview.teams.reduce((n, t) => n + t.spent_micros, 0);
@@ -98,11 +103,13 @@ export function Overview(): JSX.Element {
                         {STATES[item.state].word}
                       </Status>
                       <span className="what">{item.what}</span>
-                      <a href={item.where}>{item.action}</a>
+                      {item.where ? <a href={item.where}>{item.action}</a> : <span className="muted">{item.action}</span>}
                     </li>
                   ))}
                 </ul>
               )}
+
+              {overview.openbao && <KeyManager check={overview.openbao} />}
 
               <Region>Fleet · per profile</Region>
               {overview.profiles.length === 0 ? (
@@ -182,6 +189,37 @@ export function Overview(): JSX.Element {
   );
 }
 
+/**
+ * What the plane's OpenBao role may do, grant by grant, as the plane found it look-only.
+ * The plane cannot grant itself any of these, so one it lacks comes with the lines an
+ * OpenBao administrator runs, written with this deployment's names.
+ */
+function KeyManager({ check }: { check: OpenBaoCheck }): JSX.Element {
+  return (
+    <section aria-label="Key manager">
+      <Region>Key manager · what the plane's OpenBao role may do</Region>
+      {check.error ? (
+        <>
+          <Checks checks={[{ name: "OpenBao", ok: false, detail: `The plane could not check: ${check.error}` }]} />
+          {check.fix && <pre className="mono manifest">{check.fix}</pre>}
+        </>
+      ) : (
+        <>
+          <Checks checks={check.grants.map((g) => ({ name: g.required ? g.policy : `${g.policy} (optional)`, ok: g.ok, detail: g.detail }))} />
+          {check.grants
+            .filter((g) => !g.ok && g.fix)
+            .map((g) => (
+              <div key={g.id}>
+                <p className="hint">To grant {g.policy}, an OpenBao administrator runs:</p>
+                <pre className="mono manifest">{g.fix}</pre>
+              </div>
+            ))}
+        </>
+      )}
+    </section>
+  );
+}
+
 /** A number, never without the line that says what it is out of. */
 function Metric({ label, value, children }: { label: string; value: string; children: ReactNode }): JSX.Element {
   return (
@@ -211,7 +249,7 @@ export function profileState(profile: AdminProfile): State {
 
 // A pod is looked at where its pods are, which is a platform admin's area; a team admin is
 // sent to the profile instead.
-function attention(overview: FleetOverview, unread: number, platform: boolean): Item[] {
+function attention(overview: FleetOverview, unread: number, platform: boolean, clients: ClientVersions | null): Item[] {
   const items: Item[] = [];
   for (const profile of overview.profiles) {
     const workers = platform ? href({ page: "pods" }) : href({ page: "profiles", path: [profile.name] });
@@ -240,12 +278,31 @@ function attention(overview: FleetOverview, unread: number, platform: boolean): 
     if (state === "healthy") continue;
     items.push({ state, what: budgetWords(state, team), where: href({ page: "teams", team: team.name, tab: "limits" }), action: `${team.name}'s limits` });
   }
+  // A grant the plane's OpenBao role lacks breaks what it is for until an administrator adds it.
+  if (overview.openbao?.error) {
+    items.push({ state: "broken", what: `The plane could not check its OpenBao role: ${overview.openbao.error}`, action: "Key manager, below" });
+  }
+  for (const grant of overview.openbao?.grants ?? []) {
+    if (grant.ok || !grant.required) continue;
+    items.push({ state: "broken", what: grant.detail, action: "The lines that grant it are below" });
+  }
   if (unread > 0) {
     items.push({
       state: "waiting",
       what: `${count(unread, "session")} an unattended run started ${unread === 1 ? "is" : "are"} waiting for a person to look at ${unread === 1 ? "it" : "them"}.`,
       where: href({ page: "runs" }),
       action: "Runs and review",
+    });
+  }
+  const fleet = Object.values(clients?.fleet ?? {});
+  const behind = fleet.reduce((n, f) => n + f.behind + f.refused, 0);
+  if (behind > 0) {
+    const refused = fleet.reduce((n, f) => n + f.refused, 0);
+    items.push({
+      state: "behind",
+      what: `${count(behind, "client")} behind the recommended version${refused > 0 ? `, ${refused} of them refused when ${refused === 1 ? "it next connects" : "they next connect"}` : ""}.`,
+      where: href({ page: "clients" }),
+      action: "Client versions",
     });
   }
   return items.sort((a, b) => STATES[a.state].rank - STATES[b.state].rank);

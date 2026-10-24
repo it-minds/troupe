@@ -327,6 +327,31 @@ export interface FleetOverview {
   profiles: AdminProfile[];
   teams: TeamSpend[];
   sessions: { active: number; dormant: number; read_only: number };
+  /** A platform admin's only: what the plane's OpenBao role may do. */
+  openbao?: OpenBaoCheck;
+}
+
+/**
+ * One thing the plane does with its OpenBao credential, checked look-only: whether its
+ * role holds it, the sentence that says so, and for one it lacks the paths and the `bao`
+ * lines an OpenBao administrator runs to grant it. `required: false` is the GitHub App's.
+ */
+export interface OpenBaoGrant {
+  id: string;
+  policy: string;
+  required: boolean;
+  ok: boolean;
+  detail: string;
+  missing: Array<{ path: string; capabilities: string[] }>;
+  fix: string | null;
+}
+
+/** The check as a whole. `error` is a sentence where it could not be made at all, `fix` what to run for it. */
+export interface OpenBaoCheck {
+  ok: boolean;
+  error: string | null;
+  fix: string | null;
+  grants: OpenBaoGrant[];
 }
 
 /** A group a team draws its members from. Membership is the provider's; this is the link. */
@@ -346,6 +371,10 @@ export interface AdminGroup {
   external_id: string;
   display_name: string | null;
   looks_duplicated?: { others: string[]; likely: string } | null;
+  /** Whether a team draws its members from it. */
+  linked?: boolean;
+  /** When it last arrived in somebody's sign-in; `null` for a group only SCIM pushed. */
+  last_seen_at?: string | null;
 }
 
 /** A person in a team, with their own spend beside the team's. Read-only, always. */
@@ -433,9 +462,38 @@ export interface ClientPolicy {
   updated_at: string | null;
 }
 
-/** What `admin.clients.get` answers: a policy per component (`tui`, `daemon`, `desktop`). */
+/** How a client last seen stands against its component's policy as it is now. */
+export type ClientStanding = "current" | "behind" | "refused";
+
+/** How many of a component's clients last seen are current, behind the recommended version, or refused at their next `initialize`. */
+export interface ClientCounts {
+  current: number;
+  behind: number;
+  refused: number;
+}
+
+/** One person's client of one kind, as the plane last saw it at `initialize`. */
+export interface ClientSeen {
+  subject: string;
+  display_name: string | null;
+  version: string;
+  /** What the client said it runs on, where it said. */
+  platform: string | null;
+  /** When the plane first saw this version from them. */
+  since: string;
+  seen_at: string;
+  standing: ClientStanding;
+}
+
+/** A component's clients last seen: the counts, and the people. A team admin's is their teams' people. */
+export interface ClientFleet extends ClientCounts {
+  people: ClientSeen[];
+}
+
+/** What `admin.clients.get` answers: a policy per component (`tui`, `daemon`, `desktop`), and its clients. A plane from before it answers no `fleet`. */
 export interface ClientVersions {
   clients: Record<string, ClientPolicy>;
+  fleet?: Record<string, ClientFleet>;
 }
 
 /** What `admin.clients.put` takes: the keys to change, `null` to clear one, `blocked` whole. */
@@ -448,6 +506,8 @@ export interface ClientPolicyChange {
 /** What `admin.clients.put` answers: the policy as it now stands, and what moved. */
 export interface ClientPolicyPut extends ClientPolicy {
   changes: AuditChanges;
+  /** How the component's clients last seen stand against the policy now, as the audit records it. */
+  affected?: ClientCounts;
 }
 
 /**
