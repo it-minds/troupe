@@ -110,6 +110,7 @@ defmodule Troupe.Plane.Harness do
     "me.client_defaults" => :observe,
     "me.client_versions" => :observe,
     "me.memory" => :observe,
+    "me.clients" => :observe,
     "me.connections.list" => :observe,
     "me.connections.grant" => :control,
     "teams.list" => :observe,
@@ -334,6 +335,13 @@ defmodule Troupe.Plane.Harness do
     {:ok, Signing.signed("memory", %{"documents" => Memory.for_person(user)})}
   end
 
+  # Which version each of the caller's own clients last ran, and how that stands against
+  # the plane's policy now: the line a person's own console shows, as an administrator's
+  # Client versions page says it of them. Nobody else's.
+  defp handle("me.clients", _params, %{user: user}) do
+    {:ok, %{"clients" => ClientsSeen.of(user)}}
+  end
+
   defp handle("teams.list", _params, %{user: user}) do
     {:ok, %{"teams" => Enum.map(Identity.teams_for(user), &team_json/1)}}
   end
@@ -436,8 +444,7 @@ defmodule Troupe.Plane.Harness do
   # any of their laptops, and those shared with them. Each says whether its laptop is there
   # (`online`, or `offline` since when), and to its owner whom it is shared with.
   defp handle("remote.list", _params, %{user: user}) do
-    rows = for {offer, role} <- Remote.visible(user), do: Remote.row(offer, role, user)
-    {:ok, %{"sessions" => rows}}
+    {:ok, %{"sessions" => Remote.rows(user)}}
   end
 
   # A laptop's daemon at its first offer, with the token its person's client handed it: a

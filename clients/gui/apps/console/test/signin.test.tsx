@@ -1,7 +1,8 @@
 // Signing in to the console is the plane's own sign-in: the identity provider's page and
 // back with a code (PKCE), the plane's `/auth/exchange`, and the plane token every client
 // holds. What the person may administer is the plane's answer, on every call; the console
-// asks `me` once for who they are and calls nothing else but `admin.*`.
+// asks `me` once for who they are and, on its administrative areas, calls nothing else but
+// `admin.*`. Somebody who administers nothing signs in too, to Mine.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
@@ -113,12 +114,23 @@ describe("signing in to the console", () => {
     await seesLink("Client versions");
   });
 
-  it("tells somebody who administers nothing so, rather than showing them a console of refusals", async () => {
+  it("signs in somebody who administers nothing to what is theirs, with no administrative area and none by its address", async () => {
     await signedInAs(fake, PEOPLE.carol);
+    visit("#/teams");
     unmount = render(<App />).unmount;
-    await waitFor(() => says("Nothing to administer here"), "the refusal");
+    await waitFor(() => says("member") && document.querySelector("h1")?.textContent === "Mine", "Mine, as a member");
     await sees("Carol");
-    expect(link("Teams")).toBeNull();
+    await seesLink("Mine");
+    for (const area of ["Overview", "Sessions", "Teams", "Identity", "Audit", "Client versions", "Company memory"]) expect(link(area), area).toBeNull();
+  });
+
+  it("gives an administrator Mine as well, above the administrative map", async () => {
+    await signedInAs(fake, PEOPLE.bob);
+    unmount = render(<App />).unmount;
+    await waitFor(() => says("team admin · design"), "the console, as the design team's admin");
+    (await seesLink("Mine")).click();
+    await waitFor(() => document.querySelector("h1")?.textContent === "Mine", "Mine");
+    await seesLink("Teams");
   });
 
   it("says plainly when the plane does not answer", async () => {

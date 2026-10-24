@@ -354,6 +354,51 @@ defmodule Troupe.Plane.Remote do
       else: {"offline", offer.offline_since || offer.updated_at}
   end
 
+  @doc "Every offer `user` may see, as the listing rows `remote.list` answers."
+  @spec rows(User.t()) :: [map()]
+  def rows(%User{} = user), do: for({offer, role} <- visible(user), do: row(offer, role, user))
+
+  # -- telling the people it concerns -----------------------------------------
+
+  @topic "remote"
+
+  @doc """
+  Hear what changes in who may see which offer, and whether its laptop is there: a
+  person's watch (`Troupe.Plane.Remote.Watch`) subscribes, and is sent
+  `{:remote_changed, subjects}` naming the people a change concerns, on every replica.
+  """
+  @spec subscribe() :: :ok | {:error, term()}
+  def subscribe, do: Phoenix.PubSub.subscribe(Troupe.Plane.PubSub, @topic)
+
+  @doc """
+  Tell every watch that something changed for these people: an offer made, shared anew,
+  withdrawn, or its laptop come or gone. Sent once the change is in force, the row
+  written and the laptop's names held or let go, so a watch that reads again reads what
+  is now true.
+  """
+  @spec changed([String.t()]) :: :ok
+  def changed([]), do: :ok
+
+  def changed(subjects) when is_list(subjects) do
+    Phoenix.PubSub.broadcast(Troupe.Plane.PubSub, @topic, {:remote_changed, Enum.uniq(subjects)})
+  end
+
+  @doc "The people an offer concerns: its owner and everybody it is shared with."
+  @spec concerned(Offer.t() | nil) :: [String.t()]
+  def concerned(nil), do: []
+  def concerned(%Offer{} = offer), do: [offer.owner_subject | Enum.map(Offer.people(offer), & &1["subject"])]
+
+  @doc "What one person's laptop on `device` offers now, as rows."
+  @spec offers_from(User.t(), String.t()) :: [Offer.t()]
+  def offers_from(%User{subject: subject}, device) do
+    Repo.all(from(o in Offer, where: o.owner_subject == ^subject and o.device == ^device))
+  end
+
+  @doc "One offer's row, or `nil`."
+  @spec get(String.t() | nil) :: Offer.t() | nil
+  def get(session_id) when is_binary(session_id), do: Repo.get(Offer, session_id)
+  def get(_session_id), do: nil
+
   @doc "An offer as a listing row, for one person."
   @spec row(Offer.t(), String.t(), User.t()) :: map()
   def row(%Offer{} = offer, role, %User{} = user) do

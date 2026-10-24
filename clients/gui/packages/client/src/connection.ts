@@ -144,6 +144,8 @@ export interface ConnectionHooks {
   /** Serve a `tool.invoke`. Return the result, or throw to answer with an error. */
   onToolInvoke?: (invoke: ToolInvoke) => Promise<unknown>;
   onClose?: (reason: string) => void;
+  /** Any other notification the server sends, by its method: a plane's `remote.changed`, say. */
+  onNotification?: (method: string, params: unknown) => void;
   /** Every raw frame, for tracing. */
   onFrame?: (direction: "in" | "out", text: string) => void;
 }
@@ -393,7 +395,9 @@ export class TroupeConnection {
           return;
         }
         default:
-          return; // unknown notifications are ignored by contract
+          // Unknown notifications are ignored by contract, unless somebody asked for them.
+          this.hooks.onNotification?.(msg.method, params);
+          return;
       }
     }
   }

@@ -19,6 +19,7 @@ import {
   onThisComputer,
   openApprovals,
   openQuestions,
+  presentMembers,
   rootState,
   scratchSize,
   scratchVersion,
@@ -130,7 +131,7 @@ export function Session({
   const open = openApprovals(view.state);
   // Everyone else here, by name: who could answer an approval first, and who reads
   // what is sent.
-  const others = view.state.presence.filter((p) => p.subject && p.subject !== self).map((p) => p.display_name ?? p.subject);
+  const others = presentMembers(view.state).filter((p) => p.subject !== self).map((p) => p.display_name ?? p.subject);
   // The loop as its events say, and as the session answers for the one case they cannot:
   // a session that stopped mid-loop records the interruption only when it wakes.
   const loop = settleLoop(view.state.loop, useLoopAnswer(view.view));
@@ -222,7 +223,7 @@ export function Session({
         }
         remote={
           row && daemon && auth && row.kind === "local" ? (
-            <RemoteOfferControl daemon={daemon} row={row} />
+            <RemoteOfferControl daemon={daemon} row={row} presence={view.state.presence} />
           ) : row?.kind === "remote" ? (
             <RemoteLine row={row} />
           ) : null
@@ -487,7 +488,7 @@ function Header({
   remote?: JSX.Element | null;
 }): JSX.Element {
   const working = rootState(state);
-  const here = state.presence.filter((p) => p.subject);
+  const here = presentMembers(state);
   const role = row?.yourRole;
 
   return (

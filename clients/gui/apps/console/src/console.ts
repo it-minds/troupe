@@ -1,5 +1,5 @@
-// Who is signed in, to which plane, and what they may administer there: everything a
-// screen needs besides its own `admin.*` calls, worked out once after the sign-in.
+// Who is signed in, to which plane, and what they may administer there, if anything:
+// everything a screen needs besides its own calls, worked out once after the sign-in.
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { AdminApi, TroupeRpcError, requiredRole } from "@troupe/client";
@@ -28,24 +28,28 @@ export function useConsole(): Signed {
   return c;
 }
 
-/** What working out the role found: an administrator, or somebody who administers nothing. */
-export type Standing = { kind: "admin"; role: Role; teams: string[]; me: Me } | { kind: "none"; me: Me };
+/** What working out the role found: an administrator's role and teams, or a member's, who administers nothing. */
+export interface Standing {
+  role: Role;
+  teams: string[];
+  me: Me;
+}
 
 /**
  * Whether this person administers anything here, and which role.
  *
  * `me` says whether they are a platform admin. A team admin is anybody the plane answers
  * `admin.teams.list` for, with the teams it names; somebody it refuses for want of a role
- * administers nothing, and is told so rather than shown a console of refusals.
+ * is a member, whose console is what is theirs and none of the administrative areas.
  */
 export async function standing(auth: AuthSession, admin: AdminApi): Promise<Standing> {
   const me = await auth.rpc<Me>("me");
-  if (me.platform_admin) return { kind: "admin", role: "platform_admin", teams: [], me };
+  if (me.platform_admin) return { role: "platform_admin", teams: [], me };
   try {
     const teams = await admin.teams();
-    return { kind: "admin", role: "team_admin", teams: teams.map((t) => t.name), me };
+    return { role: "team_admin", teams: teams.map((t) => t.name), me };
   } catch (e) {
-    if (requiredRole(e)) return { kind: "none", me };
+    if (requiredRole(e)) return { role: "member", teams: [], me };
     throw e;
   }
 }

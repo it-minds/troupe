@@ -47,12 +47,14 @@ import type {
 } from "@troupe/client";
 
 /**
- * The fleet, polled, from however many sources there are.
+ * The fleet, from however many sources there are.
  *
- * The plane pushes nothing to a harness client by design, so a poll is what liveness is
- * for the team half. The daemon *could* push — it has a `fleet` topic — but the list is
- * a union and a list that was live on one half and four seconds stale on the other would
- * be worse than one that is honestly the same age throughout.
+ * The team half is polled: the plane's `/rpc` is request and answer, and the pods' news
+ * reaches an open session over its own socket. The laptops' sessions offered for steering
+ * are not: the plane tells a person's watch (`/v1/relay/watch`) of an offer made or
+ * withdrawn and of a laptop come or gone, so they reach the list as they happen, and are
+ * asked on the poll only while the watch is down and as a five-minute safety net. The
+ * daemon *could* push too — it has a `fleet` topic — and is polled with the team half.
  *
  * A source that fails keeps its last rows. Signing out of the plane does not take the
  * sessions on this computer off the screen, because they were never the plane's.
@@ -71,7 +73,7 @@ export function useFleet(
     else store.removeSource("plane");
     // Laptop sessions offered for steering from another device: the person's own from
     // their other computers, and those shared with them.
-    if (auth) store.addSource(new RemoteSource(auth.plane, () => auth.token()));
+    if (auth) store.addSource(new RemoteSource(auth.plane, () => auth.token(), { name: "troupe-gui", version: __TROUPE_VERSION__ }));
     else store.removeSource("remote");
     if (daemon) store.addSource(new DaemonSource(daemon));
     else store.removeSource("daemon");
@@ -535,6 +537,8 @@ export function useSessionView(
             settle(v);
             setStatus("live");
             void v.setPresence("viewing").catch(() => undefined);
+            // Who comes and goes, steering it from another device among them, as it happens.
+            void v.followPresence().catch(() => undefined);
             return undefined;
           })
       : SessionAttachment.open({

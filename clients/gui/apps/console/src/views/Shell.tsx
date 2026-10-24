@@ -1,14 +1,16 @@
-// The console's frame: the map down the side, grouped Watch, Configure, Operate and
-// Govern; the screen's place and name across the top; and at the foot of the map who is
-// signed in, as which role, to which plane, with the light and dark switch and the way out.
+// The console's frame: the map down the side, Mine and then, for an administrator, Watch,
+// Configure, Operate and Govern; the screen's place and name across the top; and at the
+// foot of the map who is signed in, as which role, to which plane, with the light and dark
+// switch and the way out.
 //
 // At a narrow width the map goes above the screen, folded behind one button, so the screen
 // a person opened is what they see first rather than eighteen links; choosing an area
 // folds it again.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { JSX } from "react";
-import { area, groupOf, navFor } from "../nav";
+import { area, groupOf, navFor, startFor } from "../nav";
+import type { Role } from "../nav";
 import { href, useRoute } from "../route";
 import type { Route } from "../route";
 import { useConsole } from "../console";
@@ -29,6 +31,7 @@ import { Profile, Profiles } from "./Profiles";
 import { TriggerPage, Triggers } from "./Triggers";
 import { Organisation } from "./Organisation";
 import { Memory } from "./Memory";
+import { Mine } from "./Mine";
 import { Overview } from "./Overview";
 import { RunPage, Runs } from "./Runs";
 import { RemoteSession } from "./Remote";
@@ -37,11 +40,26 @@ import { Team } from "./Team";
 import { Teams } from "./Teams";
 import { Unbuilt } from "./Unbuilt";
 
-const START: Route = { page: "overview" };
+/**
+ * A laptop's session was steered from `#/sessions/remote/<id>` before it was a person's own,
+ * and a link kept from then opens it where it is now, under Mine.
+ */
+function moved(route: Route): Route {
+  const [first, second] = route.path ?? [];
+  return route.page === "sessions" && first === "remote" && second ? { page: "mine", path: ["remote", second] } : route;
+}
+
+/** Who is signed in, as the foot of the map says it. */
+function roleWords(role: Role, teams: string[]): string {
+  if (role === "platform_admin") return "platform admin";
+  if (role === "team_admin") return `team admin · ${teams.join(", ")}`;
+  return "member";
+}
 
 export function Shell(): JSX.Element {
   const signed = useConsole();
-  const route = useRoute(START);
+  const START = useMemo<Route>(() => ({ page: startFor(signed.role) }), [signed.role]);
+  const route = moved(useRoute(START));
   const [mode, setMode] = useMode();
   const nav = navFor(signed.role);
   // An area this role is not shown is not reachable by its address either.
@@ -99,7 +117,7 @@ export function Shell(): JSX.Element {
             <span className="person">{signed.me.display_name ?? signed.me.subject}</span>
             <span className="mono subject">{signed.me.email ?? signed.me.subject}</span>
             <span className={`role ${signed.role}`}>
-              {signed.role === "platform_admin" ? "platform admin" : `team admin · ${signed.teams.join(", ")}`}
+              {roleWords(signed.role, signed.teams)}
             </span>
             <span className="mono plane" title={signed.plane.url}>
               {signed.plane.name} · {hostOf(signed.plane.url)}
@@ -136,6 +154,7 @@ function titleWithin(page: string, path: string[]): string | null {
   if (page === "triggers") return second ?? null;
   if (page === "runs") return "A run";
   if (page === "sessions") return null;
+  if (page === "mine") return first === "remote" ? "A laptop's session" : null;
   return first;
 }
 
@@ -153,8 +172,9 @@ function Screen({ route }: { route: Route }): JSX.Element {
   if (route.page === "teams" && route.team) return <Team name={route.team} tab={route.tab ?? "members"} />;
   if (route.page === "teams") return <Teams />;
   if (route.page === "overview") return <Overview />;
-  // A laptop's session offered to this person, steered from here.
-  if (route.page === "sessions" && first === "remote" && second) return <RemoteSession id={second} key={second} />;
+  // A laptop's session offered to this person, steered from here as that person.
+  if (route.page === "mine" && first === "remote" && second) return <RemoteSession id={second} key={second} />;
+  if (route.page === "mine") return <Mine />;
   if (route.page === "sessions") return <Sessions query={first ?? ""} key={first ?? ""} />;
   if (route.page === "runs" && first) return <RunPage id={first} key={first} />;
   if (route.page === "runs") return <Runs />;

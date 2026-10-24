@@ -2,8 +2,13 @@
 //
 // Not an administrative view: these are the sessions a laptop's person offered to the
 // plane, your own from your laptops and those somebody shared with you, and you steer them
-// as yourself. The rest of the console is metadata and never what a session said; this is
-// what you would see at the laptop, because its person said you may.
+// as yourself, whether you administer anything or not; they are on Mine. The administrative
+// areas are metadata and never what a session said; this is what you would see at the
+// laptop, because its person said you may.
+//
+// The list is the plane's word as it changes: a person's watch (`/v1/relay/watch`) tells it
+// of an offer made or withdrawn and of a laptop come or gone, so nothing here asks again on
+// a timer. While the watch is down it is asked once at each try to reach it again.
 //
 // Opening one attaches as the desktop app attaches to a pod: `remote.open` for an endpoint
 // and a token, the same socket and the same commands. You follow the transcript live,
@@ -12,9 +17,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { emptyTranscript, fold, isBusy, openApprovals, openQuestions, openRemote, remoteWhen, SessionAttachment } from "@troupe/client";
+import { emptyTranscript, fold, isBusy, openApprovals, openQuestions, openRemote, remoteWhen, SessionAttachment, watchRemote } from "@troupe/client";
 import type { AgentRow, AttachStatus, TranscriptState } from "@troupe/client";
-import { describeError, useConsole, useLoad } from "../console";
+import { describeError, useConsole } from "../console";
+import type { Load } from "../console";
 import { href } from "../route";
 import { Empty, Loaded } from "./bits";
 
@@ -34,30 +40,61 @@ function presence(row: RemoteRow): string {
   return row.offline_since ? `offline since ${remoteWhen(row.offline_since)}` : "offline";
 }
 
-/** Your laptops' sessions, and those shared with you, for the Sessions page. */
-export function RemoteSessions(): JSX.Element | null {
+/**
+ * The laptop sessions offered to this person, as the plane says them now: the watch's list,
+ * and `remote.list` asked while the watch is down.
+ */
+export function useOffered(): [Load<RemoteRow[]>, () => void] {
   const { auth } = useConsole();
-  const [load, reload] = useLoad(
-    () =>
-      auth
-        .rpc<{ sessions: RemoteRow[] }>("remote.list", {})
-        .then((r) => r.sessions)
-        .catch((e: unknown) => {
-          // A plane from before #58 relays nothing.
-          if ((e as { code?: unknown }).code === -32601) return [] as RemoteRow[];
-          throw e;
-        }),
-    [auth],
-  );
+  const [load, setLoad] = useState<Load<RemoteRow[]>>({ state: "loading" });
+  const [tick, setTick] = useState(0);
 
-  if (load.state === "ready" && load.data.length === 0) return null;
+  useEffect(() => {
+    let live = true;
+    const ask = (): void =>
+      void auth
+        .rpc<{ sessions: RemoteRow[] }>("remote.list", {})
+        .then((r) => live && setLoad({ state: "ready", data: r.sessions }))
+        .catch((e: unknown) => {
+          if (!live) return;
+          // A plane from before #58 relays nothing.
+          if ((e as { code?: unknown }).code === -32601) setLoad({ state: "ready", data: [] });
+          else setLoad((now) => (now.state === "ready" ? now : { state: "error", error: e }));
+        });
+    const watch = watchRemote({
+      planeUrl: auth.planeUrl,
+      token: () => auth.token(),
+      clientInfo: { name: "troupe-console", version: __TROUPE_VERSION__ },
+      onSessions: (rows) => live && setLoad({ state: "ready", data: rows as unknown as RemoteRow[] }),
+      onLive: (up) => {
+        if (!up && live) ask();
+      },
+    });
+    return () => {
+      live = false;
+      watch.close();
+    };
+  }, [auth, tick]);
+
+  return [load, () => setTick((t) => t + 1)];
+}
+
+/** Your laptops' sessions, and those shared with you, on Mine. */
+export function RemoteSessions(): JSX.Element {
+  const [load, reload] = useOffered();
 
   return (
     <section className="remote-sessions" aria-label="Offered to you from laptops">
       <h2>Offered to you from laptops</h2>
       <p className="note">Sessions a laptop's person offered for steering from another device. You steer them as yourself, not as an administrator.</p>
       <Loaded load={load} what="the sessions offered to you" retry={reload}>
-        {(rows) => (
+        {(rows) =>
+          rows.length === 0 ? (
+            <Empty title="Nothing offered to you">
+              A session appears here, as it is offered, once you offer one from a laptop with <span className="mono">/steer on</span> or Steer from elsewhere, or somebody
+              shares one with you.
+            </Empty>
+          ) : (
           <table className="sessions remote">
             <thead>
               <tr>
@@ -72,7 +109,7 @@ export function RemoteSessions(): JSX.Element | null {
               {rows.map((r) => (
                 <tr key={r.id}>
                   <td className="mono">
-                    <a href={href({ page: "sessions", path: ["remote", r.id] })}>{r.id}</a>
+                    <a href={href({ page: "mine", path: ["remote", r.id] })}>{r.id}</a>
                   </td>
                   <td>{r.your_role === "owner" ? "yours" : (r.owner_name ?? r.owner)}</td>
                   <td>{r.workspace ?? "—"}</td>
@@ -82,7 +119,8 @@ export function RemoteSessions(): JSX.Element | null {
               ))}
             </tbody>
           </table>
-        )}
+          )
+        }
       </Loaded>
     </section>
   );
@@ -155,7 +193,7 @@ export function RemoteSession({ id }: { id: string }): JSX.Element {
   return (
     <div className="page remote-session">
       <p className="crumbs">
-        <a href={href({ page: "sessions" })}>← Sessions</a> · <span className="mono">{id}</span> · on a laptop, through the plane
+        <a href={href({ page: "mine" })}>← Mine</a> · <span className="mono">{id}</span> · on a laptop, through the plane
       </p>
       {error ? (
         <Empty title="Not reachable now">{error}</Empty>

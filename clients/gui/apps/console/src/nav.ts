@@ -12,8 +12,14 @@
 // The plane holds this map too, in `Troupe.Plane.Admin.Console`, where every
 // administrative method is placed on one of these areas; `test/coverage.test.ts` holds the
 // two to the same areas.
+//
+// Above the four is a person's own: Mine, their sessions, the laptops' sessions offered to
+// them and steered from here, their clients' versions and the memory their machines read.
+// Everybody the plane knows signs in to it; an administrative role adds the four groups.
+// It is not on the plane's map, since no administrative method is placed there.
 
-export type Role = "platform_admin" | "team_admin";
+/** A person who administers nothing is a `member`: the console is theirs too, for what is theirs. */
+export type Role = "platform_admin" | "team_admin" | "member";
 
 export interface Area {
   id: string;
@@ -73,17 +79,29 @@ export const NAV: Group[] = [
   },
 ];
 
-export const AREAS: Area[] = NAV.flatMap((g) => g.areas);
+/** A person's own area, shown to every role, administrators too. */
+export const MINE: Group = {
+  label: "Mine",
+  areas: [{ id: "mine", label: "Mine", built: true, teamAdmin: true, lead: "Your sessions, the laptops' sessions offered to you, your clients' versions and your memory." }],
+};
+
+export const AREAS: Area[] = [MINE, ...NAV].flatMap((g) => g.areas);
 
 export function area(id: string): Area | null {
   return AREAS.find((a) => a.id === id) ?? null;
 }
 
 export function groupOf(id: string): string {
-  return NAV.find((g) => g.areas.some((a) => a.id === id))?.label ?? "";
+  return [MINE, ...NAV].find((g) => g.areas.some((a) => a.id === id))?.label ?? "";
 }
 
-/** The groups and areas this role is shown. */
+/** The groups and areas this role is shown: Mine for everybody, and the administrative map for an administrator. */
 export function navFor(role: Role): Group[] {
-  return NAV.map((g) => ({ label: g.label, areas: g.areas.filter((a) => role === "platform_admin" || a.teamAdmin) })).filter((g) => g.areas.length > 0);
+  if (role === "member") return [MINE];
+  return [MINE, ...NAV.map((g) => ({ label: g.label, areas: g.areas.filter((a) => role === "platform_admin" || a.teamAdmin) })).filter((g) => g.areas.length > 0)];
+}
+
+/** Where a role starts: an administrator at the Overview, a member at what is theirs. */
+export function startFor(role: Role): string {
+  return role === "member" ? "mine" : "overview";
 }

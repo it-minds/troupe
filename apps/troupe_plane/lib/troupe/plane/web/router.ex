@@ -435,6 +435,22 @@ defmodule Troupe.Plane.Web.Router do
     end
   end
 
+  # A person's watch on what is offered to them: the desktop app's and the console's list
+  # of laptop sessions, told as it changes rather than asked again. The same pages are
+  # admitted as at a viewer's door.
+  get "/v1/relay/watch" do
+    if relay_origin_allowed?(conn) do
+      conn
+      |> WebSockAdapter.upgrade(Remote.Watch, [bearer: bearer_or_nil(conn)],
+        timeout: :timer.hours(24),
+        max_frame_size: 64 * 1024
+      )
+      |> halt()
+    else
+      send_json(conn, 403, %{"error" => "origin not allowed"})
+    end
+  end
+
   match _ do
     send_json(conn, 404, %{"error" => "not found"})
   end

@@ -73,6 +73,7 @@ export {
   rootState,
   openApprovals,
   openQuestions,
+  presentMembers,
   loopEnding,
   settleLoop,
   turnLine,
@@ -115,6 +116,7 @@ export {
   syncWords,
   claimable,
   RemoteSource,
+  fleetTiming,
   rowFromRemote,
   remoteOffer,
   onThisComputer,
@@ -129,7 +131,8 @@ export type {
   RemoteOffer,
   RemotePerson,
 } from "./fleet.js";
-export { openRemote, remoteRefusal, when as remoteWhen } from "./remote.js";
+export { openRemote, remoteRefusal, watchRemote, watchUrl, when as remoteWhen } from "./remote.js";
+export type { RemoteListRow, RemoteWatch, RemoteWatchOptions } from "./remote.js";
 export { AdminApi, bundleErrors, requiredRole } from "./admin.js";
 export type {
   AdminFilter,

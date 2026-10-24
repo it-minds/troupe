@@ -2608,6 +2608,30 @@ actor.
 notification `relay.closed {"reason"}` and the socket closing: `withdrawn`, `the laptop went
 offline`, `no longer shared with you`, `the token expired`.
 
+**A person's watch.** What `remote.list` answers is also told as it changes, so a list of
+offered sessions need not ask again on a timer. A client opens `wss://<plane>/v1/relay/watch`
+(admitted from the same pages as a viewer's door) and sends `initialize` with the person's
+plane token, the one `/rpc` takes (a relay token is `unauthenticated` there). The answer
+carries `capabilities.remote_changed: true` and `sessions`, the person's list exactly as
+`remote.list` answers it; from then on the plane sends the notification below each time that
+list changes, an offer made, shared anew or withdrawn, or its laptop come or gone, and only
+to the people the change concerns. `remote.list` may be asked on the socket too. The token
+is renewed with `auth.refresh` on the open socket, warned of with `auth.expiring` two
+minutes before it ends, and the socket closed with `auth.expired` after; a person
+deactivated is closed at the next change. A plane from before the watch has no such path,
+and a client asks `remote.list` instead.
+
+```json
+{"jsonrpc": "2.0", "method": "remote.changed", "params": {"sessions": [
+  {"id": "20261024T101500-aB3dE5", "kind": "remote", "owner": "ada@example.test",
+   "owner_name": "Ada", "workspace": "billing", "state": "online", "offline_since": null,
+   "offered_at": "2026-10-24T10:15:00Z", "your_role": "control", "shares": null}]}}
+```
+
+The whole list each time, never a difference, so a client that missed one has missed
+nothing the next one does not say. It carries the listing's metadata and nothing a session
+said.
+
 ### `auth.expiring` (notification, server → client)
 
 ```json
@@ -2926,6 +2950,7 @@ than an admin uses them:
 | `initialize` | observe | anybody | `{protocol_version, client_info: {name, version, platform?}, capabilities}` → `{protocol_version, server_info: {name: "troupe-plane", version}, principal, client_update, policy: {revision}}`: the handshake over `/rpc`, where `principal` is what `me` answers, `client_update` is this plane's word on the client's version, or `update_required` signed as such, and `policy.revision` a digest of the two signed answers ([Client versions](#client-versions)) |
 | `me.client_versions` | observe | anybody | `{}` → `{tui, daemon, desktop}`, each `{recommended, minimum, blocked}`: what `troupe update` installs by, asked on its own because the client that most needs it is the one `initialize` refuses; with `release: {url}`, where releases are (null for GitHub's), and `signed`, the same as `{versions, release}` signed by the plane's key ([The plane's signing key](#the-planes-signing-key)) |
 | `me.client_defaults` | observe | anybody | `{}` → `{configured, provider, base_url, auth, models: {default, cheap, expensive}, defaults, enforced}` — what an administrator says people's own machines should talk to (the *Client defaults* settings), for a client to pre-fill its model settings with. **Never a key**: anybody signed in may ask, so each person supplies their own. `configured` is false, and the rest null, until a provider is set. `defaults` is the same in a config file's shape, only what is set, and `enforced` the `client_enforced` setting, `{}` when unset, per-tool `permissions` among what it may hold (Decision 907): the organisation's document a machine reads below its person's file and holds every layer to (Decision 869, `config.organisation`). A plane from before them answers without the two, and a client reads its old fields as the defaults. With `signed`: the whole answer signed by the plane's key ([The plane's signing key](#the-planes-signing-key)) |
+| `me.clients` | observe | anybody, for themselves | `{}` → `{clients: [{component, version, platform, since, seen_at, standing, recommended}]}`: which version of each of the caller's own clients (`tui`, `daemon`, `desktop`) the plane last saw at `initialize`, and how it stands against the policy now (`current`, `behind` the `recommended` version, or `refused` at its next `initialize`), as `admin.clients.get` says it of the people an administrator sees ([Client versions](#client-versions)). Nobody else's. A plane from before it has no `me.clients` |
 | `me.memory` | observe | anybody | `{}` → `{documents: [{scope, name, version, hash, updated_at, text}]}`: the organisation's memory documents a person's own machine reads into every session on it (#55, Decision 922), the organisation's and then each of the caller's teams', by name; never another team's, and never a profile's, since no laptop session runs on one. Instructions from the organisation, read-only to agents, each at most 8192 bytes. With `signed`, as `memory` ([The plane's signing key](#the-planes-signing-key)); the daemon keeps the answer as `<state>/memory.json` after every link that brings a token and every five minutes while it holds one, gives a changed one to the sessions running there, and drops it when the person signs out (`config.memory`). A plane from before it has no `me.memory`, and a machine keeps the copy it had |
 | `me.connections.list` | observe | anybody | the MCP servers on the caller's profiles that act as *them*, each with its `slot` and whether they have `connected` it. Whether, never what: the plane can see that a slot has a version and cannot read one |
 | `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own name at the key manager (`name`, the segment of `path` under `troupe/people/`, not always their subject: Decision 755). The client exchanges it with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
