@@ -95,10 +95,11 @@ missing where an administrator looks:
   console's profile page): `PolicyViolation`, `SecretMissing`, `MCPIdentityMissing`,
   `PlaneCAMissing` and `EndpointUnreachable` each name what is missing and what to do
   ([profiles-and-policy.md, status conditions](profiles-and-policy.md#status-conditions)).
-- **The plane's preconditions**, in `admin.overview` and the console's Overview: each one
-  missing is one sentence saying what it is for and the change that grants it. Nothing in
-  the list is something the upgrade did; each is something the release needs that the
-  installation does not yet give, and the sentence is the step.
+- **The plane's preconditions**, in `admin.overview` and the console's Overview, from the
+  release that brings them (the path to 1.0, issue #765): each one missing is one sentence
+  saying what it is for and the change that grants it. Nothing in the list is something
+  the upgrade did; each is something the release needs that the installation does not yet
+  give, and the sentence is the step.
 - **The plane's log** at start, where a check could not be made at all (OpenBao or the
   identity provider not answering): that is the installation, not the release.
 

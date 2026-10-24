@@ -36,7 +36,10 @@ defmodule Troupe.E2E.Upgrade.CheckTest do
         assert build != seed["from"], "the plane still reports #{inspect(build)}"
 
       commit ->
-        assert build["commit"] == commit,
+        # The plane says its commit short, as its footer does.
+        reported = build["commit"] || ""
+
+        assert String.length(reported) >= 7 and String.starts_with?(commit, reported),
                "the plane reports #{inspect(build)}; the images under test are #{commit}"
     end
   end
