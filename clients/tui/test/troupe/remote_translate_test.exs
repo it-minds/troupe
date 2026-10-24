@@ -673,6 +673,25 @@ defmodule Troupe.RemoteTranslateTest do
     assert nobody.data.text == "somebody offered tools that run on their own machine"
   end
 
+  # A plane whose subject claim is opaque names the person by an identifier; the event's
+  # `display_name` is what a person reads, and the subject is the fallback.
+  test "a session tainted by somebody's own tools names them by their name where it has one" do
+    data = %{
+      "kind" => "personal_connector",
+      "tools" => ["client.notes.search"],
+      "actor" => "00u1a2b3c4",
+      "display_name" => "Ada Lovelace"
+    }
+
+    [named] = translate(durable("session_tainted", data))
+
+    assert named.data.text ==
+             "Ada Lovelace offered tools that run on their own machine: client.notes.search"
+
+    [blank] = translate(durable("session_tainted", Map.put(data, "display_name", "")))
+    assert blank.data.text =~ "00u1a2b3c4 offered tools"
+  end
+
   # D126: written beside `session_tainted` each time a person's tools are offered, and
   # taken away when their connection goes; drawn raw and logged as unknown until now.
   test "tools registered and unregistered are sentences saying whose and which" do

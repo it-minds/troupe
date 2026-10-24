@@ -307,4 +307,38 @@ mod tests {
         assert_eq!(after.unwrap(), None);
         assert!(left.is_empty(), "parts {left:?} were left in Credential Manager");
     }
+
+    // The keychain on a Mac and the Secret Service on Linux, under a service of this
+    // test's own that it removes again: stored, read, replaced, four kilobytes whole, and
+    // deleted. Skipped, and said, on a machine with no store; CI's keyring job sets
+    // `TROUPE_KEYRING_REQUIRE`, so a store that did not come up there fails instead.
+    #[cfg(not(windows))]
+    #[test]
+    fn the_platform_store_keeps_a_four_kilobyte_token_and_clears_it() {
+        use super::{Os, PART_UNITS};
+        let service = format!("troupe-e41-test-{}", std::process::id());
+        let store = Os { service: &service, key: "refresh:https://plane.example.test" };
+
+        if let Err(e) = store.get(None) {
+            let required = matches!(std::env::var("TROUPE_KEYRING_REQUIRE").as_deref(), Ok("1") | Ok("true"));
+            assert!(!required, "this job starts a credential store, and it answered: {e}");
+            eprintln!("SKIPPED: no credential store on this machine ({e})");
+            return;
+        }
+
+        let value = token(4096);
+        let first = write(&store, "first", PART_UNITS).and_then(|()| read(&store));
+        let replaced = write(&store, "second", PART_UNITS).and_then(|()| read(&store));
+        let long = write(&store, &value, PART_UNITS).and_then(|()| read(&store));
+        let cleared = delete(&store);
+        let after = read(&store);
+        // Whatever failed above, nothing of the test's stays in the person's store.
+        let _ = store.delete(None);
+
+        assert_eq!(first.unwrap().as_deref(), Some("first"));
+        assert_eq!(replaced.unwrap().as_deref(), Some("second"));
+        assert_eq!(long.unwrap().as_deref(), Some(value.as_str()));
+        cleared.expect("cleared");
+        assert_eq!(after.unwrap(), None);
+    }
 }

@@ -74,9 +74,43 @@ defmodule Troupe.KeyringTest do
     end
   end
 
-  # The machine's own store, where it has one: Credential Manager on Windows, the keychain
-  # on a Mac, the Secret Service where `secret-tool` answers. Elsewhere it says it has
-  # none, and the daemon keeps the sign-in in memory.
+  # The machine's own store, end to end, as the daemon uses it: Credential Manager on
+  # Windows, the login keychain on a Mac, the Secret Service where `secret-tool` answers.
+  # Skipped, and said, where there is none; CI's keyring jobs start one and set
+  # `TROUPE_KEYRING_REQUIRE`, so a store that is missing there fails instead.
+  test "the operating system's store keeps an entry: stored, read, replaced, deleted, and four kilobytes whole" do
+    entry = Keyring.entry("steering-round-trip")
+    long = "eyJ" <> String.duplicate("a1B2-c3_D", 455)
+    on_exit(fn -> OS.delete(entry) end)
+
+    case OS.get(entry) do
+      :none ->
+        assert :ok = OS.put(entry, "eyJhIjoiYiJ9-first")
+        assert {:ok, "eyJhIjoiYiJ9-first"} = OS.get(entry)
+        assert :ok = OS.put(entry, "eyJhIjoiYiJ9-second")
+        assert {:ok, "eyJhIjoiYiJ9-second"} = OS.get(entry)
+
+        assert :ok = OS.put(entry, long)
+        assert {:ok, ^long} = OS.get(entry)
+        assert :ok = OS.put(entry, "eyJhIjoiYiJ9-short-again")
+        assert {:ok, "eyJhIjoiYiJ9-short-again"} = OS.get(entry)
+        assert OS.get(entry <> "/0") == :none, "a value that fits leaves no part behind"
+
+        assert :ok = OS.put(entry, long)
+        assert :ok = OS.delete(entry)
+        assert OS.get(entry) == :none
+        assert OS.get(entry <> "/0") == :none, "deleting takes every part"
+        assert :ok = OS.delete(entry)
+
+      absent ->
+        if System.get_env("TROUPE_KEYRING_REQUIRE") in ["1", "true"],
+          do: flunk("this job starts a credential store, and it answered #{inspect(absent)}")
+
+        IO.puts("\nSKIPPED: no credential store on this machine (#{inspect(absent)})")
+    end
+  end
+
+  # A machine with no store says so, and the daemon keeps the sign-in in memory.
   test "the operating system's store does the same, or says there is none" do
     entry = Keyring.entry("steering-test")
 

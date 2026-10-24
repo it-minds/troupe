@@ -6,12 +6,17 @@
 // that is the plane's to do, and the preview says it before anything is saved. Either
 // admin role reads it; only a platform admin changes it, since it holds every team's
 // clients alike.
+//
+// Beside each policy, the clients it holds (#657): the plane records the version each
+// person's client of each kind last gave when it connected, so a count says how many are
+// current, behind the recommended version, or refused when they next connect, and a list
+// says who is behind and since when. A team admin's are their teams' people.
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { ClientPolicy, ClientPolicyChange, ClientPolicyPut } from "@troupe/client";
+import type { ClientFleet, ClientPolicy, ClientPolicyChange, ClientPolicyPut, ClientSeen } from "@troupe/client";
 import { show, useConsole, useLoad } from "../console";
-import { AuditNote, Empty, Field, Loaded, Preview, Region, changed, when } from "./bits";
+import { AuditNote, Empty, Field, Loaded, Preview, Region, Status, changed, count, when } from "./bits";
 import type { DiffLine } from "./bits";
 
 /** What each component is to a person, for the ones this console knows the name of. */
@@ -29,6 +34,7 @@ export function ClientVersions(): JSX.Element {
   const { admin, role } = useConsole();
   const [load, reload] = useLoad(() => admin.clients(), [admin]);
   const [done, setDone] = useState<ClientPolicyPut | null>(null);
+  const [query, setQuery] = useState("");
 
   return (
     <div className="page">
@@ -53,6 +59,7 @@ export function ClientVersions(): JSX.Element {
                 <Component
                   key={p.component}
                   policy={p}
+                  fleet={data.fleet?.[p.component]}
                   editable={role === "platform_admin"}
                   onApplied={(answer) => {
                     setDone(answer);
@@ -61,11 +68,97 @@ export function ClientVersions(): JSX.Element {
                 />
               ))}
               {role !== "platform_admin" && <p className="note">Only a platform admin changes these, since they hold every team's clients alike.</p>}
+              {data.fleet && <Behind fleet={data.fleet} query={query} onQuery={setQuery} team={role !== "platform_admin"} />}
             </>
           );
         }}
       </Loaded>
     </div>
+  );
+}
+
+/** A component's clients last seen, as one line: how many, and how they stand. */
+function FleetLine({ fleet }: { fleet: ClientFleet | undefined }): JSX.Element | null {
+  if (!fleet) return null;
+  const seen = fleet.current + fleet.behind + fleet.refused;
+  if (seen === 0) return <p className="fleet muted">None has connected since the plane began recording versions.</p>;
+  const parts = [`${fleet.current} current`, `${fleet.behind} behind the recommended version`];
+  if (fleet.refused > 0) parts.push(`${fleet.refused} refused when ${fleet.refused === 1 ? "it next connects" : "they next connect"}`);
+  return (
+    <p className="fleet">
+      {count(seen, "client")} last seen: {parts.join(", ")}.
+    </p>
+  );
+}
+
+type BehindRow = ClientSeen & { component: string };
+
+/** Everyone whose client is behind its component's recommended version, or refused, oldest first, with a filter. */
+function Behind({ fleet, query, onQuery, team }: { fleet: Record<string, ClientFleet>; query: string; onQuery: (q: string) => void; team: boolean }): JSX.Element {
+  const rows: BehindRow[] = Object.entries(fleet)
+    .flatMap(([component, f]) => f.people.map((p) => ({ ...p, component })))
+    .filter((p) => p.standing !== "current")
+    .sort((a, b) => a.since.localeCompare(b.since));
+  const q = query.trim().toLowerCase();
+  const shown = rows.filter((r) => !q || [r.subject, r.display_name, r.version, r.platform, known(r.component).name, r.standing].some((v) => v?.toLowerCase().includes(q)));
+  return (
+    <>
+      <Region>Who is behind</Region>
+      {rows.length === 0 ? (
+        <Empty title="Nobody is behind">{team ? "Every client your teams' people last connected with" : "Every client last seen"} is on the recommended version or later.</Empty>
+      ) : (
+        <>
+          <div className="toolbar">
+            <input aria-label="Filter who is behind" placeholder="filter by a person, a version, a client…" value={query} onChange={(e) => onQuery(e.target.value)} />
+          </div>
+          {shown.length === 0 ? (
+            <Empty title={`Nobody behind matches "${query.trim()}"`}>Filter by a person's name or address, a version, or a kind of client.</Empty>
+          ) : (
+            <div className="scroll">
+              <table className="behind">
+                <thead>
+                  <tr>
+                    <th>Person</th>
+                    <th>Client</th>
+                    <th>Version</th>
+                    <th>Standing</th>
+                    <th>On it since</th>
+                    <th>Last seen</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map((r) => (
+                    <tr key={`${r.component}:${r.subject}`}>
+                      <td>
+                        <span className="who">{r.display_name && r.display_name !== r.subject ? `${r.display_name} (${r.subject})` : r.subject}</span>
+                      </td>
+                      <td>{known(r.component).name}</td>
+                      <td className="mono">
+                        {r.version}
+                        {r.platform && <span className="muted"> · {r.platform}</span>}
+                      </td>
+                      <td>
+                        {r.standing === "refused" ? (
+                          <Status kind="denied" glyph="✕">
+                            refused when it next connects
+                          </Status>
+                        ) : (
+                          <Status kind="local" glyph="◐">
+                            behind
+                          </Status>
+                        )}
+                      </td>
+                      <td>{when(r.since)}</td>
+                      <td>{when(r.seen_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </>
   );
 }
 
@@ -82,7 +175,17 @@ function asked(form: Form): { recommended: string | null; minimum: string | null
   };
 }
 
-function Component({ policy, editable, onApplied }: { policy: ClientPolicy; editable: boolean; onApplied: (answer: ClientPolicyPut) => void }): JSX.Element {
+function Component({
+  policy,
+  fleet,
+  editable,
+  onApplied,
+}: {
+  policy: ClientPolicy;
+  fleet: ClientFleet | undefined;
+  editable: boolean;
+  onApplied: (answer: ClientPolicyPut) => void;
+}): JSX.Element {
   const { admin, notify } = useConsole();
   const { name, program, updates } = known(policy.component);
   const [form, setForm] = useState<Form | null>(null);
@@ -121,6 +224,7 @@ function Component({ policy, editable, onApplied }: { policy: ClientPolicy; edit
           </div>
         </dl>
       )}
+      {!form && <FleetLine fleet={fleet} />}
       {!form && editable && (
         <button type="button" onClick={() => setForm(formOf(policy))}>
           Change {name.toLowerCase()}'s policy
@@ -167,7 +271,10 @@ function Component({ policy, editable, onApplied }: { policy: ClientPolicy; edit
             const answer = await admin.putClients(policy.component, change);
             setForm(null);
             setPreviewing(false);
-            notify(`${name}'s version policy is applied.`);
+            const held = answer.affected ? answer.affected.behind + answer.affected.refused : 0;
+            notify(
+              `${name}'s version policy is applied.${answer.affected && held > 0 ? ` Of the clients last seen, ${answer.affected.behind} ${answer.affected.behind === 1 ? "is" : "are"} behind it and ${answer.affected.refused} refused when they next connect.` : ""}`,
+            );
             onApplied(answer);
           }}
         />

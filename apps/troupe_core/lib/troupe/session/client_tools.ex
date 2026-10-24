@@ -457,11 +457,14 @@ defmodule Troupe.Session.ClientTools do
       actor
     )
 
+    # The subject names the person to the system; their name, where the sign-in gave one,
+    # is what the people in the session read, since a provider's subject may be an opaque id.
     Log.append(
       state.session_id,
       ["root"],
       :session_tainted,
-      %{"kind" => "personal_connector", "tools" => names, "actor" => subject_of(actor)},
+      %{"kind" => "personal_connector", "tools" => names, "actor" => subject_of(actor)}
+      |> put_display_name(actor),
       actor
     )
 
@@ -527,6 +530,12 @@ defmodule Troupe.Session.ClientTools do
     do: Map.put(data, "actor", subject)
 
   defp put_actor(data, _actor), do: data
+
+  defp put_display_name(data, %Event.Actor{display_name: name})
+       when is_binary(name) and name != "",
+       do: Map.put(data, "display_name", name)
+
+  defp put_display_name(data, _actor), do: data
 
   defp name_of(%Event.Actor{display_name: name}) when is_binary(name) and name != "", do: name
   defp name_of(%Event.Actor{subject: subject}) when is_binary(subject), do: subject

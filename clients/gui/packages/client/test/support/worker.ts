@@ -477,8 +477,23 @@ export class FakeWorker {
           this.tools.set(`${session.id}/client.${t.name}`, { sessionId: session.id, name: `client.${t.name}`, description: t.description ?? "", schema: t.schema ?? {}, client });
         }
         session.log.append("tools_registered", { tools: registered }, { kind: "user", subject: client.token.sub });
-        session.log.append("session_tainted", { kind: "personal_connector", tools: registered, actor: client.token.sub }, { kind: "user", subject: client.token.sub });
+        session.log.append("session_tainted", { kind: "personal_connector", tools: registered, actor: client.token.sub, display_name: client.token.name }, { kind: "user", subject: client.token.sub });
         return reply(ws, id, { registered, taint: "personal_connector" });
+      }
+
+      // The tools this socket registered, named or all, taken back as the gateway does.
+      case "tools.unregister": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        const asked = params["tools"] as string[] | undefined;
+        const names = asked?.map((n) => (n.startsWith("client.") ? n : `client.${n}`));
+        const gone = [...this.tools.entries()]
+          .filter(([, t]) => t.sessionId === session.id && t.client === client && (!names || names.includes(t.name)))
+          .map(([key, t]) => (this.tools.delete(key), t.name))
+          .sort();
+        if (gone.length > 0) {
+          session.log.append("tools_unregistered", { tools: gone, connection: "a socket", reason: "unregistered", actor: client.token.sub }, { kind: "user", subject: client.token.sub });
+        }
+        return reply(ws, id, { unregistered: gone });
       }
 
       case "blob.get": {

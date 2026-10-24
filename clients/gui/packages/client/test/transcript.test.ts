@@ -611,6 +611,20 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     );
   });
 
+  it("names the person by their name where the taint carries one, and by their subject where not", () => {
+    seq = 0;
+    // A plane whose subject claim is opaque: the subject is an identifier, the name is the person.
+    const state = foldAll([
+      durable("session_tainted", { kind: "personal_connector", tools: ["client.notes.search"], actor: "00u1a2b3c4", display_name: "Ada Lovelace" }, ["root"], "00u1a2b3c4"),
+      durable("session_tainted", { kind: "personal_connector", tools: ["client.notes.search"], actor: "00u1a2b3c4", display_name: "" }, ["root"], "00u1a2b3c4"),
+    ]);
+
+    assert.deepEqual(
+      state.entries.map((e) => (e.kind === "system" ? e.text : e.kind)),
+      ["Ada Lovelace offered tools that run on their own machine: client.notes.search", "00u1a2b3c4 offered tools that run on their own machine: client.notes.search"],
+    );
+  });
+
   it("says whose tools left the session, how many and why (troupe #592)", () => {
     seq = 0;
     const gone = durable("tools_unregistered", {

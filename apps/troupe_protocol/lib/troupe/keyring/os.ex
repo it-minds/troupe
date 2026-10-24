@@ -12,6 +12,8 @@ defmodule Troupe.Keyring.OS do
     order and `<entry>` holds `troupe-parts:<n>`, their count. A value that fits, and does
     not begin with that marker, is one entry as before; deleting takes every part.
   - **macOS**: the login keychain, through `security -i`, given its command on a pipe.
+    It reads one command line of at most 4096 bytes, so a value whose command would be
+    longer is kept in parts, in the layout Windows keeps one in.
   - **Linux and the other unixes**: the Secret Service, through `secret-tool`, given the
     secret on its standard input. No `secret-tool`, or no agent answering it, is
     `{:error, :unavailable}`.
@@ -192,7 +194,116 @@ defmodule Troupe.Keyring.OS do
 
   # -- macOS ---------------------------------------------------------------------
 
-  defp mac(op, entry, value) do
+  # `security -i` reads each command as one line of at most 4096 bytes, so a value whose
+  # command would not fit is kept in parts, in the layout Windows keeps a long one in:
+  # `<entry>/0`, `<entry>/1`, ... hold its pieces and `<entry>` holds `troupe-parts:<n>`.
+  # A value that fits, and is not itself the marker, is one entry, as it always was.
+  @mac_line 4096
+  @mac_part 2048
+  @index "troupe-parts:"
+
+  defp mac(:get, entry, nil) do
+    with {:ok, value} <- mac_entry(:get, entry, nil) do
+      case parts_of(value) do
+        nil -> {:ok, value}
+        n -> mac_join(entry, n)
+      end
+    end
+  end
+
+  defp mac(:put, entry, value) do
+    had = mac_parts(entry)
+
+    parts =
+      if mac_fits?(entry, value) and not String.starts_with?(value, @index),
+        do: [],
+        else: chunks(value, @mac_part)
+
+    written =
+      parts
+      |> Enum.with_index()
+      |> Enum.reduce_while(:ok, fn {part, i}, :ok ->
+        case mac_entry(:put, "#{entry}/#{i}", part) do
+          :ok -> {:cont, :ok}
+          error -> {:halt, error}
+        end
+      end)
+
+    # The index after its parts, so a reader never finds it naming one not written yet.
+    head = if parts == [], do: value, else: @index <> "#{length(parts)}"
+
+    with :ok <- written, :ok <- mac_entry(:put, entry, head) do
+      mac_drop(entry, length(parts), had)
+    end
+  end
+
+  defp mac(:delete, entry, nil) do
+    with :ok <- mac_drop(entry, 0, mac_parts(entry)), do: mac_entry(:delete, entry, nil)
+  end
+
+  defp mac_fits?(entry, value) do
+    {service, account} = split(entry)
+    command = "add-generic-password -U -s #{service} -a #{account} -w #{value}\n"
+    byte_size(command) < @mac_line
+  end
+
+  # How many parts `<entry>` says it is in: 0 where it is one value, or none.
+  defp mac_parts(entry) do
+    case mac_entry(:get, entry, nil) do
+      {:ok, value} -> parts_of(value) || 0
+      _none -> 0
+    end
+  end
+
+  defp mac_join(entry, n) do
+    Enum.reduce_while(0..(n - 1)//1, {:ok, ""}, fn i, {:ok, joined} ->
+      case mac_entry(:get, "#{entry}/#{i}", nil) do
+        {:ok, part} -> {:cont, {:ok, joined <> part}}
+        :none -> {:halt, {:error, {:keyring, "part #{i} of #{n} is missing"}}}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp mac_drop(entry, from, had) do
+    Enum.reduce_while(from..(had - 1)//1, :ok, fn i, :ok ->
+      case mac_entry(:delete, "#{entry}/#{i}", nil) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp parts_of(@index <> count) do
+    case Integer.parse(count) do
+      {n, ""} when n >= 0 -> n
+      _other -> nil
+    end
+  end
+
+  defp parts_of(_value), do: nil
+
+  # Pieces of at most `bytes`, never splitting a character.
+  defp chunks(value, bytes) do
+    value
+    |> String.codepoints()
+    |> Enum.chunk_while(
+      {0, []},
+      fn char, {used, acc} ->
+        size = byte_size(char)
+
+        if used + size > bytes and acc != [],
+          do: {:cont, acc |> Enum.reverse() |> IO.iodata_to_binary(), {size, [char]}},
+          else: {:cont, {used + size, [char | acc]}}
+      end,
+      fn
+        {_used, []} -> {:cont, {0, []}}
+        {_used, acc} -> {:cont, acc |> Enum.reverse() |> IO.iodata_to_binary(), {0, []}}
+      end
+    )
+  end
+
+  defp mac_entry(op, entry, value) do
     {service, account} = split(entry)
     env = [{"TROUPE_KEYRING_SERVICE_NAME", service}, {"TROUPE_KEYRING_ACCOUNT", account}] ++ value_env(value)
 

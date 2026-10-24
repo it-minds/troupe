@@ -76,9 +76,30 @@ describe("the overview", () => {
     for (const p of fake.admin.profiles) p.pods = Array.from({ length: p.replicas }, (_, i) => ({ ...p.pods[0]!, pod: `${p.name}-${i}`, healthy: true, draining: false, last_seen_at: "2026-10-13T09:00:00Z" }));
     for (const t of fake.admin.teams.values()) t.budget_micros = 0;
     for (const s of fake.admin.sessions) s.reviewed = true;
+    fake.admin.seen.splice(0);
     await signedInAs(fake, PEOPLE.alice);
     unmount = render(<App />).unmount;
     await waitFor(() => says("Nothing needs attention"), "the empty list");
     await sees("Nothing is unhealthy, at its ceiling or waiting on a person.");
+  });
+
+  // #657: the clients the plane last saw behind the recommended version, as one line, and
+  // none where there are none.
+  it("says how many clients are behind the recommended version, and where to look", async () => {
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    await waitFor(() => items().length > 0, "what needs attention");
+    await sees("3 clients behind the recommended version, 2 of them refused when they next connect.");
+    const line = items().find((i) => says("behind the recommended version", i))!;
+    expect(line.querySelector("a")?.textContent).toBe("Client versions");
+    expect(line.querySelector("a")?.getAttribute("href")).toBe("#/clients");
+  });
+
+  it("has no line about clients when none is behind", async () => {
+    fake.admin.seen.splice(0, fake.admin.seen.length, ...fake.admin.seen.filter((s) => s.version === "0.16.0-beta"));
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    await waitFor(() => items().length > 0, "what needs attention");
+    expect(items().some((i) => says("behind the recommended version", i))).toBe(false);
   });
 });

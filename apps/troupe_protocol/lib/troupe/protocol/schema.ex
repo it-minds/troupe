@@ -616,7 +616,8 @@ defmodule Troupe.Protocol.Schema do
       "session_tainted" => %{
         "kind" => required(:string),
         "tools" => required({:array, :string}),
-        "actor" => required(:string)
+        "actor" => required(:string),
+        "display_name" => optional(:string)
       }
     }
   end

@@ -1,0 +1,115 @@
+# The credential stores themselves, as one workflow both gates call: `Troupe.Keyring`'s OS
+# backend against a real macOS keychain and a real Secret Service on Linux, and on the Mac
+# the desktop app's `secrets.rs` against the same keychain. The suites elsewhere run the
+# store in the VM, and a fixer's Windows machine has Credential Manager alone, so this is
+# where `security` and `secret-tool` are exercised at all (#657).
+#
+# `ci.yml` calls it on a pull request into `main` that changes the stores' code, and in a
+# full run; `dev-check.yml` on a pull request into a `development-*` chunk that does. Both
+# tests skip, saying so, where a machine has no store; here `TROUPE_KEYRING_REQUIRE` makes
+# a store that did not come up a failure instead, so a green job means a round trip ran.
+name: keyring
+
+on:
+  workflow_call:
+
+env:
+  ELIXIR_VERSION: "1.20.4"
+  OTP_VERSION: "28.5.0.5"
+  ZIG_VERSION: "0.16.0"
+
+jobs:
+  elixir:
+    name: Troupe.Keyring against ${{ matrix.store }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, store: the macOS keychain }
+          - { os: ubuntu-26.04, store: a Secret Service }
+    env:
+      MIX_ENV: test
+      TROUPE_KEYRING_REQUIRE: "1"
+    # Built from its own directory, so the runner compiles the protocol app and its
+    # dependencies, not the plane's database and Kubernetes clients.
+    defaults:
+      run:
+        working-directory: apps/troupe_protocol
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      # A keychain of this job's own, unlocked and the default, so the test neither
+      # depends on the runner's login keychain nor asks anybody for a password.
+      - name: A keychain (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          security create-keychain -p "" troupe-ci.keychain
+          security unlock-keychain -p "" troupe-ci.keychain
+          security set-keychain-settings troupe-ci.keychain
+          security list-keychains -d user -s troupe-ci.keychain $(security list-keychains -d user | tr -d '"')
+          security default-keychain -s troupe-ci.keychain
+
+      - name: gnome-keyring and secret-tool (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-tools dbus-x11
+
+      - run: mix deps.get
+
+      - name: The round trip (macOS)
+        if: runner.os == 'macOS'
+        run: mix test test/troupe/keyring_test.exs --trace
+
+      # A session bus of the step's own, and a login keyring on it unlocked with an empty
+      # password, which is how a desktop session has one.
+      - name: The round trip (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          dbus-run-session -- sh -c '
+            echo -n "" | gnome-keyring-daemon --daemonize --unlock --components=secrets >/dev/null
+            mix test test/troupe/keyring_test.exs --trace
+          '
+
+  desktop:
+    name: the desktop app's secrets.rs against the macOS keychain
+    runs-on: macos-14
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      TROUPE_KEYRING_REQUIRE: "1"
+    defaults:
+      run:
+        working-directory: clients/gui/apps/desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: A keychain
+        run: |
+          security create-keychain -p "" troupe-ci.keychain
+          security unlock-keychain -p "" troupe-ci.keychain
+          security set-keychain-settings troupe-ci.keychain
+          security list-keychains -d user -s troupe-ci.keychain $(security list-keychains -d user | tr -d '"')
+          security default-keychain -s troupe-ci.keychain
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: clients/gui/apps/desktop/src-tauri -> target
+
+      - name: A web bundle to embed
+        run: mkdir -p ../dist && echo '<!doctype html><title>Troupe</title>' > ../dist/index.html
+
+      - run: cargo test --locked secrets:: -- --nocapture

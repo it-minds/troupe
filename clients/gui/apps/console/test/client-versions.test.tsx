@@ -99,6 +99,51 @@ describe("client versions", () => {
     await sees("Only a platform admin changes these");
   });
 
+  // #657: the clients each policy holds, as the plane last saw them connect.
+  it("counts each component's clients against its policy, and lists who is behind and since when", async () => {
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    const terminal = await waitFor(() => card("The terminal"), "the terminal's policy");
+    await sees("4 clients last seen: 1 current, 1 behind the recommended version, 2 refused when they next connect.", terminal);
+    await sees("1 client last seen: 1 current, 0 behind the recommended version.", () => card("The daemon"));
+    await sees("None has connected since the plane began recording versions.", () => card("The desktop app"));
+
+    const table = await waitFor(() => document.querySelector<HTMLTableElement>("table.behind"), "who is behind");
+    const rows = [...table.querySelectorAll("tbody tr")].map((r) => [...r.querySelectorAll("td")].map((c) => c.textContent));
+    // Oldest first: on the version they run longest.
+    expect(rows.map((r) => r[0])).toEqual(["Fay (fay@example.com)", "Erin (erin@example.com)", "Dan (dan@example.com)"]);
+    expect(rows[0]).toEqual(["Fay (fay@example.com)", "The terminal", "0.13.0-beta · windows/x86_64", "✕ refused when it next connects", "2026-09-30 16:20 UTC", "2026-10-13 08:55 UTC"]);
+    expect(rows[1]![3]).toBe("◐ behind");
+
+    type(document.querySelector<HTMLInputElement>('input[aria-label="Filter who is behind"]')!, "erin");
+    await waitFor(() => table.querySelectorAll("tbody tr").length === 1, "the filtered list");
+    await sees("0.14.2-beta", table);
+    type(document.querySelector<HTMLInputElement>('input[aria-label="Filter who is behind"]')!, "nobody-at-all");
+    await sees('Nobody behind matches "nobody-at-all"');
+  });
+
+  it("shows a team admin their own teams' people only", async () => {
+    await signedInAs(fake, PEOPLE.bob);
+    unmount = render(<App />).unmount;
+    const terminal = await waitFor(() => card("The terminal"), "the terminal's policy");
+    await sees("1 client last seen: 0 current, 0 behind the recommended version, 1 refused when it next connects.", terminal);
+    const table = await waitFor(() => document.querySelector<HTMLTableElement>("table.behind"), "who is behind");
+    expect([...table.querySelectorAll("tbody tr")].map((r) => r.querySelector("td")?.textContent)).toEqual(["Fay (fay@example.com)"]);
+  });
+
+  it("says how many clients a change holds once it is applied, and the audit records it", async () => {
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    const terminal = await waitFor(() => card("The terminal"), "the terminal's policy");
+    button("Change", terminal)!.click();
+    type(await waitFor(() => field("Minimum", terminal), "the form"), "0.16.0-beta");
+    button("Preview", terminal)!.click();
+    (await waitFor(() => button("Apply", terminal), "the preview")).click();
+
+    await sees("Of the clients last seen, 0 are behind it and 3 refused when they next connect.");
+    expect(fake.admin.audit.at(-1)).toMatchObject({ action: "clients.put", detail: { affected: { current: 1, behind: 0, refused: 3 } } });
+  });
+
   it("says when there is no policy at all", async () => {
     fake.admin.policies["tui"] = { recommended: null, minimum: null, blocked: [], updated_by: null, updated_at: null };
     await signedInAs(fake, PEOPLE.alice);

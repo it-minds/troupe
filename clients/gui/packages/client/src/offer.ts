@@ -9,12 +9,15 @@
 // what it sees of any client-hosted tool: names, descriptions, schemas, the arguments and
 // what came back.
 //
-// The person is asked once for each attachment. A registration goes with the socket that
-// made it, so the session issues a fresh challenge on every socket; one that comes back
-// after a drop answers its challenge with the consent the person already gave for the
-// same tools, since a call the pod parked for it has a minute and asking again for what
-// was just allowed teaches people to say yes without reading. A different set of tools is
-// asked about again.
+// The person is asked once for each attachment, and picks which of their servers to offer
+// (all of them unless they untick one). A registration goes with the socket that made it,
+// so the session issues a fresh challenge on every socket; one that comes back after a
+// drop answers its challenge with the consent the person already gave for the same tools,
+// since a call the pod parked for it has a minute and asking again for what was just
+// allowed teaches people to say yes without reading. A different set of tools is asked
+// about again, and so is a server signed in to while attached (`refresh`, which a screen
+// calls when it may have happened): the question lists every signed-in server, the ones
+// already offered and the new one ticked, one left out before unticked.
 //
 // A session that takes no person's tools at all refuses before it asks anything
 // (`forbidden`: the platform's `managed_mcp_servers_only`, or the worker profile's
@@ -23,7 +26,7 @@
 
 import { TroupeRpcError } from "./connection.js";
 import type { TroupeConnection } from "./connection.js";
-import type { DaemonClient } from "./daemon.js";
+import type { DaemonClient, LocalServer } from "./daemon.js";
 import type { ToolInvoke } from "./types.js";
 
 /** What the session asks the person before it takes their tools. */
@@ -34,7 +37,12 @@ export interface OfferAsk {
   tools: string[];
   /** The servers they come from. */
   servers: string[];
+  /** The servers ticked when the question opens: every one, but those the person left out before. */
+  chosen: string[];
 }
+
+/** The person's answer: yes to the servers ticked, no to all, or the servers they picked. */
+export type OfferAnswer = boolean | string[];
 
 /** Where the offer stands, for a screen to say. */
 export type OfferState =
@@ -46,8 +54,8 @@ export type OfferState =
 
 export interface OfferOptions {
   sessionId: string;
-  /** Show the session's question to the person, and resolve with whether they allowed it. */
-  confirm: (ask: OfferAsk) => Promise<boolean>;
+  /** Show the session's question to the person, and resolve with which servers they allowed. */
+  confirm: (ask: OfferAsk) => Promise<OfferAnswer>;
   /** Who allowed it, as the consent records it; the session's name for the caller when absent. */
   confirmedBy?: string | undefined;
   onState?: (state: OfferState) => void;
@@ -78,18 +86,26 @@ export function offeredName(server: string, tool: string): string {
  * The person's signed-in servers, offered to one session on a pod.
  *
  * Give `invoke` to the attachment as its `onToolInvoke` and call `offer` from its
- * `onLive`, on every socket it opens.
+ * `onLive`, on every socket it opens; call `refresh` when a server may have been signed in
+ * to since (the window back in focus, every little while).
  */
 export class ServerOffer {
   private routes = new Map<string, Offered>();
-  // The set of tools the person allowed or turned down, by name, for this attachment.
+  // The set of tools the person allowed, by name, for this attachment.
   private allowed: string | null = null;
-  private declined: string | null = null;
+  // The servers the person has been asked about in this attachment, and those they chose.
+  private asked = new Set<string>();
+  private chosen = new Set<string>();
   // The question out to the person, so a socket that comes back while it is waits for the
   // same answer rather than asking twice.
-  private deciding: { key: string; answer: Promise<boolean> } | null = null;
+  private deciding: { key: string; answer: Promise<OfferAnswer> } | null = null;
   // The session's reason for taking no person's tools at all, once it has given one.
   private refused: string | null = null;
+  // The socket offered over last, and the tools registered on it.
+  private live: TroupeConnection | null = null;
+  private registered = new Set<string>();
+  // One offer at a time: a refresh and a socket coming back never register side by side.
+  private queue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly daemon: DaemonClient,
@@ -115,8 +131,36 @@ export class ServerOffer {
   };
 
   /** Offer the person's signed-in servers over this socket. */
-  async offer(conn: TroupeConnection): Promise<void> {
+  offer(conn: TroupeConnection): Promise<void> {
+    if (conn !== this.live) {
+      this.live = conn;
+      this.registered = new Set();
+    }
+    return this.serial(() => this.attempt(conn));
+  }
+
+  /**
+   * Look again for a server signed in to since the person was asked, and ask about it over
+   * the socket offered last. Nothing where every signed-in server has been asked about, the
+   * socket is gone, the question is still out, or the session takes no person's tools.
+   */
+  async refresh(): Promise<void> {
+    const conn = this.live;
+    if (!conn || conn.closed || this.refused !== null || this.deciding) return;
+    const listed = await this.daemon.listServers().catch(() => null);
+    if (!listed || !signedIn(listed.servers).some((s) => !this.asked.has(s.name))) return;
+    return this.serial(() => this.attempt(conn));
+  }
+
+  private serial(run: () => Promise<void>): Promise<void> {
+    const next = this.queue.then(run);
+    this.queue = next.catch(() => undefined);
+    return next;
+  }
+
+  private async attempt(conn: TroupeConnection): Promise<void> {
     if (this.refused !== null) return this.set({ state: "refused", reason: this.refused });
+    if (conn.closed) return;
     try {
       await this.register(conn);
     } catch (e) {
@@ -131,28 +175,45 @@ export class ServerOffer {
     if (!conn.scopes.has("control")) return this.set({ state: "none" });
     const offered = await this.collect();
     if (offered.length === 0) return this.set({ state: "none" });
-
-    const names = offered.map((o) => o.spec.name).sort();
-    const servers = [...new Set(offered.map((o) => o.server))].sort();
-    const key = names.join("\n");
-    if (key === this.declined) return this.set({ state: "declined" });
     this.routes = new Map(offered.map((o) => [o.spec.name, o]));
-    const tools = offered.map((o) => o.spec);
 
-    let challenge = await this.challenge(conn, tools);
-    if (challenge && key !== this.allowed) {
-      if (!(await this.decide(key, { prompt: challenge.prompt, tools: names, servers }))) {
-        this.declined = key;
-        return this.set({ state: "declined" });
+    // A server not asked about yet asks about them all; otherwise what the person chose.
+    const fresh = serversOf(offered).some((s) => !this.asked.has(s));
+    let want = fresh ? offered : offered.filter((o) => this.chosen.has(o.server));
+    if (want.length === 0) return this.declined(conn);
+    if (!fresh && sameNames(this.registered, want)) return this.set(offeredState(want));
+
+    let challenge = await this.challenge(conn, specsOf(want));
+    if (!challenge) {
+      // Taken without asking: what the session took is what is offered.
+      for (const s of serversOf(want)) {
+        this.asked.add(s);
+        this.chosen.add(s);
       }
-      this.allowed = key;
+      return this.registeredNow(conn, want);
+    }
+    if (fresh || keyOf(want) !== this.allowed) {
+      const servers = serversOf(want);
+      const ticked = servers.filter((s) => this.chosen.has(s) || !this.asked.has(s));
+      const answer = await this.decide(keyOf(want), { prompt: challenge.prompt, tools: namesOf(want), servers, chosen: ticked });
+      // "Not now" changes nothing that was offered: the new servers stay out.
+      const before = servers.filter((s) => this.chosen.has(s));
+      for (const s of servers) this.asked.add(s);
+      this.chosen = new Set(answer === true ? ticked : answer === false ? before : answer.filter((s) => servers.includes(s)));
+      const asked = keyOf(want);
+      want = want.filter((o) => this.chosen.has(o.server));
+      if (want.length === 0) return this.declined(conn);
+      if (sameNames(this.registered, want)) return this.set(offeredState(want));
+      this.allowed = keyOf(want);
+      // The challenge covers what the session asked about; a part of it takes one of its own.
+      if (this.allowed !== asked) challenge = await this.challenge(conn, specsOf(want));
     }
 
     // A challenge that ran out while the person decided is answered with a fresh one,
     // for the same tools they allowed: once, and again, and then it is the session's fault.
     for (let tries = 0; challenge && tries < 3; tries++) {
       try {
-        await this.send(conn, tools, challenge);
+        await this.send(conn, specsOf(want), challenge);
         challenge = null;
       } catch (e) {
         challenge = consentAsked(e);
@@ -160,14 +221,35 @@ export class ServerOffer {
       }
     }
     if (challenge) throw new Error("the session kept asking for consent");
-    this.set({ state: "offered", tools: names, servers });
+    return this.registeredNow(conn, want);
+  }
+
+  /** What is registered on this socket now: `want`, and what was before and is not taken back. */
+  private async registeredNow(conn: TroupeConnection, want: Offered[]): Promise<void> {
+    await this.withdraw(conn, want);
+    this.registered = new Set(namesOf(want));
+    this.set(offeredState(want));
+  }
+
+  /** Nothing offered: what was registered on this socket is taken back. */
+  private async declined(conn: TroupeConnection): Promise<void> {
+    await this.withdraw(conn, []);
+    this.registered = new Set();
+    this.set({ state: "declined" });
+  }
+
+  /** Take back the tools registered on this socket that are not among `keep`: a server the person unticked. */
+  private async withdraw(conn: TroupeConnection, keep: Offered[]): Promise<void> {
+    const kept = new Set(namesOf(keep));
+    const gone = [...this.registered].filter((n) => !kept.has(n));
+    if (gone.length === 0 || conn.closed) return;
+    await conn.call("tools.unregister", { command_id: conn.nextCommandId(), session_id: this.opts.sessionId, tools: gone });
   }
 
   /** The person's signed-in servers' tools, as the daemon lists them with their sign-in. */
   private async collect(): Promise<Offered[]> {
     const { servers } = await this.daemon.listServers();
-    const signedIn = servers.filter((s) => s.oauth && s.auth?.state === "signed_in" && !s.disabled && !s.refused);
-    const listed = await Promise.all(signedIn.map((s) => this.daemon.serverTools({ name: s.name }).catch(() => null)));
+    const listed = await Promise.all(signedIn(servers).map((s) => this.daemon.serverTools({ name: s.name }).catch(() => null)));
     return listed.flatMap((r) =>
       r?.state === "ready"
         ? r.tools.map((t) => ({ spec: { name: offeredName(r.server, t.name), description: t.description, schema: t.schema }, server: r.server, tool: t.name }))
@@ -199,7 +281,7 @@ export class ServerOffer {
     });
   }
 
-  private decide(key: string, ask: OfferAsk): Promise<boolean> {
+  private decide(key: string, ask: OfferAsk): Promise<OfferAnswer> {
     if (this.deciding?.key === key) return this.deciding.answer;
     this.set({ state: "asking", ask });
     const answer = this.opts.confirm(ask).finally(() => {
@@ -212,6 +294,37 @@ export class ServerOffer {
   private set(state: OfferState): void {
     this.opts.onState?.(state);
   }
+}
+
+/** The servers whose tools can be offered: signed in with OAuth, enabled, and not refused. */
+function signedIn(servers: LocalServer[]): LocalServer[] {
+  return servers.filter((s) => s.oauth && s.auth?.state === "signed_in" && !s.disabled && !s.refused);
+}
+
+function serversOf(offered: Offered[]): string[] {
+  return [...new Set(offered.map((o) => o.server))].sort();
+}
+
+function namesOf(offered: Offered[]): string[] {
+  return offered.map((o) => o.spec.name).sort();
+}
+
+function specsOf(offered: Offered[]): Offered["spec"][] {
+  return offered.map((o) => o.spec);
+}
+
+/** A set of tools as one string, for telling one consent from another. */
+function keyOf(offered: Offered[]): string {
+  return namesOf(offered).join("\n");
+}
+
+function sameNames(registered: Set<string>, offered: Offered[]): boolean {
+  const names = namesOf(offered);
+  return names.length === registered.size && names.every((n) => registered.has(n));
+}
+
+function offeredState(offered: Offered[]): OfferState {
+  return { state: "offered", tools: namesOf(offered), servers: serversOf(offered) };
 }
 
 /** Why an offer failed, in the session's words where it gave some. */
