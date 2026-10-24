@@ -20,6 +20,7 @@ paths:
   - install.sh
   - install.ps1
   - docs/developer/code-signing.md
+  - docs/developer/signing-day.md
   - docs/admin/security.md
   - clients/gui/docs/install.md
 symbols:
@@ -123,7 +124,7 @@ BEAM under a Developer ID with `beam.entitlements` alone.
 Developer ID signature, and `install.ps1` its SmartScreen note only when a program it
 installed has no valid signature, so they are right before and after the first signed
 release without an edit. The docs say which releases are signed in one place,
-`docs/admin/security.md` §6 ("none yet"), and `docs/developer/code-signing.md` §6 is the
-runbook for the day: the secrets, the one-time setup, how to check the first signed release
+`docs/admin/security.md` §6 ("none yet"), and `docs/developer/signing-day.md` is the runbook
+for the day: the secrets, the one-time setup, how to check the first signed release
 on a fresh Mac and a fresh Windows machine with Smart App Control on, which paragraphs to
 drop afterwards, and what to do when notarisation is rejected.

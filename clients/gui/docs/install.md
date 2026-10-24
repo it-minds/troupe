@@ -105,8 +105,9 @@ signing configuration and is applied only when CI passes `--config` at it: in a 
 (`native.yml` with `sign: release`) where the matching secret exists in the `release`
 environment, `AZURE_ENDPOINT` turning Windows signing on and `APPLE_CERTIFICATE` macOS's,
 and in the self-signed test of it (`signing.yml`). On Windows its sign command is
-`scripts/signing/sign-windows.ps1`. What to buy, what each needs first, every secret and
-the day's runbook are in [code-signing.md](../../../docs/developer/code-signing.md). Which
+`scripts/signing/sign-windows.ps1`. What to buy and what each needs first are in
+[code-signing.md](../../../docs/developer/code-signing.md); every secret and the day's
+runbook in [signing-day.md](../../../docs/developer/signing-day.md). Which
 releases are signed is said in one place,
 [security.md §6](../../../docs/admin/security.md#6-the-apps-are-not-os-code-signed). Expect
 SmartScreen to keep warning for the first signed releases: reputation accrues from
