@@ -60,7 +60,9 @@ Arrows point at what an app depends on; a change flows back along them. So:
 | anything else (docs) | — | only `versions` |
 
 `versions` runs whatever changed, because a moved file can break any of what it checks:
-every copy of the version agrees, every Markdown link resolves, no deployment is named,
+every copy of the version agrees, every Markdown link resolves, no hand-written page passes
+400 lines and the known defects list open ones only (`scripts/doc-size.exs`, which
+`dev-check` runs too; Decision 940), no deployment is named,
 every decision in `docs/decisions/` has its fields, a number of its own and `paths`
 that match something (`mix troupe.decisions --check`, run there with a bare `elixir`;
 Decision 790), and no changed code file cites a decision number more often than it did

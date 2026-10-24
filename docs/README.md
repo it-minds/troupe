@@ -1,29 +1,120 @@
 # Troupe
 
+<div class="tx-hero" markdown>
+
 Troupe is an open-source harness for coding agents, on your own machine and on your team's
 Kubernetes cluster. An agent reads your code, changes it and runs commands, asking first,
 in a session that outlives the window you started it from.
 
-![The desktop app: a team's session on a plane, stopped to ask before it runs a command, with what it has cost so far](assets/desktop-app.png)
+On Linux or macOS:
 
-**Who it is for.** An engineer who wants an agent's work to carry on when the terminal
-closes, and to follow it from the terminal, the desktop app or a script at once. A team
-that wants agents on shared infrastructure, with sign-in from its identity provider,
-budgets per team and per person, and an audit trail. Anyone writing a client of their own,
-against [one documented protocol](../PROTOCOL.md) that the bundled clients use too.
+<!-- quick-start: sh -->
+```sh
+curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh
+sh install.sh --tui
+```
+
+On Windows, in PowerShell:
+
+<!-- quick-start: powershell -->
+```powershell
+irm https://github.com/it-minds/troupe/releases/latest/download/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Tui
+```
+
+Then, in a new terminal, `troupe config` sets up a model and `troupe` in a project
+directory opens a session. Troupe is a beta, Apache-2.0, and has nothing to sign up for.
+
+</div>
+
+<!-- recording: docs/assets/seam.mp4, from gate issue #786 row 4. Until the file exists the
+     figure shows its poster, the still below; then a <video controls poster> takes the img's place. -->
+<figure class="tx-recording">
+  <img src="assets/desktop-app.png" width="1280" height="800" alt="The desktop app: a team's session on a plane, stopped to ask before it runs a command, with what it has cost so far">
+  <figcaption>A team's session on a plane, in the desktop app, stopped to ask before it runs
+  a command, with what it has cost so far.</figcaption>
+</figure>
+
+## What is different
+
+<div class="tx-feature" markdown>
+
+<div markdown>
+
+### A session outlives its client
+
+A session lives in the [daemon](glossary.md#daemon) on your machine, or on a
+[worker](glossary.md#worker) pod of your team's plane, not in the terminal you started it
+from. Close the terminal and the agent carries on; open the session again from the
+desktop app or a script and you see what it did. On a pod, a session nobody uses sleeps in
+object storage and wakes when it is next opened
+([the harness](../ARCHITECTURE.md#2-the-harness), [a worker pod](developer/architecture-remote.md#62-a-worker-pod)).
+
+</div>
+
+[![Three clients attached to one session in troupe-daemon or a worker pod; the terminal has been closed and the session carries on](assets/session-outlives-client.svg)](assets/session-outlives-client.svg)
+
+</div>
+
+<div class="tx-feature" markdown>
+
+<div markdown>
+
+### One protocol, and no other way in
+
+The terminal client and the desktop app speak only [the protocol](../PROTOCOL.md), which
+is complete on its own, with JSON Schema for every message: a program of yours gets
+everything they get. On a plane, the console, the `admin.*` methods and the MCP server are
+three renderings of one module, and a test holds them level, so nothing the console does is
+out of a script's or an agent's reach ([the admin surface](developer/architecture-remote.md#64-the-admin-surface)).
+
+</div>
+
+[![The terminal client, the desktop app and your program all speak PROTOCOL.md to troupe-daemon, a worker pod and the plane](assets/one-protocol.svg)](assets/one-protocol.svg)
+
+</div>
+
+<div class="tx-feature" markdown>
+
+<div markdown>
+
+### Every session is a log you can replay and audit
+
+What a session did is its log: every prompt, model reply, approval and tool call, in order,
+each event carrying the hash of the one before. A client that attaches replays it and then
+follows it live, two clients see the same thing in the same order, and a changed event
+breaks the chain ([events](../PROTOCOL.md#4-events)). What a session cost is read from the
+same log.
+
+</div>
+
+[![A session's events in order, from session_created to turn_ended, each carrying the hash of the one before](assets/event-log.svg)](assets/event-log.svg)
+
+</div>
+
+## Who it is for
+
+An engineer who wants an agent's work to carry on when the terminal closes, and to follow
+it from the terminal, the desktop app or a script at once. A team that wants agents on
+shared infrastructure, with sign-in from its identity provider, budgets per team and per
+person, and an audit trail. Anyone writing a client of their own, against
+[one documented protocol](../PROTOCOL.md) that the bundled clients use too.
 [Why Troupe](why-troupe.md) says more, and when you do not need it.
 
-## Start here
+## Try it in ten minutes
+
+The [quick start](quick-start.md): the install above, a key for a model, a first session,
+what it cost and a cap on the next one, and what a plane would add. CI runs its commands
+against the latest release every night.
+
+## Where to go
 
 | | |
 |---|---|
-| **Install** | The [quick start](quick-start.md): one command on Linux, macOS or Windows, a first session, what it cost and a cap on the next one, in ten minutes. |
-| **The first run** | [Five steps](user/README.md#first-run) from an installed `troupe` to a session in your project: `troupe setup`, or the desktop app's first screens. |
+| **Install** | The [quick start](quick-start.md), then [the first run](user/README.md#first-run): `troupe setup`, or the desktop app's first screens. |
 | **Run it for a team** | [Installing a plane](admin/installing.md), from an empty cluster to a first team in the console, then the rest of the [administrator's guide](admin/README.md). |
-
-Troupe is a beta, Apache-2.0, and has nothing to sign up for. The words it uses are in the
-[glossary](glossary.md).
-
+| **The documentation** | By reader, below; the words it uses are in the [glossary](glossary.md). |
+| **The repository** | [it-minds/troupe](https://github.com/it-minds/troupe): the code, the [releases](https://github.com/it-minds/troupe/releases) and the issues. |
 ## The documentation, by reader
 
 Four kinds of reader come here, and each has a track and an order to read it in. The

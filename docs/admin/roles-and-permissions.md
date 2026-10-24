@@ -113,7 +113,7 @@ token, at most 15 minutes later.
 
 Offering a session one's own signed-in tools (`tools.register`) takes `control`. A profile
 with `personalTools: forbid` refuses it on its pods, and the platform's
-`managed_mcp_servers_only` everywhere ([profiles-and-policy.md](profiles-and-policy.md#a-persons-own-tools-on-a-pod)).
+`managed_mcp_servers_only` everywhere ([profile-options.md](profile-options.md#a-persons-own-tools-on-a-pod)).
 
 ## 6. How each surface authenticates
 

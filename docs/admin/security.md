@@ -114,7 +114,7 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   more** (`worker.seccomp`, Decision 890). Bubblewrap needs an unprivileged user namespace,
   and a container runtime's default profile refuses one, so by default the chart ships its
   own (`charts/troupe/files/worker-seccomp.json`) and a DaemonSet puts it on every node
-  ([installing.md](installing.md#the-workers-seccomp-profile)). It is containerd's default
+  ([worker-sandbox.md](worker-sandbox.md#the-workers-seccomp-profile)). It is containerd's default
   profile for a container with no capabilities, with three changes:
   - `clone` and `unshare` may make a user, mount, PID, IPC or UTS namespace, the ones the
     sandbox is made of;
@@ -139,7 +139,7 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   namespaces (`kernel.apparmor_restrict_unprivileged_userns=1`) refuses an unconfined
   process the uid map of one it makes. The chart ships its own
   (`charts/troupe/files/worker-apparmor`), and a DaemonSet loads it on every node
-  ([installing.md](installing.md#the-workers-apparmor-profile)). It is containerd's default
+  ([worker-sandbox.md](worker-sandbox.md#the-workers-apparmor-profile)). It is containerd's default
   profile with these changes:
   - `mount` and `pivot_root` are allowed, where the default denies every mount. As with
     seccomp, a process with no capabilities can mount only inside a user and mount
@@ -208,7 +208,7 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   its pushes. A push goes only to a repository the team lists, private unless the profile
   allows public ones, and never carries `.env`, a key file, a denied path or a copy of a
   mounted secret; tokens are revoked when the session goes dormant. Every token, push and
-  stop is an audit entry (Decisions 885, 891 and 911; [github.md](github.md#7-the-fix-loop),
+  stop is an audit entry (Decisions 885, 891 and 911; [github-runs.md](github-runs.md#the-fix-loop),
   [§9](github.md#9-how-far-a-run-may-go)).
 - **One OpenBao role for every profile, by default.** Every worker logs in as
   `troupe-worker`. `bao.workerRolePerProfile` gives each profile a role of its own, so one
@@ -336,7 +336,7 @@ An organisation can set defaults for people's machines and enforce a fixed list 
 settings above everything on them, the command line included: `approvals`, `provider`,
 `base_url`, `managed_mcp_servers_only`, `managed_permission_rules_only`, and the ceilings
 `max_tokens`, `max_turns`, `wall_clock_ms` and `max_depth` (Decision 869;
-[configuration.md](configuration.md#defaults-and-limits-for-peoples-machines)). When a run
+[client-config.md](client-config.md#defaults-and-limits-for-peoples-machines)). When a run
 reaches an enforced turn or time limit, the question that asks whether to go on cannot take
 it past (#622).
 
@@ -359,7 +359,7 @@ every participant sees ([PROTOCOL.md §8](../../PROTOCOL.md#8-client-hosted-tool
 
 A worker profile with `personalTools: forbid` takes none, and the platform's
 `managed_mcp_servers_only` refuses the offer on every profile at once (Decisions 862 and
-879; [profiles-and-policy.md](profiles-and-policy.md#a-persons-own-tools-on-a-pod)).
+879; [profile-options.md](profile-options.md#a-persons-own-tools-on-a-pod)).
 
 ## 9. What is logged, and how a session is erased or kept private
 
