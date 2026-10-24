@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Upgrades the kind cluster goes through with no hand step, run against `scripts/remote-up`'s
+# cluster. One case so far; the N-1 to N upgrade job in the cluster suite is meant to grow
+# from here.
+#
+#   scripts/kind-upgrade-check require-tls [chart]
+#
+# require-tls: a plane that ran without TLS on its control port, a worker pod made then
+# (which dials in plaintext), and an upgrade to `plane.controlTls.enabled` and `requireTls`.
+# The plane closes the pod's plaintext connection, so the pod can neither enrol nor be
+# drained; the operator replaces it, and its successor enrols over TLS. Passes when that
+# happens within the timeout, with nobody deleting a pod. `chart` is the chart to upgrade
+# to, `charts/troupe` unless named; the release's other values are kept (`--reuse-values`).
+#
+# Not idempotent by accident: it leaves the cluster as `requireTls: true`, as a plane ends
+# up. It deletes the profile's pod once, while setting the case up: that is the pod made
+# "before its namespace had the CA", and what the check is about is everything after it.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+case_name="${1:-}"
+chart="${2:-charts/troupe}"
+context="kind-${TROUPE_KIND_CLUSTER:-troupe-dev}"
+namespace="troupe-system"
+profile="${TROUPE_PROFILE_NAME:-dev}"
+workers="troupe-w-${profile}"
+timeout="${TROUPE_UPGRADE_TIMEOUT:-300}"
+
+kc() { kubectl --context "$context" "$@"; }
+
+# Whether the profile's pod is told where the plane's CA is, which it is exactly when it
+# dials the control port with TLS.
+dials_tls() {
+  kc -n "$workers" get pod "${workers}-0" \
+    -o jsonpath='{range .spec.containers[0].env[*]}{.name}{"\n"}{end}' | grep -qx TROUPE_PLANE_CA_PATH
+}
+
+require_tls() {
+  echo "==> a plane without TLS on its control port, and a pod made then"
+  helm --kube-context "$context" upgrade troupe "$chart" -n "$namespace" --reuse-values \
+    --set plane.controlTls.enabled=false --set plane.controlTls.requireTls=false --wait --timeout 5m
+  kc -n "$namespace" rollout status deployment/troupe-operator --timeout=180s
+  kc -n "$namespace" rollout status deployment/troupe-plane --timeout=180s
+  # Setup only: wait for the operator to have written the template without the CA.
+  sleep 20
+  kc -n "$workers" delete pod "${workers}-0"
+  kc -n "$workers" wait --for=condition=Ready "pod/${workers}-0" --timeout=300s
+  if dials_tls; then
+    echo "kind-upgrade-check: the pod made without control TLS dials with TLS; nothing to check" >&2
+    exit 1
+  fi
+  before=$(kc -n "$workers" get pod "${workers}-0" -o jsonpath='{.metadata.uid}')
+
+  echo "==> the upgrade to requireTls: true"
+  helm --kube-context "$context" upgrade troupe "$chart" -n "$namespace" --reuse-values \
+    --set plane.controlTls.enabled=true --set plane.controlTls.requireTls=true --wait --timeout 5m
+  kc -n "$namespace" rollout status deployment/troupe-operator --timeout=180s
+  kc -n "$namespace" rollout status deployment/troupe-plane --timeout=180s
+
+  echo "==> waiting up to ${timeout}s for the operator to replace the plaintext pod"
+  deadline=$((SECONDS + timeout))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    now=$(kc -n "$workers" get pod "${workers}-0" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
+    if [ -n "$now" ] && [ "$now" != "$before" ] && dials_tls &&
+        kc -n "$workers" wait --for=condition=Ready "pod/${workers}-0" --timeout=10s >/dev/null 2>&1; then
+      echo "kind-upgrade-check: require-tls: the pod was replaced and its successor dials with TLS"
+      kc -n "$namespace" get wp "$profile" \
+        -o jsonpath='{range .status.conditions[?(@.type=="UpgradePending")]}{.type}={.status} {.message}{"\n"}{end}'
+      return 0
+    fi
+    sleep 5
+  done
+
+  echo "kind-upgrade-check: require-tls: the plaintext pod is still there after ${timeout}s" >&2
+  kc -n "$namespace" get wp "$profile" \
+    -o jsonpath='{range .status.conditions[?(@.type=="UpgradePending")]}{.type}={.status} {.message}{"\n"}{end}' >&2
+  exit 1
+}
+
+case "$case_name" in
+  require-tls) require_tls ;;
+  *)
+    echo "usage: scripts/kind-upgrade-check require-tls [chart]" >&2
+    exit 2
+    ;;
+esac

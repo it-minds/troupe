@@ -177,6 +177,8 @@ export type {
   TriggerPut,
   TriggerRevision,
   FleetOverview,
+  OpenBaoCheck,
+  OpenBaoGrant,
   IdentityCheck,
   IdentityCheckResult,
   ProviderCheck,

@@ -139,6 +139,27 @@ defmodule Troupe.Operator.ReconcilerTest do
     end
   end
 
+  # A namespace made by an operator that wrote no Pod Security labels, or labelled by hand,
+  # is labelled at the next pass, keeping every other label it has.
+  test "a worker namespace made without the Pod Security labels has them after a pass" do
+    existing = %{
+      "apiVersion" => "v1",
+      "kind" => "Namespace",
+      "metadata" => %{"name" => "troupe-w-dev", "labels" => Names.managed_labels("dev")}
+    }
+
+    conn = FakeCluster.start([policy(), profile(), existing])
+
+    assert {:ok, _result} =
+             reconcile_with(conn, pod_security_labels: true, worker_user_namespaces: true)
+
+    labels = get({"v1", "Namespace", nil, "troupe-w-dev"})["metadata"]["labels"]
+    assert labels["pod-security.kubernetes.io/enforce"] == "privileged"
+    assert labels["pod-security.kubernetes.io/audit"] == "privileged"
+    assert labels["pod-security.kubernetes.io/warn"] == "privileged"
+    assert labels["troupe.dev/workers"] == "true"
+  end
+
   describe "an egress entry that is not a pattern" do
     # A bare `*` in the policy used to admit a bare `*` in a profile, and the operator wrote
     # it as a `matchPattern` that is every name there is.
@@ -551,6 +572,53 @@ defmodule Troupe.Operator.ReconcilerTest do
       assert %{"status" => "False"} = condition("UpgradePending")
     end
 
+    # A pod made before its namespace had the plane's CA dials in plaintext, and a plane
+    # that takes TLS only closes it: it cannot enrol, so the plane can never drain it, and
+    # until this the upgrade waited on it for good, with the sessions on it cut off.
+    test "replaces a pod that dials in plaintext where the plane takes TLS only, undrained" do
+      conn =
+        FakeCluster.start([
+          policy(),
+          profile(),
+          stateful_set(update: "troupe-w-dev-b", current: "troupe-w-dev-a", replicas: 2),
+          pod("troupe-w-dev-0", "troupe-w-dev-b", tls: true),
+          pod("troupe-w-dev-1", "troupe-w-dev-a", tls: false)
+        ])
+
+      assert {:ok, _result} =
+               reconcile_with(conn, plane_ca_path: "/nonexistent/ca.crt", plane_require_tls: true)
+
+      assert FakeCluster.deleted() == [{"v1", "Pod", "troupe-w-dev", "troupe-w-dev-1"}]
+
+      assert condition("UpgradePending")["message"] ==
+               "1 pod(s) run an older revision: troupe-w-dev-1 is being replaced"
+    end
+
+    test "waits for the drain of a plaintext pod while the plane takes plaintext, or a TLS one" do
+      for {settings, tls?} <- [
+            {[plane_ca_path: "/nonexistent/ca.crt", plane_require_tls: false], false},
+            {[plane_ca_path: "/nonexistent/ca.crt", plane_require_tls: true], true},
+            # No CA for the current revision either: a replacement would dial as it does.
+            {[plane_ca_path: nil, plane_require_tls: true], false}
+          ] do
+        conn =
+          FakeCluster.start([
+            policy(),
+            profile(),
+            stateful_set(update: "troupe-w-dev-b", current: "troupe-w-dev-a", replicas: 1),
+            pod("troupe-w-dev-0", "troupe-w-dev-a", tls: tls?)
+          ])
+
+        assert {:ok, _result} = reconcile_with(conn, settings)
+        assert FakeCluster.deleted() == [], inspect(settings)
+
+        assert condition("UpgradePending")["message"] ==
+                 "1 pod(s) run an older revision: troupe-w-dev-0 waits to be drained"
+
+        stop_supervised!(FakeCluster)
+      end
+    end
+
     test "deletes nothing for a profile outside the policy" do
       conn =
         FakeCluster.start([
@@ -772,6 +840,27 @@ defmodule Troupe.Operator.ReconcilerTest do
       "kind" => "Pod",
       "metadata" => metadata,
       "status" => %{"conditions" => [%{"type" => "Ready", "status" => ready}]}
+    }
+    |> then(
+      &if(Keyword.has_key?(opts, :tls),
+        do: Map.put(&1, "spec", worker_spec(opts[:tls])),
+        else: &1
+      )
+    )
+  end
+
+  # The worker container as a revision renders it: told where the plane's CA is exactly
+  # when it dials with TLS.
+  defp worker_spec(tls?) do
+    env =
+      if tls?,
+        do: [%{"name" => "TROUPE_PLANE_CA_PATH", "value" => "/etc/troupe/plane-ca/ca.crt"}],
+        else: []
+
+    %{
+      "containers" => [
+        %{"name" => "worker", "env" => [%{"name" => "TROUPE_PROFILE", "value" => "dev"} | env]}
+      ]
     }
   end
 

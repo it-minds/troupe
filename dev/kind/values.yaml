@@ -4,6 +4,15 @@
 # this anywhere else: one replica each, no TLS, a static OpenBao token, and an identity
 # provider with a password in a ConfigMap.
 
+# `troupe-system` here also runs the development dependencies (`dependencies.yaml`), which
+# `baseline` admits and `restricted` does not, so the chart is told the level rather than
+# working it out from its own pods. `scripts/remote-up` raises it to `privileged` where the
+# workers' AppArmor DaemonSet runs. The worker namespaces are the operator's to label, as
+# anywhere: `privileged`, since their pods run in user namespaces.
+podSecurity:
+  labels: true
+  level: baseline
+
 operator:
   image: {tag: dev}
   resources:

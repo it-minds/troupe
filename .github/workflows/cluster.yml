@@ -117,6 +117,37 @@ jobs:
               --show-only templates/admission-policy.yaml --show-only templates/policy-default.yaml \
             | kubectl --context kind-troupe-dev apply --dry-run=server -f -
 
+      # The Pod Security level the chart labels its namespace with admits every pod the chart
+      # makes there, as the API server's admission says: `restricted` without the DaemonSet
+      # that puts the workers' profiles on the nodes, `privileged` with it, whose host mount
+      # and root nothing lower admits. A server-side dry run in a namespace labelled as the
+      # chart labels `troupe-system` warns of any pod template the level would refuse, and
+      # writes nothing.
+      - name: The level the chart labels its namespace with admits the chart's own pods
+        run: |
+          check() {
+            want=$1; ns=$2; shift 2
+            rendered=$(helm template troupe charts/troupe --namespace "$ns" --set namespace="$ns" \
+              --set plane.controlTls.certManager=false --set a2a.enabled=true "$@")
+            level=$(grep -m1 'pod-security.kubernetes.io/enforce:' <<<"$rendered" | awk '{print $2}')
+            if [ "$level" != "$want" ]; then echo "the chart labels its namespace $level, not $want ($*)"; exit 1; fi
+            kubectl --context kind-troupe-dev create namespace "$ns"
+            kubectl --context kind-troupe-dev label namespace "$ns" \
+              "pod-security.kubernetes.io/enforce=$level" "pod-security.kubernetes.io/warn=$level"
+            out=$(kubectl --context kind-troupe-dev apply --dry-run=server -n "$ns" -f - <<<"$rendered" 2>&1 || true)
+            kubectl --context kind-troupe-dev delete namespace "$ns" --wait=false
+            if grep -q 'violate PodSecurity' <<<"$out"; then
+              echo "$level refuses a pod the chart makes:"; grep 'violate PodSecurity' <<<"$out"; exit 1
+            fi
+            for kind in deployment.apps/troupe-plane deployment.apps/troupe-operator job.batch/troupe-plane-migrate; do
+              grep -q "$kind" <<<"$out" || { echo "$kind was not dry-run:"; echo "$out"; exit 1; }
+            done
+            echo "$level admits every pod the chart makes ($*)"
+          }
+          check restricted psa-chart-restricted \
+            --set worker.seccomp.install.enabled=false --set worker.appArmor.install.enabled=false
+          check privileged psa-chart-privileged
+
       # The WorkerProfile's rule for its model settings, as the API server runs it: a model
       # without llm.endpoint is refused with the rule's plain message, and the same with one
       # is taken. A server-side dry run in the default namespace writes nothing.
