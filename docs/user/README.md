@@ -51,9 +51,9 @@ daemon is running, `troupe-daemon` and `troupe` on the `PATH`, and every plane y
 signed in to. A line that says `FAIL` makes it exit 1; `warn` does not. `troupe-daemon
 doctor` prints the same lines. `troupe doctor --bench` then says whether a session gets
 through the harness on this machine: a turn of thirty tool calls, a tool output too long
-to send whole, a compaction, a cancel, a replay of the session's log, Claude Code's,
-opencode's, Cursor's and Copilot's files onboarded, and a remembered command whose file
-changed since, ten scenarios run in `troupe`
+to send whole, a compaction, a cancel, a replay of the session's log, thinking made before
+the prompt changed, Claude Code's, opencode's, Cursor's and Copilot's files onboarded, and a
+remembered command whose file changed since, eleven scenarios run in `troupe`
 itself against a scripted model, so in a few seconds and with no provider, key or network,
 a line each saying it passed or what did not hold (`--json` prints it as one object).
 `troupe bench --live` goes further: four small tasks against your model, under a cap it

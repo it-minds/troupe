@@ -41,6 +41,39 @@ defmodule Troupe.KeyringTest do
     assert :ok = Keyring.delete("one"), "removing what is not there is not an error"
   end
 
+  # Credential Manager holds 2560 bytes in an entry: a value past that is kept in parts
+  # under the entry's name and read back whole, and deleting it takes every part. On
+  # Windows the store is the OS's, under this test's own service; elsewhere the VM's.
+  test "a value of four kilobytes round-trips and is deleted whole" do
+    backend = if match?({:win32, _}, :os.type()), do: OS, else: Memory
+    entry = Keyring.entry("steering-long")
+    value = "eyJ" <> String.duplicate("a1B2-c3_D", 455)
+    assert byte_size(value) > 4_096
+
+    on_exit(fn -> backend.delete(entry) end)
+
+    assert :ok = backend.put(entry, value)
+    assert {:ok, ^value} = backend.get(entry)
+
+    # In two parts under the entry's name, each read as an entry of its own.
+    if backend == OS do
+      assert {:ok, first} = OS.get(entry <> "/0")
+      assert {:ok, second} = OS.get(entry <> "/1")
+      assert byte_size(first) == 2_560 and first <> second == value
+      assert OS.get(entry <> "/2") == :none
+    end
+
+    assert :ok = backend.put(entry, "short")
+    assert {:ok, "short"} = backend.get(entry)
+    assert :ok = backend.put(entry, value)
+    assert :ok = backend.delete(entry)
+    assert backend.get(entry) == :none
+
+    if backend == OS do
+      for part <- 0..1, do: assert(OS.get(entry <> "/#{part}") == :none, "part #{part} was left")
+    end
+  end
+
   # The machine's own store, where it has one: Credential Manager on Windows, the keychain
   # on a Mac, the Secret Service where `secret-tool` answers. Elsewhere it says it has
   # none, and the daemon keeps the sign-in in memory.

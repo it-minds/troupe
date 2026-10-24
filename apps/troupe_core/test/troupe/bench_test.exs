@@ -22,7 +22,7 @@ defmodule Troupe.BenchTest do
     assert Bench.passed?(report), Bench.markdown(report)
 
     assert Enum.map(report["scenarios"], & &1["name"]) ==
-             ~w(tool_calls cut_output compaction cancel replay onboard_claude_code onboard_opencode onboard_cursor onboard_copilot memory_stale_anchor)
+             ~w(tool_calls cut_output compaction cancel replay prefix_change onboard_claude_code onboard_opencode onboard_cursor onboard_copilot memory_stale_anchor)
 
     # #248: the command whose file changed is marked, and recall says so (Decision 838).
     memory = scenario(report, "memory_stale_anchor")

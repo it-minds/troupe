@@ -439,7 +439,7 @@ defmodule Troupe.Agent.Server do
 
         %{
           state
-          | conversation: state.conversation ++ [message],
+          | conversation: let_thinking_go(state.conversation, data) ++ [message],
             budget: state.budget |> Budget.charge_turn() |> Budget.charge_usage(usage),
             last_input_tokens: Usage.total_input(usage),
             turn: Spend.call(state.turn, usage, get_in(data, ["gateway", "cost_micros"]))
@@ -2025,13 +2025,50 @@ defmodule Troupe.Agent.Server do
     end)
   end
 
+  # A call refused for thinking bound to another conversation and sent again without it, or
+  # one whose thinking the binding beta dropped, says that the blocks it carried were made
+  # before the prompt in front of them changed. Kept, they meet the same refusal on every
+  # later call until a compaction. So the conversation lets them go, at that call and only
+  # then: every block of Anthropic's it carried where the call was sent again with none,
+  # the last `dropped` where the beta dropped those (a dropped block takes every one after
+  # it with it). What is left is a leading run taken out, which the API accepts, and the
+  # blocks made since, under the prompt as it is now. The log keeps what the call said, so
+  # a resumed session lets the same blocks go when it folds the call.
+  defp let_thinking_go(conversation, %{"thinking_resent" => true}),
+    do: Enum.map(conversation, &without_thinking/1)
+
+  defp let_thinking_go(conversation, %{"thinking_dropped" => dropped})
+       when is_integer(dropped) and dropped > 0 do
+    conversation
+    |> Enum.reverse()
+    |> Enum.map_reduce(dropped, &without_last_thinking/2)
+    |> elem(0)
+    |> Enum.reverse()
+  end
+
+  defp let_thinking_go(conversation, _data), do: conversation
+
+  defp without_last_thinking(%Message{role: :assistant, content: blocks} = message, left)
+       when left > 0 do
+    {kept, left} =
+      blocks
+      |> Enum.reverse()
+      |> Enum.flat_map_reduce(left, fn
+        %Reasoning{provider: :anthropic}, n when n > 0 -> {[], n - 1}
+        block, n -> {[block], n}
+      end)
+
+    # A message that was nothing but thinking is left as it was rather than sent empty.
+    if kept == [], do: {message, left}, else: {%{message | content: Enum.reverse(kept)}, left}
+  end
+
+  defp without_last_thinking(message, left), do: {message, left}
+
   defp record_response(state, %Response{} = response) do
     message = Response.to_message(response)
     gateway = gateway_json(response.gateway, state, response)
 
-    log(
-      state,
-      :llm_response,
+    data =
       %{
         "message" => Message.to_json(message),
         "usage" => Usage.to_json(response.usage),
@@ -2040,7 +2077,8 @@ defmodule Troupe.Agent.Server do
         "gateway" => gateway
       }
       |> put_thinking_kept(response)
-    )
+
+    log(state, :llm_response, data)
 
     state = count_call(state, response.usage, gateway)
 
@@ -2048,7 +2086,7 @@ defmodule Troupe.Agent.Server do
     # what compaction and the context gauge read (Decision 657).
     %{
       state
-      | conversation: state.conversation ++ [message],
+      | conversation: let_thinking_go(state.conversation, data) ++ [message],
         budget: Budget.charge_turn(state.budget),
         last_input_tokens: Usage.total_input(response.usage),
         overflow_retried: false

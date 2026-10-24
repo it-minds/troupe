@@ -129,6 +129,27 @@ describe("a reload keeps you signed in", () => {
     assert.ok(await reload(store).restore(), "and once it answers again, the reload signs back in");
   });
 
+  // The provider has already exchanged the code when the store refuses the token (Windows'
+  // Credential Manager refused one past its size, D5): the sign-in stands, and the person
+  // is told in a sentence that the next launch will ask again.
+  it("signs in when the store cannot keep the token, and says the next launch will ask again", async (t) => {
+    const logged = warnings(t);
+    const kept = memoryTokenStore();
+    const refusing: TokenStore = {
+      read: (key) => kept.read(key),
+      clear: (key) => kept.clear(key),
+      write: async () => {
+        throw new Error("could not write to the credential store: Attribute 'password encoded as UTF-16' is longer than platform limit");
+      },
+    };
+
+    const auth = await h.signIn({ store: refusing });
+    assert.ok(auth.signedIn, "the sign-in failed after the provider had answered");
+    assert.match(auth.notKept ?? "", /^This sign-in could not be kept in the credential store, so the next launch will ask you to sign in again: could not write/);
+    assert.match(logged().join("\n"), /could not be kept in the credential store/);
+    assert.ok(await auth.rpc("sessions.list"), "the session it holds does not work");
+  });
+
   it("says so when a sign-in brings no refresh token, since the next reload will ask again", async (t) => {
     const logged = warnings(t);
     h.idp.offlineAccess = false;

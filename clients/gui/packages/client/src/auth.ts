@@ -207,6 +207,7 @@ export class AuthSession {
   private credential: PlaneCredential | null = null;
   private renewing: Promise<PlaneCredential> | null = null;
   private refusal: string | null = null;
+  private unkept: string | null = null;
   private readonly forcedFlow: "redirect" | "device" | null;
   private readonly listeners = new Set<(credential: PlaneCredential) => void>();
 
@@ -352,7 +353,7 @@ export class AuthSession {
         return null;
       }
       this.refusal = null;
-      if (tokens.refresh_token) await this.store.write(this.key, tokens.refresh_token);
+      if (tokens.refresh_token) await this.keep(tokens.refresh_token);
       return tokens;
     });
   }
@@ -391,7 +392,7 @@ export class AuthSession {
     // Persisted before the exchange: a rotated refresh token that is dropped because
     // the exchange failed would lock the person out until they signed in again.
     if (tokens.refresh_token) {
-      await this.store.write(this.key, tokens.refresh_token);
+      await this.keep(tokens.refresh_token);
     } else {
       // A sign-in that ends at the next reload, and nothing else would say so. Entra
       // and Authentik issue a refresh token only for `offline_access`, and Authentik
@@ -399,6 +400,27 @@ export class AuthSession {
       console.warn(`troupe: the identity provider issued no refresh token for ${this.planeUrl}, so a reload will ask for a sign-in again. Its scopes need "offline_access", allowed for this client.`);
     }
     return this.enter(tokens);
+  }
+
+  /**
+   * Store the refresh token the provider just gave. A store that refuses it does not undo
+   * a sign-in the provider has already answered, and the token it rotated from is spent:
+   * the session goes on with what it holds, and `notKept` says, in a sentence, that the
+   * next launch will ask for a sign-in again.
+   */
+  private async keep(refresh: string): Promise<void> {
+    try {
+      await this.store.write(this.key, refresh);
+      this.unkept = null;
+    } catch (e) {
+      this.unkept = `This sign-in could not be kept in the credential store, so the next launch will ask you to sign in again: ${e instanceof Error ? e.message : String(e)}`;
+      console.warn(`troupe: ${this.unkept}`);
+    }
+  }
+
+  /** Why the last sign-in or renewal was not stored, in a sentence; null when it was. */
+  get notKept(): string | null {
+    return this.unkept;
   }
 
   /** Exchange the provider's id token for a plane token. */
