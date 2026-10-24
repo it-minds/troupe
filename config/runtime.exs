@@ -147,6 +147,9 @@ if config_env() == :prod do
       # Secret (`plane.controlTls`). Set, every worker namespace is given it and every pod
       # dials the control port with TLS; unset, pods dial in plaintext.
       plane_ca_path: presence.(System.get_env("TROUPE_PLANE_CONTROL_CA")),
+      # Whether the plane takes TLS only on that port (`plane.controlTls.requireTls`), so a
+      # pod that dials in plaintext is one the plane can never drain.
+      plane_require_tls: System.get_env("TROUPE_PLANE_CONTROL_REQUIRE_TLS") == "true",
       bao_address: System.get_env("TROUPE_BAO_ADDR", "http://openbao.troupe-system.svc:8200"),
       bao_role_per_profile: System.get_env("TROUPE_BAO_WORKER_ROLE_PER_PROFILE") == "true",
       bao_auth_path: presence.(System.get_env("TROUPE_BAO_AUTH_PATH")) || "kubernetes",
@@ -171,6 +174,9 @@ if config_env() == :prod do
       # A user namespace for every worker pod and its `/proc` unmasked
       # (`worker.userNamespaces` in the chart). Unset is off, as it always was.
       worker_user_namespaces: System.get_env("TROUPE_WORKER_USER_NAMESPACES") == "true",
+      # The Pod Security labels on every worker namespace (`podSecurity.labels` in the
+      # chart). Unset is off, as it always was.
+      pod_security_labels: System.get_env("TROUPE_POD_SECURITY_LABELS") == "true",
       # Comma-separated names, as the chart joins them; an unset variable and an empty
       # one both mean no pull secrets.
       image_pull_secrets:

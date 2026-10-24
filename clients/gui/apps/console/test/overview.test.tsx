@@ -82,3 +82,41 @@ describe("the overview", () => {
     await sees("Nothing is unhealthy, at its ceiling or waiting on a person.");
   });
 });
+
+// The plane cannot grant itself an OpenBao policy, so what its role lacks is a precondition
+// it checks look-only and says, with the lines an OpenBao administrator runs (#765).
+describe("the key manager", () => {
+  const keyManager = (): HTMLElement | null => document.querySelector<HTMLElement>('section[aria-label="Key manager"]');
+
+  it("lists each grant the plane's OpenBao role holds", async () => {
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    await waitFor(() => keyManager(), "the key manager");
+    await sees("troupe-plane-signing", keyManager);
+    await sees("troupe-plane-github (optional)", keyManager);
+    expect(keyManager()!.querySelector("pre")).toBeNull();
+  });
+
+  it("names a grant it lacks as needing attention, with the lines that grant it", async () => {
+    const grant = fake.admin.openbao.grants.find((g) => g.id === "plane-signing")!;
+    Object.assign(grant, {
+      ok: false,
+      detail: "The plane's OpenBao role may not make, rotate and sign with the plane's own key.",
+      fix: "bao policy write troupe-plane-signing - <<'POLICY'\n...\nPOLICY\nbao write auth/kubernetes/role/troupe-plane token_policies=troupe-plane,troupe-plane-signing\n",
+    });
+    fake.admin.openbao.ok = false;
+
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    await waitFor(() => items().some((i) => says("may not make, rotate and sign", i)), "the missing grant among what needs attention");
+    await sees("To grant troupe-plane-signing, an OpenBao administrator runs:", keyManager);
+    await sees("token_policies=troupe-plane,troupe-plane-signing", keyManager);
+  });
+
+  it("is not shown to a team admin, whose overview says nothing of it", async () => {
+    await signedInAs(fake, PEOPLE.bob);
+    unmount = render(<App />).unmount;
+    await waitFor(() => says("Spend · per team"), "the overview, as a team admin");
+    expect(keyManager()).toBeNull();
+  });
+});

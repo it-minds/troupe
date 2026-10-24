@@ -309,6 +309,12 @@ if docker exec "${cluster}-control-plane" sh -c \
 fi
 echo "remote-up: the workers' AppArmor profile: ${apparmor}"
 
+# The DaemonSet that loads that profile runs as root with a host mount, which only
+# `privileged` admits; otherwise `troupe-system` here needs `baseline`, for the
+# dependencies beside the chart (`podSecurity` in the kind values).
+pod_security=baseline
+if [ "$apparmor" = true ]; then pod_security=privileged; fi
+
 # The gateway replaces the placeholder that is first in the kind values' egress list; an
 # index in `--set` changes that entry and keeps the rest.
 #
@@ -326,6 +332,7 @@ helm --kube-context "$context" upgrade --install troupe "$chart" \
   --values "$kind_values" \
   --set "policy.allowedEgress[0]=${gateway_host}" \
   --set "worker.appArmor.enabled=${apparmor}" \
+  --set "podSecurity.level=${pod_security}" \
   "${tags[@]}" \
   --wait --timeout 5m
 

@@ -112,7 +112,10 @@ Decision 915 is the long form.
   one from the registry, an organisation seeded through the protocol, this tree's CRDs and
   `helm upgrade`, and every seeded thing asked for again; CI's `upgrade` job, and what a
   fixer runs under the plane lock before pushing a change to the chart, the operator or a
-  migration ([ci.md](ci.md#the-upgrade-from-the-previous-release)).
+  migration ([ci.md](ci.md#the-upgrade-from-the-previous-release)). `scripts/kind-upgrade-check
+  require-tls [chart]` is the other upgrade it checks, against `scripts/remote-up`'s cluster:
+  a plane without TLS on its control port, a pod made then, and the upgrade to
+  `requireTls: true`, which passes when the operator replaces the plaintext pod by itself.
 - `scripts/pitr-drill`: restores the compose PostgreSQL to a point, rebuilds the index and
   asserts the lost session came back ([../admin/backup-restore.md](../admin/backup-restore.md)).
 - `scripts/dev-restore-rehearsal [--keep]`: a database and a bucket of its own on the dev

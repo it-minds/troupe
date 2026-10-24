@@ -115,20 +115,14 @@ defmodule Troupe.KMS.Policy do
   admin who has a reason to want to.
   """
   @spec plane(String.t()) :: String.t()
-  def plane(mount \\ "secret") do
-    """
-    path "#{mount}/metadata/troupe/teams/+/sessions/*" {
-      capabilities = ["delete", "list", "read"]
-    }
+  def plane(mount \\ "secret"), do: render(plane_rules(mount))
 
-    path "#{mount}/metadata/troupe/people/+/sessions/*" {
-      capabilities = ["delete", "list", "read"]
-    }
-
-    path "#{mount}/metadata/troupe/people/+/mcp/*" {
-      capabilities = ["list", "read"]
-    }
-    """
+  defp plane_rules(mount) do
+    [
+      {"#{mount}/metadata/troupe/teams/+/sessions/*", ["delete", "list", "read"]},
+      {"#{mount}/metadata/troupe/people/+/sessions/*", ["delete", "list", "read"]},
+      {"#{mount}/metadata/troupe/people/+/mcp/*", ["list", "read"]}
+    ]
   end
 
   @doc """
@@ -139,16 +133,14 @@ defmodule Troupe.KMS.Policy do
   it is compromised and forge nothing afterwards.
   """
   @spec signing(String.t(), String.t()) :: String.t()
-  def signing(mount \\ "transit", key \\ "troupe-session-tokens") do
-    """
-    path "#{mount}/sign/#{key}" {
-      capabilities = ["create", "update"]
-    }
+  def signing(mount \\ "transit", key \\ "troupe-session-tokens"),
+    do: render(signing_rules(mount, key))
 
-    path "#{mount}/keys/#{key}" {
-      capabilities = ["read"]
-    }
-    """
+  defp signing_rules(mount, key) do
+    [
+      {"#{mount}/sign/#{key}", ["create", "update"]},
+      {"#{mount}/keys/#{key}", ["read"]}
+    ]
   end
 
   @doc """
@@ -160,20 +152,15 @@ defmodule Troupe.KMS.Policy do
   `config` path, so not even the plane can take a copy of it or make it exportable later.
   """
   @spec plane_signing(String.t(), String.t()) :: String.t()
-  def plane_signing(mount \\ "transit", key \\ "troupe-plane-signing") do
-    """
-    path "#{mount}/keys/#{key}" {
-      capabilities = ["create", "read", "update"]
-    }
+  def plane_signing(mount \\ "transit", key \\ "troupe-plane-signing"),
+    do: render(plane_signing_rules(mount, key))
 
-    path "#{mount}/keys/#{key}/rotate" {
-      capabilities = ["update"]
-    }
-
-    path "#{mount}/sign/#{key}" {
-      capabilities = ["create", "update"]
-    }
-    """
+  defp plane_signing_rules(mount, key) do
+    [
+      {"#{mount}/keys/#{key}", ["create", "read", "update"]},
+      {"#{mount}/keys/#{key}/rotate", ["update"]},
+      {"#{mount}/sign/#{key}", ["create", "update"]}
+    ]
   end
 
   @doc """
@@ -197,52 +184,23 @@ defmodule Troupe.KMS.Policy do
         mount \\ "transit",
         key \\ "troupe-github-app",
         webhook_key \\ "troupe-github-webhook"
-      ) do
-    """
-    path "#{mount}/wrapping_key" {
-      capabilities = ["read"]
-    }
+      ),
+      do: render(github_app_rules(mount, key, webhook_key))
 
-    path "#{mount}/keys/#{key}" {
-      capabilities = ["read", "delete"]
-    }
-
-    path "#{mount}/keys/#{key}/config" {
-      capabilities = ["update"]
-    }
-
-    path "#{mount}/keys/#{key}/import" {
-      capabilities = ["create", "update"]
-    }
-
-    path "#{mount}/keys/#{key}/import_version" {
-      capabilities = ["create", "update"]
-    }
-
-    path "#{mount}/sign/#{key}" {
-      capabilities = ["create", "update"]
-    }
-
-    path "#{mount}/keys/#{webhook_key}" {
-      capabilities = ["read", "delete"]
-    }
-
-    path "#{mount}/keys/#{webhook_key}/config" {
-      capabilities = ["update"]
-    }
-
-    path "#{mount}/keys/#{webhook_key}/import" {
-      capabilities = ["create", "update"]
-    }
-
-    path "#{mount}/keys/#{webhook_key}/import_version" {
-      capabilities = ["create", "update"]
-    }
-
-    path "#{mount}/hmac/#{webhook_key}/sha2-256" {
-      capabilities = ["create", "update"]
-    }
-    """
+  defp github_app_rules(mount, key, webhook_key) do
+    [
+      {"#{mount}/wrapping_key", ["read"]},
+      {"#{mount}/keys/#{key}", ["read", "delete"]},
+      {"#{mount}/keys/#{key}/config", ["update"]},
+      {"#{mount}/keys/#{key}/import", ["create", "update"]},
+      {"#{mount}/keys/#{key}/import_version", ["create", "update"]},
+      {"#{mount}/sign/#{key}", ["create", "update"]},
+      {"#{mount}/keys/#{webhook_key}", ["read", "delete"]},
+      {"#{mount}/keys/#{webhook_key}/config", ["update"]},
+      {"#{mount}/keys/#{webhook_key}/import", ["create", "update"]},
+      {"#{mount}/keys/#{webhook_key}/import_version", ["create", "update"]},
+      {"#{mount}/hmac/#{webhook_key}/sha2-256", ["create", "update"]}
+    ]
   end
 
   @doc """
@@ -300,6 +258,170 @@ defmodule Troupe.KMS.Policy do
   @doc "The name the plane's policy is installed under."
   @spec plane_policy_name() :: String.t()
   def plane_policy_name, do: "troupe-plane"
+
+  # -- what the plane's own credential must be granted ---------------------------------
+
+  @typedoc """
+  One thing the plane does with its OpenBao credential: what it is for, what fails
+  without it, the policy it is installed as, and that policy's rules. `required: false`
+  is one only some deployments need, the GitHub App's.
+  """
+  @type grant :: %{
+          id: String.t(),
+          policy: String.t(),
+          required: boolean(),
+          for: String.t(),
+          without: String.t(),
+          rules: [{String.t(), [String.t()]}]
+        }
+
+  @doc """
+  Everything the plane's own credential must be allowed, one grant per thing it does.
+
+  The one list of them. The plane checks each against its own token, look-only, when it
+  starts and on the console's Overview, and prints the policy of one it lacks with the
+  lines that grant it; `mix troupe.openbao.policy` writes `docs/admin/openbao.md` from the
+  same entries. The plane cannot grant itself any of them: writing a policy takes an
+  OpenBao administrator, which the plane never is.
+
+  The mounts and key names are the deployment's: `:kv_mount`, `:transit_mount`,
+  `:session_key`, `:signing_key`, `:github_key` and `:github_webhook_key`, each with the
+  default the plane has.
+  """
+  @spec plane_grants(keyword()) :: [grant()]
+  def plane_grants(opts \\ []) do
+    kv = Keyword.get(opts, :kv_mount, "secret")
+    transit = Keyword.get(opts, :transit_mount, "transit")
+
+    [
+      %{
+        id: "session-tokens",
+        policy: "troupe-plane-session-tokens",
+        required: true,
+        for: "sign session tokens, and read the key's public half that workers check them with",
+        without: "no session opens, and no pod or person's daemon can check a token",
+        rules: signing_rules(transit, Keyword.get(opts, :session_key, "troupe-session-tokens"))
+      },
+      %{
+        id: "plane-signing",
+        policy: "troupe-plane-signing",
+        required: true,
+        for:
+          "make, rotate and sign with the plane's own key, which signs what it tells people's machines",
+        without:
+          "the client versions and defaults go out unsigned, and every client that pinned this plane's key refuses them",
+        rules:
+          plane_signing_rules(transit, Keyword.get(opts, :signing_key, "troupe-plane-signing"))
+      },
+      %{
+        id: "erasure",
+        policy: plane_policy_name(),
+        required: true,
+        for:
+          "destroy an erased session's key, a team's or a person's, and see which credentials a person has connected",
+        without:
+          "erasing a session cannot destroy its key, and the console cannot say who has connected what",
+        rules: plane_rules(kv)
+      },
+      %{
+        id: "github-app",
+        policy: "troupe-plane-github",
+        required: false,
+        for: "import, sign with and delete the GitHub App's key and webhook secret",
+        without: "a GitHub App cannot be set up, and one set up before stops signing",
+        rules:
+          github_app_rules(
+            transit,
+            Keyword.get(opts, :github_key, "troupe-github-app"),
+            Keyword.get(opts, :github_webhook_key, "troupe-github-webhook")
+          )
+      }
+    ]
+  end
+
+  @doc "A grant's rules as the policy text `bao policy write` takes."
+  @spec grant_policy(grant()) :: String.t()
+  def grant_policy(%{rules: rules}), do: render(rules)
+
+  @doc """
+  A path a look-only check can ask about for each rule: the rule's own, with every `+`
+  and a trailing `*` filled in, since OpenBao answers what a token may do at a path and
+  not at a pattern.
+  """
+  @spec probe_path(String.t()) :: String.t()
+  def probe_path(pattern) do
+    pattern
+    |> String.split("/")
+    |> Enum.map_join("/", fn
+      "+" -> "troupe-check"
+      "*" -> "troupe-check"
+      segment -> String.replace(segment, ~r/\*$/, "troupe-check")
+    end)
+  end
+
+  @doc """
+  The lines an OpenBao administrator runs to give the plane a grant: write its policy,
+  then add it to what the plane's login carries. `policies` is what the plane's token
+  carries now, so the role keeps them. With `role: nil` the plane uses a static token
+  (`bao.tokenSecretName`), and the line says to make it a new one.
+  """
+  @spec grant_lines(grant(), keyword()) :: String.t()
+  def grant_lines(grant, opts \\ []) do
+    policies =
+      opts
+      |> Keyword.get(:policies, [])
+      |> Enum.reject(&(&1 in ["default", "root"]))
+      |> Kernel.++([grant.policy])
+      |> Enum.uniq()
+      |> Enum.join(",")
+
+    attach =
+      case Keyword.get(opts, :role) do
+        nil ->
+          "bao token create -policy=#{String.replace(policies, ",", " -policy=")}   # the plane's new static token"
+
+        role ->
+          "bao write auth/#{Keyword.get(opts, :auth_path, "kubernetes")}/role/#{role} token_policies=#{policies}"
+      end
+
+    """
+    bao policy write #{grant.policy} - <<'POLICY'
+    #{String.trim_trailing(grant_policy(grant))}
+    POLICY
+    #{attach}
+    """
+  end
+
+  @doc """
+  The line that makes the plane's Kubernetes-auth role, carrying the policies of every
+  required grant (or `:policies`): the plane's ServiceAccount in its namespace, for the
+  audience its projected token carries. Options `:auth_path`, `:role`, `:namespace`,
+  `:audience`, and the names `plane_grants/1` takes.
+  """
+  @spec plane_role_line(keyword()) :: String.t()
+  def plane_role_line(opts \\ []) do
+    policies =
+      Keyword.get_lazy(opts, :policies, fn ->
+        for grant <- plane_grants(opts), grant.required, do: grant.policy
+      end)
+
+    "bao write auth/#{Keyword.get(opts, :auth_path, "kubernetes")}/role/" <>
+      "#{Keyword.get(opts, :role, "troupe-plane")} bound_service_account_names=troupe-plane " <>
+      "bound_service_account_namespaces=#{Keyword.get(opts, :namespace, "troupe-system")} " <>
+      "audience=#{Keyword.get(opts, :audience, "troupe-kms")} " <>
+      "token_policies=#{Enum.join(policies, ",")} ttl=1h"
+  end
+
+  # The text of one policy: a `path` block per rule, a blank line between them.
+  defp render(rules) do
+    Enum.map_join(rules, "\n", fn {path, capabilities} ->
+      """
+      path "#{path}" {
+        capabilities = [#{Enum.map_join(capabilities, ", ", &~s("#{&1}"))}]
+      }
+      """
+    end)
+  end
 
   @doc "The name the person policy is installed under, and the JWT role that carries it."
   @spec person_policy_name() :: String.t()

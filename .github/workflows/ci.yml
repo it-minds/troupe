@@ -612,6 +612,38 @@ jobs:
             exit 1
           fi
 
+      # The Pod Security labels: the chart's namespace at the lowest level its own pods need,
+      # `privileged` while the DaemonSet that puts the workers' profiles on the nodes runs and
+      # `restricted` without it, the level named when one is, none when they are off; and the
+      # operator told whether to label the worker namespaces and whether the plane takes TLS
+      # only, which decides whether it replaces a pod that dials in plaintext. The cluster
+      # job checks the levels against an API server.
+      - name: The chart labels its namespace with the Pod Security level its pods need
+        run: |
+          level() {
+            rendered=$(helm template troupe charts/troupe --show-only templates/namespace.yaml "$@")
+            grep -m1 'pod-security.kubernetes.io/enforce:' <<<"$rendered" | awk '{print $2}'
+          }
+          [ "$(level)" = privileged ] || { echo "the defaults label the namespace $(level)"; exit 1; }
+          [ "$(level --set worker.seccomp.install.enabled=false --set worker.appArmor.install.enabled=false)" = restricted ] \
+            || { echo "without the DaemonSet the namespace is not restricted"; exit 1; }
+          [ "$(level --set podSecurity.level=baseline)" = baseline ] || { echo "podSecurity.level is not used"; exit 1; }
+          [ -z "$(level --set podSecurity.labels=false)" ] || { echo "podSecurity.labels=false still labels"; exit 1; }
+          for bad in "--set podSecurity.level=lenient" "--set-string podSecurity.labels=false"; do
+            # shellcheck disable=SC2086
+            if helm template troupe charts/troupe $bad >/dev/null 2>&1; then
+              echo "$bad rendered; the chart must refuse it"
+              exit 1
+            fi
+          done
+          operator=$(helm template troupe charts/troupe --show-only templates/operator-deployment.yaml)
+          for env in TROUPE_POD_SECURITY_LABELS TROUPE_PLANE_CONTROL_REQUIRE_TLS; do
+            if ! grep -A1 "name: $env" <<<"$operator" | grep -q 'value: "true"'; then
+              echo "the operator is not told $env by default"
+              exit 1
+            fi
+          done
+
       # Rendered and checked against the Kubernetes API schemas, which is what catches a
       # misspelled field before a cluster does. The CRDs are included so a TroupePolicy
       # and a WorkerProfile are checked against their own schemas; the kinds no schema
