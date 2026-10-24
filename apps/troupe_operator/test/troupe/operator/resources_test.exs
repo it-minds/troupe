@@ -121,6 +121,53 @@ defmodule Troupe.Operator.ResourcesTest do
     assert MapSet.member?(gone, {"v1", "Service", "dev-1"})
   end
 
+  # The level the pods need, for all three modes, so a cluster whose default is higher
+  # admits them. Measured against a real API server, at each level, with the pod these
+  # settings make: in a user namespace `baseline` and `restricted` both refuse the worker's
+  # unmasked `/proc`, and `restricted` admits everything else.
+  describe "the namespace's Pod Security labels" do
+    test "say privileged where pods run in user namespaces of their own", context do
+      settings = %{context.settings | pod_security_labels: true, worker_user_namespaces: true}
+
+      assert pod_security(Resources.for_profile(context.profile, context.policy, settings)) == %{
+               "pod-security.kubernetes.io/enforce" => "privileged",
+               "pod-security.kubernetes.io/audit" => "privileged",
+               "pod-security.kubernetes.io/warn" => "privileged"
+             }
+    end
+
+    test "say privileged for an Unconfined seccomp profile, restricted otherwise", context do
+      for {type, path, level} <- [
+            {"Unconfined", nil, "privileged"},
+            {"Localhost", "troupe/worker.json", "restricted"},
+            {"RuntimeDefault", nil, "restricted"}
+          ] do
+        settings = %{
+          context.settings
+          | pod_security_labels: true,
+            worker_seccomp_type: type,
+            worker_seccomp_profile: path,
+            worker_apparmor_profile: "troupe-worker"
+        }
+
+        labels = pod_security(Resources.for_profile(context.profile, context.policy, settings))
+        assert labels["pod-security.kubernetes.io/enforce"] == level, type
+        assert Map.values(labels) == [level, level, level]
+      end
+    end
+
+    test "are not written where the installation turns them off", context do
+      settings = %{context.settings | worker_user_namespaces: true}
+      assert pod_security(Resources.for_profile(context.profile, context.policy, settings)) == %{}
+
+      # And the namespace keeps what makes it a worker namespace either way.
+      labels =
+        get_in(find(context.resources, "Namespace", "troupe-w-dev"), ["metadata", "labels"])
+
+      assert labels["troupe.dev/workers"] == "true"
+    end
+  end
+
   describe "addressing" do
     test "each pod is reachable at <ordinal>-<profile>.workers.<domain>", %{resources: resources} do
       hosts =
@@ -1767,6 +1814,13 @@ defmodule Troupe.Operator.ResourcesTest do
   end
 
   defp container(resources), do: hd(pod_spec(resources)["containers"])
+
+  defp pod_security(resources) do
+    resources
+    |> find("Namespace", "troupe-w-dev")
+    |> get_in(["metadata", "labels"])
+    |> Map.filter(fn {key, _level} -> String.starts_with?(key, "pod-security.kubernetes.io/") end)
+  end
 
   # A CA certificate of its own each time, as PEM, the way `Settings.with_plane_ca/1`
   # writes one out.

@@ -17,6 +17,8 @@ defmodule Troupe.Plane.Identity.Group do
   schema "groups" do
     field :external_id, :string
     field :display_name, :string
+    # When it last arrived in somebody's sign-in, which a SCIM push is not.
+    field :last_seen_at, :utc_datetime_usec
 
     has_one :team, Troupe.Plane.Identity.Team
 

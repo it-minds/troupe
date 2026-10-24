@@ -218,6 +218,8 @@ defmodule Troupe.Plane.Login do
       {:ok, _} = Identity.upsert_group(%{external_id: id, display_name: id})
     end
 
+    :ok = Identity.groups_seen(group_ids)
+
     with {:ok, _groups} <- Identity.set_memberships(user, group_ids), do: :ok
   end
 

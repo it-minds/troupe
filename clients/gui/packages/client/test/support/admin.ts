@@ -9,6 +9,7 @@
 // records it. A console that is right against this is right against the plane's rules,
 // which `apps/troupe_plane/test` holds the plane to.
 
+import type { OpenBaoCheck } from "../../src/admin.js";
 import { parseAgent } from "../../src/agents.js";
 import { checkRuleSet } from "../../src/rules.js";
 import { BUILTIN_AGENTS, checkAgent } from "./agents.js";
@@ -22,6 +23,8 @@ type IdentityCheckRow = { name: string; ok: boolean; detail: string; took_ms: nu
 type Answer = { result: unknown } | Refusal;
 type Role = "platform_admin" | "team_admin" | "none";
 type Changes = Record<string, { from: unknown; to: unknown }>;
+/** A group the identity provider has told the plane about, and when it last arrived in a sign-in (`null`: only SCIM pushed it). */
+type FakeGroup = { external_id: string; display_name: string | null; looks_duplicated?: { others: string[]; likely: string } | null; last_seen_at?: string | null };
 
 const FORBIDDEN = -32004;
 const NOT_FOUND = -32005;
@@ -775,7 +778,7 @@ export function diff(before: Record<string, unknown>, now: Record<string, unknow
 export class FakeAdmin {
   readonly platformAdmins: Set<string>;
   readonly teams = new Map<string, FakeTeam>();
-  readonly groups: Array<{ external_id: string; display_name: string | null; looks_duplicated?: { others: string[]; likely: string } | null }>;
+  readonly groups: FakeGroup[];
   /** Who is in each group, by its external id, as the identity provider says: membership is never the plane's. */
   readonly memberships: Record<string, string[]>;
   /** People's display names, by subject, for a member a link brings in. */
@@ -846,11 +849,24 @@ export class FakeAdmin {
     teams_from_groups: false,
   };
 
+  /** What `admin.overview` says the plane's OpenBao role may do; a test takes a grant away. */
+  openbao: OpenBaoCheck = {
+    ok: true,
+    error: null,
+    fix: null,
+    grants: [
+      { id: "session-tokens", policy: "troupe-plane-session-tokens", required: true, ok: true, detail: "The plane may sign session tokens.", missing: [], fix: null },
+      { id: "plane-signing", policy: "troupe-plane-signing", required: true, ok: true, detail: "The plane may sign with its own key.", missing: [], fix: null },
+      { id: "erasure", policy: "troupe-plane", required: true, ok: true, detail: "The plane may destroy an erased session's key.", missing: [], fix: null },
+      { id: "github-app", policy: "troupe-plane-github", required: false, ok: true, detail: "The plane may use the GitHub App's keys.", missing: [], fix: null },
+    ],
+  };
+
   constructor(
     opts: {
       platformAdmins?: string[];
       teams?: FakeTeam[];
-      groups?: Array<{ external_id: string; display_name: string | null; looks_duplicated?: { others: string[]; likely: string } | null }>;
+      groups?: FakeGroup[];
       memberships?: Record<string, string[]>;
       names?: Record<string, string>;
       profiles?: FakeProfile[];
@@ -894,7 +910,15 @@ export class FakeAdmin {
         return admin ? { result: this.visible(subject).map((t) => this.teamJson(t)) } : notAdmin;
 
       case "admin.groups.list":
-        return admin ? { result: this.groups } : notAdmin;
+        return admin
+          ? {
+              result: this.groups.map((g) => ({
+                ...g,
+                linked: [...this.teams.values()].some((t) => t.groups.some((x) => x.external_id === g.external_id)),
+                last_seen_at: g.last_seen_at ?? null,
+              })),
+            }
+          : notAdmin;
 
       case "admin.team.update": {
         const found = this.fetchTeam(subject, params["name"]);
@@ -1084,6 +1108,8 @@ export class FakeAdmin {
               reserved_micros: t.reserved_micros,
             })),
             sessions: { active: count("active"), dormant: count("dormant"), read_only: count("read_only") },
+            // The key manager is the platform's: a team admin's overview says nothing of it.
+            ...(role === "platform_admin" ? { openbao: this.openbao } : {}),
           },
         };
       }
@@ -2886,7 +2912,7 @@ export class FakeAdmin {
 
   /** Groups sharing a display name under different ids, as `Identity.group_lookalikes/0` sets them out. */
   private groupsAlike(): Array<Record<string, unknown>> {
-    const by = new Map<string, Array<{ external_id: string; display_name: string | null; looks_duplicated?: { others: string[]; likely: string } | null }>>();
+    const by = new Map<string, FakeGroup[]>();
     for (const g of this.groups) {
       if (!g.display_name) continue;
       const key = g.display_name.toLowerCase();
@@ -3374,10 +3400,12 @@ export function exampleAdmin(): FakeAdmin {
   const admin = new FakeAdmin({
     platformAdmins: ["alice@example.com"],
     groups: [
-      { external_id: "grp-core", display_name: "Core engineering" },
-      { external_id: "grp-design", display_name: "Design" },
-      { external_id: "grp-research", display_name: "Research" },
-      { external_id: "grp-platform", display_name: "Platform owners" },
+      { external_id: "grp-core", display_name: "Core engineering", last_seen_at: "2026-09-20T09:12:00Z" },
+      { external_id: "grp-design", display_name: "Design", last_seen_at: "2026-09-20T08:40:00Z" },
+      // Seen in a sign-in and drawn on by no team: the group a platform admin links next.
+      { external_id: "grp-research", display_name: "Research", last_seen_at: "2026-09-19T16:05:00Z" },
+      // Pushed by SCIM and never in a sign-in.
+      { external_id: "grp-platform", display_name: "Platform owners", last_seen_at: null },
     ],
     memberships: {
       "grp-core": ["alice@example.com", "dan@example.com", "erin@example.com"],

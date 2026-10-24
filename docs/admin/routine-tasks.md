@@ -47,7 +47,9 @@ a user namespace of its own with its `/proc` unmasked (`worker.userNamespaces`)
 2. Give each worker namespace (`troupe-w-<profile>`) the `privileged` Pod Security level
    where the cluster's default is higher, or every replacement pod is refused, and the same
    for `troupe-system`, where the DaemonSet runs; or set
-   `worker.seccomp.install.enabled: false` and install the profile another way.
+   `worker.seccomp.install.enabled: false` and install the profile another way. From
+   0.25.0 nothing to do: the operator labels every worker namespace and the chart
+   `troupe-system` (`podSecurity`).
 
 After step 2 of the upgrade, `kubectl -n troupe-system rollout status
 daemonset/troupe-worker-profiles` (`troupe-worker-seccomp` before 0.19.0). Both settings
@@ -91,6 +93,11 @@ operator made dials with TLS, so check first that none older is left:
    clear. An installation without TLS on the control port
    (`plane.controlTls.enabled: false`) sets `requireTls: false` too, or the chart refuses
    to render.
+
+From 0.25.0 neither is needed: a pod that dials in plaintext cannot enrol to be drained,
+so the operator replaces it once the plane requires TLS, one at a time, and the pod puts
+its own sessions to sleep as it stops. Turning `requireTls` from `false` to `true` is the
+upgrade and nothing else.
 
 After the upgrade, a pod still dialling in plaintext shows as a warning, "refused a
 plaintext control connection", once a minute per address with the count of the rest. A

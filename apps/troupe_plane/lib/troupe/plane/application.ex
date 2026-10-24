@@ -17,7 +17,15 @@ defmodule Troupe.Plane.Application do
   @impl Application
   def start(_type, _args) do
     children = if autostart?(), do: children(), else: []
-    Supervisor.start_link(children, strategy: :one_for_one, name: Troupe.Plane.Supervisor)
+
+    with {:ok, pid} <-
+           Supervisor.start_link(children, strategy: :one_for_one, name: Troupe.Plane.Supervisor) do
+      # Once the tree is up, and apart from it: what the plane's OpenBao role lacks, a line
+      # each in the log with the lines that grant it (`KMSCheck`). It never holds the
+      # start up, and a check that fails takes nothing down with it.
+      if autostart?(), do: Task.start(&Troupe.Plane.KMSCheck.log/0)
+      {:ok, pid}
+    end
   end
 
   defp autostart?, do: Application.get_env(:troupe_plane, :autostart, false)

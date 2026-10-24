@@ -50,7 +50,7 @@ defmodule Troupe.Operator.Resources do
     namespace = Names.namespace(policy.namespace_prefix, profile.name)
 
     List.flatten([
-      namespace(namespace, profile),
+      namespace(namespace, profile, settings),
       service_account(namespace, profile),
       mcp_identities(namespace, profile),
       plane_ca(namespace, profile, settings),
@@ -123,8 +123,17 @@ defmodule Troupe.Operator.Resources do
   # control port is open to namespaces carrying it and to nothing else in the cluster.
   # It is put here rather than in `Names.managed_labels/1` because it says something
   # about the namespace — workers live in it — and nothing about the objects inside.
-  defp namespace(namespace, profile) do
-    labels = Map.put(Names.managed_labels(profile.name), "troupe.dev/workers", "true")
+  #
+  # And the Pod Security level its pods need, the same for enforce, audit and warn, so a
+  # cluster whose default is higher admits them and nothing in the namespace is warned
+  # about that the namespace was made for. Applied on every pass, so a namespace made
+  # without them is labelled at the next one.
+  defp namespace(namespace, profile, settings) do
+    labels =
+      profile.name
+      |> Names.managed_labels()
+      |> Map.put("troupe.dev/workers", "true")
+      |> Map.merge(pod_security_labels(settings))
 
     %{
       "apiVersion" => "v1",
@@ -132,6 +141,14 @@ defmodule Troupe.Operator.Resources do
       "metadata" => %{"name" => namespace, "labels" => labels}
     }
   end
+
+  defp pod_security_labels(%Settings{pod_security_labels: true} = settings) do
+    level = Settings.pod_security_level(settings)
+
+    Map.new(~w(enforce audit warn), &{"pod-security.kubernetes.io/#{&1}", level})
+  end
+
+  defp pod_security_labels(_settings), do: %{}
 
   # `automountServiceAccountToken: false`, and the pod gets a *projected* token with
   # audience `troupe-plane` instead. A token scoped to one audience cannot be replayed
