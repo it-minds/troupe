@@ -41,7 +41,13 @@ defmodule Troupe.Release.OSSigning do
     {program, args} = command(signer, dir)
     Mix.shell().info("Signing #{dir} with #{signer}")
 
-    case System.cmd(program, args, into: IO.stream(), stderr_to_stdout: true) do
+    # Without the caller's PSModulePath: one PowerShell's module path handed to the other
+    # (pwsh's to Windows PowerShell, say) leaves the signing cmdlets unloadable.
+    case System.cmd(program, args,
+           env: [{"PSModulePath", nil}],
+           into: IO.stream(),
+           stderr_to_stdout: true
+         ) do
       {_, 0} -> :signed
       {_, status} -> Mix.raise("signing #{dir} with #{signer} exited #{status}")
     end
