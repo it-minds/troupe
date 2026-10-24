@@ -164,9 +164,8 @@ Rust crates: dispatch2, icy_sixel, jni, libappindicator-sys, mac-notification-sy
   objc2-core-foundation, objc2-core-graphics, objc2-core-image, objc2-core-location,
   objc2-core-text, objc2-exception-helper, objc2-io-surface, objc2-osa-kit,
   objc2-quartz-core, objc2-ui-kit, objc2-user-notifications, objc2-web-kit, quantette,
-  r-efi, rustler, rustls-platform-verifier-android, tui-big-text, tui-markdown,
-  unic-char-property, unic-char-range, unic-common, unic-ucd-ident, unic-ucd-version,
-  wasip3, winapi-i686-pc-windows-gnu, winapi-x86_64-pc-windows-gnu
+  r-efi, rustler, rustls-platform-verifier-android, tui-big-text, tui-markdown, wasip3,
+  winapi-i686-pc-windows-gnu, winapi-x86_64-pc-windows-gnu
 None of these ships a licence file. Each declares Apache-2.0, and this is its standard
 text.
 ----------------------------------------------------------------------------------------
@@ -836,10 +835,9 @@ Rust crates: base64-simd, block2, dispatch2, dlopen2, icy_sixel, jni,
   objc2-encode, objc2-exception-helper, objc2-foundation, objc2-io-surface,
   objc2-osa-kit, objc2-quartz-core, objc2-ui-kit, objc2-user-notifications,
   objc2-web-kit, quantette, r-efi, ratatui-3d, ratatui-termina, render3d, rustler,
-  rustls-platform-verifier-android, tui-big-text, tui-markdown, unic-char-property,
-  unic-char-range, unic-common, unic-ucd-ident, unic-ucd-version, vsimd, vtparse,
-  wasip3, webview2-com, webview2-com-sys, wezterm-input-types,
-  winapi-i686-pc-windows-gnu, winapi-x86_64-pc-windows-gnu
+  rustls-platform-verifier-android, tui-big-text, tui-markdown, vsimd, vtparse, wasip3,
+  webview2-com, webview2-com-sys, wezterm-input-types, winapi-i686-pc-windows-gnu,
+  winapi-x86_64-pc-windows-gnu
 None of these ships a licence file. Each declares MIT, and this is its standard text.
 ----------------------------------------------------------------------------------------
 
