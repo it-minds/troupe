@@ -404,19 +404,32 @@ defmodule Troupe.Instructions do
   The repository a workspace is in, as the instruction files are read up to it: the
   nearest directory with a `.git` (a worktree's `.git` file counts), or the workspace
   itself without one. `Troupe.Skills.Local` reads `.agents/skills` up to the same root.
+
+  As git looks: not up into a directory `GIT_CEILING_DIRECTORIES` names, nor above one,
+  so where git finds no repository, none is found here either.
   """
   @spec repository_root(Path.t()) :: Path.t()
   def repository_root(workspace) do
-    workspace
-    |> ancestors()
+    [workspace | workspace |> ancestors() |> tl() |> below_ceilings(ceilings())]
     |> Enum.find(workspace, &File.exists?(Path.join(&1, ".git")))
   end
+
+  defp below_ceilings(parents, []), do: parents
+  defp below_ceilings(parents, ceilings), do: Enum.take_while(parents, &(key(&1) not in ceilings))
 
   defp ancestors(dir) do
     case Path.dirname(dir) do
       ^dir -> [dir]
       parent -> [dir | ancestors(parent)]
     end
+  end
+
+  defp ceilings do
+    separator = if match?({:win32, _}, :os.type()), do: ";", else: ":"
+
+    (System.get_env("GIT_CEILING_DIRECTORIES") || "")
+    |> String.split(separator, trim: true)
+    |> Enum.map(&key(Path.expand(&1)))
   end
 
   ## Reading

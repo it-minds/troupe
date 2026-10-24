@@ -334,8 +334,9 @@ defmodule Troupe.Session.MCP do
   # -- the workspace's question ----------------------------------------------------
 
   # One question for every workspace server still waiting, asked from a task so this
-  # holder keeps answering. The id is a hash of what would run, so a session that
-  # comes back asks under the same id and finds an answer given while it was away.
+  # holder keeps answering. The id is a hash of the session and of what would run, so a
+  # session that comes back asks under the same id and finds an answer given while it was
+  # away, and another session on the workspace, a branch among them, asks under its own.
   defp ask_for_workspace(%{asking: nil} = state) do
     case pending_names(state) do
       [] ->
@@ -343,7 +344,7 @@ defmodule Troupe.Session.MCP do
 
       names ->
         records = Enum.map(names, &state.servers[&1].record)
-        call_id = "mcp-trust-" <> question_id(records)
+        call_id = "mcp-trust-" <> question_id(state.session_id, records)
         parent = self()
         session_id = state.session_id
         question = question(call_id, records, state.workspace)
@@ -366,11 +367,11 @@ defmodule Troupe.Session.MCP do
     |> Enum.sort()
   end
 
-  defp question_id(records) do
+  defp question_id(session_id, records) do
     records
     |> Enum.map(&[&1.name, &1.fingerprint])
     |> Enum.sort()
-    |> Jason.encode!()
+    |> then(&Jason.encode!([session_id | &1]))
     |> then(&:crypto.hash(:sha256, &1))
     |> Base.encode16(case: :lower)
     |> binary_part(0, 8)

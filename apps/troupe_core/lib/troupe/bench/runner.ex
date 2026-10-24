@@ -9,9 +9,11 @@ defmodule Troupe.Bench.Runner do
   same applications a daemon runs, and is stopped when the scenario ends.
 
   While a scenario runs, `TROUPE_CONFIG_HOME` and `TROUPE_STATE_HOME` name its own
-  directories, and opencode's two files name none, so nothing of the person's (their
-  config, keys, agents, skills, instruction files, sessions) reaches the prompt being
-  measured, and nothing the run writes lands among theirs. They are put back afterwards.
+  directories, opencode's two files name none, and `GIT_CEILING_DIRECTORIES` stops the
+  search for a repository at the scenario's directory, so nothing of the person's (their
+  config, keys, agents, skills, instruction files, sessions, a repository the temporary
+  directory is in) reaches the prompt being measured, and nothing the run writes lands
+  among theirs. They are put back afterwards.
   That is process-wide, so scenarios run one at a time.
   """
 
@@ -259,7 +261,11 @@ defmodule Troupe.Bench.Runner do
       "TROUPE_CONFIG_HOME" => Path.join(dir, "config"),
       "TROUPE_STATE_HOME" => Path.join(dir, "state"),
       "TROUPE_OPENCODE_CONFIG" => Path.join(dir, "no-opencode.jsonc"),
-      "TROUPE_OPENCODE_AUTH" => Path.join(dir, "no-opencode-auth.json")
+      "TROUPE_OPENCODE_AUTH" => Path.join(dir, "no-opencode-auth.json"),
+      # No repository is looked for above the scenario's own directory, by git or by the
+      # harness: under a temporary directory inside a checkout (a CI runner's workspace, a
+      # build sandbox), that checkout's instruction files are not the scenario's (#767).
+      "GIT_CEILING_DIRECTORIES" => dir
     }
   end
 

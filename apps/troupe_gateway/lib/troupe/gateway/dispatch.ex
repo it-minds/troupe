@@ -2127,6 +2127,10 @@ defmodule Troupe.Gateway.Dispatch do
         reason = "session #{session_id} is stopping; try again"
         {:error, Error.new(:unavailable, %{reason: reason})}
 
+      # Its root could not start from its log: what its `turn_ended` says.
+      {:error, {:agent_failed, detail}} ->
+        {:error, Error.new(:unavailable, %{reason: detail})}
+
       {:error, reason} ->
         {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
     end

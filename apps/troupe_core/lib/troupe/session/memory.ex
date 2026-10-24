@@ -324,11 +324,16 @@ defmodule Troupe.Session.Memory do
   # workspace's own (Decision 831). The top level is where anchors are read. A folder
   # below the top level belongs to the repository only while git does not ignore it: an
   # ignored one keeps a brief of its own.
+  #
+  # Git is not asked where the instruction files find no repository either: no `.git` up
+  # to the root, or none below a directory `GIT_CEILING_DIRECTORIES` names, which the git
+  # run here never sees (`Troupe.Git` takes every `GIT_*` away).
   defp repository_root(workspace) do
     workspace = Path.expand(workspace)
     args = ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"]
 
-    with {:ok, out} <- git(workspace, args),
+    with true <- workspace |> Instructions.repository_root() |> Path.join(".git") |> File.exists?(),
+         {:ok, out} <- git(workspace, args),
          [top, common] <- String.split(out, "\n", trim: true),
          common = Path.expand(common),
          ".git" <- Path.basename(common),

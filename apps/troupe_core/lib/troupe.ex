@@ -677,9 +677,13 @@ defmodule Troupe do
   tree to be gone, up to five seconds, and wakes it afresh, which is what it would have
   done a moment later; a stop that takes longer than that is `{:error, :stopping}`, for
   the client to say the session is stopping and to try again.
+
+  A session whose root cannot start from its log is `{:error, {:agent_failed, detail}}`,
+  `detail` being what the root's `turn_ended` says it raised.
   """
   @spec activate(String.t(), keyword()) ::
-          {:ok, pid()} | {:error, :not_found | :stopping | term()}
+          {:ok, pid()}
+          | {:error, :not_found | :stopping | {:agent_failed, String.t()} | term()}
   def activate(session_id, opts \\ []) do
     case Registry.whereis({:session, session_id}) do
       nil ->
@@ -737,8 +741,33 @@ defmodule Troupe do
       {:error, {:already_started, pid}} ->
         {:ok, pid}
 
+      # Its root could not start from the log, and wrote why before the start failed: that
+      # sentence is the answer, not the supervisor's term around it.
+      {:error, {:shutdown, {:failed_to_start_child, {Troupe.Agent.Node, _root}, _reason}}} = error ->
+        case root_failed(session_id) do
+          nil -> error
+          detail -> {:error, {:agent_failed, detail}}
+        end
+
       error ->
         error
+    end
+  end
+
+  defp root_failed(session_id) do
+    ended =
+      session_id
+      |> off_disk()
+      |> Enum.reverse()
+      |> Enum.find(&(&1.type == "turn_ended" and &1.agent == ["root"]))
+
+    case ended do
+      %{type: "turn_ended", agent: ["root"], data: %{"reason" => "agent_failed", "detail" => detail}}
+      when is_binary(detail) ->
+        detail
+
+      _other ->
+        nil
     end
   end
 
