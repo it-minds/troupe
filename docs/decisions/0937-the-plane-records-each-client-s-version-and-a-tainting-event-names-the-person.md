@@ -88,6 +88,9 @@ unavailable" answer and nothing ran `security` or `secret-tool` (D133).
   one entry" for the daemon on macOS; a value that fits is still one entry, and the
   desktop app's keyring crate, which calls the keychain directly, keeps one entry there.
   Linux's `secret-tool` takes the value on standard input and has no such limit.
+- **What the Secret Service job found.** `secret-tool clear` exits 1, printing nothing,
+  where no entry matched, which `delete/1` answered as an error; deleting what is not
+  there is `:ok`, as on the other stores and as `Troupe.Keyring` says.
 
 ## A tainting event names the person
 

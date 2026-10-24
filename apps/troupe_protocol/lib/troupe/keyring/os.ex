@@ -360,8 +360,14 @@ defmodule Troupe.Keyring.OS do
     status_only(exec("sh", ["-c", script], env))
   end
 
-  defp secret_tool(:delete, env),
-    do: status_only(exec("sh", ["-c", "secret-tool clear " <> @attributes], env))
+  # `secret-tool clear` exits 1, saying nothing, where nothing matched: removing what is
+  # not there is not an error.
+  defp secret_tool(:delete, env) do
+    case exec("sh", ["-c", "secret-tool clear " <> @attributes], env) do
+      {:ok, "", 1} -> :ok
+      other -> status_only(other)
+    end
+  end
 
   # -- running the tool ---------------------------------------------------------------
 
