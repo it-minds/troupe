@@ -874,10 +874,14 @@ jobs:
           TROUPE_SIGN_LABEL: desktop ${{ matrix.target }}
         run: |
           $verify = Join-Path $env:GITHUB_WORKSPACE "scripts/signing/sign-windows.ps1"
-          $files = @(Get-ChildItem bundle/nsis/*-setup.exe, bundle/msi/*.msi, ./*.exe | ForEach-Object FullName)
-          & $verify -Verify @files
+          # The app's executable as the setup installs it: Tauri marks a copy of the build's
+          # for each installer and signs that, so the one left in target/ is not what ships.
           $unpacked = Join-Path $env:RUNNER_TEMP "setup-unpacked"
           7z x -y -bso0 "-o$unpacked" (Get-Item bundle/nsis/*-setup.exe).FullName
+          $app = @(Get-ChildItem -Recurse -File -Path $unpacked -Filter troupe-desktop.exe | ForEach-Object FullName)
+          if ($app.Count -eq 0) { throw "the setup holds no troupe-desktop.exe" }
+          $files = @(Get-ChildItem bundle/nsis/*-setup.exe, bundle/msi/*.msi | ForEach-Object FullName) + $app
+          & $verify -Verify @files
           $env:TROUPE_SIGN_LABEL = ""
           try { & $verify -Verify $unpacked } catch { Write-Host "::notice::$($_.Exception.Message): what the setup unpacks, listed above" }
           $global:LASTEXITCODE = 0
