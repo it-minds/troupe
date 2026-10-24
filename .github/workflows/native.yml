@@ -56,6 +56,15 @@ on:
           (signing.yml).
         type: string
         default: ""
+      artifact_prefix:
+        description: >-
+          Put before every artifact's name, and looked for by the jobs here that download
+          them. Empty for a release, whose `attach` finds them as `troupe-*` and
+          `desktop-*`. `signing.yml` gives `self-signed-`, because the full suite of a pull
+          request into `main` runs this twice in one workflow run, unsigned and
+          self-signed, and the two builds' artifacts must not take each other's names.
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       macos:
@@ -369,13 +378,13 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.art.outputs.name }}
+          name: ${{ inputs.artifact_prefix }}${{ steps.art.outputs.name }}
           path: dist/${{ steps.art.outputs.name }}
 
       - uses: actions/upload-artifact@v7
         if: steps.sign.outputs.signs == 'true'
         with:
-          name: os-signed-${{ steps.art.outputs.name }}
+          name: ${{ inputs.artifact_prefix }}os-signed-${{ steps.art.outputs.name }}
           path: ${{ runner.temp }}/os-signed/records.txt
 
       - name: Remove the keychain
@@ -592,13 +601,13 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.art.outputs.name }}
+          name: ${{ inputs.artifact_prefix }}${{ steps.art.outputs.name }}
           path: clients/tui/burrito_out/${{ steps.art.outputs.name }}
 
       - uses: actions/upload-artifact@v7
         if: steps.sign.outputs.signs == 'true'
         with:
-          name: os-signed-${{ steps.art.outputs.name }}
+          name: ${{ inputs.artifact_prefix }}os-signed-${{ steps.art.outputs.name }}
           path: ${{ runner.temp }}/os-signed/records.txt
 
       - name: Remove the keychain
@@ -623,7 +632,7 @@ jobs:
           ref: ${{ inputs.ref }}
       - uses: actions/download-artifact@v8
         with:
-          pattern: troupe-*-linux_x86_64
+          pattern: ${{ inputs.artifact_prefix }}troupe-*-linux_x86_64
           merge-multiple: true
           path: dist
       # Each command under `timeout`, so a hang is a failure that names the command; the
@@ -897,7 +906,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: steps.sign.outputs.signs == 'true'
         with:
-          name: os-signed-desktop-${{ matrix.target }}
+          name: ${{ inputs.artifact_prefix }}os-signed-desktop-${{ matrix.target }}
           path: ${{ runner.temp }}/os-signed/records.txt
 
       - name: Remove the keychain
@@ -909,7 +918,7 @@ jobs:
       - name: Keep the installers
         uses: actions/upload-artifact@v7
         with:
-          name: desktop-${{ matrix.target }}
+          name: ${{ inputs.artifact_prefix }}desktop-${{ matrix.target }}
           if-no-files-found: error
           path: |
             clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz
@@ -936,12 +945,12 @@ jobs:
       # after five retries stopped v0.3.1's publish — and would have attached them.
       - uses: actions/download-artifact@v8
         with:
-          pattern: troupe-*
+          pattern: ${{ inputs.artifact_prefix }}troupe-*
           path: dist
           merge-multiple: true
       - uses: actions/download-artifact@v8
         with:
-          pattern: desktop-*
+          pattern: ${{ inputs.artifact_prefix }}desktop-*
           path: dist
           merge-multiple: true
       - name: Upload every artifact to the draft release

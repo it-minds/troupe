@@ -111,7 +111,10 @@ It calls `native.yml` with `sign: self-signed`: a certificate made in the job
 (`macos-keychain.sh self-signed`, falling back to an ad hoc signature where the runner's
 codesign refuses an untrusted certificate, and saying so; `test-certificate.ps1 -Trust`,
 which trusts it on that throwaway runner only), the stand-ins `codesign` and `signtool`,
-and no notarisation. Every check of a release runs. Then
+and no notarisation. Every check of a release runs. Its artifacts are named apart
+(`artifact_prefix: self-signed-`), because the full suite of a pull request into `main`
+also runs the unsigned native builds in the same workflow run under the plain names, and
+the manifest check downloads only its own. Then
 `scripts/signing/check-manifest.exs` makes the manifest over the uploaded files with a
 throwaway release key, as `publish` does, verifies it, and holds it to what each build
 recorded it signed: every signed file is in it with its signed sha256, and every Mac or

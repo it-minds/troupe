@@ -25,6 +25,9 @@ jobs:
       contents: read
     with:
       sign: self-signed
+      # Its own names: in the full suite of a pull request into `main`, `ci.yml` runs the
+      # unsigned native builds in the same workflow run, under the unprefixed names.
+      artifact_prefix: self-signed-
 
   manifest:
     name: the manifest names the signed files
@@ -39,20 +42,21 @@ jobs:
         with:
           otp-version: "28.5.0.5"
           elixir-version: "1.20.4"
-      # What `attach` would put on the release, and beside it what each build checked.
+      # What `attach` would put on the release, and beside it what each build checked:
+      # the self-signed builds' artifacts only, never the unsigned ones beside them.
       - uses: actions/download-artifact@v8
         with:
-          pattern: troupe-*
+          pattern: self-signed-troupe-*
           path: dist
           merge-multiple: true
       - uses: actions/download-artifact@v8
         with:
-          pattern: desktop-*
+          pattern: self-signed-desktop-*
           path: dist
           merge-multiple: true
       - uses: actions/download-artifact@v8
         with:
-          pattern: os-signed-*
+          pattern: self-signed-os-signed-*
           path: records
       - name: The release's manifest, over exactly the files that were signed
         run: |
