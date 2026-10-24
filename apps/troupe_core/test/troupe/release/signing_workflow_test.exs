@@ -98,6 +98,44 @@ defmodule Troupe.Release.SigningWorkflowTest do
     assert step_index(desktop, named("The installers and the app are signed (Windows)")) < keep
   end
 
+  # The full suite of a pull request into `main` runs native.yml twice in one workflow run,
+  # unsigned (ci.yml's `native`) and self-signed (signing.yml), and an artifact name one
+  # build uses must not be one the other uses, or the manifest check reads the wrong file.
+  test "the self-signed build's artifacts have names of their own, and only they are checked" do
+    prefix = "${{ inputs.artifact_prefix }}"
+    native = workflow("native.yml")["jobs"]
+
+    for {job, %{"steps" => steps}} <- native, step <- steps do
+      cond do
+        uses("actions/upload-artifact").(step) ->
+          assert String.starts_with?(step["with"]["name"], prefix),
+                 "#{job} uploads #{step["with"]["name"]} without the prefix"
+
+        uses("actions/download-artifact").(step) ->
+          assert String.starts_with?(step["with"]["pattern"], prefix),
+                 "#{job} downloads #{step["with"]["pattern"]} without the prefix"
+
+        true ->
+          :ok
+      end
+    end
+
+    signing = workflow("signing.yml")["jobs"]
+    own = signing["native"]["with"]["artifact_prefix"]
+    assert is_binary(own) and own != ""
+
+    downloads =
+      for step <- signing["manifest"]["steps"], uses("actions/download-artifact").(step),
+          do: step["with"]["pattern"]
+
+    assert downloads != []
+    assert Enum.all?(downloads, &String.starts_with?(&1, own)), inspect(downloads)
+
+    # A release builds once, under the names its `attach` job looks for.
+    refute Map.has_key?(workflow("release.yml")["jobs"]["native"]["with"], "artifact_prefix")
+    refute Map.has_key?(workflow("ci.yml")["jobs"]["native"]["with"] || %{}, "artifact_prefix")
+  end
+
   test "the release's files are signed before they are packed" do
     daemon = File.read!(Path.join(@root, "apps/troupe_daemon/mix.exs"))
     [steps] = Regex.run(~r/steps: \[(.*?)\]/s, daemon, capture: :all_but_first)
