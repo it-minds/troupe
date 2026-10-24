@@ -14,6 +14,8 @@ defmodule Troupe.Plane.Application do
 
   use Application
 
+  alias Troupe.Plane.KMSCheck
+
   @impl Application
   def start(_type, _args) do
     children = if autostart?(), do: children(), else: []
@@ -23,7 +25,7 @@ defmodule Troupe.Plane.Application do
       # Once the tree is up, and apart from it: what the plane's OpenBao role lacks, a line
       # each in the log with the lines that grant it (`KMSCheck`). It never holds the
       # start up, and a check that fails takes nothing down with it.
-      if autostart?(), do: Task.start(&Troupe.Plane.KMSCheck.log/0)
+      if autostart?(), do: Task.start(&KMSCheck.log/0)
       {:ok, pid}
     end
   end
