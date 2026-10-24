@@ -124,7 +124,8 @@ Each goes into **Settings → Environments → release → Environment secrets**
 place, from which release on the apps are signed. Put that release's version there, and
 drop the workaround paragraphs it points at: security.md §6's own, the "while it is
 unsigned" parts of [the desktop app's install page](../../clients/gui/docs/install.md), and
-the unsigned note in [installing.md](../admin/installing.md#the-clients-people-install). The
+the unsigned notes in [installing.md](../admin/installing.md#the-clients-people-install) and
+[the quick start](../quick-start.md#1-install). The
 installers need no change: they print their note only for a program that carries no
 signature.
 
