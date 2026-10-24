@@ -21,6 +21,20 @@ defmodule Troupe.KMS.PolicyTest do
            "docs/admin/openbao.md is stale: run `mix troupe.openbao.policy` and commit it"
   end
 
+  # The kind cluster's plane logs in under a role made from this file, so the cluster suite
+  # checks the grants against what the page asks for and nothing more.
+  test "dev/kind/openbao-plane.yaml is what mix troupe.openbao.policy writes" do
+    assert File.read!(Path.join(@root, Task.kind_output())) == Task.render_kind(),
+           "dev/kind/openbao-plane.yaml is stale: run `mix troupe.openbao.policy` and commit it"
+
+    kind = Task.render_kind()
+    [_line, carried] = Regex.run(~r/token_policies=(\S+)/, kind)
+    policies = Enum.map(Policy.plane_grants(), & &1.policy)
+
+    assert String.split(carried, ",") == policies
+    for policy <- policies, do: assert(kind =~ "  #{policy}.hcl: |\n")
+  end
+
   test "every grant the plane checks is on the page, with its policy and every path" do
     page = Task.render()
 

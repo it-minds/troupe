@@ -126,6 +126,10 @@ spec:
               value: {{ .Values.objectStore.region | quote }}
             - name: TROUPE_INGRESS_CLASS
               value: {{ .Values.operator.ingressClassName | quote }}
+            - name: TROUPE_INGRESS_NAMESPACE
+              value: {{ .Values.operator.ingressNamespace | default "" | quote }}
+            - name: TROUPE_INGRESS_NAMESPACE_LABEL
+              value: {{ ne (toString .Values.operator.labelIngressNamespace) "false" | quote }}
             - name: TROUPE_WORKERS_TLS_SECRET
               value: {{ .Values.operator.tlsSecretName | quote }}
             - name: TROUPE_WORKERS_CERT_ISSUER

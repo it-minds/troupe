@@ -146,8 +146,6 @@ defmodule Troupe.E2E.ExtendsTest do
         what: "the operator to make #{namespace}"
       )
 
-      World.secrets!(namespace)
-
       World.eventually(fn -> env(child, "TROUPE_MODEL") == "e2e-child-model" end,
         timeout: 120_000,
         what: "#{child}'s StatefulSet to run the child's model"

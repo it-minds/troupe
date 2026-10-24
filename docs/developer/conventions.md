@@ -48,7 +48,7 @@ the same pull request as the client change that needs it.
 | An upcaster adds and renames, never drops; one version at a time | `fold_test.exs` against recorded fixtures |
 | A recorded fixture hash is evidence, not a test to update | `troupe.fixtures.record` refuses to overwrite |
 | Every admin method is an API method and an MCP tool, with a summary and described arguments; destructive ones name `confirm`; none returns session content | `admin_parity_test.exs` |
-| Troupe creates no Kubernetes Secrets | no `kind: Secret` in the chart |
+| The chart makes no Kubernetes Secret, and the operator only copies, by name, those a worker namespace mounts; one a profile names only when it is labelled for workers | no `kind: Secret` in the chart; `Troupe.Operator.WorkerSecretsTest` |
 | A UI can never apply backpressure to an agent | a test stalls a socket and requires a turn within twice its idle time, or a quarter second more, whichever is larger |
 
 ## 4. Comments, decisions and messages
