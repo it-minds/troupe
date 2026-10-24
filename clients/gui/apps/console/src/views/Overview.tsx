@@ -13,10 +13,10 @@
 
 import { useEffect } from "react";
 import type { JSX, ReactNode } from "react";
-import type { AdminPod, AdminProfile, ClientVersions, FleetOverview, TeamSpend } from "@troupe/client";
+import type { AdminPod, AdminProfile, ClientVersions, FleetOverview, OpenBaoCheck, TeamSpend } from "@troupe/client";
 import { href } from "../route";
 import { useConsole, useLoad } from "../console";
-import { Empty, Loaded, Region, Status, count, money } from "./bits";
+import { Checks, Empty, Loaded, Region, Status, count, money } from "./bits";
 import type { StatusKind } from "./bits";
 import { Spend } from "./Teams";
 
@@ -42,7 +42,8 @@ export const STATES: Record<State, { kind: StatusKind; glyph: string; word: stri
 interface Item {
   state: State;
   what: string;
-  where: string;
+  /** Where it is fixed; none for what is fixed outside the console, said in `action`. */
+  where?: string;
   action: string;
 }
 
@@ -102,11 +103,13 @@ export function Overview(): JSX.Element {
                         {STATES[item.state].word}
                       </Status>
                       <span className="what">{item.what}</span>
-                      <a href={item.where}>{item.action}</a>
+                      {item.where ? <a href={item.where}>{item.action}</a> : <span className="muted">{item.action}</span>}
                     </li>
                   ))}
                 </ul>
               )}
+
+              {overview.openbao && <KeyManager check={overview.openbao} />}
 
               <Region>Fleet · per profile</Region>
               {overview.profiles.length === 0 ? (
@@ -186,6 +189,37 @@ export function Overview(): JSX.Element {
   );
 }
 
+/**
+ * What the plane's OpenBao role may do, grant by grant, as the plane found it look-only.
+ * The plane cannot grant itself any of these, so one it lacks comes with the lines an
+ * OpenBao administrator runs, written with this deployment's names.
+ */
+function KeyManager({ check }: { check: OpenBaoCheck }): JSX.Element {
+  return (
+    <section aria-label="Key manager">
+      <Region>Key manager · what the plane's OpenBao role may do</Region>
+      {check.error ? (
+        <>
+          <Checks checks={[{ name: "OpenBao", ok: false, detail: `The plane could not check: ${check.error}` }]} />
+          {check.fix && <pre className="mono manifest">{check.fix}</pre>}
+        </>
+      ) : (
+        <>
+          <Checks checks={check.grants.map((g) => ({ name: g.required ? g.policy : `${g.policy} (optional)`, ok: g.ok, detail: g.detail }))} />
+          {check.grants
+            .filter((g) => !g.ok && g.fix)
+            .map((g) => (
+              <div key={g.id}>
+                <p className="hint">To grant {g.policy}, an OpenBao administrator runs:</p>
+                <pre className="mono manifest">{g.fix}</pre>
+              </div>
+            ))}
+        </>
+      )}
+    </section>
+  );
+}
+
 /** A number, never without the line that says what it is out of. */
 function Metric({ label, value, children }: { label: string; value: string; children: ReactNode }): JSX.Element {
   return (
@@ -243,6 +277,14 @@ function attention(overview: FleetOverview, unread: number, platform: boolean, c
     const state = budgetState(team);
     if (state === "healthy") continue;
     items.push({ state, what: budgetWords(state, team), where: href({ page: "teams", team: team.name, tab: "limits" }), action: `${team.name}'s limits` });
+  }
+  // A grant the plane's OpenBao role lacks breaks what it is for until an administrator adds it.
+  if (overview.openbao?.error) {
+    items.push({ state: "broken", what: `The plane could not check its OpenBao role: ${overview.openbao.error}`, action: "Key manager, below" });
+  }
+  for (const grant of overview.openbao?.grants ?? []) {
+    if (grant.ok || !grant.required) continue;
+    items.push({ state: "broken", what: grant.detail, action: "The lines that grant it are below" });
   }
   if (unread > 0) {
     items.push({

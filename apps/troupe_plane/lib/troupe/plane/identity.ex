@@ -67,6 +67,29 @@ defmodule Troupe.Plane.Identity do
     end
   end
 
+  @doc """
+  Record that these groups arrived in a sign-in just now, which is what lets the console
+  list a group nobody links yet under a time a person can recognise it by.
+  """
+  @spec groups_seen([String.t()], DateTime.t()) :: :ok
+  def groups_seen(external_ids, at \\ DateTime.utc_now())
+
+  def groups_seen([], _at), do: :ok
+
+  def groups_seen(external_ids, at) do
+    Repo.update_all(from(g in Group, where: g.external_id in ^external_ids),
+      set: [last_seen_at: at]
+    )
+
+    :ok
+  end
+
+  @doc "The ids of every group some team draws its members from."
+  @spec linked_group_ids() :: MapSet.t(Ecto.UUID.t())
+  def linked_group_ids do
+    MapSet.new(Repo.all(from(l in TeamGroupLink, distinct: true, select: l.group_id)))
+  end
+
   @doc "Create or update a group by its identity-provider id."
   @spec upsert_group(map()) :: {:ok, Group.t()} | {:error, Ecto.Changeset.t()}
   def upsert_group(%{external_id: external_id} = attrs) do

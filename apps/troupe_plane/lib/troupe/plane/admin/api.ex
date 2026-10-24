@@ -512,7 +512,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.overview",
       function: :overview,
       summary:
-        "Fleet health, active sessions and spend per team, scoped to what the caller administers. The first call to make.",
+        "Fleet health, active sessions and spend per team, scoped to what the caller administers. The first call to make. A platform admin's carries `openbao`: each grant the plane's OpenBao role needs, checked look-only, and for one it lacks a sentence and the `bao` lines an OpenBao administrator runs to grant it.",
       risk: :read
     },
     %Method{
@@ -798,7 +798,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.groups.list",
       function: :groups_list,
       summary:
-        "Every identity-provider group this plane knows about, which is what a team links to. A group that looks like another one held twice carries `looks_duplicated`: the other group's identifier and the mismatch it most likely comes from.",
+        "Every identity-provider group this plane knows about, which is what a team links to. Each carries `linked` (whether a team draws on it) and `last_seen_at` (when it last arrived in a sign-in; empty for one only SCIM pushed), so a group no team links yet is chosen by name. A group that looks like another one held twice carries `looks_duplicated`: the other group's identifier and the mismatch it most likely comes from.",
       risk: :read
     },
     %Method{

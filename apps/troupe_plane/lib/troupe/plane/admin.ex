@@ -62,7 +62,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Gitops.GitHubApp, as: GitopsGitHubApp
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
-  alias Troupe.Plane.{OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
+  alias Troupe.Plane.{KMSCheck, OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision, Trigger}
@@ -164,7 +164,14 @@ defmodule Troupe.Plane.Admin do
 
   # -- overview ---------------------------------------------------------------
 
-  @doc "Fleet health, active sessions and spend per team, scoped to what the actor sees."
+  @doc """
+  Fleet health, active sessions and spend per team, scoped to what the actor sees.
+
+  A platform admin's also says what the plane's OpenBao role may do (`openbao`, from
+  `KMSCheck`): each grant the plane needs, checked look-only, and for one it lacks the
+  sentence and the lines an OpenBao administrator runs to grant it. A team admin's has
+  none, since the key manager is the platform's and nothing a team admin can change.
+  """
   @spec overview(actor()) :: result()
   def overview(actor) do
     with :ok <- require_admin(actor) do
@@ -179,7 +186,10 @@ defmodule Troupe.Plane.Admin do
            dormant: count_sessions(actor, "dormant"),
            read_only: count_sessions(actor, "read_only")
          }
-       }}
+       }
+       |> then(
+         &if(actor.role == :platform_admin, do: Map.put(&1, :openbao, KMSCheck.run()), else: &1)
+       )}
     end
   end
 
@@ -1561,18 +1571,26 @@ defmodule Troupe.Plane.Admin do
   What an administrator links a team to. Mirrored, never authored: this list is what SCIM
   pushed or what somebody's `groups` claim created at login, and a group absent from it is
   a group nobody from has signed in yet.
+
+  Each says whether a team draws on it (`linked`) and when it last arrived in a sign-in
+  (`last_seen_at`, empty for one only SCIM pushed), so a group the provider has started
+  sending is a name to choose from rather than an identifier to guess. Being listed grants
+  nothing: a group's people reach nothing until a team links it and is granted a profile.
   """
   @spec groups_list(actor()) :: result()
   def groups_list(actor) do
     with :ok <- require_admin(actor) do
       alike = groups_alike()
+      linked = Identity.linked_group_ids()
 
       {:ok,
        Enum.map(Identity.list_groups(), fn group ->
          %{
            external_id: group.external_id,
            display_name: group.display_name,
-           looks_duplicated: Map.get(alike, group.external_id)
+           looks_duplicated: Map.get(alike, group.external_id),
+           linked: MapSet.member?(linked, group.id),
+           last_seen_at: group.last_seen_at
          }
        end)}
     end

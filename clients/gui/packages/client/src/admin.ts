@@ -327,6 +327,31 @@ export interface FleetOverview {
   profiles: AdminProfile[];
   teams: TeamSpend[];
   sessions: { active: number; dormant: number; read_only: number };
+  /** A platform admin's only: what the plane's OpenBao role may do. */
+  openbao?: OpenBaoCheck;
+}
+
+/**
+ * One thing the plane does with its OpenBao credential, checked look-only: whether its
+ * role holds it, the sentence that says so, and for one it lacks the paths and the `bao`
+ * lines an OpenBao administrator runs to grant it. `required: false` is the GitHub App's.
+ */
+export interface OpenBaoGrant {
+  id: string;
+  policy: string;
+  required: boolean;
+  ok: boolean;
+  detail: string;
+  missing: Array<{ path: string; capabilities: string[] }>;
+  fix: string | null;
+}
+
+/** The check as a whole. `error` is a sentence where it could not be made at all, `fix` what to run for it. */
+export interface OpenBaoCheck {
+  ok: boolean;
+  error: string | null;
+  fix: string | null;
+  grants: OpenBaoGrant[];
 }
 
 /** A group a team draws its members from. Membership is the provider's; this is the link. */
@@ -346,6 +371,10 @@ export interface AdminGroup {
   external_id: string;
   display_name: string | null;
   looks_duplicated?: { others: string[]; likely: string } | null;
+  /** Whether a team draws its members from it. */
+  linked?: boolean;
+  /** When it last arrived in somebody's sign-in; `null` for a group only SCIM pushed. */
+  last_seen_at?: string | null;
 }
 
 /** A person in a team, with their own spend beside the team's. Read-only, always. */
