@@ -2,4 +2,4 @@
 # then `mkdocs serve` at the repository root. .github/workflows/pages.yml installs the same.
 mkdocs==1.6.1
 mkdocs-material==9.7.7
-pymdown-extensions==12.1
+pymdown-extensions==12.3

@@ -346,7 +346,7 @@ depends on the machine.
 
 ## The desktop app (Cargo)
 
-503 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
+498 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
 platform, build dependencies included.
 
 | package | licence |
@@ -763,11 +763,6 @@ platform, build dependencies included.
 | `typeid` | MIT OR Apache-2.0 |
 | `typenum` | MIT OR Apache-2.0 |
 | `uds_windows` | MIT |
-| `unic-char-property` | MIT/Apache-2.0 |
-| `unic-char-range` | MIT/Apache-2.0 |
-| `unic-common` | MIT/Apache-2.0 |
-| `unic-ucd-ident` | MIT/Apache-2.0 |
-| `unic-ucd-version` | MIT/Apache-2.0 |
 | `unicode-ident` | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | `unicode-segmentation` | MIT OR Apache-2.0 |
 | `untrusted` | ISC |

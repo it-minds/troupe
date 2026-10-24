@@ -36,7 +36,7 @@ tauri-plugin-dialog = "2"
 # page's own `Notification` is refused in WebView2, which denies the permission unless
 # the host answers for it, and wry answers only the clipboard's. `~2.4` because 2.5 wants
 # tauri 2.12, and tauri moves with the rest of its group, not behind a plugin.
-tauri-plugin-notification = "~2.5"
+tauri-plugin-notification = "~2.7"
 # One copy of the app: a second launch, from the Start menu or from a click on a
 # notification, hands its arguments to the one running and exits. `~2.4` because 2.5
 # wants tauri 2.12 (Decision 717); it has no JavaScript half.
@@ -45,7 +45,7 @@ tauri-plugin-single-instance = "~2.5"
 # (Windows), app archive (macOS) or AppImage (Linux) once src/update.rs has checked the
 # release's signed manifest. `~2.13` because 2.13 is the minor that wants tauri 2.12; it
 # is driven from Rust alone, so it has no JavaScript half to keep in step (Decision 717).
-tauri-plugin-updater = "~2.13"
+tauri-plugin-updater = "~2.14"
 # The manifest's check: minisign's format, the one the updater itself verifies with, and
 # sha256 for each file it names; versions as SemVer orders them. The daemon's release is a
 # `.tar.gz`, unpacked beside the one it replaces. All of them already in the lock through
@@ -55,7 +55,7 @@ sha2 = "0.10"
 # A plane's signed version policy (#657): plain Ed25519 over the document's bytes, which
 # minisign-verify does not check on its own. Already in the lock through rustls.
 ring = "0.17"
-base64 = "0.22"
+base64 = "0.23"
 semver = "1"
 tar = "0.4"
 flate2 = "1"
