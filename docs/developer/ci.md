@@ -127,7 +127,7 @@ the connection where nothing answers at that address; CI sets
 [`keyring.yml`](../../.github/workflows/keyring.yml) runs `Troupe.Keyring`'s own store
 (`apps/troupe_protocol/test/troupe/keyring_test.exs`) against a macOS keychain on a
 `macos-14` runner and a Secret Service on Linux (`gnome-keyring` on a session bus of the
-step's own, its login keyring unlocked with an empty password), and the desktop crate's
+step's own, its login keyring made and unlocked with a password of the job's own), and the desktop crate's
 `secrets.rs` tests against the same keychain: a value stored, read, replaced, four
 kilobytes of it whole, and deleted. Every other suite runs the store in the VM, and a
 Windows laptop has only Credential Manager. It runs on a pull request that changes

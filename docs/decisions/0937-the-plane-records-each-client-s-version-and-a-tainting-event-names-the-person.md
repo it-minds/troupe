@@ -74,8 +74,9 @@ unavailable" answer and nothing ran `security` or `secret-tool` (D133).
   the cluster suite is, since a fixer's Windows machine has neither store) when the code
   that keeps a secret in one changes, and in a full run: the protocol's keyring test on a
   `macos-14` runner against a keychain the job makes, unlocks and sets as default, and on
-  Linux against `gnome-keyring` on a session bus of the step's own, with an empty-password
-  login keyring; and the desktop crate's `secrets.rs` tests on the Mac. A value stored,
+  Linux against `gnome-keyring` on a session bus of the step's own, with a login keyring
+  made and unlocked with a password of the job's own (an empty one left the store asking
+  a prompt nobody sees, which CI found); and the desktop crate's `secrets.rs` tests on the Mac. A value stored,
   read, replaced, four kilobytes of it whole, and deleted with every part.
 - **Skipped where there is no store, failed where there should be one.** Both tests print
   `SKIPPED` and pass on a machine with no store; the jobs set `TROUPE_KEYRING_REQUIRE=1`,

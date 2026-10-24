@@ -72,13 +72,14 @@ jobs:
         if: runner.os == 'macOS'
         run: mix test test/troupe/keyring_test.exs --trace
 
-      # A session bus of the step's own, and a login keyring on it unlocked with an empty
-      # password, which is how a desktop session has one.
+      # A session bus of the step's own, and a login keyring on it made and unlocked with a
+      # password of the job's own, which is how a desktop session has one. An empty one
+      # leaves no unlocked collection, and every store then waits on a prompt nobody sees.
       - name: The round trip (Linux)
         if: runner.os == 'Linux'
         run: |
           dbus-run-session -- sh -c '
-            echo -n "" | gnome-keyring-daemon --daemonize --unlock --components=secrets >/dev/null
+            printf "troupe-ci\n" | gnome-keyring-daemon --daemonize --unlock --components=secrets >/dev/null
             mix test test/troupe/keyring_test.exs --trace
           '
 
