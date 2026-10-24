@@ -8,11 +8,13 @@
 # `ci.yml` runs the whole gate once, on the chunk's pull request into `main`, with every
 # issue of the run together. That is what `main` is protected by.
 #
-# But two: the suite that needs a cluster (`cluster.yml`), for a change to what it deploys.
+# But three: the suite that needs a cluster (`cluster.yml`), for a change to what it deploys.
 # A fixer's machine may have no cluster to run it on, and a CRD rule the API server refuses
-# is found by nothing short of an API server. And the credential stores (`keyring.yml`),
+# is found by nothing short of an API server. The credential stores (`keyring.yml`),
 # for a change to the code that keeps a secret in one: a fixer's Windows machine has no
-# macOS keychain or Secret Service to run the round trip against.
+# macOS keychain or Secret Service to run the round trip against. And the release's OS
+# signing, self-signed (`signing.yml`), for a change to what signs: it needs a Mac and a
+# Windows machine that can be thrown away after trusting a certificate.
 name: dev-check
 
 # Every pull request that is not into `main`: into a chunk, or stacked on another branch.
@@ -45,6 +47,7 @@ jobs:
       vscode: ${{ steps.filter.outputs.vscode }}
       cluster: ${{ steps.filter.outputs.cluster }}
       keyring: ${{ steps.filter.outputs.keyring }}
+      signing: ${{ steps.filter.outputs.signing }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -99,6 +102,13 @@ jobs:
               - apps/troupe_protocol/test/troupe/keyring_test.exs
               - clients/gui/apps/desktop/src-tauri/src/secrets.rs
               - .github/workflows/keyring.yml
+            # The same list as `ci.yml`'s: what signs a release, and the builds it signs.
+            signing:
+              - scripts/signing/**
+              - apps/troupe_core/lib/troupe/release/os_signing.ex
+              - clients/gui/apps/desktop/src-tauri/tauri.signing.conf.json
+              - .github/workflows/native.yml
+              - .github/workflows/signing.yml
 
   elixir:
     name: umbrella - compile, credo, schema
@@ -288,15 +298,26 @@ jobs:
     permissions:
       contents: read
 
+  # The release's OS signing with a self-signed certificate (`signing.yml`), when the
+  # change touches what signs: a fixer's machine has one of the two operating systems at
+  # most, and no runner to throw away after trusting a certificate. After the compile.
+  signing:
+    name: the signing, self-signed
+    needs: [changes, elixir]
+    if: ${{ !cancelled() && needs.changes.outputs.signing == 'true' && contains(fromJSON('["success", "skipped"]'), needs.elixir.result) }}
+    uses: ./.github/workflows/signing.yml
+    permissions:
+      contents: read
+
   dev-ok:
     name: dev-ok
     if: always()
-    needs: [changes, elixir, decisions, tui, gui, vscode, cluster, keyring]
+    needs: [changes, elixir, decisions, tui, gui, vscode, cluster, keyring, signing]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Every job that ran passed
         run: |
-          for r in "${{ needs.changes.result }}" "${{ needs.elixir.result }}" "${{ needs.decisions.result }}" "${{ needs.tui.result }}" "${{ needs.gui.result }}" "${{ needs.vscode.result }}" "${{ needs.cluster.result }}" "${{ needs.keyring.result }}"; do
+          for r in "${{ needs.changes.result }}" "${{ needs.elixir.result }}" "${{ needs.decisions.result }}" "${{ needs.tui.result }}" "${{ needs.gui.result }}" "${{ needs.vscode.result }}" "${{ needs.cluster.result }}" "${{ needs.keyring.result }}" "${{ needs.signing.result }}"; do
             case "$r" in success|skipped) ;; *) echo "a job ended $r"; exit 1 ;; esac
           done

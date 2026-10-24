@@ -159,6 +159,7 @@ nav:
       - Build: developer/build.md
       - CI and releases: developer/ci.md
       - Buying OS code signing: developer/code-signing.md
+      - Signing a release: developer/signing-day.md
       - Deployment: developer/deployment.md
       - Tech stack: developer/tech-stack.md
       - Fixing issues: developer/fixing-issues.md
