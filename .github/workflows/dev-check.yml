@@ -82,8 +82,13 @@ jobs:
               - scripts/kind-up
               - scripts/remote-up
               - scripts/build-images
+              - scripts/kind-upgrade-check
               - apps/troupe_operator/**
               - .github/workflows/cluster.yml
+              # What the upgrade from the previous release runs: the plane's migrations, and the
+              # version, which a release commit changes.
+              - apps/troupe_plane/priv/repo/migrations/**
+              - VERSION
               # The images it builds: the GUI's, and what every image build's context leaves out.
               - clients/gui/Dockerfile
               - .dockerignore

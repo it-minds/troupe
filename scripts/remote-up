@@ -43,6 +43,21 @@ gateway_host="${gateway_url#*://}"
 gateway_host="${gateway_host%%/*}"
 gateway_host="${gateway_host%%:*}"
 
+# What it installs: this tree's chart and images by default, or a published release's,
+# which is how `scripts/kind-upgrade-check` brings up the release before this one:
+#
+#   TROUPE_CHART=oci://ghcr.io/it-minds/charts/troupe TROUPE_CHART_VERSION=0.24.0-beta \
+#     TROUPE_IMAGE_TAG=0.24.0-beta TROUPE_IMAGES=pull \
+#     TROUPE_KIND_VALUES=<that tag's dev/kind/values.yaml> scripts/remote-up
+#
+# `TROUPE_IMAGES=pull` pulls the release's images from the registry and loads them, where
+# the default builds this tree's. `TROUPE_IMAGE_TAG` is the tag every component runs.
+chart="${TROUPE_CHART:-charts/troupe}"
+chart_version="${TROUPE_CHART_VERSION:-}"
+kind_values="${TROUPE_KIND_VALUES:-dev/kind/values.yaml}"
+image_tag="${TROUPE_IMAGE_TAG:-dev}"
+images="${TROUPE_IMAGES:-build}"
+
 step() { echo; echo "==> $*"; }
 
 # -- the cluster --------------------------------------------------------------
@@ -131,14 +146,22 @@ done
 # -- images -------------------------------------------------------------------
 
 step "4. Images"
-if [ "${TROUPE_SKIP_BUILD:-}" = "1" ]; then
+if [ "$images" = "pull" ]; then
+  # A published release's, as a cluster pulls them, loaded so that nothing waits on the
+  # registry once the chart is installed.
+  for release in troupe-operator troupe-plane troupe-worker troupe-a2a troupe-gui; do
+    image="ghcr.io/it-minds/${release}:${image_tag}"
+    docker pull --platform linux/amd64 "$image"
+    kind load docker-image "$image" --name "$cluster"
+  done
+elif [ "${TROUPE_SKIP_BUILD:-}" = "1" ]; then
   # Skipping the *build*, not the load. A fresh cluster has none of these images however
   # recently they were built, and the failure arrives as a pre-install hook that never
   # starts — "trying and failing to pull image" — several steps from anything that
   # mentions building. Whatever is on this machine is loaded; what is not, is not.
   echo "skipping the build (TROUPE_SKIP_BUILD=1); loading what is already built"
   for release in troupe-operator troupe-plane troupe-worker troupe-a2a troupe-gui; do
-    image="ghcr.io/it-minds/${release}:${TROUPE_IMAGE_TAG:-dev}"
+    image="ghcr.io/it-minds/${release}:${image_tag}"
     if docker image inspect "$image" >/dev/null 2>&1; then
       kind load docker-image "$image" --name "$cluster"
     else
@@ -266,7 +289,13 @@ done
 # Changing one is therefore deliberate, and on a development cluster this is the deliberate
 # part.
 step "6. Custom resource definitions"
-kc apply -f charts/troupe/crds/
+if [ -d "$chart" ]; then
+  kc apply -f "$chart/crds/"
+else
+  # A published chart's, as docs/admin/installing.md applies them.
+  helm show crds "$chart" ${chart_version:+--version "$chart_version"} |
+    kc apply --server-side --force-conflicts -f -
+fi
 
 step "7. The chart"
 # The workers' AppArmor profile, where the node's runtime applies AppArmor profiles:
@@ -288,18 +317,30 @@ if [ "$apparmor" = true ]; then pod_security=privileged; fi
 
 # The gateway replaces the placeholder that is first in the kind values' egress list; an
 # index in `--set` changes that entry and keeps the rest.
-helm --kube-context "$context" upgrade --install troupe charts/troupe \
+#
+# Every component on `TROUPE_IMAGE_TAG` where it is not the kind values' own `dev`.
+tags=()
+if [ "$image_tag" != "dev" ]; then
+  for component in operator plane worker gui a2a; do
+    tags+=(--set "${component}.image.tag=${image_tag}")
+  done
+fi
+
+helm --kube-context "$context" upgrade --install troupe "$chart" \
+  ${chart_version:+--version "$chart_version"} \
   --namespace "$namespace" \
-  --values dev/kind/values.yaml \
+  --values "$kind_values" \
   --set "policy.allowedEgress[0]=${gateway_host}" \
   --set "worker.appArmor.enabled=${apparmor}" \
   --set "podSecurity.level=${pod_security}" \
+  "${tags[@]}" \
   --wait --timeout 5m
 
 # A rebuilt image under the same tag changes nothing in the pod spec, so Kubernetes has
 # no reason to replace the pods. Restarting is the only way to pick one up, and skipping
-# it is how you spend an hour debugging the code you did not deploy.
-if [ "${TROUPE_SKIP_BUILD:-}" != "1" ]; then
+# it is how you spend an hour debugging the code you did not deploy. A pulled release's
+# tag names one image, and there is nothing to pick up.
+if [ "${TROUPE_SKIP_BUILD:-}" != "1" ] && [ "$images" != "pull" ]; then
   kc rollout restart -n "$namespace" deployment/troupe-plane deployment/troupe-operator deployment/troupe-gui
 fi
 
@@ -322,7 +363,7 @@ metadata:
 spec:
   image:
     repository: ghcr.io/it-minds/troupe-worker
-    tag: dev
+    tag: ${image_tag}
   replicas: 1
   sessionsPerPod: 2
   resources:
