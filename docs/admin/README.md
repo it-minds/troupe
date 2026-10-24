@@ -28,18 +28,20 @@ Also: [../a2a.md](../a2a.md) and [../egress-allowlist.md](../egress-allowlist.md
 
 ## Before the first `helm install`
 
-1. **Troupe creates no Secrets.** Every one in
+1. **The chart makes no Secret.** Every one in
    [configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects) must exist
-   first, and the object-store, model, MCP and pull secrets in **every** worker namespace as
-   well as `troupe-system`.
+   in `troupe-system` first; the operator copies those a worker namespace needs into it, a
+   model or MCP key only once it is labelled `troupe.dev/worker-secret=true`.
 2. **CRDs are installed once by Helm and never upgraded**: `kubectl apply -f
    charts/troupe/crds/` on every upgrade.
-3. **Label the ingress namespace** `troupe.dev/ingress=true`, or the network policies
-   keep the ingress controller from the console, the API, `/app` and every worker.
+3. **Name the ingress controller's namespace** in `operator.ingressNamespace` and the
+   operator labels it `troupe.dev/ingress=true`; without that label the network policies
+   keep the controller from the console, the API, `/app` and every worker. Left empty, the
+   label is yours, and each profile and the Overview say so until it is there.
 4. **Platform admin comes from an identity-provider group** carried in a claim; whether
    the claim needs a scope is the provider's ([integrations.md §1](integrations.md#1-identity-provider-oidc)).
 5. **Bucket versioning must be on**, or erasure's promise means nothing.
-6. **Do not trust `SecretMissing`**: the operator has no RBAC on Secrets.
+6. **`SecretMissing` names a Secret a worker namespace lacks** and where it was looked for.
 7. **Nothing restarts a drained worker pod** on the current revision. After
    `admin.pod.drain`, delete the pod; one behind a new revision the operator replaces.
 8. **Principals, settings, the audit trail and triggers live only in PostgreSQL** (in

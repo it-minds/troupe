@@ -220,9 +220,12 @@ one list, with links to where each part is set.
 
 ## 4. Keys and tokens
 
-**On a plane**, Troupe creates no Kubernetes Secret and no component of it can read one:
-the model key, the object store's credentials and an MCP server's credential are Secrets
-you create in each worker namespace ([configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects)).
+**On a plane**, the chart makes no Kubernetes Secret and the plane can read none: the model
+key, the object store's credentials and an MCP server's credential are Secrets you create
+in `troupe-system`. The operator reads those by name and copies them into the worker
+namespaces that mount them; it may not list Secrets, and copies one a profile names only
+where the Secret is labelled `troupe.dev/worker-secret=true`, so a profile the plane
+wrote cannot name its way to the plane's own ([configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects)).
 OpenBao holds the rest, under policies rendered by `Troupe.KMS.Policy`. An OpenBao
 administrator writes the plane's ([openbao.md](openbao.md), generated from the same code);
 the plane can write none, and checks what its role holds when it starts and on the
@@ -291,7 +294,10 @@ What the signature proves, and what it does not, is in
 
 The desktop app and the `troupe` and `troupe-daemon` binaries carry no Apple or Microsoft
 signature. macOS and Windows therefore cannot say who built them, and say so the first time
-one runs. #656 adds that signing on top of the release key.
+one runs. #656 adds that signing on top of the release key. **Which releases are signed:**
+none yet. Releases are signed from the first one made once the certificates are in the
+`release` environment ([signing-day.md](../developer/signing-day.md)), which its notes will say;
+before that, what follows applies. This is the one place the docs say it.
 
 **On macOS.** `install.sh` downloads with `curl`, which sets no quarantine flag, so
 Gatekeeper does not stop what it installs; when it finds the flag, it prints the command

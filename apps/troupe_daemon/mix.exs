@@ -72,6 +72,9 @@ defmodule Troupe.Daemon.MixProject do
           &Troupe.Daemon.Release.reaper/1,
           &Troupe.Daemon.Release.wrapper/1,
           &Troupe.Release.licences/1,
+          # The OS's signature on every executable and library, before they are packed; a
+          # build that native.yml does not sign skips it.
+          &Troupe.Release.OSSigning.release/1,
           :tar
         ]
       ]

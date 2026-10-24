@@ -95,6 +95,47 @@ describe("the overview", () => {
     expect(line.querySelector("a")?.getAttribute("href")).toBe("#/clients");
   });
 
+  // What the operator reports on a profile and nothing else may: a Secret its pods mount
+  // that the namespace has no copy of, and no namespace the ingress controller may reach a
+  // worker from, which is the cluster's and so one line however many profiles say it.
+  it("names a missing Secret per profile, and an unlabelled ingress namespace once, with the line that fixes it", async () => {
+    const ingress = {
+      type: "IngressNamespaceMissing",
+      status: "True",
+      reason: "NoNamespaceLabelled",
+      message: "no namespace carries troupe.dev/ingress=true, so no ingress controller may reach a worker: kubectl label namespace ingress-nginx troupe.dev/ingress=true",
+    };
+    for (const p of fake.admin.profiles) p.conditions = [...(p.conditions ?? []), ingress];
+    const ux = fake.admin.profiles.find((p) => p.name === "ux")!;
+    ux.conditions!.push({
+      type: "SecretMissing",
+      status: "True",
+      reason: "SecretsMissing",
+      message: "missing secret(s): llm-key (in troupe-system without troupe.dev/worker-secret=true, which lets the operator copy it to workers: kubectl -n troupe-system label secret llm-key troupe.dev/worker-secret=true)",
+    });
+
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    await waitFor(() => items().some((i) => says("kubectl label namespace ingress-nginx", i)), "the ingress namespace among what needs attention");
+    expect(items().filter((i) => says("troupe.dev/ingress=true", i))).toHaveLength(1);
+    const secret = items().find((i) => says("ux: missing secret(s): llm-key", i));
+    expect(secret?.textContent).toContain("kubectl -n troupe-system label secret llm-key troupe.dev/worker-secret=true");
+    expect(secret?.querySelector("a")?.getAttribute("href")).toBe("#/pods");
+  });
+
+  it("says nothing of a condition that does not hold", async () => {
+    for (const p of fake.admin.profiles) {
+      p.conditions = [
+        { type: "SecretMissing", status: "False", reason: "SecretsPresent", message: "every secret the pods mount is in the worker namespace" },
+        { type: "IngressNamespaceMissing", status: "False", reason: "Labelled", message: "ingress-nginx carries troupe.dev/ingress=true and runs pods" },
+      ];
+    }
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    await waitFor(() => items().length > 0, "what needs attention");
+    expect(items().some((i) => says("troupe.dev/ingress=true", i) || says("secret", i))).toBe(false);
+  });
+
   it("has no line about clients when none is behind", async () => {
     fake.admin.seen.splice(0, fake.admin.seen.length, ...fake.admin.seen.filter((s) => s.version === "0.16.0-beta"));
     await signedInAs(fake, PEOPLE.alice);

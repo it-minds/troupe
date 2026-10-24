@@ -42,6 +42,7 @@ defmodule Troupe.E2E.CredentialsTest do
     namespace = World.worker_namespace(context.profile)
 
     on_exit(fn ->
+      World.kubectl(["delete", "secret", "-n", World.namespace(), @secret, "--ignore-not-found"])
       World.kubectl(["delete", "secret", "-n", namespace, @secret, "--ignore-not-found"])
       Plane.publish!(context.channel, %{"schema" => 1, "agents" => [agent()]})
     end)
@@ -134,6 +135,50 @@ defmodule Troupe.E2E.CredentialsTest do
     assert env(context.namespace, @variable) == "a-probe-token"
   end
 
+  # The way nobody copies it by hand: kept once beside the plane, labelled for workers, and
+  # the operator puts it in the profile's namespace at its next pass.
+  test "a Secret kept in the plane's namespace and labelled for workers reaches the pod", context do
+    Plane.publish!(context.channel, %{
+      "schema" => 1,
+      "agents" => [agent()],
+      "mcp_servers" => [
+        %{"name" => @server, "url" => "https://api.github.com/mcp", "credential_ref" => @variable}
+      ]
+    })
+
+    World.eventually(fn -> projected?(context.profile) end,
+      timeout: 120_000,
+      what: "the plane to project #{@server}"
+    )
+
+    World.kubectl!([
+      "create",
+      "secret",
+      "generic",
+      @secret,
+      "-n",
+      World.namespace(),
+      "--from-literal=token=a-kept-token"
+    ])
+
+    World.kubectl!(["label", "secret", @secret, "-n", World.namespace(), "troupe.dev/worker-secret=true"])
+
+    # At the next pass, which a resync starts within half a minute.
+    World.eventually(fn -> copied?(context.namespace) end,
+      timeout: 120_000,
+      what: "the operator to copy #{@secret} into #{context.namespace}"
+    )
+
+    World.eventually(fn -> String.trim(condition(context.profile, "status")) == "False" end,
+      timeout: 120_000,
+      what: "SecretMissing to say nothing is missing",
+      explain: fn -> condition(context.profile) end
+    )
+
+    restart(context.namespace)
+    assert env(context.namespace, @variable) == "a-kept-token"
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   defp projected?(profile) do
@@ -148,6 +193,20 @@ defmodule Troupe.E2E.CredentialsTest do
          ]) do
       {output, 0} -> String.trim(output) == @secret
       _ -> false
+    end
+  end
+
+  # The operator's copy, by its marker and where it says it came from.
+  defp copied?(namespace) do
+    case World.kubectl(["get", "secret", @secret, "-n", namespace, "-o", "json"]) do
+      {json, 0} ->
+        %{"metadata" => metadata} = Jason.decode!(json)
+
+        metadata["labels"]["troupe.dev/managed"] == "operator" and
+          metadata["annotations"]["troupe.dev/copied-from"] == "#{World.namespace()}/#{@secret}"
+
+      _absent ->
+        false
     end
   end
 
@@ -176,7 +235,7 @@ defmodule Troupe.E2E.CredentialsTest do
     end
   end
 
-  defp condition(profile) do
+  defp condition(profile, field \\ "message") do
     World.kubectl!([
       "get",
       "workerprofile",
@@ -184,7 +243,7 @@ defmodule Troupe.E2E.CredentialsTest do
       "-n",
       World.namespace(),
       "-o",
-      "jsonpath={.status.conditions[?(@.type=='SecretMissing')].message}"
+      "jsonpath={.status.conditions[?(@.type=='SecretMissing')].#{field}}"
     ])
   end
 

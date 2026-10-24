@@ -141,6 +141,11 @@ spec:
                             description: Absent means the input price.
                     secretRef:
                       type: object
+                      description: >-
+                        The Secret holding the model key, by name, kept in the plane's namespace:
+                        the operator copies it into the worker namespace at every pass. One of
+                        that name already in the worker namespace is used where the plane's
+                        namespace has none.
                       properties:
                         name: {type: string}
                         key: {type: string, default: api-key}
@@ -148,7 +153,8 @@ spec:
                   type: array
                   description: >-
                     Written by the plane from the channel's config bundle. The credential
-                    is a Secret in the worker namespace; nothing here is a value.
+                    is a Secret, kept in the plane's namespace and copied into the worker
+                    namespace by the operator; nothing here is a value.
                   items:
                     type: object
                     required: [name, url]
@@ -402,6 +408,12 @@ spec:
                 observedGeneration: {type: integer}
                 readyReplicas: {type: integer}
                 namespace: {type: string}
+                copiedSecrets:
+                  type: array
+                  description: >-
+                    The operator's: the Secrets it copied into the worker namespace from the
+                    plane's, so a copy the profile stops naming is deleted at the next pass.
+                  items: {type: string}
                 podsBehind:
                   type: array
                   description: >-

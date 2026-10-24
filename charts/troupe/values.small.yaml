@@ -13,7 +13,7 @@ namespace: troupe-system
 
 # No image is set here: the chart's defaults are its own release's, public and needing
 # no credential. A registry of your own that does names its pull secrets here; they must
-# exist in `troupe-system` and in every worker namespace.
+# exist in `troupe-system`, and the operator copies them into every worker namespace.
 imagePullSecrets: []
 
 networkPolicy:
@@ -29,6 +29,8 @@ operator:
     limits: {cpu: 300m, memory: 256Mi}
   ciliumAvailable: true                                      # CHANGE ME: false without Cilium
   ingressClassName: nginx
+  # Where the ingress controller runs, which the operator labels `troupe.dev/ingress=true`.
+  ingressNamespace: ingress-nginx                            # CHANGE ME: your controller's namespace
   workersScheme: wss
   workersPort: ""
   # No page but the GUI this chart serves; see `values.yaml`.

@@ -20,11 +20,12 @@ is a worked example.
 | Where nodes enforce AppArmor (Ubuntu's), the chart's AppArmor profile loaded on them | the runtime's default AppArmor profile, and Ubuntu's restriction on unprivileged user namespaces, stop bubblewrap ([the workers' sandbox](worker-sandbox.md#the-workers-apparmor-profile)) | a pod refuses every command, saying bubblewrap could not start; on nodes without AppArmor, `worker.appArmor.enabled: false` |
 | Kubernetes ≥ 1.33, containerd ≥ 2.0 (runc ≥ 1.2), Linux ≥ 6.3, storage that takes idmapped mounts | each worker pod runs in a user namespace of its own with its `/proc` unmasked, which bubblewrap's own `/proc` needs; the operator labels each worker namespace with the Pod Security level that takes ([the workers' sandbox](worker-sandbox.md#the-workers-user-namespaces)) | a worker pod is refused or does not start; with `worker.userNamespaces: false` it starts and refuses every command |
 
-Label the ingress controller's namespace, or every worker drops its traffic:
-
-```bash
-kubectl label namespace ingress-nginx troupe.dev/ingress=true
-```
+Every worker admits HTTP only from a namespace labelled `troupe.dev/ingress=true`. Name
+the ingress controller's namespace in `operator.ingressNamespace` (`ingress-nginx` in the
+example values) and the operator puts the label there and keeps it. Left empty, the label
+is yours to put on, and until some namespace that runs a pod carries it each profile's
+`IngressNamespaceMissing` condition and the console's Overview say so, with the
+`kubectl label namespace` line.
 
 ## 1. What Troupe does not run for you
 
@@ -155,8 +156,10 @@ one, opens `/admin/breakglass` ([roles-and-permissions.md §4](roles-and-permiss
 9. **Budgets**: which ceiling would refuse, and for whom.
 
 No `kubectl`, environment variable or database write in any of them, and every step is in
-the audit trail with a diff. Then create the worker namespace's Secrets (object store, the
-model key, pull secrets) and watch `kubectl -n troupe-system get wp -w`.
+the audit trail with a diff. The operator copies the Secrets the profile's pods mount into
+its namespace from `troupe-system` ([configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects));
+watch `kubectl -n troupe-system get wp -w`, where `SecretMissing` names any it found in
+neither.
 
 ### The clients people install
 
@@ -247,9 +250,9 @@ as [openbao.md](openbao.md) writes them; the plane says on its Overview which gr
 role still lacks, with the lines that add it. `dev/kind/dependencies.yaml` has the rest as
 working commands, in development shape.
 
-**Every worker namespace** the operator creates needs its own copies of the Secrets
-[configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects) lists for
-`troupe-w-<profile>`; External Secrets Operator is how none is forgotten on a new profile.
+**Every worker namespace** gets its Secrets from the operator, copied from `troupe-system`
+at every pass ([configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects)):
+keep each once there, External Secrets Operator or by hand, and a new profile has them.
 
 **Sizing.** The example's plane is two replicas at 1 vCPU and 1 GiB each; the rest is
 [profiles-and-policy.md §7](profiles-and-policy.md#7-sizing).

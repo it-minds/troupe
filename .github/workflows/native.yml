@@ -11,6 +11,17 @@
 # everything to that draft release. See `docs/developer/ci.md`.
 #
 # `workflow_dispatch` runs it by hand, attaching nothing.
+#
+# OS code signing is the `sign` input's (docs/developer/code-signing.md, section 6). Empty,
+# as every caller but two leaves it, nothing is signed and no secret is read. `release`,
+# which `release.yml` alone passes, runs the macOS and Windows builds in the `release`
+# environment, whose secrets reach only a job that names it, and signs every executable
+# and library each artifact unpacks, the artifact itself, and on macOS notarises them;
+# where a platform's secrets are absent it builds unsigned and the summary says so.
+# `self-signed`, which `signing.yml` passes, is the test of all that: the same steps on
+# one macOS and the Windows target, with a certificate made in the job and stand-ins for
+# Apple's and Microsoft's services. Signing happens before anything is uploaded, so the
+# manifest `release.yml` writes and the release key signs is over the OS-signed files.
 name: native builds
 
 on:
@@ -37,6 +48,14 @@ on:
           request does not, because a macOS runner costs about ten Linux ones.
         type: boolean
         default: true
+      sign:
+        description: >-
+          OS code signing: empty signs nothing and reads no secret; `release` signs with
+          the `release` environment's secrets where they are set (release.yml); `self-signed`
+          signs with a certificate made in the job, macOS and Windows targets only
+          (signing.yml).
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       macos:
@@ -72,6 +91,7 @@ jobs:
       - id: pick
         env:
           MACOS: ${{ inputs.macos }}
+          SIGN: ${{ inputs.sign }}
           # `timeout` is each target's own, about three times what its build takes (Decision
           # 796): a runner that hangs fails the build in minutes rather than holding a
           # release for GitHub's six hours, and a target slow by nature is not cut short.
@@ -97,9 +117,12 @@ jobs:
               "rust-targets": "x86_64-pc-windows-msvc", "timeout": 20},
              {"name": "Linux (x64)", "os": "ubuntu-22.04", "target": "x86_64-unknown-linux-gnu",
               "rust-targets": "x86_64-unknown-linux-gnu", "timeout": 20}]
-        # `macos` is empty when nothing passed it, which means the default: build it.
+        # `macos` is empty when nothing passed it, which means the default: build it. The
+        # signing test signs what has a signature to add, on one Mac and on Windows.
         run: |
-          if [ "$MACOS" = false ]; then
+          if [ "$SIGN" = self-signed ]; then
+            pick() { jq -c 'map(select(.os == "macos-14" or (.os | startswith("windows"))))'; }
+          elif [ "$MACOS" = false ]; then
             pick() { jq -c 'map(select(.os | startswith("macos") | not))'; }
           else
             pick() { jq -c .; }
@@ -110,12 +133,52 @@ jobs:
             echo "desktop=$(pick <<<"$DESKTOP")"
           } >> "$GITHUB_OUTPUT"
 
+  # -- which builds are signed ----------------------------------------------------
+  #
+  # Per platform: none, unsigned (a release whose secrets are absent), release or
+  # self-signed. For a release, in the `release` environment, so that it sees which of
+  # the environment's secrets are set; it hands on whether each is, never a value.
+  signing:
+    name: which builds are signed
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    environment: ${{ inputs.sign == 'release' && 'release' || '' }}
+    outputs:
+      macos: ${{ steps.plan.outputs.macos }}
+      windows: ${{ steps.plan.outputs.windows }}
+      macos_reason: ${{ steps.plan.outputs.macos_reason }}
+      windows_reason: ${{ steps.plan.outputs.windows_reason }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - id: plan
+        env:
+          SIGN: ${{ inputs.sign }}
+          SET_APPLE_CERTIFICATE: ${{ inputs.sign == 'release' && secrets.APPLE_CERTIFICATE != '' }}
+          SET_APPLE_CERTIFICATE_PASSWORD: ${{ inputs.sign == 'release' && secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
+          SET_APPLE_SIGNING_IDENTITY: ${{ inputs.sign == 'release' && secrets.APPLE_SIGNING_IDENTITY != '' }}
+          SET_APPLE_API_ISSUER: ${{ inputs.sign == 'release' && secrets.APPLE_API_ISSUER != '' }}
+          SET_APPLE_API_KEY: ${{ inputs.sign == 'release' && secrets.APPLE_API_KEY != '' }}
+          SET_APPLE_API_PRIVATE_KEY: ${{ inputs.sign == 'release' && secrets.APPLE_API_PRIVATE_KEY != '' }}
+          SET_AZURE_ENDPOINT: ${{ inputs.sign == 'release' && secrets.AZURE_ENDPOINT != '' }}
+          SET_AZURE_CODE_SIGNING_NAME: ${{ inputs.sign == 'release' && secrets.AZURE_CODE_SIGNING_NAME != '' }}
+          SET_AZURE_CERT_PROFILE_NAME: ${{ inputs.sign == 'release' && secrets.AZURE_CERT_PROFILE_NAME != '' }}
+          SET_AZURE_TENANT_ID: ${{ inputs.sign == 'release' && secrets.AZURE_TENANT_ID != '' }}
+          SET_AZURE_CLIENT_ID: ${{ inputs.sign == 'release' && secrets.AZURE_CLIENT_ID != '' }}
+          SET_AZURE_CLIENT_SECRET: ${{ inputs.sign == 'release' && secrets.AZURE_CLIENT_SECRET != '' }}
+        run: sh scripts/signing/ci.sh plan "$SIGN"
+
   # -- troupe-daemon ------------------------------------------------------------
   daemon:
     name: troupe-daemon ${{ matrix.target }}
-    needs: [targets]
+    needs: [targets, signing]
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.timeout }}
+    # The release environment for a signed release's macOS and Windows builds alone: its
+    # secrets reach only a job that names it, and it takes jobs from `main` only, so a
+    # pre-release from a branch and the nightly never ask for it.
+    environment: ${{ inputs.sign == 'release' && !startsWith(matrix.os, 'ubuntu') && 'release' || '' }}
     env:
       MIX_ENV: prod
     strategy:
@@ -152,7 +215,64 @@ jobs:
 
       - run: mix deps.get
 
+      # -- OS signing (docs/developer/code-signing.md, section 6); the same five steps in
+      # the `tui` job. Nothing here runs when `sign` is empty.
+      - name: Is this build signed
+        id: sign
+        working-directory: .
+        env:
+          SIGN: ${{ inputs.sign }}
+          MACOS: ${{ needs.signing.outputs.macos }}
+          WINDOWS: ${{ needs.signing.outputs.windows }}
+          MACOS_REASON: ${{ needs.signing.outputs.macos_reason }}
+          WINDOWS_REASON: ${{ needs.signing.outputs.windows_reason }}
+        run: sh scripts/signing/ci.sh job "troupe-daemon ${{ matrix.target }}"
+
+      - name: A keychain with the signing identity (macOS)
+        id: keychain
+        if: runner.os == 'macOS' && steps.sign.outputs.signs == 'true'
+        working-directory: .
+        env:
+          MODE: ${{ steps.sign.outputs.mode }}
+          APPLE_CERTIFICATE: ${{ steps.sign.outputs.mode == 'release' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ steps.sign.outputs.mode == 'release' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ steps.sign.outputs.mode == 'release' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+        run: sh scripts/signing/macos-keychain.sh "$MODE"
+
+      - name: The signing tool (Windows)
+        if: runner.os == 'Windows' && steps.sign.outputs.mode == 'release'
+        run: cargo install artifact-signing-cli --locked
+
+      - name: A self-signed certificate, trusted on this runner only (Windows)
+        if: runner.os == 'Windows' && steps.sign.outputs.mode == 'self-signed'
+        working-directory: .
+        shell: pwsh
+        run: ./scripts/signing/test-certificate.ps1 -Trust
+
+      - name: What signs
+        if: steps.sign.outputs.signs == 'true'
+        working-directory: .
+        env:
+          IDENTITY: ${{ steps.keychain.outputs.identity }}
+          AUTHORITY: ${{ steps.keychain.outputs.authority }}
+          KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
+        run: sh scripts/signing/ci.sh env "${{ steps.sign.outputs.mode }}"
+
       - name: Build the release
+        if: steps.sign.outputs.signs != 'true'
+        run: mix release troupe_daemon --overwrite
+
+      # Every executable and library signed as the release is assembled, before `:tar`
+      # packs it (Troupe.Release.OSSigning), so the archive holds the signed files.
+      - name: Build the release, signed
+        if: steps.sign.outputs.signs == 'true'
+        env:
+          AZURE_ENDPOINT: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_ENDPOINT || '' }}
+          AZURE_CODE_SIGNING_NAME: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_CODE_SIGNING_NAME || '' }}
+          AZURE_CERT_PROFILE_NAME: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_CERT_PROFILE_NAME || '' }}
+          AZURE_TENANT_ID: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_CLIENT_SECRET || '' }}
         run: mix release troupe_daemon --overwrite
 
       - name: Name the artifact
@@ -163,6 +283,21 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/dist"
           mv "$GITHUB_WORKSPACE/_build/prod/troupe_daemon-${VERSION}.tar.gz" "$GITHUB_WORKSPACE/dist/${NAME}"
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+
+      # Every Mach-O in the release, registered with Apple: a tree of programs cannot have
+      # a ticket stapled to it, so Gatekeeper looks it up online.
+      - name: Notarise (macOS)
+        if: runner.os == 'macOS' && steps.sign.outputs.mode == 'release'
+        working-directory: .
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          TROUPE_SIGN_LABEL: ${{ steps.art.outputs.name }}
+        run: |
+          tree=$(mktemp -d)/troupe-daemon
+          mkdir -p "$tree" && tar -xzf "dist/${{ steps.art.outputs.name }}" -C "$tree"
+          sh scripts/signing/notarize-macos.sh "$tree"
 
       - name: "Smoke test (unpack; version, status, run, status, eval)"
         if: runner.os != 'Windows'
@@ -203,17 +338,58 @@ jobs:
           & "$inst\bin\troupe_daemon.bat" eval "b = :binary.list_to_bin(List.duplicate(0, 1000)); true = :ezstd.decompress(:ezstd.compress(b)) == b; IO.puts(:zstd_ok)"
           if ($LASTEXITCODE -ne 0) { throw "eval failed with $LASTEXITCODE" }
 
+      # What a person unpacks, not what was signed before it was packed: every executable
+      # and library in the archive carries the signature, counted in the summary.
+      - name: Every executable and library in the archive is signed (macOS)
+        if: runner.os == 'macOS' && steps.sign.outputs.signs == 'true'
+        working-directory: .
+        env:
+          TROUPE_SIGN_LABEL: ${{ steps.art.outputs.name }}
+        run: |
+          tree=$(mktemp -d)
+          tar -xzf "dist/${{ steps.art.outputs.name }}" -C "$tree"
+          sh scripts/signing/sign-macos.sh --verify "$tree"
+
+      - name: Every executable and library in the archive is signed (Windows)
+        if: runner.os == 'Windows' && steps.sign.outputs.signs == 'true'
+        working-directory: .
+        shell: pwsh
+        env:
+          TROUPE_SIGN_LABEL: ${{ steps.art.outputs.name }}
+        run: |
+          $tree = Join-Path $env:RUNNER_TEMP "signed-daemon"
+          New-Item -ItemType Directory -Force $tree | Out-Null
+          tar -xzf "dist/${{ steps.art.outputs.name }}" -C $tree
+          ./scripts/signing/sign-windows.ps1 -Verify $tree
+
+      - name: Record what was signed
+        if: steps.sign.outputs.signs == 'true'
+        working-directory: .
+        run: sh scripts/signing/ci.sh record "dist/${{ steps.art.outputs.name }}"
+
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.art.outputs.name }}
           path: dist/${{ steps.art.outputs.name }}
 
+      - uses: actions/upload-artifact@v7
+        if: steps.sign.outputs.signs == 'true'
+        with:
+          name: os-signed-${{ steps.art.outputs.name }}
+          path: ${{ runner.temp }}/os-signed/records.txt
+
+      - name: Remove the keychain
+        if: always() && steps.keychain.outcome == 'success'
+        working-directory: .
+        run: sh scripts/signing/macos-keychain.sh delete
+
   # -- troupe (the TUI) ---------------------------------------------------------
   tui:
     name: troupe ${{ matrix.target }}
-    needs: [targets]
+    needs: [targets, signing]
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.timeout }}
+    environment: ${{ inputs.sign == 'release' && !startsWith(matrix.os, 'ubuntu') && 'release' || '' }}
     env:
       MIX_ENV: prod
       TROUPE_REAPER_TARGETS: all
@@ -256,7 +432,54 @@ jobs:
       # from anywhere private.
       - run: mix deps.get
 
+      # -- OS signing: the same five steps as the `daemon` job's.
+      - name: Is this build signed
+        id: sign
+        working-directory: .
+        env:
+          SIGN: ${{ inputs.sign }}
+          MACOS: ${{ needs.signing.outputs.macos }}
+          WINDOWS: ${{ needs.signing.outputs.windows }}
+          MACOS_REASON: ${{ needs.signing.outputs.macos_reason }}
+          WINDOWS_REASON: ${{ needs.signing.outputs.windows_reason }}
+        run: sh scripts/signing/ci.sh job "troupe ${{ matrix.target }}"
+
+      - name: A keychain with the signing identity (macOS)
+        id: keychain
+        if: runner.os == 'macOS' && steps.sign.outputs.signs == 'true'
+        working-directory: .
+        env:
+          MODE: ${{ steps.sign.outputs.mode }}
+          APPLE_CERTIFICATE: ${{ steps.sign.outputs.mode == 'release' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ steps.sign.outputs.mode == 'release' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ steps.sign.outputs.mode == 'release' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+        run: sh scripts/signing/macos-keychain.sh "$MODE"
+
+      - name: The signing tool (Windows)
+        if: runner.os == 'Windows' && steps.sign.outputs.mode == 'release'
+        run: cargo install artifact-signing-cli --locked
+
+      - name: A self-signed certificate, trusted on this runner only (Windows)
+        if: runner.os == 'Windows' && steps.sign.outputs.mode == 'self-signed'
+        working-directory: .
+        shell: pwsh
+        run: ./scripts/signing/test-certificate.ps1 -Trust
+
+      - name: What signs
+        if: steps.sign.outputs.signs == 'true'
+        working-directory: .
+        env:
+          IDENTITY: ${{ steps.keychain.outputs.identity }}
+          AUTHORITY: ${{ steps.keychain.outputs.authority }}
+          KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
+        run: sh scripts/signing/ci.sh env "${{ steps.sign.outputs.mode }}"
+
+      # Signed or not, the same build: with `TROUPE_SIGN` set (What signs, above),
+      # Troupe.Release.OSSigning signs every executable and library in Burrito's payload
+      # after its patch phase has put the target's ERTS there and before it is packed.
+      # Two steps only so that the unsigned build cannot see the Windows signing secrets.
       - name: Build the release
+        if: steps.sign.outputs.signs != 'true'
         env:
           BURRITO_TARGET: ${{ matrix.target }}
           MATRIX_TARGET_ABI: ${{ matrix.target_abi }}
@@ -267,6 +490,21 @@ jobs:
           # What Burrito wrapped into the binary.
           ls _build/prod/rel/troupe/LICENSE _build/prod/rel/troupe/NOTICE _build/prod/rel/troupe/THIRD-PARTY-NOTICES.txt
 
+      - name: Build the release, signed
+        if: steps.sign.outputs.signs == 'true'
+        env:
+          BURRITO_TARGET: ${{ matrix.target }}
+          AZURE_ENDPOINT: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_ENDPOINT || '' }}
+          AZURE_CODE_SIGNING_NAME: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_CODE_SIGNING_NAME || '' }}
+          AZURE_CERT_PROFILE_NAME: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_CERT_PROFILE_NAME || '' }}
+          AZURE_TENANT_ID: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_CLIENT_SECRET || '' }}
+        run: |
+          mix release --overwrite
+          ls -la burrito_out
+          ls _build/prod/rel/troupe/LICENSE _build/prod/rel/troupe/NOTICE _build/prod/rel/troupe/THIRD-PARTY-NOTICES.txt
+
       - name: Name the artifact
         id: art
         run: |
@@ -275,6 +513,32 @@ jobs:
           NAME="troupe-${VERSION}-${{ matrix.target }}${EXT}"
           mv "burrito_out/troupe_${{ matrix.target }}${EXT}" "burrito_out/${NAME}"
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+
+      # The binary Burrito wrapped the signed payload in, signed itself, and on macOS
+      # registered with Apple: a standalone binary cannot have a ticket stapled to it.
+      - name: Sign the binary
+        if: steps.sign.outputs.signs == 'true'
+        env:
+          AZURE_ENDPOINT: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_ENDPOINT || '' }}
+          AZURE_CODE_SIGNING_NAME: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_CODE_SIGNING_NAME || '' }}
+          AZURE_CERT_PROFILE_NAME: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_CERT_PROFILE_NAME || '' }}
+          AZURE_TENANT_ID: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ steps.sign.outputs.mode == 'release' && runner.os == 'Windows' && secrets.AZURE_CLIENT_SECRET || '' }}
+        run: |
+          case "$TROUPE_SIGN" in
+            *.ps1) pwsh -NoProfile -NonInteractive -File "$TROUPE_SIGN" "burrito_out/${{ steps.art.outputs.name }}" ;;
+            *) sh "$TROUPE_SIGN" "burrito_out/${{ steps.art.outputs.name }}" ;;
+          esac
+
+      - name: Notarise (macOS)
+        if: runner.os == 'macOS' && steps.sign.outputs.mode == 'release'
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          TROUPE_SIGN_LABEL: ${{ steps.art.outputs.name }}
+        run: sh ../../scripts/signing/notarize-macos.sh "burrito_out/${{ steps.art.outputs.name }}"
 
       # The embedded daemon takes the scripted model from the environment: a workspace's
       # own file names a provider only once the machine trusts the workspace.
@@ -300,14 +564,53 @@ jobs:
             "$BIN" run build "no finish" --headless --auto-approve
           test -f hello.txt
 
+      # The binary, and what it unpacked on its first run above: the payload under
+      # `.burrito`, every executable and library of which carries the signature.
+      - name: The binary and everything it unpacks are signed (macOS)
+        if: runner.os == 'macOS' && steps.sign.outputs.signs == 'true'
+        env:
+          TROUPE_SIGN_LABEL: ${{ steps.art.outputs.name }}
+        run: |
+          payload=$(find "$HOME/Library/Application Support/.burrito" -maxdepth 1 -type d -name 'troupe_erts-*' | head -1)
+          [ -n "$payload" ] || { echo "the binary unpacked no payload under ~/Library/Application Support/.burrito"; exit 1; }
+          sh ../../scripts/signing/sign-macos.sh --verify "burrito_out/${{ steps.art.outputs.name }}" "$payload"
+
+      - name: The binary and everything it unpacks are signed (Windows)
+        if: runner.os == 'Windows' && steps.sign.outputs.signs == 'true'
+        shell: pwsh
+        env:
+          TROUPE_SIGN_LABEL: ${{ steps.art.outputs.name }}
+        run: |
+          $payload = @(Get-ChildItem -Directory -ErrorAction SilentlyContinue -Path "$env:APPDATA\.burrito", "$env:LOCALAPPDATA\.burrito" |
+            Where-Object { $_.Name -like 'troupe_erts-*' }) | Select-Object -First 1
+          if (-not $payload) { throw "the binary unpacked no payload under .burrito" }
+          & "$env:GITHUB_WORKSPACE/scripts/signing/sign-windows.ps1" -Verify "burrito_out/${{ steps.art.outputs.name }}" $payload.FullName
+
+      - name: Record what was signed
+        if: steps.sign.outputs.signs == 'true'
+        run: sh ../../scripts/signing/ci.sh record "burrito_out/${{ steps.art.outputs.name }}"
+
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.art.outputs.name }}
           path: clients/tui/burrito_out/${{ steps.art.outputs.name }}
 
+      - uses: actions/upload-artifact@v7
+        if: steps.sign.outputs.signs == 'true'
+        with:
+          name: os-signed-${{ steps.art.outputs.name }}
+          path: ${{ runner.temp }}/os-signed/records.txt
+
+      - name: Remove the keychain
+        if: always() && steps.keychain.outcome == 'success'
+        working-directory: .
+        run: sh scripts/signing/macos-keychain.sh delete
+
   tui-containers:
     name: the TUI's Linux binary in clean containers
     needs: [tui]
+    # The signing test builds no Linux binary.
+    if: inputs.sign != 'self-signed'
     runs-on: ubuntu-24.04
     # A binary that hangs in a container must fail this job, not hold a runner for six
     # hours: the first run of this job on GitHub did exactly that, with no log to show
@@ -356,14 +659,18 @@ jobs:
 
   # -- the desktop app ----------------------------------------------------------
   #
-  # Unsigned until the signing secrets exist. Every signing step is gated on a secret, and
-  # adding the secret turns it on with nothing else to change; until then the installers
-  # warn on first launch (clients/gui/docs/install.md).
+  # Unsigned until the signing secrets exist; with them, a release (`sign: release`) signs
+  # with nothing else to change. Tauri signs while it builds: on macOS the app, with the
+  # hardened runtime and `entitlements.plist`, notarised and stapled; on Windows the app's
+  # executable, the NSIS setup and the MSI, through the sign command in
+  # `tauri.signing.conf.json`, which is scripts/signing/sign-windows.ps1. Until then the
+  # installers warn on first launch (clients/gui/docs/install.md).
   desktop:
     name: desktop ${{ matrix.name }}
-    needs: [targets]
+    needs: [targets, signing]
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.timeout }}
+    environment: ${{ inputs.sign == 'release' && !startsWith(matrix.os, 'ubuntu') && 'release' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -402,56 +709,103 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Decide whether this build is signed
-        id: signing
+      - name: Is this build signed
+        id: sign
         shell: bash
+        working-directory: .
         env:
-          APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE }}
-          AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+          SIGN: ${{ inputs.sign }}
+          MACOS: ${{ needs.signing.outputs.macos }}
+          WINDOWS: ${{ needs.signing.outputs.windows }}
+          MACOS_REASON: ${{ needs.signing.outputs.macos_reason }}
+          WINDOWS_REASON: ${{ needs.signing.outputs.windows_reason }}
         run: |
-          signed=false
-          case "${{ matrix.os }}" in
-            macos-*)   [ -n "$APPLE_CERT" ]     && signed=true ;;
-            windows-*) [ -n "$AZURE_ENDPOINT" ] && signed=true ;;
-          esac
-          echo "signed=$signed" >> "$GITHUB_OUTPUT"
-          if [ "$signed" = false ]; then
+          sh scripts/signing/ci.sh job "desktop ${{ matrix.target }}"
+          if [ "${{ inputs.sign }}" = "" ]; then
             echo "::notice::Unsigned build. Installers will warn; see clients/gui/docs/install.md."
           fi
 
-      - name: Install the Windows signing client
-        if: steps.signing.outputs.signed == 'true' && runner.os == 'Windows'
-        run: cargo install trusted-signing-cli
+      # A release's macOS build: Tauri imports APPLE_CERTIFICATE into a keychain of its
+      # own. The test's: the self-signed identity in one of the job's own (or ad hoc), which
+      # Tauri finds by APPLE_SIGNING_IDENTITY, as codesign does.
+      - name: A keychain with the test's signing identity (macOS)
+        id: keychain
+        if: runner.os == 'macOS' && steps.sign.outputs.mode == 'self-signed'
+        shell: bash
+        working-directory: .
+        run: sh scripts/signing/macos-keychain.sh self-signed
 
-      # Two steps, not one with a conditional env block. An undefined secret is not an
+      # tauri-action takes the App Store Connect key as a file, APPLE_API_KEY_PATH; a secret
+      # cannot be a file, so the key's text is written to one only this job reads.
+      - name: The notarisation key, as a file (macOS)
+        id: apikey
+        if: runner.os == 'macOS' && steps.sign.outputs.mode == 'release'
+        shell: bash
+        # The path names no secret, so the output that carries it is not withheld.
+        env:
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          umask 077
+          dir="$RUNNER_TEMP/private_keys"; mkdir -p "$dir"
+          printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$dir/notary.p8"
+          echo "path=$dir/notary.p8" >> "$GITHUB_OUTPUT"
+
+      - name: The signing tool (Windows)
+        if: runner.os == 'Windows' && steps.sign.outputs.mode == 'release'
+        run: cargo install artifact-signing-cli --locked
+
+      - name: A self-signed certificate, trusted on this runner only (Windows)
+        if: runner.os == 'Windows' && steps.sign.outputs.mode == 'self-signed'
+        working-directory: .
+        shell: pwsh
+        run: ./scripts/signing/test-certificate.ps1 -Trust
+
+      - name: What signs (Windows)
+        if: runner.os == 'Windows' && steps.sign.outputs.signs == 'true'
+        shell: bash
+        working-directory: .
+        run: sh scripts/signing/ci.sh env "${{ steps.sign.outputs.mode }}"
+
+      # Three steps, not one with a conditional env block. An undefined secret is not an
       # absent variable: GitHub substitutes an empty string, so `APPLE_CERTIFICATE` is
       # still *defined*, and tauri-action reads its presence as "set up a signing
       # keychain" and then fails importing nothing. The unsigned build must not be able
       # to see these names at all. No `tagName`: the release job owns the release, and
       # this only builds.
       - name: Build the bundles (unsigned)
-        if: steps.signing.outputs.signed != 'true'
+        if: steps.sign.outputs.signs != 'true'
         uses: tauri-apps/tauri-action@v1
         with:
           projectPath: clients/gui/apps/desktop
           args: --target ${{ matrix.target }}
 
       - name: Build the bundles (signed)
-        if: steps.signing.outputs.signed == 'true'
+        if: steps.sign.outputs.mode == 'release'
         uses: tauri-apps/tauri-action@v1
         env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
-          AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
-          AZURE_CODE_SIGNING_NAME: ${{ secrets.AZURE_CODE_SIGNING_NAME }}
-          AZURE_CERT_PROFILE_NAME: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_API_ISSUER: ${{ runner.os == 'macOS' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_KEY: ${{ runner.os == 'macOS' && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_KEY_PATH: ${{ steps.apikey.outputs.path }}
+          AZURE_ENDPOINT: ${{ runner.os == 'Windows' && secrets.AZURE_ENDPOINT || '' }}
+          AZURE_CODE_SIGNING_NAME: ${{ runner.os == 'Windows' && secrets.AZURE_CODE_SIGNING_NAME || '' }}
+          AZURE_CERT_PROFILE_NAME: ${{ runner.os == 'Windows' && secrets.AZURE_CERT_PROFILE_NAME || '' }}
+          AZURE_CLIENT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_SECRET || '' }}
+          AZURE_TENANT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_TENANT_ID || '' }}
+        with:
+          projectPath: clients/gui/apps/desktop
+          args: --target ${{ matrix.target }} --config src-tauri/tauri.signing.conf.json
+
+      # The same configuration and sign command, with the test's identity: no certificate
+      # for Tauri to import on macOS, and no notarisation, which needs Apple.
+      - name: Build the bundles (self-signed)
+        if: steps.sign.outputs.mode == 'self-signed'
+        uses: tauri-apps/tauri-action@v1
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ steps.keychain.outputs.identity }}
         with:
           projectPath: clients/gui/apps/desktop
           args: --target ${{ matrix.target }} --config src-tauri/tauri.signing.conf.json
@@ -485,6 +839,72 @@ jobs:
           version=$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/VERSION")
           tar -czf "macos/Troupe_${version%%-*}_universal.app.tar.gz" -C macos Troupe.app
           ls -la macos
+
+      # The app as a whole, and each Mach-O in it with the hardened runtime and the
+      # identity it was signed with; for a release, also what Gatekeeper will say and the
+      # stapled ticket.
+      - name: The app is signed (macOS)
+        if: runner.os == 'macOS' && steps.sign.outputs.signs == 'true'
+        shell: bash
+        working-directory: clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle
+        env:
+          MODE: ${{ steps.sign.outputs.mode }}
+          TROUPE_SIGN_AUTHORITY: ${{ steps.sign.outputs.mode == 'release' && 'Developer ID Application:' || steps.keychain.outputs.authority }}
+          TROUPE_SIGN_LABEL: desktop ${{ matrix.target }}
+        run: |
+          codesign --verify --deep --strict --verbose=2 macos/Troupe.app
+          codesign -d --entitlements - --xml macos/Troupe.app | grep -q com.apple.security.cs.allow-jit
+          sh "$GITHUB_WORKSPACE/scripts/signing/sign-macos.sh" --verify macos/Troupe.app
+          if [ "$MODE" = release ]; then
+            spctl --assess --type execute --verbose=4 macos/Troupe.app
+            xcrun stapler validate macos/Troupe.app
+          fi
+          files=$(find macos dmg -maxdepth 1 \( -name '*.app.tar.gz' -o -name '*.dmg' \) -type f)
+          # shellcheck disable=SC2086
+          sh "$GITHUB_WORKSPACE/scripts/signing/ci.sh" record $files
+
+      # The installers and the app's executable must hold. What the NSIS setup unpacks at
+      # install time besides (its plug-in DLLs) is listed, not required: Tauri decides what
+      # it signs there.
+      - name: The installers and the app are signed (Windows)
+        if: runner.os == 'Windows' && steps.sign.outputs.signs == 'true'
+        shell: pwsh
+        working-directory: clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release
+        env:
+          TROUPE_SIGN_LABEL: desktop ${{ matrix.target }}
+        run: |
+          $verify = Join-Path $env:GITHUB_WORKSPACE "scripts/signing/sign-windows.ps1"
+          # The app's executable as the setup installs it: Tauri marks a copy of the build's
+          # for each installer and signs that, so the one left in target/ is not what ships.
+          $unpacked = Join-Path $env:RUNNER_TEMP "setup-unpacked"
+          7z x -y -bso0 "-o$unpacked" (Get-Item bundle/nsis/*-setup.exe).FullName
+          $app = @(Get-ChildItem -Recurse -File -Path $unpacked -Filter troupe-desktop.exe | ForEach-Object FullName)
+          if ($app.Count -eq 0) { throw "the setup holds no troupe-desktop.exe" }
+          $files = @(Get-ChildItem bundle/nsis/*-setup.exe, bundle/msi/*.msi | ForEach-Object FullName) + $app
+          & $verify -Verify @files
+          $env:TROUPE_SIGN_LABEL = ""
+          try { & $verify -Verify $unpacked } catch { Write-Host "::notice::$($_.Exception.Message): what the setup unpacks, listed above" }
+          $global:LASTEXITCODE = 0
+          # As `ci.sh record` writes it.
+          $dir = Join-Path $env:RUNNER_TEMP "os-signed"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Get-ChildItem bundle/nsis/*-setup.exe, bundle/msi/*.msi | ForEach-Object {
+            $line = "$((Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower())  $($_.Name)"
+            Write-Host $line
+            Add-Content -Path (Join-Path $dir "records.txt") -Value $line
+          }
+
+      - uses: actions/upload-artifact@v7
+        if: steps.sign.outputs.signs == 'true'
+        with:
+          name: os-signed-desktop-${{ matrix.target }}
+          path: ${{ runner.temp }}/os-signed/records.txt
+
+      - name: Remove the keychain
+        if: always() && steps.keychain.outcome == 'success'
+        shell: bash
+        working-directory: .
+        run: sh scripts/signing/macos-keychain.sh delete
 
       - name: Keep the installers
         uses: actions/upload-artifact@v7

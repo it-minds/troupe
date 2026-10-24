@@ -46,6 +46,9 @@ kind: Secret
 metadata:
   name: llm-credentials
   namespace: troupe-system
+  # The dev profile names it as its model key, and a Secret a profile names is copied into
+  # the profile's namespace only when it says it is for workers.
+  labels: {troupe.dev/worker-secret: "true"}
 stringData:
   # Replaced by `scripts/remote-up` with the value of TROUPE_GATEWAY_KEY, so the real key
   # is never written to a file in this repository.
@@ -255,11 +258,15 @@ spec:
               }
               POLICY
 
-              bao policy write troupe-plane - <<'POLICY'
-              path "secret/metadata/troupe/teams/+/sessions/*" {
-                capabilities = ["delete", "list", "read"]
-              }
-              POLICY
+              # The plane's: each policy `docs/admin/openbao.md` lists, from the ConfigMap
+              # `mix troupe.openbao.policy` writes (openbao-plane.yaml), and its role with
+              # those and nothing more, so the plane checks its grants against the role a
+              # deployment gives it. The root token above is this Job's and the cluster
+              # suite's, never the plane's.
+              for policy in /plane-policies/*.hcl; do
+                bao policy write "$(basename "$policy" .hcl)" "$policy"
+              done
+              sh /plane-policies/role
 
               # A profile's own identity at its MCP servers (Decision 747): a pod signs
               # with the transit keys named after its own namespace, `<namespace>.<name>`,
@@ -280,13 +287,9 @@ spec:
                 policies=troupe-shared-worker,troupe-worker-mcp-identity \
                 ttl=1h
 
-              bao write auth/kubernetes/role/troupe-plane \
-                bound_service_account_names=troupe-plane \
-                bound_service_account_namespaces=troupe-system \
-                policies=troupe-plane \
-                ttl=1h
-
               bao read transit/keys/troupe-session-tokens
+          volumeMounts: [{name: plane-policies, mountPath: /plane-policies}]
+      volumes: [{name: plane-policies, configMap: {name: openbao-plane-policies}}]
 ---
 # -- Dex ----------------------------------------------------------------------
 # An identity provider that speaks the device authorization grant, which is what

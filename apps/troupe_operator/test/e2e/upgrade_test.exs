@@ -104,8 +104,6 @@ defmodule Troupe.E2E.UpgradeTest do
       what: "the operator to make #{namespace}"
     )
 
-    World.secrets!(namespace)
-
     World.eventually(fn -> ready?(namespace) end,
       timeout: 300_000,
       every: 5_000,
