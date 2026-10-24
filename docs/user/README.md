@@ -146,13 +146,16 @@ the turn carries on.
 
 **Steering from another device.** A session on your machine you offer to the plane you are
 signed in to, so you can follow and steer it from the desktop app or the console on
-another device: `/steer on` in the terminal, or *Steer from elsewhere* in the session's
+another device (the console's *Mine*, which anybody the plane knows signs in to, not only
+its administrators): `/steer on` in the terminal, or *Steer from elsewhere* in the session's
 head in the desktop app. Name the people who may steer it too (`/steer on
 bea@example.com`), or only follow it (`cy@example.com:observe`). Your machine keeps one
 connection to the plane while it is offered and nothing listens on it; your rules and
 approvals hold for every prompt, and an approval answered from elsewhere is for that one
 call. Elsewhere it is listed as *Remote*, with *Offline since …* while your machine is
-away; in the terminal, HQ (`/remote`) lists the sessions offered to you beside the plane's,
+away, as soon as it is offered, withdrawn or goes away, since the plane tells the desktop
+app and the console rather than being asked again; the desktop app names who is steering
+your session as they arrive and leave; in the terminal, HQ (`/remote`) lists the sessions offered to you beside the plane's,
 as `laptop` rows, and opens one to steer it. Who joins and leaves is said in the session's
 window, and the status line names who is there. At your first offer the daemon signs in
 for itself and keeps that sign-in in your computer's credential store, so the offer stays

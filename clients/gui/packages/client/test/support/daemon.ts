@@ -539,7 +539,8 @@ export class FakeDaemon {
   servers: FakeServer[] = [];
   /** Sign-ins by server name (troupe-remote Decision 741); a server with `oauth` and no entry is signed out. */
   signIns: Record<string, FakeAuth> = {};
-  /** What the provider says to a sign-out, by server name: evoked where nothing is set and there was a sign-in. */
+  /** What the provider says to a sign-out, by server name: 
+evoked where nothing is set and there was a sign-in. */
   revocations: Record<string, { state: "revoked" | "failed" | "unsupported" | "none"; reason: string | null }> = {};
   /** The access token each sign-in left in the state directory, which no answer carries. */
   readonly signInTokens: Record<string, string> = {};
@@ -616,6 +617,8 @@ export class FakeDaemon {
   private readonly servesAgents: boolean;
   private nextId = 1;
   private restarts = 0;
+  /** Who hears each session's `presence:<id>` topic. */
+  private readonly presenceHeard = new Map<string, Set<(data: Record<string, unknown>) => void>>();
 
   constructor(opts: FakeDaemonOptions = {}) {
     this.token = opts.token ?? "daemon-token";
@@ -713,6 +716,15 @@ export class FakeDaemon {
 
   get port(): number {
     return (this.server!.address() as AddressInfo).port;
+  }
+
+  /**
+   * Somebody comes or goes on a session, as the daemon publishes it on `presence:<id>`:
+   * `{subject, state, display_name?, via?}`, `via: "plane"` for a person steering it from
+   * another device.
+   */
+  present(sessionId: string, data: Record<string, unknown>): void {
+    for (const hear of this.presenceHeard.get(sessionId) ?? []) hear(data);
   }
 
   /** Seed a session, as one started before the client connected. `opts.id` names it. */
@@ -1258,6 +1270,20 @@ export class FakeDaemon {
         }
         const topic = String(params["topic"] ?? "");
         const from = Number(params["from_seq"] ?? 0);
+        // Presence is a topic of its own: no seq, no replay, what happens from now on.
+        if (topic.startsWith("presence:")) {
+          const heard = this.sessions.get(topic.slice("presence:".length));
+          if (!heard) return reply(ws, id, null, { code: -32005, message: "not_found" });
+          const subscriptionId = `sub-${this.nextId++}`;
+          const hear = (data: Record<string, unknown>) =>
+            notify(ws, "event", { topic, subscription_id: subscriptionId, session_id: heard.id, event: { ephemeral: true, type: "presence", agent: ["root"], data } });
+          const set = this.presenceHeard.get(heard.id) ?? new Set();
+          set.add(hear);
+          this.presenceHeard.set(heard.id, set);
+          client.subs.set(subscriptionId, { id: subscriptionId, topic, off: () => void set.delete(hear) });
+          this.reading(topic, 1);
+          return reply(ws, id, { subscription_id: subscriptionId, head_seq: 0, replayed: 0, cursored: false });
+        }
         const target = this.sessions.get(topic.replace(/^session:/, ""));
         if (!target) return reply(ws, id, null, { code: -32005, message: "not_found" });
 

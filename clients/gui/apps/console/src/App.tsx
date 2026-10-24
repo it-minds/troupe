@@ -1,11 +1,14 @@
 // The console: sign in to the plane, find out what this person administers there, and
-// show them the console for that role, or say plainly that they administer nothing.
+// show them the console for that role. Everybody the plane knows signs in: a person who
+// administers nothing is a member, whose console is what is theirs (Mine), and an
+// administrative role adds the administrative areas.
 //
 // It is an app of its own. It shares the protocol client and the design tokens with the
 // desktop app and nothing else, needs no daemon and no desktop app to run, and talks to
-// the plane through its sign-in and its `admin.*` methods alone, besides one `me` for who
-// is signed in. A screen that needed anything else would be a door no other admin client
-// has.
+// the plane through its sign-in, its `admin.*` methods for the administrative areas, and
+// for Mine the methods any client of the person's calls (`me`, `me.clients`, `me.memory`,
+// `sessions.list`, `remote.*`), as that person. A screen that needed anything else would
+// be a door no other client has.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { JSX } from "react";
@@ -50,7 +53,7 @@ export function App({ navigate }: { navigate?: (url: string) => void } = {}): JS
   }, [phase]);
 
   const signed = useMemo<Signed | null>(() => {
-    if (phase.kind !== "ready" || phase.standing.kind !== "admin") return null;
+    if (phase.kind !== "ready") return null;
     return {
       auth: phase.auth,
       admin: new AdminApi((m, p) => phase.auth.rpc(m, p)),
@@ -68,7 +71,7 @@ export function App({ navigate }: { navigate?: (url: string) => void } = {}): JS
   if (phase.kind === "resolving") {
     return (
       <main className="signin centred" role="status">
-        Finding out what you administer…
+        Finding out what is yours here…
       </main>
     );
   }
@@ -92,25 +95,7 @@ export function App({ navigate }: { navigate?: (url: string) => void } = {}): JS
     );
   }
 
-  if (!signed) {
-    const me = phase.standing.me;
-    return (
-      <main className="signin">
-        <Wordmark size={40} />
-        <h1>Nothing to administer here</h1>
-        <p>
-          You are signed in to {planeOf(phase.auth, phase.discovery).name} as {me.display_name ?? me.subject}, who administers no team and is not a
-          platform admin. A platform admin is a member of the identity provider's group the plane names for it; a team admin is named on a team by a
-          platform admin.
-        </p>
-        <div className="actions">
-          <button type="button" onClick={signOut}>
-            Sign out
-          </button>
-        </div>
-      </main>
-    );
-  }
+  if (!signed) return <main className="signin centred" role="status" />;
 
   return (
     <ConsoleContext.Provider value={signed}>

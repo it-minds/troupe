@@ -50,6 +50,12 @@ export class SessionView {
   lastSeq = 0;
   headSeq = 0;
   subscriptionId: string | null = null;
+  /** The `presence:<id>` subscription, once `followPresence` asked for it. */
+  presenceId: string | null = null;
+  private presence = false;
+  private presenceAsking = false;
+  /** Moves on with every socket and every unsubscription, so a late answer knows it is late. */
+  private generation = 0;
 
   private connection: TroupeConnection | null = null;
   private readonly hooks: SessionViewHooks;
@@ -86,11 +92,15 @@ export class SessionView {
   bind(conn: TroupeConnection): void {
     this.connection = conn;
     this.subscriptionId = null; // subscriptions belong to the socket that made them
+    this.presenceId = null;
+    this.generation += 1;
   }
 
   unbind(): void {
     this.connection = null;
     this.subscriptionId = null;
+    this.presenceId = null;
+    this.generation += 1;
   }
 
   get topic(): string {
@@ -132,7 +142,38 @@ export class SessionView {
     });
     this.subscriptionId = r.subscription_id;
     this.headSeq = r.head_seq;
+    // A new socket holds no presence yet; one that still has it is not asked twice.
+    if (this.presence) await this.subscribePresence();
     return r;
+  }
+
+  /**
+   * Hear who is in the session as they come and go: its `presence:<id>` topic, a
+   * subscription of its own, made now and again with every resubscription. A server that
+   * does not carry presence, or refuses it, leaves the view as it was.
+   */
+  async followPresence(): Promise<void> {
+    if (this.presence) return;
+    this.presence = true;
+    if (this.subscriptionId && this.connection) await this.subscribePresence();
+  }
+
+  private async subscribePresence(): Promise<void> {
+    if (this.presenceId || this.presenceAsking) return;
+    this.presenceAsking = true;
+    const conn = this.conn;
+    const asked = this.generation;
+    try {
+      const r = await conn.call<SubscribeResult>("subscribe", { command_id: conn.nextCommandId(), topic: `presence:${this.sessionId}` });
+      // Let go of meanwhile, or moved to another socket: a subscription nobody will undo
+      // would count as somebody reading the session for as long as the socket lasts.
+      if (this.generation !== asked) void conn.call("unsubscribe", { subscription_id: r.subscription_id }).catch(() => undefined);
+      else this.presenceId = r.subscription_id;
+    } catch {
+      // A server that carries no presence; the view goes on without it.
+    } finally {
+      this.presenceAsking = false;
+    }
   }
 
   /**
@@ -153,6 +194,10 @@ export class SessionView {
 
   async unsubscribe(): Promise<void> {
     if (!this.subscriptionId || !this.connection) return;
+    this.generation += 1;
+    const presence = this.presenceId;
+    this.presenceId = null;
+    if (presence) await this.conn.call("unsubscribe", { subscription_id: presence }).catch(() => undefined);
     await this.conn.call("unsubscribe", { subscription_id: this.subscriptionId });
     this.subscriptionId = null;
   }

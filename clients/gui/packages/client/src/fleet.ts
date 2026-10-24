@@ -11,6 +11,7 @@
 // closing the window loses a cache and nothing else.
 
 import type { PlaneClient, SessionRow, SessionsFilter } from "./plane.js";
+import { watchRemote } from "./remote.js";
 import type { Unseen } from "./types.js";
 
 /**
@@ -160,7 +161,19 @@ export interface FleetSource {
   readonly id: string;
   readonly kind: SessionKind;
   list(): Promise<FleetRow[]>;
+  /**
+   * A source that is told what changes rather than asked: `push` is its whole list each
+   * time it changes, `live` whether it is being told now. While it is, the store's poll
+   * leaves it alone but for a safety net (`fleetTiming.safetyNetMs`). Returns the stop.
+   */
+  watch?(push: (rows: FleetRow[]) => void, live: (up: boolean) => void): () => void;
 }
+
+/**
+ * How often a watched source is asked anyway while its watch is up: never what delivers a
+ * change, only what would mend a list a missed message left wrong.
+ */
+export const fleetTiming = { safetyNetMs: 5 * 60_000 };
 
 /**
  * A plane's row. A private session is one of the person's own the plane lists beside the
@@ -255,7 +268,9 @@ export function rowFromRemote(row: Record<string, unknown>, source = "remote"): 
 
 /**
  * The laptop sessions the plane relays, as a source: the person's own from their other
- * computers, and those people shared with them. Polled, as the plane's own list is.
+ * computers, and those people shared with them. Watched (`/v1/relay/watch`), so an offer
+ * made on a laptop, its withdrawal and the laptop coming or going reach the list as they
+ * happen; asked with `remote.list` only while the watch is down, and as a safety net.
  */
 export class RemoteSource implements FleetSource {
   readonly id = "remote";
@@ -264,7 +279,19 @@ export class RemoteSource implements FleetSource {
   constructor(
     private readonly plane: PlaneClient,
     private readonly token: () => Promise<string>,
+    private readonly clientInfo?: { name: string; version: string },
   ) {}
+
+  watch(push: (rows: FleetRow[]) => void, live: (up: boolean) => void): () => void {
+    const w = watchRemote({
+      planeUrl: this.plane.baseUrl,
+      token: this.token,
+      onSessions: (sessions) => push(sessions.map((s) => rowFromRemote(s, this.id))),
+      onLive: live,
+      ...(this.clientInfo ? { clientInfo: this.clientInfo } : {}),
+    });
+    return () => w.close();
+  }
 
   async list(): Promise<FleetRow[]> {
     const token = await this.token();
@@ -313,19 +340,59 @@ export class FleetStore {
   private listeners = new Set<(s: FleetSnapshot) => void>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private inFlight: Promise<void> | null = null;
+  /** Whether `poll` is running, which is when watched sources are watched. */
+  private watching = false;
+  private readonly watches = new Map<string, () => void>();
+  /** The watched sources whose watch is up now. */
+  private readonly live = new Set<string>();
+  /** When each source last answered or was told, for the safety net. */
+  private readonly heard = new Map<string, number>();
 
   constructor(sources: FleetSource[] = []) {
     for (const s of sources) this.addSource(s);
   }
 
   addSource(source: FleetSource): void {
+    const before = this.sources.find((s) => s.id === source.id);
     this.sources = [...this.sources.filter((s) => s.id !== source.id), source];
+    if (before !== source) this.unwatch(source.id);
+    if (this.watching) this.watchOne(source);
   }
 
   removeSource(id: string): void {
+    this.unwatch(id);
     this.sources = this.sources.filter((s) => s.id !== id);
     this.bySource.delete(id);
     this.recompute();
+  }
+
+  /** Whether a watched source is being told what changes now. */
+  isLive(id: string): boolean {
+    return this.live.has(id);
+  }
+
+  private watchOne(source: FleetSource): void {
+    if (!source.watch || this.watches.has(source.id)) return;
+    const stop = source.watch(
+      (rows) => {
+        if (!this.sources.includes(source)) return;
+        this.bySource.set(source.id, rows);
+        this.heard.set(source.id, Date.now());
+        this.snapshot = { ...this.snapshot, sources: { ...this.snapshot.sources, [source.id]: { at: Date.now(), error: null } } };
+        this.recompute();
+      },
+      (up) => {
+        if (up) this.live.add(source.id);
+        else this.live.delete(source.id);
+      },
+    );
+    this.watches.set(source.id, stop);
+  }
+
+  private unwatch(id: string): void {
+    this.watches.get(id)?.();
+    this.watches.delete(id);
+    this.live.delete(id);
   }
 
   get current(): FleetSnapshot {
@@ -340,21 +407,35 @@ export class FleetStore {
 
   /** Ask every source. Concurrent calls share one round. */
   async refresh(): Promise<void> {
+    return this.ask(() => true);
+  }
+
+  /**
+   * The poll's round: every source but a watched one whose watch is up, which is asked
+   * only once the safety net is due.
+   */
+  private tick(): Promise<void> {
+    const now = Date.now();
+    return this.ask((s) => !this.live.has(s.id) || now - (this.heard.get(s.id) ?? 0) >= fleetTiming.safetyNetMs);
+  }
+
+  private async ask(which: (s: FleetSource) => boolean): Promise<void> {
     if (this.inFlight) return this.inFlight;
     this.emit({ ...this.snapshot, loading: true });
-    this.inFlight = this.round().finally(() => {
+    this.inFlight = this.round(which).finally(() => {
       this.inFlight = null;
     });
     return this.inFlight;
   }
 
-  private async round(): Promise<void> {
+  private async round(which: (s: FleetSource) => boolean): Promise<void> {
     const sources = this.snapshot.sources;
     const next: FleetSnapshot["sources"] = { ...sources };
     await Promise.all(
-      this.sources.map(async (s) => {
+      this.sources.filter(which).map(async (s) => {
         try {
           this.bySource.set(s.id, await s.list());
+          this.heard.set(s.id, Date.now());
           next[s.id] = { at: Date.now(), error: null };
         } catch (e) {
           // Keep what the source last said. A list that empties because a token expired
@@ -367,17 +448,24 @@ export class FleetStore {
     this.recompute();
   }
 
-  /** Poll every `ms`. Returns the stop function. */
+  /**
+   * Poll every `ms`, and watch every source that can be watched. Returns the stop
+   * function. A watched source is asked on the poll only while its watch is down.
+   */
   poll(ms = 5_000): () => void {
     this.stop();
+    this.watching = true;
+    for (const s of this.sources) this.watchOne(s);
     void this.refresh();
-    this.timer = setInterval(() => void this.refresh(), ms);
+    this.timer = setInterval(() => void this.tick(), ms);
     return () => this.stop();
   }
 
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.watching = false;
+    for (const id of [...this.watches.keys()]) this.unwatch(id);
   }
 
   /**

@@ -168,6 +168,23 @@ defmodule Troupe.Plane.ClientsSeen do
   end
 
   @doc """
+  One person's own clients, as `fleet/1` says them of an administrator's people: per
+  component they were seen with, the version, the platform, since and last seen, its
+  `standing` against the policy as it is now, and the version the policy recommends.
+  """
+  @spec of(User.t()) :: [map()]
+  def of(%User{id: user_id}) when is_binary(user_id) do
+    for {component, %{"people" => people}} <- fleet([user_id]), person <- people do
+      person
+      |> Map.drop(["subject", "display_name"])
+      |> Map.put("component", component)
+      |> Map.put("recommended", ClientVersions.policy(component).recommended)
+    end
+  end
+
+  def of(_user), do: []
+
+  @doc """
   How many of a component's clients a policy finds current, behind and refusing: what an
   administrator's change of it holds, as its audit row says.
   """

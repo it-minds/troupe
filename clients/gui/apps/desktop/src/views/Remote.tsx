@@ -4,12 +4,14 @@
 // the people it is shared with and at what, whether the plane has it now, who is steering
 // it from elsewhere, and the withdrawal, which ends every one of those views at once. On a
 // laptop's session opened from here, whose laptop it is, and since when it is away when it
-// is. What the daemon says is what is shown: its answer at once, then each listing.
+// is. What the daemon says is what is shown: its answer at once, then each listing; and who
+// is steering is the session's presence as it happens, somebody attached through the plane
+// arriving or leaving, over the daemon's own connection.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { remoteOffer, remoteWhen } from "@troupe/client";
-import type { DaemonClient, FleetRow, RemoteOffer } from "@troupe/client";
+import type { DaemonClient, FleetRow, PresenceMember, RemoteOffer, RemotePerson } from "@troupe/client";
 
 type Role = "observe" | "control";
 
@@ -28,6 +30,21 @@ export function steeringWords(offer: RemoteOffer): string | null {
   return names.length === 1 ? `${names[0]} is steering from another device` : `${names.join(", ")} are steering from other devices`;
 }
 
+/**
+ * Who is steering now: the listing's word, with what the session's presence said since,
+ * somebody through the plane who arrived added and one who left taken off. Presence starts
+ * from when this view subscribed, so the listing says who was there before.
+ */
+export function steeringNow(listed: RemotePerson[], presence: PresenceMember[]): RemotePerson[] {
+  const relayed = presence.filter((p) => p.via === "plane");
+  const heard = new Map(relayed.map((p) => [p.subject, p.state]));
+  const kept = listed.filter((p) => heard.get(p.subject) !== "left");
+  const came = relayed
+    .filter((p) => p.state !== "left" && !kept.some((k) => k.subject === p.subject))
+    .map((p) => ({ subject: p.subject, display_name: p.display_name ?? null, role: "control" }));
+  return [...kept, ...came];
+}
+
 /** The plane's word on whether the laptop is there. */
 export function presenceWords(offer: RemoteOffer): string {
   if (offer.state === "online") return "Online";
@@ -39,7 +56,7 @@ export function presenceWords(offer: RemoteOffer): string {
  * This computer's session, offered to the plane or not. Only a local session has it: a
  * private one is sealed under its person's key and never offered.
  */
-export function RemoteOfferControl({ daemon, row }: { daemon: DaemonClient; row: FleetRow }): JSX.Element | null {
+export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: DaemonClient; row: FleetRow; presence?: PresenceMember[] }): JSX.Element | null {
   const [offer, setOffer] = useState<RemoteOffer | null>(row.remote ?? null);
   const [open, setOpen] = useState(false);
   const [share, setShare] = useState(() => (row.remote?.shares ?? []).map((p) => p.email ?? p.subject).join(", "));
@@ -69,7 +86,7 @@ export function RemoteOfferControl({ daemon, row }: { daemon: DaemonClient; row:
   const offerIt = (): Promise<void> =>
     act(() => daemon.offerRemote(row.id, people(share).map((person) => ({ person, role }))));
   const withdraw = (): Promise<void> => act(() => daemon.withdrawRemote(row.id));
-  const steering = offer ? steeringWords(offer) : null;
+  const steering = offer ? steeringWords({ ...offer, steering: steeringNow(offer.steering, presence) }) : null;
 
   return (
     <div className="remote-offer" role="group" aria-label="Steer from elsewhere">

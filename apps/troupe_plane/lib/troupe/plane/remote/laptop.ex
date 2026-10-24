@@ -13,6 +13,10 @@ defmodule Troupe.Plane.Remote.Laptop do
   The connection holds a `:global` name per session it offers, which is what a viewer on
   any replica finds it by and what "online" means. It is closed at its token's expiry if
   it was not renewed, and every view it carried ends with it.
+
+  Each change it makes is told to the people it concerns (`Troupe.Plane.Remote.changed/1`)
+  once it is in force, the row written and the names held or let go, so a person's watch
+  (`Troupe.Plane.Remote.Watch`) that reads again reads what is now true.
   """
 
   @behaviour WebSock
@@ -89,6 +93,7 @@ defmodule Troupe.Plane.Remote.Laptop do
 
   defp handle_message({:request, id, "relay.sync", params}, state) do
     offers = if is_list(params["offers"]), do: params["offers"], else: []
+    before = Remote.offers_from(state.user, state.device)
     {kept, refused} = Remote.sync(state.user, state.device, offers)
     kept_ids = MapSet.new(kept, & &1.session_id)
 
@@ -99,6 +104,7 @@ defmodule Troupe.Plane.Remote.Laptop do
       |> Enum.reduce(state, &stop_offering(&2, &1, "withdrawn"))
 
     state = Enum.reduce(kept, state, &hold(&2, &1))
+    Remote.changed(Enum.flat_map(before ++ kept, &Remote.concerned/1))
 
     result = %{
       "offers" =>
@@ -113,9 +119,13 @@ defmodule Troupe.Plane.Remote.Laptop do
   end
 
   defp handle_message({:request, id, "relay.offer", params}, state) do
+    before = Remote.get(params["session_id"])
+
     case Remote.offer(state.user, state.device, params) do
       {:ok, offer} ->
         state = state |> hold(offer) |> recheck(offer)
+        # Everybody it was shared with before and is now: one it no longer names loses it.
+        Remote.changed(Remote.concerned(before) ++ Remote.concerned(offer))
         {:push, frame({:result, id, %{"shares" => Remote.Offer.people(offer)}}), state}
 
       {:error, error} ->
@@ -127,8 +137,12 @@ defmodule Troupe.Plane.Remote.Laptop do
     session_id = params["session_id"]
 
     if is_binary(session_id) do
+      before = Remote.get(session_id)
       :ok = Remote.withdraw(state.user, session_id)
       state = stop_offering(state, session_id, "withdrawn")
+
+      if before && before.owner_subject == state.user.subject,
+        do: Remote.changed(Remote.concerned(before))
       {:push, frame({:result, id, %{"withdrawn" => true}}), state}
     else
       {:push, frame({:error, id, Error.new(:invalid_params, %{field: "session_id"})}), state}
@@ -211,7 +225,21 @@ defmodule Troupe.Plane.Remote.Laptop do
       send(viewer.pid, {:relay_closed, "the laptop went offline"})
     end)
 
+    # Let go of the names before saying so: a watch that reads again as it hears it
+    # must find the laptop gone, and a dying process would hold them a moment longer.
+    Enum.each(state.sessions, fn session_id ->
+      if :global.whereis_name(Remote.name(session_id)) == self(),
+        do: :global.unregister_name(Remote.name(session_id))
+    end)
+
     Remote.offline(subject, state.device, MapSet.to_list(state.sessions))
+
+    state.user
+    |> Remote.offers_from(state.device)
+    |> Enum.filter(&MapSet.member?(state.sessions, &1.session_id))
+    |> Enum.flat_map(&Remote.concerned/1)
+    |> Remote.changed()
+
     state
   end
 
