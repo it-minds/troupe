@@ -314,23 +314,19 @@ xattr -d com.apple.quarantine ~/.local/bin/troupe
 **On Windows.** `install.ps1` downloads with `Invoke-WebRequest`, which marks nothing as
 coming from the internet, so SmartScreen rarely asks; the installer says it may, the first
 time something runs. For the desktop app's setup downloaded in a browser, SmartScreen
-shows "Windows protected your PC": **More info**, then **Run anyway**. Or, after checking
-the file, clear the mark first:
+shows "Windows protected your PC": **More info**, then **Run anyway**. Or clear the mark:
 
 ```powershell
-Unblock-File .\Troupe_X.Y.Z_x64-setup.exe   # X.Y.Z: the release you downloaded
+Unblock-File .\Troupe_X.Y.Z_x64-setup.exe   # X.Y.Z: the release you downloaded; check the file first
 ```
 
-**Why that is safe.** An operating system's signature says who built a file; the release
-key says it is the file the release workflow built. Check the first download against the
-signed manifest yourself, with the key from `apps/troupe_core/priv/release-keys.txt`:
+**Why that is safe.** An OS signature says who built a file; the release key says it is the
+file the workflow built. Check the first download yourself, with the key from `apps/troupe_core/priv/release-keys.txt`:
 
 ```sh
 minisign -Vm manifest.json -P <the release key>   # beside manifest.json.minisig
-sha256sum Troupe_X.Y.Z_x64-setup.exe             # the same as its line in manifest.json
+sha256sum Troupe_X.Y.Z_x64-setup.exe   # its line in manifest.json; shasum -a 256 on macOS, Get-FileHash in PowerShell
 ```
-
-`shasum -a 256` on macOS, `Get-FileHash` in PowerShell.
 
 From then on Troupe checks every update itself, against the key it was built with
 ([section 5](#5-releases-signed-and-verified)). [Installing the desktop app](../../clients/gui/docs/install.md)
