@@ -42,4 +42,4 @@ full_send: true
 changes nothing. One that should change files, in a throwaway checkout, sets
 `auto_approve: true` and keeps the limits. An organisation can hold every machine to
 `approvals: deny` and to ceilings on `max_turns`, `wall_clock_ms` and `max_depth`
-([its defaults and limits](../configuration.md#your-organisations-defaults-and-limits)).
+([its defaults and limits](../configuration-layers.md#your-organisations-defaults-and-limits)).

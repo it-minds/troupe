@@ -1,0 +1,7 @@
+# Crawlers read robots.txt at a host's root only, so at https://it-minds.github.io/troupe/
+# this one waits for the site to have a host of its own; until then the sitemap is given to
+# a search engine directly.
+User-agent: *
+Allow: /
+
+Sitemap: https://it-minds.github.io/troupe/sitemap.xml

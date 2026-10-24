@@ -1,0 +1,65 @@
+/* The front page (docs/overrides/landing.html): docs/README.md's own sections, read as a
+   product's page. Colours are the theme's, so light and dark follow its palette toggle. */
+
+.tx-landing h1 {
+  font-size: 2.4rem;
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+  color: var(--md-default-fg-color);
+}
+
+.tx-landing .tx-hero > p:first-child {
+  font-size: 1.12rem;
+  line-height: 1.6;
+  max-width: 38em;
+}
+
+.tx-landing .tx-hero {
+  margin-bottom: 1.6rem;
+}
+
+.tx-landing .tx-recording {
+  margin: 0 0 2.4rem;
+}
+
+.tx-landing .tx-recording img,
+.tx-landing .tx-recording video {
+  width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+  box-shadow: var(--md-shadow-z2);
+}
+
+.tx-landing .tx-recording figcaption {
+  max-width: none;
+  font-size: 0.8rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.tx-landing .tx-feature {
+  margin: 1.6rem 0 2.4rem;
+}
+
+.tx-landing .tx-feature img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.tx-landing .tx-feature h3 {
+  margin-top: 0;
+}
+
+/* Text beside its picture where there is room for both, one above the other on a phone. */
+@media screen and (min-width: 60em) {
+  .tx-landing .tx-feature {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    gap: 2rem;
+    align-items: center;
+  }
+
+  .tx-landing .tx-feature > p {
+    margin: 0;
+  }
+}

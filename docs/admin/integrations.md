@@ -47,7 +47,7 @@ check. Authentik specifically: [authentik.md](authentik.md).
 | Role `troupe-worker` (ServiceAccount `troupe-worker`, any namespace, audience `troupe-kms`), or with `bao.workerRolePerProfile` one role `troupe-worker-<profile>` per profile, bound to its namespace | worker pods log in with their projected `kms-token` under the role in `TROUPE_BAO_ROLE`, cache the client token until shortly before its lease ends, retry a 403 once after a fresh login |
 | Role `troupe-plane` (ServiceAccount `troupe-plane` in `troupe-system`), with the plane **and** signing policies | the plane logs in with its projected `bao-token`, caches the client token, retries a 403 once after a fresh login |
 | **JWT auth** at `jwt`, role `troupe-person`, keyed with the transit key's public half | a person's daemon logs in with an assertion the plane signs, for their private sessions' keys and their own MCP credentials at `troupe/people/<name>/mcp/<slot>` (`Troupe.KMS.Policy.person_role/2`) |
-| A transit key per MCP identity, `<worker namespace>.<name>` | a profile that calls an MCP server as itself signs with it ([profiles-and-policy.md](profiles-and-policy.md#calling-an-mcp-server-as-the-profile)) |
+| A transit key per MCP identity, `<worker namespace>.<name>` | a profile that calls an MCP server as itself signs with it ([profile-options.md](profile-options.md#calling-an-mcp-server-as-the-profile)) |
 
 The policies are in [roles-and-permissions.md §8](roles-and-permissions.md#8-openbao-policies);
 the commands, in development shape, in `dev/kind/dependencies.yaml`. A plane with neither

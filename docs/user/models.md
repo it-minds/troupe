@@ -126,7 +126,7 @@ word and a budget for a number. A model that refuses what it was sent fails the 
 a message that names `reasoning_effort` and what to set it to.
 
 Either way the output cap is raised to hold the thinking, no further than a `max_tokens`
-your organisation enforces ([its limits](configuration.md#your-organisations-defaults-and-limits)),
+your organisation enforces ([its limits](configuration-layers.md#your-organisations-defaults-and-limits)),
 which bounds the whole call, a compaction's summary included. Under it, an Anthropic
 model's thinking is shortened so that the answer keeps 4,096 tokens, or half the limit
 where that is less; where that leaves less than 1,024 tokens of thinking, the least

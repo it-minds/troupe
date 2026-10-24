@@ -133,7 +133,7 @@ file in effect.
 **Behind it:** Decisions 823 and 835 (onboarding asks first), 825, 829 and 830 (trust),
 828 (other tools' files are not read), 833 and 858 (Troupe's own git, #538), 846 (no program
 from the current directory); [security.md §2](../admin/security.md#2-what-it-does-unasked-and-what-it-never-does),
-[trusted workspaces](../user/configuration.md#trusted-workspaces).
+[trusted workspaces](../user/configuration-layers.md#trusted-workspaces).
 
 ## 2. A worker is isolated
 
@@ -197,7 +197,7 @@ namespace and no other. **Fail:** anything else, in particular a command refused
 nodes, so nothing runs. Bubblewrap's message names the cause: "No permissions to create
 new namespace" is the seccomp profile, "Failed to make / slave" and "setting up uid map"
 the AppArmor profile, "Can't mount proc" the pod's user namespace
-([installing.md](../admin/installing.md#the-workers-apparmor-profile)).
+([worker-sandbox.md](../admin/worker-sandbox.md#the-workers-apparmor-profile)).
 
 **Behind it:** Decisions 832 (bubblewrap), 890 (the worker's seccomp profile and user
 namespace), 898 (its AppArmor profile), 856 (the denied addresses), 752 and 758 (with and
@@ -334,7 +334,7 @@ person's machine in one place; a machine follows them and cannot go past an enfo
 3. The terminal client's settings page shows `max_turns` "set by your organisation" and
    will not change it.
 4. The managed file, as the machine's administrator: write `managed.yaml` at its path
-   ([admin configuration](../admin/configuration.md#defaults-and-limits-for-peoples-machines)),
+   ([admin configuration](../admin/client-config.md#defaults-and-limits-for-peoples-machines)),
    check it with `troupe config validate <path>`, then `troupe config --explain` lists it as
    an `org` file. Remove it afterwards.
 
@@ -360,8 +360,8 @@ this row. Besides that:
    [first run](../user/README.md#first-run), [updating](../user/updating.md),
    [installing](../admin/installing.md) and [security](../admin/security.md). Each claim
    either happened or is listed.
-4. #422's done-when holds: no hand-written page over about 400 lines but the protocol, and
-   `defects.md` lists only open defects.
+4. #422's done-when holds, as `scripts/doc-size.exs` checks in CI: no hand-written page over
+   400 lines but the protocol, and `defects.md` lists only open defects.
 
 **Pass.** Nothing listed. **Fail:** each item listed, with the page and the line; a doc fix
 is a new release, then this row again.

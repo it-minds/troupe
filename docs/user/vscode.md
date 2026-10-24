@@ -227,7 +227,7 @@ layers merged and untrusted keys left out as Troupe decides
   user file, the project's `.troupe/config.yaml` and the local
   `.troupe/config.local.yaml`. A click opens one; one that is not there opens as a new file,
   which saving makes. Under them, whether the workspace is
-  [trusted](configuration.md#trusted-workspaces): until it is, its own files cannot set the
+  [trusted](configuration-layers.md#trusted-workspaces): until it is, its own files cannot set the
   keys that page lists, the provider, endpoints and keys, approvals, watch, MCP servers and
   paths among them.
 - **Problems**, when there are any: the files' warnings and refusals. A click opens the

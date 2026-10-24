@@ -3,7 +3,7 @@
 An agent is what talks to the model; a command is a prompt you send often; a workflow is
 the steps an orchestrating agent hands to subagents. Each is a file, yours in `<config>`
 ([where that is](configuration/files.md)) or a repository's in its `.troupe/`, and which
-one wins where two share a name is [the ladder](configuration.md#which-one-wins).
+one wins where two share a name is [the ladder](configuration-layers.md#which-one-wins).
 
 ## Agents
 
@@ -33,7 +33,7 @@ the subagents `general`, `explore`, `implementer` and `reviewer`.
 - **What asks.** `write_file`, `edit_file`, `shell`, `web_fetch`, `publish`, `import` and
   `onboard_write` ask before they run, and the rest run unattended; a `permissions:` block
   changes either. A repository's agent that sets a tool to `auto` waits until you trust the
-  workspace ([trusted workspaces](configuration.md#trusted-workspaces)), and
+  workspace ([trusted workspaces](configuration-layers.md#trusted-workspaces)), and
   [per-tool rules](configuration.md#per-tool-permission-rules) answer across agents.
 
 A client saves an agent through the daemon (`agents.put`), into `<config>/agents/` or the
@@ -57,7 +57,7 @@ A profile bundle's agent is changed in the console. A session's head shows the a
 runs and switches it from the next turn, the conversation kept, and the transcript records
 the switch. The TUI's `/agents` does the same, as the agent picker Ctrl-N and Tab open, at
 the manager's density, and `/new` starts a session on the agent picked there
-([the terminal client](../../clients/tui/README.md#agents)).
+([the terminal client](terminal-screen.md#agents)).
 
 ### Seeing a delegation before it runs
 

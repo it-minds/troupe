@@ -10,7 +10,8 @@ this adds only what an agent working in the repository must not miss.
   `development-<date>` branch, never straight into `main`. It has a coordinator role
   (triage, the queue, the chunk) and a fixer role (one issue).
 - **Defects found in passing** go in [docs/developer/defects.md](docs/developer/defects.md)
-  (where, what, severity, who found it). Read it before touching code it names.
+  (where, what, severity, who found it): an entry on its last page, a row in its table.
+  Read the entries before touching code they name (`rg <path> docs/developer/defects/`).
 - **Decisions.** Before changing a file, run `mix troupe.decisions --for <path>` at the
   repository root: it lists the decisions that govern the path, number and one-line gist,
   superseded ones marked. Read the ones that bear on the change in

@@ -11,7 +11,7 @@ Committed at the repository's root, as `.troupe/config.yaml`. Some keys decide w
 requests go, with which key, and what runs without asking; those are read from a
 repository's file only once you trust the workspace (`troupe config trust`, in it), and
 until then are ignored with a warning that says so ([trusted
-workspaces](../configuration.md#trusted-workspaces)). The rest applies at once.
+workspaces](../configuration-layers.md#trusted-workspaces)). The rest applies at once.
 
 <!-- recipe: team -->
 ```yaml title=".troupe/config.yaml"

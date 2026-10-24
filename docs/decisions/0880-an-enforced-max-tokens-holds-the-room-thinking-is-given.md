@@ -22,6 +22,7 @@ paths:
   - docs/user/configuration.md
   - docs/user/models.md
   - docs/admin/configuration.md
+  - docs/admin/client-config.md
 symbols:
   - Troupe.LLM.Request.output_cap/1
   - Troupe.LLM.Provider.thinking_held/2
