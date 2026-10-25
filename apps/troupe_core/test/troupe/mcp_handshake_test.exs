@@ -217,6 +217,20 @@ defmodule Troupe.MCPHandshakeTest do
       assert FakeMCP.sessions(context.fake) == %{}
     end
 
+    # D59: reloading after a server left `mcp.json` stopped it and left its session open at
+    # the server until the local session stopped.
+    test "the session ends at the server when a reload finds it gone from the file", context do
+      %{session: session} = with_server(context)
+      wait_for_state(session.id, "notes", [:ready])
+      assert Map.keys(FakeMCP.sessions(context.fake)) == ["session-1"]
+
+      write_file(context, ".troupe/mcp.json", Jason.encode!(%{"mcpServers" => %{}}))
+      assert {:error, :unknown_server} = MCP.reload(session.id, "notes")
+
+      assert_receive {:fake_mcp, %{method: "DELETE", session: "session-1", status: 200}}, 5_000
+      assert FakeMCP.sessions(context.fake) == %{}
+    end
+
     @tag fake: [delete: :not_allowed]
     test "a server that will not end a session is let be", context do
       %{session: session} = with_server(context)

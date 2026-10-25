@@ -281,16 +281,29 @@ defmodule Troupe.Plane.ControlTest do
                call(worker, "session.memory.put", %{
                  "session_id" => "s-mem",
                  "scope" => "user",
-                 "append" => "Prefers small pull requests."
+                 "append" => "Prefers small pull requests.",
+                 "agent" => "build"
                })
 
       text = Memory.current(ada).text
       assert text =~ ~r/\ACall me Ada\.\n\n## \d{4}-\d{2}-\d{2}\n\n- Prefers small pull requests\.\z/
 
-      # The audit names the session the entry came from, and never the text.
+      # The audit names the session and the agent the entry came from, and never the text.
       [row | _] = Enum.filter(Audit.list(), &(&1.action == "memory.put"))
       assert row.detail["session"] == "s-mem"
+      assert row.detail["agent"] == "build"
       refute inspect(row) =~ "pull requests"
+
+      # And so who wrote the line: the person's own first line theirs, the entry the agent's.
+      assert [
+               %{"text" => "Call me Ada.", "version" => 1, "by" => "ada@example.test"} = mine,
+               %{"text" => "", "version" => 2},
+               %{"version" => 2},
+               %{"text" => "", "version" => 2},
+               %{"text" => "- Prefers small pull requests.", "version" => 2, "session" => "s-mem", "agent" => "build"}
+             ] = Memory.blame(ada)
+
+      refute Map.has_key?(mine, "session")
     end
 
     test "refuses every other level, and a session this pod does not hold", %{port: port} do

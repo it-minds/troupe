@@ -334,7 +334,7 @@ defmodule Troupe.Gateway.LoopbackTest do
   defp start_session(context) do
     fake =
       start_supervised!(
-        {Troupe.LLM.Fake, steps: [%{text: "done"}]},
+        {Troupe.LLM.Fake, steps: [{:text, "done"}]},
         id: {Troupe.LLM.Fake, System.unique_integer([:positive])}
       )
 

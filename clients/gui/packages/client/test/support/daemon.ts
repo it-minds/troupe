@@ -1501,6 +1501,11 @@ evoked where nothing is set and there was a sign-in. */
         return reply(ws, id, { enabled: Boolean(watching), backend: watching ? "poll" : "off", session_id: watching?.id ?? null });
       }
 
+      // The client's Local only switch: the real daemon then makes no plane call for its
+      // sessions; the fake has none to make, and says what it heard.
+      case "client.mode":
+        return reply(ws, id, { local_only: params["local_only"] === true });
+
       // The person's own memory, through this daemon's sign-in; signed out, a sentence.
       case "me.memory":
       case "me.memory.put": {

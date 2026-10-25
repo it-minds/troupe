@@ -166,7 +166,10 @@ export function App(): JSX.Element {
     // Let go of, not signed out of: the refresh token stays in its store, so turning
     // this off again signs straight back in. Signing out is a different button.
     if (on) setAuth(null);
-  }, []);
+    // The daemon keeps the promise for the sessions this app runs: it is told now, and a
+    // socket dialled later says it at its `initialize`.
+    void daemon.client?.setLocalOnly(on).catch(() => undefined);
+  }, [daemon.client]);
 
   // Offline, the plane is asked again every so often, and the app goes back to it the
   // moment it answers — with the sessions that ran here still in the one list, because

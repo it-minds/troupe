@@ -41,6 +41,14 @@ defmodule Troupe.Plane.SCIMAnswersTest do
       assert group["displayName"] == "Engineering"
     end
 
+    # D57: a body with neither raised in `put_group` and answered 500.
+    test "of a group with neither externalId nor id is refused 400, saying why", context do
+      body = Map.drop(group("eng"), ["externalId"])
+
+      assert {400, %{"detail" => detail}, nil} = request(context, :post, "/scim/v2/Groups", body)
+      assert detail =~ "externalId or id"
+    end
+
     test "of somebody who signed in first is still a create, of the person the plane has",
          context do
       {:ok, ada, _teams} = Login.from_claims(%{"sub" => "idp|ada", "email" => "ada@example.test"})

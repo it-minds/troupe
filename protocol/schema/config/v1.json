@@ -902,7 +902,7 @@
       }
     },
     "state_dir": {
-      "description": "Where session logs go. Unset: the platform's state directory. Read from a project's file only in a trusted workspace.",
+      "description": "Where session logs go, with their blobs and the outputs kept from them. Unset: the platform's state directory. Read from a project's file only in a trusted workspace.",
       "type": [
         "string",
         "null"
@@ -918,6 +918,14 @@
     "mouse": {
       "description": "The terminal UI captures the mouse: a click activates a window and the wheel scrolls. Off keeps the terminal's own click-and-drag selection; `troupe --no-mouse` turns it off for one run.",
       "default": true,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "local_only": {
+      "description": "The terminal UI is in Local only: it makes no call to a plane, and tells the daemon, which then makes none for the sessions it runs (no `remember` to your own memory, no offer for steering). `troupe doctor` says whether it is on. Read only from the user's config.yaml.",
+      "default": false,
       "type": [
         "boolean",
         "null"

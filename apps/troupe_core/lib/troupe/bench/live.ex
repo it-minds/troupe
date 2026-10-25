@@ -255,10 +255,11 @@ defmodule Troupe.Bench.Live do
       experiment_line(plan)
     ]
     |> Kernel.++(Enum.map(plan.skipped, &"#{&1["name"]} is left out: #{&1["why"]}."))
-    |> Kernel.++(if plan.history, do: ["Each run is added to #{plan.history}."], else: [])
+    # Paths the platform's way, as every other path troupe prints.
+    |> Kernel.++(if plan.history, do: ["Each run is added to #{Troupe.Paths.display(plan.history)}."], else: [])
     |> Kernel.++(
       if plan.keep,
-        do: ["Each run's workspace and session log are kept under #{plan.keep}."],
+        do: ["Each run's workspace and session log are kept under #{Troupe.Paths.display(plan.keep)}."],
         else: []
     )
     |> Enum.reject(&is_nil/1)

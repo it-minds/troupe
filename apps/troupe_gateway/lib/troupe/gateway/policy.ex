@@ -24,13 +24,15 @@ defmodule Troupe.Gateway.Policy do
   and the answers that are signed are fetched only when it moves. A forged revision makes
   the daemon ask, or not ask; what it acts on is still only what the pinned key signed.
   Nothing here fails loudly: a plane that does not answer is asked again at the next poll.
+  While every client attached is in Local only (`Troupe.Gateway.LocalOnly`), a poll asks
+  nothing.
   """
 
   use GenServer
 
   alias Troupe.Config.Org
   alias Troupe.Config.Settings
-  alias Troupe.Gateway.{Connections, Plane}
+  alias Troupe.Gateway.{Connections, LocalOnly, Plane}
   alias Troupe.PlaneKeys
   alias Troupe.Session.Organisation
 
@@ -122,7 +124,9 @@ defmodule Troupe.Gateway.Policy do
 
   @impl GenServer
   def handle_info(:poll, state) do
-    {_changed, state} = asked(state)
+    # While every client attached is in Local only the plane is not asked, and the next
+    # poll after one that is not asks again; a link still asks at once, as it always did.
+    {_changed, state} = if LocalOnly.paused?(), do: {[], state}, else: asked(state)
     {:noreply, schedule(state)}
   end
 

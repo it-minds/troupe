@@ -211,7 +211,7 @@ export interface ToolInvoke {
 export interface BlobResponse {
   blob: string;
   size: number;
-  /** Inclusive, and possibly shorter than the one asked for: the server caps a response. */
+  /** Inclusive, where a server says it: the bytes asked for, stopping at the blob's end. */
   range?: [number, number];
   encoding: "base64" | string;
   data: string;

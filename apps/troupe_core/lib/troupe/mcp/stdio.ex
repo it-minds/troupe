@@ -252,6 +252,9 @@ defmodule Troupe.MCP.Stdio do
   defp after_initialize(%{"error" => error}, state),
     do: fail(state, "initialize refused: #{describe(error)}")
 
+  defp after_initialize(_other, state),
+    do: fail(state, "answered initialize with neither a result nor an error")
+
   defp after_tools_list(%{"result" => %{"tools" => listed}}, state) when is_list(listed) do
     tools = Enum.map(listed, &tool(state, &1))
     Logger.debug("troupe: MCP server #{state.name} offers #{length(tools)} tools")

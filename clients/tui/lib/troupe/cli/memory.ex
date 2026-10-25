@@ -1,6 +1,6 @@
 defmodule Troupe.CLI.Memory do
   @moduledoc """
-  `troupe memory [--edit | --clear | --status]`: the person's own memory on the plane (root
+  `troupe memory [--edit | --clear | --status | --blame]`: the person's own memory on the plane (root
   issue #55, the user level), which every session of theirs reads on every machine, after
   their organisation's memory and before the repository's files. An agent of theirs may add an
   entry to it (`remember` with `level: "me"`); only they change or remove what is there.
@@ -15,6 +15,9 @@ defmodule Troupe.CLI.Memory do
   `--status` is for the person's own debugging (`me.memory.status`): the versions of the
   organisation's levels and their own that this machine holds, whether the plane has the same
   in force, and which each session running here read at its last turn.
+
+  `--blame` prints the person's own line by line with who wrote each: the version it came
+  in and who saved it, or, for an agent's entry, the agent and the session it came from.
   """
 
   alias Troupe.Client.Daemon.Link
@@ -27,6 +30,7 @@ defmodule Troupe.CLI.Memory do
   def run(args, say \\ &IO.puts/1, call \\ &Link.call/2)
 
   def run(%{status: true}, say, call), do: status(say, call)
+  def run(%{blame: true}, say, call), do: blame(say, call)
 
   def run(args, say, call) do
     case call.("me.memory", %{}) do
@@ -142,6 +146,47 @@ defmodule Troupe.CLI.Memory do
         1
     end
   end
+
+  # `--blame`: each line with who wrote it, in which version, and for an agent's entry the
+  # agent and the session it came from; blame, not history, as the plane derives it.
+  defp blame(say, call) do
+    case call.("me.memory", %{"blame" => true}) do
+      {:ok, %{"version" => 0} = own} ->
+        show(own, say)
+
+      {:ok, %{"lines" => [_ | _] = lines} = own} ->
+        say.(
+          "your memory on #{own["plane_url"]}, version #{own["version"]}, line by line with who wrote it:"
+        )
+
+        say.("")
+        labels = Enum.map(lines, &written_by/1)
+        width = labels |> Enum.map(&String.length/1) |> Enum.max() |> min(56)
+
+        Enum.zip_with(labels, lines, fn label, line ->
+          say.(String.trim_trailing(String.pad_trailing(label, width) <> "  " <> line["text"]))
+        end)
+
+        0
+
+      {:ok, own} ->
+        # A plane from before provenance answers no lines: the text, as `troupe memory` shows it.
+        say.("the plane says nothing of who wrote each line; it is from before it")
+        show(own, say)
+
+      {:error, reason} ->
+        say.("could not read your memory: " <> describe(reason))
+        1
+    end
+  end
+
+  defp written_by(%{"agent" => agent, "session" => session} = line) when is_binary(agent),
+    do: "v#{line["version"]} #{agent} in #{session}"
+
+  defp written_by(%{"session" => session} = line) when is_binary(session),
+    do: "v#{line["version"]} an agent in #{session}"
+
+  defp written_by(line), do: "v#{line["version"]} #{line["by"]}"
 
   # `--status`: which versions this machine's daemon holds, against what the plane has in
   # force now, and what each session running here read at its last turn. For the person's

@@ -1927,17 +1927,24 @@ defmodule Troupe.Agent.Server do
   # digest is the cache: an `instructions_loaded` event is written when what reached the
   # prompt changed since this agent's last turn, and never when it did not, so the log
   # says which files each turn was read from without saying so every turn.
+  #
+  # A root whose session its client put under Local only says so once, in the next
+  # `instructions_loaded`, written for it even where nothing read changed.
   defp load_instructions(%State{instructions: %{}, instructions_due: false} = state), do: state
 
   defp load_instructions(%State{} = state) do
     focus = Instructions.focus(state.conversation)
     loaded = Instructions.load(state.workspace.root_real, state.config, focus)
+    local_only? = state.agent_path == ["root"] and Troupe.LocalOnly.session?(state.session_id)
+    say_local_only? = local_only? and not state.local_only_said
 
-    if state.instructions == nil or loaded.digest != state.instructions.digest do
-      log(state, :instructions_loaded, Instructions.provenance(loaded))
+    if state.instructions == nil or loaded.digest != state.instructions.digest or say_local_only? do
+      provenance = Instructions.provenance(loaded)
+      provenance = if say_local_only?, do: Map.put(provenance, "local_only", Troupe.LocalOnly.line()), else: provenance
+      log(state, :instructions_loaded, provenance)
     end
 
-    %{state | instructions: loaded, instructions_due: false}
+    %{state | instructions: loaded, instructions_due: false, local_only_said: local_only?}
   end
 
   defp instructions_due(%State{} = state), do: %{state | instructions_due: true}

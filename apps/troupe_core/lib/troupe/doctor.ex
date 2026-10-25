@@ -53,7 +53,8 @@ defmodule Troupe.Doctor do
   Options: `:workspace` (the current directory); `:planes`, URLs the caller knows of
   (the TUI's logins), joined with the daemon's linked plane; `:command`, the program
   printing the answer (`"troupe-daemon"` unless it says `"troupe"`); `:live`, `false`
-  to skip the request to the provider and the planes.
+  to skip the request to the provider and the planes; `:local_only`, `true` to ask no plane
+  and say why, for a client in Local only.
   """
   @spec run(keyword()) :: [check()]
   def run(opts \\ []) do
@@ -473,9 +474,10 @@ defmodule Troupe.Doctor do
     urls =
       opts |> Keyword.get(:planes, []) |> Kernel.++(linked) |> Enum.map(&base/1) |> Enum.uniq()
 
-    case urls do
-      [] -> [check("plane", :ok, "none configured")]
-      urls -> Enum.map(urls, &plane_check(&1, live?))
+    case {urls, Keyword.get(opts, :local_only, false)} do
+      {[], _local_only} -> [check("plane", :ok, "none configured")]
+      {urls, true} -> Enum.map(urls, &check("plane #{&1}", :ok, "not asked: Local only is on"))
+      {urls, false} -> Enum.map(urls, &plane_check(&1, live?))
     end
   end
 

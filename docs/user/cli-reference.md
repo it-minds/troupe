@@ -38,7 +38,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe config trust [PATH]` | let a workspace's own files set the trusted keys; --list shows them |
 | `troupe config untrust [PATH]` | take a workspace's trust back |
 | `troupe config pull [PLANE_URL]` | fetch the organisation's defaults and limits from the plane now (never a key) |
-| `troupe memory [--edit \| --clear \| --status]` | your own memory on the plane, which every session of yours reads on every machine: show it, edit it in $EDITOR, or clear it; an agent of yours only ever adds to it. --status: which versions of the organisation's and your memory this machine holds, whether they are current, and what each session here read at its last turn |
+| `troupe memory [--edit \| --clear \| --status \| --blame]` | your own memory on the plane, which every session of yours reads on every machine: show it, edit it in $EDITOR, or clear it; an agent of yours only ever adds to it. --status: which versions of the organisation's and your memory this machine holds, whether they are current, and what each session here read at its last turn. --blame: each line with who wrote it, and the agent and session of an agent's entry |
 | `troupe models [--refresh]` | what each provider serves, its window and its price; asked again when stale, or now with --refresh |
 | `troupe models --json [--workspace DIR] [--refresh]` | the same as one JSON object for a program: models, roles, catalog, providers; never a key |
 | `troupe doctor [--json]` | check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure |

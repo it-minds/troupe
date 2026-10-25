@@ -1,8 +1,11 @@
 {
+  "$comment": {
+    "tool_calls.tool_definition_bytes": "16300: about a tenth over the 14787 measured on 0.27.0, as docs/developer/bench.md says a budget is set. At 14800 it had 13 bytes of room, so any change to one tool's description failed the bench; a tenth is room for one, and a tool set grown by more still fails it."
+  },
   "tool_calls": {
     "model_calls": 31,
     "system_prompt_bytes": 1750,
-    "tool_definition_bytes": 14800,
+    "tool_definition_bytes": 16300,
     "first_prompt_bytes": 16650,
     "largest_prompt_bytes": 32150,
     "growth_per_call_bytes": 550,

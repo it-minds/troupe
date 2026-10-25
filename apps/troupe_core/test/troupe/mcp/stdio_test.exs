@@ -43,6 +43,18 @@ defmodule Troupe.MCP.StdioTest do
     end
   end
 
+  # D121: an answer with neither a result nor an error took the server's process down with
+  # a FunctionClauseError; it is a status like any other refusal.
+  test "a server that answers initialize with neither a result nor an error has a status", context do
+    if match?({:unix, _}, :os.type()) do
+      reply = ~s({"jsonrpc":"2.0","id":1})
+      config = %{"command" => "sh", "args" => ["-c", "printf '%s\\n' '#{reply}'; sleep 5"]}
+
+      assert %{state: :error, error: "answered initialize with neither a result nor an error"} =
+               Stdio.probe("odd", config, context.workspace, 3_000)
+    end
+  end
+
   test "a server that answers initialize and exits before the next write is stopped, not crashed",
        context do
     if match?({:unix, _}, :os.type()) do

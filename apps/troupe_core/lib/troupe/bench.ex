@@ -28,7 +28,12 @@ defmodule Troupe.Bench do
 
   @budgets_path Path.expand("../../priv/bench/budgets.json", __DIR__)
   @external_resource @budgets_path
-  @budgets @budgets_path |> File.read!() |> Jason.decode!()
+  # A key starting with `$` is the file's own note on why a budget is what it is, not a
+  # scenario.
+  @budgets @budgets_path
+           |> File.read!()
+           |> Jason.decode!()
+           |> Map.reject(fn {key, _note} -> String.starts_with?(key, "$") end)
 
   @doc "The budgets the suite is held to: `%{scenario => %{measure => maximum}}`, from the file."
   @spec budgets() :: %{String.t() => %{String.t() => number()}}

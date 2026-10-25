@@ -165,6 +165,90 @@ defmodule Troupe.Plane.Memory do
   defp op_name(:del), do: "del"
   defp op_name(:ins), do: "add"
 
+  @doc """
+  Who wrote each line of a document as it stands at version `upto` (the version in force
+  where `nil`): blame, not history. Each line is `text`, `version`, the version it came in,
+  `by`, who saved that version, and `at`; an agent's entry adds `session` and `agent`, the
+  session and the agent it came from. A rollback's lines keep who wrote them in the version
+  rolled back to.
+
+  Derived and kept nowhere: each version's lines against the one before it, by the same line
+  diff a preview shows, and the session and agent from the version's audit row.
+  """
+  @spec blame(owner(), pos_integer() | nil) :: [map()]
+  def blame(owner, upto \\ nil) do
+    written = written(owner)
+
+    {lines, _by_version} =
+      owner
+      |> versions()
+      |> Enum.reverse()
+      |> Enum.filter(&(is_nil(upto) or &1.version <= upto))
+      |> Enum.reduce({[], %{}}, fn document, {lines, by_version} ->
+        from = Map.get(written, document.version, %{})
+
+        now =
+          case by_version[from["rolled_back_to"]] do
+            nil -> attributed(lines, document, from)
+            restored -> restored
+          end
+
+        {now, Map.put(by_version, document.version, now)}
+      end)
+
+    lines
+  end
+
+  # Each version's line diff against the lines before it, as they were attributed: a line
+  # that stays keeps who wrote it, a line that comes is this version's.
+  defp attributed(before, document, from) do
+    {kept, _rest} =
+      before
+      |> Enum.map(& &1["text"])
+      |> List.myers_difference(lines(document.text))
+      |> Enum.reduce({[], before}, fn
+        {:eq, texts}, {acc, old} ->
+          {same, old} = Enum.split(old, length(texts))
+          {Enum.reverse(same, acc), old}
+
+        {:del, texts}, {acc, old} ->
+          {acc, Enum.drop(old, length(texts))}
+
+        {:ins, texts}, {acc, old} ->
+          {Enum.reverse(Enum.map(texts, &line(&1, document, from)), acc), old}
+      end)
+
+    Enum.reverse(kept)
+  end
+
+  defp line(text, document, from) do
+    %{
+      "text" => text,
+      "version" => document.version,
+      "by" => document.changed_by,
+      "at" => DateTime.to_iso8601(document.inserted_at)
+    }
+    |> Map.merge(Map.take(from, ["session", "agent"]))
+  end
+
+  # What each version's audit row says of where it came from: the session and the agent of
+  # an agent's entry, and the version a rollback restored.
+  defp written(owner) do
+    [kind: "memory", subject_id: subject(owner), limit: 10_000]
+    |> Audit.list()
+    |> Enum.filter(&(&1.action == "memory.put"))
+    |> Enum.flat_map(fn event ->
+      case event.detail do
+        %{"version" => %{"to" => version}} = detail when is_integer(version) ->
+          [{version, Map.take(detail, ["session", "agent", "rolled_back_to"])}]
+
+        _other ->
+          []
+      end
+    end)
+    |> Map.new()
+  end
+
   # -- what reaches a session -------------------------------------------------
 
   @doc """
@@ -580,7 +664,7 @@ defmodule Troupe.Plane.Memory do
   for none), as `put/4` saves any. Audited as `memory.put` on `user/<subject>`, with the
   version, size and hash and never the text, as every level's save is; the sessions they run
   read it from their next turn. `opts[:session]` names the session an agent of theirs wrote
-  it from, which the audit row keeps.
+  it from and `opts[:agent]` the agent, which the audit row keeps and `blame/2` reads.
   """
   @spec save_own(User.t(), String.t(), non_neg_integer() | nil, keyword()) ::
           {:ok, %{document: map() | nil, changes: map()}}
@@ -595,7 +679,11 @@ defmodule Troupe.Plane.Memory do
 
       {:ok, %{before: before, now: now}} ->
         changes = Audit.diff(fields(before), fields(now))
-        detail = if opts[:session], do: Map.put(changes, "session", opts[:session]), else: changes
+
+        detail =
+          for {key, opt} <- [{"session", :session}, {"agent", :agent}], opts[opt], into: changes,
+            do: {key, opts[opt]}
+
         {:ok, _} = Audit.record(user.subject, "memory.put", subject(user), detail)
         _told = announce(user)
         {:ok, %{document: summary(now), changes: changes}}

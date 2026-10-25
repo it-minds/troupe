@@ -96,6 +96,10 @@ describe("local-only mode", () => {
     type(composer, "hello");
     button("Send")!.click();
     await waitFor(() => daemon.calls.some((c) => c.method === "input.send" && c.params["text"] === "hello"), "the message to reach the daemon");
+    // The daemon was told at every connect, so it makes no plane call for this session.
+    const hellos = daemon.calls.filter((c) => c.method === "initialize");
+    expect(hellos.length).toBeGreaterThan(0);
+    expect(hellos.every((c) => (c.params["client_info"] as Record<string, unknown>)["local_only"] === true)).toBe(true);
     daemon.say(created.id, "Hello from the model, by way of the daemon.");
     await waitFor(() => says("Hello from the model, by way of the daemon."), "the answer");
     expect(document.querySelector('select[aria-label="Profile"]')).toBeNull();
@@ -167,8 +171,12 @@ describe("switching local-only off and on", () => {
       () => [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find((i) => i.parentElement?.textContent?.includes("never contact a plane")),
       "the local-only switch",
     );
+    // Signed in, the daemon hears no Local only at its `initialize`.
+    expect(daemon.calls.filter((c) => c.method === "initialize").some((c) => "local_only" in (c.params["client_info"] as object))).toBe(false);
     toggle.click();
     await waitFor(() => document.querySelector(".me .name")?.textContent === "This computer", "local mode");
+    // And is told when the switch goes.
+    await waitFor(() => daemon.calls.some((c) => c.method === "client.mode" && c.params["local_only"] === true), "the daemon told of Local only");
     const kept = refreshTokenFor(plane);
     expect(kept).toBeTruthy();
 
@@ -189,6 +197,7 @@ describe("switching local-only off and on", () => {
     );
     again.click();
     await waitFor(() => document.querySelector(".me .name")?.textContent === "Alice", "signed back in");
+    await waitFor(() => daemon.calls.some((c) => c.method === "client.mode" && c.params["local_only"] === false), "the daemon told it is off");
     expect(document.querySelector(".usercode")).toBeNull();
     nav("Sessions")!.click();
     await waitFor(() => says("Rewrite the placement loop") && says("/home/ada/notes"), "both halves of the list again");

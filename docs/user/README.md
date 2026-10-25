@@ -110,6 +110,14 @@ flowchart LR
 | Your own program | anything that speaks [PROTOCOL.md](../../PROTOCOL.md) to a daemon or a pod | the protocol |
 | Another agent | a profile called through the A2A facade | [a2a.md](../a2a.md) |
 
+**Local only** is a promise the daemon keeps, not only the client: the desktop app's
+**Use this computer only**, or `local_only: true` in your own config for `troupe`
+([settings](configuration-settings.md)), tells the daemon when the client connects. For the
+sessions that client runs the daemon then calls no plane: `remember` to your own memory is
+refused and offers the repository's, a session is not offered for steering, and it reads
+the memory this machine already holds, as its first `instructions_loaded` says. While every
+client attached is in Local only, the daemon's own checks with the plane wait too.
+
 `troupe update` keeps `troupe` and the daemon current, checking each release's signature
 first, and the desktop app updates itself and the daemon beside it the same way
 ([updating](updating.md)). `troupe login <plane URL>` signs you in with a code you type in

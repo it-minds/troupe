@@ -43,6 +43,12 @@ defmodule Troupe.Agent.HeadroomTest do
     assert Headroom.describe(:wall, %{used: 125_000, limit: 1_800_000, fraction: 0.07}) == "wall clock 2m/30m (7%)"
     assert Headroom.describe(:turns, %{used: 3, limit: 40, fraction: 0.075}) == "turns 3/40 (8%)"
 
+    # D70: no figure in an exponent's notation, and one that rounds to a thousand thousands is 1.0M.
+    assert Headroom.describe(:input, %{used: 999_960, limit: 1_000_000_000, fraction: 0.001}) ==
+             "input tokens 1.0M/1000.0M (0%)"
+
+    assert Headroom.describe(:output, %{used: 999, limit: 999_949, fraction: 0.001}) == "output tokens 999/999.9k (0%)"
+
     json = Headroom.to_json(Headroom.of(%Budget{max_turns: 4, turns: 1}, 0, 10))
     assert json["turns"] == %{"used" => 1, "limit" => 4, "fraction" => 0.25}
     assert Map.keys(json) |> Enum.sort() == ~w(context input output turns wall)

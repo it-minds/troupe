@@ -193,6 +193,51 @@ defmodule Troupe.MemoryCLITest do
     assert said =~ "not checked against the plane: signed out"
   end
 
+  # #55's provenance: who wrote each line, asked of the daemon's `me.memory` with `blame`.
+  test "--blame prints each line with who wrote it, and an agent's entry with its agent and session" do
+    assert {:ok, %{mode: :memory, blame: true}} = CLI.parse(["memory", "--blame"])
+    assert {:error, "troupe memory --blame" <> _} = CLI.parse(["memory", "--blame", "--edit"])
+
+    lines = [
+      %{
+        "text" => "I write British English.",
+        "version" => 1,
+        "by" => "ada@example.test",
+        "at" => "2026-10-24T09:00:00Z"
+      },
+      %{
+        "text" => "",
+        "version" => 3,
+        "by" => "ada@example.test",
+        "session" => "20261025T101112-abc123",
+        "agent" => "build"
+      },
+      %{
+        "text" => "- Prefers small pull requests.",
+        "version" => 3,
+        "by" => "ada@example.test",
+        "session" => "20261025T101112-abc123",
+        "agent" => "build"
+      }
+    ]
+
+    {0, said} =
+      run(%{blame: true}, fn "me.memory", %{"blame" => true} ->
+        {:ok, Map.put(@own, "lines", lines)}
+      end)
+
+    assert said =~
+             "your memory on https://plane.example.test, version 3, line by line with who wrote it:"
+
+    assert said =~ ~r/^v1 ada@example\.test\s+I write British English\.$/m
+    assert said =~ ~r/^v3 build in 20261025T101112-abc123\s+- Prefers small pull requests\.$/m
+
+    # A plane from before it answers no lines: said, and the text shown.
+    {0, said} = run(%{blame: true}, fn "me.memory", _ -> {:ok, @own} end)
+    assert said =~ "says nothing of who wrote each line"
+    assert said =~ "I write British English."
+  end
+
   defp run(args, call) do
     test = self()
     status = Memory.run(args, &send(test, {:said, &1}), call)

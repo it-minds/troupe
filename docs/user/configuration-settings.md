@@ -102,6 +102,12 @@ shows in the other at once, and the next session either starts reads it.
   whether the terminal blinks what waits on you (`ui.blink`). The daemon keeps them and
   acts on none, as with `mouse` and `transcript.detail`. What belongs to one window (its
   size, the plane the desktop app last used, whether it opens on Home) stays there.
+- **Local only.** `local_only: true` in your own `config.yaml`, and only there, puts the
+  terminal in Local only: `troupe` calls no plane itself (`login`, `whoami`, `config pull`,
+  `--remote` and `--private` say why and stop), and tells the daemon when it connects, which
+  then makes no plane call for the sessions it runs. `troupe doctor` prints whether it is
+  on. The desktop app's switch is its own, on the sign-in screen and on *This computer*,
+  and tells the daemon the same way.
 - **The provider.** Every place you pick one offers the same [provider types](configuration.md#provider-types),
   from one list the daemon serves: `troupe setup`, `troupe config`, the TUI's `/settings`,
   the desktop app's first run and its **Models** panel. Each asks only what its type

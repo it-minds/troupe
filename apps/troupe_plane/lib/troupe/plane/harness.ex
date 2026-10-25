@@ -339,11 +339,15 @@ defmodule Troupe.Plane.Harness do
   # The poll carries what the machine's running sessions read at their last turn
   # (`sessions`, each its id, when the turn began and each document's scope, name, version
   # and hash), which the console's who-is-behind reads. Kept for the caller alone.
+  #
+  # `blame: true` adds `lines` to their own: who wrote each line, in which version, and from
+  # which session an agent's entry came (`Memory.blame/2`), for `troupe memory --blame`.
   defp handle("me.memory", params, %{user: user}) do
     :ok = Memory.machine(user, params["sessions"])
+    own = Memory.own(user)
+    own = if params["blame"] == true and is_binary(user.id), do: Map.put(own, "lines", Memory.blame(user)), else: own
 
-    {:ok,
-     Signing.signed("memory", %{"documents" => Memory.for_person(user), "user" => Memory.own(user)})}
+    {:ok, Signing.signed("memory", %{"documents" => Memory.for_person(user), "user" => own})}
   end
 
   # What saving a text as the person's own memory would do, written nowhere: the lines it
@@ -1274,8 +1278,10 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  defp save_own(user, %{"append" => entry}) do
-    own_result(Memory.append_own(user, entry))
+  # The session and the agent a daemon names for an agent's entry are kept with the version
+  # as who wrote the line, the person's own word about their own machine.
+  defp save_own(user, %{"append" => entry} = params) do
+    own_result(Memory.append_own(user, entry, written_from(params)))
   end
 
   defp save_own(user, params) do
@@ -1288,6 +1294,13 @@ defmodule Troupe.Plane.Harness do
           invalid("version is the version the text was edited from, 0 for none", field: "version")
       end
     end
+  end
+
+  defp written_from(params) do
+    for {key, opt} <- [{"session", :session}, {"agent", :agent}],
+        value = params[key],
+        is_binary(value) and value != "" and byte_size(value) <= 128,
+        do: {opt, value}
   end
 
   defp own_result({:ok, saved}), do: {:ok, saved}

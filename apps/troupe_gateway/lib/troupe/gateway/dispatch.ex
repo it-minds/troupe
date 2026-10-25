@@ -23,6 +23,7 @@ defmodule Troupe.Gateway.Dispatch do
     Commands,
     Connections,
     Idle,
+    LocalOnly,
     LocalSources,
     Memory,
     Plane,
@@ -58,17 +59,19 @@ defmodule Troupe.Gateway.Dispatch do
     @moduledoc "Who is calling, and what they are allowed to do."
 
     @enforce_keys [:principal, :scopes, :connection]
-    defstruct [:principal, :scopes, :connection, :next_subscription_id, :activate, :client]
+    defstruct [:principal, :scopes, :connection, :next_subscription_id, :activate, :client, local_only: false]
 
     # `client`: which client this connection is, a word from `Troupe.LLM.Identify.clients/0`;
-    # a session it creates or wakes names it to the provider (Decision 787).
+    # a session it creates or wakes names it to the provider (Decision 787). `local_only`:
+    # the client is in Local only, and nothing done for it reaches a plane.
     @type t :: %__MODULE__{
             principal: map(),
             scopes: [:observe | :control | :admin],
             connection: pid(),
             next_subscription_id: String.t() | nil,
             activate: (String.t() -> {:ok, pid()} | {:error, term()}) | nil,
-            client: String.t() | nil
+            client: String.t() | nil,
+            local_only: boolean()
           }
   end
 
@@ -247,10 +250,80 @@ defmodule Troupe.Gateway.Dispatch do
   @spec call(String.t(), map(), Context.t()) :: outcome()
   def call(method, params, %Context{} = context) do
     with :ok <- permitted(method, context),
-         :ok <- session_ids(params) do
-      idempotent(method, params, context)
+         :ok <- session_ids(params),
+         :ok <- local_only(method, params, context) do
+      method |> idempotent(params, context) |> created(method, context)
     end
   end
+
+  # -- Local only ---------------------------------------------------------------
+  #
+  # A client in Local only makes no plane call, and the daemon makes none for the sessions
+  # it runs (`Troupe.Gateway.LocalOnly`). A session is put under it, or taken out, by the
+  # client that last gave it work: before the work, so a turn it starts is already under it,
+  # and after a create, whose session there was no id for before.
+  @work ~w(input.send commands.run session.goal.set session.loop.start)
+
+  defp local_only("remote.offer", params, context) do
+    cond do
+      context.local_only -> refuse_offer("this client is in Local only")
+      LocalOnly.session?(params["session_id"]) -> refuse_offer("this session is under Local only")
+      true -> :ok
+    end
+  end
+
+  defp local_only(method, _params, %Context{local_only: true}) when method in ["me.memory", "me.memory.put"] do
+    refuse_local_only(
+      "this client is in Local only, so the daemon does not ask the plane for your own memory; " <>
+        "turn Local only off to read or change it"
+    )
+  end
+
+  defp local_only("session.create", %{"private" => true}, %Context{local_only: true}) do
+    refuse_local_only(
+      "this client is in Local only, and a private session is sealed to the plane; start it " <>
+        "as a local session, or turn Local only off"
+    )
+  end
+
+  defp local_only(method, %{"session_id" => session_id}, context)
+       when method in @work and is_binary(session_id),
+       do: given_work(session_id, context)
+
+  defp local_only(_method, _params, _context), do: :ok
+
+  defp refuse_offer(why),
+    do: refuse_local_only(why <> ", so it is not offered to the plane for steering from another device")
+
+  # An offered session's events go to the plane for whoever steers it from elsewhere, so a
+  # client in Local only gives it no work until the offer is withdrawn.
+  defp given_work(session_id, %Context{local_only: true} = context) do
+    if Remote.describe(session_id) do
+      refuse_local_only(
+        "this session is offered to the plane for steering from another device, and this " <>
+          "client is in Local only: withdraw the offer first, or turn Local only off"
+      )
+    else
+      LocalOnly.worked(context.connection, session_id)
+    end
+  end
+
+  defp given_work(session_id, context), do: LocalOnly.worked(context.connection, session_id)
+
+  defp refuse_local_only(reason), do: {:error, Error.new(:forbidden, %{local_only: true, reason: reason})}
+
+  defp created({:ok, %{} = result} = outcome, method, context) when method in ["session.create", "session.fork"] do
+    if is_binary(result["session_id"]), do: LocalOnly.worked(context.connection, result["session_id"])
+    outcome
+  end
+
+  defp created({:ok, %{"session" => %{"session_id" => id}}} = outcome, "setup.answer", context)
+       when is_binary(id) do
+    LocalOnly.worked(context.connection, id)
+    outcome
+  end
+
+  defp created(outcome, _method, _context), do: outcome
 
   defp permitted(method, context) do
     case Map.fetch(@scopes, method) do
@@ -1204,11 +1277,14 @@ defmodule Troupe.Gateway.Dispatch do
   # The person's own memory document, as the plane has it now (`Memory.own/0`), and their
   # save of it or an entry (`Memory.put_own/1`), sent with this daemon's sign-in and read by
   # the sessions running here from their next turn. Signed out, a sentence.
-  defp handle("me.memory", _params, _context), do: own_memory(Memory.own())
+  # `blame: true` adds who wrote each line and from which session (`lines`).
+  defp handle("me.memory", params, _context), do: own_memory(Memory.own(blame: params["blame"] == true))
 
   # Where this machine's copy stands against the plane, and what each session here read at
-  # its last turn (`Memory.status/0`). Signed out it still says what the copy holds.
-  defp handle("me.memory.status", _params, _context), do: {:ok, Memory.status()}
+  # its last turn (`Memory.status/1`). Signed out, or asked by a client in Local only, it
+  # still says what the copy holds, and why the plane was not asked.
+  defp handle("me.memory.status", _params, context),
+    do: {:ok, Memory.status(ask: not context.local_only)}
 
   defp handle("me.memory.put", params, _context) do
     case params do
@@ -1659,9 +1735,11 @@ defmodule Troupe.Gateway.Dispatch do
   defp answer_object(answer) when is_map(answer), do: {:ok, answer}
   defp answer_object(_other), do: {:error, Error.new(:invalid_params, %{reason: "answer must be an object"})}
 
+  # The first session's command id is named after the answer's; an answer sent without one
+  # still makes its session.
   defp first_session(wanted, params, context) do
     create = %{
-      "command_id" => params["command_id"] <> ":session",
+      "command_id" => "#{params["command_id"] || "setup"}:session",
       "workspace" => wanted["workspace"],
       "prompt" => wanted["prompt"],
       "worktree" => "never"

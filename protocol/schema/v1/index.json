@@ -8,6 +8,7 @@
     "commands/agents.validate.json",
     "commands/approval.respond.json",
     "commands/blob.get.json",
+    "commands/client.mode.json",
     "commands/commands.list.json",
     "commands/commands.run.json",
     "commands/config.changed.json",

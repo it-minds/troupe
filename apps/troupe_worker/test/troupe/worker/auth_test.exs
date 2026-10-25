@@ -23,8 +23,9 @@ defmodule Troupe.Worker.AuthTest do
   @mine "20260923T101112-q3Vx_A"
 
   # Answered by the connection before the guard is asked: a second `initialize` is
-  # `invalid_request`, and `auth.refresh` is not in the table at all.
-  @connection_own ["initialize"]
+  # `invalid_request`, and `auth.refresh` is not in the table at all. `client.mode`, a
+  # client saying it is in Local only, narrows only what is done for it.
+  @connection_own ["initialize", "client.mode"]
 
   # What a session's own client needs besides the commands that name the session: its
   # topics, and the two listings, which are narrowed to it.

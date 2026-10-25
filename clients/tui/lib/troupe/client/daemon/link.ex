@@ -411,11 +411,15 @@ defmodule Troupe.Client.Daemon.Link do
   """
   @spec client_info() :: map()
   def client_info do
-    %{
+    info = %{
       "name" => Application.get_env(:troupe, :client_name, "troupe"),
       "version" => version(),
       "platform" => platform()
     }
+
+    # Said only when on: a daemon then makes no plane call for the sessions this client
+    # runs (`Troupe.CLI.LocalOnly`).
+    if Troupe.CLI.LocalOnly.on?(), do: Map.put(info, "local_only", true), else: info
   end
 
   @doc """

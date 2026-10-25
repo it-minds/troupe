@@ -317,6 +317,23 @@ defmodule Troupe.Config.LayersTest do
       refute json =~ "literal-key-1234567890"
     end
 
+    # D63: an unset `{env:VAR}` inside a list was handed to JSON as the tuple it is kept as.
+    test "--explain --json says an unset {env:VAR} in a server's args as written", ctx do
+      var = "TROUPE_TEST_UNSET_D63_#{System.unique_integer([:positive])}"
+      System.delete_env(var)
+
+      File.write!(ctx.user, """
+      mcp:
+        fs:
+          command: npx
+          args: ["server-filesystem", "{env:#{var}}"]
+      """)
+
+      {json, 0} = Config.Explain.explain(ctx.ws, nil, user_path: ctx.user, json: true)
+      assert json =~ "{env:#{var}}"
+      assert {:ok, _decoded} = Jason.decode(json)
+    end
+
     test "an MCP server's header Troupe sends itself refuses the server", ctx do
       File.write!(ctx.user, """
       mcp:
