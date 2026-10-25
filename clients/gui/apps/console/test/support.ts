@@ -12,8 +12,14 @@ import { AuthSession } from "@troupe/client";
 import { FakeAdmin, exampleAdmin } from "../../../packages/client/test/support/admin.js";
 import { FakeIdp } from "../../../packages/client/test/support/idp.js";
 import { FakePlane } from "../../../packages/client/test/support/plane.js";
+import type { PlaneOptions } from "../../../packages/client/test/support/plane.js";
 import { FakeWorker } from "../../../packages/client/test/support/worker.js";
+import { NodeWebSocket } from "../../../packages/client/test/support/ws.js";
 import { tabTokenStore } from "../src/plane";
+
+// Mine holds a watch on the plane (`/v1/relay/watch`) wherever it is drawn, and the test
+// environment's own WebSocket cannot open one against the fake: Node's can.
+globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
 
 export const PEOPLE = {
   alice: { subject: "alice@example.com", name: "Alice" },
@@ -30,10 +36,10 @@ export interface FakeDeployment {
 }
 
 /** An identity provider, a worker and a plane with the example organisation behind it. */
-export async function startFake(admin: FakeAdmin = exampleAdmin()): Promise<FakeDeployment> {
+export async function startFake(admin: FakeAdmin = exampleAdmin(), plane_: Partial<PlaneOptions> = {}): Promise<FakeDeployment> {
   const idp = await FakeIdp.start();
   const worker = await FakeWorker.start();
-  const plane = await FakePlane.start({ idp, worker, admin });
+  const plane = await FakePlane.start({ ...plane_, idp, worker, admin });
   return {
     idp,
     worker,

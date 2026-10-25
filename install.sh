@@ -784,9 +784,12 @@ install() {
   heading "Check"
   "$BIN" version || say "warning: troupe-daemon version failed"
   if [ "$with_tui" = 1 ]; then "$TUI" --version || say "warning: troupe --version failed"; fi
+  # Said only of a program that is quarantined and carries no Developer ID signature: a
+  # release signed by Apple's rules opens without it, and one from before does not.
   if [ "$OS" = Darwin ]; then
     for f in "$TUI" "$MAC_APP"; do
-      if [ -e "$f" ] && xattr -p com.apple.quarantine "$f" >/dev/null 2>&1; then
+      if [ -e "$f" ] && xattr -p com.apple.quarantine "$f" >/dev/null 2>&1 &&
+        ! codesign -dv --verbose=2 "$f" 2>&1 | grep -q '^Authority=Developer ID Application:'; then
         say "note: the programs carry no Apple signature and are quarantined; if Gatekeeper blocks them: xattr -dr com.apple.quarantine $LIB_DIR $TUI $MAC_APP"
         break
       fi

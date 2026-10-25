@@ -22,7 +22,7 @@
 ├── install.sh, install.ps1  install troupe and troupe-daemon from a release
 ├── mix.exs, mix.lock        the umbrella: the check alias, four releases, credo
 ├── protocol/schema/v1/      GENERATED JSON Schema (commands/, events/, index.json)
-├── scripts/                 dev-up, toolbox, remote-up, build-images, release, pitr-drill, version.exs, locks-agree.exs, doc-links.exs, check-neutral.exs, decision-citations.exs, console-rig.exs, …
+├── scripts/                 dev-up, toolbox, remote-up, build-images, release, pitr-drill, version.exs, locks-agree.exs, doc-links.exs, doc-size.exs, check-neutral.exs, decision-citations.exs, console-rig.exs, …
 └── test/fixtures/logs/      recorded log fixtures, one directory per released version
 ```
 

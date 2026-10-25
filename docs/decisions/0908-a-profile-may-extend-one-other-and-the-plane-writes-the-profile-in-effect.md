@@ -20,6 +20,7 @@ paths:
   - clients/gui/packages/client/test/support/admin.ts
   - clients/gui/packages/client/test/support/extends.ts
   - docs/admin/profiles-and-policy.md
+  - docs/admin/profile-options.md
 symbols:
   - Troupe.Plane.Fleet.Extends
   - Troupe.Plane.Admin.profile_put/2

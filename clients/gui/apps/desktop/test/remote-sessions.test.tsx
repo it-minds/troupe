@@ -95,7 +95,52 @@ describe("a laptop's session, from another computer", () => {
   });
 });
 
+/** How long news may take to show: a push's, nowhere near the fleet's poll. */
+const PUSHED_MS = 1_000;
+
+describe("the list follows the plane as it changes", () => {
+  it("an offer made on a laptop shows within a second, from the plane's push and not a poll, and its withdrawal too", async () => {
+    await signedIn();
+    unmount = render(<App />).unmount;
+    await waitFor(() => harness.plane.watches.size === 1, "the desktop's watch on the plane");
+    const asked = (): number => harness.plane.asked.filter((m) => m === "remote.list").length;
+    const before = asked();
+
+    const at = Date.now();
+    harness.plane.relay("ada@example.com", { id: "s-laptop-new", ownerName: "Ada", workspace: "ledger", shares: [{ subject: "alice@example.com", role: "control" }] });
+    await waitFor(() => row("ledger"), "the new offer, pushed", PUSHED_MS);
+    expect(Date.now() - at).toBeLessThan(PUSHED_MS);
+
+    harness.plane.offline("s-laptop-new");
+    await waitFor(() => row("ledger")?.textContent?.includes("Offline since"), "the laptop gone, pushed", PUSHED_MS);
+
+    harness.plane.withdraw("s-laptop-new");
+    await waitFor(() => !row("ledger"), "the withdrawal, pushed", PUSHED_MS);
+    expect(asked(), "remote.list was asked again rather than told").toBe(before);
+  });
+});
+
 describe("this computer's own session", () => {
+  it("names who is steering it from another device as they come and go, from its presence", async () => {
+    const shop = daemon.seed("/home/alice/shop");
+    await signedIn();
+    unmount = render(<App />).unmount;
+    (await waitFor(() => row("/home/alice/shop"), "the local session's row")).click();
+    (await waitFor(() => button("Steer from elsewhere"), "the offer in the head")).click();
+    type(await waitFor(() => document.querySelector<HTMLInputElement>(".remote-share input"), "the share field"), "bea@example.com");
+    button("Offer it")!.click();
+    await sees("Offered · Online");
+    await waitFor(() => daemon.calls.some((c) => c.method === "subscribe" && c.params["topic"] === `presence:${shop.id}`), "the session's presence followed");
+
+    const at = Date.now();
+    daemon.present(shop.id, { subject: "bea@example.com", display_name: "Bea", state: "joined", via: "plane" });
+    await waitFor(() => document.querySelector(".remote-offer .steering")?.textContent === "Bea is steering from another device", "Bea, steering", PUSHED_MS);
+    expect(Date.now() - at).toBeLessThan(PUSHED_MS);
+
+    daemon.present(shop.id, { subject: "bea@example.com", display_name: "Bea", state: "left", via: "plane" });
+    await waitFor(() => !document.querySelector(".remote-offer .steering"), "Bea gone", PUSHED_MS);
+  });
+
   it("is offered to the plane from its head, shared with the people named, and withdrawn", async () => {
     daemon.seed("/home/alice/shop");
     await signedIn();

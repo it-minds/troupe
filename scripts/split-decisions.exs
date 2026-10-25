@@ -42,8 +42,14 @@ defmodule SplitDecisions do
   @home %{tui: "clients/tui", daemon: "apps/troupe_daemon"}
 
   # What cites a decision without being governed by it: the logs, the decisions themselves,
-  # the defects list (which says where a decision was not kept) and this script.
-  @not_citations ["docs/decisions/", "docs/developer/defects.md", "scripts/split-decisions.exs"]
+  # the defects list and its pages (which say where a decision was not kept), the records in
+  # docs/history/ and this script.
+  @not_citations [
+    "docs/decisions/",
+    "docs/developer/defects",
+    "docs/history/",
+    "scripts/split-decisions.exs"
+  ]
 
   # Supersession an entry states in words no pattern below reads: the daemon's 5 puts
   # Windows back in the matrix that 4 took it out of.

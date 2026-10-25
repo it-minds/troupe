@@ -40,10 +40,10 @@ the runtime's default seccomp profile and masked `/proc`, so their pods refused 
 command. The chart now gives the worker container its own seccomp profile
 (`worker.seccomp`), with a DaemonSet that puts it on the nodes, and runs each worker pod in
 a user namespace of its own with its `/proc` unmasked (`worker.userNamespaces`)
-([installing.md](installing.md#the-workers-seccomp-profile)). Before upgrading:
+([worker-sandbox.md](worker-sandbox.md#the-workers-seccomp-profile)). Before upgrading:
 
 1. Run the cluster check in
-   [installing.md](installing.md#the-workers-user-namespaces): Kubernetes 1.33 or later,
+   [worker-sandbox.md](worker-sandbox.md#the-workers-user-namespaces): Kubernetes 1.33 or later,
    containerd 2.0 or later, Linux 6.3 or later, and storage, team volumes' included, that
    takes idmapped mounts. A cluster that cannot sets `worker.userNamespaces: false`, and
    its workers go on refusing commands.
@@ -65,7 +65,7 @@ AppArmor (Ubuntu's), workers before it ran under the runtime's default AppArmor 
 which refuses bubblewrap's mounts, so their pods refused every command there. The chart now
 gives the worker container an AppArmor profile of its own (`worker.appArmor`, on by
 default) and loads it into every node's kernel
-([installing.md](installing.md#the-workers-apparmor-profile)); the node's sysctl stays as
+([worker-sandbox.md](worker-sandbox.md#the-workers-apparmor-profile)); the node's sysctl stays as
 it is. What changes:
 
 1. The DaemonSet is now `troupe-worker-profiles` (Helm removes `troupe-worker-seccomp` and
@@ -107,6 +107,16 @@ plaintext control connection", once a minute per address with the count of the r
 profile whose namespace has no `troupe-plane-ca` yet says so in its `PlaneCAMissing`
 condition.
 
+**Worker Secrets and the ingress label, from 0.26.0.** The operator copies the Secrets a
+worker namespace mounts from `troupe-system` ([configuration.md Part D](configuration.md#a-worker-namespaces-secrets)),
+and the role the chart gives it reads them by name. The ones you copied by hand keep
+working: where `troupe-system` has the source, the copy replaces yours at the first pass
+(the same data, if yours was a copy); where it has none, yours is used as it is. A model
+or MCP key a profile names is copied only once its Secret in `troupe-system` carries
+`troupe.dev/worker-secret=true`, which `SecretMissing` says with the line. Name the
+ingress controller's namespace in `operator.ingressNamespace` for the operator to keep its
+label; your own label stays either way.
+
 **Identity, from 0.20.0.** A sign-in or a SCIM push adopts the row SCIM gave its subject
 as `externalId` only when the email or `userName` agrees; otherwise a push is refused and
 the pair is listed, to be settled as in [SCIM](#scim). A `PUT` changes the person at its id,
@@ -141,8 +151,10 @@ in the answer once. `admin.principal.rotate` (the old secret stops at once) and
 
 1. Check the server's host against the policy: `admin.mcp.check {url}`. If it is refused,
    add the host to `policy.allowedEgress` and `helm upgrade`.
-2. Create the token Secret in every worker namespace whose profile follows the channel:
-   `kubectl -n troupe-w-<profile> create secret generic troupe-mcp-<server> --from-literal=token=…`
+2. Create the token Secret once in `troupe-system`, labelled for workers; the operator copies
+   it into every worker namespace whose profile follows the channel:
+   `kubectl -n troupe-system create secret generic troupe-mcp-<server> --from-literal=token=…`,
+   then `kubectl -n troupe-system label secret troupe-mcp-<server> troupe.dev/worker-secret=true`
 3. Add the server to the bundle with a `credential_ref`, then `admin.bundle.validate` and
    `admin.bundle.publish {channel, content}`. Pods on the channel are told at once;
    `admin.bundle.get` shows adoption per pod. `admin.bundle.retire` takes a version out of
@@ -170,7 +182,7 @@ visible on the writing replica at once and everywhere within 5 s. Before changin
 `platform_admin_group`, `admin.identity.check {group}` with the candidate; the console will
 not save it otherwise. What people's own machines start from and may not go past is the
 `client_*` settings and `client_enforced`
-([configuration.md](configuration.md#defaults-and-limits-for-peoples-machines)). Whether
+([client-config.md](client-config.md#defaults-and-limits-for-peoples-machines)). Whether
 people may offer their own signed-in tools to a profile's pods is the profile's
 `personalTools` (`admin.profile.put`, or the profile editor's switch).
 
@@ -282,8 +294,9 @@ Only console sign-in uses the secret.
 
 ## Rotate object-store credentials
 
-Update `troupe-object-store` in `troupe-system` and in every worker namespace, restart the
-plane, then drain and delete each worker pod, one profile at a time. Revoke the old key only
+Update `troupe-object-store` in `troupe-system`, which the operator copies into every
+worker namespace within half a minute, restart the plane, then drain and delete each
+worker pod, one profile at a time. Revoke the old key only
 after the last pod runs on the new one.
 
 ## Erase a session

@@ -34,6 +34,19 @@ describe("the plane's word on the desktop app's version", () => {
     assert.equal(suggestion(current.clientUpdate, "0.15.0-beta"), null);
   });
 
+  // D134: the daemon's handshake said where it runs and the desktop app's did not.
+  it("says where the app runs beside its version, where the shell says it", async () => {
+    h = await startHarness({ plane: { clientVersions: { desktop: { recommended: "0.15.0-beta" } } } });
+    const auth = await h.signIn();
+
+    await askPlane(auth, "0.15.0-beta", null, "windows/x86_64");
+    await askPlane(auth, "0.15.0-beta", null, null);
+    assert.deepEqual(h.plane.initialized, [
+      { name: "troupe-gui", version: "0.15.0-beta", platform: "windows/x86_64" },
+      { name: "troupe-gui", version: "0.15.0-beta" },
+    ]);
+  });
+
   it("below the minimum, or on a blocked version, is update_required as a sentence, with the policy still asked", async () => {
     h = await startHarness({ plane: { clientVersions: { desktop: { recommended: "0.15.0-beta", minimum: "0.15.0-beta", blocked: ["0.16.0-beta"] } } } });
     const auth = await h.signIn();

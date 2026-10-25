@@ -28,7 +28,7 @@ function PlaneKeyBanner({ change }: { change: NonNullable<Updates["planeKey"]> }
         This plane now signs what it tells this computer with the key <code>{change.offered}</code>, not <code>{change.pinned}</code>, the one pinned when you
         signed in. Its version policy and its organisation's settings are not taken until you accept the new key.
       </p>
-      <p className="micro">Check the fingerprint with the plane's administrators first: their console shows it under Integrations.</p>
+      <p className="micro">Check the fingerprint with the plane's administrators first: their console shows it under Configure → Integrations.</p>
       {change.error && <p className="micro">{change.error}</p>}
       <button className="link" onClick={change.accept}>
         Accept the new key

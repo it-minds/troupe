@@ -27,7 +27,7 @@ machine and you see the same transcript; two people can open the same session at
    the smallest is [Anthropic's](configuration/providers.md#anthropic), the key read from
    the environment. Your
    organisation may set defaults below it and limits above it; `troupe config --explain`
-   says which ([configuration](configuration.md#your-organisations-defaults-and-limits)).
+   says which ([configuration](configuration-layers.md#your-organisations-defaults-and-limits)).
 5. `troupe config validate` checks that file after you edit it by hand;
    [configuration.md](configuration.md) has every key.
 
@@ -146,13 +146,16 @@ the turn carries on.
 
 **Steering from another device.** A session on your machine you offer to the plane you are
 signed in to, so you can follow and steer it from the desktop app or the console on
-another device: `/steer on` in the terminal, or *Steer from elsewhere* in the session's
+another device (the console's *Mine*, which anybody the plane knows signs in to, not only
+its administrators): `/steer on` in the terminal, or *Steer from elsewhere* in the session's
 head in the desktop app. Name the people who may steer it too (`/steer on
 bea@example.com`), or only follow it (`cy@example.com:observe`). Your machine keeps one
 connection to the plane while it is offered and nothing listens on it; your rules and
 approvals hold for every prompt, and an approval answered from elsewhere is for that one
 call. Elsewhere it is listed as *Remote*, with *Offline since …* while your machine is
-away; in the terminal, HQ (`/remote`) lists the sessions offered to you beside the plane's,
+away, as soon as it is offered, withdrawn or goes away, since the plane tells the desktop
+app and the console rather than being asked again; the desktop app names who is steering
+your session as they arrive and leave; in the terminal, HQ (`/remote`) lists the sessions offered to you beside the plane's,
 as `laptop` rows, and opens one to steer it. Who joins and leaves is said in the session's
 window, and the status line names who is there. At your first offer the daemon signs in
 for itself and keeps that sign-in in your computer's credential store, so the offer stays
@@ -195,7 +198,7 @@ it, and `troupe run --headless` prints the same line:
 `turn: 12 calls · ↑ 48.2k sent · 610.4k cached · ↓ 6.3k received · $0.41`, its
 subagents' calls included, and the one that summarises the conversation when it is
 compacted; the TUI says it in its side panel
-([tokens and cost](../../clients/tui/README.md#tokens-and-cost)). `sent` is input billed in
+([tokens and cost](terminal-screen.md#tokens-and-cost)). `sent` is input billed in
 full, `cached` what the provider's prompt cache served at a fraction of the price, and the
 money is what the gateway said or what the model's price comes to (`no price` when nothing
 prices it; [what a call costs](models.md#what-a-call-costs)). The session's log keeps the
@@ -211,7 +214,7 @@ it and pushes fixes, as your organisation's GitHub App and never as you; after t
 CI rounds it stops, says on the pull request what still fails, and leaves the draft for a
 person. Each push and the pull request's link are in the transcript, and the session's
 listing shows its branch, last commit and pull request
-([the GitHub App](../admin/github.md#7-the-fix-loop)).
+([the GitHub App](../admin/github-runs.md#the-fix-loop)).
 
 ## Reading a transcript
 
@@ -221,7 +224,7 @@ tool call and what came back, reasoning, data. What you typed keeps its own pane
 default a turn's reasoning, its calls and the prose between them are one line where they
 began, above the answer: `▸ 7 steps · 1 failed · grep, read_file, edit_file · 14s`. The
 design both clients follow is [docs/design/frames.md](../design/frames.md), and the TUI's
-own way of drawing it is in [its page](../../clients/tui/README.md#reading-a-transcript).
+own way of drawing it is in [its page](terminal-screen.md#reading-a-transcript).
 
 - **In the desktop app** a click on that line opens the whole turn, every frame in it, and
   another click shuts it. `/detail quiet`, `/detail tools` or `/detail everything` in the

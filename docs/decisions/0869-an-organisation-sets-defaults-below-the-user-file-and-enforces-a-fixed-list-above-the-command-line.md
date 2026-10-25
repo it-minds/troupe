@@ -19,6 +19,7 @@ paths:
   - clients/tui/lib/troupe/settings.ex
   - docs/admin/configuration.md
   - docs/user/configuration.md
+  - docs/admin/client-config.md
 symbols:
   - Troupe.Protocol.Organisation
   - Troupe.Config.Org

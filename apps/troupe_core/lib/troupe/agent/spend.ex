@@ -89,6 +89,20 @@ defmodule Troupe.Agent.Spend do
     })
   end
 
+  @doc "Read back from what `to_json/1` wrote; a figure missing is nothing."
+  @spec from_json(map()) :: t()
+  def from_json(%{} = json) do
+    %__MODULE__{
+      calls: count(json["calls"]),
+      usage: Usage.from_json(json),
+      cost_micros: count(json["cost_micros"]),
+      unpriced: count(json["unpriced"])
+    }
+  end
+
+  defp count(n) when is_integer(n) and n >= 0, do: n
+  defp count(_other), do: 0
+
   @doc """
   What a request's prompt was made of, in bytes, as `prompt_bytes` carries it: `system`,
   the whole system prompt, of which `brief` is the instruction files and the project

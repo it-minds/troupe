@@ -203,6 +203,45 @@ defmodule Troupe.Agent.TurnCostTest do
     assert ended.data["turn"]["cost_micros"] > done.data["turn"]["cost_micros"]
   end
 
+  # D65: what the subagent reported was added to the parent's turn live only, so a restart
+  # after the delegation came back rebuilt the turn from the parent's own calls.
+  test "a delegation's call says what its subagent spent, and a restart after it keeps it",
+       context do
+    marks = "marks.txt"
+
+    sid =
+      run(context,
+        routes: %{
+          "root" => [
+            {:tools, [{"delegate", brief("general", "look")}]},
+            {:tools, [{"count", %{"path" => marks, "mark" => "after", "delay_ms" => 400}}]},
+            {:text, "done after restart"}
+          ],
+          "general" => [
+            {:text_and_tools, "looking", [{"todo_read", %{}}]},
+            {:tools, [{"finish", finished("found it")}]}
+          ]
+        }
+      )
+
+    await_started(sid, "after")
+
+    [delegated] =
+      Enum.filter(events_of_type(sid, :tool_call_completed), &(&1.data["name"] == "delegate"))
+
+    assert %{"calls" => 2, "cost_micros" => cost} = delegated.data["spent"]
+    assert is_integer(cost) and cost > 0
+
+    agent = Registry.agent_pid(sid, ["root"])
+    ref = Process.monitor(agent)
+    Process.exit(agent, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^agent, :killed}, 2_000
+
+    # The root's three calls and the subagent's two.
+    ended = await_event(sid, :turn_ended, 10_000)
+    assert ended.data["turn"]["calls"] == 5
+  end
+
   test "a cancelled turn says what it cost too", context do
     sid =
       run(context,

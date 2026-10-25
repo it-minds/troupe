@@ -35,6 +35,12 @@ its first paragraph of prose as plain text, cut to about a sentence. The theme w
 the page, it needs no second copy of what the page says first. `site_url` gives each page
 its canonical URL, which the theme writes and `main.html` repeats as `og:url`, and has
 MkDocs write `sitemap.xml`.
+
+The front page. `docs/README.md` is the site's home and the directory's front page on GitHub,
+one file for both readers. On the site it is drawn with `landing.html`, without the nav
+and the table of contents beside it, so it reads as the product's page with the
+documentation one click below; the template is set here rather than in the page's front
+matter, which GitHub would show as a table above the title.
 """
 
 import html
@@ -100,6 +106,9 @@ def on_page_markdown(markdown, *, page, config, files):
     found = _plain(str(given)) if given else description(markdown)
     # The theme writes the description into an attribute unescaped.
     page.meta["description"] = html.escape(found or config.site_description or "", quote=True)
+    if page.is_homepage:
+        page.meta.setdefault("template", "landing.html")
+        page.meta.setdefault("hide", ["navigation", "toc"])
     markdown = decision_page(markdown, src, page.meta, _state["decisions"])
     return rewrite(markdown, lambda target: _site_target(target, here, src, files))
 

@@ -1213,6 +1213,25 @@ defmodule Troupe.Client.Daemon do
 
   def whoami(_origin), do: {:error, :unsupported}
 
+  @doc "Who this computer's daemon records its sessions as: `identity.get`'s answer."
+  @spec identity() :: {:ok, map()} | {:error, term()}
+  def identity, do: Link.call("identity.get", %{})
+
+  @doc """
+  Unlink this computer's daemon (`identity.unlink`), answering who it was linked to. The
+  person this terminal is signed in as then takes it, as at a new connection, unless that
+  is the person just unlinked: a second person on this login takes it over from here.
+  """
+  @spec unlink() :: {:ok, map()} | {:error, term()}
+  def unlink do
+    with {:ok, was} <- Link.call("identity.get", %{}),
+         {:ok, _now} <-
+           Link.call("identity.unlink", %{command_id: Troupe.Remote.RPC.command_id()}) do
+      :ok = Link.take_over(if was["linked"], do: was["subject"])
+      {:ok, was}
+    end
+  end
+
   @impl true
   def fleet_status({:local, workspace}) do
     %{

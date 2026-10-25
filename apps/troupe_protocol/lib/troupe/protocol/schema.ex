@@ -200,7 +200,10 @@ defmodule Troupe.Protocol.Schema do
         # `timed_out: true` when its timeout killed it. Absent on every other tool and on
         # a call that did not run; `ok` is true for a command that ran, whatever its status.
         "exit_status" => optional(:integer),
-        "timed_out" => optional(:boolean)
+        "timed_out" => optional(:boolean),
+        # A waited-for `delegate`'s: what its subagent reported it spent, in `turn`'s shape,
+        # which is the parent's turn's too.
+        "spent" => optional(:object)
       },
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},

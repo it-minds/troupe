@@ -56,11 +56,14 @@ Arrows point at what an app depends on; a change flows back along them. So:
 | `charts/`, `docker/` | — | chart (lint, render, kubeconform), GUI-e2e, the cluster suite (pull request) |
 | `dev/kind/`, `scripts/kind-up`, `scripts/remote-up`, `scripts/build-images`, `scripts/kind-upgrade-check` | — | chart, the cluster suite (pull request) |
 | `apps/troupe_protocol/lib/troupe/keyring*`, the desktop's `secrets.rs` | as their app | [the credential stores](#the-credential-stores) on a macOS keychain and a Secret Service |
-| `PROTOCOL.md`, `protocol/`, `VERSION`, `.tool-versions`, `.github/workflows/` | everything | but the native builds, unless `native.yml` changed, the cluster suite, unless `cluster.yml` or `VERSION` changed, and the credential stores, unless `keyring.yml` changed |
+| `scripts/signing/`, `Troupe.Release.OSSigning`, `tauri.signing.conf.json`, `native.yml` | as their app | the release's OS signing, self-signed, on a Mac and on Windows (`signing.yml`, [signing-day.md](signing-day.md#how-it-is-tested-without-apple-or-microsoft)) |
+| `PROTOCOL.md`, `protocol/`, `VERSION`, `.tool-versions`, `.github/workflows/` | everything | but the native builds, unless `native.yml` changed, the cluster suite, unless `cluster.yml` or `VERSION` changed, the credential stores, unless `keyring.yml` changed, and the signing, unless `native.yml` or `signing.yml` did |
 | anything else (docs) | — | only `versions` |
 
 `versions` runs whatever changed, because a moved file can break any of what it checks:
-every copy of the version agrees, every Markdown link resolves, no deployment is named,
+every copy of the version agrees, every Markdown link resolves, no hand-written page passes
+400 lines and the known defects list open ones only (`scripts/doc-size.exs`, which
+`dev-check` runs too; Decision 940), no deployment is named,
 every decision in `docs/decisions/` has its fields, a number of its own and `paths`
 that match something (`mix troupe.decisions --check`, run there with a bare `elixir`;
 Decision 790), and no changed code file cites a decision number more often than it did
@@ -288,7 +291,8 @@ A failure is a harness regression until shown otherwise: the step prints the run
 | `pages.yml` | the documentation site (`mkdocs.yml`), strict: a broken link, a nav entry to a missing page or a page left out of the nav fails it; on `main`, published to GitHub Pages | every pull request, pushes to `main` |
 | `dco.yml` | every commit authored from 2026-09-27 has its author's `Signed-off-by:` ([CONTRIBUTING.md](../../CONTRIBUTING.md)) | pull requests into `main` and `development-*` |
 | `images.yml` | the five images to ghcr.io, `sha-<short>` and an optional version | `ci.yml` (main), `prerelease.yml`, `release.yml` |
-| `native.yml` | `troupe-daemon` ×5, `troupe` ×5, desktop ×3; optionally attached to a release | `ci.yml` (PRs that touch them, without macOS), `nightly.yml`, `prerelease.yml`, `release.yml` |
+| `native.yml` | `troupe-daemon` ×5, `troupe` ×5, desktop ×3; optionally attached to a release; OS-signed with `sign: release` ([signing-day.md](signing-day.md)) | `ci.yml` (PRs that touch them, without macOS), `nightly.yml`, `prerelease.yml`, `release.yml` (signed), `signing.yml` |
+| `signing.yml` | `native.yml` with `sign: self-signed` on one Mac and Windows, and the manifest held to what was signed | `ci.yml`, `dev-check.yml` (PRs that change what signs) |
 | `prerelease.yml` | an untested pre-release of any commit | by hand |
 | `release.yml` | full suite → images → tag → publish | a VERSION change on `main`; by hand to retry |
 | `nightly.yml` | full suite + native builds + the live check; `only: live` for the last alone | schedule; by hand |
@@ -315,7 +319,7 @@ The images and the chart need none: the workflow's own token pushes them.
 | `RELEASE_MINISIGN_KEY` | `release` environment secret | `release.yml`'s `publish` job: the release key that signs `manifest.json` ([the release key](#the-release-key)). Without it a release is not published |
 | `RELEASE_MINISIGN_KEY_PREVIOUS` | `release` environment secret | the same job, during a key rotation only: the key being retired, which signs too |
 | `GUI_BASE` | repository variable | `images.yml`: the GUI's mount path baked into its assets, default `app` |
-| `APPLE_*`, `AZURE_*` | repository secrets | `native.yml`: sign the desktop installers; absent, they are unsigned ([install.md](../../clients/gui/docs/install.md)) |
+| `APPLE_*`, `AZURE_*` | `release` environment secrets | `native.yml` with `sign: release`: sign and notarise every macOS and Windows artifact and what it unpacks; absent, a release is unsigned and says so ([signing-day.md](signing-day.md#the-secrets)) |
 | `TROUPE_NIGHTLY_BASE_URL`, `TROUPE_NIGHTLY_API_KEY` | repository secrets | `nightly.yml` → `live.yml`: the LiteLLM gateway (OpenAI-compatible, with `/v1` or without) and a key for it, capped there at about $2 a day. Without both the live check fails and says so |
 | `TROUPE_NIGHTLY_MODEL` | repository variable | the model the live check runs, by the gateway's name for it; default `qwen3-235b`, the model the runaway sessions were on |
 | `TROUPE_NIGHTLY_MODEL_PRICES` | repository variable | `nightly.yml` → `live.yml` → the runs' `TROUPE_MODEL_PRICES`: what the gateway charges for the model, in dollars per million tokens, as `{"qwen3-235b": {"input": <in>, "output": <out>}}` with the rates from the gateway's own model configuration. Unset, the summary's cost column says *not reported*; nothing else changes |

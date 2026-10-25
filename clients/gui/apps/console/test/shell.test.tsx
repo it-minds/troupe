@@ -39,10 +39,10 @@ const rail = (): HTMLElement => document.querySelector<HTMLElement>("nav.rail")!
 const heading = (): string => document.querySelector("h1")?.textContent ?? "";
 
 describe("the shell", () => {
-  it("groups the map as Watch, Configure, Operate and Govern, and says who is signed in to which plane", async () => {
+  it("groups the map as Mine, then Watch, Configure, Operate and Govern, and says who is signed in to which plane", async () => {
     await open();
     const groups = [...rail().querySelectorAll(".group > .screen")].map((g) => g.textContent);
-    expect(groups).toEqual(["Watch", "Configure", "Operate", "Govern"]);
+    expect(groups).toEqual(["Mine", "Watch", "Configure", "Operate", "Govern"]);
     for (const area of ["Overview", "Sessions", "Worker profiles", "Configuration bundles", "Workers and pods", "Budgets", "Teams", "Client versions", "Organisation", "Audit"]) {
       await seesLink(area, rail());
     }

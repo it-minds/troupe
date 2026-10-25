@@ -87,6 +87,9 @@ defmodule Troupe.Session do
       task: Keyword.get(opts, :task),
       bundle: Keyword.get(opts, :bundle),
       fake: fake_server(session_id, config, opts),
+      # Where the session runs: on this machine a root whose first start fails says why
+      # before its session's start fails with it.
+      kind: Keyword.get(opts, :kind, :local),
       # A root that keeps crashing is not started again here (Decision 727): its Node has
       # already restarted it as often as it allows, and each time again would be as many
       # more. Its giving up ends the session, which comes back dormant from its log.

@@ -16,9 +16,11 @@ exclude_docs: |
   /overrides/
   /requirements.txt
 # A decision is a page of its own and is reached from its log's index, which the nav names
-# and the hook fills in; three hundred of them in the nav would be a list nobody reads.
+# and the hook fills in; three hundred of them in the nav would be a list nobody reads. The
+# known defects' pages are reached the same way, from the table in developer/defects.md.
 not_in_nav: |
   /decisions/**/[0-9]*.md
+  /developer/defects/*.md
 
 theme:
   name: material
@@ -57,6 +59,8 @@ plugins:
 markdown_extensions:
   - admonition
   - attr_list
+  # Markdown inside the front page's `<div markdown>` sections (docs/overrides/landing.html).
+  - md_in_html
   - tables
   # Heading anchors spelt as GitHub spells them, so a `#fragment` works in both places.
   - toc:
@@ -91,12 +95,15 @@ nav:
       - Quick start: quick-start.md
       - Why Troupe: why-troupe.md
       - The terminal client: clients/tui/README.md
+      - "The terminal client's screen": user/terminal-screen.md
       - Command reference: user/cli-reference.md
       - Updating: user/updating.md
       - In VS Code: user/vscode.md
       - What a task costs: user/bench.md
       - The daemon: apps/troupe_daemon/README.md
       - Configuration: user/configuration.md
+      - Which file wins: user/configuration-layers.md
+      - Seeing and changing settings: user/configuration-settings.md
       - Models and providers: user/models.md
       - Agents, commands and workflows: user/agents.md
       - MCP servers and skills: user/mcp.md
@@ -114,15 +121,19 @@ nav:
   - Running a deployment:
       - admin/README.md
       - Installing: admin/installing.md
+      - "The workers' sandbox": admin/worker-sandbox.md
       - Configuration: admin/configuration.md
+      - The config.yaml a session reads: admin/client-config.md
       - Roles and permissions: admin/roles-and-permissions.md
       - The console: admin/console.md
       - Profiles and policy: admin/profiles-and-policy.md
+      - "A profile's options": admin/profile-options.md
       - Profiles from a repository: admin/gitops.md
       - Bundles, triggers, budgets: admin/bundles-and-triggers.md
       - Integrations: admin/integrations.md
       - What OpenBao must grant: admin/openbao.md
       - The GitHub App: admin/github.md
+      - Runs on GitHub: admin/github-runs.md
       - Authentik: admin/authentik.md
       - A worker on your own machine: admin/single-machine.md
       - Upgrading: admin/upgrading.md
@@ -137,6 +148,7 @@ nav:
       - A tour: developer/tour.md
       - How to contribute: CONTRIBUTING.md
       - Architecture: ARCHITECTURE.md
+      - "Architecture: the plane and the pods": developer/architecture-remote.md
       - Architecture in the code: developer/architecture.md
       - Repository structure: developer/repo-structure.md
       - Local setup: developer/local-setup.md
@@ -147,6 +159,7 @@ nav:
       - Build: developer/build.md
       - CI and releases: developer/ci.md
       - Buying OS code signing: developer/code-signing.md
+      - Signing a release: developer/signing-day.md
       - Deployment: developer/deployment.md
       - Tech stack: developer/tech-stack.md
       - Fixing issues: developer/fixing-issues.md

@@ -6,9 +6,8 @@
 # `docs/admin/installing.md` section 2 says; section 6 there walks this shape.
 #
 # Every host, name and size here is a placeholder or a reasoned default, not anybody's
-# deployment. Troupe creates no secrets: the ones this file names must exist in
-# `troupe-system` before the install, and the object-store and pull secrets in every
-# worker namespace as well.
+# deployment. The secrets this file names must exist in `troupe-system` before the
+# install; the operator copies those a worker namespace needs into each one it makes.
 
 namespace: troupe-system
 
@@ -17,7 +16,7 @@ namespace: troupe-system
 # A cluster that pulls through a registry of its own — a mirror, or images built with
 # `scripts/build-images` — sets each `*.image.repository` and
 # `policy.allowedImageRepositories` to it, and names its pull secret here. The secret
-# must exist in `troupe-system` and in every worker namespace.
+# must exist in `troupe-system`, and the operator copies it into every worker namespace.
 imagePullSecrets: []
 
 operator:
@@ -31,6 +30,8 @@ operator:
   # closed.
   ciliumAvailable: true                                      # CHANGE ME: false without Cilium
   ingressClassName: nginx
+  # Where the ingress controller runs, which the operator labels `troupe.dev/ingress=true`.
+  ingressNamespace: ingress-nginx                            # CHANGE ME: your controller's namespace
   # Workers are reached at `wss://<ordinal>-<profile>.workers.<domain>` on 443, which is
   # the default, so no port here.
   workersScheme: wss

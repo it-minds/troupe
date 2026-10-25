@@ -364,6 +364,28 @@ defmodule Troupe.Plane.ClientVersionsTest do
     end
   end
 
+  describe "me.clients" do
+    test "tells a person their own clients' versions against the policy, and nobody else's",
+         context do
+      put!(context.root, "tui", %{"recommended" => "0.24.0-beta"})
+      rpc(context.ada, "initialize", hello("troupe", "0.23.0-beta", "linux/x86_64"))
+      rpc(context.ada, "initialize", hello("troupe-daemon", "0.24.0-beta"))
+      rpc(context.lead, "initialize", hello("troupe", "0.24.0-beta"))
+
+      assert %{"result" => %{"clients" => clients}} = rpc(context.ada, "me.clients", %{})
+
+      assert clients |> Enum.map(&{&1["component"], &1["version"], &1["standing"]}) |> Enum.sort() ==
+               [{"daemon", "0.24.0-beta", "current"}, {"tui", "0.23.0-beta", "behind"}]
+
+      tui = Enum.find(clients, &(&1["component"] == "tui"))
+      assert tui["recommended"] == "0.24.0-beta"
+      assert tui["platform"] == "linux/x86_64"
+      refute Map.has_key?(tui, "subject"), "a person's own line names nobody"
+
+      assert %{"result" => %{"clients" => []}} = rpc(context.root, "me.clients", %{})
+    end
+  end
+
   defp put!(user, component, policy) do
     actor = Admin.actor_for(user)
     {:ok, _} = Admin.clients_put(actor, component, policy)

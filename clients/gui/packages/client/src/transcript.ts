@@ -332,7 +332,16 @@ export interface OnboardingSuggested {
 export interface PresenceMember {
   subject: string;
   display_name?: string;
+  /** What they are doing: `joined`, `viewing`, `typing`, `away`; `left` once they went. */
+  state?: string;
+  /** `plane` for somebody attached through the plane's relay, steering from another device. */
+  via?: string;
   [k: string]: unknown;
+}
+
+/** The people a session's presence says are there now: everybody heard of but those who left. */
+export function presentMembers(state: Pick<TranscriptState, "presence">): PresenceMember[] {
+  return state.presence.filter((p) => p.subject && p.state !== "left");
 }
 
 export const emptyTranscript: TranscriptState = {
@@ -1346,8 +1355,24 @@ function foldEphemeral(state: TranscriptState, e: TroupeEvent, now: () => number
       const phases = PHASES.includes(to) ? { ...state.curtain.phases, [to]: (state.curtain.phases[to as CurtainPhase] ?? 0) + 1 } : state.curtain.phases;
       return { ...state, agentState, curtain: { phases, since: now() } };
     }
-    case "presence":
-      return { ...state, presence: (e.data["members"] as PresenceMember[]) ?? state.presence };
+    case "presence": {
+      // A whole list, where a server sends one; otherwise one person's news, as a daemon
+      // and a pod say it: who, doing what, and through what. Somebody who left is kept as
+      // `left`, so a list drawn from elsewhere can be told they went.
+      const members = e.data["members"];
+      if (Array.isArray(members)) return { ...state, presence: members as PresenceMember[] };
+      const subject = e.data["subject"];
+      if (typeof subject !== "string") return state;
+      const via = typeof e.data["via"] === "string" ? e.data["via"] : undefined;
+      const next: PresenceMember = {
+        subject,
+        ...(typeof e.data["display_name"] === "string" ? { display_name: e.data["display_name"] } : {}),
+        state: str(e.data["state"], "viewing"),
+        ...(via ? { via } : {}),
+      };
+      const rest = state.presence.filter((p) => !(p.subject === subject && p.via === via));
+      return { ...state, presence: [...rest, next] };
+    }
     default:
       return state;
   }

@@ -32,7 +32,7 @@ accepted for planes upgraded under one and never written again.
 
 On a pod the bundle's agents and skills, and Troupe's built-in agents, beat a working
 copy's of the same name unless the profile says otherwise
-([profiles-and-policy.md](profiles-and-policy.md#a-repositorys-agents-and-skills-on-a-pod)).
+([profile-options.md](profile-options.md#a-repositorys-agents-and-skills-on-a-pod)).
 
 **Validation.** At most 4 MiB; only those five keys; names `^[a-z0-9][a-z0-9-]{0,63}$`,
 unique per kind. An agent's definition must parse as frontmatter plus prompt, may list only
@@ -67,7 +67,7 @@ the policy's egress check. Publishing to a channel a pod profile follows also re
 (`true` or `false`, nothing else). It matters where a profile on this channel extends one on
 another and the plane composes the two channels' bundles: an entry named like one in the
 parent's bundle replaces it only with the flag
-([profiles-and-policy.md](profiles-and-policy.md#a-profile-that-extends-another),
+([profile-options.md](profile-options.md#a-profile-that-extends-another),
 Decision 910).
 
 **MCP entries.**
@@ -87,7 +87,8 @@ On publish the plane projects each server onto the profile's resource. A `profil
 server with a `credential_ref` gets `secretRef: {name: "troupe-mcp-<server>", key: "token"}`,
 and the operator injects it as the `credential_ref` variable from an optional
 `secretKeyRef`. So for every such server, **create `troupe-mcp-<server>` with key `token`
-in every `troupe-w-<profile>` whose profile follows the channel**, and put its host in
+in `troupe-system`, labelled `troupe.dev/worker-secret=true`**: the operator copies it into
+every `troupe-w-<profile>` whose profile follows the channel. Put its host in
 `allowedEgress`. A `person` server is projected with its slot and a `client_credentials`
 one with its mode alone; neither needs a Secret.
 
@@ -99,7 +100,7 @@ several profiles, and each profile is its own client there, with its own certifi
 granted tools, so who it is goes on the profile, in `spec.mcpIdentities`. Its key is kept in
 OpenBao transit and signs without leaving it; there is no Secret to create. Setting up the
 client, the certificate and the key, and rotating them, is in
-[profiles and policy](profiles-and-policy.md#calling-an-mcp-server-as-the-profile)
+[profiles and policy](profile-options.md#calling-an-mcp-server-as-the-profile)
 (Decision 747).
 
 **Publish, adopt, retire.** `admin.bundle.publish {channel, content}` validates, assigns
@@ -134,7 +135,7 @@ secret, PKCE, a loopback redirect such as `http://localhost`, any port where the
 allows it) with the server's authorization server, grant it the server's scope, and give
 people its id. Those tools serve their local sessions, and with their consent a session on
 a pod through `tools.register` (Decision 748), never configured into the pod
-([profiles](profiles-and-policy.md#a-persons-own-tools-on-a-pod)).
+([profiles](profile-options.md#a-persons-own-tools-on-a-pod)).
 
 ## 2. Triggers
 
@@ -150,7 +151,7 @@ repository holds the triggers' definitions as well ([below](#triggers-from-a-rep
 | `principal` | a principal of the same team, which the session runs as | required |
 | `profile`, `agent` | where it starts and which primary agent; one the plane does not have is saved, and fails at each firing (the gitops reader refuses it up front) | profile required |
 | `enabled` | a disabled trigger refuses to fire | `true` |
-| `source` | `{"kind": "schedule", "cron": "…", "tz": "UTC"}`, `{"kind": "webhook", "provider": "…"}`, `{"kind": "webhook", "provider": "github", "repository": "owner/name", "label": "…", "command": "…"}` ([github.md §8](github.md#8-github-as-the-trigger)) or `{"kind": "manual"}`; a `tz` other than UTC is refused | required |
+| `source` | `{"kind": "schedule", "cron": "…", "tz": "UTC"}`, `{"kind": "webhook", "provider": "…"}`, `{"kind": "webhook", "provider": "github", "repository": "owner/name", "label": "…", "command": "…"}` ([Runs on GitHub](github-runs.md#github-as-the-trigger)) or `{"kind": "manual"}`; a `tz` other than UTC is refused | required |
 | `prompt_template` | ≤ 64 KiB, with `{{event.issue.key}}`, `{{trigger.name}}`, `{{run.fired_at}}` placeholders; a missing path renders empty, nothing is escaped | `""` |
 | `terms` | §3 | `{}` |
 | `visibility` | `private` or `team` | `team` |

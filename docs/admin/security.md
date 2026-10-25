@@ -114,7 +114,7 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   more** (`worker.seccomp`, Decision 890). Bubblewrap needs an unprivileged user namespace,
   and a container runtime's default profile refuses one, so by default the chart ships its
   own (`charts/troupe/files/worker-seccomp.json`) and a DaemonSet puts it on every node
-  ([installing.md](installing.md#the-workers-seccomp-profile)). It is containerd's default
+  ([worker-sandbox.md](worker-sandbox.md#the-workers-seccomp-profile)). It is containerd's default
   profile for a container with no capabilities, with three changes:
   - `clone` and `unshare` may make a user, mount, PID, IPC or UTS namespace, the ones the
     sandbox is made of;
@@ -139,7 +139,7 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   namespaces (`kernel.apparmor_restrict_unprivileged_userns=1`) refuses an unconfined
   process the uid map of one it makes. The chart ships its own
   (`charts/troupe/files/worker-apparmor`), and a DaemonSet loads it on every node
-  ([installing.md](installing.md#the-workers-apparmor-profile)). It is containerd's default
+  ([worker-sandbox.md](worker-sandbox.md#the-workers-apparmor-profile)). It is containerd's default
   profile with these changes:
   - `mount` and `pivot_root` are allowed, where the default denies every mount. As with
     seccomp, a process with no capabilities can mount only inside a user and mount
@@ -208,7 +208,7 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   its pushes. A push goes only to a repository the team lists, private unless the profile
   allows public ones, and never carries `.env`, a key file, a denied path or a copy of a
   mounted secret; tokens are revoked when the session goes dormant. Every token, push and
-  stop is an audit entry (Decisions 885, 891 and 911; [github.md](github.md#7-the-fix-loop),
+  stop is an audit entry (Decisions 885, 891 and 911; [github-runs.md](github-runs.md#the-fix-loop),
   [§9](github.md#9-how-far-a-run-may-go)).
 - **One OpenBao role for every profile, by default.** Every worker logs in as
   `troupe-worker`. `bao.workerRolePerProfile` gives each profile a role of its own, so one
@@ -220,9 +220,12 @@ one list, with links to where each part is set.
 
 ## 4. Keys and tokens
 
-**On a plane**, Troupe creates no Kubernetes Secret and no component of it can read one:
-the model key, the object store's credentials and an MCP server's credential are Secrets
-you create in each worker namespace ([configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects)).
+**On a plane**, the chart makes no Kubernetes Secret and the plane can read none: the model
+key, the object store's credentials and an MCP server's credential are Secrets you create
+in `troupe-system`. The operator reads those by name and copies them into the worker
+namespaces that mount them; it may not list Secrets, and copies one a profile names only
+where the Secret is labelled `troupe.dev/worker-secret=true`, so a profile the plane
+wrote cannot name its way to the plane's own ([configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects)).
 OpenBao holds the rest, under policies rendered by `Troupe.KMS.Policy`. An OpenBao
 administrator writes the plane's ([openbao.md](openbao.md), generated from the same code);
 the plane can write none, and checks what its role holds when it starts and on the
@@ -291,7 +294,10 @@ What the signature proves, and what it does not, is in
 
 The desktop app and the `troupe` and `troupe-daemon` binaries carry no Apple or Microsoft
 signature. macOS and Windows therefore cannot say who built them, and say so the first time
-one runs. #656 adds that signing on top of the release key.
+one runs. #656 adds that signing on top of the release key. **Which releases are signed:**
+none yet. Releases are signed from the first one made once the certificates are in the
+`release` environment ([signing-day.md](../developer/signing-day.md)), which its notes will say;
+before that, what follows applies. This is the one place the docs say it.
 
 **On macOS.** `install.sh` downloads with `curl`, which sets no quarantine flag, so
 Gatekeeper does not stop what it installs; when it finds the flag, it prints the command
@@ -308,23 +314,19 @@ xattr -d com.apple.quarantine ~/.local/bin/troupe
 **On Windows.** `install.ps1` downloads with `Invoke-WebRequest`, which marks nothing as
 coming from the internet, so SmartScreen rarely asks; the installer says it may, the first
 time something runs. For the desktop app's setup downloaded in a browser, SmartScreen
-shows "Windows protected your PC": **More info**, then **Run anyway**. Or, after checking
-the file, clear the mark first:
+shows "Windows protected your PC": **More info**, then **Run anyway**. Or clear the mark:
 
 ```powershell
-Unblock-File .\Troupe_X.Y.Z_x64-setup.exe   # X.Y.Z: the release you downloaded
+Unblock-File .\Troupe_X.Y.Z_x64-setup.exe   # X.Y.Z: the release you downloaded; check the file first
 ```
 
-**Why that is safe.** An operating system's signature says who built a file; the release
-key says it is the file the release workflow built. Check the first download against the
-signed manifest yourself, with the key from `apps/troupe_core/priv/release-keys.txt`:
+**Why that is safe.** An OS signature says who built a file; the release key says it is the
+file the workflow built. Check the first download yourself, with the key from `apps/troupe_core/priv/release-keys.txt`:
 
 ```sh
 minisign -Vm manifest.json -P <the release key>   # beside manifest.json.minisig
-sha256sum Troupe_X.Y.Z_x64-setup.exe             # the same as its line in manifest.json
+sha256sum Troupe_X.Y.Z_x64-setup.exe   # its line in manifest.json; shasum -a 256 on macOS, Get-FileHash in PowerShell
 ```
-
-`shasum -a 256` on macOS, `Get-FileHash` in PowerShell.
 
 From then on Troupe checks every update itself, against the key it was built with
 ([section 5](#5-releases-signed-and-verified)). [Installing the desktop app](../../clients/gui/docs/install.md)
@@ -336,7 +338,7 @@ An organisation can set defaults for people's machines and enforce a fixed list 
 settings above everything on them, the command line included: `approvals`, `provider`,
 `base_url`, `managed_mcp_servers_only`, `managed_permission_rules_only`, and the ceilings
 `max_tokens`, `max_turns`, `wall_clock_ms` and `max_depth` (Decision 869;
-[configuration.md](configuration.md#defaults-and-limits-for-peoples-machines)). When a run
+[client-config.md](client-config.md#defaults-and-limits-for-peoples-machines)). When a run
 reaches an enforced turn or time limit, the question that asks whether to go on cannot take
 it past (#622).
 
@@ -359,7 +361,7 @@ every participant sees ([PROTOCOL.md §8](../../PROTOCOL.md#8-client-hosted-tool
 
 A worker profile with `personalTools: forbid` takes none, and the platform's
 `managed_mcp_servers_only` refuses the offer on every profile at once (Decisions 862 and
-879; [profiles-and-policy.md](profiles-and-policy.md#a-persons-own-tools-on-a-pod)).
+879; [profile-options.md](profile-options.md#a-persons-own-tools-on-a-pod)).
 
 ## 9. What is logged, and how a session is erased or kept private
 

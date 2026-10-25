@@ -96,6 +96,7 @@ jobs:
       images: ${{ steps.plan.outputs.images }}
       cluster: ${{ steps.plan.outputs.cluster }}
       keyring: ${{ steps.plan.outputs.keyring }}
+      signing: ${{ steps.plan.outputs.signing }}
     steps:
       - uses: actions/checkout@v7
 
@@ -195,6 +196,14 @@ jobs:
               - apps/troupe_protocol/test/troupe/keyring_test.exs
               - clients/gui/apps/desktop/src-tauri/src/secrets.rs
               - .github/workflows/keyring.yml
+            # What signs a release by the operating systems' rules, and the builds it signs
+            # (`signing.yml`, a self-signed run of them). `dev-check.yml` has the same list.
+            signing:
+              - scripts/signing/**
+              - apps/troupe_core/lib/troupe/release/os_signing.ex
+              - clients/gui/apps/desktop/src-tauri/tauri.signing.conf.json
+              - .github/workflows/native.yml
+              - .github/workflows/signing.yml
 
       # Which umbrella apps to test follows the dependency graph, read from the apps' own
       # `mix.exs` rather than written down here, so it cannot drift: a change to an app
@@ -262,6 +271,9 @@ jobs:
           # The credential stores: in a full run, and when their code changed. Not for a
           # change to the workflows in general, since a macOS runner costs about ten Linux ones.
           keyring=$(flag eval 'on keyring')
+          # The signing test, on a pull request that changes what signs; a release signs for
+          # real, and the nightly builds unsigned.
+          signing=$(flag eval '[ "$EVENT" = pull_request ] && on signing')
 
           {
             echo "apps=$json"
@@ -277,6 +289,7 @@ jobs:
             echo "images=$images"
             echo "cluster=$cluster"
             echo "keyring=$keyring"
+            echo "signing=$signing"
           } | tee -a "$GITHUB_OUTPUT"
 
           {
@@ -285,7 +298,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| umbrella apps | \`$json\` |"
-            for k in chart protocol tui gui gui_e2e desktop vscode native images cluster keyring; do echo "| $k | ${!k} |"; done
+            for k in chart protocol tui gui gui_e2e desktop vscode native images cluster keyring signing; do echo "| $k | ${!k} |"; done
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Compile, format, credo, generated assets and boundaries: once, for the whole
@@ -846,13 +859,17 @@ jobs:
 
   # The desktop crate's own tests, which nothing else runs: the native build compiles it
   # and the GUI's tests are the web bundle's. On Linux, with the system libraries Tauri
-  # links, and a `dist` the context macro can embed, since the tests need no bundle.
+  # links, and a `dist` the context macro can embed, since the tests need no bundle. And
+  # a Secret Service, as keyring.yml starts one, so `secrets.rs`'s round trip runs rather
+  # than skips: `TROUPE_KEYRING_REQUIRE` makes a store that did not come up a failure.
   desktop:
     name: the desktop app's Rust — cargo test
     needs: [changes]
     if: needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      TROUPE_KEYRING_REQUIRE: "1"
     defaults:
       run:
         working-directory: clients/gui/apps/desktop/src-tauri
@@ -863,7 +880,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-            libayatana-appindicator3-dev libdbus-1-dev libssl-dev pkg-config build-essential
+            libayatana-appindicator3-dev libdbus-1-dev libssl-dev pkg-config build-essential \
+            gnome-keyring dbus-x11
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
@@ -873,7 +891,14 @@ jobs:
       - name: A web bundle to embed
         run: mkdir -p ../dist && echo '<!doctype html><title>Troupe</title>' > ../dist/index.html
 
-      - run: cargo test --locked
+      # A session bus of the step's own, and a login keyring on it unlocked with a
+      # password of the job's own, as keyring.yml has it.
+      - name: cargo test, with a Secret Service
+        run: |
+          dbus-run-session -- sh -c '
+            printf "troupe-ci\n" | gnome-keyring-daemon --daemonize --unlock --components=secrets >/dev/null
+            cargo test --locked
+          '
 
   gui-e2e:
     name: the GUI against a plane built from this commit
@@ -1001,6 +1026,8 @@ jobs:
           otp-version: ${{ env.OTP_VERSION }}
       - run: elixir scripts/version.exs check
       - run: elixir scripts/doc-links.exs
+      # No hand-written page past 400 lines, and the known defects only open ones.
+      - run: elixir scripts/doc-size.exs
       - run: elixir scripts/check-neutral.exs
       # Code states its own invariants and cites no decision by number; the citations
       # already there go as their files are touched (#422). Here and not in `lint`, which
@@ -1054,10 +1081,20 @@ jobs:
     permissions:
       contents: read
 
+  # The release's OS signing, run with a self-signed certificate (`signing.yml`), for a
+  # change to what signs.
+  signing:
+    name: the signing, self-signed
+    needs: [changes]
+    if: needs.changes.outputs.signing == 'true'
+    uses: ./.github/workflows/signing.yml
+    permissions:
+      contents: read
+
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, desktop, vscode, native, cluster, keyring]
+    needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, desktop, vscode, native, cluster, keyring, signing]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:

@@ -6,6 +6,7 @@
 
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { WebSocketServer, type WebSocket } from "ws";
 import type { FakeAdmin } from "./admin.js";
 import { readBody, subjectOfIdToken, type FakeIdp } from "./idp.js";
 import { encodeToken, type FakeWorker } from "./worker.js";
@@ -50,6 +51,12 @@ export interface PlaneOptions {
   beforePolicy?: boolean;
   /** The administrative half, `admin.*`. None is a plane whose admin methods are not found. */
   admin?: FakeAdmin;
+  /** A plane from before a person's watch (`/v1/relay/watch`): `remote.list` is asked instead. */
+  beforeWatch?: boolean;
+  /** What `me.clients` answers: the person's own clients as the plane last saw them. */
+  clientsSeen?: Array<Record<string, unknown>>;
+  /** What `me.memory` answers: the organisation's and the person's teams' documents. */
+  memory?: Array<Record<string, unknown>>;
 }
 
 /** SemVer's order, enough for a policy's versions: the numbers, then a pre-release below none. */
@@ -108,7 +115,12 @@ export class FakePlane {
   readonly rows = new Map<string, Row>();
   readonly relayed = new Map<string, Relayed>();
   /** Every `client_info` an `initialize` over `/rpc` gave, in order. */
-  readonly initialized: Array<{ name?: unknown; version?: unknown }> = [];
+  readonly initialized: Array<{ name?: unknown; version?: unknown; platform?: unknown }> = [];
+  /** Every `/rpc` method asked, in order: what a test counts to tell a push from a poll. */
+  readonly asked: string[] = [];
+  /** The people's watches open now (`/v1/relay/watch`), with the list each was last sent. */
+  readonly watches = new Set<{ ws: WebSocket; subject: string; sent: string }>();
+  private readonly wss: WebSocketServer | null;
   corsOrigins: string[];
   podTokenLifetime: number;
 
@@ -128,6 +140,74 @@ export class FakePlane {
     this.corsOrigins = opts.corsOrigins ?? [];
     this.podTokenLifetime = opts.podTokenLifetime ?? 900;
     this.server = createServer((req, res) => void this.handle(req, res));
+    this.wss = opts.beforeWatch ? null : new WebSocketServer({ server: this.server, path: "/v1/relay/watch" });
+    this.wss?.on("connection", (ws) => this.onWatch(ws));
+  }
+
+  /**
+   * A person's watch on the laptop sessions offered to them, as the plane's
+   * `Troupe.Plane.Remote.Watch` keeps it: `initialize` with a plane token answers the list,
+   * and each change that alters it is sent as `remote.changed`.
+   */
+  private onWatch(ws: WebSocket): void {
+    let watch: { ws: WebSocket; subject: string; sent: string } | null = null;
+    const send = (payload: unknown) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(payload));
+    ws.on("close", () => watch && this.watches.delete(watch));
+    ws.on("message", (raw) => {
+      let msg: { id?: number | string; method?: string; params?: Record<string, unknown> };
+      try {
+        msg = JSON.parse(String(raw)) as typeof msg;
+      } catch {
+        return;
+      }
+      const params = msg.params ?? {};
+      const held = (token: unknown) => {
+        const t = typeof token === "string" ? this.tokens.get(token) : undefined;
+        return t && t.exp * 1000 > Date.now() ? t : null;
+      };
+      if (msg.method === "initialize") {
+        const person = held((params["auth"] as { token?: unknown } | undefined)?.token);
+        if (!person) {
+          send({ jsonrpc: "2.0", id: msg.id, error: { code: -32003, message: "unauthenticated" } });
+          return void ws.close(1000);
+        }
+        const sessions = this.remoteRows(person.subject);
+        watch = { ws, subject: person.subject, sent: JSON.stringify(sessions) };
+        this.watches.add(watch);
+        return void send({
+          jsonrpc: "2.0",
+          id: msg.id,
+          result: {
+            protocol_version: "1",
+            server_info: { name: "troupe-plane", watch: "remote" },
+            principal: { subject: person.subject, display_name: person.name },
+            scopes: [],
+            capabilities: { remote_changed: true },
+            auth: { expires_at: person.exp },
+            sessions,
+          },
+        });
+      }
+      if (!watch) return void send({ jsonrpc: "2.0", id: msg.id, error: { code: -32001, message: "not_initialized" } });
+      if (msg.method === "remote.list") return void send({ jsonrpc: "2.0", id: msg.id, result: { sessions: this.remoteRows(watch.subject) } });
+      if (msg.method === "auth.refresh") {
+        const person = held((params["auth"] as { token?: unknown } | undefined)?.token);
+        if (!person || person.subject !== watch.subject) return void send({ jsonrpc: "2.0", id: msg.id, error: { code: -32003, message: "unauthenticated" } });
+        return void send({ jsonrpc: "2.0", id: msg.id, result: { auth: { expires_at: person.exp } } });
+      }
+      if (msg.id !== undefined) send({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method_not_found" } });
+    });
+  }
+
+  /** Tell every watch whose list this changed. */
+  private changed(): void {
+    for (const w of this.watches) {
+      const sessions = this.remoteRows(w.subject);
+      const said = JSON.stringify(sessions);
+      if (said === w.sent) continue;
+      w.sent = said;
+      if (w.ws.readyState === w.ws.OPEN) w.ws.send(JSON.stringify({ jsonrpc: "2.0", method: "remote.changed", params: { sessions } }));
+    }
   }
 
   static async start(opts: PlaneOptions): Promise<FakePlane> {
@@ -186,6 +266,9 @@ export class FakePlane {
   }
 
   async stop(): Promise<void> {
+    for (const w of this.watches) w.ws.terminate();
+    this.watches.clear();
+    if (this.wss) await new Promise<void>((r) => this.wss!.close(() => r()));
     // Ends what a page left open, a request its unmount cut off, which a close waits for.
     const closed = new Promise<void>((r) => this.server.close(() => r()));
     this.server.closeAllConnections();
@@ -228,6 +311,7 @@ export class FakePlane {
     };
     this.relayed.set(id, offer);
     this.opts.worker.createSession(id, { profile: "build" });
+    this.changed();
     return offer;
   }
 
@@ -236,6 +320,43 @@ export class FakePlane {
     const offer = this.relayed.get(id);
     if (!offer) throw new Error(`no relayed session ${id}`);
     offer.offlineSince = at;
+    this.changed();
+  }
+
+  /** The laptop's person withdrew it: gone from every list. */
+  withdraw(id: string): void {
+    this.relayed.delete(id);
+    this.changed();
+  }
+
+  /** The laptop's person shared it anew. */
+  share(id: string, shares: Relayed["shares"]): void {
+    const offer = this.relayed.get(id);
+    if (!offer) throw new Error(`no relayed session ${id}`);
+    offer.shares = shares;
+    this.changed();
+  }
+
+  /** The person's `remote.list`, as the plane answers it. */
+  private remoteRows(subject: string): Array<Record<string, unknown>> {
+    return [...this.relayed.values()].flatMap((o) => {
+      const role = this.relayRole(o, subject);
+      if (!role) return [];
+      return [
+        {
+          id: o.id,
+          kind: "remote",
+          owner: o.owner,
+          owner_name: o.ownerName,
+          workspace: o.workspace,
+          state: o.offlineSince ? "offline" : "online",
+          offline_since: o.offlineSince,
+          offered_at: o.offeredAt,
+          your_role: o.owner === subject ? "owner" : role,
+          shares: o.owner === subject ? o.shares : null,
+        },
+      ];
+    });
   }
 
   private relayRole(offer: Relayed, subject: string): string | null {
@@ -323,6 +444,7 @@ export class FakePlane {
       if (!held || held.exp * 1000 <= Date.now()) return json(401, { error: "unauthenticated" });
       const request = JSON.parse(body || "{}") as { id?: number; method?: string; params?: Record<string, unknown> };
       const method = request.method ?? "";
+      this.asked.push(method);
       let answer =
         this.opts.admin && method.startsWith("admin.")
           ? await this.opts.admin.call(held.subject, method, request.params ?? {})
@@ -364,7 +486,7 @@ export class FakePlane {
       // minimum.
       case "initialize": {
         if (this.opts.beforePolicy) return { error: { code: -32601, message: "method_not_found", data: { method } } };
-        const info = (params["client_info"] ?? {}) as { name?: unknown; version?: unknown };
+        const info = (params["client_info"] ?? {}) as { name?: unknown; version?: unknown; platform?: unknown };
         this.initialized.push(info);
         const component = COMPONENTS[String(info.name)];
         const version = typeof info.version === "string" ? info.version : null;
@@ -479,27 +601,16 @@ export class FakePlane {
         return { result: this.attachment(row, subject, name, role, "activate") };
       }
 
-      case "remote.list": {
-        const sessions = [...this.relayed.values()].flatMap((o) => {
-          const role = this.relayRole(o, subject);
-          if (!role) return [];
-          return [
-            {
-              id: o.id,
-              kind: "remote",
-              owner: o.owner,
-              owner_name: o.ownerName,
-              workspace: o.workspace,
-              state: o.offlineSince ? "offline" : "online",
-              offline_since: o.offlineSince,
-              offered_at: o.offeredAt,
-              your_role: o.owner === subject ? "owner" : role,
-              shares: o.owner === subject ? o.shares : null,
-            },
-          ];
-        });
-        return { result: { sessions } };
-      }
+      case "remote.list":
+        return { result: { sessions: this.remoteRows(subject) } };
+
+      // A person's own clients, as the plane last saw them, against its policy now.
+      case "me.clients":
+        return { result: { clients: this.opts.clientsSeen ?? [] } };
+
+      // The memory a person's machine reads into every session: signed, as the plane signs it.
+      case "me.memory":
+        return { result: { documents: this.opts.memory ?? [] } };
 
       case "remote.open": {
         const offer = this.relayed.get(String(params["session_id"] ?? ""));

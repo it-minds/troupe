@@ -19,6 +19,7 @@ import {
   onThisComputer,
   openApprovals,
   openQuestions,
+  presentMembers,
   rootState,
   scratchSize,
   scratchVersion,
@@ -58,7 +59,7 @@ import type { MemoryAsk } from "./Memory";
 import { OfferLine, OfferPanel } from "./Offer";
 import { StartLine, StartPanel } from "./Onboard";
 import { RemoteLine, RemoteOfferControl } from "./Remote";
-import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
+import { Cost, initials, Loading, personColour, Pill, Sync, When, Where } from "./bits";
 
 /**
  * A backstage pane: the running order, the files, what the instructions are read from, the
@@ -130,7 +131,7 @@ export function Session({
   const open = openApprovals(view.state);
   // Everyone else here, by name: who could answer an approval first, and who reads
   // what is sent.
-  const others = view.state.presence.filter((p) => p.subject && p.subject !== self).map((p) => p.display_name ?? p.subject);
+  const others = presentMembers(view.state).filter((p) => p.subject !== self).map((p) => p.display_name ?? p.subject);
   // The loop as its events say, and as the session answers for the one case they cannot:
   // a session that stopped mid-loop records the interruption only when it wakes.
   const loop = settleLoop(view.state.loop, useLoopAnswer(view.view));
@@ -222,7 +223,7 @@ export function Session({
         }
         remote={
           row && daemon && auth && row.kind === "local" ? (
-            <RemoteOfferControl daemon={daemon} row={row} />
+            <RemoteOfferControl daemon={daemon} row={row} presence={view.state.presence} />
           ) : row?.kind === "remote" ? (
             <RemoteLine row={row} />
           ) : null
@@ -487,7 +488,7 @@ function Header({
   remote?: JSX.Element | null;
 }): JSX.Element {
   const working = rootState(state);
-  const here = state.presence.filter((p) => p.subject);
+  const here = presentMembers(state);
   const role = row?.yourRole;
 
   return (
@@ -503,6 +504,8 @@ function Header({
           {row && (
             <>
               <Where kind={row.kind} />
+              {/* How a private session's sealing stands here, as its row in the list says. */}
+              <Sync state={row.sync} device={row.device} />
               <span className="sep" aria-hidden="true">
                 /
               </span>

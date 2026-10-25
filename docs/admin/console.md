@@ -1,8 +1,9 @@
 # The console
 
-The console is where platform admins and team admins set Troupe up and watch it run. It is
-an app of its own (#56), beside the GUI rather than part of it, at `/console` on the plane's
-host. The plane's own pages at `/admin` are a read-only overview and the break-glass door,
+The console is where platform admins and team admins set Troupe up and watch it run, and
+where anybody the plane knows steers the laptop sessions offered to them from a browser. It
+is an app of its own (#56), beside the GUI rather than part of it, at `/console` on the
+plane's host. The plane's own pages at `/admin` are a read-only overview and the break-glass door,
 for the day the console cannot be used. This page says where the console is and what it
 does.
 
@@ -18,7 +19,8 @@ and the page at `/admin` link to it (`TROUPE_CONSOLE_URL`, which the chart sets 
 methods to the same roles; its `/admin` page says so.
 
 It needs no CORS entry and no worker origin: it is on the plane's origin and opens no
-socket to a worker. It does need one thing at the identity provider: its address,
+socket to a worker, only the plane's own (`/v1/relay/watch` for the list of what is offered
+to the person, `/v1/relay/session` to steer one). It does need one thing at the identity provider: its address,
 `https://<plane host>/console`, registered as a **single-page application** redirect URI on
 the application the plane signs in with, as the GUI's `/app` is
 ([integrations.md](integrations.md)).
@@ -29,7 +31,9 @@ With the plane's own sign-in: the identity provider's page and back, then the pl
 token, as every client gets. Nothing in that token says "administrator". The plane works
 out on every call what the person administers, from the provider group named for platform
 admins and the teams a platform admin named them on ([roles-and-permissions.md](roles-and-permissions.md)),
-so a role taken away holds at the next click. Somebody who administers nothing is told so.
+so a role taken away holds at the next click. Somebody who administers nothing signs in
+too, as a **member**, to **Mine** and nothing else; an administrative role adds the four
+groups below. An address of an area the role lacks opens Mine.
 
 A link to any screen or team tab (`/console/#/teams/core/limits`) works signed out too: the
 console lands there once the provider sends the browser back, not on its first screen.
@@ -55,14 +59,15 @@ in the console.
 
 ## What it does
 
-The map is the brief's, in four groups: **Watch**, **Configure**, **Operate** and
-**Govern**. A team admin is shown only what the plane answers a team admin. On a narrow
-screen the map folds behind a **Menu** button.
+The map is **Mine**, for everybody, then for an administrator the brief's four groups:
+**Watch**, **Configure**, **Operate** and **Govern**. A team admin is shown only what the
+plane answers a team admin. On a narrow screen the map folds behind a **Menu** button.
 
 | Area | What it does |
 |---|---|
+| **Mine** | Where a member's console opens; every role has it. *Offered to you from laptops*: the sessions a laptop's person offered for steering, your own from your other computers and those shared with you, with whose laptop and whether it is there. The list is the plane's word as it changes: an offer made, withdrawn or gone offline shows within a second, with nothing asked again on a timer. Opening one follows its transcript and answers its approvals (once) and questions, sends a prompt, stops a turn and switches its agent, as you and never as an administrator (steering: [the user guide](../user/README.md), *Steering from another device*). Then your own sessions on the plane, which version of each of your clients the plane last saw against its policy, and the memory your machines read into every session, to read. Nothing here is an administrative call: each is what any client of yours asks, so you are shown nothing of anybody else's. |
 | **Overview** | Where the console opens. *Needs attention* first, worst first, each with where it is fixed: a pod that is broken, has never reported or is draining, a profile short of pods, a team at or near its ceiling, unattended runs nobody has looked at. Then each profile's fleet (pods, capacity, in use) and each team's spend against its budget. Scoped to what you administer. A platform admin's also has *Key manager*: each grant the plane's OpenBao role needs, checked look-only, and for one it lacks the sentence, under *Needs attention*, and the `bao` lines an OpenBao administrator runs ([openbao.md](openbao.md)). |
-| **Sessions** | Every session you may see, with owner, profile, state, what it holds, whether it is pinned, what it did on GitHub (its draft pull request as a link, or its `troupe/*` branch, and whether it stopped after three red CI rounds; [github.md](github.md#7-the-fix-loop)) and when it was last active; filtered by state and profile, searched, and paged. Metadata only: no role reads what a session said. **Erase** shows what goes (its key, every object version) and the forks that survive, then waits for the session's id to be typed. |
+| **Sessions** | Every session you may see, with owner, profile, state, what it holds, whether it is pinned, what it did on GitHub (its draft pull request as a link, or its `troupe/*` branch, and whether it stopped after three red CI rounds; [github-runs.md](github-runs.md#the-fix-loop)) and when it was last active; filtered by state and profile, searched, and paged. Metadata only: no role reads what a session said. **Erase** shows what goes (its key, every object version) and the forks that survive, then waits for the session's id to be typed. |
 | **Runs and review** | Every run a trigger started with nobody watching, newest first, across the teams you administer: its trigger, the repository and the issue that started it, how it stands (a skipped run with the cap that skipped it), its draft pull request with its CI rounds, what it spent and who has read it. A run's page reads its whole record, its session's GitHub record and a link to the session, and marks it read. Metadata only. |
 | **Connections** | A platform admin's. Each MCP server people connect their own credential to, who has connected (whether, never what), and whose identity each session's calls go out as. Nobody can read or remove a person's credential: the plane holds none. |
 | **Worker profiles** | Every profile, with its state, pods, image and the teams granted it; a profile's page reads every field of its spec. A platform admin makes, changes and deletes one (the delete after the warning that its grants go and its sessions turn read-only). The editor writes only the fields it shows and keeps the rest of the spec (MCP identities, GitHub permissions, model prices, a server's credential settings, anything newer than the console); it offers the plane's provider types and size classes, says what the chosen provider asks for and that model settings need an endpoint, and checks whether a pod can reach an MCP server ([profiles-and-policy.md](profiles-and-policy.md)). A team admin sees the profiles their teams are granted. |
@@ -109,4 +114,5 @@ pnpm console         # then open http://localhost:5174 and sign in to the plane 
 ```
 
 `CONSOLE_AS=bob pnpm console:fake` signs in as a team admin, and `CONSOLE_AS=carol` as
-somebody who administers nothing. `GITOPS=1` makes the fake plane one in `gitops` mode.
+a member, who administers nothing and is shown Mine; a second laptop session is offered to
+whoever is signed in fifteen seconds after it starts (`OFFER_AFTER_MS`). `GITOPS=1` makes the fake plane one in `gitops` mode.

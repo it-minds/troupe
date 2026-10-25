@@ -9,6 +9,14 @@ set -euo pipefail
 # below is relative to the root and not to wherever this was run from.
 cd "$(dirname "$0")/.."
 
+# Git Bash on Windows rewrites an argument that looks like a path into one under its own
+# install directory, so `docker exec <node> chmod 0755 /kind` would chmod
+# `C:/Program Files/Git/kind` and fail. Nothing here passes a Windows path, so the
+# rewriting is off for the whole script.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' ;;
+esac
+
 cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
 
 command -v kind >/dev/null || { echo "kind-up: kind is required" >&2; exit 1; }

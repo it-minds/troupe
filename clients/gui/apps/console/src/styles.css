@@ -1230,3 +1230,25 @@ pre.manifest {
     justify-self: start;
   }
 }
+
+/* Mine: a person's clients in a line each, and their memory to read. */
+.clients-seen {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.clients-seen li {
+  margin: 0 0 var(--space-2);
+}
+
+.memory-read h3 {
+  margin: var(--space-3) 0 var(--space-2);
+  font: var(--t-subheading);
+}
+
+.memory-text {
+  margin: 0 0 var(--space-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

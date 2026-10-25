@@ -20,7 +20,7 @@ defmodule Troupe.Operator.Reconciler do
 
   use GenServer
 
-  alias Troupe.Operator.{Names, Resources, Settings, Status}
+  alias Troupe.Operator.{IngressCheck, Names, Resources, Settings, Status, WorkerSecrets}
   alias Troupe.Policy
   alias Troupe.WorkerProfile, as: Profile
   alias Troupe.WorkerProfile.Reach
@@ -137,13 +137,15 @@ defmodule Troupe.Operator.Reconciler do
     settings = plane_ca(Settings.from_env())
     desired = Resources.for_profile(profile, policy, settings)
     namespace = namespace_of(desired)
-    missing = missing_secrets(conn, profile, settings, namespace)
     upgrade = upgrade(conn, policy, profile, Profile.drained(resource), settings)
 
     # The namespace first and on its own: nothing else in the list can be created
-    # before it exists. Everything after that is independent and goes out together.
+    # before it exists. Then the Secrets its pods mount, so a new profile's first pod
+    # finds them. Everything after that is independent and goes out together.
     {namespace_resource, rest} = Enum.split_with(desired, &(&1["kind"] == "Namespace"))
     applied = Bonny.Resource.apply_async(namespace_resource, conn, apply_opts())
+    copied = get_in(resource, ["status", "copiedSecrets"]) || []
+    secrets = WorkerSecrets.sync(conn, profile, settings, namespace, copied)
     applied = applied ++ Bonny.Resource.apply_async(rest, conn, apply_opts())
 
     failures = Enum.filter(applied, &match?({_resource, {:error, _}}, &1))
@@ -153,8 +155,10 @@ defmodule Troupe.Operator.Reconciler do
     status =
       resource
       |> status_for(desired, failures, pruned, namespace)
+      |> Map.put("copiedSecrets", WorkerSecrets.recorded(secrets, copied))
       |> egress_status(desired, failures, generation(resource))
-      |> secret_status(missing, generation(resource))
+      |> secret_status(secrets, settings, generation(resource))
+      |> ingress_status(IngressCheck.run(conn, settings), generation(resource))
       |> identity_status(Profile.identity_problems(profile), generation(resource))
       |> upgrade_status(upgrade, generation(resource))
       |> endpoint_status(profile, settings, generation(resource))
@@ -286,35 +290,25 @@ defmodule Troupe.Operator.Reconciler do
     Status.put(status, "PlaneCAMissing", true, "NotWritten", message, generation)
   end
 
-  # A secret the profile refers to and the cluster does not have. Reported rather than
-  # refused: the reference may be right and the secret on its way, and a profile that
-  # would not reconcile until every secret existed could not be created before them.
-  # What it must not be is invisible — a pod that will not start because a Secret is
-  # missing is a mystery unless somebody says so here.
-  #
-  # Looked for in the *worker's* namespace, because that is the only namespace a pod can
-  # mount from. Checking the plane's namespace instead asked a question about a different
-  # cluster object that merely shares a name: it called a secret sitting correctly beside
-  # its pods missing, and would have called a genuinely absent one present the moment
-  # something of that name existed in `troupe-system`. Both halves of that happened here.
+  # A secret the profile's pods need that the worker namespace has no copy of and the
+  # plane's namespace none to copy (`WorkerSecrets`). Reported rather than refused: the
+  # reference may be right and the secret on its way, and a profile that would not
+  # reconcile until every secret existed could not be created before them. What it must
+  # not be is invisible — a pod that will not start because a Secret is missing is a
+  # mystery unless somebody says so here, with the Secret's name and where it was looked
+  # for.
   #
   # The object store is on the list for the same reason the pods are: a worker signs
   # every read and write of a session's log with those credentials, and one without them
   # signs with `nil` and dies inside the signer, a long way from the mistake.
-  defp missing_secrets(conn, profile, settings, namespace) do
-    [settings.object_store_secret_name | Profile.secret_names(profile)]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq()
-    |> Enum.reject(&secret_exists?(conn, namespace, &1))
-  end
+  defp secret_status(status, %{missing: []} = secrets, settings, generation) do
+    message =
+      case secrets.copied do
+        [] -> "every secret the pods mount is in the worker namespace"
+        copied -> "every secret the pods mount is in the worker namespace; copied from #{settings.plane_namespace}: #{Enum.join(copied, ", ")}"
+      end
 
-  defp secret_exists?(conn, namespace, name) do
-    operation = K8s.Client.get("v1", "Secret", namespace: namespace, name: name)
-    match?({:ok, _secret}, K8s.Client.run(conn, operation))
-  end
-
-  defp secret_status(status, [], generation) do
-    Status.put(status, "SecretMissing", false, "SecretsPresent", "every referenced secret exists", generation)
+    Status.put(status, "SecretMissing", false, "SecretsPresent", message, generation)
   end
 
   # `SecretMissing` and not `Ready: False`. The spec gives these separate conditions
@@ -322,10 +316,18 @@ defmodule Troupe.Operator.Reconciler do
   # was asked to, and it did — the namespace, the StatefulSet and the rest all exist.
   # Whether the pods can *start* is the secret's business, and merging the two would make
   # a missing secret indistinguishable from an apply that failed.
-  defp secret_status(status, missing, generation) do
-    message = "missing secret(s): #{Enum.join(missing, ", ")}"
+  defp secret_status(status, %{missing: missing}, _settings, generation) do
+    message =
+      "missing secret(s): " <> Enum.map_join(missing, "; ", fn {name, why} -> "#{name} (#{why})" end)
+
     Status.put(status, "SecretMissing", true, "SecretsMissing", message, generation)
   end
+
+  # Whether the ingress controller may reach the profile's workers, which the namespace it
+  # runs in carrying `troupe.dev/ingress=true` decides (`IngressCheck`). Beside `Ready` for
+  # the reason `SecretMissing` is: everything was made, and the workers are unreachable.
+  defp ingress_status(status, {missing?, reason, message}, generation),
+    do: Status.put(status, "IngressNamespaceMissing", missing?, reason, message, generation)
 
   # A server the bundle marks `client_credentials` that the profile gives no usable
   # identity (Decision 747). Reported beside `SecretMissing` and for the same reasons: the

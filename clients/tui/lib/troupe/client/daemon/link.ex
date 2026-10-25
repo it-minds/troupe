@@ -116,6 +116,21 @@ defmodule Troupe.Client.Daemon.Link do
     :exit, _ -> :not_started
   end
 
+  @doc """
+  After the daemon was unlinked from here (`/unlink`): the token of the person this
+  terminal is signed in as is handed over now, as at a new connection, so a second person
+  on this login takes the daemon over from the terminal. Not when that person is
+  `previous`, the one just unlinked, whose renewals stop handing it over too, until the
+  next connection.
+  """
+  @spec take_over(String.t() | nil) :: :ok
+  def take_over(previous) do
+    with pid when is_pid(pid) <- Process.whereis(@name),
+         do: send(pid, {:take_over, previous})
+
+    :ok
+  end
+
   @doc "Remember what `watch.set` answered for a session, for the status line."
   @spec put_watch(String.t(), boolean(), String.t() | nil) :: :ok
   def put_watch(sid, enabled?, backend), do: GenServer.cast(@name, {:watch, sid, enabled?, backend})
@@ -206,6 +221,15 @@ defmodule Troupe.Client.Daemon.Link do
     do: {:noreply, hand_over(%{state | renew: nil})}
 
   def handle_info(:hand_over, state), do: {:noreply, %{state | renew: nil}}
+
+  def handle_info({:take_over, previous}, %{client: client} = state) when is_pid(client) do
+    if state.renew, do: Process.cancel_timer(state.renew)
+    link = self()
+    Task.start(fn -> send(link, {:handed, handed_over(previous)}) end)
+    {:noreply, %{state | renew: nil}}
+  end
+
+  def handle_info({:take_over, _previous}, state), do: {:noreply, state}
 
   def handle_info({:handed, result}, state) do
     {:noreply, renew_after(state, result)}
@@ -308,9 +332,10 @@ defmodule Troupe.Client.Daemon.Link do
     state
   end
 
-  defp handed_over do
+  defp handed_over(previous \\ nil) do
     with {:ok, %{plane_url: plane}} <- signed_in(),
          {:ok, person} <- Tokens.person(plane),
+         :ok <- not_previous(person, previous),
          {:ok, identity} <- call("identity.get", %{}),
          :ok <- ours(identity, person, plane),
          {:ok, _linked} <- call("identity.link", link_params(person, identity, plane)) do
@@ -324,6 +349,10 @@ defmodule Troupe.Client.Daemon.Link do
       :error -> {:error, :not_signed_in}
     end
   end
+
+  # The person just unlinked from here is not linked again by it.
+  defp not_previous(%{subject: subject}, subject) when is_binary(subject), do: {:error, :not_ours}
+  defp not_previous(_person, _previous), do: :ok
 
   # Unlinked, or linked to this person at this plane already: a daemon somebody else
   # linked, or linked at another plane, is theirs to change.
@@ -377,11 +406,41 @@ defmodule Troupe.Client.Daemon.Link do
   What this VM tells the daemon it is when it connects: `troupe`, the terminal UI, or
   `troupe-headless` once the runner has said this is a headless run (`:client_name`). The
   daemon names the sessions a connection creates to the provider by it (root Decision 787;
-  Decision 147 here).
+  Decision 147 here). With the platform, as the daemon's own `initialize` to a plane
+  gives it.
   """
   @spec client_info() :: map()
-  def client_info,
-    do: %{"name" => Application.get_env(:troupe, :client_name, "troupe"), "version" => version()}
+  def client_info do
+    %{
+      "name" => Application.get_env(:troupe, :client_name, "troupe"),
+      "version" => version(),
+      "platform" => platform()
+    }
+  end
+
+  @doc """
+  Where this client runs, in the daemon's words (`windows/x86_64`, `macos/aarch64`,
+  `linux/x86_64`): the `client_info.platform` every `initialize` it makes gives, which a
+  plane keeps beside the version it last served each person's client.
+  """
+  @spec platform() :: String.t()
+  def platform do
+    os =
+      case :os.type() do
+        {:win32, _} -> "windows"
+        {:unix, :darwin} -> "macos"
+        {_family, name} -> Atom.to_string(name)
+      end
+
+    arch =
+      case :erlang.system_info(:system_architecture) |> List.to_string() |> String.split("-") do
+        [arch | _] when arch in ["aarch64", "arm64"] -> "aarch64"
+        [arch | _] when arch in ["x86_64", "amd64"] -> "x86_64"
+        [arch | _] -> arch
+      end
+
+    os <> "/" <> arch
+  end
 
   defp error_message(%{message: message, data: %{"reason" => reason}}) when is_binary(reason),
     do: "#{message}: #{reason}"

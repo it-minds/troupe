@@ -341,7 +341,117 @@ defmodule Troupe.Plane.RemoteTest do
     end
   end
 
+  describe "a person's watch on what is offered to them" do
+    test "an offer, a new share, the laptop going and a withdrawal reach the people they concern at once",
+         ctx do
+      bea = watch!(ctx, @bea)
+      cy = watch!(ctx, @cy, :cy)
+      assert {:ok, %{"sessions" => []}} = Client.call(bea, "remote.list", %{})
+      assert {:ok, %{"sessions" => []}} = Client.call(cy, "remote.list", %{})
+
+      laptop = laptop!(ctx, @ada)
+      {:ok, _} = sync(laptop, ctx.session_id, [%{"person" => @bea, "role" => "control"}])
+
+      assert_receive {:troupe_notification, "remote.changed", %{"sessions" => [row]}}, 1_000
+      assert row["id"] == ctx.session_id
+      assert row["state"] == "online"
+      assert row["your_role"] == "control"
+
+      # Shared anew with Cy instead: Bea's list empties and Cy's has it.
+      {:ok, _} =
+        Client.call(laptop, "relay.offer", %{
+          "session_id" => ctx.session_id,
+          "workspace" => "project",
+          "share" => [%{"person" => @cy, "role" => "observe"}]
+        })
+
+      assert_receive {:troupe_notification, "remote.changed", %{"sessions" => []}}, 1_000
+      assert_receive {:cy, {:troupe_notification, "remote.changed", %{"sessions" => [seen]}}}, 1_000
+      assert seen["your_role"] == "observe"
+
+      # The laptop goes: offline since then, told; and back, and withdrawn.
+      Client.close(laptop)
+      assert_receive {:cy, {:troupe_notification, "remote.changed", %{"sessions" => [away]}}}, 1_000
+      assert away["state"] == "offline"
+      assert is_binary(away["offline_since"])
+
+      laptop = laptop!(ctx, @ada)
+      {:ok, _} = sync(laptop, ctx.session_id, [%{"person" => @cy, "role" => "observe"}])
+      assert_receive {:cy, {:troupe_notification, "remote.changed", %{"sessions" => [%{"state" => "online"}]}}}, 1_000
+
+      {:ok, _} = Client.call(laptop, "relay.withdraw", %{"session_id" => ctx.session_id})
+      assert_receive {:cy, {:troupe_notification, "remote.changed", %{"sessions" => []}}}, 1_000
+
+      # Bea heard none of what concerned only Cy.
+      refute_received {:troupe_notification, "remote.changed", _}
+      Client.close(bea)
+      Client.close(cy)
+    end
+
+    test "a member who administers nothing lists, watches and opens only what is offered to them",
+         ctx do
+      refute Admin.admin?(Admin.actor_for(Identity.get_user(@cy)))
+      refute Admin.admin?(Admin.actor_for(Identity.get_user(@bea)))
+      laptop = laptop!(ctx, @ada)
+      {:ok, _} = sync(laptop, ctx.session_id, [%{"person" => @bea, "role" => "control"}])
+
+      cy = watch!(ctx, @cy)
+
+      assert {:ok, %{"sessions" => []}} = rpc(ctx, @cy, "remote.list", %{})
+      assert {:ok, %{"sessions" => []}} = Client.call(cy, "remote.list", %{})
+
+      assert {:error, %{"message" => "not_found"}} =
+               rpc(ctx, @cy, "remote.open", %{"session_id" => ctx.session_id})
+
+      assert {:ok, %{"token" => token, "your_role" => "control"}} =
+               rpc(ctx, @bea, "remote.open", %{"session_id" => ctx.session_id})
+
+      # A relay token is for one session's door, not for a person's watch.
+      assert {:error, %{message: "unauthenticated"}} =
+               Client.connect(url: ctx.ws <> "/v1/relay/watch", token: token)
+    end
+
+    test "a page from an origin the plane does not admit is refused", ctx do
+      assert {:ok, %{status: 403}} =
+               Req.request(
+                 method: :get,
+                 url: ctx.url <> "/v1/relay/watch",
+                 headers: [{"origin", "https://evil.example.test"}],
+                 retry: false
+               )
+    end
+  end
+
   # -- the laptop ---------------------------------------------------------------
+
+  # A person's watch, whose notifications reach the test as they are, or tagged.
+  defp watch!(ctx, subject, tag \\ nil) do
+    test = self()
+
+    owner =
+      if tag,
+        do: spawn_link(fn -> forward(test, tag) end),
+        else: test
+
+    {:ok, watch} =
+      Client.connect(
+        url: ctx.ws <> "/v1/relay/watch",
+        token: ctx.tokens[subject],
+        client_info: %{"name" => "troupe-console", "version" => "1"},
+        owner: owner
+      )
+
+    on_exit(fn -> Client.close(watch) end)
+    watch
+  end
+
+  defp forward(test, tag) do
+    receive do
+      message ->
+        send(test, {tag, message})
+        forward(test, tag)
+    end
+  end
 
   defp laptop!(ctx, subject_or_token, device \\ "d-ada") do
     {:ok, laptop} =

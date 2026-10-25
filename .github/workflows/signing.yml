@@ -1,0 +1,64 @@
+# The test of the OS code signing a release does (docs/developer/code-signing.md), without
+# Apple or Microsoft: `native.yml` with `sign: self-signed`, which builds troupe-daemon,
+# troupe and the desktop app on one Mac and on Windows and signs each exactly as a release
+# would, with a certificate made in the job and stand-ins for the services (codesign with
+# that certificate, or ad hoc where the runner refuses it, and no notarisation; signtool
+# with that certificate). Each build checks that every executable and library it ships or
+# unpacks carries the signature, and records the files it checked. Then the manifest a
+# release would publish is made over those files with a throwaway release key, as
+# `release.yml` makes it, and held to the records: what the release key signs is what was
+# OS-signed.
+#
+# `ci.yml` calls it on a pull request into `main` that changes the signing scripts, the
+# Elixir step that runs them or `native.yml`; `dev-check.yml` on one into a
+# `development-*` chunk. About twenty minutes, on two macOS and four Windows runners.
+name: signing
+
+on:
+  workflow_call:
+
+jobs:
+  native:
+    name: self-signed
+    uses: ./.github/workflows/native.yml
+    permissions:
+      contents: read
+    with:
+      sign: self-signed
+      # Its own names: in the full suite of a pull request into `main`, `ci.yml` runs the
+      # unsigned native builds in the same workflow run, under the unprefixed names.
+      artifact_prefix: self-signed-
+
+  manifest:
+    name: the manifest names the signed files
+    needs: [native]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.5.0.5"
+          elixir-version: "1.20.4"
+      # What `attach` would put on the release, and beside it what each build checked:
+      # the self-signed builds' artifacts only, never the unsigned ones beside them.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: self-signed-troupe-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: self-signed-desktop-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: self-signed-os-signed-*
+          path: records
+      - name: The release's manifest, over exactly the files that were signed
+        run: |
+          find dist records -type f | sort
+          elixir scripts/signing/check-manifest.exs "$(tr -d '[:space:]' < VERSION)" dist records/*/records.txt

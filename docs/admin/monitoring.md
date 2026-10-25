@@ -23,7 +23,7 @@ deployed, the rollout has not finished or the image tag did not move.
 
 - **`WorkerProfile` conditions** `Ready`, `PolicyViolation`, `SecretMissing`,
   `MCPIdentityMissing`, `UpgradePending`, `EgressByHostname`, `PlaneCAMissing`,
-  `EndpointUnreachable`
+  `EndpointUnreachable`, `IngressNamespaceMissing`
   ([profiles-and-policy.md §2](profiles-and-policy.md#status-conditions));
   `kubectl -n troupe-system get wp`.
 - **Events**: the operator may write them (through Bonny); Troupe's own code writes none.
@@ -100,16 +100,16 @@ Phoenix's own; nothing in a deployment attaches to them.
 | A release dies in its config provider | Kubernetes injected `<SERVICE>_PORT=tcp://…`, which collides with `TROUPE_PLANE_CONTROL_PORT`; keep `enableServiceLinks: false` |
 | A worker enrols, looks healthy and refuses every client | it has no JWKS; the plane pushes one at enrolment and logs if that failed |
 | `permission denied` logging into OpenBao | no reviewer JWT on the Kubernetes auth mount |
-| A worker Ingress answers 503 | the ingress namespace lacks `troupe.dev/ingress=true`, or the pod is drained and was never deleted |
-| `the pod did not accept the session`, a signer crash on `nil` | object-store credentials missing from the **worker** namespace |
+| A worker Ingress answers 503 | the ingress namespace lacks `troupe.dev/ingress=true`: the profile's `IngressNamespaceMissing` condition, and the Overview's *Needs attention*, give the `kubectl label namespace` line ([configuration.md Part E](configuration.md#part-e--ports-and-network-policy)); or the pod is drained and was never deleted |
+| `the pod did not accept the session`, a signer crash on `nil` | object-store credentials missing from the **worker** namespace: `SecretMissing` says why the operator could not copy them |
 | `the pod did not accept the session` with `object_store_unreachable`; in a worker's log, `could not read` with it, or `this pod cannot use its object store` when it enrols | the pod cannot reach `objectStore.endpoint`: check its egress. With Cilium, the `troupe-egress` CiliumNetworkPolicy in `troupe-w-<profile>` names the host when it is outside the cluster |
 | `the pod did not accept the session` with `kms_unreachable`, or `could not read` with it in a worker's log | the pod cannot reach `bao.address`: check its egress, as for the object store above |
 | Workers enrol, then go quiet | the worker namespace lacks `troupe.dev/workers=true` |
 | `429` from the plane behind one office address | `plane.ingress.rateLimit` is per client IP; raise `connections` first |
-| `unauthorized` pulling an image in a worker namespace | the pull secret exists in `troupe-system` only |
-| Worker pod `CreateContainerConfigError` | the `llm.secretRef` Secret is missing in `troupe-w-<profile>` |
+| `unauthorized` pulling an image in a worker namespace | the pull secret is not named in `imagePullSecrets`, so the operator does not copy it |
+| Worker pod `CreateContainerConfigError` | the `llm.secretRef` Secret is missing in `troupe-w-<profile>`: `SecretMissing` says where it was looked for, and for one in `troupe-system` without `troupe.dev/worker-secret=true` gives the `kubectl label` line |
 | `PlaneCAMissing: True` | the operator reads no certificate from `TROUPE_PLANE_CONTROL_CA` yet: the `plane.controlTls` Secret has no `ca.crt` (cert-manager has not issued it, or a Secret of your own lacks it); the operator's log says the same once a pass |
-| `SecretMissing: True` with the Secrets present | the operator has no RBAC on Secrets; ignore the condition |
+| `SecretMissing: True` with the Secrets present | an operator from before 0.26.0, whose role had no verb on Secrets; upgrade the chart |
 | A profile is saved but no `WorkerProfile` appears; `not_applied`, `no_cluster` | the plane has no Kubernetes connection (`TROUPE_KUBECONFIG`, or the in-pod ServiceAccount) |
 | `PolicyViolation: NoPolicy` on every profile | `policy.name` is not `default`, and nothing sets `TROUPE_POLICY_NAME` |
 | A profile keeps a pod more than its sessions need | a scale-down lowers the count only once the pods above it hold no active session. `did not drain for a scale-down: {:stranded, [...]}` in the plane's log names a session the pod never reported dormant; the pod stays until it is |
@@ -125,12 +125,12 @@ Phoenix's own; nothing in a deployment attaches to them.
 | Workers cannot write to a bucket outside `us-east-1`, the plane can | the worker pods have no `TROUPE_OBJECT_REGION` and sign for `us-east-1`: an operator from before it passed `objectStore.region` on to them |
 | Plane replicas do not cluster during a rolling image upgrade | the Erlang cookie is baked into each image build |
 | Team volumes never appear inside sessions | they are mounted on the pod, not into a session's mount table |
-| Every command on a profile's pods fails, "this worker runs every command in a sandbox" | the worker container's seccomp profile refuses bubblewrap its user namespace (`worker.seccomp.type: RuntimeDefault`, or an operator from before 0.17.0), the nodes do not allow unprivileged user namespaces, or the image lacks bubblewrap ([installing.md](installing.md#the-workers-seccomp-profile)) |
-| Every command on a profile's pods fails, "bubblewrap could not start one here (bwrap: ...)" | what bubblewrap names refused it: the table at the end of [installing.md's check](installing.md#the-workers-user-namespaces) says what each message means and what fixes it (`Can't mount proc`: the pod has no user namespace of its own; `Failed to make / slave` or `setting up uid map`: AppArmor, `worker.appArmor.enabled: false` or an operator from before 0.19.0) |
-| Worker pods are not created, `FailedCreate` on the StatefulSet naming `procMount` or `seccompProfile` | the worker namespace's Pod Security level is `baseline` or `restricted`; workers need `privileged`, which the operator labels it with unless `podSecurity.labels` is off or something else rewrote the label ([installing.md](installing.md#the-workers-user-namespaces)) |
+| Every command on a profile's pods fails, "this worker runs every command in a sandbox" | the worker container's seccomp profile refuses bubblewrap its user namespace (`worker.seccomp.type: RuntimeDefault`, or an operator from before 0.17.0), the nodes do not allow unprivileged user namespaces, or the image lacks bubblewrap ([worker-sandbox.md](worker-sandbox.md#the-workers-seccomp-profile)) |
+| Every command on a profile's pods fails, "bubblewrap could not start one here (bwrap: ...)" | what bubblewrap names refused it: the table at the end of [the workers' sandbox](worker-sandbox.md#the-workers-user-namespaces) says what each message means and what fixes it (`Can't mount proc`: the pod has no user namespace of its own; `Failed to make / slave` or `setting up uid map`: AppArmor, `worker.appArmor.enabled: false` or an operator from before 0.19.0) |
+| Worker pods are not created, `FailedCreate` on the StatefulSet naming `procMount` or `seccompProfile` | the worker namespace's Pod Security level is `baseline` or `restricted`; workers need `privileged`, which the operator labels it with unless `podSecurity.labels` is off or something else rewrote the label ([worker-sandbox.md](worker-sandbox.md#the-workers-user-namespaces)) |
 | The plane's log or the console's Overview says its OpenBao role "may not" do something | the role lacks that grant; the line comes with the `bao` lines an OpenBao administrator runs to add it ([openbao.md](openbao.md)) |
-| Worker pods stay in `ContainerCreating` or `CreateContainerError` naming an idmapped mount | a volume's filesystem does not take idmapped mounts, as NFS does not ([installing.md](installing.md#the-workers-user-namespaces)) |
+| Worker pods stay in `ContainerCreating` or `CreateContainerError` naming an idmapped mount | a volume's filesystem does not take idmapped mounts, as NFS does not ([worker-sandbox.md](worker-sandbox.md#the-workers-user-namespaces)) |
 | Worker pods stay in `CreateContainerError`, "cannot load seccomp profile" | the `Localhost` profile is not on that node: `kubectl -n troupe-system get daemonset troupe-worker-profiles`, or where something else installs it, its path against `worker.seccomp.localhostProfile` |
 | Worker pods stay in `CreateContainerError`, "apparmor profile not found" | the AppArmor profile is not loaded on that node: `kubectl -n troupe-system get daemonset troupe-worker-profiles` and the log of its `apparmor` container, or where something else loads it, its name against `worker.appArmor.profile` |
-| Worker pods fail at once, "Cannot enforce AppArmor: AppArmor is not enabled on the host" | the node runs no AppArmor and the worker asks for a profile: `worker.appArmor.enabled: false` ([installing.md](installing.md#the-workers-apparmor-profile)) |
+| Worker pods fail at once, "Cannot enforce AppArmor: AppArmor is not enabled on the host" | the node runs no AppArmor and the worker asks for a profile: `worker.appArmor.enabled: false` ([worker-sandbox.md](worker-sandbox.md#the-workers-apparmor-profile)) |
 | A client is refused with `update_required` | it is below the minimum the console's **Client versions** sets, or on a version blocked there ([routine-tasks.md](routine-tasks.md#client-versions)) |

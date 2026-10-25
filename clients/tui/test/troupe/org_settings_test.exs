@@ -123,6 +123,8 @@ defmodule Troupe.OrgSettingsTest do
       assert ModelConfig.keep(@plane, %{"configured" => false}, say, call) == 0
       assert [line] = Agent.get(said, & &1)
       assert line =~ "sets no defaults or limits for people's own machines"
+      # The console's place, as the console names it (#768).
+      assert line =~ "Govern → Policy and settings, in the panel What people's own machines talk to"
     end
 
     test "a document the daemon refuses is said, and exits 1" do

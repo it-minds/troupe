@@ -99,7 +99,7 @@ export function SignIn({
       <header>
         <span className="screen">Console</span>
         <Wordmark size={40} />
-        <p>Administer the platform: its teams, what people's own machines are held to, and which clients it serves.</p>
+        <p>Steer the laptop sessions offered to you, and see what is yours on the plane; if you administer it, its teams, what people's own machines are held to, and which clients it serves.</p>
       </header>
       <form
         onSubmit={(e) => {

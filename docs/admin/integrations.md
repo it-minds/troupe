@@ -47,7 +47,7 @@ check. Authentik specifically: [authentik.md](authentik.md).
 | Role `troupe-worker` (ServiceAccount `troupe-worker`, any namespace, audience `troupe-kms`), or with `bao.workerRolePerProfile` one role `troupe-worker-<profile>` per profile, bound to its namespace | worker pods log in with their projected `kms-token` under the role in `TROUPE_BAO_ROLE`, cache the client token until shortly before its lease ends, retry a 403 once after a fresh login |
 | Role `troupe-plane` (ServiceAccount `troupe-plane` in `troupe-system`), with the plane **and** signing policies | the plane logs in with its projected `bao-token`, caches the client token, retries a 403 once after a fresh login |
 | **JWT auth** at `jwt`, role `troupe-person`, keyed with the transit key's public half | a person's daemon logs in with an assertion the plane signs, for their private sessions' keys and their own MCP credentials at `troupe/people/<name>/mcp/<slot>` (`Troupe.KMS.Policy.person_role/2`) |
-| A transit key per MCP identity, `<worker namespace>.<name>` | a profile that calls an MCP server as itself signs with it ([profiles-and-policy.md](profiles-and-policy.md#calling-an-mcp-server-as-the-profile)) |
+| A transit key per MCP identity, `<worker namespace>.<name>` | a profile that calls an MCP server as itself signs with it ([profile-options.md](profile-options.md#calling-an-mcp-server-as-the-profile)) |
 
 The policies are in [roles-and-permissions.md §8](roles-and-permissions.md#8-openbao-policies);
 the commands, in development shape, in `dev/kind/dependencies.yaml`. A plane with neither
@@ -80,7 +80,8 @@ snapshots ([backup-restore.md](backup-restore.md)).
   their machines too, not only from inside the cluster.
 - **Versioning must be on.** Erasure destroys the key first, then every version; without
   versioning "every version" means nothing.
-- Credentials `troupe-object-store` in `troupe-system` **and every worker namespace**.
+- Credentials `troupe-object-store` in `troupe-system`, which the operator copies into every
+  worker namespace.
 - `TROUPE_OBJECT_REGION` (`objectStore.region`) reaches the plane and every worker.
 - No lifecycle or replication rules are configured by anything here.
 
@@ -119,7 +120,7 @@ endpoint, and, for models that endpoint does not price, `llm.prices`.
 | CNI | one that enforces NetworkPolicy (kind's does not, silently); Cilium for egress by hostname |
 | Version | ≥ 1.30 for `ValidatingAdmissionPolicy`; `admission.install: false` leaves the operator's check alone. CI validates the chart against 1.31 |
 | CRDs | installed by Helm once and never upgraded: apply `charts/troupe/crds/` on every upgrade |
-| ingress-nginx | 3600 s proxy timeouts and a 16m body ([installing.md §6](installing.md#6-a-worked-example-on-managed-services)); then label its namespace `troupe.dev/ingress=true` |
+| ingress-nginx | 3600 s proxy timeouts and a 16m body ([installing.md §6](installing.md#6-a-worked-example-on-managed-services)); name its namespace in `operator.ingressNamespace`, which the operator labels `troupe.dev/ingress=true` |
 | cert-manager | a ClusterIssuer, `letsencrypt` in the example: HTTP-01, one certificate per pod hostname, no wildcard |
 | Storage classes | a block class (`ReadWriteOnce`) for pod disks, a file-storage class (`ReadWriteMany`) for team volumes, and one for OpenBao's Raft volume; the policy lists what profiles may name |
 | Nodes | what bubblewrap needs, since every command on a pod runs in it and a pod that cannot start it refuses every command (Decisions 832 and 890): unprivileged user namespaces, the chart's seccomp profile and, where nodes enforce AppArmor, its AppArmor profile, and user namespaces for pods (Kubernetes 1.33+, containerd 2.0+, Linux 6.3+, storage that takes idmapped mounts) ([installing.md §0](installing.md#0-before-the-first-command)) |
@@ -128,7 +129,8 @@ endpoint, and, for models that endpoint does not price, `llm.prices`.
 
 **Servers a bundle declares** (Troupe as client) are declared once in the bundle, projected
 onto the profile by the plane, injected by the operator, and discovered by the pod over
-streamable HTTP. You create the `troupe-mcp-<server>` Secret in each worker namespace and
+streamable HTTP. You create the `troupe-mcp-<server>` Secret in `troupe-system`, labelled
+`troupe.dev/worker-secret=true`, which the operator copies into each worker namespace, and
 put the host in `allowedEgress` ([bundles-and-triggers.md §1](bundles-and-triggers.md#1-config-bundles)).
 
 **A person's own servers** are called from their machine, with their sign-in, and offered

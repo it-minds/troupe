@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The entitlements of every program in troupe-daemon's release and in troupe's Burrito
+  payload when they are signed with the hardened runtime, which notarisation requires
+  (scripts/signing/sign-macos.sh). The BEAM's JIT writes machine code into memory it maps
+  with MAP_JIT, which the hardened runtime refuses without allow-jit; this gives it back
+  and nothing else.
+
+  Not `disable-library-validation`: every NIF is signed in the same pass, by the same
+  Developer ID and so the same team, which is what library validation asks. The signing
+  test, whose self-signed certificate has no team, adds it for its own run only
+  (beam-test.entitlements). Not `allow-unsigned-executable-memory`: MAP_JIT is the JIT's way on macOS.
+  If the first signed release's smoke test fails on either, the job says so before
+  anything is published, and that is when to add one.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+  </dict>
+</plist>

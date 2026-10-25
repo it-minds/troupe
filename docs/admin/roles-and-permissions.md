@@ -113,14 +113,15 @@ token, at most 15 minutes later.
 
 Offering a session one's own signed-in tools (`tools.register`) takes `control`. A profile
 with `personalTools: forbid` refuses it on its pods, and the platform's
-`managed_mcp_servers_only` everywhere ([profiles-and-policy.md](profiles-and-policy.md#a-persons-own-tools-on-a-pod)).
+`managed_mcp_servers_only` everywhere ([profile-options.md](profile-options.md#a-persons-own-tools-on-a-pod)).
 
 ## 6. How each surface authenticates
 
 | Surface | Credential | Actor |
 |---|---|---|
 | Console `/admin/*` | a signed cookie carrying the subject only; `/admin/login` → provider → `/admin/callback` (authorization code with the client secret) | resolved on every LiveView mount; break-glass, else admin, else refused. Profile pages are platform admin only |
-| Console `/console` ([console.md](console.md)) | the plane token below, from the provider's authorization code with PKCE in the page and `/auth/exchange`; kept for the browser tab | as `POST /rpc`: the role is worked out on every `admin.*` call, so no token says "administrator" |
+| Console `/console` ([console.md](console.md)) | the plane token below, from the provider's authorization code with PKCE in the page and `/auth/exchange`; kept for the browser tab | as `POST /rpc`: the role is worked out on every `admin.*` call, so no token says "administrator"; anybody the plane knows signs in, and a person with no administrative role is a member, shown only *Mine* |
+| `GET /v1/relay/watch` | a plane token, in `initialize`; renewed with `auth.refresh` | the person: told the laptop sessions offered to them (`remote.changed`) as that changes, and nobody else's |
 | `POST /rpc` | `Bearer <plane token>`, `aud` = `TROUPE_PLANE_AUDIENCE`, JWKS from OpenBao | subject resolved per request; `admin.*` to the admin API, everything else to the harness as the person |
 | `POST /mcp` | a plane token, or the provider's own token with `aud` in `client_id`, `api://<client_id>`, `<base_url>/mcp` | a 401 carries `WWW-Authenticate … resource_metadata=` for OAuth-capable clients |
 | Control channel (TLS on TCP 4001; plaintext too where `plane.controlTls.requireTls` is off) | a projected ServiceAccount token (audience `troupe-plane`), or a registered machine's secret, over TLS only | `TokenReview`: ServiceAccount `troupe-worker`, and the namespace decides the profile; a machine's secret in plaintext is refused before it is looked at |
