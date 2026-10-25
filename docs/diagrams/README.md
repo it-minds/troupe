@@ -1,6 +1,6 @@
 # Diagrams
 
-[principles.html](principles.html) reads all sixteen in order, with a short text on what
+[principles.html](principles.html) reads all seventeen in order, with a short text on what
 each principle buys and what it rules out; it is one long page in the same design.
 On the site it is <https://it-minds.github.io/troupe/principles/>, published from `main`
 by `.github/workflows/pages.yml` with the rest of the documentation.
@@ -29,6 +29,7 @@ must decide*.
 | [media/14-a-profile-is-the-config.svg](media/14-a-profile-is-the-config.svg) | Where configuration lives: who writes which layer, the profile as a versioned hashed bundle under a policy ceiling, enforced by the pod and remembered by the session; against config on every laptop. |
 | [media/15-agents.svg](media/15-agents.svg) | An agent is a markdown file: the frontmatter contract and the prose role; the four layers it can live in, lowest to highest; one root per session with delegation and branches; the same session.create from a person or a trigger, read from the pinned bundle on a pod. |
 | [media/16-mcp-tools.svg](media/16-mcp-tools.svg) | MCP in one breath, then one pod session whose tool list holds built-ins, the bundle's servers and your laptop's tools; attach, offer with consent, discover, and a call to yours sent back over your own socket; the rules, including a profile's `personalTools: forbid`. |
+| [media/17-who-brings-the-tools.svg](media/17-who-brings-the-tools.svg) | Code stays home, only the name travels: a tool implemented as a function that never moves, described as a name and a schema, permitted by the agent file, chosen by name by the model, then checked against the rules where the code is and run; a profile's deny ends it at the gate. |
 
 Each file is 1600×900 (16:9) and scales. The first `<rect>` is the background; drop it
 for a transparent page. Fonts are Figtree, DM Mono and VT323 with system fallbacks, loaded
