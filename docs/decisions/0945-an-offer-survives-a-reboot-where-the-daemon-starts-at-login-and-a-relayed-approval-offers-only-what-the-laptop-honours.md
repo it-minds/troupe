@@ -110,9 +110,11 @@ allowed it, would undo that sentence, so the clients stop offering it instead:
 - **The signature count.** `code-signing.md` §3 said a release signs about 85 Windows files.
   `sign-windows.ps1` leaves a file that already carries a valid signature as it is, and the
   Erlang runtime's own executables and libraries in both payloads are signed by Ericsson AB,
-  so what a release signs is what the build makes itself: about three files in
-  `troupe-daemon`'s payload, five in `troupe.exe`'s, the desktop app's executable and its
-  installers. The cost paragraph follows from the count.
+  so what a release signs is what the build makes itself. Measured on the installed 0.26.0
+  build: `troupe-daemon` holds 25 PE files of which 22 carry a valid signature (left: the
+  zstd NIF, `inotifywait.exe`, the reaper), and the terminal's payload 36 of which 32 (the
+  same three and the renderer's NIF), with `troupe.exe` itself the fifth; then the desktop
+  app's executable and its installers. The cost paragraph follows from the count.
 
 ## Proof
 
@@ -132,5 +134,11 @@ allowed it, would undo that sentence, so the clients stop offering it instead:
   bundle holding the build's own archive, the upload's globs taking the versioned archive
   and the disk image only, and a manifest over them naming no unversioned archive; it failed
   on the tip's workflow.
-- The installed build, with scratch homes, against a stand-in plane: an offer, the daemon
-  killed and started again with the login entry's command, the offer back online.
+- The installed build, with scratch homes (APPDATA among them, so the login entry went
+  into a scratch Startup folder) and a test credential-store service, against a stand-in
+  plane: the offer answered `until_restart`; after `troupe-daemon login on`,
+  `across_restarts`; the daemon killed and started by running the entry, it dialled on
+  its kept grant, synced the offer within about two seconds of the entry running, with no
+  new grant and no client, and listed it online and `restored`. A relayed
+  `allow_session` was refused with the laptop's sentence and a relayed `allow` ran the
+  tool; the laptop's `initialize` said `capabilities.relayed`.
