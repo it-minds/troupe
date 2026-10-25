@@ -46,6 +46,23 @@ A save reaches the sessions running on the machine that saved it, and on the pla
 at their next turn, with a line saying your memory changed; your other machines read it
 within five minutes.
 
+## Which version a session ran under
+
+A session's log says, as each turn's instructions are read, which version of each document
+the turn ran under (the `instructions_loaded` event's `memory`, each document's level, name,
+version and hash), and `memory_changed` says when a later turn read a newer one.
+
+A session on the plane's pods asks the plane, as each turn begins, whether it holds the
+versions in force, and reads the new ones first if it does not. A session on your machine
+reads the copy your daemon keeps, which it asks the plane for every five minutes. Each of
+those asks tells the plane which version each session's last turn ran under, by version and
+hash and never the text, so your organisation's administrators can see on *Company memory*
+which running sessions are behind a save. Your own memory is not shown there.
+
+`troupe memory --status` prints which versions this machine holds, whether the plane has the
+same in force (it asks, and keeps the answer), and which each session running here read at
+its last turn: the place to start when a session seems not to follow what was saved.
+
 ## What an agent may write
 
 An agent may add to your own memory and to the repository's, and to nothing else:

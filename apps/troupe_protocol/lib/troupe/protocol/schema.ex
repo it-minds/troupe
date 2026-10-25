@@ -223,12 +223,16 @@ defmodule Troupe.Protocol.Schema do
       # each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`,
       # `trimmed`, `skipped`, `imported_by`, `unfollowed` and `hash` (Decision 798), and
       # `reason`, in words, for a file left out (Decision 806).
-      # Written when the set or a file changed since the agent's last turn.
+      # Written when the set or a file changed since the agent's last turn. `memory` is each
+      # memory document read (#55), as the plane names it: `scope` (organisation, team,
+      # profile, user), `name`, `version` and `hash`, so the log says which version of each
+      # the turns from here run under.
       "instructions_loaded" => %{
         "budget" => required(:integer),
         "used" => required(:integer),
         "files" => required(:array),
-        "searched" => optional({:array, :string})
+        "searched" => optional({:array, :string}),
+        "memory" => optional(:array)
       },
       # The organisation's memory documents an agent reads changed while the session ran
       # (#55): a save on the plane reached it, and its next turn read the new ones. Each
@@ -1082,6 +1086,9 @@ defmodule Troupe.Protocol.Schema do
       # The person's own memory document on the plane (#55), read and saved through the
       # daemon's sign-in: the whole `text` over the `version` edited, or one `append`ed entry.
       "me.memory" => %{},
+      # Where this machine's copy of the plane's memory stands, for the person's own
+      # debugging: what it holds, what is in force, what each session here last read.
+      "me.memory.status" => %{},
       "me.memory.put" => %{
         "command_id" => required(:string),
         "text" => optional(:string),

@@ -80,6 +80,14 @@ defmodule Troupe.Protocol.Memory do
     do: "sha256:" <> Base.encode16(:crypto.hash(:sha256, text), case: :lower)
 
   @doc """
+  A document as a session says it read it: its `scope`, `name`, `version` and `hash`, never
+  its text. What `instructions_loaded` names, what a pod and a person's machine tell the
+  plane a turn ran under, and what the plane keeps of it.
+  """
+  @spec stamp(document()) :: document()
+  def stamp(%{} = document), do: Map.new(~w(scope name version hash), &{&1, document[&1]})
+
+  @doc """
   The documents of a list that a session reads, checked and in `scopes/0`'s order: each a
   known scope, a version, and text that is not empty. A document past the limit, from a
   plane that allows more, is kept to the limit, cut at a character, and marked `trimmed`.
