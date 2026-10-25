@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">Who brings the tools, and where a call is checked</title>
+<desc id="desc">Left: four sources of tools. Built-ins coded into the harness; the bundle's MCP servers, called as the profile; the workspace's own MCP servers; and a person's client-hosted tools, run on their machine. Middle: the agent's frontmatter, its tools allowlist and its deny entries, decides which of those the model is shown; the model picks a name. Right: before any code runs, the harness checks the call in order: the tool exists and was offered, the agent allows it, the rules from the profile, the organisation, the person and the repository, where deny beats ask beats allow, then an approval if one is needed, and only then does code run, in the harness or on the client. A profile's deny refuses the call whatever the agent, the repository or the model say.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+.tile{fill:#12121C;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+.box{fill:#1C1C2B;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+  <symbol id="server" viewBox="0 0 48 48">
+    <rect x="6" y="8" width="36" height="14" fill="none" stroke="currentColor" stroke-width="3"/>
+    <rect x="6" y="26" width="36" height="14" fill="none" stroke="currentColor" stroke-width="3"/>
+    <circle cx="13" cy="15" r="2" fill="currentColor"/><circle cx="13" cy="33" r="2" fill="currentColor"/>
+  </symbol>
+  <symbol id="ab" viewBox="0 0 48 48">
+    <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="800" fill="currentColor" font-family="Figtree,'Segoe UI',system-ui,sans-serif">AB</text>
+  </symbol>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#A3A3B8"/>
+  </marker>
+  <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#00C6C9"/>
+  </marker>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// WHAT A TOOL IS, AND WHO BRINGS IT</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">The model names a tool. The harness runs it, or refuses.</text>
+
+<!-- ===== column 1: the sources ===== -->
+<text class="m" x="80" y="186" font-size="10" fill="#7B7B94" letter-spacing="2">WHERE TOOLS COME FROM · ALL OF THEM ARE CODE</text>
+
+<rect class="tile" x="80" y="200" width="440" height="150"/>
+<rect x="80" y="200" width="4" height="150" fill="#A3A3B8"/>
+<text class="m" x="100" y="222" font-size="10" font-weight="500" fill="#A3A3B8" letter-spacing="2">BUILT IN · CODED INTO THE HARNESS</text>
+<g class="m" font-size="10" fill="#E8DFD0">
+  <text x="100" y="246">read_file · list_files · grep · glob · git_read · recall</text>
+  <text x="100" y="264">write_file · edit_file · shell · web_fetch · publish · import</text>
+  <text x="100" y="282">delegate · stop_child · finish · remember · ask_user · show</text>
+  <text x="100" y="300">todo_write · todo_read · read_output · read_branch · onboard_write</text>
+</g>
+<text class="m" x="100" y="330" font-size="9" fill="#FF0080" letter-spacing="1">ASK BY DEFAULT: write · edit · shell · web_fetch · publish · import</text>
+
+<rect class="tile" x="80" y="366" width="440" height="92"/>
+<rect x="80" y="366" width="4" height="92" fill="#00C6C9"/>
+<text class="m" x="100" y="388" font-size="10" font-weight="500" fill="#00DBD3" letter-spacing="2">THE BUNDLE'S MCP SERVERS · THE TEAM'S</text>
+<use href="#server" x="100" y="398" width="30" height="30" color="#F4ECDB"/>
+<text class="m" x="140" y="412" font-size="10" fill="#E8DFD0">mcp.jira.search · mcp.jira.get_issue</text>
+<text class="m" x="140" y="428" font-size="9" fill="#8A8AA0" letter-spacing="1">AS THE PROFILE · THE SERVER'S OWN tools AND permission</text>
+<text class="m" x="100" y="448" font-size="9" fill="#7B7B94" letter-spacing="1">A TEAM'S ENTITLEMENTS NARROW WHICH SERVERS A SESSION GETS</text>
+
+<rect class="tile" x="80" y="474" width="440" height="74"/>
+<rect x="80" y="474" width="4" height="74" fill="#A3A3B8"/>
+<text class="m" x="100" y="496" font-size="10" font-weight="500" fill="#A3A3B8" letter-spacing="2">THE WORKSPACE'S MCP SERVERS · AT HOME</text>
+<text class="m" x="100" y="518" font-size="10" fill="#E8DFD0">mcp.json · a program on stdio, or a URL</text>
+<text class="m" x="100" y="536" font-size="9" fill="#8A8AA0" letter-spacing="1">RUN ONLY ONCE YOU TRUST THE WORKSPACE · NEVER ON A POD</text>
+
+<rect class="tile" x="80" y="564" width="440" height="92"/>
+<rect x="80" y="564" width="4" height="92" fill="#FFBC56"/>
+<text class="m" x="100" y="586" font-size="10" font-weight="500" fill="#FFBC56" letter-spacing="2">YOURS · HOSTED BY YOUR CLIENT</text>
+<use href="#ab" x="100" y="596" width="30" height="30" color="#F4ECDB"/>
+<text class="m" x="140" y="610" font-size="10" fill="#E8DFD0">client.notes.search · client.wiki.search</text>
+<text class="m" x="140" y="626" font-size="9" fill="#8A8AA0" letter-spacing="1">ON YOUR MACHINE · WITH CONSENT · ASK BY DEFAULT</text>
+<text class="m" x="100" y="646" font-size="9" fill="#7B7B94" letter-spacing="1">A PROFILE MAY FORBID THEM: personalTools: forbid</text>
+
+<!-- ===== column 2: the list the model sees ===== -->
+<line x1="520" y1="420" x2="580" y2="420" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" x="600" y="186" font-size="10" fill="#7B7B94" letter-spacing="2">WHAT THE MODEL IS SHOWN</text>
+
+<rect class="tile" x="600" y="200" width="380" height="160"/>
+<rect x="600" y="200" width="4" height="160" fill="#00C6C9"/>
+<text class="m" x="620" y="222" font-size="10" font-weight="500" fill="#00DBD3" letter-spacing="2">THE AGENT'S FRONTMATTER DECIDES THE LIST</text>
+<g class="m" font-size="11">
+  <text x="620" y="250" fill="#8A8AA0">tools:</text><text x="700" y="250" fill="#E8DFD0">[read_file, grep, shell, mcp.jira.*]</text>
+  <text x="620" y="272" fill="#8A8AA0">permissions:</text>
+  <text x="640" y="290" fill="#8A8AA0">write_file:</text><text x="740" y="290" fill="#FF7E6E">deny</text><text x="790" y="290" fill="#7B7B94"># left off the list</text>
+  <text x="640" y="308" fill="#8A8AA0">shell:</text><text x="740" y="308" fill="#FF0080">ask</text><text x="790" y="308" fill="#7B7B94"># listed; asks when called</text>
+</g>
+<text class="t" x="620" y="344" font-size="12" fill="#A3A3B8">An unlisted or denied tool is simply absent from the list.</text>
+
+<line x1="790" y1="360" x2="790" y2="400" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect class="box" x="600" y="404" width="380" height="118"/>
+<text class="m" x="620" y="426" font-size="9" fill="#8A8AA0" letter-spacing="1.5">THE LIST, AS SENT WITH EVERY REQUEST</text>
+<g class="m" font-size="10" fill="#E8DFD0">
+  <text x="620" y="448">read_file · grep · shell</text>
+  <text x="620" y="466">mcp.jira.search · mcp.jira.get_issue</text>
+  <text x="620" y="484">client.notes.search · client.wiki.search</text>
+</g>
+<text class="m" x="620" y="508" font-size="9" fill="#7B7B94" letter-spacing="1">NAMES AND SCHEMAS ONLY. NO CODE GOES TO THE MODEL.</text>
+
+<use href="#mask" x="620" y="552" width="44" height="44" color="#00DBD3"/>
+<text class="t" x="676" y="572" font-size="16" font-weight="800" fill="#F4ECDB">The model picks a name</text>
+<text class="m" x="676" y="592" font-size="10" fill="#8A8AA0" letter-spacing="1">shell · {"command": "mix test"}</text>
+<text class="t" x="620" y="630" font-size="12" fill="#A3A3B8">It cannot run anything. It can only ask for</text>
+<text class="t" x="620" y="648" font-size="12" fill="#A3A3B8">a tool by name, with arguments.</text>
+
+<!-- ===== column 3: the checks ===== -->
+<line x1="980" y1="574" x2="1040" y2="574" stroke="#00C6C9" stroke-width="2" marker-end="url(#arrow-cyan)"/>
+<text class="m" x="1060" y="186" font-size="10" fill="#7B7B94" letter-spacing="2">BEFORE ANY CODE RUNS · THE HARNESS CHECKS, IN ORDER</text>
+
+<g class="m" font-size="10">
+  <rect class="tile" x="1060" y="200" width="460" height="52"/>
+  <text x="1080" y="222" font-size="11" font-weight="500" fill="#F4ECDB" letter-spacing="2">1 · IS IT THERE, AND WAS IT OFFERED?</text>
+  <text x="1080" y="240" fill="#8A8AA0" letter-spacing="1">NOT ENTITLED, OR NEVER DISCOVERED: "THERE IS NO TOOL NAMED …"</text>
+
+  <rect class="tile" x="1060" y="262" width="460" height="52"/>
+  <text x="1080" y="284" font-size="11" font-weight="500" fill="#F4ECDB" letter-spacing="2">2 · DOES THE AGENT ALLOW IT?</text>
+  <text x="1080" y="302" fill="#8A8AA0" letter-spacing="1">OUTSIDE tools: OR permissions: deny → REFUSED, EVEN IF NAMED</text>
+
+  <rect class="tile" x="1060" y="324" width="460" height="116"/>
+  <rect x="1060" y="324" width="4" height="116" fill="#FF7E6E"/>
+  <text x="1080" y="346" font-size="11" font-weight="500" fill="#F4ECDB" letter-spacing="2">3 · WHAT DO THE RULES SAY?</text>
+  <text x="1080" y="366" fill="#E8DFD0">the profile's · the organisation's · yours · the repository's</text>
+  <text x="1080" y="386" fill="#FF7E6E" letter-spacing="1">deny  BEATS  ask  BEATS  allow · WHATEVER FILE EACH IS IN</text>
+  <text x="1080" y="406" fill="#8A8AA0" letter-spacing="1">A PROFILE'S deny shell(curl) REFUSES THE CALL, WHATEVER THE</text>
+  <text x="1080" y="422" fill="#8A8AA0" letter-spacing="1">AGENT, THE REPOSITORY OR THE MODEL SAY.</text>
+
+  <rect class="tile" x="1060" y="450" width="460" height="66"/>
+  <rect x="1060" y="450" width="4" height="66" fill="#FF0080"/>
+  <text x="1080" y="472" font-size="11" font-weight="500" fill="#FF0080" letter-spacing="2">4 · DOES SOMEONE HAVE TO SAY YES?</text>
+  <text x="1080" y="492" fill="#8A8AA0" letter-spacing="1">ask, FROM THE TOOL, THE AGENT OR A RULE → A PERSON ANSWERS</text>
+  <text x="1080" y="508" fill="#8A8AA0" letter-spacing="1">UNATTENDED: approvals: wait | deny · NEVER AUTO</text>
+</g>
+
+<line x1="1290" y1="516" x2="1290" y2="548" stroke="#00C6C9" stroke-width="2" marker-end="url(#arrow-cyan)"/>
+
+<rect x="1068" y="560" width="460" height="100" fill="#000353"/>
+<rect class="tile" x="1060" y="552" width="460" height="100"/>
+<rect x="1060" y="552" width="4" height="100" fill="#00C6C9"/>
+<text class="m" x="1080" y="576" font-size="11" font-weight="500" fill="#00DBD3" letter-spacing="2">5 · ONLY NOW DOES CODE RUN</text>
+<text class="t" x="1080" y="600" font-size="13" fill="#E8DFD0">In the harness: a built-in, or the MCP client calling a server.</text>
+<text class="t" x="1080" y="620" font-size="13" fill="#E8DFD0">On your client: tool.invoke over your socket, for client.* tools.</text>
+<text class="m" x="1080" y="642" font-size="9" fill="#8A8AA0" letter-spacing="1">THE RESULT GOES TO THE MODEL AND THE LOG, WITH WHO SAID YES</text>
+
+<!-- ===== the point ===== -->
+<line x1="80" y1="700" x2="1520" y2="700" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+<text class="t" x="80" y="746" font-size="22" font-weight="800" fill="#F4ECDB">The agent carries the permissions to the model; the harness holds the code.</text>
+<text class="t" x="80" y="776" font-size="15" fill="#A3A3B8">The model only ever names a tool. A profile that denies one makes the call fail at step 3, on every pod of that profile, whatever the agent file,</text>
+<text class="t" x="80" y="798" font-size="15" fill="#A3A3B8">the repository or the model would like. Nothing the model says can reach code the rules did not clear.</text>
+
+<!-- key -->
+<rect x="80" y="846" width="14" height="14" fill="#00C6C9"/>
+<text class="m" x="104" y="858" font-size="11" fill="#8A8AA0" letter-spacing="2">THE MACHINE</text>
+<rect x="250" y="846" width="14" height="14" fill="#FFBC56"/>
+<text class="m" x="274" y="858" font-size="11" fill="#8A8AA0" letter-spacing="2">YOUR MACHINE</text>
+<rect x="430" y="846" width="14" height="14" fill="#FF7E6E"/>
+<text class="m" x="454" y="858" font-size="11" fill="#8A8AA0" letter-spacing="2">REFUSED</text>
+<rect x="580" y="846" width="14" height="14" fill="#FF0080"/>
+<text class="m" x="604" y="858" font-size="11" fill="#8A8AA0" letter-spacing="2">A PERSON MUST DECIDE</text>
+</svg>
