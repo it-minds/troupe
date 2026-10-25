@@ -13,8 +13,9 @@ defmodule Troupe.Protocol.ClientTest do
 
   alias Troupe.Protocol.{Client, Error}
 
-  # A server that answers `initialize` and hands the connection to the test.
-  defp serve do
+  # A server that answers `initialize` and hands the connection to the test. `along`, the
+  # frames it sends in the same write as the answer.
+  defp serve(along \\ []) do
     {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, packet: :line, reuseaddr: true])
     {:ok, port} = :inet.port(listen)
     test = self()
@@ -25,7 +26,8 @@ defmodule Troupe.Protocol.ClientTest do
         {:ok, line} = :gen_tcp.recv(socket, 0, 5_000)
         %{"id" => id, "method" => "initialize"} = Jason.decode!(line)
         reply = %{"jsonrpc" => "2.0", "id" => id, "result" => %{"protocol_version" => "1"}}
-        :ok = :gen_tcp.send(socket, [Jason.encode!(reply), "\n"])
+        frames = Enum.map([reply | along], &[Jason.encode!(&1), "\n"])
+        :ok = :gen_tcp.send(socket, frames)
         :ok = :gen_tcp.controlling_process(socket, test)
         send(test, {:accepted, socket})
       end)
@@ -55,6 +57,16 @@ defmodule Troupe.Protocol.ClientTest do
   defp await_request(socket, method) do
     {:ok, line} = :gen_tcp.recv(socket, 0, 5_000)
     assert %{"method" => ^method} = Jason.decode!(line)
+  end
+
+  # The answer and the frame after it in one read: the frame is delivered at once, not
+  # left in the buffer until something else arrives.
+  test "a frame that comes in the same read as the initialize answer is delivered" do
+    notice = %{"jsonrpc" => "2.0", "method" => "fleet.changed", "params" => %{"n" => 1}}
+    %{client: client} = serve([notice])
+
+    assert_receive {:troupe_notification, "fleet.changed", %{"n" => 1}}, 2_000
+    Client.close(client)
   end
 
   test "the server closing the connection with a call in it answers the call unavailable" do

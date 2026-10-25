@@ -844,6 +844,18 @@ defmodule Troupe.Plane.GitHub do
       nil
   end
 
+  @doc """
+  Whether the plane has an App set up: an id, a key in transit and an installation, as
+  `describe/0`'s `configured` says. `false` where the row could not be read.
+  """
+  @spec configured?() :: boolean()
+  def configured? do
+    case stored() do
+      %App{} = row -> configured?(row)
+      nil -> false
+    end
+  end
+
   defp configured?(row) do
     not is_nil(row.app_id) and not is_nil(row.key_version) and (row.installations || []) != []
   end

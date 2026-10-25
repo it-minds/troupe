@@ -1,13 +1,13 @@
 defmodule Troupe.LadderTest do
   @moduledoc """
-  The precedence ladder (Decision 822), a step at a time, lowest first, as
-  `docs/user/configuration.md` writes it: built-ins, a profile's bundle, `.agents/`,
+  The precedence ladder, a step at a time, lowest first, as
+  `docs/user/configuration-layers.md` writes it: built-ins, a profile's bundle, `.agents/`,
   `AGENTS.md`, the person's `<config>/`, the repository's `.troupe/`. What has a name is
   taken from the highest step that has it, and each one below is listed as skipped,
   saying which is used; instruction files all apply, the higher later in the prompt and
   kept whole first, the person's own `<config>/AGENTS.md` being the one that is read
-  first. The bundle against the repository's files on a pod is Decision 826's step, and
-  its tests are there.
+  first. The bundle against the repository's files on a pod (the bundle wins unless the
+  profile lets the repository's win) is tested in `pod_layers_test.exs`.
 
   `async: false`: two tests write the suite's shared config home.
   """
@@ -26,6 +26,17 @@ defmodule Troupe.LadderTest do
     File.mkdir_p!(workspace)
     on_exit(fn -> File.rm_rf!(base) end)
     %{base: base, repo: repo, workspace: workspace}
+  end
+
+  test "the page this suite names is the one that writes the ladder out" do
+    [page] =
+      Regex.run(~r/`(docs\/user\/[^`]+\.md)` writes it/, File.read!(__ENV__.file),
+        capture: :all_but_first
+      )
+
+    text = File.read!(Path.expand("../../../../" <> page, __DIR__))
+    assert text =~ "## Which one wins"
+    assert text =~ "ladder, lowest first:"
   end
 
   test "built-ins, then a profile's bundle, then <config>/, then .troupe/: an agent of one " <>
