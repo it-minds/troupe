@@ -92,22 +92,22 @@ spec:
     # written. Written out twice, once for each side, because CEL has no functions.
     - name: hostParts
       expression: >-
-        variables.hosts.map(h,
+        variables.hosts.map(h, string(h)).map(h,
           h.startsWith('[') && h.contains(']:') && h.substring(h.indexOf(']:') + 2).matches('^[0-9]{1,5}$')
             ? [h, h.substring(1, h.indexOf(']:')), h.substring(h.indexOf(']:') + 2)]
             : h.indexOf(':') >= 0 && h.indexOf(':') == h.lastIndexOf(':') &&
                 h.substring(h.indexOf(':') + 1).matches('^[0-9]{1,5}$')
               ? [h, h.substring(0, h.indexOf(':')), h.substring(h.indexOf(':') + 1)]
-              : [h, h, ''])
+              : [h, string(h), ''])
     - name: allowedParts
       expression: >-
-        variables.allowedEgress.filter(p, !(p in variables.notPatternsAllowed)).map(p,
+        variables.allowedEgress.filter(p, !(p in variables.notPatternsAllowed)).map(p, string(p)).map(p,
           p.startsWith('[') && p.contains(']:') && p.substring(p.indexOf(']:') + 2).matches('^[0-9]{1,5}$')
             ? [p, p.substring(1, p.indexOf(']:')), p.substring(p.indexOf(']:') + 2)]
             : p.indexOf(':') >= 0 && p.indexOf(':') == p.lastIndexOf(':') &&
                 p.substring(p.indexOf(':') + 1).matches('^[0-9]{1,5}$')
               ? [p, p.substring(0, p.indexOf(':')), p.substring(p.indexOf(':') + 1)]
-              : [p, p, ''])
+              : [p, string(p), ''])
     # The hosts no pattern covers, as `Troupe.Policy.matches?/2` judges them: the host and
     # the port apart, a pattern with no port covering any port and one with a port that
     # port alone. `*.example.com` matches exactly one label, as it does everywhere else that
