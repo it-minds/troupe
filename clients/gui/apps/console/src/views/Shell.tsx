@@ -35,6 +35,7 @@ import { Memory } from "./Memory";
 import { Mine } from "./Mine";
 import { Overview } from "./Overview";
 import { RunPage, Runs } from "./Runs";
+import { InvitedSession } from "./Invited";
 import { RemoteSession } from "./Remote";
 import { Sessions } from "./Sessions";
 import { Team } from "./Team";
@@ -176,6 +177,7 @@ function Screen({ route }: { route: Route }): JSX.Element {
   if (route.page === "overview") return <Overview />;
   // A laptop's session offered to this person, steered from here as that person.
   if (route.page === "mine" && first === "remote" && second) return <RemoteSession id={second} key={second} />;
+  if (route.page === "mine" && first === "invited" && second) return <InvitedSession id={second} key={second} />;
   if (route.page === "mine") return <Mine />;
   if (route.page === "artifacts") {
     const place = artifactPlace(route.path ?? []);

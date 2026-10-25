@@ -10,6 +10,8 @@
 // The store holds no session state either. A row is what a source last said, and
 // closing the window loses a cache and nothing else.
 
+import { invitationsFrom } from "./invites.js";
+import type { Invitation } from "./invites.js";
 import type { PlaneClient, SessionRow, SessionsFilter } from "./plane.js";
 import { watchRemote } from "./remote.js";
 import type { Unseen } from "./types.js";
@@ -17,9 +19,11 @@ import type { Unseen } from "./types.js";
 /**
  * Where a session runs, which is the one thing a person must be able to see at a glance.
  * `remote` is a session on somebody's laptop, theirs or another person's, offered to the
- * plane for steering from another device (troupe #58).
+ * plane for steering from another device (troupe #58). `invited` is somebody else's private
+ * session they invited this person into, read on this computer from the plane's sealed
+ * copy (troupe #765).
  */
-export type SessionKind = "team" | "local" | "private" | "remote";
+export type SessionKind = "team" | "local" | "private" | "remote" | "invited";
 
 /**
  * Whether a session of this kind runs on this computer, reached through its daemon: a
@@ -180,6 +184,8 @@ export interface FleetRow {
    * (what the daemon says of it) or a `remote` row (what the plane says of its laptop).
    */
   remote?: RemoteOffer | null;
+  /** The invitation this person holds into it, where somebody invited them by name (troupe #765). */
+  invitation?: Invitation | null;
   /** The source's own row, for anything a view needs that this shape does not carry. */
   raw: unknown;
 }
@@ -311,10 +317,21 @@ export class RemoteSource implements FleetSource {
   ) {}
 
   watch(push: (rows: FleetRow[]) => void, live: (up: boolean) => void): () => void {
+    // The invitations to the person ride the same watch (troupe #765): each list is the
+    // offers and the invitations as they last stood.
+    let offered: FleetRow[] = [];
+    let invited: FleetRow[] = [];
     const w = watchRemote({
       planeUrl: this.plane.baseUrl,
       token: this.token,
-      onSessions: (sessions) => push(sessions.map((s) => rowFromRemote(s, this.id))),
+      onSessions: (sessions) => {
+        offered = sessions.map((s) => rowFromRemote(s, this.id));
+        push([...offered, ...invited]);
+      },
+      onInvites: (invites) => {
+        invited = invites.map((i) => rowFromInvite(i, this.id));
+        push([...offered, ...invited]);
+      },
       onLive: live,
       ...(this.clientInfo ? { clientInfo: this.clientInfo } : {}),
     });
@@ -323,15 +340,55 @@ export class RemoteSource implements FleetSource {
 
   async list(): Promise<FleetRow[]> {
     const token = await this.token();
-    try {
-      const { sessions } = await this.plane.rpc<{ sessions: Record<string, unknown>[] }>(token, "remote.list", {});
-      return (sessions ?? []).map((s) => rowFromRemote(s, this.id));
-    } catch (e) {
-      // A plane from before #58 relays nothing, which is no sessions rather than a fault.
-      if ((e as { code?: unknown }).code === -32601) return [];
-      throw e;
-    }
+    const [offered, invited] = await Promise.all([
+      this.plane
+        .rpc<{ sessions: Record<string, unknown>[] }>(token, "remote.list", {})
+        .then(({ sessions }) => (sessions ?? []).map((s) => rowFromRemote(s, this.id)))
+        // A plane from before #58 relays nothing, which is no sessions rather than a fault.
+        .catch(none),
+      this.plane
+        .rpc<{ invites: unknown }>(token, "invites.list", {})
+        .then(({ invites }) => invitationsFrom(invites).map((i) => rowFromInvite(i, this.id)))
+        // Nor does a plane from before #765 invite anybody.
+        .catch(none),
+    ]);
+    return [...offered, ...invited];
   }
+}
+
+function none(e: unknown): FleetRow[] {
+  if ((e as { code?: unknown }).code === -32601) return [];
+  throw e;
+}
+
+/**
+ * An invitation as a row: a pod session's, which the plane's own listing has too and this
+ * only marks with who invited the person; or a private session's, `invited`, which only
+ * this person's daemon can read, from the plane's sealed copy (troupe #765).
+ */
+export function rowFromInvite(i: Invitation, source = "remote"): FleetRow {
+  return {
+    id: i.session_id,
+    kind: i.kind === "private" ? "invited" : "team",
+    source,
+    title: i.title ?? null,
+    profile: i.profile ?? null,
+    owner: i.owner,
+    state: i.state ?? "dormant",
+    status: null,
+    doneReason: null,
+    pendingApprovals: 0,
+    pendingQuestions: 0,
+    costMicros: null,
+    lastActiveAt: i.invited_at,
+    pinned: false,
+    yourRole: i.kind === "private" ? i.role : i.role === "control" ? "collaborator" : "viewer",
+    origin: null,
+    reviewedBy: null,
+    sync: null,
+    invitation: i,
+    raw: i,
+  };
 }
 
 export interface FleetFilter {
@@ -524,7 +581,10 @@ export class FleetStore {
       for (const source of this.sources.filter((s) => s.kind === kind)) {
         for (const row of this.bySource.get(source.id) ?? []) {
           const existing = merged.get(row.id);
-          merged.set(row.id, existing ? joined(existing, row) : row);
+          // An invitation marks the row the plane already lists with who invited the person,
+          // and is a row of its own only where nothing else lists the session.
+          if (existing && row.invitation) merged.set(row.id, { ...existing, invitation: row.invitation });
+          else merged.set(row.id, existing ? joined(existing, row) : row);
         }
       }
     }

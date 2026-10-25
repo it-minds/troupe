@@ -44,6 +44,7 @@ ServiceAccount token says so at start, and on the Overview, with the role line a
 | `session-tokens` | `troupe-plane-session-tokens` | sign session tokens, and read the key's public half that workers check them with | no session opens, and no pod or person's daemon can check a token |
 | `plane-signing` | `troupe-plane-signing` | make, rotate and sign with the plane's own key, which signs what it tells people's machines | the client versions and defaults go out unsigned, and every client that pinned this plane's key refuses them |
 | `erasure` | `troupe-plane` | destroy an erased session's key, a team's or a person's, and see which credentials a person has connected | erasing a session cannot destroy its key, and the console cannot say who has connected what |
+| `invites` (only for inviting people into private sessions) | `troupe-plane-invites` | destroy the copy of a private session's key its owner's daemon put in an invitee's own slot, when the invitation is taken back or the session erased | an erasure of a private session somebody was invited into stays pending, and taking an invitation back leaves the copy it gave in the invitee's slot |
 | `github-app` (only with a GitHub App) | `troupe-plane-github` | import, sign with and delete the GitHub App's key and webhook secret | a GitHub App cannot be set up, and one set up before stops signing |
 
 ### `troupe-plane-session-tokens`
@@ -103,6 +104,19 @@ path "secret/metadata/troupe/people/+/mcp/*" {
 }
 POLICY
 bao write auth/kubernetes/role/troupe-plane token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane
+```
+
+### `troupe-plane-invites`
+
+To destroy the copy of a private session's key its owner's daemon put in an invitee's own slot, when the invitation is taken back or the session erased. Only where people are invited into private sessions.
+
+```sh
+bao policy write troupe-plane-invites - <<'POLICY'
+path "secret/metadata/troupe/people/+/invited/*" {
+  capabilities = ["delete"]
+}
+POLICY
+bao write auth/kubernetes/role/troupe-plane token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane,troupe-plane-invites
 ```
 
 ### `troupe-plane-github`

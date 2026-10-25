@@ -266,6 +266,42 @@ defmodule Troupe.Client.Remote do
     {:error, "this session runs on the plane already: /steer offers a session on this computer"}
   end
 
+  # A pod session's invitations are made at the plane, where each is the session's grant
+  # made visible (root #765).
+  @impl true
+  def invites(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> invite_on(plane, sid, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp invite_on(plane, sid, :list) do
+    case call(plane, "session.invites", %{session_id: sid}) do
+      {:ok, %{"invites" => invites}} -> {:ok, Troupe.Client.Invites.line(invites)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp invite_on(plane, sid, {:invite, person, role}) do
+    case call(plane, "session.invite", %{session_id: sid, subject: person, role: role}) do
+      {:ok, answer} -> {:ok, Troupe.Client.Invites.invited(answer, role)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp invite_on(plane, sid, {:uninvite, person}) do
+    case call(plane, "session.uninvite", %{session_id: sid, subject: person}) do
+      {:ok, answer} -> {:ok, Troupe.Client.Invites.uninvited(answer, person)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  # The plane's sentence where it gave one: who may not be invited, and why.
+  defp refusal(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
+  defp refusal(%{"data" => %{"reason" => reason}}) when is_binary(reason), do: reason
+  defp refusal(reason), do: message(reason)
+
   @impl true
   def instructions(sid) do
     case Worker.rpc(sid, "context.get", %{}) do

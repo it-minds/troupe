@@ -118,11 +118,14 @@ export {
   RemoteSource,
   fleetTiming,
   rowFromRemote,
+  rowFromInvite,
   remoteOffer,
   offerRestartWords,
   RESTART_SENTENCE,
   onThisComputer,
 } from "./fleet.js";
+export { invitationWords, invitationsFrom, inviteRefusal, personName, removedSentence, roleWords } from "./invites.js";
+export type { Invitation, Invitee, InviteRole, Person, SealedEvent, SealedRead } from "./invites.js";
 export type {
   FleetRow,
   FleetSource,

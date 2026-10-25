@@ -179,15 +179,23 @@ defmodule Mix.Tasks.Troupe.Openbao.Policy do
   end
 
   defp row(grant) do
-    name = if grant.required, do: "`#{grant.id}`", else: "`#{grant.id}` (only with a GitHub App)"
+    name =
+      if grant.required,
+        do: "`#{grant.id}`",
+        else: "`#{grant.id}` (#{grant[:only] || "only with a GitHub App"})"
+
     "| #{name} | `#{grant.policy}` | #{grant.for} | #{grant.without} |"
   end
+
+  defp only_where(%{required: true}), do: ""
+  defp only_where(%{id: "invites"}), do: " Only where people are invited into private sessions."
+  defp only_where(_grant), do: " Only where the plane has a GitHub App."
 
   defp section(grant) do
     """
     ### `#{grant.policy}`
 
-    To #{grant.for}.#{if grant.required, do: "", else: " Only where the plane has a GitHub App."}
+    To #{grant.for}.#{only_where(grant)}
 
     ```sh
     #{String.trim_trailing(Policy.grant_lines(grant, role: "troupe-plane", policies: plane_policies(grant)))}
