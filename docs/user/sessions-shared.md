@@ -48,16 +48,24 @@ does not open it: a page the plane serves could only read it if the plane could,
 cannot. What they see is what your computer has sealed, which is at the end of each turn
 and at least every minute while your computer is on and signed in.
 
-A private session is shared to **follow** only. Steering a session from another device
-goes through the plane's relay, which carries what it says past the plane in the clear, and
-a private session is never offered for that; `/invite bea@example.com control` on one is
-refused and says so.
+Somebody invited to **steer** a private session steers it only while you offer it. Steering
+from another device goes through the plane's relay, which carries what the session says
+through the plane unsealed, so offering a private session asks you first, in these words:
+*This session is private: while it is offered, what it says and does passes through the
+plane unsealed, and the plane relays it to whoever you invited with control. The plane keeps
+none of it. Offer it?* Only a yes offers it (`/steer on yes`, or *Offer it* in the desktop
+app). While it is offered, the people you invited with `control` steer it from the desktop
+app or the console, and their list says *offered · you can steer*; otherwise it says *not
+offered · read-only*, and they read the sealed copy. Withdrawing the offer (`/steer off`)
+makes it sealed only again: their views through the plane close with a sentence saying so,
+and their own computer still reads the sealed copy.
 
 ## Taking it back
 
 Taking an invitation back ends every way it let the person in. Their list loses the
 session at once, an open view of it closes and says you took it back, and a pod session
-refuses their next command.
+refuses their next command; on a private session you offer, their steering through the
+plane ends at once.
 
 On a private session, the copy of the key in their slot is destroyed, and your computer
 seals everything after that moment under a **new key** they are never given. Everybody

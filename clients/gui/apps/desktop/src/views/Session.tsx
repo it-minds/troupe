@@ -17,7 +17,6 @@ import {
   isBusy,
   needsYou,
   onThisComputer,
-  invitationWords,
   openApprovals,
   openQuestions,
   presentMembers,
@@ -59,7 +58,7 @@ import { MemoryPane } from "./Memory";
 import type { MemoryAsk } from "./Memory";
 import { OfferLine, OfferPanel } from "./Offer";
 import { StartLine, StartPanel } from "./Onboard";
-import { RemoteLine, RemoteOfferControl } from "./Remote";
+import { inviteLine, RemoteLine, RemoteOfferControl } from "./Remote";
 import { InviteControl } from "./Invites";
 import { Cost, initials, Loading, personColour, Pill, Sync, When, Where } from "./bits";
 
@@ -224,7 +223,7 @@ export function Session({
           />
         }
         remote={
-          row && daemon && auth && row.kind === "local" ? (
+          row && daemon && auth && (row.kind === "local" || row.kind === "private") ? (
             <RemoteOfferControl daemon={daemon} row={row} presence={view.state.presence} />
           ) : row?.kind === "remote" ? (
             <RemoteLine row={row} />
@@ -539,7 +538,7 @@ function Header({
               <span className="sep" aria-hidden="true">
                 ·
               </span>
-              <span className="invited-by">{invitationWords(row.invitation)}</span>
+              <span className="invited-by">{inviteLine(row.invitation)}</span>
             </>
           )}
         </div>

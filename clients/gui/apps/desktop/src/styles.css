@@ -3668,3 +3668,20 @@ pre.instruction {
     gap: var(--space-half);
   }
 }
+
+/* A private session's question before it is offered for steering (troupe #765): a person is
+   asked, so it is the reserved colour's edge, and nothing is offered until they answer. */
+.remote-consent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: var(--bw-marker) solid var(--waiting-solid);
+  background: var(--waiting-bg);
+}
+.remote-consent p {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--waiting-fg);
+}

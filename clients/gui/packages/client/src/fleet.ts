@@ -62,6 +62,11 @@ export interface RemoteOffer {
   lasts: "across_restarts" | "until_restart" | null;
   /** On this computer's own row: read back from the daemon's record as it started. */
   restored: boolean;
+  /**
+   * A private session, offered with its owner's yes to its passing through the plane
+   * unsealed while it is (troupe #765): steered by the people invited into it with control.
+   */
+  private: boolean;
 }
 
 /** The daemon's or the plane's word on an offer, or null where it says none. */
@@ -77,6 +82,7 @@ export function remoteOffer(value: unknown): RemoteOffer | null {
     steering: Array.isArray(v["steering"]) ? (v["steering"] as RemotePerson[]) : [],
     lasts: v["lasts"] === "across_restarts" || v["lasts"] === "until_restart" ? v["lasts"] : null,
     restored: v["restored"] === true,
+    private: v["private"] === true,
   };
 }
 
@@ -97,6 +103,14 @@ export function offerRestartWords(offer: RemoteOffer): string[] {
  */
 export const RESTART_SENTENCE =
   "It stays offered until this machine restarts: troupe-daemon login on starts the daemon when you log in, and the offer comes back with it.";
+
+/**
+ * What a private session's person is asked before it is offered for steering (troupe
+ * #765), in the daemon's own words: the terminal's `/steer on` asks the same, and only a
+ * yes offers it.
+ */
+export const PRIVATE_OFFER_SENTENCE =
+  "This session is private: while it is offered, what it says and does passes through the plane unsealed, and the plane relays it to whoever you invited with control. The plane keeps none of it. Offer it?";
 
 /**
  * How a private session's sealing stands, as the daemon's `session.list` says it (troupe
@@ -295,6 +309,7 @@ export function rowFromRemote(row: Record<string, unknown>, source = "remote"): 
       owner: row["owner"],
       owner_name: row["owner_name"],
       shares: row["shares"] ?? [],
+      private: row["private"],
     }),
     raw: row,
   };

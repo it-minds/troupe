@@ -1399,9 +1399,13 @@ defmodule Troupe.Gateway.Dispatch do
   # plane has no `admin` and cannot reach these. The answer is what the session's listing
   # then says of it (`remote`).
 
+  # A private session needs `consent: "private"`, its person's yes to its passing through
+  # the plane unsealed while it is offered; without it the refusal says so in the words the
+  # client asks with.
   defp handle("remote.offer", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
-         {:ok, remote} <- Remote.offer(session_id, Map.get(params, "share"), subject(context)) do
+         {:ok, remote} <-
+           Remote.offer(session_id, Map.get(params, "share"), subject(context), params["consent"]) do
       {:ok, %{"session_id" => session_id, "remote" => remote}}
     end
   end
@@ -2528,17 +2532,6 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp invite_error(session_id, :not_private),
     do: Error.new(:invalid_params, %{session_id: session_id, reason: "not a private session"})
-
-  defp invite_error(session_id, :followed_only) do
-    Error.new(:invalid_params, %{
-      session_id: session_id,
-      field: "role",
-      reason:
-        "a private session is followed by the people invited into it: steering it from " <>
-          "another device would carry it past the plane in the clear, and a private session " <>
-          "is never offered"
-    })
-  end
 
   defp invite_error(session_id, :no_keys),
     do: Error.new(:not_found, %{session_id: session_id, reason: "no key of it is yours"})

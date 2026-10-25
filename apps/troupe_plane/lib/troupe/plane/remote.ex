@@ -30,11 +30,19 @@ defmodule Troupe.Plane.Remote do
   **A team's administrators may forbid offering** (`teams.remote_offering_allowed`): a
   person in a team that does not allow it is refused a grant, an offer and an attach to
   one they made earlier, with the team named.
+
+  **A private session, offered with its owner's consent** (#765). The laptop says so
+  (`private`), and so does the plane's own row of the session where it has one. While it is
+  offered the relay carries it unsealed, as it carries any offered session, and keeps none
+  of it; a person the offer names steers it only while they also hold an invitation into it
+  with `control` (`Troupe.Plane.Invites`), so taking the invitation back ends their
+  steering at once wherever the laptop's record stands. The offer is in the audit trail as
+  `remote.offer` with `private: true`.
   """
 
   import Ecto.Query
 
-  alias Troupe.Plane.{Audit, Identity, Tokens}
+  alias Troupe.Plane.{Audit, Identity, Invites, Sessions, Tokens}
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Remote.{Grant, Offer}
   alias Troupe.Plane.Repo
@@ -218,8 +226,9 @@ defmodule Troupe.Plane.Remote do
 
   @doc """
   Record one offer from `user`'s laptop `device`: the session, its workspace's name and
-  the share, each `%{"person" => subject or email, "role" => "observe" | "control"}`.
-  Answers the share as resolved. A session another person offered is a `conflict`.
+  the share, each `%{"person" => subject or email, "role" => "observe" | "control"}`, and
+  `private` for a private session its owner consented to offer. Answers the share as
+  resolved. A session another person offered is a `conflict`.
   """
   @spec offer(User.t(), String.t(), map()) :: {:ok, Offer.t()} | {:error, Error.t()}
   def offer(%User{} = user, device, params) do
@@ -236,7 +245,8 @@ defmodule Troupe.Plane.Remote do
         workspace: label(params["workspace"]),
         shares: %{"people" => people},
         offered_at: now,
-        offline_since: nil
+        offline_since: nil,
+        private: private?(session_id, params)
       }
 
       existing = Repo.get(Offer, session_id) || %Offer{}
@@ -338,12 +348,34 @@ defmodule Troupe.Plane.Remote do
     end
   end
 
-  @doc "The role a person holds on an offer, or `nil`."
+  @doc """
+  The role a person holds on an offer, or `nil`. On a private session's, the narrower of
+  the share's and their invitation's: somebody whose invitation was taken back holds none,
+  whatever the laptop has yet to say.
+  """
   @spec role(Offer.t(), User.t()) :: String.t() | nil
   def role(%Offer{owner_subject: subject}, %User{subject: subject}), do: "control"
 
+  def role(%Offer{private: true} = offer, %User{subject: subject}) do
+    shared = Enum.find_value(Offer.people(offer), &(&1["subject"] == subject && &1["role"]))
+
+    case Invites.invitation(offer.session_id, subject) do
+      %{role: invited} -> Relay.narrower(shared, invited)
+      nil -> nil
+    end
+  end
+
   def role(%Offer{} = offer, %User{subject: subject}) do
     Enum.find_value(Offer.people(offer), &(&1["subject"] == subject && &1["role"]))
+  end
+
+  @doc "Whether a session is offered now: its row is here and its laptop is there."
+  @spec offered?(String.t()) :: boolean()
+  def offered?(session_id) do
+    case get(session_id) do
+      %Offer{} -> laptop(session_id) != nil
+      nil -> false
+    end
   end
 
   @doc "Whether the laptop is there now, and since when it is not."
@@ -383,10 +415,21 @@ defmodule Troupe.Plane.Remote do
     Phoenix.PubSub.broadcast(Troupe.Plane.PubSub, @topic, {:remote_changed, Enum.uniq(subjects)})
   end
 
-  @doc "The people an offer concerns: its owner and everybody it is shared with."
+  @doc """
+  The people an offer concerns: its owner and everybody it is shared with, and on a private
+  session's everybody invited into it, whose invitation says whether it is offered.
+  """
   @spec concerned(Offer.t() | nil) :: [String.t()]
   def concerned(nil), do: []
-  def concerned(%Offer{} = offer), do: [offer.owner_subject | Enum.map(Offer.people(offer), & &1["subject"])]
+
+  def concerned(%Offer{} = offer) do
+    invited =
+      if offer.private,
+        do: offer.session_id |> Invites.of_session() |> Enum.map(& &1.subject),
+        else: []
+
+    Enum.uniq([offer.owner_subject | Enum.map(Offer.people(offer), & &1["subject"])] ++ invited)
+  end
 
   @doc "What one person's laptop on `device` offers now, as rows."
   @spec offers_from(User.t(), String.t()) :: [Offer.t()]
@@ -414,6 +457,7 @@ defmodule Troupe.Plane.Remote do
       "state" => state,
       "offline_since" => since && DateTime.to_iso8601(since),
       "offered_at" => DateTime.to_iso8601(offer.offered_at),
+      "private" => offer.private == true,
       "your_role" => if(offer.owner_subject == user.subject, do: "owner", else: role),
       "shares" => if(offer.owner_subject == user.subject, do: Offer.people(offer))
     }
@@ -507,6 +551,12 @@ defmodule Troupe.Plane.Remote do
   end
 
   defp session_id(_id), do: {:error, Error.new(:invalid_params, %{field: "session_id"})}
+
+  # A private session's offer: the laptop says so, having asked its person, and the plane's
+  # own row of the session says so where there is one, whatever the laptop said.
+  defp private?(session_id, params) do
+    params["private"] == true or match?(%{kind: "private"}, Sessions.get(session_id))
+  end
 
   defp label(name) when is_binary(name), do: name |> Path.basename() |> String.slice(0, 255)
   defp label(_name), do: nil

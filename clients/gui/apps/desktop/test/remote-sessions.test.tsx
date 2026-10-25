@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
-import { RESTART_SENTENCE, webTokenStore } from "@troupe/client";
+import { PRIVATE_OFFER_SENTENCE, RESTART_SENTENCE, webTokenStore } from "@troupe/client";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
@@ -169,6 +169,41 @@ describe("this computer's own session", () => {
     button("Withdraw")!.click();
     await waitFor(() => button("Steer from elsewhere"), "the offer taken back");
     expect(daemon.calls.some((c) => c.method === "remote.withdraw")).toBe(true);
+  });
+
+  it("offers a private session only after the yes, asked in pink in the daemon's words, to the people it invited with control", async () => {
+    const diary = daemon.seed("/home/alice/diary", { kind: "private", sync: "current" });
+    daemon.invited.set(diary.id, [
+      { subject: "bea@example.com", role: "control" },
+      { subject: "cy@example.com", role: "observe" },
+    ]);
+    await signedIn();
+    unmount = render(<App />).unmount;
+    (await waitFor(() => row("/home/alice/diary"), "the private session's row")).click();
+    (await waitFor(() => button("Steer from elsewhere"), "the offer in the head")).click();
+
+    // Asked first, and nothing offered until it is answered; no share to fill in.
+    const asked = await waitFor(() => document.querySelector<HTMLElement>(".remote-consent"), "the question");
+    expect(asked.textContent).toContain(PRIVATE_OFFER_SENTENCE);
+    expect(document.querySelector(".remote-share input")).toBeNull();
+    expect(daemon.calls.some((c) => c.method === "remote.offer")).toBe(false);
+
+    button("Keep it sealed", asked)!.click();
+    await waitFor(() => !document.querySelector(".remote-consent"), "the question put away");
+    expect(daemon.calls.some((c) => c.method === "remote.offer")).toBe(false);
+
+    button("Steer from elsewhere")!.click();
+    button("Offer it", await waitFor(() => document.querySelector<HTMLElement>(".remote-consent"), "the question again"))!.click();
+
+    await sees("Offered · Private · Online");
+    const offered = daemon.calls.find((c) => c.method === "remote.offer")!;
+    expect(offered.params["consent"]).toBe("private");
+    expect(offered.params["share"]).toEqual([]);
+    expect(diary.remote?.shares).toEqual([{ subject: "bea@example.com", display_name: "bea@example.com", email: "bea@example.com", role: "control" }]);
+    expect(button("Share")).toBeNull();
+
+    button("Withdraw")!.click();
+    await waitFor(() => button("Steer from elsewhere"), "sealed only again");
   });
 
   it("says once that an offer lasts until this machine restarts, with the command, and says one a restart brought back", async () => {

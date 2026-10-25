@@ -38,6 +38,7 @@ import { COMMANDS, DEFINED, expandDefined } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 import { PROVIDER_TYPES, SETUP_KINDS } from "./provider-types.js";
 import { FakeScratch } from "./scratch.js";
+import { PRIVATE_OFFER_SENTENCE } from "../../src/fleet.js";
 
 interface Session {
   id: string;
@@ -87,6 +88,8 @@ interface Session {
     lasts: "across_restarts" | "until_restart";
     /** Read back from the record as the daemon started. */
     restored: boolean;
+    /** A private session, offered with its person's yes. */
+    private?: boolean;
   } | null;
 }
 
@@ -1251,13 +1254,19 @@ evoked where nothing is set and there was a sign-in. */
       }
 
       // A session offered to the plane for steering from another device, and taken back
-      // (troupe #58): a private one is refused, as the daemon refuses it.
+      // (troupe #58): a private one only with its person's yes, and to the people it
+      // invited with control (troupe #765), as the daemon offers it.
       case "remote.offer": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
-        if (session.kind === "private") {
-          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: "a private session is never offered to the plane" } });
+        const isPrivate = session.kind === "private";
+        if (isPrivate && params["consent"] !== "private") {
+          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { consent: "private", reason: PRIVATE_OFFER_SENTENCE } });
         }
-        const share = Array.isArray(params["share"]) ? (params["share"] as Array<{ person: string; role?: string }>) : [];
+        const share = isPrivate
+          ? (this.invited.get(sessionId) ?? []).filter((p) => p.role === "control").map((p) => ({ person: p.subject, role: "control" }))
+          : Array.isArray(params["share"])
+            ? (params["share"] as Array<{ person: string; role?: string }>)
+            : [];
         session.remote = {
           owner: this.linked?.subject ?? null,
           shares: share.map((s) => ({ subject: s.person, display_name: s.person, email: s.person, role: s.role ?? "observe" })),
@@ -1266,6 +1275,7 @@ evoked where nothing is set and there was a sign-in. */
           steering: [],
           lasts: this.atLogin ? "across_restarts" : "until_restart",
           restored: false,
+          ...(isPrivate ? { private: true } : {}),
         };
         return reply(ws, id, { session_id: sessionId, remote: session.remote });
       }

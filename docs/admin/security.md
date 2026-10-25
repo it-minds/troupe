@@ -390,7 +390,9 @@ a session when it passes (#635).
 **A private session** runs on the person's machine and nowhere else, sealed under a key in
 their own part of OpenBao that no pod can reach. The plane learns that it exists and how
 far it has got, and lists it so the person can open it from another device. Erasing one
-destroys its key at the plane first (Decisions 756 and 789).
+destroys its key at the plane first (Decisions 756 and 789). While its owner offers it for
+steering, which they are asked to agree to first, what it says passes through the plane
+unsealed to the people invited with control; the plane keeps none of it (Decision 952).
 
 ## 10. Reporting a vulnerability
 

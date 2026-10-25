@@ -724,8 +724,12 @@ export class DaemonClient {
    * Offering again replaces the share. A private session is refused. The answer is what
    * the session's row then says of it.
    */
-  offerRemote(sessionId: string, share: Array<{ person: string; role: "observe" | "control" }> = []): Promise<{ session_id: string; remote: unknown }> {
-    return this.command("remote.offer", { session_id: sessionId, share });
+  offerRemote(
+    sessionId: string,
+    share: Array<{ person: string; role: "observe" | "control" }> = [],
+    consent?: "private",
+  ): Promise<{ session_id: string; remote: unknown }> {
+    return this.command("remote.offer", { session_id: sessionId, share, ...(consent ? { consent } : {}) });
   }
 
   /** Take an offer back: every view of the session from another device ends at once. */

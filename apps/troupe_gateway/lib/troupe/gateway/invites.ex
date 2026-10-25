@@ -27,6 +27,11 @@ defmodule Troupe.Gateway.Invites do
   `session_uninvited`, and a new key goes to the people the plane lists who are invited by
   the log as well. A plane that listed somebody nobody here invited is given no key for them.
 
+  An invitation with `control` steers the session while its owner offers it
+  (`Troupe.Gateway.Remote`), which is shared with the people the log invited with `control`;
+  so each invitation made or taken back here shares an offer anew (`Remote.reshare/1`), and
+  the view of a person taken back is closed at once. Unoffered, they read the sealed copy.
+
   ## The invitee's side
 
   `read/2`: the plane says where this person's copies of the session's keys are
@@ -35,7 +40,7 @@ defmodule Troupe.Gateway.Invites do
   storage through URLs the plane signs for reading only. Nothing of it is written here.
   """
 
-  alias Troupe.Gateway.{Plane, Private}
+  alias Troupe.Gateway.{Plane, Private, Remote}
   alias Troupe.KMS
   alias Troupe.Session.Log
   alias Troupe.Sessions.{Sealer, Storage}
@@ -52,7 +57,6 @@ defmodule Troupe.Gateway.Invites do
     plane = Keyword.get(opts, :plane, Plane)
 
     with :ok <- owned(session, plane),
-         :ok <- followed_only(role),
          {:ok, slot} <-
            Plane.call(
              "session.invite_slot",
@@ -79,6 +83,7 @@ defmodule Troupe.Gateway.Invites do
         "by" => Plane.subject(plane)
       })
 
+      reshare(session_id, opts)
       {:ok, invited}
     end
   end
@@ -106,6 +111,8 @@ defmodule Troupe.Gateway.Invites do
         "subject" => answer["subject"],
         "by" => Plane.subject(plane)
       })
+
+      reshare(session_id, opts)
 
       case rekeyed do
         {:ok, row} ->
@@ -197,15 +204,29 @@ defmodule Troupe.Gateway.Invites do
   """
   @spec invited_here(String.t(), keyword()) :: MapSet.t(String.t())
   def invited_here(session_id, opts \\ []) do
+    session_id |> invited(opts) |> Map.keys() |> MapSet.new()
+  end
+
+  @doc """
+  The same, with each invitation as the log last said it: `%{subject => %{"role",
+  "display_name"}}`. A person invited again carries their latest role.
+  """
+  @spec invited(String.t(), keyword()) :: %{String.t() => map()}
+  def invited(session_id, opts \\ []) do
     read = Keyword.get(opts, :replay, &Troupe.replay_from/2)
 
     session_id
     |> read.(0)
-    |> Enum.reduce(MapSet.new(), fn event, acc ->
+    |> Enum.reduce(%{}, fn event, acc ->
       case {to_string(event.type), event.data} do
-        {"session_invited", %{"subject" => subject}} -> MapSet.put(acc, subject)
-        {"session_uninvited", %{"subject" => subject}} -> MapSet.delete(acc, subject)
-        _other -> acc
+        {"session_invited", %{"subject" => subject} = data} ->
+          Map.put(acc, subject, Map.take(data, ["role", "display_name"]))
+
+        {"session_uninvited", %{"subject" => subject}} ->
+          Map.delete(acc, subject)
+
+        _other ->
+          acc
       end
     end)
   end
@@ -311,10 +332,9 @@ defmodule Troupe.Gateway.Invites do
       Logger.info("troupe: #{session_id} did not record #{type}: #{inspect(reason)}")
   end
 
-  # Followed, not steered: steering a private session from another device is offering it,
-  # which a private session never is. Asked before any key goes anywhere.
-  defp followed_only("control"), do: {:error, :followed_only}
-  defp followed_only(_observe), do: :ok
+  # An offer of the session shared anew with whom the log now invites, unless a test keeps
+  # no steering of its own.
+  defp reshare(session_id, opts), do: Keyword.get(opts, :reshare, &Remote.reshare/1).(session_id)
 
   defp owned(session, plane) do
     owner = Map.get(session, :owner)

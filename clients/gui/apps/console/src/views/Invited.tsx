@@ -7,10 +7,13 @@
 // A private session is not opened here: its log is sealed under its owner's key, and only
 // the invitee's own machine opens the copy of the key put in their slot. A page the plane
 // serves cannot, which is the point: the plane that serves this page cannot read it either.
+// While its owner offers it for steering, having said yes to its passing through the plane
+// unsealed, somebody invited with control steers it from here through the relay, as any
+// laptop's offered session; the row says which it is now.
 
 import { useRef } from "react";
 import type { JSX } from "react";
-import { invitationWords, remoteWhen, removedSentence } from "@troupe/client";
+import { invitationWords, remoteWhen, removedSentence, steerWords } from "@troupe/client";
 import type { Invitation } from "@troupe/client";
 import type { Load } from "../console";
 import { href } from "../route";
@@ -53,7 +56,19 @@ export function InvitedToYou({ load, reload }: { load: Load<Invitation[]>; reloa
                       {i.owner_name ?? i.owner}
                       {i.kind === "private" ? " · private: read it in the desktop app" : i.profile ? ` · ${i.profile}` : ""}
                     </td>
-                    <td>{i.role === "control" ? "steer it" : "follow it"}</td>
+                    <td>
+                      {i.kind === "private" && i.role === "control" ? (
+                        i.offered ? (
+                          <a href={href({ page: "mine", path: ["remote", i.session_id] })}>{steerWords(i)}</a>
+                        ) : (
+                          steerWords(i)
+                        )
+                      ) : i.role === "control" ? (
+                        "steer it"
+                      ) : (
+                        "follow it"
+                      )}
+                    </td>
                     <td>
                       {invitationWords(i)}, {remoteWhen(i.invited_at)}
                     </td>
@@ -95,6 +110,7 @@ export function InvitedSession({ id }: { id: string }): JSX.Element {
     return (
       <Empty title="Read it on your own computer">
         This private session is sealed under its owner's key. The desktop app reads it with your own key, which only your machine can open.
+        {invitation.role === "control" && invitation.offered ? " Its owner offers it for steering now: steer it from Offered to you from laptops." : ""}
       </Empty>
     );
   }
