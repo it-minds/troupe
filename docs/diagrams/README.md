@@ -1,5 +1,8 @@
 # Diagrams
 
+[principles.html](principles.html) reads all sixteen in order, with a short text on the
+principle behind each; it is one long page in the same design.
+
 Standalone SVGs for presentations and web pages, drawn in the app's own design
 (Afterglow, dark): the void ground, cream type, square corners, one hard shadow, the mask
 for an agent and initials in a ring for a person. The colour rule is the app's too: cyan
