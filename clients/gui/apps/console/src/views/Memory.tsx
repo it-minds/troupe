@@ -10,7 +10,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { MemoryDocument, MemoryInherited, MemoryLine, MemoryPreview, MemoryReader, MemoryReaders, MemoryScope, MemorySaved } from "@troupe/client";
+import type { MemoryBlameLine, MemoryDocument, MemoryInherited, MemoryLine, MemoryPreview, MemoryReader, MemoryReaders, MemoryScope, MemorySaved } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Loaded, Preview, Region, TextDiff, count, useChange, when } from "./bits";
 
@@ -117,6 +117,7 @@ function Document({
         <p className="note">Nothing written yet: no session reads anything from here.</p>
       )}
       {draft === null && doc.text !== "" && <pre className="prompt">{doc.text}</pre>}
+      {draft === null && (doc.lines ?? []).length > 0 && <Blame doc={doc} />}
 
       {doc.editable && draft === null && (
         <div className="actions">
@@ -295,6 +296,43 @@ function Inherited({ docs }: { docs: MemoryInherited[] }): JSX.Element {
       ))}
     </section>
   );
+}
+
+/**
+ * Who wrote each line of the version shown (troupe #55's provenance), asked for: the version
+ * a line came in and who saved it in a column beside it, and for an agent's entry the agent
+ * and the session it came from. Blame, not history: the versions say the rest.
+ */
+function Blame({ doc }: { doc: MemoryDocument }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="blame">
+      <button type="button" className="link" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {open ? "Hide who wrote each line" : "Who wrote each line"}
+      </button>
+      {open && (
+        <table className="blame-lines mono" aria-label={`Who wrote each line of ${doc.subject} v${doc.version ?? 0}`}>
+          <tbody>
+            {(doc.lines ?? []).map((l, i) => (
+              <tr key={i}>
+                <th scope="row" title={`saved ${when(l.at)} by ${l.by ?? "nobody named"}`}>
+                  {writtenBy(l)}
+                </th>
+                <td>{l.text}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+/** A line's side column: the version and who saved it, or the agent and session of an agent's entry. */
+export function writtenBy(line: MemoryBlameLine): string {
+  if (line.agent) return `v${line.version} ${line.agent} in ${line.session ?? "a session"}`;
+  if (line.session) return `v${line.version} an agent in ${line.session}`;
+  return `v${line.version} ${line.by ?? ""}`.trim();
 }
 
 /**

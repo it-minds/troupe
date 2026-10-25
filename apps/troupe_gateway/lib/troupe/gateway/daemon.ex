@@ -9,12 +9,14 @@ defmodule Troupe.Gateway.Daemon do
 
   The tree:
 
-      Daemon (one_for_one)
+      Daemon (rest_for_one)
       ├── Commands      idempotency ledger: command_id -> acknowledgement
+      ├── LocalOnly     which attached clients are in Local only, and which sessions are theirs
       ├── Plane         where the plane is and how to speak to it, if anybody has said
       ├── Private       a sealer per private session, and the registry that names them
       ├── Setup         the first run's questions, as far as somebody has answered them
       ├── Connections   DynamicSupervisor, one process per attached client
+      ├── Remote        the sessions offered to the plane, and the connection they are steered over
       ├── Listener      accepts on the transport and hands sockets to Connections
       ├── Loopback      a WebSocket on 127.0.0.1, which is the only door a browser has
       ├── Idle          shuts the daemon down after a quiet period
@@ -34,6 +36,7 @@ defmodule Troupe.Gateway.Daemon do
     Connections,
     Idle,
     Listener,
+    LocalOnly,
     Loopback,
     Memory,
     Plane,
@@ -83,6 +86,9 @@ defmodule Troupe.Gateway.Daemon do
 
     children = [
       {Commands, opts},
+      # Before every connection, each of which says at its `initialize` whether its client
+      # is in Local only.
+      LocalOnly,
       # Before the Listener, because the first thing a client may do is link — and
       # a restart here must not take the sessions with it, which is why it holds a
       # token and nothing else.

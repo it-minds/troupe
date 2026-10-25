@@ -9,6 +9,9 @@
     "files": {
       "type": "array"
     },
+    "local_only": {
+      "type": "string"
+    },
     "memory": {
       "type": "array"
     },

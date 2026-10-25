@@ -219,6 +219,7 @@ export type {
   SigningKeyVersion,
   PlaneRelease,
   PlaneReleases,
+  MemoryBlameLine,
   MemoryDocument,
   MemoryInherited,
   MemoryLine,

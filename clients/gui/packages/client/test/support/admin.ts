@@ -844,6 +844,25 @@ export function lineDiff(before: string, now: string): Array<{ op: "same" | "del
   return out;
 }
 
+/** Who wrote each line of a document up to version `upto`, as the plane's `Memory.blame/2` derives it: each version's lines against the one before. */
+export function memoryBlame(
+  versions: Array<{ version: number; text: string; changed_by: string; changed_at: string }>,
+  upto: number,
+): Array<{ text: string; version: number; by: string; at: string }> {
+  let lines: Array<{ text: string; version: number; by: string; at: string }> = [];
+  for (const v of versions.filter((x) => x.version <= upto)) {
+    const before = lines;
+    let k = 0;
+    lines = [];
+    for (const d of lineDiff(before.map((l) => l.text).join("\n"), v.text)) {
+      if (d.op === "same") lines.push(before[k++]!);
+      else if (d.op === "del") k++;
+      else lines.push({ text: d.text, version: v.version, by: v.changed_by, at: v.changed_at });
+    }
+  }
+  return lines;
+}
+
 /** The diff the plane's audit records: a dotted path per field that moved, maps walked. */
 export function diff(before: Record<string, unknown>, now: Record<string, unknown>, path: string[] = []): Changes {
   const out: Changes = {};
@@ -1763,6 +1782,7 @@ export class FakeAdmin {
             versions: [...versions].reverse().map(memorySummary),
             inherited: params["scope"] === "profile" ? this.memoryInherited(String(params["name"])) : [],
             readers: this.readersOf(found.subject),
+            lines: shown ? memoryBlame(versions, shown.version) : [],
           },
         };
       }

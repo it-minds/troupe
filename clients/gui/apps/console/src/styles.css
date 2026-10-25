@@ -912,6 +912,23 @@ ul.plain li {
 .memory-version .side-by-side td.empty {
   background: var(--bg-sunken);
 }
+/* Who wrote each line: the version and its author in a column beside the line itself. */
+.blame-lines {
+  width: 100%;
+  margin-top: var(--space-2);
+}
+.blame-lines th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--text-muted);
+  white-space: nowrap;
+  vertical-align: top;
+  padding-right: var(--space-4);
+}
+.blame-lines td {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 /* A running session whose last turn read an older version than the one in force. */
 .readers tr.behind td,
 .memory-mark {

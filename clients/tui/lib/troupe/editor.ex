@@ -18,7 +18,9 @@ defmodule Troupe.Editor do
   console program there (a script's interpreter, `code`'s `.cmd`) is started without a
   console window of its own (`:hide`), without which it does not run at all from a port;
   a program with a window, by its executable's header, is started as it is, since
-  `:hide` would hide its window too.
+  `:hide` would hide its window too. An app's alias in WindowsApps (the Store's `pwsh.exe`),
+  which the system will not start as a program, goes through cmd.exe's `start /wait`, which
+  follows it and waits, rather than failing the edit.
 
   This is the one OS process the TUI starts outside `Troupe.OS.Process` and its reaper
   besides the file watcher (TUI Decision 19): the reaper takes the child's standard input
@@ -70,11 +72,37 @@ defmodule Troupe.Editor do
 
     [name | args] = words
 
-    case Troupe.OS.Process.executable(name) do
+    case Troupe.OS.Process.executable(name) ||
+           app_alias(name, Troupe.Executable.dirs(System.get_env("PATH") || "")) do
       nil -> {:missing, name}
       program -> {program, args}
     end
   end
+
+  @doc """
+  An app's alias for `name` in one of `dirs` (the `PATH`'s), on Windows: the Store's `pwsh.exe`
+  in WindowsApps is listed there but is a link the system will not open as a file, so the
+  lookup above passes it by. Started through the shell, which follows it. `nil` elsewhere.
+  """
+  @spec app_alias(String.t(), [String.t()], {atom(), atom()}) :: String.t() | nil
+  def app_alias(name, dirs, os \\ :os.type())
+
+  def app_alias(name, dirs, {:win32, _}) do
+    file = if Path.extname(name) == "", do: name <> ".exe", else: name
+
+    if Path.basename(file) == file do
+      Enum.find_value(dirs, fn dir ->
+        with {:ok, listed} <- File.ls(dir),
+             true <- Enum.any?(listed, &(String.downcase(&1) == String.downcase(file))) do
+          String.replace(Path.join(dir, file), "/", "\\")
+        else
+          _not_here -> nil
+        end
+      end)
+    end
+  end
+
+  def app_alias(_name, _dirs, _os), do: nil
 
   defp default do
     case :os.type() do
@@ -91,11 +119,18 @@ defmodule Troupe.Editor do
       {:win32, _} ->
         hide = if windows_gui?(program), do: [], else: [:hide]
 
-        Port.open(
-          {:spawn_executable, program},
-          [:binary, :exit_status, :stderr_to_stdout] ++ hide ++ [args: args ++ [path]]
-        )
-        |> wait(Path.basename(program))
+        try do
+          Port.open(
+            {:spawn_executable, program},
+            [:binary, :exit_status, :stderr_to_stdout] ++ hide ++ [args: args ++ [path]]
+          )
+          |> wait(Path.basename(program))
+        rescue
+          # An app's alias in WindowsApps (the Store's `pwsh.exe`) is a link only the shell
+          # follows: the system cannot start it as a program, so cmd.exe's `start /wait`
+          # does, in a window of its own, and waits for it.
+          ErlangError -> through_shell(program, args, path)
+        end
 
       _ ->
         back = if Keyword.get(opts, :mouse, false), do: @back <> @mouse_on, else: @back
@@ -113,6 +148,35 @@ defmodule Troupe.Editor do
         |> then(&{:terminal, &1})
     end
   end
+
+  defp through_shell(program, args, path) do
+    Port.open(
+      {:spawn, String.to_charlist(shell_line(Troupe.Executable.comspec(), program, args, path))},
+      [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        :hide
+      ]
+    )
+    |> wait(Path.basename(program))
+  rescue
+    error in ErlangError ->
+      {:error, "the editor #{program} could not be started (#{Exception.message(error)})"}
+  end
+
+  @doc """
+  The command line that starts a Windows editor through cmd.exe, by its absolute path, and
+  waits for it: `start "" /wait`, which follows an app's alias as the shell does. Each word
+  is quoted, the title an empty one.
+  """
+  @spec shell_line(String.t(), String.t(), [String.t()], String.t()) :: String.t()
+  def shell_line(comspec, program, args, path) do
+    words = Enum.map_join([windows_path(program) | args] ++ [windows_path(path)], " ", &~s("#{&1}"))
+    ~s("#{comspec}" /c start "" /wait #{words})
+  end
+
+  defp windows_path(path), do: String.replace(path, "/", "\\")
 
   @doc """
   Whether a Windows executable opens a window of its own: its PE header's subsystem is

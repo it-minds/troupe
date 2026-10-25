@@ -332,6 +332,12 @@ export interface DaemonHooks {
   locate?: () => Promise<DaemonEndpoint | null>;
   /** A tool the client is hosting. Registered per session through `tools.register`. */
   onToolInvoke?: (invoke: ToolInvoke) => Promise<unknown>;
+  /**
+   * Whether the app is in *Local only*, asked at every dial: said in `initialize`'s
+   * `client_info.local_only`, so the daemon makes no plane call for the sessions this app
+   * runs, from the first request on a socket. A change while connected is `setLocalOnly`.
+   */
+  localOnly?: () => boolean;
 }
 
 /** Somebody watching one session's events alongside its view's owner. */
@@ -488,7 +494,7 @@ export class DaemonClient {
         {
           url: daemonUrl(this.at),
           token: this.at.token,
-          clientInfo: { name: "troupe-gui", version: "1" },
+          clientInfo: { name: "troupe-gui", version: "1", ...(this.hooks.localOnly?.() ? { local_only: true } : {}) },
           // Tools only when something is actually hosting them: a client that says it can
           // serve `tool.invoke` and then answers `method_not_found` is worse than one that
           // never offered.
@@ -1034,6 +1040,17 @@ export class DaemonClient {
    */
   ownMemory(): Promise<OwnMemory> {
     return this.call<OwnMemory>("me.memory");
+  }
+
+  /**
+   * The app's Local only switch moved: tell the daemon, which from now on makes no plane
+   * call for the sessions this app runs while it is on, and puts the ones open here under
+   * it. A socket not open yet says it at its `initialize` (`localOnly`), so this asks only
+   * of one that is.
+   */
+  async setLocalOnly(on: boolean): Promise<void> {
+    if (!this.conn) return;
+    await this.conn.call("client.mode", { local_only: on });
   }
 
   /** Save it, the whole text over the version it was edited from; the sessions here read it from their next turn. */

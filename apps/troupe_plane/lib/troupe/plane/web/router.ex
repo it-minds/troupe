@@ -817,7 +817,8 @@ defmodule Troupe.Plane.Web.Router do
         scim_resource(conn, status, SCIM.render_group(group, Identity.members_of(group)))
 
       {:error, reason} ->
-        send_json(conn, 400, %{"status" => "400", "detail" => inspect(reason)})
+        detail = if is_binary(reason), do: reason, else: inspect(reason)
+        send_json(conn, 400, %{"status" => "400", "detail" => detail})
     end
   end
 

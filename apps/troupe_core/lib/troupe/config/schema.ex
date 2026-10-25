@@ -578,7 +578,7 @@ defmodule Troupe.Config.Schema do
           scope: :user,
           field: :trusted_workspaces
         ),
-        spec("state_dir", :string, "Where session logs go. Unset: the platform's state directory.",
+        spec("state_dir", :string, "Where session logs go, with their blobs and the outputs kept from them. Unset: the platform's state directory.",
           scope: :trusted,
           field: :state_dir
         ),
@@ -598,6 +598,15 @@ defmodule Troupe.Config.Schema do
           default: true,
           field: :mouse,
           label: "mouse"
+        ),
+        spec(
+          "local_only",
+          :boolean,
+          "The terminal UI is in Local only: it makes no call to a plane, and tells the daemon, which then makes " <>
+            "none for the sessions it runs (no `remember` to your own memory, no offer for steering). `troupe doctor` says whether it is on.",
+          default: false,
+          scope: :user,
+          field: :local_only
         ),
         spec(
           "ui",

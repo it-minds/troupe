@@ -6,6 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
+import { writtenBy } from "../src/views/Memory";
 import { PEOPLE, button, freshBrowser, render, says, sees, seesButton, seesField, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
@@ -67,6 +68,31 @@ describe("company memory", () => {
     await sees("organisation v1 → v2", org);
     const added = await waitFor(() => org()?.querySelector(".memory-version .add"), "the line version 2 added");
     expect(added.textContent).toContain("The on-call rota is in the wiki.");
+  });
+
+  // #55's provenance: blame, not history, in a column beside each line.
+  it("says who wrote each line, beside it", async () => {
+    visit("#/memory");
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+
+    const org = () => card("The organisation's memory");
+    await waitFor(org, "the organisation's memory");
+    (await seesButton("Who wrote each line", org()!)).click();
+    const table = await waitFor(() => org()?.querySelector<HTMLTableElement>("table.blame-lines"), "who wrote each line");
+    const rows = [...table.querySelectorAll("tr")].map((r) => [r.querySelector("th")!.textContent, r.querySelector("td")!.textContent]);
+    expect(rows).toEqual([
+      ["v1 alice@example.com", "We deploy on Tuesdays."],
+      ["v2 alice@example.com", "The on-call rota is in the wiki."],
+    ]);
+    expect(table.querySelector("th")!.getAttribute("title")).toContain("by alice@example.com");
+    (await seesButton("Hide who wrote each line", org()!)).click();
+    await waitFor(() => !org()?.querySelector("table.blame-lines"), "the column folded away");
+
+    // An agent's entry, in a person's own, names the agent and the session it came from.
+    expect(writtenBy({ text: "- Tabs.", version: 3, by: "ada@example.com", session: "20261025T101112-abc123", agent: "build" })).toBe(
+      "v3 build in 20261025T101112-abc123",
+    );
   });
 
   it("says when somebody else saved first, and saves nothing", async () => {

@@ -22,9 +22,16 @@ import { Cost, Loading, RowStatus, When } from "./bits";
 
 type Origin = "trigger" | "a2a";
 
-/** The two reasons a run is worth looking at before the ones that merely finished. */
-function wentWrong(row: FleetRow): boolean {
-  return row.doneReason === "budget_exhausted" || row.doneReason === "llm_error";
+/** Why a run is worth looking at before the ones that merely finished: its turn failed, or it ran out. */
+export function wentWrong(row: Pick<FleetRow, "failed" | "doneReason">): boolean {
+  return Boolean(row.failed) || row.doneReason === "budget_exhausted" || row.doneReason === "llm_error";
+}
+
+/** How a run ended, in a word: a failed turn says so, and why, before its session's state. */
+export function ended(row: Pick<FleetRow, "failed" | "doneReason" | "status">): string {
+  if (row.failed) return `Failed: ${words(row.failed.reason)}`;
+  if (row.doneReason) return words(row.doneReason);
+  return row.status ? words(row.status) : "still going";
 }
 
 export function Review({
@@ -229,7 +236,7 @@ function Run({
             {run?.fired_by ? ` by ${run.fired_by}` : ""}
           </dd>
           <dt>Ended</dt>
-          <dd>{row.doneReason ? words(row.doneReason) : row.status ? words(row.status) : "still going"}</dd>
+          <dd>{ended(row)}</dd>
           {run && (
             <>
               <dt>Run</dt>

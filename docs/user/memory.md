@@ -77,5 +77,16 @@ An agent may add to your own memory and to the repository's, and to nothing else
 
 When your own memory is full, `remember` says so and names `troupe memory --edit`: make room
 there and ask again. With no plane signed in on this machine, `remember` to your own memory
-is refused with a sentence, and the agent can keep the fact in the repository instead. The
-desktop app in *Local only* does not reach the plane, and so does not edit it either.
+is refused with a sentence, and the agent can keep the fact in the repository instead. So is
+it in a session a client in *Local only* runs (the desktop app's switch, or `local_only:
+true` for `troupe`): the daemon sends nothing of that session to the plane. The desktop app
+in Local only does not edit your memory either.
+
+## Who wrote each line
+
+`troupe memory --blame` prints your own memory a line at a time with who wrote each: the
+version it came in and who saved it, or, for an agent's entry, the agent and the session it
+came from. In the console, *Who wrote each line* under a document does the same for the
+organisation's, a team's and a profile's, beside each line. It is worked out from the
+versions and the audit, which keep nothing more for it: blame, not history, and the versions
+list is the history.

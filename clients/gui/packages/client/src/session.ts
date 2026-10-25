@@ -433,9 +433,9 @@ export class SessionView {
   }
 
   /**
-   * `blob.get`. `range` is inclusive and optional; a server may answer with a shorter
-   * range than asked for, and says so, so a caller reading a large blob loops on the
-   * range it got back rather than the one it sent.
+   * `blob.get`. `range` is inclusive and optional; the answer is the bytes in it, stopping
+   * at the blob's end, and `size` is the whole blob's, so a caller reading a large blob
+   * counts the bytes it decoded and asks for the next range until it has `size`.
    */
   blobGet(blob: string, range?: [number, number]): Promise<BlobResponse> {
     const params: Record<string, unknown> = { session_id: this.sessionId, blob };

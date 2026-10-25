@@ -979,6 +979,18 @@ export interface MemoryDocument {
   inherited?: MemoryInherited[];
   /** The running sessions it reaches that have had a turn, and which of them are behind. Absent from a plane from before it. */
   readers?: MemoryReaders;
+  /** The version shown line by line with who wrote each line (blame, not history). Absent from a plane from before it. */
+  lines?: MemoryBlameLine[];
+}
+
+/** One line of a memory document with who wrote it: the version it came in, who saved that, and an agent's entry's session and agent. */
+export interface MemoryBlameLine {
+  text: string;
+  version: number;
+  by?: string | null;
+  at?: string | null;
+  session?: string;
+  agent?: string;
 }
 
 /** Which version of one document the running sessions it reaches read at their last turn. */

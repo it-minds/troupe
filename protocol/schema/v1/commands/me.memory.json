@@ -2,7 +2,11 @@
   "$id": "https://troupe.dev/schema/v1/commands/me.memory.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "properties": {},
+  "properties": {
+    "blame": {
+      "type": "boolean"
+    }
+  },
   "required": [],
   "title": "me.memory",
   "type": "object"

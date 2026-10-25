@@ -82,7 +82,8 @@ defmodule Troupe.CLI do
           update_version: String.t() | nil,
           edit: boolean(),
           clear: boolean(),
-          status: boolean()
+          status: boolean(),
+          blame: boolean()
         }
 
   @switches [
@@ -118,7 +119,8 @@ defmodule Troupe.CLI do
     keep: :string,
     edit: :boolean,
     clear: :boolean,
-    status: :boolean
+    status: :boolean,
+    blame: :boolean
   ]
 
   # Every command line `troupe` takes: how it is typed, what it does, and command lines
@@ -200,12 +202,19 @@ defmodule Troupe.CLI do
     {"troupe config pull [PLANE_URL]",
      "fetch the organisation's defaults and limits from the plane now (never a key)",
      [["config", "pull"]]},
-    {"troupe memory [--edit | --clear | --status]",
+    {"troupe memory [--edit | --clear | --status | --blame]",
      "your own memory on the plane, which every session of yours reads on every machine: " <>
        "show it, edit it in $EDITOR, or clear it; an agent of yours only ever adds to it. " <>
        "--status: which versions of the organisation's and your memory this machine holds, " <>
-       "whether they are current, and what each session here read at its last turn",
-     [["memory"], ["memory", "--edit"], ["memory", "--clear"], ["memory", "--status"]]},
+       "whether they are current, and what each session here read at its last turn. " <>
+       "--blame: each line with who wrote it, and the agent and session of an agent's entry",
+     [
+       ["memory"],
+       ["memory", "--edit"],
+       ["memory", "--clear"],
+       ["memory", "--status"],
+       ["memory", "--blame"]
+     ]},
     {"troupe models [--refresh]",
      "what each provider serves, its window and its price; asked again when stale, or now with --refresh",
      [["models", "--refresh"]]},
@@ -377,7 +386,8 @@ defmodule Troupe.CLI do
       update_version: nil,
       edit: Keyword.get(opts, :edit, false),
       clear: Keyword.get(opts, :clear, false),
-      status: Keyword.get(opts, :status, false)
+      status: Keyword.get(opts, :status, false),
+      blame: Keyword.get(opts, :blame, false)
     }
 
     cond do
@@ -469,6 +479,9 @@ defmodule Troupe.CLI do
 
   defp parse_rest(["memory"], %{status: true} = base) when base.edit or base.clear,
     do: {:error, "troupe memory --status changes nothing; it takes neither --edit nor --clear"}
+
+  defp parse_rest(["memory"], %{blame: true} = base) when base.edit or base.clear or base.status,
+    do: {:error, "troupe memory --blame only shows who wrote each line; it takes nothing else"}
 
   defp parse_rest(["memory"], base), do: {:ok, %{base | mode: :memory}}
   defp parse_rest(["models"], base), do: {:ok, %{base | mode: :models}}

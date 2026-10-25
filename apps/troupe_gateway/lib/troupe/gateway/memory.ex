@@ -18,8 +18,12 @@ defmodule Troupe.Gateway.Memory do
   Every ask carries what each session running here read at its last turn (`sessions`, each
   document's scope, name, version and hash and when the turn began), which the plane keeps
   so its console sees which sessions are behind: a field on the poll the daemon makes anyway,
-  not a call of its own. `status/0` says where this machine stands, for `troupe memory
+  not a call of its own. `status/1` says where this machine stands, for `troupe memory
   --status`.
+
+  **Local only** (`Troupe.Gateway.LocalOnly`): a session under it is left out of that
+  report, and an agent's entry from it is refused; it reads the copy kept here. While every
+  client attached is in Local only, the poll asks nothing.
 
   One writer for all three (`keep/2`): a copy the pin refuses is not kept, and the copy
   before stays. A copy whose documents changed is announced to every client as
@@ -41,7 +45,7 @@ defmodule Troupe.Gateway.Memory do
 
   use GenServer
 
-  alias Troupe.Gateway.{Connections, Plane}
+  alias Troupe.Gateway.{Connections, LocalOnly, Plane}
   alias Troupe.PlaneKeys
   alias Troupe.PlaneMemory
   alias Troupe.Protocol.Memory, as: Shape
@@ -73,8 +77,12 @@ defmodule Troupe.Gateway.Memory do
 
   # What every ask of `me.memory` carries: what each session running here read at its last
   # turn, by session id, when the turn began, and each document's scope, name, version and
-  # hash, never its text, so the console sees who is behind. Nothing else of a session.
-  defp asked, do: %{"sessions" => Troupe.Session.PlaneMemory.reads()}
+  # hash, never its text, so the console sees who is behind. Nothing else of a session, and
+  # nothing of one under Local only, whose client promised that nothing of it leaves here.
+  defp asked do
+    reads = Enum.reject(Troupe.Session.PlaneMemory.reads(), &LocalOnly.session?(&1["session_id"]))
+    %{"sessions" => reads}
+  end
 
   @doc """
   Where this machine's memory stands, for its person's own debugging (`troupe memory
@@ -83,10 +91,10 @@ defmodule Troupe.Gateway.Memory do
   documents in force now where it could be asked (`in_force`, then kept as every answer is)
   and whether the copy was `current`, and each session running here with what its last turn
   read and whether that is `current` against the copy now. `reason` says why the plane was
-  not asked.
+  not asked. `ask: false` (a client in Local only) asks nothing of the plane.
   """
-  @spec status() :: map()
-  def status do
+  @spec status(keyword()) :: map()
+  def status(opts \\ []) do
     {held, problem} =
       case PlaneMemory.read_cache() do
         {:ok, cached} -> {cached, nil}
@@ -98,7 +106,8 @@ defmodule Troupe.Gateway.Memory do
 
     # The plane's answer, checked and kept as every answer is, is what is in force now.
     asked =
-      with {:ok, url} <- signed_in(),
+      with :ok <- asking(Keyword.get(opts, :ask, true)),
+           {:ok, url} <- signed_in(),
            {:ok, answer} <- plane_call("me.memory", asked()),
            {:ok, _kept} <- keep(url, answer) do
         {:ok, documents_now()}
@@ -120,7 +129,11 @@ defmodule Troupe.Gateway.Memory do
 
   defp in_force({:ok, stamps}, held), do: %{"in_force" => stamps, "current" => same?(held, stamps), "reason" => nil}
   defp in_force({:error, :signed_out}, _held), do: %{"in_force" => nil, "current" => nil, "reason" => "signed out: the plane was not asked"}
+  defp in_force({:error, :local_only}, _held), do: %{"in_force" => nil, "current" => nil, "reason" => "Local only: the plane was not asked"}
   defp in_force({:error, reason}, _held), do: %{"in_force" => nil, "current" => nil, "reason" => sentence(reason)}
+
+  defp asking(true), do: :ok
+  defp asking(false), do: {:error, :local_only}
 
   defp documents_now do
     case PlaneMemory.read_cache() do
@@ -218,12 +231,16 @@ defmodule Troupe.Gateway.Memory do
   @doc """
   The person's own document as the plane has it now, asked of the plane and kept as every
   answer of `me.memory` is: `version` (`0` for none), `text`, `bytes`, `limit`, who saved it
-  and when, and `plane_url`. `{:error, :signed_out}` with no plane token.
+  and when, and `plane_url`. `{:error, :signed_out}` with no plane token. `blame: true` adds
+  `lines`: each line with who wrote it, the version it came in and the session an agent's
+  entry came from (`troupe memory --blame`).
   """
-  @spec own() :: {:ok, map()} | {:error, :signed_out | term()}
-  def own do
+  @spec own(keyword()) :: {:ok, map()} | {:error, :signed_out | term()}
+  def own(opts \\ []) do
+    ask = if opts[:blame], do: Map.put(asked(), "blame", true), else: asked()
+
     with {:ok, url} <- signed_in(),
-         {:ok, answer} <- plane_call("me.memory", asked()) do
+         {:ok, answer} <- plane_call("me.memory", ask) do
       _kept = keep(url, answer)
       own_of(answer, url)
     end
@@ -238,7 +255,8 @@ defmodule Troupe.Gateway.Memory do
   @spec put_own(map()) :: {:ok, map()} | {:error, :signed_out | term()}
   def put_own(params) when is_map(params) do
     with {:ok, url} <- signed_in(),
-         {:ok, saved} <- plane_call("me.memory.put", Map.take(params, ["text", "version", "append"])) do
+         {:ok, saved} <-
+           plane_call("me.memory.put", Map.take(params, ["text", "version", "append", "session", "agent"])) do
       _refreshed = refresh()
       {:ok, Map.put(saved, "plane_url", url)}
     end
@@ -246,16 +264,32 @@ defmodule Troupe.Gateway.Memory do
 
   @doc """
   Where `remember` with `level: "me"` sends its entry on this machine (`Troupe.UserMemory`):
-  `put_own/1` with the entry. The plane's refusal comes back as its sentence.
+  `put_own/1` with the entry, naming the session and the agent it came from, which the plane
+  keeps beside the version as who wrote the line. The plane's refusal comes back as its
+  sentence. A session under Local only sends nothing, and says so.
   """
   @spec append(String.t(), Troupe.Tool.Ctx.t()) :: {:ok, map()} | {:error, :signed_out | String.t()}
-  def append(entry, _ctx) do
-    case put_own(%{"append" => entry}) do
+  def append(entry, ctx) do
+    if LocalOnly.session?(ctx.session_id), do: {:error, local_only()}, else: send_entry(entry, ctx)
+  end
+
+  defp local_only do
+    "this session is under Local only, so nothing of it goes to the plane, the person's own " <>
+      "memory included. Remember it for this repository instead (level repository, the " <>
+      "default), or ask them to turn Local only off"
+  end
+
+  defp send_entry(entry, ctx) do
+    case put_own(%{"append" => entry, "session" => ctx.session_id, "agent" => agent(ctx)}) do
       {:ok, saved} -> {:ok, %{"entry" => saved["entry"], "version" => get_in(saved, ["user", "version"])}}
       {:error, :signed_out} -> {:error, :signed_out}
       {:error, reason} -> {:error, sentence(reason)}
     end
   end
+
+  defp agent(%{definition: %{name: name}}) when is_binary(name), do: name
+  defp agent(%{agent_path: [_ | _] = path}), do: List.last(path)
+  defp agent(_ctx), do: nil
 
   @doc "What a refusal of the plane's says, in words."
   @spec sentence(term()) :: String.t()
@@ -304,7 +338,9 @@ defmodule Troupe.Gateway.Memory do
 
   @impl GenServer
   def handle_info(:poll, state) do
-    if Plane.linked?() do
+    # While every client attached is in Local only, the plane is not asked; the next poll
+    # after one that is not asks again.
+    if Plane.linked?() and not LocalOnly.paused?() do
       case refresh() do
         {:error, reason} ->
           Logger.info(

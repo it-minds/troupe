@@ -2679,7 +2679,9 @@ defmodule Troupe.Plane.Admin do
   `against` names another version to compare the one shown with, in place of the one
   before it: what the editor's side-by-side shows. And `readers`: the running sessions the
   document reaches that have had a turn, each with the version of it that turn ran under and
-  whether that is behind the version in force (`Memory.readers/1`).
+  whether that is behind the version in force (`Memory.readers/1`). And `lines`: each line of
+  the version shown with who wrote it, the version it came in and, for an agent's entry, the
+  session and the agent (`Memory.blame/2`).
   """
   @spec memory_get(actor(), String.t(), String.t() | nil, integer() | nil, integer() | nil) ::
           result()
@@ -2701,11 +2703,16 @@ defmodule Troupe.Plane.Admin do
          against_text: before && before.text,
          diff: Memory.diff(before && before.text, shown && shown.text),
          versions: owner |> Memory.versions() |> Enum.map(&Memory.summary/1),
+         lines: memory_lines(owner, shown),
          inherited: memory_inherited(scope, owner),
          readers: memory_readers(owner)
        }}
     end
   end
+
+  # Who wrote each line of the version shown, and from which session; nothing for none.
+  defp memory_lines(_owner, nil), do: []
+  defp memory_lines(owner, shown), do: Memory.blame(owner, shown.version)
 
   # The version a version is compared with: the one named, or the one before it.
   defp memory_against(owner, shown, nil),

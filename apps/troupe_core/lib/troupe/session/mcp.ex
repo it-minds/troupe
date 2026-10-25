@@ -527,12 +527,21 @@ defmodule Troupe.Session.MCP do
 
     case Enum.find(records, &(&1.name == name)) do
       nil ->
-        {:reply, {:error, :unknown_server}, stop_server(state, name)}
+        {:reply, {:error, :unknown_server}, state |> stop_server(name) |> retain_sessions()}
 
       record ->
-        state = state |> stop_server(name) |> place(record)
+        state = state |> stop_server(name) |> place(record) |> retain_sessions()
         {:reply, :ok, ask_for_workspace(state)}
     end
+  end
+
+  # A server gone from the files, or moved to another address, has its HTTP sessions ended
+  # now, at the server too, as a pod's are when its bundle drops one, rather than when the
+  # session stops; every other server's are kept and go on.
+  defp retain_sessions(state) do
+    servers = for {_name, %{kind: :http, http: %{server: %Server{} = server}}} <- state.servers, do: server
+    :ok = Sessions.retain(state.sessions, servers)
+    state
   end
 
   # `config.yaml`'s entries as the session started with them: a reload reads the

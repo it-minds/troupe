@@ -98,6 +98,10 @@ defmodule Troupe.Agent.State do
     # input was taken or the conversation compacted since they were read.
     instructions: nil,
     instructions_due: true,
+    # Whether the root's `instructions_loaded` has said the session is under its client's
+    # Local only (`Troupe.LocalOnly`): said once, and again only after it left it and came
+    # back. Not replayed.
+    local_only_said: false,
     # The MCP servers' and the person's clients' tools as this turn's first model call
     # found them (Decision 871), offered for the rest of the turn, so a server that comes
     # back with another list, a sign-in or a person's tools leaving change the tools at the

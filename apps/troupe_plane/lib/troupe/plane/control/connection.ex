@@ -706,7 +706,7 @@ defmodule Troupe.Plane.Control.Connection do
          %Session{} = session <- session_of(params["session_id"], state.worker),
          :ok <- at_epoch(session, params["epoch"]),
          {:owner, %User{active: true} = owner} <- {:owner, Identity.get_user(session.owner_subject)} do
-      case Memory.append_own(owner, params["append"], session: session.id) do
+      case Memory.append_own(owner, params["append"], [session: session.id] ++ agent_of(params)) do
         {:ok, saved} ->
           {:ok, %{"entry" => saved.entry, "changed" => saved.changes != %{}, "version" => Memory.own(owner)["version"]}, state}
 
@@ -925,6 +925,13 @@ defmodule Troupe.Plane.Control.Connection do
   defp own_reason(:no_person), do: "the session's owner has no memory of their own"
   defp own_reason(reason) when is_binary(reason), do: reason
   defp own_reason(reason), do: inspect(reason)
+
+  # The agent an entry came from, as the pod names it: kept beside the version as who wrote
+  # the line.
+  defp agent_of(%{"agent" => agent}) when is_binary(agent) and agent != "" and byte_size(agent) <= 128,
+    do: [agent: agent]
+
+  defp agent_of(_params), do: []
 
   defp fetch_bundle(%{"hash" => hash}, worker) when is_binary(hash) do
     Bundles.by_hash(hash, channel: channel_of(worker))

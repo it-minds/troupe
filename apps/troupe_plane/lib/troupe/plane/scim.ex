@@ -112,14 +112,24 @@ defmodule Troupe.Plane.SCIM do
   """
   @spec put_group(map()) :: {:ok, Group.t()} | {:error, term()}
   def put_group(resource) do
-    with {:ok, group} <-
+    with {:ok, external_id} <- group_id(resource),
+         {:ok, group} <-
            Identity.upsert_group(%{
-             external_id: Map.get(resource, "externalId") || Map.fetch!(resource, "id"),
-             display_name: Map.get(resource, "displayName") || Map.fetch!(resource, "id")
+             external_id: external_id,
+             display_name: Map.get(resource, "displayName") || external_id
            }) do
       replace_members(group, Map.get(resource, "members", []))
       maybe_enable_team(group)
       {:ok, group}
+    end
+  end
+
+  # What a group is known by: its `externalId`, else its `id`. A body with neither names no
+  # group, and is refused as the request it is rather than raising.
+  defp group_id(resource) do
+    case Map.get(resource, "externalId") || Map.get(resource, "id") do
+      id when is_binary(id) and id != "" -> {:ok, id}
+      _none -> {:error, "a group names itself with externalId or id, and this one has neither"}
     end
   end
 

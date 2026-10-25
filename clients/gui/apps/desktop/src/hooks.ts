@@ -23,6 +23,7 @@ import {
   StartQuestions,
   TroupeRpcError,
 } from "@troupe/client";
+import { storedLocalOnly } from "./mode";
 import { noticeEvent } from "./notify";
 import { adoptFragment, daemonHint, forgetDaemon, rememberDaemon, shell } from "./shell";
 import type {
@@ -280,6 +281,8 @@ export function useDaemon(auth: AuthSession | null = null): {
           .catch(() => undefined);
       },
       ...(locate ? { locate } : {}),
+      // Asked at every dial, so a socket opened after the switch says what it now is.
+      localOnly: storedLocalOnly,
     });
     setReached(null);
     next

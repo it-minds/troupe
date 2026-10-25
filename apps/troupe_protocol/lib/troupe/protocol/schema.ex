@@ -229,13 +229,16 @@ defmodule Troupe.Protocol.Schema do
       # Written when the set or a file changed since the agent's last turn. `memory` is each
       # memory document read (#55), as the plane names it: `scope` (organisation, team,
       # profile, user), `name`, `version` and `hash`, so the log says which version of each
-      # the turns from here run under.
+      # the turns from here run under. `local_only`, once, where the session's client put it
+      # under Local only: a sentence that it reads the memory the machine already holds and
+      # that nothing of it goes to the plane.
       "instructions_loaded" => %{
         "budget" => required(:integer),
         "used" => required(:integer),
         "files" => required(:array),
         "searched" => optional({:array, :string}),
-        "memory" => optional(:array)
+        "memory" => optional(:array),
+        "local_only" => optional(:string)
       },
       # The organisation's memory documents an agent reads changed while the session ran
       # (#55): a save on the plane reached it, and its next turn read the new ones. Each
@@ -1088,7 +1091,8 @@ defmodule Troupe.Protocol.Schema do
       },
       # The person's own memory document on the plane (#55), read and saved through the
       # daemon's sign-in: the whole `text` over the `version` edited, or one `append`ed entry.
-      "me.memory" => %{},
+      # `blame` adds `lines`, who wrote each line and from which session (#55).
+      "me.memory" => %{"blame" => optional(:boolean)},
       # Where this machine's copy of the plane's memory stands, for the person's own
       # debugging: what it holds, what is in force, what each session here last read.
       "me.memory.status" => %{},
@@ -1098,6 +1102,10 @@ defmodule Troupe.Protocol.Schema do
         "version" => optional(:integer),
         "append" => optional(:string)
       },
+      # The client's Local only switch moved: the daemon makes no plane call
+      # for the sessions it runs while it is on. Said at `initialize` as
+      # `client_info.local_only`.
+      "client.mode" => %{"local_only" => required(:boolean)},
       # A page, a document or a file published on the plane as the person (#62), through
       # the daemon's sign-in: `files` each `{path, bytes}` (base64) and an optional
       # `content_type`; `id` republishes one of theirs; `session_id` names where it came from.
