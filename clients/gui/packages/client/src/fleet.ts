@@ -50,6 +50,14 @@ export interface RemoteOffer {
   ownerName?: string | null;
   shares: RemotePerson[];
   steering: RemotePerson[];
+  /**
+   * On this computer's own row, whether it comes back after a restart: `across_restarts`
+   * where the daemon starts at login, `until_restart` where nothing starts it then; null
+   * on a `remote` row, and from a daemon before it said.
+   */
+  lasts: "across_restarts" | "until_restart" | null;
+  /** On this computer's own row: read back from the daemon's record as it started. */
+  restored: boolean;
 }
 
 /** The daemon's or the plane's word on an offer, or null where it says none. */
@@ -63,8 +71,28 @@ export function remoteOffer(value: unknown): RemoteOffer | null {
     ownerName: typeof v["owner_name"] === "string" ? v["owner_name"] : null,
     shares: Array.isArray(v["shares"]) ? (v["shares"] as RemotePerson[]) : [],
     steering: Array.isArray(v["steering"]) ? (v["steering"] as RemotePerson[]) : [],
+    lasts: v["lasts"] === "across_restarts" || v["lasts"] === "until_restart" ? v["lasts"] : null,
+    restored: v["restored"] === true,
   };
 }
+
+/**
+ * What an offer of this computer's says of a restart, as the terminal's `/steer` says it:
+ * that it came back after one, and that it lasts only until the next where nothing starts
+ * the daemon at login. Empty for a `remote` row, which the plane says nothing of this for.
+ */
+export function offerRestartWords(offer: RemoteOffer): string[] {
+  return [offer.restored ? "back after a restart" : null, offer.lasts === "until_restart" ? "until this machine restarts" : null].filter(
+    (w): w is string => w !== null,
+  );
+}
+
+/**
+ * What the desktop app says once, as an offer is made, where nothing starts the daemon at
+ * login: the terminal's `/steer on` says the same.
+ */
+export const RESTART_SENTENCE =
+  "It stays offered until this machine restarts: troupe-daemon login on starts the daemon when you log in, and the offer comes back with it.";
 
 /**
  * How a private session's sealing stands, as the daemon's `session.list` says it (troupe

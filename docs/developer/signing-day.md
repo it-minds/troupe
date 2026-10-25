@@ -19,9 +19,9 @@ Smart App Control check each one, then signs the artifact, then checks what it m
 | `native.yml` job | what is signed, and how | checked in the job by |
 | --- | --- | --- |
 | `daemon`, macOS | every Mach-O in the release (the ERTS programs, `beam.smp`, every NIF), with the hardened runtime, a secure timestamp and [`beam.entitlements`](../../scripts/signing/beam.entitlements), by `Troupe.Release.OSSigning` before `:tar` packs it; then the tree is notarised | `sign-macos.sh --verify` on the unpacked archive; the smoke test runs the signed files |
-| `daemon`, Windows | every PE file in the release, before `:tar`, with `artifact-signing-cli` | `sign-windows.ps1 -Verify` on the unpacked archive |
-| `tui`, macOS and Windows | every Mach-O or PE file in Burrito's payload, after Burrito's patch phase puts the target's ERTS in it and before it is packed; then the `troupe` binary; on macOS it is notarised | the same, on the binary and on the payload it unpacks on its first run |
-| `desktop`, macOS | Tauri: the app with the hardened runtime and `entitlements.plist`, notarised and stapled; the updater's `.app.tar.gz` is packed afterwards, from the stapled app | `codesign --verify --deep --strict`, `spctl --assess`, `xcrun stapler validate` |
+| `daemon`, Windows | every PE file in the release that carries no valid signature yet, before `:tar`, with `artifact-signing-cli`; the Erlang runtime's own are Ericsson AB's already, so about three are signed | `sign-windows.ps1 -Verify` on the unpacked archive |
+| `tui`, macOS and Windows | every Mach-O or PE file in Burrito's payload, after Burrito's patch phase puts the target's ERTS in it and before it is packed (on Windows the unsigned ones, about five); then the `troupe` binary; on macOS it is notarised | the same, on the binary and on the payload it unpacks on its first run |
+| `desktop`, macOS | Tauri: the app with the hardened runtime and `entitlements.plist`, notarised and stapled; the updater's `Troupe_<version>_universal.app.tar.gz` is packed afterwards, from the stapled app, and is the only app archive kept | `codesign --verify --deep --strict`, `spctl --assess`, `xcrun stapler validate` |
 | `desktop`, Windows | Tauri, through the sign command in `tauri.signing.conf.json`, which is `sign-windows.ps1`: the app's executable, the NSIS setup and its uninstaller, the MSI | `sign-windows.ps1 -Verify`; what the setup unpacks is listed beside it |
 | Linux targets | nothing: Linux has no OS signature to add | — |
 

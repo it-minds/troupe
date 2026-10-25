@@ -840,13 +840,18 @@ jobs:
       # archive, the shape Tauri's updater unpacks, beside the disk image a person installs
       # from. Windows updates from the setup and Linux from the AppImage, both kept already.
       # Packed here and signed in `release.yml`'s publish job, which alone holds the key.
+      # Only the versioned archive is kept: the build leaves an unversioned
+      # `Troupe.app.tar.gz` of its own in `macos/`, which no `latest.json` names and the
+      # release key never signs, and releases carried it beside the versioned one.
       - name: The app archive the updater reads (macOS)
         if: runner.os == 'macOS'
         shell: bash
         working-directory: clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle
         run: |
           version=$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/VERSION")
-          tar -czf "macos/Troupe_${version%%-*}_universal.app.tar.gz" -C macos Troupe.app
+          archive="Troupe_${version%%-*}_universal.app.tar.gz"
+          find macos -maxdepth 1 \( -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \) -type f -delete
+          tar -czf "macos/$archive" -C macos Troupe.app
           ls -la macos
 
       # The app as a whole, and each Mach-O in it with the hardened runtime and the
@@ -920,8 +925,9 @@ jobs:
         with:
           name: ${{ inputs.artifact_prefix }}desktop-${{ matrix.target }}
           if-no-files-found: error
+          # The updater's app archive by its versioned name alone (see its step above).
           path: |
-            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz
+            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Troupe_*_universal.app.tar.gz
             clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
             clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
             clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi

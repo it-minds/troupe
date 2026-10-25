@@ -169,9 +169,13 @@ HSM, and a hosted CI runner can only reach the cloud kind.
 | The key | in Microsoft's HSMs (FIPS 140-3 Level 3); the certificate is never handed out and renews itself ([FAQ](https://learn.microsoft.com/en-us/azure/artifact-signing/faq)) | in the CA's cloud HSM; a USB token instead cannot be reached from a hosted runner | the same |
 | SmartScreen | reputation builds from downloads | the same | the same: EV no longer bypasses it, and Artifact Signing issues no EV ([SmartScreen reputation](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation), [FAQ](https://learn.microsoft.com/en-us/azure/artifact-signing/faq)) |
 
-A release signs about 85 files on Windows (the desktop app's executable and installers, 25
-in `troupe-daemon` and 57 in `troupe.exe`'s payload), so a tier priced per signature has to
-be sized for that, times the releases in a month.
+A release signs about a dozen files on Windows: three in `troupe-daemon` (the zstd NIF,
+`inotifywait.exe` and the reaper), five for `troupe.exe` (the same three, the terminal
+renderer's NIF and `troupe.exe` itself), the desktop app's executable and its installers.
+The two payloads hold about 60 PE files between them, as measured on 0.26.0, but the rest
+are the Erlang runtime's own, which Ericsson AB already signs, and
+`scripts/signing/sign-windows.ps1` leaves a file that carries a valid signature as it is.
+A tier priced per signature is sized for that, times the releases in a month.
 
 **Where the sources disagree: how old an organisation must be.** Microsoft's quickstart and
 FAQ for Artifact Signing, as read, state no minimum age. Search results quoting the earlier
@@ -188,9 +192,9 @@ validation cannot be argued further once the three chances to add documents are 
 If the organisation is in one of the listed countries and passes identity validation,
 use **Microsoft Artifact Signing on the Basic plan**:
 
-- **It is the cheapest by an order of magnitude**: 9.99 USD a month covers a release's 85
-  signatures many times over, where a CA's cloud signing priced per signature costs 85 USD a
-  month or more for one release a month.
+- **It is the cheapest**: 9.99 USD a month covers a release's dozen signatures hundreds of
+  times over, where a CA's cloud signing priced per signature costs 20 USD a month for 20
+  signatures, about one release, on top of the certificate's 129 USD a year.
 - **No key to hold.** The service "automatically manages your certificate lifecycle"
   ([pricing](https://azure.microsoft.com/en-us/pricing/details/artifact-signing/)), so there
   is no `.pfx`, no token and no reissue every 460 days to remember.

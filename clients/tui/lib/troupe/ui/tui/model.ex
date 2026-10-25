@@ -229,6 +229,15 @@ defmodule Troupe.UI.TUI.Model do
   @spec rebuild(String.t(), String.t(), [Event.t()]) :: t()
   def rebuild(sid, workspace, events), do: Enum.reduce(events, new(sid, workspace), &apply(&2, &1))
 
+  @doc """
+  Whether this is a laptop's session steered from here through the plane (root #58): the
+  laptop's daemon says so in `initialize` (`capabilities.relayed`), and answers an approval
+  from here once, never for the rest of the session.
+  """
+  @spec relayed?(t()) :: boolean()
+  def relayed?(%__MODULE__{remote: %{relayed?: true}}), do: true
+  def relayed?(_model), do: false
+
   @spec apply(t(), Event.t()) :: t()
   def apply(%__MODULE__{} = m, %Event{} = e) do
     root = root(e.agent_path)
@@ -1833,7 +1842,11 @@ defmodule Troupe.UI.TUI.Model do
   def view(false), do: view(%{detail: :quiet})
 
   def view(%{} = v),
-    do: Map.merge(%{detail: :quiet, open: MapSet.new(), turn_lines: true, now: 0}, v)
+    do:
+      Map.merge(
+        %{detail: :quiet, open: MapSet.new(), turn_lines: true, now: 0, once_only: false},
+        v
+      )
 
   # Every frame body past `@frame_cap` lines keeps its first `@frame_keep` and says how many
   # more there are, expanding in place when its turn is opened.
@@ -2142,7 +2155,7 @@ defmodule Troupe.UI.TUI.Model do
       end
 
     streaming = if agent.streaming == "", do: [], else: [frame(streaming_lines(agent.streaming))]
-    pending = pending_blocks(w, agent_path, selection, gate)
+    pending = pending_blocks(w, agent_path, selection, gate, view.once_only)
 
     activity =
       case pending == [] && curtain_segments(w, agent_path, tick, now) do
@@ -2884,9 +2897,14 @@ defmodule Troupe.UI.TUI.Model do
 
   # Whatever the window waits on, shown at the end of every agent's pane so the
   # keys that answer it (y / n / a, Enter) are explained where the reader looks.
-  defp pending_blocks(%{pending: []}, _path, _selection, _gate), do: []
+  # A laptop's session steered from here through the plane (`once_only`) is answered once:
+  # allowing a tool for the rest of the session is the laptop's person's to give, at the
+  # laptop, so neither the key nor the words offer it.
+  defp pending_blocks(%{pending: []}, _path, _selection, _gate, _once_only), do: []
 
-  defp pending_blocks(w, path, selection, gate) do
+  defp pending_blocks(w, path, selection, gate, once_only) do
+    keys = if once_only, do: "y allow once / n deny", else: "y allow / n deny / a allow for session"
+
     [
       Enum.flat_map(w.pending, fn item ->
         who = if item.agent_path == path, do: "", else: "[#{item.agent_path}] "
@@ -2894,12 +2912,12 @@ defmodule Troupe.UI.TUI.Model do
         case item do
           # A delegation a person asked to see first (root Decision 850, TUI Decision 157).
           %{kind: :approval, delegation: %{} = _delegation} ->
-            gate_lines(item, who, gate)
+            gate_lines(item, who, gate, once_only)
 
           %{kind: :approval, name: name, preview: preview} = item ->
             [
               {:blank, ""},
-              {:pending, "#{who}APPROVAL: #{name} (y allow / n deny / a allow for session)"}
+              {:pending, "#{who}APPROVAL: #{name} (#{keys})"}
               | asked_by(item) ++
                   ((preview || "") |> sanitize() |> String.split("\n") |> Enum.map(&diff_line/1))
             ]
@@ -3019,17 +3037,18 @@ defmodule Troupe.UI.TUI.Model do
   # The whole thing before the child starts: the agent and where its definition is, the
   # tools and permissions it will hold, its depth and budget share, the brief's five parts
   # as they will be sent, and what the keys do now.
-  defp gate_lines(item, who, draft) do
+  defp gate_lines(item, who, draft, once_only) do
     d = item.delegation
     draft = gate_draft(draft, item)
     asked = d["agent"]
     agent = gate_agent(draft, item)
+    always = if once_only, do: "", else: " · a always for #{agent}"
 
     [
       {:blank, ""},
       {:pending,
        "#{who}DELEGATE to #{agent}#{if agent != asked, do: " (switched from #{asked})", else: ""}: " <>
-         "run it? (y run · e edit · s switch · n deny · a always for #{agent})"},
+         "run it? (y run · e edit · s switch · n deny#{always})"},
       {:system, "  /agents #{asked} opens its definition: #{definition_where(d["definition"])}"},
       {:system,
        "  depth #{d["depth"]} of #{d["max_depth"]} · #{share(d["budget_share"])} of the budget · " <>
