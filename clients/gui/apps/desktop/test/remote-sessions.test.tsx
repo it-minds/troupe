@@ -106,7 +106,9 @@ describe("the list follows the plane as it changes", () => {
   it("an offer made on a laptop shows within a second, from the plane's push and not a poll, and its withdrawal too", async () => {
     await signedIn();
     unmount = render(<App />).unmount;
-    await waitFor(() => harness.plane.watches.size === 1, "the desktop's watch on the plane");
+    await waitFor(() => harness.plane.watches.size === 1, "the desktop's watch on the plane, its initialize answered");
+    // A push from here on is behind that answer on the socket, and is heard even when both
+    // arrive in one read.
     const asked = (): number => harness.plane.asked.filter((m) => m === "remote.list").length;
     const before = asked();
 

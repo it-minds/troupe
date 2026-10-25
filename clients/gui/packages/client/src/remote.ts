@@ -113,6 +113,9 @@ export function watchRemote(opts: RemoteWatchOptions): RemoteWatch {
 
   const dial = async (): Promise<void> => {
     if (closed) return;
+    // Whether this socket has pushed a list yet: one that came right behind the answer is
+    // newer than the list the answer carried, and the answer's must not overwrite it.
+    let pushed = false;
     try {
       held = await opts.token();
       const opened = await TroupeConnection.open(
@@ -121,7 +124,9 @@ export function watchRemote(opts: RemoteWatchOptions): RemoteWatch {
           onNotification: (method, params) => {
             if (method !== "remote.changed") return;
             const sessions = (params as { sessions?: unknown } | null)?.sessions;
-            if (Array.isArray(sessions)) opts.onSessions(sessions as RemoteListRow[]);
+            if (!Array.isArray(sessions)) return;
+            pushed = true;
+            opts.onSessions(sessions as RemoteListRow[]);
           },
           onAuthExpiring: () => {
             void opts
@@ -147,7 +152,7 @@ export function watchRemote(opts: RemoteWatchOptions): RemoteWatch {
       conn = opened;
       wait = first;
       const sessions = opened.hello["sessions"];
-      opts.onSessions(Array.isArray(sessions) ? (sessions as RemoteListRow[]) : []);
+      if (!pushed) opts.onSessions(Array.isArray(sessions) ? (sessions as RemoteListRow[]) : []);
       say(true);
     } catch {
       if (closed) return;
