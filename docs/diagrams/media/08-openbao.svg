@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">OpenBao: who holds the keys</title>
+<desc id="desc">OpenBao in the middle holds every key and hands out none. Three jobs. One: the plane asks it to sign tokens, so the plane holds no private key; pods verify offline with the public keys. Two: a pod exchanges a plane-signed assertion for a token scoped to one session's key slot, encrypts the log segments and uploads them to object storage; erasing a session destroys the key first, so even backups become noise. Three: a person's own slots, MCP credentials and private sessions, live under a path no pod rule mentions.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+  <symbol id="person" viewBox="0 0 48 48">
+    <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="800" fill="currentColor" font-family="Figtree,'Segoe UI',system-ui,sans-serif">AB</text>
+  </symbol>
+  <symbol id="lock" viewBox="0 0 48 48">
+    <path d="M14 22 V15 Q14 6 24 6 Q34 6 34 15 V22" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"/>
+    <rect x="8" y="22" width="32" height="22" fill="currentColor"/>
+    <rect x="21.5" y="29" width="5" height="9" fill="#0B0B12"/>
+  </symbol>
+  <symbol id="key" viewBox="0 0 48 48">
+    <rect x="6" y="18" width="14" height="12" fill="none" stroke="currentColor" stroke-width="3"/>
+    <line x1="20" y1="24" x2="42" y2="24" stroke="currentColor" stroke-width="3"/>
+    <line x1="34" y1="24" x2="34" y2="31" stroke="currentColor" stroke-width="3"/>
+    <line x1="40" y1="24" x2="40" y2="31" stroke="currentColor" stroke-width="3"/>
+  </symbol>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#A3A3B8"/>
+  </marker>
+  <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#00C6C9"/>
+  </marker>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// WHO HOLDS THE KEYS</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">OpenBao</text>
+
+<!-- OpenBao, in the middle -->
+<rect x="608" y="258" width="400" height="330" fill="#000353"/>
+<rect x="600" y="250" width="400" height="330" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<use href="#lock" x="624" y="274" width="44" height="44" color="#F4ECDB"/>
+<text class="t" x="684" y="298" font-size="30" font-weight="900" fill="#F4ECDB" letter-spacing="-0.5">OpenBao</text>
+<text class="t" x="684" y="322" font-size="14" fill="#A3A3B8">Holds every key. Hands out none.</text>
+
+<line x1="624" y1="346" x2="976" y2="346" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+
+<text class="m" x="624" y="378" font-size="13" fill="#8A8AA0" letter-spacing="1.5">transit/</text>
+<text class="m" x="720" y="378" font-size="13" fill="#F4ECDB">signing key</text>
+<text class="m" x="976" y="378" text-anchor="end" font-size="10" fill="#7B7B94" letter-spacing="1.5">NEVER LEAVES</text>
+
+<text class="m" x="624" y="418" font-size="13" fill="#8A8AA0" letter-spacing="1.5">troupe/</text>
+<text class="m" x="640" y="446" font-size="13" fill="#8A8AA0">├</text>
+<text class="m" x="660" y="446" font-size="13" fill="#00DBD3">teams/&lt;team&gt;/sessions/&lt;id&gt;</text>
+<text class="m" x="976" y="446" text-anchor="end" font-size="10" fill="#00DBD3" letter-spacing="1.5">A POD</text>
+<text class="m" x="640" y="474" font-size="13" fill="#8A8AA0">└</text>
+<text class="m" x="660" y="474" font-size="13" fill="#F4ECDB">people/&lt;you&gt;/…</text>
+<text class="m" x="976" y="474" text-anchor="end" font-size="10" fill="#F4ECDB" letter-spacing="1.5">ONLY YOU</text>
+
+<text class="t" x="624" y="520" font-size="13" fill="#A3A3B8">One key slot per session. A pod is let into the slots of</text>
+<text class="t" x="624" y="540" font-size="13" fill="#A3A3B8">the teams it serves. No pod rule mentions people/ at all.</text>
+<text class="t" x="624" y="566" font-size="13" fill="#A3A3B8">Not the plane, not an admin, can read a session log.</text>
+
+<!-- 1 · the plane gets signatures, never a key -->
+<rect x="86" y="266" width="300" height="90" fill="#000353"/>
+<rect x="80" y="260" width="300" height="90" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="m" x="100" y="288" font-size="11" font-weight="500" fill="#00DBD3" letter-spacing="2.5">1 · SIGN</text>
+<text class="t" x="100" y="320" font-size="24" font-weight="900" fill="#F4ECDB">plane</text>
+<text class="t" x="100" y="341" font-size="13" fill="#A3A3B8">Holds no key it could leak.</text>
+<line x1="380" y1="292" x2="600" y2="292" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" x="490" y="284" text-anchor="middle" font-size="10" fill="#8A8AA0" letter-spacing="1.5">SIGN THIS TOKEN</text>
+<line x1="600" y1="322" x2="380" y2="322" stroke="#A3A3B8" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<text class="m" x="490" y="340" text-anchor="middle" font-size="10" fill="#8A8AA0" letter-spacing="1.5">A SIGNATURE, ES256</text>
+
+<!-- the token goes to you, then to a pod, which checks it offline -->
+<use href="#person" x="80" y="398" width="48" height="48" color="#F4ECDB"/>
+<polyline points="230,350 230,422 140,422" fill="none" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" x="240" y="426" font-size="10" fill="#8A8AA0" letter-spacing="1.5">A TOKEN · 15 MIN</text>
+<text class="m" x="240" y="442" font-size="10" fill="#7B7B94" letter-spacing="1.5">aud = one pod, not a pool</text>
+
+<!-- 2 · a pod gets one session's key -->
+<rect x="1226" y="266" width="300" height="90" fill="#000353"/>
+<rect x="1220" y="260" width="300" height="90" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<rect x="1220" y="260" width="4" height="90" fill="#00C6C9"/>
+<text class="m" x="1244" y="288" font-size="11" font-weight="500" fill="#00DBD3" letter-spacing="2.5">2 · UNLOCK ONE SESSION</text>
+<use href="#mask" x="1244" y="300" width="36" height="36" color="#00DBD3"/>
+<text class="t" x="1292" y="320" font-size="24" font-weight="900" fill="#F4ECDB">worker pod</text>
+<text class="t" x="1292" y="341" font-size="13" fill="#A3A3B8">Checks tokens offline: public keys only.</text>
+<line x1="1220" y1="292" x2="1000" y2="292" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" x="1110" y="284" text-anchor="middle" font-size="10" fill="#8A8AA0" letter-spacing="1.5">SIGNED NOTE: SESSION 42</text>
+<line x1="1000" y1="322" x2="1220" y2="322" stroke="#00C6C9" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#arrow-cyan)"/>
+<text class="m" x="1110" y="340" text-anchor="middle" font-size="10" fill="#00DBD3" letter-spacing="1.5">ONE KEY: SLOT 42 ONLY</text>
+
+<!-- the pod seals the log to object storage -->
+<line x1="1370" y1="350" x2="1370" y2="440" stroke="#00C6C9" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+<use href="#key" x="1382" y="380" width="30" height="30" color="#00DBD3"/>
+<text class="m" x="1418" y="400" font-size="10" fill="#00DBD3" letter-spacing="1.5">AES-256-GCM</text>
+<rect x="1226" y="446" width="300" height="80" fill="#000353"/>
+<rect x="1220" y="440" width="300" height="80" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="t" x="1244" y="472" font-size="20" font-weight="800" fill="#F4ECDB">object storage</text>
+<text class="m" x="1244" y="500" font-size="10" fill="#8A8AA0" letter-spacing="1.5">SEALED SEGMENTS · EVERY TURN</text>
+<g fill="none" stroke="#00DBD3" stroke-width="1.5">
+  <rect x="1470" y="458" width="12" height="12"/><rect x="1486" y="458" width="12" height="12"/><rect x="1502" y="458" width="12" height="12"/>
+  <rect x="1470" y="474" width="12" height="12"/><rect x="1486" y="474" width="12" height="12"/><rect x="1502" y="474" width="12" height="12" stroke-dasharray="2 2"/>
+</g>
+
+<!-- erasure -->
+<rect x="1220" y="546" width="300" height="60" fill="none" stroke="#FF7E6E" stroke-width="1.5"/>
+<text class="m" x="1244" y="570" font-size="11" font-weight="500" fill="#FF7E6E" letter-spacing="2">ERASE = DESTROY THE KEY FIRST</text>
+<text class="t" x="1244" y="592" font-size="13" fill="#A3A3B8">Then old versions and backups are just noise.</text>
+
+<!-- 3 · your own slots -->
+<rect x="86" y="486" width="300" height="120" fill="#000353"/>
+<rect x="80" y="480" width="300" height="120" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<rect x="80" y="480" width="4" height="120" fill="#FFBC56"/>
+<text class="m" x="104" y="508" font-size="11" font-weight="500" fill="#FFBC56" letter-spacing="2.5">3 · YOURS</text>
+<text class="t" x="104" y="540" font-size="20" font-weight="800" fill="#F4ECDB">people/AB/…</text>
+<text class="t" x="104" y="562" font-size="13" fill="#A3A3B8">Your MCP credentials. Your private</text>
+<text class="t" x="104" y="582" font-size="13" fill="#A3A3B8">sessions from the laptop daemon.</text>
+<line x1="380" y1="540" x2="600" y2="474" stroke="#F4ECDB" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" x="470" y="548" text-anchor="middle" font-size="10" fill="#8A8AA0" letter-spacing="1.5">ONLY WITH YOUR TOKEN</text>
+
+<!-- how a pod is let in -->
+<text class="m" x="600" y="640" font-size="11" fill="#7B7B94" letter-spacing="2">HOW A POD GETS IN</text>
+<text class="t" x="600" y="664" font-size="14" fill="#E8DFD0">It shows OpenBao a short note the plane signed, naming one session and its owner.</text>
+<text class="t" x="600" y="686" font-size="14" fill="#E8DFD0">OpenBao answers with a token good for that owner's slots and nothing else.</text>
+<text class="t" x="600" y="708" font-size="14" fill="#E8DFD0">A pod naming a session it does not hold gets not_found.</text>
+
+<!-- the point -->
+<rect x="80" y="780" width="1440" height="1.5" fill="#E8DFD0" fill-opacity=".18"/>
+<text class="t" x="80" y="826" font-size="22" font-weight="800" fill="#F4ECDB">The plane knows who and where. OpenBao knows the keys. Storage holds the bytes.</text>
+<text class="t" x="80" y="854" font-size="16" fill="#A3A3B8">No one of them can read a session on its own.</text>
+</svg>

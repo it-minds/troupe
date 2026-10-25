@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">On the cluster: what runs where</title>
+<desc id="desc">A Kubernetes cluster with two kinds of namespace. troupe-system holds the plane, the operator, the GUI and the A2A facade. One namespace per worker profile holds the pods. You reach the plane through one ingress and a pod directly through another. Pods talk to the plane over an internal control channel that never goes through ingress. Outside the cluster: the identity provider, PostgreSQL, OpenBao, object storage and the model. The plane uses the first three; a pod uses the last three and nothing else, because egress is default-deny.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+  <symbol id="person" viewBox="0 0 48 48">
+    <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="800" fill="currentColor" font-family="Figtree,'Segoe UI',system-ui,sans-serif">AB</text>
+  </symbol>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#A3A3B8"/>
+  </marker>
+  <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#00C6C9"/>
+  </marker>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// WHAT RUNS WHERE</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">On the cluster</text>
+
+<!-- the cluster -->
+<rect x="420" y="180" width="880" height="520" fill="none" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5" stroke-dasharray="8 6"/>
+<text class="m" x="1284" y="204" text-anchor="end" font-size="12" fill="#7B7B94" letter-spacing="3">YOUR KUBERNETES CLUSTER</text>
+
+<!-- namespace troupe-system -->
+<rect x="460" y="215" width="440" height="255" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+<text class="m" x="476" y="236" font-size="11" fill="#8A8AA0" letter-spacing="2.5">NAMESPACE · troupe-system</text>
+
+<rect x="486" y="256" width="210" height="80" fill="#000353"/>
+<rect x="480" y="250" width="210" height="80" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="t" x="498" y="284" font-size="22" font-weight="900" fill="#F4ECDB">plane</text>
+<text class="m" x="498" y="310" font-size="11" fill="#8A8AA0" letter-spacing="1.5">/rpc · /mcp · /admin</text>
+<text class="m" x="676" y="272" text-anchor="end" font-size="11" fill="#8A8AA0" letter-spacing="1.5">x2</text>
+
+<rect x="716" y="256" width="170" height="80" fill="#000353"/>
+<rect x="710" y="250" width="170" height="80" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="t" x="728" y="284" font-size="22" font-weight="900" fill="#F4ECDB">operator</text>
+<text class="m" x="728" y="310" font-size="11" fill="#8A8AA0" letter-spacing="1.5">profiles → pods</text>
+
+<rect x="480" y="350" width="210" height="60" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="t" x="498" y="380" font-size="18" font-weight="800" fill="#F4ECDB">gui</text>
+<text class="m" x="676" y="382" text-anchor="end" font-size="11" fill="#8A8AA0" letter-spacing="1.5">/app</text>
+
+<rect x="710" y="350" width="170" height="60" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="t" x="728" y="380" font-size="18" font-weight="800" fill="#F4ECDB">a2a</text>
+<text class="m" x="866" y="382" text-anchor="end" font-size="11" fill="#8A8AA0" letter-spacing="1.5">other agents</text>
+
+<!-- cluster policy -->
+<rect x="460" y="500" width="440" height="72" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="t" x="478" y="527" font-size="16" font-weight="800" fill="#F4ECDB">TroupePolicy</text>
+<text class="t" x="478" y="545" font-size="13" fill="#A3A3B8">Cluster-wide: what any profile may ask for.</text>
+<text class="t" x="478" y="563" font-size="13" fill="#A3A3B8">A cluster admin writes it, never the plane.</text>
+
+<!-- worker namespaces -->
+<rect x="940" y="215" width="330" height="135" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+<text class="m" x="956" y="236" font-size="11" fill="#8A8AA0" letter-spacing="2.5">NAMESPACE · profile build</text>
+<rect x="960" y="252" width="60" height="60" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<use href="#mask" x="974" y="266" width="32" height="32" color="#00DBD3"/>
+<rect x="1040" y="252" width="60" height="60" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<use href="#mask" x="1054" y="266" width="32" height="32" color="#00DBD3"/>
+<rect x="1120" y="252" width="60" height="60" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<use href="#mask" x="1134" y="266" width="32" height="32" color="#00DBD3"/>
+<text class="m" x="960" y="336" font-size="10" fill="#7B7B94" letter-spacing="1.5">STATEFULSET · ONE POD, MANY SESSIONS</text>
+
+<rect x="940" y="370" width="330" height="115" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+<text class="m" x="956" y="391" font-size="11" fill="#8A8AA0" letter-spacing="2.5">NAMESPACE · profile review</text>
+<rect x="960" y="407" width="60" height="60" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<use href="#mask" x="974" y="421" width="32" height="32" color="#00DBD3"/>
+<rect x="1040" y="407" width="60" height="60" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<use href="#mask" x="1054" y="421" width="32" height="32" color="#00DBD3"/>
+
+<text class="m" x="940" y="527" font-size="11" fill="#FF7E6E" letter-spacing="2">EGRESS DEFAULT-DENY</text>
+<text class="t" x="940" y="549" font-size="13" fill="#A3A3B8">A pod reaches only what its profile names.</text>
+<text class="t" x="940" y="569" font-size="13" fill="#A3A3B8">The namespace decides the profile: a pod can</text>
+<text class="t" x="940" y="589" font-size="13" fill="#A3A3B8">only enrol as what it is.</text>
+
+<!-- operator makes the worker namespaces -->
+<polyline points="880,290 920,290 920,282 940,282" fill="none" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<polyline points="920,290 920,437 940,437" fill="none" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<!-- control channel: pods dial the plane, inside the cluster -->
+<polyline points="1000,215 1000,200 585,200 585,250" fill="none" stroke="#00C6C9" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#arrow-cyan)"/>
+<text class="m" x="790" y="196" text-anchor="middle" font-size="10" fill="#00DBD3" letter-spacing="1.5">CONTROL CHANNEL · INTERNAL · NEVER THROUGH INGRESS</text>
+
+<!-- doors in: two ingresses -->
+<rect x="404" y="270" width="32" height="40" fill="#00C6C9"/>
+<text class="m" transform="translate(424 290) rotate(-90)" text-anchor="middle" font-size="9" font-weight="500" fill="#0B0B12" letter-spacing="1.5">HTTPS</text>
+<rect x="404" y="600" width="32" height="40" fill="#00C6C9"/>
+<text class="m" transform="translate(424 620) rotate(-90)" text-anchor="middle" font-size="9" font-weight="500" fill="#0B0B12" letter-spacing="1.5">WSS</text>
+<text class="m" x="452" y="652" font-size="10" fill="#7B7B94" letter-spacing="1.5">INGRESS · ONE PER WORKER POOL</text>
+<text class="m" x="420" y="326" text-anchor="middle" font-size="9" fill="#7B7B94" letter-spacing="1.5">INGRESS</text>
+
+<!-- you -->
+<use href="#person" x="80" y="262" width="56" height="56" color="#F4ECDB"/>
+<text class="t" x="150" y="286" font-size="22" font-weight="900" fill="#F4ECDB">You</text>
+<text class="m" x="150" y="308" font-size="11" fill="#8A8AA0" letter-spacing="1.5">TUI · APP · A SCRIPT</text>
+<line x1="300" y1="290" x2="404" y2="290" stroke="#A3A3B8" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<text class="m" x="352" y="280" text-anchor="middle" font-size="10" fill="#8A8AA0" letter-spacing="1.5">ASK</text>
+<polyline points="108,330 108,620 404,620" fill="none" stroke="#00C6C9" stroke-width="3" marker-end="url(#arrow-cyan)"/>
+<text class="m" x="130" y="612" font-size="11" font-weight="500" fill="#00DBD3" letter-spacing="2">THE SESSION, DIRECTLY</text>
+<polyline points="436,620 1190,620" fill="none" stroke="#00C6C9" stroke-width="3" stroke-opacity=".35"/>
+<polyline points="1190,620 1190,485" fill="none" stroke="#00C6C9" stroke-width="3" marker-end="url(#arrow-cyan)"/>
+
+<!-- outside the cluster -->
+<text class="m" x="420" y="740" font-size="11" fill="#7B7B94" letter-spacing="2.5">OUTSIDE THE CLUSTER</text>
+<g class="t" font-size="16" font-weight="800" fill="#F4ECDB">
+  <rect x="420" y="752" width="160" height="70" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="438" y="782">Identity</text>
+  <text class="m" x="438" y="806" font-size="10" font-weight="400" fill="#8A8AA0" letter-spacing="1.5">OIDC · YOUR IDP</text>
+  <rect x="438" y="758" width="0" height="0"/>
+  <rect x="558" y="762" width="10" height="10" fill="#F4ECDB"/>
+
+  <rect x="596" y="752" width="160" height="70" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="614" y="782">PostgreSQL</text>
+  <text class="m" x="614" y="806" font-size="10" font-weight="400" fill="#8A8AA0" letter-spacing="1.5">ROWS, NEVER CONTENT</text>
+  <rect x="734" y="762" width="10" height="10" fill="#F4ECDB"/>
+
+  <rect x="772" y="752" width="160" height="70" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="790" y="782">OpenBao</text>
+  <text class="m" x="790" y="806" font-size="10" font-weight="400" fill="#8A8AA0" letter-spacing="1.5">KEYS · SIGNATURES</text>
+  <rect x="896" y="762" width="10" height="10" fill="#F4ECDB"/>
+  <rect x="910" y="762" width="10" height="10" fill="#00C6C9"/>
+
+  <rect x="948" y="752" width="160" height="70" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="966" y="782">Object storage</text>
+  <text class="m" x="966" y="806" font-size="10" font-weight="400" fill="#8A8AA0" letter-spacing="1.5">S3 · ENCRYPTED LOGS</text>
+  <rect x="1086" y="762" width="10" height="10" fill="#00C6C9"/>
+
+  <rect x="1124" y="752" width="160" height="70" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="1142" y="782">The model</text>
+  <text class="m" x="1142" y="806" font-size="10" font-weight="400" fill="#8A8AA0" letter-spacing="1.5">OR A GATEWAY</text>
+  <rect x="1262" y="762" width="10" height="10" fill="#00C6C9"/>
+</g>
+
+<!-- key -->
+<rect x="420" y="852" width="10" height="10" fill="#F4ECDB"/>
+<text class="m" x="440" y="861" font-size="11" fill="#8A8AA0" letter-spacing="2">THE PLANE USES IT</text>
+<rect x="620" y="852" width="10" height="10" fill="#00C6C9"/>
+<text class="m" x="640" y="861" font-size="11" fill="#8A8AA0" letter-spacing="2">A POD USES IT</text>
+<text class="m" x="1284" y="861" text-anchor="end" font-size="11" fill="#7B7B94" letter-spacing="2">ONE HELM CHART · FIVE IMAGES</text>
+</svg>

@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">It breathes: scaling from demand, not from a commit</title>
+<desc id="desc">Top: the loop. What people are doing, counted as active plus pending sessions, goes into the plane, which every fifteen seconds computes replicas as the ceiling of active plus pending over sessions per pod, plus warm workers, and writes it into the WorkerProfile by server-side apply. The operator reconciles that into a StatefulSet with ordinal pods, each with its own volume, service and ingress. Pods heartbeat back every five seconds. Bottom: one profile over one day, stepping between one, two and three pods as demand rises and falls, with scale-down draining the highest ordinal first and never killing a session.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+.tile{fill:#12121C;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+.box{fill:#1C1C2B;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#A3A3B8"/>
+  </marker>
+  <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#00C6C9"/>
+  </marker>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// IT BREATHES</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">Scaling from demand, not from a commit</text>
+
+<!-- ===== the loop ===== -->
+<!-- what people are doing -->
+<text class="m" x="80" y="186" font-size="10" fill="#7B7B94" letter-spacing="2">WHAT PEOPLE ARE DOING</text>
+<rect x="88" y="204" width="220" height="200" fill="#000353"/>
+<rect class="tile" x="80" y="196" width="220" height="200"/>
+<g color="#00DBD3">
+  <use href="#mask" x="100" y="214" width="34" height="34"/><use href="#mask" x="142" y="214" width="34" height="34"/><use href="#mask" x="184" y="214" width="34" height="34"/><use href="#mask" x="226" y="214" width="34" height="34"/>
+  <use href="#mask" x="100" y="256" width="34" height="34"/><use href="#mask" x="142" y="256" width="34" height="34"/><use href="#mask" x="184" y="256" width="34" height="34"/><use href="#mask" x="226" y="256" width="34" height="34"/>
+  <use href="#mask" x="100" y="298" width="34" height="34"/>
+</g>
+<use href="#mask" x="142" y="298" width="34" height="34" color="#7B7B94"/>
+<text class="m" x="186" y="322" font-size="10" fill="#7B7B94" letter-spacing="1">pending</text>
+<text class="t" x="100" y="366" font-size="22" font-weight="900" fill="#F4ECDB">10 sessions</text>
+<text class="m" x="100" y="384" font-size="10" fill="#8A8AA0" letter-spacing="1.5">ACTIVE + PENDING</text>
+
+<line x1="300" y1="296" x2="360" y2="296" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<!-- the plane -->
+<rect x="368" y="204" width="350" height="200" fill="#000353"/>
+<rect class="tile" x="360" y="196" width="350" height="200"/>
+<text class="m" x="380" y="222" font-size="10" font-weight="500" fill="#00DBD3" letter-spacing="2">THE PLANE · EVERY 15 S</text>
+<text class="t" x="380" y="254" font-size="22" font-weight="900" fill="#F4ECDB">counts, then writes</text>
+<rect class="box" x="380" y="270" width="310" height="60"/>
+<text class="m" x="392" y="292" font-size="11" fill="#F4ECDB">replicas = ceil(active+pending / perPod)</text>
+<text class="m" x="392" y="312" font-size="11" fill="#F4ECDB">         + warm_workers</text>
+<text class="m" x="392" y="356" font-size="11" fill="#00DBD3">= ceil(10 / 4) + 0 = 3</text>
+<text class="t" x="380" y="384" font-size="12" fill="#A3A3B8">Server-side apply into the WorkerProfile. No commit.</text>
+
+<line x1="710" y1="296" x2="790" y2="296" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" x="750" y="284" text-anchor="middle" font-size="9" fill="#8A8AA0">WorkerProfile</text>
+
+<!-- the operator -->
+<rect x="798" y="204" width="170" height="200" fill="#000353"/>
+<rect class="tile" x="790" y="196" width="170" height="200"/>
+<text class="m" x="810" y="222" font-size="10" font-weight="500" fill="#8A8AA0" letter-spacing="2">THE OPERATOR</text>
+<text class="t" x="810" y="254" font-size="22" font-weight="900" fill="#F4ECDB">reconciles</text>
+<text class="t" x="810" y="286" font-size="12" fill="#A3A3B8">Level-triggered.</text>
+<text class="t" x="810" y="304" font-size="12" fill="#A3A3B8">Idempotent.</text>
+<text class="t" x="810" y="322" font-size="12" fill="#A3A3B8">Prunes by label.</text>
+<text class="t" x="810" y="340" font-size="12" fill="#A3A3B8">Checks the policy</text>
+<text class="t" x="810" y="358" font-size="12" fill="#A3A3B8">ceilings again.</text>
+
+<line x1="960" y1="296" x2="1020" y2="296" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<!-- the StatefulSet -->
+<rect x="1028" y="204" width="492" height="200" fill="#000353"/>
+<rect class="tile" x="1020" y="196" width="492" height="200"/>
+<text class="m" x="1040" y="222" font-size="10" font-weight="500" fill="#8A8AA0" letter-spacing="2">STATEFULSET · troupe-w-build</text>
+<text class="m" x="1500" y="222" text-anchor="end" font-size="10" fill="#00DBD3" letter-spacing="1.5">replicas: 3</text>
+<g>
+  <rect class="box" x="1040" y="238" width="140" height="96"/>
+  <use href="#mask" x="1050" y="248" width="30" height="30" color="#00DBD3"/>
+  <text class="m" x="1088" y="268" font-size="12" fill="#F4ECDB">-0</text>
+  <text class="m" x="1050" y="298" font-size="9" fill="#8A8AA0" letter-spacing="1">PVC · SVC · INGRESS</text>
+  <text class="m" x="1050" y="316" font-size="9" fill="#8A8AA0" letter-spacing="1">4 SESSIONS</text>
+
+  <rect class="box" x="1196" y="238" width="140" height="96"/>
+  <use href="#mask" x="1206" y="248" width="30" height="30" color="#00DBD3"/>
+  <text class="m" x="1244" y="268" font-size="12" fill="#F4ECDB">-1</text>
+  <text class="m" x="1206" y="298" font-size="9" fill="#8A8AA0" letter-spacing="1">PVC · SVC · INGRESS</text>
+  <text class="m" x="1206" y="316" font-size="9" fill="#8A8AA0" letter-spacing="1">4 SESSIONS</text>
+
+  <rect class="box" x="1352" y="238" width="140" height="96"/>
+  <use href="#mask" x="1362" y="248" width="30" height="30" color="#00DBD3"/>
+  <text class="m" x="1400" y="268" font-size="12" fill="#F4ECDB">-2</text>
+  <text class="m" x="1362" y="298" font-size="9" fill="#8A8AA0" letter-spacing="1">PVC · SVC · INGRESS</text>
+  <text class="m" x="1362" y="316" font-size="9" fill="#8A8AA0" letter-spacing="1">2 SESSIONS</text>
+</g>
+<text class="m" x="1040" y="360" font-size="9" fill="#7B7B94" letter-spacing="1">podManagementPolicy: Parallel · updateStrategy: OnDelete · PDB maxUnavailable: 1</text>
+<text class="t" x="1040" y="382" font-size="12" fill="#A3A3B8">OnDelete: a pod holds live sessions. A new image waits until each pod is drained.</text>
+
+<!-- heartbeat back -->
+<polyline points="1266,396 1266,430 540,430 540,396" fill="none" stroke="#00C6C9" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#arrow-cyan)"/>
+<text class="m" x="900" y="424" text-anchor="middle" font-size="10" fill="#00DBD3" letter-spacing="1.5">HEARTBEAT EVERY 5 S · CAPACITY · ACTIVE · DISK · DRAINING</text>
+<text class="m" x="900" y="450" text-anchor="middle" font-size="9" fill="#7B7B94" letter-spacing="1">PLACEMENT PICKS: HEALTHY · NOT DRAINING · DISK BELOW 80 %</text>
+
+<!-- ceilings -->
+<text class="m" x="80" y="430" font-size="9" fill="#7B7B94" letter-spacing="1">AN ADMIN SETS ONLY</text>
+<text class="m" x="80" y="446" font-size="10" fill="#A3A3B8">size_class · max_sessions · warm_workers</text>
+<text class="m" x="80" y="466" font-size="9" fill="#7B7B94" letter-spacing="1">A CLUSTER ADMIN CAPS IT: TroupePolicy maxReplicas · maxSessionsPerPod</text>
+
+<!-- ===== one profile, one day ===== -->
+<text class="m" x="80" y="530" font-size="10" fill="#7B7B94" letter-spacing="2">ONE PROFILE, ONE DAY · warm_workers = 1 · sessionsPerPod = 4</text>
+
+<!-- ceiling -->
+<line x1="120" y1="580" x2="1500" y2="580" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5" stroke-dasharray="4 5"/>
+<text class="m" x="1500" y="574" text-anchor="end" font-size="9" fill="#7B7B94" letter-spacing="1">CEILING · max_sessions / maxReplicas</text>
+
+<!-- grid + y labels -->
+<g stroke="#E8DFD0" stroke-opacity=".1" stroke-width="1">
+  <line x1="120" y1="625" x2="1500" y2="625"/><line x1="120" y1="670" x2="1500" y2="670"/><line x1="120" y1="715" x2="1500" y2="715"/>
+</g>
+<line x1="120" y1="760" x2="1500" y2="760" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<g class="m" font-size="9" fill="#8A8AA0" letter-spacing="1" text-anchor="end">
+  <text x="108" y="629">3 PODS</text><text x="108" y="674">2</text><text x="108" y="719">1 · WARM</text><text x="108" y="764">0</text>
+</g>
+
+<!-- the breathing -->
+<path d="M120 715 H312 V670 H388 V625 H580 V670 H657 V625 H1002 V670 H1078 V715 H1500 V760 H120 Z" fill="#00C6C9" fill-opacity=".10"/>
+<path d="M120 715 H312 V670 H388 V625 H580 V670 H657 V625 H1002 V670 H1078 V715 H1500" fill="none" stroke="#00C6C9" stroke-width="2.5"/>
+
+<!-- x axis -->
+<g class="m" font-size="9" fill="#7B7B94" letter-spacing="1" text-anchor="middle">
+  <text x="120" y="782">06:00</text><text x="350" y="782">09:00</text><text x="580" y="782">12:00</text><text x="810" y="782">15:00</text><text x="1040" y="782">18:00</text><text x="1270" y="782">21:00</text><text x="1500" y="782">24:00</text>
+</g>
+
+<!-- annotations -->
+<line x1="312" y1="670" x2="312" y2="606" stroke="#A3A3B8" stroke-width="1" stroke-dasharray="2 3"/>
+<text class="m" x="318" y="602" font-size="10" fill="#F4ECDB">08:30 · people arrive · a pod in about 30 s</text>
+
+<line x1="580" y1="670" x2="580" y2="646" stroke="#A3A3B8" stroke-width="1" stroke-dasharray="2 3"/>
+<text class="m" x="586" y="650" font-size="10" fill="#F4ECDB">12:00 · quieter · -2 drained first</text>
+<text class="m" x="586" y="664" font-size="10" fill="#8A8AA0">its sessions go dormant to storage. nothing is killed.</text>
+
+<line x1="1078" y1="715" x2="1078" y2="690" stroke="#A3A3B8" stroke-width="1" stroke-dasharray="2 3"/>
+<text class="m" x="1084" y="694" font-size="10" fill="#F4ECDB">18:30 · idle two minutes · back to the warm count</text>
+<text class="m" x="1084" y="708" font-size="10" fill="#8A8AA0">warm_workers = 0 would be zero pods overnight</text>
+
+<!-- the point -->
+<text class="t" x="80" y="836" font-size="18" font-weight="800" fill="#F4ECDB">GitOps, if you use it, carries the profile's shape: image, model, egress, tools.</text>
+<text class="t" x="80" y="862" font-size="15" fill="#A3A3B8">The number of pods is never a commit. It is the plane answering what people are doing, inside ceilings a cluster admin set once.</text>
+</svg>

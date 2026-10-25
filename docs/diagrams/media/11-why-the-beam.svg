@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">Why the BEAM: the runtime does the hard part</title>
+<desc id="desc">Left: a session drawn as its real supervision tree. The log first, then approvals and registrations, then the agent's node with its server, tool tasks, model stream and subagents, then the file watcher, the loop and the summary last. A crashed tool task dies alone; a crashed agent is rebuilt from the log. Right: a ledger of what the Erlang runtime brings against what you write by hand in Rust or Go: a process per thing, crashes that stay local, mailboxes, backpressure, clustering, state machines.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+.box{fill:#1C1C2B;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+.rail{stroke:#A3A3B8;stroke-width:1.5}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// WHY ERLANG</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">The runtime does the hard part</text>
+
+<!-- ===== the tree ===== -->
+<text class="m" x="80" y="186" font-size="11" fill="#7B7B94" letter-spacing="2.5">ONE SESSION, AS IT REALLY IS: A TREE OF PROCESSES</text>
+
+<rect x="88" y="204" width="340" height="52" fill="#000353"/>
+<rect x="80" y="196" width="340" height="52" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="t" x="98" y="222" font-size="20" font-weight="900" fill="#F4ECDB">Session</text>
+<text class="m" x="98" y="240" font-size="10" fill="#8A8AA0" letter-spacing="1">rest_for_one · started in dependency order</text>
+
+<line class="rail" x1="104" y1="248" x2="104" y2="686"/>
+
+<!-- Log -->
+<line class="rail" x1="104" y1="288" x2="130" y2="288"/>
+<rect class="box" x="130" y="270" width="200" height="36"/>
+<text class="m" x="146" y="293" font-size="12" fill="#F4ECDB">Session.Log</text>
+<text class="t" x="345" y="293" font-size="12" fill="#A3A3B8">first: everything persists through it, and it never calls back</text>
+
+<!-- Approvals etc -->
+<line class="rail" x1="104" y1="336" x2="130" y2="336"/>
+<rect class="box" x="130" y="318" width="340" height="36"/>
+<text class="m" x="146" y="341" font-size="12" fill="#F4ECDB">Approvals · Questions · ClientTools · MCP</text>
+<text class="t" x="485" y="341" font-size="12" fill="#A3A3B8">above the agent, so a restarted agent finds its answers</text>
+
+<!-- Agent.Node -->
+<line class="rail" x1="104" y1="384" x2="130" y2="384"/>
+<rect class="box" x="130" y="366" width="200" height="36"/>
+<text class="m" x="146" y="389" font-size="12" fill="#F4ECDB">Agent.Node</text>
+<text class="m" x="250" y="389" font-size="10" fill="#8A8AA0">one_for_all</text>
+<rect x="130" y="412" width="740" height="150" fill="none" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5" stroke-dasharray="6 5"/>
+
+<rect x="150" y="430" width="240" height="52" fill="#12121C" stroke="#00C6C9" stroke-width="1.5"/>
+<use href="#mask" x="160" y="440" width="30" height="30" color="#00DBD3"/>
+<text class="m" x="198" y="450" font-size="12" fill="#F4ECDB">Agent.Server</text>
+<text class="m" x="198" y="468" font-size="9" fill="#8A8AA0" letter-spacing="1">gen_statem · a state machine</text>
+
+<g>
+  <rect class="box" x="420" y="438" width="36" height="36"/>
+  <rect x="470" y="438" width="36" height="36" fill="#1C1C2B" stroke="#FF7E6E" stroke-width="1.5"/>
+  <line x1="478" y1="446" x2="498" y2="466" stroke="#FF7E6E" stroke-width="2.5"/>
+  <line x1="498" y1="446" x2="478" y2="466" stroke="#FF7E6E" stroke-width="2.5"/>
+  <rect class="box" x="520" y="438" width="36" height="36"/>
+  <text class="m" x="488" y="494" text-anchor="middle" font-size="9" fill="#8A8AA0" letter-spacing="1">TOOL TASKS</text>
+  <rect class="box" x="590" y="438" width="36" height="36"/>
+  <line x1="598" y1="456" x2="618" y2="456" stroke="#00DBD3" stroke-width="2"/>
+  <text class="m" x="608" y="494" text-anchor="middle" font-size="9" fill="#8A8AA0" letter-spacing="1">STREAM</text>
+</g>
+
+<rect class="box" x="660" y="430" width="190" height="52"/>
+<use href="#mask" x="670" y="440" width="30" height="30" color="#00DBD3"/>
+<text class="m" x="708" y="450" font-size="12" fill="#F4ECDB">a subagent</text>
+<text class="m" x="708" y="468" font-size="9" fill="#8A8AA0" letter-spacing="1">its own node and tasks</text>
+
+
+<text class="t" x="150" y="522" font-size="12" fill="#FF7E6E">A tool task dies: an error result, the agent carries on.</text>
+<text class="t" x="150" y="542" font-size="12" fill="#A3A3B8">Agent.Server dies: the node restarts it with its tasks, rebuilt from the log. A finished call never runs twice.</text>
+
+<!-- Watcher / Files -->
+<line class="rail" x1="104" y1="592" x2="130" y2="592"/>
+<rect class="box" x="130" y="574" width="200" height="36"/>
+<text class="m" x="146" y="597" font-size="12" fill="#F4ECDB">Watcher · Files</text>
+<text class="t" x="345" y="597" font-size="12" fill="#A3A3B8">below the agent, so file watching can never disturb it</text>
+
+<!-- Loop -->
+<line class="rail" x1="104" y1="636" x2="130" y2="636"/>
+<rect class="box" x="130" y="618" width="200" height="36"/>
+<text class="m" x="146" y="641" font-size="12" fill="#F4ECDB">Loop</text>
+<text class="t" x="345" y="641" font-size="12" fill="#A3A3B8">/loop, run as turns of the root agent</text>
+
+<!-- Summary -->
+<line class="rail" x1="104" y1="680" x2="130" y2="680"/>
+<rect class="box" x="130" y="662" width="200" height="36"/>
+<text class="m" x="146" y="685" font-size="12" fill="#F4ECDB">Summary</text>
+<text class="t" x="345" y="685" font-size="12" fill="#A3A3B8">last: a projection that could crash the agent is worse than none</text>
+
+<text class="m" x="80" y="722" font-size="10" fill="#7B7B94" letter-spacing="1.5">THE SESSION DIES 3× IN 10 S: THE WHOLE TREE, REPLAYED FROM THE LOG · THE VM DIES: SESSIONS COME BACK DORMANT</text>
+
+<!-- ===== the ledger ===== -->
+<text class="m" x="960" y="186" font-size="11" fill="#7B7B94" letter-spacing="2.5">WHAT THE RUNTIME BRINGS</text>
+<text class="m" x="1140" y="220" font-size="11" font-weight="500" fill="#00DBD3" letter-spacing="2.5">BEAM</text>
+<text class="m" x="1360" y="220" font-size="11" font-weight="500" fill="#8A8AA0" letter-spacing="2.5">RUST · GO</text>
+<line x1="960" y1="230" x2="1520" y2="230" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+
+<g class="t" font-size="11">
+  <!-- row 1 -->
+  <text x="960" y="256" font-weight="800" fill="#F4ECDB">One process per</text>
+  <text x="960" y="272" font-weight="800" fill="#F4ECDB">agent, call, stream</text>
+  <rect x="1140" y="242" width="4" height="36" fill="#00C6C9"/>
+  <text x="1154" y="256" fill="#E8DFD0">Cheap, isolated, preempted.</text>
+  <text x="1154" y="272" fill="#E8DFD0">Millions if you like.</text>
+  <text x="1360" y="256" fill="#8A8AA0">Threads and channels.</text>
+  <text x="1360" y="272" fill="#8A8AA0">You wire and guard them.</text>
+  <line x1="960" y1="290" x2="1520" y2="290" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+
+  <!-- row 2 -->
+  <text x="960" y="316" font-weight="800" fill="#F4ECDB">When something dies</text>
+  <rect x="1140" y="302" width="4" height="36" fill="#00C6C9"/>
+  <text x="1154" y="316" fill="#E8DFD0">Dies alone. A supervisor restarts</text>
+  <text x="1154" y="332" fill="#E8DFD0">it and its dependants, in order.</text>
+  <text x="1360" y="316" fill="#8A8AA0">try, catch, retry, and the</text>
+  <text x="1360" y="332" fill="#8A8AA0">state you clean up.</text>
+  <line x1="960" y1="350" x2="1520" y2="350" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+
+  <!-- row 3 -->
+  <text x="960" y="376" font-weight="800" fill="#F4ECDB">Input while busy</text>
+  <rect x="1140" y="362" width="4" height="36" fill="#00C6C9"/>
+  <text x="1154" y="376" fill="#E8DFD0">Waits in the mailbox. Postponed</text>
+  <text x="1154" y="392" fill="#E8DFD0">to the turn boundary, not lost.</text>
+  <text x="1360" y="376" fill="#8A8AA0">A mutex, a select, a queue</text>
+  <text x="1360" y="392" fill="#8A8AA0">you write and get wrong.</text>
+  <line x1="960" y1="410" x2="1520" y2="410" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+
+  <!-- row 4 -->
+  <text x="960" y="436" font-weight="800" fill="#F4ECDB">A slow client</text>
+  <rect x="1140" y="422" width="4" height="36" fill="#00C6C9"/>
+  <text x="1154" y="436" fill="#E8DFD0">A Writer process per socket owns</text>
+  <text x="1154" y="452" fill="#E8DFD0">the wait. Agents never notice.</text>
+  <text x="1360" y="436" fill="#8A8AA0">Backpressure you design,</text>
+  <text x="1360" y="452" fill="#8A8AA0">test, and design again.</text>
+  <line x1="960" y1="470" x2="1520" y2="470" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+
+  <!-- row 5 -->
+  <text x="960" y="496" font-weight="800" fill="#F4ECDB">Two plane replicas</text>
+  <rect x="1140" y="482" width="4" height="36" fill="#00C6C9"/>
+  <text x="1154" y="496" fill="#E8DFD0">They cluster. One global actor</text>
+  <text x="1154" y="512" fill="#E8DFD0">per profile places sessions.</text>
+  <text x="1360" y="496" fill="#8A8AA0">A coordination service</text>
+  <text x="1360" y="512" fill="#8A8AA0">on the side.</text>
+  <line x1="960" y1="530" x2="1520" y2="530" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+
+  <!-- row 6 -->
+  <text x="960" y="556" font-weight="800" fill="#F4ECDB">The agent itself</text>
+  <rect x="1140" y="542" width="4" height="36" fill="#00C6C9"/>
+  <text x="1154" y="556" fill="#E8DFD0">A state machine the runtime ships,</text>
+  <text x="1154" y="572" fill="#E8DFD0">postpone and timeouts built in.</text>
+  <text x="1360" y="556" fill="#8A8AA0">A switch, a queue and a</text>
+  <text x="1360" y="572" fill="#8A8AA0">loop you maintain.</text>
+  <line x1="960" y1="590" x2="1520" y2="590" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+</g>
+
+<text class="m" x="960" y="620" font-size="10" fill="#7B7B94" letter-spacing="1.5">TESTED: A STALLED SOCKET COSTS UNDER 10 % TURN LATENCY</text>
+<text class="m" x="960" y="640" font-size="10" fill="#7B7B94" letter-spacing="1.5">THE DAEMON CAN LOSE ITS LISTENER AND EVERY CLIENT WITHOUT AN AGENT NOTICING</text>
+
+<!-- the point -->
+<line x1="80" y1="760" x2="1520" y2="760" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+<text class="t" x="80" y="806" font-size="22" font-weight="800" fill="#F4ECDB">Rust and Go give you a fast language. The BEAM gives you what a harness actually is:</text>
+<text class="t" x="80" y="836" font-size="22" font-weight="800" fill="#F4ECDB">thousands of small processes that fail alone, restart in order and talk through mailboxes.</text>
+<text class="t" x="80" y="866" font-size="15" fill="#A3A3B8">Thirty years of it, in telephone exchanges. We wrote the agent. The runtime already knew how to keep it alive.</text>
+</svg>

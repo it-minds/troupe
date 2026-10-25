@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">Actors, sessions, profiles</title>
+<desc id="desc">Three columns. Actors: a person, an agent, a trigger and another agent, everything that does something. Sessions: one agent in one directory with a log of every event, each signed by its actor, in one of four states. Profiles: a kind of worker, an image, a model, a bundle of tools and some storage, that a remote session runs on.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+  <symbol id="mask-wait" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="#FF0080"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="#0B0B12"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="#0B0B12"/>
+  </symbol>
+  <symbol id="person" viewBox="0 0 48 48">
+    <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="800" fill="currentColor" font-family="Figtree,'Segoe UI',system-ui,sans-serif">AB</text>
+  </symbol>
+  <symbol id="clock" viewBox="0 0 48 48">
+    <rect x="5" y="5" width="38" height="38" fill="none" stroke="currentColor" stroke-width="3"/>
+    <line x1="24" y1="24" x2="24" y2="13" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+    <line x1="24" y1="24" x2="32" y2="29" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  </symbol>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#A3A3B8"/>
+  </marker>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// WHO, WHAT, WHERE</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">Actors, sessions, profiles</text>
+
+<!-- ACTORS -->
+<text class="m" x="80" y="212" font-size="13" font-weight="500" fill="#00DBD3" letter-spacing="3">ACTORS</text>
+<line x1="80" y1="224" x2="480" y2="224" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+
+<use href="#person" x="80" y="252" width="52" height="52" color="#F4ECDB"/>
+<text class="t" x="152" y="276" font-size="24" font-weight="800" fill="#F4ECDB">A person</text>
+<text class="t" x="152" y="300" font-size="15" fill="#A3A3B8">signed in where you always sign in</text>
+
+<use href="#mask" x="80" y="352" width="52" height="52" color="#00DBD3"/>
+<text class="t" x="152" y="376" font-size="24" font-weight="800" fill="#F4ECDB">An agent</text>
+<text class="t" x="152" y="400" font-size="15" fill="#A3A3B8">one at the root, and the ones it delegates to</text>
+
+<use href="#clock" x="80" y="452" width="52" height="52" color="#F4ECDB"/>
+<text class="t" x="152" y="476" font-size="24" font-weight="800" fill="#F4ECDB">A trigger</text>
+<text class="t" x="152" y="500" font-size="15" fill="#A3A3B8">on a schedule or a webhook, as a service account</text>
+
+<use href="#mask" x="80" y="552" width="52" height="52" color="#A3A3B8"/>
+<text class="t" x="152" y="576" font-size="24" font-weight="800" fill="#F4ECDB">Another agent</text>
+<text class="t" x="152" y="600" font-size="15" fill="#A3A3B8">calling in from outside, over A2A</text>
+
+<text class="t" x="80" y="668" font-size="17" fill="#E8DFD0">Everything that happens is signed</text>
+<text class="t" x="80" y="692" font-size="17" fill="#E8DFD0">by who did it.</text>
+
+<!-- actors act on a session -->
+<line x1="490" y1="420" x2="580" y2="420" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" x="535" y="404" text-anchor="middle" font-size="11" fill="#8A8AA0" letter-spacing="1.5">STARTS</text>
+<text class="m" x="535" y="442" text-anchor="middle" font-size="11" fill="#8A8AA0" letter-spacing="1.5">STEERS</text>
+<text class="m" x="535" y="460" text-anchor="middle" font-size="11" fill="#8A8AA0" letter-spacing="1.5">APPROVES</text>
+
+<!-- SESSIONS -->
+<text class="m" x="590" y="212" font-size="13" font-weight="500" fill="#00DBD3" letter-spacing="3">SESSIONS</text>
+<line x1="590" y1="224" x2="1010" y2="224" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+
+<rect x="598" y="256" width="420" height="300" fill="#000353"/>
+<rect x="590" y="248" width="420" height="300" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="t" x="614" y="290" font-size="24" font-weight="900" fill="#F4ECDB">One agent, one directory,</text>
+<text class="t" x="614" y="318" font-size="24" font-weight="900" fill="#F4ECDB">one log.</text>
+
+<!-- the log: a chain of events, each coloured by its actor -->
+<g stroke-width="2">
+  <rect x="614" y="350" width="36" height="36" fill="none" stroke="#F4ECDB"/>
+  <line x1="650" y1="368" x2="670" y2="368" stroke="#A3A3B8"/>
+  <rect x="670" y="350" width="36" height="36" fill="none" stroke="#00DBD3"/>
+  <line x1="706" y1="368" x2="726" y2="368" stroke="#A3A3B8"/>
+  <rect x="726" y="350" width="36" height="36" fill="none" stroke="#00DBD3"/>
+  <line x1="762" y1="368" x2="782" y2="368" stroke="#A3A3B8"/>
+  <rect x="782" y="350" width="36" height="36" fill="#FF0080" stroke="#FF0080"/>
+  <line x1="818" y1="368" x2="838" y2="368" stroke="#A3A3B8"/>
+  <rect x="838" y="350" width="36" height="36" fill="none" stroke="#F4ECDB"/>
+  <line x1="874" y1="368" x2="894" y2="368" stroke="#A3A3B8"/>
+  <rect x="894" y="350" width="36" height="36" fill="none" stroke="#00DBD3"/>
+  <line x1="930" y1="368" x2="950" y2="368" stroke="#A3A3B8"/>
+  <rect x="950" y="350" width="36" height="36" fill="none" stroke="#00DBD3" stroke-dasharray="4 3"/>
+</g>
+<text class="m" x="632" y="410" text-anchor="middle" font-size="10" fill="#8A8AA0">YOU</text>
+<text class="m" x="688" y="410" text-anchor="middle" font-size="10" fill="#8A8AA0">AGENT</text>
+<text class="m" x="744" y="410" text-anchor="middle" font-size="10" fill="#8A8AA0">TOOL</text>
+<text class="m" x="800" y="410" text-anchor="middle" font-size="10" fill="#FF0080">ASKS</text>
+<text class="m" x="856" y="410" text-anchor="middle" font-size="10" fill="#8A8AA0">YOU</text>
+<text class="m" x="912" y="410" text-anchor="middle" font-size="10" fill="#8A8AA0">TOOL</text>
+<text class="m" x="968" y="410" text-anchor="middle" font-size="10" fill="#8A8AA0">NEXT</text>
+<text class="m" x="614" y="446" font-size="12" font-weight="500" fill="#00DBD3" letter-spacing="3">THE LOG IS THE SESSION</text>
+
+<!-- states -->
+<g class="m" font-size="11" font-weight="500" letter-spacing="2">
+  <rect x="614" y="478" width="78" height="26" fill="none" stroke="#008687" stroke-width="1.5"/>
+  <text x="653" y="496" text-anchor="middle" fill="#00DBD3">ACTIVE</text>
+  <rect x="704" y="478" width="92" height="26" fill="none" stroke="#4A3F86" stroke-width="1.5"/>
+  <text x="750" y="496" text-anchor="middle" fill="#9C8BFF">DORMANT</text>
+  <rect x="808" y="478" width="100" height="26" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="858" y="496" text-anchor="middle" fill="#8A8AA0">READ-ONLY</text>
+  <rect x="920" y="478" width="78" height="26" fill="none" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+  <text x="959" y="496" text-anchor="middle" fill="#7B7B94">ERASED</text>
+</g>
+<text class="t" x="614" y="532" font-size="14" fill="#A3A3B8">Asleep keeps the log. Wake it and it carries on.</text>
+
+<text class="t" x="590" y="600" font-size="17" fill="#E8DFD0">Close the window and the work carries on.</text>
+<text class="t" x="590" y="624" font-size="17" fill="#E8DFD0">Open two windows and you see the same session.</text>
+
+<!-- a session runs on a profile -->
+<line x1="1020" y1="420" x2="1110" y2="420" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" x="1065" y="406" text-anchor="middle" font-size="11" fill="#8A8AA0" letter-spacing="1.5">RUNS ON</text>
+
+<!-- PROFILES -->
+<text class="m" x="1120" y="212" font-size="13" font-weight="500" fill="#00DBD3" letter-spacing="3">PROFILES</text>
+<line x1="1120" y1="224" x2="1520" y2="224" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+
+<text class="t" x="1120" y="290" font-size="24" font-weight="900" fill="#F4ECDB">A kind of worker.</text>
+
+<g>
+  <rect x="1128" y="322" width="392" height="56" fill="#000353"/>
+  <rect x="1120" y="314" width="392" height="56" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text class="m" x="1140" y="348" font-size="12" font-weight="500" fill="#8A8AA0" letter-spacing="2.5">IMAGE</text>
+  <text class="t" x="1240" y="349" font-size="17" fill="#E8DFD0">which harness version</text>
+
+  <rect x="1120" y="370" width="392" height="56" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text class="m" x="1140" y="404" font-size="12" font-weight="500" fill="#8A8AA0" letter-spacing="2.5">MODEL</text>
+  <text class="t" x="1240" y="405" font-size="17" fill="#E8DFD0">which one, and its budget</text>
+
+  <rect x="1120" y="426" width="392" height="56" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text class="m" x="1140" y="460" font-size="12" font-weight="500" fill="#8A8AA0" letter-spacing="2.5">BUNDLE</text>
+  <text class="t" x="1240" y="461" font-size="17" fill="#E8DFD0">agents, skills, MCP servers</text>
+
+  <rect x="1120" y="482" width="392" height="56" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text class="m" x="1140" y="516" font-size="12" font-weight="500" fill="#8A8AA0" letter-spacing="2.5">STORAGE</text>
+  <text class="t" x="1240" y="517" font-size="17" fill="#E8DFD0">the workspace, and what stays</text>
+</g>
+
+<text class="t" x="1120" y="600" font-size="17" fill="#E8DFD0">A remote session is created on one.</text>
+<text class="t" x="1120" y="624" font-size="17" fill="#E8DFD0">Your team decides which you may use.</text>
+<use href="#mask" x="1466" y="256" width="46" height="46" color="#00DBD3"/>
+
+<!-- key -->
+<rect x="80" y="846" width="14" height="14" fill="none" stroke="#F4ECDB" stroke-width="2"/>
+<text class="m" x="104" y="858" font-size="13" fill="#8A8AA0" letter-spacing="2">A PERSON</text>
+<rect x="230" y="846" width="14" height="14" fill="none" stroke="#00DBD3" stroke-width="2"/>
+<text class="m" x="254" y="858" font-size="13" fill="#8A8AA0" letter-spacing="2">THE MACHINE</text>
+<rect x="400" y="846" width="14" height="14" fill="#FF0080"/>
+<text class="m" x="424" y="858" font-size="13" fill="#8A8AA0" letter-spacing="2">A PERSON MUST DECIDE</text>
+</svg>

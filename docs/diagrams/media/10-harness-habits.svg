@@ -1,0 +1,199 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">Six habits of the harness</title>
+<desc id="desc">Six tiles. Worktrees: a second session in the same repository gets its own git worktree. The brief: a memory file in the repository, read into every prompt and written by the agents. Watch mode: an AI! comment in a saved file starts work. Bounded results: big outputs show head and tail with a handle for the rest. Replay: a crashed agent rebuilds from the log and finishes. Goal and loop: a goal seen on every turn and a loop that stops when it is met.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+.tile{fill:#12121C;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+.box{fill:#1C1C2B;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+  <symbol id="person" viewBox="0 0 48 48">
+    <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="800" fill="currentColor" font-family="Figtree,'Segoe UI',system-ui,sans-serif">AB</text>
+  </symbol>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#A3A3B8"/>
+  </marker>
+  <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#00C6C9"/>
+  </marker>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// WHAT THE HARNESS DOES ON ITS OWN</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">Six habits of the harness</text>
+
+<!-- ===== 1. Worktrees ===== -->
+<rect x="88" y="188" width="440" height="290" fill="#000353"/>
+<rect class="tile" x="80" y="180" width="440" height="290"/>
+<text class="m" x="100" y="206" font-size="10" fill="#7B7B94" letter-spacing="2.5">01</text>
+<!-- your checkout -->
+<rect class="box" x="100" y="224" width="150" height="56"/>
+<use href="#person" x="110" y="236" width="32" height="32" color="#F4ECDB"/>
+<text class="m" x="150" y="248" font-size="11" fill="#F4ECDB">repo/</text>
+<text class="m" x="150" y="266" font-size="10" fill="#8A8AA0">main · yours</text>
+<!-- the two worktrees -->
+<line x1="250" y1="252" x2="280" y2="252" stroke="#A3A3B8" stroke-width="1.5"/>
+<line x1="280" y1="236" x2="280" y2="304" stroke="#A3A3B8" stroke-width="1.5"/>
+<line x1="280" y1="236" x2="310" y2="236" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="280" y1="304" x2="310" y2="304" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect class="box" x="312" y="216" width="188" height="40"/>
+<use href="#mask" x="320" y="222" width="28" height="28" color="#00DBD3"/>
+<text class="m" x="356" y="241" font-size="11" fill="#00DBD3">troupe/fix-login</text>
+<rect class="box" x="312" y="284" width="188" height="40"/>
+<use href="#mask" x="320" y="290" width="28" height="28" color="#00DBD3"/>
+<text class="m" x="356" y="309" font-size="11" fill="#00DBD3">troupe/write-docs</text>
+<text class="m" x="100" y="352" font-size="10" fill="#7B7B94" letter-spacing="1.5">ONE REPO · ONE WORKTREE PER LIVE SESSION</text>
+<text class="t" x="100" y="392" font-size="22" font-weight="900" fill="#F4ECDB">Worktrees</text>
+<text class="t" x="100" y="418" font-size="14" fill="#A3A3B8">A second session in the same repo gets its own git</text>
+<text class="t" x="100" y="438" font-size="14" fill="#A3A3B8">worktree. Two agents never see each other's half-done</text>
+<text class="t" x="100" y="458" font-size="14" fill="#A3A3B8">edits as yours. A dirty tree is never removed unasked.</text>
+
+<!-- ===== 2. The brief ===== -->
+<rect x="568" y="188" width="440" height="290" fill="#000353"/>
+<rect class="tile" x="560" y="180" width="440" height="290"/>
+<text class="m" x="580" y="206" font-size="10" fill="#7B7B94" letter-spacing="2.5">02</text>
+<!-- the file -->
+<rect class="box" x="700" y="222" width="160" height="96"/>
+<text class="m" x="716" y="246" font-size="11" fill="#F4ECDB">.troupe/memory.md</text>
+<line x1="716" y1="262" x2="836" y2="262" stroke="#8A8AA0" stroke-width="1.5"/>
+<line x1="716" y1="278" x2="800" y2="278" stroke="#8A8AA0" stroke-width="1.5"/>
+<line x1="716" y1="294" x2="820" y2="294" stroke="#8A8AA0" stroke-width="1.5"/>
+<!-- writers -->
+<use href="#mask" x="586" y="228" width="30" height="30" color="#00DBD3"/>
+<text class="m" x="622" y="248" font-size="10" fill="#8A8AA0">remember</text>
+<line x1="622" y1="256" x2="700" y2="256" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<use href="#mask" x="586" y="282" width="30" height="30" color="#00DBD3"/>
+<text class="m" x="622" y="302" font-size="10" fill="#8A8AA0">librarian</text>
+<line x1="622" y1="310" x2="700" y2="310" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<!-- reader: every prompt -->
+<line x1="860" y1="270" x2="900" y2="270" stroke="#00C6C9" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+<rect class="box" x="904" y="238" width="76" height="64"/>
+<line x1="916" y1="254" x2="968" y2="254" stroke="#00DBD3" stroke-width="2"/>
+<line x1="916" y1="270" x2="968" y2="270" stroke="#8A8AA0" stroke-width="1.5"/>
+<line x1="916" y1="286" x2="968" y2="286" stroke="#8A8AA0" stroke-width="1.5"/>
+<text class="m" x="942" y="322" text-anchor="middle" font-size="9" fill="#7B7B94" letter-spacing="1">EVERY PROMPT</text>
+<text class="m" x="580" y="352" font-size="10" fill="#7B7B94" letter-spacing="1.5">A FILE IN YOUR REPO · YOU CAN READ IT TOO</text>
+<text class="t" x="580" y="392" font-size="22" font-weight="900" fill="#F4ECDB">The project brief</text>
+<text class="t" x="580" y="418" font-size="14" fill="#A3A3B8">What the troupe has learned about this repo, read into</text>
+<text class="t" x="580" y="438" font-size="14" fill="#A3A3B8">every prompt once. Agents write it with remember; a</text>
+<text class="t" x="580" y="458" font-size="14" fill="#A3A3B8">librarian keeps it tidy. Committed, so it travels with the code.</text>
+
+<!-- ===== 3. Watch mode ===== -->
+<rect x="1048" y="188" width="440" height="290" fill="#000353"/>
+<rect class="tile" x="1040" y="180" width="440" height="290"/>
+<text class="m" x="1060" y="206" font-size="10" fill="#7B7B94" letter-spacing="2.5">03</text>
+<rect class="box" x="1060" y="222" width="270" height="104"/>
+<g class="m" font-size="11">
+  <text x="1076" y="246" fill="#8A8AA0">function login(user) {</text>
+  <rect x="1070" y="254" width="250" height="18" fill="#00C6C9" fill-opacity=".18"/>
+  <text x="1076" y="267" fill="#00DBD3">  // AI! this leaks the token</text>
+  <text x="1076" y="288" fill="#8A8AA0">  return token;</text>
+  <text x="1076" y="309" fill="#8A8AA0">}</text>
+</g>
+<line x1="1330" y1="262" x2="1380" y2="262" stroke="#00C6C9" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+<use href="#mask" x="1388" y="242" width="40" height="40" color="#00DBD3"/>
+<text class="m" x="1408" y="302" text-anchor="middle" font-size="9" fill="#7B7B94" letter-spacing="1">ON SAVE</text>
+<text class="m" x="1060" y="352" font-size="10" fill="#7B7B94" letter-spacing="1.5">AI!  DO IT · AI?  ASK · AI  NOTE · OWN WRITES IGNORED</text>
+<text class="t" x="1060" y="392" font-size="22" font-weight="900" fill="#F4ECDB">Watch mode</text>
+<text class="t" x="1060" y="418" font-size="14" fill="#A3A3B8">Leave a comment in the code and save. The session</text>
+<text class="t" x="1060" y="438" font-size="14" fill="#A3A3B8">picks it up from your editor, whichever one. It knows</text>
+<text class="t" x="1060" y="458" font-size="14" fill="#A3A3B8">its own writes by content hash and never chases them.</text>
+
+<!-- ===== 4. Bounded results ===== -->
+<rect x="88" y="518" width="440" height="290" fill="#000353"/>
+<rect class="tile" x="80" y="510" width="440" height="290"/>
+<text class="m" x="100" y="536" font-size="10" fill="#7B7B94" letter-spacing="2.5">04</text>
+<!-- a tall output, cut -->
+<rect class="box" x="100" y="552" width="200" height="110"/>
+<g stroke="#A3A3B8" stroke-width="1.5">
+  <line x1="112" y1="566" x2="270" y2="566"/><line x1="112" y1="578" x2="240" y2="578"/><line x1="112" y1="590" x2="260" y2="590"/>
+</g>
+<line x1="112" y1="608" x2="288" y2="608" stroke="#7B7B94" stroke-width="1.5" stroke-dasharray="3 4"/>
+<text class="m" x="200" y="623" text-anchor="middle" font-size="9" fill="#7B7B94" letter-spacing="1">… 41,000 LINES …</text>
+<g stroke="#A3A3B8" stroke-width="1.5">
+  <line x1="112" y1="638" x2="250" y2="638"/><line x1="112" y1="650" x2="275" y2="650"/>
+</g>
+<line x1="300" y1="607" x2="340" y2="607" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect class="box" x="344" y="588" width="156" height="38"/>
+<text class="m" x="422" y="606" text-anchor="middle" font-size="10" fill="#F4ECDB">blob.get(3f9c…)</text>
+<text class="m" x="422" y="620" text-anchor="middle" font-size="9" fill="#7B7B94" letter-spacing="1">THE REST, ON DEMAND</text>
+<text class="m" x="100" y="682" font-size="10" fill="#7B7B94" letter-spacing="1.5">HEAD · TAIL · A HANDLE · NOTHING REWRITTEN LATER</text>
+<text class="t" x="100" y="722" font-size="22" font-weight="900" fill="#F4ECDB">Bounded results</text>
+<text class="t" x="100" y="748" font-size="14" fill="#A3A3B8">Big outputs are cut where they are made, with a handle</text>
+<text class="t" x="100" y="768" font-size="14" fill="#A3A3B8">for the rest. Nothing already said is ever rewritten, so</text>
+<text class="t" x="100" y="788" font-size="14" fill="#A3A3B8">the model's cache stays warm and the bill stays down.</text>
+
+<!-- ===== 5. Replay ===== -->
+<rect x="568" y="518" width="440" height="290" fill="#000353"/>
+<rect class="tile" x="560" y="510" width="440" height="290"/>
+<text class="m" x="580" y="536" font-size="10" fill="#7B7B94" letter-spacing="2.5">05</text>
+<!-- the log chain -->
+<g stroke-width="2">
+  <rect x="580" y="580" width="30" height="30" fill="none" stroke="#F4ECDB"/>
+  <line x1="610" y1="595" x2="626" y2="595" stroke="#A3A3B8"/>
+  <rect x="626" y="580" width="30" height="30" fill="none" stroke="#00DBD3"/>
+  <line x1="656" y1="595" x2="672" y2="595" stroke="#A3A3B8"/>
+  <rect x="672" y="580" width="30" height="30" fill="none" stroke="#00DBD3"/>
+  <line x1="702" y1="595" x2="718" y2="595" stroke="#A3A3B8"/>
+  <rect x="718" y="580" width="30" height="30" fill="none" stroke="#00DBD3"/>
+  <line x1="748" y1="595" x2="764" y2="595" stroke="#A3A3B8"/>
+  <rect x="764" y="580" width="30" height="30" fill="none" stroke="#00DBD3" stroke-dasharray="3 3"/>
+</g>
+<text class="m" x="580" y="632" font-size="9" fill="#7B7B94" letter-spacing="1">THE LOG</text>
+<!-- the crash -->
+<use href="#mask" x="840" y="552" width="40" height="40" color="#FF7E6E"/>
+<line x1="846" y1="558" x2="874" y2="586" stroke="#FF7E6E" stroke-width="3"/>
+<line x1="874" y1="558" x2="846" y2="586" stroke="#FF7E6E" stroke-width="3"/>
+<text class="m" x="860" y="608" text-anchor="middle" font-size="9" fill="#FF7E6E" letter-spacing="1">CRASH</text>
+<!-- rebuilt -->
+<polyline points="780,610 780,650 900,650 900,620" fill="none" stroke="#00C6C9" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+<text class="m" x="840" y="666" text-anchor="middle" font-size="9" fill="#00DBD3" letter-spacing="1">FOLD THE LOG</text>
+<use href="#mask" x="920" y="552" width="40" height="40" color="#00DBD3"/>
+<text class="m" x="940" y="608" text-anchor="middle" font-size="9" fill="#00DBD3" letter-spacing="1">CARRIES ON</text>
+<text class="m" x="580" y="682" font-size="10" fill="#7B7B94" letter-spacing="1.5">A FINISHED CALL IS NEVER RUN TWICE</text>
+<text class="t" x="580" y="722" font-size="22" font-weight="900" fill="#F4ECDB">Replay</text>
+<text class="t" x="580" y="748" font-size="14" fill="#A3A3B8">An agent that dies is rebuilt from its own log and</text>
+<text class="t" x="580" y="768" font-size="14" fill="#A3A3B8">finishes what it started. The log is the truth; the</text>
+<text class="t" x="580" y="788" font-size="14" fill="#A3A3B8">process is disposable. Same trick wakes a dormant session.</text>
+
+<!-- ===== 6. Goal and loop ===== -->
+<rect x="1048" y="518" width="440" height="290" fill="#000353"/>
+<rect class="tile" x="1040" y="510" width="440" height="290"/>
+<text class="m" x="1060" y="536" font-size="10" fill="#7B7B94" letter-spacing="2.5">06</text>
+<rect class="box" x="1060" y="552" width="400" height="34"/>
+<text class="m" x="1076" y="574" font-size="11" fill="#F4ECDB">/goal  all tests green, no new warnings</text>
+<!-- the turns -->
+<g class="m" font-size="9" letter-spacing="1">
+  <rect x="1060" y="604" width="60" height="30" fill="none" stroke="#00DBD3" stroke-width="1.5"/>
+  <text x="1090" y="623" text-anchor="middle" fill="#00DBD3">TURN 1</text>
+  <line x1="1120" y1="619" x2="1138" y2="619" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="1140" y="604" width="60" height="30" fill="none" stroke="#00DBD3" stroke-width="1.5"/>
+  <text x="1170" y="623" text-anchor="middle" fill="#00DBD3">TURN 2</text>
+  <line x1="1200" y1="619" x2="1218" y2="619" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="1220" y="604" width="60" height="30" fill="none" stroke="#00DBD3" stroke-width="1.5"/>
+  <text x="1250" y="623" text-anchor="middle" fill="#00DBD3">TURN 3</text>
+  <line x1="1280" y1="619" x2="1298" y2="619" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="1300" y="604" width="70" height="30" fill="#00C6C9"/>
+  <text x="1335" y="623" text-anchor="middle" fill="#0B0B12" font-weight="500">GOAL MET</text>
+</g>
+<text class="m" x="1060" y="660" font-size="9" fill="#7B7B94" letter-spacing="1">EACH TURN ENDS WITH: IS THE GOAL MET?</text>
+<text class="m" x="1060" y="682" font-size="10" fill="#7B7B94" letter-spacing="1.5">STOPS: MET · LIMIT · 3 FAILED TURNS · BUDGET ASKS YOU</text>
+<text class="t" x="1060" y="722" font-size="22" font-weight="900" fill="#F4ECDB">Goal and loop</text>
+<text class="t" x="1060" y="748" font-size="14" fill="#A3A3B8">The goal is on every turn and survives a restart. /loop</text>
+<text class="t" x="1060" y="768" font-size="14" fill="#A3A3B8">feeds turns on its own and stops when the goal is met,</text>
+<text class="t" x="1060" y="788" font-size="14" fill="#A3A3B8">or when something is wrong. You can keep typing meanwhile.</text>
+
+<!-- footer -->
+<text class="m" x="80" y="858" font-size="11" fill="#7B7B94" letter-spacing="2">ALSO: SKILLS DISCLOSED ONE LINE AT A TIME · A REAPER THAT KILLS EVERY PROCESS THE VM STARTED · COMPACTION THAT KEEPS THE CACHE</text>
+</svg>

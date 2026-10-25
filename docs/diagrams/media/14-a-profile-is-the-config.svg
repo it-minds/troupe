@@ -1,0 +1,210 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">A profile is the configuration</title>
+<desc id="desc">Left: four authors, a cluster admin, a team admin, the repository and you, each write their own layer. The cluster admin's TroupePolicy is a ceiling. The team admin's profile carries image, model, a versioned hashed bundle, storage and egress. The repository and your own files are local layers that merge by key, with risky keys counting only once a workspace is trusted. The profile lands in two places: the pod enforces it, and the session remembers which version it ran. Right, the usual way: configuration on every laptop, with capabilities shared through an MCP side-door, so each machine still decides its own model, approvals and tools, and no run is pinned to a version.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+.tile{fill:#12121C;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+.box{fill:#1C1C2B;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+.faint{fill:#0B0B12;stroke:#E8DFD0;stroke-opacity:.18;stroke-width:1.5}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+  <symbol id="person" viewBox="0 0 48 48">
+    <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="800" fill="currentColor" font-family="Figtree,'Segoe UI',system-ui,sans-serif">AB</text>
+  </symbol>
+  <symbol id="lock" viewBox="0 0 48 48">
+    <path d="M14 22 V15 Q14 6 24 6 Q34 6 34 15 V22" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"/>
+    <rect x="8" y="22" width="32" height="22" fill="currentColor"/>
+  </symbol>
+  <symbol id="laptop" viewBox="0 0 48 48">
+    <rect x="8" y="10" width="32" height="22" fill="none" stroke="currentColor" stroke-width="3"/>
+    <rect x="3" y="34" width="42" height="5" fill="currentColor"/>
+  </symbol>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#A3A3B8"/>
+  </marker>
+  <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#00C6C9"/>
+  </marker>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// WHERE CONFIGURATION LIVES</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">A profile is the configuration</text>
+
+<!-- ===== authors ===== -->
+<text class="m" x="80" y="184" font-size="10" fill="#7B7B94" letter-spacing="2">WHO WRITES WHAT</text>
+
+<rect class="tile" x="80" y="196" width="250" height="70"/>
+<text class="m" x="96" y="216" font-size="9" font-weight="500" fill="#FF7E6E" letter-spacing="2">CLUSTER ADMIN</text>
+<text class="t" x="96" y="238" font-size="16" font-weight="800" fill="#F4ECDB">TroupePolicy</text>
+<text class="m" x="96" y="256" font-size="9" fill="#8A8AA0" letter-spacing="1">IMAGES · EGRESS · REPLICAS · CPU</text>
+
+<rect class="tile" x="80" y="286" width="250" height="70"/>
+<text class="m" x="96" y="306" font-size="9" font-weight="500" fill="#00DBD3" letter-spacing="2">TEAM ADMIN</text>
+<text class="t" x="96" y="328" font-size="16" font-weight="800" fill="#F4ECDB">profile + bundle</text>
+<text class="m" x="96" y="346" font-size="9" fill="#8A8AA0" letter-spacing="1">MODEL · SIZE · AGENTS · SKILLS · MCP</text>
+
+<rect class="tile" x="80" y="376" width="250" height="70"/>
+<text class="m" x="96" y="396" font-size="9" font-weight="500" fill="#8A8AA0" letter-spacing="2">THE REPOSITORY</text>
+<text class="t" x="96" y="418" font-size="16" font-weight="800" fill="#F4ECDB">.troupe/</text>
+<text class="m" x="96" y="436" font-size="9" fill="#8A8AA0" letter-spacing="1">CONFIG · AGENTS · SKILLS · AGENTS.md</text>
+<use href="#lock" x="298" y="394" width="20" height="20" color="#FFBC56"/>
+
+<rect class="tile" x="80" y="466" width="250" height="70"/>
+<rect x="80" y="466" width="4" height="70" fill="#FFBC56"/>
+<text class="m" x="96" y="486" font-size="9" font-weight="500" fill="#FFBC56" letter-spacing="2">YOU</text>
+<text class="t" x="96" y="508" font-size="16" font-weight="800" fill="#F4ECDB">~/.config/troupe</text>
+<text class="m" x="96" y="526" font-size="9" fill="#8A8AA0" letter-spacing="1">CONFIG · MCP · SKILLS · COMMANDS</text>
+
+<text class="m" x="80" y="562" font-size="9" fill="#FFBC56" letter-spacing="1">LOCK: A REPO'S RISKY KEYS COUNT</text>
+<text class="m" x="80" y="576" font-size="9" fill="#FFBC56" letter-spacing="1">ONLY ONCE YOU TRUST IT</text>
+<text class="m" x="80" y="592" font-size="9" fill="#7B7B94" letter-spacing="1">approvals · endpoints · keys · mcp · paths</text>
+
+<!-- arrows from authors -->
+<line x1="330" y1="231" x2="400" y2="231" stroke="#FF7E6E" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="330" y1="321" x2="400" y2="321" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<polyline points="330,411 365,411 365,520 400,520" fill="none" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<polyline points="330,501 365,501 365,534 400,534" fill="none" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<!-- ===== the ceiling ===== -->
+<rect x="400" y="196" width="320" height="38" fill="none" stroke="#FF7E6E" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text class="m" x="416" y="219" font-size="10" font-weight="500" fill="#FF7E6E" letter-spacing="2">CEILING · NOTHING BELOW MAY EXCEED IT</text>
+
+<!-- ===== the profile ===== -->
+<rect x="408" y="254" width="320" height="226" fill="#000353"/>
+<rect class="tile" x="400" y="246" width="320" height="226"/>
+<rect x="400" y="246" width="4" height="226" fill="#00C6C9"/>
+<text class="m" x="420" y="270" font-size="10" font-weight="500" fill="#00DBD3" letter-spacing="2">PROFILE · build</text>
+<g class="m" font-size="11">
+  <text x="420" y="300" fill="#8A8AA0" letter-spacing="1.5">IMAGE</text><text x="520" y="300" fill="#E8DFD0">release</text>
+  <text x="420" y="326" fill="#8A8AA0" letter-spacing="1.5">MODEL</text><text x="520" y="326" fill="#E8DFD0">gateway/glm-5.2</text>
+  <text x="420" y="352" fill="#8A8AA0" letter-spacing="1.5">BUNDLE</text><text x="520" y="352" fill="#00DBD3">v3 · sha256:9f2c…</text>
+  <text x="420" y="378" fill="#8A8AA0" letter-spacing="1.5">STORAGE</text><text x="520" y="378" fill="#E8DFD0">team volume · rw</text>
+  <text x="420" y="404" fill="#8A8AA0" letter-spacing="1.5">EGRESS</text><text x="520" y="404" fill="#E8DFD0">3 hosts</text>
+</g>
+<line x1="420" y1="420" x2="700" y2="420" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+<g class="m" font-size="9" font-weight="500" letter-spacing="1">
+  <rect x="420" y="432" width="34" height="20" fill="none" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/><text x="437" y="446" text-anchor="middle" fill="#7B7B94">v1</text>
+  <rect x="460" y="432" width="34" height="20" fill="none" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/><text x="477" y="446" text-anchor="middle" fill="#7B7B94">v2</text>
+  <rect x="500" y="432" width="34" height="20" fill="#00C6C9"/><text x="517" y="446" text-anchor="middle" fill="#0B0B12">v3</text>
+</g>
+<text class="m" x="546" y="446" font-size="9" fill="#8A8AA0" letter-spacing="1">APPEND-ONLY · ROLLBACK = v4</text>
+<text class="t" x="420" y="466" font-size="11" fill="#A3A3B8">The bundle is one hashed, immutable document per version.</text>
+
+<!-- ===== local layers ===== -->
+<rect class="tile" x="400" y="492" width="320" height="108"/>
+<text class="m" x="416" y="512" font-size="9" fill="#7B7B94" letter-spacing="2">ON A LAPTOP: THE SAME, UNDER YOUR LAYERS</text>
+<g class="m" font-size="8" letter-spacing=".5">
+  <rect class="box" x="416" y="522" width="52" height="20"/><text x="442" y="536" text-anchor="middle" fill="#A3A3B8">built-in</text>
+  <rect class="box" x="472" y="522" width="48" height="20"/><text x="496" y="536" text-anchor="middle" fill="#00DBD3">bundle</text>
+  <rect class="box" x="524" y="522" width="40" height="20"/><text x="544" y="536" text-anchor="middle" fill="#FFBC56">you</text>
+  <rect class="box" x="568" y="522" width="40" height="20"/><text x="588" y="536" text-anchor="middle" fill="#A3A3B8">repo</text>
+  <rect class="box" x="612" y="522" width="40" height="20"/><text x="632" y="536" text-anchor="middle" fill="#A3A3B8">.local</text>
+  <rect class="box" x="656" y="522" width="26" height="20"/><text x="669" y="536" text-anchor="middle" fill="#A3A3B8">env</text>
+  <rect class="box" x="686" y="522" width="22" height="20"/><text x="697" y="536" text-anchor="middle" fill="#A3A3B8">cli</text>
+</g>
+<text class="m" x="416" y="560" font-size="9" fill="#8A8AA0" letter-spacing="1">LATER WINS · MAPS MERGE BY KEY</text>
+<text class="m" x="416" y="574" font-size="9" fill="#8A8AA0" letter-spacing="1">null REMOVES · A LIST REPLACES</text>
+<text class="m" x="416" y="590" font-size="9" fill="#7B7B94" letter-spacing="1">config show: every value and its file</text>
+
+<!-- ===== where it lands ===== -->
+<line x1="720" y1="300" x2="780" y2="300" stroke="#00C6C9" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+<line x1="720" y1="420" x2="780" y2="420" stroke="#00C6C9" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+
+<rect x="788" y="254" width="232" height="100" fill="#000353"/>
+<rect class="tile" x="780" y="246" width="232" height="100"/>
+<text class="m" x="796" y="268" font-size="9" font-weight="500" fill="#00DBD3" letter-spacing="2">THE POD ENFORCES IT</text>
+<use href="#mask" x="796" y="280" width="30" height="30" color="#00DBD3"/>
+<text class="t" x="836" y="292" font-size="11" fill="#E8DFD0">NetworkPolicy from egress</text>
+<text class="t" x="836" y="308" font-size="11" fill="#E8DFD0">secrets injected, never in the doc</text>
+<text class="t" x="836" y="324" font-size="11" fill="#E8DFD0">tool allowlist at discovery</text>
+<text class="t" x="836" y="340" font-size="11" fill="#E8DFD0">bundle hash verified before use</text>
+
+<rect x="788" y="374" width="232" height="100" fill="#000353"/>
+<rect class="tile" x="780" y="366" width="232" height="100"/>
+<text class="m" x="796" y="388" font-size="9" font-weight="500" fill="#00DBD3" letter-spacing="2">THE SESSION REMEMBERS IT</text>
+<text class="m" x="796" y="410" font-size="10" fill="#F4ECDB">session 42 · bundle v3 · 9f2c…</text>
+<text class="t" x="796" y="430" font-size="11" fill="#A3A3B8">A new version is for new sessions.</text>
+<text class="t" x="796" y="446" font-size="11" fill="#A3A3B8">Retire v3 and it moves at its next</text>
+<text class="t" x="796" y="462" font-size="11" fill="#A3A3B8">wake, with a config_upgraded event.</text>
+
+<text class="m" x="780" y="512" font-size="9" fill="#7B7B94" letter-spacing="1">A GRANT MAY NARROW IT: ENTITLEMENTS</text>
+<text class="m" x="780" y="526" font-size="9" fill="#7B7B94" letter-spacing="1">which agents, skills, servers</text>
+<text class="m" x="780" y="552" font-size="9" fill="#7B7B94" letter-spacing="1">GITOPS OPTIONAL · PROFILE AS A COMMIT</text>
+<text class="m" x="780" y="566" font-size="9" fill="#7B7B94" letter-spacing="1">pending until the resource catches up</text>
+
+<!-- ===== the usual way ===== -->
+<rect class="faint" x="1060" y="196" width="460" height="386"/>
+<text class="m" x="1080" y="220" font-size="10" fill="#8A8AA0" letter-spacing="2">THE USUAL WAY · CONFIG ON EVERY LAPTOP</text>
+<text class="m" x="1080" y="236" font-size="9" fill="#7B7B94" letter-spacing="1">OpenWork over opencode.json · .claude/ · .cursor/ …</text>
+
+<g>
+  <rect class="faint" x="1080" y="256" width="130" height="92"/>
+  <use href="#laptop" x="1090" y="262" width="32" height="32" color="#A3A3B8"/>
+  <text class="m" x="1128" y="282" font-size="9" fill="#A3A3B8">opencode.json</text>
+  <text class="m" x="1090" y="312" font-size="8" fill="#7B7B94" letter-spacing=".5">model: its own</text>
+  <text class="m" x="1090" y="324" font-size="8" fill="#7B7B94" letter-spacing=".5">approvals: its own</text>
+  <text class="m" x="1090" y="336" font-size="8" fill="#7B7B94" letter-spacing=".5">tools: its own</text>
+
+  <rect class="faint" x="1225" y="256" width="130" height="92"/>
+  <use href="#laptop" x="1235" y="262" width="32" height="32" color="#A3A3B8"/>
+  <text class="m" x="1273" y="282" font-size="9" fill="#A3A3B8">opencode.json</text>
+  <text class="m" x="1235" y="312" font-size="8" fill="#7B7B94" letter-spacing=".5">model: another</text>
+  <text class="m" x="1235" y="324" font-size="8" fill="#7B7B94" letter-spacing=".5">approvals: off</text>
+  <text class="m" x="1235" y="336" font-size="8" fill="#7B7B94" letter-spacing=".5">tools: a few more</text>
+
+  <rect class="faint" x="1370" y="256" width="130" height="92"/>
+  <use href="#laptop" x="1380" y="262" width="32" height="32" color="#A3A3B8"/>
+  <text class="m" x="1418" y="282" font-size="9" fill="#A3A3B8">.claude/</text>
+  <text class="m" x="1380" y="312" font-size="8" fill="#7B7B94" letter-spacing=".5">model: ?</text>
+  <text class="m" x="1380" y="324" font-size="8" fill="#7B7B94" letter-spacing=".5">approvals: ?</text>
+  <text class="m" x="1380" y="336" font-size="8" fill="#7B7B94" letter-spacing=".5">last edited: ?</text>
+</g>
+
+<!-- the side door -->
+<rect class="faint" x="1140" y="392" width="300" height="44"/>
+<text class="m" x="1290" y="410" text-anchor="middle" font-size="9" fill="#A3A3B8" letter-spacing="1.5">SHARED CAPABILITIES · AN MCP SIDE-DOOR</text>
+<text class="m" x="1290" y="426" text-anchor="middle" font-size="8" fill="#7B7B94" letter-spacing=".5">skills reused · settings stay the laptop's</text>
+<line x1="1145" y1="392" x2="1145" y2="348" stroke="#A3A3B8" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arrow)"/>
+<line x1="1290" y1="392" x2="1290" y2="348" stroke="#A3A3B8" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arrow)"/>
+<line x1="1435" y1="392" x2="1435" y2="348" stroke="#A3A3B8" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arrow)"/>
+
+<g class="t" font-size="12">
+  <text x="1080" y="470" fill="#00DBD3">+ works with the agent you already have</text>
+  <text x="1080" y="496" fill="#FF7E6E">− every machine decides its own model, approvals and tools</text>
+  <text x="1080" y="518" fill="#FF7E6E">− nothing pins a run to a version of anything</text>
+  <text x="1080" y="540" fill="#FF7E6E">− a ceiling is advice the laptop can edit out</text>
+  <text x="1080" y="562" fill="#FF7E6E">− "what did it run with?" means asking the laptop</text>
+</g>
+
+<!-- ===== what you get ===== -->
+<g class="m" font-size="10" font-weight="500" letter-spacing="1.5">
+  <rect x="80" y="630" width="220" height="32" fill="none" stroke="#008687" stroke-width="1.5"/>
+  <text x="190" y="650" text-anchor="middle" fill="#00DBD3">ONE TRUTH PER TEAM</text>
+  <rect x="316" y="630" width="260" height="32" fill="none" stroke="#008687" stroke-width="1.5"/>
+  <text x="446" y="650" text-anchor="middle" fill="#00DBD3">VERSIONED · HASHED · PINNED</text>
+  <rect x="592" y="630" width="250" height="32" fill="none" stroke="#008687" stroke-width="1.5"/>
+  <text x="717" y="650" text-anchor="middle" fill="#00DBD3">CEILINGS HOLD AT THE POD</text>
+  <rect x="858" y="630" width="290" height="32" fill="none" stroke="#008687" stroke-width="1.5"/>
+  <text x="1003" y="650" text-anchor="middle" fill="#00DBD3">EVERY RUN SAYS WHICH VERSION</text>
+  <rect x="1164" y="630" width="356" height="32" fill="none" stroke="#A37734" stroke-width="1.5"/>
+  <text x="1342" y="650" text-anchor="middle" fill="#FFBC56">YOUR LAPTOP STILL GETS ITS OWN LAYERS</text>
+</g>
+
+<!-- the point -->
+<line x1="80" y1="710" x2="1520" y2="710" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+<text class="t" x="80" y="756" font-size="22" font-weight="800" fill="#F4ECDB">Configuration is a fact about the session, not about whose laptop it ran on.</text>
+<text class="t" x="80" y="786" font-size="15" fill="#A3A3B8">The team publishes a version. The pod enforces it. The session records it. You still layer your own on top at home,</text>
+<text class="t" x="80" y="808" font-size="15" fill="#A3A3B8">and a repository's risky keys wait until you say you trust it.</text>
+</svg>

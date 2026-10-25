@@ -1,0 +1,204 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">MCP tools: your tools follow you to the pod</title>
+<desc id="desc">Top: MCP in one breath. An agent talks to a server over JSON-RPC: initialize, tools/list to learn what exists, tools/call to run one. Main scene: your laptop with a client, the daemon and your own MCP servers whose tokens stay there; a pod session whose tool list holds built-ins, the bundle's servers and your client-hosted tools side by side; the team's servers on the pod's side. Numbered flow: attach, offer with a consent round trip, the model discovers one list, and a call to your tool goes back over your own connection as tool.invoke and returns a result that is logged like any other. Rules: only the registering connection is asked, a disconnect takes the tools away, a call in flight waits sixty seconds, same allowlists and approvals, and the session is visibly tainted.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+.tile{fill:#12121C;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+.box{fill:#1C1C2B;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+  <symbol id="person" viewBox="0 0 48 48">
+    <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="800" fill="currentColor" font-family="Figtree,'Segoe UI',system-ui,sans-serif">AB</text>
+  </symbol>
+  <symbol id="server" viewBox="0 0 48 48">
+    <rect x="6" y="8" width="36" height="14" fill="none" stroke="currentColor" stroke-width="3"/>
+    <rect x="6" y="26" width="36" height="14" fill="none" stroke="currentColor" stroke-width="3"/>
+    <circle cx="13" cy="15" r="2" fill="currentColor"/><circle cx="13" cy="33" r="2" fill="currentColor"/>
+  </symbol>
+  <symbol id="key" viewBox="0 0 48 48">
+    <rect x="6" y="18" width="14" height="12" fill="none" stroke="currentColor" stroke-width="3"/>
+    <line x1="20" y1="24" x2="42" y2="24" stroke="currentColor" stroke-width="3"/>
+    <line x1="34" y1="24" x2="34" y2="31" stroke="currentColor" stroke-width="3"/>
+    <line x1="40" y1="24" x2="40" y2="31" stroke="currentColor" stroke-width="3"/>
+  </symbol>
+  <symbol id="plug" viewBox="0 0 48 48">
+    <rect x="14" y="18" width="20" height="16" fill="none" stroke="currentColor" stroke-width="3"/>
+    <line x1="20" y1="18" x2="20" y2="8" stroke="currentColor" stroke-width="3"/>
+    <line x1="28" y1="18" x2="28" y2="8" stroke="currentColor" stroke-width="3"/>
+    <line x1="24" y1="34" x2="24" y2="42" stroke="currentColor" stroke-width="3"/>
+  </symbol>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#A3A3B8"/>
+  </marker>
+  <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#00C6C9"/>
+  </marker>
+  <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#FFBC56"/>
+  </marker>
+  <marker id="arrow-pink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#FF0080"/>
+  </marker>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// TOOLS, WHEREVER THEY ARE</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">Your tools follow you to the pod</text>
+
+<!-- ===== MCP in one breath ===== -->
+<text class="m" x="80" y="184" font-size="10" fill="#7B7B94" letter-spacing="2">MCP IN ONE BREATH</text>
+<use href="#mask" x="80" y="204" width="40" height="40" color="#00DBD3"/>
+<g class="m" font-size="10">
+  <line x1="130" y1="214" x2="330" y2="214" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="230" y="208" text-anchor="middle" fill="#8A8AA0" letter-spacing="1">1 · initialize</text>
+  <line x1="330" y1="228" x2="130" y2="228" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="230" y="243" text-anchor="middle" fill="#F4ECDB" letter-spacing="1">2 · tools/list</text>
+  <text x="230" y="256" text-anchor="middle" fill="#7B7B94" letter-spacing=".5">"here is what I can do"</text>
+</g>
+<use href="#server" x="334" y="204" width="40" height="40" color="#F4ECDB"/>
+<text class="m" x="384" y="220" font-size="10" fill="#F4ECDB">a server</text>
+<text class="m" x="384" y="234" font-size="9" fill="#7B7B94" letter-spacing=".5">Jira · a wiki · a database</text>
+<text class="m" x="384" y="247" font-size="9" fill="#7B7B94" letter-spacing=".5">stdio at home · HTTPS on a pod</text>
+<line x1="130" y1="266" x2="330" y2="266" stroke="#00C6C9" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+<text class="m" x="230" y="282" text-anchor="middle" font-size="10" fill="#00DBD3" letter-spacing="1">3 · tools/call → a result</text>
+<text class="t" x="80" y="316" font-size="13" fill="#A3A3B8">JSON-RPC. Three verbs. The model sees each tool as a name: mcp.jira.search.</text>
+
+<!-- the one point, top right -->
+<rect class="tile" x="900" y="186" width="620" height="130"/>
+<text class="m" x="920" y="210" font-size="10" font-weight="500" fill="#00DBD3" letter-spacing="2">THE POINT</text>
+<text class="t" x="920" y="244" font-size="20" font-weight="900" fill="#F4ECDB">The pod does not need to have your tools.</text>
+<text class="t" x="920" y="272" font-size="14" fill="#A3A3B8">You attach, you offer them, the model finds them in its list, and a call</text>
+<text class="t" x="920" y="292" font-size="14" fill="#A3A3B8">comes back down your own connection to run on your machine. Nothing is installed on the pod.</text>
+
+<!-- ===== your laptop ===== -->
+<text class="m" x="80" y="366" font-size="10" fill="#7B7B94" letter-spacing="2">WHERE YOU ARE</text>
+<rect x="88" y="386" width="320" height="340" fill="#000353"/>
+<rect class="tile" x="80" y="378" width="320" height="340"/>
+<rect x="80" y="378" width="4" height="340" fill="#FFBC56"/>
+<text class="m" x="100" y="402" font-size="10" font-weight="500" fill="#FFBC56" letter-spacing="2">YOUR LAPTOP</text>
+<!-- the client -->
+<rect class="box" x="100" y="416" width="280" height="56"/>
+<use href="#person" x="110" y="426" width="36" height="36" color="#F4ECDB"/>
+<text class="t" x="156" y="440" font-size="16" font-weight="800" fill="#F4ECDB">the desktop app</text>
+<text class="m" x="156" y="458" font-size="9" fill="#8A8AA0" letter-spacing="1">OR THE TUI · ON A POD SESSION</text>
+<!-- the daemon -->
+<rect class="box" x="100" y="488" width="280" height="56"/>
+<use href="#mask" x="110" y="498" width="36" height="36" color="#FFBC56"/>
+<text class="t" x="156" y="512" font-size="16" font-weight="800" fill="#F4ECDB">troupe-daemon</text>
+<text class="m" x="156" y="530" font-size="9" fill="#8A8AA0" letter-spacing="1">RUNS THE CALL HERE WHEN ASKED</text>
+<!-- your servers -->
+<rect class="box" x="100" y="560" width="280" height="96"/>
+<text class="m" x="116" y="580" font-size="9" fill="#8A8AA0" letter-spacing="1.5">YOUR MCP SERVERS · mcp.json</text>
+<use href="#server" x="116" y="590" width="30" height="30" color="#F4ECDB"/>
+<text class="m" x="154" y="604" font-size="10" fill="#F4ECDB">notes</text>
+<text class="m" x="154" y="616" font-size="8" fill="#7B7B94">stdio · a program</text>
+<use href="#server" x="240" y="590" width="30" height="30" color="#F4ECDB"/>
+<text class="m" x="278" y="604" font-size="10" fill="#F4ECDB">wiki</text>
+<text class="m" x="278" y="616" font-size="8" fill="#7B7B94">signed in as you</text>
+<use href="#key" x="116" y="626" width="24" height="24" color="#FFBC56"/>
+<text class="m" x="148" y="642" font-size="9" fill="#FFBC56" letter-spacing="1">TOKENS NEVER LEAVE THIS MACHINE</text>
+<line x1="260" y1="544" x2="260" y2="560" stroke="#A3A3B8" stroke-width="1.5"/>
+<text class="t" x="100" y="690" font-size="12" fill="#A3A3B8">At home these are simply the session's tools.</text>
+<text class="t" x="100" y="708" font-size="12" fill="#A3A3B8">On a pod they travel with you, as below.</text>
+
+<!-- ===== the pod session ===== -->
+<text class="m" x="600" y="366" font-size="10" fill="#7B7B94" letter-spacing="2">WHERE THE WORK IS</text>
+<rect x="628" y="386" width="420" height="340" fill="#000353"/>
+<rect class="tile" x="620" y="378" width="420" height="340"/>
+<rect x="620" y="378" width="4" height="340" fill="#00C6C9"/>
+<text class="m" x="640" y="402" font-size="10" font-weight="500" fill="#00DBD3" letter-spacing="2">A POD SESSION</text>
+<rect x="900" y="390" width="124" height="20" fill="none" stroke="#FFBC56" stroke-width="1.5"/>
+<text class="m" x="962" y="404" text-anchor="middle" font-size="8" font-weight="500" fill="#FFBC56" letter-spacing="1">session_tainted</text>
+<use href="#mask" x="640" y="416" width="44" height="44" color="#00DBD3"/>
+<text class="t" x="696" y="436" font-size="18" font-weight="900" fill="#F4ECDB">the agent</text>
+<text class="m" x="696" y="454" font-size="9" fill="#8A8AA0" letter-spacing="1">SEES ONE LIST. CANNOT TELL WHERE A TOOL RUNS.</text>
+<!-- the tool list -->
+<rect class="box" x="640" y="474" width="380" height="188"/>
+<text class="m" x="656" y="494" font-size="9" fill="#8A8AA0" letter-spacing="1.5">THE MODEL'S TOOL LIST</text>
+<g class="m" font-size="11">
+  <rect x="656" y="504" width="6" height="14" fill="#A3A3B8"/>
+  <text x="672" y="516" fill="#E8DFD0">read_file · edit_file · shell</text>
+  <text x="1004" y="516" text-anchor="end" font-size="9" fill="#7B7B94" letter-spacing="1">BUILT IN</text>
+  <rect x="656" y="530" width="6" height="14" fill="#00C6C9"/>
+  <text x="672" y="542" fill="#E8DFD0">mcp.jira.search · mcp.jira.get_issue</text>
+  <text x="1004" y="542" text-anchor="end" font-size="9" fill="#00DBD3" letter-spacing="1">THE BUNDLE'S</text>
+  <rect x="656" y="556" width="6" height="14" fill="#FFBC56"/>
+  <text x="672" y="568" fill="#E8DFD0">client.notes.search</text>
+  <text x="1004" y="568" text-anchor="end" font-size="9" fill="#FFBC56" letter-spacing="1">YOURS</text>
+  <rect x="656" y="582" width="6" height="14" fill="#FFBC56"/>
+  <text x="672" y="594" fill="#E8DFD0">client.wiki.search</text>
+  <text x="1004" y="594" text-anchor="end" font-size="9" fill="#FFBC56" letter-spacing="1">YOURS</text>
+</g>
+<line x1="656" y1="612" x2="1004" y2="612" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+<text class="m" x="656" y="632" font-size="9" fill="#8A8AA0" letter-spacing="1">SAME ALLOWLISTS · SAME PERMISSIONS · SAME APPROVALS</text>
+<text class="m" x="656" y="648" font-size="9" fill="#7B7B94" letter-spacing="1">client.* can never collide with a profile's mcp.*</text>
+<text class="t" x="640" y="690" font-size="12" fill="#A3A3B8">Every call, wherever it ran, lands in the one log</text>
+<text class="t" x="640" y="708" font-size="12" fill="#A3A3B8">with its result, like any other tool.</text>
+
+<!-- ===== the team's servers ===== -->
+<text class="m" x="1160" y="366" font-size="10" fill="#7B7B94" letter-spacing="2">ON THE POD'S SIDE</text>
+<rect class="tile" x="1160" y="378" width="360" height="150"/>
+<text class="m" x="1180" y="402" font-size="10" font-weight="500" fill="#00DBD3" letter-spacing="2">THE BUNDLE'S SERVERS</text>
+<use href="#server" x="1180" y="416" width="40" height="40" color="#F4ECDB"/>
+<text class="t" x="1232" y="434" font-size="16" font-weight="800" fill="#F4ECDB">Jira</text>
+<text class="m" x="1232" y="452" font-size="9" fill="#8A8AA0" letter-spacing="1">HTTPS · EGRESS ALLOWLISTED · TOOLS FILTERED</text>
+<text class="m" x="1180" y="482" font-size="9" fill="#7B7B94" letter-spacing="1">WHOSE CREDENTIAL GOES OUT:</text>
+<text class="m" x="1180" y="498" font-size="9" fill="#A3A3B8" letter-spacing=".5">profile token · its own identity · your OpenBao slot</text>
+<text class="m" x="1180" y="514" font-size="9" fill="#7B7B94" letter-spacing="1">FROM THE BUNDLE · DISCOVERED ON config.updated</text>
+
+<!-- ===== the rules ===== -->
+<rect class="tile" x="1160" y="548" width="360" height="170"/>
+<text class="m" x="1180" y="572" font-size="10" font-weight="500" fill="#8A8AA0" letter-spacing="2">THE RULES FOR YOURS</text>
+<g class="t" font-size="12" fill="#E8DFD0">
+  <text x="1180" y="598">Only the connection that offered a tool is asked.</text>
+  <text x="1180" y="618">Disconnect, and your tools leave the list.</text>
+  <text x="1180" y="638">A call in flight waits 60 s for you. Same call_id.</text>
+  <text x="1180" y="658">Everyone in the session sees a laptop is involved.</text>
+</g>
+<text class="m" x="1180" y="690" font-size="9" fill="#7B7B94" letter-spacing="1">WHO MAY ASK THE AGENT TO USE YOURS: OPEN, ISSUE 331</text>
+
+<!-- ===== the flow ===== -->
+<!-- 1 attach -->
+<line x1="400" y1="444" x2="620" y2="444" stroke="#00C6C9" stroke-width="2.5" marker-end="url(#arrow-cyan)"/>
+<text class="m" x="510" y="434" text-anchor="middle" font-size="10" font-weight="500" fill="#00DBD3" letter-spacing="1.5">1 · ATTACH · WSS</text>
+<!-- 2 offer -->
+<line x1="400" y1="480" x2="620" y2="480" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" x="510" y="472" text-anchor="middle" font-size="9" fill="#A3A3B8" letter-spacing="1">2 · tools.register</text>
+<line x1="620" y1="500" x2="400" y2="500" stroke="#FF0080" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow-pink)"/>
+<text class="m" x="510" y="515" text-anchor="middle" font-size="9" fill="#FF0080" letter-spacing="1">consent.challenge · YOU CONFIRM</text>
+<text class="m" x="510" y="528" text-anchor="middle" font-size="8" fill="#7B7B94" letter-spacing=".5">registered as client.&lt;server&gt;.&lt;tool&gt;</text>
+<!-- 3 discover -->
+<text class="m" x="510" y="556" text-anchor="middle" font-size="9" fill="#8A8AA0" letter-spacing="1">3 · THE MODEL SEES THE LIST →</text>
+<!-- 4 call back -->
+<line x1="620" y1="584" x2="400" y2="584" stroke="#FFBC56" stroke-width="2.5" marker-end="url(#arrow-amber)"/>
+<text class="m" x="510" y="576" text-anchor="middle" font-size="10" font-weight="500" fill="#FFBC56" letter-spacing="1.5">4 · tool.invoke</text>
+<text class="m" x="510" y="600" text-anchor="middle" font-size="8" fill="#7B7B94" letter-spacing=".5">over your socket, no other</text>
+<line x1="400" y1="624" x2="620" y2="624" stroke="#FFBC56" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow-amber)"/>
+<text class="m" x="510" y="640" text-anchor="middle" font-size="9" fill="#FFBC56" letter-spacing="1">the result · logged</text>
+<!-- pod to jira -->
+<line x1="1040" y1="444" x2="1160" y2="444" stroke="#00C6C9" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+<text class="m" x="1100" y="434" text-anchor="middle" font-size="9" fill="#00DBD3" letter-spacing="1">tools/call</text>
+
+<!-- key -->
+<rect x="80" y="760" width="14" height="14" fill="#00C6C9"/>
+<text class="m" x="104" y="772" font-size="12" fill="#8A8AA0" letter-spacing="2">RUNS ON THE POD, OR FROM IT</text>
+<rect x="400" y="760" width="14" height="14" fill="#FFBC56"/>
+<text class="m" x="424" y="772" font-size="12" fill="#8A8AA0" letter-spacing="2">RUNS ON YOUR MACHINE</text>
+<rect x="690" y="760" width="14" height="14" fill="#FF0080"/>
+<text class="m" x="714" y="772" font-size="12" fill="#8A8AA0" letter-spacing="2">YOU MUST SAY YES</text>
+
+<!-- the point -->
+<text class="t" x="80" y="826" font-size="22" font-weight="800" fill="#F4ECDB">A tool is a name the model can call. Where it runs is the harness's business.</text>
+<text class="t" x="80" y="854" font-size="15" fill="#A3A3B8">On the pod, on the team's server, or back on your laptop over the very socket you are watching from.</text>
+</svg>
