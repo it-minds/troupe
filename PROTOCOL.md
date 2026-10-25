@@ -717,9 +717,13 @@ that cannot yet — no token, or no plane answering — makes the session anyway
 `remote` is `null`, or how the session stands offered to the plane for steering from
 another device ([Steering from another device](#steering-from-another-device)):
 `{"owner", "shares": [{"subject", "display_name", "email", "role"}], "offered_at", "state",
-"since", "steering": [{"subject", "display_name", "role"}]}`, where `state` is `online`,
-`connecting` or `offline` (since `since`), and `steering` is who is attached through the
-plane now.
+"since", "steering": [{"subject", "display_name", "role"}], "lasts", "restored"}`, where
+`state` is `online`, `connecting` or `offline` (since `since`), and `steering` is who is
+attached through the plane now. `lasts` says whether the offer comes back after this
+machine restarts: `across_restarts` where the daemon starts at login (`troupe-daemon login
+on`), which reads its own sign-in back and offers it again, and `until_restart` where
+nothing starts the daemon then. `restored` is true for an offer the daemon read back from
+its record as it started, until it is offered again.
 
 `kind` is where the session is kept: `local`, `private` (sealed under its person's key,
 see `private` above), or a pod's `team`. A private session's `sync` says how its sealing

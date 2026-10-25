@@ -11,18 +11,51 @@ defmodule Troupe.Client.Steering do
     do: "Not offered to the plane. /steer on offers it, to steer it from another device."
 
   def line(%{} = remote) do
-    [offered(remote), steering(remote["steering"])]
+    [said(remote), steering(remote["steering"])]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(" ")
   end
 
-  @doc "The sentence for an offer just made."
+  @doc """
+  The sentence for an offer just made, and once, where nothing starts the daemon at login,
+  what keeps it offered after a restart.
+  """
   @spec offered(map() | nil) :: String.t()
   def offered(nil), do: line(nil)
 
   def offered(%{} = remote) do
-    "Offered to the plane#{shared(remote["shares"])} (#{presence(remote)}). " <>
-      "/steer off withdraws it."
+    if remote["lasts"] == "until_restart",
+      do: said(remote) <> " " <> restart_sentence(),
+      else: said(remote)
+  end
+
+  defp said(remote),
+    do:
+      "Offered to the plane#{shared(remote["shares"])} (#{state(remote)}). /steer off withdraws it."
+
+  @doc """
+  What `/steer on` says once of an offer that lasts until this machine restarts. The
+  desktop app says the same.
+  """
+  @spec restart_sentence() :: String.t()
+  def restart_sentence,
+    do:
+      "It stays offered until this machine restarts: troupe-daemon login on starts the " <>
+        "daemon when you log in, and the offer comes back with it."
+
+  @doc """
+  An offer's state in words: whether the plane has it, then whether it came back after a
+  restart or lasts only until one. The desktop app's *Offered* pill says the same.
+  """
+  @spec state(map()) :: String.t()
+  def state(%{} = remote) do
+    [
+      presence(remote),
+      remote["restored"] == true && "back after a restart",
+      remote["lasts"] == "until_restart" && "until this machine restarts"
+    ]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.join(", ")
   end
 
   @doc """

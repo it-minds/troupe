@@ -531,6 +531,47 @@ defmodule Troupe.Gateway.RemoteTest do
     end
   end
 
+  describe "after a restart" do
+    test "an offer on a daemon that does not start at login is recorded as lasting until this machine restarts",
+         ctx do
+      {:ok, _} = Troupe.StartAtLogin.disable()
+      %{session: session} = start_session(ctx, default: {:text, "ok"})
+
+      assert {:ok, %{"remote" => remote}} = offer(ctx, session.id)
+      assert remote["lasts"] == "until_restart"
+      refute remote["restored"]
+
+      {:ok, got} = Client.call(ctx.ada, "session.get", %{"session_id" => session.id})
+      assert got["remote"]["lasts"] == "until_restart"
+    end
+
+    test "with the daemon started at login the offer lasts across restarts, and a restart brings it back, said so",
+         ctx do
+      {:ok, %{"at_login" => true}} = Troupe.StartAtLogin.enable()
+      on_exit(fn -> Troupe.StartAtLogin.disable() end)
+
+      %{session: session} = start_session(ctx, default: {:text, "ok"})
+      assert {:ok, %{"remote" => remote}} = offer(ctx, session.id)
+      assert remote["lasts"] == "across_restarts"
+      refute remote["restored"]
+      assert_receive {:relay, "relay.offer", _}, 5_000
+      grants = Enum.count(FakePlane.calls(ctx.plane.state), &match?({"remote.grant", _}, &1))
+
+      # The machine restarted: no client, and the daemon's steering starts from its record.
+      :ok = Plane.unlink()
+      Process.exit(Process.whereis(Remote), :kill)
+
+      assert_receive {:relay, "relay.sync", %{"offers" => [%{"session_id" => id}]}}, 10_000
+      assert id == session.id
+
+      assert Enum.count(FakePlane.calls(ctx.plane.state), &match?({"remote.grant", _}, &1)) ==
+               grants
+
+      eventually(fn -> Remote.describe(session.id)["state"] == "online" end)
+      assert %{"restored" => true, "lasts" => "across_restarts"} = Remote.describe(session.id)
+    end
+  end
+
   defp withdraw(ctx, session_id) do
     Client.call(ctx.ada, "remote.withdraw", %{"command_id" => Client.command_id(), "session_id" => session_id})
   end

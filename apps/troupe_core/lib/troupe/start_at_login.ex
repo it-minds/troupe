@@ -129,6 +129,17 @@ defmodule Troupe.StartAtLogin do
     }
   end
 
+  @doc """
+  Whether the daemon starts at login, and nothing else: the entry's files, without looking
+  for the `troupe-daemon` it would start. Cheap enough to ask on every listing, which is
+  how an offered session says whether it comes back after a restart.
+  """
+  @spec enabled?(keyword()) :: boolean()
+  def enabled?(opts \\ []) do
+    opts = options(opts)
+    on?(kind(opts), opts)
+  end
+
   defp on?(:systemd, opts), do: File.regular?(path(:systemd, opts)) and link?(wants(opts))
   defp on?(kind, opts), do: File.regular?(path(kind, opts))
 

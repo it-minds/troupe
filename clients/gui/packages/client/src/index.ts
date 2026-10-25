@@ -119,6 +119,8 @@ export {
   fleetTiming,
   rowFromRemote,
   remoteOffer,
+  offerRestartWords,
+  RESTART_SENTENCE,
   onThisComputer,
 } from "./fleet.js";
 export type {
