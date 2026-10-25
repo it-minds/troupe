@@ -16,6 +16,7 @@ import type { Route } from "../route";
 import { useConsole } from "../console";
 import { shownMode, useMode } from "../theme";
 import { Wordmark } from "./brand";
+import { ArtifactPage, Artifacts, artifactPlace } from "./Artifacts";
 import { Audit } from "./Audit";
 import { Budgets } from "./Budgets";
 import { Bundles, Channel, Version } from "./Bundles";
@@ -156,6 +157,7 @@ function titleWithin(page: string, path: string[]): string | null {
   if (page === "runs") return "A run";
   if (page === "sessions") return null;
   if (page === "mine") return first === "remote" ? "A laptop's session" : null;
+  if (page === "artifacts") return "id" in artifactPlace(path) ? "An artifact" : null;
   return first;
 }
 
@@ -177,6 +179,10 @@ function Screen({ route }: { route: Route }): JSX.Element {
   if (route.page === "mine" && first === "remote" && second) return <RemoteSession id={second} key={second} />;
   if (route.page === "mine" && first === "invited" && second) return <InvitedSession id={second} key={second} />;
   if (route.page === "mine") return <Mine />;
+  if (route.page === "artifacts") {
+    const place = artifactPlace(route.path ?? []);
+    return "id" in place ? <ArtifactPage id={place.id} key={place.id} /> : <Artifacts tab={place.tab} />;
+  }
   if (route.page === "sessions") return <Sessions query={first ?? ""} key={first ?? ""} />;
   if (route.page === "runs" && first) return <RunPage id={first} key={first} />;
   if (route.page === "runs") return <Runs />;

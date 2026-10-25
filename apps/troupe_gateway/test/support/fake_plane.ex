@@ -558,6 +558,27 @@ defmodule Troupe.Gateway.FakePlane do
     end
   end
 
+  # An artifact published (#62): the plane's answer, as its id, the next version of one
+  # named, and an address on an artifacts host; a page with no title is refused, as the
+  # plane refuses it.
+  defp dispatch(_state, "artifact.publish", %{"title" => title} = params) when is_binary(title) and title != "" do
+    id = params["id"] || "art-fakefakefakefake"
+
+    {:ok,
+     %{
+       "id" => id,
+       "title" => title,
+       "kind" => params["kind"],
+       "visibility" => params["visibility"],
+       "version" => if(params["id"], do: 2, else: 1),
+       "origin" => Map.take(params, ["session_id", "agent"]),
+       "url" => "https://artifacts.example.test/a/#{id}/"
+     }}
+  end
+
+  defp dispatch(_state, "artifact.publish", _params),
+    do: {:rpc_error, -32_602, "invalid_params", %{"reason" => "an artifact needs a title"}}
+
   defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
 
   defp take_back(state, id, subject) do

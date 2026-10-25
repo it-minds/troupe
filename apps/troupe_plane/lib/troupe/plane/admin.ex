@@ -33,6 +33,7 @@ defmodule Troupe.Plane.Admin do
   """
 
   alias Troupe.Plane.{
+    Artifacts,
     Audit,
     Breakglass,
     Budget,
@@ -1268,7 +1269,8 @@ defmodule Troupe.Plane.Admin do
   # read by `GitHub.Policy.read_team/2` over what the team has, key by key.
   @team_keys ~w(budget_micros budget_period idle_timeout_seconds cache_eviction_days) ++
                ~w(erase_after_days members_may_control pins_allowed volume_size) ++
-               ~w(volume_storage_class allow_unenforced_workers github remote_offering_allowed)
+               ~w(volume_storage_class allow_unenforced_workers github remote_offering_allowed) ++
+               ~w(artifact_quota_bytes)
 
   @doc "The fields of a team `admin.team.update` sets, as its schema declares them."
   @spec team_keys() :: [String.t()]
@@ -4876,6 +4878,10 @@ defmodule Troupe.Plane.Admin do
       allow_unenforced_workers: team.allow_unenforced_workers,
       # Whether its people may offer a laptop session for steering from another device.
       remote_offering_allowed: team.remote_offering_allowed,
+      # What its artifacts hold in the object store, every version counted, against its
+      # quota (zero is none): the storage the Budgets screen shows beside the spend.
+      artifact_quota_bytes: team.artifact_quota_bytes,
+      artifact_bytes: Artifacts.usage(team),
       # The repositories its sessions may name, and its fix loop's caps: an empty list
       # names none.
       github: %{
@@ -5037,7 +5043,8 @@ defmodule Troupe.Plane.Admin do
       :volume_storage_class,
       :volume_size,
       :github,
-      :remote_offering_allowed
+      :remote_offering_allowed,
+      :artifact_quota_bytes
     ])
   end
 

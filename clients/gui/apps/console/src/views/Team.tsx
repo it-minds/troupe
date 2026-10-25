@@ -22,7 +22,7 @@ import { TEAM_TABS, href } from "../route";
 import type { TeamTab } from "../route";
 import { recorded, show, useConsole, useLoad } from "../console";
 import type { Load } from "../console";
-import { AuditNote, Empty, Field, Loaded, Locked, Preview, Region, Status, changed, count, money, useChange, when } from "./bits";
+import { AuditNote, Empty, Field, Loaded, Locked, Preview, Region, Status, bytes, changed, count, money, useChange, when } from "./bits";
 import type { DiffLine, Done, FieldProps } from "./bits";
 import { Spend, Twice } from "./Teams";
 
@@ -553,13 +553,15 @@ function Admins({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
 
 // -- limits ------------------------------------------------------------------------------
 
-type LimitKey = "budget_micros" | "budget_period" | "idle_timeout_seconds" | "cache_eviction_days" | "erase_after_days" | "members_may_control" | "pins_allowed" | "volume_size" | "volume_storage_class" | "allow_unenforced_workers" | "remote_offering_allowed";
+type LimitKey = "budget_micros" | "budget_period" | "idle_timeout_seconds" | "cache_eviction_days" | "erase_after_days" | "members_may_control" | "pins_allowed" | "volume_size" | "volume_storage_class" | "allow_unenforced_workers" | "remote_offering_allowed" | "artifact_quota_bytes";
 
 interface Limit {
   field: LimitKey;
   label: string;
-  kind: "money" | "period" | "seconds" | "days" | "switch" | "text";
+  kind: "money" | "period" | "seconds" | "days" | "switch" | "text" | "mebibytes";
   platformOnly?: boolean;
+  /** Shown only where the plane answers it: one older than the field has no such limit. */
+  answered?: boolean;
 }
 
 const LIMITS: Limit[] = [
@@ -573,6 +575,7 @@ const LIMITS: Limit[] = [
   { field: "remote_offering_allowed", label: "Members may offer a laptop session for steering", kind: "switch" },
   { field: "volume_size", label: "Team volume size", kind: "text" },
   { field: "volume_storage_class", label: "Team volume storage class", kind: "text" },
+  { field: "artifact_quota_bytes", label: "Artifacts' storage quota", kind: "mebibytes", answered: true },
   { field: "allow_unenforced_workers", label: "May use workers nothing is enforced on", kind: "switch", platformOnly: true },
 ];
 
@@ -585,6 +588,8 @@ function valueWords(limit: Limit, value: unknown): string {
       return `${String(value)} s`;
     case "days":
       return `${String(value)} days`;
+    case "mebibytes":
+      return Number(value) === 0 ? "no quota" : bytes(Number(value));
     case "switch":
       return value ? "yes" : "no";
     default:
@@ -615,7 +620,7 @@ function Limits({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
   const [done, setDone] = useState<Done | null>(null);
   const own = team as unknown as Record<string, unknown>;
   const ladder = new Map<string, LadderValue>((team.effective ?? []).map((e) => [e.field, e]));
-  const limits = LIMITS.filter((l) => !l.platformOnly || role === "platform_admin" || own[l.field] !== undefined);
+  const limits = LIMITS.filter((l) => !l.platformOnly || role === "platform_admin" || own[l.field] !== undefined).filter((l) => !l.answered || own[l.field] !== undefined);
   const editable = limits.filter((l) => !l.platformOnly || role === "platform_admin");
 
   const asked: Record<string, unknown> = {};
@@ -706,7 +711,16 @@ function limitOf(field: string): Limit {
 
 /** What a limit's field says beside it: its unit, and the ceiling the rungs above allow. */
 function hintFor(limit: Limit, laddered: LadderValue | undefined): string | undefined {
-  const unit = limit.kind === "money" ? "In currency units; 0 is no ceiling." : limit.kind === "seconds" ? "In seconds." : limit.kind === "days" ? "In days." : "";
+  const unit =
+    limit.kind === "money"
+      ? "In currency units; 0 is no ceiling."
+      : limit.kind === "seconds"
+        ? "In seconds."
+        : limit.kind === "days"
+          ? "In days."
+          : limit.kind === "mebibytes"
+            ? "In MiB, for all the team's artifacts and their versions together; 0 is no quota."
+            : "";
   const ceiling = laddered ? `The platform allows at most ${valueWords(limit, laddered.ceiling)}.` : "";
   return [unit, ceiling].filter(Boolean).join(" ") || undefined;
 }
@@ -735,14 +749,18 @@ function Ladder({ limit, value }: { limit: Limit; value: LadderValue }): JSX.Ele
 function toForm(limit: Limit, value: unknown): string {
   if (value === null || value === undefined) return "";
   if (limit.kind === "money") return String(Number(value) / 1_000_000);
+  if (limit.kind === "mebibytes") return String(Number(value) / MIB);
   return String(value);
 }
+
+const MIB = 1024 * 1024;
 
 function fromForm(limit: Limit, text: string): unknown {
   const t = text.trim();
   if (limit.kind === "switch") return t === "" ? null : t === "true";
   if (t === "") return null;
   if (limit.kind === "money") return Number.isFinite(Number(t)) ? Math.round(Number(t) * 1_000_000) : t;
+  if (limit.kind === "mebibytes") return Number.isFinite(Number(t)) ? Math.round(Number(t) * MIB) : t;
   if (limit.kind === "seconds" || limit.kind === "days") return /^\d+$/.test(t) ? Number(t) : t;
   return t;
 }
@@ -798,6 +816,10 @@ function consequence(team: string, line: DiffLine, laddered: LadderValue | undef
       return to
         ? `${team}'s members may offer a session on their laptop, to steer it from another device.`
         : `${team}'s members may no longer offer a laptop session: each new offer is refused, saying the team does not allow it, and one already offered can no longer be opened.`;
+    case "artifact_quota_bytes":
+      return to === 0 || to === null
+        ? `${team}'s artifacts have no quota of the team's.`
+        : `${team}'s artifacts may hold ${bytes(Number(to))} in all; a publish that would go past it is refused, and what is published already stays.`;
     case "volume_size":
     case "volume_storage_class":
       return `${team}'s team volume asks for ${show(to)}; one that exists already changes only as its storage class allows.`;

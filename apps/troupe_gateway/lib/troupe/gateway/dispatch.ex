@@ -19,6 +19,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   alias Troupe.Gateway.{
     Agents,
+    Artifacts,
     ClientTool,
     Commands,
     Connections,
@@ -200,6 +201,9 @@ defmodule Troupe.Gateway.Dispatch do
     # sign-in (#55): what every session of theirs reads, on every machine.
     "me.memory" => :control,
     "me.memory.put" => :control,
+    # A page or a file published on the plane as the person, through this daemon's sign-in
+    # (#62): what a client's "Publish…" sends, the files read on this machine.
+    "artifact.publish" => :control,
     # Where this machine's copy of the plane's memory stands, and what each session here
     # last read: for the person's own debugging (`troupe memory --status`).
     "me.memory.status" => :observe,
@@ -1277,6 +1281,26 @@ defmodule Troupe.Gateway.Dispatch do
       %{"append" => entry} when is_binary(entry) -> own_memory(Memory.put_own(%{"append" => entry}))
       %{"text" => text, "version" => v} when is_binary(text) and is_integer(v) -> own_memory(Memory.put_own(params))
       _ -> {:error, Error.new(:invalid_params, %{reason: "me.memory.put takes text and version, or append"})}
+    end
+  end
+
+  # An artifact published as the person (`Artifacts.put/1`), for a client's "Publish…": the
+  # plane's answer with `plane_url`. Signed out, a sentence; the plane's refusal, its own.
+  defp handle("artifact.publish", params, _context) do
+    case Artifacts.put(params) do
+      {:ok, artifact} ->
+        {:ok, artifact}
+
+      {:error, :signed_out} ->
+        {:error,
+         Error.new(:unavailable, %{
+           reason:
+             "this computer's daemon is not signed in to a Troupe plane, so there is nowhere to " <>
+               "publish it; troupe login signs it in, or send the file itself"
+         })}
+
+      {:error, reason} ->
+        {:error, Error.new(:invalid_params, %{reason: Memory.sentence(reason)})}
     end
   end
 

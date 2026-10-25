@@ -1001,8 +1001,8 @@ defmodule Troupe.UI.TUI.Server do
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
   @builtins ~w(new cancel dismiss merge discard goal loop steer invite uninvite sessions back hq observer files
-               scratch upload copy memory context watch settings models mcp skills help agents
-               worktree workflow detail unlink quit)
+               scratch upload publish copy memory context watch settings models mcp skills help
+               agents worktree workflow detail unlink quit)
 
   @doc false
   @spec builtins() :: [String.t()]
@@ -1394,6 +1394,9 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("upload", args, state, _target),
     do: notice_of(upload(state.session_id, String.trim(args)))
 
+  defp builtin("publish", args, state, _target),
+    do: notice_of(publish(state.session_id, String.trim(args)))
+
   defp builtin("copy", args, state, _target), do: copy_command(state, String.trim(args))
 
   # The default agent in a worktree of its own: a branch like any agent's, which the
@@ -1640,6 +1643,73 @@ defmodule Troupe.UI.TUI.Server do
   # path is read here rather than on the worker: the worker has no access to this machine.
   # Its size is asked first, so a file larger than the daemon takes in a message is
   # refused without being read (D115).
+  # `/publish <path> <organisation | profile:<name>>` publishes one file from this machine as
+  # an artifact on the plane (root #62), as the person this computer's daemon is signed in
+  # as: a page (`.html`), a document (`.md`) or a file, titled by its own heading or title,
+  # else its name, and named as coming from this session. Read here, as `/upload` reads it.
+  defp publish(sid, args) do
+    case String.split(args, ~r/\s+/, trim: true) do
+      [path, visibility | _] -> publish(sid, path, visibility)
+      _usage -> {:error, "usage: /publish <path> <organisation | profile:<name>>"}
+    end
+  end
+
+  defp publish(sid, path, visibility) do
+    local = Path.expand(path)
+    name = Path.basename(local)
+
+    with {:ok, content} <- File.read(local),
+         kind = artifact_kind(name),
+         {:ok, artifact} <-
+           Client.publish_artifact(%{
+             "title" => artifact_title(kind, content, name),
+             "kind" => kind,
+             "visibility" => visibility,
+             "files" => [%{"path" => name, "bytes" => Base.encode64(content)}],
+             "session_id" => sid
+           }) do
+      {:ok,
+       "published #{path} as #{artifact["id"]} version #{artifact["version"]}" <>
+         if(artifact["url"], do: ": #{artifact["url"]}", else: "")}
+    else
+      {:error, reason} when is_atom(reason) -> {:error, "#{path}: #{:file.format_error(reason)}"}
+      {:error, reason} -> {:error, "#{path} not published: #{refusal(reason)}"}
+    end
+  end
+
+  # The daemon's sentence, or the plane's, whichever way the refusal came.
+  defp refusal(%{"data" => %{"reason" => reason}}) when is_binary(reason), do: reason
+  defp refusal(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
+  defp refusal(%{data: %{reason: reason}}) when is_binary(reason), do: reason
+  defp refusal(reason), do: to_message(reason)
+
+  defp artifact_kind(name) do
+    case name |> Path.extname() |> String.downcase() do
+      ext when ext in [".html", ".htm"] -> "html"
+      ext when ext in [".md", ".markdown"] -> "markdown"
+      _other -> "file"
+    end
+  end
+
+  defp artifact_title(kind, content, name) do
+    found =
+      case kind do
+        "html" ->
+          Regex.run(~r/<title[^>]*>\s*([^<]+?)\s*<\/title>/i, content, capture: :all_but_first)
+
+        "markdown" ->
+          Regex.run(~r/^#\s+(.+?)\s*$/m, content, capture: :all_but_first)
+
+        "file" ->
+          nil
+      end
+
+    case found do
+      [title] -> if String.valid?(title), do: title, else: name
+      _none -> name
+    end
+  end
+
   defp upload(_sid, ""), do: {:error, "usage: /upload <path>"}
 
   defp upload(sid, path) do

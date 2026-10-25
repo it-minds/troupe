@@ -447,6 +447,18 @@ defmodule Troupe.Commands do
             "session leaves it.",
         example: "/upload notes.md"
       ),
+      entry("publish", "workspace", "Publish a page, a document or a file for others to read",
+        usage: "/publish <path> <organisation | profile:<name>>",
+        args: [arg("path", true, "file"), arg("visibility", true, "text")],
+        detail:
+          "The file is read on this machine and published on your Troupe plane as an artifact, " <>
+            "as the person this computer's daemon is signed in as: a page (.html), a Markdown " <>
+            "document (.md) or any other file. The whole organisation reads it, or the people " <>
+            "a profile is granted to, in the console's Artifacts, served from a host that can " <>
+            "reach nothing of yours. A page with stylesheets or scripts of its own is an " <>
+            "agent's to publish, with publish_artifact.",
+        example: "/publish report.html profile:dev"
+      ),
       entry("copy", "workspace", "Copy a transcript to the clipboard",
         usage: "/copy [window]",
         args: [window()],
