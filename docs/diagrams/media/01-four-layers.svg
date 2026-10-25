@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">Four layers: LLM, agent, harness, client</title>
+<desc id="desc">Four nested squares. Innermost the LLM, the model that thinks. Around it the agent, a role. Around that the harness, which runs the agent with tools, approvals, a workspace and a log. Outermost the client: a terminal, the desktop app or a program you wrote, talking to the harness over one protocol.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// WHAT IS INSIDE WHAT</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">Four layers</text>
+
+<!-- the onion: one hard shadow, four squares -->
+<rect x="170" y="220" width="620" height="620" fill="#000353"/>
+<rect x="160" y="210" width="620" height="620" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<rect x="230" y="280" width="480" height="480" fill="#1C1C2B" stroke="#00C6C9" stroke-width="1.5" stroke-dasharray="7 6"/>
+<rect x="300" y="350" width="340" height="340" fill="#242436" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<rect x="370" y="420" width="200" height="200" fill="#00C6C9"/>
+
+<!-- layer names -->
+<text class="t" x="180" y="248" font-size="24" font-weight="900" fill="#F4ECDB">Client</text>
+<text class="t" x="250" y="318" font-size="24" font-weight="900" fill="#F4ECDB">Harness</text>
+<use href="#mask" x="318" y="364" width="30" height="30" color="#00DBD3"/>
+<text class="t" x="356" y="388" font-size="24" font-weight="900" fill="#F4ECDB">Agent</text>
+<text class="t" x="470" y="530" text-anchor="middle" font-size="46" font-weight="900" fill="#0B0B12" letter-spacing="-1">LLM</text>
+<text class="m" x="470" y="562" text-anchor="middle" font-size="14" fill="#0B0B12" opacity=".75" letter-spacing="3">THE MODEL</text>
+
+<!-- what the harness band holds -->
+<text class="m" x="250" y="740" font-size="13" fill="#8A8AA0" letter-spacing="2.5">LOG · TOOLS · WORKSPACE · APPROVALS</text>
+
+<!-- the clients, in the client band -->
+<rect x="182" y="776" width="40" height="30" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="m" x="190" y="797" font-size="14" font-weight="500" fill="#00DBD3">&gt;_</text>
+<rect x="236" y="776" width="40" height="30" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<line x1="236" y1="785" x2="276" y2="785" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<rect x="290" y="776" width="40" height="30" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="m" x="310" y="797" text-anchor="middle" font-size="15" fill="#F4ECDB">{ }</text>
+<text class="m" x="350" y="797" font-size="13" fill="#8A8AA0" letter-spacing="2.5">TUI · APP · YOUR PROGRAM</text>
+
+<!-- the boundary between client and harness is the wire -->
+<text class="m" transform="translate(752 520) rotate(-90)" text-anchor="middle" font-size="13" fill="#00DBD3" letter-spacing="3">ONE PROTOCOL</text>
+
+<!-- legend, outside to inside -->
+<text class="m" x="922" y="262" text-anchor="middle" font-size="12" fill="#7B7B94" letter-spacing="3">OUTSIDE</text>
+
+<rect x="900" y="272" width="44" height="44" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="t" x="970" y="302" font-size="26" font-weight="800" fill="#F4ECDB">Client</text>
+<text class="t" x="970" y="334" font-size="18" fill="#A3A3B8">The screen. A terminal, the desktop app, or a program you</text>
+<text class="t" x="970" y="358" font-size="18" fill="#A3A3B8">wrote. Several can watch one session at the same time.</text>
+
+<rect x="900" y="417" width="44" height="44" fill="#1C1C2B" stroke="#00C6C9" stroke-width="1.5" stroke-dasharray="7 6"/>
+<text class="t" x="970" y="447" font-size="26" font-weight="800" fill="#F4ECDB">Harness</text>
+<text class="t" x="970" y="479" font-size="18" fill="#A3A3B8">Runs the agent: its tools, the approvals you give, the</text>
+<text class="t" x="970" y="503" font-size="18" fill="#A3A3B8">workspace, and a log of everything that happened.</text>
+
+<rect x="900" y="562" width="44" height="44" fill="#242436" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<use href="#mask" x="909" y="571" width="26" height="26" color="#00DBD3"/>
+<text class="t" x="970" y="592" font-size="26" font-weight="800" fill="#F4ECDB">Agent</text>
+<text class="t" x="970" y="624" font-size="18" fill="#A3A3B8">A role, written in a markdown file: what to do and which</text>
+<text class="t" x="970" y="648" font-size="18" fill="#A3A3B8">tools it may use. It can hand parts of the job to other agents.</text>
+
+<rect x="900" y="707" width="44" height="44" fill="#00C6C9"/>
+<text class="t" x="970" y="737" font-size="26" font-weight="800" fill="#F4ECDB">LLM</text>
+<text class="t" x="970" y="769" font-size="18" fill="#A3A3B8">The model that thinks. Anthropic, OpenAI or a gateway:</text>
+<text class="t" x="970" y="793" font-size="18" fill="#A3A3B8">your choice and your key.</text>
+
+<text class="m" x="922" y="830" text-anchor="middle" font-size="12" fill="#7B7B94" letter-spacing="3">INSIDE</text>
+</svg>

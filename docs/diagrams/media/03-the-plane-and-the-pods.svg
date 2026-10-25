@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">The plane and the pods</title>
+<desc id="desc">You ask the plane for a session. The plane decides who you are, which profile and where it runs, and hands the profile to the operator, which spawns worker pods. Then you talk to the pod directly; the plane never sees the session. On the side, troupe-daemon runs private sessions on your own machine.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+  <symbol id="person" viewBox="0 0 48 48">
+    <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="800" fill="currentColor" font-family="Figtree,'Segoe UI',system-ui,sans-serif">AB</text>
+  </symbol>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#A3A3B8"/>
+  </marker>
+  <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#00C6C9"/>
+  </marker>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// WHO DECIDES, WHO WORKS</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">The plane and the pods</text>
+
+<!-- you -->
+<rect x="96" y="386" width="290" height="120" fill="#000353"/>
+<rect x="90" y="380" width="290" height="120" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<use href="#person" x="112" y="410" width="56" height="56" color="#F4ECDB"/>
+<text class="t" x="186" y="434" font-size="26" font-weight="900" fill="#F4ECDB">You</text>
+<text class="m" x="186" y="462" font-size="12" fill="#8A8AA0" letter-spacing="2">TUI · APP · A SCRIPT</text>
+<text class="m" x="186" y="482" font-size="12" fill="#8A8AA0" letter-spacing="2">OR ANOTHER AGENT</text>
+
+<!-- the plane -->
+<rect x="528" y="198" width="480" height="130" fill="#000353"/>
+<rect x="520" y="190" width="480" height="130" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="m" x="548" y="222" font-size="13" font-weight="500" fill="#00DBD3" letter-spacing="3">THE PLANE</text>
+<text class="t" x="548" y="262" font-size="30" font-weight="900" fill="#F4ECDB" letter-spacing="-0.5">troupe-plane</text>
+<text class="t" x="548" y="294" font-size="16" fill="#A3A3B8">Who you are · which profile · where it runs · what it cost</text>
+
+<!-- the operator -->
+<rect x="528" y="388" width="480" height="100" fill="#000353"/>
+<rect x="520" y="380" width="480" height="100" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="t" x="548" y="424" font-size="26" font-weight="900" fill="#F4ECDB" letter-spacing="-0.5">troupe-operator</text>
+<text class="t" x="548" y="456" font-size="16" fill="#A3A3B8">Turns a profile into a set of pods, and a policy into what they may do.</text>
+
+<!-- plane to operator -->
+<line x1="760" y1="320" x2="760" y2="380" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" x="774" y="356" font-size="12" fill="#8A8AA0" letter-spacing="2">PROFILES</text>
+
+<!-- pods: profile build -->
+<text class="m" x="1120" y="192" font-size="13" font-weight="500" fill="#8A8AA0" letter-spacing="3">PROFILE · BUILD</text>
+<rect x="1120" y="205" width="90" height="90" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<use href="#mask" x="1143" y="228" width="44" height="44" color="#00DBD3"/>
+<rect x="1240" y="205" width="90" height="90" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<use href="#mask" x="1263" y="228" width="44" height="44" color="#00DBD3"/>
+<rect x="1360" y="205" width="90" height="90" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5" stroke-dasharray="5 5"/>
+<use href="#mask" x="1383" y="228" width="44" height="44" color="#9C8BFF"/>
+<text class="m" x="1120" y="322" font-size="12" fill="#7B7B94" letter-spacing="2">POD · POD · ASLEEP</text>
+
+<!-- pods: profile review -->
+<text class="m" x="1120" y="382" font-size="13" font-weight="500" fill="#8A8AA0" letter-spacing="3">PROFILE · REVIEW</text>
+<rect x="1120" y="395" width="90" height="90" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<use href="#mask" x="1143" y="418" width="44" height="44" color="#00DBD3"/>
+<rect x="1240" y="395" width="90" height="90" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<use href="#mask" x="1263" y="418" width="44" height="44" color="#00DBD3"/>
+<text class="m" x="1120" y="512" font-size="12" fill="#7B7B94" letter-spacing="2">POD · POD</text>
+
+<!-- cluster frame -->
+<rect x="500" y="160" width="1000" height="380" fill="none" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5" stroke-dasharray="8 6"/>
+<text class="m" x="1490" y="152" text-anchor="end" font-size="12" fill="#7B7B94" letter-spacing="3">YOUR CLUSTER</text>
+
+<!-- 1: ask the plane -->
+<polyline points="380,420 440,420 440,255 520,255" fill="none" stroke="#A3A3B8" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<text class="m" x="428" y="340" text-anchor="end" font-size="13" font-weight="500" fill="#F4ECDB" letter-spacing="2">1 · ASK</text>
+<text class="m" x="428" y="360" text-anchor="end" font-size="12" fill="#8A8AA0" letter-spacing="1.5">sign in, a session please</text>
+
+<!-- 2: operator spawns pods -->
+<polyline points="1000,430 1060,430 1060,268 1120,268" fill="none" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<polyline points="1060,430 1120,440" fill="none" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" x="1030" y="410" text-anchor="middle" font-size="13" font-weight="500" fill="#F4ECDB" letter-spacing="2">2 · SPAWN</text>
+
+<!-- plane places the session on a pod -->
+<polyline points="1000,232 1120,232" fill="none" stroke="#A3A3B8" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<text class="m" x="1060" y="254" text-anchor="middle" font-size="11" fill="#8A8AA0" letter-spacing="2">ACTIVATE</text>
+
+<!-- 3: you talk to the pod directly -->
+<polyline points="220,500 220,640 1285,640 1285,485" fill="none" stroke="#00C6C9" stroke-width="3" marker-end="url(#arrow-cyan)"/>
+<text class="m" x="750" y="632" text-anchor="middle" font-size="13" font-weight="500" fill="#00DBD3" letter-spacing="2.5">3 · THE SESSION, DIRECTLY. THE PLANE NEVER SEES IT.</text>
+
+<!-- the daemon at home -->
+<rect x="96" y="706" width="460" height="110" fill="#000353"/>
+<rect x="90" y="700" width="460" height="110" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<rect x="90" y="700" width="4" height="110" fill="#FFBC56"/>
+<text class="m" x="118" y="730" font-size="12" font-weight="500" fill="#FFBC56" letter-spacing="3">THIS MACHINE</text>
+<text class="t" x="118" y="762" font-size="24" font-weight="900" fill="#F4ECDB" letter-spacing="-0.5">troupe-daemon</text>
+<text class="t" x="118" y="790" font-size="15" fill="#A3A3B8">The same harness on your laptop. A private session never touches a pod.</text>
+<use href="#mask" x="490" y="740" width="36" height="36" color="#FFBC56"/>
+
+<!-- what ships -->
+<text class="m" x="640" y="740" font-size="12" fill="#7B7B94" letter-spacing="3">ONE RELEASE · FIVE IMAGES · ONE HELM CHART</text>
+<g class="m" font-size="14" fill="#A3A3B8" letter-spacing="1">
+  <rect x="640" y="758" width="130" height="36" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="705" y="781" text-anchor="middle">plane</text>
+  <rect x="784" y="758" width="130" height="36" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="849" y="781" text-anchor="middle">operator</text>
+  <rect x="928" y="758" width="130" height="36" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="993" y="781" text-anchor="middle">worker</text>
+  <rect x="1072" y="758" width="130" height="36" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="1137" y="781" text-anchor="middle">a2a</text>
+  <rect x="1216" y="758" width="130" height="36" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="1281" y="781" text-anchor="middle">gui</text>
+</g>
+</svg>

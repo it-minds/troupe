@@ -1,0 +1,184 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">Agents: a markdown file, where it lives, how it runs</title>
+<desc id="desc">Left: an agent is one markdown file, YAML frontmatter then prose: description, mode primary or subagent, model as a role, tools, permissions, budget share, skills. Middle: four layers searched lowest to highest, built-ins, the profile's bundle, your config directory, the workspace's .troupe folder; a higher file with the same name replaces the lower; a bundle replaces a built-in only with override true; entitlements filter after the merge. Right: one root agent per session, named at session.create, delegating to subagents with a budget share, and a branch as a session of its own. On the plane the pod reads the agent from the pinned bundle version; a trigger names principal, profile and agent and makes the same call as a service principal.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+.tile{fill:#12121C;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+.box{fill:#1C1C2B;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+  <symbol id="person" viewBox="0 0 48 48">
+    <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="800" fill="currentColor" font-family="Figtree,'Segoe UI',system-ui,sans-serif">AB</text>
+  </symbol>
+  <symbol id="svc" viewBox="0 0 48 48">
+    <rect x="5" y="5" width="38" height="38" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="14" font-weight="500" fill="currentColor" font-family="'DM Mono',ui-monospace,Menlo,Consolas,monospace">svc</text>
+  </symbol>
+  <symbol id="clock" viewBox="0 0 48 48">
+    <rect x="5" y="5" width="38" height="38" fill="none" stroke="currentColor" stroke-width="3"/>
+    <line x1="24" y1="24" x2="24" y2="13" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+    <line x1="24" y1="24" x2="32" y2="29" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  </symbol>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#A3A3B8"/>
+  </marker>
+  <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#00C6C9"/>
+  </marker>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// WHO PLAYS WHOM</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">An agent is a markdown file</text>
+
+<!-- ===== the file ===== -->
+<text class="m" x="80" y="184" font-size="10" fill="#7B7B94" letter-spacing="2">ONE FILE · reviewer.md</text>
+<rect x="88" y="204" width="400" height="356" fill="#000353"/>
+<rect class="tile" x="80" y="196" width="400" height="356"/>
+<g class="m" font-size="11">
+  <text x="100" y="222" fill="#7B7B94">---</text>
+  <text x="100" y="242" fill="#8A8AA0">description:</text><text x="204" y="242" fill="#E8DFD0">Reviews a change before it merges.</text>
+  <text x="100" y="262" fill="#8A8AA0">mode:</text><text x="204" y="262" fill="#00DBD3">primary</text><text x="276" y="262" fill="#7B7B94"># or subagent</text>
+  <text x="100" y="282" fill="#8A8AA0">model:</text><text x="204" y="282" fill="#00DBD3">expensive</text><text x="290" y="282" fill="#7B7B94"># a role, not an id</text>
+  <text x="100" y="302" fill="#8A8AA0">tools:</text><text x="204" y="302" fill="#E8DFD0">[read_file, grep, shell]</text>
+  <text x="100" y="322" fill="#8A8AA0">permissions:</text>
+  <text x="120" y="340" fill="#8A8AA0">write_file:</text><text x="220" y="340" fill="#FF7E6E">deny</text>
+  <text x="120" y="358" fill="#8A8AA0">shell:</text><text x="220" y="358" fill="#FF0080">ask</text>
+  <text x="100" y="378" fill="#8A8AA0">budget_share:</text><text x="204" y="378" fill="#E8DFD0">0.5</text><text x="240" y="378" fill="#7B7B94"># of what the parent has left</text>
+  <text x="100" y="398" fill="#8A8AA0">skills:</text><text x="204" y="398" fill="#E8DFD0">[review-checklist]</text>
+  <text x="100" y="418" fill="#7B7B94">---</text>
+</g>
+<g class="t" font-size="13" fill="#E8DFD0">
+  <text x="100" y="448">You review pull requests for this team.</text>
+  <text x="100" y="468">Read the diff, run the tests, say what</text>
+  <text x="100" y="488">would break. Never edit.</text>
+</g>
+<text class="m" x="100" y="532" font-size="10" fill="#8A8AA0" letter-spacing="1.5">FRONTMATTER = THE CONTRACT · PROSE = THE ROLE</text>
+<text class="t" x="80" y="590" font-size="14" fill="#A3A3B8">No code, no plugin. A role, written down, in the repo</text>
+<text class="t" x="80" y="610" font-size="14" fill="#A3A3B8">next to the code it works on. The model picks it like a tool.</text>
+
+<!-- ===== where it lives: the search order ===== -->
+<text class="m" x="540" y="184" font-size="10" fill="#7B7B94" letter-spacing="2">WHERE IT LIVES · LOWEST TO HIGHEST</text>
+
+<rect class="tile" x="540" y="196" width="380" height="76"/>
+<rect x="540" y="196" width="4" height="76" fill="#A3A3B8"/>
+<text class="m" x="560" y="218" font-size="10" font-weight="500" fill="#A3A3B8" letter-spacing="2">4 · THE WORKSPACE</text>
+<text class="m" x="560" y="240" font-size="12" fill="#F4ECDB">&lt;workspace&gt;/.troupe/agents/*.md</text>
+<text class="t" x="560" y="260" font-size="11" fill="#8A8AA0">this repository's own cast</text>
+
+<rect class="tile" x="540" y="282" width="380" height="76"/>
+<rect x="540" y="282" width="4" height="76" fill="#FFBC56"/>
+<text class="m" x="560" y="304" font-size="10" font-weight="500" fill="#FFBC56" letter-spacing="2">3 · YOU</text>
+<text class="m" x="560" y="326" font-size="12" fill="#F4ECDB">~/.config/troupe/agents/*.md</text>
+<text class="t" x="560" y="346" font-size="11" fill="#8A8AA0">yours, on every workspace of this machine</text>
+
+<rect class="tile" x="540" y="368" width="380" height="76"/>
+<rect x="540" y="368" width="4" height="76" fill="#00C6C9"/>
+<text class="m" x="560" y="390" font-size="10" font-weight="500" fill="#00DBD3" letter-spacing="2">2 · THE PROFILE'S BUNDLE</text>
+<text class="m" x="560" y="412" font-size="12" fill="#F4ECDB">bundles/&lt;hash&gt;/agents/*.md</text>
+<text class="t" x="560" y="432" font-size="11" fill="#8A8AA0">the team's, versioned; what a pod has</text>
+
+<rect class="tile" x="540" y="454" width="380" height="98"/>
+<text class="m" x="560" y="476" font-size="10" font-weight="500" fill="#8A8AA0" letter-spacing="2">1 · BUILT IN</text>
+<g color="#7B7B94">
+  <use href="#mask" x="560" y="486" width="22" height="22"/><use href="#mask" x="586" y="486" width="22" height="22"/><use href="#mask" x="612" y="486" width="22" height="22"/><use href="#mask" x="638" y="486" width="22" height="22"/><use href="#mask" x="664" y="486" width="22" height="22"/><use href="#mask" x="690" y="486" width="22" height="22"/><use href="#mask" x="716" y="486" width="22" height="22"/><use href="#mask" x="742" y="486" width="22" height="22"/><use href="#mask" x="768" y="486" width="22" height="22"/><use href="#mask" x="794" y="486" width="22" height="22"/><use href="#mask" x="820" y="486" width="22" height="22"/>
+</g>
+<text class="m" x="560" y="524" font-size="9" fill="#8A8AA0" letter-spacing=".5">build · plan · explore · general · reviewer · librarian</text>
+<text class="m" x="560" y="540" font-size="9" fill="#8A8AA0" letter-spacing=".5">implementer · quick · ask · answer · workflow</text>
+
+<!-- the arrow up -->
+<line x1="936" y1="540" x2="936" y2="210" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" transform="translate(950 375) rotate(-90)" text-anchor="middle" font-size="9" fill="#8A8AA0" letter-spacing="2">SAME NAME · HIGHER WINS</text>
+
+<text class="m" x="540" y="580" font-size="9" fill="#7B7B94" letter-spacing="1">A BUNDLE REPLACES A BUILT-IN ONLY WITH override: true</text>
+<text class="m" x="540" y="596" font-size="9" fill="#7B7B94" letter-spacing="1">ENTITLEMENTS FILTER AFTER THE MERGE: A TEAM GETS ITS SHARE</text>
+<text class="m" x="540" y="612" font-size="9" fill="#7B7B94" letter-spacing="1">SKILLS: ONE LINE EACH IN THE PROMPT, THE BODY ON DEMAND</text>
+
+<!-- ===== how it runs ===== -->
+<text class="m" x="990" y="184" font-size="10" fill="#7B7B94" letter-spacing="2">HOW IT RUNS · ONE ROOT PER SESSION</text>
+<rect class="tile" x="990" y="196" width="530" height="190"/>
+<use href="#person" x="1008" y="222" width="40" height="40" color="#F4ECDB"/>
+<text class="m" x="1058" y="236" font-size="10" fill="#8A8AA0">troupe --agent reviewer</text>
+<text class="m" x="1058" y="252" font-size="10" fill="#8A8AA0">or the launcher's pick</text>
+<line x1="1058" y1="268" x2="1200" y2="268" stroke="#A3A3B8" stroke-width="1" stroke-dasharray="2 3"/>
+<text class="m" x="1058" y="284" font-size="9" fill="#7B7B94" letter-spacing="1">default: build · plan for a proposal first</text>
+
+<!-- root and children -->
+<use href="#mask" x="1250" y="212" width="44" height="44" color="#00DBD3"/>
+<text class="m" x="1302" y="232" font-size="11" fill="#F4ECDB">root · reviewer</text>
+<text class="m" x="1302" y="248" font-size="9" fill="#7B7B94" letter-spacing="1">THE ONE THAT TALKS TO YOU</text>
+<line x1="1272" y1="256" x2="1272" y2="300" stroke="#A3A3B8" stroke-width="1.5"/>
+<line x1="1272" y1="300" x2="1250" y2="300" stroke="#A3A3B8" stroke-width="1.5"/>
+<line x1="1272" y1="300" x2="1380" y2="300" stroke="#A3A3B8" stroke-width="1.5"/>
+<line x1="1250" y1="300" x2="1250" y2="318" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="1380" y1="300" x2="1380" y2="318" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<use href="#mask" x="1218" y="322" width="32" height="32" color="#00DBD3"/>
+<text class="m" x="1256" y="336" font-size="10" fill="#E8DFD0">explore</text>
+<text class="m" x="1256" y="350" font-size="8" fill="#7B7B94" letter-spacing=".5">reads · share 0.4</text>
+<use href="#mask" x="1348" y="322" width="32" height="32" color="#00DBD3"/>
+<text class="m" x="1386" y="336" font-size="10" fill="#E8DFD0">general</text>
+<text class="m" x="1386" y="350" font-size="8" fill="#7B7B94" letter-spacing=".5">edits · share 0.4</text>
+<text class="m" x="1008" y="376" font-size="9" fill="#7B7B94" letter-spacing="1">delegate · max_depth 3 · a child stops once it reports</text>
+<!-- a branch -->
+<use href="#mask" x="1470" y="212" width="32" height="32" color="#A3A3B8"/>
+<text class="m" x="1486" y="262" text-anchor="middle" font-size="8" fill="#7B7B94" letter-spacing=".5">/plan …</text>
+<text class="m" x="1486" y="274" text-anchor="middle" font-size="8" fill="#7B7B94" letter-spacing=".5">a branch:</text>
+<text class="m" x="1486" y="286" text-anchor="middle" font-size="8" fill="#7B7B94" letter-spacing=".5">own session,</text>
+<text class="m" x="1486" y="298" text-anchor="middle" font-size="8" fill="#7B7B94" letter-spacing=".5">a parent</text>
+
+<!-- ===== on the plane, and from a trigger ===== -->
+<text class="m" x="990" y="420" font-size="10" fill="#7B7B94" letter-spacing="2">ON THE PLANE · THE SAME CALL, TWO CALLERS</text>
+<rect class="tile" x="990" y="432" width="530" height="190"/>
+
+<use href="#person" x="1008" y="452" width="34" height="34" color="#F4ECDB"/>
+<text class="m" x="1016" y="508" font-size="8" fill="#7B7B94" letter-spacing=".5">a person</text>
+<use href="#clock" x="1008" y="530" width="34" height="34" color="#F4ECDB"/>
+<use href="#svc" x="1048" y="530" width="34" height="34" color="#F4ECDB"/>
+<text class="m" x="1016" y="586" font-size="8" fill="#7B7B94" letter-spacing=".5">a trigger · svc</text>
+
+<line x1="1050" y1="469" x2="1130" y2="500" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="1090" y1="547" x2="1130" y2="520" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect class="box" x="1134" y="480" width="150" height="56"/>
+<text class="m" x="1148" y="500" font-size="10" fill="#F4ECDB">session.create</text>
+<text class="m" x="1148" y="516" font-size="9" fill="#00DBD3">profile: standard</text>
+<text class="m" x="1148" y="530" font-size="9" fill="#00DBD3">agent: reviewer</text>
+
+<line x1="1284" y1="508" x2="1330" y2="508" stroke="#00C6C9" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+
+<rect class="box" x="1334" y="462" width="170" height="92"/>
+<text class="m" x="1348" y="482" font-size="9" fill="#8A8AA0" letter-spacing="1.5">A POD · BUNDLE v3</text>
+<use href="#mask" x="1348" y="492" width="30" height="30" color="#00DBD3"/>
+<text class="m" x="1386" y="506" font-size="9" fill="#F4ECDB">bundles/9f2c…/</text>
+<text class="m" x="1386" y="520" font-size="9" fill="#F4ECDB">agents/reviewer.md</text>
+<text class="m" x="1348" y="544" font-size="8" fill="#7B7B94" letter-spacing=".5">pinned to its version</text>
+
+<text class="m" x="1120" y="572" font-size="9" fill="#7B7B94" letter-spacing="1">TRIGGER: principal · profile · agent · cron · terms</text>
+<text class="m" x="1120" y="588" font-size="9" fill="#FF0080" letter-spacing="1">approvals: wait | deny · review: required · never auto</text>
+<text class="m" x="1120" y="604" font-size="9" fill="#7B7B94" letter-spacing="1">A PERSON'S GRANT AND A TRIGGER'S TERMS BOTH APPLY. SAME LOG.</text>
+
+<!-- ===== legend of keys ===== -->
+<line x1="80" y1="660" x2="1520" y2="660" stroke="#E8DFD0" stroke-opacity=".18" stroke-width="1.5"/>
+<g class="m" font-size="10" letter-spacing="1.5">
+  <text x="80" y="690" fill="#00DBD3" font-weight="500">mode</text><text x="80" y="706" fill="#8A8AA0">primary: may be a root</text><text x="80" y="720" fill="#8A8AA0">subagent: only delegated to</text>
+  <text x="340" y="690" fill="#00DBD3" font-weight="500">model</text><text x="340" y="706" fill="#8A8AA0">cheap · default · expensive</text><text x="340" y="720" fill="#8A8AA0">the profile maps roles to ids</text>
+  <text x="600" y="690" fill="#00DBD3" font-weight="500">tools · permissions</text><text x="600" y="706" fill="#8A8AA0">an allowlist, and deny / ask / auto per tool</text><text x="600" y="720" fill="#8A8AA0">a definition may only tighten a server's rule</text>
+  <text x="960" y="690" fill="#00DBD3" font-weight="500">budget_share</text><text x="960" y="706" fill="#8A8AA0">a child's slice of the parent's</text><text x="960" y="720" fill="#8A8AA0">tokens and time left</text>
+  <text x="1240" y="690" fill="#00DBD3" font-weight="500">skills</text><text x="1240" y="706" fill="#8A8AA0">only ones the bundle has</text><text x="1240" y="720" fill="#8A8AA0">disclosed one line at a time</text>
+</g>
+
+<!-- the point -->
+<text class="t" x="80" y="790" font-size="22" font-weight="800" fill="#F4ECDB">The cast is files. The team publishes a version of it; a session is pinned to one; a trigger names one by name.</text>
+<text class="t" x="80" y="820" font-size="15" fill="#A3A3B8">Whoever starts the session, a person or a schedule, the same agent file runs under the same log and the same approvals.</text>
+</svg>

@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">Bring your own: every piece around the harness can be swapped</title>
+<desc id="desc">The harness in the middle as a puzzle piece with four sockets. On top the client, on the left the model, on the right the tools, below where it runs. One piece is fitted in each socket; the alternatives wait beside it: desktop app, your program, another agent; OpenAI, a gateway, a local server; your own MCP server, skills, the built-in tools; your cluster.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+.fit{fill:#12121C;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+.spare{fill:#0B0B12;stroke:#E8DFD0;stroke-opacity:.18;stroke-width:1.5}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// SWAP ANY PIECE</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">Bring your own</text>
+
+<!-- the harness: a piece with four sockets -->
+<path d="M608 338 H782 V364 H834 V338 H1008 V442 H982 V494 H1008 V598 H834 V572 H782 V598 H608 V494 H634 V442 H608 Z" fill="#000353"/>
+<path d="M600 330 H774 V356 H826 V330 H1000 V434 H974 V486 H1000 V590 H826 V564 H774 V590 H600 V486 H626 V434 H600 Z" fill="#1C1C2B" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<use href="#mask" x="772" y="380" width="56" height="56" color="#00DBD3"/>
+<text class="t" x="800" y="486" text-anchor="middle" font-size="34" font-weight="900" fill="#F4ECDB" letter-spacing="-1">troupe</text>
+<text class="m" x="800" y="514" text-anchor="middle" font-size="13" fill="#8A8AA0" letter-spacing="3">THE HARNESS</text>
+<text class="m" x="800" y="546" text-anchor="middle" font-size="12" fill="#7B7B94" letter-spacing="2">AGENTS · LOG · APPROVALS · SESSIONS</text>
+
+<!-- TOP: client, fitted -->
+<path class="fit" d="M640 230 H960 V330 H826 V356 H774 V330 H640 Z"/>
+<text class="m" x="660" y="258" font-size="13" font-weight="500" fill="#00DBD3" letter-spacing="3">CLIENT</text>
+<text class="t" x="660" y="298" font-size="26" font-weight="900" fill="#F4ECDB">Terminal UI</text>
+<rect x="890" y="270" width="40" height="30" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="m" x="898" y="291" font-size="14" font-weight="500" fill="#00DBD3">&gt;_</text>
+
+<!-- TOP: spares -->
+<path class="spare" d="M560 100 H760 V170 H686 V196 H634 V170 H560 Z"/>
+<text class="t" x="580" y="144" font-size="20" font-weight="800" fill="#A3A3B8">Desktop app</text>
+<path class="spare" d="M780 100 H980 V170 H906 V196 H854 V170 H780 Z"/>
+<text class="t" x="800" y="144" font-size="20" font-weight="800" fill="#A3A3B8">Your program</text>
+<path class="spare" d="M1000 100 H1200 V170 H1126 V196 H1074 V170 H1000 Z"/>
+<text class="t" x="1020" y="144" font-size="20" font-weight="800" fill="#A3A3B8">Another agent</text>
+
+<!-- LEFT: model, fitted -->
+<path class="fit" d="M360 400 H600 V434 H626 V486 H600 V520 H360 Z"/>
+<text class="m" x="380" y="428" font-size="13" font-weight="500" fill="#00DBD3" letter-spacing="3">MODEL</text>
+<text class="t" x="380" y="470" font-size="26" font-weight="900" fill="#F4ECDB">Anthropic</text>
+<text class="m" x="380" y="498" font-size="12" fill="#8A8AA0" letter-spacing="2">YOUR KEY</text>
+
+<!-- LEFT: spares -->
+<path class="spare" d="M90 300 H300 V320 H326 V350 H300 V370 H90 Z"/>
+<text class="t" x="110" y="343" font-size="20" font-weight="800" fill="#A3A3B8">OpenAI</text>
+<path class="spare" d="M90 400 H300 V420 H326 V450 H300 V470 H90 Z"/>
+<text class="t" x="110" y="443" font-size="20" font-weight="800" fill="#A3A3B8">A gateway</text>
+<path class="spare" d="M90 500 H300 V520 H326 V550 H300 V570 H90 Z"/>
+<text class="t" x="110" y="543" font-size="20" font-weight="800" fill="#A3A3B8">A local server</text>
+
+<!-- RIGHT: tools, fitted -->
+<path class="fit" d="M1000 400 H1240 V520 H1000 V486 H974 V434 H1000 Z"/>
+<text class="m" x="1020" y="428" font-size="13" font-weight="500" fill="#00DBD3" letter-spacing="3">TOOLS</text>
+<text class="t" x="1020" y="470" font-size="26" font-weight="900" fill="#F4ECDB">MCP servers</text>
+<text class="m" x="1020" y="498" font-size="12" fill="#8A8AA0" letter-spacing="2">THE TEAM'S</text>
+
+<!-- RIGHT: spares -->
+<path class="spare" d="M1300 300 H1510 V370 H1300 V350 H1274 V320 H1300 Z"/>
+<text class="t" x="1320" y="343" font-size="20" font-weight="800" fill="#A3A3B8">Your own server</text>
+<path class="spare" d="M1300 400 H1510 V470 H1300 V450 H1274 V420 H1300 Z"/>
+<text class="t" x="1320" y="443" font-size="20" font-weight="800" fill="#A3A3B8">Skills</text>
+<path class="spare" d="M1300 500 H1510 V570 H1300 V550 H1274 V520 H1300 Z"/>
+<text class="t" x="1320" y="543" font-size="20" font-weight="800" fill="#A3A3B8">Files, shell, web</text>
+
+<!-- BOTTOM: runs on, fitted -->
+<path class="fit" d="M640 590 H774 V564 H826 V590 H960 V690 H640 Z"/>
+<text class="m" x="660" y="626" font-size="13" font-weight="500" fill="#FFBC56" letter-spacing="3">RUNS ON</text>
+<text class="t" x="660" y="666" font-size="26" font-weight="900" fill="#F4ECDB">Your laptop</text>
+<rect x="640" y="590" width="4" height="100" fill="#FFBC56"/>
+
+<!-- BOTTOM: spare -->
+<path class="spare" d="M640 760 H774 V734 H826 V760 H960 V830 H640 Z"/>
+<text class="t" x="660" y="804" font-size="20" font-weight="800" fill="#A3A3B8">Your cluster, your sign-in</text>
+
+<!-- key -->
+<text class="m" x="1510" y="858" text-anchor="end" font-size="12" fill="#7B7B94" letter-spacing="2.5">ONE PROTOCOL FOR CLIENTS · ONE CONFIG LINE FOR THE MODEL · ONE BUNDLE FOR TOOLS</text>
+</svg>

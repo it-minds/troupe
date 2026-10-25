@@ -1,0 +1,205 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">Whose identity does a session act with? Issue 331</title>
+<desc id="desc">Top, the problem: a shared session on a pod with three people attached. AB offers a personal tool whose token stays on AB's laptop. CD asks the agent to use it, EF approves, and the answer lands in a transcript everyone reads. A pasted file can ask for it too. Bottom, three answers for a pod's MCP call: system only, where the call carries the profile; on behalf of the person, where the plane exchanges the person's token; client-hosted, where the call goes back to the person's own machine. A strip of open questions at the foot: what is private, what sharing does, who may trigger and approve, triggers, audit, and what the person sees.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+.tile{fill:#12121C;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+.box{fill:#1C1C2B;stroke:#E8DFD0;stroke-opacity:.42;stroke-width:1.5}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+  <symbol id="ab" viewBox="0 0 48 48">
+    <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="800" fill="currentColor" font-family="Figtree,'Segoe UI',system-ui,sans-serif">AB</text>
+  </symbol>
+  <symbol id="cd" viewBox="0 0 48 48">
+    <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="800" fill="currentColor" font-family="Figtree,'Segoe UI',system-ui,sans-serif">CD</text>
+  </symbol>
+  <symbol id="ef" viewBox="0 0 48 48">
+    <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="16" font-weight="800" fill="currentColor" font-family="Figtree,'Segoe UI',system-ui,sans-serif">EF</text>
+  </symbol>
+  <symbol id="svc" viewBox="0 0 48 48">
+    <rect x="5" y="5" width="38" height="38" fill="none" stroke="currentColor" stroke-width="3"/>
+    <text x="24" y="30" text-anchor="middle" font-size="14" font-weight="500" fill="currentColor" font-family="'DM Mono',ui-monospace,Menlo,Consolas,monospace">svc</text>
+  </symbol>
+  <symbol id="key" viewBox="0 0 48 48">
+    <rect x="6" y="18" width="14" height="12" fill="none" stroke="currentColor" stroke-width="3"/>
+    <line x1="20" y1="24" x2="42" y2="24" stroke="currentColor" stroke-width="3"/>
+    <line x1="34" y1="24" x2="34" y2="31" stroke="currentColor" stroke-width="3"/>
+    <line x1="40" y1="24" x2="40" y2="31" stroke="currentColor" stroke-width="3"/>
+  </symbol>
+  <symbol id="doc" viewBox="0 0 48 48">
+    <path d="M10 6 H30 L40 16 V42 H10 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <line x1="16" y1="24" x2="34" y2="24" stroke="currentColor" stroke-width="2.5"/>
+    <line x1="16" y1="31" x2="34" y2="31" stroke="currentColor" stroke-width="2.5"/>
+  </symbol>
+  <symbol id="server" viewBox="0 0 48 48">
+    <rect x="6" y="8" width="36" height="14" fill="none" stroke="currentColor" stroke-width="3"/>
+    <rect x="6" y="26" width="36" height="14" fill="none" stroke="currentColor" stroke-width="3"/>
+    <circle cx="13" cy="15" r="2" fill="currentColor"/><circle cx="13" cy="33" r="2" fill="currentColor"/>
+  </symbol>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#A3A3B8"/>
+  </marker>
+  <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#00C6C9"/>
+  </marker>
+  <marker id="arrow-pink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#FF0080"/>
+  </marker>
+  <marker id="arrow-cream" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#F4ECDB"/>
+  </marker>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// WHOSE IDENTITY · ISSUE 331</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">A session acts as someone. Who?</text>
+
+<!-- ===== the problem ===== -->
+<text class="m" x="80" y="184" font-size="10" fill="#7B7B94" letter-spacing="2">TODAY · A SHARED SESSION ON A POD</text>
+
+<!-- three people -->
+<use href="#ab" x="84" y="210" width="48" height="48" color="#F4ECDB"/>
+<text class="m" x="144" y="226" font-size="10" fill="#8A8AA0" letter-spacing="1">OFFERS A TOOL</text>
+<use href="#cd" x="84" y="282" width="48" height="48" color="#A3A3B8"/>
+<text class="m" x="144" y="298" font-size="10" fill="#8A8AA0" letter-spacing="1">"USE AB'S JIRA"</text>
+<use href="#ef" x="84" y="354" width="48" height="48" color="#A3A3B8"/>
+<text class="m" x="144" y="370" font-size="10" fill="#8A8AA0" letter-spacing="1">ANSWERS THE APPROVAL</text>
+
+<!-- the session -->
+<rect x="308" y="204" width="360" height="212" fill="#000353"/>
+<rect class="tile" x="300" y="196" width="360" height="212"/>
+<rect x="300" y="196" width="4" height="212" fill="#00C6C9"/>
+<text class="m" x="324" y="222" font-size="10" font-weight="500" fill="#00DBD3" letter-spacing="2">ONE SESSION · session_tainted</text>
+<use href="#mask" x="324" y="238" width="44" height="44" color="#00DBD3"/>
+<text class="t" x="380" y="258" font-size="20" font-weight="900" fill="#F4ECDB">the agent</text>
+<text class="m" x="380" y="276" font-size="10" fill="#8A8AA0" letter-spacing="1">anyone with control steers it</text>
+<!-- the offered tool -->
+<rect class="box" x="460" y="300" width="180" height="44"/>
+<use href="#key" x="468" y="308" width="28" height="28" color="#F4ECDB"/>
+<text class="m" x="504" y="320" font-size="11" fill="#F4ECDB">AB's Jira</text>
+<text class="m" x="504" y="335" font-size="9" fill="#8A8AA0" letter-spacing="1">ACTS AS AB</text>
+<!-- the approval -->
+<rect x="324" y="300" width="120" height="44" fill="#FF0080"/>
+<text class="m" x="384" y="318" text-anchor="middle" font-size="10" font-weight="500" fill="#0B0B12" letter-spacing="1.5">ALLOW?</text>
+<text class="m" x="384" y="334" text-anchor="middle" font-size="9" fill="#0B0B12" letter-spacing="1">ANY ONE OF THEM</text>
+<text class="t" x="324" y="386" font-size="12" fill="#A3A3B8">The answer lands in the transcript all three read.</text>
+
+<!-- arrows from people -->
+<line x1="140" y1="234" x2="300" y2="234" stroke="#F4ECDB" stroke-width="1.5" marker-end="url(#arrow-cream)"/>
+<line x1="140" y1="306" x2="300" y2="306" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<polyline points="140,378 250,378 250,322 324,322" fill="none" stroke="#FF0080" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+
+<!-- the token stays on AB's laptop -->
+<polyline points="640,322 680,322 680,300 700,300" fill="none" stroke="#F4ECDB" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#arrow-cream)"/>
+<rect class="tile" x="700" y="240" width="200" height="82"/>
+<rect x="700" y="240" width="4" height="82" fill="#FFBC56"/>
+<text class="m" x="720" y="264" font-size="10" font-weight="500" fill="#FFBC56" letter-spacing="2">AB'S LAPTOP</text>
+<use href="#key" x="720" y="276" width="30" height="30" color="#F4ECDB"/>
+<text class="t" x="758" y="297" font-size="13" fill="#E8DFD0">the token never leaves</text>
+<text class="m" x="720" y="340" font-size="9" fill="#7B7B94" letter-spacing="1">PROTOCOL §8 · CLIENT-HOSTED · TODAY</text>
+
+<!-- prompt injection -->
+<use href="#doc" x="724" y="368" width="36" height="36" color="#FF7E6E"/>
+<polyline points="724,386 680,386 680,370 660,370" fill="none" stroke="#FF7E6E" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" x="768" y="384" font-size="10" fill="#FF7E6E" letter-spacing="1">A PASTED FILE CAN ASK TOO</text>
+<text class="m" x="768" y="400" font-size="9" fill="#7B7B94" letter-spacing="1">ONE APPROVAL LETS IT THROUGH</text>
+
+<!-- the problem, said once -->
+<rect class="tile" x="980" y="196" width="540" height="212"/>
+<text class="m" x="1000" y="222" font-size="10" font-weight="500" fill="#FF7E6E" letter-spacing="2">THE PROBLEM</text>
+<text class="t" x="1000" y="256" font-size="20" font-weight="900" fill="#F4ECDB">Anything that acts as one person</text>
+<text class="t" x="1000" y="282" font-size="20" font-weight="900" fill="#F4ECDB">can be driven by the others.</text>
+<text class="t" x="1000" y="318" font-size="13" fill="#A3A3B8">Tainted says a personal tool is here. Nothing says who may pull it,</text>
+<text class="t" x="1000" y="338" font-size="13" fill="#A3A3B8">or who may answer for it.</text>
+<text class="t" x="1000" y="372" font-size="13" fill="#A3A3B8">The profile's own identity has the opposite problem: a server that</text>
+<text class="t" x="1000" y="392" font-size="13" fill="#A3A3B8">answers per person cannot, because it only ever sees the profile.</text>
+
+<!-- ===== three answers ===== -->
+<text class="m" x="80" y="462" font-size="10" fill="#7B7B94" letter-spacing="2">WHOSE IDENTITY DOES A POD'S MCP CALL CARRY? THREE ANSWERS</text>
+
+<!-- A · system only -->
+<rect x="88" y="486" width="440" height="250" fill="#000353"/>
+<rect class="tile" x="80" y="478" width="440" height="250"/>
+<text class="m" x="100" y="504" font-size="11" font-weight="500" fill="#00DBD3" letter-spacing="2.5">A · SYSTEM ONLY</text>
+<use href="#mask" x="100" y="528" width="40" height="40" color="#00DBD3"/>
+<line x1="150" y1="548" x2="236" y2="548" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<use href="#svc" x="166" y="520" width="28" height="28" color="#F4ECDB"/>
+<use href="#server" x="240" y="528" width="40" height="40" color="#F4ECDB"/>
+<text class="m" x="296" y="553" font-size="10" fill="#8A8AA0" letter-spacing="1">THE SERVER SEES</text>
+<text class="m" x="296" y="567" font-size="10" fill="#F4ECDB" letter-spacing="1">ONE IDENTITY: THE PROFILE</text>
+<g color="#4A4A66"><use href="#ab" x="100" y="586" width="28" height="28"/><use href="#cd" x="134" y="586" width="28" height="28"/><use href="#ef" x="168" y="586" width="28" height="28"/></g>
+<text class="m" x="206" y="605" font-size="9" fill="#7B7B94" letter-spacing="1">ALL LOOK THE SAME TO IT</text>
+<text class="t" x="100" y="652" font-size="13" fill="#00DBD3">+ nothing personal ever on a pod</text>
+<text class="t" x="100" y="674" font-size="13" fill="#00DBD3">+ what we have today (D747)</text>
+<text class="t" x="100" y="704" font-size="13" fill="#FF7E6E">− per-person answers are impossible</text>
+
+<!-- B · on behalf of -->
+<rect x="568" y="486" width="440" height="250" fill="#000353"/>
+<rect class="tile" x="560" y="478" width="440" height="250"/>
+<text class="m" x="580" y="504" font-size="11" font-weight="500" fill="#00DBD3" letter-spacing="2.5">B · ON BEHALF OF THE PERSON</text>
+<use href="#ab" x="580" y="528" width="40" height="40" color="#F4ECDB"/>
+<line x1="628" y1="548" x2="676" y2="548" stroke="#F4ECDB" stroke-width="1.5" marker-end="url(#arrow-cream)"/>
+<use href="#key" x="636" y="530" width="24" height="24" color="#F4ECDB"/>
+<rect class="box" x="680" y="530" width="92" height="36"/>
+<text class="m" x="726" y="548" text-anchor="middle" font-size="10" fill="#F4ECDB">plane</text>
+<text class="m" x="726" y="560" text-anchor="middle" font-size="8" fill="#8A8AA0" letter-spacing="1">EXCHANGES</text>
+<line x1="772" y1="548" x2="818" y2="548" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<use href="#mask" x="822" y="528" width="40" height="40" color="#00DBD3"/>
+<line x1="870" y1="548" x2="918" y2="548" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<use href="#ab" x="878" y="530" width="24" height="24" color="#F4ECDB"/>
+<use href="#server" x="922" y="528" width="40" height="40" color="#F4ECDB"/>
+<text class="m" x="580" y="605" font-size="9" fill="#7B7B94" letter-spacing="1">RFC 8693 TOKEN EXCHANGE · OR THE IDP'S OWN OBO FLOW</text>
+<text class="t" x="580" y="652" font-size="13" fill="#00DBD3">+ real per-person answers, on a pod</text>
+<text class="t" x="580" y="682" font-size="13" fill="#FF7E6E">− the plane holds or fetches a person's token:</text>
+<text class="t" x="580" y="702" font-size="13" fill="#FF7E6E">   refresh, revoke, audience to get right</text>
+<text class="t" x="580" y="722" font-size="13" fill="#A3A3B8">   only in a private session, or only on AB's own turns</text>
+
+<!-- C · client-hosted -->
+<rect x="1048" y="486" width="472" height="250" fill="#000353"/>
+<rect class="tile" x="1040" y="478" width="472" height="250"/>
+<text class="m" x="1060" y="504" font-size="11" font-weight="500" fill="#00DBD3" letter-spacing="2.5">C · CLIENT-HOSTED</text>
+<use href="#mask" x="1060" y="528" width="40" height="40" color="#00DBD3"/>
+<polyline points="1108,548 1180,548" fill="none" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect class="tile" x="1184" y="524" width="150" height="48"/>
+<rect x="1184" y="524" width="4" height="48" fill="#FFBC56"/>
+<use href="#ab" x="1198" y="534" width="28" height="28" color="#F4ECDB"/>
+<use href="#key" x="1232" y="534" width="28" height="28" color="#F4ECDB"/>
+<text class="m" x="1268" y="552" font-size="10" fill="#F4ECDB">laptop</text>
+<line x1="1334" y1="548" x2="1396" y2="548" stroke="#F4ECDB" stroke-width="1.5" marker-end="url(#arrow-cream)"/>
+<use href="#server" x="1400" y="528" width="40" height="40" color="#F4ECDB"/>
+<text class="m" x="1060" y="605" font-size="9" fill="#7B7B94" letter-spacing="1">THE CALL GOES BACK TO THE PERSON'S OWN MACHINE · §8 · D748</text>
+<text class="t" x="1060" y="652" font-size="13" fill="#00DBD3">+ the plane holds nothing</text>
+<text class="t" x="1060" y="674" font-size="13" fill="#00DBD3">+ the token never leaves the laptop</text>
+<text class="t" x="1060" y="704" font-size="13" fill="#FF7E6E">− only while AB is attached; and the sharing problem above</text>
+
+<!-- ===== open questions ===== -->
+<text class="m" x="80" y="776" font-size="10" fill="#7B7B94" letter-spacing="2">STILL TO SETTLE · ONE DECISION IN DECISIONS.md</text>
+<g class="m" font-size="10" font-weight="500" letter-spacing="1.5">
+  <rect x="80" y="790" width="150" height="30" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="155" y="809" text-anchor="middle" fill="#F4ECDB">WHAT IS PRIVATE?</text>
+  <rect x="242" y="790" width="190" height="30" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="337" y="809" text-anchor="middle" fill="#F4ECDB">WHAT DOES SHARING DO?</text>
+  <rect x="444" y="790" width="250" height="30" fill="none" stroke="#FF0080" stroke-width="1.5"/>
+  <text x="569" y="809" text-anchor="middle" fill="#FF0080">WHO MAY TRIGGER · WHO MAY APPROVE</text>
+  <rect x="706" y="790" width="220" height="30" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="816" y="809" text-anchor="middle" fill="#F4ECDB">TRIGGERS: ALWAYS THE PROFILE?</text>
+  <rect x="938" y="790" width="250" height="30" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="1063" y="809" text-anchor="middle" fill="#F4ECDB">AUDIT: WHOSE NAME ON THE CALL</text>
+  <rect x="1200" y="790" width="180" height="30" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text x="1290" y="809" text-anchor="middle" fill="#F4ECDB">WHAT DOES AB SEE?</text>
+</g>
+<text class="m" x="80" y="858" font-size="10" fill="#7B7B94" letter-spacing="1.5">RELATED · #315 PROFILE IDENTITY · #308 A PERSON'S SERVERS ON A POD · #58 REMOTE CONTROL · D741 D747 D748</text>
+</svg>

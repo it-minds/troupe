@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">Where the work runs: daemon, worker, clients and tools</title>
+<desc id="desc">Three clients at the top, a terminal UI, the desktop app and your own program, all speaking one protocol. Below them two homes for the same harness: troupe-daemon on your machine and troupe-worker in a pod on your cluster. Below those, what the harness calls: the model, files, shell and MCP servers. Files and shell ask a person first.</desc>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&amp;family=DM+Mono:wght@400;500&amp;family=VT323&amp;display=swap');
+.t{font-family:Figtree,'Segoe UI',system-ui,sans-serif}
+.m{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+.s{font-family:VT323,'DM Mono',ui-monospace,monospace}
+</style>
+<defs>
+  <symbol id="mask" viewBox="0 0 48 48">
+    <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"/>
+    <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"/>
+  </symbol>
+  <symbol id="chain" viewBox="0 0 100 20">
+    <rect x="1" y="2" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"/>
+    <line x1="17" y1="10" x2="42" y2="10" stroke="currentColor" stroke-width="2"/>
+    <rect x="42" y="2" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"/>
+    <line x1="58" y1="10" x2="83" y2="10" stroke="currentColor" stroke-width="2"/>
+    <rect x="83" y="2" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"/>
+  </symbol>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#A3A3B8"/>
+  </marker>
+</defs>
+
+<rect width="1600" height="900" fill="#0B0B12"/>
+
+<!-- header -->
+<text class="s" x="80" y="78" font-size="24" fill="#00DBD3" letter-spacing="4">// ONE HARNESS, TWO HOMES</text>
+<text class="t" x="80" y="134" font-size="46" font-weight="900" fill="#F4ECDB" letter-spacing="-1.5">Where the work runs</text>
+
+<!-- clients -->
+<g>
+  <rect x="256" y="186" width="300" height="84" fill="#000353"/>
+  <rect x="250" y="180" width="300" height="84" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <rect x="272" y="206" width="40" height="30" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text class="m" x="280" y="227" font-size="14" font-weight="500" fill="#00DBD3">&gt;_</text>
+  <text class="t" x="330" y="216" font-size="22" font-weight="800" fill="#F4ECDB">Terminal UI</text>
+  <text class="m" x="330" y="244" font-size="13" fill="#8A8AA0" letter-spacing="2">TROUPE</text>
+
+  <rect x="656" y="186" width="300" height="84" fill="#000353"/>
+  <rect x="650" y="180" width="300" height="84" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <rect x="672" y="206" width="40" height="30" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <line x1="672" y1="215" x2="712" y2="215" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text class="t" x="730" y="216" font-size="22" font-weight="800" fill="#F4ECDB">Desktop app</text>
+  <text class="m" x="730" y="244" font-size="13" fill="#8A8AA0" letter-spacing="2">OR THE WEB APP</text>
+
+  <rect x="1056" y="186" width="300" height="84" fill="#000353"/>
+  <rect x="1050" y="180" width="300" height="84" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <rect x="1072" y="206" width="40" height="30" fill="none" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+  <text class="m" x="1092" y="227" text-anchor="middle" font-size="15" fill="#F4ECDB">{ }</text>
+  <text class="t" x="1130" y="216" font-size="22" font-weight="800" fill="#F4ECDB">Your own program</text>
+  <text class="m" x="1130" y="244" font-size="13" fill="#8A8AA0" letter-spacing="2">SPEAKS THE PROTOCOL</text>
+</g>
+
+<!-- one protocol -->
+<line x1="400" y1="264" x2="400" y2="320" stroke="#00C6C9" stroke-width="1.5"/>
+<line x1="800" y1="264" x2="800" y2="320" stroke="#00C6C9" stroke-width="1.5"/>
+<line x1="1200" y1="264" x2="1200" y2="320" stroke="#00C6C9" stroke-width="1.5"/>
+<line x1="400" y1="320" x2="1200" y2="320" stroke="#00C6C9" stroke-width="1.5"/>
+<line x1="510" y1="320" x2="510" y2="380" stroke="#00C6C9" stroke-width="1.5"/>
+<line x1="1090" y1="320" x2="1090" y2="380" stroke="#00C6C9" stroke-width="1.5"/>
+<text class="m" x="800" y="352" text-anchor="middle" font-size="13" fill="#00DBD3" letter-spacing="3">ONE PROTOCOL · SAME EVENTS EVERYWHERE</text>
+
+<!-- the daemon, on your machine -->
+<rect x="258" y="388" width="520" height="200" fill="#000353"/>
+<rect x="250" y="380" width="520" height="200" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<rect x="250" y="380" width="4" height="200" fill="#FFBC56"/>
+<text class="m" x="280" y="414" font-size="13" font-weight="500" fill="#FFBC56" letter-spacing="3">THIS MACHINE</text>
+<text class="t" x="280" y="456" font-size="30" font-weight="900" fill="#F4ECDB" letter-spacing="-0.5">troupe-daemon</text>
+<text class="t" x="280" y="486" font-size="17" fill="#A3A3B8">The harness, on your laptop.</text>
+<use href="#mask" x="280" y="528" width="32" height="32" color="#00DBD3"/>
+<use href="#chain" x="328" y="534" width="100" height="20" color="#A3A3B8"/>
+<text class="m" x="446" y="550" font-size="13" fill="#8A8AA0" letter-spacing="2.5">AGENT · LOG · TOOLS</text>
+
+<!-- same code -->
+<text class="t" x="800" y="498" text-anchor="middle" font-size="48" font-weight="900" fill="#8A8AA0">=</text>
+
+<!-- the worker, on the cluster -->
+<rect x="838" y="388" width="520" height="200" fill="#000353"/>
+<rect x="830" y="380" width="520" height="200" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<rect x="830" y="380" width="4" height="200" fill="#00C6C9"/>
+<text class="m" x="860" y="414" font-size="13" font-weight="500" fill="#00DBD3" letter-spacing="3">REMOTE</text>
+<text class="t" x="860" y="456" font-size="30" font-weight="900" fill="#F4ECDB" letter-spacing="-0.5">troupe-worker</text>
+<text class="t" x="860" y="486" font-size="17" fill="#A3A3B8">The same harness, in a pod on your cluster.</text>
+<use href="#mask" x="860" y="528" width="32" height="32" color="#00DBD3"/>
+<use href="#chain" x="908" y="534" width="100" height="20" color="#A3A3B8"/>
+<text class="m" x="1026" y="550" font-size="13" fill="#8A8AA0" letter-spacing="2.5">AGENT · LOG · TOOLS</text>
+
+<!-- tool calls -->
+<line x1="510" y1="580" x2="510" y2="640" stroke="#A3A3B8" stroke-width="1.5"/>
+<line x1="1090" y1="580" x2="1090" y2="640" stroke="#A3A3B8" stroke-width="1.5"/>
+<line x1="365" y1="640" x2="1235" y2="640" stroke="#A3A3B8" stroke-width="1.5"/>
+<line x1="365" y1="640" x2="365" y2="690" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="655" y1="640" x2="655" y2="690" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="945" y1="640" x2="945" y2="690" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="1235" y1="640" x2="1235" y2="690" stroke="#A3A3B8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="m" x="800" y="632" text-anchor="middle" font-size="13" fill="#8A8AA0" letter-spacing="3">WHAT THE AGENT CALLS</text>
+
+<!-- the gate: files and shell ask first -->
+<rect x="600" y="654" width="110" height="22" fill="#FF0080"/>
+<text class="m" x="655" y="670" text-anchor="middle" font-size="12" font-weight="500" fill="#0B0B12" letter-spacing="2">ASKS FIRST</text>
+<rect x="890" y="654" width="110" height="22" fill="#FF0080"/>
+<text class="m" x="945" y="670" text-anchor="middle" font-size="12" font-weight="500" fill="#0B0B12" letter-spacing="2">ASKS FIRST</text>
+
+<!-- the tools -->
+<rect x="250" y="690" width="230" height="110" fill="#12121C" stroke="#00C6C9" stroke-width="1.5"/>
+<text class="t" x="272" y="732" font-size="24" font-weight="900" fill="#F4ECDB">Model</text>
+<text class="t" x="272" y="762" font-size="15" fill="#A3A3B8">Anthropic, OpenAI,</text>
+<text class="t" x="272" y="782" font-size="15" fill="#A3A3B8">or a gateway. Thinks.</text>
+
+<rect x="540" y="690" width="230" height="110" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="t" x="562" y="732" font-size="24" font-weight="900" fill="#F4ECDB">Files</text>
+<text class="t" x="562" y="762" font-size="15" fill="#A3A3B8">Reads on its own.</text>
+<text class="t" x="562" y="782" font-size="15" fill="#A3A3B8">Writes with your say-so.</text>
+
+<rect x="830" y="690" width="230" height="110" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="t" x="852" y="732" font-size="24" font-weight="900" fill="#F4ECDB">Shell</text>
+<text class="t" x="852" y="762" font-size="15" fill="#A3A3B8">Commands in the</text>
+<text class="t" x="852" y="782" font-size="15" fill="#A3A3B8">workspace. Sandboxed on a pod.</text>
+
+<rect x="1120" y="690" width="230" height="110" fill="#12121C" stroke="#E8DFD0" stroke-opacity=".42" stroke-width="1.5"/>
+<text class="t" x="1142" y="732" font-size="24" font-weight="900" fill="#F4ECDB">MCP servers</text>
+<text class="t" x="1142" y="762" font-size="15" fill="#A3A3B8">The team's tools,</text>
+<text class="t" x="1142" y="782" font-size="15" fill="#A3A3B8">and your own.</text>
+
+<!-- key -->
+<rect x="250" y="846" width="14" height="14" fill="#FFBC56"/>
+<text class="m" x="274" y="858" font-size="13" fill="#8A8AA0" letter-spacing="2">THIS MACHINE</text>
+<rect x="430" y="846" width="14" height="14" fill="#00C6C9"/>
+<text class="m" x="454" y="858" font-size="13" fill="#8A8AA0" letter-spacing="2">THE MACHINE WORKING</text>
+<rect x="680" y="846" width="14" height="14" fill="#FF0080"/>
+<text class="m" x="704" y="858" font-size="13" fill="#8A8AA0" letter-spacing="2">A PERSON MUST DECIDE</text>
+</svg>
