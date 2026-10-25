@@ -55,13 +55,19 @@ defmodule Troupe.CLI.Memory do
   defp show(own, say) do
     say.(
       "your memory on #{own["plane_url"]}, version #{own["version"]}, #{own["bytes"]} of " <>
-        "#{own["limit"]} bytes, saved by #{own["changed_by"]} at #{own["changed_at"]}:"
+        "#{own["limit"]} bytes#{saved_by(own)}:"
     )
 
     say.("")
     say.(own["text"])
     0
   end
+
+  defp saved_by(%{"changed_by" => by, "changed_at" => at}) when is_binary(by) and is_binary(at),
+    do: ", saved by #{by} at #{at}"
+
+  defp saved_by(%{"changed_by" => by}) when is_binary(by), do: ", saved by #{by}"
+  defp saved_by(_own), do: ""
 
   defp edit(own, say, call) do
     path = Path.join(System.tmp_dir!(), "troupe-memory-#{System.unique_integer([:positive])}.md")
@@ -84,6 +90,15 @@ defmodule Troupe.CLI.Memory do
           say.("your memory was not edited: " <> why)
           1
       end
+    rescue
+      # An editor the system cannot start as a program, such as an app's alias in
+      # WindowsApps, is said as the others are, not as a crash of the command.
+      error in ErlangError ->
+        say.(
+          "your memory was not edited: the editor could not be started (#{Exception.message(error)})"
+        )
+
+        1
     after
       File.rm(path)
     end

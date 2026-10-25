@@ -196,6 +196,10 @@ defmodule Troupe.Gateway.Memory do
   def sentence({:rpc, %{"message" => message}}), do: "the plane refused it (#{message})"
   def sentence(:unauthorized), do: "the plane did not take this machine's sign-in; sign in again"
   def sentence({:update_required, sentence}), do: sentence
+
+  def sentence(%{__exception__: true} = error),
+    do: "the plane could not be reached (#{Exception.message(error)})"
+
   def sentence(reason), do: format(reason)
 
   defp signed_in do

@@ -98,6 +98,11 @@ defmodule Troupe.MemoryCLITest do
 
     {1, said} = run(%{edit: true}, call)
     assert said =~ "version 4 is in force now"
+
+    # An editor that cannot be started as a program is said, and nothing is saved.
+    Application.put_env(:troupe, :edit_file, fn _path -> raise ErlangError, original: :enoent end)
+    {1, said} = run(%{edit: true}, fn "me.memory", _ -> {:ok, @own} end)
+    assert said =~ "your memory was not edited: the editor could not be started"
   end
 
   test "--clear empties it, and a daemon not signed in says so" do
