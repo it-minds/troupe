@@ -20,6 +20,7 @@ import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsP
 import { remoteOffer, syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
 import type { OwnMemory, OwnMemorySaved } from "./instructions.js";
+import type { Invitee, InviteRole, SealedRead } from "./invites.js";
 import type { MemoryBrief } from "./memory.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
 import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
@@ -688,6 +689,34 @@ export class DaemonClient {
    */
   claimSession(sessionId: string): Promise<ClaimResult> {
     return this.command<ClaimResult>("session.claim", { session_id: sessionId });
+  }
+
+  /**
+   * Invite a person, by name or email, into a private session sealed on this computer
+   * (troupe #765): the daemon puts the session's key in their own slot at the key manager
+   * and tells the plane where. A pod session is invited at the plane (`PlaneClient.inviteToSession`).
+   */
+  inviteSession(sessionId: string, person: string, role: InviteRole): Promise<{ session_id: string; invite: Invitee }> {
+    return this.command("session.invite", { session_id: sessionId, person, role });
+  }
+
+  /** Take an invitation into a private session back, and seal what follows under a key they never get. */
+  uninviteSession(sessionId: string, person: string): Promise<{ session_id: string; subject: string; rekey_due: boolean }> {
+    return this.command("session.uninvite", { session_id: sessionId, person });
+  }
+
+  /** Whom a private session is shared with by name, as the plane says. */
+  sessionInvites(sessionId: string): Promise<{ session_id: string; invites: Invitee[] }> {
+    return this.call("session.invites", { session_id: sessionId });
+  }
+
+  /**
+   * A private session somebody invited this computer's person into, read from the plane's
+   * sealed copy with the keys in their own slot: its events after `afterSeq`. Nothing of it
+   * is kept on this computer.
+   */
+  readSealed(sessionId: string, afterSeq = 0): Promise<SealedRead> {
+    return this.call<SealedRead>("session.read_sealed", { session_id: sessionId, after_seq: afterSeq });
   }
 
   /**

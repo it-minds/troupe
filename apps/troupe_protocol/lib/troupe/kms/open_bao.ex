@@ -65,6 +65,41 @@ defmodule Troupe.KMS.OpenBao do
     match?({:ok, _}, fetch(team, session_id, opts))
   end
 
+  # -- a key in somebody's own slot ---------------------------------------------
+
+  @doc """
+  Put a key at a path, once: refused, and nothing written, where something is already
+  there. How a private session's owner hands its key to a person invited into it, at a
+  path under the invitee's own subtree (`Troupe.KMS.invited_slot/4`), which the owner's
+  credential may create and may not read back (`Troupe.KMS.Policy.person/3`).
+  """
+  @impl Troupe.KMS
+  def put_at(path, key, opts \\ []) do
+    body = %{"options" => %{"cas" => 0}, "data" => %{"key" => Base.encode64(key)}}
+
+    case request(:post, "/v1/#{mount(opts)}/data/#{encode(path)}", body, opts) do
+      {:ok, status, _body} when status in 200..299 -> :ok
+      {:ok, 403, _body} -> {:error, :forbidden}
+      {:ok, 400, _body} -> {:error, :exists}
+      {:ok, status, _body} -> {:error, {:unexpected_status, status}}
+      error -> error
+    end
+  end
+
+  @doc "Read a key at a path, with a credential allowed to: the invitee's, from their own slot."
+  @impl Troupe.KMS
+  def fetch_at(path, opts \\ []), do: read_key(path, opts)
+
+  @doc "Destroy every version of the key at a path: an invitee's copy, at erasure or removal."
+  @impl Troupe.KMS
+  def destroy_at(path, opts \\ []) do
+    case request(:delete, "/v1/#{mount(opts)}/metadata/#{encode(path)}", nil, opts) do
+      {:ok, status, _body} when status in 200..299 or status == 404 -> :ok
+      {:ok, status, _body} -> {:error, {:unexpected_status, status}}
+      error -> error
+    end
+  end
+
   # A key path is a *logical* path — it is what the policy matches on and what the store
   # files the secret under — and a URL is not. `idp|ada` is a perfectly ordinary subject
   # (Auth0 writes every one of them that way) and a perfectly invalid request target, so

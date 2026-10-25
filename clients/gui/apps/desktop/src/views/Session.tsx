@@ -17,6 +17,7 @@ import {
   isBusy,
   needsYou,
   onThisComputer,
+  invitationWords,
   openApprovals,
   openQuestions,
   presentMembers,
@@ -60,6 +61,7 @@ import type { MemoryAsk } from "./Memory";
 import { OfferLine, OfferPanel } from "./Offer";
 import { StartLine, StartPanel } from "./Onboard";
 import { RemoteLine, RemoteOfferControl } from "./Remote";
+import { InviteControl } from "./Invites";
 import { Cost, initials, Loading, personColour, Pill, Sync, When, Where } from "./bits";
 
 /**
@@ -232,6 +234,7 @@ export function Session({
             <RemoteLine row={row} />
           ) : null
         }
+        invites={row ? <InviteControl auth={auth} daemon={daemon} row={row} /> : null}
       />
 
       <Banners status={view.status} detail={view.detail} dormant={dormant} readOnly={readOnly} error={view.error} />
@@ -472,6 +475,7 @@ function Header({
   view,
   agent,
   remote,
+  invites,
 }: {
   row: FleetRow | undefined;
   sessionId: string;
@@ -490,6 +494,8 @@ function Header({
   agent: JSX.Element;
   /** Steering from another device: this computer's offer, or whose laptop a relayed one is on. */
   remote?: JSX.Element | null;
+  /** Whom it is shared with by name, and for its owner the invitation (troupe #765). */
+  invites?: JSX.Element | null;
 }): JSX.Element {
   const working = rootState(state);
   const here = presentMembers(state);
@@ -532,6 +538,14 @@ function Header({
               </span>
             </>
           )}
+          {row?.invitation && (
+            <>
+              <span className="sep" aria-hidden="true">
+                ·
+              </span>
+              <span className="invited-by">{invitationWords(row.invitation)}</span>
+            </>
+          )}
         </div>
         <h1 className="title">{row?.title ?? sessionId}</h1>
         <GoalLine goal={state.goal} loop={loop} canChange={canChange} onSet={view.setGoal} onClear={view.clearGoal} onStartLoop={view.startLoop} />
@@ -559,6 +573,8 @@ function Header({
         <LoopStatus loop={loop} canStop={canChange} onStop={view.stopLoop} />
 
         {remote}
+
+        {invites}
 
         {/* The agent this window runs, and the switch to another from the next turn. */}
         {agent}

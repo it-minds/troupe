@@ -12,7 +12,7 @@ metadata:
   namespace: troupe-system
 data:
   role: |
-    bao write auth/kubernetes/role/troupe-plane bound_service_account_names=troupe-plane bound_service_account_namespaces=troupe-system audience=troupe-kms token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane,troupe-plane-github ttl=1h
+    bao write auth/kubernetes/role/troupe-plane bound_service_account_names=troupe-plane bound_service_account_namespaces=troupe-system audience=troupe-kms token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane,troupe-plane-invites,troupe-plane-github ttl=1h
   troupe-plane-session-tokens.hcl: |
     path "transit/sign/troupe-session-tokens" {
       capabilities = ["create", "update"]
@@ -44,6 +44,10 @@ data:
 
     path "secret/metadata/troupe/people/+/mcp/*" {
       capabilities = ["list", "read"]
+    }
+  troupe-plane-invites.hcl: |
+    path "secret/metadata/troupe/people/+/invited/*" {
+      capabilities = ["delete"]
     }
   troupe-plane-github.hcl: |
     path "transit/wrapping_key" {

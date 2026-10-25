@@ -16,7 +16,8 @@ import type { OwnMemory, OwnMemoryPreview, OwnMemorySaved, SessionRow } from "@t
 import { describeError, show, useConsole, useLoad } from "../console";
 import { Empty, Field, Loaded, Preview, Region, Status, TextDiff, count, when } from "./bits";
 import type { StatusKind } from "./bits";
-import { RemoteSessions } from "./Remote";
+import { InvitedToYou } from "./Invited";
+import { RemoteSessions, useOffered } from "./Remote";
 
 /** One of the person's clients, as the plane last saw it. */
 interface ClientSeen {
@@ -47,13 +48,15 @@ const STANDING: Record<string, { kind: StatusKind; glyph: string; word: string; 
 
 export function Mine(): JSX.Element {
   const { me, plane } = useConsole();
+  const [offered, reload, invites] = useOffered();
   return (
     <div className="page mine">
       <p className="lead">
-        What is yours on {plane.name}, {me.display_name ?? me.subject}: the sessions offered to you from laptops, to follow and steer from here, your sessions, your clients'
+        What is yours on {plane.name}, {me.display_name ?? me.subject}: the sessions offered to you from laptops and those you were invited into, to follow and steer from here, your sessions, your clients'
         versions, and the memory your machines read.
       </p>
-      <RemoteSessions />
+      <RemoteSessions load={offered} reload={reload} />
+      <InvitedToYou load={invites} reload={reload} />
       <YourSessions />
       <YourClients />
       <YourMemory />

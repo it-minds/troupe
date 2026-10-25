@@ -524,6 +524,15 @@ export class FakeDaemon {
   readonly privateSessions = new Set<string>();
   /** The sessions `session.claim` took over, oldest first. */
   readonly claims: string[] = [];
+  /**
+   * Invitations into this computer's private sessions, as the daemon makes them through
+   * the plane (troupe #765): by session, the people and their roles, and every key version
+   * a removal sealed forward under.
+   */
+  readonly invited = new Map<string, Array<{ subject: string; role: string }>>();
+  readonly rekeyed: string[] = [];
+  /** Somebody else's private sessions shared with this computer's person: their sealed events, by session. */
+  readonly sealed = new Map<string, Array<Record<string, unknown>>>();
   /** How many times `daemon.stop` was asked, for an update to replace the daemon. */
   stopsAsked = 0;
   /** Refuse every claim as the daemon does one whose plane copy went further than this one. */
@@ -1290,6 +1299,42 @@ evoked where nothing is set and there was a sign-in. */
         session.sync = "current";
         session.device = null;
         return reply(ws, id, { session_id: sessionId, device: "this-laptop", epoch: 2, sync: "current" });
+      }
+
+      // A private session's invitations, from the machine that seals it (troupe #765).
+      case "session.invite": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        if (session.kind !== "private") {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { session_id: sessionId, reason: "only a private session is invited from this machine" } });
+        }
+        const person = String(params["person"] ?? "");
+        const role = params["role"] === "control" ? "control" : "observe";
+        const people = (this.invited.get(sessionId) ?? []).filter((p) => p.subject !== person);
+        this.invited.set(sessionId, [...people, { subject: person, role }]);
+        return reply(ws, id, { session_id: sessionId, invite: { subject: person, role, invited_by: this.linked?.subject ?? "me", invited_at: new Date().toISOString() } });
+      }
+
+      case "session.uninvite": {
+        const person = String(params["person"] ?? "");
+        const people = this.invited.get(sessionId) ?? [];
+        if (!people.some((p) => p.subject === person)) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "invitation" } });
+        this.invited.set(sessionId, people.filter((p) => p.subject !== person));
+        this.rekeyed.push(sessionId);
+        return reply(ws, id, { session_id: sessionId, subject: person, rekey_due: false, key_version: this.rekeyed.filter((s) => s === sessionId).length + 1 });
+      }
+
+      case "session.invites":
+        return reply(ws, id, {
+          session_id: sessionId,
+          invites: (this.invited.get(sessionId) ?? []).map((p) => ({ ...p, display_name: p.subject, invited_by: "me", invited_at: "2026-10-25T10:00:00Z" })),
+        });
+
+      case "session.read_sealed": {
+        const events = this.sealed.get(sessionId);
+        if (!events) return reply(ws, id, null, { code: -32005, message: "not_found", data: { session_id: sessionId } });
+        const after = Number(params["after_seq"] ?? 0);
+        const later = events.filter((e) => Number(e["seq"]) > after);
+        return reply(ws, id, { session_id: sessionId, events: later, last_seq: events.length, key_version: 1 });
       }
 
       case "subscribe": {

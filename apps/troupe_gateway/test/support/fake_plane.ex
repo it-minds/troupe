@@ -153,6 +153,14 @@ defmodule Troupe.Gateway.FakePlane do
   @doc false
   def token(state), do: Agent.get(state, & &1.token)
 
+  @doc "The invitations the fake plane holds for a session, by subject, each with its keys."
+  @spec invitations(pid(), String.t()) :: map()
+  def invitations(state, session_id), do: invites(state, session_id)
+
+  @doc "Whose invitation `session.keys` answers from now on: the person reading."
+  @spec keys_for(pid(), String.t()) :: :ok
+  def keys_for(state, subject), do: Agent.update(state, &Map.put(&1, :reader, subject))
+
   @doc "The row the fake plane holds for a session, or nil."
   @spec row(pid(), String.t()) :: map() | nil
   def row(state, session_id), do: Agent.get(state, & &1.sessions[session_id])
@@ -461,6 +469,95 @@ defmodule Troupe.Gateway.FakePlane do
     end
   end
 
+  # Invitations into a private session (#765), kept as the plane keeps them: whom, at which
+  # role, and where each generation of the session's key was put in their slot, a person's
+  # name at the key manager being their subject here. Taking one back marks the row
+  # `rekey_due` until `session.rekeyed` names the next generation with a key for everybody
+  # still invited. `session.keys` answers the slots of `keys_for/2`'s person, with no
+  # assertion: this plane signs none.
+  defp dispatch(state, "session.invite_slot", %{"session_id" => id, "subject" => subject}) do
+    case row(state, id) do
+      nil ->
+        {:error, "not_found"}
+
+      row ->
+        {:ok,
+         %{
+           "session_id" => id,
+           "subject" => subject,
+           "display_name" => subject,
+           "prefix" => "troupe/people/#{subject}/invited/#{id}/",
+           "key_version" => row["key_version"] || 1
+         }}
+    end
+  end
+
+  defp dispatch(state, "session.invite", %{"session_id" => id, "subject" => subject} = params) do
+    versions = for key <- params["keys"] || [], do: key["key_version"]
+
+    case row(state, id) do
+      nil ->
+        {:error, "not_found"}
+
+      row ->
+        if Enum.sort(versions) == Enum.to_list(1..(row["key_version"] || 1)) do
+          invite = %{"subject" => subject, "role" => params["role"], "keys" => params["keys"]}
+          put_invite(state, id, subject, invite)
+          {:ok, %{"session_id" => id, "invite" => Map.delete(invite, "keys"), "pushed" => false}}
+        else
+          {:rpc_error, -32_602, "invalid_params", %{"field" => "keys"}}
+        end
+    end
+  end
+
+  defp dispatch(state, "session.uninvite", %{"session_id" => id, "subject" => subject}) do
+    if invites(state, id)[subject] do
+      take_back(state, id, subject)
+
+      {:ok, %{"session_id" => id, "subject" => subject, "rekey_due" => true, "pushed" => false}}
+    else
+      {:error, "not_found"}
+    end
+  end
+
+  defp dispatch(state, "session.invites", %{"session_id" => id}) do
+    rows = for {_subject, invite} <- invites(state, id), do: Map.delete(invite, "keys")
+    {:ok, %{"session_id" => id, "invites" => rows}}
+  end
+
+  defp dispatch(
+         state,
+         "session.rekeyed",
+         %{"session_id" => id, "key_version" => version} = params
+       ) do
+    given = Map.new(params["keys"] || [], &{&1["subject"], &1["slot"]})
+    missing = invites(state, id) |> Map.keys() |> Enum.reject(&Map.has_key?(given, &1))
+
+    if missing == [] do
+      rekey(state, id, version, given)
+      {:ok, row(state, id)}
+    else
+      {:rpc_error, -32_602, "invalid_params", %{"field" => "keys", "missing" => missing}}
+    end
+  end
+
+  defp dispatch(state, "session.keys", %{"session_id" => id}) do
+    reader = Agent.get(state, &Map.get(&1, :reader))
+
+    case reader && invites(state, id)[reader] do
+      nil ->
+        {:error, "not_found"}
+
+      invite ->
+        {:ok,
+         %{
+           "session_id" => id,
+           "key_version" => (row(state, id) || %{})["key_version"] || 1,
+           "keys" => invite["keys"]
+         }}
+    end
+  end
+
   # An artifact published (#62): the plane's answer, as its id, the next version of one
   # named, and an address on an artifacts host; a page with no title is refused, as the
   # plane refuses it.
@@ -524,6 +621,50 @@ defmodule Troupe.Gateway.FakePlane do
   end
 
   defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
+
+  defp take_back(state, id, subject) do
+    Agent.update(state, fn s ->
+      s
+      |> Map.update(:invites, %{}, &Map.update(&1, id, %{}, fn i -> Map.delete(i, subject) end))
+      |> Map.update!(
+        :sessions,
+        &Map.update!(&1, id, fn row -> Map.put(row, "rekey_due", true) end)
+      )
+    end)
+  end
+
+  defp rekey(state, id, version, given) do
+    Agent.update(state, fn s ->
+      s
+      |> Map.update!(:sessions, &Map.update!(&1, id, fn row -> rekeyed_row(row, version) end))
+      |> Map.update(
+        :invites,
+        %{},
+        &Map.update(&1, id, %{}, fn i -> given_keys(i, version, given) end)
+      )
+    end)
+  end
+
+  defp rekeyed_row(row, version),
+    do: Map.merge(row, %{"key_version" => version, "rekey_due" => false})
+
+  defp given_keys(invites, version, given) do
+    Map.new(invites, fn {subject, invite} ->
+      key = %{"key_version" => version, "slot" => given[subject]}
+      {subject, Map.update!(invite, "keys", &(&1 ++ [key]))}
+    end)
+  end
+
+  defp invites(state, id),
+    do: Agent.get(state, &get_in(&1, [Access.key(:invites, %{}), Access.key(id, %{})]))
+
+  defp put_invite(state, id, subject, invite) do
+    Agent.update(state, fn s ->
+      Map.update(s, :invites, %{id => %{subject => invite}}, fn all ->
+        Map.update(all, id, %{subject => invite}, &Map.put(&1, subject, invite))
+      end)
+    end)
+  end
 
   defp own_put(nil, _params), do: {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory.put"}}
 

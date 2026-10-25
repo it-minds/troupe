@@ -11,7 +11,7 @@
 
 import { useMemo, useState } from "react";
 import type { JSX } from "react";
-import { claimable, claimRefusal, filterRows } from "@troupe/client";
+import { claimable, claimRefusal, filterRows, invitationWords } from "@troupe/client";
 import type { FleetRow, SessionKind } from "@troupe/client";
 import { Cost, RowStatus, statusOf, Sync, Unread, When, Where } from "./bits";
 import { presenceWords } from "./Remote";
@@ -115,6 +115,7 @@ export function Sessions({
             <option value="local">On this computer</option>
             <option value="private">Private</option>
             <option value="remote">On a laptop, through the plane</option>
+            <option value="invited">Shared with you</option>
           </select>
         )}
         <span className="spacer" />
@@ -202,6 +203,7 @@ function Rows({ rows, onOpen, onClaim }: { rows: FleetRow[]; onOpen: (id: string
                 {r.kind === "remote" && r.remote && r.remote.state !== "online" && (
                   <span className="micro muted">{presenceWords(r.remote)}</span>
                 )}
+                {r.invitation && <span className="micro muted">{invitationWords(r.invitation)}</span>}
                 <Sync state={r.sync} device={r.device} />
                 <RowStatus row={r} />
                 <When iso={r.lastActiveAt} />
