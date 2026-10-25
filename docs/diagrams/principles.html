@@ -41,11 +41,6 @@
   header.hero h1 { font-size: clamp(38px, 6vw, 64px); font-weight: 900; letter-spacing: -2px; color: var(--cream); margin: 10px 0 18px; line-height: 1.02; }
   header.hero p.lede { font-size: 21px; max-width: 760px; color: var(--muted); margin: 0 0 18px; }
   header.hero p.how { font-size: 16px; max-width: 760px; color: var(--dim); margin: 0 0 28px; }
-  .legend { display: flex; flex-wrap: wrap; gap: 18px 32px; font-family: "DM Mono", ui-monospace, monospace; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--dim); }
-  .legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 10px; vertical-align: -1px; }
-  .legend .cyan::before { background: var(--cyan); }
-  .legend .amber::before { background: var(--amber); }
-  .legend .pink::before { background: var(--pink); }
 
   nav.toc { padding: 28px 0; border-bottom: 1px solid var(--line); }
   nav.toc .chapters { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 22px 32px; }
@@ -87,11 +82,6 @@
     <h1>How Troupe is built and governed</h1>
     <p class="lede">Troupe runs coding agents for an organisation, and it runs them under rules. A versioned profile says what a workload may touch, how much it may spend and who has to approve what it does, so a team can put agents on a shared cluster while the people responsible for data, security and infrastructure keep their say.</p>
     <p class="how">We drew the core mechanics to show how the pieces fit. Each diagram maps one part of the system, and the text under it covers the trade-off: why we chose this, what it gets you, and which operational problems it was built to avoid. Five chapters; read down, or jump to one.</p>
-    <div class="legend">
-      <span class="cyan">the machine working</span>
-      <span class="amber">this machine, or yours</span>
-      <span class="pink">a person must decide</span>
-    </div>
   </div>
 </header>
 
