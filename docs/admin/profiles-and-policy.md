@@ -213,7 +213,7 @@ this resource and nothing else.
 | `allowedImageRepositories` | image repositories, compared without tag or digest, exactly or as a prefix `<repo>/` | none (every image refused) |
 | `maxReplicas`, `maxSessionsPerPod` | ceilings | 10, 16 |
 | `maxResources.cpu`, `.memory` | ceiling on **limits** | 4 CPU, 8Gi |
-| `allowedEgress` | hostnames pods may reach, including the LLM endpoint and MCP servers; `*.example.com` matches one label. A star anywhere else is refused, in the policy and in a profile's egress alike: a bare `*`, `**.example.com`, `*.*`, `a.*.example.com`, `*example.com`. The CRD refuses such an entry when the policy is written; a policy that holds one anyway (an older CRD) admits no profile, at admission or in the operator, until it is removed, and the refusal names it (Decision 883) | none |
+| `allowedEgress` | hostnames pods may reach, including the LLM endpoint and MCP servers; `*.example.com` matches one label. An entry's port is compared apart from its host: `api.example.com` or `*.example.com` covers a profile's `api.example.com:8443`, `api.example.com:8443` covers that port alone. A star anywhere else is refused, in the policy and in a profile's egress alike: a bare `*`, `**.example.com`, `*.*`, `a.*.example.com`, `*example.com`. The CRD refuses such an entry when the policy is written; a policy that holds one anyway (an older CRD) admits no profile, at admission or in the operator, until it is removed, and the refusal names it (Decision 883) | none |
 | `allowedStorageClasses` | classes a team volume or pod disk may name | none |
 | `orgVolume` | the org-wide read-only volume profiles may opt into | none |
 | `namespacePrefix`, `workersDomain` | worker namespaces and hostnames | `troupe-w-`, `workers.example.test` |
@@ -241,13 +241,15 @@ Cilium is there (the rules themselves: [configuration.md Part E](configuration.m
   (`bao.address`, `objectStore.endpoint`) when they are outside the cluster, on whatever
   port they name: they are the platform's, so they need no entry in `egress.fqdns`, which
   holds the profile's own destinations. A host given as an IP address is admitted as that
-  one address (`toCIDR`). An address inside the cluster, a Service's cluster IP say, is not
+  one address (`toCIDR`). A host is admitted on any port, except an `egress.fqdns` entry
+  written `host:port`, which is that host on that port alone (a `toPorts` beside it), as
+  without Cilium. An address inside the cluster, a Service's cluster IP say, is not
   admitted that way: name the Service (`*.svc`). A host nobody names does not connect.
 - **Without Cilium** the external ones are one wide rule, public addresses on 443 and 80,
   and the allowlist is a check at admission and reconcile, not on the wire. The
   installation's own OpenBao and object store outside the cluster, and the profile's own
-  endpoints (its LLM endpoint, its MCP servers, its bundle's included, and its
-  `egress.fqdns` entries; Decision 752) are admitted on the port they name: an IP address,
+  endpoints (its LLM endpoint, its MCP servers, its bundle's included, its MCP identities'
+  `tokenUrl`s, and its `egress.fqdns` entries; Decision 752) are admitted on the port they name: an IP address,
   private or public, as that one address, and a name on a port other than 443 and 80 as
   public addresses on that port, so a gateway on 8443 opens 8443 to every public host for
   that profile's workers. An `egress.fqdns` entry says its port as `host:port`; one without
@@ -271,8 +273,9 @@ that would give one to such a profile is refused the same way (Decision 749). Wh
 repository holds cannot be refused, so the operator reports it as `EndpointUnreachable`
 (on the console's **Workers** page), as it does for a profile saved before. Give the
 endpoint as a pod reaches it: by name, at another address, or as its Service
-(`<service>.<namespace>.svc`). A git host or an MCP identity's token endpoint at such an
-address gets no rule either, but is neither refused nor named.
+(`<service>.<namespace>.svc`). An MCP identity's token endpoint (`tokenUrl`) is refused and
+named as a server is. A git host at such an address gets no rule either, but is neither
+refused nor named.
 
 No name gets there either (Decision 856): with Cilium the `CiliumNetworkPolicy` denies
 link-local and the metadata addresses whatever a name resolves to, and without it the

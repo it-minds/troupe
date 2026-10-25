@@ -18,6 +18,7 @@ import {
   openApprovals,
   openQuestions,
   partsOf,
+  presentMembers,
   rootState,
   settleLoop,
 } from "../src/index.js";
@@ -860,5 +861,29 @@ describe("the files a session did not read (troupe Decision 826)", () => {
     const gone = foldAll([durable("files_skipped", { files: [] })]);
     const empty = gone.entries.at(-1);
     assert.equal(empty?.kind === "system" ? empty.text : "", "no agent or skill file is skipped now");
+  });
+});
+
+describe("who is here (#58)", () => {
+  const presence = (subject: string, state: string, via?: string) =>
+    ephemeral("presence", { subject, display_name: subject, state, ...(via ? { via } : {}) });
+
+  it("keeps a person attached twice under the same via as one entry while either is attached", () => {
+    const twice = foldAll([presence("bo", "joined", "plane"), presence("bo", "joined", "plane")]);
+    assert.deepEqual(presentMembers(twice).map((p) => p.subject), ["bo"]);
+
+    const once = fold(twice, presence("bo", "left", "plane"));
+    assert.deepEqual(presentMembers(once).map((p) => p.subject), ["bo"]);
+
+    const gone = fold(once, presence("bo", "left", "plane"));
+    assert.deepEqual(presentMembers(gone), []);
+  });
+
+  it("keeps the same person under another via apart, and a state change does not count as an attachment", () => {
+    const state = foldAll([presence("bo", "joined"), presence("bo", "joined", "plane"), presence("bo", "typing", "plane"), presence("bo", "left", "plane")]);
+    assert.deepEqual(
+      presentMembers(state).map((p) => [p.subject, p.via ?? "here"]),
+      [["bo", "here"]],
+    );
   });
 });

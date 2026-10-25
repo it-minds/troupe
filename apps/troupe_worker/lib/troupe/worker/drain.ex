@@ -52,22 +52,37 @@ defmodule Troupe.Worker.Drain do
 
   Returns once every session is dormant or has failed to become dormant, so a caller
   that then removes the pod knows it is safe to.
+
+  `progress:` is told how far it has got, as a map: `total` sessions, those `left` to put
+  to sleep, and the `session_id` in hand, once as the drain starts and again before each
+  session. The plane drains a pod with one that reports to it, and waits while it hears
+  them (`Troupe.Plane.Drain.pod/2`).
   """
   @spec run(keyword()) :: map()
   def run(opts \\ []) do
     timeout_ms = Keyword.get(opts, :timeout_ms, default_timeout_ms())
+    progress = Keyword.get(opts, :progress, fn _report -> :ok end)
 
     # Before anything else, and not undone: a pod that started draining and then
     # reported ready again would be sent a session it is about to abandon.
     :persistent_term.put(@flag, true)
 
     ids = Sessions.active_ids()
+    total = length(ids)
     started = System.monotonic_time(:millisecond)
 
-    Logger.info("troupe worker: draining #{length(ids)} session(s)")
+    Logger.info("troupe worker: draining #{total} session(s)")
+    progress.(%{"total" => total, "left" => total})
 
     {finished, cancelled} = settle(ids, started + timeout_ms, opts)
-    dormant = Enum.flat_map(ids, &to_dormant/1)
+
+    dormant =
+      ids
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {session_id, done} ->
+        progress.(%{"total" => total, "left" => total - done, "session_id" => session_id})
+        to_dormant(session_id)
+      end)
 
     %{
       "drained" => length(dormant),

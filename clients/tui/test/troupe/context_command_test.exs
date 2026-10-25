@@ -146,6 +146,35 @@ defmodule Troupe.ContextCommandTest do
                "the team design's memory, version 5 (team) 1,200 · AGENTS.md (root) 9"
   end
 
+  # Root issue #55's user level: the person's own memory from the plane, after the
+  # organisation's, named as theirs with its version.
+  test "the line names the person's own memory after the organisation's" do
+    memory = fn scope, path, label, version ->
+      %{
+        "scope" => scope,
+        "path" => path,
+        "label" => label,
+        "version" => version,
+        "chars" => 10,
+        "status" => "whole",
+        "trimmed" => 0
+      }
+    end
+
+    answer = %{
+      "budget" => 16_000,
+      "used" => 0,
+      "searched" => ["/home/me/repo"],
+      "files" => [
+        memory.("organisation", "memory:organisation", "the organisation's memory", 3),
+        memory.("person", "memory:user", "your own memory", 2)
+      ]
+    }
+
+    assert Instructions.line(answer, "/home/me/repo") =~
+             "the organisation's memory, version 3 (organisation) 10 · your own memory, version 2 (person) 10"
+  end
+
   # Decision 148: a file left out says why in words, as `context.get`'s `reason` puts it,
   # and so does an import that was not followed; no bare "0".
   test "a file left out, and an import not followed, say why" do

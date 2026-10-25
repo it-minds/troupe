@@ -1,8 +1,8 @@
 defmodule Troupe.Protocol.Memory do
   @moduledoc """
-  The organisation's memory documents (#55): what the organisation, a team and a worker
-  profile wrote for every agent in their scope, kept on the plane and edited in the
-  console.
+  The memory documents on the plane (#55): what the organisation, a team and a worker
+  profile wrote for every agent in their scope, edited in the console, and a person's own,
+  which follows them to every session they run and is the one level an agent may add to.
 
   Here rather than in the plane or the core because both read a document the same way:
   the plane, which refuses one past the limit when an administrator saves it, and the
@@ -11,15 +11,20 @@ defmodule Troupe.Protocol.Memory do
 
   A document as it travels, in `me.memory` and with a pod's activation:
 
-      %{"scope" => "organisation" | "team" | "profile", "name" => the team's or the
-        profile's name (null for the organisation's), "version" => 1.., "hash" =>
-        "sha256:...", "updated_at" => ISO 8601, "text" => the document}
+      %{"scope" => "organisation" | "team" | "profile" | "user", "name" => the team's or
+        the profile's name (null for the organisation's and the person's), "version" =>
+        1.., "hash" => "sha256:...", "updated_at" => ISO 8601, "text" => the document}
 
-  A session reads them in `scopes/0`'s order, the organisation's first, and then the
-  person's own instructions and the repository's files: the narrower comes later and wins.
+  A session reads them in `scopes/0`'s order, the organisation's first and the person's
+  own last, and then the person's own instruction file and the repository's files: the
+  narrower comes later and wins.
   """
 
-  @scopes ~w(organisation team profile)
+  @scopes ~w(organisation team profile user)
+
+  # The levels an organisation writes, read-only to every agent; the person's own is not
+  # among them.
+  @organisation_scopes ~w(organisation team profile)
 
   # Each document's limit, in bytes of its UTF-8 text. Eight kibibytes is about two
   # thousand tokens: three documents in every prompt cost no more than the repository's
@@ -31,6 +36,10 @@ defmodule Troupe.Protocol.Memory do
   @doc "The scopes a document has, in the order a session reads them."
   @spec scopes() :: [String.t()]
   def scopes, do: @scopes
+
+  @doc "The scopes an organisation's administrators write and no agent changes."
+  @spec organisation_scopes() :: [String.t()]
+  def organisation_scopes, do: @organisation_scopes
 
   @doc "The most bytes one document may hold."
   @spec max_bytes() :: pos_integer()

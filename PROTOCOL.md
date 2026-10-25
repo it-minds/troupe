@@ -296,7 +296,7 @@ Durable:
 | `todo_updated` | `items`, `source` |
 | `profile_switched` | `from`, `to`; and `layer` (`builtin`, `bundle`, `user` or `project`, where the new agent was read from), `tools_added` and `tools_removed` (the tool names the new agent holds that the old did not, and the other way round) and the switch's `command_id`, under the actor who switched it (Decision 841) |
 | `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the organisation's memory documents (`organisation`, `team`, `profile`, each with its `version`), the instruction files (`AGENTS.md`, `.agents/AGENTS.md` and `.troupe/rules`, and the other tools' files listed as not read) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `reason`, `trimmed`, `skipped`, `imported_by`, `unfollowed`, `rule`, `applies` and `hash`. Read as the turn began and held for the rest of it. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
-| `memory_changed` | `changes`, `message` — the organisation's memory documents the agent reads changed while the session ran (#55, Decision 929): a save on the plane reached it, on a pod through `session.memory` and on a laptop through its daemon's copy, and this turn read the new ones. Written by each agent as the turn begins, before its `instructions_loaded`, and never during a turn. Each change is `{scope, name, from, to}`, the versions, `null` for a document new or taken away; `message` is the sentence a client shows as it is (`The organisation's memory changed: the team design's memory is now version 6 (it was 5). Read from this turn on.`) |
+| `memory_changed` | `changes`, `message` — the organisation's memory documents the agent reads changed while the session ran (#55, Decision 929): a save on the plane reached it, on a pod through `session.memory` and on a laptop through its daemon's copy, and this turn read the new ones. Written by each agent as the turn begins, before its `instructions_loaded`, and never during a turn. Each change is `{scope, name, from, to}`, the versions, `null` for a document new or taken away; `message` is the sentence a client shows as it is (`The organisation's memory changed: the team design's memory is now version 6 (it was 5). Read from this turn on.`, or `Your memory changed: …` where only the person's own did, Decision 943) |
 | `goal_set` | `text`, `command_id` — the session's goal, written by the root agent under the actor who set it (`session.goal.set`) |
 | `goal_cleared` | `command_id` |
 | `loop_started` | `loop_id` (`loop-<n>`), `max_iterations`, `max_failures`, `goal`, `command_id` — a loop towards the goal, written by the session under the actor who started it (`session.loop.start`) |
@@ -717,9 +717,13 @@ that cannot yet — no token, or no plane answering — makes the session anyway
 `remote` is `null`, or how the session stands offered to the plane for steering from
 another device ([Steering from another device](#steering-from-another-device)):
 `{"owner", "shares": [{"subject", "display_name", "email", "role"}], "offered_at", "state",
-"since", "steering": [{"subject", "display_name", "role"}]}`, where `state` is `online`,
-`connecting` or `offline` (since `since`), and `steering` is who is attached through the
-plane now.
+"since", "steering": [{"subject", "display_name", "role"}], "lasts", "restored"}`, where
+`state` is `online`, `connecting` or `offline` (since `since`), and `steering` is who is
+attached through the plane now. `lasts` says whether the offer comes back after this
+machine restarts: `across_restarts` where the daemon starts at login (`troupe-daemon login
+on`), which reads its own sign-in back and offers it again, and `until_restart` where
+nothing starts the daemon then. `restored` is true for an offer the daemon read back from
+its record as it started, until it is offered again.
 
 `kind` is where the session is kept: `local`, `private` (sealed under its person's key,
 see `private` above), or a pod's `team`. A private session's `sync` says how its sealing
@@ -1528,6 +1532,11 @@ agent. `status` is `absent` (no facts), `stale` (never built, older than
 went since it was last checked, Decision 838), `fresh` or `disabled` (`memory: false` in the workspace
 config). A `librarian`'s run that ends as it meant to builds it, whether or not it
 rewrote any of it.
+`remember` with `level: "me"` writes the person's own memory on the plane instead (#55,
+Decision 943): one entry, `claim` alone, added under the day's heading through the daemon's
+`me.memory.put` or, on a pod, `session.memory.put`; refused with a sentence offering the
+repository where the session's person is signed in to no plane. It has no level for the
+organisation's, a team's or a profile's memory, which no tool writes.
 One brief per repository: a worktree's is the main checkout's, and so is that of a folder
 the repository tracks or would add. A folder the repository ignores keeps a brief of its
 own, as a directory in no repository does (Decision 881). `repository` says which:
@@ -1959,6 +1968,20 @@ and `version`, and `changed`, each document whose version moved, `{scope, name, 
 to}`, `null` for none; empty where nothing did. `identity.sign_out` for the plane the copy
 came from, and `identity.unlink`, drop the copy, and the sessions here read none from
 their next turn; the key pinned for the plane stays.
+
+#### `me.memory`, `me.memory.put`
+
+The person's own memory on the plane (#55's user level, Decision 943), read and saved
+through the daemon's own sign-in, both `control`: `me.memory` → `{version, text, hash,
+bytes, limit, changed_by, changed_at, plane_url}`, the plane's `user` as it answers now,
+the copy here kept from the same answer; `me.memory.put {command_id, text, version}` or
+`{command_id, append}` → the plane's answer to its own `me.memory.put` with `plane_url`, after
+which the daemon asks `me.memory` again, so the sessions running here read the saved version
+from their next turn (`memory_changed`) rather than at the next poll. `conflict` where the
+plane refused a stale `version`; `unavailable`, with a sentence, where the daemon holds no
+plane token. `troupe memory` and the desktop app's Instructions pane are these two. An
+agent's `remember` with `level: "me"` reaches the same save from inside the daemon, as an
+`append`.
 
 #### `setup.get`, `setup.answer`
 
@@ -2462,7 +2485,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | scope | grants |
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
-| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
+| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`, `me.memory`, `me.memory.put`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `config.memory`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop`, `remote.offer`, `remote.withdraw` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
@@ -2951,7 +2974,9 @@ than an admin uses them:
 | `me.client_versions` | observe | anybody | `{}` → `{tui, daemon, desktop}`, each `{recommended, minimum, blocked}`: what `troupe update` installs by, asked on its own because the client that most needs it is the one `initialize` refuses; with `release: {url}`, where releases are (null for GitHub's), and `signed`, the same as `{versions, release}` signed by the plane's key ([The plane's signing key](#the-planes-signing-key)) |
 | `me.client_defaults` | observe | anybody | `{}` → `{configured, provider, base_url, auth, models: {default, cheap, expensive}, defaults, enforced}` — what an administrator says people's own machines should talk to (the *Client defaults* settings), for a client to pre-fill its model settings with. **Never a key**: anybody signed in may ask, so each person supplies their own. `configured` is false, and the rest null, until a provider is set. `defaults` is the same in a config file's shape, only what is set, and `enforced` the `client_enforced` setting, `{}` when unset, per-tool `permissions` among what it may hold (Decision 907): the organisation's document a machine reads below its person's file and holds every layer to (Decision 869, `config.organisation`). A plane from before them answers without the two, and a client reads its old fields as the defaults. With `signed`: the whole answer signed by the plane's key ([The plane's signing key](#the-planes-signing-key)) |
 | `me.clients` | observe | anybody, for themselves | `{}` → `{clients: [{component, version, platform, since, seen_at, standing, recommended}]}`: which version of each of the caller's own clients (`tui`, `daemon`, `desktop`) the plane last saw at `initialize`, and how it stands against the policy now (`current`, `behind` the `recommended` version, or `refused` at its next `initialize`), as `admin.clients.get` says it of the people an administrator sees ([Client versions](#client-versions)). Nobody else's. A plane from before it has no `me.clients` |
-| `me.memory` | observe | anybody | `{}` → `{documents: [{scope, name, version, hash, updated_at, text}]}`: the organisation's memory documents a person's own machine reads into every session on it (#55, Decision 922), the organisation's and then each of the caller's teams', by name; never another team's, and never a profile's, since no laptop session runs on one. Instructions from the organisation, read-only to agents, each at most 8192 bytes. With `signed`, as `memory` ([The plane's signing key](#the-planes-signing-key)); the daemon keeps the answer as `<state>/memory.json` after every link that brings a token and every five minutes while it holds one, gives a changed one to the sessions running there, and drops it when the person signs out (`config.memory`). A plane from before it has no `me.memory`, and a machine keeps the copy it had |
+| `me.memory` | observe | anybody | `{}` → `{documents: [{scope, name, version, hash, updated_at, text}], user}`: the memory documents a person's own machine reads into every session on it (#55, Decision 922), the organisation's and then each of the caller's teams', by name, then the caller's own (`scope: "user"`, `name: null`, Decision 943); never another team's or another person's, and never a profile's, since no laptop session runs on one. The organisation's are instructions from the organisation, read-only to agents; each document holds at most 8192 bytes. `user` is the caller's own as they edit it, `{version, text, hash, bytes, limit, changed_by, changed_at}`, `version` 0 where they have none, which is what a save names. With `signed`, as `memory` ([The plane's signing key](#the-planes-signing-key)); the daemon keeps the answer as `<state>/memory.json` after every link that brings a token and every five minutes while it holds one, gives a changed one to the sessions running there, and drops it when the person signs out (`config.memory`). A plane from before it has no `me.memory`, and a machine keeps the copy it had |
+| `me.memory.preview` | observe | anybody, for themselves | `{text}` → `{version, bytes, limit, unchanged, diff, effect}`: what saving `text` as the caller's own memory would do, written nowhere, the lines it changes against the version in force (`op` `same`, `del` or `add`) and its size against the limit; refused as the save would be. What the console's Mine previews with |
+| `me.memory.put` | control | anybody, for themselves | `{text, version}` → `{changed, entry: null, user}`: the caller's own memory as they wrote it, the next version over `version`, the one edited (0 for none); `conflict`, naming the version in force, where it was saved elsewhere since; `invalid_params` past 8192 bytes. Or `{append}` → `{changed, entry, user}`: one entry, folded onto one line and at most 1024 bytes, added under a heading of the day (`## 2026-10-25`) below what is there and never in place of it, which is what a daemon sends for an agent's `remember` with `level: "me"`; refused past the limit, naming `troupe memory --edit`. Every version is kept with who saved it, audited as `memory.put` on `user/<subject>` with the version, size and hash and never the text; the caller's running sessions on pods are told (`session.memory`) and read it from their next turn. No administrator's method reads, lists or changes anybody's (`admin.memory.*` refuses the scope). A service principal has none (`forbidden`) |
 | `me.connections.list` | observe | anybody | the MCP servers on the caller's profiles that act as *them*, each with its `slot` and whether they have `connected` it. Whether, never what: the plane can see that a slot has a version and cannot read one |
 | `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own name at the key manager (`name`, the segment of `path` under `troupe/people/`, not always their subject: Decision 755). The client exchanges it with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
 | `session.register` | control | anybody, for their own private sessions | `{session_id, device, epoch, head_hash, last_seq, object_bytes, workspace_bytes, title, claim}` → the session row. Idempotent on the id: the first call mints epoch 1, a later one is a seal report. A seal carries the `epoch` the device holds and is refused with `stale_version` if another device has moved past it; `last_seq` never goes backwards. `claim: true` takes the session over on this device, bumping the epoch conditionally — two devices sending the same `epoch` produce one winner, and the loser learns it lost on its next seal rather than by being told, and stops sealing (issue #433) |
@@ -2964,6 +2989,15 @@ than an admin uses them:
 | `remote.list` | observe | anybody | `{}` → `{sessions: [{id, kind: "remote", owner, owner_name, workspace, state, offline_since, offered_at, your_role, shares}]}`: laptop sessions offered for steering from another device that are the caller's own or shared with them ([Relayed connections](#relayed-connections)). `state` is `online` while the laptop's connection is up, else `offline` since `offline_since`; `your_role` is `owner`, `control` or `observe`; `shares` only for the owner. `workspace` is the last name of its folder, never a path; nothing a session says is kept |
 | `remote.open` | observe | the owner, or a person the session is shared with | `{session_id}` → `{session_id, kind: "remote", endpoint, role, your_role, token, expires_at}`: where to attach, and a token for that session alone at the caller's role, audience `troupe-relay`, at most fifteen minutes. Asked again for a fresh one. `not_found` for anybody else; `unavailable` with `offline_since` for a laptop that is away; `forbidden` with `data.team` where a team of the owner's does not allow offering |
 | `remote.grant` | control | anybody | `{device}` → `{grant, device}`: a laptop daemon's own sign-in for steering, asked at its first offer (Decision 928). One per person and device, a new one replacing the last; the plane keeps its hash, and records `remote.grant` in the audit with the device. `forbidden` with `data.team` where a team of the caller's does not allow offering (`teams.remote_offering_allowed`) |
+
+**A pod's agent adds to its person's own memory** with `session.memory.put {session_id,
+scope, append, epoch?}` over the pod's control connection (Decision 943), the one write of
+memory an agent has. The plane takes whose memory it is from the session's row, as it takes
+`kms.assertion`'s subject, so a pod writes only for the owner of a session it holds
+(`not_found` otherwise, `conflict` at a stale `epoch`); `scope` is `user` or absent, and any
+other level is refused as `forbidden`, the organisation's, a team's and a profile's being
+read-only to agents. The entry is added as `me.memory.put`'s `append` adds it, recorded in
+the audit with the session it came from; the answer is `{entry, changed, version}`.
 
 A daemon exchanges its grant at `POST /auth/relay {grant}` → `{token, expires_at, subject,
 device}`: a fifteen-minute token whose audience is `troupe-relay-laptop` and which names the

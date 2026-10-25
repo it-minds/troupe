@@ -172,7 +172,9 @@ defmodule Troupe.Protocol.Client do
          state = %__MODULE__{transport: transport, owner: owner},
          {:ok, state} <- handshake(state, opts, timeout) do
       Process.monitor(owner)
-      {:ok, state}
+      # What came in the same read as the answer is delivered now: the transport is
+      # active, but nothing would read the buffer again until the next message arrives.
+      {:ok, state, {:continue, :consume}}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -338,6 +340,9 @@ defmodule Troupe.Protocol.Client do
       {:error, _reason} -> {:noreply, state}
     end
   end
+
+  @impl GenServer
+  def handle_continue(:consume, state), do: {:noreply, consume(state)}
 
   # The owner going away is the only reason to close: a client with nobody listening
   # is a socket held open for nothing.

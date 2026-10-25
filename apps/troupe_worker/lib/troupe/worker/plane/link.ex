@@ -646,7 +646,7 @@ defmodule Troupe.Worker.Plane.Link do
     # has heartbeats to send and other pushes to receive in the meantime.
     link = self()
 
-    spawn(fn -> send(link, {:respond, id, Commands.handle(method, params)}) end)
+    spawn(fn -> send(link, {:respond, id, Commands.handle(method, params, link: link)}) end)
 
     state
   end

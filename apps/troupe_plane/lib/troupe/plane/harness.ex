@@ -110,6 +110,9 @@ defmodule Troupe.Plane.Harness do
     "me.client_defaults" => :observe,
     "me.client_versions" => :observe,
     "me.memory" => :observe,
+    # The person's own memory document, theirs alone to change.
+    "me.memory.preview" => :observe,
+    "me.memory.put" => :control,
     "me.clients" => :observe,
     "me.connections.list" => :observe,
     "me.connections.grant" => :control,
@@ -329,10 +332,45 @@ defmodule Troupe.Plane.Harness do
 
   # The memory documents a person's own machine reads into every session on it: the
   # organisation's and each of their teams' (`Memory.for_person/1`), none of another
-  # team's. Signed as the organisation's document is, since a machine takes them as
-  # instructions from the organisation and keeps a copy.
+  # team's, and their own last. Signed as the organisation's document is, since a machine
+  # takes them as instructions and keeps a copy. Beside them, `user`: their own as they edit
+  # it, with the version a save names, which is there for a document never saved or cleared.
   defp handle("me.memory", _params, %{user: user}) do
-    {:ok, Signing.signed("memory", %{"documents" => Memory.for_person(user)})}
+    {:ok,
+     Signing.signed("memory", %{"documents" => Memory.for_person(user), "user" => Memory.own(user)})}
+  end
+
+  # What saving a text as the person's own memory would do, written nowhere: the lines it
+  # changes, its size against the limit. Refused as the save would be.
+  defp handle("me.memory.preview", params, %{user: user}) do
+    with :ok <- own_memory(user),
+         {:ok, text} <- memory_text(params) do
+      own = Memory.own(user)
+
+      {:ok,
+       %{
+         "version" => own["version"],
+         "bytes" => byte_size(text),
+         "limit" => own["limit"],
+         "unchanged" => own["text"] == text,
+         "diff" => Memory.diff(own["text"], text),
+         "effect" =>
+           "Every session you run reads it from its next turn: on the plane's pods at once, and " <>
+             "on your machines within five minutes, after your organisation's memory and before " <>
+             "the repository's files. Nobody else reads it."
+       }}
+    end
+  end
+
+  # The person's own memory, saved: `text` over `version` (the version edited, 0 for none),
+  # the whole document as they wrote it; or `append`, one entry under a heading of the day,
+  # which is what a daemon sends for `remember` to the person's memory. Never anybody
+  # else's: the caller's own, by their token.
+  defp handle("me.memory.put", params, %{user: user}) do
+    with :ok <- own_memory(user),
+         {:ok, saved} <- save_own(user, params) do
+      {:ok, own_saved(user, saved)}
+    end
   end
 
   # Which version each of the caller's own clients last ran, and how that stands against
@@ -1205,6 +1243,74 @@ defmodule Troupe.Plane.Harness do
 
   defp invalid(reason, extra \\ []) do
     {:error, Error.new(:invalid_params, Map.merge(%{reason: reason}, Map.new(extra)))}
+  end
+
+  # A person's own memory is a person's: a service principal has no row to keep it under.
+  defp own_memory(%User{id: id}) when is_binary(id), do: :ok
+
+  defp own_memory(_principal),
+    do: {:error, Error.new(:forbidden, %{reason: "a service principal has no memory of its own"})}
+
+  defp memory_text(params) do
+    with {:ok, text} <- memory_string(params, "text"), do: {:ok, Troupe.Protocol.Memory.normalise(text)}
+  end
+
+  defp memory_string(params, key) do
+    case Map.get(params, key) do
+      text when is_binary(text) ->
+        case Troupe.Protocol.Memory.check(text) do
+          :ok -> {:ok, text}
+          {:error, reason} -> invalid(reason, field: key)
+        end
+
+      _ ->
+        {:error, Error.new(:invalid_params, %{missing: key})}
+    end
+  end
+
+  defp save_own(user, %{"append" => entry}) do
+    own_result(Memory.append_own(user, entry))
+  end
+
+  defp save_own(user, params) do
+    with {:ok, text} <- memory_string(params, "text") do
+      case params["version"] do
+        version when is_integer(version) and version >= 0 ->
+          own_result(Memory.save_own(user, text, version))
+
+        _ ->
+          invalid("version is the version the text was edited from, 0 for none", field: "version")
+      end
+    end
+  end
+
+  defp own_result({:ok, saved}), do: {:ok, saved}
+
+  defp own_result({:error, {:conflict, current}}) do
+    {:error,
+     Error.new(:conflict, %{
+       reason: "your memory was saved somewhere else since; version #{current} is in force now",
+       version: current
+     })}
+  end
+
+  defp own_result({:error, {:full, bytes}}) do
+    invalid(
+      "your memory is full: with this entry it would be #{bytes} bytes, past the " <>
+        "#{Troupe.Protocol.Memory.max_bytes()} a document holds; make room with `troupe memory --edit`",
+      full: true
+    )
+  end
+
+  defp own_result({:error, :no_person}), do: own_memory(nil)
+  defp own_result({:error, reason}) when is_binary(reason), do: invalid(reason)
+
+  defp own_saved(user, saved) do
+    %{
+      "changed" => saved.changes != %{},
+      "entry" => Map.get(saved, :entry),
+      "user" => Memory.own(user)
+    }
   end
 
   defp required_string(params, key) do
@@ -2647,7 +2753,7 @@ defmodule Troupe.Plane.Harness do
   # switches are, so a save reaches a session the next time it wakes and restarts no pod; an
   # empty list takes away what was there.
   defp memory_params(session, team),
-    do: %{"memory" => Memory.for_session(team, session.profile)}
+    do: %{"memory" => Memory.for_session(team, session.profile, Identity.get_user(session.owner_subject))}
 
   # Whether the profile lets a repository's agents and skills replace its bundle's and the
   # built-ins of the same name (Decision 826): `spec.repositoryOverridesBundle`, on only

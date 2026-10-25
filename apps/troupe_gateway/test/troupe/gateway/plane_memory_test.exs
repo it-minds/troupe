@@ -262,6 +262,94 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
              Enum.filter(answer["files"], &(&1["scope"] in ["organisation", "team", "profile"]))
   end
 
+  # #55's user level: the person's own document, saved through the daemon's `me.memory.put`
+  # as them, and an agent's `remember` with `level: "me"` adding to it; both reach the
+  # sessions running here at their next turn, since the daemon asks `me.memory` again at once.
+  describe "the person's own memory" do
+    test "me.memory and me.memory.put read and save it as the person, and a running session reads it next turn",
+         ctx do
+      _fingerprint = FakePlane.sign(ctx.plane.state)
+      FakePlane.memory_with(ctx.plane.state, @documents)
+      FakePlane.keep_own(ctx.plane.state)
+      assert {:ok, %{"linked" => true}} = link(ctx)
+      assert eventually(fn -> match?({:ok, _}, PlaneMemory.read_cache()) end)
+
+      assert {:ok, %{"version" => 0, "text" => "", "plane_url" => url}} = Client.call(ctx.client, "me.memory", %{})
+      assert url == ctx.plane.url
+
+      %{session: session, fake: fake} = session(ctx, [{:text, "one"}, {:text, "two"}])
+      turn(session.id, "hello")
+
+      assert {:ok, %{"user" => %{"version" => 1}}} =
+               Client.call(ctx.client, "me.memory.put", %{
+                 "command_id" => Client.command_id(),
+                 "text" => "I write British English.",
+                 "version" => 0
+               })
+
+      assert {:ok, %{"documents" => documents}} = PlaneMemory.read_cache()
+      assert List.last(documents)["scope"] == "user"
+
+      turn(session.id, "again")
+      [_first, second] = Fake.requests(fake)
+      assert second.system =~ "# The person's own memory"
+      assert second.system =~ "I write British English."
+
+      # A save from a machine that had not seen version 1 is told so.
+      assert {:error, %{message: "conflict", data: %{"version" => 1}}} =
+               Client.call(ctx.client, "me.memory.put", %{"command_id" => Client.command_id(), "text" => "x", "version" => 0})
+    end
+
+    test "remember with level me lands in the person's document and a second session reads it at its next turn",
+         ctx do
+      _fingerprint = FakePlane.sign(ctx.plane.state)
+      FakePlane.memory_with(ctx.plane.state, @documents)
+      FakePlane.keep_own(ctx.plane.state)
+      assert {:ok, %{"linked" => true}} = link(ctx)
+      assert eventually(fn -> match?({:ok, _}, PlaneMemory.read_cache()) end)
+
+      %{session: other, fake: other_fake} = session(ctx, [{:text, "one"}, {:text, "two"}])
+      turn(other.id, "hello")
+
+      %{session: writer} =
+        session(ctx, [
+          {:tools, [{"remember", %{"level" => "me", "claim" => "Prefers small pull requests."}}]},
+          {:text, "Noted."}
+        ])
+
+      turn(writer.id, "remember that I like small pull requests")
+
+      assert FakePlane.own(ctx.plane.state)["text"] =~ ~r/## \d{4}-\d{2}-\d{2}\n\n- Prefers small pull requests\./
+
+      assert Enum.any?(Troupe.events(writer.id), fn event ->
+               event.type == "tool_call_completed" and inspect(event.data) =~ "person's own memory on the plane, version 1"
+             end)
+
+      turn(other.id, "again")
+      [_first, second] = Fake.requests(other_fake)
+      assert second.system =~ "- Prefers small pull requests."
+
+      assert [%{data: %{"changes" => [%{"scope" => "user", "from" => nil, "to" => 1}]}}] =
+               other.id |> Troupe.events() |> Enum.filter(&(&1.type == "memory_changed"))
+    end
+
+    test "signed out, the daemon says so and remember offers the repository", ctx do
+      assert {:error, %{message: "unavailable", data: %{"reason" => reason}}} =
+               Client.call(ctx.client, "me.memory", %{})
+
+      assert reason =~ "not signed in to a Troupe plane"
+
+      %{session: writer} =
+        session(ctx, [{:tools, [{"remember", %{"level" => "me", "claim" => "Likes tabs."}}]}, {:text, "ok"}])
+
+      turn(writer.id, "remember that I like tabs")
+
+      assert Enum.any?(Troupe.events(writer.id), fn event ->
+               event.type == "tool_call_completed" and inspect(event.data) =~ "level repository"
+             end)
+    end
+  end
+
   defp session(ctx, steps, overrides \\ []) do
     fake =
       start_supervised!(

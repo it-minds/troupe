@@ -11,11 +11,13 @@ defmodule Troupe.Plane.ControlTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.{
+    Audit,
     Bundles,
     Drain,
     FakePod,
     Fleet,
     Identity,
+    Memory,
     Placement,
     SCIM,
     Sessions,
@@ -260,6 +262,71 @@ defmodule Troupe.Plane.ControlTest do
       assert changeset.errors[:owner_subject]
     end
 
+  end
+
+  # Issue #55's user level: an agent of a pod's session adds to its owner's own memory, the
+  # one level an agent may write, and to no other level and nobody else's.
+  describe "session.memory.put" do
+    test "adds one entry to the session owner's own memory", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(worker, [])
+
+      [pod] = Fleet.list_workers("dev")
+      ada = person("ada@example.test", [])
+      {:ok, _} = Memory.save_own(ada, "Call me Ada.", 0)
+      {:ok, _} = Sessions.create(%{id: "s-mem", owner_subject: ada.subject, profile: "dev"})
+      {:ok, _} = Sessions.place("s-mem", pod)
+
+      assert {:ok, %{"entry" => "Prefers small pull requests.", "version" => 2}} =
+               call(worker, "session.memory.put", %{
+                 "session_id" => "s-mem",
+                 "scope" => "user",
+                 "append" => "Prefers small pull requests."
+               })
+
+      text = Memory.current(ada).text
+      assert text =~ ~r/\ACall me Ada\.\n\n## \d{4}-\d{2}-\d{2}\n\n- Prefers small pull requests\.\z/
+
+      # The audit names the session the entry came from, and never the text.
+      [row | _] = Enum.filter(Audit.list(), &(&1.action == "memory.put"))
+      assert row.detail["session"] == "s-mem"
+      refute inspect(row) =~ "pull requests"
+    end
+
+    test "refuses every other level, and a session this pod does not hold", %{port: port} do
+      mine = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(mine, [])
+      theirs = enrolled(port, "dev-token", "troupe-w-dev-1")
+      answer_index(theirs, [])
+
+      [here, other] = Enum.sort_by(Fleet.list_workers("dev"), & &1.pod_name)
+      ada = person("ada@example.test", [])
+      bo = person("bo@example.test", [])
+      {:ok, _} = Sessions.create(%{id: "s-ada-m", owner_subject: ada.subject, profile: "dev"})
+      {:ok, _} = Sessions.place("s-ada-m", here)
+      {:ok, _} = Sessions.create(%{id: "s-bo-m", owner_subject: bo.subject, profile: "dev"})
+      {:ok, _} = Sessions.place("s-bo-m", other)
+
+      for scope <- ["organisation", "team", "profile"] do
+        assert {:error, error} =
+                 call(mine, "session.memory.put", %{
+                   "session_id" => "s-ada-m",
+                   "scope" => scope,
+                   "append" => "Everyone must."
+                 })
+
+        assert error["message"] == "forbidden"
+        assert error["data"]["reason"] =~ "read-only to agents"
+      end
+
+      assert {:error, %{"message" => "not_found"}} =
+               call(mine, "session.memory.put", %{"session_id" => "s-bo-m", "append" => "Not his."})
+
+      assert {:error, %{"message" => "conflict"}} =
+               call(mine, "session.memory.put", %{"session_id" => "s-ada-m", "epoch" => 7, "append" => "Late."})
+
+      assert Repo.aggregate(Memory.Document, :count) == 0
+    end
   end
 
   describe "a pod that restarted" do

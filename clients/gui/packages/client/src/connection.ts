@@ -246,10 +246,27 @@ export class TroupeConnection {
     const initText = JSON.stringify(init);
     hooks.onFrame?.("out", initText);
 
+    // What arrives after the answer and before the connection listens is kept, and handed
+    // to it in order. A WebSocket may deliver every frame of one read at once, as Node's
+    // `ws` does, and a server may send something right behind the answer (a plane's watch
+    // pushes `remote.changed`): between this listener resolving and the connection's own
+    // being attached, a frame would otherwise reach nobody.
+    const early: string[] = [];
+    let endedEarly: string | null = null;
+    let answered = false;
+    const onEarlyClose = (ev: CloseEvent) => {
+      if (answered) endedEarly = `${ev.code} ${ev.reason || "closed"}`;
+    };
+    ws.addEventListener("close", onEarlyClose);
+    let onMessage: ((ev: MessageEvent) => void) | null = null;
     const hello = await new Promise<InitializeResult>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("initialize timed out")), timeoutMs);
-      const onMessage = (ev: MessageEvent) => {
+      onMessage = (ev: MessageEvent) => {
         const text = String(ev.data);
+        if (answered) {
+          early.push(text);
+          return;
+        }
         hooks.onFrame?.("in", text);
         let msg: JsonRpcResponse;
         try {
@@ -259,7 +276,7 @@ export class TroupeConnection {
         }
         if (msg.id !== 1) return;
         clearTimeout(timer);
-        ws.removeEventListener("message", onMessage);
+        answered = true;
         if (msg.error) reject(new TroupeRpcError("initialize", msg.error));
         else resolve(msg.result as InitializeResult);
       };
@@ -273,10 +290,15 @@ export class TroupeConnection {
         { once: true },
       );
       ws.send(initText);
+    }).finally(() => {
+      if (onMessage) ws.removeEventListener("message", onMessage);
     });
 
     const conn = new TroupeConnection(ws, opts.url, hello, hooks);
     conn.attach();
+    ws.removeEventListener("close", onEarlyClose);
+    for (const text of early) conn.onMessage(text);
+    if (endedEarly !== null) conn.onClose(endedEarly);
     return conn;
   }
 

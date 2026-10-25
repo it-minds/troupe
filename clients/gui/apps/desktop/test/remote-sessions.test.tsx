@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
-import { webTokenStore } from "@troupe/client";
+import { RESTART_SENTENCE, webTokenStore } from "@troupe/client";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
@@ -76,10 +76,12 @@ describe("a laptop's session, from another computer", () => {
     type(again, "approve: rm -rf build");
     (await waitFor(() => button("Send"), "the send button")).click();
     const panel = await waitFor(() => document.querySelector<HTMLElement>("section.approval:not(.answered)"), "the approval");
-    await waitFor(() => button("Allow", panel), "the allow button");
+    const allow = await waitFor(() => button("Allow", panel), "the allow button");
     // at once: drawn with its buttons, the scoped one is not among them
     expect(panel.querySelector("button.scoped")).toBeNull();
-    button("Allow", panel)!.click();
+    // As the console and the terminal say it: once.
+    expect(allow.textContent).toBe("Allow once");
+    allow.click();
     const decided = await waitFor(() => harness.worker.calls.find((c) => c.method === "approval.respond"), "the answer at the laptop");
     expect(decided.params["decision"]).toBe("allow");
   });
@@ -96,13 +98,17 @@ describe("a laptop's session, from another computer", () => {
 });
 
 /** How long news may take to show: a push's, nowhere near the fleet's poll. */
-const PUSHED_MS = 1_000;
+// Well under the 4 s a poll would take, and wide enough for a loaded runner: the proof that
+// a change was pushed is that `remote.list` was not asked again, not the clock.
+const PUSHED_MS = 3_000;
 
 describe("the list follows the plane as it changes", () => {
   it("an offer made on a laptop shows within a second, from the plane's push and not a poll, and its withdrawal too", async () => {
     await signedIn();
     unmount = render(<App />).unmount;
-    await waitFor(() => harness.plane.watches.size === 1, "the desktop's watch on the plane");
+    await waitFor(() => harness.plane.watches.size === 1, "the desktop's watch on the plane, its initialize answered");
+    // A push from here on is behind that answer on the socket, and is heard even when both
+    // arrive in one read.
     const asked = (): number => harness.plane.asked.filter((m) => m === "remote.list").length;
     const before = asked();
 
@@ -163,5 +169,28 @@ describe("this computer's own session", () => {
     button("Withdraw")!.click();
     await waitFor(() => button("Steer from elsewhere"), "the offer taken back");
     expect(daemon.calls.some((c) => c.method === "remote.withdraw")).toBe(true);
+  });
+
+  it("says once that an offer lasts until this machine restarts, with the command, and says one a restart brought back", async () => {
+    const shop = daemon.seed("/home/alice/shop");
+    await signedIn();
+    unmount = render(<App />).unmount;
+    (await waitFor(() => row("/home/alice/shop"), "the local session's row")).click();
+    (await waitFor(() => button("Steer from elsewhere"), "the offer in the head")).click();
+    (await waitFor(() => button("Offer it"), "the offer's form")).click();
+
+    // Nothing starts the daemon at login here: the pill says so, and the sentence the
+    // terminal says once, with the command, is said as the offer is made.
+    await sees("Offered · Online · until this machine restarts");
+    await sees(RESTART_SENTENCE);
+
+    // The daemon started at login and restarted: the listing says the offer came back.
+    daemon.atLogin = true;
+    shop.remote = { ...shop.remote!, lasts: "across_restarts", restored: true };
+    await waitFor(
+      () => document.querySelector(".remote-offer .pill")?.textContent === "Offered · Online · back after a restart",
+      "the offer back after a restart",
+      15_000,
+    );
   });
 });

@@ -1,9 +1,11 @@
 defmodule Troupe.PlaneMemory do
   @moduledoc """
-  The organisation's memory documents a session reads (#55): the organisation's, a team's
-  and a worker profile's, kept on the plane and edited in its console, each reaching the
-  sessions in its scope as instructions from the organisation, before the person's own
-  instruction file and the repository's files. No tool writes them.
+  The memory documents a session reads (#55): the organisation's, a team's and a worker
+  profile's, kept on the plane and edited in its console, each reaching the sessions in its
+  scope as instructions from the organisation, before the person's own instruction file and
+  the repository's files, and no tool writes them; and after them the person's own, kept on
+  the plane too, which they edit and an agent of theirs adds to with `remember`
+  (`Troupe.UserMemory`).
 
   Where a session gets them depends on where it runs:
 
@@ -281,7 +283,12 @@ defmodule Troupe.PlaneMemory do
         end
       end)
 
-    "The organisation's memory changed: " <> Enum.join(said, "; ") <> ". Read from this turn on."
+    whose =
+      if Enum.all?(changes, &(&1["scope"] == "user")),
+        do: "Your memory changed: ",
+        else: "The organisation's memory changed: "
+
+    whose <> Enum.join(said, "; ") <> ". Read from this turn on."
   end
 
   @doc "One line per document in force, as `troupe config --explain` names them."
@@ -299,6 +306,7 @@ defmodule Troupe.PlaneMemory do
   def label(%{"scope" => "organisation"}), do: "the organisation's memory"
   def label(%{"scope" => "team", "name" => name}), do: "the team #{name}'s memory"
   def label(%{"scope" => "profile", "name" => name}), do: "the worker profile #{name}'s memory"
+  def label(%{"scope" => "user"}), do: "your own memory"
 
   defp from(%{source: nil}), do: ""
 

@@ -203,20 +203,22 @@ defmodule Troupe.Gateway.DaemonTest do
       assert {:ok, _} = Client.call(client, "session.list")
     end
 
-    test "session.list is empty before anything runs, and lists a session after", context do
+    # The daemon's index is the VM's, and remembers the state directory of every session it
+    # saw: a session an earlier test left dormant is listed beside this test's own, in no
+    # particular order. So these find their own session by its id.
+    test "session.list lists a session once it runs", context do
+      leave_a_session(context)
       client = connect(context)
-
-      assert {:ok, %{"sessions" => []}} = Client.call(client, "session.list")
-
       %{session: session} = start_session(context, [{:text, "hi"}])
 
-      assert {:ok, %{"sessions" => [listed]}} = Client.call(client, "session.list")
-      assert listed["id"] == session.id
+      assert {:ok, %{"sessions" => sessions}} = Client.call(client, "session.list")
+      assert [listed] = Enum.filter(sessions, &(&1["id"] == session.id))
       assert listed["state"] == "active"
     end
 
     @tag :capture_log
     test "session.list says how a root that kept crashing failed its last turn", context do
+      leave_a_session(context)
       %{session: session} = start_session(context, [{:text, "hi"}])
       sid = session.id
       Troupe.subscribe(sid)
@@ -234,8 +236,9 @@ defmodule Troupe.Gateway.DaemonTest do
 
       listed =
         eventually(fn ->
-          {:ok, %{"sessions" => [listed]}} = Client.call(client, "session.list")
-          listed["state"] == "dormant" && listed
+          {:ok, %{"sessions" => sessions}} = Client.call(client, "session.list")
+          listed = Enum.find(sessions, &(&1["id"] == sid))
+          listed && listed["state"] == "dormant" && listed
         end)
 
       assert %{"reason" => "agent_failed", "detail" => detail} = listed["failed"]
@@ -891,6 +894,24 @@ defmodule Troupe.Gateway.DaemonTest do
 
   # What `fun` answers once it answers something, for what the daemon notices in its own
   # time: a session that went down is listed from its log once the index has heard.
+  # A session of another workspace and state directory, stopped and so dormant, as one an
+  # earlier test in the VM leaves.
+  defp leave_a_session(context) do
+    other = Path.join(context.base, "other")
+    File.mkdir_p!(Path.join(other, "workspace"))
+
+    elsewhere = %{
+      context
+      | workspace: Path.join(other, "workspace"),
+        state_dir: Path.join(other, "state")
+    }
+
+    %{session: session} = start_session(elsewhere, [{:text, "hi"}])
+
+    Troupe.stop_session(session.id)
+    session
+  end
+
   defp eventually(fun, attempts \\ 200) do
     case fun.() do
       falsy when falsy in [nil, false] and attempts > 0 ->

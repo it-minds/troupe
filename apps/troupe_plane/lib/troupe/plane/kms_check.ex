@@ -13,11 +13,15 @@ defmodule Troupe.Plane.KMSCheck do
   path, which the `default` policy every login carries allows, and `auth/token/lookup-self`
   which policies the token carries now, so the printed lines keep them. What is asked is
   `Troupe.KMS.Policy.plane_grants/1`, the one list the docs page is written from too.
+
+  The GitHub App's grant is the list's one optional grant, and it is optional only while
+  the plane has no App: once one is set up (`Troupe.Plane.GitHub.configured?/0`), missing
+  it stops the App signing, so it is required and the plane is not healthy without it.
   """
 
   alias Troupe.KMS.Policy
+  alias Troupe.Plane.{GitHub, Signing, Tokens}
   alias Troupe.Plane.GitHub.{Key, WebhookSecret}
-  alias Troupe.Plane.{Signing, Tokens}
 
   require Logger
 
@@ -47,7 +51,7 @@ defmodule Troupe.Plane.KMSCheck do
           grants: [verdict()]
         }
   def run(opts \\ []) do
-    grants = Policy.plane_grants(names())
+    grants = Enum.map(Policy.plane_grants(names()), &required_now/1)
     config = Application.get_env(:troupe_plane, :transit, [])
 
     paths =
@@ -99,6 +103,10 @@ defmodule Troupe.Plane.KMSCheck do
       Logger.warning("troupe plane: OpenBao: #{verdict.detail} To grant it:\n#{verdict.fix}")
     end
   end
+
+  # The App's grant is needed only for an App, and needed once there is one.
+  defp required_now(%{id: "github-app"} = grant), do: %{grant | required: GitHub.configured?()}
+  defp required_now(grant), do: grant
 
   # The deployment's mounts and key names, as the modules that use them read them.
   defp names do

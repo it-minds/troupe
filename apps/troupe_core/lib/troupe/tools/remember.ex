@@ -17,15 +17,23 @@ defmodule Troupe.Tools.Remember do
   The arguments from before facts, `section` and `text`, kept working for one release
   (Decision 839) and are refused now (Decision 854): an older prompt or a bundle's agent
   that still calls the old way is told the form that replaced them, and writes nothing.
+
+  `level: "me"` writes to the person's own memory on the plane instead (#55): the one level
+  above the repository an agent may write, and only by adding one entry, which the plane
+  puts under the day's heading below what is there (`Troupe.UserMemory`). The model names no
+  path and no document there either, only the sentence; the organisation's, a team's and a
+  profile's memory have no level here at all. Signed out, or with no plane, it is refused
+  with a sentence that offers the repository's memory.
   """
 
   @behaviour Troupe.Tool
 
   alias Troupe.Memory.Facts
   alias Troupe.Session.Log
-  alias Troupe.{Tool, Workspace}
+  alias Troupe.{Tool, UserMemory, Workspace}
 
   @kinds ~w(command convention overview layout negative note)
+  @levels ~w(repository me)
   @old_form "remember no longer takes section and text: it writes one fact, with kind " <>
               "(command, convention, overview, layout, negative or note), claim (one or two " <>
               "sentences) and anchors (the files you read it in), as " <>
@@ -51,6 +59,17 @@ defmodule Troupe.Tools.Remember do
     |> String.trim()
   end
 
+  # Said only where an entry has somewhere to go (`Troupe.UserMemory`): a session with no
+  # plane is not offered a level it cannot use, and its tool list stays as it was.
+  @impl Troupe.Tool
+  def describe(_ctx) do
+    if UserMemory.reachable?(),
+      do:
+        description() <>
+          "\n\n`level`: `repository` (the default), or `me` for the person's own memory, which every session of theirs reads on every machine: how they like to work, not facts about this code. With `me`, give only `claim`; it is added as one entry.",
+      else: description()
+  end
+
   @impl Troupe.Tool
   def schema do
     %{
@@ -60,7 +79,8 @@ defmodule Troupe.Tools.Remember do
         "claim" => %{"type" => "string"},
         "anchors" => %{"type" => "array", "items" => %{"type" => "string"}},
         "scope" => %{"type" => "string", "description" => "A glob; none is the whole repository."},
-        "replaces" => %{"type" => "string"}
+        "replaces" => %{"type" => "string"},
+        "level" => %{"enum" => @levels}
       }
     }
   end
@@ -74,6 +94,11 @@ defmodule Troupe.Tools.Remember do
       when (is_map_key(args, "section") or is_map_key(args, "text")) and
              not is_map_key(args, "claim"),
       do: {:error, @old_form}
+
+  def run(%{"level" => "me"} = args, ctx), do: remember_for_person(args, ctx)
+
+  def run(%{"level" => level}, _ctx) when level not in [nil | @levels],
+    do: {:error, "level is repository (the default) or me, not #{inspect(level)}; nothing was written"}
 
   def run(%{"replaces" => id} = args, ctx) when not is_map_key(args, "claim") do
     with {:ok, id} <- Tool.fetch_string(args, "replaces"),
@@ -112,6 +137,44 @@ defmodule Troupe.Tools.Remember do
       {:ok, fact} -> {:ok, fact}
       {:error, reason} -> {:error, "not remembered: #{reason_text(reason)}"}
     end
+  end
+
+  ## The person's own memory
+
+  defp remember_for_person(args, ctx) do
+    with :ok <- only_claim(args),
+         :ok <- not_the_librarian(ctx),
+         {:ok, claim} <- claim(args) do
+      case UserMemory.append(claim, ctx) do
+        {:ok, saved} ->
+          {:ok,
+           "remembered in the person's own memory on the plane, version #{saved["version"]}: " <>
+             "\"#{saved["entry"] || claim}\". Every session of theirs reads it from its next turn"}
+
+        {:error, :signed_out} ->
+          {:error,
+           "not remembered: this session's person is not signed in to a Troupe plane here, so " <>
+             "there is no memory of theirs to add to. Remember it for this repository instead " <>
+             "(level repository, the default), or ask them to sign in"}
+
+        {:error, reason} ->
+          {:error, "not remembered in the person's own memory: #{reason_text(reason)}"}
+      end
+    end
+  end
+
+  defp only_claim(args) do
+    case Enum.filter(~w(anchors scope replaces), &Map.has_key?(args, &1)) do
+      [] -> :ok
+      named -> {:error, "#{Enum.join(named, " and ")} are for the repository's facts; with level me give only claim"}
+    end
+  end
+
+  # The librarian surveys repositories; what it learns is theirs, never a person's.
+  defp not_the_librarian(ctx) do
+    if by(ctx) == "librarian",
+      do: {:error, "the librarian writes only the repository's facts, never a person's memory"},
+      else: :ok
   end
 
   ## The fact

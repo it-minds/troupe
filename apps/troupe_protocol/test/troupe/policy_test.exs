@@ -147,6 +147,33 @@ defmodule Troupe.PolicyTest do
       end
     end
 
+    # Compared as the whole string, `api.example.com:8443` passed no policy that named the
+    # host, and with Cilium it became a name that carried the port and admitted nothing.
+    test "an entry's host and port are compared apart, and a pattern with no port takes any" do
+      assert Policy.matches?("api.example.com:8443", "api.example.com")
+      assert Policy.matches?("api.example.com:8443", "*.example.com")
+      assert Policy.matches?("api.example.com:8443", "api.example.com:8443")
+      refute Policy.matches?("api.example.com:8443", "api.example.com:9443")
+      refute Policy.matches?("api.example.com", "api.example.com:8443")
+      refute Policy.matches?("a.b.example.com:8443", "*.example.com")
+      assert Policy.matches?("[2001:db8::1]:8443", "2001:db8::1")
+      assert Policy.matches?("10.20.0.5:8443", "10.20.0.5")
+
+      ported = [egress: %{"fqdns" => ["api.example.com:8443"], "gitHosts" => []}]
+      assert check(ported, allowedEgress: allowed_egress(["api.example.com"])) == []
+
+      assert [{:egress_not_allowed, "api.example.com:8443"}] =
+               check(ported, allowedEgress: allowed_egress(["api.example.com:9443"]))
+    end
+
+    test "an entry's host and port, as the operator and the admission rule read them" do
+      assert Policy.host_and_port("api.example.com:8443") == {"api.example.com", 8443}
+      assert Policy.host_and_port("[2001:db8::1]:8443") == {"2001:db8::1", 8443}
+      assert Policy.host_and_port("api.example.com") == {"api.example.com", nil}
+      assert Policy.host_and_port("2001:db8::1") == {"2001:db8::1", nil}
+      assert Policy.host_and_port("*.example.com:443") == {"*.example.com", 443}
+    end
+
     test "a profile's wildcard passes only a policy that holds the same wildcard" do
       wildcard = [egress: %{"fqdns" => ["*.example.com"], "gitHosts" => []}]
 

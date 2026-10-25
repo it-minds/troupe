@@ -57,6 +57,29 @@ export interface PlaneOptions {
   clientsSeen?: Array<Record<string, unknown>>;
   /** What `me.memory` answers: the organisation's and the person's teams' documents. */
   memory?: Array<Record<string, unknown>>;
+  /** Each person's own memory document to start with, by subject (#55's user level). */
+  own?: Record<string, string>;
+}
+
+/** A person's own memory document as the fake plane keeps it. */
+interface OwnMemory {
+  version: number;
+  text: string;
+  changed_by: string | null;
+  changed_at: string | null;
+}
+
+/** What a save changes, line by line: the lines both keep, then those it drops and adds. */
+function lineDiff(before: string, now: string): Array<{ op: "same" | "del" | "add"; text: string }> {
+  const a = before === "" ? [] : before.split("\n");
+  const b = now === "" ? [] : now.split("\n");
+  let same = 0;
+  while (same < a.length && same < b.length && a[same] === b[same]) same += 1;
+  return [
+    ...a.slice(0, same).map((text) => ({ op: "same" as const, text })),
+    ...a.slice(same).map((text) => ({ op: "del" as const, text })),
+    ...b.slice(same).map((text) => ({ op: "add" as const, text })),
+  ];
 }
 
 /** SemVer's order, enough for a policy's versions: the numbers, then a pre-release below none. */
@@ -118,7 +141,13 @@ export class FakePlane {
   readonly initialized: Array<{ name?: unknown; version?: unknown; platform?: unknown }> = [];
   /** Every `/rpc` method asked, in order: what a test counts to tell a push from a poll. */
   readonly asked: string[] = [];
-  /** The people's watches open now (`/v1/relay/watch`), with the list each was last sent. */
+  /** Each person's own memory document, by subject. */
+  readonly own = new Map<string, OwnMemory>();
+  /**
+   * The people's watches open now (`/v1/relay/watch`), with the list each was last sent. A
+   * watch is here from the moment its `initialize` is answered, so a change made once a test
+   * sees it is pushed behind that answer on the same socket.
+   */
   readonly watches = new Set<{ ws: WebSocket; subject: string; sent: string }>();
   private readonly wss: WebSocketServer | null;
   corsOrigins: string[];
@@ -137,6 +166,9 @@ export class FakePlane {
 
   private constructor(opts: PlaneOptions) {
     this.opts = opts;
+    for (const [subject, text] of Object.entries(opts.own ?? {})) {
+      this.own.set(subject, { version: 1, text, changed_by: subject, changed_at: "2026-10-24T09:00:00Z" });
+    }
     this.corsOrigins = opts.corsOrigins ?? [];
     this.podTokenLifetime = opts.podTokenLifetime ?? 900;
     this.server = createServer((req, res) => void this.handle(req, res));
@@ -338,6 +370,14 @@ export class FakePlane {
   }
 
   /** The person's `remote.list`, as the plane answers it. */
+  private ownOf(subject: string): OwnMemory {
+    return this.own.get(subject) ?? { version: 0, text: "", changed_by: null, changed_at: null };
+  }
+
+  private ownJson(own: OwnMemory): Record<string, unknown> {
+    return { ...own, hash: own.version ? `sha256:own-${own.version}` : null, bytes: new TextEncoder().encode(own.text).length, limit: 8192 };
+  }
+
   private remoteRows(subject: string): Array<Record<string, unknown>> {
     return [...this.relayed.values()].flatMap((o) => {
       const role = this.relayRole(o, subject);
@@ -609,8 +649,42 @@ export class FakePlane {
         return { result: { clients: this.opts.clientsSeen ?? [] } };
 
       // The memory a person's machine reads into every session: signed, as the plane signs it.
-      case "me.memory":
-        return { result: { documents: this.opts.memory ?? [] } };
+      case "me.memory": {
+        const own = this.ownOf(subject);
+        const mine = own.text === "" ? [] : [{ scope: "user", name: null, version: own.version, hash: `sha256:own-${own.version}`, updated_at: own.changed_at, text: own.text }];
+        return { result: { documents: [...(this.opts.memory ?? []), ...mine], user: this.ownJson(own) } };
+      }
+
+      // A person's own memory: what a save would change, written nowhere; and the save, over
+      // the version edited, refused where somebody saved since.
+      case "me.memory.preview": {
+        const own = this.ownOf(subject);
+        const text = String(params["text"] ?? "").replace(/\r\n/g, "\n").trimEnd();
+        const bytes = new TextEncoder().encode(text).length;
+        if (bytes > 8192) return { error: { code: -32602, message: "invalid_params", data: { reason: `a memory document holds at most 8192 bytes; this one is ${bytes}` } } };
+        return {
+          result: {
+            version: own.version,
+            bytes,
+            limit: 8192,
+            unchanged: own.text === text,
+            diff: lineDiff(own.text, text),
+            effect: "Every session you run reads it from its next turn. Nobody else reads it.",
+          },
+        };
+      }
+
+      case "me.memory.put": {
+        const own = this.ownOf(subject);
+        const text = String(params["text"] ?? "").replace(/\r\n/g, "\n").trimEnd();
+        if (params["version"] !== own.version) {
+          return { error: { code: -32006, message: "conflict", data: { reason: `your memory was saved somewhere else since; version ${own.version} is in force now`, version: own.version } } };
+        }
+        if (text === own.text) return { result: { changed: false, entry: null, user: this.ownJson(own) } };
+        const now = { version: own.version + 1, text, changed_by: subject, changed_at: new Date().toISOString() };
+        this.own.set(subject, now);
+        return { result: { changed: true, entry: null, user: this.ownJson(now) } };
+      }
 
       case "remote.open": {
         const offer = this.relayed.get(String(params["session_id"] ?? ""));

@@ -115,6 +115,19 @@ defmodule Troupe.Gateway.FakePlane do
   def memory_with(state, documents), do: Agent.update(state, &Map.put(&1, :memory, documents))
 
   @doc """
+  Keep a person's own memory document (#55's user level) from now on, empty at version 0:
+  `me.memory` lists it after the documents `memory_with/2` set, with `user` beside them, and
+  `me.memory.put` saves it, the whole text over the version edited or one `append`ed entry
+  under the day's heading, as the plane does. Answers what it holds with `own/1`.
+  """
+  @spec keep_own(pid()) :: :ok
+  def keep_own(state), do: Agent.update(state, &Map.put(&1, :own, %{"version" => 0, "text" => ""}))
+
+  @doc "The person's own document as this plane holds it."
+  @spec own(pid()) :: map() | nil
+  def own(state), do: Agent.get(state, &Map.get(&1, :own))
+
+  @doc """
   Sign from now on with a key of the plane's own, a new one each time (a rotation), as
   `Troupe.Protocol.PlaneSignature` lays it out. Answers its fingerprint.
   """
@@ -410,10 +423,23 @@ defmodule Troupe.Gateway.FakePlane do
   end
 
   defp dispatch(state, "me.memory", _params) do
-    case Agent.get(state, &Map.get(&1, :memory)) do
-      nil -> {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory"}}
-      documents -> {:ok, signed(state, "memory", %{"documents" => documents})}
+    case Agent.get(state, &{Map.get(&1, :memory), Map.get(&1, :own)}) do
+      {nil, nil} -> {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory"}}
+      {documents, nil} -> {:ok, signed(state, "memory", %{"documents" => documents})}
+      {documents, own} -> {:ok, signed(state, "memory", %{"documents" => List.wrap(documents) ++ own_documents(own), "user" => own_json(own)})}
     end
+  end
+
+  defp dispatch(state, "me.memory.put", params) do
+    Agent.get_and_update(state, fn held ->
+      case own_put(Map.get(held, :own), params) do
+        {:ok, now, entry} ->
+          {{:ok, %{"changed" => true, "entry" => entry, "user" => own_json(now)}}, Map.put(held, :own, now)}
+
+        refused ->
+          {refused, held}
+      end
+    end)
   end
 
   # A laptop's own sign-in for steering (#58 slice 2): a grant for the device, kept here
@@ -436,6 +462,30 @@ defmodule Troupe.Gateway.FakePlane do
   end
 
   defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
+
+  defp own_put(nil, _params), do: {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory.put"}}
+
+  defp own_put(own, %{"append" => entry}) do
+    heading = "## " <> Date.to_iso8601(Date.utc_today())
+    above = if own["text"] == "", do: "", else: own["text"] <> "\n\n"
+    {:ok, %{"version" => own["version"] + 1, "text" => above <> heading <> "\n\n- " <> entry}, entry}
+  end
+
+  defp own_put(%{"version" => version}, %{"text" => text, "version" => version}),
+    do: {:ok, %{"version" => version + 1, "text" => text}, nil}
+
+  defp own_put(own, %{"text" => _text}) do
+    reason = "your memory was saved somewhere else since; version #{own["version"]} is in force now"
+    {:rpc_error, -32_602, "conflict", %{"reason" => reason, "version" => own["version"]}}
+  end
+
+  defp own_documents(%{"text" => ""}), do: []
+
+  defp own_documents(own),
+    do: [%{"scope" => "user", "name" => nil, "version" => own["version"], "hash" => "sha256:own-#{own["version"]}", "text" => own["text"]}]
+
+  defp own_json(own),
+    do: Map.merge(own, %{"bytes" => byte_size(own["text"]), "limit" => 8192, "changed_by" => "ada@example.test"})
 
   defp put_signed(answer, nil), do: answer
   defp put_signed(answer, signed), do: Map.put(answer, "signed", signed)

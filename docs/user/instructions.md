@@ -24,6 +24,9 @@ they open the system prompt instead, rewritten each turn.
    repository's facts (`.troupe/memory/facts.jsonl`), each that may no longer be true
    marked so, and a line naming the `recall` tool for the rest.
 
+Signed in to a plane, a session reads your organisation's memory and then your own before
+all of these ([Memory](memory.md)).
+
 An `.agents/AGENTS.md` at the root, or in one of those directories, belongs to its
 directory and is read right before that directory's own `AGENTS.md`, so where the two
 disagree the directory's own wins; `/context` names it with its directory's scope

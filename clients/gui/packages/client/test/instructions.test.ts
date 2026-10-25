@@ -69,4 +69,29 @@ describe("instructionLayers", () => {
 
     assert.equal(rows[0]?.source, "the plane, with the session's activation");
   });
+
+  // #55's user level: the person's own memory from the plane, after the organisation's,
+  // before their own file, named as theirs with its version.
+  it("lists the person's own memory after the organisation's and before their own file", () => {
+    const rows = instructionLayers({
+      budget: 16000,
+      used: 10,
+      memory_from: { source: "https://plane.example.test", fetched_at: "2026-10-25T09:00:00Z" },
+      files: [
+        file("organisation", "memory:organisation", { version: 3, label: "the organisation's memory" }),
+        file("person", "memory:user", { version: 2, label: "your own memory" }),
+        file("user", "/home/me/.config/troupe/AGENTS.md"),
+      ],
+    });
+
+    assert.deepEqual(
+      rows.map((r) => [r.layer, r.heading, r.what, r.version]),
+      [
+        ["organisation", "Organisation", "the organisation's memory", "version 3"],
+        ["person", "Your memory", "your own memory", "version 2"],
+        ["yours", "Your own", "/home/me/.config/troupe/AGENTS.md", "01234567"],
+      ],
+    );
+    assert.equal(rows[1]?.source, "https://plane.example.test, fetched 2026-10-25T09:00:00Z");
+  });
 });

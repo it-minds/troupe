@@ -19,7 +19,7 @@ defmodule Troupe.Plane.Drain do
   stays removed, and the operator deletes a pod behind once its drain is recorded.
   """
 
-  alias Troupe.Plane.{Budget, Fleet, Placement, Sessions}
+  alias Troupe.Plane.{Audit, Budget, Fleet, Placement, Sessions}
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Fleet.Worker
   alias Troupe.Plane.Sessions.Session
@@ -30,12 +30,29 @@ defmodule Troupe.Plane.Drain do
   # (`Troupe.Worker.Session.Manager.go_dormant/2`), as for an archive.
   @sleep_ms 120_000
 
+  # What the plane allows beyond the pod's own numbers: the time a report takes to arrive,
+  # and a pod's last answer after its last session.
+  @slack_ms 30_000
+
   @doc """
   Drain one pod and wait for it to be empty.
 
   `{:ok, report}` when every session on it is dormant, `{:error, {:stranded, ids}}` when
   some are not — which is a refusal to say the pod is safe to remove, not a failure to
   have tried.
+
+  The wait is as long as the pod is getting on with it. The pod lets running turns finish,
+  up to `timeout_ms`, and then puts its sessions to sleep one after another, each given up
+  to two minutes (`per_session_ms`), and says before each one how many it has left and
+  which it has in hand (`drain.progress`). The plane waits the timeout and a margin, and
+  from each report a session's time and the margin again, up to a ceiling: the timeout, a
+  session's time for each session the pod holds, and the margin. A pod that stops
+  reporting before it answers is the failure, `{:error, {:gave_up, :silent, ids}}`, and
+  one still reporting at the ceiling `{:error, {:gave_up, :ceiling, ids}}`: either way its
+  sessions are marked dormant as of their last seal, as a lost pod's are, and the audit
+  says why, how long the ceiling was and how long the plane waited (`pod.drain.gave_up`).
+  A pod of a release before it sends no reports and is waited for as before, the timeout
+  and the margin, or a session's time if that is longer.
   """
   @spec pod(Worker.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def pod(%Worker{} = worker, opts \\ []) do
@@ -48,10 +65,133 @@ defmodule Troupe.Plane.Drain do
 
     Logger.info("troupe plane: draining #{worker.pod_name} with #{before} session(s)")
 
-    case Router.push(worker, "drain", %{"timeout_ms" => timeout_ms}, timeout_ms + 30_000) do
-      {:ok, result} -> settle(worker, result, before, opts)
-      {:error, reason} -> unreachable(worker, before, reason)
+    # Before the push, so no report the pod sends in answer to it can come first.
+    :ok = Phoenix.PubSub.subscribe(Troupe.Plane.PubSub, topic(worker))
+    wait = wait(timeout_ms, before, opts)
+    push = Task.async(fn -> Router.push(worker, "drain", %{"timeout_ms" => timeout_ms}, wait.ceiling_ms) end)
+
+    try do
+      case await(push, worker, wait) do
+        {:ok, result} -> settle(worker, result, before, opts)
+        {:gave_up, why, wait} -> give_up(worker, why, wait)
+        {:error, reason} -> unreachable(worker, before, reason)
+      end
+    after
+      Phoenix.PubSub.unsubscribe(Troupe.Plane.PubSub, topic(worker))
     end
+  end
+
+  @doc """
+  A pod's report of how far its drain has got, handed to the replica waiting on it,
+  wherever that is (`pod/2`).
+  """
+  @spec progress(Worker.t(), map()) :: :ok
+  def progress(%Worker{} = worker, report) do
+    Phoenix.PubSub.broadcast(Troupe.Plane.PubSub, topic(worker), {:drain_progress, worker.id, report})
+  rescue
+    # A listener started without the rest of the plane has no PubSub, and nobody waiting
+    # on a drain: a pod's report is never what takes its connection down.
+    ArgumentError -> :ok
+  end
+
+  defp topic(%Worker{id: id}), do: "drain:" <> id
+
+  defp wait(timeout_ms, sessions, opts) do
+    slack_ms = Keyword.get(opts, :slack_ms, @slack_ms)
+    per_session_ms = Keyword.get(opts, :per_session_ms, @sleep_ms)
+
+    %{
+      started: now(),
+      timeout_ms: timeout_ms,
+      slack_ms: slack_ms,
+      per_session_ms: per_session_ms,
+      sessions: sessions,
+      ceiling_ms: ceiling(timeout_ms, sessions, per_session_ms, slack_ms),
+      heard: nil
+    }
+  end
+
+  defp ceiling(timeout_ms, sessions, per_session_ms, slack_ms),
+    do: timeout_ms + max(sessions, 1) * per_session_ms + slack_ms
+
+  # Until the pod answers, a report extends the wait by a session's time, and the ceiling
+  # holds: a pod holding more sessions than the plane counted raises it once, by its own
+  # count, which it sends with every report.
+  defp await(%Task{ref: ref} = push, worker, wait) do
+    {deadline, why} = deadline(wait)
+
+    receive do
+      {^ref, result} ->
+        Process.demonitor(ref, [:flush])
+        result
+
+      {:drain_progress, id, report} when id == worker.id ->
+        Logger.info("troupe plane: #{worker.pod_name} drains, #{report["left"] || "?"} session(s) left")
+        await(push, worker, heard(wait, report))
+
+      {:DOWN, ^ref, :process, _pid, reason} ->
+        {:error, {:push_failed, reason}}
+    after
+      max(deadline - now(), 0) ->
+        case Task.shutdown(push, :brutal_kill) do
+          {:ok, result} -> result
+          _gone -> {:gave_up, why, wait}
+        end
+    end
+  end
+
+  defp heard(wait, report) do
+    sessions = max(wait.sessions, positive(report["total"]))
+
+    %{
+      wait
+      | heard: now(),
+        sessions: sessions,
+        ceiling_ms: ceiling(wait.timeout_ms, sessions, wait.per_session_ms, wait.slack_ms)
+    }
+  end
+
+  defp positive(n) when is_integer(n) and n > 0, do: n
+  defp positive(_none), do: 0
+
+  defp deadline(wait) do
+    ceiling = wait.started + wait.ceiling_ms
+    from_report = (wait.heard || wait.started) + wait.per_session_ms + wait.slack_ms
+    patience = max(wait.started + wait.timeout_ms + wait.slack_ms, from_report)
+
+    if patience < ceiling, do: {patience, :silent}, else: {ceiling, :ceiling}
+  end
+
+  defp now, do: System.monotonic_time(:millisecond)
+
+  # The plane has stopped waiting, so its sessions are what a lost pod's are, and the
+  # audit says why: the pod went quiet, or it was still talking at the ceiling.
+  defp give_up(worker, why, wait) do
+    waited_ms = now() - wait.started
+
+    because =
+      case why do
+        :silent -> "it stopped reporting"
+        :ceiling -> "its ceiling of #{wait.ceiling_ms}ms"
+      end
+
+    Logger.error(
+      "troupe plane: gave up on draining #{worker.pod_name} after #{waited_ms}ms " <>
+        "(#{because}); marking its sessions dormant"
+    )
+
+    stranded = strand(worker)
+
+    {:ok, _} =
+      Audit.record("system:drain", "pod.drain.gave_up", worker.pod_name, %{
+        "profile" => worker.profile,
+        "why" => Atom.to_string(why),
+        "ceiling_seconds" => wait.ceiling_ms / 1_000,
+        "waited_seconds" => div(waited_ms, 1_000),
+        "sessions" => stranded
+      })
+
+    {:error, {:gave_up, why, stranded}}
   end
 
   @doc """

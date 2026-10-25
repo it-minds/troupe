@@ -405,6 +405,11 @@ spec:
                   description: >-
                     The operator's: the status.effective.revision it last reconciled, so a
                     change the plane makes there is acted on at once.
+                drainedRevision:
+                  type: string
+                  description: >-
+                    The operator's: a hash of the troupe.dev/drained annotation it last acted
+                    on, so a drain the plane records is acted on at once.
                 observedGeneration: {type: integer}
                 readyReplicas: {type: integer}
                 namespace: {type: string}

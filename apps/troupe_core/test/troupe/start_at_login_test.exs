@@ -62,8 +62,10 @@ defmodule Troupe.StartAtLoginTest do
       file = StartAtLogin.path(:startup_folder, opts)
 
       assert %{"at_login" => false, "kind" => "startup_folder"} = StartAtLogin.status(opts)
+      refute StartAtLogin.enabled?(opts)
 
       assert {:ok, %{"at_login" => true} = status} = StartAtLogin.enable(opts)
+      assert StartAtLogin.enabled?(opts)
       assert status["path"] == Troupe.Paths.display(file)
       assert status["command"] == Troupe.Paths.display(@command)
 
@@ -149,6 +151,7 @@ defmodule Troupe.StartAtLoginTest do
       # A unit nothing wants is disabled: off, as systemctl would say.
       File.rm!(link)
       assert %{"at_login" => false} = StartAtLogin.status(opts)
+      refute StartAtLogin.enabled?(opts)
 
       assert {:ok, %{"at_login" => false}} = StartAtLogin.disable(opts)
       refute File.exists?(unit)

@@ -108,6 +108,7 @@ nav:
       - Agents, commands and workflows: user/agents.md
       - MCP servers and skills: user/mcp.md
       - Instruction files and onboarding: user/instructions.md
+      - Memory: user/memory.md
       - Configuration cookbook:
           - user/configuration/cookbook.md
           - Where your files are: user/configuration/files.md
@@ -164,6 +165,7 @@ nav:
       - Tech stack: developer/tech-stack.md
       - Fixing issues: developer/fixing-issues.md
       - Walking the Stage 1 gate: developer/gate-walk.md
+      - The gate's rows: developer/gate-walk-rows.md
       - Known defects: developer/defects.md
       - Decisions:
           - decisions/README.md

@@ -239,6 +239,42 @@ defmodule Troupe.BenchLiveTest do
       assert [%{status: 500}, %{status: 200} | _] = FakeOpenAI.requests(fake)
     end
 
+    # #767's twin: a live run's directories are under the temporary directory (or the one
+    # `--keep` names), and one inside a repository must not put that repository's
+    # instruction files in front of the model. Kept here, inside the outer repository, so
+    # the run's log can be read for what it loaded.
+    test "a run reads no instruction file of a repository its directory is in", %{
+      tmp_dir: dir
+    } do
+      {_, 0} = System.cmd("git", ["init", "--quiet", dir])
+      File.write!(Path.join(dir, "AGENTS.md"), "A rule of the outer repository.\n")
+      fake = start_fake()
+
+      {:ok, plan} =
+        Bench.plan(
+          config: person(fake),
+          scenarios: only(["write_file"]),
+          keep: Path.join(dir, "kept"),
+          history: nil
+        )
+
+      report = Bench.live(plan)
+      assert Bench.passed?(report), Bench.markdown(report)
+
+      [log] =
+        Path.wildcard(
+          Path.join([report["kept_in"], "write_file-1", "state", "**", "events.jsonl"])
+        )
+
+      loaded =
+        for line <- String.split(File.read!(log), "\n", trim: true),
+            event = Jason.decode!(line),
+            event["type"] == "instructions_loaded",
+            do: event["data"]
+
+      refute inspect(loaded) =~ Path.join(dir, "AGENTS.md")
+    end
+
     test "a run that has not ended by its wall clock is stopped, and says so" do
       fake = start_fake(done_ms: 5_000)
 

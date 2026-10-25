@@ -77,7 +77,17 @@ interface Session {
    * Offered to the plane for steering from another device (troupe #58), as
    * `remote.offer` left it and `session.list` says it.
    */
-  remote?: { owner: string | null; shares: Array<{ subject: string; role: string }>; state: string; since: string | null; steering: unknown[] } | null;
+  remote?: {
+    owner: string | null;
+    shares: Array<{ subject: string; role: string }>;
+    state: string;
+    since: string | null;
+    steering: unknown[];
+    /** Whether it comes back after a restart: `across_restarts` where the daemon starts at login. */
+    lasts: "across_restarts" | "until_restart";
+    /** Read back from the record as the daemon started. */
+    restored: boolean;
+  } | null;
 }
 
 interface Client {
@@ -598,6 +608,13 @@ evoked where nothing is set and there was a sign-in. */
   memoryOn = true;
   /** What `context.get` answers for every session; null for the repository's AGENTS.md alone. */
   instructions: Record<string, unknown> | null = null;
+  /**
+   * The person's own memory on the plane, as this daemon reads and saves it through its
+   * sign-in (`me.memory`, `me.memory.put`, troupe #55); null for a daemon signed in to none.
+   */
+  own: { version: number; text: string } | null = null;
+  /** Every `me.memory.put` asked, in order. */
+  readonly ownPuts: Array<Record<string, unknown>> = [];
   memoryAutoRefresh = true;
   /** The agent files of every layer (troupe Decision 841): the built-ins, the person's and each workspace's. */
   readonly agents: FakeAgents;
@@ -701,6 +718,10 @@ evoked where nothing is set and there was a sign-in. */
     this.token = `daemon-token-${this.restarts}`;
     // The label is in `identity.json` and survives; the plane token was in memory.
     this.planeToken = null;
+    // What was offered comes back from its record, on the daemon's own sign-in (troupe #58).
+    for (const s of this.sessions.values()) {
+      if (s.remote) s.remote = { ...s.remote, restored: true, lasts: this.atLogin ? "across_restarts" : "until_restart" };
+    }
     await this.start();
   }
 
@@ -1234,6 +1255,8 @@ evoked where nothing is set and there was a sign-in. */
           state: "online",
           since: null,
           steering: [],
+          lasts: this.atLogin ? "across_restarts" : "until_restart",
+          restored: false,
         };
         return reply(ws, id, { session_id: sessionId, remote: session.remote });
       }
@@ -1476,6 +1499,25 @@ evoked where nothing is set and there was a sign-in. */
         const workspace = String(params["workspace"] ?? "");
         const watching = [...this.sessions.values()].find((s) => s.watch && s.workspace === workspace);
         return reply(ws, id, { enabled: Boolean(watching), backend: watching ? "poll" : "off", session_id: watching?.id ?? null });
+      }
+
+      // The person's own memory, through this daemon's sign-in; signed out, a sentence.
+      case "me.memory":
+      case "me.memory.put": {
+        const own = this.own;
+        if (!own) {
+          return reply(ws, id, null, { code: -32010, message: "unavailable", data: { reason: "this computer's daemon is not signed in to a Troupe plane, so there is no memory of yours to read or change; troupe login signs it in" } });
+        }
+        const json = (o: { version: number; text: string }) => ({ ...o, bytes: new TextEncoder().encode(o.text).length, limit: 8192, changed_by: "alice@example.com", plane_url: "https://plane.example.test" });
+        if (method === "me.memory") return reply(ws, id, json(own));
+        this.ownPuts.push(params);
+        if (params["version"] !== own.version) {
+          return reply(ws, id, null, { code: -32006, message: "conflict", data: { reason: `your memory was saved somewhere else since; version ${own.version} is in force now`, version: own.version } });
+        }
+        const text = String(params["text"] ?? "").replace(/\r\n/g, "\n").trimEnd();
+        if (text === own.text) return reply(ws, id, { changed: false, entry: null, user: json(own) });
+        this.own = { version: own.version + 1, text };
+        return reply(ws, id, { changed: true, entry: null, user: json(this.own) });
       }
 
       // What a session's next prompt is read from (troupe #55): what a test set, or the
