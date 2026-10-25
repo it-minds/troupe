@@ -103,7 +103,7 @@ describe("artifacts", () => {
 
     await sees("Carol's weekly", cards);
     await seesLink("Artifacts", rail());
-    await waitFor(() => tabs().join(",") === "Mine,Organisation,dev,ux", "a tab for each profile");
+    await waitFor(() => tabs().join(",") === "Mine,Shared with you,Organisation,dev,ux", "a tab for each profile");
     await sees("HTML page", cards);
     await sees("version 2", cards);
     // A title is words, whatever it looks like.
@@ -266,6 +266,7 @@ describe("artifacts' storage", () => {
     await sees("What people may publish", group);
     await sees("artifacts_enabled", group);
     await sees("artifacts_publish_organisation", group);
+    await sees("artifacts_public_links", group);
   });
 
   it("keeps the Artifacts area beside Mine for an administrator too", async () => {

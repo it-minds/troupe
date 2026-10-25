@@ -90,13 +90,22 @@ defmodule Troupe.Tools.PublishArtifactTest do
                  "kind" => "markdown",
                  "visibility" => "organisation",
                  "files" => ["docs/notes.md"],
-                 "id" => "art-abcdefghijklmnop"
+                 "id" => "art-abcdefghijklmnop",
+                 "note" => "the figures for October"
                },
                ctx(session, context)
              )
 
     assert_received {:published,
-                     %{"id" => "art-abcdefghijklmnop", "files" => [%{"path" => "notes.md"}]}}
+                     %{
+                       "id" => "art-abcdefghijklmnop",
+                       "note" => "the figures for October",
+                       "files" => [%{"path" => "notes.md"}]
+                     }}
+
+    # The tool says what `id` and `note` are for: a new version, of one's own or an edit link's.
+    assert PublishArtifact.schema()["properties"]["note"]
+    assert PublishArtifact.description() =~ "edit link"
 
     assert said =~ "version 2"
     assert said =~ "the whole organisation"

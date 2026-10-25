@@ -502,6 +502,17 @@ defmodule Troupe.Plane.Settings do
         "platform_admins refuses everybody else's organisation-wide publish and points them at a profile's " <>
           "people instead. Artifacts published already keep their visibility.",
       effect: :immediate
+    },
+    %Setting{
+      key: "artifacts_public_links",
+      group: :artifacts,
+      type: :boolean,
+      fallback: false,
+      summary: "Whether an artifact's owner may make a public link, which opens it for anybody who has it, signed in or not.",
+      consequence:
+        "On, an owner may make view-only public links that expire within 90 days, and switch an artifact's off. " <>
+          "Off, none is made and every one made already stops opening; links that honour sign-in work either way.",
+      effect: :immediate
     }
   ]
 

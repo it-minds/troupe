@@ -1379,6 +1379,51 @@ pre.manifest {
   margin-bottom: var(--space-2);
 }
 
-.artifact-versions header button {
+.artifact-versions header .version-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.artifact .actions select {
+  width: auto;
+}
+
+/* The editor: the text beside the artifacts host's own preview of it, framed. */
+.artifact-edit-panes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.artifact-preview iframe {
+  width: 100%;
+  min-height: 28rem;
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-none);
+  background: var(--bg-panel);
+}
+
+.artifact-links {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-links > li {
+  margin-bottom: var(--space-4);
+}
+
+.artifact-links header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.artifact-links header button {
   margin-left: auto;
 }
