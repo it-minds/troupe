@@ -120,7 +120,9 @@ describe("the list follows the plane as it changes", () => {
     visit("#/mine");
     unmount = render(<App />).unmount;
     await sees("Nothing offered to you");
-    await waitFor(() => fake.plane.watches.size === 1, "the console's watch");
+    await waitFor(() => fake.plane.watches.size === 1, "the console's watch, its initialize answered");
+    // A push from here on is behind that answer on the socket, and is heard even when both
+    // arrive in one read.
     const asked = fake.plane.asked.filter((m) => m === "remote.list").length;
 
     const at = Date.now();

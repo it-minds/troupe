@@ -143,7 +143,11 @@ export class FakePlane {
   readonly asked: string[] = [];
   /** Each person's own memory document, by subject. */
   readonly own = new Map<string, OwnMemory>();
-  /** The people's watches open now (`/v1/relay/watch`), with the list each was last sent. */
+  /**
+   * The people's watches open now (`/v1/relay/watch`), with the list each was last sent. A
+   * watch is here from the moment its `initialize` is answered, so a change made once a test
+   * sees it is pushed behind that answer on the same socket.
+   */
   readonly watches = new Set<{ ws: WebSocket; subject: string; sent: string }>();
   private readonly wss: WebSocketServer | null;
   corsOrigins: string[];
