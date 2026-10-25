@@ -133,10 +133,34 @@ interface Relayed {
   offeredAt: string;
 }
 
+/**
+ * An invitation by name into a session (troupe #765), as the plane keeps it: into a pod
+ * session the fake holds, or into a private one, sealed on its owner's machine, which the
+ * fake only lists.
+ */
+interface Invited {
+  session_id: string;
+  subject: string;
+  display_name: string;
+  role: "observe" | "control";
+  kind: "team" | "private";
+  title: string | null;
+  profile: string | null;
+  owner: string;
+  owner_name: string;
+  invited_by: string;
+  invited_by_name: string;
+  invited_at: string;
+}
+
 export class FakePlane {
   readonly server: Server;
   readonly rows = new Map<string, Row>();
   readonly relayed = new Map<string, Relayed>();
+  /** The invitations by name, by session and then by person (troupe #765). */
+  readonly invitations = new Map<string, Map<string, Invited>>();
+  /** Who `people.search` can find: each person's subject, name and email. */
+  people: Array<{ subject: string; display_name: string; email: string }> = [];
   /** Every `client_info` an `initialize` over `/rpc` gave, in order. */
   readonly initialized: Array<{ name?: unknown; version?: unknown; platform?: unknown }> = [];
   /** Every `/rpc` method asked, in order: what a test counts to tell a push from a poll. */
@@ -148,7 +172,7 @@ export class FakePlane {
    * watch is here from the moment its `initialize` is answered, so a change made once a test
    * sees it is pushed behind that answer on the same socket.
    */
-  readonly watches = new Set<{ ws: WebSocket; subject: string; sent: string }>();
+  readonly watches = new Set<{ ws: WebSocket; subject: string; sent: string; invited: string }>();
   private readonly wss: WebSocketServer | null;
   corsOrigins: string[];
   podTokenLifetime: number;
@@ -182,7 +206,7 @@ export class FakePlane {
    * and each change that alters it is sent as `remote.changed`.
    */
   private onWatch(ws: WebSocket): void {
-    let watch: { ws: WebSocket; subject: string; sent: string } | null = null;
+    let watch: { ws: WebSocket; subject: string; sent: string; invited: string } | null = null;
     const send = (payload: unknown) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(payload));
     ws.on("close", () => watch && this.watches.delete(watch));
     ws.on("message", (raw) => {
@@ -204,7 +228,8 @@ export class FakePlane {
           return void ws.close(1000);
         }
         const sessions = this.remoteRows(person.subject);
-        watch = { ws, subject: person.subject, sent: JSON.stringify(sessions) };
+        const invites = this.invitesTo(person.subject);
+        watch = { ws, subject: person.subject, sent: JSON.stringify(sessions), invited: JSON.stringify(invites) };
         this.watches.add(watch);
         return void send({
           jsonrpc: "2.0",
@@ -214,14 +239,16 @@ export class FakePlane {
             server_info: { name: "troupe-plane", watch: "remote" },
             principal: { subject: person.subject, display_name: person.name },
             scopes: [],
-            capabilities: { remote_changed: true },
+            capabilities: { remote_changed: true, invites_changed: true },
             auth: { expires_at: person.exp },
             sessions,
+            invites,
           },
         });
       }
       if (!watch) return void send({ jsonrpc: "2.0", id: msg.id, error: { code: -32001, message: "not_initialized" } });
       if (msg.method === "remote.list") return void send({ jsonrpc: "2.0", id: msg.id, result: { sessions: this.remoteRows(watch.subject) } });
+      if (msg.method === "invites.list") return void send({ jsonrpc: "2.0", id: msg.id, result: { invites: this.invitesTo(watch.subject) } });
       if (msg.method === "auth.refresh") {
         const person = held((params["auth"] as { token?: unknown } | undefined)?.token);
         if (!person || person.subject !== watch.subject) return void send({ jsonrpc: "2.0", id: msg.id, error: { code: -32003, message: "unauthenticated" } });
@@ -231,15 +258,84 @@ export class FakePlane {
     });
   }
 
-  /** Tell every watch whose list this changed. */
+  /** Tell every watch whose list this changed, the offers and the invitations each. */
   private changed(): void {
     for (const w of this.watches) {
+      const open = w.ws.readyState === w.ws.OPEN;
+      const invites = this.invitesTo(w.subject);
+      const invited = JSON.stringify(invites);
+      if (invited !== w.invited) {
+        w.invited = invited;
+        if (open) w.ws.send(JSON.stringify({ jsonrpc: "2.0", method: "invites.changed", params: { invites } }));
+      }
       const sessions = this.remoteRows(w.subject);
       const said = JSON.stringify(sessions);
       if (said === w.sent) continue;
       w.sent = said;
-      if (w.ws.readyState === w.ws.OPEN) w.ws.send(JSON.stringify({ jsonrpc: "2.0", method: "remote.changed", params: { sessions } }));
+      if (open) w.ws.send(JSON.stringify({ jsonrpc: "2.0", method: "remote.changed", params: { sessions } }));
     }
+  }
+
+  /**
+   * Invite `subject` into a session by name, as `session.invite` does: one the fake holds,
+   * or, with `kind: "private"`, somebody's private session it only lists (troupe #765).
+   */
+  invite(
+    sessionId: string,
+    subject: string,
+    role: "observe" | "control",
+    by: string,
+    meta: { kind?: "team" | "private"; title?: string; ownerName?: string; displayName?: string; byName?: string } = {},
+  ): Invited {
+    const row = this.rows.get(sessionId);
+    const invited: Invited = {
+      session_id: sessionId,
+      subject,
+      display_name: meta.displayName ?? this.people.find((p) => p.subject === subject)?.display_name ?? subject,
+      role,
+      kind: meta.kind ?? "team",
+      title: meta.title ?? row?.title ?? null,
+      profile: meta.kind === "private" ? null : (row?.profile ?? null),
+      owner: row?.owner ?? by,
+      owner_name: meta.ownerName ?? row?.owner ?? by,
+      invited_by: by,
+      invited_by_name: meta.byName ?? meta.ownerName ?? by,
+      invited_at: new Date(Date.now() + ++this.counter).toISOString(),
+    };
+    const of = this.invitations.get(sessionId) ?? new Map<string, Invited>();
+    of.set(subject, invited);
+    this.invitations.set(sessionId, of);
+    this.changed();
+    return invited;
+  }
+
+  /** Take an invitation back, as `session.uninvite` does. */
+  uninvite(sessionId: string, subject: string): boolean {
+    const gone = this.invitations.get(sessionId)?.delete(subject) ?? false;
+    this.changed();
+    return gone;
+  }
+
+  /** The invitations to a person, as `invites.list` answers them. */
+  private invitesTo(subject: string): Array<Record<string, unknown>> {
+    return [...this.invitations.values()].flatMap((of) => {
+      const i = of.get(subject);
+      if (!i) return [];
+      const { subject: _who, display_name: _name, ...invitation } = i;
+      return [invitation];
+    });
+  }
+
+  /** Whom a session is shared with, as `session.invites` lists them. */
+  private inviteesOf(sessionId: string): Array<Record<string, unknown>> {
+    return [...(this.invitations.get(sessionId)?.values() ?? [])].map((i) => ({
+      subject: i.subject,
+      display_name: i.display_name,
+      email: this.people.find((p) => p.subject === i.subject)?.email ?? null,
+      role: i.role,
+      invited_by: i.invited_by,
+      invited_at: i.invited_at,
+    }));
   }
 
   static async start(opts: PlaneOptions): Promise<FakePlane> {
@@ -643,6 +739,49 @@ export class FakePlane {
 
       case "remote.list":
         return { result: { sessions: this.remoteRows(subject) } };
+
+      // Inviting by name (troupe #765): the owner invites and takes back, anybody in the
+      // session reads whom it is shared with, and a person reads the invitations to them.
+      case "session.invite": {
+        const id = String(params["session_id"] ?? "");
+        const row = this.rows.get(id);
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner" } } };
+        const who = String(params["subject"] ?? "");
+        const person = this.people.find((p) => p.subject === who || p.email === who);
+        if (!person) return { error: { code: -32005, message: "not_found", data: { kind: "person", reason: "nobody of that name has signed in to this plane, so they cannot be invited yet" } } };
+        if (person.email.endsWith("@elsewhere.example.com")) {
+          return { error: { code: -32004, message: "forbidden", data: { person: person.subject, reason: "not on this profile's teams", profile: row.profile } } };
+        }
+        const role = params["role"] === "control" ? "control" : "observe";
+        const made = this.invite(id, person.subject, role, subject, { byName: name, ownerName: name, displayName: person.display_name });
+        return { result: { session_id: id, invite: this.inviteesOf(id).find((i) => i["subject"] === made.subject), pushed: true } };
+      }
+
+      case "session.uninvite": {
+        const id = String(params["session_id"] ?? "");
+        const row = this.rows.get(id);
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner" } } };
+        const who = String(params["subject"] ?? "");
+        const sub = this.people.find((p) => p.email === who)?.subject ?? who;
+        if (!this.uninvite(id, sub)) return { error: { code: -32005, message: "not_found", data: { kind: "invitation" } } };
+        return { result: { session_id: id, subject: sub, rekey_due: false, pushed: true } };
+      }
+
+      case "session.invites":
+        return { result: { session_id: params["session_id"], invites: this.inviteesOf(String(params["session_id"] ?? "")) } };
+
+      case "invites.list":
+        return { result: { invites: this.invitesTo(subject) } };
+
+      case "people.search": {
+        const q = String(params["query"] ?? "").toLowerCase();
+        const people = this.people.filter(
+          (p) => p.subject !== subject && [p.display_name, p.email, p.subject].some((s) => s.toLowerCase().startsWith(q)),
+        );
+        return { result: { people } };
+      }
 
       // A person's own clients, as the plane last saw them, against its policy now.
       case "me.clients":

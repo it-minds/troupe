@@ -17,8 +17,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { emptyTranscript, fold, isBusy, openApprovals, openQuestions, openRemote, remoteWhen, SessionAttachment, watchRemote } from "@troupe/client";
-import type { AgentRow, AttachStatus, TranscriptState } from "@troupe/client";
+import { emptyTranscript, fold, invitationsFrom, isBusy, openApprovals, openQuestions, openRemote, remoteWhen, SessionAttachment, watchRemote } from "@troupe/client";
+import type { AgentRow, Attachment, AttachStatus, Invitation, TranscriptState } from "@troupe/client";
 import { describeError, useConsole } from "../console";
 import type { Load } from "../console";
 import { href } from "../route";
@@ -44,14 +44,16 @@ function presence(row: RemoteRow): string {
  * The laptop sessions offered to this person, as the plane says them now: the watch's list,
  * and `remote.list` asked while the watch is down.
  */
-export function useOffered(): [Load<RemoteRow[]>, () => void] {
+export function useOffered(): [Load<RemoteRow[]>, () => void, Load<Invitation[]>] {
   const { auth } = useConsole();
   const [load, setLoad] = useState<Load<RemoteRow[]>>({ state: "loading" });
+  // The invitations to the person ride the same watch (troupe #765).
+  const [invites, setInvites] = useState<Load<Invitation[]>>({ state: "loading" });
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     let live = true;
-    const ask = (): void =>
+    const ask = (): void => {
       void auth
         .rpc<{ sessions: RemoteRow[] }>("remote.list", {})
         .then((r) => live && setLoad({ state: "ready", data: r.sessions }))
@@ -61,11 +63,22 @@ export function useOffered(): [Load<RemoteRow[]>, () => void] {
           if ((e as { code?: unknown }).code === -32601) setLoad({ state: "ready", data: [] });
           else setLoad((now) => (now.state === "ready" ? now : { state: "error", error: e }));
         });
+      void auth
+        .rpc<{ invites: unknown }>("invites.list", {})
+        .then((r) => live && setInvites({ state: "ready", data: invitationsFrom(r.invites) }))
+        .catch((e: unknown) => {
+          if (!live) return;
+          // Nor does a plane from before #765 invite anybody.
+          if ((e as { code?: unknown }).code === -32601) setInvites({ state: "ready", data: [] });
+          else setInvites((now) => (now.state === "ready" ? now : { state: "error", error: e }));
+        });
+    };
     const watch = watchRemote({
       planeUrl: auth.planeUrl,
       token: () => auth.token(),
       clientInfo: { name: "troupe-console", version: __TROUPE_VERSION__ },
       onSessions: (rows) => live && setLoad({ state: "ready", data: rows as unknown as RemoteRow[] }),
+      onInvites: (rows) => live && setInvites({ state: "ready", data: rows }),
       onLive: (up) => {
         if (!up && live) ask();
       },
@@ -76,12 +89,11 @@ export function useOffered(): [Load<RemoteRow[]>, () => void] {
     };
   }, [auth, tick]);
 
-  return [load, () => setTick((t) => t + 1)];
+  return [load, () => setTick((t) => t + 1), invites];
 }
 
 /** Your laptops' sessions, and those shared with you, on Mine. */
-export function RemoteSessions(): JSX.Element {
-  const [load, reload] = useOffered();
+export function RemoteSessions({ load, reload }: { load: Load<RemoteRow[]>; reload: () => void }): JSX.Element {
 
   return (
     <section className="remote-sessions" aria-label="Offered to you from laptops">
@@ -126,8 +138,12 @@ export function RemoteSessions(): JSX.Element {
   );
 }
 
-/** One laptop's session, followed and steered. */
-export function RemoteSession({ id }: { id: string }): JSX.Element {
+/**
+ * One laptop's session, followed and steered; or, with `pod`, a pod session somebody
+ * invited this person into (troupe #765), attached as the desktop app attaches to one: an
+ * endpoint and a token from `session.open`, read to follow it and activated to steer it.
+ */
+export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | "activate"; whose: string } }): JSX.Element {
   const { auth } = useConsole();
   const [state, setState] = useState<TranscriptState>(emptyTranscript);
   const [status, setStatus] = useState<AttachStatus>("connecting");
@@ -142,13 +158,16 @@ export function RemoteSession({ id }: { id: string }): JSX.Element {
     let live = true;
     setState(emptyTranscript);
     setError(null);
-    const open = () => openRemote((method, params) => auth.rpc(method, params), auth.planeUrl, id);
+    const open = pod
+      ? () => auth.rpc<Attachment>("session.open", { session_id: id, mode: pod.mode })
+      : () => openRemote((method, params) => auth.rpc(method, params), auth.planeUrl, id);
+    const mint = pod ? () => auth.rpc<Attachment>("token.mint", { session_id: id }) : open;
 
     SessionAttachment.open({
       sessionId: id,
-      mode: "activate",
+      mode: pod?.mode ?? "activate",
       open,
-      mint: open,
+      mint,
       clientInfo: { name: "troupe-console", version: __TROUPE_VERSION__ },
       hooks: { onEvent: (e) => live && setState((s) => fold(s, e, { now: Date.now() })) },
       onStatus: (s, detail) => {
@@ -174,7 +193,7 @@ export function RemoteSession({ id }: { id: string }): JSX.Element {
       attachment.current = null;
       if (a) void a.close();
     };
-  }, [auth, id]);
+  }, [auth, id, pod?.mode]);
 
   const act = async (f: (a: SessionAttachment) => Promise<unknown>): Promise<void> => {
     const a = attachment.current;
@@ -193,7 +212,8 @@ export function RemoteSession({ id }: { id: string }): JSX.Element {
   return (
     <div className="page remote-session">
       <p className="crumbs">
-        <a href={href({ page: "mine" })}>← Mine</a> · <span className="mono">{id}</span> · on a laptop, through the plane
+        <a href={href({ page: "mine" })}>← Mine</a> · <span className="mono">{id}</span> ·{" "}
+        {pod ? `on the platform, shared with you by ${pod.whose}` : "on a laptop, through the plane"}
       </p>
       {error ? (
         <Empty title="Not reachable now">{error}</Empty>
