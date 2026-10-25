@@ -4,8 +4,8 @@ Defects found in passing, while working on something else, and not fixed yet. Ea
 place in the code, what goes wrong and who saw it. This page lists every one still open;
 the entries themselves are on the pages under `defects/`, by number, a few hundred lines
 each. Every entry but D8 (the flaky tests, which have their own pass) was checked against
-the code of 0.15.0 on 2026-10-12 (#422): what was fixed was deleted, and what was said
-twice is said once.
+the code of 0.15.0 on 2026-10-12 (#422), and again, D40 and D54 aside, against 0.26.0's
+on 2026-10-25 (chunk 43): what was fixed was deleted, and what was said twice is said once.
 
 Fixers following [fixing-issues.md](fixing-issues.md) add their `noticed` defects: a new
 entry goes at the end of the [last page](defects/d130.md), under the next number, with a
