@@ -77,7 +77,17 @@ interface Session {
    * Offered to the plane for steering from another device (troupe #58), as
    * `remote.offer` left it and `session.list` says it.
    */
-  remote?: { owner: string | null; shares: Array<{ subject: string; role: string }>; state: string; since: string | null; steering: unknown[] } | null;
+  remote?: {
+    owner: string | null;
+    shares: Array<{ subject: string; role: string }>;
+    state: string;
+    since: string | null;
+    steering: unknown[];
+    /** Whether it comes back after a restart: `across_restarts` where the daemon starts at login. */
+    lasts: "across_restarts" | "until_restart";
+    /** Read back from the record as the daemon started. */
+    restored: boolean;
+  } | null;
 }
 
 interface Client {
@@ -701,6 +711,10 @@ evoked where nothing is set and there was a sign-in. */
     this.token = `daemon-token-${this.restarts}`;
     // The label is in `identity.json` and survives; the plane token was in memory.
     this.planeToken = null;
+    // What was offered comes back from its record, on the daemon's own sign-in (troupe #58).
+    for (const s of this.sessions.values()) {
+      if (s.remote) s.remote = { ...s.remote, restored: true, lasts: this.atLogin ? "across_restarts" : "until_restart" };
+    }
     await this.start();
   }
 
@@ -1234,6 +1248,8 @@ evoked where nothing is set and there was a sign-in. */
           state: "online",
           since: null,
           steering: [],
+          lasts: this.atLogin ? "across_restarts" : "until_restart",
+          restored: false,
         };
         return reply(ws, id, { session_id: sessionId, remote: session.remote });
       }

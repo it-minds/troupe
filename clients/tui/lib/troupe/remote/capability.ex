@@ -8,14 +8,17 @@ defmodule Troupe.Remote.Capability do
   a caller asks directly.
   """
 
+  # `relayed?` is a laptop's session reached through the plane, which answers an approval
+  # once; the worker adds it from the laptop's `initialize`.
   @type t :: %{
-          state: atom(),
-          scopes: [String.t()],
-          can_input?: boolean(),
-          can_approve?: boolean(),
-          reason: String.t() | nil,
-          up?: boolean(),
-          remote?: boolean()
+          required(:state) => atom(),
+          required(:scopes) => [String.t()],
+          required(:can_input?) => boolean(),
+          required(:can_approve?) => boolean(),
+          required(:reason) => String.t() | nil,
+          required(:up?) => boolean(),
+          required(:remote?) => boolean(),
+          optional(:relayed?) => boolean()
         }
 
   @doc """

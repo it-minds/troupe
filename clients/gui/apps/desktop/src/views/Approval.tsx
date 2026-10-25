@@ -215,7 +215,7 @@ function ToolApproval({
       {canAnswer ? (
         <div className="answers">
           <button ref={allow} className="allow" onClick={() => void answer("allow")} disabled={busy !== null}>
-            {busy === "allow" ? "Allowing…" : "Allow"}
+            {busy === "allow" ? "Allowing…" : onceOnly ? "Allow once" : "Allow"}
           </button>
           <button className="deny" onClick={() => void answer("deny")} disabled={busy !== null}>
             {busy === "deny" ? "Denying…" : "Deny"}

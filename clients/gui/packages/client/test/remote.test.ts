@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { FleetStore, onThisComputer, openRemote, remoteOffer, remoteRefusal, rowFromDaemon, rowFromRemote, TroupeRpcError } from "../src/index.js";
+import { FleetStore, offerRestartWords, onThisComputer, openRemote, remoteOffer, remoteRefusal, rowFromDaemon, rowFromRemote, TroupeRpcError } from "../src/index.js";
 import type { FleetRow, FleetSource } from "../src/index.js";
 
 const listed = {
@@ -27,7 +27,18 @@ describe("a relayed session", () => {
     assert.equal(row.title, "billing");
     assert.equal(row.state, "offline");
     assert.equal(row.yourRole, "control");
-    assert.deepEqual(row.remote, { state: "offline", since: "2026-10-18T07:30:00Z", owner: "ada@example.com", ownerName: "Ada", shares: [], steering: [] });
+    // The plane says nothing of a restart: that is the laptop's own listing's to say.
+    assert.deepEqual(row.remote, {
+      state: "offline",
+      since: "2026-10-18T07:30:00Z",
+      owner: "ada@example.com",
+      ownerName: "Ada",
+      shares: [],
+      steering: [],
+      lasts: null,
+      restored: false,
+    });
+    assert.deepEqual(offerRestartWords(row.remote!), []);
     assert.equal(onThisComputer(row.kind), false);
     assert.equal(onThisComputer("local"), true);
     assert.equal(onThisComputer("private"), true);
@@ -36,6 +47,12 @@ describe("a relayed session", () => {
   it("is this computer's own row where this computer offered it", async () => {
     const offered = rowFromDaemon({ id: "s-1", workspace: "/home/ada/billing", kind: "local", remote: { state: "online", owner: "ada@example.com", shares: [], steering: [{ subject: "bea@example.com", role: "control" }] } } as never);
     assert.equal(offered.remote?.steering[0]?.subject, "bea@example.com");
+
+    // What it says of a restart, in the terminal's words.
+    const back = rowFromDaemon({ id: "s-2", workspace: "/w", kind: "local", remote: { state: "online", lasts: "across_restarts", restored: true, shares: [], steering: [] } } as never);
+    assert.deepEqual(offerRestartWords(back.remote!), ["back after a restart"]);
+    const once = rowFromDaemon({ id: "s-3", workspace: "/w", kind: "local", remote: { state: "online", lasts: "until_restart", shares: [], steering: [] } } as never);
+    assert.deepEqual(offerRestartWords(once.remote!), ["until this machine restarts"]);
 
     const source = (kind: FleetRow["kind"], id: string, rows: FleetRow[]): FleetSource => ({ id, kind, list: async () => rows });
     const store = new FleetStore([source("local", "daemon", [offered]), source("remote", "remote", [rowFromRemote(listed)])]);

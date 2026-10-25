@@ -20,6 +20,11 @@ defmodule Troupe.UI.TUI.Server do
   @tick_ms 33
   @mailbox_threshold 50
 
+  # What `a` says on a laptop's session steered through the plane, which takes an answer
+  # once and keeps allowing for the session to the person at the laptop.
+  @once_only "From another device a call is allowed or denied once: y allows it, n denies it. " <>
+               "Allowing it for the rest of the session is done at the laptop."
+
   @type state :: %{
           session_id: String.t(),
           workspace: String.t(),
@@ -3375,10 +3380,16 @@ defmodule Troupe.UI.TUI.Server do
   defp window_key(%Key{code: code, modifiers: []}, path, %{win_text: ""} = state)
        when code in ["y", "n", "a"] do
     w = Map.fetch!(state.model.windows, path)
+    once_only? = Model.relayed?(state.model)
 
     case answerable(w, state.pane.agent || path) do
       nil ->
         put_win(state, code)
+
+      # Through the plane an approval is answered once, as the laptop holds it: allowing
+      # for the rest of the session is its own person's, so `a` is not sent from here.
+      _item when code == "a" and once_only? ->
+        notice(state, @once_only)
 
       %{delegation: %{}} = item ->
         gate_key(state, item, code)

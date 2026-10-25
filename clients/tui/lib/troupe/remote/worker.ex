@@ -357,7 +357,8 @@ defmodule Troupe.Remote.Worker do
        state: state.session_state,
        scopes: state.scopes,
        endpoint: state.endpoint,
-       error: state.error
+       error: state.error,
+       relayed?: relayed?(state)
      }, state}
   end
 
@@ -1454,9 +1455,15 @@ defmodule Troupe.Remote.Worker do
       state,
       state.agent || "session",
       :remote_status,
-      capability |> Map.put(:endpoint, state.endpoint) |> Map.put(:plane_url, state.plane_url)
+      capability
+      |> Map.put(:endpoint, state.endpoint)
+      |> Map.put(:plane_url, state.plane_url)
+      |> Map.put(:relayed?, relayed?(state))
     )
   end
+
+  # A laptop's session reached through the plane: its daemon says so in `initialize`.
+  defp relayed?(state), do: state.capabilities["relayed"] == true
 
   defp publish_note(state, text),
     do: notify(state, state.agent || "session", :notice, %{text: text})

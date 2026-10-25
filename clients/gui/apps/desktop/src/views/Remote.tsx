@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { remoteOffer, remoteWhen } from "@troupe/client";
+import { RESTART_SENTENCE, offerRestartWords, remoteOffer, remoteWhen } from "@troupe/client";
 import type { DaemonClient, FleetRow, PresenceMember, RemoteOffer, RemotePerson } from "@troupe/client";
 
 type Role = "observe" | "control";
@@ -53,6 +53,14 @@ export function presenceWords(offer: RemoteOffer): string {
 }
 
 /**
+ * This computer's offer in words: whether the plane has it, then whether it came back
+ * after a restart or lasts only until one, as the terminal's `/steer` says it.
+ */
+export function offerWords(offer: RemoteOffer): string {
+  return [presenceWords(offer), ...offerRestartWords(offer)].join(" · ");
+}
+
+/**
  * This computer's session, offered to the plane or not. Only a local session has it: a
  * private one is sealed under its person's key and never offered.
  */
@@ -63,18 +71,23 @@ export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: Dae
   const [role, setRole] = useState<Role>((row.remote?.shares[0]?.role as Role | undefined) ?? "control");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Said once, as the offer is made, where nothing starts the daemon at login.
+  const [restart, setRestart] = useState(false);
 
   // The listing catches up with what was done here, and with what another client did.
   useEffect(() => setOffer(row.remote ?? null), [row.remote]);
 
   if (row.kind !== "local") return null;
 
-  const act = async (f: () => Promise<{ remote: unknown }>): Promise<void> => {
+  const act = async (f: () => Promise<{ remote: unknown }>, offering = false): Promise<void> => {
     setBusy(true);
     setError(null);
+    setRestart(false);
     try {
       const answer = await f();
-      setOffer(remoteOffer(answer.remote));
+      const made = remoteOffer(answer.remote);
+      setOffer(made);
+      setRestart(offering && made?.lasts === "until_restart");
       setOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -84,7 +97,7 @@ export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: Dae
   };
 
   const offerIt = (): Promise<void> =>
-    act(() => daemon.offerRemote(row.id, people(share).map((person) => ({ person, role }))));
+    act(() => daemon.offerRemote(row.id, people(share).map((person) => ({ person, role }))), true);
   const withdraw = (): Promise<void> => act(() => daemon.withdrawRemote(row.id));
   const steering = offer ? steeringWords({ ...offer, steering: steeringNow(offer.steering, presence) }) : null;
 
@@ -92,8 +105,8 @@ export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: Dae
     <div className="remote-offer" role="group" aria-label="Steer from elsewhere">
       {offer ? (
         <>
-          <span className="pill" title={presenceWords(offer)}>
-            Offered · {presenceWords(offer)}
+          <span className="pill" title={offerWords(offer)}>
+            Offered · {offerWords(offer)}
           </span>
           {steering && <span className="steering">{steering}</span>}
           <button className="tab" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={busy}>
@@ -136,6 +149,12 @@ export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: Dae
             {offer ? "Share" : "Offer it"}
           </button>
         </form>
+      )}
+
+      {offer && restart && (
+        <p className="also" role="status">
+          {RESTART_SENTENCE}
+        </p>
       )}
 
       {error && (
