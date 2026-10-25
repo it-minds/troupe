@@ -2012,7 +2012,8 @@ export class FakeAdmin {
         const window = `manual:${row.id}:${subject}:`;
         this.record(subject, "trigger.run", `${row.team}/${row.name}`, { run: `${window}${now}` });
         if (!row.enabled) return refuse(FORBIDDEN, "forbidden", { reason: "trigger is disabled", trigger: row.name });
-        return { result: this.byHand(row, subject, window, { kind: "manual", by: subject, at }, {}) };
+        // The same instant as the audit row names: the key the page shows is the key the run has.
+        return { result: this.byHand(row, subject, window, { kind: "manual", by: subject, at }, {}, now) };
       }
 
       // `Admin.trigger_fix/4`, the console's "fix this": one run of a trigger on a GitHub
@@ -2623,8 +2624,7 @@ export class FakeAdmin {
    * clock's minute, as `Triggers.fire_by_hand/5` keys it; skipped, saying why, over the
    * trigger's cap.
    */
-  private byHand(row: FakeTrigger, subject: string, window: string, event: Record<string, unknown>, extra: Partial<FakeRun>): Record<string, unknown> {
-    const now = new Date().toISOString();
+  private byHand(row: FakeTrigger, subject: string, window: string, event: Record<string, unknown>, extra: Partial<FakeRun>, now = new Date().toISOString()): Record<string, unknown> {
     const key = `${window}${now}`;
     const again = this.runRows
       .filter((r) => r.idempotency_key.startsWith(window) && Math.abs(Date.parse(r.fired_at) - Date.parse(now)) < 60_000)
