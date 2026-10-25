@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { JSX } from "react";
 import { AdminApi } from "@troupe/client";
 import type { AuthSession, Discovery } from "@troupe/client";
-import { ConsoleContext, describeError, openInNewTab, planeOf, standing } from "./console";
+import { ConsoleContext, describeError, openInNewTab, planeOf, reserveNewTab, standing } from "./console";
 import type { Signed, Standing } from "./console";
 import { SignIn } from "./views/SignIn";
 import { Shell } from "./views/Shell";
@@ -24,7 +24,7 @@ type Phase = { kind: "signed-out" } | { kind: "resolving"; auth: AuthSession } |
 
 export function App({
   navigate,
-  openTab = openInNewTab,
+  openTab,
 }: {
   navigate?: (url: string) => void;
   /** Open an artifact's link in a tab of its own. A test catches the address instead. */
@@ -70,9 +70,12 @@ export function App({
       plane: planeOf(phase.auth, phase.discovery),
       signOut,
       notify: setToast,
-      openTab,
+      openTab: openTab ?? openInNewTab,
+      // A test's catch is handed the address when it comes; a browser's tab is opened at the click.
+      reserveTab: openTab ? () => (url: string | null) => void (url && openTab(url)) : reserveNewTab,
+      follow: navigate ?? ((url: string) => globalThis.location.assign(url)),
     };
-  }, [phase, signOut, openTab]);
+  }, [phase, signOut, openTab, navigate]);
 
   if (phase.kind === "signed-out") return <SignIn onSignedIn={onSignedIn} {...(navigate ? { navigate } : {})} />;
 

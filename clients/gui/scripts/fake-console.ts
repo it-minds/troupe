@@ -21,8 +21,9 @@
 // Mine has something of the person's own: a laptop's session offered to them, one of their
 // sessions on a worker, two clients' versions and the organisation's memory. OFFER_AFTER_MS
 // (15000 by default) later, a second laptop session is offered, which the list shows as it
-// is pushed; OFFER_AFTER_MS=0 for none. Artifacts has two: a page of the person's own in two
-// versions, and somebody else's Markdown for the dev profile's people.
+// is pushed; OFFER_AFTER_MS=0 for none. Artifacts has three: a page of the person's own in two
+// versions, a Markdown document of theirs to edit and share, and somebody else's Markdown for
+// the dev profile's people.
 
 import { exampleAdmin } from "../packages/client/test/support/admin.js";
 import { FakeIdp } from "../packages/client/test/support/idp.js";
@@ -69,6 +70,13 @@ const plane = await FakePlane.start({
         { n: 1, files: [{ path: "index.html", content_type: "text/html", content: "<h1>Week 42</h1>" }], published_by: { subject: as.subject, display_name: as.displayName }, published_at: "2026-10-24T12:00:00Z" },
         { n: 2, files: [{ path: "index.html", content_type: "text/html", content: "<h1>Week 43</h1>" }, { path: "chart.svg", content_type: "image/svg+xml", content: "<svg/>" }], published_by: { subject: as.subject, display_name: as.displayName }, published_at: "2026-10-25T12:00:00Z" },
       ],
+    }),
+    // A document of the person's own, to edit, roll back and share.
+    artifact("art-fake-plan", { subject: as.subject, display_name: as.displayName }, {
+      title: "Quarter plan",
+      kind: "markdown",
+      visibility: "profile:dev",
+      versions: [{ n: 1, files: [{ path: "index.md", content_type: "text/markdown", content: "# Quarter plan\n\nFirst draft." }], published_by: { subject: as.subject, display_name: as.displayName }, published_at: "2026-10-25T08:00:00Z" }],
     }),
     artifact("art-fake-notes", { subject: "ada@example.com", display_name: "Ada" }, { title: "Release notes draft", kind: "markdown", visibility: "profile:dev", versions: [{ n: 1, files: [{ path: "notes.md", content_type: "text/markdown", content: "# Notes" }], published_by: { subject: "ada@example.com", display_name: "Ada" }, published_at: "2026-10-23T09:00:00Z" }] }),
   ],

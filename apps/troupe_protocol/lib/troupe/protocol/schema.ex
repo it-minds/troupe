@@ -1108,7 +1108,15 @@ defmodule Troupe.Protocol.Schema do
         "visibility" => required(:string),
         "files" => required(:array),
         "id" => optional(:string),
+        "note" => optional(:string),
         "session_id" => optional(:string)
+      },
+      # The person's own artifacts on the plane (#62), for a client's "Publish a new version
+      # of…": `mine`, `shared` or `visibility` narrows it, as the plane's `artifact.list`.
+      "artifact.list" => %{
+        "mine" => optional(:boolean),
+        "shared" => optional(:boolean),
+        "visibility" => optional(:string)
       },
       # A first run's questions (Decision 705) — the daemon's only, like the settings
       # they write; a worker answers `method_not_found`. `answer` is the named step's

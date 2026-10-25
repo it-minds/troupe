@@ -579,6 +579,47 @@ defmodule Troupe.Gateway.FakePlane do
   defp dispatch(_state, "artifact.publish", _params),
     do: {:rpc_error, -32_602, "invalid_params", %{"reason" => "an artifact needs a title"}}
 
+  # An upload handle, as the plane makes one: a PUT presigned into the development MinIO for
+  # each file under `artifact-uploads/<handle>/`.
+  defp dispatch(_state, "artifact.upload.begin", %{"files" => files}) do
+    handle = "up-fake#{System.unique_integer([:positive])}"
+    store = ObjectStore.from_env()
+
+    {:ok,
+     %{
+       "upload" => handle,
+       "expires_in" => 900,
+       "urls" =>
+         Enum.map(files, fn file ->
+           key = "artifact-uploads/#{handle}/#{file["path"]}"
+           %{"path" => file["path"], "url" => ObjectStore.presign(store, :put, key, ttl: 300)}
+         end)
+     }}
+  end
+
+  # The person's own artifacts, as the plane lists them, with the gallery's address.
+  defp dispatch(_state, "artifact.list", params) do
+    {:ok,
+     %{
+       "enabled" => true,
+       "profiles" => ["dev"],
+       "publish_organisation" => "everyone",
+       "public_links" => false,
+       "gallery_url" => "https://plane.example.test/console#/artifacts",
+       "asked" => params,
+       "artifacts" => [
+         %{
+           "id" => "art-fakefakefakefake",
+           "title" => "Weekly",
+           "kind" => "html",
+           "visibility" => "organisation",
+           "version" => 1,
+           "mine" => true
+         }
+       ]
+     }}
+  end
+
   defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
 
   defp take_back(state, id, subject) do

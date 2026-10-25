@@ -51,6 +51,7 @@ import { CommandPalette } from "./CommandPalette";
 import type { PaletteScreen } from "./CommandPalette";
 import { Files } from "./Files";
 import { PodConfig } from "./PodConfig";
+import { Publish } from "./Publish";
 import { Curtain, ProseFrame, ReasoningFrame, StripLine, ToolFrame, useNow } from "./Frames";
 import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
@@ -119,6 +120,7 @@ export function Session({
   // What `/memory refresh` or `/memory forget` asked of the memory pane, until it takes it.
   const [memoryAsk, setMemoryAsk] = useState<MemoryAsk | null>(null);
   const [palette, setPalette] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   // The scratchpad document open beside the conversation, by name; null while it is closed.
   const [scratch, setScratch] = useState<string | null>(null);
   useEffect(() => setScratch(null), [sessionId]);
@@ -189,9 +191,11 @@ export function Session({
             detail: detail.command,
             ...(here && onAgents ? { agents: () => onAgents() } : {}),
             ...(agentRows ? { agentRows } : {}),
+            ...(daemon ? { publish: () => setPublishing(true) } : {}),
           }}
         />
       )}
+      {publishing && daemon && <Publish daemon={daemon} sessionId={here ? sessionId : undefined} onClose={() => setPublishing(false)} />}
 
       <Header
         row={row}

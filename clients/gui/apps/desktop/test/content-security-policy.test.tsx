@@ -61,6 +61,8 @@ describe("the app's Content-Security-Policy", () => {
     expect(p["object-src"]).toEqual(["'none'"]);
     expect(p["base-uri"]).toEqual(["'none'"]);
     expect(p["form-action"]).toEqual(["'self'"]);
+    // The console's editor frames an artifact's preview from the artifacts host, over TLS alone.
+    expect(p["frame-src"]).toEqual(["https:"]);
   });
 
   it("takes styles, fonts and images from the bundle", () => {

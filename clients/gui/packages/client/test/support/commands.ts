@@ -125,6 +125,18 @@ export const COMMANDS: CommandEntry[] = [
     example: "/memory refresh",
   },
   {
+    name: "publish",
+    aliases: [],
+    section: "workspace",
+    summary: "Publish a page, a document or a file for others to read",
+    usage: "/publish <path> <organisation | profile:<name>>",
+    args: [arg("path", true, "file"), arg("visibility", true, "text")],
+    availability: "always",
+    source: "builtin",
+    detail: "The file is read on this machine and published on your Troupe plane as an artifact.",
+    example: "/publish report.html profile:dev",
+  },
+  {
     name: "settings",
     aliases: [],
     section: "setup",

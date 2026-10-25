@@ -46,6 +46,8 @@ export interface PaletteActions {
   agents?: (() => void) | undefined;
   /** `agents.list`'s rows for the session's workspace, which an agent's row takes its facts from: a session on this computer's. */
   agentRows?: (() => Promise<AgentRow[]>) | undefined;
+  /** "Publish…": files from this computer on the plane, through its daemon's sign-in, where there is a daemon. */
+  publish?: (() => void) | undefined;
 }
 
 interface RunContext extends PaletteActions {
@@ -109,6 +111,9 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
   unlink: ({ go }) => void go("local"),
   agents: ({ agents }) =>
     agents ? void agents() : "a session on the platform runs its profile bundle's agents, which are changed in the console; the header switches between them",
+  // "Publish…", as the terminal client's /publish: a new artifact, or a new version of one of
+  // the person's own, from files on this computer, through its daemon's sign-in.
+  publish: ({ publish }) => (publish ? void publish() : "publishing goes through this computer's daemon, and there is none here"),
   copy: async ({ transcript }) => {
     await navigator.clipboard.writeText(transcript());
     return "copied the transcript";
@@ -116,6 +121,9 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
   help: () => "",
   quit: () => void window.close(),
 };
+
+/** The built-ins this app asks its arguments of in a dialog of their own, rather than on the line. */
+const ASKS_ITSELF = new Set(["publish"]);
 
 /** Why a built-in has no runner here: said on its row, not hidden. */
 const NOT_HERE: Record<string, string> = {
@@ -364,7 +372,7 @@ export function CommandPalette({
       return;
     }
     const { entry } = row;
-    if (entry.args.some((a) => a.required) && args === "") {
+    if (entry.args.some((a) => a.required) && args === "" && !ASKS_ITSELF.has(entry.name)) {
       // It wants an argument: leave the name on the line to finish typing.
       setQuery(`${entry.name} `);
       setNotice(`usage: ${entry.usage}`);

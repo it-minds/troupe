@@ -7,6 +7,9 @@ defmodule Troupe.Plane.Web.Artifacts do
       GET /a/<id>/                    the current version
       GET /a/<id>/<path>              a file of the current version
       GET /a/<id>/v<n>/[<path>]       a version, and its files
+      GET /s/<token>                  a link: its role for the viewer signed in here, then the artifact
+      GET /s/<token>/[<path>]         a public link's artifact, where public links are on
+      GET /p/<nonce>/[<path>]         an edit's preview, which the console frames
       GET /_/document.css             the stylesheet a Markdown artifact's page uses
       GET /healthz                    liveness
 
@@ -25,6 +28,13 @@ defmodule Troupe.Plane.Web.Artifacts do
   nobody has redeemed, so the only way onto this host is through the plane. A viewer with no
   cookie, or an expired one, is sent to the console, which signs them in and opens the
   artifact again with a fresh ticket.
+
+  **A link** (`/s/<token>`) is the same door: a viewer signed in here is given its role and
+  opens the artifact; anybody else is sent to the console with the link, which signs them in
+  at the plane and spends it for them there. Only a public link, which exists while an
+  administrator allows them, opens without a sign-in, and then under its own address, so
+  nothing it serves carries a cookie. An edit's preview (`/p/<nonce>/`) is served under the
+  same policy and checked against who may put, at every request.
   """
 
   use Plug.Router
@@ -87,7 +97,72 @@ defmodule Troupe.Plane.Web.Artifacts do
     end
   end
 
+  # A link's own address. Signed in here, the viewer takes its role and goes to the
+  # artifact; not, to the console, which signs them in at the plane and spends it there.
+  # A public one is the artifact itself, under the link's address.
+  get "/s/:token/*rest" do
+    case Artifacts.link?(token) do
+      {:ok, :public} when rest == [] ->
+        if String.ends_with?(conn.request_path, "/"),
+          do: public(conn, token, nil),
+          else: conn |> put_resp_header("location", "/s/#{token}/") |> send_resp(301, "")
+
+      {:ok, :public} ->
+        public(conn, token, join(rest))
+
+      {:ok, :signed_in} ->
+        enter_by_link(conn, token)
+
+      :error ->
+        not_found(conn)
+    end
+  end
+
+  # An edit's preview: the edited file over the version it was made on. Its address is its
+  # key for an hour, and whether its person may still put is read at every request.
+  get "/p/:nonce/*rest" do
+    if rest == [] and not String.ends_with?(conn.request_path, "/") do
+      conn |> put_resp_header("location", conn.request_path <> "/") |> send_resp(301, "")
+    else
+      case Artifacts.preview_file(nonce, join(rest)) do
+        {:ok, found} -> answer(conn, found)
+        :error -> not_found(conn)
+      end
+    end
+  end
+
   match(_, do: not_found(conn))
+
+  defp public(conn, token, path) do
+    case Artifacts.public(token, path) do
+      {:ok, found} -> answer(conn, found)
+      :error -> not_found(conn)
+    end
+  end
+
+  defp enter_by_link(conn, token) do
+    conn = Plug.Conn.fetch_cookies(conn)
+
+    with {:ok, viewer} <- Artifacts.viewer(conn.cookies[@cookie]),
+         {:ok, id} <- Artifacts.use_link(token, viewer) do
+      conn |> put_resp_header("location", "/a/#{id}/") |> send_resp(303, "")
+    else
+      _not_here ->
+        case Artifacts.console_url() do
+          nil ->
+            text(
+              conn,
+              401,
+              "Sign in to your Troupe plane's console, and open this link again from there."
+            )
+
+          console ->
+            conn
+            |> put_resp_header("location", "#{console}#/artifacts/link/#{token}")
+            |> send_resp(302, "")
+        end
+    end
+  end
 
   # -- serving ------------------------------------------------------------------------
 
@@ -132,6 +207,11 @@ defmodule Troupe.Plane.Web.Artifacts do
   # A Markdown artifact's own document is a page rendered here; everything else is served
   # as it was published, with the type it was published with.
   defp answer(conn, %{artifact: artifact, file: file, body: body}) do
+    conn =
+      if String.starts_with?(conn.request_path, "/p/"),
+        do: register_before_send(conn, &put_resp_header(&1, "cache-control", "no-store")),
+        else: conn
+
     if artifact.kind == "markdown" and markdown?(file["path"]) do
       conn
       |> put_resp_content_type("text/html")
@@ -172,22 +252,7 @@ defmodule Troupe.Plane.Web.Artifacts do
     end
   end
 
-  defp console_url do
-    case Application.get_env(:troupe_plane, :base_url) do
-      base when is_binary(base) and base != "" ->
-        URI.to_string(URI.merge(String.trim_trailing(base, "/") <> "/", console_path()))
-
-      _none ->
-        nil
-    end
-  end
-
-  defp console_path do
-    case Application.get_env(:troupe_plane, :console_url, "/console") do
-      "" -> "/console"
-      url -> url
-    end
-  end
+  defp console_url, do: Artifacts.console_url()
 
   # Host-only (no `Domain`), so no other host is sent it, and out of every script's reach.
   # `SameSite=None` where it can be `Secure`: a sandboxed page is a document of no site, and
