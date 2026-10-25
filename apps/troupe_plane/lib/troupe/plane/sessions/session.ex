@@ -55,6 +55,11 @@ defmodule Troupe.Plane.Sessions.Session do
     # The machine that last sealed a private session. A name the person chose, not an
     # identifier we can check, which is all a conflict display needs it to be.
     field(:device, :string)
+    # How many keys a private session has been sealed under: one, and one more each time
+    # an invitation to it is taken back. `rekey_due` says one was taken back and its
+    # owner's machine has not yet sealed under the next.
+    field(:key_version, :integer, default: 1)
+    field(:rekey_due, :boolean, default: false)
 
     field(:title, :string)
     field(:workspace_source, :map)
@@ -148,6 +153,8 @@ defmodule Troupe.Plane.Sessions.Session do
     :epoch,
     :worker_id,
     :device,
+    :key_version,
+    :rekey_due,
     :title,
     :workspace_source,
     :repository,

@@ -249,6 +249,35 @@ defmodule Troupe.Worker.Plane.Commands do
     end
   end
 
+  # A person invited into this session by name, or the invitation taken back (#765). The
+  # pod's part is the log's line, as for a share: the plane holds the row and has already
+  # changed the ACL this pod's mirror was told of. Best effort, for the same reason: a
+  # dormant session has no tree to append to.
+  defp dispatch("invite.changed", params) do
+    session_id = params["session_id"]
+    type = params["type"]
+
+    case {type, Sessions.whereis(session_id)} do
+      {type, _tree} when type not in ["session_invited", "session_uninvited"] ->
+        {:error, Error.new(:invalid_params, %{field: "type"})}
+
+      {_type, nil} ->
+        {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "dormant"}}
+
+      {type, _tree} ->
+        invite = params["invite"] || %{}
+
+        data =
+          %{"subject" => invite["subject"], "by" => invite["by"]}
+          |> put_present("role", if(type == "session_invited", do: invite["role"]))
+          |> put_present("display_name", invite["display_name"])
+          |> put_present("by_name", invite["by_name"])
+
+        {:ok, seq} = Log.append(session_id, [], type, data)
+        {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+    end
+  end
+
   # This pod's part of an erasure: the session's copy here and its objects. The key is the
   # plane's, which destroys it before it asks (Decision 811); this pod's credential may
   # destroy none (`Troupe.KMS.Policy.worker/2`), and once the key is gone nothing under the

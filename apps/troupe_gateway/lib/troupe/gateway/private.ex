@@ -497,6 +497,8 @@ defmodule Troupe.Gateway.Private do
         false
 
       {:ok, %{"device" => ^device} = row} ->
+        if row["rekey_due"], do: rekey_now(session.id, plane, opts)
+
         started?(
           session,
           plane,
@@ -522,6 +524,16 @@ defmodule Troupe.Gateway.Private do
       {:error, reason} ->
         Logger.info("troupe: #{session.id} is local for now: #{inspect(reason)}")
         false
+    end
+  end
+
+  # An invitation to it was taken back somewhere other than here, or here while the plane
+  # could not be told the new key: before anything more is sealed, so what follows is under
+  # one the person removed does not have, and the sealer starts at the row's new generation.
+  defp rekey_now(session_id, plane, opts) do
+    case Troupe.Gateway.Invites.rekey(session_id, Keyword.put(opts, :plane, plane)) do
+      {:ok, _row} -> :ok
+      {:error, reason} -> Logger.warning("troupe: #{session_id} is not re-keyed yet: #{inspect(reason)}")
     end
   end
 
@@ -632,6 +644,8 @@ defmodule Troupe.Gateway.Private do
 
   # The store names the row's epoch in every request to sign a write, which is the fence a
   # sealer meets before it writes (Decision 800).
+  # It seals under the generation of the key the row names, one more for each invitation
+  # taken back (#765).
   defp context(plane, subject, session_id, row, opts, exchange) do
     with {:ok, key_manager} <- exchange.(plane, session_id) do
       {name, kms_options} = Keyword.pop(key_manager, :name)
@@ -640,6 +654,7 @@ defmodule Troupe.Gateway.Private do
       Context.open(session_id,
         team: {:person, name || subject},
         epoch: epoch,
+        key_version: row["key_version"] || 1,
         owner_subject: subject,
         store: Keyword.get_lazy(opts, :store, fn -> store(session_id, plane, epoch) end),
         state_dir: opts[:state_dir],
@@ -649,6 +664,34 @@ defmodule Troupe.Gateway.Private do
       )
     end
   end
+
+  @doc """
+  This daemon's sign-in at the key manager as a private session's owner, as a sealer gets
+  one: whose key it is, `{:person, name}`, and the options a key manager call takes. For
+  inviting somebody into the session and re-keying it (`Troupe.Gateway.Invites`).
+  """
+  @spec sign_in(GenServer.server(), String.t(), keyword()) ::
+          {:ok, %{owner: KMS.owner(), options: keyword()}} | {:error, term()}
+  def sign_in(plane, session_id, opts \\ []) do
+    with {:ok, key_manager} <- key_manager(opts).(plane, session_id) do
+      {name, options} = Keyword.pop(key_manager, :name)
+      {:ok, %{owner: {:person, name || Plane.subject(plane)}, options: options}}
+    end
+  end
+
+  @doc """
+  Spend an assertion the plane answered with, `assertion` and `key_manager`, at the key
+  manager it names: the options a key manager call takes, under the caller's own name.
+  """
+  @spec spend(map()) :: {:ok, keyword()} | {:error, term()}
+  def spend(%{"assertion" => assertion, "key_manager" => manager}) do
+    case KMS.OpenBao.jwt_login(manager["address"], manager["auth_path"], manager["role"], assertion) do
+      {:ok, %{token: token}} -> {:ok, [token: token, address: manager["address"], mount: manager["mount"]]}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def spend(_grant), do: {:error, :no_assertion}
 
   # How the daemon gets a key manager token. A function rather than a call, because a
   # test that has no plane to sign an assertion still has a seal path worth exercising —

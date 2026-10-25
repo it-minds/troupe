@@ -29,7 +29,7 @@ defmodule Troupe.Plane.KMSCheckTest do
     {token, _names} = token_for(context.transit, Enum.map(Policy.plane_grants(), & &1.id))
 
     assert %{ok: true, error: nil, grants: grants} = KMSCheck.run(token: token)
-    assert Enum.map(grants, & &1.id) == ~w(session-tokens plane-signing erasure github-app)
+    assert Enum.map(grants, & &1.id) == ~w(session-tokens plane-signing erasure invites github-app)
     assert Enum.all?(grants, & &1.ok)
     assert Enum.all?(grants, &is_nil(&1.fix))
   end

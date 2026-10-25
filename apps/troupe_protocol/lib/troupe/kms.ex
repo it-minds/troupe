@@ -50,6 +50,15 @@ defmodule Troupe.KMS do
   @doc "Whether a key exists, without reading it."
   @callback exists?(owner(), session_id(), keyword()) :: boolean()
 
+  @doc "Put a key at a path, once: `{:error, :exists}` where something is there already."
+  @callback put_at(String.t(), key(), keyword()) :: :ok | {:error, term()}
+
+  @doc "Read the key at a path. Refused where the credential may not."
+  @callback fetch_at(String.t(), keyword()) :: {:ok, key()} | {:error, term()}
+
+  @doc "Destroy every version of the key at a path."
+  @callback destroy_at(String.t(), keyword()) :: :ok | {:error, term()}
+
   @doc "The configured key manager."
   @spec adapter() :: module()
   def adapter, do: Application.get_env(:troupe_protocol, :kms, Troupe.KMS.OpenBao)
@@ -76,6 +85,52 @@ defmodule Troupe.KMS do
   def path(team, session_id) when is_binary(team) do
     "troupe/teams/#{team}/sessions/#{session_id}"
   end
+
+  @doc """
+  The id a private session's key of one generation is kept under, beside its first.
+
+  A private session is sealed under one key until an invitation to it is taken back, and
+  then under a new one the person removed was never given: the first is the session's own
+  id, each after it the id and `.k<n>`. Every generation stays, since what was sealed under
+  it is read with it, and an erasure destroys them all. A path of its own rather than a
+  new version at the same path, because the key manager keeps a bounded number of versions
+  of a secret, and the oldest going would leave the start of a session unreadable.
+
+      iex> Troupe.KMS.generation("s-2", 1)
+      "s-2"
+
+      iex> Troupe.KMS.generation("s-2", 3)
+      "s-2.k3"
+  """
+  @spec generation(session_id(), pos_integer()) :: String.t()
+  def generation(session_id, 1), do: session_id
+  def generation(session_id, version) when is_integer(version) and version > 1,
+    do: "#{session_id}.k#{version}"
+
+  @doc """
+  Where a private session's keys are put for a person invited into it: under their own
+  subtree, `invited/<session>/`, which only their credential reads. Anybody's may create
+  there and none may read or overwrite what another put (`Troupe.KMS.Policy.person/3`), so
+  the owner's daemon hands the key over by writing it, and the plane, which holds the
+  paths, can destroy each copy and read none.
+
+      iex> Troupe.KMS.invited_prefix("idp|bea", "s-2")
+      "troupe/people/idp|bea/invited/s-2/"
+  """
+  @spec invited_prefix(String.t(), session_id()) :: String.t()
+  def invited_prefix(name, session_id), do: person_prefix(name) <> "/invited/#{session_id}/"
+
+  @doc """
+  One generation of a session's key, put for one invitee, at a path of its own: the
+  generation and a random part nobody can guess, so nobody could have put something there
+  first.
+
+      iex> Troupe.KMS.invited_slot("idp|bea", "s-2", 2, "Xy")
+      "troupe/people/idp|bea/invited/s-2/k2-Xy"
+  """
+  @spec invited_slot(String.t(), session_id(), pos_integer(), String.t()) :: String.t()
+  def invited_slot(name, session_id, version, nonce),
+    do: invited_prefix(name, session_id) <> "k#{version}-#{nonce}"
 
   @doc """
   Where a person's credential for one MCP server's slot lives.

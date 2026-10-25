@@ -601,6 +601,22 @@ defmodule Troupe.Protocol.Schema do
       },
       "share_revoked" => %{"id" => required(:string), "reason" => optional(:string)},
       "acl_granted" => %{"subject" => required(:string), "role" => required(:string)},
+      # A person invited into this session by name, or the invitation taken back (#765):
+      # whom, at which role (`observe` or `control`), and by whom. Durable, for the reason
+      # a share is: who was let in to read what was said is part of what happened.
+      "session_invited" => %{
+        "subject" => required(:string),
+        "role" => required(:string),
+        "by" => required(:string),
+        "display_name" => optional(:string),
+        "by_name" => optional(:string)
+      },
+      "session_uninvited" => %{
+        "subject" => required(:string),
+        "by" => required(:string),
+        "display_name" => optional(:string),
+        "by_name" => optional(:string)
+      },
       "acl_revoked" => %{"subject" => required(:string), "role" => required(:string)},
       # Client-hosted tools. Durable, all three, because a tool that ran on somebody's
       # laptop is part of what happened in this session and a replay that did not say so

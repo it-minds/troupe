@@ -29,6 +29,7 @@ defmodule Troupe.Sessions.Context do
     :owner_subject,
     :profile,
     :state_dir,
+    key_version: 1,
     workspace: nil
   ]
 
@@ -41,7 +42,8 @@ defmodule Troupe.Sessions.Context do
           owner_subject: String.t() | nil,
           profile: String.t() | nil,
           state_dir: Path.t() | nil,
-          workspace: Path.t() | nil
+          workspace: Path.t() | nil,
+          key_version: pos_integer()
         }
 
   @doc """
@@ -51,19 +53,26 @@ defmodule Troupe.Sessions.Context do
   activated again gets the key it already had, and one being created for the first time
   gets a new one. A worker that had to know which case it was in would get it wrong the
   first time a create was retried.
+
+  `:key_version` is the generation of a private session's key to seal under, one more for
+  each invitation to it taken back (`KMS.generation/2`); the first, the session's own id,
+  where it is not given.
   """
   @spec open(String.t(), keyword()) :: {:ok, t()} | {:error, term()}
   def open(session_id, opts) do
     team = Keyword.fetch!(opts, :team)
     kms = Keyword.get(opts, :kms, KMS.adapter())
+    version = Keyword.get(opts, :key_version, 1)
 
-    with {:ok, key} <- kms.create(team, session_id, Keyword.get(opts, :kms_options, [])) do
+    with {:ok, key} <-
+           kms.create(team, KMS.generation(session_id, version), Keyword.get(opts, :kms_options, [])) do
       {:ok,
        %__MODULE__{
          session_id: session_id,
          team: team,
          epoch: Keyword.get(opts, :epoch, 1),
          data_key: key,
+         key_version: version,
          store: Keyword.get_lazy(opts, :store, &ObjectStore.from_env/0),
          owner_subject: Keyword.get(opts, :owner_subject),
          profile: Keyword.get(opts, :profile),
