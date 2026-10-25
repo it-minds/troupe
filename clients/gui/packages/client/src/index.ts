@@ -133,6 +133,8 @@ export type {
   RemoteOffer,
   RemotePerson,
 } from "./fleet.js";
+export { ArtifactApi } from "./artifacts.js";
+export type { Artifact, ArtifactDetail, ArtifactFile, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactOrigin, ArtifactPerson, ArtifactTicket, ArtifactVersion } from "./artifacts.js";
 export { openRemote, remoteRefusal, watchRemote, watchUrl, when as remoteWhen } from "./remote.js";
 export type { RemoteListRow, RemoteWatch, RemoteWatchOptions } from "./remote.js";
 export { AdminApi, bundleErrors, requiredRole } from "./admin.js";

@@ -500,6 +500,32 @@ if config_env() == :prod do
     if store = object_store.() do
       config :troupe_protocol, object_store: store
     end
+
+    # The artifacts host (#62): where published pages are read, on a hostname that is not
+    # the plane's and a port of its own (`plane.artifactsHost` in the chart). Without a
+    # URL there is nowhere to open one, and `artifact.open` says so; without a port the
+    # listener does not start. The same host as the plane's would put every published page
+    # in the plane's origin, so a plane told that refuses to start.
+    artifacts_url = presence.(System.get_env("TROUPE_ARTIFACTS_URL"))
+
+    if artifacts_url && URI.parse(artifacts_url).host == URI.parse(base_url).host do
+      raise """
+      TROUPE_ARTIFACTS_URL names the plane's own host (#{URI.parse(base_url).host}).
+
+      Artifacts run what people and agents published, so they are served from a host of
+      their own, which can reach nothing of the plane's. Give them another hostname: best
+      a domain of its own (artifacts.example.org beside plane.example.com), or a sibling
+      of the plane's (artifacts.example.com).
+      """
+    end
+
+    config :troupe_plane, :artifacts,
+      url: artifacts_url,
+      port:
+        (case presence.(System.get_env("TROUPE_ARTIFACTS_PORT")) do
+           nil -> nil
+           port -> String.to_integer(port)
+         end)
   end
 
   # How a worker proves which worker it is.

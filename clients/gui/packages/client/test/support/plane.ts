@@ -59,6 +59,57 @@ export interface PlaneOptions {
   memory?: Array<Record<string, unknown>>;
   /** Each person's own memory document to start with, by subject (#55's user level). */
   own?: Record<string, string>;
+  /** What `artifact.*` serves, in any order: the list sorts them, newest published first. */
+  artifacts?: FakeArtifact[];
+  /** `false` is a plane whose administrator switched artifacts off. */
+  artifactsEnabled?: boolean;
+  /** Who may publish to the whole organisation. */
+  publishOrganisation?: "everyone" | "platform_admins";
+}
+
+/** A file of an artifact's version, with what it holds, which no answer carries. */
+export interface FakeArtifactFile {
+  path: string;
+  content_type: string;
+  content: string;
+}
+
+/** A version of an artifact as the fake keeps it. */
+export interface FakeArtifactVersion {
+  n: number;
+  files: FakeArtifactFile[];
+  published_by: { subject: string; display_name: string | null };
+  published_at: string;
+}
+
+/** An artifact as the fake keeps it: what `artifact.list` says of it, and its versions. */
+export interface FakeArtifact {
+  id: string;
+  title: string;
+  kind: "html" | "markdown" | "file";
+  visibility: string;
+  owner: { subject: string; display_name: string | null };
+  origin: { session_id: string | null; profile: string | null; agent: string | null; where: "pod" | "laptop" | "person" };
+  team: string | null;
+  created_at: string;
+  /** Oldest first, as they were published. */
+  versions: FakeArtifactVersion[];
+}
+
+/** An artifact with the plane's shape: one version of one HTML page, unless told otherwise. */
+export function artifact(id: string, owner: { subject: string; display_name: string | null }, fields: Partial<FakeArtifact> = {}): FakeArtifact {
+  return {
+    id,
+    title: id,
+    kind: "html",
+    visibility: "organisation",
+    owner,
+    origin: { session_id: null, profile: null, agent: null, where: "person" },
+    team: null,
+    created_at: "2026-10-25T10:00:00Z",
+    versions: [{ n: 1, files: [{ path: "index.html", content_type: "text/html", content: "<h1>A page</h1>" }], published_by: owner, published_at: "2026-10-25T10:00:00Z" }],
+    ...fields,
+  };
 }
 
 /** A person's own memory document as the fake plane keeps it. */
@@ -143,6 +194,10 @@ export class FakePlane {
   readonly asked: string[] = [];
   /** Each person's own memory document, by subject. */
   readonly own = new Map<string, OwnMemory>();
+  /** The artifacts published to it, by id. */
+  readonly artifacts = new Map<string, FakeArtifact>();
+  /** Every `artifact.open` asked, in order, with the link it answered. */
+  readonly opened: Array<{ subject: string; id: string; version: number | null; url: string }> = [];
   /**
    * The people's watches open now (`/v1/relay/watch`), with the list each was last sent. A
    * watch is here from the moment its `initialize` is answered, so a change made once a test
@@ -169,6 +224,7 @@ export class FakePlane {
     for (const [subject, text] of Object.entries(opts.own ?? {})) {
       this.own.set(subject, { version: 1, text, changed_by: subject, changed_at: "2026-10-24T09:00:00Z" });
     }
+    for (const a of opts.artifacts ?? []) this.artifacts.set(a.id, a);
     this.corsOrigins = opts.corsOrigins ?? [];
     this.podTokenLifetime = opts.podTokenLifetime ?? 900;
     this.server = createServer((req, res) => void this.handle(req, res));
@@ -376,6 +432,46 @@ export class FakePlane {
 
   private ownJson(own: OwnMemory): Record<string, unknown> {
     return { ...own, hash: own.version ? `sha256:own-${own.version}` : null, bytes: new TextEncoder().encode(own.text).length, limit: 8192 };
+  }
+
+  /** Whether this person may see this artifact: their own, the organisation's, or a profile of theirs. */
+  private mayRead(a: FakeArtifact, subject: string): boolean {
+    if (a.owner.subject === subject || a.visibility === "organisation") return true;
+    const profile = a.visibility.startsWith("profile:") ? a.visibility.slice("profile:".length) : null;
+    return profile !== null && (this.opts.profiles ?? ["dev", "ux"]).includes(profile);
+  }
+
+  /** An artifact as `artifact.list` answers it to this person: never a file's content. */
+  private artifactJson(a: FakeArtifact, subject: string): Record<string, unknown> {
+    const latest = a.versions[a.versions.length - 1]!;
+    const { versions: _versions, ...shown } = a;
+    return {
+      ...shown,
+      mine: a.owner.subject === subject,
+      version: latest.n,
+      bytes: latest.files.reduce((n, f) => n + new TextEncoder().encode(f.content).length, 0),
+      url: `https://artifacts.example.test/a/${a.id}/`,
+      published_at: latest.published_at,
+      may_delete: a.owner.subject === subject || this.opts.admin?.role(subject) === "platform_admin",
+    };
+  }
+
+  /** Its versions, newest first, each with its files described and none of what they hold. */
+  private artifactVersions(a: FakeArtifact): Array<Record<string, unknown>> {
+    return [...a.versions]
+      .sort((x, y) => y.n - x.n)
+      .map((v) => {
+        const files = v.files.map((f) => ({ path: f.path, sha256: `sha256:${a.id}-${v.n}-${f.path}`, content_type: f.content_type, bytes: new TextEncoder().encode(f.content).length }));
+        return {
+          n: v.n,
+          hash: `sha256:${a.id}-${v.n}`,
+          bytes: files.reduce((n, f) => n + f.bytes, 0),
+          files,
+          published_by: v.published_by,
+          published_at: v.published_at,
+          url: `https://artifacts.example.test/a/${a.id}/v${v.n}/`,
+        };
+      });
   }
 
   private remoteRows(subject: string): Array<Record<string, unknown>> {
@@ -684,6 +780,48 @@ export class FakePlane {
         const now = { version: own.version + 1, text, changed_by: subject, changed_at: new Date().toISOString() };
         this.own.set(subject, now);
         return { result: { changed: true, entry: null, user: this.ownJson(now) } };
+      }
+
+      // Artifacts, as any signed-in person asks for them: the list, one with its versions, a
+      // one-time link to open it on the artifacts host, and its deletion by its owner or a
+      // platform admin's takedown. No answer carries what a file holds.
+      case "artifact.list": {
+        const enabled = this.opts.artifactsEnabled ?? true;
+        const rows = enabled
+          ? [...this.artifacts.values()]
+              .filter((a) => this.mayRead(a, subject))
+              .filter((a) => params["mine"] !== true || a.owner.subject === subject)
+              .filter((a) => typeof params["visibility"] !== "string" || a.visibility === params["visibility"])
+              .map((a) => this.artifactJson(a, subject))
+              .sort((x, y) => String(y["published_at"]).localeCompare(String(x["published_at"])))
+          : [];
+        return { result: { enabled, profiles, publish_organisation: this.opts.publishOrganisation ?? "everyone", artifacts: rows } };
+      }
+
+      case "artifact.get": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
+      }
+
+      case "artifact.open": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        const version = typeof params["version"] === "number" ? params["version"] : null;
+        if (version !== null && !a.versions.some((v) => v.n === version)) return { error: { code: -32005, message: "not_found" } };
+        const url = `https://artifacts.example.test/enter?ticket=t-${++this.counter}`;
+        this.opened.push({ subject, id: a.id, version, url });
+        return { result: { url, expires_in: 60 } };
+      }
+
+      case "artifact.delete": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        if (a.owner.subject !== subject && this.opts.admin?.role(subject) !== "platform_admin") {
+          return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner or a platform admin deletes an artifact" } } };
+        }
+        this.artifacts.delete(a.id);
+        return { result: { deleted: true, id: a.id } };
       }
 
       case "remote.open": {

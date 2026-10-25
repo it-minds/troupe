@@ -301,6 +301,10 @@ export interface FakeTeam {
   remote_offering_allowed: boolean;
   /** The repositories its sessions may name and the fix loop's caps, as the plane answers them. */
   github: { repositories: string[]; max_pushes: number | null; max_runs: number | null; max_attempts?: number | null };
+  /** What the team's artifacts hold now, in bytes. */
+  artifact_bytes: number;
+  /** The most they may hold, in bytes; 0 is no quota. */
+  artifact_quota_bytes: number;
   admins: string[];
   grants: Array<{ profile: string; volume_mode: string | null }>;
   groups: Array<{ external_id: string; display_name: string | null; issuer: string | null; linked_by: string | null }>;
@@ -562,6 +566,16 @@ const SETTINGS: Setting[] = [
   },
   { key: "managed_mcp_servers_only", group: "sessions", type: "boolean", fallback: false, summary: "Whether a session may use only the MCP servers its bundle names.", consequence: "On, a person's own servers are not offered to sessions here." },
   { key: "default_bundle_channel", group: "sessions", type: "string", fallback: "stable", summary: "The channel a profile follows when it names none.", consequence: "Profiles that name one keep theirs." },
+  { key: "artifacts_enabled", group: "artifacts", type: "boolean", fallback: true, summary: "Whether people and their agents may publish artifacts, and open them.", consequence: "Off, nothing is published and no artifact opens; none is deleted." },
+  {
+    key: "artifacts_publish_organisation",
+    group: "artifacts",
+    type: "enum",
+    values: ["everyone", "platform_admins"],
+    fallback: "everyone",
+    summary: "Who may publish an artifact the whole organisation sees.",
+    consequence: "Those published already stay where they are.",
+  },
   { key: "issuer", group: "sign_in", type: "string", summary: "The identity provider's issuer URL.", consequence: "Wrong, and nobody signs in. Saved behind a check; reset puts the deployment's back." },
   { key: "client_id", group: "sign_in", type: "string", summary: "This plane's client id at the provider.", consequence: "The provider refuses a sign-in for a client it does not know." },
   { key: "client_secret", group: "sign_in", type: "string", secret: true, summary: "The client's secret, for the console's code exchange.", consequence: "Never shown. A blank field keeps it." },
@@ -590,6 +604,7 @@ const GROUPS = [
       "The organisation's defaults for a person's local sessions, below their own settings: provider, URL and models. Never a key; each person pastes their own. And what those sessions may not go past, above everything a person sets.",
   },
   { key: "sessions", title: "What a new session runs with", blurb: "Defaults for work started after the change." },
+  { key: "artifacts", title: "What people may publish", blurb: "Pages and files people and their agents publish, for the organisation or a profile's people to open." },
   { key: "sign_in", title: "Where people sign in", blurb: "The identity provider, on its own screen." },
   { key: "deployment", title: "What this plane was deployed with", blurb: "Read-only here on purpose. Change them in the deployment and roll it." },
 ];
@@ -662,8 +677,9 @@ const TEAM_KEYS = [
   "allow_unenforced_workers",
   "github",
   "remote_offering_allowed",
+  "artifact_quota_bytes",
 ];
-const INTEGER_KEYS = ["budget_micros", "idle_timeout_seconds", "cache_eviction_days", "erase_after_days"];
+const INTEGER_KEYS = ["budget_micros", "idle_timeout_seconds", "cache_eviction_days", "erase_after_days", "artifact_quota_bytes"];
 
 type TeamGitHubFake = FakeTeam["github"];
 
@@ -3410,6 +3426,8 @@ export function team(name: string, fields: Partial<FakeTeam> = {}): FakeTeam {
     allow_unenforced_workers: false,
     remote_offering_allowed: true,
     github: { repositories: [], max_pushes: null, max_runs: null },
+    artifact_bytes: 0,
+    artifact_quota_bytes: 0,
     admins: [],
     grants: [],
     groups: [],
@@ -3525,6 +3543,8 @@ export function exampleAdmin(): FakeAdmin {
         volume_size: "20Gi",
         volume_storage_class: "fast-ssd",
         github: { repositories: ["example-org/widgets"], max_pushes: 5, max_runs: null },
+        artifact_bytes: 12 * 1024 * 1024,
+        artifact_quota_bytes: 100 * 1024 * 1024,
         admins: ["dan@example.com"],
         grants: [
           { profile: "dev", volume_mode: "rw" },

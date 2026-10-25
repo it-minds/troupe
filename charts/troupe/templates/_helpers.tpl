@@ -44,6 +44,9 @@ the worker admits by itself. A page whose origin is not here gets no socket.
 {{- end -}}
 
 {{- define "troupe.plane.validate" -}}
+{{- if and .Values.plane.artifactsHost (eq .Values.plane.artifactsHost .Values.plane.host) }}
+{{- fail (printf "plane.artifactsHost is %q, the plane's own host: published artifacts run what people and agents wrote, so they are served from a host of their own, which can reach nothing of the plane's. Give them another hostname." .Values.plane.artifactsHost) }}
+{{- end }}
 {{- if and (gt (int .Values.plane.replicas) 1) (ne .Values.plane.distribution "name") }}
 {{- fail (printf "plane.replicas is %d but plane.distribution is %q: replicas that do not form an Erlang cluster each place sessions as if alone. Set plane.distribution to \"name\", or plane.replicas to 1." (int .Values.plane.replicas) .Values.plane.distribution) }}
 {{- end }}

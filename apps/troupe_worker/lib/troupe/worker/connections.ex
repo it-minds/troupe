@@ -41,8 +41,8 @@ defmodule Troupe.Worker.Connections do
   alias Troupe.KMS
   alias Troupe.KMS.Policy
   alias Troupe.MCP.Server
+  alias Troupe.Worker.{Artifacts, UserMemory}
   alias Troupe.Worker.Plane.Link
-  alias Troupe.Worker.UserMemory
 
   require Logger
 
@@ -105,6 +105,9 @@ defmodule Troupe.Worker.Connections do
       # And where an agent's entry for its person's own memory goes, asked of the plane
       # the same way: by the session, never by whose it is.
       UserMemory.install()
+      # And where its sessions' `publish_artifact` sends an artifact, asked of the plane by
+      # the session in the same way.
+      Artifacts.install()
     end
 
     {:ok, %{}}

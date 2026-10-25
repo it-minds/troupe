@@ -415,6 +415,10 @@ export interface AdminTeam extends TeamSpend {
    * Absent from a plane older than the field.
    */
   github?: TeamGitHub;
+  /** What the team's artifacts hold now, in bytes. Absent from a plane older than artifacts. */
+  artifact_bytes?: number;
+  /** The most the team's artifacts may hold, in bytes; 0 is no quota. Absent from a plane older than artifacts. */
+  artifact_quota_bytes?: number;
   admins: string[];
   grants: Array<{ profile: string; volume_mode: string | null }>;
   groups: AdminTeamGroup[];

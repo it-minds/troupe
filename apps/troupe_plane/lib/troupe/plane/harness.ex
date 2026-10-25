@@ -25,6 +25,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.ObjectStore
 
   alias Troupe.Plane.{
+    Artifacts,
     Audit,
     Budget,
     Build,
@@ -149,7 +150,14 @@ defmodule Troupe.Plane.Harness do
     "remote.list" => :observe,
     "remote.open" => :observe,
     # The laptop's daemon's own sign-in, asked with its person's token at its first offer.
-    "remote.grant" => :control
+    "remote.grant" => :control,
+    # Artifacts (#62): what the caller may see, one with its versions, a one-time address
+    # that opens it on the artifacts host, and publishing and deleting their own.
+    "artifact.list" => :observe,
+    "artifact.get" => :observe,
+    "artifact.open" => :observe,
+    "artifact.publish" => :control,
+    "artifact.delete" => :control
   }
 
   @doc "Every method the plane answers, and the scope each needs."
@@ -372,6 +380,33 @@ defmodule Troupe.Plane.Harness do
       {:ok, own_saved(user, saved)}
     end
   end
+
+  # Artifacts (`Artifacts`): every answer is what the caller may see, read now, and one
+  # they may not is not there. A client publishes for its person, naming the session it
+  # came from as provenance; a pod's agent publishes over its control link instead, where
+  # the plane reads the session off its own row.
+  defp handle("artifact.list", params, %{user: user} = context) do
+    Artifacts.list(user, Map.take(params, ["mine", "visibility"]), platform_admin?: admin?(context))
+  end
+
+  defp handle("artifact.get", %{"id" => id}, %{user: user} = context),
+    do: Artifacts.get(id, user, platform_admin?: admin?(context))
+
+  defp handle("artifact.open", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.ticket(id, user, platform_admin?: admin?(context), version: params["version"])
+
+  defp handle("artifact.publish", params, %{user: user} = context) do
+    Artifacts.publish(user, params,
+      platform_admin?: admin?(context),
+      origin: Map.take(params, ["session_id", "agent"])
+    )
+  end
+
+  defp handle("artifact.delete", %{"id" => id}, %{user: user} = context),
+    do: Artifacts.delete(id, user, platform_admin?: admin?(context))
+
+  defp handle(method, _params, _context) when method in ~w(artifact.get artifact.open artifact.delete),
+    do: {:error, Error.new(:invalid_params, %{reason: "#{method} takes an artifact's id"})}
 
   # Which version each of the caller's own clients last ran, and how that stands against
   # the plane's policy now: the line a person's own console shows, as an administrator's
@@ -2785,6 +2820,8 @@ defmodule Troupe.Plane.Harness do
   defp granted_profiles(user) do
     user |> Identity.profiles_for() |> Enum.map(& &1.profile) |> Enum.uniq() |> Enum.sort()
   end
+
+  defp admin?(context), do: Map.get(context, :platform_admin?, false)
 
   # Resolved, not raw. What a client reads here it acts on — whether to offer a steer
   # button, when to expect a session to go dormant — and a column that the platform is
