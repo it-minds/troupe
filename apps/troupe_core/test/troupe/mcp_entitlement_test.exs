@@ -1,7 +1,7 @@
 defmodule Troupe.MCPEntitlementTest do
   @moduledoc """
-  A team's entitlements narrow which MCP servers' tools a session is offered, and leave
-  what the pod discovered alone.
+  A team's entitlements narrow which MCP servers' tools a session is offered, refuse a
+  call to one it was not offered, and leave what the pod discovered alone.
 
   Not async, and on its own for that reason: the pod's discovered tools live in the
   application environment, which every session in the VM reads, so a test that puts
@@ -46,6 +46,33 @@ defmodule Troupe.MCPEntitlementTest do
     # because asking four servers for their tool list at every create would put
     # somebody else's latency on the create path.
     assert Enum.any?(Tools.all(), &(Tool.name(&1) == "mcp.pager.page"))
+  end
+
+  test "refuses a call to a server's tool the team is not entitled to, as a tool that is not there",
+       context do
+    jira = fake_mcp_tool("jira", "create_issue")
+    pager = fake_mcp_tool("pager", "page")
+
+    Application.put_env(:troupe_core, :remote_tools, [jira, pager])
+    on_exit(fn -> Application.delete_env(:troupe_core, :remote_tools) end)
+
+    definition = %Definition{name: "plain", mode: :primary, prompt: ""}
+    narrowed = Map.put(context.bundle, :entitlements, %{"mcp_servers" => ["jira"]})
+
+    # The list the model is sent is a convenience; this is the boundary. A model that
+    # names the tool anyway, from a prompt or a guess, gets the same answer as for a tool
+    # that was never discovered, because for this session it never was.
+    assert {:run, _tool, _mode} =
+             Tools.authorize("mcp.jira.create_issue", definition, ctx(context, narrowed))
+
+    assert {:reject, %Tool.Result{ok?: false, content: content}} =
+             Tools.authorize("mcp.pager.page", definition, ctx(context, narrowed))
+
+    assert content =~ "There is no tool named mcp.pager.page"
+
+    # With no entitlements on the bundle, every discovered server's tools run.
+    assert {:run, _tool, _mode} =
+             Tools.authorize("mcp.pager.page", definition, ctx(context, context.bundle))
   end
 
   defp ctx(context, bundle) do

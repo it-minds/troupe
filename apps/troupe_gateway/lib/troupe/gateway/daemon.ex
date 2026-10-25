@@ -31,6 +31,7 @@ defmodule Troupe.Gateway.Daemon do
   use Supervisor
 
   alias Troupe.Gateway.{
+    Artifacts,
     Commands,
     Connections,
     Idle,
@@ -79,6 +80,9 @@ defmodule Troupe.Gateway.Daemon do
     Process.set_label("troupe daemon")
     :persistent_term.erase(@instance_key)
     _ = instance_id()
+    # Where its sessions' `publish_artifact` sends what it publishes: the plane, with this
+    # daemon's sign-in, which is what gives those sessions the tool at all.
+    :ok = Artifacts.install()
 
     children = [
       {Commands, opts},

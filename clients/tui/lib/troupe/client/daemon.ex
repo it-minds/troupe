@@ -1218,6 +1218,14 @@ defmodule Troupe.Client.Daemon do
   def identity, do: Link.call("identity.get", %{})
 
   @doc """
+  Publish an artifact on the plane as this daemon's person (`artifact.publish`, root #62):
+  the plane's answer, its `url` among it, or the daemon's sentence where it is signed out.
+  """
+  @spec publish_artifact(map()) :: {:ok, map()} | {:error, term()}
+  def publish_artifact(params),
+    do: Link.call("artifact.publish", Map.put(params, "command_id", Troupe.Remote.RPC.command_id()))
+
+  @doc """
   Unlink this computer's daemon (`identity.unlink`), answering who it was linked to. The
   person this terminal is signed in as then takes it, as at a new connection, unless that
   is the person just unlinked: a second person on this login takes it over from here.

@@ -95,6 +95,13 @@ policy:
   allowedEgress: ["*.anthropic.com", api.openai.com, github.com]
 ```
 
+For [artifacts](../user/artifacts.md), the pages people and agents publish, give them a
+host of their own: `plane.artifactsHost` (best a domain apart from the plane's, such as
+`artifacts.example.org`; never `plane.host`, which the chart refuses) and
+`plane.artifactsTlsSecretName`. The chart routes it, through an Ingress of its own, to the
+plane's artifacts port and nothing else. Left empty, artifacts are published and listed,
+and opening one says the plane has no artifacts host.
+
 The database URL is the `troupe-plane-database` Secret. [../egress-allowlist.md](../egress-allowlist.md)
 is generated from what each component declares it dials: read it before narrowing
 `allowedEgress`, because a host the code needs and the policy refuses is a tool that fails

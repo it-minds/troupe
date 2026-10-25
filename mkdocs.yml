@@ -110,6 +110,7 @@ nav:
       - MCP servers and skills: user/mcp.md
       - Instruction files and onboarding: user/instructions.md
       - Memory: user/memory.md
+      - Artifacts: user/artifacts.md
       - Configuration cookbook:
           - user/configuration/cookbook.md
           - Where your files are: user/configuration/files.md

@@ -632,6 +632,10 @@ defmodule Troupe.Client do
   @spec identity() :: {:ok, map()} | {:error, term()}
   def identity, do: Daemon.identity()
 
+  @doc "Publish an artifact on the plane through this computer's daemon, as its person."
+  @spec publish_artifact(map()) :: {:ok, map()} | {:error, term()}
+  def publish_artifact(params), do: Daemon.publish_artifact(params)
+
   @doc """
   Unlink this computer's daemon from the person it records sessions as, answering who that
   was; the person this terminal is signed in as, if somebody else, takes it.

@@ -254,6 +254,12 @@ defmodule Troupe.Plane.Admin.API do
         "Whether the team's people may offer a laptop session for steering from another device. False refuses each new offer, and each attach to one already made, saying the team does not allow it."
     },
     %Argument{
+      name: "artifact_quota_bytes",
+      type: :integer,
+      description:
+        "What the team's artifacts may hold in the object store, every version counted, in bytes. 0 is no quota. A publish that would go past it is refused; what is published already stays."
+    },
+    %Argument{
       name: "volume_size",
       type: :string,
       description: "The team volume's size, as a Kubernetes quantity such as 10Gi."

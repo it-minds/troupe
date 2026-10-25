@@ -34,6 +34,14 @@ spec:
         {{- end }}
       ports:
         - {protocol: TCP, port: {{ .Values.plane.httpPort }}}
+    {{- if .Values.plane.artifactsHost }}
+    # The artifacts host's port (#62): from the ingress controller alone, as the API is.
+    - from:
+        - namespaceSelector:
+            matchLabels: {"troupe.dev/ingress": "true"}
+      ports:
+        - {protocol: TCP, port: {{ .Values.plane.artifactsPort }}}
+    {{- end }}
     # The control port: workers dial it to enrol and to be told about sessions, and the
     # operator may reach it. Worker namespaces carry `troupe.dev/workers=true` because
     # the operator puts it there when it creates them. Nothing outside the cluster can

@@ -7,6 +7,7 @@
     "commands/agents.put.json",
     "commands/agents.validate.json",
     "commands/approval.respond.json",
+    "commands/artifact.publish.json",
     "commands/blob.get.json",
     "commands/client.mode.json",
     "commands/commands.list.json",
