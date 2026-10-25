@@ -305,6 +305,18 @@ defmodule Troupe.Gateway.Dispatch do
       else: :ok
   end
 
+  # An artifact is published on the plane and listed from it, so a client in Local only, or
+  # a session under it, publishes and lists nothing.
+  defp local_only("artifact." <> _ = method, params, context) do
+    if context.local_only or LocalOnly.session?(params["session_id"]),
+      do:
+        refuse_local_only(
+          "Local only is on for this client or this session, so nothing is published on the " <>
+            "plane or listed from it (#{method})"
+        ),
+      else: :ok
+  end
+
   defp local_only("session.create", %{"private" => true}, %Context{local_only: true}) do
     refuse_local_only(
       "this client is in Local only, and a private session is sealed to the plane; start it " <>

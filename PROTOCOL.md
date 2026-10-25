@@ -170,7 +170,8 @@ that client disconnects. For it the daemon calls no plane: an agent's `remember`
 `instructions_loaded` under it carries `local_only`, a sentence saying it reads the memory
 the machine holds. The client itself is refused `me.memory`, `me.memory.put` and a private
 `session.create`, and gives an offered session no work; `session.invite`, `session.uninvite`,
-`session.invites` and `session.read_sealed` are `forbidden` to it and for a session under it; `me.memory.status` answers what the
+`session.invites` and `session.read_sealed` are `forbidden` to it and for a session under it,
+and so are the daemon's `artifact.*` (an agent's `publish_artifact` there is refused too); `me.memory.status` answers what the
 copy holds without asking the plane. While every client attached is in Local only, the
 daemon's own polls of the plane (`me.memory`, the version policy) wait. A client from before
 it sends neither, and is in none.

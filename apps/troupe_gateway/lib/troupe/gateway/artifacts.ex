@@ -18,7 +18,7 @@ defmodule Troupe.Gateway.Artifacts do
   of…", with where the console's gallery is.
   """
 
-  alias Troupe.Gateway.{Memory, Plane}
+  alias Troupe.Gateway.{LocalOnly, Memory, Plane}
 
   @keys ~w(title kind visibility files id note session_id agent)
 
@@ -33,6 +33,16 @@ defmodule Troupe.Gateway.Artifacts do
   @doc "What `publish_artifact` sends from a session here: `put/1`, naming the session and its agent."
   @spec publish(map(), Troupe.Tool.Ctx.t()) :: {:ok, map()} | {:error, :signed_out | String.t()}
   def publish(params, ctx) do
+    # A session under its client's Local only sends nothing to the plane (`LocalOnly`).
+    if LocalOnly.session?(ctx.session_id),
+      do:
+        {:error,
+         "this session is under Local only, so nothing of it is published on the plane; " <>
+           "the file stays in the workspace"},
+      else: send_publish(params, ctx)
+  end
+
+  defp send_publish(params, ctx) do
     params
     |> Map.put("session_id", ctx.session_id)
     |> Map.put("agent", agent(ctx))

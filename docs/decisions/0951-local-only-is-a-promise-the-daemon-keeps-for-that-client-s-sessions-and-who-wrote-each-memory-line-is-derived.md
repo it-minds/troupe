@@ -12,6 +12,7 @@ paths:
   - apps/troupe_gateway/lib/troupe/gateway/policy.ex
   - apps/troupe_gateway/lib/troupe/gateway/plane.ex
   - apps/troupe_gateway/lib/troupe/gateway/daemon.ex
+  - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
   - apps/troupe_core/lib/troupe/local_only.ex
   - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/config/schema.ex
@@ -105,6 +106,10 @@ would take the terminal's person's `remember` away from them).
 - **Invitations** (Decision 949): `session.invite`, `session.uninvite`, `session.invites` and
   `session.read_sealed` are refused to a client in Local only and for a session under it,
   since the plane keeps who is invited and wraps a sealed session's key.
+- **Artifacts** (Decisions 948 and 950): the daemon's `artifact.*` methods are refused to a
+  client in Local only and for a session under it, and an agent's `publish_artifact` in such
+  a session is refused by the host (`Troupe.Gateway.Artifacts.publish/2`); the file stays in
+  the workspace.
 
 **While every client attached is in Local only** the daemon's own polls wait: the memory
 poll and the version policy's `initialize` every thirty seconds. With nobody attached they

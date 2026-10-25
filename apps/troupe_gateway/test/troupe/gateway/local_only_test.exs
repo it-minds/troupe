@@ -265,6 +265,39 @@ defmodule Troupe.Gateway.LocalOnlyTest do
     end
   end
 
+  test "a Local-only client publishes and lists no artifact, and its session's agent publishes none",
+       ctx do
+    publish = %{
+      "command_id" => Client.command_id(),
+      "title" => "Weekly",
+      "kind" => "html",
+      "visibility" => "organisation",
+      "files" => [%{"path" => "index.html", "bytes" => Base.encode64("<h1>Weekly</h1>")}]
+    }
+
+    assert {:error, %{message: "forbidden", data: %{"reason" => reason}}} =
+             Client.call(ctx.local, "artifact.publish", publish)
+
+    assert reason =~ "Local only"
+
+    assert {:error, %{message: "forbidden"}} = Client.call(ctx.local, "artifact.list", %{})
+
+    File.write!(Path.join(ctx.workspace, "report.md"), "# Weekly\n")
+
+    tool = %{
+      "title" => "Weekly",
+      "kind" => "markdown",
+      "visibility" => "organisation",
+      "files" => ["report.md"]
+    }
+
+    %{session: kept} = session(ctx, [{:tools, [{"publish_artifact", tool}]}, {:text, "ok"}])
+    turn(ctx.local, kept.id, "publish the report")
+
+    assert completed(kept.id) =~ "under Local only"
+    refute Enum.any?(FakePlane.calls(ctx.plane.state), &match?({"artifact." <> _, _}, &1))
+  end
+
   test "a Local-only client is refused a private session", ctx do
     assert {:error, %{message: "forbidden", data: %{"reason" => reason}}} =
              Client.call(ctx.local, "session.create", %{
