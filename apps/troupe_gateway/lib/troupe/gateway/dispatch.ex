@@ -187,6 +187,10 @@ defmodule Troupe.Gateway.Dispatch do
     # The plane's memory documents, kept as this machine's copy (#55): what every session
     # here reads first.
     "config.memory" => :admin,
+    # The person's own memory on the plane, read and changed as them through this daemon's
+    # sign-in (#55): what every session of theirs reads, on every machine.
+    "me.memory" => :control,
+    "me.memory.put" => :control,
     # A first run's questions (Decision 705): reading where it stands says nothing
     # secret; answering sends a key to a provider, writes the settings and starts a
     # session, so it takes what `config.set` takes.
@@ -1194,6 +1198,19 @@ defmodule Troupe.Gateway.Dispatch do
   # And the key the plane linked to signs with, as this machine pinned it (#657), with the
   # key it offers instead where it has changed, for a client to show its fingerprint and
   # ask its person to accept it.
+  # The person's own memory document, as the plane has it now (`Memory.own/0`), and their
+  # save of it or an entry (`Memory.put_own/1`), sent with this daemon's sign-in and read by
+  # the sessions running here from their next turn. Signed out, a sentence.
+  defp handle("me.memory", _params, _context), do: own_memory(Memory.own())
+
+  defp handle("me.memory.put", params, _context) do
+    case params do
+      %{"append" => entry} when is_binary(entry) -> own_memory(Memory.put_own(%{"append" => entry}))
+      %{"text" => text, "version" => v} when is_binary(text) and is_integer(v) -> own_memory(Memory.put_own(params))
+      _ -> {:error, Error.new(:invalid_params, %{reason: "me.memory.put takes text and version, or append"})}
+    end
+  end
+
   defp handle("identity.get", _params, _context) do
     identity =
       Identity.get()
@@ -1746,6 +1763,23 @@ defmodule Troupe.Gateway.Dispatch do
         :ok
     end
   end
+
+  defp own_memory({:ok, answer}), do: {:ok, answer}
+
+  defp own_memory({:error, :signed_out}) do
+    {:error,
+     Error.new(:unavailable, %{
+       reason:
+         "this computer's daemon is not signed in to a Troupe plane, so there is no memory of " <>
+           "yours to read or change; troupe login signs it in"
+     })}
+  end
+
+  defp own_memory({:error, {:rpc, %{"message" => "conflict", "data" => data}}}),
+    do: {:error, Error.new(:conflict, %{reason: data["reason"], version: data["version"]})}
+
+  defp own_memory({:error, reason}),
+    do: {:error, Error.new(:invalid_params, %{reason: Memory.sentence(reason)})}
 
   defp format_reason(reason) when is_binary(reason), do: reason
   defp format_reason(reason), do: inspect(reason)

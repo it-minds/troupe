@@ -1,0 +1,24 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/me.memory.put.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "append": {
+      "type": "string"
+    },
+    "command_id": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "command_id"
+  ],
+  "title": "me.memory.put",
+  "type": "object"
+}

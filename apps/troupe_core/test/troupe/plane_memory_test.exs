@@ -214,4 +214,25 @@ defmodule Troupe.PlaneMemoryTest do
                Jason.decode!(json)["memory"]
     end
   end
+
+  # The user level: the person's own document is read after the organisation's levels, is
+  # named as theirs, and a change of it alone is said as theirs.
+  describe "the person's own" do
+    test "is read last, named as theirs, and its change said as theirs", ctx do
+      own = %{"scope" => "user", "name" => nil, "version" => 1, "hash" => "sha256:u", "text" => "Mine."}
+      {:ok, _} = PlaneMemory.save(@plane, %{"documents" => [own | @documents]}, ctx.cache)
+
+      {text, 0} = Config.explain(ctx.ws, nil, user_path: ctx.user)
+      assert text =~ "  memory   your own memory, version 1 (#{@plane}"
+      assert Enum.map(Shape.read([own | @documents]), & &1["scope"]) == ["organisation", "team", "user"]
+
+      assert PlaneMemory.change_line([%{"scope" => "user", "name" => nil, "from" => 1, "to" => 2}]) ==
+               "Your memory changed: your own memory is now version 2 (it was 1). Read from this turn on."
+
+      assert PlaneMemory.change_line([
+               %{"scope" => "organisation", "name" => nil, "from" => 1, "to" => 2},
+               %{"scope" => "user", "name" => nil, "from" => nil, "to" => 1}
+             ]) =~ "The organisation's memory changed: "
+    end
+  end
 end

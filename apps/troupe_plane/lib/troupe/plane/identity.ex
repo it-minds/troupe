@@ -211,6 +211,15 @@ defmodule Troupe.Plane.Identity do
       set: [owner_id: Ecto.UUID.dump!(provisioned.id)]
     )
 
+    # Their own memory is kept by their id, so it goes with them to the row that stays.
+    # The row SCIM made has written none, as nobody could sign in as it.
+    Repo.delete_all(from(d in "memory_documents", where: d.scope == "user" and d.owner == ^provisioned.id))
+
+    Repo.update_all(
+      from(d in "memory_documents", where: d.scope == "user" and d.owner == ^known.id),
+      set: [owner: provisioned.id]
+    )
+
     # A ceiling is the plane's opinion of the person, not the provider's, so the one they
     # had is kept where the row SCIM made has none.
     if is_nil(provisioned.budget_micros) and not is_nil(known.budget_micros) do
@@ -550,6 +559,10 @@ defmodule Troupe.Plane.Identity do
     sessions = Sessions.hand_to_removed(user.subject, marker)
     notified_by = drop_from_notify(user.subject)
     :ok = hand_spend_to(user.subject, marker)
+
+    # Their own memory is theirs and nobody else's to read, so it goes with them, every
+    # version; the audit keeps what it has of each save, which never held the text.
+    Repo.delete_all(from(d in "memory_documents", where: d.scope == "user" and d.owner == ^user.id))
 
     Repo.delete!(user)
 

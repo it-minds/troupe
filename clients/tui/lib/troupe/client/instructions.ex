@@ -54,9 +54,10 @@ defmodule Troupe.Client.Instructions do
   end
 
   # The organisation's memory documents (root issue #55), named as the daemon names them,
-  # with the version in force: they come from the plane, not from a path on this machine.
+  # with the version in force: they come from the plane, not from a path on this machine;
+  # and the person's own from the plane (`person`), after them.
   defp entry(%{"scope" => scope, "label" => label} = f, _workspace)
-       when scope in ["organisation", "team", "profile"] and is_binary(label) do
+       when scope in ["organisation", "team", "profile", "person"] and is_binary(label) do
     "#{label}, version #{f["version"]} (#{scope}) #{number(f["chars"])}#{cut(f)}"
   end
 

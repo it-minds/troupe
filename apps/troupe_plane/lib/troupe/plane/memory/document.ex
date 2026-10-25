@@ -1,7 +1,7 @@
 defmodule Troupe.Plane.Memory.Document do
   @moduledoc """
-  One version of one memory document: the organisation's, a team's or a worker profile's
-  (`Troupe.Plane.Memory`). Never updated; a save is the next version.
+  One version of one memory document: the organisation's, a team's, a worker profile's or a
+  person's own (`Troupe.Plane.Memory`). Never updated; a save is the next version.
   """
 
   use Ecto.Schema
@@ -14,7 +14,7 @@ defmodule Troupe.Plane.Memory.Document do
 
   schema "memory_documents" do
     field(:scope, :string)
-    # Empty for the organisation's, the team's id, or the profile's name.
+    # Empty for the organisation's, the team's id, the profile's name, or the person's id.
     field(:owner, :string, default: "")
     field(:version, :integer)
     field(:text, :string, default: "")

@@ -108,6 +108,7 @@ nav:
       - Agents, commands and workflows: user/agents.md
       - MCP servers and skills: user/mcp.md
       - Instruction files and onboarding: user/instructions.md
+      - Memory: user/memory.md
       - Configuration cookbook:
           - user/configuration/cookbook.md
           - Where your files are: user/configuration/files.md
