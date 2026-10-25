@@ -313,7 +313,10 @@ defmodule Troupe.Tools do
   end
 
   defp authorize_listed(name, definition, ctx, args) do
-    case fetch(name, ctx.session_id) |> or_scoped(name, definition, ctx) |> or_gone(name, ctx) do
+    case fetch(name, ctx.session_id)
+         |> or_entitled(name, ctx)
+         |> or_scoped(name, definition, ctx)
+         |> or_gone(name, ctx) do
       {:error, reason} ->
         {:reject, Result.error(ctx.call_id, name, reason)}
 
@@ -345,6 +348,21 @@ defmodule Troupe.Tools do
   end
 
   defp rule(_name, _args, _ctx), do: nil
+
+  # An MCP server the session's team is not entitled to (ARCHITECTURE.md section 9): its
+  # tools were never offered to this session, so a call to one is unknown, as a
+  # session-scoped tool the profile does not qualify for is. `available/2` narrows the list
+  # the provider is sent the same way; this is the check that holds when a model names
+  # the tool anyway, since the list is a convenience for the model and never the boundary.
+  defp or_entitled({:ok, tool}, name, %Ctx{bundle: %{entitlements: %{"mcp_servers" => names}}})
+       when is_list(names) do
+    case Troupe.MCP.server_of(Tool.name(tool)) do
+      nil -> {:ok, tool}
+      server -> if server in names, do: {:ok, tool}, else: {:error, {:unknown_tool, name}}
+    end
+  end
+
+  defp or_entitled(found, _name, _ctx), do: found
 
   # The pod-wide list first, then the session-scoped tools. A name found in neither is
   # unknown; a session-scoped tool the profile does not qualify for is unknown too,
