@@ -94,7 +94,8 @@ nav:
       - user/README.md
       - Quick start: quick-start.md
       - Why Troupe: why-troupe.md
-      - The principles in pictures: diagrams/README.md
+      - The principles, in pictures: https://it-minds.github.io/troupe/principles/
+      - The diagrams, one by one: diagrams/README.md
       - The terminal client: clients/tui/README.md
       - "The terminal client's screen": user/terminal-screen.md
       - Command reference: user/cli-reference.md

@@ -1,7 +1,9 @@
 # Diagrams
 
-[principles.html](principles.html) reads all sixteen in order, with a short text on the
-principle behind each; it is one long page in the same design.
+[principles.html](principles.html) reads all sixteen in order, with a short text on what
+each principle buys and what it rules out; it is one long page in the same design.
+On the site it is <https://it-minds.github.io/troupe/principles/>, published from `main`
+by `.github/workflows/pages.yml` with the rest of the documentation.
 
 Standalone SVGs for presentations and web pages, drawn in the app's own design
 (Afterglow, dark): the void ground, cream type, square corners, one hard shadow, the mask
@@ -23,10 +25,10 @@ must decide*.
 | [media/10-harness-habits.svg](media/10-harness-habits.svg) | Six habits of the harness: worktrees, the project brief, watch mode, bounded results, replay from the log, goal and loop. |
 | [media/11-why-the-beam.svg](media/11-why-the-beam.svg) | Why Erlang: a session as its real supervision tree with the failure rules drawn on, and a ledger of what the BEAM brings against what you write by hand in Rust or Go. |
 | [media/12-it-breathes.svg](media/12-it-breathes.svg) | Scaling from demand: the plane recomputes replicas every fifteen seconds and writes the WorkerProfile, the operator reconciles a StatefulSet, pods heartbeat back; one profile over one day, draining the highest ordinal first. |
-| [media/13-whose-identity.svg](media/13-whose-identity.svg) | Issue 331, to speak from: a shared session where one person's tool can be driven by the others; three answers for whose identity a pod's MCP call carries (system only, on behalf of, client-hosted); the questions still open. |
+| [media/13-whose-identity.svg](media/13-whose-identity.svg) | Whose name a call carries, as decided (issue 331; decisions 747, 861, 862, 879): the bundle's servers called as the profile, a person's own servers called as the person from their machine, on-behalf-of rejected, and the four rules around it. |
 | [media/14-a-profile-is-the-config.svg](media/14-a-profile-is-the-config.svg) | Where configuration lives: who writes which layer, the profile as a versioned hashed bundle under a policy ceiling, enforced by the pod and remembered by the session; against config on every laptop. |
 | [media/15-agents.svg](media/15-agents.svg) | An agent is a markdown file: the frontmatter contract and the prose role; the four layers it can live in, lowest to highest; one root per session with delegation and branches; the same session.create from a person or a trigger, read from the pinned bundle on a pod. |
-| [media/16-mcp-tools.svg](media/16-mcp-tools.svg) | MCP in one breath, then one pod session whose tool list holds built-ins, the bundle's servers and your laptop's tools; attach, offer with consent, discover, and a call to yours sent back over your own socket; the rules. |
+| [media/16-mcp-tools.svg](media/16-mcp-tools.svg) | MCP in one breath, then one pod session whose tool list holds built-ins, the bundle's servers and your laptop's tools; attach, offer with consent, discover, and a call to yours sent back over your own socket; the rules, including a profile's `personalTools: forbid`. |
 
 Each file is 1600×900 (16:9) and scales. The first `<rect>` is the background; drop it
 for a transparent page. Fonts are Figtree, DM Mono and VT323 with system fallbacks, loaded
