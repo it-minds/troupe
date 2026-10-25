@@ -1,7 +1,9 @@
 # Diagrams
 
-[principles.html](principles.html) reads all sixteen in order, with a short text on the
-principle behind each; it is one long page in the same design.
+[principles.html](principles.html) reads all sixteen in order, with a short text on what
+each principle buys and what it rules out; it is one long page in the same design.
+On the site it is <https://it-minds.github.io/troupe/principles/>, published from `main`
+by `.github/workflows/pages.yml` with the rest of the documentation.
 
 Standalone SVGs for presentations and web pages, drawn in the app's own design
 (Afterglow, dark): the void ground, cream type, square corners, one hard shadow, the mask
