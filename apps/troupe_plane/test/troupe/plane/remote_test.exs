@@ -11,9 +11,9 @@ defmodule Troupe.Plane.RemoteTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Audit, Identity, Repo}
+  alias Troupe.Plane.{Admin, Audit, Harness, Identity, Invites, Repo, Sessions}
   alias Troupe.Plane.Web.Router
-  alias Troupe.Protocol.{Client, SessionId}
+  alias Troupe.Protocol.{Client, Relay, SessionId}
 
   @moduletag timeout: 60_000
 
@@ -157,6 +157,92 @@ defmodule Troupe.Plane.RemoteTest do
 
       assert {:error, %{message: "unauthenticated"}} =
                Client.connect(url: ctx.ws <> "/v1/relay/session", token: ctx.tokens[@bea])
+    end
+  end
+
+  describe "a private session, offered with its owner's consent (#765)" do
+    test "said private, audited, steered by a control invitee alone, and the plane keeps none of it",
+         ctx do
+      id = private!(ctx)
+      invite!(id, @bea, "control")
+      laptop = laptop!(ctx, @ada)
+
+      # The laptop says private and names Bea and Cy; Cy holds no invitation.
+      {:ok, _} =
+        Client.call(laptop, "relay.offer", %{
+          "session_id" => id,
+          "workspace" => "/home/ada/project",
+          "private" => true,
+          "share" => [%{"person" => @bea, "role" => "control"}, %{"person" => @cy, "role" => "control"}]
+        })
+
+      {:ok, %{"sessions" => [row]}} = rpc(ctx, @bea, "remote.list", %{})
+      assert row["id"] == id
+      assert row["private"] == true
+      assert row["your_role"] == "control"
+      assert {:ok, %{"sessions" => []}} = rpc(ctx, @cy, "remote.list", %{})
+      assert {:error, %{"message" => "not_found"}} = rpc(ctx, @cy, "remote.open", %{"session_id" => id})
+
+      # Her invitation says it is offered.
+      {:ok, %{"invites" => [invitation]}} = rpc(ctx, @bea, "invites.list", %{})
+      assert invitation["offered"] == true
+
+      [offered] = Enum.filter(Audit.list(), &(&1.action == "remote.offer" and &1.subject_id == id))
+      assert offered.actor == @ada
+      assert offered.detail["private"] == true
+
+      # Bea steers it, and what passes says something nothing on the plane may keep.
+      marker = "marker-" <> Base.encode16(:crypto.strong_rand_bytes(8))
+      {:ok, opened} = rpc(ctx, @bea, "remote.open", %{"session_id" => id})
+      viewer = viewer!(ctx, laptop, opened["token"], @bea, "control", id)
+
+      task =
+        Task.async(fn ->
+          Client.call(viewer, "input.send", %{"command_id" => "c-1", "session_id" => id, "text" => marker})
+        end)
+
+      {viewer_id, frame} = await_frame(laptop)
+      assert frame["params"]["text"] == marker
+      answer(laptop, viewer_id, frame["id"], %{"accepted" => true, "echo" => marker})
+      assert {:ok, %{"accepted" => true}} = Task.await(task)
+
+      event = %{"seq" => 1, "type" => "assistant_message", "agent" => ["root"], "data" => %{"text" => marker}}
+      params = %{"topic" => "session:#{id}", "session_id" => id, "event" => event}
+      data = Jason.encode!(%{"jsonrpc" => "2.0", "method" => "event", "params" => params})
+      Client.notify(laptop, "relay.frame", %{"viewer" => viewer_id, "data" => data})
+      assert_receive {:troupe_event, _topic, ^id, %{data: %{"text" => ^marker}}}, 5_000
+
+      assert stored_anywhere(marker) == [], "the plane kept what a private session said"
+
+      # Taking her invitation back closes her view at once, and refuses her after.
+      Invites.uninvite(Sessions.get(id), @bea, @ada)
+      taken_back = Relay.invitation_taken_back()
+      assert_receive {:troupe_notification, "relay.closed", %{"reason" => ^taken_back}}, 5_000
+      assert {:error, %{"message" => "not_found"}} = rpc(ctx, @bea, "remote.open", %{"session_id" => id})
+    end
+
+    test "the plane's own row makes an offer private, and withdrawing makes it sealed-only again", ctx do
+      id = private!(ctx)
+      invite!(id, @bea, "control")
+      laptop = laptop!(ctx, @ada)
+
+      # A laptop that did not say so is still offering a private session.
+      {:ok, _} = sync(laptop, id, [%{"person" => @bea, "role" => "control"}])
+      {:ok, %{"sessions" => [row]}} = rpc(ctx, @bea, "remote.list", %{})
+      assert row["private"] == true
+
+      {:ok, opened} = rpc(ctx, @bea, "remote.open", %{"session_id" => id})
+      _viewer = viewer!(ctx, laptop, opened["token"], @bea, "control", id)
+
+      {:ok, %{"withdrawn" => true}} = Client.call(laptop, "relay.withdraw", %{"session_id" => id})
+      withdrawn = Relay.private_withdrawn()
+      assert_receive {:troupe_notification, "relay.closed", %{"reason" => ^withdrawn}}, 5_000
+
+      assert {:ok, %{"sessions" => []}} = rpc(ctx, @bea, "remote.list", %{})
+      assert {:error, %{"message" => "not_found"}} = rpc(ctx, @bea, "remote.open", %{"session_id" => id})
+      {:ok, %{"invites" => [invitation]}} = rpc(ctx, @bea, "invites.list", %{})
+      assert invitation["offered"] == false
+      assert invitation["role"] == "control"
     end
   end
 
@@ -480,9 +566,54 @@ defmodule Troupe.Plane.RemoteTest do
     })
   end
 
+  # Ada's private session, as her daemon registers it.
+  defp private!(_ctx) do
+    id = SessionId.generate()
+    ada = Identity.get_user(@ada)
+
+    {:ok, _row} =
+      Harness.call(
+        "session.register",
+        %{"session_id" => id, "device" => "ada-laptop"},
+        %{user: ada, platform_admin?: false}
+      )
+
+    id
+  end
+
+  # An invitation's row, as her daemon's `session.invite` leaves it; the keys are the
+  # invites suite's.
+  defp invite!(id, subject, role) do
+    Repo.insert!(%Invites.Invite{
+      session_id: id,
+      subject: subject,
+      role: role,
+      invited_by: @ada,
+      invited_at: DateTime.utc_now()
+    })
+  end
+
+  # Every row of every table on the plane that holds `text` anywhere, as `table`.
+  defp stored_anywhere(text) do
+    %{rows: tables} =
+      Repo.query!("""
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'
+      """)
+
+    for [table] <- tables,
+        %{rows: [[count]]} =
+          Repo.query!(
+            "SELECT count(*) FROM \"#{table}\" AS t WHERE t::text LIKE $1",
+            ["%" <> text <> "%"]
+          ),
+        count > 0,
+        do: table
+  end
+
   # A viewer attaching: its `initialize` is relayed to the laptop, without its token, and
   # the laptop's answer goes back.
-  defp viewer!(ctx, laptop, token, subject, role) do
+  defp viewer!(ctx, laptop, token, subject, role, session_id \\ nil) do
     test = self()
 
     task =
@@ -491,7 +622,7 @@ defmodule Troupe.Plane.RemoteTest do
       end)
 
     assert_receive {:troupe_notification, "relay.open", opened}, 5_000
-    assert opened["session_id"] == ctx.session_id
+    assert opened["session_id"] == (session_id || ctx.session_id)
     assert opened["person"]["subject"] == subject
     assert opened["role"] == role
 

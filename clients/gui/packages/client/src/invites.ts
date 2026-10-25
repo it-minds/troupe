@@ -27,6 +27,11 @@ export interface Invitation {
   invited_by: string;
   invited_by_name?: string | null;
   invited_at: string;
+  /**
+   * A private session's: whether its owner offers it for steering now, which is when an
+   * invitation with control steers it. Null for a pod session, and from a plane before it.
+   */
+  offered?: boolean | null;
 }
 
 /** A person invited into a session, as `session.invites` lists them to anybody in it. */
@@ -80,6 +85,17 @@ export function roleWords(role: string): string {
 export function invitationWords(i: Invitation): string {
   const by = i.invited_by_name || i.invited_by;
   return `${by} invited you to ${i.role === "control" ? "steer" : "follow"} it`;
+}
+
+/**
+ * What a private session's invitation to steer lets this person do now, in the words every
+ * client says it in: steer it while its owner offers it, and read it otherwise. Null for an
+ * invitation to follow, and for a pod session's, whose invitation is its grant whatever the
+ * owner does.
+ */
+export function steerWords(i: Invitation): string | null {
+  if (i.kind !== "private" || i.role !== "control") return null;
+  return i.offered ? "offered · you can steer" : "not offered · read-only";
 }
 
 /** What an open view says when the invitation it was opened under is taken back. */

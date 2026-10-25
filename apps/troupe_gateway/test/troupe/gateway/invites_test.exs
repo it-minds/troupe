@@ -92,12 +92,29 @@ defmodule Troupe.Gateway.InvitesTest do
              Invites.invite(%{session(id) | owner: @cy}, @bea, "observe", opts(ctx))
   end
 
+  test "an invitation to steer is made as one to follow is, and shares an offer of the session anew",
+       ctx do
+    {id, _sealer, _context} = private(ctx)
+    test = self()
+    opts = Keyword.put(opts(ctx), :reshare, fn session_id -> send(test, {:reshare, session_id}) end)
+
+    assert {:ok, _} = Invites.invite(session(id), @bea, "control", opts)
+    assert %{"role" => "control", "keys" => [_k1]} = FakePlane.invitations(ctx.plane.state, id)[@bea]
+    assert_receive {:reshare, ^id}
+
+    # The log is what an offer is shared from: Bea, to steer it.
+    assert %{@bea => %{"role" => "control"}} = Invites.invited(id, opts)
+
+    assert {:ok, _} = Invites.uninvite(session(id), @bea, opts)
+    assert_receive {:reshare, ^id}
+    assert Invites.invited(id, opts) == %{}
+  end
+
   test "taking an invitation back seals what follows under a new key, given to everybody still invited and not to them",
        ctx do
     {id, sealer, context} = private(ctx)
     {:ok, _} = Invites.invite(session(id), @bea, "observe", opts(ctx))
     {:ok, _} = Invites.invite(session(id), @cy, "observe", opts(ctx))
-    assert {:error, :followed_only} = Invites.invite(session(id), @cy, "control", opts(ctx))
     send_event(id, sealer, 1)
     assert {:ok, _} = Sealer.seal_now(sealer)
 

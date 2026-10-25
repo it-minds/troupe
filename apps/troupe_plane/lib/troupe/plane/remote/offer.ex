@@ -6,6 +6,10 @@ defmodule Troupe.Plane.Remote.Offer do
   `shares` is `%{"people" => [%{"subject", "display_name", "email", "role"}]}`, the people
   the laptop named when it offered the session, as this plane resolved them; the laptop
   keeps the same list and checks every relayed message against its own copy.
+
+  `private` is an offer of a private session, made with its owner's consent: while it is
+  offered the relay carries it unsealed, and a person it names steers it only while they
+  hold an invitation into it with `control`.
   """
 
   use Ecto.Schema
@@ -21,13 +25,23 @@ defmodule Troupe.Plane.Remote.Offer do
     field :shares, :map, default: %{"people" => []}
     field :offered_at, :utc_datetime_usec
     field :offline_since, :utc_datetime_usec
+    field :private, :boolean, default: false
 
     timestamps(type: :utc_datetime_usec)
   end
 
   @type t :: %__MODULE__{}
 
-  @fields [:session_id, :owner_subject, :device, :workspace, :shares, :offered_at, :offline_since]
+  @fields [
+    :session_id,
+    :owner_subject,
+    :device,
+    :workspace,
+    :shares,
+    :offered_at,
+    :offline_since,
+    :private
+  ]
 
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(offer, attrs) do

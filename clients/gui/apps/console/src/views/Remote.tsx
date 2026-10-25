@@ -45,6 +45,8 @@ interface RemoteRow {
   state: string;
   offline_since?: string | null;
   your_role: string;
+  /** A private session, offered with its owner's yes to its passing through the plane unsealed. */
+  private?: boolean;
 }
 
 /** The laptop's presence, as a person reads it. */
@@ -137,7 +139,10 @@ export function RemoteSessions({ load, reload }: { load: Load<RemoteRow[]>; relo
                     <a href={href({ page: "mine", path: ["remote", r.id] })}>{r.id}</a>
                   </td>
                   <td>{r.your_role === "owner" ? "yours" : (r.owner_name ?? r.owner)}</td>
-                  <td>{r.workspace ?? "—"}</td>
+                  <td>
+                    {r.workspace ?? "—"}
+                    {r.private ? " · private, unsealed while offered" : ""}
+                  </td>
                   <td>{r.your_role === "observe" ? "follow it" : "steer it"}</td>
                   <td>{presence(r)}</td>
                 </tr>

@@ -499,11 +499,11 @@ defmodule Troupe.Plane.InvitesTest do
                  as(bea)
                )
 
-      # Followed, not steered: steering it from elsewhere would be offering it.
-      assert {:error, %{message: "invalid_params", data: %{field: "role"}}} =
-               invite_private(ada, id, bea, "control")
-
+      # To steer it, which its owner's offer makes possible while it stands.
       assert Invites.of_session(id) == []
+      assert {:ok, _} = invite_private(ada, id, bea, "control")
+      assert [%{subject: subject, role: "control"}] = Invites.of_session(id)
+      assert subject == bea.subject
     end
 
     test "taking an invitation back re-keys forward: what follows is under a key the person removed never gets",

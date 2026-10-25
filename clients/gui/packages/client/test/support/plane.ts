@@ -205,6 +205,8 @@ interface Relayed {
   shares: Array<{ subject: string; role: "observe" | "control" }>;
   offlineSince: string | null;
   offeredAt: string;
+  /** A private session, offered with its owner's yes (troupe #765). */
+  private?: boolean;
 }
 
 /**
@@ -225,6 +227,8 @@ interface Invited {
   invited_by: string;
   invited_by_name: string;
   invited_at: string;
+  /** A private session's: whether its owner offers it for steering now. */
+  offered?: boolean | null;
 }
 
 export class FakePlane {
@@ -368,7 +372,7 @@ export class FakePlane {
     subject: string,
     role: "observe" | "control",
     by: string,
-    meta: { kind?: "team" | "private"; title?: string; ownerName?: string; displayName?: string; byName?: string } = {},
+    meta: { kind?: "team" | "private"; title?: string; ownerName?: string; displayName?: string; byName?: string; offered?: boolean } = {},
   ): Invited {
     const row = this.rows.get(sessionId);
     const invited: Invited = {
@@ -384,12 +388,19 @@ export class FakePlane {
       invited_by: by,
       invited_by_name: meta.byName ?? meta.ownerName ?? by,
       invited_at: new Date(Date.now() + ++this.counter).toISOString(),
+      ...(meta.kind === "private" ? { offered: meta.offered === true } : {}),
     };
     const of = this.invitations.get(sessionId) ?? new Map<string, Invited>();
     of.set(subject, invited);
     this.invitations.set(sessionId, of);
     this.changed();
     return invited;
+  }
+
+  /** A private session's owner offered it for steering, or withdrew it: its invitations say so. */
+  offered(sessionId: string, offered: boolean): void {
+    for (const i of this.invitations.get(sessionId)?.values() ?? []) i.offered = offered;
+    this.changed();
   }
 
   /** Take an invitation back, as `session.uninvite` does. */
@@ -509,7 +520,10 @@ export class FakePlane {
   }
 
   /** A laptop's session, offered by `owner` and shared as `shares` says, its laptop online. */
-  relay(owner: string, params: { id?: string; ownerName?: string; workspace?: string; shares?: Relayed["shares"] } = {}): Relayed {
+  relay(
+    owner: string,
+    params: { id?: string; ownerName?: string; workspace?: string; shares?: Relayed["shares"]; private?: boolean } = {},
+  ): Relayed {
     const id = params.id ?? `s-laptop-${++this.counter}`;
     const offer: Relayed = {
       id,
@@ -519,6 +533,7 @@ export class FakePlane {
       shares: params.shares ?? [],
       offlineSince: null,
       offeredAt: new Date(Date.now() + this.counter).toISOString(),
+      ...(params.private ? { private: true } : {}),
     };
     this.relayed.set(id, offer);
     this.opts.worker.createSession(id, { profile: "build" });
@@ -664,6 +679,7 @@ export class FakePlane {
           state: o.offlineSince ? "offline" : "online",
           offline_since: o.offlineSince,
           offered_at: o.offeredAt,
+          private: o.private === true,
           your_role: o.owner === subject ? "owner" : role,
           shares: o.owner === subject ? o.shares : null,
         },

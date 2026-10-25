@@ -37,8 +37,11 @@ describe("a relayed session", () => {
       steering: [],
       lasts: null,
       restored: false,
+      private: false,
     });
     assert.deepEqual(offerRestartWords(row.remote!), []);
+    // A private session's offer is said to be one, on every device (troupe #765).
+    assert.equal(rowFromRemote({ ...listed, private: true }).remote?.private, true);
     assert.equal(onThisComputer(row.kind), false);
     assert.equal(onThisComputer("local"), true);
     assert.equal(onThisComputer("private"), true);

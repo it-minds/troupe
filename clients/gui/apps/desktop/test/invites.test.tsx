@@ -134,6 +134,20 @@ describe("a person invited into a session", () => {
     await sees("Ada took back your invitation: this session is no longer shared with you.");
   });
 
+  it("says of a private session they may steer whether it is offered now, and steers it through the relay while it is", async () => {
+    harness.plane.invite("s-priv-5", ME, "control", "ada@example.com", { kind: "private", title: "ada's diary", ownerName: "Ada" });
+    await signedIn();
+    unmount = render(<App />).unmount;
+
+    const listed = await waitFor(() => row("ada's diary"), "the shared private session's row");
+    await waitFor(() => listed.textContent?.includes("Ada invited you to steer it · not offered · read-only"), "not offered, in the list");
+
+    // Ada offers it, with her yes: the plane relays it to Bea, and her list says so.
+    harness.plane.relay("ada@example.com", { id: "s-priv-5", ownerName: "Ada", workspace: "diary", private: true, shares: [{ subject: ME, role: "control" }] });
+    harness.plane.offered("s-priv-5", true);
+    await waitFor(() => row("diary")?.textContent?.includes("Ada invited you to steer it · offered · you can steer"), "offered, in the list");
+  });
+
   it("reads somebody's private session from its sealed copy through this computer's daemon", async () => {
     harness.plane.invite("s-priv-9", ME, "observe", "ada@example.com", { kind: "private", title: "ada's notes", ownerName: "Ada" });
     daemon.sealed.set("s-priv-9", [

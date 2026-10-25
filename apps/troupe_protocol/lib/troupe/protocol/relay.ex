@@ -21,6 +21,13 @@ defmodule Troupe.Protocol.Relay do
   per-tool rules and approvals apply to it as to one typed at the laptop. An approval
   answered remotely is `allow` or `deny` for that one call; `allow_session`, which would
   stop the session asking for that tool, is the laptop's person's to give at the laptop.
+
+  **A private session, with its owner's consent.** A private session is sealed under its
+  person's key, and the relay carries what an offered session says through the plane
+  unsealed. So it is offered only after its owner has said yes to that, in the words below
+  (`private_consent/0`), which every client shows the same; while it is offered, only the
+  people invited into it with `control` steer it, and withdrawing the offer makes it
+  sealed-only again.
   """
 
   alias Troupe.Protocol.Error
@@ -54,6 +61,16 @@ defmodule Troupe.Protocol.Relay do
 
   @roles ~w(observe control)
 
+  @private_consent "This session is private: while it is offered, what it says and does passes " <>
+                     "through the plane unsealed, and the plane relays it to whoever you invited " <>
+                     "with control. The plane keeps none of it. Offer it?"
+
+  @private_withdrawn "The owner withdrew the offer: this private session is sealed-only again, " <>
+                       "and what it says no longer passes through the plane."
+
+  @invitation_taken_back "Your invitation into this private session was taken back: you no " <>
+                           "longer steer it."
+
   @doc "Every method a relayed connection may call, with the scope it needs."
   @spec methods() :: %{String.t() => :observe | :control}
   def methods, do: @methods
@@ -61,6 +78,22 @@ defmodule Troupe.Protocol.Relay do
   @doc "The roles a session may be offered to a person with: `observe` or `control`."
   @spec roles() :: [String.t()]
   def roles, do: @roles
+
+  @doc """
+  What a private session's owner is asked before it is offered: that while it is offered,
+  what it says passes through the plane unsealed, to the people invited with `control`.
+  The terminal, the desktop app and the docs say these words.
+  """
+  @spec private_consent() :: String.t()
+  def private_consent, do: @private_consent
+
+  @doc "What closes a view of a private session whose offer was withdrawn."
+  @spec private_withdrawn() :: String.t()
+  def private_withdrawn, do: @private_withdrawn
+
+  @doc "What closes a view of a private session once the person's invitation is taken back."
+  @spec invitation_taken_back() :: String.t()
+  def invitation_taken_back, do: @invitation_taken_back
 
   @doc "The scopes a role carries over the relay."
   @spec scopes(String.t()) :: [:observe | :control]

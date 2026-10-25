@@ -843,14 +843,19 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # A private session is offered only with its person's yes (root #765): the daemon's
+  # refusal carries the sentence every client asks it in, and this asks it.
   def remote_steering(sid, {:offer, people}) do
+    {consent, people} = Troupe.Client.Steering.consent(people)
+
     with {:ok, share} <- Troupe.Client.Steering.share(people) do
       params = %{session_id: sid, share: share, command_id: Troupe.Remote.RPC.command_id()}
+      params = if consent, do: Map.put(params, :consent, consent), else: params
 
       case Link.call("remote.offer", params) do
         {:ok, %{"remote" => remote}} -> {:ok, Troupe.Client.Steering.offered(remote)}
         {:ok, _older} -> {:error, "this daemon does not offer sessions to the plane: update it"}
-        {:error, reason} -> {:error, refusal(reason)}
+        {:error, reason} -> asked_or_refused(refusal(reason))
       end
     end
   end
@@ -898,6 +903,12 @@ defmodule Troupe.Client.Daemon do
   end
 
   # The daemon's sentence where it gave one, as it gave it.
+  defp asked_or_refused(said) do
+    if String.contains?(said, Troupe.Client.Steering.private_consent()),
+      do: {:ok, Troupe.Client.Steering.consent_question()},
+      else: {:error, said}
+  end
+
   defp refusal(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
   defp refusal(reason), do: message(reason)
 

@@ -348,7 +348,7 @@ defmodule Troupe.Commands do
         example: "/loop 10"
       ),
       entry("steer", "session", "Offer this session to the plane, to steer it from another device",
-        usage: "/steer [on [PERSON[:observe] ...] | off]",
+        usage: "/steer [on [yes | PERSON[:observe] ...] | off]",
         args: [arg("verb", false, "text"), arg("people", false, "text")],
         availability: "local",
         detail:
@@ -358,8 +358,10 @@ defmodule Troupe.Commands do
             ":observe. This computer keeps one connection to the plane while it is offered " <>
             "and nothing listens here; your rules and approvals hold for every prompt. " <>
             "/steer off withdraws it and ends every remote view at once; /steer alone " <>
-            "says whether it is offered and who is steering. A private session is never " <>
-            "offered.",
+            "says whether it is offered and who is steering. A private session is asked " <>
+            "about first, since while it is offered what it says passes through the plane " <>
+            "unsealed: /steer on yes offers it, to the people invited into it with control, " <>
+            "and /steer off makes it sealed only again.",
         example: "/steer on bea@example.com cy@example.com:observe"
       ),
       entry("invite", "session", "Invite a person into this session by name",
@@ -369,10 +371,11 @@ defmodule Troupe.Commands do
           "Invites a person, by email, to follow this session (observe, the default) or " <>
             "steer it (control): they see it in their list in the desktop app and on the " <>
             "console's Mine, and act in it under its own rules. A pod session is invited at " <>
-            "the plane, and only somebody its profile's teams cover may be; a private one, " <>
-            "to follow only, from this computer, which puts its key in their own slot at the " <>
-            "key manager, where the plane cannot read it. /invite alone says whom it is " <>
-            "shared with. A session on this computer alone is offered instead (/steer on).",
+            "the plane, and only somebody its profile's teams cover may be; a private one " <>
+            "from this computer, which puts its key in their own slot at the key manager, " <>
+            "where the plane cannot read it, and somebody invited to steer it does so while " <>
+            "you offer it (/steer on). /invite alone says whom it is shared with. A session " <>
+            "on this computer alone is offered instead (/steer on).",
         example: "/invite bea@example.com control"
       ),
       entry("uninvite", "session", "Take an invitation into this session back",

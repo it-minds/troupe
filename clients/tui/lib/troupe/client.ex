@@ -507,6 +507,13 @@ defmodule Troupe.Client do
           {:ok, String.t()} | {:error, term()}
   def remote_steering(sid, verb), do: impl(sid).remote_steering(sid, verb)
 
+  @doc """
+  Whether a notice is what `/steer on` asks of a private session's person before it is
+  offered (root #765), which the screen draws as a person being needed.
+  """
+  @spec consent_asked?(term()) :: boolean()
+  defdelegate consent_asked?(notice), to: Troupe.Client.Steering, as: :asks?
+
   @typedoc "What `/invite` and `/uninvite` ask: whom it is shared with, an invitation, or one taken back."
   @type invite_verb :: :list | {:invite, String.t(), String.t()} | {:uninvite, String.t()}
 

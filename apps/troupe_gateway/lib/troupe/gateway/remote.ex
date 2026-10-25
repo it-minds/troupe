@@ -56,13 +56,24 @@ defmodule Troupe.Gateway.Remote do
   a plane that did not hear still relays nothing more. A dropped connection closes every
   view, the plane shows the session offline since the drop and queues nothing; the
   daemon dials again, backing off, and offers again exactly what its record still holds.
-  A private session is never offered: it is sealed under its person's key and the plane
-  holds its row, which is another promise.
+
+  ## A private session, with its owner's consent
+
+  A private session is sealed under its person's key, and the relay carries what an offered
+  session says through the plane unsealed. So it is offered only with `consent: "private"`,
+  which a client sends once its person has said yes to `Troupe.Protocol.Relay.private_consent/0`;
+  without it the offer is refused with that sentence and `consent` in the error, for the
+  client to ask. It is shared with the people its own log says are invited into it with
+  `control` (`Troupe.Gateway.Invites.invited/2`), nobody named besides, and shared anew as
+  an invitation is made or taken back here (`reshare/1`), the view of one taken back closed
+  at once. The listing says `private`. Sealing goes on as before: the relay is in addition
+  to the sealed copy, never instead. Withdrawing makes it sealed-only again, every view
+  closed with a sentence saying so.
   """
 
   use GenServer
 
-  alias Troupe.Gateway.{Plane, Remote.Viewer}
+  alias Troupe.Gateway.{Invites, Plane, Remote.Viewer}
   alias Troupe.Keyring.Steering
   alias Troupe.Protocol.{Client, Endpoint, Error, Relay}
 
@@ -113,13 +124,29 @@ defmodule Troupe.Gateway.Remote do
 
   @doc """
   Offer a session to the plane, shared with `share`: a list of `%{"person" => subject or
-  email, "role" => "observe" | "control"}`. Answers what `describe/1` says of it after.
+  email, "role" => "observe" | "control"}`. A private session needs `consent` to be
+  `"private"`, its person's yes to its passing through the plane unsealed while it is
+  offered, and is shared with its `control` invitees alone. Answers what `describe/1` says
+  of it after.
   """
-  @spec offer(String.t(), list(), String.t() | nil) :: {:ok, map()} | {:error, Error.t()}
-  def offer(session_id, share, subject) do
-    GenServer.call(@name, {:offer, session_id, share, subject}, 30_000)
+  @spec offer(String.t(), list() | nil, String.t() | nil, String.t() | nil) ::
+          {:ok, map()} | {:error, Error.t()}
+  def offer(session_id, share, subject, consent \\ nil) do
+    GenServer.call(@name, {:offer, session_id, share, subject, consent}, 30_000)
   catch
     :exit, {:noproc, _} -> {:error, Error.new(:unavailable, %{reason: "not served here"})}
+  end
+
+  @doc """
+  A private session's invitations changed here: where it is offered, it is shared anew with
+  the people its log now says are invited with `control`, and the view of anybody it no
+  longer names is closed at once.
+  """
+  @spec reshare(String.t()) :: :ok
+  def reshare(session_id) do
+    GenServer.call(@name, {:reshare, session_id}, 30_000)
+  catch
+    :exit, {:noproc, _} -> :ok
   end
 
   @doc "Withdraw a session: every remote view of it ends now."
@@ -252,18 +279,45 @@ defmodule Troupe.Gateway.Remote do
   end
 
   @impl GenServer
-  def handle_call({:offer, session_id, share, subject}, from, state) do
-    with {:ok, session} <- offerable(state, session_id, subject),
-         {:ok, share} <- share_param(share) do
-      request = {:offer, from, session_id, workspace_label(session), share, subject}
+  def handle_call({:offer, session_id, share, subject, consent}, from, state) do
+    with {:ok, session} <- offerable(state, session_id, subject, consent),
+         {:ok, share} <- share_param(share),
+         {:ok, share} <- share_of(session, share) do
+      request = {:offer, from, session_id, workspace_label(session), share, subject, private?(session)}
       {:noreply, publish(when_online(%{state | refused: nil}, request))}
     else
       {:error, %Error{} = error} -> {:reply, {:error, error}, state}
     end
   end
 
+  def handle_call({:reshare, session_id}, _from, state) do
+    case Map.fetch(state.offers, session_id) do
+      {:ok, %{"private" => true} = offer} ->
+        shares = invited_shares(session_id)
+        state = %{state | offers: Map.put(state.offers, session_id, Map.put(offer, "shares", shares))}
+        state = narrow_viewers(state, session_id)
+        persist(state)
+
+        if state.status == :online do
+          params = %{
+            "session_id" => session_id,
+            "workspace" => session_id |> Troupe.get_session() |> workspace_label(),
+            "share" => Enum.map(shares, &%{"person" => &1["subject"], "role" => &1["role"]}),
+            "private" => true
+          }
+
+          call_plane(state, "relay.offer", params, {:reshare, session_id})
+        end
+
+        {:reply, :ok, publish(state)}
+
+      _not_offered ->
+        {:reply, :ok, state}
+    end
+  end
+
   def handle_call({:withdraw, session_id}, _from, state) do
-    state = close_viewers(state, session_id, "withdrawn")
+    state = close_viewers(state, session_id, withdrawn_reason(state, session_id))
     had? = Map.has_key?(state.offers, session_id)
 
     state = %{
@@ -418,7 +472,7 @@ defmodule Troupe.Gateway.Remote do
 
   def handle_info({:renewed, _stale, _result}, state), do: {:noreply, state}
 
-  def handle_info({:answered, :offer, from, session_id, subject, result}, state) do
+  def handle_info({:answered, :offer, from, {session_id, private?}, subject, result}, state) do
     case result do
       {:ok, %{"shares" => shares}} ->
         offer = %{
@@ -426,6 +480,8 @@ defmodule Troupe.Gateway.Remote do
           "shares" => shares,
           "offered_at" => now()
         }
+
+        offer = if private?, do: Map.put(offer, "private", true), else: offer
 
         state = %{
           state
@@ -458,6 +514,17 @@ defmodule Troupe.Gateway.Remote do
         {:noreply, publish(%{state | offers: offers})}
 
       _other ->
+        {:noreply, state}
+    end
+  end
+
+  # The plane's names for the people a private session is shared anew with.
+  def handle_info({:answered, :reshare, _from, session_id, _subject, {:ok, %{"shares" => shares}}}, state) do
+    case Map.fetch(state.offers, session_id) do
+      {:ok, offer} ->
+        {:noreply, publish(%{state | offers: Map.put(state.offers, session_id, Map.put(offer, "shares", shares))})}
+
+      :error ->
         {:noreply, state}
     end
   end
@@ -534,12 +601,13 @@ defmodule Troupe.Gateway.Remote do
 
   # -- offering ---------------------------------------------------------------
 
-  # The session is here, is not private, and is the linked person's: one made while
-  # somebody else was linked is theirs to offer at their next link. And there is a plane
-  # to offer it to: a client's token, or the daemon's own sign-in for this person.
-  defp offerable(state, session_id, subject) do
+  # The session is here, is the linked person's (one made while somebody else was linked
+  # is theirs to offer at their next link) and, if private, its person said yes to its
+  # passing through the plane unsealed. And there is a plane to offer it to: a client's
+  # token, or the daemon's own sign-in for this person.
+  defp offerable(state, session_id, subject, consent) do
     with {:ok, session} <- session(session_id),
-         :ok <- not_private(session),
+         :ok <- consented(session, consent),
          :ok <- linked(state, subject),
          :ok <- owned(session, subject) do
       {:ok, session}
@@ -553,16 +621,53 @@ defmodule Troupe.Gateway.Remote do
     end
   end
 
-  defp not_private(%{kind: "private"}) do
+  # Asked of the person by the client, in the words every client shows; the refusal carries
+  # them, and `consent`, for a client to ask with.
+  defp consented(%{kind: "private"}, "private"), do: :ok
+
+  defp consented(%{kind: "private"}, _consent) do
+    {:error, Error.new(:forbidden, %{consent: "private", reason: Relay.private_consent()})}
+  end
+
+  defp consented(_session, _consent), do: :ok
+
+  defp private?(session), do: Map.get(session, :kind) == "private"
+
+  # A private session is shared with the people its log says are invited with `control`,
+  # and nobody else: the consent its person gave names them.
+  defp share_of(%{kind: "private", id: session_id}, []) do
+    {:ok, Enum.map(invited_shares(session_id), &%{"person" => &1["subject"], "role" => &1["role"]})}
+  end
+
+  defp share_of(%{kind: "private"}, _named) do
     {:error,
-     Error.new(:forbidden, %{
+     Error.new(:invalid_params, %{
+       field: "share",
        reason:
-         "a private session is never offered to the plane: it is sealed under your own key, " <>
-           "and steering it from elsewhere is claiming it there (session.claim)"
+         "a private session is steered by the people invited into it with control, and " <>
+           "nobody else: invite them (session.invite) rather than naming them here"
      })}
   end
 
-  defp not_private(_session), do: :ok
+  defp share_of(_session, share), do: {:ok, share}
+
+  # The session's `control` invitees as its own log names them, in the record's shape.
+  defp invited_shares(session_id) do
+    session_id
+    |> Invites.invited()
+    |> Enum.filter(fn {_subject, invite} -> invite["role"] == "control" end)
+    |> Enum.sort()
+    |> Enum.map(fn {subject, invite} ->
+      %{"subject" => subject, "display_name" => invite["display_name"] || subject, "role" => "control"}
+    end)
+  end
+
+  defp withdrawn_reason(state, session_id) do
+    case Map.get(state.offers, session_id) do
+      %{"private" => true} -> Relay.private_withdrawn()
+      _other -> "withdrawn"
+    end
+  end
 
   defp linked(%{sign_in: %{subject: subject}}, subject) when is_binary(subject), do: :ok
 
@@ -629,7 +734,7 @@ defmodule Troupe.Gateway.Remote do
   defp fail_waiting(state, reason) do
     error = waiting_error(reason)
 
-    Enum.each(state.waiting, fn {:offer, from, _id, _label, _share, _subject} ->
+    Enum.each(state.waiting, fn {:offer, from, _id, _label, _share, _subject, _private} ->
       GenServer.reply(from, {:error, error})
     end)
 
@@ -665,9 +770,10 @@ defmodule Troupe.Gateway.Remote do
   defp refusal?({:rpc, %{"code" => -32_004}}), do: true
   defp refusal?(_reason), do: false
 
-  defp run(state, {:offer, from, session_id, label, share, subject}) do
+  defp run(state, {:offer, from, session_id, label, share, subject, private?}) do
     params = %{"session_id" => session_id, "workspace" => label, "share" => share}
-    call_plane(state, "relay.offer", params, {:offer, from, session_id, subject})
+    params = if private?, do: Map.put(params, "private", true), else: params
+    call_plane(state, "relay.offer", params, {:offer, from, {session_id, private?}, subject})
     state
   end
 
@@ -905,11 +1011,13 @@ defmodule Troupe.Gateway.Remote do
       |> owned_offers()
       |> Enum.filter(fn {id, _offer} -> Troupe.get_session(id) != nil end)
       |> Enum.map(fn {id, offer} ->
-        %{
+        synced = %{
           "session_id" => id,
           "workspace" => id |> Troupe.get_session() |> workspace_label(),
           "share" => Enum.map(offer["shares"], &%{"person" => &1["subject"], "role" => &1["role"]})
         }
+
+        if offer["private"] == true, do: Map.put(synced, "private", true), else: synced
       end)
 
     call_plane(state, "relay.sync", %{"offers" => offers}, :sync)
@@ -961,6 +1069,7 @@ defmodule Troupe.Gateway.Remote do
       case tag do
         :ignore -> :ok
         {:offer, from, id, subject} -> send(owner, {:answered, :offer, from, id, subject, result})
+        {:reshare, id} -> send(owner, {:answered, :reshare, nil, id, nil, result})
         :sync -> send(owner, {:answered, :sync, nil, nil, nil, result})
       end
     end)
@@ -1070,7 +1179,10 @@ defmodule Troupe.Gateway.Remote do
           not Enum.any?(offer["shares"], &(&1["subject"] == v.principal["subject"]))
       end)
 
-    Enum.each(gone, fn {id, viewer} -> close_viewer(state, id, viewer, "no longer shared with you") end)
+    reason =
+      if offer["private"] == true, do: Relay.invitation_taken_back(), else: "no longer shared with you"
+
+    Enum.each(gone, fn {id, viewer} -> close_viewer(state, id, viewer, reason) end)
     %{state | viewers: Map.new(kept)}
   end
 
@@ -1096,7 +1208,8 @@ defmodule Troupe.Gateway.Remote do
         "state" => Atom.to_string(state.status),
         "since" => if(state.status != :online, do: state.since),
         "steering" => steering,
-        "restored" => MapSet.member?(state.restored, id)
+        "restored" => MapSet.member?(state.restored, id),
+        "private" => offer["private"] == true
       }
 
       :ets.insert(@table, {id, described})

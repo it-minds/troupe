@@ -22,6 +22,13 @@ defmodule Troupe.Plane.Invites do
   stays readable to whoever kept it: an invitation cannot be taken back for what it already
   showed.
 
+  **A private session's `control` is steering while it is offered.** Its owner may offer it
+  for steering, having said yes to its passing through the plane unsealed while it is
+  (`Troupe.Plane.Remote`); a person invited with `control` steers it through the relay then,
+  and reads the sealed copy otherwise. Their list says which (`offered`). An invitation made,
+  changed or taken back reaches the views open on the offer at once: one whose person no
+  longer holds it is closed with a sentence.
+
   **Who may be invited.** Into a pod session, anybody the session's profile covers: a
   member of a team granted that profile, whose rules are the ones they would act under.
   Into a private session, which has no profile, anybody who shares a team with its owner. A
@@ -36,7 +43,7 @@ defmodule Troupe.Plane.Invites do
   import Ecto.Query
 
   alias Troupe.KMS
-  alias Troupe.Plane.{Admin, Audit, Identity, Repo}
+  alias Troupe.Plane.{Admin, Audit, Identity, Remote, Repo}
   alias Troupe.Plane.Identity.{Membership, Team, TeamGroupLink, User}
   alias Troupe.Plane.Sessions
   alias Troupe.Plane.Sessions.Session
@@ -257,7 +264,6 @@ defmodule Troupe.Plane.Invites do
           {:ok, Invite.t()} | {:error, Error.t()}
   def invite(%Session{} = session, %User{} = invitee, role, by, keys \\ []) do
     with :ok <- known_role(role),
-         :ok <- followed_only(session, role),
          :ok <- eligible(session, invitee),
          {:ok, keys} <- invite_keys(session, invitee, keys) do
       attrs = %{
@@ -278,6 +284,7 @@ defmodule Troupe.Plane.Invites do
             })
 
           changed([invitee.subject])
+          offer_changed(session)
           {:ok, invite}
 
         {:error, %Error{} = error} ->
@@ -315,25 +322,6 @@ defmodule Troupe.Plane.Invites do
   defp known_role(_role),
     do:
       {:error, Error.new(:invalid_params, %{field: "role", reason: "role is observe or control"})}
-
-  @doc """
-  A private session is followed by the people invited into it, and not steered: steering it
-  from another device is offering it, which carries what it says past the plane in the
-  clear, and a private session is never offered. `:ok` for every other invitation.
-  """
-  @spec followed_only(Session.t(), String.t()) :: :ok | {:error, Error.t()}
-  def followed_only(%Session{kind: "private"}, "control") do
-    {:error,
-     Error.new(:invalid_params, %{
-       field: "role",
-       reason:
-         "a private session is followed by the people invited into it: steering it from " <>
-           "another device would carry it past the plane in the clear, and a private session " <>
-           "is never offered"
-     })}
-  end
-
-  def followed_only(_session, _role), do: :ok
 
   # A private session's invitation carries where its key was put for the invitee, once for
   # every generation it has been sealed under: one missing would leave part of the log
@@ -426,9 +414,24 @@ defmodule Troupe.Plane.Invites do
           })
 
         changed([subject])
+        offer_changed(session)
         {:ok, invite}
     end
   end
+
+  # A private session offered from its owner's laptop: the connection offering it rechecks
+  # every view it carries, so one whose invitation went is closed now rather than at its
+  # next command, and the people it concerns are told.
+  defp offer_changed(%Session{kind: "private", id: session_id}) do
+    case Remote.laptop(session_id) do
+      nil -> :ok
+      laptop -> send(laptop, {:offer_changed, session_id})
+    end
+
+    session_id |> Remote.get() |> Remote.concerned() |> Remote.changed()
+  end
+
+  defp offer_changed(_session), do: :ok
 
   # A private session is then due a new key; a pod session's ACL row goes with the row.
   defp drop_invite(%Session{kind: "private"} = session, invite) do
@@ -675,7 +678,8 @@ defmodule Troupe.Plane.Invites do
       "role" => invite.role,
       "invited_by" => invite.invited_by,
       "invited_by_name" => by && by.display_name,
-      "invited_at" => DateTime.to_iso8601(invite.invited_at)
+      "invited_at" => DateTime.to_iso8601(invite.invited_at),
+      "offered" => if(session.kind == "private", do: Remote.offered?(session.id))
     }
   end
 

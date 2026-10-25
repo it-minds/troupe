@@ -17,7 +17,8 @@ defmodule Troupe.Plane.Remote.Watch do
   `invites.list` would (`invites`), and `invites.changed {invites}`, the whole list again,
   follows each invitation to them made, changed or taken back
   (`Troupe.Plane.Invites.changed/1`). A client that does not know the notification ignores
-  it.
+  it. A private session's invitation says whether it is offered now (`offered`), so a change
+  to its offer is told as both: the laptop's list and the invitations, each where it moved.
 
   It carries nothing of a session, and asks nothing of a laptop: what it sends is the
   listing's metadata. It is renewed on the open socket (`auth.refresh`), warned two
@@ -119,14 +120,9 @@ defmodule Troupe.Plane.Remote.Watch do
   defp handle_message(_notification_or_answer, state), do: {:ok, state}
 
   @impl WebSock
-  def handle_info({:remote_changed, subjects}, %{user: %User{subject: subject}} = state) do
+  def handle_info({changed, subjects}, %{user: %User{subject: subject}} = state)
+      when changed in [:remote_changed, :invites_changed] do
     if subject in subjects, do: tell(Identity.get_user(subject), state), else: {:ok, state}
-  end
-
-  def handle_info({:invites_changed, subjects}, %{user: %User{subject: subject}} = state) do
-    if subject in subjects,
-      do: tell_invites(Identity.get_user(subject), state),
-      else: {:ok, state}
   end
 
   def handle_info(:auth_expiring, state) do
@@ -139,12 +135,15 @@ defmodule Troupe.Plane.Remote.Watch do
 
   def handle_info(_message, state), do: {:ok, state}
 
-  # A change that names the person: their list again, if it moved, or the end of the watch
-  # for a person no longer active.
+  # A change that names the person: their list and their invitations again, each where it
+  # moved, or the end of the watch for a person no longer active.
   defp tell(%User{active: true} = user, state) do
-    case list(%{state | user: user}) do
-      {[], state} -> {:ok, state}
-      {changed, state} -> {:push, changed, state}
+    {listed, state} = list(%{state | user: user})
+    {invited, state} = invitations(state)
+
+    case listed ++ invited do
+      [] -> {:ok, state}
+      changed -> {:push, changed, state}
     end
   end
 
@@ -154,17 +153,15 @@ defmodule Troupe.Plane.Remote.Watch do
   end
 
   # The invitations to the person, as a frame where they differ from the last ones sent.
-  defp tell_invites(%User{active: true} = user, state) do
-    invites = Invites.to(user)
+  defp invitations(state) do
+    invites = Invites.to(state.user)
 
     if invites == state.invites,
-      do: {:ok, state},
+      do: {[], state},
       else:
-        {:push, [frame({:notification, "invites.changed", %{"invites" => invites}})],
-         %{state | user: user, invites: invites}}
+        {[frame({:notification, "invites.changed", %{"invites" => invites}})],
+         %{state | invites: invites}}
   end
-
-  defp tell_invites(gone, state), do: tell(gone, state)
 
   # The person's list, as a frame where it differs from the last one sent.
   defp list(state) do

@@ -3,7 +3,18 @@ defmodule Troupe.Client.Steering do
   A session offered to the plane for steering from another device (root #58), in the
   sentences `/steer` says: whether it is offered, to whom, whether the plane has it now,
   and who is steering it from elsewhere. The desktop app says the same.
+
+  A private session is offered only after its person says yes to its passing through the
+  plane unsealed while it is (root #765): `/steer on` asks it in the words every client
+  shows (`consent_question/0`), drawn in the colour that means a person is needed, and
+  `/steer on yes` offers it.
   """
+
+  # The daemon's own words (its refusal carries them), which the desktop app says too; the
+  # terminal keeps a copy, since it reaches the harness only through the daemon.
+  @private_consent "This session is private: while it is offered, what it says and does passes " <>
+                     "through the plane unsealed, and the plane relays it to whoever you invited " <>
+                     "with control. The plane keeps none of it. Offer it?"
 
   @doc "What `/steer` says of a session's offer, as the daemon's `session.get` has it."
   @spec line(map() | nil) :: String.t()
@@ -29,9 +40,44 @@ defmodule Troupe.Client.Steering do
       else: said(remote)
   end
 
+  defp said(%{"private" => true} = remote) do
+    "Offered to the plane, private#{shared(remote["shares"])} (#{state(remote)}): what it says " <>
+      "passes through the plane unsealed while it is offered. /steer off withdraws it and " <>
+      "keeps it sealed only."
+  end
+
   defp said(remote),
     do:
       "Offered to the plane#{shared(remote["shares"])} (#{state(remote)}). /steer off withdraws it."
+
+  @doc """
+  What `/steer on` asks of a private session's person before it is offered: the daemon's
+  refusal says it needs this yes, and `/steer on yes` gives it.
+  """
+  @spec consent_question() :: String.t()
+  def consent_question,
+    do: @private_consent <> " /steer on yes offers it; anything else keeps it sealed only."
+
+  @doc "The sentence the daemon refuses an offer of a private session with until its yes."
+  @spec private_consent() :: String.t()
+  def private_consent, do: @private_consent
+
+  @doc "Whether a notice is the question above, which is drawn as a person being needed."
+  @spec asks?(term()) :: boolean()
+  def asks?(text) when is_binary(text), do: String.starts_with?(text, @private_consent)
+  def asks?(_text), do: false
+
+  @doc """
+  The yes `/steer on yes` gives, taken off the words that follow it: `{"private", rest}`,
+  or `{nil, words}` for none.
+  """
+  @spec consent(String.t()) :: {String.t() | nil, String.t()}
+  def consent(words) do
+    case String.split(String.trim(words), [" ", ","], parts: 2, trim: true) do
+      ["yes" | rest] -> {"private", Enum.join(rest)}
+      _other -> {nil, words}
+    end
+  end
 
   @doc """
   What `/steer on` says once of an offer that lasts until this machine restarts. The

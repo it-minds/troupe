@@ -1018,11 +1018,14 @@ defmodule Troupe.Protocol.Schema do
         "subject" => optional(:string)
       },
       # A laptop's session offered to the plane for steering from another device, shared
-      # with `[{person, role}]`, and taken back (#58): the daemon's only.
+      # with `[{person, role}]`, and taken back (#58): the daemon's only. A private one
+      # needs `consent: "private"`, its person's yes to its passing through the plane
+      # unsealed while it is offered (#765).
       "remote.offer" => %{
         "command_id" => required(:string),
         "session_id" => required(:string),
-        "share" => optional({:array, :object})
+        "share" => optional({:array, :object}),
+        "consent" => optional(:string)
       },
       "remote.withdraw" => %{
         "command_id" => required(:string),

@@ -14,8 +14,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { emptyTranscript, fold, invitationWords, inviteRefusal, personName, removedSentence, roleWords } from "@troupe/client";
+import { emptyTranscript, fold, inviteRefusal, personName, removedSentence, roleWords } from "@troupe/client";
 import type { AuthSession, DaemonClient, FleetRow, Invitee, InviteRole, Person, TranscriptState, TroupeEvent } from "@troupe/client";
+import { inviteLine } from "./Remote";
 
 /** How the head reaches a session's invitations: the plane for a pod session, the daemon for a private one. */
 interface Inviting {
@@ -150,7 +151,7 @@ export function InviteControl({
         >
           <p>
             {row.kind === "private"
-              ? "Invite somebody by name to follow this private session. Its key goes from this computer into their own slot at the key manager; the plane cannot read it. Taking it back seals what follows under a new key they never get, and what they read before stays read."
+              ? "Invite somebody by name into this private session. Its key goes from this computer into their own slot at the key manager; the plane cannot read it. Somebody invited to steer it does so only while you offer it from elsewhere. Taking it back seals what follows under a new key they never get, and what they read before stays read."
               : "Invite somebody by name. They act under this profile's rules, and see it in their list."}
           </p>
           <label>
@@ -187,8 +188,8 @@ export function InviteControl({
             They may
             <select value={role} onChange={(e) => setRole(e.target.value as InviteRole)}>
               <option value="observe">Follow it</option>
-              {/* A private session is followed, never steered from elsewhere: that would be offering it. */}
-              {row.kind !== "private" && <option value="control">Steer it</option>}
+              {/* A private session is steered only while its owner offers it, which they say yes to first. */}
+              <option value="control">{row.kind === "private" ? "Steer it while offered" : "Steer it"}</option>
             </select>
           </label>
           <button type="submit" disabled={busy || !person}>
@@ -256,7 +257,7 @@ export function InvitedSession({ daemon, row, onBack }: { daemon: DaemonClient |
           ← Sessions
         </button>
         <h2>{row.title ?? row.id}</h2>
-        {invitation && <span className="shared">{invitationWords(invitation)}</span>}
+        {invitation && <span className="shared">{inviteLine(invitation)}</span>}
       </header>
       <p className="note">
         {invitation?.owner_name ?? row.owner ?? "Its owner"}'s private session, read on this computer from the plane's sealed copy with your own key. What

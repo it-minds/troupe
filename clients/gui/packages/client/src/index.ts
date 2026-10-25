@@ -122,9 +122,10 @@ export {
   remoteOffer,
   offerRestartWords,
   RESTART_SENTENCE,
+  PRIVATE_OFFER_SENTENCE,
   onThisComputer,
 } from "./fleet.js";
-export { invitationWords, invitationsFrom, inviteRefusal, personName, removedSentence, roleWords } from "./invites.js";
+export { invitationWords, invitationsFrom, inviteRefusal, personName, removedSentence, roleWords, steerWords } from "./invites.js";
 export type { Invitation, Invitee, InviteRole, Person, SealedEvent, SealedRead } from "./invites.js";
 export type {
   FleetRow,

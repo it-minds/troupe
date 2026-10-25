@@ -145,7 +145,7 @@ defmodule Troupe.Plane.Remote.Viewer do
 
   def handle_info({:recheck, offer}, state) do
     case Remote.role(offer, state.user) do
-      nil -> closed("no longer shared with you", state)
+      nil -> closed(unshared(offer), state)
       held -> {:ok, %{state | role: Relay.narrower(state.role, held)}}
     end
   end
@@ -174,6 +174,11 @@ defmodule Troupe.Plane.Remote.Viewer do
   defp closed(reason, state) do
     {:stop, :normal, 1000, [frame({:notification, "relay.closed", %{"reason" => reason}})], state}
   end
+
+  # A private session's view ends because the invitation went; any other, because the
+  # laptop's share no longer names the person.
+  defp unshared(%Remote.Offer{private: true}), do: Relay.invitation_taken_back()
+  defp unshared(_offer), do: "no longer shared with you"
 
   defp refuse(id, error, state), do: {:stop, :normal, 1000, [frame({:error, id, error})], state}
 
