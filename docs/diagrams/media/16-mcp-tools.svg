@@ -166,7 +166,7 @@
   <text x="1180" y="638">A call in flight waits 60 s for you. Same call_id.</text>
   <text x="1180" y="658">Everyone in the session sees a laptop is involved.</text>
 </g>
-<text class="m" x="1180" y="690" font-size="9" fill="#7B7B94" letter-spacing="1">WHO MAY ASK THE AGENT TO USE YOURS: OPEN, ISSUE 331</text>
+<text class="m" x="1180" y="690" font-size="9" fill="#7B7B94" letter-spacing="1">A PROFILE MAY FORBID IT: personalTools: forbid · DECISION 862</text>
 
 <!-- ===== the flow ===== -->
 <!-- 1 attach -->

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Troupe, in sixteen pictures</title>
-<meta name="description" content="The core principles of Troupe, one diagram at a time: layers, where the work runs, the plane, sessions, turns, the cluster, keys, triggers, habits, the BEAM, scaling, identity, profiles, agents and MCP tools.">
+<meta name="description" content="The core principles of Troupe, one diagram at a time, and what each one buys an organisation: layers, where the work runs, the plane, sessions, turns, the cluster, keys, triggers, habits, scaling, profiles, agents, tools, identity, and why it is built on the BEAM.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&family=DM+Mono:wght@400;500&family=VT323&display=swap">
 <style>
@@ -20,6 +20,7 @@
     --cyan: #00DBD3;
     --cyan-2: #00C6C9;
     --amber: #FFBC56;
+    --pink: #FF0080;
     --ink: #000353;
     --shadow: 10px 10px 0 #000353;
   }
@@ -32,17 +33,19 @@
   a { color: var(--cyan); text-decoration: none; }
   a:hover { text-decoration: underline; }
   code, .mono { font-family: "DM Mono", ui-monospace, Menlo, Consolas, monospace; }
+  code { font-size: .9em; color: var(--cream); }
   .screen { font-family: VT323, "DM Mono", ui-monospace, monospace; letter-spacing: 4px; color: var(--cyan); font-size: 22px; }
   .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
 
   header.hero { padding: 72px 0 40px; border-bottom: 1px solid var(--line); }
   header.hero h1 { font-size: clamp(38px, 6vw, 64px); font-weight: 900; letter-spacing: -2px; color: var(--cream); margin: 10px 0 18px; line-height: 1.02; }
-  header.hero p.lede { font-size: 21px; max-width: 760px; color: var(--muted); margin: 0 0 28px; }
+  header.hero p.lede { font-size: 21px; max-width: 760px; color: var(--muted); margin: 0 0 18px; }
+  header.hero p.how { font-size: 16px; max-width: 760px; color: var(--dim); margin: 0 0 28px; }
   .legend { display: flex; flex-wrap: wrap; gap: 18px 32px; font-family: "DM Mono", ui-monospace, monospace; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--dim); }
   .legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 10px; vertical-align: -1px; }
   .legend .cyan::before { background: var(--cyan); }
   .legend .amber::before { background: var(--amber); }
-  .legend .pink::before { background: #FF0080; }
+  .legend .pink::before { background: var(--pink); }
 
   nav.toc { padding: 28px 0; border-bottom: 1px solid var(--line); }
   nav.toc ol { columns: 2; column-gap: 40px; margin: 0; padding-left: 28px; font-family: "DM Mono", ui-monospace, monospace; font-size: 14px; line-height: 1.9; color: var(--muted); }
@@ -54,9 +57,12 @@
   section.pic h2 { font-size: clamp(28px, 4vw, 42px); font-weight: 900; letter-spacing: -1.2px; color: var(--cream); margin: 0 0 18px; line-height: 1.08; }
   section.pic .text { max-width: 820px; }
   section.pic .text p { margin: 0 0 14px; }
-  section.pic .text p strong { color: var(--cream); font-weight: 800; }
+  section.pic .text p.claim { font-size: 19px; color: var(--cream); font-weight: 800; }
+  section.pic .text .k { display: block; font-family: "DM Mono", ui-monospace, monospace; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: var(--dim); margin: 18px 0 4px; }
+  section.pic .text .k.out { color: #FF7E6E; }
   section.pic .text ul { margin: 0 0 14px; padding-left: 22px; }
   section.pic .text li { margin: 0 0 6px; }
+  section.pic .text li strong { color: var(--cream); font-weight: 800; }
   figure { margin: 30px 0 0; }
   figure .frame { background: var(--void); border: 1px solid var(--line); box-shadow: var(--shadow); }
   figure object, figure img { display: block; width: 100%; aspect-ratio: 16 / 9; height: auto; }
@@ -73,10 +79,11 @@
   <div class="wrap">
     <div class="screen">// TROUPE, IN SIXTEEN PICTURES</div>
     <h1>The principles, one diagram at a time</h1>
-    <p class="lede">Troupe runs coding agents for an organisation: on a laptop, or on a cluster where a session outlives the client that started it. These are the ideas the design holds to, each drawn once. Read down; the pictures stand on their own as well.</p>
+    <p class="lede">Troupe runs coding agents for an organisation: on a laptop, or on a cluster where a session outlives the client that started it. These are the ideas the design holds to, each drawn once.</p>
+    <p class="how">Each picture carries the mechanism. The text under it says what the mechanism buys you and what it rules out, which is the part a picture cannot say. Read down, or jump to one.</p>
     <div class="legend">
       <span class="cyan">the machine working</span>
-      <span class="amber">this machine</span>
+      <span class="amber">this machine, or yours</span>
       <span class="pink">a person must decide</span>
     </div>
   </div>
@@ -95,12 +102,12 @@
       <li><a href="#openbao">Keys, and erasure</a></li>
       <li><a href="#triggers">Work nobody starts</a></li>
       <li><a href="#habits">Habits of the harness</a></li>
-      <li><a href="#beam">Why the BEAM</a></li>
       <li><a href="#breathes">It breathes</a></li>
-      <li><a href="#identity">Whose identity</a></li>
-      <li><a href="#profile">A profile is the config</a></li>
+      <li><a href="#profile">Policy, profile, bundle</a></li>
       <li><a href="#agents">An agent is a file</a></li>
       <li><a href="#mcp">Tools, and whose they are</a></li>
+      <li><a href="#identity">Whose name a call carries</a></li>
+      <li><a href="#beam">Why it is built this way</a></li>
     </ol>
   </div>
 </nav>
@@ -109,216 +116,264 @@
 
 <section class="pic" id="layers">
   <div class="wrap">
-    <div class="screen eyebrow">// 01 · WHAT IS INSIDE WHAT</div>
+    <div class="screen eyebrow">// WHAT IS INSIDE WHAT</div>
     <h2>Four layers</h2>
     <div class="text">
-      <p><strong>The model thinks; everything around it is ours.</strong> An LLM sits inside an agent, which is a role. The agent sits inside the harness, which runs it: a workspace, tools, approvals, and a log of everything that happened. The harness sits inside a client — a terminal, the desktop app, or a program you wrote — which talks to it over one protocol.</p>
-      <p>The line that matters is the harness's edge. Anything a client can do goes through the protocol, and there is no private back door for our own apps: what the console does, a script can do. Swap the model, swap the client, and the harness is the same.</p>
+      <p class="claim">The model is the one part we did not write, and it sits innermost.</p>
+      <span class="k">So what</span>
+      <p>Everything an organisation cares about is decided outside the model: what an agent may touch, who said yes, what it cost, what was logged. Those live in the harness, which is why the model can be swapped by one line of configuration without any guarantee changing. The harness's edge is one protocol, and our own apps get no private door through it: what the console can do, a script can do, and an audit from either is the same audit.</p>
+      <span class="k out">What it rules out</span>
+      <p>A vendor lock at the model layer, and a client that is more trusted than another.</p>
     </div>
     <figure><div class="frame"><object data="media/01-four-layers.svg" type="image/svg+xml"><img src="media/01-four-layers.svg" alt="Four nested squares: LLM, agent, harness, client, with the protocol at the harness's edge."></object></div>
-    <figcaption>01 · <a href="media/01-four-layers.svg">01-four-layers.svg</a></figcaption></figure>
+    <figcaption><a href="media/01-four-layers.svg">01-four-layers.svg</a></figcaption></figure>
   </div>
 </section>
 
 <section class="pic" id="where">
   <div class="wrap">
-    <div class="screen eyebrow">// 02 · THE SAME HARNESS, TWO HOMES</div>
+    <div class="screen eyebrow">// THE SAME HARNESS, TWO HOMES</div>
     <h2>Where the work runs</h2>
     <div class="text">
-      <p><strong>One harness, whether it runs on your laptop or in a pod.</strong> On a laptop it is the daemon; on the cluster it is a worker. Three clients — the terminal, the desktop app, the web console — speak the same protocol to either, so a session feels the same wherever it lives.</p>
-      <p>What an agent may call is a short list: read and write files, run a shell, search, delegate, remember. Some of those ask first. Which ones ask is not the model's choice and not the agent's; it is the person's rules, or the organisation's, and the harness enforces them before the call runs.</p>
+      <p class="claim">The same harness runs on a laptop and in a pod. What changes is who sets the rules.</p>
+      <span class="k">So what</span>
+      <p>A developer can try everything alone with the daemon, then move the same kind of session to the cluster without learning a second product; the terminal, the desktop app and any program written against the protocol work in both places. The difference between the two homes is authority, not features. At home the person's own configuration decides which calls ask first. On a pod the profile decides, and a repository's files cannot loosen it.</p>
+      <span class="k out">What it rules out</span>
+      <p>An agent that writes a file or runs a command without the rules having been consulted first, in either home.</p>
     </div>
     <figure><div class="frame"><object data="media/02-where-the-work-runs.svg" type="image/svg+xml"><img src="media/02-where-the-work-runs.svg" alt="Three clients over one protocol; the daemon on a laptop and the worker in a pod as the same harness."></object></div>
-    <figcaption>02 · <a href="media/02-where-the-work-runs.svg">02-where-the-work-runs.svg</a></figcaption></figure>
+    <figcaption><a href="media/02-where-the-work-runs.svg">02-where-the-work-runs.svg</a></figcaption></figure>
   </div>
 </section>
 
 <section class="pic" id="plane">
   <div class="wrap">
-    <div class="screen eyebrow">// 03 · ASK ONCE, THEN TALK DIRECTLY</div>
+    <div class="screen eyebrow">// ASK ONCE, THEN TALK DIRECTLY</div>
     <h2>The plane and the pods</h2>
     <div class="text">
-      <p><strong>The plane is the front door, not the middleman.</strong> A client asks the plane for a session on a profile; the operator keeps pods running per profile; the plane hands the client a pod to talk to directly. From then on the conversation is between the client and its pod, with the plane keeping the index, the audit and the keys.</p>
-      <p>The daemon at home is the same picture with the plane left out: a laptop runs its own harness and needs nobody's permission to start. Five images make up a deployment: the plane, the operator, the worker, the console and the a2a gateway.</p>
+      <p class="claim">The plane decides who and where. It is never in the data path.</p>
+      <span class="k">So what</span>
+      <p>A client asks the plane for a session, gets a pod and a short-lived token, and from then on talks to the pod. Session content never passes through the plane, so the plane keeps the index, the budget and the audit of administration, and nothing that could leak a transcript. It holds no key either: signing is done for it by OpenBao. Compromising the internet-facing plane yields requests that still have to pass policy, not transcripts and not a cluster. A laptop needs no plane at all.</p>
+      <span class="k out">What it rules out</span>
+      <p>A central component that can read every session, and a single hop whose failure stalls every running turn.</p>
     </div>
     <figure><div class="frame"><object data="media/03-the-plane-and-the-pods.svg" type="image/svg+xml"><img src="media/03-the-plane-and-the-pods.svg" alt="Ask the plane, the operator spawns pods per profile, then the client talks to the pod directly."></object></div>
-    <figcaption>03 · <a href="media/03-the-plane-and-the-pods.svg">03-the-plane-and-the-pods.svg</a></figcaption></figure>
+    <figcaption><a href="media/03-the-plane-and-the-pods.svg">03-the-plane-and-the-pods.svg</a></figcaption></figure>
   </div>
 </section>
 
 <section class="pic" id="byo">
   <div class="wrap">
-    <div class="screen eyebrow">// 04 · FOUR SOCKETS</div>
+    <div class="screen eyebrow">// FOUR SOCKETS</div>
     <h2>Bring your own</h2>
     <div class="text">
-      <p><strong>The harness is a puzzle piece with four sockets:</strong> which client drives it, which model thinks, which tools it may use, and where it runs. Each socket takes more than one piece. Anthropic or a gateway of your own in the model socket; your own MCP servers in the tools socket; a laptop or a cluster in the last.</p>
-      <p>Nothing in the harness assumes a particular answer to any of the four. That is what makes it fit an organisation that already has opinions about models, tools and where code may run.</p>
+      <p class="claim">Four sockets, no favourite piece in any of them.</p>
+      <span class="k">So what</span>
+      <p>Adopting Troupe does not mean choosing a model vendor, a tool vendor or a hosting answer. The model socket takes Anthropic, OpenAI or the gateway you already run; the tools socket takes the team's MCP servers and your own; the client socket takes the terminal, the desktop app or something you wrote; the last socket takes a laptop or your cluster with your sign-in. An organisation keeps the opinions it already has.</p>
+      <span class="k out">What it rules out</span>
+      <p>A feature that only works with one model, one client or one host.</p>
     </div>
     <figure><div class="frame"><object data="media/04-bring-your-own.svg" type="image/svg+xml"><img src="media/04-bring-your-own.svg" alt="The harness as a puzzle piece with four sockets: client, model, tools, where it runs."></object></div>
-    <figcaption>04 · <a href="media/04-bring-your-own.svg">04-bring-your-own.svg</a></figcaption></figure>
+    <figcaption><a href="media/04-bring-your-own.svg">04-bring-your-own.svg</a></figcaption></figure>
   </div>
 </section>
 
 <section class="pic" id="actors">
   <div class="wrap">
-    <div class="screen eyebrow">// 05 · THE NOUNS</div>
+    <div class="screen eyebrow">// THE NOUNS</div>
     <h2>Actors, sessions, profiles</h2>
     <div class="text">
-      <p><strong>Three nouns carry the whole system.</strong> An actor is whoever acts: a person, a service principal, or an agent acting for one of them, and every event names its actor. A session is a log: an append-only record of turns, calls, approvals and results, which the harness can replay to the same state. A profile is what a team is held to: the model, the tools, the limits, the image, the budget.</p>
-      <p>Because a session is its log, it can go dormant and wake, move between pods, be audited line by line, or be erased by destroying its key. Because a profile is one thing, an organisation can say in one place what a team's agents may do.</p>
+      <p class="claim">Every event names who did it. A session is its log. A profile is what a team is held to.</p>
+      <span class="k">So what</span>
+      <p>Accountability needs no second system. "Who approved this shell command" is a line in the session's log, hash-chained to the one before it, and the same line a client, a restart and an auditor all read. Because a session is nothing but its log, going dormant, waking on another pod, being reviewed months later and being erased are all operations on one record. Because a profile is one object, an organisation says in one place where a team's sessions run and with what; the money is the team's, not the profile's.</p>
+      <span class="k out">What it rules out</span>
+      <p>A transcript that differs between what the person saw and what the audit shows.</p>
     </div>
     <figure><div class="frame"><object data="media/05-actors-sessions-profiles.svg" type="image/svg+xml"><img src="media/05-actors-sessions-profiles.svg" alt="Who acts, what a session is, and what a profile carries."></object></div>
-    <figcaption>05 · <a href="media/05-actors-sessions-profiles.svg">05-actors-sessions-profiles.svg</a></figcaption></figure>
+    <figcaption><a href="media/05-actors-sessions-profiles.svg">05-actors-sessions-profiles.svg</a></figcaption></figure>
   </div>
 </section>
 
 <section class="pic" id="turn">
   <div class="wrap">
-    <div class="screen eyebrow">// 06 · THINK, ACT, REPEAT</div>
+    <div class="screen eyebrow">// THINK, ACT, REPEAT</div>
     <h2>One turn</h2>
     <div class="text">
-      <p><strong>A turn is one input and everything the agent does with it.</strong> The model streams its thinking and its text as deltas; it asks for tools; the harness runs them, several at once where it can, and feeds the results back; the loop continues until the agent finishes or hits a limit. The next input is the next turn.</p>
-      <p>Approval gates sit inside the loop, not around it. A call that needs a yes waits for one — from the person at the keyboard, from someone steering remotely, or from a rule — and the rest of the turn waits with it. Every delta, call and answer is a line in the log, which is why a client that attaches late sees exactly what one that was there saw.</p>
+      <p class="claim">A turn is one input and everything the agent does with it. The gates sit inside the loop.</p>
+      <span class="k">So what</span>
+      <p>A "yes" is specific: to one call, on one turn, recorded with who gave it. The agent runs several tool calls at once where it can, but a call that needs a person waits for that person and nothing runs on their behalf meanwhile. Every delta, call and answer is a line in the log, so a client that attaches late sees exactly what one that was there saw. Budgets end a turn and ask; they do not make it vanish.</p>
+      <span class="k out">What it rules out</span>
+      <p>A blanket approval that covers calls nobody has seen yet.</p>
     </div>
     <figure><div class="frame"><object data="media/06-one-turn.svg" type="image/svg+xml"><img src="media/06-one-turn.svg" alt="One turn of an agent: the think, act, repeat loop with streaming deltas, tool calls and approval gates."></object></div>
-    <figcaption>06 · <a href="media/06-one-turn.svg">06-one-turn.svg</a></figcaption></figure>
+    <figcaption><a href="media/06-one-turn.svg">06-one-turn.svg</a></figcaption></figure>
   </div>
 </section>
 
 <section class="pic" id="cluster">
   <div class="wrap">
-    <div class="screen eyebrow">// 07 · WHAT RUNS WHERE</div>
+    <div class="screen eyebrow">// WHAT RUNS WHERE</div>
     <h2>On the cluster</h2>
     <div class="text">
-      <p><strong>One system namespace, and one namespace per profile.</strong> The plane, the operator, the console and OpenBao live in the system namespace. Each profile's workers live in a namespace of their own, with the Secrets they need copied in by the operator, a Pod Security level the pod actually needs, and a network policy that admits the plane's control channel and the egress the profile names, and nothing else.</p>
-      <p>Two ingresses: one for people and clients, one for the a2a gateway. The control channel between the plane and a pod is internal and encrypted; what a pod may reach outside is a short list of hosts, and the cloud's metadata service is never on it.</p>
+      <p class="claim">One namespace per profile, two kinds of door, and nothing else reachable.</p>
+      <span class="k">So what</span>
+      <p>The plane, the operator and the console share the system namespace, with OpenBao beside them. Each profile's pods get a namespace of their own, the Secrets they need injected, and a network policy that admits two things: the plane's internal control channel, and the handful of hosts the profile names. People come in through the plane's HTTPS ingress to ask, and through a worker ingress to talk to their pod directly; a pod reaches out only to the model, its MCP servers, storage and OpenBao. A security reviewer can read one profile file and know what its pods can touch. The blast radius of a compromised pod is one profile's namespace and its listed hosts.</p>
+      <span class="k out">What it rules out</span>
+      <p>A pod that can reach another team's pods, the cloud's metadata service, or anything a profile did not name.</p>
     </div>
     <figure><div class="frame"><object data="media/07-on-the-cluster.svg" type="image/svg+xml"><img src="media/07-on-the-cluster.svg" alt="The system namespace, one namespace per profile, two ingresses, the internal control channel, and outside services."></object></div>
-    <figcaption>07 · <a href="media/07-on-the-cluster.svg">07-on-the-cluster.svg</a></figcaption></figure>
+    <figcaption><a href="media/07-on-the-cluster.svg">07-on-the-cluster.svg</a></figcaption></figure>
   </div>
 </section>
 
 <section class="pic" id="openbao">
   <div class="wrap">
-    <div class="screen eyebrow">// 08 · THREE JOBS FOR ONE KEY MANAGER</div>
+    <div class="screen eyebrow">// THREE JOBS FOR ONE KEY MANAGER</div>
     <h2>Keys, and erasure</h2>
     <div class="text">
-      <p><strong>OpenBao does three things, and the plane never holds a raw key.</strong> It signs the plane's tokens and the plane's word to clients, so a client can pin the plane's public key and refuse a forged policy. It holds one key slot per session on a pod, so a session's log at rest is readable only through that slot. And it holds a person's own slots, for what is theirs alone.</p>
-      <p>Erasure is destroying the key first. A session whose key is gone is unreadable wherever its bytes still sit: in the object store, in a backup, in a pod that has not been drained yet. The rows go after; the proof that nobody can read them comes first.</p>
+      <p class="claim">OpenBao holds every key. The plane holds none.</p>
+      <span class="k">So what</span>
+      <p>The plane can sign tokens, its version policy and the organisation's document without ever being able to leak the key that signs them. A pod can open only the key slots of the teams it serves, one slot per session, so a pod naming a session it does not hold gets nothing. A person's own slots, for private sessions and their own tool credentials, are reachable by nobody else, not by a pod and not by an administrator. Erasure is destroying the key first: once it is gone, the session's bytes are noise wherever they still sit, in the object store, in a backup, on a pod not yet drained. Deleting the rows afterwards is tidiness.</p>
+      <span class="k out">What it rules out</span>
+      <p>An administrator reading a transcript, and an erasure that depends on every copy being found.</p>
     </div>
     <figure><div class="frame"><object data="media/08-openbao.svg" type="image/svg+xml"><img src="media/08-openbao.svg" alt="OpenBao's three jobs: signing the plane's tokens, one key slot per session, a person's own slots; erasure by destroying the key first."></object></div>
-    <figcaption>08 · <a href="media/08-openbao.svg">08-openbao.svg</a></figcaption></figure>
+    <figcaption><a href="media/08-openbao.svg">08-openbao.svg</a></figcaption></figure>
   </div>
 </section>
 
 <section class="pic" id="triggers">
   <div class="wrap">
-    <div class="screen eyebrow">// 09 · WORK NOBODY STARTS</div>
+    <div class="screen eyebrow">// WORK NOBODY STARTS</div>
     <h2>Triggers</h2>
     <div class="text">
-      <p><strong>A trigger is a frozen request.</strong> A schedule, a webhook from a repository, or another agent fires it; what fires is a revision — the profile, the agent, the prompt and the terms, hashed, so the run is exactly what an administrator approved and not what the file says today.</p>
-      <p>The session runs as a service principal with its own terms: how many turns, which approvals are denied outright, how many at once. It is flagged for review until a person looks, and a run nobody looked at cannot be mistaken for one somebody did. A blind retry within a minute is the run it repeats, never a second one.</p>
+      <p class="claim">A trigger is a frozen request, run under terms, by a credential a team owns.</p>
+      <span class="k">So what</span>
+      <p>Unattended work is reviewable because nothing about it is loose. What fires is a revision, hashed, so a run is exactly what was approved and not what the file says today, and the session carries that hash in its origin. The terms cap money, turns and time, and set approvals to wait or deny, never to auto. The session runs as a service principal with a subset of the team's grants and no admin role, so a trigger cannot do more than the team could. Every run is flagged for review until a person looks, and a retry with the same key is the same run, never a second one.</p>
+      <span class="k out">What it rules out</span>
+      <p>A scheduled job that quietly approves its own writes, or escalates past the team that owns it.</p>
     </div>
     <figure><div class="frame"><object data="media/09-triggers.svg" type="image/svg+xml"><img src="media/09-triggers.svg" alt="A schedule, a webhook or another agent fires a trigger frozen as a revision; the session runs as a service principal and is flagged for review."></object></div>
-    <figcaption>09 · <a href="media/09-triggers.svg">09-triggers.svg</a></figcaption></figure>
+    <figcaption><a href="media/09-triggers.svg">09-triggers.svg</a></figcaption></figure>
   </div>
 </section>
 
 <section class="pic" id="habits">
   <div class="wrap">
-    <div class="screen eyebrow">// 10 · SIX HABITS</div>
+    <div class="screen eyebrow">// SIX HABITS</div>
     <h2>Habits of the harness</h2>
     <div class="text">
-      <p><strong>Six things the harness does without being asked, because an agent that does them badly is worse than no agent.</strong></p>
+      <p class="claim">Six things the harness does without being asked. They are the difference between a demo and something you leave running.</p>
       <ul>
-        <li><strong>Worktrees:</strong> a session works in a worktree of its own, never on a branch someone else has checked out.</li>
-        <li><strong>The project brief:</strong> a repository's own instructions reach every session in it — once the workspace is trusted, and never a program it carries.</li>
-        <li><strong>Watch mode:</strong> the harness notices what changed on disk, so the agent reads what is there and not what it remembers.</li>
-        <li><strong>Bounded results:</strong> a tool's output is cut at a size the model can use, with a way to read the rest on purpose.</li>
-        <li><strong>Replay from the log:</strong> a crash, a move or a wake rebuilds the session from its own record.</li>
-        <li><strong>Goal and loop:</strong> a turn knows what it is for, and ends when it is done or when a limit says so.</li>
+        <li><strong>Worktrees.</strong> A second live session in the same repository gets its own git worktree, so two agents never see each other's half-done edits as yours, and a dirty tree is never removed unasked.</li>
+        <li><strong>The project brief.</strong> What the troupe has learned about a repository lives in a file in that repository, written by the agents themselves and read into every prompt. It travels with the code and you can read it too.</li>
+        <li><strong>Watch mode.</strong> An <code>AI!</code> comment in a file you save is picked up from whatever editor you use. The harness knows its own writes by content hash and never chases them.</li>
+        <li><strong>Bounded results.</strong> A big output is cut where it is made, head and tail with a handle for the rest, and nothing already in the conversation is rewritten, so the model's cache stays warm and the bill stays down.</li>
+        <li><strong>Replay.</strong> An agent that dies is rebuilt from its own log and finishes what it started. A finished call never runs twice. The same trick wakes a dormant session.</li>
+        <li><strong>Goal and loop.</strong> A goal is seen on every turn and survives a restart. A loop runs turns on its own and stops when the goal is met, at the limit, after three failed turns, or when the budget asks you.</li>
       </ul>
+      <span class="k out">What it rules out</span>
+      <p>An agent that clobbers your checkout, forgets what it learned last week, or runs up a bill re-reading its own output.</p>
     </div>
     <figure><div class="frame"><object data="media/10-harness-habits.svg" type="image/svg+xml"><img src="media/10-harness-habits.svg" alt="Six habits of the harness: worktrees, the project brief, watch mode, bounded results, replay from the log, goal and loop."></object></div>
-    <figcaption>10 · <a href="media/10-harness-habits.svg">10-harness-habits.svg</a></figcaption></figure>
-  </div>
-</section>
-
-<section class="pic" id="beam">
-  <div class="wrap">
-    <div class="screen eyebrow">// 11 · WHY ERLANG</div>
-    <h2>Why the BEAM</h2>
-    <div class="text">
-      <p><strong>A session is a supervision tree, and the failure rules are drawn, not written.</strong> The root agent, its delegates, its tool calls and its link to the client are processes under supervisors with stated restart rules: a tool that crashes takes nothing else with it; a root that dies is restarted from the log; a client that drops leaves the session running.</p>
-      <p>The ledger on the right is the honest version of the argument. What the BEAM gives for free — isolation, supervision, cheap concurrency, hot introspection, distribution between replicas — is what you would write by hand, and get subtly wrong, in Rust or Go. The cost is a runtime fewer people know. We take that trade for a system whose job is to keep going while things fail.</p>
-    </div>
-    <figure><div class="frame"><object data="media/11-why-the-beam.svg" type="image/svg+xml"><img src="media/11-why-the-beam.svg" alt="A session as its supervision tree with the failure rules drawn on, and a ledger of what the BEAM brings against hand-written Rust or Go."></object></div>
-    <figcaption>11 · <a href="media/11-why-the-beam.svg">11-why-the-beam.svg</a></figcaption></figure>
+    <figcaption><a href="media/10-harness-habits.svg">10-harness-habits.svg</a></figcaption></figure>
   </div>
 </section>
 
 <section class="pic" id="breathes">
   <div class="wrap">
-    <div class="screen eyebrow">// 12 · SCALING FROM DEMAND</div>
+    <div class="screen eyebrow">// SCALING FROM DEMAND</div>
     <h2>It breathes</h2>
     <div class="text">
-      <p><strong>Pods follow demand, and the plane is the only one who counts.</strong> Every fifteen seconds the plane looks at the sessions each profile has and the pods it has, decides how many it wants, and writes that number into the WorkerProfile. The operator reconciles a StatefulSet to it. Pods heartbeat back, so the plane knows which are alive and which are still finishing something.</p>
-      <p>Scaling down drains the highest ordinal first: the plane tells the pod, the pod puts its sessions to sleep one by one and reports progress, the plane waits while progress is made, and the operator replaces the pod the moment the plane records it drained. A quiet profile goes to zero over a night and comes back with the first session in the morning.</p>
+      <p class="claim">Pods follow demand. The number of them is never a commit.</p>
+      <span class="k">So what</span>
+      <p>Every fifteen seconds the plane counts a profile's active and pending sessions, divides by sessions per pod, adds the warm count, and writes that into the profile's resource; the operator reconciles the StatefulSet to it, and the pods report back. Cost follows use without a person in the loop, inside ceilings a cluster administrator set once. Scaling down drains the pods it removes first: placement stops, running turns finish, sessions go dormant to storage, and only then does the pod go. A profile with no warm workers is zero pods overnight and one pod about half a minute after the first session in the morning. GitOps, where it is used, carries the profile's shape; it never carries a replica count.</p>
+      <span class="k out">What it rules out</span>
+      <p>A session killed mid-turn by a scale-down, and a pull request to add a pod.</p>
     </div>
     <figure><div class="frame"><object data="media/12-it-breathes.svg" type="image/svg+xml"><img src="media/12-it-breathes.svg" alt="The plane recomputes replicas every fifteen seconds, the operator reconciles, pods heartbeat; one profile over one day, draining the highest ordinal first."></object></div>
-    <figcaption>12 · <a href="media/12-it-breathes.svg">12-it-breathes.svg</a></figcaption></figure>
-  </div>
-</section>
-
-<section class="pic" id="identity">
-  <div class="wrap">
-    <div class="screen eyebrow">// 13 · WHO IS CALLING</div>
-    <h2>Whose identity</h2>
-    <div class="text">
-      <p><strong>When a pod calls a tool, the question is whose name it speaks in.</strong> A shared session makes it sharp: one person's tool can be driven by the others at the table. Three answers were on the table — the system's identity only; on behalf of a person, with a token minted for them; or client-hosted, where the tool stays on the person's laptop and the call is relayed back over their own socket.</p>
-      <p>Troupe took the third for personal tools: a person's signed-in servers are offered to a session with consent, the token never leaves their machine, and every participant sees a line saying whose tools the session is using. System identities stay for what a profile owns. This picture is the one to argue from when the question comes up again.</p>
-    </div>
-    <figure><div class="frame"><object data="media/13-whose-identity.svg" type="image/svg+xml"><img src="media/13-whose-identity.svg" alt="A shared session where one person's tool can be driven by the others; three answers for whose identity a pod's MCP call carries."></object></div>
-    <figcaption>13 · <a href="media/13-whose-identity.svg">13-whose-identity.svg</a></figcaption></figure>
+    <figcaption><a href="media/12-it-breathes.svg">12-it-breathes.svg</a></figcaption></figure>
   </div>
 </section>
 
 <section class="pic" id="profile">
   <div class="wrap">
-    <div class="screen eyebrow">// 14 · WHERE CONFIGURATION LIVES</div>
-    <h2>A profile is the config</h2>
+    <div class="screen eyebrow">// WHERE CONFIGURATION LIVES</div>
+    <h2>Policy, profile, bundle</h2>
     <div class="text">
-      <p><strong>Configuration is a ladder, and the profile is the rung an organisation holds.</strong> Defaults, then the person's own file, then the repository's, then the environment; above them, on a pod, the profile: a versioned, hashed bundle of agents, servers, skills and limits, under a policy ceiling nobody below it can raise.</p>
-      <p>The pod enforces it and the session remembers which revision it ran under, so an audit can say what rules applied to a turn months later. The alternative on the right — config on every laptop, hand-edited, drifting — is what most teams have today, and why a profile is worth the ceremony.</p>
+      <p class="claim">Three objects, three owners, three enforcers. Configuration is a fact about the session, not about whose laptop it ran on.</p>
+      <span class="k">So what</span>
+      <p>They are easy to blur, so keep them apart. The <strong>policy</strong> is the cluster administrator's ceiling: which images, which hosts, how many replicas, how much CPU any profile may ask for. It is checked at admission and again by the operator. The <strong>profile</strong> is the team administrator's choice of where sessions run and with what: image, size, model, storage, egress, the bundle channel it follows. The operator enforces it: the egress becomes a network policy, the secrets are injected rather than written down. The <strong>bundle</strong> is the content sessions carry, agents, skills and MCP servers, one hashed immutable document per published version. The pod verifies the hash before use and every session is pinned to the version it started on, so an audit can say which agents and tools applied to a turn months later. A new version is for new sessions; retiring one moves them at their next wake, with a logged event.</p>
+      <p>On a laptop the same bundle sits under your own layers: built-ins, then the bundle, then your config, then the repository's, then the environment, later winning by key. A repository's risky keys count only once you trust the workspace. The faded panel on the right is the usual way, configuration on every laptop, where each machine decides its own model, approvals and tools and nothing pins a run to a version of anything.</p>
+      <span class="k out">What it rules out</span>
+      <p>"Works on my machine" as an explanation, and a ceiling a laptop can edit out.</p>
     </div>
     <figure><div class="frame"><object data="media/14-a-profile-is-the-config.svg" type="image/svg+xml"><img src="media/14-a-profile-is-the-config.svg" alt="Who writes which layer; the profile as a versioned hashed bundle under a policy ceiling, enforced by the pod and remembered by the session."></object></div>
-    <figcaption>14 · <a href="media/14-a-profile-is-the-config.svg">14-a-profile-is-the-config.svg</a></figcaption></figure>
+    <figcaption><a href="media/14-a-profile-is-the-config.svg">14-a-profile-is-the-config.svg</a></figcaption></figure>
   </div>
 </section>
 
 <section class="pic" id="agents">
   <div class="wrap">
-    <div class="screen eyebrow">// 15 · A ROLE IN A FILE</div>
+    <div class="screen eyebrow">// A ROLE IN A FILE</div>
     <h2>An agent is a file</h2>
     <div class="text">
-      <p><strong>An agent is a markdown file: a frontmatter contract and a prose role.</strong> The frontmatter says what it may use — the model, the tools, delegation, limits; the prose says who it is. It can live in four layers, lowest to highest: built in, the person's own, the repository's, the profile's bundle, and the highest that names it wins.</p>
-      <p>A session has one root agent, which may delegate to others and branch its own work. The same <code>session.create</code> starts it whether a person asked or a trigger fired; on a pod the agent is read from the pinned bundle, so what runs is what was published, not what someone has on disk.</p>
+      <p class="claim">An agent is a markdown file: a frontmatter contract the harness enforces, and a prose role the model reads.</p>
+      <span class="k">So what</span>
+      <p>A role is reviewable like code, versioned like code, and shipped by a team in a bundle like code. The frontmatter says which model role, which tools, which permissions and what share of the budget; the prose says who the agent is. Four layers can hold one, lowest to highest: the harness's built-ins, the profile's bundle, your own configuration, the workspace's <code>.troupe/agents/</code>, and the highest file with the name wins. A session has one root agent, which may delegate and branch, and the same <code>session.create</code> starts it whether a person asked or a trigger fired. On a pod the agent is read from the pinned bundle, so what runs is what was published.</p>
+      <span class="k out">What it rules out</span>
+      <p>A role that exists only on one engineer's disk, and an agent on a pod that nobody reviewed.</p>
     </div>
     <figure><div class="frame"><object data="media/15-agents.svg" type="image/svg+xml"><img src="media/15-agents.svg" alt="An agent as a markdown file: the frontmatter contract and the prose role; the four layers; one root per session with delegation and branches."></object></div>
-    <figcaption>15 · <a href="media/15-agents.svg">15-agents.svg</a></figcaption></figure>
+    <figcaption><a href="media/15-agents.svg">15-agents.svg</a></figcaption></figure>
   </div>
 </section>
 
 <section class="pic" id="mcp">
   <div class="wrap">
-    <div class="screen eyebrow">// 16 · TOOLS, AND WHOSE THEY ARE</div>
+    <div class="screen eyebrow">// TOOLS, AND WHOSE THEY ARE</div>
     <h2>MCP tools</h2>
     <div class="text">
-      <p><strong>MCP in one breath: a server lists tools, a client calls them, the answers come back as text.</strong> One pod session's tool list holds three kinds at once: the harness's built-ins, the servers the profile's bundle names, and the tools on your own laptop.</p>
-      <p>The last kind is the point. You attach, you are asked whether to offer your servers, you choose which; the session discovers them; a call to one of yours is sent back over your own socket and runs on your machine with your sign-in. The rules: the token never leaves the laptop, every participant sees whose tools are in play, the tools leave with you, and a profile can forbid it outright.</p>
+      <p class="claim">The pod does not need to have your tools. They follow you.</p>
+      <span class="k">So what</span>
+      <p>A team's servers come with the bundle and are called under the profile's identity, so everyone granted the profile gets the same view. Your own servers come with you: you attach, you are asked once whether to offer them, the model finds them in the same list as everything else, and a call to one of yours is sent back over your own connection to run on your machine with your sign-in. The token never leaves the laptop, the tools leave when you do, and everyone in the session sees that a laptop is involved. A profile may forbid personal tools on its pods outright, for teams whose pods must take only what the profile names.</p>
+      <span class="k out">What it rules out</span>
+      <p>Installing a person's credentials on a shared pod, and a tool whose owner cannot be seen.</p>
     </div>
     <figure><div class="frame"><object data="media/16-mcp-tools.svg" type="image/svg+xml"><img src="media/16-mcp-tools.svg" alt="MCP in one breath; one pod session whose tool list holds built-ins, the bundle's servers and your laptop's tools; attach, offer with consent, discover, and a call sent back over your own socket."></object></div>
-    <figcaption>16 · <a href="media/16-mcp-tools.svg">16-mcp-tools.svg</a></figcaption></figure>
+    <figcaption><a href="media/16-mcp-tools.svg">16-mcp-tools.svg</a></figcaption></figure>
+  </div>
+</section>
+
+<section class="pic" id="identity">
+  <div class="wrap">
+    <div class="screen eyebrow">// WHO IS CALLING</div>
+    <h2>Whose name a call carries</h2>
+    <div class="text">
+      <p class="claim">A profile's servers are called as the profile. A person's own servers are called as the person, from the person's machine. There is nothing in between.</p>
+      <span class="k">So what</span>
+      <p>The question was sharp because a shared session lets anyone with control steer the agent, and the agent can reach whatever tools are offered. Troupe settled it in two halves. A server the team put in a bundle is called under the profile's own identity, so it answers organisation-wide and who sees what is decided by which teams were granted the profile. A server you signed in to yourself is called back on your laptop, over your socket, and never from the pod; the plane never holds your token. What was rejected is the middle option, the plane exchanging your token on your behalf, because it would make the plane a holder of personal credentials. Around that rule: a profile may forbid personal tools on its pods, everyone in a session sees when one is in play, and a call whose owner left mid-turn waits a minute for them and then fails once, telling the model it may already have run.</p>
+      <span class="k out">What it rules out</span>
+      <p>The plane holding a person's token, and a personal tool reachable after its owner has gone.</p>
+    </div>
+    <figure><div class="frame"><object data="media/13-whose-identity.svg" type="image/svg+xml"><img src="media/13-whose-identity.svg" alt="Two lanes: the bundle's servers called as the profile, a person's own servers called as the person from their machine; the on-behalf-of option crossed out; the four rules around it."></object></div>
+    <figcaption><a href="media/13-whose-identity.svg">13-whose-identity.svg</a></figcaption></figure>
+  </div>
+</section>
+
+<section class="pic" id="beam">
+  <div class="wrap">
+    <div class="screen eyebrow">// WHY ERLANG</div>
+    <h2>Why it is built this way</h2>
+    <div class="text">
+      <p class="claim">The guarantees above are properties of the runtime, not of code we wrote.</p>
+      <span class="k">So what</span>
+      <p>A tool that crashes takes nothing else with it. An agent that dies is rebuilt from the log and finishes. A client that drops, or a slow one, never stalls a turn. Two plane replicas agree on where a session is placed. In most languages each of those is a failure path somebody writes by hand and gets subtly wrong; on the BEAM they are what a supervision tree, a mailbox and a cluster do by default, and have done in telephone exchanges for thirty years. Fewer hand-written failure paths means fewer places for the guarantees to be false. The cost is a runtime fewer people know, and the picture is the one page on this site drawn for the engineers who will: its names are the real ones, and the ledger on the right is the argument.</p>
+      <span class="k out">What it rules out</span>
+      <p>A bug in one tool taking down a session, and a restart that loses what the agent was doing.</p>
+    </div>
+    <figure><div class="frame"><object data="media/11-why-the-beam.svg" type="image/svg+xml"><img src="media/11-why-the-beam.svg" alt="A session as its supervision tree with the failure rules drawn on, and a ledger of what the BEAM brings against hand-written Rust or Go."></object></div>
+    <figcaption><a href="media/11-why-the-beam.svg">11-why-the-beam.svg</a></figcaption></figure>
   </div>
 </section>
 
