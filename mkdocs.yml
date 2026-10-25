@@ -164,6 +164,7 @@ nav:
       - Tech stack: developer/tech-stack.md
       - Fixing issues: developer/fixing-issues.md
       - Walking the Stage 1 gate: developer/gate-walk.md
+      - The gate's rows: developer/gate-walk-rows.md
       - Known defects: developer/defects.md
       - Decisions:
           - decisions/README.md

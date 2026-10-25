@@ -13,6 +13,7 @@ defmodule Troupe.Plane.KMSCheckTest do
 
   alias Troupe.KMS.Policy
   alias Troupe.Plane.{Admin, KMSCheck}
+  alias Troupe.Plane.GitHub.App
 
   @moduletag timeout: 60_000
 
@@ -71,6 +72,27 @@ defmodule Troupe.Plane.KMSCheckTest do
     github = Enum.find(grants, &(&1.id == "github-app"))
     refute github.ok
     assert github.detail =~ "(needed only for that)"
+    refute github.required
+  end
+
+  test "once a GitHub App is set up, its grant is required and missing it is not healthy",
+       context do
+    Repo.insert!(%App{
+      id: App.id(),
+      app_id: 4242,
+      key_version: 1,
+      installations: [%{"owner" => "example", "id" => 7}]
+    })
+
+    required = for grant <- Policy.plane_grants(), grant.required, do: grant.id
+    {token, _names} = token_for(context.transit, required)
+
+    assert %{ok: false, grants: grants} = KMSCheck.run(token: token)
+    github = Enum.find(grants, &(&1.id == "github-app"))
+    refute github.ok
+    assert github.required
+    refute github.detail =~ "(needed only for that)"
+    assert github.detail =~ "one set up before stops signing"
   end
 
   test "an OpenBao that does not answer is one sentence, and nothing is listed" do

@@ -6,6 +6,7 @@ status: accepted
 issue: 765
 paths:
   - docs/developer/gate-walk.md
+  - docs/developer/gate-walk-rows.md
   - scripts/gate-check
   - scripts/gate-check.ps1
 gist: One issue per release, Stage 1 gate v<version>; carry a PASS only if nothing since touched the row; a fix is a new release; private evidence never in the issue

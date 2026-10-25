@@ -336,6 +336,8 @@ export interface PresenceMember {
   state?: string;
   /** `plane` for somebody attached through the plane's relay, steering from another device. */
   via?: string;
+  /** How many of their connections under this `via` this view has heard of; one entry for them all. */
+  attached?: number;
   [k: string]: unknown;
 }
 
@@ -1363,14 +1365,23 @@ function foldEphemeral(state: TranscriptState, e: TroupeEvent, now: () => number
       if (Array.isArray(members)) return { ...state, presence: members as PresenceMember[] };
       const subject = e.data["subject"];
       if (typeof subject !== "string") return state;
+      // One person attached twice through the same door (two windows, two terminals) is
+      // one entry, counted: each `joined` is one more attachment and each `left` one fewer,
+      // and they have left only when the last goes. Somebody first heard doing something
+      // was attached before this view was, once as far as it knows.
       const via = typeof e.data["via"] === "string" ? e.data["via"] : undefined;
+      const said = str(e.data["state"], "viewing");
+      const was = state.presence.find((p) => p.subject === subject && p.via === via);
+      const held = was && was.state !== "left" ? (was.attached ?? 1) : 0;
+      const attached = said === "joined" ? held + 1 : said === "left" ? Math.max(held - 1, 0) : Math.max(held, 1);
       const next: PresenceMember = {
         subject,
         ...(typeof e.data["display_name"] === "string" ? { display_name: e.data["display_name"] } : {}),
-        state: str(e.data["state"], "viewing"),
+        state: said === "left" && attached > 0 ? (was?.state ?? "viewing") : said,
+        attached,
         ...(via ? { via } : {}),
       };
-      const rest = state.presence.filter((p) => !(p.subject === subject && p.via === via));
+      const rest = state.presence.filter((p) => p !== was);
       return { ...state, presence: [...rest, next] };
     }
     default:
