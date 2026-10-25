@@ -11,6 +11,8 @@ defmodule Troupe.Plane.Control.Connection do
   in its person's own memory (`session.memory.put`), which is that person's from then on.
   Nor is an artifact an agent publishes for its person (`session.artifact.publish`): the
   page or file they asked to have published, and nothing else of the session's.
+  As a turn begins a pod says which versions its session holds (`session.memory.read`):
+  each document's scope, name, version and hash, never its text.
 
   The first message must be `enrol`, carrying the pod's projected ServiceAccount token.
   Until Kubernetes has said which namespace that token belongs to, the connection has
@@ -774,6 +776,24 @@ defmodule Troupe.Plane.Control.Connection do
 
       nil ->
         {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+      end
+    end
+
+  # A session on this pod beginning a turn says which memory documents it holds, by scope,
+  # name, version and hash and never their text. The plane keeps that as what the turn runs
+  # under and, where the session is behind the versions in force, answers with them, for the
+  # pod to give the session before the turn starts: a `session.memory` lost between two
+  # turns leaves no turn on the versions before it.
+  defp dispatch("session.memory.read", params, state) do
+    with %Session{} = session <- session_of(params["session_id"], state.worker),
+         :ok <- at_epoch(session, params["epoch"]) do
+      case Memory.turn(session, params["documents"]) do
+        {:current, _documents} -> {:ok, %{"session_id" => session.id, "current" => true}, state}
+        {:behind, documents} -> {:ok, %{"session_id" => session.id, "current" => false, "memory" => documents}, state}
+      end
+    else
+      :stale_epoch -> {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+      nil -> {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
     end
   end
 

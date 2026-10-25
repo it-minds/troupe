@@ -1946,18 +1946,29 @@ defmodule Troupe.Agent.Server do
   # configuration was resolved (`Troupe.Session.PlaneMemory`), taken as a turn begins and
   # never during one, said in the log with the versions from and to, and read into the
   # instructions this turn. The same versions again change nothing and say nothing.
+  #
+  # The root's turn first asks, where the host can (a pod asks the plane), whether what the
+  # session holds is in force, so a push lost since the last turn is not this turn's memory;
+  # and keeps what the turn then reads, which the host tells the plane.
   defp take_memory(%State{} = state) do
-    with %{documents: documents} <- Troupe.Session.PlaneMemory.given(state.session_id),
-         [_ | _] = changes <- Troupe.PlaneMemory.changes(state.config.plane_memory, documents) do
-      log(state, :memory_changed, %{
-        "changes" => changes,
-        "message" => Troupe.PlaneMemory.change_line(changes)
-      })
+    root? = state.agent_path == ["root"]
+    if root?, do: :ok = Troupe.Session.PlaneMemory.before_turn(state.session_id, state.config.plane_memory)
 
-      instructions_due(%{state | config: %{state.config | plane_memory: documents}})
-    else
-      _same -> state
-    end
+    state =
+      with %{documents: documents} <- Troupe.Session.PlaneMemory.given(state.session_id),
+           [_ | _] = changes <- Troupe.PlaneMemory.changes(state.config.plane_memory, documents) do
+        log(state, :memory_changed, %{
+          "changes" => changes,
+          "message" => Troupe.PlaneMemory.change_line(changes)
+        })
+
+        instructions_due(%{state | config: %{state.config | plane_memory: documents}})
+      else
+        _same -> state
+      end
+
+    if root?, do: :ok = Troupe.Session.PlaneMemory.read(state.session_id, state.config.plane_memory)
+    state
   end
 
   defp environment_section(state) do

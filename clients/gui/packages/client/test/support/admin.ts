@@ -907,6 +907,12 @@ export class FakeAdmin {
   readonly hostRows: FakeHost[] = [];
   /** Every version of every memory document, oldest first, by subject: `organisation`, `team/<name>`, `profile/<name>`. */
   readonly memory = new Map<string, Array<{ version: number; text: string; changed_by: string; changed_at: string }>>();
+  /** By subject: the running sessions a document reaches, each with the version its last turn read. */
+  readonly memoryReaders = new Map<string, Array<{ session_id: string; where: "pod" | "machine"; owner: string; profile: string | null; team: string | null; version: number; turn_at: string }>>();
+  /** By session id: whether its last turn read the memory in force for it, as the session listing marks. */
+  readonly memoryStanding = new Map<string, "current" | "behind">();
+  /** The sessions an administrator nudged, in order. */
+  readonly memoryNudged: string[] = [];
   /** Service principals beyond their subjects, by subject. */
   readonly principalRows = new Map<string, FakePrincipal>();
   /** People who look held twice, as `Identity.lookalikes/0` would set them out. */
@@ -1730,7 +1736,9 @@ export class FakeAdmin {
         const asked = typeof params["version"] === "number" ? params["version"] : null;
         const shown = asked === null ? versions.at(-1) ?? null : versions.find((v) => v.version === asked) ?? null;
         if (asked !== null && !shown) return refuse(NOT_FOUND, "not_found", { version: asked });
-        const before = shown ? versions.find((v) => v.version === shown.version - 1) ?? null : null;
+        const against = typeof params["against"] === "number" ? params["against"] : null;
+        const before = against !== null ? versions.find((v) => v.version === against) ?? null : shown ? versions.find((v) => v.version === shown.version - 1) ?? null : null;
+        if (against !== null && !before) return refuse(NOT_FOUND, "not_found", { version: against });
         return {
           result: {
             scope: params["scope"],
@@ -1741,11 +1749,57 @@ export class FakeAdmin {
             version: shown?.version ?? null,
             text: shown?.text ?? "",
             shown: shown ? memorySummary(shown) : null,
+            against: before?.version ?? null,
+            against_text: before?.text ?? null,
             diff: lineDiff(before?.text ?? "", shown?.text ?? ""),
             versions: [...versions].reverse().map(memorySummary),
             inherited: params["scope"] === "profile" ? this.memoryInherited(String(params["name"])) : [],
+            readers: this.readersOf(found.subject),
           },
         };
+      }
+
+      case "admin.memory.rollback": {
+        const found = this.memoryOwner(subject, params["scope"], params["name"]);
+        if ("error" in found) return found;
+        if (!found.editable) return notPlatform;
+        const versions = this.memory.get(found.subject) ?? [];
+        const to = versions.find((v) => v.version === params["to"]);
+        if (!to) return refuse(NOT_FOUND, "not_found", { version: params["to"] });
+        const current = versions.at(-1) ?? null;
+        if (typeof params["version"] === "number" && params["version"] !== (current?.version ?? 0)) {
+          return refuse(CONFLICT, "conflict", {
+            reason: `${found.subject} was saved by somebody else since version ${params["version"]}; version ${current?.version ?? 0} is in force now`,
+            version: current?.version ?? 0,
+          });
+        }
+        if (current && current.text === to.text) return { result: { document: memorySummary(current), changes: {} } };
+        const now = { version: (current?.version ?? 0) + 1, text: to.text, changed_by: subject, changed_at: new Date().toISOString() };
+        this.memory.set(found.subject, [...versions, now]);
+        const fields = (v: typeof now | null) => ({ version: v?.version ?? 0, bytes: v ? new TextEncoder().encode(v.text).length : 0, hash: v ? memoryHash(v.text) : null });
+        const changes = diff(fields(current), fields(now));
+        this.record(subject, "memory.put", found.subject, { ...changes, rolled_back_to: to.version, note: `rolled back to v${to.version}` });
+        return { result: { document: memorySummary(now), changes } };
+      }
+
+      case "admin.memory.nudge": {
+        const found = this.memoryOwner(subject, params["scope"], params["name"]);
+        if ("error" in found) return found;
+        if (!found.editable) return notPlatform;
+        const reader = (this.memoryReaders.get(found.subject) ?? []).find((r) => r.session_id === params["session_id"]);
+        if (!reader) return refuse(NOT_FOUND, "not_found", { session_id: params["session_id"], reason: "no running session this document reaches" });
+        if (reader.where === "machine") {
+          return {
+            result: {
+              session_id: reader.session_id,
+              where: "machine",
+              told: false,
+              reason: "a session on a person's machine is not told: its daemon asks for the memory at its next poll, within five minutes, and the session reads it at its next turn",
+            },
+          };
+        }
+        this.memoryNudged.push(reader.session_id);
+        return { result: { session_id: reader.session_id, where: "pod", told: true } };
       }
 
       case "admin.memory.preview": {
@@ -1766,6 +1820,7 @@ export class FakeAdmin {
             unchanged: (current?.text ?? "") === text,
             diff: lineDiff(current?.text ?? "", text),
             effect: memoryEffect(params["scope"], params["name"]),
+            readers: this.readersOf(found.subject),
           },
         };
       }
@@ -2295,6 +2350,15 @@ export class FakeAdmin {
     });
   }
 
+  // Which running sessions read a document and which are behind the version in force, as
+  // `Memory.readers/1` answers it.
+  private readersOf(subject: string): Record<string, unknown> {
+    const current = (this.memory.get(subject) ?? []).at(-1) ?? null;
+    const inForce = current && current.text !== "" ? current.version : 0;
+    const sessions = (this.memoryReaders.get(subject) ?? []).map((r) => ({ ...r, behind: r.version !== inForce })).sort((a, b) => a.session_id.localeCompare(b.session_id));
+    return { version: current?.version ?? 0, behind: sessions.filter((s) => s.behind).length, sessions };
+  }
+
   private memoryRow(scope: "organisation" | "team" | "profile", name: string | null, editable: boolean): Record<string, unknown> {
     const subject = scope === "organisation" ? "organisation" : `${scope}/${name}`;
     const current = (this.memory.get(subject) ?? []).at(-1) ?? null;
@@ -2548,6 +2612,7 @@ export class FakeAdmin {
       last_active_at: s.last_active_at,
       repository: s.repository ?? null,
       github: s.github ?? null,
+      memory: this.memoryStanding.get(s.id) ?? null,
     };
   }
 
@@ -3938,5 +4003,13 @@ export function exampleAdmin(): FakeAdmin {
     { version: 1, text: "We deploy on Tuesdays.", changed_by: "alice@example.com", changed_at: "2026-10-12T09:00:00Z" },
     { version: 2, text: "We deploy on Tuesdays.\nThe on-call rota is in the wiki.", changed_by: "alice@example.com", changed_at: "2026-10-14T11:20:00Z" },
   ]);
+  // Two running sessions read it: one on a pod whose last turn was before version 2, and one
+  // on a person's machine that has it.
+  admin.memoryReaders.set("organisation", [
+    { session_id: "s-7f3a9c21", where: "pod", owner: "alice@example.com", profile: "dev", team: "core", version: 1, turn_at: "2026-10-14T11:05:00Z" },
+    { session_id: "laptop-9b1d", where: "machine", owner: "erin@example.com", profile: null, team: null, version: 2, turn_at: "2026-10-14T11:40:00Z" },
+  ]);
+  admin.memoryStanding.set("s-7f3a9c21", "behind");
+  admin.memoryStanding.set("s-7f3a9c23", "current");
   return admin;
 }

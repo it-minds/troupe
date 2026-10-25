@@ -366,6 +366,10 @@ defmodule Troupe.Instructions do
   the order it is read, with its scope, size, the characters that reached the prompt,
   the budget they count against and its share of it, and for a rule its front matter
   (`rule`) and why it applies (`applies`) or not (`reason`). Wire-shaped, string keys.
+
+  And `memory`: each memory document read, as the plane names it (`scope` organisation,
+  team, profile or user, `name`, `version`, `hash`), in the order read, so the log says
+  which version of each a turn ran under without reading the file list.
   """
   @spec provenance(t()) :: map()
   def provenance(%{} = loaded) do
@@ -373,7 +377,17 @@ defmodule Troupe.Instructions do
       "budget" => loaded.budget,
       "used" => loaded.used,
       "searched" => loaded.searched,
-      "files" => Enum.map(loaded.files, &file_json/1)
+      "files" => Enum.map(loaded.files, &file_json/1),
+      "memory" => for(f <- loaded.files, f.scope in @memory_scopes, do: memory_stamp(f))
+    }
+  end
+
+  defp memory_stamp(f) do
+    %{
+      "scope" => if(f.scope == :person, do: "user", else: to_string(f.scope)),
+      "name" => f.where,
+      "version" => f.version,
+      "hash" => f.hash
     }
   end
 

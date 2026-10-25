@@ -41,7 +41,7 @@ defmodule Troupe.Worker.Connections do
   alias Troupe.KMS
   alias Troupe.KMS.Policy
   alias Troupe.MCP.Server
-  alias Troupe.Worker.{Artifacts, UserMemory}
+  alias Troupe.Worker.{Artifacts, MemoryRead, UserMemory}
   alias Troupe.Worker.Plane.Link
 
   require Logger
@@ -108,6 +108,8 @@ defmodule Troupe.Worker.Connections do
       # And where its sessions' `publish_artifact` sends an artifact, asked of the plane by
       # the session in the same way.
       Artifacts.install()
+      # And how a session's turn asks whether the memory it holds is in force.
+      MemoryRead.install()
     end
 
     {:ok, %{}}

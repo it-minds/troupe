@@ -1934,7 +1934,11 @@ defmodule Troupe.Plane.Admin do
   def sessions_list(actor, opts \\ []) do
     with :ok <- require_admin(actor),
          {:ok, opts} <- team_filter(actor, opts) do
-      {:ok, actor |> Sessions.for_admin(team_ids(actor), opts) |> Enum.map(&session_summary/1)}
+      sessions = Sessions.for_admin(actor, team_ids(actor), opts)
+      # Whether each running pod session's last turn read the memory in force for it now.
+      standing = Memory.standing(sessions)
+
+      {:ok, Enum.map(sessions, &Map.put(session_summary(&1), :memory, standing[&1.id]))}
     end
   end
 
@@ -2671,13 +2675,18 @@ defmodule Troupe.Plane.Admin do
   team's or the profile's. A profile's has `inherited` besides: the documents of the
   profiles it extends, which its sessions read before its own, the one that extends nothing
   first, each with the profile it is from and the version in force.
-  """
-  @spec memory_get(actor(), String.t(), String.t() | nil, integer() | nil) :: result()
-  def memory_get(actor, scope, name, version) do
-    with {:ok, owner, editable?} <- memory_owner(actor, scope, name),
-         {:ok, shown} <- memory_version(owner, version) do
-      before = if shown && shown.version > 1, do: Memory.version(owner, shown.version - 1)
 
+  `against` names another version to compare the one shown with, in place of the one
+  before it: what the editor's side-by-side shows. And `readers`: the running sessions the
+  document reaches that have had a turn, each with the version of it that turn ran under and
+  whether that is behind the version in force (`Memory.readers/1`).
+  """
+  @spec memory_get(actor(), String.t(), String.t() | nil, integer() | nil, integer() | nil) ::
+          result()
+  def memory_get(actor, scope, name, version, against \\ nil) do
+    with {:ok, owner, editable?} <- memory_owner(actor, scope, name),
+         {:ok, shown} <- memory_version(owner, version),
+         {:ok, before} <- memory_against(owner, shown, against) do
       {:ok,
        %{
          scope: scope,
@@ -2688,11 +2697,31 @@ defmodule Troupe.Plane.Admin do
          version: shown && shown.version,
          text: (shown && shown.text) || "",
          shown: shown && Memory.summary(shown),
+         against: before && before.version,
+         against_text: before && before.text,
          diff: Memory.diff(before && before.text, shown && shown.text),
          versions: owner |> Memory.versions() |> Enum.map(&Memory.summary/1),
-         inherited: memory_inherited(scope, owner)
+         inherited: memory_inherited(scope, owner),
+         readers: memory_readers(owner)
        }}
     end
+  end
+
+  # The version a version is compared with: the one named, or the one before it.
+  defp memory_against(owner, shown, nil),
+    do: {:ok, if(shown && shown.version > 1, do: Memory.version(owner, shown.version - 1))}
+
+  defp memory_against(owner, _shown, number), do: memory_version(owner, number)
+
+  defp memory_readers(owner) do
+    readers = Memory.readers(owner)
+
+    sessions =
+      Enum.map(readers.sessions, fn row ->
+        Map.update!(row, :turn_at, &(&1 && DateTime.to_iso8601(&1)))
+      end)
+
+    %{readers | sessions: sessions}
   end
 
   # What a profile's sessions read before its own: the documents of the profiles it
@@ -2740,8 +2769,45 @@ defmodule Troupe.Plane.Admin do
          limit: Troupe.Protocol.Memory.max_bytes(),
          unchanged: (current && current.text) == text or (is_nil(current) and text == ""),
          diff: Memory.diff(current && current.text, text),
-         effect: memory_effect(owner)
+         effect: memory_effect(owner),
+         readers: memory_readers(owner)
        }}
+    end
+  end
+
+  @doc """
+  Roll a memory document back to version `to`: a save of that version's text as the next
+  version, over `version` as any save is, so the history keeps every version and the audit's
+  `memory.put` says `rolled back to v<to>`. The text in force already makes no version.
+  """
+  @spec memory_rollback(actor(), String.t(), String.t() | nil, integer() | nil, integer() | nil) ::
+          result()
+  def memory_rollback(actor, scope, name, to, version) do
+    with {:ok, owner} <- memory_writer(actor, scope, name),
+         {:ok, %{text: text}} <- memory_rollback_to(owner, to) do
+      memory_save(actor, owner, text, version, %{"rolled_back_to" => to, "note" => "rolled back to v#{to}"})
+    end
+  end
+
+  defp memory_rollback_to(owner, to) when is_integer(to), do: memory_version(owner, to)
+
+  defp memory_rollback_to(_owner, _to),
+    do: {:error, Error.new(:invalid_params, %{field: "to", reason: "to is the number of the version to roll back to"})}
+
+  @doc """
+  Tell one running session a memory document reaches what it reads now, again: on a pod,
+  `session.memory`, which it reads at its next turn (a pod's session also asks as every turn
+  begins, so this is for an administrator who will not wait for one). A session on a person's
+  machine is not told; its daemon asks at its next poll, and the answer says so. Written
+  nowhere and not audited: it changes nothing but when a session hears.
+  """
+  @spec memory_nudge(actor(), String.t(), String.t() | nil, String.t() | nil) :: result()
+  def memory_nudge(actor, scope, name, session_id) do
+    with {:ok, owner} <- memory_writer(actor, scope, name) do
+      case is_binary(session_id) && Memory.nudge(owner, session_id) do
+        {:ok, told} -> {:ok, told}
+        _not_reached -> {:error, Error.new(:not_found, %{session_id: session_id, reason: "no running session this document reaches"})}
+      end
     end
   end
 
@@ -2757,30 +2823,36 @@ defmodule Troupe.Plane.Admin do
   def memory_put(actor, scope, name, text, version) do
     with {:ok, owner} <- memory_writer(actor, scope, name),
          :ok <- memory_text(text) do
-      case Memory.put(owner, text, actor.subject, version) do
-        {:ok, :unchanged} ->
-          current = Memory.current(owner)
-          {:ok, %{document: current && Memory.summary(current), changes: %{}}}
+      memory_save(actor, owner, text, version, %{})
+    end
+  end
 
-        {:ok, %{before: before, now: now}} ->
-          changes = Audit.diff(memory_fields(before), memory_fields(now))
-          {:ok, _} = Audit.record(actor.subject, "memory.put", Memory.subject(owner), changes)
-          # The sessions running now read it from their next turn.
-          _told = Memory.announce(owner)
-          {:ok, %{document: Memory.summary(now), changes: changes}}
+  # One save, as a put or a rollback makes it; `note` is what the audit row says besides
+  # the version, size and hash.
+  defp memory_save(actor, owner, text, version, note) do
+    case Memory.put(owner, text, actor.subject, version) do
+      {:ok, :unchanged} ->
+        current = Memory.current(owner)
+        {:ok, %{document: current && Memory.summary(current), changes: %{}}}
 
-        {:error, {:conflict, current}} ->
-          {:error,
-           Error.new(:conflict, %{
-             reason:
-               "#{Memory.subject(owner)} was saved by somebody else since version #{version}; " <>
-                 "version #{current} is in force now",
-             version: current
-           })}
+      {:ok, %{before: before, now: now}} ->
+        changes = Audit.diff(memory_fields(before), memory_fields(now))
+        {:ok, _} = Audit.record(actor.subject, "memory.put", Memory.subject(owner), Map.merge(changes, note))
+        # The sessions running now read it from their next turn.
+        _told = Memory.announce(owner)
+        {:ok, %{document: Memory.summary(now), changes: changes}}
 
-        {:error, reason} ->
-          {:error, Error.new(:invalid_params, %{reason: reason})}
-      end
+      {:error, {:conflict, current}} ->
+        {:error,
+         Error.new(:conflict, %{
+           reason:
+             "#{Memory.subject(owner)} was saved by somebody else since version #{version}; " <>
+               "version #{current} is in force now",
+           version: current
+         })}
+
+      {:error, reason} ->
+        {:error, Error.new(:invalid_params, %{reason: reason})}
     end
   end
 

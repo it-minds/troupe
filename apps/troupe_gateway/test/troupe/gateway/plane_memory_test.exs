@@ -176,6 +176,53 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
     assert [%{"path" => "memory:organisation", "version" => 3} | _] = answer["files"]
   end
 
+  # The poll tells the plane what each session here read at its last turn, by
+  # version and hash and never the text, and `me.memory.status` says where this machine
+  # stands for its person's own debugging.
+  test "the poll says what each session read at its last turn, and me.memory.status where this machine stands",
+       ctx do
+    _fingerprint = FakePlane.sign(ctx.plane.state)
+    FakePlane.memory_with(ctx.plane.state, @documents)
+    assert {:ok, %{"linked" => true}} = link(ctx)
+    assert eventually(fn -> match?({:ok, %{"documents" => @documents}}, PlaneMemory.read_cache()) end)
+
+    %{session: session} = session(ctx, [{:text, "one"}])
+    turn(session.id, "hello")
+    id = session.id
+
+    read = [
+      %{"scope" => "organisation", "name" => nil, "version" => 2, "hash" => "sha256:o"},
+      %{"scope" => "team", "name" => "design", "version" => 5, "hash" => "sha256:t"}
+    ]
+
+    assert eventually(fn ->
+             Enum.any?(FakePlane.calls(ctx.plane.state), fn
+               {"me.memory", %{"sessions" => sessions}} ->
+                 Enum.any?(sessions, &match?(%{"session_id" => ^id, "documents" => ^read, "turn_at" => _}, &1))
+
+               _other ->
+                 false
+             end)
+           end)
+
+    refute Enum.any?(FakePlane.calls(ctx.plane.state), fn {_method, params} -> inspect(params) =~ "Tuesdays" end)
+
+    assert {:ok, status} = Client.call(ctx.client, "me.memory.status", %{})
+    assert status["plane_url"] == ctx.plane.url
+    assert status["documents"] == read
+    assert status["in_force"] == read
+    assert status["current"] == true
+    assert [%{"session_id" => ^id, "current" => true}] = Enum.filter(status["sessions"], &(&1["session_id"] == id))
+
+    # A save on the plane: the status asks it (the poll may have been first), names what is
+    # in force, and the session is behind until its next turn.
+    FakePlane.memory_with(ctx.plane.state, [%{hd(@documents) | "version" => 3, "hash" => "sha256:o3"}])
+    assert {:ok, status} = Client.call(ctx.client, "me.memory.status", %{})
+    assert [%{"version" => 3}] = status["in_force"]
+    assert status["documents"] |> Enum.map(& &1["version"]) |> Enum.member?(3) or status["current"] == false
+    assert [%{"current" => false}] = Enum.filter(status["sessions"], &(&1["session_id"] == id))
+  end
+
   test "config.memory keeps what troupe config pull fetched, says what changed, and gives it to the sessions here",
        ctx do
     %{session: session, fake: fake} = session(ctx, [{:text, "one"}, {:text, "two"}])

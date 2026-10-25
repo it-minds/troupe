@@ -9,6 +9,9 @@
     "files": {
       "type": "array"
     },
+    "memory": {
+      "type": "array"
+    },
     "searched": {
       "items": {
         "type": "string"
