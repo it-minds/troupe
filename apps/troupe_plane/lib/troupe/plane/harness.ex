@@ -157,7 +157,23 @@ defmodule Troupe.Plane.Harness do
     "artifact.get" => :observe,
     "artifact.open" => :observe,
     "artifact.publish" => :control,
-    "artifact.delete" => :control
+    "artifact.delete" => :control,
+    # A new version, a rollback and a pin; one text file read for the console's editor and
+    # an edit previewed on the artifacts host; an upload handle for a version too large for
+    # one call; links that honour sign-in, spent by the person the plane signs in through
+    # one, and the owner's switch for its public links.
+    "artifact.put" => :control,
+    "artifact.rollback" => :control,
+    "artifact.pin" => :control,
+    "artifact.read" => :observe,
+    "artifact.preview" => :control,
+    "artifact.upload.begin" => :control,
+    "artifact.share" => :control,
+    "artifact.unshare" => :control,
+    "artifact.public" => :control,
+    # As `session.redeem`: its caller is not yet anybody on this artifact, and what the link
+    # gives them was decided when it was made.
+    "artifact.redeem" => :observe
   }
 
   @doc "Every method the plane answers, and the scope each needs."
@@ -392,8 +408,51 @@ defmodule Troupe.Plane.Harness do
   # came from as provenance; a pod's agent publishes over its control link instead, where
   # the plane reads the session off its own row.
   defp handle("artifact.list", params, %{user: user} = context) do
-    Artifacts.list(user, Map.take(params, ["mine", "visibility"]), platform_admin?: admin?(context))
+    Artifacts.list(user, Map.take(params, ["mine", "shared", "visibility"]),
+      platform_admin?: admin?(context)
+    )
   end
+
+  defp handle("artifact.put", params, %{user: user} = context),
+    do: Artifacts.put(user, params, platform_admin?: admin?(context))
+
+  defp handle("artifact.rollback", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.rollback(id, params["version"], user, platform_admin?: admin?(context))
+
+  defp handle("artifact.pin", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.pin(id, params["version"], user, platform_admin?: admin?(context))
+
+  defp handle("artifact.read", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.read(id, user, params, platform_admin?: admin?(context))
+
+  defp handle("artifact.preview", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.preview(id, user, params, platform_admin?: admin?(context))
+
+  defp handle("artifact.upload.begin", params, %{user: user}),
+    do: Artifacts.begin_upload(user, params)
+
+  defp handle("artifact.share", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.share(id, user, params, platform_admin?: admin?(context))
+
+  defp handle("artifact.unshare", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.unshare(id, user, params, platform_admin?: admin?(context))
+
+  defp handle("artifact.public", %{"id" => id, "enabled" => enabled}, %{user: user} = context)
+       when is_boolean(enabled),
+       do: Artifacts.public_links(id, enabled, user, platform_admin?: admin?(context))
+
+  defp handle("artifact.redeem", %{"token" => token}, %{user: user}) when is_binary(token),
+    do: Artifacts.redeem_link(token, user)
+
+  defp handle("artifact.redeem", _params, _context),
+    do: {:error, Error.new(:invalid_params, %{reason: "artifact.redeem takes a link's token"})}
+
+  defp handle("artifact.public", _params, _context),
+    do:
+      {:error,
+       Error.new(:invalid_params, %{
+         reason: "artifact.public takes an artifact's id and enabled, true or false"
+       })}
 
   defp handle("artifact.get", %{"id" => id}, %{user: user} = context),
     do: Artifacts.get(id, user, platform_admin?: admin?(context))
@@ -411,7 +470,9 @@ defmodule Troupe.Plane.Harness do
   defp handle("artifact.delete", %{"id" => id}, %{user: user} = context),
     do: Artifacts.delete(id, user, platform_admin?: admin?(context))
 
-  defp handle(method, _params, _context) when method in ~w(artifact.get artifact.open artifact.delete),
+  defp handle(method, _params, _context)
+       when method in ~w(artifact.get artifact.open artifact.delete artifact.rollback artifact.pin
+                         artifact.read artifact.preview artifact.share artifact.unshare),
     do: {:error, Error.new(:invalid_params, %{reason: "#{method} takes an artifact's id"})}
 
   # Which version each of the caller's own clients last ran, and how that stands against

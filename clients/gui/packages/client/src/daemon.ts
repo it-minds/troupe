@@ -14,6 +14,7 @@
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
+import type { Artifact, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactUpload } from "./artifacts.js";
 import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { remoteOffer, syncState } from "./fleet.js";
@@ -1009,6 +1010,20 @@ export class DaemonClient {
   /** Save it, the whole text over the version it was edited from; the sessions here read it from their next turn. */
   putOwnMemory(text: string, version: number): Promise<OwnMemorySaved> {
     return this.command<OwnMemorySaved>("me.memory.put", { text, version });
+  }
+
+  /**
+   * Publish files as an artifact on the plane (troupe #62), as this daemon's person: a new
+   * one, or with `id` the next version of one of theirs. The daemon sends a version too large
+   * for one call by an upload handle. Refused with a sentence where it is signed in to no plane.
+   */
+  publishArtifact(params: { title: string; kind: ArtifactKind; visibility: string; files: ArtifactUpload[]; id?: string; note?: string; session_id?: string }): Promise<Artifact & { plane_url?: string }> {
+    return this.command<Artifact & { plane_url?: string }>("artifact.publish", params);
+  }
+
+  /** The person's own artifacts on the plane, and where the console's gallery is. */
+  artifacts(filter: ArtifactFilter = { mine: true }): Promise<ArtifactList & { plane_url?: string }> {
+    return this.call<ArtifactList & { plane_url?: string }>("artifact.list", { ...filter });
   }
 
   /** Forget one fact of a repository's memory, by its id; `memory.md` is written again without it. */

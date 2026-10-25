@@ -1,0 +1,19 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/artifact.list.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "mine": {
+      "type": "boolean"
+    },
+    "shared": {
+      "type": "boolean"
+    },
+    "visibility": {
+      "type": "string"
+    }
+  },
+  "required": [],
+  "title": "artifact.list",
+  "type": "object"
+}

@@ -110,6 +110,59 @@ defmodule Troupe.Gateway.ArtifactsTest do
     assert reason =~ "needs a title"
   end
 
+  test "a version too large for one call goes by an upload handle, straight to the object store",
+       ctx do
+    assert {:ok, %{"linked" => true}} = link(ctx)
+    big = :binary.copy("x", 3 * 1024 * 1024)
+
+    on_exit(fn ->
+      Troupe.ObjectStore.delete_prefix(Troupe.ObjectStore.from_env(), "artifact-uploads/")
+    end)
+
+    assert {:ok, _artifact} =
+             publish(ctx, %{
+               "id" => "art-fakefakefakefake",
+               "note" => "bigger",
+               "files" => [
+                 %{"path" => "index.html", "bytes" => Base.encode64("<h1>Big</h1>")},
+                 %{"path" => "data.bin", "bytes" => Base.encode64(big)}
+               ]
+             })
+
+    calls = FakePlane.calls(ctx.plane.state)
+    {"artifact.upload.begin", begun} = Enum.find(calls, &match?({"artifact.upload.begin", _}, &1))
+
+    assert Enum.sort_by(begun["files"], & &1["path"]) == [
+             %{"path" => "data.bin", "size" => byte_size(big)},
+             %{"path" => "index.html", "size" => 12}
+           ]
+
+    {"artifact.publish", sent} = Enum.find(calls, &match?({"artifact.publish", _}, &1))
+    refute Map.has_key?(sent, "files")
+    assert "up-fake" <> _ = handle = sent["upload"]
+    assert sent["note"] == "bigger"
+
+    assert {:ok, ^big} =
+             Troupe.ObjectStore.get(
+               Troupe.ObjectStore.from_env(),
+               "artifact-uploads/#{handle}/data.bin"
+             )
+  end
+
+  test "the person's own artifacts are listed through the daemon, with the gallery", ctx do
+    assert {:error, %{message: "unavailable"}} =
+             Client.call(ctx.client, "artifact.list", %{"mine" => true})
+
+    assert {:ok, %{"linked" => true}} = link(ctx)
+
+    assert {:ok, %{"artifacts" => [%{"id" => "art-fakefakefakefake"}], "gallery_url" => gallery}} =
+             Client.call(ctx.client, "artifact.list", %{"mine" => true})
+
+    assert gallery =~ "#/artifacts"
+    assert {"artifact.list", %{"mine" => true}} =
+             Enum.find(FakePlane.calls(ctx.plane.state), &match?({"artifact.list", _}, &1))
+  end
+
   test "a session's agent publishes through the daemon, naming the session and itself", ctx do
     assert {:ok, %{"linked" => true}} = link(ctx)
     File.write!(Path.join(ctx.workspace, "report.md"), "# Findings")

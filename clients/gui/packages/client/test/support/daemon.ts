@@ -615,6 +615,13 @@ evoked where nothing is set and there was a sign-in. */
   own: { version: number; text: string } | null = null;
   /** Every `me.memory.put` asked, in order. */
   readonly ownPuts: Array<Record<string, unknown>> = [];
+  /**
+   * The person's own artifacts on the plane, as this daemon lists them through its sign-in
+   * (`artifact.list`, troupe #62); null for a daemon signed in to none.
+   */
+  artifacts: Array<Record<string, unknown>> | null = null;
+  /** Every `artifact.publish` asked, in order. */
+  readonly publishedArtifacts: Array<Record<string, unknown>> = [];
   memoryAutoRefresh = true;
   /** The agent files of every layer (troupe Decision 841): the built-ins, the person's and each workspace's. */
   readonly agents: FakeAgents;
@@ -1518,6 +1525,26 @@ evoked where nothing is set and there was a sign-in. */
         if (text === own.text) return reply(ws, id, { changed: false, entry: null, user: json(own) });
         this.own = { version: own.version + 1, text };
         return reply(ws, id, { changed: true, entry: null, user: json(this.own) });
+      }
+
+      // An artifact published on the plane through this daemon's sign-in, and the person's
+      // own listed there (troupe #62); signed out, a sentence.
+      case "artifact.list":
+      case "artifact.publish": {
+        const mine = this.artifacts;
+        if (!mine) {
+          return reply(ws, id, null, { code: -32010, message: "unavailable", data: { reason: "this computer's daemon is not signed in to a Troupe plane, so there is nowhere to publish it; troupe login signs it in, or send the file itself" } });
+        }
+        if (method === "artifact.list") {
+          return reply(ws, id, { enabled: true, profiles: ["dev"], publish_organisation: "everyone", public_links: false, gallery_url: "https://plane.example.test/console#/artifacts", plane_url: "https://plane.example.test", artifacts: mine });
+        }
+        this.publishedArtifacts.push(params);
+        const existing = mine.find((a) => a["id"] === params["id"]);
+        const published = existing
+          ? Object.assign(existing, { version: Number(existing["version"]) + 1 })
+          : { id: `art-fake${mine.length + 1}`, title: params["title"], kind: params["kind"], visibility: params["visibility"], version: 1, mine: true };
+        if (!existing) mine.push(published);
+        return reply(ws, id, { ...published, url: `https://artifacts.example.test/a/${String(published["id"])}/`, plane_url: "https://plane.example.test" });
       }
 
       // What a session's next prompt is read from (troupe #55): what a test set, or the

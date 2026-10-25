@@ -20,11 +20,44 @@ export interface Signed {
   notify: (text: string) => void;
   /** Open an address in a tab of its own, with no way back to this page from it. */
   openTab: (url: string) => void;
+  /**
+   * A tab of its own opened now, at the click, for an address an answer gives a moment later:
+   * a browser that blocks a tab opened after an `await` does not block one opened in the
+   * click itself. The function it gives points the tab at the address, or closes it (`null`).
+   */
+  reserveTab: () => (url: string | null) => void;
+  /** Go on to an address in this tab: where a link the person followed takes them. */
+  follow: (url: string) => void;
 }
 
 /** A new tab that is given no handle on the console and no referrer from it. */
 export function openInNewTab(url: string): void {
   globalThis.open?.(url, "_blank", "noopener,noreferrer");
+}
+
+/**
+ * A blank tab opened now, and pointed at its address once the answer comes. `noopener`
+ * would leave no handle to point it with, so the tab is cut loose by hand: no `opener`, and
+ * the artifacts host's own policy sends no referrer on from it. A browser that opened none
+ * gets the address in a tab of its own as before.
+ */
+export function reserveNewTab(): (url: string | null) => void {
+  const tab = globalThis.open?.("about:blank", "_blank") ?? null;
+  if (tab) {
+    try {
+      tab.opener = null;
+    } catch {
+      // A tab this page may not touch is one it has no handle on either.
+    }
+  }
+  return (url) => {
+    if (!tab) {
+      if (url) openInNewTab(url);
+      return;
+    }
+    if (url) tab.location.replace(url);
+    else tab.close();
+  };
 }
 
 export const ConsoleContext = createContext<Signed | null>(null);
