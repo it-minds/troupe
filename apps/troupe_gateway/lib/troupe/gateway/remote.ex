@@ -21,7 +21,9 @@ defmodule Troupe.Gateway.Remote do
   `/auth/relay` for a token of the laptop's door alone, dials with that, and exchanges it
   again before each token runs out, renewing on the open socket (`auth.refresh`). A
   daemon that restarts with something offered reads the grant back and dials again with
-  no client at all.
+  no client at all, so where the daemon starts at login (`Troupe.StartAtLogin`) a reboot
+  brings every offer back; where it does not, an offer is said to last until this machine
+  restarts, since nothing starts the daemon then until a client does.
 
   Withdrawing the last offer, signing out (`identity.sign_out` for this plane and person,
   which a client's sign-out and `troupe logout` send) and unlinking the daemon release the
@@ -97,7 +99,10 @@ defmodule Troupe.Gateway.Remote do
             keyring: nil,
             renew: nil,
             renewing: nil,
-            refused: nil
+            refused: nil,
+            # The offers read back from the record as this process started: a listing says
+            # they came back after a restart until they are offered again.
+            restored: MapSet.new()
 
   # -- api --------------------------------------------------------------------
 
@@ -176,8 +181,12 @@ defmodule Troupe.Gateway.Remote do
   @doc """
   What a session's listing says of its offer: `nil` for one not offered, or its shares,
   whether the plane has it (`online`, `connecting`, `offline` with `since`) and who is
-  steering it from another device now. Read from a table, so a listing never waits on
-  this process, and `nil` where none runs, as on a worker.
+  steering it from another device now. `lasts` says whether it comes back after this
+  machine restarts: `across_restarts` where the daemon starts at login, which reads its
+  own sign-in back and offers it again, and `until_restart` where nothing starts the
+  daemon then. `restored` is an offer read back from the record as the daemon started,
+  until it is offered again. Read from a table, so a listing never waits on this process,
+  and `nil` where none runs, as on a worker.
   """
   @spec describe(String.t()) :: map() | nil
   def describe(session_id) do
@@ -187,11 +196,16 @@ defmodule Troupe.Gateway.Remote do
 
       table ->
         case :ets.lookup(table, session_id) do
-          [{^session_id, described}] -> described
+          [{^session_id, described}] -> Map.put(described, "lasts", lasts())
           [] -> nil
         end
     end
   end
+
+  # Asked at each listing rather than kept, so `troupe-daemon login on` after the offer is
+  # what the next listing says.
+  defp lasts,
+    do: if(Troupe.StartAtLogin.enabled?(), do: "across_restarts", else: "until_restart")
 
   @doc "The role this daemon's record gives `subject` on an offered session, or `nil`."
   @spec role(String.t(), String.t() | nil) :: String.t() | nil
@@ -218,6 +232,7 @@ defmodule Troupe.Gateway.Remote do
 
     state = %__MODULE__{
       offers: offers,
+      restored: offers |> Map.keys() |> MapSet.new(),
       device: device,
       path: path,
       since: now(),
@@ -250,7 +265,13 @@ defmodule Troupe.Gateway.Remote do
   def handle_call({:withdraw, session_id}, _from, state) do
     state = close_viewers(state, session_id, "withdrawn")
     had? = Map.has_key?(state.offers, session_id)
-    state = %{state | offers: Map.delete(state.offers, session_id)}
+
+    state = %{
+      state
+      | offers: Map.delete(state.offers, session_id),
+        restored: MapSet.delete(state.restored, session_id)
+    }
+
     persist(state)
     last? = owned_offers(state) == %{}
 
@@ -406,7 +427,12 @@ defmodule Troupe.Gateway.Remote do
           "offered_at" => now()
         }
 
-        state = %{state | offers: Map.put(state.offers, session_id, offer)}
+        state = %{
+          state
+          | offers: Map.put(state.offers, session_id, offer),
+            restored: MapSet.delete(state.restored, session_id)
+        }
+
         state = narrow_viewers(state, session_id)
         persist(state)
         state = publish(state)
@@ -1069,7 +1095,8 @@ defmodule Troupe.Gateway.Remote do
         "offered_at" => offer["offered_at"],
         "state" => Atom.to_string(state.status),
         "since" => if(state.status != :online, do: state.since),
-        "steering" => steering
+        "steering" => steering,
+        "restored" => MapSet.member?(state.restored, id)
       }
 
       :ets.insert(@table, {id, described})

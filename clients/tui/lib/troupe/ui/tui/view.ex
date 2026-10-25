@@ -246,7 +246,9 @@ defmodule Troupe.UI.TUI.View do
           detail: detail(state),
           open: Map.get(state.pane, :open, MapSet.new()),
           turn_lines: side == nil,
-          now: state.now
+          now: state.now,
+          # A laptop's session steered through the plane answers an approval once.
+          once_only: Model.relayed?(state.model)
         }
 
         pairs = Model.transcript_blocks(w, agent, view)
@@ -519,7 +521,9 @@ defmodule Troupe.UI.TUI.View do
        row.root? && present(w.summary) && field("summary", w.summary),
        row.root? && present(w.message) && field("failure", w.message),
        row.root? && present(w.diff_stat) && field("diff", w.diff_stat)
-     ] ++ todo_block(a, row.root?) ++ pending_block(w, row.path) ++ recent_block(a))
+     ] ++
+       todo_block(a, row.root?) ++
+       pending_block(w, row.path, Model.relayed?(state.model)) ++ recent_block(a))
     |> Enum.filter(& &1)
     |> Enum.join("\n")
   end
@@ -558,14 +562,14 @@ defmodule Troupe.UI.TUI.View do
   defp todo_block(%{todos: todos}, root?),
     do: ["", "tasks"] ++ Enum.map(todo_texts(todos, root?), &("  " <> &1))
 
-  defp pending_block(w, path) do
+  defp pending_block(w, path, once?) do
     case Enum.filter(w.pending, &(&1.agent_path == path)) do
       [] ->
         []
 
       pending ->
         ["", "waiting for you"] ++
-          Enum.map(pending, &("  " <> pending_summary(&1, "y / n / a in the window")))
+          Enum.map(pending, &("  " <> pending_summary(&1, once?, " in the window")))
     end
   end
 
@@ -574,19 +578,24 @@ defmodule Troupe.UI.TUI.View do
   # inside `render/2`, which ExRatatui rescues by dropping the frame — the screen
   # would freeze on stale content while the app kept consuming keys.
   # A delegation at the gate (TUI Decision 157) has five answers, not three.
-  defp pending_summary(%{kind: :approval, delegation: %{"agent" => agent}}, _keys),
-    do: "delegation to #{agent} (y / e / s / n / a in the window)"
+  # `once?` is a laptop's session steered through the plane, which takes an answer once:
+  # no `a`, which would allow for the rest of the session.
+  defp pending_summary(%{kind: :approval, delegation: %{"agent" => agent}}, once?, _where),
+    do: "delegation to #{agent} (y / e / s / n#{if once?, do: "", else: " / a"} in the window)"
 
-  defp pending_summary(%{kind: :approval, name: name}, keys), do: "approval: #{name} (#{keys})"
+  defp pending_summary(%{kind: :approval, name: name}, once?, where),
+    do: "approval: #{name} (#{if once?, do: "y / n", else: "y / n / a"}#{where})"
 
-  defp pending_summary(%{kind: :budget} = p, keys),
-    do: "budget exhausted: #{Map.get(p, :detail) || "limit reached"} (#{keys})"
+  defp pending_summary(%{kind: :budget} = p, _once?, where),
+    do: "budget exhausted: #{Map.get(p, :detail) || "limit reached"} (y / n / a#{where})"
 
-  defp pending_summary(%{kind: :question, question: q, options: [_ | _] = opts}, _keys),
+  defp pending_summary(%{kind: :question, question: q, options: [_ | _] = opts}, _once?, _where),
     do: "question: #{q} (#{length(opts)} options — open the window)"
 
-  defp pending_summary(%{kind: :question, question: q}, _keys), do: "question: #{q} (type + Enter)"
-  defp pending_summary(%{kind: kind}, _keys), do: "#{kind} (see the window)"
+  defp pending_summary(%{kind: :question, question: q}, _once?, _where),
+    do: "question: #{q} (type + Enter)"
+
+  defp pending_summary(%{kind: kind}, _once?, _where), do: "#{kind} (see the window)"
 
   defp recent_block(agent) do
     case agent.transcript |> Enum.filter(&match?({:tool, _}, &1)) |> Enum.take(-6) do
@@ -1896,7 +1905,7 @@ defmodule Troupe.UI.TUI.View do
   # the session's own lines in whatever room the rest leaves), the branches' rows, and
   # the worktrees'.
   defp collection(state, windows, asked, inner_w, inner_h) do
-    head = [facts_line(state)] ++ needs_lines(windows, asked)
+    head = [facts_line(state)] ++ needs_lines(windows, asked, Model.relayed?(state.model))
     branches = branch_lines(state, windows, inner_w)
     trees = worktree_lines(state, windows)
     room = inner_h - Model.row_count(head ++ branches ++ trees, inner_w)
@@ -1971,7 +1980,7 @@ defmodule Troupe.UI.TUI.View do
 
   # What waits on a person: the start's question as its own window would draw it, then a
   # line per window asking something, with the digit that opens it.
-  defp needs_lines(windows, asked) do
+  defp needs_lines(windows, asked, once?) do
     question =
       case asked do
         nil -> []
@@ -1988,7 +1997,7 @@ defmodule Troupe.UI.TUI.View do
           {:pending,
            [
              {:pending, "#{n} #{w.path} · "},
-             {:pending, pending_summary(p, "y / n / a in its window")},
+             {:pending, pending_summary(p, once?, " in its window")},
              {Theme.style(:muted), " — #{n} opens it"}
            ]}
         end)
@@ -2396,7 +2405,7 @@ defmodule Troupe.UI.TUI.View do
     side =
       if g.side do
         inner_w = max(g.side.width - 2, 1)
-        lines = side_lines(w, g.agent, inner_w)
+        lines = side_lines(w, g.agent, inner_w, Model.relayed?(state.model))
 
         [
           {%Paragraph{
@@ -2437,6 +2446,7 @@ defmodule Troupe.UI.TUI.View do
     agents = length(Model.agent_paths(w))
     delegation? = Enum.any?(w.pending, &match?(%{kind: :approval, delegation: %{}}, &1))
     approval? = not delegation? and Enum.any?(w.pending, &(&1.kind in [:approval, :budget]))
+    once? = Model.relayed?(state.model)
     verb = if turn_open?(g), do: "closes", else: "opens"
     selection? = Map.get(state, :selection) != nil
 
@@ -2447,9 +2457,12 @@ defmodule Troupe.UI.TUI.View do
       {not delegation?, ["e #{verb} the turn", "e #{verb}", "e"]},
       {selection?, ["Ctrl-Y copies the selection", "Ctrl-Y copies selection", "Ctrl-Y sel"]},
       {not selection?, ["drag selects · Ctrl-Y copies all", "drag · Ctrl-Y copy", nil]},
-      {approval?, ["y/n/a approve", "y/n/a", "y/n/a"]},
+      # Through the plane an approval is answered once, so there is no `a` to offer.
+      {approval? and once?, ["y/n approve once", "y/n", "y/n"]},
+      {approval? and not once?, ["y/n/a approve", "y/n/a", "y/n/a"]},
       # A delegation at the gate (TUI Decision 157): run, edit, switch, deny, always.
-      {delegation?, ["y/e/s/n/a delegation", "y/e/s/n/a", "y/e/s/n/a"]},
+      {delegation? and once?, ["y/e/s/n delegation", "y/e/s/n", "y/e/s/n"]},
+      {delegation? and not once?, ["y/e/s/n/a delegation", "y/e/s/n/a", "y/e/s/n/a"]},
       {armed?(state, w.path, "x"), ["x again cancels & removes", "x again cancels", "x again"]},
       {armed?(state, w.path, "d"), ["d again dismisses", "d again dismisses", "d again"]},
       {not armed?(state, w.path, "x") and w.state in [:running, :needs_input],
@@ -2617,7 +2630,7 @@ defmodule Troupe.UI.TUI.View do
 
   ## Side panel
 
-  defp side_lines(w, viewed, width) do
+  defp side_lines(w, viewed, width, once?) do
     todos = todo_lines(w, w.path, "")
     paths = Model.agent_paths(w)
 
@@ -2649,7 +2662,7 @@ defmodule Troupe.UI.TUI.View do
 
         items ->
           [{:blank, ""}, {:system, "Waiting for you:"}] ++
-            Enum.map(items, &{:pending, "  " <> pending_summary(&1, "y / n / a")})
+            Enum.map(items, &{:pending, "  " <> pending_summary(&1, once?, "")})
       end
 
     # What the last turn cost and, beneath it, the session (TUI Decision 160), indented

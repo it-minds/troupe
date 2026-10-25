@@ -42,7 +42,66 @@ defmodule Troupe.Release.DesktopUpdateTest do
     assert Enum.any?(desktop_steps, &((&1["run"] || "") =~ "_universal.app.tar.gz"))
 
     kept = Enum.find(desktop_steps, &(&1["name"] == "Keep the installers"))
-    assert kept["with"]["path"] =~ "*.app.tar.gz"
+    assert kept["with"]["path"] =~ "/macos/Troupe_*_universal.app.tar.gz"
+  end
+
+  @bundle "clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/"
+
+  @tag :tmp_dir
+  test "the release keeps the versioned app archive alone, and the manifest names no other", %{
+    tmp_dir: tmp
+  } do
+    {:ok, native} = YamlElixir.read_from_file(@native)
+    steps = native["jobs"]["desktop"]["steps"]
+    pack = Enum.find(steps, &(&1["name"] == "The app archive the updater reads (macOS)"))
+    kept = Enum.find(steps, &(&1["name"] == "Keep the installers"))
+
+    # What the macOS build leaves in its bundle: the app, its disk image, and an archive
+    # of the app of the build's own, named for no version.
+    bundle = Path.join(tmp, "bundle")
+    File.mkdir_p!(Path.join(bundle, "macos/Troupe.app/Contents"))
+    File.write!(Path.join(bundle, "macos/Troupe.app/Contents/Info.plist"), "an app\n")
+    File.write!(Path.join(bundle, "macos/Troupe.app.tar.gz"), "the build's own archive\n")
+    File.mkdir_p!(Path.join(bundle, "dmg"))
+    File.write!(Path.join(bundle, "dmg/Troupe_9.9.9_universal.dmg"), "a disk image\n")
+    File.write!(Path.join(tmp, "VERSION"), "9.9.9-beta\n")
+
+    bash = System.find_executable("bash") || flunk("no bash on the PATH")
+
+    {out, status} =
+      System.cmd(bash, ["-c", pack["run"]],
+        cd: bundle,
+        env: [{"GITHUB_WORKSPACE", tmp}],
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, out
+
+    # The files `Keep the installers` uploads, by its own globs, are what the release gets.
+    uploaded =
+      kept["with"]["path"]
+      |> String.split("\n", trim: true)
+      |> Enum.flat_map(fn glob ->
+        assert String.starts_with?(glob, @bundle), "#{glob} is not in the bundle"
+        Path.wildcard(Path.join(bundle, String.replace_prefix(glob, @bundle, "")))
+      end)
+      |> Enum.map(&Path.basename/1)
+      |> Enum.sort()
+
+    assert uploaded == ["Troupe_9.9.9_universal.app.tar.gz", "Troupe_9.9.9_universal.dmg"]
+
+    dist = Path.join(tmp, "dist")
+    File.mkdir_p!(dist)
+
+    for file <- Path.wildcard(Path.join(bundle, "*/*")),
+        Path.basename(file) in uploaded,
+        do: File.cp!(file, Path.join(dist, Path.basename(file)))
+
+    files = "9.9.9-beta" |> Manifest.build(dist) |> Map.fetch!(:artifacts) |> Enum.map(& &1.file)
+    assert "Troupe_9.9.9_universal.app.tar.gz" in files
+
+    refute Enum.any?(files, &(&1 =~ ~r/^Troupe\.app\.tar\.gz/)),
+           "the manifest names #{inspect(files)}"
   end
 
   defp dist(tmp) do

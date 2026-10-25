@@ -73,7 +73,10 @@ defmodule Troupe.Client.Remote do
   @impl true
   def capability(sid) do
     status = Worker.status(sid)
-    Capability.of(status.state, status.scopes, status.up?, status.error)
+
+    status.state
+    |> Capability.of(status.scopes, status.up?, status.error)
+    |> Map.put(:relayed?, Map.get(status, :relayed?, false))
   end
 
   @impl true
