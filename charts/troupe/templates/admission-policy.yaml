@@ -86,6 +86,41 @@ spec:
         variables.hosts.filter(h, h.contains('*') &&
           !(h.startsWith('*.') && h.size() > 2 && !h.substring(2).contains('*') &&
             !h.substring(2).startsWith('.') && !h.endsWith('.') && !h.contains('..')))
+    # Each entry as written, its host and its port ('' for none), as
+    # `Troupe.Policy.host_and_port/1` reads them: a port is one to five digits after the one
+    # colon, or after `]:` behind a bracketed IPv6 address; anything else is the entry as
+    # written. Written out twice, once for each side, because CEL has no functions.
+    - name: hostParts
+      expression: >-
+        variables.hosts.map(h, string(h)).map(h,
+          h.startsWith('[') && h.contains(']:') && h.substring(h.indexOf(']:') + 2).matches('^[0-9]{1,5}$')
+            ? [h, h.substring(1, h.indexOf(']:')), h.substring(h.indexOf(']:') + 2)]
+            : h.indexOf(':') >= 0 && h.indexOf(':') == h.lastIndexOf(':') &&
+                h.substring(h.indexOf(':') + 1).matches('^[0-9]{1,5}$')
+              ? [h, h.substring(0, h.indexOf(':')), h.substring(h.indexOf(':') + 1)]
+              : [h, string(h), ''])
+    - name: allowedParts
+      expression: >-
+        variables.allowedEgress.filter(p, !(p in variables.notPatternsAllowed)).map(p, string(p)).map(p,
+          p.startsWith('[') && p.contains(']:') && p.substring(p.indexOf(']:') + 2).matches('^[0-9]{1,5}$')
+            ? [p, p.substring(1, p.indexOf(']:')), p.substring(p.indexOf(']:') + 2)]
+            : p.indexOf(':') >= 0 && p.indexOf(':') == p.lastIndexOf(':') &&
+                p.substring(p.indexOf(':') + 1).matches('^[0-9]{1,5}$')
+              ? [p, p.substring(0, p.indexOf(':')), p.substring(p.indexOf(':') + 1)]
+              : [p, string(p), ''])
+    # The hosts no pattern covers, as `Troupe.Policy.matches?/2` judges them: the host and
+    # the port apart, a pattern with no port covering any port and one with a port that
+    # port alone. `*.example.com` matches exactly one label, as it does everywhere else that
+    # syntax appears: the host must end with the suffix and what is left in front of it must
+    # contain no dot of its own.
+    - name: outside
+      expression: >-
+        variables.hostParts.filter(e, !(e[0] in variables.notPatternsAsked) &&
+          !variables.allowedParts.exists(a,
+            (a[2] == '' || (e[2] != '' && int(a[2]) == int(e[2]))) &&
+            (e[1] == a[1] ||
+             (a[1].startsWith('*.') && e[1].endsWith(a[1].substring(1)) && e[1].size() > a[1].size() - 1 &&
+              !e[1].substring(0, e[1].size() - (a[1].size() - 1)).contains('.'))))).map(e, e[0])
     # Every storage class the profile names: one per team volume that asks for one, and
     # the pod's own data volume when it does. A profile that could name any class could
     # put a working copy on whatever the cluster has, which is what the policy's list
@@ -152,23 +187,10 @@ spec:
         ' is not a hostname or a one-label wildcard such as *.example.com'
       reason: Forbidden
 
-    # `*.example.com` matches exactly one label, as it does everywhere else that syntax
-    # appears: the host must end with the suffix and what is left in front of it must
-    # contain no dot of its own. What is not a pattern is refused above, and covers
-    # nothing here.
-    - expression: >-
-        variables.hosts.all(h, h in variables.notPatternsAsked ||
-          variables.allowedEgress.exists(p, !(p in variables.notPatternsAllowed) &&
-            (h == p ||
-             (p.startsWith('*.') && h.endsWith(p.substring(1)) && h.size() > p.size() - 1 &&
-              !h.substring(0, h.size() - (p.size() - 1)).contains('.')))))
+    # What is not a pattern is refused above, and covers nothing here.
+    - expression: variables.outside.size() == 0
       messageExpression: >-
-        'egress to ' + variables.hosts.filter(h, !(h in variables.notPatternsAsked) &&
-          !variables.allowedEgress.exists(p, !(p in variables.notPatternsAllowed) &&
-            (h == p ||
-             (p.startsWith('*.') && h.endsWith(p.substring(1)) && h.size() > p.size() - 1 &&
-              !h.substring(0, h.size() - (p.size() - 1)).contains('.'))))).join(', ') +
-        ' is outside the patterns allowed by TroupePolicy'
+        'egress to ' + variables.outside.join(', ') + ' is outside the patterns allowed by TroupePolicy'
       reason: Forbidden
 
     - expression: >-

@@ -42,6 +42,7 @@ defmodule Troupe.Worker.Connections do
   alias Troupe.KMS.Policy
   alias Troupe.MCP.Server
   alias Troupe.Worker.Plane.Link
+  alias Troupe.Worker.UserMemory
 
   require Logger
 
@@ -99,7 +100,13 @@ defmodule Troupe.Worker.Connections do
   def init(opts) do
     Process.set_label("troupe connections")
     :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
-    if Keyword.get(opts, :install, true), do: install()
+    if Keyword.get(opts, :install, true) do
+      install()
+      # And where an agent's entry for its person's own memory goes, asked of the plane
+      # the same way: by the session, never by whose it is.
+      UserMemory.install()
+    end
+
     {:ok, %{}}
   end
 

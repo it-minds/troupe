@@ -32,6 +32,10 @@ defmodule Troupe.Worker.DrainTest do
     owner = Sandbox.start_owner!(Repo, shared: true)
     on_exit(fn -> Sandbox.stop_owner(owner) end)
 
+    # Where the pod's reports of how far its drain has got reach the plane's wait. The
+    # plane's suite starts one for the whole run, which a run of both suites shares.
+    unless Process.whereis(Troupe.Plane.PubSub),
+      do: start_supervised!({Phoenix.PubSub, name: Troupe.Plane.PubSub})
     start_supervised!({Registry, keys: :duplicate, name: Troupe.Plane.Control.Registry})
     start_supervised!(Connections)
     start_supervised!(Troupe.Plane.Singleton)
@@ -75,8 +79,21 @@ defmodule Troupe.Worker.DrainTest do
 
     assert Fleet.placeable("dev") |> Enum.map(& &1.ordinal) == [0, 1]
 
-    {elapsed_ms, result} = :timer.tc(fn -> Drain.pod(one, timeout_ms: 30_000, poll_ms: 50) end, :millisecond)
+    # Heard here too, as the replica waiting on the drain hears it.
+    :ok = Phoenix.PubSub.subscribe(Troupe.Plane.PubSub, "drain:" <> one.id)
+
+    {elapsed_ms, result} =
+      fn -> :timer.tc(fn -> Drain.pod(one, timeout_ms: 30_000, poll_ms: 50) end, :millisecond) end
+      |> Task.async()
+      |> Task.await(60_000)
+
     assert {:ok, report} = result
+
+    # The pod said how far it had got: as it started, and with the session in hand.
+    session_id = context.session_id
+    one_id = one.id
+    assert_received {:drain_progress, ^one_id, %{"total" => 1, "left" => 1}}
+    assert_received {:drain_progress, ^one_id, %{"left" => 1, "session_id" => ^session_id}}
 
     # 1. It waited for the turn rather than cancelling it.
     assert report.cancelled == []

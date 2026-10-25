@@ -24,6 +24,7 @@ defmodule Troupe.CLI do
           | :config_untrust
           | :config_trust_list
           | :config_pull
+          | :memory
           | :models
           | :doctor
           | :instructions_check
@@ -78,7 +79,9 @@ defmodule Troupe.CLI do
           path: String.t() | nil,
           check: boolean(),
           rollback: boolean(),
-          update_version: String.t() | nil
+          update_version: String.t() | nil,
+          edit: boolean(),
+          clear: boolean()
         }
 
   @switches [
@@ -111,7 +114,9 @@ defmodule Troupe.CLI do
     compare: :boolean,
     suite: :string,
     scenario: :string,
-    keep: :string
+    keep: :string,
+    edit: :boolean,
+    clear: :boolean
   ]
 
   # Every command line `troupe` takes: how it is typed, what it does, and command lines
@@ -193,6 +198,10 @@ defmodule Troupe.CLI do
     {"troupe config pull [PLANE_URL]",
      "fetch the organisation's defaults and limits from the plane now (never a key)",
      [["config", "pull"]]},
+    {"troupe memory [--edit | --clear]",
+     "your own memory on the plane, which every session of yours reads on every machine: " <>
+       "show it, edit it in $EDITOR, or clear it; an agent of yours only ever adds to it",
+     [["memory"], ["memory", "--edit"], ["memory", "--clear"]]},
     {"troupe models [--refresh]",
      "what each provider serves, its window and its price; asked again when stale, or now with --refresh",
      [["models", "--refresh"]]},
@@ -361,7 +370,9 @@ defmodule Troupe.CLI do
       path: nil,
       check: false,
       rollback: false,
-      update_version: nil
+      update_version: nil,
+      edit: Keyword.get(opts, :edit, false),
+      clear: Keyword.get(opts, :clear, false)
     }
 
     cond do
@@ -448,6 +459,10 @@ defmodule Troupe.CLI do
   defp parse_rest(["config", "pull", url], base),
     do: {:ok, %{base | mode: :config_pull, plane_url: url}}
 
+  defp parse_rest(["memory"], %{edit: true, clear: true}),
+    do: {:error, "troupe memory takes --edit or --clear, not both"}
+
+  defp parse_rest(["memory"], base), do: {:ok, %{base | mode: :memory}}
   defp parse_rest(["models"], base), do: {:ok, %{base | mode: :models}}
   defp parse_rest(["doctor"], base), do: {:ok, %{base | mode: :doctor}}
 

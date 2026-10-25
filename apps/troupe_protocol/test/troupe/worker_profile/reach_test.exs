@@ -190,6 +190,42 @@ defmodule Troupe.WorkerProfile.ReachTest do
            ]
   end
 
+  # The worker dials it for every token, so it is egress as the server is: with Cilium a
+  # name the allowlist holds on any port, and without it on the port it names.
+  test "an MCP identity's token endpoint is admitted and judged as a server is" do
+    profile =
+      Profile.from_resource(%{
+        "metadata" => %{"name" => "office"},
+        "spec" => %{
+          "image" => %{"repository" => "ghcr.io/troupe/worker"},
+          "mcpIdentities" => [
+            %{"server" => "jira", "tokenUrl" => "https://login.example.test:8443/oauth2/token"},
+            %{"server" => "wiki", "tokenUrl" => "http://169.254.169.254/token"},
+            %{"server" => "chat"}
+          ]
+        }
+      })
+
+    assert Reach.admitted(profile) == [{:public, [8443]}]
+
+    assert Reach.unreachable(profile) == [
+             "MCP server wiki's tokenUrl http://169.254.169.254/token is at 169.254.169.254, " <>
+               "a link-local address"
+           ]
+  end
+
+  test "an IPv6 address is written as the canonical form, an IPv4-compatible one too" do
+    assert Reach.admission("::2", [443]) == [{"::2/128", [443]}]
+    assert Reach.admission("::a:b", [443]) == [{"::a:b/128", [443]}]
+    assert Reach.admission("fd00::5", [443]) == [{"fd00::5/128", [443]}]
+    assert Reach.ntoa({0, 0, 0, 0, 0, 0, 0, 2}) == "::2"
+    assert Reach.ntoa({0, 0, 0, 0, 0, 0, 0x0A14, 5}) == "::a14:5"
+    assert Reach.ntoa({0, 0, 0, 0, 0, 0xFFFF, 0x0A14, 5}) == "::ffff:10.20.0.5"
+    assert Reach.ntoa({0, 0, 0, 0, 0, 0, 0, 1}) == "::1"
+    assert Reach.ntoa({0, 0, 0, 0, 0, 0, 0, 0}) == "::"
+    assert Reach.ntoa({10, 20, 0, 5}) == "10.20.0.5"
+  end
+
   test "an endpoint two entries name is admitted once" do
     assert Reach.admitted([
              {:llm, "https://gateway.example.test:8443/v1"},

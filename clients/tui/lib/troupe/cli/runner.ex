@@ -127,6 +127,10 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :config_pull} = args} ->
         Troupe.CLI.ModelConfig.pull(args.plane_url)
 
+      # The person's own memory on the plane, through this machine's daemon (root #55).
+      {:ok, %{mode: :memory} = args} ->
+        Troupe.CLI.Memory.run(args)
+
       {:ok, %{mode: :models} = args} ->
         case models_report(args) do
           {:ok, report} ->
@@ -259,6 +263,7 @@ defmodule Troupe.CLI.Runner do
         :doctor,
         :bench,
         :config_pull,
+        :memory,
         :update
       ]
 

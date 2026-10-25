@@ -148,6 +148,9 @@ policy:
     # fixtures name this one. A development policy that refused it would make
     # `scripts/remote-up` and `mix check` unable to share a cluster.
     - "*.anthropic.com"
+    # The cluster suite's public host for an `egress.fqdns` entry with a port: a profile
+    # names it on one port, and its workers reach it there and on no other.
+    - example.net
   allowedStorageClasses:
     - standard
   namespacePrefix: troupe-w-

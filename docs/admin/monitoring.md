@@ -92,6 +92,17 @@ Phoenix's own; nothing in a deployment attaches to them.
 | Dormancy | a session sleeps after 10 min idle on the pod; sealed every 60 s and at a turn's end |
 | Caches | ledger sums 60 s per node; settings 5 s; provider JWKS until a bad signature |
 
+**A drain** (a scale-down, an upgrade, or `admin.pod.drain`) stops placing on the pod, lets
+running turns finish for up to the drain timeout (300 s by default), cancels any still running, then
+puts every session to sleep one after another, each given up to 120 s to seal and upload.
+The pod tells the plane before each session how many it has left, and the plane waits as
+long as it hears that, up to a ceiling of the timeout, 120 s a session and 30 s more: about
+11.5 min for three busy sessions. A pod that goes quiet for 150 s (and at least the timeout
+and 30 s) or reaches the ceiling is given up on: its sessions are marked dormant at their
+last seal, and the audit has a `pod.drain.gave_up` row saying which, why, the ceiling and
+how long the plane waited. Once the plane records a pod behind on an upgrade drained, the
+operator replaces it within seconds, if the pod has stopped being Ready.
+
 ## 7. If something does not work
 
 | Symptom | Cause |

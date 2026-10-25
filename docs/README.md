@@ -135,8 +135,8 @@ You run agents, on your own machine or on your team's plane.
    takes, and every command you type inside a session.
 4. [Configuration](user/configuration.md) — every key in `config.yaml`, and which file
    set it; [models](user/models.md), [agents and commands](user/agents.md),
-   [MCP servers and skills](user/mcp.md) and [instruction files](user/instructions.md)
-   each have a page.
+   [MCP servers and skills](user/mcp.md), [instruction files](user/instructions.md) and
+   [memory](user/memory.md) each have a page.
 5. [The daemon](../apps/troupe_daemon/README.md) — `troupe-daemon`, what runs your
    sessions, and how long it stays up.
 6. [The desktop app](../clients/gui/docs/install.md) — installing the builds while they

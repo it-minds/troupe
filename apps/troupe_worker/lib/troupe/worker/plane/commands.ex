@@ -30,10 +30,18 @@ defmodule Troupe.Worker.Plane.Commands do
 
   require Logger
 
-  @doc "Run one pushed method and give back a JSON-RPC result or error."
-  @spec handle(String.t(), map()) :: {:ok, map()} | {:error, Error.t()}
-  def handle(method, params) do
-    dispatch(method, params)
+  @doc """
+  Run one pushed method and give back a JSON-RPC result or error.
+
+  `link:` is the link the push came in on, which a drain reports how far it has got down:
+  the plane waits while it hears that.
+  """
+  @spec handle(String.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def handle(method, params, opts \\ []) do
+    case method do
+      "drain" -> drain(params, Keyword.get(opts, :link, Link))
+      _other -> dispatch(method, params)
+    end
   rescue
     exception ->
       Logger.error("troupe worker: #{method} failed: #{Exception.message(exception)}")
@@ -187,19 +195,6 @@ defmodule Troupe.Worker.Plane.Commands do
     {:ok, %{"session_id" => params["session_id"], "fenced" => true}}
   end
 
-  # What a pod does when it is going away: running turns finish, then everything it holds
-  # goes to sleep in object storage. A session left behind would have to be rebuilt from
-  # its last seal, losing whatever came after it.
-  defp dispatch("drain", params) do
-    options =
-      case params["timeout_ms"] do
-        timeout when is_integer(timeout) -> [timeout_ms: timeout]
-        _ -> []
-      end
-
-    {:ok, Drain.run(options)}
-  end
-
   defp dispatch("session.index", _params) do
     {:ok, %{"sessions" => index()}}
   end
@@ -328,6 +323,22 @@ defmodule Troupe.Worker.Plane.Commands do
   defp dispatch("ping", _params), do: {:ok, %{"pong" => true}}
 
   defp dispatch(method, _params), do: {:error, Error.new(:method_not_found, %{method: method})}
+
+  # What a pod does when it is going away: running turns finish, then everything it holds
+  # goes to sleep in object storage. A session left behind would have to be rebuilt from
+  # its last seal, losing whatever came after it. How far it has got goes to the plane as
+  # it goes, before each session it puts to sleep, so a drain that takes longer than its
+  # timeout is waited for rather than given up on.
+  defp drain(params, link) do
+    options =
+      case params["timeout_ms"] do
+        timeout when is_integer(timeout) -> [timeout_ms: timeout]
+        _ -> []
+      end
+
+    progress = fn report -> Link.report(link, Map.put(report, "type", "drain.progress")) end
+    {:ok, Drain.run([progress: progress] ++ options)}
+  end
 
   # The plane generates every id it activates, in the one shape `SessionId` describes. The
   # id becomes a directory on this pod and a prefix in object storage, so one in any other

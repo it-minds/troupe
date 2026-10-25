@@ -404,6 +404,56 @@ defmodule Troupe.InstructionsPromptTest do
            ] = event.data["files"]
   end
 
+  # Issue #55's user level: the person's own memory from the plane comes after the
+  # organisation's levels, in a section of its own that says an agent may add to it with
+  # `remember`, and before their own AGENTS.md and the repository's.
+  test "the person's own memory comes after the organisation's, then your own AGENTS.md and the repository's",
+       context do
+    cache = Troupe.PlaneMemory.cache_path()
+
+    documents = [
+      %{"scope" => "user", "name" => nil, "version" => 2, "hash" => "sha256:u", "text" => "Me: British English."},
+      %{"scope" => "organisation", "name" => nil, "version" => 4, "hash" => "sha256:o", "text" => "Org: deploy on Tuesdays."}
+    ]
+
+    {:ok, _} = Troupe.PlaneMemory.save("https://plane.example.test", %{"documents" => documents}, cache)
+    on_exit(fn -> File.rm(cache) end)
+
+    mine = Path.join(Paths.config_dir(), "AGENTS.md")
+    File.write!(mine, "Mine: sign every commit.\n")
+    on_exit(fn -> File.rm(mine) end)
+    write_file(context, "AGENTS.md", "Theirs: run mix check.\n")
+
+    %{session: session, fake: fake} =
+      start_session(context, config_overrides: @per_turn, steps: [{:text, "ok"}])
+
+    :ok = Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "hello")
+    await_event(session.id, :turn_ended)
+
+    [request] = Fake.requests(fake)
+
+    at = fn text ->
+      {at, _} = :binary.match(request.system, text)
+      at
+    end
+
+    assert at.("Org: deploy on Tuesdays.") < at.("# The person's own memory")
+    assert at.("# The person's own memory") < at.("Your own memory (version 2):\nMe: British English.")
+    assert at.("Me: British English.") < at.("Mine: sign every commit.")
+    assert at.("Mine: sign every commit.") < at.("Theirs: run mix check.")
+    assert request.system =~ ~s(`remember` and `level: "me"`)
+
+    assert [event] = events_of_type(session.id, :instructions_loaded)
+
+    assert [
+             %{"scope" => "organisation", "version" => 4},
+             %{"scope" => "person", "path" => "memory:user", "version" => 2, "label" => "your own memory"},
+             %{"scope" => "user"},
+             %{"scope" => "root"} | _
+           ] = event.data["files"]
+  end
+
   test "the prompt names exactly the files the provenance lists", context do
     write_file(context, "AGENTS.md", "root\n")
     write_file(context, "CLAUDE.md", "an alias nobody reads\n")

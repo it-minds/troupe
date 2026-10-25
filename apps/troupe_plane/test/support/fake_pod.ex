@@ -82,6 +82,13 @@ defmodule Troupe.Plane.FakePod do
     end
   end
 
+  @doc "Tell the plane something as the pod, a notification it does not answer."
+  @spec say(%{socket: port()}, String.t(), map()) :: :ok | {:error, term()}
+  def say(%{socket: socket}, method, params) do
+    notification = Jason.encode!(%{"jsonrpc" => "2.0", "method" => method, "params" => params})
+    :gen_tcp.send(socket, [notification, ?\n])
+  end
+
   @doc "A token as `enrol/4` sends it, for a test that speaks the control channel itself."
   @spec token(String.t()) :: String.t()
   def token(token), do: token <> mark()

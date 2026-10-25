@@ -38,7 +38,6 @@ row, and on a page past 400 lines; a full page is closed and the next one,
 | [D32](defects/d008.md#d32---small-leftovers-from-the-060-work-low) | Small leftovers from the 0.6.0 work | low |
 | [D36](defects/d008.md#d36---tui-leftovers-after-the-attention-fix-low) | TUI leftovers after the attention fix | low |
 | [D37](defects/d008.md#d37---small-leftovers-from-the-061-work-low) | Small leftovers from the 0.6.1 work | low |
-| [D40](defects/d008.md#d40---the-planes-drains-medium) | The plane's drains | medium |
 | [D41](defects/d008.md#d41---a-click-in-windows-notification-centre-unconfirmed) | A click in Windows' notification centre | unconfirmed |
 | [D43](defects/d008.md#d43---small-leftovers-from-the-063-work-low) | Small leftovers from the 0.6.3 work | low |
 | [D45](defects/d008.md#d45---small-leftovers-from-the-070-work-low) | Small leftovers from the 0.7.0 work | low |

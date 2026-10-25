@@ -96,6 +96,34 @@ defmodule Troupe.Plane.ReachTest do
       assert Fleet.get_profile("local") == nil
     end
 
+    # A token endpoint is dialled for every token, as a server is for every call: one at a
+    # link-local address was neither admitted nor refused.
+    test "whose MCP identity's token endpoint is at a link-local address is refused, naming it",
+         context do
+      identity = %{
+        "server" => "jira",
+        "clientId" => "client-dev",
+        "transitKey" => "troupe-w-tokens.jira",
+        "certificateThumbprint" => String.duplicate("A", 43)
+      }
+
+      attrs =
+        "tokens"
+        |> profile("https://gateway.example.test/v1")
+        |> put_in(["spec", "mcpIdentities"], [
+          Map.put(identity, "tokenUrl", "http://169.254.169.254/token"),
+          Map.merge(identity, %{"server" => "wiki", "tokenUrl" => "https://login.example.test:8443/token"})
+        ])
+
+      assert {:error, error} = Admin.profile_put(context.actor, attrs)
+
+      assert error.data.unreachable == [
+               "MCP server jira's tokenUrl http://169.254.169.254/token is at 169.254.169.254, a link-local address"
+             ]
+
+      assert Fleet.get_profile("tokens") == nil
+    end
+
     test "on a public name on 443, or in the cluster on any port, is saved", context do
       assert {:ok, _} =
                Admin.profile_put(
