@@ -21,7 +21,7 @@ defmodule Troupe.Worker.Artifacts do
   def publish(params, ctx) do
     params =
       params
-      |> Map.take(~w(title kind visibility files id))
+      |> Map.take(~w(title kind visibility files id note))
       |> Map.put("session_id", ctx.session_id)
       |> put_agent(ctx)
 

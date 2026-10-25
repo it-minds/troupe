@@ -204,6 +204,8 @@ defmodule Troupe.Gateway.Dispatch do
     # A page or a file published on the plane as the person, through this daemon's sign-in
     # (#62): what a client's "Publish…" sends, the files read on this machine.
     "artifact.publish" => :control,
+    # The person's own artifacts there, for "Publish a new version of…".
+    "artifact.list" => :observe,
     # Where this machine's copy of the plane's memory stands, and what each session here
     # last read: for the person's own debugging (`troupe memory --status`).
     "me.memory.status" => :observe,
@@ -1297,6 +1299,24 @@ defmodule Troupe.Gateway.Dispatch do
            reason:
              "this computer's daemon is not signed in to a Troupe plane, so there is nowhere to " <>
                "publish it; troupe login signs it in, or send the file itself"
+         })}
+
+      {:error, reason} ->
+        {:error, Error.new(:invalid_params, %{reason: Memory.sentence(reason)})}
+    end
+  end
+
+  # The person's own artifacts on the plane, for a client's "Publish a new version of…",
+  # with where the console's gallery is. Signed out, a sentence.
+  defp handle("artifact.list", params, _context) do
+    case Artifacts.list(params) do
+      {:ok, answer} ->
+        {:ok, answer}
+
+      {:error, :signed_out} ->
+        {:error,
+         Error.new(:unavailable, %{
+           reason: "this computer's daemon is not signed in to a Troupe plane; troupe login signs it in"
          })}
 
       {:error, reason} ->

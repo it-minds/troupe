@@ -20,7 +20,12 @@ defmodule Troupe.Plane.Artifacts.Artifact do
     field(:profile, :string)
     # `session_id`, `agent` and `where` (`pod`, `laptop` or `person`).
     field(:origin, :map, default: %{})
+    # The newest version.
     field(:version, :integer)
+    # The version the owner pinned as the one its address serves, or nil for the newest.
+    field(:pinned, :integer)
+    # The owner's switch for this artifact's public links, under the administrator's.
+    field(:public_links, :boolean, default: true)
     # The version in force, and every version, which is what counts against the quota.
     field(:bytes, :integer, default: 0)
     field(:total_bytes, :integer, default: 0)
@@ -29,6 +34,8 @@ defmodule Troupe.Plane.Artifacts.Artifact do
       references: :id,
       foreign_key: :artifact_id
     )
+
+    has_many(:shares, Troupe.Plane.Artifacts.Share, references: :id, foreign_key: :artifact_id)
 
     timestamps(type: :utc_datetime_usec)
   end

@@ -1,50 +1,62 @@
 // Artifacts: the pages and files a person, their organisation and their profiles' people
 // have published, for everybody who signs in, administrators too. A tab for their own, one
-// for the organisation's and one for each profile they are covered by; a card for each,
-// and a page for one with its versions, newest first.
+// for those a link gave them, one for the organisation's and one for each profile they are
+// covered by; a card for each, and a page for one with its versions, newest first.
 //
 // An artifact is never drawn here. Its card is its title and its kind, and its page says
 // what it is and where it came from; opening it asks the plane for a one-time link at the
 // moment it is opened, and the artifacts host shows it in a tab of its own that has no hold
 // on this one. A published page's HTML or Markdown is a stranger's code to this console.
+// The tab is opened at the click, before the plane answers, so a browser that blocks a tab
+// opened later lets this one through. An edit's preview is the host's too, framed and
+// sandboxed (`ArtifactEditor`).
 //
-// Nothing here is an administrative call: `artifact.list`, `artifact.get`, `artifact.open`
-// and `artifact.delete` are what any client of the person's asks the plane as that person.
-// Deleting is the owner's, or a platform admin's takedown of somebody else's, which the
-// confirm says it is.
+// Nothing here is an administrative call: `artifact.*` are what any client of the person's
+// asks the plane as that person. Deleting is the owner's, or a platform admin's takedown of
+// somebody else's, which the confirm says it is. A new version (an edit, a rollback) is the
+// owner's or an edit link's holder's; pinning the version its address serves, and the links
+// (`ArtifactLinks`), are the owner's. A link somebody followed lands on `#/artifacts/link/
+// <token>`, which spends it as the person signed in here and goes on to the artifact.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { ArtifactApi, TroupeRpcError } from "@troupe/client";
 import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { go, href } from "../route";
 import type { Route } from "../route";
+import { ArtifactEditor, editableFiles } from "./ArtifactEditor";
+import { ArtifactLinks } from "./ArtifactLinks";
 import { Empty, Fields, Loaded, Preview, Region, Status, bytes, count, when } from "./bits";
 
 /** Which artifacts a tab lists. */
-export type ArtifactTab = { kind: "mine" } | { kind: "organisation" } | { kind: "profile"; name: string };
+export type ArtifactTab = { kind: "mine" } | { kind: "shared" } | { kind: "organisation" } | { kind: "profile"; name: string };
 
 /**
- * What an address under `#/artifacts` names: a tab (`mine`, `organisation`,
- * `profile/<name>`), or one artifact by its id, which the plane never makes one of those words.
+ * What an address under `#/artifacts` names: a tab (`mine`, `shared`, `organisation`,
+ * `profile/<name>`), a link somebody followed (`link/<token>`), or one artifact by its id,
+ * which the plane never makes one of those words.
  */
-export function artifactPlace(path: string[]): { tab: ArtifactTab } | { id: string } {
+export function artifactPlace(path: string[]): { tab: ArtifactTab } | { id: string } | { link: string } {
   const [first, second] = path;
   if (!first || first === "mine") return { tab: { kind: "mine" } };
+  if (first === "shared") return { tab: { kind: "shared" } };
   if (first === "organisation") return { tab: { kind: "organisation" } };
   if (first === "profile" && second) return { tab: { kind: "profile", name: second } };
+  if (first === "link" && second) return { link: second };
   return { id: first };
 }
 
 function routeOf(tab: ArtifactTab): Route {
   if (tab.kind === "mine") return { page: "artifacts" };
+  if (tab.kind === "shared") return { page: "artifacts", path: ["shared"] };
   if (tab.kind === "organisation") return { page: "artifacts", path: ["organisation"] };
   return { page: "artifacts", path: ["profile", tab.name] };
 }
 
 function filterOf(tab: ArtifactTab): ArtifactFilter {
   if (tab.kind === "mine") return { mine: true };
+  if (tab.kind === "shared") return { shared: true };
   if (tab.kind === "organisation") return { visibility: "organisation" };
   return { visibility: `profile:${tab.name}` };
 }
@@ -105,6 +117,7 @@ export function Artifacts({ tab }: { tab: ArtifactTab }): JSX.Element {
 function Gallery({ tab, list }: { tab: ArtifactTab; list: ArtifactList }): JSX.Element {
   const tabs: Array<{ tab: ArtifactTab; label: string }> = [
     { tab: { kind: "mine" }, label: "Mine" },
+    { tab: { kind: "shared" }, label: "Shared with you" },
     { tab: { kind: "organisation" }, label: "Organisation" },
     ...list.profiles.map((name) => ({ tab: { kind: "profile" as const, name }, label: name })),
   ];
@@ -118,7 +131,7 @@ function Gallery({ tab, list }: { tab: ArtifactTab; list: ArtifactList }): JSX.E
         ))}
       </nav>
       {list.artifacts.length === 0 ? (
-        <Empty title={tab.kind === "mine" ? "You have published nothing yet" : "Nothing published here yet"}>
+        <Empty title={tab.kind === "mine" ? "You have published nothing yet" : tab.kind === "shared" ? "Nobody has given you a link yet" : "Nothing published here yet"}>
           <p>
             An agent publishes a page or a file with its <code>publish_artifact</code> tool, and you can from the terminal client with <code>{"/publish <file>"}</code>.
           </p>
@@ -149,6 +162,11 @@ function Card({ artifact: a }: { artifact: Artifact }): JSX.Element {
       <p className="card-meta">
         {a.mine ? `for ${visibilityWords(a.visibility)} · ` : ""}published {when(a.published_at)}
       </p>
+      {(a.public || a.pinned || a.role === "edit") && (
+        <p className="card-meta">
+          {[a.public ? "public link" : null, a.pinned ? `pinned to version ${a.pinned}` : null, a.role === "edit" ? "you may edit it" : null].filter(Boolean).join(" · ")}
+        </p>
+      )}
     </li>
   );
 }
@@ -176,7 +194,7 @@ export function ArtifactPage({ id }: { id: string }): JSX.Element {
               It does not exist, it was deleted, or it is not one you may open. <a href={href({ page: "artifacts" })}>Your artifacts</a>
             </Empty>
           ) : (
-            <Detail artifact={a} />
+            <Detail artifact={a} reload={reload} />
           )
         }
       </Loaded>
@@ -184,27 +202,52 @@ export function ArtifactPage({ id }: { id: string }): JSX.Element {
   );
 }
 
-function Detail({ artifact: a }: { artifact: ArtifactDetail }): JSX.Element {
-  const { notify, openTab } = useConsole();
+function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () => void }): JSX.Element {
+  const { notify, reserveTab } = useConsole();
   const api = useArtifacts();
   const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [deleting, setDeleting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [switched, setSwitched] = useState<string>("current");
+  const [acting, setActing] = useState(false);
   const takedown = !a.mine;
   const versions = [...a.versions].sort((x, y) => y.n - x.n);
+  const current = a.current ?? a.version;
+  const editable = a.may_edit === true && (a.kind === "html" || a.kind === "markdown") && editableFiles(versions[0]?.files ?? []).length > 0;
 
-  // The link is asked for at the click, since it is good once and for a minute.
+  // The link is asked for at the click, since it is good once and for a minute; the tab is
+  // opened in the click itself, so a popup blocker lets it through, and pointed at the link
+  // when the plane answers, or closed if it refuses.
   const open = (version?: number): void => {
     const what = version === undefined ? "latest" : `v${version}`;
+    const tab = reserveTab();
     setOpening(what);
     setError(null);
     api.open(a.id, version).then(
       (ticket) => {
         setOpening(null);
-        openTab(ticket.url);
+        tab(ticket.url);
       },
       (e: unknown) => {
+        tab(null);
         setOpening(null);
+        setError(e);
+      },
+    );
+  };
+
+  const act = (work: Promise<unknown>, done: string): void => {
+    setActing(true);
+    setError(null);
+    work.then(
+      () => {
+        setActing(false);
+        notify(done);
+        reload();
+      },
+      (e: unknown) => {
+        setActing(false);
         setError(e);
       },
     );
@@ -222,7 +265,8 @@ function Detail({ artifact: a }: { artifact: ArtifactDetail }): JSX.Element {
           ["Who may open it", visibilityWords(a.visibility)],
           ["Owner", a.mine ? `you, ${personWords(a.owner)}` : personWords(a.owner)],
           ["Team", a.team ?? "—"],
-          ["Version", `${a.version} of ${count(versions.length, "version")}`],
+          ["Version", a.pinned ? `${current}, pinned by its owner; the newest is ${a.version}` : `${a.version} of ${count(versions.length, "version")}`],
+          ["You", a.mine ? "its owner" : a.role === "edit" ? "may publish new versions, through a link" : "may open it"],
           ["Size", bytes(a.bytes)],
           ["Published", when(a.published_at)],
           ["First published", when(a.created_at)],
@@ -234,6 +278,23 @@ function Detail({ artifact: a }: { artifact: ArtifactDetail }): JSX.Element {
         <button type="button" className="primary" disabled={opening !== null} onClick={() => open()}>
           {opening === "latest" ? "Opening…" : "Open"}
         </button>
+        <select aria-label="Version to open" value={switched} onChange={(e) => setSwitched(e.target.value)}>
+          <option value="current">The current version ({current})</option>
+          {versions.map((v) => (
+            <option key={v.n} value={String(v.n)}>
+              Version {v.n}
+              {v.note ? `: ${v.note}` : ""}
+            </option>
+          ))}
+        </select>
+        <button type="button" disabled={opening !== null} onClick={() => open(switched === "current" ? undefined : Number(switched))}>
+          Open that version
+        </button>
+        {editable && !editing && (
+          <button type="button" onClick={() => setEditing(true)}>
+            Edit
+          </button>
+        )}
         {a.may_delete && !deleting && (
           <button type="button" className="danger" onClick={() => setDeleting(true)}>
             {takedown ? "Take down" : "Delete"}
@@ -245,6 +306,17 @@ function Detail({ artifact: a }: { artifact: ArtifactDetail }): JSX.Element {
         <p className="field-error" role="alert">
           Could not open it: {describeError(error)}
         </p>
+      )}
+      {editing && (
+        <ArtifactEditor
+          artifact={a}
+          api={api}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            reload();
+          }}
+        />
       )}
       {deleting && (
         <Preview
@@ -276,10 +348,33 @@ function Detail({ artifact: a }: { artifact: ArtifactDetail }): JSX.Element {
                   {" "}
                   · published by {personWords(v.published_by)} · {when(v.published_at)} · {bytes(v.bytes)}
                 </span>
-                <button type="button" disabled={opening !== null} onClick={() => open(v.n)}>
-                  {opening === `v${v.n}` ? "Opening…" : `Open version ${v.n}`}
-                </button>
+                <span className="version-actions">
+                  <button type="button" disabled={opening !== null} onClick={() => open(v.n)}>
+                    {opening === `v${v.n}` ? "Opening…" : `Open version ${v.n}`}
+                  </button>
+                  {a.may_edit && v.n !== a.version && (
+                    <button type="button" disabled={acting} onClick={() => act(api.rollback(a.id, v.n), `Version ${v.n}'s files are version ${a.version + 1} now.`)}>
+                      Roll back to version {v.n}
+                    </button>
+                  )}
+                  {a.mine && a.pinned !== v.n && (
+                    <button type="button" disabled={acting} onClick={() => act(api.pin(a.id, v.n), `Its address serves version ${v.n} now.`)}>
+                      Pin version {v.n}
+                    </button>
+                  )}
+                  {a.mine && a.pinned === v.n && (
+                    <button type="button" disabled={acting} onClick={() => act(api.pin(a.id, null), "Its address serves the newest version again.")}>
+                      Unpin
+                    </button>
+                  )}
+                </span>
               </header>
+              {(v.note || v.n === current) && (
+                <p className="note">
+                  {v.n === current ? "Its address serves this version. " : ""}
+                  {v.note ?? ""}
+                </p>
+              )}
               <div className="scroll">
                 <table>
                   <thead>
@@ -304,7 +399,43 @@ function Detail({ artifact: a }: { artifact: ArtifactDetail }): JSX.Element {
           ))}
         </ol>
       </section>
+      {a.mine && <ArtifactLinks artifact={a} api={api} reload={reload} />}
     </>
+  );
+}
+
+/**
+ * A link somebody followed to an artifact, landing here once the plane signed them in: it is
+ * spent as them, and this tab goes on to the artifact on its host. One that expired, was
+ * revoked or is not one says so.
+ */
+export function ArtifactLink({ token }: { token: string }): JSX.Element {
+  const { follow } = useConsole();
+  const api = useArtifacts();
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => {
+    let live = true;
+    api.redeem(token).then(
+      (opened) => live && follow(opened.url),
+      (e: unknown) => live && setError(e),
+    );
+    return () => {
+      live = false;
+    };
+    // The link is spent once, when the page is reached, whatever else changes.
+  }, [token]);
+  return (
+    <div className="page artifact">
+      {error === null ? (
+        <p className="lead" role="status">
+          Opening the artifact this link is to…
+        </p>
+      ) : (
+        <Empty title="This link opens nothing">
+          It has expired, its owner revoked it, or it is not a link to an artifact: {describeError(error)} <a href={href({ page: "artifacts" })}>Your artifacts</a>
+        </Empty>
+      )}
+    </div>
   );
 }
 

@@ -36,7 +36,7 @@ defmodule Troupe.Tools.PublishArtifact do
 
     `files`: workspace paths; they keep their paths below the directory they share, so relative links still work. A page opens `index.html`; a document `index.md` or `README.md`. Pages run sandboxed: scripts only from the artifact's own .js files (no inline script), and nothing outside the artifact can be fetched. Keep it to a few megabytes.
 
-    `visibility`: `organisation`, or `profile:<name>` for the people a profile is granted to. `id`: one of yours to republish, as the next version at the same address.
+    `visibility`: `organisation`, or `profile:<name>` for the people a profile is granted to. `id`: one of yours, or one you were given an edit link to, to publish as the next version at the same address, with `note` saying what changed; the earlier versions are kept.
     """
     |> String.trim()
   end
@@ -50,7 +50,11 @@ defmodule Troupe.Tools.PublishArtifact do
         "kind" => %{"type" => "string", "enum" => @kinds},
         "visibility" => %{"type" => "string", "description" => "organisation, or profile:<name>"},
         "files" => %{"type" => "array", "items" => %{"type" => "string"}},
-        "id" => %{"type" => "string", "description" => "An artifact of yours to republish."}
+        "id" => %{
+          "type" => "string",
+          "description" => "An artifact of yours, or one you hold an edit link to, to publish a new version of."
+        },
+        "note" => %{"type" => "string", "description" => "What changed in this version, in a line."}
       },
       "required" => ["title", "kind", "visibility", "files"]
     }
@@ -78,6 +82,7 @@ defmodule Troupe.Tools.PublishArtifact do
           "files" => Enum.map(files, &wire/1)
         }
         |> put_id(args["id"])
+        |> put_note(args["note"])
 
       case Artifacts.publish(params, ctx) do
         {:ok, artifact} ->
@@ -113,6 +118,9 @@ defmodule Troupe.Tools.PublishArtifact do
 
   defp put_id(params, id) when is_binary(id) and id != "", do: Map.put(params, "id", id)
   defp put_id(params, _id), do: params
+
+  defp put_note(params, note) when is_binary(note) and note != "", do: Map.put(params, "note", note)
+  defp put_note(params, _note), do: params
 
   # Each a regular file inside the workspace, read now; their paths below the directory
   # they share, as the artifact keeps them.
