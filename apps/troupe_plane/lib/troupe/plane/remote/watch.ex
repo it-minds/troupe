@@ -124,7 +124,9 @@ defmodule Troupe.Plane.Remote.Watch do
   end
 
   def handle_info({:invites_changed, subjects}, %{user: %User{subject: subject}} = state) do
-    if subject in subjects, do: tell_invites(Identity.get_user(subject), state), else: {:ok, state}
+    if subject in subjects,
+      do: tell_invites(Identity.get_user(subject), state),
+      else: {:ok, state}
   end
 
   def handle_info(:auth_expiring, state) do

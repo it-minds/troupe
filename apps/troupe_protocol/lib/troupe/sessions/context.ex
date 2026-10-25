@@ -65,7 +65,11 @@ defmodule Troupe.Sessions.Context do
     version = Keyword.get(opts, :key_version, 1)
 
     with {:ok, key} <-
-           kms.create(team, KMS.generation(session_id, version), Keyword.get(opts, :kms_options, [])) do
+           kms.create(
+             team,
+             KMS.generation(session_id, version),
+             Keyword.get(opts, :kms_options, [])
+           ) do
       {:ok,
        %__MODULE__{
          session_id: session_id,

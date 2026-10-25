@@ -52,13 +52,24 @@ defmodule Troupe.Gateway.Invites do
     plane = Keyword.get(opts, :plane, Plane)
 
     with :ok <- owned(session, plane),
-         {:ok, slot} <- Plane.call("session.invite_slot", %{"session_id" => session_id, "subject" => person}, plane),
+         :ok <- followed_only(role),
+         {:ok, slot} <-
+           Plane.call(
+             "session.invite_slot",
+             %{"session_id" => session_id, "subject" => person},
+             plane
+           ),
          {:ok, manager} <- Private.sign_in(plane, session_id, opts),
          {:ok, keys} <- put_keys(session_id, slot, 1..slot["key_version"], manager, opts),
          {:ok, invited} <-
            Plane.call(
              "session.invite",
-             %{"session_id" => session_id, "subject" => slot["subject"], "role" => role, "keys" => keys},
+             %{
+               "session_id" => session_id,
+               "subject" => slot["subject"],
+               "role" => role,
+               "keys" => keys
+             },
              plane
            ) do
       recorder(opts).(session_id, :session_invited, %{
@@ -82,7 +93,12 @@ defmodule Troupe.Gateway.Invites do
     plane = Keyword.get(opts, :plane, Plane)
 
     with :ok <- owned(session, plane),
-         {:ok, answer} <- Plane.call("session.uninvite", %{"session_id" => session_id, "subject" => person}, plane) do
+         {:ok, answer} <-
+           Plane.call(
+             "session.uninvite",
+             %{"session_id" => session_id, "subject" => person},
+             plane
+           ) do
       # The new key first, so that the line saying so is sealed under it with what follows.
       rekeyed = rekey(session_id, opts)
 
@@ -115,9 +131,15 @@ defmodule Troupe.Gateway.Invites do
          :ok <- due(row),
          version = (row["key_version"] || 1) + 1,
          {:ok, manager} <- Private.sign_in(plane, session_id, opts),
-         {:ok, key} <- kms(opts).create(manager[:owner], KMS.generation(session_id, version), manager[:options]),
+         {:ok, key} <-
+           kms(opts).create(
+             manager[:owner],
+             KMS.generation(session_id, version),
+             manager[:options]
+           ),
          :ok <- swap(session_id, key, version),
-         {:ok, %{"invites" => invites}} <- Plane.call("session.invites", %{"session_id" => session_id}, plane),
+         {:ok, %{"invites" => invites}} <-
+           Plane.call("session.invites", %{"session_id" => session_id}, plane),
          {:ok, keys} <- hand_on(session_id, invites, version, key, manager, plane, opts) do
       Plane.call(
         "session.rekeyed",
@@ -156,7 +178,11 @@ defmodule Troupe.Gateway.Invites do
     |> Enum.filter(&MapSet.member?(here, &1["subject"]))
     |> Enum.reduce_while({:ok, []}, fn invite, {:ok, acc} ->
       with {:ok, slot} <-
-             Plane.call("session.invite_slot", %{"session_id" => session_id, "subject" => invite["subject"]}, plane),
+             Plane.call(
+               "session.invite_slot",
+               %{"session_id" => session_id, "subject" => invite["subject"]},
+               plane
+             ),
            {:ok, path} <- put_key(slot["prefix"], version, key, manager, opts) do
         {:cont, {:ok, [%{"subject" => invite["subject"], "slot" => path} | acc]}}
       else
@@ -188,7 +214,12 @@ defmodule Troupe.Gateway.Invites do
   # invitee's slot, which that sign-in may create in and may not read.
   defp put_keys(session_id, slot, versions, manager, opts) do
     Enum.reduce_while(versions, {:ok, []}, fn version, {:ok, acc} ->
-      with {:ok, key} <- kms(opts).fetch(manager[:owner], KMS.generation(session_id, version), manager[:options]),
+      with {:ok, key} <-
+             kms(opts).fetch(
+               manager[:owner],
+               KMS.generation(session_id, version),
+               manager[:options]
+             ),
            {:ok, path} <- put_key(slot["prefix"], version, key, manager, opts) do
         {:cont, {:ok, acc ++ [%{"key_version" => version, "slot" => path}]}}
       else
@@ -250,12 +281,14 @@ defmodule Troupe.Gateway.Invites do
       segments
       |> Storage.live_segments()
       |> Enum.filter(&(&1.last_seq > after_seq))
-      |> Enum.reduce_while({:ok, []}, fn segment, {:ok, acc} ->
-        case Storage.read_segment(store, session_id, keys, segment.key) do
-          {:ok, events} -> {:cont, {:ok, acc ++ Enum.filter(events, &(seq(&1) > after_seq))}}
-          error -> {:halt, error}
-        end
-      end)
+      |> Enum.reduce_while({:ok, []}, &read_into(store, session_id, keys, after_seq, &1, &2))
+    end
+  end
+
+  defp read_into(store, session_id, keys, after_seq, segment, {:ok, acc}) do
+    case Storage.read_segment(store, session_id, keys, segment.key) do
+      {:ok, events} -> {:cont, {:ok, acc ++ Enum.filter(events, &(seq(&1) > after_seq))}}
+      error -> {:halt, error}
     end
   end
 
@@ -274,8 +307,14 @@ defmodule Troupe.Gateway.Invites do
       [] -> :not_running
     end
   catch
-    :exit, reason -> Logger.info("troupe: #{session_id} did not record #{type}: #{inspect(reason)}")
+    :exit, reason ->
+      Logger.info("troupe: #{session_id} did not record #{type}: #{inspect(reason)}")
   end
+
+  # Followed, not steered: steering a private session from another device is offering it,
+  # which a private session never is. Asked before any key goes anywhere.
+  defp followed_only("control"), do: {:error, :followed_only}
+  defp followed_only(_observe), do: :ok
 
   defp owned(session, plane) do
     owner = Map.get(session, :owner)

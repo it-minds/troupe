@@ -864,6 +864,39 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # A private session's invitations, made from this computer, which seals it (root #765):
+  # the daemon puts the session's key in the invitee's own slot and tells the plane where.
+  @impl true
+  def invites(sid, :list) do
+    case Link.call("session.invites", %{session_id: sid}) do
+      {:ok, %{"invites" => invites}} -> {:ok, Troupe.Client.Invites.line(invites)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  def invites(sid, {:invite, person, role}) do
+    params = %{
+      session_id: sid,
+      person: person,
+      role: role,
+      command_id: Troupe.Remote.RPC.command_id()
+    }
+
+    case Link.call("session.invite", params) do
+      {:ok, answer} -> {:ok, Troupe.Client.Invites.invited(answer, role)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  def invites(sid, {:uninvite, person}) do
+    params = %{session_id: sid, person: person, command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call("session.uninvite", params) do
+      {:ok, answer} -> {:ok, Troupe.Client.Invites.uninvited(answer, person)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
   # The daemon's sentence where it gave one, as it gave it.
   defp refusal(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
   defp refusal(reason), do: message(reason)

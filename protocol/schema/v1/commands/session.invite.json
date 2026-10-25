@@ -1,0 +1,26 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/session.invite.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "person": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "person",
+    "session_id"
+  ],
+  "title": "session.invite",
+  "type": "object"
+}

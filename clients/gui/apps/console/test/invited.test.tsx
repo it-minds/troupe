@@ -53,20 +53,22 @@ describe("Invited to you", () => {
     listed.querySelector<HTMLAnchorElement>("a")!.click();
     await waitFor(() => document.querySelector('[role="status"]')?.textContent?.startsWith("idle"), "the session attached");
     await sees("on the platform, shared with you by Ada");
+    // Everybody present is named.
+    await sees(`Shared with ${PEOPLE.carol.subject} (follows)`);
 
     fake.plane.uninvite(row.id, PEOPLE.carol.subject);
     await sees("Ada took back your invitation: this session is no longer shared with you.");
   });
 
   it("lists a private session and says it is read on your own computer", async () => {
-    fake.plane.invite("s-priv-3", PEOPLE.carol.subject, "control", "ada@example.com", { kind: "private", title: "ada's notes", ownerName: "Ada" });
+    fake.plane.invite("s-priv-3", PEOPLE.carol.subject, "observe", "ada@example.com", { kind: "private", title: "ada's notes", ownerName: "Ada" });
     await signedInAs(fake, PEOPLE.carol);
     visit("#/mine");
     unmount = render(<App />).unmount;
 
     const listed = await waitFor(() => invitedRow("ada's notes"), "the private invitation");
     expect(listed.textContent).toContain("private: read it in the desktop app");
-    expect(listed.textContent).toContain("steer it");
+    expect(listed.textContent).toContain("follow it");
     expect(listed.querySelector("a")).toBeNull();
   });
 });

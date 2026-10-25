@@ -1,6 +1,6 @@
 defmodule Troupe.Plane.InvitesTest do
   @moduledoc """
-  A person invites another into their session by name (#765, Decision 949).
+  A person invites another into their session by name (#765).
 
   A pod session's invitation is its grant made visible: the ACL row, the pod told, the
   log's line through the pod, a row that says who invited whom and when, and the invitee
@@ -23,6 +23,7 @@ defmodule Troupe.Plane.InvitesTest do
     Audit,
     Erasure,
     FakePod,
+    Fleet,
     Harness,
     Identity,
     Invites,
@@ -30,6 +31,7 @@ defmodule Troupe.Plane.InvitesTest do
     Sessions,
     Tokens
   }
+
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Web.Router
@@ -65,7 +67,11 @@ defmodule Troupe.Plane.InvitesTest do
       assert {:ok, answer} =
                Harness.call(
                  "session.invite",
-                 %{"session_id" => session.id, "subject" => "BEA@example.test@example.test", "role" => "observe"},
+                 %{
+                   "session_id" => session.id,
+                   "subject" => "BEA@example.test@example.test",
+                   "role" => "observe"
+                 },
                  as(ada)
                )
 
@@ -114,7 +120,9 @@ defmodule Troupe.Plane.InvitesTest do
                  as(ada)
                )
 
-      assert_receive {:pushed, "acl.changed", %{"changes" => [%{"role" => "collaborator"}]}}, 5_000
+      assert_receive {:pushed, "acl.changed", %{"changes" => [%{"role" => "collaborator"}]}},
+                     5_000
+
       assert [_one] = Invites.of_session(session.id)
 
       assert {:ok, %{"your_role" => "collaborator"}} =
@@ -154,7 +162,11 @@ defmodule Troupe.Plane.InvitesTest do
 
       # Ada is the owner, not an invitee; and a role nobody defined is refused.
       assert {:error, %{message: "invalid_params"}} =
-               Harness.call("session.invite", %{"session_id" => session.id, "subject" => ada.subject}, as(ada))
+               Harness.call(
+                 "session.invite",
+                 %{"session_id" => session.id, "subject" => ada.subject},
+                 as(ada)
+               )
     end
 
     test "a platform administrator may be invited by anybody", %{port: port} do
@@ -207,14 +219,25 @@ defmodule Troupe.Plane.InvitesTest do
       :ok = Invites.subscribe()
 
       assert {:ok, answer} =
-               Harness.call("session.uninvite", %{"session_id" => session.id, "subject" => bea.email}, as(ada))
+               Harness.call(
+                 "session.uninvite",
+                 %{"session_id" => session.id, "subject" => bea.email},
+                 as(ada)
+               )
 
       assert answer["subject"] == bea.subject
       assert answer["rekey_due"] == false
 
-      assert_receive {:pushed, "acl.changed", %{"changes" => [%{"subject" => subject, "role" => nil}]}}, 5_000
+      assert_receive {:pushed, "acl.changed",
+                      %{"changes" => [%{"subject" => subject, "role" => nil}]}},
+                     5_000
+
       assert subject == bea.subject
-      assert_receive {:pushed, "invite.changed", %{"type" => "session_uninvited", "invite" => removed}}, 5_000
+
+      assert_receive {:pushed, "invite.changed",
+                      %{"type" => "session_uninvited", "invite" => removed}},
+                     5_000
+
       assert removed["subject"] == bea.subject
       refute Map.has_key?(removed, "role")
       assert_receive {:invites_changed, [^subject]}, 1_000
@@ -227,7 +250,11 @@ defmodule Troupe.Plane.InvitesTest do
 
       # Twice is a person not invited.
       assert {:error, %{message: "not_found"}} =
-               Harness.call("session.uninvite", %{"session_id" => session.id, "subject" => bea.subject}, as(ada))
+               Harness.call(
+                 "session.uninvite",
+                 %{"session_id" => session.id, "subject" => bea.subject},
+                 as(ada)
+               )
     end
 
     test "a picker finds people by the start of their name, only among those the caller may invite or meets",
@@ -242,19 +269,30 @@ defmodule Troupe.Plane.InvitesTest do
       session = running(ada, team, pod)
 
       assert {:ok, %{"people" => people}} =
-               Harness.call("people.search", %{"query" => "Be", "session_id" => session.id}, as(ada))
+               Harness.call(
+                 "people.search",
+                 %{"query" => "Be", "session_id" => session.id},
+                 as(ada)
+               )
 
       assert Enum.map(people, & &1["subject"]) == ["bea@example.test", "ben@example.test"]
 
-      assert {:ok, %{"people" => []}} = Harness.call("people.search", %{"query" => "bob"}, as(ada))
-      assert {:ok, %{"people" => [_one]}} = Harness.call("people.search", %{"query" => "be", "limit" => 1}, as(ada))
-      assert {:ok, %{"people" => []}} = Harness.call("people.search", %{"query" => "ada"}, as(ada))
+      assert {:ok, %{"people" => []}} =
+               Harness.call("people.search", %{"query" => "bob"}, as(ada))
+
+      assert {:ok, %{"people" => [_one]}} =
+               Harness.call("people.search", %{"query" => "be", "limit" => 1}, as(ada))
+
+      assert {:ok, %{"people" => []}} =
+               Harness.call("people.search", %{"query" => "ada"}, as(ada))
     end
   end
 
   describe "a person's watch" do
     setup do
-      {:ok, listener} = start_supervised({Bandit, plug: Router, scheme: :http, port: 0, startup_log: false})
+      {:ok, listener} =
+        start_supervised({Bandit, plug: Router, scheme: :http, port: 0, startup_log: false})
+
       {:ok, {_address, port}} = ThousandIsland.listener_info(listener)
 
       Application.put_env(:troupe_plane, :oidc,
@@ -281,15 +319,31 @@ defmodule Troupe.Plane.InvitesTest do
       ada = person("ada@example.test", ["eng"])
       bea = person("bea@example.test", ["eng"])
       _cy = person("cy@example.test", ["eng"])
-      pod = FakePod.enrol(ctx.port, "dev-token", "troupe-w-dev-0", notify: spawn(fn -> Process.sleep(:infinity) end))
+
+      pod =
+        FakePod.enrol(ctx.port, "dev-token", "troupe-w-dev-0",
+          notify: spawn(fn -> Process.sleep(:infinity) end)
+        )
+
       session = running(ada, team, pod)
 
-      {:ok, watch} = Client.connect(url: ctx.ws <> "/v1/relay/watch", token: bea_token, client_info: %{"name" => "t", "version" => "1"})
+      {:ok, watch} =
+        Client.connect(
+          url: ctx.ws <> "/v1/relay/watch",
+          token: bea_token,
+          client_info: %{"name" => "t", "version" => "1"}
+        )
+
       on_exit(fn -> Client.close(watch) end)
       cy_owner = spawn_link(fn -> collect([]) end)
 
       {:ok, cy_watch} =
-        Client.connect(url: ctx.ws <> "/v1/relay/watch", token: cy_token, client_info: %{"name" => "t", "version" => "1"}, owner: cy_owner)
+        Client.connect(
+          url: ctx.ws <> "/v1/relay/watch",
+          token: cy_token,
+          client_info: %{"name" => "t", "version" => "1"},
+          owner: cy_owner
+        )
 
       on_exit(fn -> Client.close(cy_watch) end)
 
@@ -300,7 +354,13 @@ defmodule Troupe.Plane.InvitesTest do
       assert row["session_id"] == session.id
       assert row["role"] == "observe"
 
-      {:ok, _} = Harness.call("session.uninvite", %{"session_id" => session.id, "subject" => bea.subject}, as(ada))
+      {:ok, _} =
+        Harness.call(
+          "session.uninvite",
+          %{"session_id" => session.id, "subject" => bea.subject},
+          as(ada)
+        )
+
       assert_receive {:troupe_notification, "invites.changed", %{"invites" => []}}, 1_000
 
       send(cy_owner, {:report, self()})
@@ -310,34 +370,9 @@ defmodule Troupe.Plane.InvitesTest do
 
   describe "a private session" do
     setup context do
-      cond do
-        not PersonAuth.reachable?() ->
-          IO.puts(:stderr, "\nSKIPPED: no OpenBao (#{PersonAuth.address()}); bring one up with `scripts/dev-up`.\n")
-          {:ok, skip: "no OpenBao"}
-
-        true ->
-          Application.put_env(:troupe_plane, :issuer, @issuer)
-          Application.put_env(:troupe_plane, :person_auth_path, @auth_path)
-
-          on_exit(fn ->
-            Application.delete_env(:troupe_plane, :issuer)
-            Application.delete_env(:troupe_plane, :person_auth_path)
-          end)
-
-          :ok = PersonAuth.configure(@auth_path, @role, @issuer)
-
-          # The plane's credential for the length of each test: its policies, the invites
-          # grant among them, and nothing more. The root token stays in hand for what an
-          # operator writes.
-          transit = Application.get_env(:troupe_plane, :transit, [])
-          root = transit[:token]
-          plane = token_for(root, [Policy.plane("secret"), Policy.signing(), Policy.invites()])
-          Application.put_env(:troupe_plane, :transit, Keyword.put(transit, :token, plane))
-          on_exit(fn -> Application.put_env(:troupe_plane, :transit, transit) end)
-
-          start_supervised!({Task.Supervisor, name: Erasure.Tasks})
-          {:ok, Map.merge(context, %{root: root, plane: plane})}
-      end
+      if PersonAuth.reachable?(),
+        do: with_bao(context),
+        else: no_bao()
     end
 
     test "its key is put in the invitee's own slot: the plane and the owner cannot read it there, the invitee can",
@@ -354,16 +389,26 @@ defmodule Troupe.Plane.InvitesTest do
       assert String.starts_with?(slot, "troupe/people/#{User.kms_name(bea)}/invited/#{id}/k1-")
 
       # The plane's own credential cannot read it, knowing exactly where it is.
-      assert {:error, :forbidden} = OpenBao.fetch_at(slot, token: plane, address: PersonAuth.address())
+      assert {:error, :forbidden} =
+               OpenBao.fetch_at(slot, token: plane, address: PersonAuth.address())
 
       # Nor can the owner who put it there, nor put another over it: giving is all it may.
       ada_token = login(ada, id)
-      assert {:error, :forbidden} = OpenBao.fetch_at(slot, token: ada_token, address: PersonAuth.address())
-      refute :ok == OpenBao.put_at(slot, :crypto.strong_rand_bytes(32), token: ada_token, address: PersonAuth.address())
+
+      assert {:error, :forbidden} =
+               OpenBao.fetch_at(slot, token: ada_token, address: PersonAuth.address())
+
+      refute :ok ==
+               OpenBao.put_at(slot, :crypto.strong_rand_bytes(32),
+                 token: ada_token,
+                 address: PersonAuth.address()
+               )
 
       # Nor anybody else invited into nothing, with a sign-in of their own.
       cy = person("cy-#{unique()}@example.test", [group])
-      assert {:error, :forbidden} = OpenBao.fetch_at(slot, token: own_login(cy), address: PersonAuth.address())
+
+      assert {:error, :forbidden} =
+               OpenBao.fetch_at(slot, token: own_login(cy), address: PersonAuth.address())
 
       # Bea's daemon, with her own sign-in at the key manager, reads it.
       assert {:ok, keys} = Harness.call("session.keys", %{"session_id" => id}, as(bea))
@@ -376,12 +421,21 @@ defmodule Troupe.Plane.InvitesTest do
       key = "sessions/#{id}/segments/000000000001-000000000001-000000000003.seg"
 
       assert {:ok, %{"urls" => %{^key => _url}}} =
-               Harness.call("session.presign", %{"session_id" => id, "method" => "get", "keys" => [key]}, as(bea))
+               Harness.call(
+                 "session.presign",
+                 %{"session_id" => id, "method" => "get", "keys" => [key]},
+                 as(bea)
+               )
 
-      assert {:ok, %{"keys" => _}} = Harness.call("session.objects", %{"session_id" => id}, as(bea))
+      assert {:ok, %{"keys" => _}} =
+               Harness.call("session.objects", %{"session_id" => id}, as(bea))
 
       assert {:error, %{message: "forbidden"}} =
-               Harness.call("session.presign", %{"session_id" => id, "method" => "put", "keys" => [key]}, as(bea))
+               Harness.call(
+                 "session.presign",
+                 %{"session_id" => id, "method" => "put", "keys" => [key]},
+                 as(bea)
+               )
 
       # Listed to her, and not as a session of her own.
       assert {:ok, %{"invites" => [%{"session_id" => ^id, "kind" => "private"}]}} =
@@ -401,7 +455,11 @@ defmodule Troupe.Plane.InvitesTest do
       %{ada: ada, bea: bea, id: id} = private_session(context)
 
       assert {:error, refused} =
-               Harness.call("session.invite", %{"session_id" => id, "subject" => bea.subject}, as(ada))
+               Harness.call(
+                 "session.invite",
+                 %{"session_id" => id, "subject" => bea.subject},
+                 as(ada)
+               )
 
       assert refused.message == "invalid_params"
       assert refused.data.field == "keys"
@@ -413,7 +471,11 @@ defmodule Troupe.Plane.InvitesTest do
       assert {:error, %{message: "invalid_params", data: %{field: "keys"}}} =
                Harness.call(
                  "session.invite",
-                 %{"session_id" => id, "subject" => bea.subject, "keys" => [%{"key_version" => 1, "slot" => elsewhere}]},
+                 %{
+                   "session_id" => id,
+                   "subject" => bea.subject,
+                   "keys" => [%{"key_version" => 1, "slot" => elsewhere}]
+                 },
                  as(ada)
                )
 
@@ -421,12 +483,27 @@ defmodule Troupe.Plane.InvitesTest do
       # is put anywhere.
       stranger = person("dan-#{unique()}@example.test", ["elsewhere-#{unique()}"])
 
-      assert {:error, %{message: "forbidden", data: %{reason: "shares no team with this session's owner"}}} =
-               Harness.call("session.invite_slot", %{"session_id" => id, "subject" => stranger.subject}, as(ada))
+      assert {:error,
+              %{message: "forbidden", data: %{reason: "shares no team with this session's owner"}}} =
+               Harness.call(
+                 "session.invite_slot",
+                 %{"session_id" => id, "subject" => stranger.subject},
+                 as(ada)
+               )
 
       # And nobody but the owner asks where to put it.
       assert {:error, %{message: "forbidden"}} =
-               Harness.call("session.invite_slot", %{"session_id" => id, "subject" => bea.subject}, as(bea))
+               Harness.call(
+                 "session.invite_slot",
+                 %{"session_id" => id, "subject" => bea.subject},
+                 as(bea)
+               )
+
+      # Followed, not steered: steering it from elsewhere would be offering it.
+      assert {:error, %{message: "invalid_params", data: %{field: "role"}}} =
+               invite_private(ada, id, bea, "control")
+
+      assert Invites.of_session(id) == []
     end
 
     test "taking an invitation back re-keys forward: what follows is under a key the person removed never gets",
@@ -435,19 +512,27 @@ defmodule Troupe.Plane.InvitesTest do
       %{ada: ada, bea: bea, id: id, k1: k1, root: root, group: group} = private_session(context)
       cy = person("cy-#{unique()}@example.test", [group])
       {:ok, _} = invite_private(ada, id, bea, "observe")
-      {:ok, _} = invite_private(ada, id, cy, "control")
+      {:ok, _} = invite_private(ada, id, cy, "observe")
       [%{slot: bea_slot}] = Invites.keys_for(id, bea.subject)
       assert key_present?(root, bea_slot)
 
       assert {:ok, %{"rekey_due" => true}} =
-               Harness.call("session.uninvite", %{"session_id" => id, "subject" => bea.subject}, as(ada))
+               Harness.call(
+                 "session.uninvite",
+                 %{"session_id" => id, "subject" => bea.subject},
+                 as(ada)
+               )
 
       # Her copy is destroyed in her slot, and nothing more is handed to her.
       refute key_present?(root, bea_slot)
       assert Sessions.get(id).rekey_due
       assert Invites.keys_for(id, bea.subject) == []
-      assert {:error, %{message: "not_found"}} = Harness.call("session.keys", %{"session_id" => id}, as(bea))
-      assert {:error, %{message: "not_found"}} = Harness.call("session.objects", %{"session_id" => id}, as(bea))
+
+      assert {:error, %{message: "not_found"}} =
+               Harness.call("session.keys", %{"session_id" => id}, as(bea))
+
+      assert {:error, %{message: "forbidden"}} =
+               Harness.call("session.objects", %{"session_id" => id}, as(bea))
 
       # The owner's daemon seals under the next generation, put in Cy's slot: Cy is still in.
       token = login(ada, id)
@@ -464,7 +549,11 @@ defmodule Troupe.Plane.InvitesTest do
 
       # Not without everybody still invited.
       assert {:error, %{message: "invalid_params", data: %{missing: [missing]}}} =
-               Harness.call("session.rekeyed", %{"session_id" => id, "key_version" => 2, "keys" => []}, as(ada))
+               Harness.call(
+                 "session.rekeyed",
+                 %{"session_id" => id, "key_version" => 2, "keys" => []},
+                 as(ada)
+               )
 
       assert missing == cy.subject
 
@@ -473,7 +562,11 @@ defmodule Troupe.Plane.InvitesTest do
       assert {:ok, row} =
                Harness.call(
                  "session.rekeyed",
-                 %{"session_id" => id, "key_version" => 2, "keys" => [%{"subject" => cy.subject, "slot" => cy_slot}]},
+                 %{
+                   "session_id" => id,
+                   "key_version" => 2,
+                   "keys" => [%{"subject" => cy.subject, "slot" => cy_slot}]
+                 },
                  as(ada)
                )
 
@@ -486,18 +579,26 @@ defmodule Troupe.Plane.InvitesTest do
       {:ok, %{token: cy_token}} = spend(keys)
 
       assert [{:ok, ^k1}, {:ok, ^k2}] =
-               Enum.map(keys["keys"], &OpenBao.fetch_at(&1["slot"], token: cy_token, address: PersonAuth.address()))
+               Enum.map(
+                 keys["keys"],
+                 &OpenBao.fetch_at(&1["slot"], token: cy_token, address: PersonAuth.address())
+               )
 
       # Bea, invited again, is given every key there is, or is not invited.
-      assert {:error, %{message: "invalid_params"}} = invite_private(ada, id, bea, "observe", [k1])
+      assert {:error, %{message: "invalid_params"}} =
+               invite_private(ada, id, bea, "observe", [k1])
+
       assert {:ok, _} = invite_private(ada, id, bea, "observe", [k1, k2])
     end
 
-    test "an erasure destroys every generation of its key and every copy in an invitee's slot", context do
+    test "an erasure destroys every generation of its key and every copy in an invitee's slot",
+         context do
       requires_bao(context)
       %{ada: ada, bea: bea, id: id, k1: k1, root: root} = private_session(context)
       {:ok, _} = invite_private(ada, id, bea, "observe")
-      {:ok, _} = Harness.call("session.uninvite", %{"session_id" => id, "subject" => bea.subject}, as(ada))
+
+      {:ok, _} =
+        Harness.call("session.uninvite", %{"session_id" => id, "subject" => bea.subject}, as(ada))
 
       {:ok, k2} =
         OpenBao.create({:person, User.kms_name(ada)}, KMS.generation(id, 2),
@@ -505,15 +606,22 @@ defmodule Troupe.Plane.InvitesTest do
           address: PersonAuth.address()
         )
 
-      {:ok, _} = Harness.call("session.rekeyed", %{"session_id" => id, "key_version" => 2, "keys" => []}, as(ada))
-      {:ok, _} = invite_private(ada, id, bea, "control", [k1, k2])
+      {:ok, _} =
+        Harness.call(
+          "session.rekeyed",
+          %{"session_id" => id, "key_version" => 2, "keys" => []},
+          as(ada)
+        )
+
+      {:ok, _} = invite_private(ada, id, bea, "observe", [k1, k2])
       slots = for key <- Invites.keys_for(id, bea.subject), do: key.slot
       assert length(slots) == 2
 
       paths = for v <- [1, 2], do: KMS.path({:person, User.kms_name(ada)}, KMS.generation(id, v))
       assert Enum.all?(paths ++ slots, &key_present?(root, &1))
 
-      assert {:ok, %{"erased" => true}} = Harness.call("session.erase", %{"session_id" => id}, as(ada))
+      assert {:ok, %{"erased" => true}} =
+               Harness.call("session.erase", %{"session_id" => id}, as(ada))
 
       refute Enum.any?(paths ++ slots, &key_present?(root, &1))
       assert Invites.keys_for(id, bea.subject) == []
@@ -521,7 +629,8 @@ defmodule Troupe.Plane.InvitesTest do
       assert {:ok, %{"invites" => []}} = Harness.call("invites.list", %{}, as(bea))
     end
 
-    test "an erasure stays pending while a copy in an invitee's slot cannot be destroyed", context do
+    test "an erasure stays pending while a copy in an invitee's slot cannot be destroyed",
+         context do
       requires_bao(context)
       %{ada: ada, bea: bea, id: id, root: root} = private_session(context)
       {:ok, _} = invite_private(ada, id, bea, "observe")
@@ -540,7 +649,9 @@ defmodule Troupe.Plane.InvitesTest do
 
       Application.put_env(:troupe_plane, :transit, transit)
 
-      assert {:ok, %{"erased" => true}} = Harness.call("session.erase", %{"session_id" => id}, as(ada))
+      assert {:ok, %{"erased" => true}} =
+               Harness.call("session.erase", %{"session_id" => id}, as(ada))
+
       refute key_present?(root, slot)
     end
   end
@@ -548,6 +659,38 @@ defmodule Troupe.Plane.InvitesTest do
   # -- helpers ----------------------------------------------------------------
 
   defp as(user), do: %{user: user, platform_admin?: false}
+
+  defp no_bao do
+    IO.puts(
+      :stderr,
+      "\nSKIPPED: no OpenBao (#{PersonAuth.address()}); bring one up with `scripts/dev-up`.\n"
+    )
+
+    {:ok, skip: "no OpenBao"}
+  end
+
+  defp with_bao(context) do
+    Application.put_env(:troupe_plane, :issuer, @issuer)
+    Application.put_env(:troupe_plane, :person_auth_path, @auth_path)
+
+    on_exit(fn ->
+      Application.delete_env(:troupe_plane, :issuer)
+      Application.delete_env(:troupe_plane, :person_auth_path)
+    end)
+
+    :ok = PersonAuth.configure(@auth_path, @role, @issuer)
+
+    # The plane's credential for the length of each test: its policies, the invites grant
+    # among them, and nothing more. The root token stays in hand for what an operator writes.
+    transit = Application.get_env(:troupe_plane, :transit, [])
+    root = transit[:token]
+    plane = token_for(root, [Policy.plane("secret"), Policy.signing(), Policy.invites()])
+    Application.put_env(:troupe_plane, :transit, Keyword.put(transit, :token, plane))
+    on_exit(fn -> Application.put_env(:troupe_plane, :transit, transit) end)
+
+    start_supervised!({Task.Supervisor, name: Erasure.Tasks})
+    {:ok, Map.merge(context, %{root: root, plane: plane})}
+  end
 
   # A session of the team's on the fake pod, as a placement leaves one.
   defp running(owner, team, pod) do
@@ -563,16 +706,21 @@ defmodule Troupe.Plane.InvitesTest do
         epoch: 1
       })
 
-    {:ok, placed} = Sessions.place(session.id, Troupe.Plane.Fleet.get_worker(pod.worker_id))
+    {:ok, placed} = Sessions.place(session.id, Fleet.get_worker(pod.worker_id))
     placed
   end
 
   # A watch's owner that keeps what it was told, and says so when asked.
   defp collect(seen) do
     receive do
-      {:troupe_notification, "invites.changed", %{"invites" => invites}} -> collect([invites | seen])
-      {:report, to} -> send(to, {:cy_saw, seen})
-      _other -> collect(seen)
+      {:troupe_notification, "invites.changed", %{"invites" => invites}} ->
+        collect([invites | seen])
+
+      {:report, to} ->
+        send(to, {:cy_saw, seen})
+
+      _other ->
+        collect(seen)
     end
   end
 
@@ -586,7 +734,9 @@ defmodule Troupe.Plane.InvitesTest do
 
   defp audited?(actor, action, session_id) do
     Repo.exists?(
-      from(a in Audit.Event, where: a.actor == ^actor and a.action == ^action and a.subject_id == ^session_id)
+      from(a in Audit.Event,
+        where: a.actor == ^actor and a.action == ^action and a.subject_id == ^session_id
+      )
     )
   end
 
@@ -598,9 +748,18 @@ defmodule Troupe.Plane.InvitesTest do
     ada = person("ada-#{unique()}@example.test", [group])
     bea = person("bea-#{unique()}@example.test", [group])
     id = SessionId.generate()
-    {:ok, _row} = Harness.call("session.register", %{"session_id" => id, "device" => "ada-laptop"}, as(ada))
+
+    {:ok, _row} =
+      Harness.call("session.register", %{"session_id" => id, "device" => "ada-laptop"}, as(ada))
+
     token = login(ada, id)
-    {:ok, k1} = OpenBao.create({:person, User.kms_name(ada)}, id, token: token, address: PersonAuth.address())
+
+    {:ok, k1} =
+      OpenBao.create({:person, User.kms_name(ada)}, id,
+        token: token,
+        address: PersonAuth.address()
+      )
+
     Map.merge(context, %{ada: ada, bea: bea, id: id, k1: k1, group: group})
   end
 
@@ -626,9 +785,16 @@ defmodule Troupe.Plane.InvitesTest do
 
   defp put_for(owner, id, invitee, version, key) do
     {:ok, where} =
-      Harness.call("session.invite_slot", %{"session_id" => id, "subject" => invitee.subject}, as(owner))
+      Harness.call(
+        "session.invite_slot",
+        %{"session_id" => id, "subject" => invitee.subject},
+        as(owner)
+      )
 
-    slot = where["prefix"] <> "k#{version}-" <> Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+    slot =
+      where["prefix"] <>
+        "k#{version}-" <> Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+
     :ok = OpenBao.put_at(slot, key, token: login(owner, id), address: PersonAuth.address())
     slot
   end
@@ -728,9 +894,13 @@ defmodule Troupe.Plane.InvitesTest do
 
   defp plane_token(ctx, subject) do
     {:ok, %{status: 200, body: body}} =
-      Req.request(method: :post, url: ctx.http <> "/auth/exchange", json: %{"id_token" => "good:#{subject}"}, retry: false)
+      Req.request(
+        method: :post,
+        url: ctx.http <> "/auth/exchange",
+        json: %{"id_token" => "good:#{subject}"},
+        retry: false
+      )
 
     body["token"]
   end
-
 end

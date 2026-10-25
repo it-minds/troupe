@@ -2498,6 +2498,17 @@ defmodule Troupe.Gateway.Dispatch do
   defp invite_error(session_id, :not_private),
     do: Error.new(:invalid_params, %{session_id: session_id, reason: "not a private session"})
 
+  defp invite_error(session_id, :followed_only) do
+    Error.new(:invalid_params, %{
+      session_id: session_id,
+      field: "role",
+      reason:
+        "a private session is followed by the people invited into it: steering it from " <>
+          "another device would carry it past the plane in the clear, and a private session " <>
+          "is never offered"
+    })
+  end
+
   defp invite_error(session_id, :no_keys),
     do: Error.new(:not_found, %{session_id: session_id, reason: "no key of it is yours"})
 

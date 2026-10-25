@@ -104,6 +104,7 @@ defmodule Troupe.KMS do
   """
   @spec generation(session_id(), pos_integer()) :: String.t()
   def generation(session_id, 1), do: session_id
+
   def generation(session_id, version) when is_integer(version) and version > 1,
     do: "#{session_id}.k#{version}"
 

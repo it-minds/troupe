@@ -952,7 +952,13 @@ defmodule Troupe.Plane.Harness do
          invitee = Invites.person(name),
          :ok <- Invites.eligible(session, invitee),
          {:ok, invite} <-
-           Invites.invite(session, invitee, params["role"] || "observe", user.subject, params["keys"]) do
+           Invites.invite(
+             session,
+             invitee,
+             params["role"] || "observe",
+             user.subject,
+             params["keys"]
+           ) do
       pushed =
         if session.kind == "private" do
           false
@@ -965,7 +971,8 @@ defmodule Troupe.Plane.Harness do
       {:ok,
        %{
          "session_id" => session.id,
-         "invite" => session.id |> Invites.rows_of() |> Enum.find(&(&1["subject"] == invitee.subject)),
+         "invite" =>
+           session.id |> Invites.rows_of() |> Enum.find(&(&1["subject"] == invitee.subject)),
          "pushed" => pushed
        }}
     end
@@ -973,8 +980,8 @@ defmodule Troupe.Plane.Harness do
 
   # Taking an invitation back ends every route it gave: a pod session's ACL row and the
   # pod's mirror of it, so an open connection is refused at its next command; a private
-  # session's copies of its key in that person's slot, and the session is `rekey_due` until its owner's
-  # daemon seals what follows under a key they never get.
+  # session's copies of its key in that person's slot, and the session is `rekey_due` until
+  # its owner's daemon seals what follows under a key they never get.
   defp handle("session.uninvite", params, %{user: user}) do
     with {:ok, session} <- inviting(params["session_id"], user),
          {:ok, name} <- required_string(params, "subject"),
@@ -985,7 +992,10 @@ defmodule Troupe.Plane.Harness do
           false
         else
           acl = push_acl_change(session, subject, nil)
-          logged = announce_invite(session, "session_uninvited", Identity.get_user(subject), nil, user)
+
+          logged =
+            announce_invite(session, "session_uninvited", Identity.get_user(subject), nil, user)
+
           acl and logged
         end
 
@@ -1070,11 +1080,11 @@ defmodule Troupe.Plane.Harness do
   defp handle("session.rekeyed", params, %{user: user}) do
     with {:ok, session_id} <- required_string(params, "session_id"),
          {:ok, session} <- own_private(session_id, user),
-         {:ok, rekeyed} <- Invites.rekeyed(session, params["key_version"], params["keys"] || []) do
+         keys = params["keys"] || [],
+         {:ok, rekeyed} <- Invites.rekeyed(session, params["key_version"], keys) do
       {:ok, session_json(rekeyed, user)}
     end
   end
-
 
   # Anybody who may see the session may say they have looked at it. Reviewing is an
   # acknowledgement rather than a command — it changes nothing the agent will do — and
@@ -1659,7 +1669,11 @@ defmodule Troupe.Plane.Harness do
 
         match?(
           {:ok, _pushed},
-          Router.push(worker, "invite.changed", %{"session_id" => session.id, "type" => type, "invite" => invite})
+          Router.push(worker, "invite.changed", %{
+            "session_id" => session.id,
+            "type" => type,
+            "invite" => invite
+          })
         )
     end
   end

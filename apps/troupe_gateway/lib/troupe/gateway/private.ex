@@ -78,7 +78,7 @@ defmodule Troupe.Gateway.Private do
   #386, Decision 784).
   """
 
-  alias Troupe.Gateway.Plane
+  alias Troupe.Gateway.{Invites, Plane}
   alias Troupe.KMS
   alias Troupe.ObjectStore.Signed
   alias Troupe.Protocol.Event
@@ -497,7 +497,7 @@ defmodule Troupe.Gateway.Private do
         false
 
       {:ok, %{"device" => ^device} = row} ->
-        if row["rekey_due"], do: rekey_now(session.id, plane, opts)
+        rekey_if_due(row, session.id, plane, opts)
 
         started?(
           session,
@@ -530,12 +530,17 @@ defmodule Troupe.Gateway.Private do
   # An invitation to it was taken back somewhere other than here, or here while the plane
   # could not be told the new key: before anything more is sealed, so what follows is under
   # one the person removed does not have, and the sealer starts at the row's new generation.
-  defp rekey_now(session_id, plane, opts) do
-    case Troupe.Gateway.Invites.rekey(session_id, Keyword.put(opts, :plane, plane)) do
-      {:ok, _row} -> :ok
-      {:error, reason} -> Logger.warning("troupe: #{session_id} is not re-keyed yet: #{inspect(reason)}")
+  defp rekey_if_due(%{"rekey_due" => true}, session_id, plane, opts) do
+    case Invites.rekey(session_id, Keyword.put(opts, :plane, plane)) do
+      {:ok, _row} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("troupe: #{session_id} is not re-keyed yet: #{inspect(reason)}")
     end
   end
+
+  defp rekey_if_due(_row, _session_id, _plane, _opts), do: :ok
 
   defp erased?(%{"data" => %{"reason" => "erased"}}), do: true
   defp erased?(_error), do: false
@@ -685,9 +690,17 @@ defmodule Troupe.Gateway.Private do
   """
   @spec spend(map()) :: {:ok, keyword()} | {:error, term()}
   def spend(%{"assertion" => assertion, "key_manager" => manager}) do
-    case KMS.OpenBao.jwt_login(manager["address"], manager["auth_path"], manager["role"], assertion) do
-      {:ok, %{token: token}} -> {:ok, [token: token, address: manager["address"], mount: manager["mount"]]}
-      {:error, reason} -> {:error, reason}
+    case KMS.OpenBao.jwt_login(
+           manager["address"],
+           manager["auth_path"],
+           manager["role"],
+           assertion
+         ) do
+      {:ok, %{token: token}} ->
+        {:ok, [token: token, address: manager["address"], mount: manager["mount"]]}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

@@ -289,19 +289,22 @@ defmodule Troupe.Plane.Erasure do
   # a team session's is the one call it always was.
   defp destroy_generations(owner, %Session{kind: "private"} = session, options) do
     with :ok <- Invites.destroy_copies(session.id),
-         :ok <-
-           Enum.reduce_while(1..((session.key_version || 1) + 1), :ok, fn version, :ok ->
-             case KMS.adapter().destroy(owner, KMS.generation(session.id, version), options) do
-               :ok -> {:cont, :ok}
-               error -> {:halt, error}
-             end
-           end) do
+         :ok <- destroy_each(owner, session.id, 1..((session.key_version || 1) + 1), options) do
       Invites.forget(session.id)
     end
   end
 
   defp destroy_generations(owner, session, options),
     do: KMS.adapter().destroy(owner, session.id, options)
+
+  defp destroy_each(owner, session_id, versions, options) do
+    Enum.reduce_while(versions, :ok, fn version, :ok ->
+      case KMS.adapter().destroy(owner, KMS.generation(session_id, version), options) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
 
   # A person's under their name at the key manager, which is not their subject once they
   # have been moved (Decision 755). A team's under the team: the row's, or, once the team

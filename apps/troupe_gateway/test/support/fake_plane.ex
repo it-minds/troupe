@@ -512,11 +512,7 @@ defmodule Troupe.Gateway.FakePlane do
 
   defp dispatch(state, "session.uninvite", %{"session_id" => id, "subject" => subject}) do
     if invites(state, id)[subject] do
-      Agent.update(state, fn s ->
-        s
-        |> Map.update(:invites, %{}, &Map.update(&1, id, %{}, fn i -> Map.delete(i, subject) end))
-        |> Map.update!(:sessions, &Map.update!(&1, id, fn row -> Map.put(row, "rekey_due", true) end))
-      end)
+      take_back(state, id, subject)
 
       {:ok, %{"session_id" => id, "subject" => subject, "rekey_due" => true, "pushed" => false}}
     else
@@ -529,23 +525,16 @@ defmodule Troupe.Gateway.FakePlane do
     {:ok, %{"session_id" => id, "invites" => rows}}
   end
 
-  defp dispatch(state, "session.rekeyed", %{"session_id" => id, "key_version" => version} = params) do
+  defp dispatch(
+         state,
+         "session.rekeyed",
+         %{"session_id" => id, "key_version" => version} = params
+       ) do
     given = Map.new(params["keys"] || [], &{&1["subject"], &1["slot"]})
     missing = invites(state, id) |> Map.keys() |> Enum.reject(&Map.has_key?(given, &1))
 
     if missing == [] do
-      Agent.update(state, fn s ->
-        s
-        |> Map.update!(:sessions, &Map.update!(&1, id, fn row -> Map.merge(row, %{"key_version" => version, "rekey_due" => false}) end))
-        |> Map.update(:invites, %{}, fn all ->
-          Map.update(all, id, %{}, fn invites ->
-            Map.new(invites, fn {subject, invite} ->
-              {subject, Map.update!(invite, "keys", &(&1 ++ [%{"key_version" => version, "slot" => given[subject]}]))}
-            end)
-          end)
-        end)
-      end)
-
+      rekey(state, id, version, given)
       {:ok, row(state, id)}
     else
       {:rpc_error, -32_602, "invalid_params", %{"field" => "keys", "missing" => missing}}
@@ -556,14 +545,56 @@ defmodule Troupe.Gateway.FakePlane do
     reader = Agent.get(state, &Map.get(&1, :reader))
 
     case reader && invites(state, id)[reader] do
-      nil -> {:error, "not_found"}
-      invite -> {:ok, %{"session_id" => id, "key_version" => (row(state, id) || %{})["key_version"] || 1, "keys" => invite["keys"]}}
+      nil ->
+        {:error, "not_found"}
+
+      invite ->
+        {:ok,
+         %{
+           "session_id" => id,
+           "key_version" => (row(state, id) || %{})["key_version"] || 1,
+           "keys" => invite["keys"]
+         }}
     end
   end
 
   defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
 
-  defp invites(state, id), do: Agent.get(state, &get_in(&1, [Access.key(:invites, %{}), Access.key(id, %{})]))
+  defp take_back(state, id, subject) do
+    Agent.update(state, fn s ->
+      s
+      |> Map.update(:invites, %{}, &Map.update(&1, id, %{}, fn i -> Map.delete(i, subject) end))
+      |> Map.update!(
+        :sessions,
+        &Map.update!(&1, id, fn row -> Map.put(row, "rekey_due", true) end)
+      )
+    end)
+  end
+
+  defp rekey(state, id, version, given) do
+    Agent.update(state, fn s ->
+      s
+      |> Map.update!(:sessions, &Map.update!(&1, id, fn row -> rekeyed_row(row, version) end))
+      |> Map.update(
+        :invites,
+        %{},
+        &Map.update(&1, id, %{}, fn i -> given_keys(i, version, given) end)
+      )
+    end)
+  end
+
+  defp rekeyed_row(row, version),
+    do: Map.merge(row, %{"key_version" => version, "rekey_due" => false})
+
+  defp given_keys(invites, version, given) do
+    Map.new(invites, fn {subject, invite} ->
+      key = %{"key_version" => version, "slot" => given[subject]}
+      {subject, Map.update!(invite, "keys", &(&1 ++ [key]))}
+    end)
+  end
+
+  defp invites(state, id),
+    do: Agent.get(state, &get_in(&1, [Access.key(:invites, %{}), Access.key(id, %{})]))
 
   defp put_invite(state, id, subject, invite) do
     Agent.update(state, fn s ->

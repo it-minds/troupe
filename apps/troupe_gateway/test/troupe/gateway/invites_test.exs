@@ -1,7 +1,7 @@
 defmodule Troupe.Gateway.InvitesTest do
   @moduledoc """
   Inviting a person into a private session from the machine that seals it, and reading one
-  you were invited into (#765, Decision 949), the daemon's half.
+  you were invited into (#765), the daemon's half.
 
   The store is the real MinIO and the keys are in the real OpenBao, as in the sealing tests:
   each generation of the session's key goes into the invitee's own slot there, and what is
@@ -35,7 +35,11 @@ defmodule Troupe.Gateway.InvitesTest do
         {:ok, skip: "no object storage"}
 
       not bao_reachable?() ->
-        IO.puts(:stderr, "\nSKIPPED: no OpenBao (#{bao_address()}); bring it up with `scripts/dev-up`.\n")
+        IO.puts(
+          :stderr,
+          "\nSKIPPED: no OpenBao (#{bao_address()}); bring it up with `scripts/dev-up`.\n"
+        )
+
         {:ok, skip: "no OpenBao"}
 
       true ->
@@ -49,7 +53,13 @@ defmodule Troupe.Gateway.InvitesTest do
     plane = FakePlane.serve()
     name = :"plane-#{System.unique_integer([:positive])}"
     start_supervised!({Plane, name: name})
-    :ok = Plane.link(%{"subject" => @ada, "plane_url" => plane.url, "plane_token" => "plane-token"}, name)
+
+    :ok =
+      Plane.link(
+        %{"subject" => @ada, "plane_url" => plane.url, "plane_token" => "plane-token"},
+        name
+      )
+
     start_supervised!(Private.Sealers)
     on_exit(fn -> Process.exit(plane.server, :normal) end)
 
@@ -75,15 +85,19 @@ defmodule Troupe.Gateway.InvitesTest do
     assert data == %{"subject" => @bea, "display_name" => @bea, "role" => "observe", "by" => @ada}
 
     # Nothing of the kind for a session that is not private, or one somebody else owns.
-    assert {:error, :not_private} = Invites.invite(%{session(id) | kind: "local"}, @bea, "observe", opts(ctx))
-    assert {:error, :not_owner} = Invites.invite(%{session(id) | owner: @cy}, @bea, "observe", opts(ctx))
+    assert {:error, :not_private} =
+             Invites.invite(%{session(id) | kind: "local"}, @bea, "observe", opts(ctx))
+
+    assert {:error, :not_owner} =
+             Invites.invite(%{session(id) | owner: @cy}, @bea, "observe", opts(ctx))
   end
 
   test "taking an invitation back seals what follows under a new key, given to everybody still invited and not to them",
        ctx do
     {id, sealer, context} = private(ctx)
     {:ok, _} = Invites.invite(session(id), @bea, "observe", opts(ctx))
-    {:ok, _} = Invites.invite(session(id), @cy, "control", opts(ctx))
+    {:ok, _} = Invites.invite(session(id), @cy, "observe", opts(ctx))
+    assert {:error, :followed_only} = Invites.invite(session(id), @cy, "control", opts(ctx))
     send_event(id, sealer, 1)
     assert {:ok, _} = Sealer.seal_now(sealer)
 
@@ -94,7 +108,9 @@ defmodule Troupe.Gateway.InvitesTest do
     # The plane's row is at the second key, which is Ada's second generation, put in Cy's slot.
     assert %{"key_version" => 2, "rekey_due" => false} = FakePlane.row(ctx.plane.state, id)
     refute Map.has_key?(FakePlane.invitations(ctx.plane.state, id), @bea)
-    assert %{"keys" => [_k1, %{"key_version" => 2, "slot" => cy_slot}]} = FakePlane.invitations(ctx.plane.state, id)[@cy]
+
+    assert %{"keys" => [_k1, %{"key_version" => 2, "slot" => cy_slot}]} =
+             FakePlane.invitations(ctx.plane.state, id)[@cy]
 
     path = KMS.generation(id, 2)
     assert {:ok, k2} = OpenBao.fetch({:person, @ada}, path, token: root(), address: bao_address())
@@ -106,17 +122,28 @@ defmodule Troupe.Gateway.InvitesTest do
     assert {:ok, %{sealed_through: 2}} = Sealer.seal_now(sealer)
     assert {:ok, [first, second]} = Storage.list_segments(context.store, id)
 
-    assert {:ok, [%{"seq" => 1}]} = Storage.read_segment(context.store, id, context.data_key, first.key)
-    assert {:error, :invalid} = Storage.read_segment(context.store, id, context.data_key, second.key)
+    assert {:ok, [%{"seq" => 1}]} =
+             Storage.read_segment(context.store, id, context.data_key, first.key)
+
+    assert {:error, :invalid} =
+             Storage.read_segment(context.store, id, context.data_key, second.key)
+
     assert {:ok, [%{"seq" => 2}]} = Storage.read_segment(context.store, id, k2, second.key)
-    assert {:ok, [%{"seq" => 2}]} = Storage.read_segment(context.store, id, [context.data_key, k2], second.key)
+
+    assert {:ok, [%{"seq" => 2}]} =
+             Storage.read_segment(context.store, id, [context.data_key, k2], second.key)
 
     # The log says she was removed, and the next invitation into it is given both keys.
     assert ["session_invited", "session_invited", "session_uninvited"] =
              ctx.log |> Agent.get(& &1) |> Enum.map(& &1.type)
 
     {:ok, _} = Invites.invite(session(id), @bea, "observe", opts(ctx))
-    assert [1, 2] = for(k <- FakePlane.invitations(ctx.plane.state, id)[@bea]["keys"], do: k["key_version"])
+
+    assert [1, 2] =
+             for(
+               k <- FakePlane.invitations(ctx.plane.state, id)[@bea]["keys"],
+               do: k["key_version"]
+             )
   end
 
   test "an invitee's daemon reads the whole sealed log with the keys in its own slot", ctx do
@@ -133,7 +160,11 @@ defmodule Troupe.Gateway.InvitesTest do
     # Cy, on her own machine: the plane says where her keys are, and she reads them from her
     # slot with her own sign-in, here the root token in its place.
     FakePlane.keys_for(ctx.plane.state, @cy)
-    reading = [plane: ctx.name, spend: fn _grant -> {:ok, [token: root(), address: bao_address()]} end]
+
+    reading = [
+      plane: ctx.name,
+      spend: fn _grant -> {:ok, [token: root(), address: bao_address()]} end
+    ]
 
     assert {:ok, read} = Invites.read(id, reading)
     assert Enum.map(read["events"], & &1["seq"]) == [1, 2, 3]
@@ -145,7 +176,8 @@ defmodule Troupe.Gateway.InvitesTest do
     assert {:error, {:rpc, %{"message" => "not_found"}}} = Invites.read(id, reading)
   end
 
-  test "a new key goes only to people this session's own log invited, whatever the plane lists", ctx do
+  test "a new key goes only to people this session's own log invited, whatever the plane lists",
+       ctx do
     {id, _sealer, _context} = private(ctx)
     {:ok, _} = Invites.invite(session(id), @bea, "observe", opts(ctx))
 
@@ -157,7 +189,12 @@ defmodule Troupe.Gateway.InvitesTest do
           "session_id" => id,
           "subject" => "mallory@example.test",
           "role" => "observe",
-          "keys" => [%{"key_version" => 1, "slot" => "troupe/people/mallory@example.test/invited/#{id}/k1-x"}]
+          "keys" => [
+            %{
+              "key_version" => 1,
+              "slot" => "troupe/people/mallory@example.test/invited/#{id}/k1-x"
+            }
+          ]
         },
         ctx.name
       )
@@ -183,7 +220,11 @@ defmodule Troupe.Gateway.InvitesTest do
     :ok = Private.stop(id)
 
     # Taken back at the plane, from another client, while this machine was away.
-    FakePlane.put(ctx.plane.state, id, Map.merge(FakePlane.row(ctx.plane.state, id), %{"rekey_due" => true}))
+    FakePlane.put(
+      ctx.plane.state,
+      id,
+      Map.merge(FakePlane.row(ctx.plane.state, id), %{"rekey_due" => true})
+    )
 
     log = [event(1), event(2)]
 
@@ -201,9 +242,14 @@ defmodule Troupe.Gateway.InvitesTest do
     sealer = Registry.whereis_name({Private.Registry, id})
     assert {:ok, %{sealed_through: 2}} = Sealer.seal_now(sealer)
 
-    {:ok, k2} = OpenBao.fetch({:person, @ada}, KMS.generation(id, 2), token: root(), address: bao_address())
+    {:ok, k2} =
+      OpenBao.fetch({:person, @ada}, KMS.generation(id, 2), token: root(), address: bao_address())
+
     assert {:ok, [_first, second]} = Storage.list_segments(context.store, id)
-    assert {:error, :invalid} = Storage.read_segment(context.store, id, context.data_key, second.key)
+
+    assert {:error, :invalid} =
+             Storage.read_segment(context.store, id, context.data_key, second.key)
+
     assert {:ok, [%{"seq" => 2}]} = Storage.read_segment(context.store, id, k2, second.key)
   end
 
@@ -247,10 +293,14 @@ defmodule Troupe.Gateway.InvitesTest do
     System.get_env("TROUPE_BAO_TOKEN") || Application.get_env(:troupe_worker, :kms, [])[:token]
   end
 
-  defp bao_address, do: Application.get_env(:troupe_worker, :kms, [])[:address] || "http://localhost:28200"
+  defp bao_address,
+    do: Application.get_env(:troupe_worker, :kms, [])[:address] || "http://localhost:28200"
 
   defp bao_reachable? do
-    match?({:ok, %{status: 200}}, Req.request(method: :get, url: bao_address() <> "/v1/sys/health", retry: false))
+    match?(
+      {:ok, %{status: 200}},
+      Req.request(method: :get, url: bao_address() <> "/v1/sys/health", retry: false)
+    )
   rescue
     _ -> false
   end

@@ -150,7 +150,7 @@ export function InviteControl({
         >
           <p>
             {row.kind === "private"
-              ? "Invite somebody by name to read this private session. Its key goes from this computer into their own slot at the key manager; the plane cannot read it. Taking it back seals what follows under a new key they never get, and what they read before stays read."
+              ? "Invite somebody by name to follow this private session. Its key goes from this computer into their own slot at the key manager; the plane cannot read it. Taking it back seals what follows under a new key they never get, and what they read before stays read."
               : "Invite somebody by name. They act under this profile's rules, and see it in their list."}
           </p>
           <label>
@@ -187,7 +187,8 @@ export function InviteControl({
             They may
             <select value={role} onChange={(e) => setRole(e.target.value as InviteRole)}>
               <option value="observe">Follow it</option>
-              <option value="control">Steer it</option>
+              {/* A private session is followed, never steered from elsewhere: that would be offering it. */}
+              {row.kind !== "private" && <option value="control">Steer it</option>}
             </select>
           </label>
           <button type="submit" disabled={busy || !person}>

@@ -55,11 +55,11 @@ defmodule Troupe.Plane.Invites do
     @primary_key {:id, :binary_id, autogenerate: true}
 
     schema "session_invites" do
-      field :session_id, :string
-      field :subject, :string
-      field :role, :string
-      field :invited_by, :string
-      field :invited_at, :utc_datetime_usec
+      field(:session_id, :string)
+      field(:subject, :string)
+      field(:role, :string)
+      field(:invited_by, :string)
+      field(:invited_at, :utc_datetime_usec)
 
       timestamps(type: :utc_datetime_usec)
     end
@@ -89,10 +89,10 @@ defmodule Troupe.Plane.Invites do
     @primary_key {:id, :binary_id, autogenerate: true}
 
     schema "session_invite_keys" do
-      field :session_id, :string
-      field :subject, :string
-      field :key_version, :integer
-      field :slot, :string
+      field(:session_id, :string)
+      field(:subject, :string)
+      field(:key_version, :integer)
+      field(:slot, :string)
 
       timestamps(type: :utc_datetime_usec)
     end
@@ -257,6 +257,7 @@ defmodule Troupe.Plane.Invites do
           {:ok, Invite.t()} | {:error, Error.t()}
   def invite(%Session{} = session, %User{} = invitee, role, by, keys \\ []) do
     with :ok <- known_role(role),
+         :ok <- followed_only(session, role),
          :ok <- eligible(session, invitee),
          {:ok, keys} <- invite_keys(session, invitee, keys) do
       attrs = %{
@@ -267,23 +268,7 @@ defmodule Troupe.Plane.Invites do
         invited_at: DateTime.utc_now()
       }
 
-      Repo.transaction(fn ->
-        existing = Repo.get_by(Invite, session_id: session.id, subject: invitee.subject)
-
-        invite =
-          case (existing || %Invite{}) |> Invite.changeset(attrs) |> Repo.insert_or_update() do
-            {:ok, invite} -> invite
-            {:error, changeset} -> Repo.rollback(invalid(changeset))
-          end
-
-        Enum.each(keys, &put_key(session, invitee.subject, &1))
-
-        if session.kind != "private" do
-          {:ok, _acl} = Sessions.grant_access(session.id, invitee.subject, acl_role(role), by)
-        end
-
-        invite
-      end)
+      Repo.transaction(fn -> write_invite(session, attrs, keys) end)
       |> case do
         {:ok, invite} ->
           {:ok, _} =
@@ -301,10 +286,54 @@ defmodule Troupe.Plane.Invites do
     end
   end
 
+  # The row, the keys and a pod session's ACL row, in one transaction.
+  defp write_invite(session, attrs, keys) do
+    existing = Repo.get_by(Invite, session_id: session.id, subject: attrs.subject)
+
+    invite =
+      case (existing || %Invite{}) |> Invite.changeset(attrs) |> Repo.insert_or_update() do
+        {:ok, invite} -> invite
+        {:error, changeset} -> Repo.rollback(invalid(changeset))
+      end
+
+    Enum.each(keys, &put_key(session, attrs.subject, &1))
+    grant(session, attrs)
+    invite
+  end
+
+  defp grant(%Session{kind: "private"}, _attrs), do: :ok
+
+  defp grant(session, attrs) do
+    {:ok, _acl} =
+      Sessions.grant_access(session.id, attrs.subject, acl_role(attrs.role), attrs.invited_by)
+
+    :ok
+  end
+
   defp known_role(role) when role in @roles, do: :ok
 
   defp known_role(_role),
-    do: {:error, Error.new(:invalid_params, %{field: "role", reason: "role is observe or control"})}
+    do:
+      {:error, Error.new(:invalid_params, %{field: "role", reason: "role is observe or control"})}
+
+  @doc """
+  A private session is followed by the people invited into it, and not steered: steering it
+  from another device is offering it, which carries what it says past the plane in the
+  clear, and a private session is never offered. `:ok` for every other invitation.
+  """
+  @spec followed_only(Session.t(), String.t()) :: :ok | {:error, Error.t()}
+  def followed_only(%Session{kind: "private"}, "control") do
+    {:error,
+     Error.new(:invalid_params, %{
+       field: "role",
+       reason:
+         "a private session is followed by the people invited into it: steering it from " <>
+           "another device would carry it past the plane in the clear, and a private session " <>
+           "is never offered"
+     })}
+  end
+
+  def followed_only(_session, _role), do: :ok
 
   # A private session's invitation carries where its key was put for the invitee, once for
   # every generation it has been sealed under: one missing would leave part of the log
@@ -312,7 +341,11 @@ defmodule Troupe.Plane.Invites do
   # none.
   defp invite_keys(%Session{kind: "private"} = session, invitee, keys) do
     prefix = KMS.invited_prefix(User.kms_name(invitee), session.id)
-    keys = for %{} = entry <- List.wrap(keys), do: %{key_version: entry["key_version"], slot: entry["slot"]}
+
+    keys =
+      for %{} = entry <- List.wrap(keys),
+          do: %{key_version: entry["key_version"], slot: entry["slot"]}
+
     versions = keys |> Enum.map(& &1.key_version) |> Enum.sort()
 
     cond do
@@ -327,7 +360,12 @@ defmodule Troupe.Plane.Invites do
          })}
 
       not Enum.all?(keys, &in_slot?(&1.slot, prefix)) ->
-        {:error, Error.new(:invalid_params, %{field: "keys", reason: "each key is in the invitee's own slot", prefix: prefix})}
+        {:error,
+         Error.new(:invalid_params, %{
+           field: "keys",
+           reason: "each key is in the invitee's own slot",
+           prefix: prefix
+         })}
 
       true ->
         {:ok, keys}
@@ -374,18 +412,12 @@ defmodule Troupe.Plane.Invites do
         {:error, Error.new(:not_found, %{kind: "invitation", person: subject})}
 
       %Invite{} = invite ->
-        kept = destroy_slots(from(k in Key, where: k.session_id == ^session.id and k.subject == ^subject))
+        kept =
+          destroy_slots(
+            from(k in Key, where: k.session_id == ^session.id and k.subject == ^subject)
+          )
 
-        {:ok, _} =
-          Repo.transaction(fn ->
-            Repo.delete!(invite)
-
-            if session.kind == "private" do
-              Repo.update_all(from(s in Session, where: s.id == ^session.id), set: [rekey_due: true])
-            else
-              Sessions.revoke_access(session.id, subject)
-            end
-          end)
+        {:ok, _} = Repo.transaction(fn -> drop_invite(session, invite) end)
 
         {:ok, _} =
           Audit.record(by, "session.uninvite", session.id, %{
@@ -396,6 +428,17 @@ defmodule Troupe.Plane.Invites do
         changed([subject])
         {:ok, invite}
     end
+  end
+
+  # A private session is then due a new key; a pod session's ACL row goes with the row.
+  defp drop_invite(%Session{kind: "private"} = session, invite) do
+    Repo.delete!(invite)
+    Repo.update_all(from(s in Session, where: s.id == ^session.id), set: [rekey_due: true])
+  end
+
+  defp drop_invite(session, invite) do
+    Repo.delete!(invite)
+    Sessions.revoke_access(session.id, invite.subject)
   end
 
   @doc """
@@ -410,7 +453,10 @@ defmodule Troupe.Plane.Invites do
     invited = session.id |> of_session() |> Map.new(&{&1.subject, &1})
 
     given =
-      for %{"subject" => s, "slot" => slot} <- keys, is_map_key(invited, s), into: %{}, do: {s, slot}
+      for %{"subject" => s, "slot" => slot} <- keys,
+          is_map_key(invited, s),
+          into: %{},
+          do: {s, slot}
 
     missing = invited |> Map.keys() |> Enum.reject(&Map.has_key?(given, &1)) |> Enum.sort()
 
@@ -436,42 +482,56 @@ defmodule Troupe.Plane.Invites do
          })}
 
       misplaced != [] ->
-        {:error, Error.new(:invalid_params, %{field: "keys", reason: "each key is in its invitee's own slot"})}
+        {:error,
+         Error.new(:invalid_params, %{
+           field: "keys",
+           reason: "each key is in its invitee's own slot"
+         })}
 
       true ->
-        Repo.transaction(fn ->
-          Enum.each(given, fn {subject, slot} ->
-            put_key(session, subject, %{key_version: version, slot: slot})
-          end)
-
-          {1, [updated]} =
-            Repo.update_all(
-              from(s in Session, where: s.id == ^session.id, select: s),
-              set: [key_version: version, rekey_due: false, updated_at: DateTime.utc_now()]
-            )
-
-          updated
-        end)
-        |> case do
-          {:ok, updated} ->
-            {:ok, _} =
-              Audit.record(session.owner_subject, "session.rekeyed", session.id, %{
-                "key_version" => version
-              })
-
-            {:ok, updated}
-
-          {:error, %Error{} = error} ->
-            {:error, error}
-        end
+        session |> write_rekey(version, given) |> audited_rekey(session, version)
     end
   end
 
   def rekeyed(%Session{kind: "private"}, _version, _keys),
-    do: {:error, Error.new(:invalid_params, %{field: "key_version", reason: "a key version and the keys"})}
+    do:
+      {:error,
+       Error.new(:invalid_params, %{field: "key_version", reason: "a key version and the keys"})}
 
   def rekeyed(_session, _version, _keys),
-    do: {:error, Error.new(:invalid_params, %{reason: "only a private session is sealed under keys of its own"})}
+    do:
+      {:error,
+       Error.new(:invalid_params, %{
+         reason: "only a private session is sealed under keys of its own"
+       })}
+
+  # The new generation's slots and the row's version, in one transaction.
+  defp write_rekey(session, version, given) do
+    Repo.transaction(fn ->
+      Enum.each(given, fn {subject, slot} ->
+        put_key(session, subject, %{key_version: version, slot: slot})
+      end)
+
+      {1, [updated]} =
+        Repo.update_all(
+          from(s in Session, where: s.id == ^session.id, select: s),
+          set: [key_version: version, rekey_due: false, updated_at: DateTime.utc_now()]
+        )
+
+      updated
+    end)
+  end
+
+  defp audited_rekey({:ok, updated}, session, version) do
+    {:ok, _} =
+      Audit.record(session.owner_subject, "session.rekeyed", session.id, %{
+        "key_version" => version
+      })
+
+    {:ok, updated}
+  end
+
+  defp audited_rekey({:error, %Error{} = error}, _session, _version), do: {:error, error}
 
   # -- at an erasure ------------------------------------------------------------------
 

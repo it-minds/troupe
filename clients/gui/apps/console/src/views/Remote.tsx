@@ -17,8 +17,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { emptyTranscript, fold, invitationsFrom, isBusy, openApprovals, openQuestions, openRemote, remoteWhen, SessionAttachment, watchRemote } from "@troupe/client";
-import type { AgentRow, Attachment, AttachStatus, Invitation, TranscriptState } from "@troupe/client";
+import {
+  emptyTranscript,
+  fold,
+  invitationsFrom,
+  isBusy,
+  openApprovals,
+  openQuestions,
+  openRemote,
+  personName,
+  remoteWhen,
+  roleWords,
+  SessionAttachment,
+  watchRemote,
+} from "@troupe/client";
+import type { AgentRow, Attachment, AttachStatus, Invitation, Invitee, TranscriptState } from "@troupe/client";
 import { describeError, useConsole } from "../console";
 import type { Load } from "../console";
 import { href } from "../route";
@@ -152,7 +165,21 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
   const [text, setText] = useState("");
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [refusal, setRefusal] = useState<string | null>(null);
+  // Whom a pod session is shared with by name, named to everybody in it (troupe #765).
+  const [shared, setShared] = useState<Invitee[]>([]);
   const attachment = useRef<SessionAttachment | null>(null);
+
+  useEffect(() => {
+    if (!pod) return;
+    let live = true;
+    auth
+      .rpc<{ invites: Invitee[] }>("session.invites", { session_id: id })
+      .then((r) => live && setShared(r.invites))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [auth, id, Boolean(pod)]);
 
   useEffect(() => {
     let live = true;
@@ -215,6 +242,9 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
         <a href={href({ page: "mine" })}>← Mine</a> · <span className="mono">{id}</span> ·{" "}
         {pod ? `on the platform, shared with you by ${pod.whose}` : "on a laptop, through the plane"}
       </p>
+      {shared.length > 0 && (
+        <p className="meta shared">Shared with {shared.map((i) => `${personName(i)} (${roleWords(i.role)})`).join(", ")}</p>
+      )}
       {error ? (
         <Empty title="Not reachable now">{error}</Empty>
       ) : (

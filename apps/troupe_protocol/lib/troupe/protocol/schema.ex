@@ -735,6 +735,27 @@ defmodule Troupe.Protocol.Schema do
       # A private session another device sealed last, taken over on this one (Decision 785):
       # the daemon's only, since a pod holds no private session.
       "session.claim" => %{"command_id" => required(:string), "session_id" => required(:string)},
+      # A person invited by name into a private session sealed here, and the invitation
+      # taken back (#765): the daemon's, since only it holds the session's key. `role` is
+      # `observe` (the default) or `control`. A pod session is invited at the plane.
+      "session.invite" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "person" => required(:string),
+        "role" => optional(:string)
+      },
+      "session.uninvite" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "person" => required(:string)
+      },
+      "session.invites" => %{"session_id" => required(:string)},
+      # Somebody's private session shared with this machine's person, read from the plane's
+      # sealed copy with the keys in their own slot, after `after_seq`.
+      "session.read_sealed" => %{
+        "session_id" => required(:string),
+        "after_seq" => optional(:integer)
+      },
       # A second session from this one's conversation as it stands (Decision 812): the
       # daemon's; a pod session is forked through the plane's method of the same name.
       "session.fork" => %{
