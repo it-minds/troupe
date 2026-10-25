@@ -1000,7 +1000,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(new cancel dismiss merge discard goal loop steer sessions back hq observer files
+  @builtins ~w(new cancel dismiss merge discard goal loop steer invite uninvite sessions back hq observer files
                scratch upload publish copy memory context watch settings models mcp skills help
                agents worktree workflow detail unlink quit)
 
@@ -1360,6 +1360,31 @@ defmodule Troupe.UI.TUI.Server do
       {"off", _} -> notice_of(Client.remote_steering(sid, :withdraw))
       {"on", people} -> remote_on(sid, people)
       {other, _} -> {:error, "/steer on, /steer off, or /steer alone: not #{other}"}
+    end
+  end
+
+  # A person invited into the session by name (root #765): alone it says whom it is shared
+  # with, `/invite <email> [observe|control]` invites them, `/uninvite <email>` takes it back.
+  defp builtin("invite", args, state, _target) do
+    case String.trim(args) do
+      "" ->
+        notice_of(Client.invites(state.session_id, :list))
+
+      text ->
+        case Client.invite_args(text) do
+          {:ok, person, role} ->
+            notice_of(Client.invites(state.session_id, {:invite, person, role}))
+
+          {:error, sentence} ->
+            {:error, sentence}
+        end
+    end
+  end
+
+  defp builtin("uninvite", args, state, _target) do
+    case String.trim(args) do
+      "" -> {:error, "/uninvite <email> takes back one person's invitation"}
+      person -> notice_of(Client.invites(state.session_id, {:uninvite, person}))
     end
   end
 

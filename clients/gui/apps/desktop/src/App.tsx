@@ -33,6 +33,7 @@ import type { SetupOutcome } from "./views/Onboarding";
 import { Review } from "./views/Review";
 import { Sessions } from "./views/Sessions";
 import { Session } from "./views/Session";
+import { Opened } from "./views/Invites";
 import { newSession, SignIn } from "./views/SignIn";
 import { StartSession } from "./views/StartSession";
 import { Eye, Wordmark } from "./views/brand";
@@ -470,22 +471,24 @@ export function App(): JSX.Element {
         )}
 
         {where.screen === "session" && (
-          <Session
-            auth={planeAuth}
-            daemon={daemon.client}
-            machineUser={daemon.user?.subject ?? null}
-            row={row}
-            sessionId={where.id}
-            created={where.kind}
-            startedIn={where.workspace}
-            onBack={() => setWhere({ screen: "sessions" })}
-            onGo={(screen) => setWhere({ screen })}
-            onAgents={(agent) => setWhere({ screen: "agents", ...workspaceOf(row), ...(agent ? { agent } : {}) })}
-            onStarted={(id, kind, workspace) => {
-              refresh();
-              setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
-            }}
-          />
+          <Opened row={row} sessionId={where.id} daemon={daemon.client} onBack={() => setWhere({ screen: "sessions" })}>
+            <Session
+              auth={planeAuth}
+              daemon={daemon.client}
+              machineUser={daemon.user?.subject ?? null}
+              row={row}
+              sessionId={where.id}
+              created={where.kind}
+              startedIn={where.workspace}
+              onBack={() => setWhere({ screen: "sessions" })}
+              onGo={(screen) => setWhere({ screen })}
+              onAgents={(agent) => setWhere({ screen: "agents", ...workspaceOf(row), ...(agent ? { agent } : {}) })}
+              onStarted={(id, kind, workspace) => {
+                refresh();
+                setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
+              }}
+            />
+          </Opened>
         )}
       </main>
     </div>

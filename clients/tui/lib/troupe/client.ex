@@ -146,6 +146,7 @@ defmodule Troupe.Client do
   @callback instructions(session_id()) :: {:ok, String.t()} | {:error, term()}
   @callback remote_steering(session_id(), :status | :withdraw | {:offer, String.t()}) ::
               {:ok, String.t()} | {:error, term()}
+  @callback invites(session_id(), invite_verb()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback scratch_read(session_id(), String.t() | nil, String.t()) ::
@@ -505,6 +506,26 @@ defmodule Troupe.Client do
   @spec remote_steering(session_id(), :status | :withdraw | {:offer, String.t()}) ::
           {:ok, String.t()} | {:error, term()}
   def remote_steering(sid, verb), do: impl(sid).remote_steering(sid, verb)
+
+  @typedoc "What `/invite` and `/uninvite` ask: whom it is shared with, an invitation, or one taken back."
+  @type invite_verb :: :list | {:invite, String.t(), String.t()} | {:uninvite, String.t()}
+
+  @doc """
+  A person invited into the session by name (root #765): `:list` says whom it is shared
+  with; `{:invite, person, role}` invites a person, by email or subject, to follow it
+  (`observe`) or steer it (`control`); `{:uninvite, person}` takes it back. A pod session
+  is invited at the plane, a private one through the daemon that seals it. Each answers
+  the sentence to show.
+  """
+  @spec invites(session_id(), invite_verb()) :: {:ok, String.t()} | {:error, term()}
+  def invites(sid, verb), do: impl(sid).invites(sid, verb)
+
+  @doc """
+  What `/invite` names after the command: a person, and `observe` (the default) or
+  `control`; anything else is the sentence saying what it takes.
+  """
+  @spec invite_args(String.t()) :: {:ok, String.t(), String.t()} | {:error, String.t()}
+  defdelegate invite_args(text), to: Troupe.Client.Invites, as: :parse
 
   @spec fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   def fs_list(sid, path), do: impl(sid).fs_list(sid, path)

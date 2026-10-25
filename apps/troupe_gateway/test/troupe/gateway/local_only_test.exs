@@ -254,6 +254,17 @@ defmodule Troupe.Gateway.LocalOnlyTest do
     refute LocalOnly.session?(session.id)
   end
 
+  test "a Local-only client is refused the invitations, which are the plane's", ctx do
+    %{session: session} = session(ctx, [{:text, "one"}])
+
+    for method <- ~w(session.invites session.read_sealed) do
+      assert {:error, %{message: "forbidden", data: %{"reason" => reason}}} =
+               Client.call(ctx.local, method, %{"session_id" => session.id})
+
+      assert reason =~ "Local only"
+    end
+  end
+
   test "a Local-only client is refused a private session", ctx do
     assert {:error, %{message: "forbidden", data: %{"reason" => reason}}} =
              Client.call(ctx.local, "session.create", %{

@@ -68,6 +68,14 @@ defmodule Troupe.KMS.Policy do
 
   Read and write, no `delete`, exactly as a pod has: a person must not be able to make
   their own session unreadable outside erasure, for the same reason a pod must not.
+
+  And one rule for invitations into a private session (`Troupe.KMS.invited_slot/4`):
+  `create`, and nothing else, under every person's `invited/`, which is how the owner's
+  daemon hands the session's key to the person invited, into that person's own subtree. It
+  can put a key there and cannot read one back or overwrite one, its own included; the
+  invitee reads it under the rule above, which OpenBao prefers for their own subtree,
+  since its first wildcard comes later. Putting something in somebody's slot is giving
+  them something, never reading what is theirs.
   """
   @spec person(String.t(), String.t()) :: String.t()
   def person(mount \\ "secret", accessor) do
@@ -92,6 +100,10 @@ defmodule Troupe.KMS.Policy do
 
     path "#{mount}/metadata/troupe/people/#{name}/*" {
       capabilities = ["read", "list"]
+    }
+
+    path "#{mount}/data/troupe/people/+/invited/*" {
+      capabilities = ["create"]
     }
     """
   end
@@ -267,6 +279,7 @@ defmodule Troupe.KMS.Policy do
   is one only some deployments need, the GitHub App's.
   """
   @type grant :: %{
+          optional(:only) => String.t(),
           id: String.t(),
           policy: String.t(),
           required: boolean(),
@@ -324,9 +337,21 @@ defmodule Troupe.KMS.Policy do
         rules: plane_rules(kv)
       },
       %{
+        id: "invites",
+        policy: "troupe-plane-invites",
+        required: false,
+        only: "only for inviting people into private sessions",
+        for:
+          "destroy the copy of a private session's key its owner's daemon put in an invitee's own slot, when the invitation is taken back or the session erased",
+        without:
+          "an erasure of a private session somebody was invited into stays pending, and taking an invitation back leaves the copy it gave in the invitee's slot",
+        rules: invites_rules(kv)
+      },
+      %{
         id: "github-app",
         policy: "troupe-plane-github",
         required: false,
+        only: "only with a GitHub App",
         for: "import, sign with and delete the GitHub App's key and webhook secret",
         without: "a GitHub App cannot be set up, and one set up before stops signing",
         rules:
@@ -338,6 +363,16 @@ defmodule Troupe.KMS.Policy do
       }
     ]
   end
+
+  @doc """
+  The policy for invitations into a private session: destroy the copies of its key in
+  invitees' slots, on the metadata path, and nothing on the data path. The plane holds the
+  path of each copy, and can end one and read none, as it can a session's own key.
+  """
+  @spec invites(String.t()) :: String.t()
+  def invites(mount \\ "secret"), do: render(invites_rules(mount))
+
+  defp invites_rules(mount), do: [{"#{mount}/metadata/troupe/people/+/invited/*", ["delete"]}]
 
   @doc "A grant's rules as the policy text `bao policy write` takes."
   @spec grant_policy(grant()) :: String.t()

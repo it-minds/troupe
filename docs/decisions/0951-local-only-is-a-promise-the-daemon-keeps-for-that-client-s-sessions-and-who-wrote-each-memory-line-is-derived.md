@@ -102,6 +102,9 @@ would take the terminal's person's `remember` away from them).
 - **The client's own memory calls.** `me.memory` and `me.memory.put` are refused to a client
   in Local only, and a private `session.create` (a private session is sealed to the plane);
   `me.memory.status` answers what the copy holds and says the plane was not asked.
+- **Invitations** (Decision 949): `session.invite`, `session.uninvite`, `session.invites` and
+  `session.read_sealed` are refused to a client in Local only and for a session under it,
+  since the plane keeps who is invited and wraps a sealed session's key.
 
 **While every client attached is in Local only** the daemon's own polls wait: the memory
 poll and the version policy's `initialize` every thirty seconds. With nobody attached they

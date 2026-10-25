@@ -1,0 +1,29 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/session_invited.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "by": {
+      "type": "string"
+    },
+    "by_name": {
+      "type": "string"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "by",
+    "role",
+    "subject"
+  ],
+  "title": "session_invited",
+  "type": "object"
+}

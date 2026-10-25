@@ -18,7 +18,7 @@ import { failedTitle, relative, statusOf, Unread } from "./bits";
 import type { DaemonState } from "./Local";
 
 /** The one word for where a row runs, as the list's pill says it. */
-const KIND: Record<FleetRow["kind"], string> = { team: "Team", local: "This computer", private: "Private", remote: "Remote" };
+const KIND: Record<FleetRow["kind"], string> = { team: "Team", local: "This computer", private: "Private", remote: "Remote", invited: "Shared with you" };
 
 /** Whether the app opens here, which it does until the person says the list. */
 export function opensOnLauncher(): boolean {

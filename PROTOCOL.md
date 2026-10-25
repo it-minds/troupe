@@ -169,7 +169,8 @@ that client disconnects. For it the daemon calls no plane: an agent's `remember`
 `forbidden`, its turns are left out of the `sessions` the memory poll reports, and its first
 `instructions_loaded` under it carries `local_only`, a sentence saying it reads the memory
 the machine holds. The client itself is refused `me.memory`, `me.memory.put` and a private
-`session.create`, and gives an offered session no work; `me.memory.status` answers what the
+`session.create`, and gives an offered session no work; `session.invite`, `session.uninvite`,
+`session.invites` and `session.read_sealed` are `forbidden` to it and for a session under it; `me.memory.status` answers what the
 copy holds without asking the plane. While every client attached is in Local only, the
 daemon's own polls of the plane (`me.memory`, the version policy) wait. A client from before
 it sends neither, and is in none.
@@ -350,6 +351,7 @@ Durable:
 | `fs_changed` | `path`, `hash`, `size` |
 | `scratch_updated` | `name`, `path`, `kind`, `title`, `size`, `hash`, `version`, `call_id` — a document the `show` tool wrote to the session's scratchpad, or replaced (Decision 870), or the `patch` tool revised in place: a plan, report, comparison, diagram or table the agent shows the person beside the chat instead of printing it there. `path` is where `fs.read` reads it (`scratch:/<name>`), `kind` how to show it (`markdown`, `mermaid`, `json`, `csv` or `text`), `hash` the same `sha256:…` `fs.read` answers, `version` the writes of that name in the session from 1, and `call_id` the `show` or `patch` call that wrote it, so a client puts a card where the call was rather than the call's `content`. `scratch.list` lists the documents |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
+| `session_invited` / `session_uninvited` | `subject`, `role` (invited only), `by`, `display_name`, `by_name` — a person invited into the session by name, to follow it (`observe`) or steer it (`control`), or the invitation taken back (Decision 949): written by the pod holding a pod session when the plane tells it, and by the daemon sealing a private one when its owner invites from there. A private session's daemon reads who it has invited from these, and puts a new key only in the slots of people they name |
 | `mounts_resolved` | `mounts` — the volumes a pod session's working tree was given, as the session started |
 | `published` | `source`, `destination`, `hash`, `bytes`, `direction` — a file the `publish` tool copied to or from a shared volume |
 | `config_upgraded` | `channel`, `from`, `to`, `hash`, `entitlements` — the configuration a session was pinned to was retired, and an activation moved it to the channel's current version |
@@ -839,6 +841,39 @@ not have, and sealing this copy after them would make the session two histories.
 `stale_version` where another device claimed it first; `unavailable` with `reason:
 "unlinked"` where no client has handed the daemon a plane token; and `invalid_params`
 for a session that is not private.
+
+#### `session.invite`, `session.uninvite`, `session.invites`, `session.read_sealed`
+```json
+{"command_id": "c-6", "session_id": "s-9f", "person": "bea@example.test", "role": "observe"}
+```
+→ the plane's `session.invite` answer.
+
+A person invited by name into a private session sealed here (Decision 949), the daemon's
+only, since it alone holds the session's key: a pod session is invited at the plane, and
+`invalid_params` says so of a session on this machine alone, which is offered instead
+(`remote.offer`). `role` is `observe`; `control` is `invalid_params`, since steering a
+private session from elsewhere would be offering it. The daemon asks the plane where the
+invitee's slot is (`session.invite_slot`), signs in at the key manager as the session's
+owner, puts each generation of the session's key there, which its credential may create and
+may not read back, tells the plane where (`session.invite` with `keys`), and writes
+`session_invited` in the log where the session is running here.
+
+`session.uninvite {command_id, session_id, person}` → `{session_id, subject, rekey_due,
+key_version}`: the plane takes the invitation back and destroys that person's copies, and
+the daemon re-keys forward: what is pending is sealed under the key held now, a new
+generation is made (`<session_id>.k<n>`), everything after is sealed under it, it is put in
+the slot of each person the plane lists whom this session's own log also says was invited,
+the plane is told (`session.rekeyed`), and `session_uninvited` follows in the log, under the
+new key. `rekey_due: true` where any of that could not be done now; the next link that carries
+the session on does it before anything more is sealed.
+
+`session.invites {session_id}` → the plane's answer. `session.read_sealed {session_id,
+after_seq}` → `{session_id, events, last_seq, key_version}`: somebody else's private session
+shared with this machine's person, read from the plane's sealed copy: the daemon asks
+`session.keys`, spends its assertion at the key manager under the person's own name, reads
+each key from their slot and the segments through URLs the plane signs for reading, and
+answers the durable events after `after_seq`, oldest first, as far as the owner's machine has
+sealed them. Nothing of it is kept here. `not_found` where it is not shared with them.
 
 #### `session.fork`
 ```json
@@ -2518,9 +2553,9 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `client.mode`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get`, `me.memory.status` |
+| `observe` | `initialize`, `client.mode`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.invites`, `session.read_sealed`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get`, `me.memory.status` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`, `me.memory`, `me.memory.put`, `artifact.publish`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `config.memory`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop`, `remote.offer`, `remote.withdraw` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `session.invite`, `session.uninvite`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `config.memory`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop`, `remote.offer`, `remote.withdraw` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three, and so does the loopback TCP token; a daemon mints no narrower token.
@@ -2688,6 +2723,15 @@ and a client asks `remote.list` instead.
 The whole list each time, never a difference, so a client that missed one has missed
 nothing the next one does not say. It carries the listing's metadata and nothing a session
 said.
+
+**Invitations ride the same watch** (Decision 949). The answer also carries
+`capabilities.invites_changed: true` and `invites`, the person's invitations as
+`invites.list` answers them, and the plane sends `invites.changed {invites}`, the whole list
+again, each time an invitation to that person is made, changed or taken back, or the session
+it was into is erased. `invites.list` may be asked on the socket too. A client that does not
+know the notification ignores it; a plane from before invitations sends neither, and a client
+asks `invites.list` once at each failed dial, as it asks `remote.list`. A client with a view
+open under an invitation that is no longer listed closes it, saying it was taken back.
 
 ### `auth.expiring` (notification, server → client)
 
@@ -3005,6 +3049,14 @@ than an admin uses them:
 | --- | --- | --- | --- |
 | `trigger.fire` | control | the trigger's principal, or an admin of its team | `{trigger (name, `team/name` or id), idempotency_key, event}` → the run and, when a session was made, the same `{session_id, endpoint, token}` `session.create` returns. The run names the `revision` and `revision_hash` it ran. The same key returns the same run, the same revision and a fresh token; over the trigger's `concurrency` the run is `skipped` and has no session |
 | `session.grant` | control | the session's owner, or an admin of its team | `{session_id, subject, role}` (`owner`, `collaborator`, `viewer`; default collaborator) → mirrored in the plane's ACL and pushed to the pod holding the session as `acl.changed` |
+| `session.invite` | control | a pod session's owner or an admin of its team; a private session's owner | `{session_id, subject, role, keys}` → `{session_id, invite: {subject, display_name, email, role, invited_by, invited_at}, pushed}`: a person invited by name (Decision 949), `subject` their subject or their email, `role` `observe` (default) or `control`. A pod session's is its grant made visible: the ACL row (`viewer` or `collaborator`) pushed to the pod as `acl.changed`, and the pod told `invite.changed`, which gives the log `session_invited`. A private session's is `observe` only (`invalid_params` on `control`: steering it from elsewhere is offering it) and carries `keys: [{key_version, slot}]`, where its owner's daemon put each generation of its key in the invitee's own slot (`troupe/people/<invitee>/invited/<session_id>/k<n>-<random>`), one for each of the session's `key_version`; the plane keeps the paths and cannot read what is there. `forbidden` with `reason: "not on this profile's teams"` and `profile` for a person the pod session's profile does not cover, `"shares no team with this session's owner"` for a private one; a platform admin is always invitable; `not_found` for nobody of that name. Inviting again changes the role. The invitee's watch is told (`invites.changed`) |
+| `session.uninvite` | control | as `session.invite` | `{session_id, subject}` → `{session_id, subject, rekey_due, pushed}`: the invitation taken back. A pod session's ACL row goes and the pod is pushed `acl.changed` with `role: null`, refusing the person's next command, and `invite.changed` (`session_uninvited`); a private session's copies of its key in their slot are destroyed with the plane's credential, and the session is `rekey_due` until its owner's daemon reports a new key (`session.rekeyed`). `not_found` for a person not invited |
+| `session.invites` | observe | anybody who may see the session, or is invited into it | `{session_id}` → `{session_id, invites: [{subject, display_name, email, role, invited_by, invited_at}]}`: whom it is shared with, the oldest first |
+| `session.invite_slot` | control | a private session's owner | `{session_id, subject}` → `{session_id, subject, display_name, prefix, key_version}`: where to put the session's key for a person about to be invited, the invitee's own `troupe/people/<name>/invited/<session_id>/`, after the same refusals `session.invite` makes, so nothing is put anywhere for somebody it would refuse |
+| `session.keys` | observe | a person invited into a private session | `{session_id}` → `{assertion, expires_at, audience, key_manager, session_id, key_version, last_seq, keys: [{key_version, slot}]}`: where each generation of the session's key was put for the caller, and an assertion for their own name, which their daemon spends at the key manager to read them. `not_found` for anybody not invited, and for a session erased or being erased |
+| `session.rekeyed` | control | a private session's owner | `{session_id, key_version, keys: [{subject, slot}]}` → the session row: sealed from now on under generation `key_version` of its key (`<session_id>.k<n>` beside the first), put in the slot of every person still invited; no longer `rekey_due`. `conflict` for a version that is neither the session's nor the next, `invalid_params` with `missing` where a person still invited has no key in it. The same version again is a retry |
+| `invites.list` | observe | anybody, for themselves | `{}` → `{invites: [{session_id, kind, title, profile, state, owner, owner_name, role, invited_by, invited_by_name, invited_at}]}`: the invitations to the caller, newest first, not those into a session erased or being erased |
+| `people.search` | observe | anybody | `{query, session_id?, limit?}` → `{people: [{subject, display_name, email}]}`: active people whose name, email or subject starts with `query`, among those who share a team with the caller and, with a `session_id` the caller may invite into, those its profile covers. At most `limit` (10 by default, 25 at most); never the caller, nor the session's owner |
 | `session.review` | control | anybody who can see the session | `{session_id}` → sets `reviewed_by`/`reviewed_at` on the session and its run, audited as `session.review` |
 | `initialize` | observe | anybody | `{protocol_version, client_info: {name, version, platform?}, capabilities}` → `{protocol_version, server_info: {name: "troupe-plane", version}, principal, client_update, policy: {revision}}`: the handshake over `/rpc`, where `principal` is what `me` answers, `client_update` is this plane's word on the client's version, or `update_required` signed as such, and `policy.revision` a digest of the two signed answers ([Client versions](#client-versions)) |
 | `me.client_versions` | observe | anybody | `{}` → `{tui, daemon, desktop}`, each `{recommended, minimum, blocked}`: what `troupe update` installs by, asked on its own because the client that most needs it is the one `initialize` refuses; with `release: {url}`, where releases are (null for GitHub's), and `signed`, the same as `{versions, release}` signed by the plane's key ([The plane's signing key](#the-planes-signing-key)) |
@@ -3016,8 +3068,8 @@ than an admin uses them:
 | `me.connections.list` | observe | anybody | the MCP servers on the caller's profiles that act as *them*, each with its `slot` and whether they have `connected` it. Whether, never what: the plane can see that a slot has a version and cannot read one |
 | `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own name at the key manager (`name`, the segment of `path` under `troupe/people/`, not always their subject: Decision 755). The client exchanges it with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
 | `session.register` | control | anybody, for their own private sessions | `{session_id, device, epoch, head_hash, last_seq, object_bytes, workspace_bytes, title, claim}` → the session row. Idempotent on the id: the first call mints epoch 1, a later one is a seal report. A seal carries the `epoch` the device holds and is refused with `stale_version` if another device has moved past it; `last_seq` never goes backwards. `claim: true` takes the session over on this device, bumping the epoch conditionally — two devices sending the same `epoch` produce one winner, and the loser learns it lost on its next seal rather than by being told, and stops sealing (issue #433) |
-| `session.presign` | control | anybody, for their own private sessions | `{session_id, method (`get`/`put`/`head`), keys, epoch}` → `{expires_in, urls}`, one signed URL per key, good for five minutes. Every key must be under `sessions/<session_id>/` and at most 64 per call. **The bytes never cross the plane**: it holds an object-storage credential scoped to signing and no key for what it signs for, which is the narrowest revision of Decision 90 that lets a laptop seal at all. `epoch`, optional, is the one the caller holds: a daemon sealing names it on every `put`, and one another device has claimed past is refused with `stale_version` and signed nothing, so the device that lost the session learns it before it writes under the prefix rather than at the report after (issue #441, Decision 800). Without one it signs as before, for a restore and a daemon from before 0.8.6 |
-| `session.objects` | observe | anybody, for their own private sessions | `{session_id, prefix}` → `{keys}` under `sessions/<session_id>/`. A caller with no object-storage credential cannot list — a listing is signed against the bucket, not against a key it does not yet know — so the plane lists for it. A `prefix` may narrow the listing and may not widen it; one that is not under the session's own is ignored |
+| `session.presign` | control | anybody, for their own private sessions; a person invited into one, to `get` and `head` | `{session_id, method (`get`/`put`/`head`), keys, epoch}` → `{expires_in, urls}`, one signed URL per key, good for five minutes. Every key must be under `sessions/<session_id>/` and at most 64 per call. **The bytes never cross the plane**: it holds an object-storage credential scoped to signing and no key for what it signs for, which is the narrowest revision of Decision 90 that lets a laptop seal at all. `epoch`, optional, is the one the caller holds: a daemon sealing names it on every `put`, and one another device has claimed past is refused with `stale_version` and signed nothing, so the device that lost the session learns it before it writes under the prefix rather than at the report after (issue #441, Decision 800). Without one it signs as before, for a restore and a daemon from before 0.8.6 |
+| `session.objects` | observe | anybody, for their own private sessions, and a person invited into one | `{session_id, prefix}` → `{keys}` under `sessions/<session_id>/`. A caller with no object-storage credential cannot list — a listing is signed against the bucket, not against a key it does not yet know — so the plane lists for it. A `prefix` may narrow the listing and may not widen it; one that is not under the session's own is ignored |
 | `session.assertion` | control | anybody, for their own private sessions | `{session_id}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`, the same shape `me.connections.grant` answers and for the same reason. The path is `troupe/people/<name>/sessions/<session_id>`; the person policy covers their own subtree and no pod role covers any of it. A daemon makes or finds the session's key under `name`, and under the subject it is linked as only where a plane from before Decision 755 answers none. The session must already be registered, which is what makes this a statement about a session the plane agrees is theirs |
 | `session.erasures` | control | anybody, for their own private sessions | `{device}` → `{erasures: [{session_id, erased_at}]}`: the caller's private sessions whose key is destroyed and whose erasure this `device` has not acknowledged. A daemon asks when a client links it with a plane token. A session whose key is not yet destroyed is tried again first and is not listed until it is (Decision 756) |
 | `session.erased` | control | anybody, for their own erased private sessions | `{session_id, device}` → `{session_id, device, deleting, objects_deleted}`: this device has stopped sealing the session and erased its copy, and the plane deletes every version of every object under `sessions/<session_id>/` and records the device once none is left. `deleting: false` with how many went when that is done within the call; `deleting: true` and no count when it takes longer than the call waits (five seconds), and the plane carries on and records the device when it is done. `unavailable` with `objects_deleted` and `objects_left` where the object store refused or failed some: the device is not recorded, and `session.erasures` names the session to it again, which tries again (Decision 804). `not_found` for a session that is not the caller's, not private or not erased: saying a session is erased does not erase it |
@@ -3083,6 +3135,18 @@ sealed under `troupe/people/<name>/sessions/<id>`, and is never placed on a pod.
 plane's row carries `kind: "private"`, no `team`, no `profile` and no worker — sizes,
 sequence numbers, hashes and a `device` name, and nothing else. A team admin does not see
 it; a platform admin sees a count and a size.
+
+**Invited into one** (Decision 949). A person the owner invites follows a private session
+with keys of their own: its owner's daemon puts a copy of each generation of the session's
+key in the invitee's slot, `troupe/people/<invitee>/invited/<session_id>/`, which any
+person's credential may create in and only the invitee's may read, and the plane keeps the
+paths. Taking the invitation back destroys those copies, and the owner's daemon seals what
+follows under a new generation, `troupe/people/<name>/sessions/<session_id>.k<n>`, which only
+the people still invited are given; the row's `key_version` is the generation sealed under
+now, and `rekey_due` is true while a new one is owed. A segment is sealed under one
+generation, and a reader holding several tries each: AES-GCM verifies under one only. An
+erasure destroys the invitees' copies and then every generation, and is `erasure_pending`
+until all are gone.
 
 A session's JSON carries `kind` and, for a private one, the `device` that last sealed
 it, and `bundle_version` — the configuration it was pinned to when it was created,

@@ -13,6 +13,12 @@ defmodule Troupe.Plane.Remote.Watch do
   (`Troupe.Plane.Remote.changed/1`), and the watch sends a list only where it differs from
   the last one it sent.
 
+  The invitations to the person ride the same socket (#765): the answer carries them as
+  `invites.list` would (`invites`), and `invites.changed {invites}`, the whole list again,
+  follows each invitation to them made, changed or taken back
+  (`Troupe.Plane.Invites.changed/1`). A client that does not know the notification ignores
+  it.
+
   It carries nothing of a session, and asks nothing of a laptop: what it sends is the
   listing's metadata. It is renewed on the open socket (`auth.refresh`), warned two
   minutes before its token ends (`auth.expiring`), and closed with `auth.expired` after.
@@ -21,7 +27,7 @@ defmodule Troupe.Plane.Remote.Watch do
 
   @behaviour WebSock
 
-  alias Troupe.Plane.{Identity, Remote}
+  alias Troupe.Plane.{Identity, Invites, Remote}
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Remote.Auth
   alias Troupe.Protocol.{Error, JSONRPC}
@@ -32,7 +38,14 @@ defmodule Troupe.Plane.Remote.Watch do
   @impl WebSock
   def init(opts) do
     {:ok,
-     %{bearer: Keyword.get(opts, :bearer), user: nil, sent: nil, timers: [], expires_at: nil}}
+     %{
+       bearer: Keyword.get(opts, :bearer),
+       user: nil,
+       sent: nil,
+       invites: nil,
+       timers: [],
+       expires_at: nil
+     }}
   end
 
   @impl WebSock
@@ -47,9 +60,11 @@ defmodule Troupe.Plane.Remote.Watch do
 
   defp handle_message({:request, id, "initialize", params}, %{user: nil} = state) do
     with {:ok, user, claims} <- Auth.person(get_in(params, ["auth", "token"]) || state.bearer),
-         :ok <- Remote.subscribe() do
+         :ok <- Remote.subscribe(),
+         :ok <- Invites.subscribe() do
       rows = Remote.rows(user)
-      state = expiry(%{state | user: user, sent: rows}, claims["exp"])
+      invites = Invites.to(user)
+      state = expiry(%{state | user: user, sent: rows, invites: invites}, claims["exp"])
 
       # The list as it stands is in the answer, and only a change follows it: a list sent
       # in the same breath as the answer can wait in a client's buffer for its next read.
@@ -58,9 +73,10 @@ defmodule Troupe.Plane.Remote.Watch do
         "server_info" => %{"name" => "troupe-plane", "watch" => "remote"},
         "principal" => %{"subject" => user.subject, "display_name" => user.display_name},
         "scopes" => [],
-        "capabilities" => %{"remote_changed" => true},
+        "capabilities" => %{"remote_changed" => true, "invites_changed" => true},
         "auth" => %{"expires_at" => claims["exp"]},
-        "sessions" => rows
+        "sessions" => rows,
+        "invites" => invites
       }
 
       {:push, frame({:result, id, result}), state}
@@ -91,6 +107,11 @@ defmodule Troupe.Plane.Remote.Watch do
     {:push, frame({:result, id, %{"sessions" => rows}}), %{state | sent: rows}}
   end
 
+  defp handle_message({:request, id, "invites.list", _params}, state) do
+    invites = Invites.to(state.user)
+    {:push, frame({:result, id, %{"invites" => invites}}), %{state | invites: invites}}
+  end
+
   defp handle_message({:request, id, method, _params}, state) do
     {:push, frame({:error, id, Error.new(:method_not_found, %{method: method})}), state}
   end
@@ -100,6 +121,12 @@ defmodule Troupe.Plane.Remote.Watch do
   @impl WebSock
   def handle_info({:remote_changed, subjects}, %{user: %User{subject: subject}} = state) do
     if subject in subjects, do: tell(Identity.get_user(subject), state), else: {:ok, state}
+  end
+
+  def handle_info({:invites_changed, subjects}, %{user: %User{subject: subject}} = state) do
+    if subject in subjects,
+      do: tell_invites(Identity.get_user(subject), state),
+      else: {:ok, state}
   end
 
   def handle_info(:auth_expiring, state) do
@@ -125,6 +152,19 @@ defmodule Troupe.Plane.Remote.Watch do
     {:stop, :normal, 1000,
      [frame({:notification, "auth.expired", %{"reason" => "account deactivated"}})], state}
   end
+
+  # The invitations to the person, as a frame where they differ from the last ones sent.
+  defp tell_invites(%User{active: true} = user, state) do
+    invites = Invites.to(user)
+
+    if invites == state.invites,
+      do: {:ok, state},
+      else:
+        {:push, [frame({:notification, "invites.changed", %{"invites" => invites}})],
+         %{state | user: user, invites: invites}}
+  end
+
+  defp tell_invites(gone, state), do: tell(gone, state)
 
   # The person's list, as a frame where it differs from the last one sent.
   defp list(state) do

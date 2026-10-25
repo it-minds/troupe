@@ -24,6 +24,7 @@ defmodule Troupe.Gateway.Dispatch do
     Commands,
     Connections,
     Idle,
+    Invites,
     LocalOnly,
     LocalSources,
     Memory,
@@ -155,6 +156,14 @@ defmodule Troupe.Gateway.Dispatch do
     # Taking a private session over from another device, which then stops sealing it, is
     # the person's own say about where their session lives, like archiving or erasing it.
     "session.claim" => :admin,
+    # Inviting a person into a private session hands them its key, and taking it back
+    # re-keys it forward (#765): the person's own say about who reads their session.
+    "session.invite" => :admin,
+    "session.uninvite" => :admin,
+    # Whom a private session is shared with, and one shared with this machine's person,
+    # read from the plane's sealed copy: reading, as a listing is.
+    "session.invites" => :observe,
+    "session.read_sealed" => :observe,
     # A fork is a session created, from another's history (Decision 812).
     "session.fork" => :admin,
     "worktree.remove" => :admin,
@@ -267,6 +276,7 @@ defmodule Troupe.Gateway.Dispatch do
   # client that last gave it work: before the work, so a turn it starts is already under it,
   # and after a create, whose session there was no id for before.
   @work ~w(input.send commands.run session.goal.set session.loop.start)
+  @invites ~w(session.invite session.uninvite session.invites session.read_sealed)
 
   defp local_only("remote.offer", params, context) do
     cond do
@@ -281,6 +291,16 @@ defmodule Troupe.Gateway.Dispatch do
       "this client is in Local only, so the daemon does not ask the plane for your own memory; " <>
         "turn Local only off to read or change it"
     )
+  end
+
+  # An invitation is the plane's to keep, and a sealed session's key the plane's to wrap.
+  defp local_only(method, params, context) when method in @invites do
+    if context.local_only or LocalOnly.session?(params["session_id"]),
+      do:
+        refuse_local_only(
+          "Local only is on for this client or this session, so the plane is asked nothing about who is invited to it"
+        ),
+      else: :ok
   end
 
   defp local_only("session.create", %{"private" => true}, %Context{local_only: true}) do
@@ -1149,6 +1169,59 @@ defmodule Troupe.Gateway.Dispatch do
 
         {:error, reason} ->
           {:error, claim_error(session_id, reason)}
+      end
+    end
+  end
+
+  # A person invited by name into a private session sealed here (#765): its key is put in
+  # their own slot at the key manager from this machine, which the plane cannot read, and
+  # the plane told where. A pod session is invited at the plane, and one on this machine
+  # alone is offered instead (`/steer on`).
+  defp handle("session.invite", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, person} <- fetch(params, "person"),
+         {:ok, session} <- lookup(session_id),
+         :ok <- invitable(session) do
+      case Invites.invite(session, person, Map.get(params, "role", "observe")) do
+        {:ok, invited} -> {:ok, invited}
+        {:error, reason} -> {:error, invite_error(session_id, reason)}
+      end
+    end
+  end
+
+  # The invitation taken back, and what follows sealed under a key the person is never
+  # given. `rekey_due: true` where the plane has taken it back and the new key is not yet
+  # in place; the next link here finishes it.
+  defp handle("session.uninvite", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, person} <- fetch(params, "person"),
+         {:ok, session} <- lookup(session_id),
+         :ok <- invitable(session) do
+      case Invites.uninvite(session, person) do
+        {:ok, answer} -> {:ok, answer}
+        {:error, reason} -> {:error, invite_error(session_id, reason)}
+      end
+    end
+  end
+
+  defp handle("session.invites", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id") do
+      case Plane.call("session.invites", %{"session_id" => session_id}) do
+        {:ok, answer} -> {:ok, answer}
+        {:error, reason} -> {:error, invite_error(session_id, reason)}
+      end
+    end
+  end
+
+  # A private session somebody invited this machine's person into, read from the plane's
+  # sealed copy with their own keys (#765). Nothing of it is kept here.
+  defp handle("session.read_sealed", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id") do
+      after_seq = if is_integer(params["after_seq"]), do: params["after_seq"], else: 0
+
+      case Invites.read(session_id, after_seq: after_seq) do
+        {:ok, read} -> {:ok, read}
+        {:error, reason} -> {:error, invite_error(session_id, reason)}
       end
     end
   end
@@ -2515,6 +2588,51 @@ defmodule Troupe.Gateway.Dispatch do
     do: Error.new(:unavailable, %{session_id: session_id, reason: "unlinked"})
 
   defp claim_error(session_id, reason),
+    do: Error.new(:unavailable, %{session_id: session_id, reason: inspect(reason)})
+
+  # A private session is invited from here; any other is refused with where it is invited.
+  defp invitable(%{kind: "private"}), do: :ok
+
+  defp invitable(%{id: session_id}) do
+    {:error,
+     Error.new(:invalid_params, %{
+       session_id: session_id,
+       reason:
+         "only a private session is invited from this machine: a pod session is invited at " <>
+           "the plane, and one on this machine alone is offered for steering (/steer on)"
+     })}
+  end
+
+  # The plane's refusal as it said it, with its sentence; what this machine could not do,
+  # as why.
+  defp invite_error(_session_id, {:rpc, %{"code" => code, "message" => message} = error}) do
+    %Error{code: code, message: message, data: error["data"]}
+  end
+
+  defp invite_error(session_id, :unlinked),
+    do: Error.new(:unavailable, %{session_id: session_id, reason: "unlinked"})
+
+  defp invite_error(session_id, :not_owner),
+    do: Error.new(:forbidden, %{session_id: session_id, reason: "not_owner"})
+
+  defp invite_error(session_id, :not_private),
+    do: Error.new(:invalid_params, %{session_id: session_id, reason: "not a private session"})
+
+  defp invite_error(session_id, :followed_only) do
+    Error.new(:invalid_params, %{
+      session_id: session_id,
+      field: "role",
+      reason:
+        "a private session is followed by the people invited into it: steering it from " <>
+          "another device would carry it past the plane in the clear, and a private session " <>
+          "is never offered"
+    })
+  end
+
+  defp invite_error(session_id, :no_keys),
+    do: Error.new(:not_found, %{session_id: session_id, reason: "no key of it is yours"})
+
+  defp invite_error(session_id, reason),
     do: Error.new(:unavailable, %{session_id: session_id, reason: inspect(reason)})
 
   defp erase_private(%{id: session_id} = session) do

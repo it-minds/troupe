@@ -75,6 +75,10 @@ export const callTimeouts: { defaultMs: number; byMethod: Record<string, number>
     "mcp.call": 120_000,
     "worktree.merge": 120_000,
     "fs.upload": 120_000,
+    // A sealed copy read segment by segment from object storage, and a session re-keyed:
+    // each at the key manager and the plane in turn (troupe #765).
+    "session.read_sealed": 120_000,
+    "session.uninvite": 120_000,
   },
 };
 

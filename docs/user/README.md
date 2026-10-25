@@ -176,6 +176,14 @@ the last one withdrawn, signing out or `troupe logout`, the daemon lets its sign
 Your team's administrators may turn offering off for the team. A private session is never
 offered.
 
+**Sharing by name.** Invite a person into a pod session of yours, to follow it or to steer
+it, or into a private one to follow it: *Invite* in the session's head in the desktop app, or `/invite
+bea@example.com [observe|control]` in the terminal. It is in their list at once, under
+*Invited to you* on the console's *Mine*, and taking it back (`/uninvite`) closes their view.
+A private session's key goes from your computer into their own slot, where the plane cannot
+read it, and they read it in the desktop app on their computer
+([sharing a session by name](sessions-shared.md)).
+
 **Agent.** A session starts with `build`, or `plan` for a proposal first, which may
 delegate to others, waiting for each or letting it work in the background while it goes
 on; it can look in on one at work and stop it, and cancelling the turn stops them too.

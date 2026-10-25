@@ -40,7 +40,7 @@ defmodule Troupe.Plane.Erasure do
   alias Troupe.KMS
   alias Troupe.ObjectStore
   alias Troupe.Plane.Control.Router
-  alias Troupe.Plane.{Drain, Fleet, Identity, Repo, Sessions}
+  alias Troupe.Plane.{Drain, Fleet, Identity, Invites, Repo, Sessions}
   alias Troupe.Plane.Identity.Team
   alias Troupe.Plane.Sessions.{Session, Tombstone}
   alias Troupe.Plane.Tokens.Credential
@@ -90,6 +90,7 @@ defmodule Troupe.Plane.Erasure do
     # destruction leaves an erasure that will be finished; a crash the other way round
     # leaves data nobody believes exists.
     with {:ok, tombstone} <- write_tombstone(session, opts) do
+      Invites.forget(session.id)
       # Off its pod, giving back its slot and its budget slice. The pod's `session.erase`
       # stops a running session without reporting it dormant, so nothing else would.
       Drain.park(session)
@@ -268,7 +269,7 @@ defmodule Troupe.Plane.Erasure do
         mount: Application.get_env(:troupe_plane, :kms_mount, "secret")
       ]
 
-      case KMS.adapter().destroy(owner, session.id, options) do
+      case destroy_generations(owner, session, options) do
         # A login OpenBao has stopped honouring is exchanged at the next attempt.
         {:error, {:unexpected_status, 403}} = refused ->
           Credential.forget(config, token)
@@ -278,6 +279,31 @@ defmodule Troupe.Plane.Erasure do
           result
       end
     end
+  end
+
+  # A private session's key is gone when every copy of it is: those its owner's daemon put
+  # in the slots of the people invited into it, first (#765), and then every generation of
+  # its own, one for each time an invitation was taken back (`KMS.generation/2`), and one
+  # past the last the plane was told of, which a daemon makes before it says so. The
+  # invitations go once nothing is left. The first generation is the session's own id, so
+  # a team session's is the one call it always was.
+  defp destroy_generations(owner, %Session{kind: "private"} = session, options) do
+    with :ok <- Invites.destroy_copies(session.id),
+         :ok <- destroy_each(owner, session.id, 1..((session.key_version || 1) + 1), options) do
+      Invites.forget(session.id)
+    end
+  end
+
+  defp destroy_generations(owner, session, options),
+    do: KMS.adapter().destroy(owner, session.id, options)
+
+  defp destroy_each(owner, session_id, versions, options) do
+    Enum.reduce_while(versions, :ok, fn version, :ok ->
+      case KMS.adapter().destroy(owner, KMS.generation(session_id, version), options) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
   end
 
   # A person's under their name at the key manager, which is not their subject once they

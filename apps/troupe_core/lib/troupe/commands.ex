@@ -362,6 +362,29 @@ defmodule Troupe.Commands do
             "offered.",
         example: "/steer on bea@example.com cy@example.com:observe"
       ),
+      entry("invite", "session", "Invite a person into this session by name",
+        usage: "/invite [PERSON [observe | control]]",
+        args: [arg("person", false, "text"), arg("role", false, "text")],
+        detail:
+          "Invites a person, by email, to follow this session (observe, the default) or " <>
+            "steer it (control): they see it in their list in the desktop app and on the " <>
+            "console's Mine, and act in it under its own rules. A pod session is invited at " <>
+            "the plane, and only somebody its profile's teams cover may be; a private one, " <>
+            "to follow only, from this computer, which puts its key in their own slot at the " <>
+            "key manager, where the plane cannot read it. /invite alone says whom it is " <>
+            "shared with. A session on this computer alone is offered instead (/steer on).",
+        example: "/invite bea@example.com control"
+      ),
+      entry("uninvite", "session", "Take an invitation into this session back",
+        usage: "/uninvite PERSON",
+        args: [arg("person", true, "text")],
+        detail:
+          "Ends every way the invitation let them in: their open views close. A private " <>
+            "session is sealed from then on under a new key they are never given; what they " <>
+            "read before stays read, since an invitation cannot be taken back for what it " <>
+            "already showed.",
+        example: "/uninvite bea@example.com"
+      ),
       entry("sessions", "navigate", "This directory's sessions, newest first",
         aliases: ["resume"],
         usage: "/sessions [n | id]",

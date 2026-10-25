@@ -4,6 +4,7 @@
 // token; the live session is then spoken to the worker directly (see connection.ts).
 
 import { TroupeRpcError } from "./connection.js";
+import type { Invitation, Invitee, InviteRole, Person } from "./invites.js";
 import type { JsonRpcError, JsonRpcResponse } from "./types.js";
 
 export interface Discovery {
@@ -387,6 +388,35 @@ export class PlaneClient {
     role: "collaborator" | "viewer",
   ): Promise<{ session_id: string; subject: string; role: string; pushed: boolean }> {
     return this.rpc(planeToken, "session.grant", { session_id: sessionId, subject, role });
+  }
+
+  /**
+   * Invite a person into a pod session by name, to follow it (`observe`) or steer it
+   * (`control`): the session's grant made visible (troupe #765). Owner or team admin only.
+   * A private session is invited from the daemon that seals it (`DaemonClient.inviteSession`).
+   */
+  inviteToSession(planeToken: string, sessionId: string, subject: string, role: InviteRole): Promise<{ session_id: string; invite: Invitee }> {
+    return this.rpc(planeToken, "session.invite", { session_id: sessionId, subject, role });
+  }
+
+  /** Take an invitation back: every route it gave ends. */
+  uninviteFromSession(planeToken: string, sessionId: string, subject: string): Promise<{ session_id: string; subject: string }> {
+    return this.rpc(planeToken, "session.uninvite", { session_id: sessionId, subject });
+  }
+
+  /** Whom a session is shared with by name, to anybody in it. */
+  sessionInvites(planeToken: string, sessionId: string): Promise<{ session_id: string; invites: Invitee[] }> {
+    return this.rpc(planeToken, "session.invites", { session_id: sessionId });
+  }
+
+  /** The invitations to this person. */
+  listInvites(planeToken: string): Promise<{ invites: Invitation[] }> {
+    return this.rpc(planeToken, "invites.list", {});
+  }
+
+  /** People whose name starts with `query`, among those this person may invite into `sessionId` or shares a team with. */
+  searchPeople(planeToken: string, query: string, sessionId?: string): Promise<{ people: Person[] }> {
+    return this.rpc(planeToken, "people.search", sessionId ? { query, session_id: sessionId } : { query });
   }
 
   pinSession(planeToken: string, sessionId: string, pinned: boolean): Promise<unknown> {

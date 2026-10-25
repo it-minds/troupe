@@ -35,6 +35,12 @@ defmodule Troupe.Worker.AuthTest do
   @daemon_level [
     "session.create",
     "session.claim",
+    # A private session's invitations, from the machine that holds its key (#765): a pod
+    # session is invited at the plane.
+    "session.invite",
+    "session.uninvite",
+    "session.invites",
+    "session.read_sealed",
     "config.get",
     "config.models",
     "config.set",
@@ -233,6 +239,7 @@ defmodule Troupe.Worker.AuthTest do
 
       params = %{"session_id" => @mine, "topic" => "session:" <> other}
       assert guard.(unscoped_token(), "subscribe", params) == {:ok, [:observe]}
+
       assert guard.(unscoped_token(), "input.send", %{"session_id" => @mine}) ==
                {:ok, [:observe, :control]}
     end
