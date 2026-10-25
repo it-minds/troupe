@@ -11,6 +11,12 @@ defmodule Troupe.Operator.SkipObserved do
   as `status.effectiveRevision`; a new one goes through at once rather than at the next
   resync.
 
+  The same for the plane's record of the pods it has finished draining, an annotation
+  (`troupe.dev/drained`), which no generation counts either: a resource is halted only
+  once the pass has acted on the record it carries, which the pass writes as
+  `status.drainedRevision`, so the pod a drain has emptied is replaced when the plane says
+  so rather than half a minute later.
+
   Nothing else is different, and the resync (`:reconcile`) always goes through.
   """
 
@@ -41,6 +47,7 @@ defmodule Troupe.Operator.SkipObserved do
     generation == get_in(resource, ["status", "observedGeneration"]) and
       (is_nil(WorkerProfile.extends(resource)) or
          WorkerProfile.effective_revision(resource) ==
-           get_in(resource, ["status", "effectiveRevision"]))
+           get_in(resource, ["status", "effectiveRevision"])) and
+      WorkerProfile.drained_revision(resource) == get_in(resource, ["status", "drainedRevision"])
   end
 end

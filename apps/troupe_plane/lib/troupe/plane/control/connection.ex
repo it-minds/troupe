@@ -519,6 +519,14 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
+  # How far a pod has got with the drain the plane asked of it: the sessions it has left,
+  # and the one in hand. Handed to whichever replica is waiting on that drain, which is
+  # how a drain that takes longer than its timeout is waited for and not given up on.
+  defp dispatch("drain.progress", params, state) do
+    Drain.progress(state.worker, params)
+    {:ok, %{"ok" => true}, state}
+  end
+
   # A pod confirming it has carried an erasure out on its own disk.
   defp dispatch("session.erased", params, state) do
     Erasure.applied(params["session_id"], state.worker.pod_name)

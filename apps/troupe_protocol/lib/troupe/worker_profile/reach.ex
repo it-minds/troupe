@@ -9,9 +9,10 @@ defmodule Troupe.WorkerProfile.Reach do
   neither reaches gets a rule of its own (`admission/2`): a name on another port is the
   public rule's addresses on that port, since a NetworkPolicy cannot name a host, and an
   address is that one address on its port. The installation's own OpenBao and object
-  store are admitted so (Decision 724), and so are a profile's LLM endpoint, MCP servers
-  and `egress.fqdns` entries (Decision 752): `admitted/1` says which rules they need, and
-  the operator writes them.
+  store are admitted so, at any address, since the installation chose them, and so are a
+  profile's LLM endpoint, MCP servers, its MCP identities' token endpoints and
+  `egress.fqdns` entries: `admitted/1` says which rules they need, and the operator writes
+  them.
 
   Except at a loopback or a link-local address, in either family and however it is
   spelled, or at one of the two metadata addresses outside those ranges. From a pod,
@@ -86,7 +87,10 @@ defmodule Troupe.WorkerProfile.Reach do
 
   @typedoc "One endpoint a profile names, as `admitted/1` and `unreachable/1` take it."
   @type endpoint ::
-          {:llm, String.t()} | {:mcp, String.t(), String.t()} | {:fqdn, String.t()}
+          {:llm, String.t()}
+          | {:mcp, String.t(), String.t()}
+          | {:token, String.t(), String.t()}
+          | {:fqdn, String.t()}
 
   @typedoc """
   A rule the NetworkPolicy adds beyond the public rule: the public rule's addresses
@@ -124,8 +128,8 @@ defmodule Troupe.WorkerProfile.Reach do
 
   @doc """
   The rules a worker without Cilium needs to reach the endpoints a profile names, each
-  once: the LLM endpoint, each MCP server and each `egress.fqdns` entry, of a profile or
-  as a list of `t:endpoint/0`. An endpoint `unreachable/1` names has none, and a `*.svc`
+  once: the LLM endpoint, each MCP server, the token endpoint each MCP identity names
+  (`tokenUrl`) and each `egress.fqdns` entry, of a profile or as a list of `t:endpoint/0`. An endpoint `unreachable/1` names has none, and a `*.svc`
   host none here, since the operator admits it by its namespace.
   """
   @spec admitted(Profile.t() | [endpoint()]) :: [admission()]
@@ -229,6 +233,11 @@ defmodule Troupe.WorkerProfile.Reach do
         is_binary(server.url),
         do: {:mcp, server.name, server.url}
       ) ++
+      for(
+        identity <- profile.mcp_identities,
+        is_binary(identity.token_url),
+        do: {:token, identity.server, identity.token_url}
+      ) ++
       for(entry <- profile.egress_fqdns, is_binary(entry), do: {:fqdn, entry})
   end
 
@@ -253,6 +262,7 @@ defmodule Troupe.WorkerProfile.Reach do
   # The rules that admit one endpoint, or the sentence that says why none can.
   defp judge({:llm, url}), do: judge_url("llm.endpoint #{url}", url)
   defp judge({:mcp, name, url}), do: judge_url("MCP server #{name} at #{url}", url)
+  defp judge({:token, server, url}), do: judge_url("MCP server #{server}'s tokenUrl #{url}", url)
 
   # A host, and maybe a port: a profile's own hosts are names, and one written with a port
   # says which it means. One without is reached where a name is, on 443 and 80.
@@ -300,8 +310,21 @@ defmodule Troupe.WorkerProfile.Reach do
   end
 
   # The one address, as a block of one in its shortest form.
-  defp block({_a, _b, _c, _d} = address), do: "#{:inet.ntoa(address)}/32"
-  defp block(address), do: "#{:inet.ntoa(address)}/128"
+  defp block({_a, _b, _c, _d} = address), do: "#{ntoa(address)}/32"
+  defp block(address), do: "#{ntoa(address)}/128"
+
+  @doc """
+  An address as text, in the form RFC 5952 gives it: as `:inet.ntoa/1` writes it, except an
+  IPv6 address in `::/96`, which that writes in the deprecated dotted form (`::0.0.0.2`)
+  and this as the others (`::2`). The CiliumNetworkPolicy's blocks are written with it too,
+  so the two policies spell an address alike.
+  """
+  @spec ntoa(:inet.ip_address()) :: String.t()
+  def ntoa({0, 0, 0, 0, 0, 0, 0, low}) when low > 1, do: "::" <> hex(low)
+  def ntoa({0, 0, 0, 0, 0, 0, high, low}) when high > 0, do: "::" <> hex(high) <> ":" <> hex(low)
+  def ntoa(address), do: address |> :inet.ntoa() |> to_string()
+
+  defp hex(group), do: group |> Integer.to_string(16) |> String.downcase()
 
   defp within?(address, block) do
     [network, size] = String.split(block, "/")

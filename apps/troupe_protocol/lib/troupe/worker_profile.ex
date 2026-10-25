@@ -514,6 +514,19 @@ defmodule Troupe.WorkerProfile do
     end
   end
 
+  @doc """
+  Which record of finished drains a resource carries, as a hash of `drained/1`, or `nil`
+  where it records none: what the operator writes as `status.drainedRevision` once it has
+  acted on it, so a new record is acted on when it arrives.
+  """
+  @spec drained_revision(map()) :: String.t() | nil
+  def drained_revision(resource) do
+    case drained(resource) do
+      drained when drained == %{} -> nil
+      drained -> revision_of(drained)
+    end
+  end
+
   @doc "The annotation's value for these finished drains."
   @spec encode_drained(%{String.t() => String.t()}) :: String.t()
   def encode_drained(drained), do: Jason.encode!(drained)

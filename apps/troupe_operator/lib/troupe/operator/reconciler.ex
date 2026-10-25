@@ -164,6 +164,7 @@ defmodule Troupe.Operator.Reconciler do
       |> endpoint_status(profile, settings, generation(resource))
       |> plane_ca_status(plane_ca, settings, generation(resource))
       |> resolved_status(resource)
+      |> drained_status(resource)
 
     write_status(conn, resource, status)
 
@@ -644,6 +645,16 @@ defmodule Troupe.Operator.Reconciler do
           "runs the profile in effect the plane resolved from #{Enum.join(chain, " → ")}",
           generation(resource)
         )
+    end
+  end
+
+  # Which of the plane's records of finished drains this pass acted on, so the next one is
+  # acted on when it arrives rather than at the resync (`Troupe.Operator.SkipObserved`): the
+  # record is an annotation, which moves no generation. None recorded, none said.
+  defp drained_status(status, resource) do
+    case Profile.drained_revision(resource) do
+      nil -> Map.delete(status, "drainedRevision")
+      revision -> Map.put(status, "drainedRevision", revision)
     end
   end
 

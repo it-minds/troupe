@@ -285,9 +285,13 @@ defmodule Troupe.E2E.Plane do
     call("admin.team.grant", %{"name" => team, "profile" => profile})
   end
 
-  @doc "A profile the plane knows about, matching the one the operator is already running."
-  @spec profile!(String.t(), String.t()) :: map()
-  def profile!(name, channel) do
+  @doc """
+  A profile the plane knows about, matching the one the operator is already running, with
+  `spec` beside its channel: the egress a test gives it, say, and takes away again by
+  writing it without.
+  """
+  @spec profile!(String.t(), String.t(), map()) :: map()
+  def profile!(name, channel, spec \\ %{}) do
     call!("admin.profile.put", %{
       "profile" => %{
         "name" => name,
@@ -300,7 +304,7 @@ defmodule Troupe.E2E.Plane do
         # that is about something else. The test that is about scaling to zero sets up its
         # own profile and says so.
         "warm_workers" => 1,
-        "spec" => %{"configBundleChannel" => channel}
+        "spec" => Map.put(spec, "configBundleChannel", channel)
       }
     })
   end
