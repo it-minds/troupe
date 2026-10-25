@@ -203,7 +203,10 @@ defmodule Troupe.Protocol.Schema do
         "timed_out" => optional(:boolean),
         # A waited-for `delegate`'s: what its subagent reported it spent, in `turn`'s shape,
         # which is the parent's turn's too.
-        "spent" => optional(:object)
+        "spent" => optional(:object),
+        # A `publish_artifact`'s: what it published on the plane (#62), `id`, `version`,
+        # `url`, `title` and `visibility`.
+        "artifact" => optional(:object)
       },
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
@@ -1057,6 +1060,18 @@ defmodule Troupe.Protocol.Schema do
         "text" => optional(:string),
         "version" => optional(:integer),
         "append" => optional(:string)
+      },
+      # A page, a document or a file published on the plane as the person (#62), through
+      # the daemon's sign-in: `files` each `{path, bytes}` (base64) and an optional
+      # `content_type`; `id` republishes one of theirs; `session_id` names where it came from.
+      "artifact.publish" => %{
+        "command_id" => required(:string),
+        "title" => required(:string),
+        "kind" => required(:string),
+        "visibility" => required(:string),
+        "files" => required(:array),
+        "id" => optional(:string),
+        "session_id" => optional(:string)
       },
       # A first run's questions (Decision 705) — the daemon's only, like the settings
       # they write; a worker answers `method_not_found`. `answer` is the named step's

@@ -13,10 +13,12 @@
 // administrative method is placed on one of these areas; `test/coverage.test.ts` holds the
 // two to the same areas.
 //
-// Above the four is a person's own: Mine, their sessions, the laptops' sessions offered to
-// them and steered from here, their clients' versions and the memory their machines read.
-// Everybody the plane knows signs in to it; an administrative role adds the four groups.
-// It is not on the plane's map, since no administrative method is placed there.
+// Above the four is a person's own group, of two areas: Mine, their sessions, the laptops'
+// sessions offered to them and steered from here, their clients' versions and the memory
+// their machines read; and Artifacts, what they, their organisation and their profiles'
+// people have published. Everybody the plane knows signs in to it; an administrative role
+// adds the four groups. The group is not on the plane's map, since no administrative
+// method is placed on either of its areas.
 
 /** A person who administers nothing is a `member`: the console is theirs too, for what is theirs. */
 export type Role = "platform_admin" | "team_admin" | "member";
@@ -79,10 +81,13 @@ export const NAV: Group[] = [
   },
 ];
 
-/** A person's own area, shown to every role, administrators too. */
+/** A person's own areas, shown to every role, administrators too. */
 export const MINE: Group = {
   label: "Mine",
-  areas: [{ id: "mine", label: "Mine", built: true, teamAdmin: true, lead: "Your sessions, the laptops' sessions offered to you, your clients' versions and your memory." }],
+  areas: [
+    { id: "mine", label: "Mine", built: true, teamAdmin: true, lead: "Your sessions, the laptops' sessions offered to you, your clients' versions and your memory." },
+    { id: "artifacts", label: "Artifacts", built: true, teamAdmin: true, lead: "The pages and files you, your organisation and your profiles' people have published." },
+  ],
 };
 
 export const AREAS: Area[] = [MINE, ...NAV].flatMap((g) => g.areas);

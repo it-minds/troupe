@@ -7,6 +7,9 @@
 // that applies, narrowest first, with what each has left: the one that binds is named, and
 // the others are what somebody changes if the tight one is right.
 //
+// Beside each team's spend is what its artifacts hold against its quota for them, which is
+// changed on its Limits tab too.
+//
 // A team's own ceiling is changed on its Limits tab. A person's own cap follows them
 // between teams, so it is a platform admin's, here; asking which ceiling binds is too.
 
@@ -15,7 +18,7 @@ import type { JSX } from "react";
 import type { AdminTeam, Ceiling } from "@troupe/client";
 import { useConsole, useLoad } from "../console";
 import { href } from "../route";
-import { AuditNote, Empty, Field, Loaded, Preview, Region, money, useChange } from "./bits";
+import { AuditNote, Empty, Field, Loaded, Preview, Region, bytes, money, useChange } from "./bits";
 import { Spend } from "./Teams";
 
 export function Budgets(): JSX.Element {
@@ -43,7 +46,15 @@ function per(period: string | null | undefined): string {
   return period ?? "";
 }
 
+/** What a team's artifacts hold, against its quota where it has one. */
+function artifactStorage(team: AdminTeam): string {
+  const held = bytes(team.artifact_bytes ?? 0);
+  return team.artifact_quota_bytes ? `${held} of ${bytes(team.artifact_quota_bytes)}` : `${held} · no quota`;
+}
+
 function TeamCeilings({ teams }: { teams: AdminTeam[] }): JSX.Element {
+  // A plane older than artifacts says nothing of their storage.
+  const storage = teams.some((t) => t.artifact_bytes !== undefined);
   return (
     <section aria-label="Every team">
       <Region>Every team</Region>
@@ -58,6 +69,7 @@ function TeamCeilings({ teams }: { teams: AdminTeam[] }): JSX.Element {
                 <th>Against its ceiling</th>
                 <th className="num">Reserved</th>
                 <th>Counted</th>
+                {storage && <th>Artifacts' storage</th>}
               </tr>
             </thead>
             <tbody>
@@ -71,13 +83,14 @@ function TeamCeilings({ teams }: { teams: AdminTeam[] }): JSX.Element {
                   </td>
                   <td className="num">{money(t.reserved_micros)}</td>
                   <td>{t.budget_micros ? per(t.budget_period) : "no ceiling"}</td>
+                  {storage && <td>{artifactStorage(t)}</td>}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
-      <p className="note">A team's ceiling is changed on its Limits tab. A spend is in dollars; a monthly ceiling turns over on the 1st, in UTC.</p>
+      <p className="note">A team's ceiling, and its quota for artifacts, are changed on its Limits tab. A spend is in dollars; a monthly ceiling turns over on the 1st, in UTC.</p>
     </section>
   );
 }

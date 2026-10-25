@@ -18,6 +18,13 @@ export interface Signed {
   signOut: () => void;
   /** A short line at the corner of the screen once something has been done. */
   notify: (text: string) => void;
+  /** Open an address in a tab of its own, with no way back to this page from it. */
+  openTab: (url: string) => void;
+}
+
+/** A new tab that is given no handle on the console and no referrer from it. */
+export function openInNewTab(url: string): void {
+  globalThis.open?.(url, "_blank", "noopener,noreferrer");
 }
 
 export const ConsoleContext = createContext<Signed | null>(null);

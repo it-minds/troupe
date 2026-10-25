@@ -143,11 +143,22 @@ plane:
   # Leave empty and `tlsSecretName` must name a certificate somebody else put there.
   certIssuer: ""
   tlsSecretName: ""
+  # Where published artifacts are read (#62): a hostname of its own, never the plane's, so
+  # a page someone published runs where it can reach nothing of the plane's. Best a domain
+  # of its own (artifacts.example.org beside plane.example.com); a sibling of the plane's
+  # host works. Empty means no artifacts host: artifacts can be published and listed, and
+  # opening one says this plane has none. Served by the plane on `artifactsPort`, behind an
+  # Ingress of its own, with the plane's `certIssuer` and this `artifactsTlsSecretName`.
+  artifactsHost: ""
+  artifactsPort: 4003
+  artifactsTlsSecretName: ""
   ingress:
     enabled: true
-    # The largest request body the ingress will pass on. Nothing a client sends the
-    # plane is large — session data goes to object storage from the worker.
-    bodySize: 1m
+    # The largest request body the ingress will pass on. The largest thing a client sends
+    # the plane is an artifact a laptop publishes, which one call carries as base64 within
+    # the plane's own limit on a body (4 MiB); session data goes to object storage from
+    # the worker and never through here.
+    bodySize: 4m
     # Per client IP, enforced by ingress-nginx. `rps` is the steady rate, the burst is
     # `rps * burstMultiplier`, and `connections` is concurrent connections — which is
     # the one an office behind a single NAT address will notice first, since every open

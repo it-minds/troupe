@@ -21,11 +21,12 @@
 // Mine has something of the person's own: a laptop's session offered to them, one of their
 // sessions on a worker, two clients' versions and the organisation's memory. OFFER_AFTER_MS
 // (15000 by default) later, a second laptop session is offered, which the list shows as it
-// is pushed; OFFER_AFTER_MS=0 for none.
+// is pushed; OFFER_AFTER_MS=0 for none. Artifacts has two: a page of the person's own in two
+// versions, and somebody else's Markdown for the dev profile's people.
 
 import { exampleAdmin } from "../packages/client/test/support/admin.js";
 import { FakeIdp } from "../packages/client/test/support/idp.js";
-import { FakePlane } from "../packages/client/test/support/plane.js";
+import { FakePlane, artifact } from "../packages/client/test/support/plane.js";
 import { FakeWorker } from "../packages/client/test/support/worker.js";
 
 const PEOPLE: Record<string, { subject: string; displayName: string }> = {
@@ -59,6 +60,18 @@ const plane = await FakePlane.start({
     { component: "tui", version: "0.23.0-beta", platform: "linux/x86_64", since: "2026-10-10T09:00:00Z", seen_at: new Date().toISOString(), standing: "behind", recommended: "0.25.0-beta" },
   ],
   memory: [{ scope: "organisation", name: null, version: 2, hash: "sha256:fake", updated_at: "2026-10-22T10:00:00Z", text: "We write British English.\nEvery change has a test." }],
+  artifacts: [
+    artifact("art-fake-weekly", { subject: as.subject, display_name: as.displayName }, {
+      title: "Weekly report",
+      origin: { session_id: "s-fake-1", profile: "dev", agent: "agent:build", where: "pod" },
+      team: "core",
+      versions: [
+        { n: 1, files: [{ path: "index.html", content_type: "text/html", content: "<h1>Week 42</h1>" }], published_by: { subject: as.subject, display_name: as.displayName }, published_at: "2026-10-24T12:00:00Z" },
+        { n: 2, files: [{ path: "index.html", content_type: "text/html", content: "<h1>Week 43</h1>" }, { path: "chart.svg", content_type: "image/svg+xml", content: "<svg/>" }], published_by: { subject: as.subject, display_name: as.displayName }, published_at: "2026-10-25T12:00:00Z" },
+      ],
+    }),
+    artifact("art-fake-notes", { subject: "ada@example.com", display_name: "Ada" }, { title: "Release notes draft", kind: "markdown", visibility: "profile:dev", versions: [{ n: 1, files: [{ path: "notes.md", content_type: "text/markdown", content: "# Notes" }], published_by: { subject: "ada@example.com", display_name: "Ada" }, published_at: "2026-10-23T09:00:00Z" }] }),
+  ],
 });
 
 plane.relay("ada@example.com", { id: "s-laptop-billing", ownerName: "Ada", workspace: "billing", shares: [{ subject: as.subject, role: "control" }] });

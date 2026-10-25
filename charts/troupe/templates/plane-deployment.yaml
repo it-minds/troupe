@@ -20,6 +20,13 @@ spec:
     - name: http
       port: {{ .Values.plane.httpPort }}
       targetPort: http
+    {{- if .Values.plane.artifactsHost }}
+    # The artifacts host's listener (#62): another port, behind another Ingress, so that
+    # nothing of the plane's is ever answered on the origin published pages run in.
+    - name: artifacts
+      port: {{ .Values.plane.artifactsPort }}
+      targetPort: artifacts
+    {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -196,6 +203,10 @@ spec:
               containerPort: {{ .Values.plane.httpPort }}
             - name: control
               containerPort: {{ .Values.plane.controlPort }}
+            {{- if .Values.plane.artifactsHost }}
+            - name: artifacts
+              containerPort: {{ .Values.plane.artifactsPort }}
+            {{- end }}
             {{- if eq .Values.plane.distribution "name" }}
             - name: epmd
               containerPort: 4369
@@ -253,6 +264,14 @@ spec:
               value: {{ .Values.plane.host | quote }}
             - name: TROUPE_BASE_URL
               value: {{ .Values.plane.baseUrl | default (printf "https://%s" .Values.plane.host) | quote }}
+            {{- if .Values.plane.artifactsHost }}
+            # Where published artifacts are read, on a host of their own, and the port the
+            # plane serves them on there (#62).
+            - name: TROUPE_ARTIFACTS_URL
+              value: {{ printf "https://%s" .Values.plane.artifactsHost | quote }}
+            - name: TROUPE_ARTIFACTS_PORT
+              value: {{ .Values.plane.artifactsPort | quote }}
+            {{- end }}
             # Where the index page at `/` points a browser looking for the graphical
             # client: `plane.appUrl` when it is set, else the GUI this chart serves on
             # this host (`gui:`), else nothing — and the index offers no door.
@@ -508,7 +527,8 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     # Nothing a client sends the plane is large: a JSON-RPC call, a profile, a login
-    # form. Session data goes to object storage from the worker and never through here.
+    # form, an artifact a laptop publishes within the plane's own 4 MiB. Session data goes
+    # to object storage from the worker and never through here.
     nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.plane.ingress.bodySize | quote }}
     {{- with .Values.plane.ingress.rateLimit }}
     # Per client IP. The plane is the one internet-facing thing that talks to the
@@ -537,5 +557,45 @@ spec:
                 name: troupe-plane
                 port:
                   number: {{ .Values.plane.httpPort }}
+{{- if .Values.plane.artifactsHost }}
+---
+# The artifacts host (#62): its own hostname, routed to the plane's artifacts port and to
+# nothing else, so no path of the plane's (`/rpc`, the console, the API) is reachable on the
+# origin where published pages run. Only reading: no body worth the name is sent here.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: troupe-artifacts
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.plane.certIssuer }}
+    cert-manager.io/cluster-issuer: {{ .Values.plane.certIssuer | quote }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/proxy-body-size: "64k"
+    {{- with .Values.plane.ingress.rateLimit }}
+    nginx.ingress.kubernetes.io/limit-rps: {{ .rps | quote }}
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: {{ .burstMultiplier | quote }}
+    nginx.ingress.kubernetes.io/limit-connections: {{ .connections | quote }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.plane.ingressClassName }}
+  {{- if .Values.plane.artifactsTlsSecretName }}
+  tls:
+    - hosts: [{{ .Values.plane.artifactsHost | quote }}]
+      secretName: {{ .Values.plane.artifactsTlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.plane.artifactsHost | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: troupe-plane
+                port:
+                  number: {{ .Values.plane.artifactsPort }}
+{{- end }}
 {{- end }}
 {{- end }}

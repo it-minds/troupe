@@ -9,6 +9,8 @@ defmodule Troupe.Plane.Control.Connection do
   file is wrong. Memory is not session content: the documents a session reads go down with
   its activation, and the one thing that comes back is an entry an agent was asked to keep
   in its person's own memory (`session.memory.put`), which is that person's from then on.
+  Nor is an artifact an agent publishes for its person (`session.artifact.publish`): the
+  page or file they asked to have published, and nothing else of the session's.
   As a turn begins a pod says which versions its session holds (`session.memory.read`):
   each document's scope, name, version and hash, never its text.
 
@@ -41,6 +43,8 @@ defmodule Troupe.Plane.Control.Connection do
   use GenServer, restart: :temporary
 
   alias Troupe.Plane.{
+    Admin,
+    Artifacts,
     Audit,
     Budget,
     Bundles,
@@ -741,6 +745,39 @@ defmodule Troupe.Plane.Control.Connection do
         {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
     end
   end
+
+  # An agent of a session on this pod publishing an artifact (`publish_artifact`) for the
+  # session's owner. As for the owner's memory, whose it is is read off the session row, so
+  # a pod publishes only for the person whose session it holds, counted against the
+  # session's team and recorded with its profile; what it may publish, and to whom, is that
+  # person's, as `artifact.publish` checks it for them. What crosses is the artifact itself,
+  # which its person asked for published, and nothing else of the session's.
+  defp dispatch("session.artifact.publish", params, state) do
+    with %Session{} = session <- session_of(params["session_id"], state.worker),
+         :ok <- at_epoch(session, params["epoch"]),
+         {:owner, %User{active: true} = owner} <- {:owner, Identity.get_user(session.owner_subject)} do
+      artifact =
+        Artifacts.publish(owner, Map.drop(params, ["session_id", "epoch", "agent"]),
+          session: session,
+          agent: params["agent"],
+          platform_admin?: Admin.actor_for(owner).role == :platform_admin
+        )
+
+      case artifact do
+        {:ok, published} -> {:ok, published, state}
+        {:error, %Error{} = error} -> {:error, error, state}
+      end
+    else
+      :stale_epoch ->
+        {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+
+      {:owner, _gone} ->
+        {:error, Error.new(:forbidden, %{reason: "the session's owner is deactivated"}), state}
+
+      nil ->
+        {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+      end
+    end
 
   # A session on this pod beginning a turn says which memory documents it holds, by scope,
   # name, version and hash and never their text. The plane keeps that as what the turn runs
