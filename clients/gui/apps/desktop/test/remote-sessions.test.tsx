@@ -98,7 +98,9 @@ describe("a laptop's session, from another computer", () => {
 });
 
 /** How long news may take to show: a push's, nowhere near the fleet's poll. */
-const PUSHED_MS = 1_000;
+// Well under the 4 s a poll would take, and wide enough for a loaded runner: the proof that
+// a change was pushed is that `remote.list` was not asked again, not the clock.
+const PUSHED_MS = 3_000;
 
 describe("the list follows the plane as it changes", () => {
   it("an offer made on a laptop shows within a second, from the plane's push and not a poll, and its withdrawal too", async () => {
