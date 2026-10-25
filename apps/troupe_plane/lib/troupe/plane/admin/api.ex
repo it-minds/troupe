@@ -1018,7 +1018,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.sessions.list",
       function: :sessions_list,
       summary:
-        "Session metadata: who, which profile, what state, what it cost. Never content — there is no method that returns content.",
+        "Session metadata: who, which profile, what state, what it cost, and for a running pod session whether its last turn read the memory in force for it (memory: current or behind). Never content — there is no method that returns content.",
       risk: :read,
       arguments: [
         %Argument{
@@ -1464,7 +1464,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.memory.get",
       function: :memory_get,
       summary:
-        "One memory document: a version's text (the one in force where no version is named), every version with who saved it and when, and what the version shown changed against the one before it, line by line (op same, del or add). A profile's has inherited: the documents of the profiles it extends, which its sessions read before its own, each with the profile it is from.",
+        "One memory document: a version's text (the one in force where no version is named), every version with who saved it and when, and what the version shown changed against the one before it, or against the version named as against, line by line (op same, del or add). A profile's has inherited: the documents of the profiles it extends, which its sessions read before its own, each with the profile it is from. readers lists the running sessions it reaches that have had a turn: each session_id, where it runs (pod or machine), its owner, profile and team, the version of this document its last turn ran under (0 for none), when that turn began, and whether it is behind the version in force; behind counts them.",
       risk: :read,
       arguments: @memory_document ++
         [
@@ -1472,6 +1472,11 @@ defmodule Troupe.Plane.Admin.API do
             name: "version",
             type: :integer,
             description: "The version to show. Absent is the one in force."
+          },
+          %Argument{
+            name: "against",
+            type: :integer,
+            description: "Another version to compare the one shown with. Absent is the version before it."
           }
         ]
     },
@@ -1479,7 +1484,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.memory.preview",
       function: :memory_preview,
       summary:
-        "What saving a text as a memory document would do, written nowhere: the lines it changes against the version in force, its size against the limit, and which sessions read it and when. Refused as the save would be.",
+        "What saving a text as a memory document would do, written nowhere: the lines it changes against the version in force, its size against the limit, which sessions read it and when (effect), and the running sessions that read it now, each with the version its last turn ran under (readers, as admin.memory.get has them). Refused as the save would be.",
       risk: :read,
       arguments: @memory_document ++ [@memory_text]
     },
@@ -1498,6 +1503,45 @@ defmodule Troupe.Plane.Admin.API do
               type: :integer,
               description:
                 "The version the text was edited from, as admin.memory.get answered it; 0 for a document never saved."
+            }
+          ]
+    },
+    %Method{
+      name: "admin.memory.rollback",
+      function: :memory_rollback,
+      summary:
+        "Roll a memory document back to an earlier version: that version's text saved as the next version, so every version stays in the history. Refused as admin.memory.put is: by whom it may be changed, and as conflict where somebody saved since the version named. Audited as memory.put, with rolled_back_to and the note \"rolled back to v<n>\". Running sessions read it from their next turn.",
+      risk: :write,
+      arguments:
+        @memory_document ++
+          [
+            %Argument{
+              name: "to",
+              type: :integer,
+              required: true,
+              description: "The version whose text becomes the next version."
+            },
+            %Argument{
+              name: "version",
+              type: :integer,
+              description: "The version in force as admin.memory.get answered it, which the rollback replaces."
+            }
+          ]
+    },
+    %Method{
+      name: "admin.memory.nudge",
+      function: :memory_nudge,
+      summary:
+        "Tell one running session a memory document reaches what it reads now, again: a session on a pod is sent session.memory and reads it at its next turn (a pod's session also asks as every turn begins). A session on a person's machine is not told: its daemon asks at its next poll, within five minutes, and the answer says so (told false, with the reason). Changes nothing else and is not audited.",
+      risk: :write,
+      arguments:
+        @memory_document ++
+          [
+            %Argument{
+              name: "session_id",
+              type: :string,
+              required: true,
+              description: "The session, as admin.memory.get's readers lists it."
             }
           ]
     },

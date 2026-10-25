@@ -167,7 +167,9 @@ defmodule Troupe.Plane.Admin.Console do
     memory_list: {:area, :memory},
     memory_get: {:area, :memory},
     memory_preview: {:area, :memory},
-    memory_put: {:area, :memory}
+    memory_put: {:area, :memory},
+    memory_rollback: {:area, :memory},
+    memory_nudge: {:area, :memory}
   }
 
   @doc """

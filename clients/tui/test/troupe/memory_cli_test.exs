@@ -129,6 +129,70 @@ defmodule Troupe.MemoryCLITest do
     assert said =~ "not signed in to a Troupe plane"
   end
 
+  # --status: which versions this machine holds, whether they are current, and what each
+  # session here read at its last turn.
+  test "--status says which versions this machine holds and what each session here read" do
+    assert {:ok, %{mode: :memory, status: true}} = CLI.parse(["memory", "--status"])
+    assert {:error, message} = CLI.parse(["memory", "--status", "--edit"])
+    assert message =~ "changes nothing"
+
+    org = %{
+      "scope" => "organisation",
+      "name" => nil,
+      "version" => 2,
+      "hash" => "sha256:0123456789abcdef"
+    }
+
+    team = %{
+      "scope" => "team",
+      "name" => "design",
+      "version" => 5,
+      "hash" => "sha256:fedcba9876543210"
+    }
+
+    status = %{
+      "plane_url" => "https://plane.example.test",
+      "fetched_at" => "2026-10-25T09:00:00Z",
+      "path" => "~/.local/state/troupe/memory.json",
+      "documents" => [org, team],
+      "problem" => nil,
+      "in_force" => [%{org | "version" => 3}, team],
+      "current" => false,
+      "reason" => nil,
+      "sessions" => [
+        %{
+          "session_id" => "s-1",
+          "turn_at" => "2026-10-25T08:59:00Z",
+          "documents" => [org, team],
+          "current" => false
+        }
+      ]
+    }
+
+    {0, said} = run(%{status: true}, fn "me.memory.status", _ -> {:ok, status} end)
+
+    assert said =~
+             "this machine holds the memory of https://plane.example.test, fetched 2026-10-25T09:00:00Z"
+
+    assert said =~ "  the organisation's memory, version 2 (sha256:0123456789ab)"
+    assert said =~ "  the team design's memory, version 5"
+    assert said =~ "behind: the plane has the organisation's memory, version 3"
+
+    assert said =~
+             "session s-1, last turn 2026-10-25T08:59:00Z: organisation v2, team v5 (behind until its next turn)"
+
+    signed_out = %{
+      status
+      | "current" => nil,
+        "in_force" => nil,
+        "reason" => "signed out: the plane was not asked",
+        "sessions" => []
+    }
+
+    {0, said} = run(%{status: true}, fn "me.memory.status", _ -> {:ok, signed_out} end)
+    assert said =~ "not checked against the plane: signed out"
+  end
+
   defp run(args, call) do
     test = self()
     status = Memory.run(args, &send(test, {:said, &1}), call)

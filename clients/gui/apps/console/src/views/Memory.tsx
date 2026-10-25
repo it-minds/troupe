@@ -10,7 +10,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { MemoryDocument, MemoryInherited, MemoryPreview, MemoryScope, MemorySaved } from "@troupe/client";
+import type { MemoryDocument, MemoryInherited, MemoryLine, MemoryPreview, MemoryReader, MemoryReaders, MemoryScope, MemorySaved } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Loaded, Preview, Region, TextDiff, count, useChange, when } from "./bits";
 
@@ -70,6 +70,14 @@ export function MemoryEditor({ scope, name, title }: { scope: MemoryScope; name:
                 (answer) => (answer as MemorySaved).changes,
               )
             }
+            onRollback={(to) =>
+              apply(
+                "memory.put",
+                doc.subject,
+                () => admin.memoryRollback(scope, name, to, doc.version ?? 0),
+                `${title} is rolled back to version ${to}; running sessions read it from their next turn.`,
+              )
+            }
             onEdit={clear}
           />
         )}
@@ -78,7 +86,19 @@ export function MemoryEditor({ scope, name, title }: { scope: MemoryScope; name:
   );
 }
 
-function Document({ doc, title, onSave, onEdit }: { doc: MemoryDocument; title: string; onSave: (text: string) => Promise<void>; onEdit: () => void }): JSX.Element {
+function Document({
+  doc,
+  title,
+  onSave,
+  onRollback,
+  onEdit,
+}: {
+  doc: MemoryDocument;
+  title: string;
+  onSave: (text: string) => Promise<void>;
+  onRollback: (to: number) => Promise<void>;
+  onEdit: () => void;
+}): JSX.Element {
   const { admin } = useConsole();
   const [draft, setDraft] = useState<string | null>(null);
   const [preview, setPreview] = useState<MemoryPreview | null>(null);
@@ -146,7 +166,7 @@ function Document({ doc, title, onSave, onEdit }: { doc: MemoryDocument; title: 
           title={preview.subject}
           lines={preview.unchanged ? [] : [{ field: "text", from: doc.version, to: (doc.version ?? 0) + 1 }]}
           body={<TextDiff title={`${preview.subject} v${preview.version ?? 0} → v${(preview.version ?? 0) + 1}`} lines={preview.unchanged ? [] : preview.diff} />}
-          effects={[preview.effect, `${preview.bytes} of ${preview.limit} bytes.`]}
+          effects={[preview.effect, ...readersEffect(preview.readers), `${preview.bytes} of ${preview.limit} bytes.`]}
           verb="Save"
           onConfirm={async () => {
             await onSave(draft);
@@ -157,8 +177,102 @@ function Document({ doc, title, onSave, onEdit }: { doc: MemoryDocument; title: 
         />
       )}
 
-      {doc.versions.length > 0 && <Versions doc={doc} />}
+      {doc.readers && <Readers doc={doc} readers={doc.readers} />}
+      {doc.versions.length > 0 && <Versions doc={doc} onRollback={onRollback} />}
     </>
+  );
+}
+
+/** The preview's word on who reads the document now: how many running sessions, and how many are behind. */
+function readersEffect(readers: MemoryReaders | undefined): string[] {
+  if (!readers || readers.sessions.length === 0) return [];
+  const n = readers.sessions.length;
+  return [`${count(n, "running session")} ${n === 1 ? "reads" : "read"} it now; ${readers.behind} of them ${readers.behind === 1 ? "is" : "are"} behind version ${readers.version}.`];
+}
+
+/**
+ * Who is behind: every running session the document reaches that has had a turn, with the
+ * version its last turn ran under. A session on a pod can be nudged, which sends it the
+ * documents again for its next turn; one on a person's machine hears at its daemon's next
+ * poll, and the nudge says so.
+ */
+function Readers({ doc, readers }: { doc: MemoryDocument; readers: MemoryReaders }): JSX.Element {
+  const { admin } = useConsole();
+  const [said, setSaid] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+
+  const nudge = (r: MemoryReader): void => {
+    setError(null);
+    admin.memoryNudge(doc.scope, doc.name, r.session_id).then(
+      (n) => setSaid(n.told ? `Told ${n.session_id} again; it reads version ${readers.version} at its next turn.` : `${n.session_id} is not told: ${n.reason ?? "its machine asks at its next poll"}.`),
+      setError,
+    );
+  };
+
+  return (
+    <section className="readers" aria-label="Who reads it">
+      <Region>Who reads it</Region>
+      {readers.sessions.length === 0 ? (
+        <p className="note">No running session has had a turn under it yet; each reads the version in force at its first.</p>
+      ) : (
+        <>
+          <p className="note">
+            {readers.behind === 0
+              ? `Every one of the ${count(readers.sessions.length, "running session")} that read it ran its last turn under version ${readers.version}.`
+              : `${count(readers.behind, "running session")} behind version ${readers.version}: each reads it at its next turn.`}
+          </p>
+          <table className="readers">
+            <thead>
+              <tr>
+                <th scope="col">Session</th>
+                <th scope="col">Owner</th>
+                <th scope="col">Profile</th>
+                <th scope="col">Version read</th>
+                <th scope="col">Last turn</th>
+                <th scope="col">
+                  <span className="visually-hidden">Nudge</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {readers.sessions.map((r) => (
+                <tr key={r.session_id} className={r.behind ? "behind" : undefined}>
+                  <td className="mono">
+                    {r.session_id}
+                    {r.where === "machine" ? " (a person's machine)" : ""}
+                  </td>
+                  <td>{r.owner ?? "—"}</td>
+                  <td>{r.profile ?? "—"}</td>
+                  <td>
+                    {r.version === 0 ? "none" : `v${r.version}`}
+                    {r.behind ? " · behind" : ""}
+                  </td>
+                  <td>{when(r.turn_at)}</td>
+                  <td>
+                    {doc.editable && r.behind && (
+                      <button type="button" onClick={() => nudge(r)}>
+                        Nudge {r.session_id}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="note">A session on a pod is told at once by a nudge; one on a person's machine hears at its daemon's next poll, within five minutes.</p>
+        </>
+      )}
+      {said !== null && (
+        <p className="note" role="status">
+          {said}
+        </p>
+      )}
+      {error !== null && (
+        <p className="field-error" role="alert">
+          {describeError(error)}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -183,15 +297,79 @@ function Inherited({ docs }: { docs: MemoryInherited[] }): JSX.Element {
   );
 }
 
+/**
+ * Two versions side by side: the older on the left and the one shown on the right, line for
+ * line as the plane compared them, a line that went marked on the left and one that came on
+ * the right, and a run of each paired across.
+ */
+function SideBySide({ doc }: { doc: MemoryDocument }): JSX.Element {
+  const rows = besideRows(doc.diff);
+  return (
+    <table className="side-by-side mono" aria-label={`${doc.subject} v${doc.against ?? 0} beside v${doc.version ?? 0}`}>
+      <thead>
+        <tr>
+          <th scope="col">Version {doc.against ?? 0}</th>
+          <th scope="col">Version {doc.version ?? 0}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={i}>
+            <td className={r.left === null ? "empty" : r.changed ? "del" : "ctx"}>
+              {r.left !== null && r.changed && <span className="visually-hidden">removed: </span>}
+              {r.left ?? ""}
+            </td>
+            <td className={r.right === null ? "empty" : r.changed ? "add" : "ctx"}>
+              {r.right !== null && r.changed && <span className="visually-hidden">added: </span>}
+              {r.right ?? ""}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** The plane's line diff as two columns: a line kept on both sides, a run of lines gone beside the run that came. */
+export function besideRows(lines: MemoryLine[]): Array<{ left: string | null; right: string | null; changed: boolean }> {
+  const rows: Array<{ left: string | null; right: string | null; changed: boolean }> = [];
+  let gone: string[] = [];
+  let came: string[] = [];
+  const flush = (): void => {
+    for (let i = 0; i < Math.max(gone.length, came.length); i++) rows.push({ left: gone[i] ?? null, right: came[i] ?? null, changed: true });
+    gone = [];
+    came = [];
+  };
+  for (const l of lines) {
+    if (l.op === "same") {
+      flush();
+      rows.push({ left: l.text, right: l.text, changed: false });
+    } else if (l.op === "del") {
+      if (came.length > 0) flush();
+      gone.push(l.text);
+    } else came.push(l.text);
+  }
+  flush();
+  return rows;
+}
+
 function scope(of: MemoryScope): string {
   return of === "team" ? "Only this team's admins change it." : "Only a platform admin changes it.";
 }
 
-/** Every version, newest first, each opening onto what it changed against the one before. */
-function Versions({ doc }: { doc: MemoryDocument }): JSX.Element {
+/**
+ * Every version, newest first, each opening onto what it changed against the one before;
+ * an open one can be set beside the version in force, two columns with the changed lines
+ * marked, and, for whoever may change the document, rolled back to: its text saved as the
+ * next version, previewed first as every save is.
+ */
+function Versions({ doc, onRollback }: { doc: MemoryDocument; onRollback: (to: number) => Promise<void> }): JSX.Element {
   const { admin } = useConsole();
   const [open, setOpen] = useState<MemoryDocument | null>(null);
+  const [beside, setBeside] = useState<MemoryDocument | null>(null);
+  const [rollback, setRollback] = useState<MemoryPreview | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const inForce = doc.versions[0]?.version ?? null;
 
   return (
     <>
@@ -205,6 +383,8 @@ function Versions({ doc }: { doc: MemoryDocument }): JSX.Element {
               aria-expanded={open?.version === v.version}
               onClick={() => {
                 setError(null);
+                setBeside(null);
+                setRollback(null);
                 if (open?.version === v.version) setOpen(null);
                 else admin.memoryGet(doc.scope, doc.name, v.version).then(setOpen, setError);
               }}
@@ -212,9 +392,50 @@ function Versions({ doc }: { doc: MemoryDocument }): JSX.Element {
               Version {v.version}
             </button>{" "}
             · {when(v.changed_at)} by {v.changed_by} · {count(v.bytes, "byte")}
+            {v.version === inForce ? " · in force" : ""}
             {open?.version === v.version && (
               <div className="memory-version">
                 <TextDiff title={`${doc.subject} v${v.version - 1} → v${v.version}`} lines={open.diff} />
+                {inForce !== null && v.version !== inForce && (
+                  <div className="actions">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setError(null);
+                        admin.memoryGet(doc.scope, doc.name, inForce, v.version).then(setBeside, setError);
+                      }}
+                    >
+                      Beside version {inForce}
+                    </button>
+                    {doc.editable && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setError(null);
+                          admin.memoryPreview(doc.scope, doc.name, open.text).then(setRollback, setError);
+                        }}
+                      >
+                        Restore version {v.version}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {beside !== null && <SideBySide doc={beside} />}
+                {rollback !== null && (
+                  <Preview
+                    title={rollback.subject}
+                    lines={rollback.unchanged ? [] : [{ field: "text", from: inForce, to: (inForce ?? 0) + 1 }]}
+                    body={<TextDiff title={`${rollback.subject} v${inForce} → v${(inForce ?? 0) + 1}, the text of v${v.version}`} lines={rollback.unchanged ? [] : rollback.diff} />}
+                    effects={[`Saved as version ${(inForce ?? 0) + 1}, with the text of version ${v.version}; every version stays.`, rollback.effect, ...readersEffect(rollback.readers)]}
+                    verb="Roll back"
+                    onConfirm={async () => {
+                      await onRollback(v.version);
+                      setRollback(null);
+                      setOpen(null);
+                    }}
+                    onCancel={() => setRollback(null)}
+                  />
+                )}
               </div>
             )}
           </li>

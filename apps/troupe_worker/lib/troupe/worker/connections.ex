@@ -41,8 +41,8 @@ defmodule Troupe.Worker.Connections do
   alias Troupe.KMS
   alias Troupe.KMS.Policy
   alias Troupe.MCP.Server
+  alias Troupe.Worker.{MemoryRead, UserMemory}
   alias Troupe.Worker.Plane.Link
-  alias Troupe.Worker.UserMemory
 
   require Logger
 
@@ -105,6 +105,8 @@ defmodule Troupe.Worker.Connections do
       # And where an agent's entry for its person's own memory goes, asked of the plane
       # the same way: by the session, never by whose it is.
       UserMemory.install()
+      # And how a session's turn asks whether the memory it holds is in force.
+      MemoryRead.install()
     end
 
     {:ok, %{}}

@@ -898,6 +898,25 @@ ul.plain li {
 .memory.card {
   margin-bottom: var(--space-5);
 }
+/* Two versions side by side: each column its own lines as written, a line with no partner blank. */
+.memory-version .side-by-side {
+  table-layout: fixed;
+  width: 100%;
+  margin-top: var(--space-2);
+}
+.memory-version .side-by-side td {
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.memory-version .side-by-side td.empty {
+  background: var(--bg-sunken);
+}
+/* A running session whose last turn read an older version than the one in force. */
+.readers tr.behind td,
+.memory-mark {
+  color: var(--waiting-fg);
+}
 .preview .effects,
 .card .effects {
   margin: 0;

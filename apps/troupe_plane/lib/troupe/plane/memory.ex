@@ -15,6 +15,11 @@ defmodule Troupe.Plane.Memory do
     keeps the copy as it keeps the organisation's document. A laptop's session belongs to
     no team, so it reads the person's teams'.
 
+  What each running session's last turn read is kept as well (`Troupe.Plane.Memory.Read`):
+  a pod's session says it as each turn begins and is answered with the documents in force
+  where it is behind (`turn/2`), and a laptop's daemon says it of its sessions with its poll
+  (`machine/2`). `readers/1` is who is behind, what the console shows.
+
   A team's document reaches only that team's sessions and its members' machines; a person's
   own, every session they own, on a pod and on their machines, after the organisation's
   levels, which come first.
@@ -32,7 +37,7 @@ defmodule Troupe.Plane.Memory do
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Fleet.Extends
   alias Troupe.Plane.Identity.{Team, User}
-  alias Troupe.Plane.Memory.Document
+  alias Troupe.Plane.Memory.{Document, Read}
   alias Troupe.Protocol.Memory, as: Shape
 
   @type scope :: String.t()
@@ -42,6 +47,14 @@ defmodule Troupe.Plane.Memory do
 
   # One entry an agent adds to a person's memory: a sentence or two, on one line.
   @entry_bytes 1_024
+
+  # How many sessions one machine's poll may say it runs, and how long one it named counts
+  # as running: three polls of five minutes.
+  @machine_sessions 64
+  @running_seconds 900
+
+  @machine_nudge "a session on a person's machine is not told: its daemon asks for the memory " <>
+                   "at its next poll, within five minutes, and the session reads it at its next turn"
 
   # -- reading ----------------------------------------------------------------
 
@@ -279,6 +292,265 @@ defmodule Troupe.Plane.Memory do
   # A person's own, for a person the plane keeps a row for; a service principal has none.
   defp own_reaching(%User{id: id} = user) when is_binary(id), do: reaching(current(user), nil)
   defp own_reaching(_nobody), do: []
+
+  # -- what each running session read -----------------------------------------
+
+  @doc """
+  A pod's session's turn is beginning, and it holds `reported`, the documents' stamps
+  (`Troupe.Protocol.Memory.stamp/1`). Kept as what the turn reads, and answered with the
+  documents in force: `{:current, documents}`
+  where it holds them already, `{:behind, documents}` where it does not, for the pod to give
+  the session before the turn starts. So a `session.memory` lost between two turns leaves no
+  turn on the versions before it, and what is kept is what the turn reads: the versions in
+  force, where it was behind.
+  """
+  @spec turn(Sessions.Session.t(), term()) :: {:current | :behind, [Shape.document()]}
+  def turn(%Sessions.Session{} = session, reported) do
+    in_force = session_documents(session)
+    stamps = Enum.map(in_force, &Shape.stamp/1)
+    now = DateTime.utc_now()
+    standing = if same?(stamps(reported), stamps), do: :current, else: :behind
+
+    :ok =
+      keep(%{
+        session_id: session.id,
+        owner_id: session.owner_id,
+        owner_subject: session.owner_subject,
+        where: "pod",
+        documents: stamps,
+        turn_at: now,
+        seen_at: now
+      })
+
+    {standing, in_force}
+  end
+
+  @doc """
+  What a person's machine says of the sessions running on it, with its poll of `me.memory`:
+  each one's `session_id`, the stamps its last turn read (`documents`) and when that turn
+  began (`turn_at`). At most #{@machine_sessions} a poll, and only for the person who sent
+  them: a row of a pod's session, or of another person's, is left as it is. Rows nothing has
+  said anything of for a week go.
+  """
+  @spec machine(User.t(), term()) :: :ok
+  def machine(%User{id: user_id} = user, sessions) when is_binary(user_id) and is_list(sessions) do
+    now = DateTime.utc_now()
+
+    sessions
+    |> Enum.flat_map(&machine_row(&1, user, now))
+    |> Enum.take(@machine_sessions)
+    |> Enum.each(fn row ->
+      Repo.insert(Read.changeset(%Read{}, row),
+        on_conflict:
+          from(r in Read,
+            where: r.where == "machine" and r.owner_id == ^user_id,
+            update: [set: [documents: ^row.documents, turn_at: ^row.turn_at, seen_at: ^now]]
+          ),
+        conflict_target: :session_id
+      )
+    end)
+
+    _pruned = Repo.delete_all(from(r in Read, where: r.seen_at < ^DateTime.add(now, -7, :day)))
+    :ok
+  end
+
+  def machine(_user, _sessions), do: :ok
+
+  defp machine_row(%{"session_id" => id} = reported, user, now)
+       when is_binary(id) and byte_size(id) in 1..128 do
+    [
+      %{
+        session_id: id,
+        owner_id: user.id,
+        owner_subject: user.subject,
+        where: "machine",
+        documents: stamps(reported["documents"]),
+        turn_at: time(reported["turn_at"]) || now,
+        seen_at: now
+      }
+    ]
+  end
+
+  defp machine_row(_other, _user, _now), do: []
+
+  @doc "What the plane keeps of one session's last turn, or `nil` for none."
+  @spec read_of(String.t()) :: Read.t() | nil
+  def read_of(session_id) when is_binary(session_id), do: Repo.get(Read, session_id)
+
+  @doc """
+  The running sessions one document reaches that said what they read: each with the version
+  of it their last turn ran under (`0` for none) and whether that is behind the version in
+  force; and how many are behind. A pod's session is running while the plane has it active
+  on a pod, a machine's while its daemon named it at a poll in the last fifteen minutes,
+  three polls. A session that has had no turn yet is not listed: it reads the version in
+  force at its first.
+  """
+  @spec readers(owner()) :: %{version: non_neg_integer(), behind: non_neg_integer(), sessions: [map()]}
+  def readers(owner) do
+    current = current(owner)
+    in_force = if current && current.text != "", do: current.version
+    key = {elem(key(owner), 0), name_of(owner)}
+
+    sessions =
+      (pod_readers(owner) ++ machine_readers(owner))
+      |> Enum.map(fn row ->
+        read = Enum.find(row.documents, &({&1["scope"], &1["name"]} == key))
+        version = read && read["version"]
+
+        row
+        |> Map.delete(:documents)
+        |> Map.merge(%{version: version || 0, behind: version != in_force})
+      end)
+      |> Enum.sort_by(& &1.session_id)
+
+    %{version: number(current), behind: Enum.count(sessions, & &1.behind), sessions: sessions}
+  end
+
+  defp pod_readers(%User{}), do: []
+
+  defp pod_readers(owner) do
+    from([s] in reached(owner),
+      join: r in Read,
+      on: r.session_id == s.id,
+      left_join: t in Team,
+      on: t.id == s.team_id,
+      select: %{
+        session_id: s.id,
+        where: "pod",
+        owner: s.owner_subject,
+        profile: s.profile,
+        team: t.name,
+        documents: r.documents,
+        turn_at: r.turn_at
+      }
+    )
+    |> Repo.all()
+  end
+
+  defp machine_readers(owner) do
+    since = DateTime.add(DateTime.utc_now(), -@running_seconds, :second)
+    machines = from(r in Read, where: r.where == "machine" and r.seen_at >= ^since)
+
+    machines =
+      case owner do
+        :organisation -> machines
+        %Team{} = team -> where(machines, [r], r.owner_id in ^Enum.map(Identity.members_of_team(team), & &1.id))
+        _profile_or_person -> where(machines, [_r], false)
+      end
+
+    machines
+    |> select([r], %{
+      session_id: r.session_id,
+      where: "machine",
+      owner: r.owner_subject,
+      profile: nil,
+      team: nil,
+      documents: r.documents,
+      turn_at: r.turn_at
+    })
+    |> Repo.all()
+  end
+
+  @doc """
+  Whether each of these sessions' last turn ran under the memory in force for it now:
+  `"current"` or `"behind"`, by id, and absent for one not running on a pod or that has had
+  no turn. What the session listing marks.
+  """
+  @spec standing([Sessions.Session.t()]) :: %{String.t() => String.t()}
+  def standing(sessions) do
+    running = Enum.filter(sessions, &(&1.state == "active" and not is_nil(&1.worker_id)))
+    ids = Enum.map(running, & &1.id)
+    reads = Map.new(Repo.all(from(r in Read, where: r.where == "pod" and r.session_id in ^ids)), &{&1.session_id, &1})
+
+    {standings, _cache} =
+      running
+      |> Enum.filter(&Map.has_key?(reads, &1.id))
+      |> Enum.reduce({%{}, %{}}, fn session, {acc, cache} ->
+        # The documents in force are the same for every session of one team, profile and owner.
+        whose = {session.team_id, session.profile, session.owner_subject}
+        cache = Map.put_new_lazy(cache, whose, fn -> session |> session_documents() |> Enum.map(&Shape.stamp/1) end)
+        word = if same?(stamps(reads[session.id].documents), cache[whose]), do: "current", else: "behind"
+        {Map.put(acc, session.id, word), cache}
+      end)
+
+    standings
+  end
+
+  @doc """
+  Tell one running session a document reaches what it reads now, again: on a pod,
+  `session.memory` as a save sends it, which the session reads at its next turn. A machine's
+  session is not told: its daemon asks at its next poll, and the answer says so.
+  `{:error, :not_found}` for a session the document does not reach or that is not running.
+  """
+  @spec nudge(owner(), String.t()) :: {:ok, map()} | {:error, :not_found}
+  def nudge(owner, session_id) do
+    case Enum.find(readers(owner).sessions, &(&1.session_id == session_id)) do
+      %{where: "pod"} -> nudge_pod(Sessions.get(session_id))
+      %{where: "machine"} -> {:ok, %{session_id: session_id, where: "machine", told: false, reason: @machine_nudge}}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  defp nudge_pod(%Sessions.Session{worker_id: worker_id} = session) when not is_nil(worker_id) do
+    case Fleet.get_worker(worker_id) do
+      nil ->
+        {:error, :not_found}
+
+      worker ->
+        Router.notify(worker, "session.memory", %{
+          "session_id" => session.id,
+          "epoch" => session.epoch,
+          "memory" => session_documents(session)
+        })
+
+        {:ok, %{session_id: session.id, where: "pod", told: true}}
+    end
+  end
+
+  defp nudge_pod(_gone), do: {:error, :not_found}
+
+  defp session_documents(%Sessions.Session{} = session) do
+    team = session.team_id && Identity.fetch_team(session.team_id)
+    for_session(team, session.profile, Identity.get_user(session.owner_subject))
+  end
+
+  defp keep(row) do
+    {:ok, _} =
+      Repo.insert(Read.changeset(%Read{}, row),
+        on_conflict: {:replace, [:owner_id, :owner_subject, :where, :documents, :turn_at, :seen_at]},
+        conflict_target: :session_id
+      )
+
+    :ok
+  end
+
+  # Stamps as they were sent: documents, each with its scope, name, version and hash.
+  defp stamps(documents) when is_list(documents) do
+    documents
+    |> Enum.filter(&(is_map(&1) and is_binary(&1["scope"]) and is_integer(&1["version"])))
+    |> Enum.take(32)
+    |> Enum.map(&Shape.stamp/1)
+  end
+
+  defp stamps(_other), do: []
+
+  defp same?(read, in_force), do: MapSet.new(read, &identity/1) == MapSet.new(in_force, &identity/1)
+
+  defp identity(stamp), do: {stamp["scope"], stamp["name"], stamp["version"], stamp["hash"]}
+
+  defp time(text) when is_binary(text) do
+    case DateTime.from_iso8601(text) do
+      {:ok, at, _offset} -> at
+      _other -> nil
+    end
+  end
+
+  defp time(_other), do: nil
+
+  defp name_of(:organisation), do: nil
+  defp name_of(%Team{name: name}), do: name
+  defp name_of(%User{}), do: nil
+  defp name_of(profile) when is_binary(profile), do: profile
 
   # -- a person's own ---------------------------------------------------------
 
