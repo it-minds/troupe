@@ -1042,6 +1042,15 @@ defmodule Troupe.Protocol.Schema do
         "plane_url" => required(:string),
         "document" => required(:object)
       },
+      # The person's own memory document on the plane (#55), read and saved through the
+      # daemon's sign-in: the whole `text` over the `version` edited, or one `append`ed entry.
+      "me.memory" => %{},
+      "me.memory.put" => %{
+        "command_id" => required(:string),
+        "text" => optional(:string),
+        "version" => optional(:integer),
+        "append" => optional(:string)
+      },
       # A first run's questions (Decision 705) — the daemon's only, like the settings
       # they write; a worker answers `method_not_found`. `answer` is the named step's
       # answer, whose shape the step decides; the key goes in through it and never

@@ -1,9 +1,12 @@
 defmodule Troupe.Plane.Memory do
   @moduledoc """
-  The organisation's memory documents (#55): what the organisation, each team and each
-  worker profile wrote for every agent in their scope. Edited in the console
-  (`Troupe.Plane.Admin`), every version kept with who saved it, and handed to the sessions
-  they reach as instructions from the organisation, read-only to every agent.
+  The memory documents (#55): what the organisation, each team and each worker profile
+  wrote for every agent in their scope, and each person's own. The organisation's levels are
+  edited in the console (`Troupe.Plane.Admin`) and handed to the sessions they reach as
+  instructions from the organisation, read-only to every agent. A person's own is theirs:
+  edited by them alone (`save_own/4`), added to by an agent of theirs one entry at a time
+  (`append_own/3`), read by every session they run and by nobody else, every version kept
+  with who saved it as the others are.
 
   - **On a pod** a session gets its organisation's, its team's and its profile's, with
     every activation (`for_session/2`), so a save reaches a session the next time it wakes.
@@ -12,7 +15,9 @@ defmodule Troupe.Plane.Memory do
     keeps the copy as it keeps the organisation's document. A laptop's session belongs to
     no team, so it reads the person's teams'.
 
-  A team's document reaches only that team's sessions and its members' machines.
+  A team's document reaches only that team's sessions and its members' machines; a person's
+  own, every session they own, on a pod and on their machines, after the organisation's
+  levels, which come first.
 
   A document is text, at most `Troupe.Protocol.Memory.max_bytes/0` bytes. Each save is a
   new version, numbered from 1; an empty one clears the document, which then reaches no
@@ -23,8 +28,8 @@ defmodule Troupe.Plane.Memory do
 
   import Ecto.Query
 
+  alias Troupe.Plane.{Audit, Fleet, Identity, Repo, Sessions}
   alias Troupe.Plane.Control.Router
-  alias Troupe.Plane.{Fleet, Identity, Repo, Sessions}
   alias Troupe.Plane.Fleet.Extends
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Memory.Document
@@ -32,8 +37,11 @@ defmodule Troupe.Plane.Memory do
 
   @type scope :: String.t()
 
-  @typedoc "Whose a document is: the organisation's, a team, or a profile by name."
-  @type owner :: :organisation | Team.t() | String.t()
+  @typedoc "Whose a document is: the organisation's, a team, a profile by name, or a person."
+  @type owner :: :organisation | Team.t() | String.t() | User.t()
+
+  # One entry an agent adds to a person's memory: a sentence or two, on one line.
+  @entry_bytes 1_024
 
   # -- reading ----------------------------------------------------------------
 
@@ -149,14 +157,15 @@ defmodule Troupe.Plane.Memory do
   @doc """
   The documents a session on a pod reads: the organisation's, its team's, then its worker
   profile's chain, the profile it extends before its own, as the profile's rules and
-  bundle are composed from the chain; each that has text. A session of no team reads no
-  team's.
+  bundle are composed from the chain, then its owner's own; each that has text. A session
+  of no team reads no team's, and one whose owner the plane has no person for, nobody's.
   """
-  @spec for_session(Team.t() | nil, String.t() | nil) :: [Shape.document()]
-  def for_session(team, profile) do
+  @spec for_session(Team.t() | nil, String.t() | nil, User.t() | nil) :: [Shape.document()]
+  def for_session(team, profile, owner \\ nil) do
     ([{:organisation, nil}, {team, team && team.name}] ++ Enum.map(chain(profile), &{&1, &1}))
     |> Enum.reject(fn {owner, _name} -> is_nil(owner) end)
     |> Enum.flat_map(fn {owner, name} -> reaching(current(owner), name) end)
+    |> Kernel.++(own_reaching(owner))
   end
 
   @doc """
@@ -199,14 +208,16 @@ defmodule Troupe.Plane.Memory do
   activation anyway, and a save never waits on the slowest pod. Answers how many sessions
   were told.
 
-  The organisation's reaches every running session of a team, a team's that team's, and a
-  profile's the sessions of that profile and of every profile that extends it.
+  The organisation's reaches every running session of a team, a team's that team's, a
+  profile's the sessions of that profile and of every profile that extends it, and a
+  person's own the sessions they own.
   """
   @spec announce(owner()) :: non_neg_integer()
   def announce(owner) do
     sessions = Repo.all(reached(owner))
     teams = sessions |> Enum.map(& &1.team_id) |> Enum.uniq() |> Map.new(&{&1, &1 && Identity.fetch_team(&1)})
     workers = sessions |> Enum.map(& &1.worker_id) |> Enum.uniq() |> Map.new(&{&1, Fleet.get_worker(&1)})
+    owners = sessions |> Enum.map(& &1.owner_subject) |> Enum.uniq() |> Map.new(&{&1, Identity.get_user(&1)})
 
     Enum.count(sessions, fn session ->
       case workers[session.worker_id] do
@@ -217,7 +228,7 @@ defmodule Troupe.Plane.Memory do
           Router.notify(worker, "session.memory", %{
             "session_id" => session.id,
             "epoch" => session.epoch,
-            "memory" => for_session(teams[session.team_id], session.profile)
+            "memory" => for_session(teams[session.team_id], session.profile, owners[session.owner_subject])
           })
 
           true
@@ -235,6 +246,7 @@ defmodule Troupe.Plane.Memory do
     case owner do
       :organisation -> running
       %Team{id: id} -> where(running, [s], s.team_id == ^id)
+      %User{subject: subject} -> where(running, [s], s.owner_subject == ^subject)
       profile when is_binary(profile) -> where(running, [s], s.profile in ^[profile | Extends.descendants(profile)])
     end
   end
@@ -253,15 +265,143 @@ defmodule Troupe.Plane.Memory do
 
   @doc """
   The documents a person's own machine reads, for every session on it: the organisation's,
-  then each of their teams', by name. Not a profile's: a laptop's session runs on none.
+  then each of their teams', by name, then their own. Not a profile's: a laptop's session
+  runs on none.
   """
   @spec for_person(User.t()) :: [Shape.document()]
   def for_person(%User{} = user) do
     teams = user |> Identity.teams_for() |> Enum.sort_by(& &1.name)
 
     reaching(current(:organisation), nil) ++
-      Enum.flat_map(teams, &reaching(current(&1), &1.name))
+      Enum.flat_map(teams, &reaching(current(&1), &1.name)) ++ own_reaching(user)
   end
+
+  # A person's own, for a person the plane keeps a row for; a service principal has none.
+  defp own_reaching(%User{id: id} = user) when is_binary(id), do: reaching(current(user), nil)
+  defp own_reaching(_nobody), do: []
+
+  # -- a person's own ---------------------------------------------------------
+
+  @doc """
+  A person's own document as they edit it: the version in force (`0` for none), its text,
+  its size and the limit, and who saved it and when. Asked only for the person themselves:
+  no administrator's method reads it.
+  """
+  @spec own(User.t()) :: map()
+  def own(%User{} = user) do
+    current = if is_binary(user.id), do: current(user)
+    text = (current && current.text) || ""
+
+    %{
+      "version" => number(current),
+      "text" => text,
+      "hash" => current && current.hash,
+      "bytes" => byte_size(text),
+      "limit" => Shape.max_bytes(),
+      "changed_by" => current && current.changed_by,
+      "changed_at" => current && DateTime.to_iso8601(current.inserted_at)
+    }
+  end
+
+  @doc """
+  Save a person's own document as they wrote it, over `base` (the version they edited, `0`
+  for none), as `put/4` saves any. Audited as `memory.put` on `user/<subject>`, with the
+  version, size and hash and never the text, as every level's save is; the sessions they run
+  read it from their next turn. `opts[:session]` names the session an agent of theirs wrote
+  it from, which the audit row keeps.
+  """
+  @spec save_own(User.t(), String.t(), non_neg_integer() | nil, keyword()) ::
+          {:ok, %{document: map() | nil, changes: map()}}
+          | {:error, {:conflict, non_neg_integer()} | :no_person | String.t()}
+  def save_own(user, text, base, opts \\ [])
+
+  def save_own(%User{id: id} = user, text, base, opts) when is_binary(id) do
+    case put(user, text, user.subject, base) do
+      {:ok, :unchanged} ->
+        current = current(user)
+        {:ok, %{document: current && summary(current), changes: %{}}}
+
+      {:ok, %{before: before, now: now}} ->
+        changes = Audit.diff(fields(before), fields(now))
+        detail = if opts[:session], do: Map.put(changes, "session", opts[:session]), else: changes
+        {:ok, _} = Audit.record(user.subject, "memory.put", subject(user), detail)
+        _told = announce(user)
+        {:ok, %{document: summary(now), changes: changes}}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  def save_own(_user, _text, _base, _opts), do: {:error, :no_person}
+
+  @doc """
+  Add one entry to a person's own document, as an agent of theirs does with `remember`:
+  under a heading of the day, `## 2026-10-25`, below whatever is there and never in place of
+  it. The entry is one line, white space folded, at most 1024 bytes. One that would take the
+  document past the limit is refused as `{:full, bytes}`, and nothing is written. Saved as
+  `save_own/4` saves, over the version just read, and read again when somebody saved in
+  between.
+  """
+  @spec append_own(User.t(), String.t(), keyword()) ::
+          {:ok, %{document: map() | nil, changes: map(), entry: String.t()}}
+          | {:error, {:full, non_neg_integer()} | :no_person | String.t()}
+  def append_own(user, entry, opts \\ []) do
+    with {:ok, entry} <- entry(entry), do: append(user, entry, opts, 3)
+  end
+
+  defp append(%User{id: id} = user, entry, opts, attempts) when is_binary(id) do
+    current = current(user)
+    today = Keyword.get_lazy(opts, :today, &Date.utc_today/0)
+    text = appended((current && current.text) || "", entry, today)
+
+    with :ok <- room(text),
+         {:ok, saved} <- save_own(user, text, number(current), opts) do
+      {:ok, Map.put(saved, :entry, entry)}
+    else
+      {:error, {:conflict, _}} when attempts > 1 -> append(user, entry, opts, attempts - 1)
+      error -> error
+    end
+  end
+
+  defp append(_user, _entry, _opts, _attempts), do: {:error, :no_person}
+
+  defp entry(entry) when is_binary(entry) do
+    folded = entry |> String.split() |> Enum.join(" ")
+
+    cond do
+      folded == "" -> {:error, "nothing to remember: the entry is empty"}
+      not String.valid?(folded) -> {:error, "an entry is UTF-8 text"}
+      byte_size(folded) > @entry_bytes -> {:error, "an entry holds at most #{@entry_bytes} bytes; this one is #{byte_size(folded)}"}
+      true -> {:ok, folded}
+    end
+  end
+
+  defp entry(_other), do: {:error, "an entry is text"}
+
+  # Below the last heading where it is the day's, under a new one where it is not.
+  defp appended("", entry, day), do: "## #{Date.to_iso8601(day)}\n\n- #{entry}"
+
+  defp appended(text, entry, day) do
+    heading = "## #{Date.to_iso8601(day)}"
+
+    last =
+      text
+      |> String.split("\n")
+      |> Enum.filter(&String.starts_with?(&1, "## "))
+      |> List.last()
+
+    if last == heading,
+      do: text <> "\n- " <> entry,
+      else: text <> "\n\n" <> heading <> "\n\n- " <> entry
+  end
+
+  defp room(text) do
+    if byte_size(text) > Shape.max_bytes(), do: {:error, {:full, byte_size(text)}}, else: :ok
+  end
+
+  defp fields(nil), do: %{version: 0, bytes: 0, hash: nil}
+  defp fields(document), do: %{version: document.version, bytes: byte_size(document.text), hash: document.hash}
 
   defp reaching(nil, _name), do: []
   defp reaching(%Document{text: ""}, _name), do: []
@@ -297,6 +437,7 @@ defmodule Troupe.Plane.Memory do
   def subject(:organisation), do: "organisation"
   def subject(%Team{name: name}), do: "team/#{name}"
   def subject(profile) when is_binary(profile), do: "profile/#{profile}"
+  def subject(%User{subject: subject}), do: "user/#{subject}"
 
   @doc "The worker profiles a profile's document may be kept for: those the plane has."
   @spec profile?(String.t()) :: boolean()
@@ -306,4 +447,6 @@ defmodule Troupe.Plane.Memory do
   defp key(:organisation), do: {"organisation", ""}
   defp key(%Team{id: id}), do: {"team", id}
   defp key(profile) when is_binary(profile), do: {"profile", profile}
+  # By the person's id, so a re-key keeps it and their removal finds it.
+  defp key(%User{id: id}) when is_binary(id), do: {"user", id}
 end

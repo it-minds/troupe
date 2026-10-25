@@ -6,6 +6,8 @@
 // The organisation's memory documents come from the plane: their source is the plane's URL
 // and when this machine fetched them, or the session's activation on a pod, and they carry
 // the version in force. A file's source is its path; its "version" is the start of its hash.
+// After them comes the person's own memory from the plane (`person`), the one layer they
+// edit from here and an agent of theirs adds to with `remember`.
 
 /** One file or document `context.get` lists. */
 export interface InstructionFile {
@@ -38,7 +40,36 @@ export interface InstructionsContext {
 }
 
 /** Which layer a line is: who wrote it, from farthest to nearest. */
-export type InstructionLayer = "organisation" | "team" | "profile" | "yours" | "repository" | "brief";
+export type InstructionLayer = "organisation" | "team" | "profile" | "person" | "yours" | "repository" | "brief";
+
+/** The person's own memory on the plane as they edit it (`me.memory`'s `user`, troupe #55). */
+export interface OwnMemory {
+  /** The version in force, 0 for none: what a save names it was edited from. */
+  version: number;
+  text: string;
+  bytes: number;
+  limit: number;
+  changed_by?: string | null;
+  changed_at?: string | null;
+  plane_url?: string;
+}
+
+/** What a save of it answers: whether it changed anything, and the document as it now stands. */
+export interface OwnMemorySaved {
+  changed: boolean;
+  entry?: string | null;
+  user: OwnMemory;
+}
+
+/** What saving a text as it would do, written nowhere (`me.memory.preview` on the plane). */
+export interface OwnMemoryPreview {
+  version: number;
+  bytes: number;
+  limit: number;
+  unchanged: boolean;
+  diff: Array<{ op: "same" | "del" | "add"; text: string }>;
+  effect: string;
+}
 
 /** One line of a session's instructions view. */
 export interface InstructionRow {
@@ -56,10 +87,10 @@ export interface InstructionRow {
   note: string;
 }
 
-const MEMORY = new Set(["organisation", "team", "profile"]);
+const MEMORY = new Set(["organisation", "team", "profile", "person"]);
 
 function layerOf(scope: string): InstructionLayer {
-  if (scope === "organisation" || scope === "team" || scope === "profile") return scope;
+  if (scope === "organisation" || scope === "team" || scope === "profile" || scope === "person") return scope;
   if (scope === "user") return "yours";
   if (scope === "brief") return "brief";
   return "repository";
@@ -69,6 +100,7 @@ const HEADINGS: Record<InstructionLayer, string> = {
   organisation: "Organisation",
   team: "Team",
   profile: "Worker profile",
+  person: "Your memory",
   yours: "Your own",
   repository: "Repository",
   brief: "Project brief",
@@ -113,9 +145,9 @@ function noteOf(f: InstructionFile): string {
 
 /**
  * Every layer in force for the session, in the order its prompt reads them: the
- * organisation's, a team's and a worker profile's memory, then the person's own file, the
- * repository's and the brief. A file found and not read stays listed, saying why, so
- * nobody looks for one that never reached the prompt.
+ * organisation's, a team's and a worker profile's memory, the person's own memory, then
+ * their own file, the repository's and the brief. A file found and not read stays listed,
+ * saying why, so nobody looks for one that never reached the prompt.
  */
 export function instructionLayers(context: InstructionsContext): InstructionRow[] {
   return context.files.map((f) => {

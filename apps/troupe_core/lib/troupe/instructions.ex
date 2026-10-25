@@ -16,8 +16,10 @@ defmodule Troupe.Instructions do
 
   Before all of them come the organisation's memory documents (`Troupe.PlaneMemory`): the
   organisation's, a team's and a worker profile's, from the plane, in their own section
-  that says they are the organisation's word and no agent's to change. Each is held to its
-  own limit on the plane rather than to the files' budget, and listed with its version.
+  that says they are the organisation's word and no agent's to change. Then the person's own
+  memory from the plane, in a section of its own that says it is theirs and that an agent
+  adds to it only with `remember`. Each is held to its own limit on the plane rather than to
+  the files' budget, and listed with its version.
 
   Other tools' files are not read (Decision 828): `troupe onboard` brings what they say
   into Troupe's own files once. A `CLAUDE.md` or a `GEMINI.md` in one of those
@@ -113,18 +115,33 @@ defmodule Troupe.Instructions do
   working on wins; nearer files come later here.
   """
 
-  # The organisation's memory documents (`Troupe.PlaneMemory`), read before every file.
-  @memory_scopes [:organisation, :team, :profile]
+  # The organisation's memory documents (`Troupe.PlaneMemory`), read before every file, and
+  # the person's own from the plane after them. Named `person` here, as `user` is the
+  # person's own instruction file on this machine.
+  @organisation_scopes [:organisation, :team, :profile]
+  @memory_scopes [:person | @organisation_scopes]
 
   @memory_preamble """
   What your organisation's administrators wrote for every agent in their scope, kept on
   its Troupe plane: instructions from the organisation, which apply as written. Where two
   disagree the narrower wins: a team's over the organisation's, a worker profile's over
-  the team's, and the person's own instructions and the repository's files below over all
-  three. You cannot change these: no tool of yours writes them, and `remember` keeps only
-  the repository's memory. If you are asked to change one, say that you cannot, and that
-  an administrator edits it in the Troupe console: the organisation's and a team's under
-  Company memory, a worker profile's on that profile's page.
+  the team's, and the person's own memory and instructions and the repository's files below
+  over all three. You cannot change these: no tool of yours writes them, and `remember`
+  writes only the repository's memory and the person's own.
+  If you are asked to change one, say that you cannot, and that an administrator edits it in
+  the Troupe console: the organisation's and a team's under Company memory, a worker
+  profile's on that profile's page.
+  """
+
+  @person_preamble """
+  What the person you work for keeps for every session of theirs, on every machine, on
+  their Troupe plane: how they like to work, which applies as they wrote it, after the
+  organisation's memory and before the repository's files. You may add to it with
+  `remember` and `level: "me"`, one short entry at a time, when they ask you to remember
+  something about how they work or it is plainly about them rather than this repository;
+  you cannot change or remove what is there. They edit it themselves, with
+  `troupe memory --edit`, in the desktop app's Instructions pane, or under Mine in the
+  Troupe console.
   """
 
   @typedoc """
@@ -132,7 +149,7 @@ defmodule Troupe.Instructions do
   profile's memory documents, the person's own file, the repository root's, a directory
   between the root and where the session works, and the brief.
   """
-  @type scope :: :organisation | :team | :profile | :user | :root | :nested | :brief
+  @type scope :: :organisation | :team | :profile | :person | :user | :root | :nested | :brief
 
   @typedoc """
   One file in force. `size` is its bytes on disk; `chars` what reached the prompt, which
@@ -286,6 +303,7 @@ defmodule Troupe.Instructions do
   def to_prompt(%{files: files}, opts) do
     recall? = Keyword.get(opts, :recall, true)
     {memory, files} = Enum.split_with(files, &(&1.scope in @memory_scopes))
+    {own, memory} = Enum.split_with(memory, &(&1.scope == :person))
     {briefs, instructions} = Enum.split_with(files, &(&1.scope == :brief))
 
     blocks =
@@ -299,25 +317,28 @@ defmodule Troupe.Instructions do
         _ -> "# Instruction files\n#{@preamble}\n" <> Enum.join(blocks, "\n\n")
       end
 
-    [memory_section(memory), section | Enum.map(briefs, &brief_text(&1, recall?))]
+    [memory_section(memory), own_section(own), section | Enum.map(briefs, &brief_text(&1, recall?))]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
   end
 
   defp memory_section([]), do: ""
 
-  defp memory_section(documents) do
-    blocks =
-      Enum.map(documents, fn f ->
-        cut =
-          if f.trimmed > 0,
-            do: "\n\n(cut here: #{f.trimmed} more bytes of this document did not fit its limit)",
-            else: ""
+  defp memory_section(documents),
+    do: "# Your organisation's memory\n#{@memory_preamble}\n" <> Enum.map_join(documents, "\n\n", &document_block/1)
 
-        "#{String.capitalize(f.label, :ascii)} (version #{f.version}):\n#{f.text}#{cut}"
-      end)
+  defp own_section([]), do: ""
 
-    "# Your organisation's memory\n#{@memory_preamble}\n" <> Enum.join(blocks, "\n\n")
+  defp own_section(documents),
+    do: "# The person's own memory\n#{@person_preamble}\n" <> Enum.map_join(documents, "\n\n", &document_block/1)
+
+  defp document_block(f) do
+    cut =
+      if f.trimmed > 0,
+        do: "\n\n(cut here: #{f.trimmed} more bytes of this document did not fit its limit)",
+        else: ""
+
+    "#{String.capitalize(f.label, :ascii)} (version #{f.version}):\n#{f.text}#{cut}"
   end
 
   defp brief_text(%{memory: %{} = prompt}, recall?), do: Memory.compose(prompt, recall?)
@@ -986,7 +1007,7 @@ defmodule Troupe.Instructions do
     max = Troupe.Protocol.Memory.max_bytes()
 
     Enum.map(documents, fn document ->
-      scope = String.to_existing_atom(document["scope"])
+      scope = memory_scope(document["scope"])
       text = document["text"]
       trimmed = document["trimmed"] || 0
 
@@ -1016,7 +1037,11 @@ defmodule Troupe.Instructions do
 
   defp memory(_config), do: []
 
+  defp memory_scope("user"), do: :person
+  defp memory_scope(scope), do: String.to_existing_atom(scope)
+
   defp memory_path(%{"scope" => "organisation"}), do: "memory:organisation"
+  defp memory_path(%{"scope" => "user"}), do: "memory:user"
   defp memory_path(%{"scope" => scope, "name" => name}), do: "memory:#{scope}/#{name}"
 
   defp stat(path) do

@@ -165,7 +165,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "scope",
       type: :string,
       required: true,
-      values: Troupe.Protocol.Memory.scopes(),
+      values: Troupe.Protocol.Memory.organisation_scopes(),
       description:
         "Whose document: organisation (every session's), team (that team's sessions and its members' machines) or profile (the sessions on that worker profile's pods)."
     },

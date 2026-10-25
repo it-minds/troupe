@@ -18,6 +18,7 @@ import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, 
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { remoteOffer, syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
+import type { OwnMemory, OwnMemorySaved } from "./instructions.js";
 import type { MemoryBrief } from "./memory.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
 import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
@@ -994,6 +995,20 @@ export class DaemonClient {
    */
   memory(workspace: string): Promise<MemoryBrief> {
     return this.call<MemoryBrief>("memory.get", { workspace });
+  }
+
+  /**
+   * The person's own memory on the plane (troupe #55), read through this daemon's sign-in:
+   * what every session of theirs reads after their organisation's. Refused with a sentence
+   * where the daemon is signed in to no plane.
+   */
+  ownMemory(): Promise<OwnMemory> {
+    return this.call<OwnMemory>("me.memory");
+  }
+
+  /** Save it, the whole text over the version it was edited from; the sessions here read it from their next turn. */
+  putOwnMemory(text: string, version: number): Promise<OwnMemorySaved> {
+    return this.command<OwnMemorySaved>("me.memory.put", { text, version });
   }
 
   /** Forget one fact of a repository's memory, by its id; `memory.md` is written again without it. */

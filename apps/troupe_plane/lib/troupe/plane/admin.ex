@@ -2818,7 +2818,9 @@ defmodule Troupe.Plane.Admin do
     {:error,
      Error.new(:invalid_params, %{
        field: "scope",
-       reason: "scope is one of #{Enum.join(Troupe.Protocol.Memory.scopes(), ", ")}",
+       reason:
+         "scope is one of #{Enum.join(Troupe.Protocol.Memory.organisation_scopes(), ", ")}: " <>
+           "a person's own memory is theirs, and no administrator's method reads or changes it",
        scope: scope
      })}
   end

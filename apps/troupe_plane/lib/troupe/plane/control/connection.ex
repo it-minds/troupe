@@ -6,7 +6,9 @@ defmodule Troupe.Plane.Control.Connection do
   What crosses it is presence, the session *index*, usage records, and pushes back the
   other way. **No session content**, ever — a done item looks for a marker string sent
   as session input in captured control-channel traffic, and finding it would mean this
-  file is wrong.
+  file is wrong. Memory is not session content: the documents a session reads go down with
+  its activation, and the one thing that comes back is an entry an agent was asked to keep
+  in its person's own memory (`session.memory.put`), which is that person's from then on.
 
   The first message must be `enrol`, carrying the pod's projected ServiceAccount token.
   Until Kubernetes has said which namespace that token belongs to, the connection has
@@ -46,6 +48,7 @@ defmodule Troupe.Plane.Control.Connection do
     Fleet,
     GitHub,
     Identity,
+    Memory,
     Placement,
     Sessions,
     TeamBudget,
@@ -677,6 +680,58 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
+  # An agent of a session on this pod adding one entry to its owner's own memory
+  # (`remember` to `me`). The one level an agent may write: the organisation's, a team's
+  # and a profile's are read-only to every agent, and a pod asking to write one is refused
+  # whoever asks. Whose memory is read off the session row, as the key manager's subject is,
+  # so a pod can add only to the owner of a session it holds, and only an entry under the
+  # day's heading, never the document in place of what is there. The text is the person's
+  # memory, which reaches this pod anyway with every activation.
+  defp dispatch("session.memory.put", params, state) do
+    with {:scope, "user"} <- {:scope, params["scope"] || "user"},
+         %Session{} = session <- session_of(params["session_id"], state.worker),
+         :ok <- at_epoch(session, params["epoch"]),
+         {:owner, %User{active: true} = owner} <- {:owner, Identity.get_user(session.owner_subject)} do
+      case Memory.append_own(owner, params["append"], session: session.id) do
+        {:ok, saved} ->
+          {:ok, %{"entry" => saved.entry, "changed" => saved.changes != %{}, "version" => Memory.own(owner)["version"]}, state}
+
+        {:error, {:full, bytes}} ->
+          {:error,
+           Error.new(:invalid_params, %{
+             full: true,
+             reason:
+               "the person's memory is full: with this entry it would be #{bytes} bytes, past " <>
+                 "the #{Troupe.Protocol.Memory.max_bytes()} a document holds; they make room with `troupe memory --edit`"
+           }), state}
+
+        {:error, reason} ->
+          {:error, Error.new(:invalid_params, %{reason: own_reason(reason)}), state}
+      end
+    else
+      {:scope, scope} ->
+        {:error,
+         Error.new(:forbidden, %{
+           scope: scope,
+           reason:
+             "an agent writes only its person's own memory: the organisation's, a team's and " <>
+               "a profile's are read-only to agents, and an administrator changes them in the console"
+         }), state}
+
+      :stale_epoch ->
+        {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+
+      {:owner, %User{}} ->
+        {:error, Error.new(:forbidden, %{reason: "the session's owner is deactivated"}), state}
+
+      {:owner, nil} ->
+        {:error, Error.new(:forbidden, %{reason: "the session's owner has no memory of their own"}), state}
+
+      nil ->
+        {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+    end
+  end
+
   defp dispatch("bundle.fetch", params, state) do
     case fetch_bundle(params, state.worker) do
       %Bundle{} = bundle ->
@@ -797,6 +852,14 @@ defmodule Troupe.Plane.Control.Connection do
   end
 
   defp session_of(_session_id, _worker), do: nil
+
+  defp at_epoch(_session, nil), do: :ok
+  defp at_epoch(%Session{epoch: epoch}, epoch), do: :ok
+  defp at_epoch(_session, _epoch), do: :stale_epoch
+
+  defp own_reason(:no_person), do: "the session's owner has no memory of their own"
+  defp own_reason(reason) when is_binary(reason), do: reason
+  defp own_reason(reason), do: inspect(reason)
 
   defp fetch_bundle(%{"hash" => hash}, worker) when is_binary(hash) do
     Bundles.by_hash(hash, channel: channel_of(worker))

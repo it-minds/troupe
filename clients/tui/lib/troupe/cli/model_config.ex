@@ -93,6 +93,7 @@ defmodule Troupe.CLI.ModelConfig do
   end
 
   defp memory_label(%{"scope" => "organisation"}), do: "the organisation's memory"
+  defp memory_label(%{"scope" => "user"}), do: "your own memory"
   defp memory_label(%{"scope" => scope, "name" => name}), do: "the #{scope} #{name}'s memory"
 
   @doc """

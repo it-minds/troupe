@@ -24,6 +24,13 @@ defmodule Troupe.Gateway.Memory do
   Signing out of the plane the copy came from drops it (`forget/1`): the organisation's
   words are its members', and a machine whose person signed out is no longer one. The key
   the machine pinned for the plane stays, as the trust it is.
+
+  The person's own document is among them, last, and is the one this daemon also writes,
+  as its person: `put_own/1` sends their edit (`me.memory.put`, the whole text over the
+  version they edited) or an agent's entry (`append`, which `remember` with `level: "me"`
+  sends through `append/2`, installed as `Troupe.UserMemory`'s host), then asks `me.memory`
+  again, so the sessions running here read it from their next turn rather than the next
+  poll. Signed out, there is nowhere to send either, and it says so.
   """
 
   use GenServer
@@ -135,12 +142,88 @@ defmodule Troupe.Gateway.Memory do
   end
 
   defp key(%{"scope" => "organisation"}), do: "memory:organisation"
+  defp key(%{"scope" => "user"}), do: "memory:user"
   defp key(%{"scope" => scope, "name" => name}), do: "memory:#{scope}/#{name}"
+
+  # -- the person's own -------------------------------------------------------------
+
+  @doc """
+  The person's own document as the plane has it now, asked of the plane and kept as every
+  answer of `me.memory` is: `version` (`0` for none), `text`, `bytes`, `limit`, who saved it
+  and when, and `plane_url`. `{:error, :signed_out}` with no plane token.
+  """
+  @spec own() :: {:ok, map()} | {:error, :signed_out | term()}
+  def own do
+    with {:ok, url} <- signed_in(),
+         {:ok, answer} <- plane_call("me.memory", %{}) do
+      _kept = keep(url, answer)
+      own_of(answer, url)
+    end
+  end
+
+  @doc """
+  Save the person's own document on the plane: `%{"text" => ..., "version" => n}` for their
+  edit, `%{"append" => entry}` for one entry. Then the copy here is asked for again, so the
+  sessions running here read it from their next turn. Answers the plane's: `changed`, the
+  `entry` as kept for an append, and `user`, the document as it now stands.
+  """
+  @spec put_own(map()) :: {:ok, map()} | {:error, :signed_out | term()}
+  def put_own(params) when is_map(params) do
+    with {:ok, url} <- signed_in(),
+         {:ok, saved} <- plane_call("me.memory.put", Map.take(params, ["text", "version", "append"])) do
+      _refreshed = refresh()
+      {:ok, Map.put(saved, "plane_url", url)}
+    end
+  end
+
+  @doc """
+  Where `remember` with `level: "me"` sends its entry on this machine (`Troupe.UserMemory`):
+  `put_own/1` with the entry. The plane's refusal comes back as its sentence.
+  """
+  @spec append(String.t(), Troupe.Tool.Ctx.t()) :: {:ok, map()} | {:error, :signed_out | String.t()}
+  def append(entry, _ctx) do
+    case put_own(%{"append" => entry}) do
+      {:ok, saved} -> {:ok, %{"entry" => saved["entry"], "version" => get_in(saved, ["user", "version"])}}
+      {:error, :signed_out} -> {:error, :signed_out}
+      {:error, reason} -> {:error, sentence(reason)}
+    end
+  end
+
+  @doc "What a refusal of the plane's says, in words."
+  @spec sentence(term()) :: String.t()
+  def sentence({:rpc, %{"data" => %{"reason" => reason}}}) when is_binary(reason), do: reason
+  def sentence({:rpc, %{"code" => -32_601}}), do: "the plane keeps no memory of a person's own; it is from before it"
+  def sentence({:rpc, %{"message" => message}}), do: "the plane refused it (#{message})"
+  def sentence(:unauthorized), do: "the plane did not take this machine's sign-in; sign in again"
+  def sentence({:update_required, sentence}), do: sentence
+  def sentence(reason), do: format(reason)
+
+  defp signed_in do
+    case Plane.url() do
+      url when is_binary(url) -> if Plane.linked?(), do: {:ok, url}, else: {:error, :signed_out}
+      _none -> {:error, :signed_out}
+    end
+  end
+
+  defp plane_call(method, params) do
+    case Plane.call(method, params) do
+      {:error, :unlinked} -> {:error, :signed_out}
+      other -> other
+    end
+  end
+
+  defp own_of(%{"user" => %{} = own}, url), do: {:ok, Map.put(own, "plane_url", url)}
+
+  defp own_of(_answer, _url),
+    do: {:error, {:rpc, %{"code" => -32_601, "message" => "method_not_found"}}}
 
   # -- the poll ---------------------------------------------------------------------
 
   @impl GenServer
   def init(opts) do
+    # This daemon is where an agent's entry for its person's own memory goes.
+    :ok = Troupe.UserMemory.install(&__MODULE__.append/2)
+
     every =
       Keyword.get(opts, :poll_ms, Application.get_env(:troupe_gateway, :memory_poll_ms, @poll_ms))
 

@@ -545,6 +545,46 @@ defmodule Troupe.Plane.BundlesTest do
              ]
     end
 
+    # Issue #55's user level: a person's own memory rides with their sessions' activation,
+    # after the organisation's levels, and a save of it tells the pods holding their running
+    # sessions and nobody else's.
+    test "a person's own memory reaches their sessions on a pod, last, and nobody else's",
+         context do
+      {:ok, v1} = Bundles.publish("stable", %{"agents" => ["build"]}, announce: false)
+      pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+      ada = granted_user()
+      bo = person("bo@example.test", ["engineering"])
+      hers = dormant_session(ada, "dev", v1.version)
+      his = dormant_session(bo, "dev", v1.version)
+
+      {:ok, _} = Memory.put(:organisation, "Everyone.", "root@example.test")
+      {:ok, _} = Memory.save_own(ada, "I write British English.", 0)
+
+      assert Enum.map(pushed(pod, hers, ada)["memory"], &{&1["scope"], &1["text"]}) == [
+               {"organisation", "Everyone."},
+               {"user", "I write British English."}
+             ]
+
+      assert Enum.map(pushed(pod, his, bo)["memory"], & &1["scope"]) == ["organisation"]
+
+      # Running now; her next save reaches her session at its next turn, not his.
+      id = hers.id
+      theirs = his.id
+      {:ok, _} = Memory.append_own(ada, "Prefers small pull requests.", session: id)
+
+      assert_receive {:pushed, ^pod, "session.memory", %{"session_id" => ^id} = told}, 5_000
+      assert [%{"scope" => "organisation"}, %{"scope" => "user", "text" => text}] = told["memory"]
+      assert text =~ "I write British English.\n\n## "
+      assert text =~ "- Prefers small pull requests."
+      refute_receive {:pushed, ^pod, "session.memory", %{"session_id" => ^theirs}}, 500
+
+      # And an organisation's save keeps her own in what her session is told it reads.
+      {:ok, _} = Memory.put(:organisation, "Everyone, v2.", "root@example.test")
+      _told = Memory.announce(:organisation)
+      assert_receive {:pushed, ^pod, "session.memory", %{"session_id" => ^id} = again}, 5_000
+      assert Enum.map(again["memory"], & &1["scope"]) == ["organisation", "user"]
+    end
+
     # Issue #724: the profile's per-tool rules ride the same way, each with the profile that
     # wrote it, those of a profile it extends first, so a rule reaches a session at its next
     # wake and restarts no pod.
