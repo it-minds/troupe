@@ -15,6 +15,12 @@ defmodule Troupe.Gateway.Memory do
     * when a client hands it an answer it fetched itself (`troupe config pull`,
       `config.memory`).
 
+  Every ask carries what each session running here read at its last turn (`sessions`, each
+  document's scope, name, version and hash and when the turn began), which the plane keeps
+  so its console sees which sessions are behind: a field on the poll the daemon makes anyway,
+  not a call of its own. `status/0` says where this machine stands, for `troupe memory
+  --status`.
+
   One writer for all three (`keep/2`): a copy the pin refuses is not kept, and the copy
   before stays. A copy whose documents changed is announced to every client as
   `config.changed` (scope `memory`, the documents that changed as its keys), and given to
@@ -38,6 +44,7 @@ defmodule Troupe.Gateway.Memory do
   alias Troupe.Gateway.{Connections, Plane}
   alias Troupe.PlaneKeys
   alias Troupe.PlaneMemory
+  alias Troupe.Protocol.Memory, as: Shape
 
   require Logger
 
@@ -54,7 +61,7 @@ defmodule Troupe.Gateway.Memory do
   @spec refresh() :: :ok | {:ok, map()} | {:error, term()}
   def refresh do
     with url when is_binary(url) <- Plane.url(),
-         {:ok, answer} <- Plane.call("me.memory", %{}) do
+         {:ok, answer} <- Plane.call("me.memory", asked()) do
       keep(url, answer)
     else
       {:error, {:rpc, %{"code" => -32_601}}} -> :ok
@@ -63,6 +70,67 @@ defmodule Troupe.Gateway.Memory do
       _no_plane -> :ok
     end
   end
+
+  # What every ask of `me.memory` carries: what each session running here read at its last
+  # turn, by session id, when the turn began, and each document's scope, name, version and
+  # hash, never its text, so the console sees who is behind. Nothing else of a session.
+  defp asked, do: %{"sessions" => Troupe.Session.PlaneMemory.reads()}
+
+  @doc """
+  Where this machine's memory stands, for its person's own debugging (`troupe memory
+  --status`): the copy kept here (`plane_url`, `fetched_at`, `documents`, each `scope`,
+  `name`, `version` and `hash`, and `problem` where the copy is refused), the plane's
+  documents in force now where it could be asked (`in_force`, then kept as every answer is)
+  and whether the copy was `current`, and each session running here with what its last turn
+  read and whether that is `current` against the copy now. `reason` says why the plane was
+  not asked.
+  """
+  @spec status() :: map()
+  def status do
+    {held, problem} =
+      case PlaneMemory.read_cache() do
+        {:ok, cached} -> {cached, nil}
+        :absent -> {nil, nil}
+        {:error, reason} -> {nil, reason}
+      end
+
+    held_stamps = Enum.map((held && held["documents"]) || [], &Shape.stamp/1)
+
+    # The plane's answer, checked and kept as every answer is, is what is in force now.
+    asked =
+      with {:ok, url} <- signed_in(),
+           {:ok, answer} <- plane_call("me.memory", asked()),
+           {:ok, _kept} <- keep(url, answer) do
+        {:ok, documents_now()}
+      end
+
+    now = documents_now()
+
+    %{
+      "plane_url" => (held && held["plane_url"]) || Plane.url(),
+      "fetched_at" => held && held["fetched_at"],
+      "path" => Troupe.Paths.display(PlaneMemory.cache_path()),
+      "documents" => held_stamps,
+      "problem" => problem,
+      "sessions" =>
+        Enum.map(Troupe.Session.PlaneMemory.reads(), &Map.put(&1, "current", same?(&1["documents"], now)))
+    }
+    |> Map.merge(in_force(asked, held_stamps))
+  end
+
+  defp in_force({:ok, stamps}, held), do: %{"in_force" => stamps, "current" => same?(held, stamps), "reason" => nil}
+  defp in_force({:error, :signed_out}, _held), do: %{"in_force" => nil, "current" => nil, "reason" => "signed out: the plane was not asked"}
+  defp in_force({:error, reason}, _held), do: %{"in_force" => nil, "current" => nil, "reason" => sentence(reason)}
+
+  defp documents_now do
+    case PlaneMemory.read_cache() do
+      {:ok, cached} -> Enum.map(cached["documents"] || [], &Shape.stamp/1)
+      _none -> []
+    end
+  end
+
+  defp same?(a, b), do: MapSet.new(List.wrap(a), &stamp_key/1) == MapSet.new(List.wrap(b), &stamp_key/1)
+  defp stamp_key(stamp), do: {stamp["scope"], stamp["name"], stamp["version"], stamp["hash"]}
 
   @doc """
   Keep a plane's `me.memory` answer as this machine's copy, as the plane signed it. Answers
@@ -155,7 +223,7 @@ defmodule Troupe.Gateway.Memory do
   @spec own() :: {:ok, map()} | {:error, :signed_out | term()}
   def own do
     with {:ok, url} <- signed_in(),
-         {:ok, answer} <- plane_call("me.memory", %{}) do
+         {:ok, answer} <- plane_call("me.memory", asked()) do
       _kept = keep(url, answer)
       own_of(answer, url)
     end

@@ -41,6 +41,7 @@
     "commands/mcp.tools.json",
     "commands/me.memory.json",
     "commands/me.memory.put.json",
+    "commands/me.memory.status.json",
     "commands/memory.decline.json",
     "commands/memory.forget.json",
     "commands/memory.get.json",

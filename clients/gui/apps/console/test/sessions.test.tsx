@@ -45,6 +45,15 @@ describe("sessions", () => {
     await sees("Metadata only");
   });
 
+  // A running pod session whose last turn read an older version of its memory
+  // than the one in force is marked; one that read the version in force is not.
+  it("marks a running session whose last turn read memory older than the version in force", async () => {
+    await open();
+    await waitFor(() => row("s-7f3a9c21"), "the sessions");
+    await sees("memory: behind", row("s-7f3a9c21")!);
+    expect(says("memory: behind", row("s-7f3a9c23")!)).toBe(false);
+  });
+
   it("searches, filters by state and profile at the plane, and says what to do when nothing matches", async () => {
     await open();
     await waitFor(() => row("s-7f3a9c21"), "the sessions");

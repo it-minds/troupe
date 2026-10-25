@@ -191,6 +191,9 @@ defmodule Troupe.Gateway.Dispatch do
     # sign-in (#55): what every session of theirs reads, on every machine.
     "me.memory" => :control,
     "me.memory.put" => :control,
+    # Where this machine's copy of the plane's memory stands, and what each session here
+    # last read: for the person's own debugging (`troupe memory --status`).
+    "me.memory.status" => :observe,
     # A first run's questions (Decision 705): reading where it stands says nothing
     # secret; answering sends a key to a provider, writes the settings and starts a
     # session, so it takes what `config.set` takes.
@@ -1202,6 +1205,10 @@ defmodule Troupe.Gateway.Dispatch do
   # save of it or an entry (`Memory.put_own/1`), sent with this daemon's sign-in and read by
   # the sessions running here from their next turn. Signed out, a sentence.
   defp handle("me.memory", _params, _context), do: own_memory(Memory.own())
+
+  # Where this machine's copy stands against the plane, and what each session here read at
+  # its last turn (`Memory.status/0`). Signed out it still says what the copy holds.
+  defp handle("me.memory.status", _params, _context), do: {:ok, Memory.status()}
 
   defp handle("me.memory.put", params, _context) do
     case params do

@@ -335,7 +335,13 @@ defmodule Troupe.Plane.Harness do
   # team's, and their own last. Signed as the organisation's document is, since a machine
   # takes them as instructions and keeps a copy. Beside them, `user`: their own as they edit
   # it, with the version a save names, which is there for a document never saved or cleared.
-  defp handle("me.memory", _params, %{user: user}) do
+  #
+  # The poll carries what the machine's running sessions read at their last turn
+  # (`sessions`, each its id, when the turn began and each document's scope, name, version
+  # and hash), which the console's who-is-behind reads. Kept for the caller alone.
+  defp handle("me.memory", params, %{user: user}) do
+    :ok = Memory.machine(user, params["sessions"])
+
     {:ok,
      Signing.signed("memory", %{"documents" => Memory.for_person(user), "user" => Memory.own(user)})}
   end
