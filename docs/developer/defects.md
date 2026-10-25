@@ -113,7 +113,7 @@ row, and on a page past 400 lines; a full page is closed and the next one,
 | [D133](defects/d130.md#d133---offers-memory-refresh-the-signed-policy-and-the-picker-after-chunk-40-low) | Offers, memory refresh, the signed policy and the picker after chunk 40 | low |
 | [D134](defects/d130.md#d134---the-gates-desk-walk-the-charts-hand-steps-the-upgrade-test-and-the-seam-after-chunk-41-low) | The gate's desk walk, the chart's hand steps, the upgrade test and the seam after chunk 41 | low |
 | [D135](defects/d130.md#d135---signing-wired-the-last-hand-steps-the-docs-new-shape-and-the-seam-after-chunk-42-low) | Signing wired, the last hand steps, the docs' new shape and the seam after chunk 42 | low |
-| [D136](defects/d130.md#d136---a-person-s-memory-the-drains-offers-after-a-restart-and-the-sweep-after-chunk-43-low) | A person's memory, the drains, offers after a restart and the sweep after chunk 43 | low |
+| [D136](defects/d130.md#d136---a-persons-memory-the-drains-offers-after-a-restart-and-the-sweep-after-chunk-43-low) | A person's memory, the drains, offers after a restart and the sweep after chunk 43 | low |
 
 The pages: [D8 to D62](defects/d008.md), [D63 to D89](defects/d063.md),
 [D90 to D120](defects/d090.md), [D121 to D129](defects/d121.md) and
