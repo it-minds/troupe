@@ -74,6 +74,10 @@ defmodule Troupe.Operator.FakeCluster do
     Agent.get(__MODULE__, &Map.get(&1.objects, {api_version, kind, namespace, name}))
   end
 
+  @doc "Write an object as another writer would, such as the plane's annotation on a profile."
+  @spec put(map()) :: :ok
+  def put(object), do: Agent.update(__MODULE__, &put_in(&1, [:objects, key(object)], object))
+
   @doc "Every delete the cluster was asked for and carried out, oldest first."
   @spec deleted() :: [{String.t(), String.t(), String.t() | nil, String.t()}]
   def deleted, do: Agent.get(__MODULE__, &Enum.reverse(&1.deleted))

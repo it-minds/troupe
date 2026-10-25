@@ -506,14 +506,15 @@ defmodule Troupe.Operator.Resources do
 
   # And when they are *not* external. A worker fetches its session key from the key
   # manager and reads and writes sealed segments in object storage; a pod that could
-  # reach neither could not activate a session at all. The same goes for a model gateway
-  # or an MCP server the profile names by a `.svc` host. None of these is reachable by
+  # reach neither could not activate a session at all. The same goes for a model gateway,
+  # an MCP server or an MCP identity's token endpoint the profile names by a `.svc` host. None of these is reachable by
   # an FQDN rule — the name resolves to a Service address, which Cilium translates to a
   # pod before it applies policy — nor by the public rule above, which leaves out the
   # private ranges a cluster lives in. So each is its namespace and its port.
   defp in_cluster_rules(%Profile{} = profile, %Settings{} = settings) do
     [settings.bao_address, settings.object_store_endpoint, profile.llm_endpoint]
     |> Enum.concat(Enum.map(profile.mcp_servers, & &1.url))
+    |> Enum.concat(Enum.map(profile.mcp_identities, & &1.token_url))
     |> Enum.flat_map(&in_cluster_rule/1)
     |> Enum.uniq()
   end
@@ -646,18 +647,39 @@ defmodule Troupe.Operator.Resources do
   # The policy check refuses such a profile before anything is rendered; this holds
   # whatever path reaches here, because a bare `*` written as a `matchPattern` is every
   # name there is, and `**.` any number of labels.
+  #
+  # An entry written `host:port` is its host on that port alone (`Policy.host_and_port/1`):
+  # the host is the name or the address, and the port a `toPorts` beside it, one rule per
+  # port. As a `matchName` that carried the port it admitted nothing, and without Cilium the
+  # NetworkPolicy admits the same entry on that port (`Reach.admitted/1`).
   defp allowlist_rules(profile, settings) do
     own =
       profile
       |> Profile.egress_destinations()
-      |> Enum.reject(&Reach.refused?/1)
       |> Enum.filter(&Policy.pattern?/1)
+      |> Enum.map(&Policy.host_and_port/1)
+      |> Enum.reject(fn {host, _port} -> Reach.refused?(host) end)
 
-    hosts = Enum.uniq(own ++ platform_hosts(settings))
+    platform = for host <- platform_hosts(settings), do: {host, nil}
+
+    (own ++ platform)
+    |> Enum.uniq()
+    |> Enum.group_by(fn {_host, port} -> port end, fn {host, _port} -> host end)
+    |> Enum.sort_by(fn {port, _hosts} -> port || 0 end)
+    |> Enum.flat_map(fn {port, hosts} -> port_rules(Enum.uniq(hosts), port) end)
+  end
+
+  defp port_rules(hosts, port) do
     {addresses, names} = Enum.split_with(hosts, &address_block/1)
 
-    fqdn_rule(names) ++ cidr_rule(addresses |> Enum.map(&address_block/1) |> Enum.uniq())
+    (fqdn_rule(names) ++ cidr_rule(addresses |> Enum.map(&address_block/1) |> Enum.uniq()))
+    |> Enum.map(&on_port(&1, port))
   end
+
+  defp on_port(rule, nil), do: rule
+
+  defp on_port(rule, port),
+    do: Map.put(rule, "toPorts", [%{"ports" => [%{"port" => Integer.to_string(port), "protocol" => "TCP"}]}])
 
   defp fqdn_rule([]), do: []
   defp fqdn_rule(hosts), do: [%{"toFQDNs" => Enum.map(hosts, &fqdn_selector/1)}]
@@ -667,11 +689,12 @@ defmodule Troupe.Operator.Resources do
 
   # The one address a literal names, as a block of one in its shortest form, or `nil` for
   # a name. Strictly: `:inet.parse_address/1` also takes `10.1` for an address, which
-  # nobody writing an endpoint means by it.
+  # nobody writing an endpoint means by it. Printed as `Reach` prints its blocks, so `::2`
+  # is `::2/128` and not the dotted form `:inet.ntoa/1` gives it.
   defp address_block(host) do
     case :inet.parse_strict_address(String.to_charlist(host)) do
-      {:ok, {_a, _b, _c, _d} = address} -> "#{:inet.ntoa(address)}/32"
-      {:ok, address} -> "#{:inet.ntoa(address)}/128"
+      {:ok, {_a, _b, _c, _d} = address} -> "#{Reach.ntoa(address)}/32"
+      {:ok, address} -> "#{Reach.ntoa(address)}/128"
       {:error, _not_an_address} -> nil
     end
   end

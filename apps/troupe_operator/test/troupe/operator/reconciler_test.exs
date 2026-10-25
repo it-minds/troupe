@@ -463,6 +463,39 @@ defmodule Troupe.Operator.ReconcilerTest do
       assert status()["podsBehind"] == []
     end
 
+    test "acts on a drain the plane records at once, though the generation has not moved" do
+      # The plane's record is an annotation, which no generation counts: the event it makes
+      # is one the pass that last ran this generation would halt, and the pod would wait
+      # for the next resync.
+      conn =
+        FakeCluster.start([
+          policy(),
+          profile(),
+          stateful_set(update: "troupe-w-dev-b", current: "troupe-w-dev-a", replicas: 2),
+          pod("troupe-w-dev-0", "troupe-w-dev-b"),
+          pod("troupe-w-dev-1", "troupe-w-dev-a", ready: false)
+        ])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+      ran = get({"troupe.dev/v1alpha1", "WorkerProfile", "troupe-system", "dev"})
+      assert SkipObserved.observed?(ran)
+
+      drained =
+        put_in(ran, ["metadata", "annotations"], %{
+          Profile.drained_annotation() => Profile.encode_drained(%{"troupe-w-dev-1" => "troupe-w-dev-a"})
+        })
+
+      refute SkipObserved.observed?(drained)
+
+      # Once a pass has run it, the next event the same record carries is halted again. The
+      # StatefulSet's revisions are its controller's, which the first pass's apply left out.
+      FakeCluster.put(drained)
+      FakeCluster.put(stateful_set(update: "troupe-w-dev-b", current: "troupe-w-dev-a", replicas: 2))
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+      assert FakeCluster.deleted() == [{"v1", "Pod", "troupe-w-dev", "troupe-w-dev-1"}]
+      assert SkipObserved.observed?(get({"troupe.dev/v1alpha1", "WorkerProfile", "troupe-system", "dev"}))
+    end
+
     test "keeps a pod that is behind and that the plane has not drained" do
       # Not Ready, so a drain has started, and its sessions may still be being sealed.
       conn =

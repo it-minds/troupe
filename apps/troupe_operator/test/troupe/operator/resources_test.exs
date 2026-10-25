@@ -1279,6 +1279,57 @@ defmodule Troupe.Operator.ResourcesTest do
       refute Enum.any?(names, &(&1 =~ ~r/^[\d.]+$/ or &1 =~ ":"))
     end
 
+    # A `matchName` that carried the port admitted nothing, so a port in an entry worked
+    # without Cilium only. Now the same entry is the host on that port in both modes.
+    test "an egress.fqdns entry with a port is that host on that port, with Cilium as without",
+         %{policy: policy} do
+      profile =
+        [
+          egress: %{
+            "fqdns" => ["registry.example.test:5000", "10.1.2.4:5432", "[fd00::5]:8443", "pypi.example.test"],
+            "gitHosts" => []
+          }
+        ]
+        |> profile()
+        |> Profile.from_resource()
+
+      with_cilium = Resources.for_profile(profile, policy, %Settings{cilium_available: true})
+      [cilium] = all(with_cilium, "CiliumNetworkPolicy")
+      rules = get_in(cilium, ["spec", "egress"])
+
+      assert %{
+               "toFQDNs" => [%{"matchName" => "registry.example.test"}],
+               "toPorts" => [%{"ports" => [%{"port" => "5000", "protocol" => "TCP"}]}]
+             } in rules
+
+      assert %{
+               "toCIDR" => ["10.1.2.4/32"],
+               "toPorts" => [%{"ports" => [%{"port" => "5432", "protocol" => "TCP"}]}]
+             } in rules
+
+      assert %{
+               "toCIDR" => ["fd00::5/128"],
+               "toPorts" => [%{"ports" => [%{"port" => "8443", "protocol" => "TCP"}]}]
+             } in rules
+
+      # A name with no port is admitted on any, as before, and no name carries a port.
+      assert "pypi.example.test" in fqdn_names(with_cilium)
+      refute Enum.any?(fqdn_names(with_cilium), &String.contains?(&1, ":"))
+      refute Enum.any?(rules, &(is_nil(&1["toPorts"]) and "10.1.2.4/32" in (&1["toCIDR"] || [])))
+
+      # Without Cilium: the public rule's addresses on the name's port, and the address on
+      # its own.
+      without =
+        profile
+        |> Resources.for_profile(policy, %Settings{cilium_available: false})
+        |> egress()
+        |> address_rules()
+
+      assert public_addresses_on([5000]) in without
+      assert one_address_on("10.1.2.4/32", 5432) in without
+      assert one_address_on("fd00::5/128", 8443) in without
+    end
+
     test "an object store and OpenBao inside the cluster stay their namespace, with no FQDN rule",
          %{profile: profile, policy: policy} do
       # The chart's defaults. A `.svc` name resolves to a Service address, which an FQDN rule

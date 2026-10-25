@@ -35,9 +35,9 @@ defmodule Troupe.Plane.Reach do
   names, with every such endpoint in a sentence (`unreachable`) and why and what to do
   (`reason`, which the editor shows).
 
-  What the put sets up is checked: its LLM endpoint, its MCP servers, its `egress.fqdns`,
-  and the servers its channel's bundle gives its pods. A put without a spec changes none of
-  them.
+  What the put sets up is checked: its LLM endpoint, its MCP servers, its MCP identities'
+  token endpoints, its `egress.fqdns`, and the servers its channel's bundle gives its pods.
+  A put without a spec changes none of them.
   """
   @spec check(map()) :: :ok | {:error, Error.t()}
   def check(attrs) do
@@ -95,7 +95,15 @@ defmodule Troupe.Plane.Reach do
         is_binary(url),
         do: {:mcp, to_string(server["name"]), url}
       ) ++
+      tokens(spec) ++
       fqdns
+  end
+
+  # The token endpoint each MCP identity names, which its pods dial for every token.
+  defp tokens(spec) do
+    for %{"tokenUrl" => url} = identity <- list(spec["mcpIdentities"]),
+        is_binary(url) and url != "",
+        do: {:token, to_string(identity["server"]), url}
   end
 
   # A put names its provisioner or keeps the one the row has; a profile it does not name is

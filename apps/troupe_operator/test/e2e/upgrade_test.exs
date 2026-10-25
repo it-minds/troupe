@@ -122,6 +122,38 @@ defmodule Troupe.E2E.UpgradeTest do
       what: "a new revision of #{name}'s StatefulSet"
     )
 
+    # The plane records the pod's drain finished, and the operator acts on that record at
+    # once rather than at its next resync, half a minute later: the record is an
+    # annotation, which no generation counts.
+    World.eventually(fn -> drained?(name, revision) end,
+      timeout: 600_000,
+      every: 500,
+      what: "the plane to record #{name}'s pod drained"
+    )
+
+    recorded = System.monotonic_time(:millisecond)
+
+    # A pod still Ready when the record lands is not replaced yet, and its readiness
+    # changing is no event the operator hears: that one waits for the resync, so the time
+    # is claimed only for the ordinary order, in which the drain took it out of its
+    # Service before the plane's next step recorded it.
+    if ready?(namespace) do
+      IO.puts(:stderr, """
+
+      SKIPPED: #{name}'s pod was still Ready when the plane recorded its drain, so how soon
+      the operator acted on the record was not timed.
+      """)
+    else
+      World.eventually(fn -> replacing?(namespace, uid) end,
+        timeout: 120_000,
+        every: 500,
+        what: "the operator to replace #{name}'s drained pod"
+      )
+
+      took = System.monotonic_time(:millisecond) - recorded
+      assert took < 10_000, "the operator took #{took} ms to act on a drain the plane recorded"
+    end
+
     # And then nothing is done by hand.
     World.eventually(
       fn ->
@@ -171,6 +203,34 @@ defmodule Troupe.E2E.UpgradeTest do
     case World.kubectl(["get", "statefulset", "-n", namespace, "troupe-w-" <> name, "-o", "jsonpath={.status.updateRevision}"]) do
       {output, 0} -> String.trim(output)
       _missing -> nil
+    end
+  end
+
+  # Whether the plane's record of finished drains names a pod on `revision`.
+  defp drained?(name, revision) do
+    path = ~S|jsonpath={.metadata.annotations.troupe\.dev/drained}|
+
+    with {output, 0} <- World.kubectl(["get", "workerprofile", name, "-n", World.namespace(), "-o", path]),
+         {:ok, %{} = drained} <- Jason.decode(String.trim(output)) do
+      revision in Map.values(drained)
+    else
+      _unrecorded -> false
+    end
+  end
+
+  # The pod `uid` is being deleted, or is gone and another stands in its place.
+  defp replacing?(namespace, uid) do
+    path = "jsonpath={.items[0].metadata.uid} {.items[0].metadata.deletionTimestamp}"
+
+    case World.kubectl(["get", "pods", "-n", namespace, "-l", "app.kubernetes.io/name=troupe-worker", "-o", path]) do
+      {output, 0} ->
+        case String.split(output, " ", trim: true) do
+          [^uid] -> false
+          _deleting_or_replaced -> true
+        end
+
+      _no_pod ->
+        true
     end
   end
 

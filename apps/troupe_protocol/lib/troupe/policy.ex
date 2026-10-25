@@ -186,10 +186,45 @@ defmodule Troupe.Policy do
   merely covers some of the names it would reach. The operator renders such an entry as
   a Cilium `matchPattern`, whose `*` is also a single label, so what was admitted here
   and what the network allows are the same set of names.
+
+  An entry written `host:port` is its host and its port, compared apart
+  (`host_and_port/1`): the host as above, and a pattern with no port covers any port, one
+  with a port that port alone. So `api.example.com:8443` passes a policy holding
+  `api.example.com` or `*.example.com`, and the operator admits the host on that port, with
+  Cilium as without.
   """
   @spec matches?(String.t(), String.t()) :: boolean()
-  def matches?(host, pattern) do
-    pattern?(host) and pattern?(pattern) and covers?(host, pattern)
+  def matches?(entry, pattern) do
+    {host, port} = host_and_port(entry)
+    {covering, only} = host_and_port(pattern)
+
+    pattern?(entry) and pattern?(pattern) and covers?(host, covering) and only in [nil, port]
+  end
+
+  @doc """
+  An egress entry's host and port, apart: `api.example.com:8443` is
+  `{"api.example.com", 8443}`, `[2001:db8::1]:8443` is `{"2001:db8::1", 8443}`, and an
+  entry with no port, an IPv6 address among them, is itself and `nil`. A port is one to
+  five digits after the one colon, or after the bracket; anything else is not a port, and
+  the entry is taken as written. The admission rule reads an entry the same way.
+  """
+  @spec host_and_port(String.t()) :: {String.t(), :inet.port_number() | nil}
+  def host_and_port(entry) when is_binary(entry) do
+    with [host, port] <- split_port(entry),
+         true <- Regex.match?(~r/\A[0-9]{1,5}\z/, port) do
+      {host, String.to_integer(port)}
+    else
+      _no_port -> {entry, nil}
+    end
+  end
+
+  defp split_port("[" <> rest), do: :binary.split(rest, "]:")
+
+  defp split_port(entry) do
+    case String.split(entry, ":") do
+      [_host, _port] = parts -> parts
+      _none_or_v6 -> [entry]
+    end
   end
 
   defp covers?(host, "*." <> domain) do

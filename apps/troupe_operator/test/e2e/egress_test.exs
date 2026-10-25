@@ -166,6 +166,59 @@ defmodule Troupe.E2E.EgressTest do
     end
   end
 
+  describe "an egress.fqdns entry with a port" do
+    # A public host that answers on both ports, which the cluster's policy allows by name
+    # (`dev/kind/values.yaml`) and the profile names on one of them.
+    @ported {"example.net", 443}
+    @other_port {"example.net", 80}
+
+    test "is judged by its host and its port, by the plane and at admission", context do
+      # Compared as the whole string, an entry with a port passed no policy naming its host.
+      # The plane's check and the API server's admission rule both read the port apart now.
+      Plane.profile!(context.profile, context.channel, %{"egress" => %{"fqdns" => ["example.net:443"]}})
+      on_exit(fn -> Plane.profile!(context.profile, context.channel) end)
+
+      assert {_admitted, 0} = admission_dry_run(context.profile, ["example.net:8443"])
+
+      # And a host the policy does not name is refused, its port named with it.
+      assert {refused, status} = admission_dry_run(context.profile, ["elsewhere.example.org:443"])
+      assert status != 0
+      assert refused =~ "egress to elsewhere.example.org:443 is outside the patterns allowed by TroupePolicy"
+    end
+
+    test "is its host on that port, and on no other", context do
+      outsider = context.outsider
+
+      # Both ports answer a pod under no policy, so the refusal below is the rule's and not
+      # a port nobody listens on.
+      if reachable_from_here?(@ported) and connects?(outsider.namespace, outsider.pod, @other_port) do
+        Plane.profile!(context.profile, context.channel, %{"egress" => %{"fqdns" => ["example.net:443"]}})
+        on_exit(fn -> Plane.profile!(context.profile, context.channel) end)
+
+        namespace = World.worker_namespace(context.profile)
+        pod = pod(context.profile)
+
+        World.eventually(fn -> connects?(namespace, pod, @ported) end,
+          timeout: 120_000,
+          every: 5_000,
+          what: "a worker to reach example.net:443, which its profile names"
+        )
+
+        refute connects?(namespace, pod, @other_port), """
+        A worker pod opened a connection to example.net:80, while its profile names the host
+        on 443 alone. An egress.fqdns entry's port admits the host on every port.
+        """
+      else
+        IO.puts(:stderr, """
+
+        SKIPPED: example.net does not answer on 443 from this machine, or on 80 from a pod
+        under no policy, so whether an entry's port is the only one a worker reaches was
+        not tested.
+        """)
+      end
+    end
+  end
+
   describe "a neighbour" do
     test "is not reached by a worker, and reaches a worker only as the ingress", context do
       pod = pod(context.profile)
@@ -432,6 +485,29 @@ defmodule Troupe.E2E.EgressTest do
 
     %URI{host: host, port: port} = URI.parse(url)
     {host, port}
+  end
+
+  # A profile like `profile`'s, under another name and with these `egress.fqdns`, put to the
+  # API server and its admission rule without being stored.
+  defp admission_dry_run(profile, fqdns) do
+    held = World.kubectl!(["get", "workerprofile", profile, "-n", World.namespace(), "-o", "json"])
+    spec = held |> Jason.decode!() |> Map.fetch!("spec") |> put_in([Access.key("egress", %{}), "fqdns"], fqdns)
+
+    probe = %{
+      "apiVersion" => "troupe.dev/v1alpha1",
+      "kind" => "WorkerProfile",
+      "metadata" => %{"name" => profile <> "-port-probe", "namespace" => World.namespace()},
+      "spec" => spec
+    }
+
+    path = Path.join(System.tmp_dir!(), "troupe-e2e-#{System.unique_integer([:positive])}.json")
+    File.write!(path, Jason.encode!(probe))
+
+    try do
+      World.kubectl(["apply", "--dry-run=server", "-f", path])
+    after
+      File.rm(path)
+    end
   end
 
   defp reachable_from_here?({host, port}) do
