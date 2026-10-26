@@ -42,9 +42,9 @@ export interface Artifact {
   id: string;
   title: string;
   kind: ArtifactKind;
-  /** `private`, `organisation`, `team:<name>` or `profile:<name>`. */
+  /** `organisation`, `team:<name>`, `profile:<name>`, or `private` for its owner alone. */
   visibility: string;
-  /** Which tab it is under for this caller; absent from a plane before teams. */
+  /** Which part of a gallery it is in for this caller (`scopeOf`); absent from a plane from before it. */
   scope?: ArtifactScope;
   owner: ArtifactPerson;
   /** Whether it is the caller's own. */
@@ -204,6 +204,35 @@ export function textBytes(text: string): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(binary);
+}
+
+/** Who an artifact is for, as a gallery groups them: everyone, a team's or a profile's people, a link's, or its owner alone. */
+export type ArtifactAudience = "everyone" | "team" | "shared" | "private";
+
+/**
+ * Which part of the gallery an `artifact.list` row is in (`scope`): `mine`, `private` (the caller's own private one), `organisation`,
+ * `team:<name>`, `profile:<name>` or `shared`, a link's. A plane that does not say it yet is
+ * read from the row: the caller's own, one a link gave them (the ids a `shared` listing
+ * answered), or its visibility.
+ */
+export function scopeOf(artifact: Artifact, shared: ReadonlySet<string> = new Set()): string {
+  if (typeof artifact.scope === "string" && artifact.scope !== "") return artifact.scope;
+  if (artifact.mine) return "mine";
+  return shared.has(artifact.id) ? "shared" : artifact.visibility;
+}
+
+/** Who it is for: its visibility, or a link where that is how the caller has it. */
+export function audienceOf(artifact: Artifact, shared: ReadonlySet<string> = new Set()): ArtifactAudience {
+  if (artifact.visibility === "private") return "private";
+  if (scopeOf(artifact, shared) === "shared") return "shared";
+  if (artifact.visibility === "organisation") return "everyone";
+  return "team";
+}
+
+/** The team's or the profile's name an artifact is for, or null. */
+export function audienceName(artifact: Artifact): string | null {
+  const m = /^(?:team|profile):(.+)$/.exec(artifact.visibility);
+  return m ? m[1]! : null;
 }
 
 /** The person's own calls on artifacts, one per method. */

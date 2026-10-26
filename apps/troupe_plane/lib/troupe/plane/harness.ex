@@ -115,6 +115,9 @@ defmodule Troupe.Plane.Harness do
     # The person's own memory document, theirs alone to change.
     "me.memory.preview" => :observe,
     "me.memory.put" => :control,
+    # Its history, for the person's own app: every version, two side by side, a rollback.
+    "me.memory.history" => :observe,
+    "me.memory.rollback" => :control,
     "me.clients" => :observe,
     "me.connections.list" => :observe,
     "me.connections.grant" => :control,
@@ -414,6 +417,38 @@ defmodule Troupe.Plane.Harness do
   defp handle("me.memory.put", params, %{user: user}) do
     with :ok <- own_memory(user),
          {:ok, saved} <- save_own(user, params) do
+      {:ok, own_saved(user, saved)}
+    end
+  end
+
+  # The person's own memory's history, theirs alone as the document is: every version with
+  # who saved it and when, newest first; `version`'s text (the one in force where none is
+  # named) beside `against`'s (the version before it where none is named), and the plane's
+  # line diff between them, as the console's editor has them for the organisation's levels.
+  defp handle("me.memory.history", params, %{user: user}) do
+    with :ok <- own_memory(user),
+         {:ok, shown} <- own_version(user, params["version"]),
+         {:ok, before} <- own_against(user, shown, params["against"]) do
+      {:ok,
+       %{
+         "versions" => user |> Memory.versions() |> Enum.map(&Memory.summary/1),
+         "version" => shown && shown.version,
+         "text" => (shown && shown.text) || "",
+         "against" => before && before.version,
+         "against_text" => before && before.text,
+         "diff" => Memory.diff(before && before.text, shown && shown.text)
+       }}
+    end
+  end
+
+  # A rollback of the person's own: version `to`'s text saved as the next version, over
+  # `version` as every save is, audited as `memory.put` with `rolled_back_to` and a note, so
+  # its lines keep who wrote them in the version brought back. Answered as `me.memory.put` is.
+  defp handle("me.memory.rollback", params, %{user: user}) do
+    with :ok <- own_memory(user),
+         {:ok, to} <- rollback_to(params["to"]),
+         {:ok, %{text: text}} <- own_version(user, to),
+         {:ok, saved} <- own_rollback(user, text, to, params["version"]) do
       {:ok, own_saved(user, saved)}
     end
   end
@@ -1578,6 +1613,33 @@ defmodule Troupe.Plane.Harness do
 
   defp own_result({:error, :no_person}), do: own_memory(nil)
   defp own_result({:error, reason}) when is_binary(reason), do: invalid(reason)
+
+  # One version of the person's own: the one in force for none named, `not_found` for one
+  # there is not.
+  defp own_version(user, nil), do: {:ok, Memory.current(user)}
+
+  defp own_version(user, number) when is_integer(number) do
+    case Memory.version(user, number) do
+      nil -> {:error, Error.new(:not_found, %{version: number})}
+      found -> {:ok, found}
+    end
+  end
+
+  defp own_version(_user, _other), do: invalid("version is a number", field: "version")
+
+  defp own_against(user, shown, nil),
+    do: {:ok, if(shown && shown.version > 1, do: Memory.version(user, shown.version - 1))}
+
+  defp own_against(user, _shown, number), do: own_version(user, number)
+
+  defp rollback_to(to) when is_integer(to) and to > 0, do: {:ok, to}
+  defp rollback_to(_to), do: invalid("to is the number of the version to roll back to", field: "to")
+
+  defp own_rollback(user, text, to, base) when is_integer(base) and base >= 0,
+    do: own_result(Memory.save_own(user, text, base, rolled_back_to: to, note: "rolled back to v#{to}"))
+
+  defp own_rollback(_user, _text, _to, _base),
+    do: invalid("version is the version in force, which the rollback replaces", field: "version")
 
   defp own_saved(user, saved) do
     %{

@@ -46,11 +46,22 @@ function sentence(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export function Publish({ daemon, sessionId, onClose }: { daemon: DaemonClient; sessionId?: string | undefined; onClose: () => void }): JSX.Element {
+export function Publish({
+  daemon,
+  sessionId,
+  target: chosenTarget,
+  onClose,
+}: {
+  daemon: DaemonClient;
+  sessionId?: string | undefined;
+  /** One of the person's own, chosen already: the gallery's "Publish a new version". */
+  target?: string | undefined;
+  onClose: () => void;
+}): JSX.Element {
   const [list, setList] = useState<ArtifactList & { plane_url?: string } | null>(null);
   const [listError, setListError] = useState<string | null>(null);
-  const [mode, setMode] = useState<"new" | "version">("new");
-  const [target, setTarget] = useState<string>("");
+  const [mode, setMode] = useState<"new" | "version">(chosenTarget ? "version" : "new");
+  const [target, setTarget] = useState<string>(chosenTarget ?? "");
   const [files, setFiles] = useState<File[]>([]);
   const [title, setTitle] = useState("");
   const [visibility, setVisibility] = useState("private");

@@ -14,12 +14,12 @@
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
-import type { Artifact, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactUpload } from "./artifacts.js";
+import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactTicket, ArtifactUpload } from "./artifacts.js";
 import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { remoteOffer, syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
-import type { OwnMemory, OwnMemorySaved } from "./instructions.js";
+import type { MemoryStatus, OwnMemory, OwnMemoryHistory, OwnMemorySaved } from "./instructions.js";
 import type { Invitee, InviteRole, SealedRead } from "./invites.js";
 import type { MemoryBrief } from "./memory.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
@@ -1042,8 +1042,23 @@ export class DaemonClient {
    * what every session of theirs reads after their organisation's. Refused with a sentence
    * where the daemon is signed in to no plane.
    */
-  ownMemory(): Promise<OwnMemory> {
-    return this.call<OwnMemory>("me.memory");
+  ownMemory(opts: { blame?: boolean } = {}): Promise<OwnMemory> {
+    return this.call<OwnMemory>("me.memory", opts.blame ? { blame: true } : {});
+  }
+
+  /** Its history: every version, `version`'s text (the one in force for none) beside `against`'s, and the line diff. */
+  ownMemoryHistory(params: { version?: number; against?: number } = {}): Promise<OwnMemoryHistory> {
+    return this.call<OwnMemoryHistory>("me.memory.history", { ...params });
+  }
+
+  /** Version `to`'s text again as the next version, over `version`, the one in force as it was read. */
+  rollbackOwnMemory(to: number, version: number): Promise<OwnMemorySaved> {
+    return this.command<OwnMemorySaved>("me.memory.rollback", { to, version });
+  }
+
+  /** Where this computer's copy of the plane's memory stands, and what each session here read at its last turn. */
+  memoryStatus(): Promise<MemoryStatus> {
+    return this.call<MemoryStatus>("me.memory.status");
   }
 
   /**
@@ -1074,6 +1089,36 @@ export class DaemonClient {
   /** The person's own artifacts on the plane, and where the console's gallery is. */
   artifacts(filter: ArtifactFilter = { mine: true }): Promise<ArtifactList & { plane_url?: string }> {
     return this.call<ArtifactList & { plane_url?: string }>("artifact.list", { ...filter });
+  }
+
+  /** One artifact with its versions, and for its owner its links: the plane's `artifact.get`. */
+  artifact(id: string): Promise<ArtifactDetail> {
+    return this.call<ArtifactDetail>("artifact.get", { id });
+  }
+
+  /** A one-time address on the artifacts host that opens it, or one version of it, asked at the moment it is opened. */
+  openArtifact(id: string, version?: number): Promise<ArtifactTicket> {
+    return this.call<ArtifactTicket>("artifact.open", version === undefined ? { id } : { id, version });
+  }
+
+  /** A link to it, `view` or `edit`, its token shown this once. The owner's. */
+  shareArtifact(id: string, role: "view" | "edit" = "view"): Promise<ArtifactNewLink> {
+    return this.command<ArtifactNewLink>("artifact.share", { id, role });
+  }
+
+  /** Revoke a link by its id, or one person from every link to it. The owner's. */
+  unshareArtifact(id: string, which: { share: string } | { person: string }): Promise<{ revoked: boolean }> {
+    return this.command<{ revoked: boolean }>("artifact.unshare", { id, ...which });
+  }
+
+  /** Version `version`'s files again as the next version. */
+  rollbackArtifact(id: string, version: number): Promise<ArtifactDetail> {
+    return this.command<ArtifactDetail>("artifact.rollback", { id, version });
+  }
+
+  /** The version its address serves, or null for the newest. The owner's. */
+  pinArtifact(id: string, version: number | null): Promise<ArtifactDetail> {
+    return this.command<ArtifactDetail>("artifact.pin", { id, version });
   }
 
   /** Forget one fact of a repository's memory, by its id; `memory.md` is written again without it. */
