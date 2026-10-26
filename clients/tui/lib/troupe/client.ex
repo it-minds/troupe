@@ -730,6 +730,15 @@ defmodule Troupe.Client do
           {:ok, map()} | {:conflict, map()} | {:error, String.t()}
   def save_own_memory(text, version), do: OwnMemory.save(text, version)
 
+  @doc "The person's own memory's versions, and two of their texts side by side."
+  @spec memory_history(keyword()) :: {:ok, map()} | {:error, String.t()}
+  def memory_history(opts \\ []), do: OwnMemory.history(opts)
+
+  @doc "Roll the person's own memory back to a version, over the one in force as they saw it."
+  @spec rollback_own_memory(pos_integer(), non_neg_integer()) ::
+          {:ok, map()} | {:conflict, map()} | {:error, String.t()}
+  def rollback_own_memory(to, version), do: OwnMemory.rollback(to, version)
+
   @doc "Where this machine's copy of the memory stands, as `troupe memory --status` says it."
   @spec memory_status() :: {:ok, map()} | {:error, String.t()}
   def memory_status, do: OwnMemory.status()

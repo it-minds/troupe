@@ -163,52 +163,68 @@ defmodule Troupe.Gateway.ArtifactsTest do
              Enum.find(FakePlane.calls(ctx.plane.state), &match?({"artifact.list", _}, &1))
   end
 
-  test "one artifact, the address that opens it, a file of it and a link are asked of the plane through the daemon",
-       ctx do
-    id = "art-fakefakefakefake"
+  # The desktop app's gallery and viewer, and the terminal's: one artifact with its versions, a
+  # ticket to open it or one version on its host, one text file of a version, a view link and its revoking, a rollback and a pin, each the
+  # plane's own method sent with the daemon's sign-in, its answer and its refusal as the
+  # plane gave them.
+  test "the viewer's methods are forwarded to the plane as the person, its refusals kept", ctx do
+    forwarded = [
+      {"artifact.get", %{"id" => "art-fakefakefakefake"}},
+      {"artifact.open", %{"id" => "art-fakefakefakefake", "version" => 1}},
+      {"artifact.read", %{"id" => "art-fakefakefakefake", "version" => 1, "path" => "index.md"}},
+      {"artifact.share", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "role" => "view"}},
+      {"artifact.unshare", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "share" => "sh-1"}},
+      {"artifact.rollback", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => 1}},
+      {"artifact.pin", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => nil}}
+    ]
 
-    for method <- ~w(artifact.get artifact.open artifact.read) do
+    for {method, params} <- forwarded do
       assert {:error, %{message: "unavailable", data: %{"reason" => reason}}} =
-               Client.call(ctx.client, method, %{"id" => id})
+               Client.call(ctx.client, method, params)
 
-      assert reason =~ "not signed in to a Troupe plane"
+      assert reason =~ "not signed in to a Troupe plane", method
     end
 
+    refute Enum.any?(FakePlane.calls(ctx.plane.state), &match?({"artifact." <> _, _}, &1))
     assert {:ok, %{"linked" => true}} = link(ctx)
 
-    assert {:ok, %{"versions" => [%{"n" => 1}]}} = Client.call(ctx.client, "artifact.get", %{"id" => id})
+    assert {:ok, %{"versions" => [%{"n" => 1}], "plane_url" => url}} =
+             Client.call(ctx.client, "artifact.get", %{"id" => "art-fakefakefakefake"})
 
-    assert {:ok, %{"url" => "https://artifacts.example.test/enter?ticket=t-2"}} =
-             Client.call(ctx.client, "artifact.open", %{"id" => id, "version" => 2})
+    assert url == ctx.plane.url
 
-    assert {:ok, %{"text" => "# Weekly"}} =
-             Client.call(ctx.client, "artifact.read", %{"id" => id, "path" => "index.md"})
+    assert {:ok, %{"url" => "https://artifacts.example.test/enter?ticket=" <> _, "expires_in" => 60}} =
+             Client.call(ctx.client, "artifact.open", %{"id" => "art-fakefakefakefake", "version" => 1})
 
-    assert {:ok, %{"url" => "https://artifacts.example.test/s/tok"}} =
-             Client.call(ctx.client, "artifact.share", %{
+    assert {:ok, %{"url" => "https://artifacts.example.test/s/" <> _, "share" => %{"role" => "view"}}} =
+             Client.call(ctx.client, "artifact.share", Enum.at(forwarded, 3) |> elem(1))
+
+    assert {:ok, %{"text" => "# Weekly"}} = Client.call(ctx.client, "artifact.read", Enum.at(forwarded, 2) |> elem(1))
+
+    for {method, params} <- Enum.drop(forwarded, 4) do
+      assert {:ok, _answer} = Client.call(ctx.client, method, params), method
+    end
+
+    calls = FakePlane.calls(ctx.plane.state)
+
+    for {method, params} <- forwarded do
+      {^method, sent} = Enum.find(calls, &match?({^method, _}, &1))
+      refute Map.has_key?(sent, "command_id")
+      assert sent == Map.delete(params, "command_id"), method
+    end
+
+    # A refusal keeps its code: one the person may not see is not there.
+    assert {:error, %{message: "not_found"}} =
+             Client.call(ctx.client, "artifact.get", %{"id" => "art-somebody-elses"})
+
+    assert {:error, %{message: "forbidden", data: %{"reason" => reason}}} =
+             Client.call(ctx.client, "artifact.pin", %{
                "command_id" => Client.command_id(),
-               "id" => id,
-               "role" => "view"
+               "id" => "art-somebody-elses",
+               "version" => 1
              })
 
-    # Only what each method takes reaches the plane.
-    calls = FakePlane.calls(ctx.plane.state)
-    assert {"artifact.share", %{"id" => ^id, "role" => "view"} = shared} = Enum.find(calls, &match?({"artifact.share", _}, &1))
-    refute Map.has_key?(shared, "command_id")
-
-    # The plane's refusal comes back as its own.
-    assert {:error, %{message: "invalid_params", data: %{"reason" => _}}} =
-             Client.call(ctx.client, "artifact.get", %{"id" => "art-nobody"})
-
-    # A client in Local only asks the plane nothing about them.
-    assert {:ok, _} = Client.call(ctx.client, "client.mode", %{"local_only" => true})
-    before = length(FakePlane.calls(ctx.plane.state))
-
-    assert {:error, %{data: %{"reason" => reason}}} =
-             Client.call(ctx.client, "artifact.open", %{"id" => id})
-
-    assert reason =~ "Local only"
-    assert length(FakePlane.calls(ctx.plane.state)) == before
+    assert reason =~ "owner"
   end
 
   test "a session's agent publishes through the daemon, naming the session and itself", ctx do

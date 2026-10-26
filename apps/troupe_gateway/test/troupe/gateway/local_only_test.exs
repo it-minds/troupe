@@ -177,6 +177,14 @@ defmodule Troupe.Gateway.LocalOnlyTest do
 
     assert own =~ "Local only"
 
+    # Its history and a rollback are the plane's as much.
+    for {method, params} <- [{"me.memory.history", %{}}, {"me.memory.rollback", %{"to" => 1, "version" => 2}}] do
+      assert {:error, %{message: "forbidden", data: %{"reason" => why}}} =
+               Client.call(ctx.local, method, Map.put(params, "command_id", Client.command_id()))
+
+      assert why =~ "Local only", method
+    end
+
     asked = length(FakePlane.calls(ctx.plane.state))
     assert {:ok, status} = Client.call(ctx.local, "me.memory.status", %{})
     assert status["reason"] =~ "Local only"
@@ -281,6 +289,14 @@ defmodule Troupe.Gateway.LocalOnlyTest do
     assert reason =~ "Local only"
 
     assert {:error, %{message: "forbidden"}} = Client.call(ctx.local, "artifact.list", %{})
+
+    # Nor the desktop app's gallery and viewer, which go to the plane through the daemon.
+    for method <- ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.rollback artifact.pin) do
+      assert {:error, %{message: "forbidden", data: %{"reason" => why}}} =
+               Client.call(ctx.local, method, %{"command_id" => Client.command_id(), "id" => "art-1"})
+
+      assert why =~ "Local only", method
+    end
 
     File.write!(Path.join(ctx.workspace, "report.md"), "# Weekly\n")
 

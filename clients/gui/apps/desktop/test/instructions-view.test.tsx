@@ -13,7 +13,7 @@ import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, render, sees, startOnTheList, waitFor } from "./support";
+import { button, render, sees, seesButton, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -88,7 +88,9 @@ describe("a session on this computer", () => {
       "Repository | /home/alice/notes/CLAUDE.mdnot read: run troupe onboard | the repository's root | ",
     ]);
     const pane = [...backstage().querySelectorAll("section")].find((s) => s.querySelector("h3")?.textContent === "Instructions")!;
-    expect(pane.querySelectorAll("input, select, textarea, button")).toHaveLength(0);
+    // Nothing on it changes anything: its one button goes to the Memory view.
+    expect(pane.querySelectorAll("input, select, textarea")).toHaveLength(0);
+    expect([...pane.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Open your memory"]);
 
     // A save on the plane reached the session: its turn says so, and the pane follows.
     daemon.instructions = layers(4);
@@ -100,65 +102,29 @@ describe("a session on this computer", () => {
   });
 });
 
-// #55's user level: the person's own memory is the one layer edited in the pane, in place,
-// through this computer's daemon, saved over the version it was edited from.
+// #55's user level: the person's own memory is listed as its own layer, and read and changed
+// in the app's Memory view, which the pane links to; nothing is edited here.
 describe("your own memory", () => {
-  const open = async (): Promise<void> => {
+  it("is listed as its own layer, and the pane opens the Memory view for it", async () => {
+    localStorage.setItem("troupe.pref.localOnly", "yes");
+    daemon.instructions = {
+      ...layers(3),
+      files: [memory("organisation", null, 3, "the organisation's memory"), { ...memory("person", null, 2, "your own memory"), path: "memory:user" }],
+    };
+    daemon.seed("/home/alice/notes");
     unmount = render(<App />).unmount;
     const row = await waitFor(
       () => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("/home/alice/notes")),
       "the session's row",
     );
     row.click();
-    const tab = await waitFor(() => document.querySelector(".backstage") && button("Instructions", backstage()), "the Instructions tab");
-    // The app opened on this computer alone; the pane is opened with Local only turned off.
-    localStorage.setItem("troupe.pref.localOnly", "no");
-    tab.click();
-  };
-
-  it("is listed as its own layer, edited in place and saved over the version it was edited from", async () => {
-    localStorage.setItem("troupe.pref.localOnly", "yes");
-    daemon.instructions = {
-      ...layers(3),
-      files: [memory("organisation", null, 3, "the organisation's memory"), { ...memory("person", null, 2, "your own memory"), path: "memory:user" }],
-    };
-    daemon.own = { version: 2, text: "I write British English." };
-    daemon.seed("/home/alice/notes");
-    await open();
+    (await waitFor(() => document.querySelector(".backstage") && button("Instructions", backstage()), "the Instructions tab")).click();
 
     await sees("your own memory");
     expect(rows()[1]).toBe("Your memory | your own memory | https://plane.example.test, fetched 2026-10-23T09:00:00Z | version 2");
-
-    const mine = () => document.querySelector<HTMLElement>('[aria-label="Your own memory"]');
-    await waitFor(() => mine()?.textContent?.includes("I write British English."), "I write British English.");
-    (await waitFor(() => button("Edit your memory", mine()!), "the edit button")).click();
-    const area = await waitFor(() => mine()!.querySelector<HTMLTextAreaElement>("textarea"), "the editor");
-    const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
-    set.call(area, "I write British English.\nTabs, not spaces.");
-    area.dispatchEvent(new Event("input", { bubbles: true }));
-    button("Save", mine()!)!.click();
-
-    await waitFor(() => mine()?.textContent?.includes("Saved as version 3"), "Saved as version 3");
-    expect(daemon.ownPuts).toEqual([expect.objectContaining({ text: "I write British English.\nTabs, not spaces.", version: 2 })]);
-    expect(daemon.own).toEqual({ version: 3, text: "I write British English.\nTabs, not spaces." });
-
-    // Saved somewhere else meanwhile: said, and nothing overwritten.
-    daemon.own = { version: 5, text: "From the other laptop." };
-    button("Edit your memory", mine()!)!.click();
-    const again = await waitFor(() => mine()!.querySelector<HTMLTextAreaElement>("textarea"), "the editor again");
-    set.call(again, "Mine.");
-    again.dispatchEvent(new Event("input", { bubbles: true }));
-    button("Save", mine()!)!.click();
-    await waitFor(() => mine()?.textContent?.includes("version 5 is in force now"), "version 5 is in force now");
-    expect(daemon.own).toEqual({ version: 5, text: "From the other laptop." });
-  });
-
-  it("says why it cannot be edited with the daemon signed in to no plane", async () => {
-    localStorage.setItem("troupe.pref.localOnly", "yes");
-    daemon.seed("/home/alice/notes");
-    await open();
-    await sees("not signed in to a Troupe plane");
-    expect(button("Edit your memory")).toBeNull();
+    expect(backstage().querySelector("textarea")).toBeNull();
+    (await seesButton("Open your memory", backstage())).click();
+    await waitFor(() => document.querySelector(".memory-screen"), "the Memory view");
   });
 });
 

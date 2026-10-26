@@ -23,7 +23,6 @@ paths:
   - apps/troupe_core/lib/troupe/commands.ex
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
   - apps/troupe_gateway/lib/troupe/gateway/memory.ex
-  - apps/troupe_plane/lib/troupe/plane/memory.ex
   - clients/tui/test/troupe/artifacts_screen_test.exs
   - clients/tui/test/troupe/memory_screen_test.exs
   - clients/tui/test/troupe/artifacts_cli_test.exs
@@ -51,13 +50,12 @@ repository brief's facts alone, and HQ listed no invitations (D137).
 ## Artifacts
 
 **Through the daemon, never the terminal's own sign-in.** `/artifacts`, `troupe artifacts`
-and HQ's shared line ask this computer's daemon (`artifact.list`, and `artifact.get`,
-`artifact.open`, `artifact.read` and `artifact.share`, which the daemon now forwards to the
-plane as the person, `observe` but the link, `control`), so the terminal and the desktop app
-see the same list, and Local only is the daemon's to keep as for every `artifact.*`; the
-terminal under `local_only` asks nothing at all and says "Local only: the plane is not
-asked". The desktop app's slot adds the same daemon methods; whichever lands second keeps
-one copy.
+and HQ's shared line ask this computer's daemon: `artifact.list`, and the methods root
+Decision 954 forwards to the plane as the person (`artifact.get`, `artifact.open`,
+`artifact.share`), to which this adds `artifact.read` (`observe`), one text file of a version.
+So the terminal and the desktop app see the same list, and Local only is the daemon's to keep
+as for every `artifact.*`; the terminal under `local_only` asks nothing at all and says
+"Local only: the plane is not asked".
 
 **Grouped by who can see it, in the desktop app's words.** The maintainer's design for the
 gallery names four audiences with a glyph each: ◉ *Everyone at* the organisation, ◎ *Your
@@ -97,18 +95,18 @@ replacing the lower ones'. `/memory` is the terminal form of the design's page: 
 replaces), then ◉ the organisation's, ◎ each team's and ○ Only you, a level the person
 cannot change here marked `· read`. Until the plane answers entries, the client reads them
 from each level's text (`Troupe.Client.MemoryEntries`) and saves Only you's whole text over
-its version — a shim to go when it does. The daemon's `me.memory` now carries the levels it
-answered with (`documents`) and, asked, the person's versions with their text (`versions`,
-the newest fifty, a plane change); its `me.memory.status` carries the copy's texts (`held`),
-which is all the page reads under Local only, where it is read-only.
+its version — a shim to go when it does. It reads the levels from the daemon's `me.memory`
+(`documents`) and the history from `me.memory.history` and `me.memory.rollback`, root
+Decision 954's; the daemon's `me.memory.status` now carries the copy's texts (`held`), which
+is all the page reads under Local only, where it is read-only.
 
 **Only you's, changed on the page.** `a` takes the topic on the page — refused where Only you
 has it, said to replace a lower level's where one has — and the words in the person's editor
 (`VISUAL`, then `EDITOR`), or, with neither set, in a box here, rather than Notepad or `vi`
 uninvited; `e` edits and `f` forgets after a confirm line. A save names the version it was
 made on: a `conflict` shows the person's text beside the version saved since, and `l`
-reloads it. `h` lists the versions, two side by side, `r` saves an old one again (a version
-of its own); `b` is who wrote each line, `troupe memory --blame`'s column; `s` is `--status`'s
+reloads it. `h` lists the versions, two side by side, `r` rolls back to one (a version of its
+own); `b` is who wrote each line, `troupe memory --blame`'s column; `s` is `--status`'s
 lines. A `memory_changed` in the session, or the daemon's `config.changed` for memory, reads
 the page again. The organisation's and a team's are read-only here in this slice: a team
 admin's and a platform admin's saves go through the console until the daemon forwards
@@ -132,7 +130,6 @@ it replaces, a team read, edit in the editor and in a box, a clash refused and o
 replace, forget after its confirm, a conflict beside the version saved since and reloaded,
 the versions side by side and a roll back, who wrote each line, Local only read-only from
 the copy), `artifacts_cli_test.exs`, `hq_inbox_test.exs`, against `FakeRemote` with the
-embedded daemon linked to it; the gateway's `artifacts_test.exs` (the four forwarded,
-signed out a sentence, Local only nothing asked) and `plane_memory_test.exs` (`versions` and
-`documents` through, `held`), and the plane's `own_memory_versions_test.exs`. All failed on
-the chunk's tip (`e544a82f`): no screen, command, method or `versions`.
+embedded daemon linked to it; the gateway's `artifacts_test.exs` (the forwarded
+methods with `artifact.read` among them) and `plane_memory_test.exs` (`held`). All failed on the
+chunk's tip (`e544a82f`): no screen, command or method.

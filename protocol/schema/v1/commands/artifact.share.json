@@ -18,7 +18,8 @@
   },
   "required": [
     "command_id",
-    "id"
+    "id",
+    "role"
   ],
   "title": "artifact.share",
   "type": "object"

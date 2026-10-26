@@ -20,11 +20,14 @@
 //                          it (src/plane_word.rs)
 //   an agent's file        a person's or a repository's, in the editor the system opens
 //                          Markdown with, and no other file (src/agent_file.rs)
+//   an artifact's window   an artifact shown from its own host in a window of its own,
+//                          granted nothing, never fetched into the app (src/artifact_window.rs)
 //
 // Each one is reached through `TroupeShell` in `src/shell.ts`, which the shell installs
 // on `window.troupe` at startup. Nothing else in the bundle knows this process exists.
 //
 mod agent_file;
+mod artifact_window;
 mod daemon;
 mod notify;
 mod plane_word;
@@ -54,6 +57,7 @@ pub fn run() {
             secrets::secret_set,
             secrets::secret_delete,
             agent_file::agent_file_open,
+            artifact_window::artifact_window_open,
             daemon::daemon_endpoint,
             daemon::daemon_start,
             notify::notify_show,

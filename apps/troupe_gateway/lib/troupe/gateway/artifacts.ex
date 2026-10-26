@@ -15,7 +15,8 @@ defmodule Troupe.Gateway.Artifacts do
   and the publish names the handle instead of carrying the files.
 
   `list/1` is the person's own artifacts on the plane, for a client's "Publish a new version
-  of…", with where the console's gallery is; `forward/2` the rest a client browses them with.
+  of…", with where the console's gallery is. `forward/2` is what the desktop app's gallery
+  and viewer ask of one artifact, each the plane's method of the same name.
   """
 
   alias Troupe.Gateway.{LocalOnly, Memory, Plane}
@@ -83,37 +84,41 @@ defmodule Troupe.Gateway.Artifacts do
     end
   end
 
-  # What each of a client's other artifact methods carries to the plane: one artifact by its
-  # id, a version where one is asked, a file of it, and a link's role.
+  # What a client's gallery and viewer ask of one artifact, each the plane's own method with
+  # the arguments it takes, nothing else of what the client sent: one with its versions, a
+  # ticket to open it or one version on its host, a view or edit link and its revoking, a
+  # rollback and a pin. The plane decides who may: the owner, an edit link's holder, a reader.
   @forwarded %{
     "artifact.get" => ~w(id),
     "artifact.open" => ~w(id version),
+    # One text file of a version, for the terminal's frame.
     "artifact.read" => ~w(id version path),
-    "artifact.share" => ~w(id role expires)
+    "artifact.share" => ~w(id role expires),
+    "artifact.unshare" => ~w(id share person),
+    "artifact.rollback" => ~w(id version),
+    "artifact.pin" => ~w(id version)
   }
 
+  @doc "The methods `forward/2` sends to the plane."
+  @spec forwarded() :: [String.t()]
+  def forwarded, do: Map.keys(@forwarded)
+
   @doc """
-  One of the person's artifact methods asked of the linked plane as them, the plane's answer
-  as it is: `artifact.get` (one with its versions), `artifact.open` (a one-time address that
-  opens it on the artifacts host), `artifact.read` (one text file of a version) and
-  `artifact.share` (a link to one of theirs).
+  One of `forwarded/0`, sent to the linked plane as this daemon's person: the plane's answer
+  with `plane_url`, or its refusal as it gave it (`{:rpc, error}`).
   """
   @spec forward(String.t(), map()) :: {:ok, map()} | {:error, :signed_out | term()}
   def forward(method, params) when is_map_key(@forwarded, method) do
     with url when is_binary(url) <- Plane.url(),
          true <- Plane.linked?(),
          {:ok, answer} <- Plane.call(method, Map.take(params, @forwarded[method])) do
-      {:ok, answer}
+      {:ok, Map.put(answer, "plane_url", url)}
     else
       {:error, :unlinked} -> {:error, :signed_out}
       {:error, reason} -> {:error, reason}
       _signed_out -> {:error, :signed_out}
     end
   end
-
-  @doc "The methods `forward/2` carries."
-  @spec forwarded() :: [String.t()]
-  def forwarded, do: Map.keys(@forwarded)
 
   # Inline where it fits in one call; else by an upload handle, the files sent to the
   # object store first and the publish naming the handle.

@@ -5,9 +5,6 @@
   "properties": {
     "blame": {
       "type": "boolean"
-    },
-    "versions": {
-      "type": "boolean"
     }
   },
   "required": [],

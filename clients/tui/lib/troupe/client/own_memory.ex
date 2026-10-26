@@ -17,14 +17,13 @@ defmodule Troupe.Client.OwnMemory do
 
   @doc """
   The document as the plane has it now: `version` (`0` for none), `text`, `bytes`, `limit`,
-  who saved it and `plane_url`; `blame: true` adds `lines`, `versions: true` `versions`.
+  who saved it and `plane_url`, and the levels above it (`documents`); `blame: true` adds `lines`.
   """
   @spec own(keyword()) :: {:ok, map()} | {:error, String.t()}
   def own(opts \\ []) do
     params =
       %{}
       |> then(&if(opts[:blame], do: Map.put(&1, "blame", true), else: &1))
-      |> then(&if(opts[:versions], do: Map.put(&1, "versions", true), else: &1))
 
     case Link.call("me.memory", params) do
       {:ok, own} -> {:ok, own}
@@ -41,8 +40,11 @@ defmodule Troupe.Client.OwnMemory do
           {:ok, map()} | {:conflict, map()} | {:error, String.t()}
   def save(text, version) do
     params = %{"command_id" => Protocol.command_id(), "text" => text, "version" => version}
+    saved(Link.call("me.memory.put", params))
+  end
 
-    case Link.call("me.memory.put", params) do
+  defp saved(answer) do
+    case answer do
       {:ok, %{"user" => now} = saved} ->
         {:ok, Map.put(now, "changed", saved["changed"] != false)}
 
@@ -58,6 +60,36 @@ defmodule Troupe.Client.OwnMemory do
       {:error, reason} ->
         {:error, Artifacts.reason(reason)}
     end
+  end
+
+  @doc """
+  The document's history (`me.memory.history`): every version, newest first, each `{version,
+  hash, bytes, changed_by, changed_at}`, and `version`'s text beside `against`'s (`text`,
+  `against_text`), the one in force and the one before it where none is named.
+  """
+  @spec history(keyword()) :: {:ok, map()} | {:error, String.t()}
+  def history(opts \\ []) do
+    params =
+      for {key, value} <- [{"version", opts[:version]}, {"against", opts[:against]}],
+          value != nil,
+          into: %{},
+          do: {key, value}
+
+    case Link.call("me.memory.history", params) do
+      {:ok, answer} -> {:ok, answer}
+      {:error, reason} -> {:error, Artifacts.reason(reason)}
+    end
+  end
+
+  @doc """
+  Roll back to version `to`, over `version`, the one in force as the person saw it: its text
+  saved as the next version. Answered as `save/2` is.
+  """
+  @spec rollback(pos_integer(), non_neg_integer()) ::
+          {:ok, map()} | {:conflict, map()} | {:error, String.t()}
+  def rollback(to, version) do
+    params = %{"command_id" => Protocol.command_id(), "to" => to, "version" => version}
+    saved(Link.call("me.memory.rollback", params))
   end
 
   @doc """

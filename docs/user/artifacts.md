@@ -127,3 +127,13 @@ script from the web, or on inline script, needs those moved into files of its ow
 
 Opening one signs you in to that host for an hour, through the plane. If you follow a link to
 an artifact while signed out, you are sent to the console to sign in first.
+
+**In the desktop app**, *Artifacts* in the rail is the same gallery, read through this
+computer's daemon: cards grouped by when, chips for who each is for (everyone, your teams and
+profiles, shared with you by a link, only you) and a search. A card new to you is one whose
+newest version this computer has not opened. The one you choose shows its versions, where it
+came from and who can see it; **Open** shows it in a window of its own, from its own host,
+and each version opens the same way. **Copy link** copies a view link for your own and the
+address for anybody else's. On your own you can also pin or roll back to a version, revoke a
+link and publish a new version. The app never loads an artifact into itself. Under *Local
+only* the gallery asks the plane nothing.

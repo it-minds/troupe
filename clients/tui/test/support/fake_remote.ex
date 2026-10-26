@@ -1187,15 +1187,11 @@ defmodule Troupe.FakeRemote do
     end
   end
 
-  # The person's own memory, its versions and who wrote it, and the levels above it.
+  # The person's own memory and who wrote it, and the levels above it.
   defp dispatch(state, _kind, "me.memory", params, _pid) do
-    own = own_document(state)
-
     own =
-      own
-      |> then(
-        &if(params["versions"] == true, do: Map.put(&1, "versions", state.own_versions), else: &1)
-      )
+      state
+      |> own_document()
       |> then(fn own ->
         if params["blame"] == true,
           do:
@@ -1233,6 +1229,30 @@ defmodule Troupe.FakeRemote do
     else
       {{:error, -32_009, "conflict", %{"version" => current}}, state}
     end
+  end
+
+  # Its history: every version newest first, and two of them, as the plane answers it.
+  defp dispatch(state, _kind, "me.memory.history", params, _pid) do
+    text_of = fn n ->
+      Enum.find_value(state.own_versions, "", &(&1["version"] == n && &1["text"]))
+    end
+
+    shown = params["version"] || own_document(state)["version"]
+    against = params["against"] || shown - 1
+
+    {{:ok,
+      %{
+        "versions" => Enum.map(state.own_versions, &Map.delete(&1, "text")),
+        "version" => shown,
+        "text" => text_of.(shown),
+        "against" => against,
+        "against_text" => text_of.(against)
+      }}, state}
+  end
+
+  defp dispatch(state, kind, "me.memory.rollback", %{"to" => to, "version" => base}, pid) do
+    text = Enum.find_value(state.own_versions, "", &(&1["version"] == to && &1["text"]))
+    dispatch(state, kind, "me.memory.put", %{"text" => text, "version" => base}, pid)
   end
 
   defp dispatch(state, _kind, "invites.list", _params, _pid),

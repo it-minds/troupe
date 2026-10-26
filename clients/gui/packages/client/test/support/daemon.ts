@@ -96,6 +96,8 @@ interface Session {
 interface Client {
   ws: WebSocket;
   subs: Map<string, { id: string; topic: string; off: () => void }>;
+  /** Whether it said Local only, at `initialize` or with `client.mode`: the plane is asked nothing for it. */
+  localOnly?: boolean;
 }
 
 export interface FakeDaemonOptions {
@@ -627,6 +629,18 @@ evoked where nothing is set and there was a sign-in. */
   own: { version: number; text: string } | null = null;
   /** Every `me.memory.put` asked, in order. */
   readonly ownPuts: Array<Record<string, unknown>> = [];
+  /** Every version of the person's own the fake has seen, oldest first, for `me.memory.history`. */
+  readonly ownVersions: Array<{ version: number; text: string; by: string; at: string }> = [];
+  /** Every `me.memory.rollback` asked, in order. */
+  readonly ownRollbacks: Array<Record<string, unknown>> = [];
+  /** The levels above the person's own that `me.memory` answers beside it: the organisation's and their teams'. */
+  ownAbove: Array<{ scope: string; name: string | null; version: number; text: string }> = [];
+  /** What `me.memory.status` says each session here read at its last turn. */
+  memoryReads: Array<Record<string, unknown>> = [];
+  /** Every forwarded `artifact.*` call (get, open, share, unshare, rollback, pin), in order. */
+  readonly artifactCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  /** The links made to the person's artifacts. */
+  readonly artifactShares: Array<Record<string, unknown>> = [];
   /**
    * The person's own artifacts on the plane, as this daemon lists them through its sign-in
    * (`artifact.list`, troupe #62); null for a daemon signed in to none.
@@ -682,6 +696,14 @@ evoked where nothing is set and there was a sign-in. */
     if (keys.length === 0 || !this.servesKeys) return;
     const changed = { scope: "user", path: String(this.configJson()["path"]), keys };
     for (const c of this.clients) notify(c.ws, "config.changed", changed);
+  }
+
+  /**
+   * What the daemon says when this computer's copy of the plane's memory changed (troupe #55): a save,
+   * a rollback or an agent's entry, `config.changed` with scope `memory` to every client attached.
+   */
+  announceMemory(keys: string[]): void {
+    for (const c of this.clients) notify(c.ws, "config.changed", { scope: "memory", path: "~/.local/state/troupe/memory.json", keys });
   }
 
   /**
@@ -1125,7 +1147,7 @@ evoked where nothing is set and there was a sign-in. */
         if (auth?.token !== this.token) {
           return reply(ws, msg.id, null, { code: -32003, message: "unauthenticated" });
         }
-        client = { ws, subs: new Map() };
+        client = { ws, subs: new Map(), localOnly: (params["client_info"] as { local_only?: unknown } | undefined)?.local_only === true };
         this.clients.add(client);
         return reply(ws, msg.id, {
           protocol_version: "1",
@@ -1566,37 +1588,138 @@ evoked where nothing is set and there was a sign-in. */
       // The client's Local only switch: the real daemon then makes no plane call for its
       // sessions; the fake has none to make, and says what it heard.
       case "client.mode":
+        client.localOnly = params["local_only"] === true;
         return reply(ws, id, { local_only: params["local_only"] === true });
 
-      // The person's own memory, through this daemon's sign-in; signed out, a sentence.
+      // Where this computer's copy stands: what it holds of the person's own, and the sessions here.
+      case "me.memory.status": {
+        const held = this.own ? [{ scope: "user", name: null, version: this.own.version, hash: `sha256:own-${this.own.version}` }] : [];
+        return reply(ws, id, {
+          plane_url: "https://plane.example.test",
+          fetched_at: "2026-10-26T09:00:00Z",
+          path: "~/.local/state/troupe/memory.json",
+          documents: held,
+          problem: null,
+          in_force: client.localOnly ? null : held,
+          current: client.localOnly ? null : true,
+          reason: client.localOnly ? "Local only: the plane was not asked" : null,
+          sessions: this.memoryReads,
+        });
+      }
+
+      // The person's own memory, through this daemon's sign-in; signed out, a sentence. Every
+      // version is kept, so its history, two side by side and a rollback answer as the plane's.
       case "me.memory":
-      case "me.memory.put": {
+      case "me.memory.put":
+      case "me.memory.history":
+      case "me.memory.rollback": {
         const own = this.own;
+        if (client.localOnly) {
+          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { local_only: true, reason: "this client is in Local only, so the daemon does not ask the plane for your own memory; turn Local only off to read or change it" } });
+        }
         if (!own) {
           return reply(ws, id, null, { code: -32010, message: "unavailable", data: { reason: "this computer's daemon is not signed in to a Troupe plane, so there is no memory of yours to read or change; troupe login signs it in" } });
         }
+        if (this.ownVersions.length === 0 || this.ownVersions[this.ownVersions.length - 1]!.version !== own.version) {
+          if (own.version > 0) this.ownVersions.push({ version: own.version, text: own.text, by: "alice@example.com", at: "2026-10-26T08:00:00Z" });
+        }
         const json = (o: { version: number; text: string }) => ({ ...o, bytes: new TextEncoder().encode(o.text).length, limit: 8192, changed_by: "alice@example.com", plane_url: "https://plane.example.test" });
-        if (method === "me.memory") return reply(ws, id, json(own));
-        this.ownPuts.push(params);
+        const keep = (text: string, by = "alice@example.com"): void => {
+          this.own = { version: this.own!.version + 1, text };
+          this.ownVersions.push({ version: this.own.version, text, by, at: new Date().toISOString() });
+        };
+        if (method === "me.memory") {
+          const lines = params["blame"] === true ? own.text.split("\n").filter((l) => l !== "").map((text) => ({ text, version: own.version, by: "alice@example.com", at: "2026-10-26T08:00:00Z" })) : undefined;
+          return reply(ws, id, { ...json(own), documents: this.ownAbove, ...(lines ? { lines } : {}) });
+        }
+        if (method === "me.memory.history") {
+          const of = (n: unknown): { version: number; text: string } | undefined => this.ownVersions.find((v) => v.version === n);
+          const shown = params["version"] === undefined ? this.ownVersions[this.ownVersions.length - 1] : of(params["version"]);
+          if (params["version"] !== undefined && !shown) return reply(ws, id, null, { code: -32005, message: "not_found", data: { version: params["version"] } });
+          const against = params["against"] === undefined ? (shown && shown.version > 1 ? of(shown.version - 1) : undefined) : of(params["against"]);
+          const before = against?.text ? against.text.split("\n") : [];
+          const now = shown?.text ? shown.text.split("\n") : [];
+          const diff = [...before.filter((l) => !now.includes(l)).map((text) => ({ op: "del", text })), ...now.map((text) => ({ op: before.includes(text) ? "same" : "add", text }))];
+          return reply(ws, id, {
+            versions: [...this.ownVersions].reverse().map((v) => ({ version: v.version, hash: `sha256:own-${v.version}`, bytes: v.text.length, changed_by: v.by, changed_at: v.at })),
+            version: shown?.version ?? null,
+            text: shown?.text ?? "",
+            against: against?.version ?? null,
+            against_text: against?.text ?? null,
+            diff,
+            plane_url: "https://plane.example.test",
+          });
+        }
         if (params["version"] !== own.version) {
+          if (method === "me.memory.put") this.ownPuts.push(params);
           return reply(ws, id, null, { code: -32006, message: "conflict", data: { reason: `your memory was saved somewhere else since; version ${own.version} is in force now`, version: own.version } });
         }
+        if (method === "me.memory.rollback") {
+          const to = this.ownVersions.find((v) => v.version === params["to"]);
+          if (!to) return reply(ws, id, null, { code: -32005, message: "not_found", data: { version: params["to"] } });
+          this.ownRollbacks.push(params);
+          keep(to.text);
+          return reply(ws, id, { changed: true, entry: null, user: json(this.own!) });
+        }
+        this.ownPuts.push(params);
         const text = String(params["text"] ?? "").replace(/\r\n/g, "\n").trimEnd();
         if (text === own.text) return reply(ws, id, { changed: false, entry: null, user: json(own) });
-        this.own = { version: own.version + 1, text };
-        return reply(ws, id, { changed: true, entry: null, user: json(this.own) });
+        keep(text);
+        return reply(ws, id, { changed: true, entry: null, user: json(this.own!) });
       }
 
       // An artifact published on the plane through this daemon's sign-in, and the person's
       // own listed there (troupe #62); signed out, a sentence.
       case "artifact.list":
-      case "artifact.publish": {
+      case "artifact.publish":
+      case "artifact.get":
+      case "artifact.open":
+      case "artifact.share":
+      case "artifact.unshare":
+      case "artifact.rollback":
+      case "artifact.pin": {
         const mine = this.artifacts;
+        // Refused under Local only as the daemon refuses them; publish and list are left to the
+        // tests from before that, which drive "Publish…" in an app opened on this computer alone.
+        if (client.localOnly && method !== "artifact.publish" && method !== "artifact.list") {
+          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { local_only: true, reason: `Local only is on for this client or this session, so nothing is published on the plane or listed from it (${method})` } });
+        }
         if (!mine) {
           return reply(ws, id, null, { code: -32010, message: "unavailable", data: { reason: "this computer's daemon is not signed in to a Troupe plane, so there is nowhere to publish it; troupe login signs it in, or send the file itself" } });
         }
         if (method === "artifact.list") {
-          return reply(ws, id, { enabled: true, profiles: ["dev"], publish_organisation: "everyone", public_links: false, gallery_url: "https://plane.example.test/console#/artifacts", plane_url: "https://plane.example.test", artifacts: mine });
+          const rows = mine.filter((a) => (params["mine"] === true ? a["mine"] === true : params["shared"] === true ? a["shared"] === true : true));
+          return reply(ws, id, { enabled: true, profiles: ["dev"], publish_organisation: "everyone", public_links: false, gallery_url: "https://plane.example.test/console#/artifacts", plane_url: "https://plane.example.test", artifacts: rows });
+        }
+        if (method !== "artifact.publish") {
+          this.artifactCalls.push({ method, params });
+          const found = mine.find((a) => a["id"] === params["id"]);
+          if (!found) return reply(ws, id, null, { code: -32005, message: "not_found", data: { id: params["id"] } });
+          const versions = Array.from({ length: Number(found["version"]) }, (_, i) => Number(found["version"]) - i).map((n) => ({ n, note: n === 1 ? null : `Version ${n}'s note`, published_at: "2026-10-26T08:00:00Z", url: `https://artifacts.example.test/a/${String(found["id"])}/v${n}/`, files: [], hash: `sha256:${n}`, bytes: 10, published_by: { subject: "ada@example.test" } }));
+          const owner = found["mine"] === true;
+          switch (method) {
+            case "artifact.get":
+              return reply(ws, id, { ...found, versions, ...(owner ? { shares: this.artifactShares.filter((s) => s["artifact"] === found["id"]) } : {}) });
+            case "artifact.open":
+              return reply(ws, id, { url: `https://artifacts.example.test/enter?ticket=t-${String(found["id"])}${params["version"] === undefined ? "" : `-v${String(params["version"])}`}`, expires_in: 60 });
+            case "artifact.share": {
+              if (!owner) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: "only its owner makes a link to it" } });
+              const share = { id: `sh-${this.artifactShares.length + 1}`, artifact: found["id"], role: params["role"], public: false, state: "live", expires_at: null, revoked_at: null, created_by: "ada@example.test", created_at: "2026-10-26T09:00:00Z", used_by: [] };
+              this.artifactShares.push(share);
+              return reply(ws, id, { token: "tok", url: `https://artifacts.example.test/s/tok-${share.id}`, share });
+            }
+            case "artifact.unshare": {
+              const share = this.artifactShares.find((s) => s["id"] === params["share"]);
+              if (share) share["state"] = "revoked";
+              return reply(ws, id, { revoked: Boolean(share), id: found["id"], share: params["share"] });
+            }
+            case "artifact.rollback":
+              found["version"] = Number(found["version"]) + 1;
+              return reply(ws, id, { ...found });
+            case "artifact.pin":
+              found["pinned"] = params["version"] ?? null;
+              return reply(ws, id, { ...found });
+          }
         }
         this.publishedArtifacts.push(params);
         const existing = mine.find((a) => a["id"] === params["id"]);

@@ -1094,9 +1094,8 @@ defmodule Troupe.Protocol.Schema do
       },
       # The person's own memory document on the plane (#55), read and saved through the
       # daemon's sign-in: the whole `text` over the `version` edited, or one `append`ed entry.
-      # `blame` adds `lines`, who wrote each line and from which session (#55); `versions`
-      # the newest versions with their text.
-      "me.memory" => %{"blame" => optional(:boolean), "versions" => optional(:boolean)},
+      # `blame` adds `lines`, who wrote each line and from which session (#55).
+      "me.memory" => %{"blame" => optional(:boolean)},
       # Where this machine's copy of the plane's memory stands, for the person's own
       # debugging: what it holds, what is in force, what each session here last read.
       "me.memory.status" => %{},
@@ -1105,6 +1104,15 @@ defmodule Troupe.Protocol.Schema do
         "text" => optional(:string),
         "version" => optional(:integer),
         "append" => optional(:string)
+      },
+      # Its history, for the desktop app's Memory view: every version, `version`'s text (the
+      # one in force for none) beside `against`'s (the one before it for none), and the line
+      # diff; and a rollback to `to`, over `version`, the one in force as the client saw it.
+      "me.memory.history" => %{"version" => optional(:integer), "against" => optional(:integer)},
+      "me.memory.rollback" => %{
+        "command_id" => required(:string),
+        "to" => required(:integer),
+        "version" => required(:integer)
       },
       # The client's Local only switch moved: the daemon makes no plane call
       # for the sessions it runs while it is on. Said at `initialize` as
@@ -1130,11 +1138,13 @@ defmodule Troupe.Protocol.Schema do
         "shared" => optional(:boolean),
         "visibility" => optional(:string)
       },
-      # One of them with its versions, a one-time address that opens it (a version of it
-      # where one is named) on the artifacts host, one text file of a version, and a link to
-      # one of the person's own (`role` `view` or `edit`), each the plane's as it answers it.
+      # The desktop app's viewer (#62): each the plane's method of the same name, sent with
+      # the daemon's sign-in. One artifact with its versions; a one-time ticket that opens it,
+      # or `version`, on the artifacts host; a link (`role` view or edit) and its revoking, by
+      # `share` or `person`; a rollback to `version`; a pin of `version`, null for the newest.
       "artifact.get" => %{"id" => required(:string)},
       "artifact.open" => %{"id" => required(:string), "version" => optional(:integer)},
+      # One text file of a version (its entry where no path is named), for the terminal's frame.
       "artifact.read" => %{
         "id" => required(:string),
         "version" => optional(:integer),
@@ -1143,8 +1153,24 @@ defmodule Troupe.Protocol.Schema do
       "artifact.share" => %{
         "command_id" => required(:string),
         "id" => required(:string),
-        "role" => optional(:string),
+        "role" => required(:string),
         "expires" => optional(:string)
+      },
+      "artifact.unshare" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "share" => optional(:string),
+        "person" => optional(:string)
+      },
+      "artifact.rollback" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "version" => required(:integer)
+      },
+      "artifact.pin" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "version" => required({:nullable, :integer})
       },
       # A first run's questions (Decision 705) — the daemon's only, like the settings
       # they write; a worker answers `method_not_found`. `answer` is the named step's

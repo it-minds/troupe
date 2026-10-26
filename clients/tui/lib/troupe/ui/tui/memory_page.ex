@@ -219,7 +219,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
   end
 
   defp own_key(page, %{code: "h"}) do
-    case Client.own_memory(versions: true) do
+    case Client.memory_history() do
       {:ok, own} ->
         {:ok,
          %{
@@ -370,10 +370,12 @@ defmodule Troupe.UI.TUI.MemoryPage do
   end
 
   # A save names the version it was made on; one saved elsewhere first is shown beside it.
-  defp save(page, text, said) do
-    level = own(page)
+  defp save(page, text, said),
+    do: saved(page, Client.save_own_memory(text, own(page).version), said, text)
 
-    case Client.save_own_memory(text, level.version) do
+  # A rollback carries no text of the person's: its conflict shows the version saved since.
+  defp saved(page, result, said, text) do
+    case result do
       {:ok, %{"changed" => false}} ->
         %{page | mode: :list, status: "it was as it is; nothing was saved"}
 
@@ -385,7 +387,8 @@ defmodule Troupe.UI.TUI.MemoryPage do
         }
 
       {:conflict, theirs} ->
-        %{page | mode: {:conflict, %{mine: text, theirs: theirs}}, status: nil}
+        mine = text || "(a roll back, not saved)"
+        %{page | mode: {:conflict, %{mine: mine, theirs: theirs}}, status: nil}
 
       {:error, reason} ->
         %{page | mode: :list, status: "not saved: #{reason}"}
@@ -394,7 +397,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
 
   defp history_key(page, %{code: "esc"}), do: {:ok, %{page | mode: :list}}
 
-  defp history_key(%{mode: {:history, %{compare: {_, _}} = h}} = page, _key),
+  defp history_key(%{mode: {:history, %{compare: %{}} = h}} = page, _key),
     do: {:ok, %{page | mode: {:history, %{h | compare: nil}}}}
 
   defp history_key(%{mode: {:history, h}} = page, %{code: code})
@@ -413,24 +416,53 @@ defmodule Troupe.UI.TUI.MemoryPage do
   defp history_key(%{mode: {:history, h}} = page, %{code: " "}),
     do: {:ok, %{page | mode: {:history, %{h | mark: h.cursor}}}}
 
+  # Two versions side by side, the older on the left: the marked one, else the one beside
+  # the cursor's, as the plane reads both.
   defp history_key(%{mode: {:history, h}} = page, %{code: "enter"}) do
     other = h.mark || if(h.cursor == 0, do: min(1, length(h.versions) - 1), else: 0)
-    {:ok, %{page | mode: {:history, %{h | compare: {other, h.cursor}}}}}
-  end
 
-  defp history_key(%{mode: {:history, h}} = page, %{code: "r"}) do
-    case Enum.at(h.versions, h.cursor) do
-      %{"version" => n, "text" => text} ->
-        if n == own(page).version,
-          do: {:ok, %{page | status: "version #{n} is the one in force"}},
-          else: {:ok, save(page, text, "Rolled back to version #{n}.")}
+    case Enum.sort([number_at(h, other), number_at(h, h.cursor)]) do
+      [older, newer] when is_integer(older) and is_integer(newer) ->
+        case Client.memory_history(version: newer, against: older) do
+          {:ok, both} ->
+            compare = %{
+              older: {older, both["against_text"] || ""},
+              newer: {newer, both["text"] || ""}
+            }
+
+            {:ok, %{page | mode: {:history, %{h | compare: compare}}}}
+
+          {:error, reason} ->
+            {:ok, %{page | status: "the versions could not be read: #{reason}"}}
+        end
 
       _none ->
         {:ok, page}
     end
   end
 
+  defp history_key(%{mode: {:history, h}} = page, %{code: "r"}) do
+    case number_at(h, h.cursor) do
+      nil ->
+        {:ok, page}
+
+      n ->
+        if n == own(page).version,
+          do: {:ok, %{page | status: "version #{n} is the one in force"}},
+          else:
+            {:ok,
+             saved(
+               page,
+               Client.rollback_own_memory(n, own(page).version),
+               "Rolled back to version #{n}.",
+               nil
+             )}
+    end
+  end
+
   defp history_key(page, _key), do: {:ok, page}
+
+  defp number_at(h, index), do: h.versions |> Enum.at(index) |> then(&(&1 && &1["version"]))
 
   ## Rendering
 
@@ -458,7 +490,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
 
   def footer(%{mode: {:forget, _}}), do: " y forgets it · any other key keeps it "
   def footer(%{mode: {:conflict, _}}), do: " l reloads the version saved since · Esc back "
-  def footer(%{mode: {:history, %{compare: {_, _}}}}), do: " any key back to the versions "
+  def footer(%{mode: {:history, %{compare: %{}}}}), do: " any key back to the versions "
 
   def footer(%{mode: {:history, _}}),
     do: " ↑↓ a version · Space marks one · Enter side by side · r roll back to it · Esc back "
@@ -626,20 +658,17 @@ defmodule Troupe.UI.TUI.MemoryPage do
     ]
   end
 
-  defp body(%{mode: {:history, %{compare: {a, b}} = h}}, rect) do
+  defp body(%{mode: {:history, %{compare: %{} = compare} = h}}, rect) do
     [left, right] = Layout.split(rect, :horizontal, [{:fill, 1}, {:fill, 1}])
 
-    [older, newer] =
-      [Enum.at(h.versions, a), Enum.at(h.versions, b)]
-      |> Enum.sort_by(&((&1 && &1["version"]) || 0))
+    for {{n, text}, r} <- [{compare.older, left}, {compare.newer, right}] do
+      version = Enum.find(h.versions, &(&1["version"] == n)) || %{}
 
-    for {version, r} <- [{older, left}, {newer, right}] do
       {%Paragraph{
-         text: (version && version["text"]) || "",
+         text: text,
          wrap: true,
          block: %Block{
-           title:
-             " version #{version && version["version"]}#{by_when(version && version["changed_by"], version && version["changed_at"])} ",
+           title: " version #{n}#{by_when(version["changed_by"], version["changed_at"])} ",
            borders: [:all]
          }
        }, r}
