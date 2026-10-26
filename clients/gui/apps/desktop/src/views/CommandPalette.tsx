@@ -27,7 +27,7 @@ import type { SessionHandle } from "../hooks";
 import { loopError } from "./Goal";
 
 /** The screens a command can leave the session for; `setup` is also where a refused key sends people. */
-export type PaletteScreen = "sessions" | "local" | "appearance" | "setup";
+export type PaletteScreen = "sessions" | "local" | "appearance" | "setup" | "memory";
 
 export interface PaletteActions {
   go: (screen: PaletteScreen) => void;

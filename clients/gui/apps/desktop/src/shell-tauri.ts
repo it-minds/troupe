@@ -90,6 +90,12 @@ async function openAgentFile(path: string): Promise<void> {
   await invoke("agent_file_open", { path });
 }
 
+/** An artifact in a window of its own at its host's one-time address: `artifact_window_open`, which grants that window nothing. */
+async function openArtifactWindow(url: string, title: string, key: string): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("artifact_window_open", { url, title, key });
+}
+
 async function pickDirectory(): Promise<string | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const chosen = await open({ directory: true, multiple: false, title: "Choose a workspace" });
@@ -204,6 +210,7 @@ export async function installShell(): Promise<void> {
     readDaemon,
     pickDirectory,
     openAgentFile,
+    openArtifactWindow,
     notifications: notifications(),
     updater: updater(),
   };

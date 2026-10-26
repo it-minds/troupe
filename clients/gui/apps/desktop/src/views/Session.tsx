@@ -317,6 +317,7 @@ export function Session({
                   }
                 : null
             }
+            onOpenMemory={onGo ? () => onGo("memory") : undefined}
           />
         )}
       </div>
@@ -1109,6 +1110,7 @@ function Backstage({
   pane,
   onPane,
   memory,
+  onOpenMemory,
 }: {
   view: SessionHandle;
   daemon: DaemonClient | null;
@@ -1129,6 +1131,8 @@ function Backstage({
     ask: MemoryAsk | null;
     onAsked: () => void;
   } | null;
+  /** The app's Memory view, where the person's own memory is read and changed. */
+  onOpenMemory?: (() => void) | undefined;
 }): JSX.Element {
   const agents = Object.entries(view.state.agentState).filter(([path]) => path !== "");
   // A team session's memory is its pod's, and `memory.get` is this computer's daemon's; a
@@ -1170,7 +1174,7 @@ function Backstage({
       ) : shown === "instructions" ? (
         <section>
           <h3>Instructions</h3>
-          <Instructions view={view.view} daemon={team ? null : daemon} />
+          <Instructions view={view.view} daemon={team ? null : daemon} onOpenMemory={onOpenMemory} />
         </section>
       ) : shown === "memory" && memory ? (
         <section>

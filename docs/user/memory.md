@@ -38,13 +38,24 @@ made elsewhere meanwhile is said rather than overwritten:
 
 - **`troupe memory`** prints it; `troupe memory --edit` opens it in your editor (`VISUAL`,
   then `EDITOR`) and saves what you leave there; `troupe memory --clear` empties it.
-- **The desktop app**: a session's *Instructions* pane lists it as *Your memory* and edits it
-  in place, through this computer's daemon.
+- **The desktop app**: *Memory* in the rail, through this computer's daemon (below). A
+  session's *Instructions* pane lists it as *Your memory* and opens *Memory* for it.
 - **The console**, under *Mine*: a change is previewed line by line before it is saved.
 
 A save reaches the sessions running on the machine that saved it, and on the plane's pods,
 at their next turn, with a line saying your memory changed; your other machines read it
 within five minutes.
+
+**In the desktop app**, *Memory* reads each level as entries, one per `## Topic` heading of
+its document. *In effect for you* shows what a new session in one of your teams starts
+knowing: on each topic the closest level's entry, yours over your team's over your
+organisation's, with what it replaces struck through. *Only you* is yours to add to, edit
+and forget, saved as the whole document over the version you read; the other levels are
+marked *READ* and are changed in the console by those who keep them. Its *Versions* drawer
+lists every version, sets any two side by side, rolls back to one, shows who wrote each line,
+and says whether this computer's copy is current and what each session running here read.
+An entry an agent adds while it is open appears in it. Under *Local only* it asks the plane
+nothing and says what this computer holds.
 
 ## Which version a session ran under
 

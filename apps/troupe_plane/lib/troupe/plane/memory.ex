@@ -681,8 +681,15 @@ defmodule Troupe.Plane.Memory do
         changes = Audit.diff(fields(before), fields(now))
 
         detail =
-          for {key, opt} <- [{"session", :session}, {"agent", :agent}], opts[opt], into: changes,
-            do: {key, opts[opt]}
+          for {key, opt} <- [
+                {"session", :session},
+                {"agent", :agent},
+                {"rolled_back_to", :rolled_back_to},
+                {"note", :note}
+              ],
+              opts[opt],
+              into: changes,
+              do: {key, opts[opt]}
 
         {:ok, _} = Audit.record(user.subject, "memory.put", subject(user), detail)
         _told = announce(user)

@@ -70,6 +70,13 @@ export interface TroupeShell {
    */
   openAgentFile?: (path: string) => Promise<void>;
   /**
+   * Show an artifact from its own host (troupe #62): a window of the shell's own at `url`,
+   * the one-time address `artifact.open` answered, granted nothing and kept on that host, one
+   * per `key` (the artifact's id). The app never fetches an artifact into its own origin; a
+   * browser build opens the address in a tab of its own instead.
+   */
+  openArtifactWindow?: (url: string, title: string, key: string) => Promise<void>;
+  /**
    * The operating system's notifications. A browser has its own `Notification`, and a
    * webview has one that does nothing: WebView2 refuses the permission unless the host
    * answers for it. So a shell brings its own, and `notify.ts` prefers it.

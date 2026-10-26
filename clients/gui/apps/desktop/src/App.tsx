@@ -25,6 +25,8 @@ import { capabilities, likelyPlaneUrl, prefs } from "./shell";
 import { useSharedPrefs } from "./shared";
 import { hasChosen, markChosen, useAppearance } from "./theme";
 import { Approvals } from "./views/Approvals";
+import { Artifacts } from "./views/Artifacts";
+import { MemoryScreen } from "./views/OwnMemory";
 import { Launcher, opensOnLauncher } from "./views/Launcher";
 import { Local } from "./views/Local";
 import { AppearanceSettings, Onboarding } from "./views/Appearance";
@@ -43,6 +45,8 @@ type Where =
   | { screen: "sessions" }
   | { screen: "new" }
   | { screen: "approvals" }
+  | { screen: "artifacts" }
+  | { screen: "memory" }
   | { screen: "review" }
   | { screen: "local" }
   | { screen: "agents"; workspace?: string; agent?: string }
@@ -309,6 +313,16 @@ export function App(): JSX.Element {
           <button aria-current={where.screen === "sessions" ? "page" : undefined} onClick={() => setWhere({ screen: "sessions" })}>
             Sessions <span className="count muted">{snapshot.rows.length}</span>
           </button>
+          {/* A person's own things, read and changed here rather than in the console: what
+              they and their troupe published for them, and what every session of theirs
+              remembers. Both through this computer's daemon; neither asks a plane under
+              Local only. */}
+          <button aria-current={where.screen === "artifacts" ? "page" : undefined} onClick={() => setWhere({ screen: "artifacts" })}>
+            Artifacts
+          </button>
+          <button aria-current={where.screen === "memory" ? "page" : undefined} onClick={() => setWhere({ screen: "memory" })}>
+            Memory
+          </button>
           <button aria-current={where.screen === "approvals" ? "page" : undefined} onClick={() => setWhere({ screen: "approvals" })}>
             Waiting for you
             {waiting > 0 && (
@@ -455,6 +469,16 @@ export function App(): JSX.Element {
         {where.screen === "review" && planeAuth && (
           <Review auth={planeAuth} admin={adminApi} daemon={daemon.client} teams={planeAuth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
         )}
+
+        {where.screen === "artifacts" && (
+          <Artifacts
+            daemon={daemon.client}
+            localOnly={localOnly}
+            onOpenSession={(id) => (snapshot.rows.some((r) => r.id === id) ? setWhere({ screen: "session", id }) : undefined)}
+          />
+        )}
+
+        {where.screen === "memory" && <MemoryScreen daemon={daemon.client} localOnly={localOnly} teams={planeAuth?.me?.teams ?? []} />}
 
         {where.screen === "appearance" && <AppearanceSettings {...appearance} />}
 
