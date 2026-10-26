@@ -107,6 +107,8 @@ Moving one is a reviewed change, in the pull request that moved the number:
    regression does.
 3. A change that makes a number smaller should lower its budget too, so the improvement
    stays: this is how #389's slices are kept.
+4. Where the reason is not the number itself, say it in the file: the top-level `$comment`
+   object holds a note per `scenario.measure`, and keys starting with `$` are not scenarios.
 
 A budget for a measure a scenario that ran does not take fails the run, so a renamed measure
 cannot leave a budget holding nothing; a budget under a scenario name that no longer exists

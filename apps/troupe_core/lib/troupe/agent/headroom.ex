@@ -110,11 +110,15 @@ defmodule Troupe.Agent.Headroom do
   defp value(:turns, n), do: Integer.to_string(n)
   defp value(_dim, n), do: tokens(n)
 
-  defp duration(ms) when ms >= 3_600_000, do: "#{Float.round(ms / 3_600_000, 1)}h"
+  defp duration(ms) when ms >= 3_600_000, do: "#{one_place(ms / 3_600_000)}h"
   defp duration(ms) when ms >= 60_000, do: "#{div(ms, 60_000)}m"
   defp duration(ms), do: "#{div(ms, 1000)}s"
 
-  defp tokens(n) when n >= 1_000_000, do: "#{Float.round(n / 1_000_000, 1)}M"
-  defp tokens(n) when n >= 1_000, do: "#{Float.round(n / 1_000, 1)}k"
+  # A thousand thousands that rounds up to 1000.0k is 1.0M, and no figure is printed in
+  # an exponent's notation.
+  defp tokens(n) when n >= 999_950, do: "#{one_place(n / 1_000_000)}M"
+  defp tokens(n) when n >= 1_000, do: "#{one_place(n / 1_000)}k"
   defp tokens(n), do: Integer.to_string(n)
+
+  defp one_place(x), do: :erlang.float_to_binary(x * 1.0, decimals: 1)
 end

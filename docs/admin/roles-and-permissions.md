@@ -111,6 +111,21 @@ role narrowed with `session.grant`, holds at their next command on the pod, what
 token they hold still says (Decision 859). Widening a role takes effect with their next
 token, at most 15 minutes later.
 
+**Invitations by name** (Decision 949, [sessions-shared.md](../user/sessions-shared.md)):
+
+| Method | Who | What it does |
+|---|---|---|
+| `session.invite` | a pod session's owner or an admin of its team; a private session's owner, from the daemon that seals it | `observe` is a viewer row, `control` a collaborator row, with who invited whom and when; the invitee is told over their watch, and the log gets `session_invited` |
+| `session.uninvite` | the same | the row goes, the pod refuses their next command, and a private session's copy of its key in their slot is destroyed and what follows is sealed under a new key |
+| `session.invites` | anybody who may see the session, or is invited into it | whom it is shared with, at which role |
+| `invites.list`, `people.search` | anybody signed in | the invitations to them; people who share a team with them, or whom a session's profile covers |
+
+Only a person the session's profile covers may be invited into a pod session (a member
+of a team granted that profile, whose rules they then act under), and into a private one,
+which has no profile, only somebody who shares a team with its owner; a platform admin may
+be invited into either by anybody. Everybody else is refused with the reason, and a service
+principal is never invited.
+
 Offering a session one's own signed-in tools (`tools.register`) takes `control`. A profile
 with `personalTools: forbid` refuses it on its pods, and the platform's
 `managed_mcp_servers_only` everywhere ([profile-options.md](profile-options.md#a-persons-own-tools-on-a-pod)).
@@ -154,7 +169,8 @@ Rendered by `Troupe.KMS.Policy`, so the tested string and the installed one are 
 |---|---|
 | `troupe-worker-<profile>` | create, read, update on `<mount>/data/troupe/teams/<team>/sessions/*` and read, list on the metadata path, per granted team; never delete |
 | `troupe-plane` | delete, list, read on `<mount>/metadata/troupe/teams/+/sessions/*` and `<mount>/metadata/troupe/people/+/sessions/*`, list and read on `<mount>/metadata/troupe/people/+/mcp/*`, and nothing on the data path: it destroys an erased session's key, a team's or a person's (Decisions 756 and 811), says whether a person has connected a server, and reads no value |
-| `troupe-person` | create, read, update on `<mount>/data/troupe/people/<name>/*` and read, list on its metadata, templated on the name OpenBao's JWT auth vouched for: a person's own daemon, logging in at the `jwt` auth path with an assertion the plane signs (audience `troupe-kms`), for their private sessions' keys and their own MCP credentials |
+| `troupe-person` | create, read, update on `<mount>/data/troupe/people/<name>/*` and read, list on its metadata, templated on the name OpenBao's JWT auth vouched for: a person's own daemon, logging in at the `jwt` auth path with an assertion the plane signs (audience `troupe-kms`), for their private sessions' keys and their own MCP credentials; and create, nothing else, on `<mount>/data/troupe/people/+/invited/*`, where the owner of a private session puts its key for a person invited into it, and which only that person reads (Decision 949). Rewrite it when upgrading: a policy written before has no such rule, and inviting anybody into a private session is refused by OpenBao |
+| `troupe-plane-invites` | delete on `<mount>/metadata/troupe/people/+/invited/*` (`Policy.invites/1`): the plane destroys a copy of a private session's key in an invitee's slot when the invitation is taken back or the session erased, and reads none. Without it such an erasure stays `erasure_pending` |
 | signing | create, update on `transit/sign/troupe-session-tokens`, read on its key; not exportable |
 | the plane's signing key | create, read and update on `transit/keys/troupe-plane-signing`, update on its `rotate`, create and update on `transit/sign/troupe-plane-signing` (`Policy.plane_signing/2`): the plane makes the key on first use, `ed25519` and not exportable, signs what it tells people's machines with it, and rotates it from the console; nothing exports it. Without it the plane's answers go out unsigned, which a machine that pinned the key refuses |
 | the GitHub App's key and webhook secret | import, sign (or HMAC), read and delete on `transit/keys/troupe-github-app` and `transit/keys/troupe-github-webhook`, and read on `transit/wrapping_key` (`Policy.github_app/3`, the paths in [github.md §4](github.md#4-give-the-plane-the-app)): the plane imports both once, signs the App's JWT, checks each delivery's signature, and deletes both when the App is removed; nothing exports either |
@@ -163,7 +179,7 @@ Rendered by `Troupe.KMS.Policy`, so the tested string and the installed one are 
 The Kubernetes-auth roles in `dev/kind/dependencies.yaml` (`troupe-worker` for the
 ServiceAccount of that name in any namespace, audience `troupe-kms`; `troupe-plane` in
 `troupe-system`) are the shape production needs. A production plane role needs the plane
-policy **and** the signing policy, the plane's signing key's, and the GitHub App's where the plane has one. A worker role whose profiles call an MCP server as
+policy **and** the signing policy, the plane's signing key's, the invitations', and the GitHub App's where the plane has one. A worker role whose profiles call an MCP server as
 themselves also needs `troupe-worker-mcp-identity`, written once with the Kubernetes auth
 mount's accessor (`bao read -field=accessor sys/auth/kubernetes`), as the dev manifest
 writes it.

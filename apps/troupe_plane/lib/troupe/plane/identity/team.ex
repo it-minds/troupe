@@ -84,6 +84,10 @@ defmodule Troupe.Plane.Identity.Team do
     # every one of them allows it.
     field :remote_offering_allowed, :boolean, default: true
 
+    # What the team's artifacts may hold in the object store, every version counted, in
+    # bytes. Zero is no quota. A publish that would go past it is refused; what is there stays.
+    field :artifact_quota_bytes, :integer, default: 1_073_741_824
+
     has_many :grants, Troupe.Plane.Identity.Grant
 
     timestamps(type: :utc_datetime_usec)
@@ -107,7 +111,8 @@ defmodule Troupe.Plane.Identity.Team do
     :volume_size,
     :allow_unenforced_workers,
     :github,
-    :remote_offering_allowed
+    :remote_offering_allowed,
+    :artifact_quota_bytes
   ]
 
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()
@@ -118,6 +123,7 @@ defmodule Troupe.Plane.Identity.Team do
     |> validate_format(:name, @name_format, message: @name_rule)
     |> validate_inclusion(:budget_period, @budget_periods)
     |> validate_number(:idle_timeout_seconds, greater_than: 0)
+    |> validate_number(:artifact_quota_bytes, greater_than_or_equal_to: 0)
     # The name, not the group. A team is addressed by name everywhere — a grant, a
     # session's team, an audit row — so two called `engineering` would be two answers to
     # one question; but one group may be two teams, which is the whole of what a link

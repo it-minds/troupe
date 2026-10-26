@@ -1927,17 +1927,24 @@ defmodule Troupe.Agent.Server do
   # digest is the cache: an `instructions_loaded` event is written when what reached the
   # prompt changed since this agent's last turn, and never when it did not, so the log
   # says which files each turn was read from without saying so every turn.
+  #
+  # A root whose session its client put under Local only says so once, in the next
+  # `instructions_loaded`, written for it even where nothing read changed.
   defp load_instructions(%State{instructions: %{}, instructions_due: false} = state), do: state
 
   defp load_instructions(%State{} = state) do
     focus = Instructions.focus(state.conversation)
     loaded = Instructions.load(state.workspace.root_real, state.config, focus)
+    local_only? = state.agent_path == ["root"] and Troupe.LocalOnly.session?(state.session_id)
+    say_local_only? = local_only? and not state.local_only_said
 
-    if state.instructions == nil or loaded.digest != state.instructions.digest do
-      log(state, :instructions_loaded, Instructions.provenance(loaded))
+    if state.instructions == nil or loaded.digest != state.instructions.digest or say_local_only? do
+      provenance = Instructions.provenance(loaded)
+      provenance = if say_local_only?, do: Map.put(provenance, "local_only", Troupe.LocalOnly.line()), else: provenance
+      log(state, :instructions_loaded, provenance)
     end
 
-    %{state | instructions: loaded, instructions_due: false}
+    %{state | instructions: loaded, instructions_due: false, local_only_said: local_only?}
   end
 
   defp instructions_due(%State{} = state), do: %{state | instructions_due: true}
@@ -1946,18 +1953,29 @@ defmodule Troupe.Agent.Server do
   # configuration was resolved (`Troupe.Session.PlaneMemory`), taken as a turn begins and
   # never during one, said in the log with the versions from and to, and read into the
   # instructions this turn. The same versions again change nothing and say nothing.
+  #
+  # The root's turn first asks, where the host can (a pod asks the plane), whether what the
+  # session holds is in force, so a push lost since the last turn is not this turn's memory;
+  # and keeps what the turn then reads, which the host tells the plane.
   defp take_memory(%State{} = state) do
-    with %{documents: documents} <- Troupe.Session.PlaneMemory.given(state.session_id),
-         [_ | _] = changes <- Troupe.PlaneMemory.changes(state.config.plane_memory, documents) do
-      log(state, :memory_changed, %{
-        "changes" => changes,
-        "message" => Troupe.PlaneMemory.change_line(changes)
-      })
+    root? = state.agent_path == ["root"]
+    if root?, do: :ok = Troupe.Session.PlaneMemory.before_turn(state.session_id, state.config.plane_memory)
 
-      instructions_due(%{state | config: %{state.config | plane_memory: documents}})
-    else
-      _same -> state
-    end
+    state =
+      with %{documents: documents} <- Troupe.Session.PlaneMemory.given(state.session_id),
+           [_ | _] = changes <- Troupe.PlaneMemory.changes(state.config.plane_memory, documents) do
+        log(state, :memory_changed, %{
+          "changes" => changes,
+          "message" => Troupe.PlaneMemory.change_line(changes)
+        })
+
+        instructions_due(%{state | config: %{state.config | plane_memory: documents}})
+      else
+        _same -> state
+      end
+
+    if root?, do: :ok = Troupe.Session.PlaneMemory.read(state.session_id, state.config.plane_memory)
+    state
   end
 
   defp environment_section(state) do

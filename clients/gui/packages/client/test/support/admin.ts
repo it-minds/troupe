@@ -301,6 +301,10 @@ export interface FakeTeam {
   remote_offering_allowed: boolean;
   /** The repositories its sessions may name and the fix loop's caps, as the plane answers them. */
   github: { repositories: string[]; max_pushes: number | null; max_runs: number | null; max_attempts?: number | null };
+  /** What the team's artifacts hold now, in bytes. */
+  artifact_bytes: number;
+  /** The most they may hold, in bytes; 0 is no quota. */
+  artifact_quota_bytes: number;
   admins: string[];
   grants: Array<{ profile: string; volume_mode: string | null }>;
   groups: Array<{ external_id: string; display_name: string | null; issuer: string | null; linked_by: string | null }>;
@@ -562,6 +566,24 @@ const SETTINGS: Setting[] = [
   },
   { key: "managed_mcp_servers_only", group: "sessions", type: "boolean", fallback: false, summary: "Whether a session may use only the MCP servers its bundle names.", consequence: "On, a person's own servers are not offered to sessions here." },
   { key: "default_bundle_channel", group: "sessions", type: "string", fallback: "stable", summary: "The channel a profile follows when it names none.", consequence: "Profiles that name one keep theirs." },
+  { key: "artifacts_enabled", group: "artifacts", type: "boolean", fallback: true, summary: "Whether people and their agents may publish artifacts, and open them.", consequence: "Off, nothing is published and no artifact opens; none is deleted." },
+  {
+    key: "artifacts_publish_organisation",
+    group: "artifacts",
+    type: "enum",
+    values: ["everyone", "platform_admins"],
+    fallback: "everyone",
+    summary: "Who may publish an artifact the whole organisation sees.",
+    consequence: "Those published already stay where they are.",
+  },
+  {
+    key: "artifacts_public_links",
+    group: "artifacts",
+    type: "boolean",
+    fallback: false,
+    summary: "Whether an artifact's owner may make a public link, which opens it for anybody who has it, signed in or not.",
+    consequence: "Off, none is made and every one made already stops opening; links that honour sign-in work either way.",
+  },
   { key: "issuer", group: "sign_in", type: "string", summary: "The identity provider's issuer URL.", consequence: "Wrong, and nobody signs in. Saved behind a check; reset puts the deployment's back." },
   { key: "client_id", group: "sign_in", type: "string", summary: "This plane's client id at the provider.", consequence: "The provider refuses a sign-in for a client it does not know." },
   { key: "client_secret", group: "sign_in", type: "string", secret: true, summary: "The client's secret, for the console's code exchange.", consequence: "Never shown. A blank field keeps it." },
@@ -590,6 +612,7 @@ const GROUPS = [
       "The organisation's defaults for a person's local sessions, below their own settings: provider, URL and models. Never a key; each person pastes their own. And what those sessions may not go past, above everything a person sets.",
   },
   { key: "sessions", title: "What a new session runs with", blurb: "Defaults for work started after the change." },
+  { key: "artifacts", title: "What people may publish", blurb: "Pages and files people and their agents publish, for the organisation or a profile's people to open." },
   { key: "sign_in", title: "Where people sign in", blurb: "The identity provider, on its own screen." },
   { key: "deployment", title: "What this plane was deployed with", blurb: "Read-only here on purpose. Change them in the deployment and roll it." },
 ];
@@ -662,8 +685,9 @@ const TEAM_KEYS = [
   "allow_unenforced_workers",
   "github",
   "remote_offering_allowed",
+  "artifact_quota_bytes",
 ];
-const INTEGER_KEYS = ["budget_micros", "idle_timeout_seconds", "cache_eviction_days", "erase_after_days"];
+const INTEGER_KEYS = ["budget_micros", "idle_timeout_seconds", "cache_eviction_days", "erase_after_days", "artifact_quota_bytes"];
 
 type TeamGitHubFake = FakeTeam["github"];
 
@@ -820,6 +844,25 @@ export function lineDiff(before: string, now: string): Array<{ op: "same" | "del
   return out;
 }
 
+/** Who wrote each line of a document up to version `upto`, as the plane's `Memory.blame/2` derives it: each version's lines against the one before. */
+export function memoryBlame(
+  versions: Array<{ version: number; text: string; changed_by: string; changed_at: string }>,
+  upto: number,
+): Array<{ text: string; version: number; by: string; at: string }> {
+  let lines: Array<{ text: string; version: number; by: string; at: string }> = [];
+  for (const v of versions.filter((x) => x.version <= upto)) {
+    const before = lines;
+    let k = 0;
+    lines = [];
+    for (const d of lineDiff(before.map((l) => l.text).join("\n"), v.text)) {
+      if (d.op === "same") lines.push(before[k++]!);
+      else if (d.op === "del") k++;
+      else lines.push({ text: d.text, version: v.version, by: v.changed_by, at: v.changed_at });
+    }
+  }
+  return lines;
+}
+
 /** The diff the plane's audit records: a dotted path per field that moved, maps walked. */
 export function diff(before: Record<string, unknown>, now: Record<string, unknown>, path: string[] = []): Changes {
   const out: Changes = {};
@@ -891,6 +934,12 @@ export class FakeAdmin {
   readonly hostRows: FakeHost[] = [];
   /** Every version of every memory document, oldest first, by subject: `organisation`, `team/<name>`, `profile/<name>`. */
   readonly memory = new Map<string, Array<{ version: number; text: string; changed_by: string; changed_at: string }>>();
+  /** By subject: the running sessions a document reaches, each with the version its last turn read. */
+  readonly memoryReaders = new Map<string, Array<{ session_id: string; where: "pod" | "machine"; owner: string; profile: string | null; team: string | null; version: number; turn_at: string }>>();
+  /** By session id: whether its last turn read the memory in force for it, as the session listing marks. */
+  readonly memoryStanding = new Map<string, "current" | "behind">();
+  /** The sessions an administrator nudged, in order. */
+  readonly memoryNudged: string[] = [];
   /** Service principals beyond their subjects, by subject. */
   readonly principalRows = new Map<string, FakePrincipal>();
   /** People who look held twice, as `Identity.lookalikes/0` would set them out. */
@@ -1714,7 +1763,9 @@ export class FakeAdmin {
         const asked = typeof params["version"] === "number" ? params["version"] : null;
         const shown = asked === null ? versions.at(-1) ?? null : versions.find((v) => v.version === asked) ?? null;
         if (asked !== null && !shown) return refuse(NOT_FOUND, "not_found", { version: asked });
-        const before = shown ? versions.find((v) => v.version === shown.version - 1) ?? null : null;
+        const against = typeof params["against"] === "number" ? params["against"] : null;
+        const before = against !== null ? versions.find((v) => v.version === against) ?? null : shown ? versions.find((v) => v.version === shown.version - 1) ?? null : null;
+        if (against !== null && !before) return refuse(NOT_FOUND, "not_found", { version: against });
         return {
           result: {
             scope: params["scope"],
@@ -1725,11 +1776,58 @@ export class FakeAdmin {
             version: shown?.version ?? null,
             text: shown?.text ?? "",
             shown: shown ? memorySummary(shown) : null,
+            against: before?.version ?? null,
+            against_text: before?.text ?? null,
             diff: lineDiff(before?.text ?? "", shown?.text ?? ""),
             versions: [...versions].reverse().map(memorySummary),
             inherited: params["scope"] === "profile" ? this.memoryInherited(String(params["name"])) : [],
+            readers: this.readersOf(found.subject),
+            lines: shown ? memoryBlame(versions, shown.version) : [],
           },
         };
+      }
+
+      case "admin.memory.rollback": {
+        const found = this.memoryOwner(subject, params["scope"], params["name"]);
+        if ("error" in found) return found;
+        if (!found.editable) return notPlatform;
+        const versions = this.memory.get(found.subject) ?? [];
+        const to = versions.find((v) => v.version === params["to"]);
+        if (!to) return refuse(NOT_FOUND, "not_found", { version: params["to"] });
+        const current = versions.at(-1) ?? null;
+        if (typeof params["version"] === "number" && params["version"] !== (current?.version ?? 0)) {
+          return refuse(CONFLICT, "conflict", {
+            reason: `${found.subject} was saved by somebody else since version ${params["version"]}; version ${current?.version ?? 0} is in force now`,
+            version: current?.version ?? 0,
+          });
+        }
+        if (current && current.text === to.text) return { result: { document: memorySummary(current), changes: {} } };
+        const now = { version: (current?.version ?? 0) + 1, text: to.text, changed_by: subject, changed_at: new Date().toISOString() };
+        this.memory.set(found.subject, [...versions, now]);
+        const fields = (v: typeof now | null) => ({ version: v?.version ?? 0, bytes: v ? new TextEncoder().encode(v.text).length : 0, hash: v ? memoryHash(v.text) : null });
+        const changes = diff(fields(current), fields(now));
+        this.record(subject, "memory.put", found.subject, { ...changes, rolled_back_to: to.version, note: `rolled back to v${to.version}` });
+        return { result: { document: memorySummary(now), changes } };
+      }
+
+      case "admin.memory.nudge": {
+        const found = this.memoryOwner(subject, params["scope"], params["name"]);
+        if ("error" in found) return found;
+        if (!found.editable) return notPlatform;
+        const reader = (this.memoryReaders.get(found.subject) ?? []).find((r) => r.session_id === params["session_id"]);
+        if (!reader) return refuse(NOT_FOUND, "not_found", { session_id: params["session_id"], reason: "no running session this document reaches" });
+        if (reader.where === "machine") {
+          return {
+            result: {
+              session_id: reader.session_id,
+              where: "machine",
+              told: false,
+              reason: "a session on a person's machine is not told: its daemon asks for the memory at its next poll, within five minutes, and the session reads it at its next turn",
+            },
+          };
+        }
+        this.memoryNudged.push(reader.session_id);
+        return { result: { session_id: reader.session_id, where: "pod", told: true } };
       }
 
       case "admin.memory.preview": {
@@ -1750,6 +1848,7 @@ export class FakeAdmin {
             unchanged: (current?.text ?? "") === text,
             diff: lineDiff(current?.text ?? "", text),
             effect: memoryEffect(params["scope"], params["name"]),
+            readers: this.readersOf(found.subject),
           },
         };
       }
@@ -2279,6 +2378,15 @@ export class FakeAdmin {
     });
   }
 
+  // Which running sessions read a document and which are behind the version in force, as
+  // `Memory.readers/1` answers it.
+  private readersOf(subject: string): Record<string, unknown> {
+    const current = (this.memory.get(subject) ?? []).at(-1) ?? null;
+    const inForce = current && current.text !== "" ? current.version : 0;
+    const sessions = (this.memoryReaders.get(subject) ?? []).map((r) => ({ ...r, behind: r.version !== inForce })).sort((a, b) => a.session_id.localeCompare(b.session_id));
+    return { version: current?.version ?? 0, behind: sessions.filter((s) => s.behind).length, sessions };
+  }
+
   private memoryRow(scope: "organisation" | "team" | "profile", name: string | null, editable: boolean): Record<string, unknown> {
     const subject = scope === "organisation" ? "organisation" : `${scope}/${name}`;
     const current = (this.memory.get(subject) ?? []).at(-1) ?? null;
@@ -2532,6 +2640,7 @@ export class FakeAdmin {
       last_active_at: s.last_active_at,
       repository: s.repository ?? null,
       github: s.github ?? null,
+      memory: this.memoryStanding.get(s.id) ?? null,
     };
   }
 
@@ -3410,6 +3519,8 @@ export function team(name: string, fields: Partial<FakeTeam> = {}): FakeTeam {
     allow_unenforced_workers: false,
     remote_offering_allowed: true,
     github: { repositories: [], max_pushes: null, max_runs: null },
+    artifact_bytes: 0,
+    artifact_quota_bytes: 0,
     admins: [],
     grants: [],
     groups: [],
@@ -3525,6 +3636,8 @@ export function exampleAdmin(): FakeAdmin {
         volume_size: "20Gi",
         volume_storage_class: "fast-ssd",
         github: { repositories: ["example-org/widgets"], max_pushes: 5, max_runs: null },
+        artifact_bytes: 12 * 1024 * 1024,
+        artifact_quota_bytes: 100 * 1024 * 1024,
         admins: ["dan@example.com"],
         grants: [
           { profile: "dev", volume_mode: "rw" },
@@ -3918,5 +4031,13 @@ export function exampleAdmin(): FakeAdmin {
     { version: 1, text: "We deploy on Tuesdays.", changed_by: "alice@example.com", changed_at: "2026-10-12T09:00:00Z" },
     { version: 2, text: "We deploy on Tuesdays.\nThe on-call rota is in the wiki.", changed_by: "alice@example.com", changed_at: "2026-10-14T11:20:00Z" },
   ]);
+  // Two running sessions read it: one on a pod whose last turn was before version 2, and one
+  // on a person's machine that has it.
+  admin.memoryReaders.set("organisation", [
+    { session_id: "s-7f3a9c21", where: "pod", owner: "alice@example.com", profile: "dev", team: "core", version: 1, turn_at: "2026-10-14T11:05:00Z" },
+    { session_id: "laptop-9b1d", where: "machine", owner: "erin@example.com", profile: null, team: null, version: 2, turn_at: "2026-10-14T11:40:00Z" },
+  ]);
+  admin.memoryStanding.set("s-7f3a9c21", "behind");
+  admin.memoryStanding.set("s-7f3a9c23", "current");
   return admin;
 }

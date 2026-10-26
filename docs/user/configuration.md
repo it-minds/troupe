@@ -357,7 +357,7 @@ a key by, in the desktop app and the TUI alike.
 | Key | Type | Default | Set by | Shown as | What it does |
 |---|---|---|---|---|---|
 | `trusted_workspaces` | list of strings |  | user file only |  | Workspaces whose own files may set the keys marked trusted. A path trusts everything under it. |
-| `state_dir` | string |  | user; project if trusted |  | Where session logs go. Unset: the platform's state directory. |
+| `state_dir` | string |  | user; project if trusted |  | Where session logs go, with their blobs and the outputs kept from them. Unset: the platform's state directory. |
 | `fake_script` | string |  | user; project if trusted |  | With `provider: fake`, the file of scripted answers. |
 
 ### Clients
@@ -365,6 +365,7 @@ a key by, in the desktop app and the TUI alike.
 | Key | Type | Default | Set by | Shown as | What it does |
 |---|---|---|---|---|---|
 | `mouse` | boolean | `true` | any | mouse | The terminal UI captures the mouse: a click activates a window and the wheel scrolls. Off keeps the terminal's own click-and-drag selection; `troupe --no-mouse` turns it off for one run. |
+| `local_only` | boolean | `false` | user file only |  | The terminal UI is in Local only: it makes no call to a plane, and tells the daemon, which then makes none for the sessions it runs (no `remember` to your own memory, no offer for steering). `troupe doctor` says whether it is on. |
 | `ui` | settings |  | any |  | What follows a person from one client to the other. The daemon keeps it and acts on none of it. |
 | `ui.theme` | string | `afterglow` | any | theme | The palette the desktop app and the terminal UI draw in: `afterglow`, `signal`, `footlight` or `limelight`. One a client does not know reads as `afterglow`. |
 | `ui.blink` | boolean | `true` | any | blink | What waits on you blinks: the terminal UI's mark and border of a window that needs you. Off holds them lit. |

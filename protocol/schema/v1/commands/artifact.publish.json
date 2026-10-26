@@ -1,0 +1,40 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/artifact.publish.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "files": {
+      "type": "array"
+    },
+    "id": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "note": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "visibility": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "files",
+    "kind",
+    "title",
+    "visibility"
+  ],
+  "title": "artifact.publish",
+  "type": "object"
+}

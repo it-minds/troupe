@@ -71,6 +71,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_APP_URL` | `/app` | where `/` links to the GUI, and the `plane.app` address `/.well-known/troupe` gives `troupe-daemon open`; empty says no GUI is mounted | `plane.appUrl`, default `gui.basePath` when `gui.enabled` |
 | `TROUPE_CONSOLE_URL` | `/console` | where `/`'s console door and the `/admin` page point; empty says no console is mounted, and both say the plane is administered over the admin API | `console.basePath` when `console.enabled`, else empty |
 | `TROUPE_CLI_URL` | empty | where `/` links to the TUI; empty says to ask an administrator | `plane.cliUrl` |
+| `TROUPE_ARTIFACTS_URL`, `TROUPE_ARTIFACTS_PORT` | unset | where published [artifacts](../user/artifacts.md) are read, a host that is not the plane's (the plane refuses to start on its own), and the port it serves them on; no URL, nothing opens one, and no port, no listener | `plane.artifactsHost`, `plane.artifactsPort` (`4003`) |
 | `TROUPE_CORS_ORIGINS` | CORS off | exact origins answered on `/rpc`, `/auth/exchange`, `/.well-known/*` | `plane.corsOrigins` |
 | `TROUPE_LOG_FORMAT` | text | `"json"`: one object per line with `request_id`, `session_id` | none |
 | `RELEASE_DISTRIBUTION`, `TROUPE_NODE_BASENAME`, `TROUPE_PLANE_SELECTOR` | set by chart | `name` clusters replicas through libcluster's Kubernetes topology | `plane.distribution` |
@@ -172,7 +173,8 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 | `operator.replicas` | `1` | leader elected by Lease |
 | `plane.enabled` | `true` | whether the plane is rendered at all |
 | `plane.replicas` | `2` | `Recreate` when 1; PDB `minAvailable: 1` when more; more than 1 without `distribution: name` fails the render |
-| `plane.ingress.enabled`, `.bodySize`, `.rateLimit.{rps,burstMultiplier,connections}` | `true`, `1m`, `20`/`5`/`100` | the plane's Ingress and its nginx limits, per client IP; `rateLimit: null` turns them off |
+| `plane.ingress.enabled`, `.bodySize`, `.rateLimit.{rps,burstMultiplier,connections}` | `true`, `4m`, `20`/`5`/`100` | the plane's Ingress and its nginx limits, per client IP; `rateLimit: null` turns them off |
+| `plane.artifactsHost`, `.artifactsPort`, `.artifactsTlsSecretName` | empty, `4003`, empty | the [artifacts](../user/artifacts.md) host: an Ingress of its own to the plane's artifacts port, with `plane.certIssuer`; never `plane.host`, which is refused |
 | `plane.ingressClassName`, `plane.certIssuer`, `plane.tlsSecretName` | `nginx`, `""`, `""` | the plane's Ingress class and TLS |
 | `plane.distPort`, `plane.maxPorts` | `9100`, `65536` | Erlang distribution port; `+Q` |
 | `plane.controlTls.enabled`, `.certManager`, `.issuer.{kind,name}`, `.secretName`, `.dnsNames`, `.ipAddresses`, `.requireTls` | `true`, `true`, the chart's own CA, `troupe-plane-control-tls`, `[]`, `[]`, `true` | TLS on the control port: a cert-manager `Certificate` for `troupe-plane-control` by its in-cluster names and these, from the named issuer (a CA, not ACME) or a CA the chart makes (ten years, its key kept on renewal), mounted into the plane; `certManager: false` mounts the Secret as you put it there. The operator copies its `ca.crt` into every worker namespace (`troupe-plane-ca`), so pods dial with TLS. `requireTls` closes a plaintext connection, a pod's included ([routine-tasks.md](routine-tasks.md#upgrade) before upgrading from 0.19). A string for any flag is refused, and so is `requireTls` without `enabled` |
@@ -347,6 +349,7 @@ kubectl -n troupe-system label secret llm-credentials troupe.dev/worker-secret=t
 | 4000 | worker WebSocket `/v1/socket`, `/health/live`, `/health/ready` | per-pod Service → Ingress `<ordinal>-<profile>.<workersDomain>` |
 | 4001 | plane control listener (NDJSON over TCP, or over TLS with the control certificate; a registered machine over TLS only) | Service `troupe-plane-control`, never an Ingress; a machine outside the cluster through a route of your own |
 | 4002 | A2A facade | Service `troupe-a2a` → Ingress `a2a.host` |
+| 4003 | the artifacts host (published pages, nothing of the plane's) | Service `troupe-plane` → Ingress `plane.artifactsHost` |
 | 4100 | worker raw NDJSON harness | in-pod only |
 | 4369, 9100 | epmd and Erlang distribution on plane pods, when clustered | pod to pod only |
 | 8080 | the GUI and the console | Service `troupe-gui` → Ingresses at `gui.basePath` and `console.basePath` on `plane.host` |

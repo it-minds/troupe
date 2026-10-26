@@ -118,11 +118,15 @@ export {
   RemoteSource,
   fleetTiming,
   rowFromRemote,
+  rowFromInvite,
   remoteOffer,
   offerRestartWords,
   RESTART_SENTENCE,
+  PRIVATE_OFFER_SENTENCE,
   onThisComputer,
 } from "./fleet.js";
+export { invitationWords, invitationsFrom, inviteRefusal, personName, removedSentence, roleWords, steerWords } from "./invites.js";
+export type { Invitation, Invitee, InviteRole, Person, SealedEvent, SealedRead } from "./invites.js";
 export type {
   FleetRow,
   FleetSource,
@@ -133,6 +137,8 @@ export type {
   RemoteOffer,
   RemotePerson,
 } from "./fleet.js";
+export { ArtifactApi, textBytes } from "./artifacts.js";
+export type { Artifact, ArtifactDetail, ArtifactFile, ArtifactFilter, ArtifactKind, ArtifactLinkUse, ArtifactList, ArtifactNewLink, ArtifactOrigin, ArtifactPerson, ArtifactPut, ArtifactRole, ArtifactShare, ArtifactText, ArtifactTicket, ArtifactUpload, ArtifactVersion } from "./artifacts.js";
 export { openRemote, remoteRefusal, watchRemote, watchUrl, when as remoteWhen } from "./remote.js";
 export type { RemoteListRow, RemoteWatch, RemoteWatchOptions } from "./remote.js";
 export { AdminApi, bundleErrors, requiredRole } from "./admin.js";
@@ -214,11 +220,15 @@ export type {
   SigningKeyVersion,
   PlaneRelease,
   PlaneReleases,
+  MemoryBlameLine,
   MemoryDocument,
   MemoryInherited,
   MemoryLine,
   MemoryListing,
+  MemoryNudged,
   MemoryPreview,
+  MemoryReader,
+  MemoryReaders,
   MemoryRow,
   MemorySaved,
   MemoryScope,

@@ -1,8 +1,8 @@
 defmodule Troupe.CLI.Memory do
   @moduledoc """
-  `troupe memory [--edit | --clear]`: the person's own memory on the plane (root issue #55,
-  the user level), which every session of theirs reads on every machine, after their
-  organisation's memory and before the repository's files. An agent of theirs may add an
+  `troupe memory [--edit | --clear | --status | --blame]`: the person's own memory on the plane (root
+  issue #55, the user level), which every session of theirs reads on every machine, after
+  their organisation's memory and before the repository's files. An agent of theirs may add an
   entry to it (`remember` with `level: "me"`); only they change or remove what is there.
 
   Asked of this machine's daemon, which reads and saves it with its own sign-in
@@ -11,6 +11,13 @@ defmodule Troupe.CLI.Memory do
   (`Troupe.Editor`: `VISUAL`, then `EDITOR`) and saves what they leave there, over the
   version they started from, so a save made elsewhere meanwhile is said, not overwritten;
   `--clear` empties it. A daemon that is not signed in says so.
+
+  `--status` is for the person's own debugging (`me.memory.status`): the versions of the
+  organisation's levels and their own that this machine holds, whether the plane has the same
+  in force, and which each session running here read at its last turn.
+
+  `--blame` prints the person's own line by line with who wrote each: the version it came
+  in and who saved it, or, for an agent's entry, the agent and the session it came from.
   """
 
   alias Troupe.Client.Daemon.Link
@@ -20,7 +27,12 @@ defmodule Troupe.CLI.Memory do
 
   @doc "Show, edit or clear the person's own memory; returns the exit status."
   @spec run(map(), (String.t() -> any()), call()) :: non_neg_integer()
-  def run(args, say \\ &IO.puts/1, call \\ &Link.call/2) do
+  def run(args, say \\ &IO.puts/1, call \\ &Link.call/2)
+
+  def run(%{status: true}, say, call), do: status(say, call)
+  def run(%{blame: true}, say, call), do: blame(say, call)
+
+  def run(args, say, call) do
     case call.("me.memory", %{}) do
       {:ok, own} ->
         cond do
@@ -133,6 +145,106 @@ defmodule Troupe.CLI.Memory do
         say.("your memory was not saved: " <> describe(reason))
         1
     end
+  end
+
+  # `--blame`: each line with who wrote it, in which version, and for an agent's entry the
+  # agent and the session it came from; blame, not history, as the plane derives it.
+  defp blame(say, call) do
+    case call.("me.memory", %{"blame" => true}) do
+      {:ok, %{"version" => 0} = own} ->
+        show(own, say)
+
+      {:ok, %{"lines" => [_ | _] = lines} = own} ->
+        say.(
+          "your memory on #{own["plane_url"]}, version #{own["version"]}, line by line with who wrote it:"
+        )
+
+        say.("")
+        labels = Enum.map(lines, &written_by/1)
+        width = labels |> Enum.map(&String.length/1) |> Enum.max() |> min(56)
+
+        Enum.zip_with(labels, lines, fn label, line ->
+          say.(String.trim_trailing(String.pad_trailing(label, width) <> "  " <> line["text"]))
+        end)
+
+        0
+
+      {:ok, own} ->
+        # A plane from before provenance answers no lines: the text, as `troupe memory` shows it.
+        say.("the plane says nothing of who wrote each line; it is from before it")
+        show(own, say)
+
+      {:error, reason} ->
+        say.("could not read your memory: " <> describe(reason))
+        1
+    end
+  end
+
+  defp written_by(%{"agent" => agent, "session" => session} = line) when is_binary(agent),
+    do: "v#{line["version"]} #{agent} in #{session}"
+
+  defp written_by(%{"session" => session} = line) when is_binary(session),
+    do: "v#{line["version"]} an agent in #{session}"
+
+  defp written_by(line), do: "v#{line["version"]} #{line["by"]}"
+
+  # `--status`: which versions this machine's daemon holds, against what the plane has in
+  # force now, and what each session running here read at its last turn. For the person's
+  # own debugging; nothing is changed but the copy, which is fetched as at any poll.
+  defp status(say, call) do
+    case call.("me.memory.status", %{}) do
+      {:ok, status} ->
+        say.(held_line(status))
+        Enum.each(status["documents"] || [], &say.("  " <> document_line(&1)))
+        say.(standing_line(status))
+        Enum.each(status["sessions"] || [], &say.("  " <> session_line(&1)))
+        0
+
+      {:error, reason} ->
+        say.("could not ask this machine's daemon: " <> describe(reason))
+        1
+    end
+  end
+
+  defp held_line(%{"problem" => problem}) when is_binary(problem),
+    do: "this machine's copy of the plane's memory is not used: #{problem}"
+
+  defp held_line(%{"documents" => [], "fetched_at" => nil}),
+    do: "this machine holds no copy of the plane's memory"
+
+  defp held_line(status),
+    do:
+      "this machine holds the memory of #{status["plane_url"]}, fetched #{status["fetched_at"]}, kept in #{status["path"]}:"
+
+  defp document_line(document),
+    do: "#{label(document)}, version #{document["version"]} (#{short(document["hash"])})"
+
+  defp label(%{"scope" => "organisation"}), do: "the organisation's memory"
+  defp label(%{"scope" => "team", "name" => name}), do: "the team #{name}'s memory"
+  defp label(%{"scope" => "profile", "name" => name}), do: "the worker profile #{name}'s memory"
+  defp label(%{"scope" => "user"}), do: "your own memory"
+  defp label(%{"scope" => scope}), do: "#{scope} memory"
+
+  defp short("sha256:" <> hex), do: "sha256:" <> String.slice(hex, 0, 12)
+  defp short(other), do: to_string(other)
+
+  defp standing_line(%{"current" => true}), do: "current: the plane has the same versions in force"
+
+  defp standing_line(%{"current" => false, "in_force" => in_force}),
+    do:
+      "behind: the plane has " <>
+        Enum.map_join(in_force, "; ", &document_line/1) <> " in force, now fetched"
+
+  defp standing_line(%{"reason" => reason}), do: "not checked against the plane: #{reason}"
+
+  defp session_line(%{"session_id" => id, "turn_at" => at, "current" => current} = session) do
+    read =
+      session["documents"]
+      |> List.wrap()
+      |> Enum.map_join(", ", &"#{&1["scope"]} v#{&1["version"]}")
+
+    word = if current, do: "current", else: "behind until its next turn"
+    "session #{id}, last turn #{at}: #{if read == "", do: "no memory", else: read} (#{word})"
   end
 
   defp describe(reason) when is_binary(reason), do: reason

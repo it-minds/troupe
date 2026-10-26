@@ -50,6 +50,7 @@ import { CommandPalette } from "./CommandPalette";
 import type { PaletteScreen } from "./CommandPalette";
 import { Files } from "./Files";
 import { PodConfig } from "./PodConfig";
+import { Publish } from "./Publish";
 import { Curtain, ProseFrame, ReasoningFrame, StripLine, ToolFrame, useNow } from "./Frames";
 import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
@@ -58,7 +59,8 @@ import { MemoryPane } from "./Memory";
 import type { MemoryAsk } from "./Memory";
 import { OfferLine, OfferPanel } from "./Offer";
 import { StartLine, StartPanel } from "./Onboard";
-import { RemoteLine, RemoteOfferControl } from "./Remote";
+import { inviteLine, RemoteLine, RemoteOfferControl } from "./Remote";
+import { InviteControl } from "./Invites";
 import { Cost, initials, Loading, personColour, Pill, Sync, When, Where } from "./bits";
 
 /**
@@ -117,6 +119,7 @@ export function Session({
   // What `/memory refresh` or `/memory forget` asked of the memory pane, until it takes it.
   const [memoryAsk, setMemoryAsk] = useState<MemoryAsk | null>(null);
   const [palette, setPalette] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   // The scratchpad document open beside the conversation, by name; null while it is closed.
   const [scratch, setScratch] = useState<string | null>(null);
   useEffect(() => setScratch(null), [sessionId]);
@@ -187,9 +190,11 @@ export function Session({
             detail: detail.command,
             ...(here && onAgents ? { agents: () => onAgents() } : {}),
             ...(agentRows ? { agentRows } : {}),
+            ...(daemon ? { publish: () => setPublishing(true) } : {}),
           }}
         />
       )}
+      {publishing && daemon && <Publish daemon={daemon} sessionId={here ? sessionId : undefined} onClose={() => setPublishing(false)} />}
 
       <Header
         row={row}
@@ -222,12 +227,13 @@ export function Session({
           />
         }
         remote={
-          row && daemon && auth && row.kind === "local" ? (
+          row && daemon && auth && (row.kind === "local" || row.kind === "private") ? (
             <RemoteOfferControl daemon={daemon} row={row} presence={view.state.presence} />
           ) : row?.kind === "remote" ? (
             <RemoteLine row={row} />
           ) : null
         }
+        invites={row ? <InviteControl auth={auth} daemon={daemon} row={row} /> : null}
       />
 
       <Banners status={view.status} detail={view.detail} dormant={dormant} readOnly={readOnly} error={view.error} />
@@ -468,6 +474,7 @@ function Header({
   view,
   agent,
   remote,
+  invites,
 }: {
   row: FleetRow | undefined;
   sessionId: string;
@@ -486,6 +493,8 @@ function Header({
   agent: JSX.Element;
   /** Steering from another device: this computer's offer, or whose laptop a relayed one is on. */
   remote?: JSX.Element | null;
+  /** Whom it is shared with by name, and for its owner the invitation (troupe #765). */
+  invites?: JSX.Element | null;
 }): JSX.Element {
   const working = rootState(state);
   const here = presentMembers(state);
@@ -528,6 +537,14 @@ function Header({
               </span>
             </>
           )}
+          {row?.invitation && (
+            <>
+              <span className="sep" aria-hidden="true">
+                ·
+              </span>
+              <span className="invited-by">{inviteLine(row.invitation)}</span>
+            </>
+          )}
         </div>
         <h1 className="title">{row?.title ?? sessionId}</h1>
         <GoalLine goal={state.goal} loop={loop} canChange={canChange} onSet={view.setGoal} onClear={view.clearGoal} onStartLoop={view.startLoop} />
@@ -555,6 +572,8 @@ function Header({
         <LoopStatus loop={loop} canStop={canChange} onStop={view.stopLoop} />
 
         {remote}
+
+        {invites}
 
         {/* The agent this window runs, and the switch to another from the next turn. */}
         {agent}

@@ -40,8 +40,25 @@ defmodule Troupe.Sessions.Cipher do
     @magic <> nonce <> tag <> ciphertext
   end
 
-  @doc "Decrypt, or say why not. A tampered object is `{:error, :invalid}` and never plaintext."
-  @spec open(key(), String.t(), binary()) :: {:ok, binary()} | {:error, :invalid | :unknown_format}
+  @doc """
+  Decrypt, or say why not. A tampered object is `{:error, :invalid}` and never plaintext.
+
+  Given a list of keys, each in turn: a private session sealed under a new key each time an
+  invitation to it was taken back is read by somebody holding several, and the tag says
+  which one sealed an object, since under any other it does not verify.
+  """
+  @spec open(key() | [key()], String.t(), binary()) ::
+          {:ok, binary()} | {:error, :invalid | :unknown_format}
+  def open([_ | _] = keys, session_id, blob) do
+    Enum.reduce_while(keys, {:error, :invalid}, fn key, refused ->
+      case open(key, session_id, blob) do
+        {:ok, plaintext} -> {:halt, {:ok, plaintext}}
+        {:error, :unknown_format} = unknown -> {:halt, unknown}
+        {:error, :invalid} -> {:cont, refused}
+      end
+    end)
+  end
+
   def open(key, session_id, <<@magic, nonce::binary-size(@nonce_bytes), tag::binary-size(@tag_bytes), ciphertext::binary>>)
       when byte_size(key) == 32 do
     case :crypto.crypto_one_time_aead(:aes_256_gcm, key, nonce, ciphertext, session_id, tag, false) do

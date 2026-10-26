@@ -2753,6 +2753,11 @@ defmodule Troupe.UI.TUI.View do
           ""
       end
 
+    # A question the person must answer before anything happens, such as whether a private
+    # session may pass through the plane unsealed, is drawn as a person being needed.
+    {notice, asked} =
+      if Client.consent_asked?(notice), do: {nil, " · " <> notice}, else: {notice, ""}
+
     text =
       "#{goal_note(state.model)}#{loop_note(state.model)}#{present_note(state.model)}" <>
         " · #{watch}#{mcp}" <>
@@ -2775,7 +2780,7 @@ defmodule Troupe.UI.TUI.View do
       end
 
     line =
-      [{needs, :needs_you}, {others, nil}, {hint, :needs_you}, {text, nil}]
+      [{needs, :needs_you}, {others, nil}, {hint, :needs_you}, {asked, :needs_you}, {text, nil}]
       |> Enum.reject(fn {part, _role} -> part == "" end)
       |> Enum.map(fn
         {part, nil} -> Span.new(part)

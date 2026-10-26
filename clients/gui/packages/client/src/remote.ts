@@ -8,6 +8,8 @@
 // agent, and nothing of the laptop.
 
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
+import { invitationsFrom } from "./invites.js";
+import type { Invitation } from "./invites.js";
 import type { Attachment } from "./plane.js";
 
 type Rpc = <T = unknown>(method: string, params?: unknown) => Promise<T>;
@@ -56,6 +58,11 @@ export interface RemoteWatchOptions {
   token: () => Promise<string>;
   /** The person's whole list, as `remote.list` answers it: when the watch opens, and at each change. */
   onSessions: (sessions: RemoteListRow[]) => void;
+  /**
+   * The invitations to the person (troupe #765), which ride the same socket: when it opens,
+   * and each time one is made, changed or taken back. A plane from before them says none.
+   */
+  onInvites?: (invites: Invitation[]) => void;
   /**
    * Whether the watch is up: `true` once it opens, `false` each time a dial fails or the
    * socket drops. A list it pushed is news only while it is up; a caller asks again at each
@@ -116,12 +123,18 @@ export function watchRemote(opts: RemoteWatchOptions): RemoteWatch {
     // Whether this socket has pushed a list yet: one that came right behind the answer is
     // newer than the list the answer carried, and the answer's must not overwrite it.
     let pushed = false;
+    let invited = false;
     try {
       held = await opts.token();
       const opened = await TroupeConnection.open(
         { url: watchUrl(opts.planeUrl), token: held, clientInfo: opts.clientInfo, WebSocketImpl: opts.WebSocketImpl },
         {
           onNotification: (method, params) => {
+            if (method === "invites.changed") {
+              invited = true;
+              opts.onInvites?.(invitationsFrom((params as { invites?: unknown } | null)?.invites));
+              return;
+            }
             if (method !== "remote.changed") return;
             const sessions = (params as { sessions?: unknown } | null)?.sessions;
             if (!Array.isArray(sessions)) return;
@@ -153,6 +166,7 @@ export function watchRemote(opts: RemoteWatchOptions): RemoteWatch {
       wait = first;
       const sessions = opened.hello["sessions"];
       if (!pushed) opts.onSessions(Array.isArray(sessions) ? (sessions as RemoteListRow[]) : []);
+      if (!invited) opts.onInvites?.(invitationsFrom(opened.hello["invites"]));
       say(true);
     } catch {
       if (closed) return;

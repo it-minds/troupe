@@ -348,7 +348,7 @@ defmodule Troupe.Commands do
         example: "/loop 10"
       ),
       entry("steer", "session", "Offer this session to the plane, to steer it from another device",
-        usage: "/steer [on [PERSON[:observe] ...] | off]",
+        usage: "/steer [on [yes | PERSON[:observe] ...] | off]",
         args: [arg("verb", false, "text"), arg("people", false, "text")],
         availability: "local",
         detail:
@@ -358,9 +358,35 @@ defmodule Troupe.Commands do
             ":observe. This computer keeps one connection to the plane while it is offered " <>
             "and nothing listens here; your rules and approvals hold for every prompt. " <>
             "/steer off withdraws it and ends every remote view at once; /steer alone " <>
-            "says whether it is offered and who is steering. A private session is never " <>
-            "offered.",
+            "says whether it is offered and who is steering. A private session is asked " <>
+            "about first, since while it is offered what it says passes through the plane " <>
+            "unsealed: /steer on yes offers it, to the people invited into it with control, " <>
+            "and /steer off makes it sealed only again.",
         example: "/steer on bea@example.com cy@example.com:observe"
+      ),
+      entry("invite", "session", "Invite a person into this session by name",
+        usage: "/invite [PERSON [observe | control]]",
+        args: [arg("person", false, "text"), arg("role", false, "text")],
+        detail:
+          "Invites a person, by email, to follow this session (observe, the default) or " <>
+            "steer it (control): they see it in their list in the desktop app and on the " <>
+            "console's Mine, and act in it under its own rules. A pod session is invited at " <>
+            "the plane, and only somebody its profile's teams cover may be; a private one " <>
+            "from this computer, which puts its key in their own slot at the key manager, " <>
+            "where the plane cannot read it, and somebody invited to steer it does so while " <>
+            "you offer it (/steer on). /invite alone says whom it is shared with. A session " <>
+            "on this computer alone is offered instead (/steer on).",
+        example: "/invite bea@example.com control"
+      ),
+      entry("uninvite", "session", "Take an invitation into this session back",
+        usage: "/uninvite PERSON",
+        args: [arg("person", true, "text")],
+        detail:
+          "Ends every way the invitation let them in: their open views close. A private " <>
+            "session is sealed from then on under a new key they are never given; what they " <>
+            "read before stays read, since an invitation cannot be taken back for what it " <>
+            "already showed.",
+        example: "/uninvite bea@example.com"
       ),
       entry("sessions", "navigate", "This directory's sessions, newest first",
         aliases: ["resume"],
@@ -423,6 +449,18 @@ defmodule Troupe.Commands do
             "the checkout: git sees the file, other sessions there see it, and erasing the " <>
             "session leaves it.",
         example: "/upload notes.md"
+      ),
+      entry("publish", "workspace", "Publish a page, a document or a file for others to read",
+        usage: "/publish <path> <organisation | profile:<name>>",
+        args: [arg("path", true, "file"), arg("visibility", true, "text")],
+        detail:
+          "The file is read on this machine and published on your Troupe plane as an artifact, " <>
+            "as the person this computer's daemon is signed in as: a page (.html), a Markdown " <>
+            "document (.md) or any other file. The whole organisation reads it, or the people " <>
+            "a profile is granted to, in the console's Artifacts, served from a host that can " <>
+            "reach nothing of yours. A page with stylesheets or scripts of its own is an " <>
+            "agent's to publish, with publish_artifact.",
+        example: "/publish report.html profile:dev"
       ),
       entry("copy", "workspace", "Copy a transcript to the clipboard",
         usage: "/copy [window]",

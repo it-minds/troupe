@@ -38,6 +38,7 @@ import { COMMANDS, DEFINED, expandDefined } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 import { PROVIDER_TYPES, SETUP_KINDS } from "./provider-types.js";
 import { FakeScratch } from "./scratch.js";
+import { PRIVATE_OFFER_SENTENCE } from "../../src/fleet.js";
 
 interface Session {
   id: string;
@@ -87,6 +88,8 @@ interface Session {
     lasts: "across_restarts" | "until_restart";
     /** Read back from the record as the daemon started. */
     restored: boolean;
+    /** A private session, offered with its person's yes. */
+    private?: boolean;
   } | null;
 }
 
@@ -524,6 +527,15 @@ export class FakeDaemon {
   readonly privateSessions = new Set<string>();
   /** The sessions `session.claim` took over, oldest first. */
   readonly claims: string[] = [];
+  /**
+   * Invitations into this computer's private sessions, as the daemon makes them through
+   * the plane (troupe #765): by session, the people and their roles, and every key version
+   * a removal sealed forward under.
+   */
+  readonly invited = new Map<string, Array<{ subject: string; role: string }>>();
+  readonly rekeyed: string[] = [];
+  /** Somebody else's private sessions shared with this computer's person: their sealed events, by session. */
+  readonly sealed = new Map<string, Array<Record<string, unknown>>>();
   /** How many times `daemon.stop` was asked, for an update to replace the daemon. */
   stopsAsked = 0;
   /** Refuse every claim as the daemon does one whose plane copy went further than this one. */
@@ -615,6 +627,13 @@ evoked where nothing is set and there was a sign-in. */
   own: { version: number; text: string } | null = null;
   /** Every `me.memory.put` asked, in order. */
   readonly ownPuts: Array<Record<string, unknown>> = [];
+  /**
+   * The person's own artifacts on the plane, as this daemon lists them through its sign-in
+   * (`artifact.list`, troupe #62); null for a daemon signed in to none.
+   */
+  artifacts: Array<Record<string, unknown>> | null = null;
+  /** Every `artifact.publish` asked, in order. */
+  readonly publishedArtifacts: Array<Record<string, unknown>> = [];
   memoryAutoRefresh = true;
   /** The agent files of every layer (troupe Decision 841): the built-ins, the person's and each workspace's. */
   readonly agents: FakeAgents;
@@ -1242,13 +1261,19 @@ evoked where nothing is set and there was a sign-in. */
       }
 
       // A session offered to the plane for steering from another device, and taken back
-      // (troupe #58): a private one is refused, as the daemon refuses it.
+      // (troupe #58): a private one only with its person's yes, and to the people it
+      // invited with control (troupe #765), as the daemon offers it.
       case "remote.offer": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
-        if (session.kind === "private") {
-          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: "a private session is never offered to the plane" } });
+        const isPrivate = session.kind === "private";
+        if (isPrivate && params["consent"] !== "private") {
+          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { consent: "private", reason: PRIVATE_OFFER_SENTENCE } });
         }
-        const share = Array.isArray(params["share"]) ? (params["share"] as Array<{ person: string; role?: string }>) : [];
+        const share = isPrivate
+          ? (this.invited.get(sessionId) ?? []).filter((p) => p.role === "control").map((p) => ({ person: p.subject, role: "control" }))
+          : Array.isArray(params["share"])
+            ? (params["share"] as Array<{ person: string; role?: string }>)
+            : [];
         session.remote = {
           owner: this.linked?.subject ?? null,
           shares: share.map((s) => ({ subject: s.person, display_name: s.person, email: s.person, role: s.role ?? "observe" })),
@@ -1257,6 +1282,7 @@ evoked where nothing is set and there was a sign-in. */
           steering: [],
           lasts: this.atLogin ? "across_restarts" : "until_restart",
           restored: false,
+          ...(isPrivate ? { private: true } : {}),
         };
         return reply(ws, id, { session_id: sessionId, remote: session.remote });
       }
@@ -1283,6 +1309,42 @@ evoked where nothing is set and there was a sign-in. */
         session.sync = "current";
         session.device = null;
         return reply(ws, id, { session_id: sessionId, device: "this-laptop", epoch: 2, sync: "current" });
+      }
+
+      // A private session's invitations, from the machine that seals it (troupe #765).
+      case "session.invite": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        if (session.kind !== "private") {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { session_id: sessionId, reason: "only a private session is invited from this machine" } });
+        }
+        const person = String(params["person"] ?? "");
+        const role = params["role"] === "control" ? "control" : "observe";
+        const people = (this.invited.get(sessionId) ?? []).filter((p) => p.subject !== person);
+        this.invited.set(sessionId, [...people, { subject: person, role }]);
+        return reply(ws, id, { session_id: sessionId, invite: { subject: person, role, invited_by: this.linked?.subject ?? "me", invited_at: new Date().toISOString() } });
+      }
+
+      case "session.uninvite": {
+        const person = String(params["person"] ?? "");
+        const people = this.invited.get(sessionId) ?? [];
+        if (!people.some((p) => p.subject === person)) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "invitation" } });
+        this.invited.set(sessionId, people.filter((p) => p.subject !== person));
+        this.rekeyed.push(sessionId);
+        return reply(ws, id, { session_id: sessionId, subject: person, rekey_due: false, key_version: this.rekeyed.filter((s) => s === sessionId).length + 1 });
+      }
+
+      case "session.invites":
+        return reply(ws, id, {
+          session_id: sessionId,
+          invites: (this.invited.get(sessionId) ?? []).map((p) => ({ ...p, display_name: p.subject, invited_by: "me", invited_at: "2026-10-25T10:00:00Z" })),
+        });
+
+      case "session.read_sealed": {
+        const events = this.sealed.get(sessionId);
+        if (!events) return reply(ws, id, null, { code: -32005, message: "not_found", data: { session_id: sessionId } });
+        const after = Number(params["after_seq"] ?? 0);
+        const later = events.filter((e) => Number(e["seq"]) > after);
+        return reply(ws, id, { session_id: sessionId, events: later, last_seq: events.length, key_version: 1 });
       }
 
       case "subscribe": {
@@ -1501,6 +1563,11 @@ evoked where nothing is set and there was a sign-in. */
         return reply(ws, id, { enabled: Boolean(watching), backend: watching ? "poll" : "off", session_id: watching?.id ?? null });
       }
 
+      // The client's Local only switch: the real daemon then makes no plane call for its
+      // sessions; the fake has none to make, and says what it heard.
+      case "client.mode":
+        return reply(ws, id, { local_only: params["local_only"] === true });
+
       // The person's own memory, through this daemon's sign-in; signed out, a sentence.
       case "me.memory":
       case "me.memory.put": {
@@ -1518,6 +1585,26 @@ evoked where nothing is set and there was a sign-in. */
         if (text === own.text) return reply(ws, id, { changed: false, entry: null, user: json(own) });
         this.own = { version: own.version + 1, text };
         return reply(ws, id, { changed: true, entry: null, user: json(this.own) });
+      }
+
+      // An artifact published on the plane through this daemon's sign-in, and the person's
+      // own listed there (troupe #62); signed out, a sentence.
+      case "artifact.list":
+      case "artifact.publish": {
+        const mine = this.artifacts;
+        if (!mine) {
+          return reply(ws, id, null, { code: -32010, message: "unavailable", data: { reason: "this computer's daemon is not signed in to a Troupe plane, so there is nowhere to publish it; troupe login signs it in, or send the file itself" } });
+        }
+        if (method === "artifact.list") {
+          return reply(ws, id, { enabled: true, profiles: ["dev"], publish_organisation: "everyone", public_links: false, gallery_url: "https://plane.example.test/console#/artifacts", plane_url: "https://plane.example.test", artifacts: mine });
+        }
+        this.publishedArtifacts.push(params);
+        const existing = mine.find((a) => a["id"] === params["id"]);
+        const published = existing
+          ? Object.assign(existing, { version: Number(existing["version"]) + 1 })
+          : { id: `art-fake${mine.length + 1}`, title: params["title"], kind: params["kind"], visibility: params["visibility"], version: 1, mine: true };
+        if (!existing) mine.push(published);
+        return reply(ws, id, { ...published, url: `https://artifacts.example.test/a/${String(published["id"])}/`, plane_url: "https://plane.example.test" });
       }
 
       // What a session's next prompt is read from (troupe #55): what a test set, or the

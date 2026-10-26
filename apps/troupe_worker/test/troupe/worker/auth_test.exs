@@ -23,8 +23,9 @@ defmodule Troupe.Worker.AuthTest do
   @mine "20260923T101112-q3Vx_A"
 
   # Answered by the connection before the guard is asked: a second `initialize` is
-  # `invalid_request`, and `auth.refresh` is not in the table at all.
-  @connection_own ["initialize"]
+  # `invalid_request`, and `auth.refresh` is not in the table at all. `client.mode`, a
+  # client saying it is in Local only, narrows only what is done for it.
+  @connection_own ["initialize", "client.mode"]
 
   # What a session's own client needs besides the commands that name the session: its
   # topics, and the two listings, which are narrowed to it.
@@ -34,6 +35,12 @@ defmodule Troupe.Worker.AuthTest do
   @daemon_level [
     "session.create",
     "session.claim",
+    # A private session's invitations, from the machine that holds its key (#765): a pod
+    # session is invited at the plane.
+    "session.invite",
+    "session.uninvite",
+    "session.invites",
+    "session.read_sealed",
     "config.get",
     "config.models",
     "config.set",
@@ -232,6 +239,7 @@ defmodule Troupe.Worker.AuthTest do
 
       params = %{"session_id" => @mine, "topic" => "session:" <> other}
       assert guard.(unscoped_token(), "subscribe", params) == {:ok, [:observe]}
+
       assert guard.(unscoped_token(), "input.send", %{"session_id" => @mine}) ==
                {:ok, [:observe, :control]}
     end

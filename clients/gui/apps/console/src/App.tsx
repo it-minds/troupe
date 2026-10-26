@@ -6,15 +6,15 @@
 // It is an app of its own. It shares the protocol client and the design tokens with the
 // desktop app and nothing else, needs no daemon and no desktop app to run, and talks to
 // the plane through its sign-in, its `admin.*` methods for the administrative areas, and
-// for Mine the methods any client of the person's calls (`me`, `me.clients`, `me.memory`,
-// `sessions.list`, `remote.*`), as that person. A screen that needed anything else would
-// be a door no other client has.
+// for the person's own areas the methods any client of the person's calls (`me`,
+// `me.clients`, `me.memory`, `sessions.list`, `remote.*`, `artifact.*`), as that person. A
+// screen that needed anything else would be a door no other client has.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { JSX } from "react";
 import { AdminApi } from "@troupe/client";
 import type { AuthSession, Discovery } from "@troupe/client";
-import { ConsoleContext, describeError, planeOf, standing } from "./console";
+import { ConsoleContext, describeError, openInNewTab, planeOf, reserveNewTab, standing } from "./console";
 import type { Signed, Standing } from "./console";
 import { SignIn } from "./views/SignIn";
 import { Shell } from "./views/Shell";
@@ -22,7 +22,14 @@ import { Wordmark } from "./views/brand";
 
 type Phase = { kind: "signed-out" } | { kind: "resolving"; auth: AuthSession } | { kind: "failed"; auth: AuthSession; error: unknown } | { kind: "ready"; auth: AuthSession; standing: Standing; discovery: Discovery | null };
 
-export function App({ navigate }: { navigate?: (url: string) => void } = {}): JSX.Element {
+export function App({
+  navigate,
+  openTab,
+}: {
+  navigate?: (url: string) => void;
+  /** Open an artifact's link in a tab of its own. A test catches the address instead. */
+  openTab?: (url: string) => void;
+} = {}): JSX.Element {
   const [phase, setPhase] = useState<Phase>({ kind: "signed-out" });
   const [toast, setToast] = useState<string | null>(null);
 
@@ -63,8 +70,12 @@ export function App({ navigate }: { navigate?: (url: string) => void } = {}): JS
       plane: planeOf(phase.auth, phase.discovery),
       signOut,
       notify: setToast,
+      openTab: openTab ?? openInNewTab,
+      // A test's catch is handed the address when it comes; a browser's tab is opened at the click.
+      reserveTab: openTab ? () => (url: string | null) => void (url && openTab(url)) : reserveNewTab,
+      follow: navigate ?? ((url: string) => globalThis.location.assign(url)),
     };
-  }, [phase, signOut]);
+  }, [phase, signOut, openTab, navigate]);
 
   if (phase.kind === "signed-out") return <SignIn onSignedIn={onSignedIn} {...(navigate ? { navigate } : {})} />;
 

@@ -231,14 +231,18 @@ defmodule Troupe.Config do
             # Workspaces whose own files may set the keys the schema marks trusted
             # (Decision 686). Read only from the user file.
             trusted_workspaces: [],
-            # Where session logs go. `nil` means the platform state directory; an explicit
-            # path lets an embedding caller isolate state without touching the environment.
+            # Where session logs go, with their blobs and the outputs kept from them. `nil`
+            # means the platform state directory; an explicit path lets an embedding caller
+            # isolate state without touching the environment.
             state_dir: nil,
             # Only meaningful with `provider: "fake"`: a JSON script of scripted
             # answers, which is how a packaged binary is smoke-tested with no model.
             fake_script: nil,
             # The terminal UI's: whether it captures the mouse. The daemon has no opinion.
             mouse: true,
+            # The terminal UI's: whether it is in Local only, which it tells the daemon when
+            # it connects; the daemon then makes no plane call for its sessions.
+            local_only: false,
             # Keys starting with `x-`, which a file may carry for its own tools and Troupe
             # does not read.
             extra: %{},

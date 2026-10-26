@@ -17,13 +17,18 @@ defmodule Troupe.Plane.Remote.Laptop do
   Each change it makes is told to the people it concerns (`Troupe.Plane.Remote.changed/1`)
   once it is in force, the row written and the names held or let go, so a person's watch
   (`Troupe.Plane.Remote.Watch`) that reads again reads what is now true.
+
+  Each offer is recorded in the audit trail as `remote.offer`, with the device, how many
+  people it is shared with and whether the session is private. What a session says is not
+  there, nor anywhere else on the plane: the frames pass through this process and nothing
+  of them is written.
   """
 
   @behaviour WebSock
 
-  alias Troupe.Plane.Remote
+  alias Troupe.Plane.{Audit, Remote}
   alias Troupe.Plane.Remote.Auth
-  alias Troupe.Protocol.{Error, JSONRPC}
+  alias Troupe.Protocol.{Error, JSONRPC, Relay}
 
   @renew_warning_seconds 120
   @expiry_grace_seconds 30
@@ -124,6 +129,7 @@ defmodule Troupe.Plane.Remote.Laptop do
     case Remote.offer(state.user, state.device, params) do
       {:ok, offer} ->
         state = state |> hold(offer) |> recheck(offer)
+        audit_offer(state, offer)
         # Everybody it was shared with before and is now: one it no longer names loses it.
         Remote.changed(Remote.concerned(before) ++ Remote.concerned(offer))
         {:push, frame({:result, id, %{"shares" => Remote.Offer.people(offer)}}), state}
@@ -139,7 +145,7 @@ defmodule Troupe.Plane.Remote.Laptop do
     if is_binary(session_id) do
       before = Remote.get(session_id)
       :ok = Remote.withdraw(state.user, session_id)
-      state = stop_offering(state, session_id, "withdrawn")
+      state = stop_offering(state, session_id, withdrawn(before))
 
       if before && before.owner_subject == state.user.subject,
         do: Remote.changed(Remote.concerned(before))
@@ -201,6 +207,19 @@ defmodule Troupe.Plane.Remote.Laptop do
   end
 
   def handle_info({:viewer_gone, id}, state), do: forget_viewer(state, id)
+
+  # An invitation into a session this connection offers was made, changed or taken back:
+  # the views open on it meet it now, and one whose person no longer holds a role ends.
+  def handle_info({:offer_changed, session_id}, state) do
+    case Remote.get(session_id) do
+      %Remote.Offer{} = offer ->
+        if MapSet.member?(state.sessions, session_id), do: recheck(state, offer)
+        {:ok, state}
+
+      nil ->
+        {:ok, state}
+    end
+  end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
     case Enum.find(state.viewers, fn {_id, v} -> v.pid == pid end) do
@@ -285,6 +304,22 @@ defmodule Troupe.Plane.Remote.Laptop do
 
     state
   end
+
+  # Who offered what, from where, to how many, and whether it is private: never a word of
+  # what the session says.
+  defp audit_offer(state, offer) do
+    {:ok, _} =
+      Audit.record(state.user.subject, "remote.offer", offer.session_id, %{
+        "device" => state.device,
+        "private" => offer.private == true,
+        "shared_with" => length(Remote.Offer.people(offer))
+      })
+
+    :ok
+  end
+
+  defp withdrawn(%Remote.Offer{private: true}), do: Relay.private_withdrawn()
+  defp withdrawn(_offer), do: "withdrawn"
 
   defp forget_viewer(state, id) do
     case Map.pop(state.viewers, id) do

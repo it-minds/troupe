@@ -96,11 +96,12 @@ defmodule Troupe.CLI.Daemon do
           ])
 
         # The line goes on as it is written, as `System.shell/2` hands it to cmd.exe: the
-        # reaper passes its own command line on unchanged, less its own name.
+        # reaper passes its own command line on unchanged, less its own name. cmd.exe by its
+        # absolute path, never a bare `cmd` a current directory could answer for.
         {:shell, line} ->
           reaper = String.replace(reaper, "/", "\\")
-          shell = System.get_env("COMSPEC", "cmd")
-          Port.open({:spawn, ~c"\"#{reaper}\" #{shell} /s /c #{line}"}, @port)
+          shell = Troupe.Executable.comspec()
+          Port.open({:spawn, ~c"\"#{reaper}\" \"#{shell}\" /s /c #{line}"}, @port)
       end
 
     relay(port)

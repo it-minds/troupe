@@ -19,7 +19,9 @@ defmodule Troupe.Worker.UserMemory do
   @doc "Send one entry for the owner of the session `ctx` names; the plane's answer or its refusal."
   @spec append(String.t(), Troupe.Tool.Ctx.t()) :: {:ok, map()} | {:error, String.t()}
   def append(entry, ctx) do
-    params = %{"session_id" => ctx.session_id, "scope" => "user", "append" => entry}
+    # The agent is named so the plane keeps who wrote the line; whose memory it is, it reads
+    # off the session.
+    params = %{"session_id" => ctx.session_id, "scope" => "user", "append" => entry, "agent" => agent(ctx)}
 
     case request(params) do
       {:ok, answer} ->
@@ -38,6 +40,10 @@ defmodule Troupe.Worker.UserMemory do
         {:error, "the plane could not be reached from this pod; try again later"}
     end
   end
+
+  defp agent(%{definition: %{name: name}}) when is_binary(name), do: name
+  defp agent(%{agent_path: [_ | _] = path}), do: List.last(path)
+  defp agent(_ctx), do: nil
 
   defp reason(%{"reason" => reason}, _message) when is_binary(reason), do: reason
   defp reason(%{reason: reason}, _message) when is_binary(reason), do: reason

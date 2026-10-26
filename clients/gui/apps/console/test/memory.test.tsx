@@ -6,6 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
+import { writtenBy } from "../src/views/Memory";
 import { PEOPLE, button, freshBrowser, render, says, sees, seesButton, seesField, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
@@ -67,6 +68,31 @@ describe("company memory", () => {
     await sees("organisation v1 → v2", org);
     const added = await waitFor(() => org()?.querySelector(".memory-version .add"), "the line version 2 added");
     expect(added.textContent).toContain("The on-call rota is in the wiki.");
+  });
+
+  // #55's provenance: blame, not history, in a column beside each line.
+  it("says who wrote each line, beside it", async () => {
+    visit("#/memory");
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+
+    const org = () => card("The organisation's memory");
+    await waitFor(org, "the organisation's memory");
+    (await seesButton("Who wrote each line", org()!)).click();
+    const table = await waitFor(() => org()?.querySelector<HTMLTableElement>("table.blame-lines"), "who wrote each line");
+    const rows = [...table.querySelectorAll("tr")].map((r) => [r.querySelector("th")!.textContent, r.querySelector("td")!.textContent]);
+    expect(rows).toEqual([
+      ["v1 alice@example.com", "We deploy on Tuesdays."],
+      ["v2 alice@example.com", "The on-call rota is in the wiki."],
+    ]);
+    expect(table.querySelector("th")!.getAttribute("title")).toContain("by alice@example.com");
+    (await seesButton("Hide who wrote each line", org()!)).click();
+    await waitFor(() => !org()?.querySelector("table.blame-lines"), "the column folded away");
+
+    // An agent's entry, in a person's own, names the agent and the session it came from.
+    expect(writtenBy({ text: "- Tabs.", version: 3, by: "ada@example.com", session: "20261025T101112-abc123", agent: "build" })).toBe(
+      "v3 build in 20261025T101112-abc123",
+    );
   });
 
   it("says when somebody else saved first, and saves nothing", async () => {
@@ -141,6 +167,63 @@ describe("company memory", () => {
     await sees("Recorded in the audit as memory.put on profile/dev", dev);
     await sees("Fix one issue at a time.", dev);
     expect(fake.admin.memory.get("profile/dev")!.map((v) => v.text)).toEqual(["Fix one issue at a time."]);
+  });
+
+  // Who is behind: each running session the document reaches, with the version
+  // its last turn ran under; a pod's is nudged, a machine's hears at its next poll.
+  it("lists the running sessions behind the version in force, and nudges a pod's", async () => {
+    visit("#/memory");
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+
+    const org = () => card("The organisation's memory");
+    await waitFor(org, "the organisation's memory");
+    await sees("1 running session behind version 2", org);
+    const readers = () => org()?.querySelector<HTMLElement>('section.readers[aria-label="Who reads it"]') ?? null;
+    await sees("s-7f3a9c21", readers);
+    await sees("v1 · behind", readers);
+    await sees("laptop-9b1d (a person's machine)", readers);
+    await sees("on a person's machine hears at its daemon's next poll", readers);
+
+    (await seesButton("Nudge s-7f3a9c21", readers()!)).click();
+    await sees("Told s-7f3a9c21 again; it reads version 2 at its next turn.", readers);
+    expect(fake.admin.memoryNudged).toEqual(["s-7f3a9c21"]);
+
+    // The preview names the same sessions.
+    (await seesButton("Change the organisation's memory", org()!)).click();
+    type(await seesField("The organisation's memory", org()!), "We deploy on Thursdays.");
+    button("Preview", org()!)!.click();
+    await sees("2 running sessions read it now; 1 of them is behind version 2.", org);
+  });
+
+  it("sets two versions side by side, and rolls back to one as a new version with the audit's note", async () => {
+    visit("#/memory");
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+
+    const org = () => card("The organisation's memory");
+    await waitFor(org, "the organisation's memory");
+    (await seesButton("Version 1", org()!)).click();
+    (await seesButton("Beside version 2", org()!)).click();
+
+    const table = await waitFor(() => org()?.querySelector<HTMLTableElement>("table.side-by-side"), "the two versions side by side");
+    const head = [...table.querySelectorAll("th")].map((th) => th.textContent);
+    expect(head).toEqual(["Version 1", "Version 2"]);
+    const added = table.querySelector("td.add");
+    expect(added?.textContent).toContain("The on-call rota is in the wiki.");
+    expect(table.querySelector("td.empty")).not.toBeNull();
+
+    (await seesButton("Restore version 1", org()!)).click();
+    await sees("What will happen", org);
+    await sees("Saved as version 3, with the text of version 1; every version stays.", org);
+    expect(fake.admin.memory.get("organisation")!.length).toBe(2);
+
+    (await seesButton("Roll back", org()!)).click();
+    await sees("Recorded in the audit as memory.put on organisation", org);
+    await sees("rolled back to v1", org);
+    await sees("Version 3, saved", org);
+    expect(fake.admin.memory.get("organisation")!.at(-1)!.text).toBe("We deploy on Tuesdays.");
+    expect(fake.admin.audit.at(-1)!).toMatchObject({ action: "memory.put", detail: { rolled_back_to: 1, note: "rolled back to v1" } });
   });
 
   // Slice 2: a profile that extends another shows, above its own, the memory its sessions

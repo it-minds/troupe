@@ -11,14 +11,18 @@ import {
   filterRows,
   FleetStore,
   hasUnseen,
+  invitationsFrom,
+  invitationWords,
+  onThisComputer,
   rowFromDaemon,
+  rowFromInvite,
   rowFromPlane,
   syncState,
   syncWords,
   totalCostMicros,
   unseenSummary,
 } from "../src/index.js";
-import type { FleetRow, FleetSource, SessionKind, SessionRow } from "../src/index.js";
+import type { FleetRow, FleetSource, Invitation, SessionKind, SessionRow } from "../src/index.js";
 
 function planeRow(id: string, over: Partial<SessionRow> = {}): SessionRow {
   return {
@@ -300,5 +304,53 @@ describe("what happened while nobody was reading (issue #119)", () => {
     const row = { unseen: { turns: 1, approvals: 0, questions: 0, since: since.toISOString() }, pendingApprovals: 0, pendingQuestions: 0, failed: failed.failed };
     assert.equal(unseenSummary(row, new Date(2026, 8, 27, 15, 0)), "1 turn failed since 14:02");
     assert.equal(describeUnseen({ turns: 3, approvals: 0, questions: 0 }, row), "3 turns ended, the last one failed");
+  });
+});
+
+describe("invitations by name (troupe #765)", () => {
+  const invitation = (over: Partial<Invitation> = {}): Invitation => ({
+    session_id: "s-pod",
+    kind: "team",
+    title: "incident review",
+    profile: "dev",
+    state: "active",
+    owner: "ada@example.com",
+    owner_name: "Ada",
+    role: "observe",
+    invited_by: "ada@example.com",
+    invited_by_name: "Ada",
+    invited_at: "2026-10-25T10:00:00Z",
+    ...over,
+  });
+
+  it("marks the row the plane lists with who invited the person, and lists a private one of its own", async () => {
+    const plane = new StubSource("plane", "team");
+    plane.rows = [rowFromPlane(planeRow("s-pod", { your_role: "viewer", cost_micros: 1200 }))];
+    const remote = new StubSource("remote", "remote");
+    remote.rows = [rowFromInvite(invitation()), rowFromInvite(invitation({ session_id: "s-priv", kind: "private", role: "control", profile: null }))];
+    const store = new FleetStore([plane, remote]);
+    await store.refresh();
+
+    const pod = store.current.rows.find((r) => r.id === "s-pod")!;
+    assert.equal(pod.kind, "team", "the plane's row, not replaced");
+    assert.equal(pod.costMicros, 1200, "with what the plane said of it");
+    assert.equal(pod.invitation?.invited_by_name, "Ada");
+
+    const priv = store.current.rows.find((r) => r.id === "s-priv")!;
+    assert.equal(priv.kind, "invited");
+    assert.equal(priv.yourRole, "control");
+    assert.equal(onThisComputer(priv.kind), false, "read from the sealed copy, not run here");
+    assert.equal(invitationWords(priv.invitation!), "Ada invited you to steer it");
+  });
+
+  it("a pod session's invitation alone is a team row the plane opens, as a viewer or a collaborator", () => {
+    assert.equal(rowFromInvite(invitation()).kind, "team");
+    assert.equal(rowFromInvite(invitation()).yourRole, "viewer");
+    assert.equal(rowFromInvite(invitation({ role: "control" })).yourRole, "collaborator");
+  });
+
+  it("reads only the well-formed invitations a plane sent", () => {
+    assert.deepEqual(invitationsFrom(undefined), []);
+    assert.equal(invitationsFrom([invitation(), { session_id: 3 }, null]).length, 1);
   });
 });

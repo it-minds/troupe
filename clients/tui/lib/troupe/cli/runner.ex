@@ -14,7 +14,7 @@ defmodule Troupe.CLI.Runner do
   use Task
 
   alias Troupe.{CLI, Client}
-  alias Troupe.CLI.{Interrupt, Terminal}
+  alias Troupe.CLI.{Interrupt, LocalOnly, Terminal}
   alias Troupe.UI.Headless.Printer
   alias Troupe.UI.TUI
 
@@ -75,9 +75,13 @@ defmodule Troupe.CLI.Runner do
   def main(argv) do
     parsed = argv |> CLI.parse() |> needs_terminal(Terminal.stdout?())
     if interruptible?(parsed), do: Interrupt.watch(fn -> halt(130, false) end)
+    parsed = local_only(parsed)
 
     case parsed do
       {:no_terminal, message} ->
+        fail(message)
+
+      {:local_only, message} ->
         fail(message)
 
       {:ok, %{mode: :version}} ->
@@ -192,7 +196,8 @@ defmodule Troupe.CLI.Runner do
         Troupe.Update.run(action,
           version: args.update_version,
           installed: to_string(Application.spec(:troupe, :vsn)),
-          plane: if(action != :rollback, do: Troupe.CLI.Remote.client_versions())
+          plane:
+            if(action != :rollback and not LocalOnly.on?(), do: Troupe.CLI.Remote.client_versions())
         )
 
       {:ok, %{mode: :tui} = args} ->
@@ -221,6 +226,32 @@ defmodule Troupe.CLI.Runner do
         2
     end
   end
+
+  @doc """
+  Local only, read from the person's config as the command starts and held for the run
+  (`Troupe.CLI.LocalOnly`): a command that would call a plane itself is
+  `{:local_only, why}`; anything else is passed on as it came.
+  """
+  @spec local_only(term()) :: term()
+  def local_only({:ok, %{mode: mode} = args} = parsed) when mode not in [:version, :help] do
+    if LocalOnly.load(args.workspace) and plane_call?(args),
+      do: {:local_only, LocalOnly.refusal(plane_command(args))},
+      else: parsed
+  end
+
+  def local_only(parsed), do: parsed
+
+  defp plane_call?(%{mode: mode}) when mode in [:login, :whoami, :config_pull], do: true
+  defp plane_call?(%{mode: :tui, remote: true}), do: true
+  # A private session is sealed to the plane.
+  defp plane_call?(%{mode: mode, private: true}) when mode in [:tui, :run, :resume], do: true
+  defp plane_call?(_args), do: false
+
+  defp plane_command(%{mode: :login}), do: "troupe login"
+  defp plane_command(%{mode: :whoami}), do: "troupe whoami"
+  defp plane_command(%{mode: :config_pull}), do: "troupe config pull"
+  defp plane_command(%{remote: true}), do: "troupe --remote"
+  defp plane_command(%{private: true}), do: "troupe --private"
 
   @doc """
   A command line that would draw the terminal UI, when standard output is not a

@@ -5,8 +5,8 @@ defmodule Troupe.CLI.Doctor do
   The checks are the harness's (`Troupe.Doctor`), the same lines `troupe-daemon doctor`
   prints, so a person reads one report whichever program they have. What this adds is
   what only this client knows: the planes it is logged in to, each of which is asked
-  for its discovery document. Nothing here needs a daemon; the daemon line says whether
-  one is running.
+  for its discovery document, and whether this terminal is in Local only, in which case no
+  plane is asked. Nothing here needs a daemon; the daemon line says whether one is running.
 
   `--bench` then runs the offline bench's scenarios in this program, against a scripted
   model, and adds a line for each and one for the whole (root Decision 821): whether a
@@ -15,6 +15,7 @@ defmodule Troupe.CLI.Doctor do
   object instead.
   """
 
+  alias Troupe.CLI.LocalOnly
   alias Troupe.Remote.Credentials
 
   @doc """
@@ -26,7 +27,17 @@ defmodule Troupe.CLI.Doctor do
   @spec run(Troupe.CLI.args(), keyword()) :: non_neg_integer()
   def run(args, opts \\ []) do
     planes = Enum.map(Credentials.list(), & &1.plane_url)
-    checks = Troupe.Doctor.run(workspace: args.workspace, planes: planes, command: "troupe")
+    local_only? = LocalOnly.on?()
+
+    checks =
+      Troupe.Doctor.run(
+        workspace: args.workspace,
+        planes: planes,
+        command: "troupe",
+        local_only: local_only?
+      ) ++
+        [local_only_check(local_only?)]
+
     # The checks are on the screen while the bench runs.
     unless args.json, do: IO.write(Troupe.Doctor.format(checks))
 
@@ -39,4 +50,22 @@ defmodule Troupe.CLI.Doctor do
 
     Troupe.Doctor.exit_status(checks ++ lines)
   end
+
+  # Whether this terminal is in Local only, from the person's own config: a line either way,
+  # so the report says what it promises.
+  defp local_only_check(true) do
+    %{
+      name: "local only",
+      state: :ok,
+      detail:
+        "on (local_only in your config): troupe calls no plane, and the daemon calls none for its sessions"
+    }
+  end
+
+  defp local_only_check(false),
+    do: %{
+      name: "local only",
+      state: :ok,
+      detail: "off; local_only: true in your config turns it on"
+    }
 end

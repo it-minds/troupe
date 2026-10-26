@@ -59,6 +59,80 @@ export interface PlaneOptions {
   memory?: Array<Record<string, unknown>>;
   /** Each person's own memory document to start with, by subject (#55's user level). */
   own?: Record<string, string>;
+  /** What `artifact.*` serves, in any order: the list sorts them, newest published first. */
+  artifacts?: FakeArtifact[];
+  /** `false` is a plane whose administrator switched artifacts off. */
+  artifactsEnabled?: boolean;
+  /** Who may publish to the whole organisation. */
+  publishOrganisation?: "everyone" | "platform_admins";
+  /** Whether an administrator allows public links (`artifacts_public_links`). */
+  publicLinks?: boolean;
+}
+
+/** A file of an artifact's version, with what it holds, which no answer carries. */
+export interface FakeArtifactFile {
+  path: string;
+  content_type: string;
+  content: string;
+}
+
+/** A version of an artifact as the fake keeps it. */
+export interface FakeArtifactVersion {
+  n: number;
+  files: FakeArtifactFile[];
+  published_by: { subject: string; display_name: string | null };
+  published_at: string;
+  note?: string | null;
+  rolled_back_to?: number | null;
+}
+
+/** A link to an artifact as the fake keeps it, token and all. */
+export interface FakeArtifactShare {
+  id: string;
+  artifact: string;
+  token: string;
+  role: "view" | "edit";
+  public: boolean;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_by: string;
+  created_at: string;
+  /** Who the plane signed in through it, by subject, and whether the owner revoked them. */
+  uses: Array<{ subject: string; at: string; revoked: boolean }>;
+}
+
+/** An artifact as the fake keeps it: what `artifact.list` says of it, and its versions. */
+export interface FakeArtifact {
+  id: string;
+  title: string;
+  kind: "html" | "markdown" | "file";
+  visibility: string;
+  owner: { subject: string; display_name: string | null };
+  origin: { session_id: string | null; profile: string | null; agent: string | null; where: "pod" | "laptop" | "person" };
+  team: string | null;
+  created_at: string;
+  /** Oldest first, as they were published. */
+  versions: FakeArtifactVersion[];
+  /** The version its owner pinned, or null for the newest. */
+  pinned?: number | null;
+  /** The owner's switch for its public links. */
+  public_links?: boolean;
+}
+
+/** An artifact with the plane's shape: one version of one HTML page, unless told otherwise. */
+export function artifact(id: string, owner: { subject: string; display_name: string | null }, fields: Partial<FakeArtifact> = {}): FakeArtifact {
+  return {
+    id,
+    title: id,
+    kind: "html",
+    visibility: "organisation",
+    owner,
+    origin: { session_id: null, profile: null, agent: null, where: "person" },
+    team: null,
+    created_at: "2026-10-25T10:00:00Z",
+    versions: [{ n: 1, files: [{ path: "index.html", content_type: "text/html", content: "<h1>A page</h1>" }], published_by: owner, published_at: "2026-10-25T10:00:00Z" }],
+    ...fields,
+  };
 }
 
 /** A person's own memory document as the fake plane keeps it. */
@@ -131,24 +205,60 @@ interface Relayed {
   shares: Array<{ subject: string; role: "observe" | "control" }>;
   offlineSince: string | null;
   offeredAt: string;
+  /** A private session, offered with its owner's yes (troupe #765). */
+  private?: boolean;
+}
+
+/**
+ * An invitation by name into a session (troupe #765), as the plane keeps it: into a pod
+ * session the fake holds, or into a private one, sealed on its owner's machine, which the
+ * fake only lists.
+ */
+interface Invited {
+  session_id: string;
+  subject: string;
+  display_name: string;
+  role: "observe" | "control";
+  kind: "team" | "private";
+  title: string | null;
+  profile: string | null;
+  owner: string;
+  owner_name: string;
+  invited_by: string;
+  invited_by_name: string;
+  invited_at: string;
+  /** A private session's: whether its owner offers it for steering now. */
+  offered?: boolean | null;
 }
 
 export class FakePlane {
   readonly server: Server;
   readonly rows = new Map<string, Row>();
   readonly relayed = new Map<string, Relayed>();
+  /** The invitations by name, by session and then by person (troupe #765). */
+  readonly invitations = new Map<string, Map<string, Invited>>();
+  /** Who `people.search` can find: each person's subject, name and email. */
+  people: Array<{ subject: string; display_name: string; email: string }> = [];
   /** Every `client_info` an `initialize` over `/rpc` gave, in order. */
   readonly initialized: Array<{ name?: unknown; version?: unknown; platform?: unknown }> = [];
   /** Every `/rpc` method asked, in order: what a test counts to tell a push from a poll. */
   readonly asked: string[] = [];
   /** Each person's own memory document, by subject. */
   readonly own = new Map<string, OwnMemory>();
+  /** The artifacts published to it, by id. */
+  readonly artifacts = new Map<string, FakeArtifact>();
+  /** Every `artifact.open` asked, in order, with the link it answered. */
+  readonly opened: Array<{ subject: string; id: string; version: number | null; url: string }> = [];
+  /** The links made to artifacts, by id. */
+  readonly shares = new Map<string, FakeArtifactShare>();
+  /** Every `artifact.preview` asked, in order, with what it showed and the address it answered. */
+  readonly previews: Array<{ subject: string; id: string; base: number; path: string; text: string; url: string }> = [];
   /**
    * The people's watches open now (`/v1/relay/watch`), with the list each was last sent. A
    * watch is here from the moment its `initialize` is answered, so a change made once a test
    * sees it is pushed behind that answer on the same socket.
    */
-  readonly watches = new Set<{ ws: WebSocket; subject: string; sent: string }>();
+  readonly watches = new Set<{ ws: WebSocket; subject: string; sent: string; invited: string }>();
   private readonly wss: WebSocketServer | null;
   corsOrigins: string[];
   podTokenLifetime: number;
@@ -169,6 +279,7 @@ export class FakePlane {
     for (const [subject, text] of Object.entries(opts.own ?? {})) {
       this.own.set(subject, { version: 1, text, changed_by: subject, changed_at: "2026-10-24T09:00:00Z" });
     }
+    for (const a of opts.artifacts ?? []) this.artifacts.set(a.id, a);
     this.corsOrigins = opts.corsOrigins ?? [];
     this.podTokenLifetime = opts.podTokenLifetime ?? 900;
     this.server = createServer((req, res) => void this.handle(req, res));
@@ -182,7 +293,7 @@ export class FakePlane {
    * and each change that alters it is sent as `remote.changed`.
    */
   private onWatch(ws: WebSocket): void {
-    let watch: { ws: WebSocket; subject: string; sent: string } | null = null;
+    let watch: { ws: WebSocket; subject: string; sent: string; invited: string } | null = null;
     const send = (payload: unknown) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(payload));
     ws.on("close", () => watch && this.watches.delete(watch));
     ws.on("message", (raw) => {
@@ -204,7 +315,8 @@ export class FakePlane {
           return void ws.close(1000);
         }
         const sessions = this.remoteRows(person.subject);
-        watch = { ws, subject: person.subject, sent: JSON.stringify(sessions) };
+        const invites = this.invitesTo(person.subject);
+        watch = { ws, subject: person.subject, sent: JSON.stringify(sessions), invited: JSON.stringify(invites) };
         this.watches.add(watch);
         return void send({
           jsonrpc: "2.0",
@@ -214,14 +326,16 @@ export class FakePlane {
             server_info: { name: "troupe-plane", watch: "remote" },
             principal: { subject: person.subject, display_name: person.name },
             scopes: [],
-            capabilities: { remote_changed: true },
+            capabilities: { remote_changed: true, invites_changed: true },
             auth: { expires_at: person.exp },
             sessions,
+            invites,
           },
         });
       }
       if (!watch) return void send({ jsonrpc: "2.0", id: msg.id, error: { code: -32001, message: "not_initialized" } });
       if (msg.method === "remote.list") return void send({ jsonrpc: "2.0", id: msg.id, result: { sessions: this.remoteRows(watch.subject) } });
+      if (msg.method === "invites.list") return void send({ jsonrpc: "2.0", id: msg.id, result: { invites: this.invitesTo(watch.subject) } });
       if (msg.method === "auth.refresh") {
         const person = held((params["auth"] as { token?: unknown } | undefined)?.token);
         if (!person || person.subject !== watch.subject) return void send({ jsonrpc: "2.0", id: msg.id, error: { code: -32003, message: "unauthenticated" } });
@@ -231,15 +345,91 @@ export class FakePlane {
     });
   }
 
-  /** Tell every watch whose list this changed. */
+  /** Tell every watch whose list this changed, the offers and the invitations each. */
   private changed(): void {
     for (const w of this.watches) {
+      const open = w.ws.readyState === w.ws.OPEN;
+      const invites = this.invitesTo(w.subject);
+      const invited = JSON.stringify(invites);
+      if (invited !== w.invited) {
+        w.invited = invited;
+        if (open) w.ws.send(JSON.stringify({ jsonrpc: "2.0", method: "invites.changed", params: { invites } }));
+      }
       const sessions = this.remoteRows(w.subject);
       const said = JSON.stringify(sessions);
       if (said === w.sent) continue;
       w.sent = said;
-      if (w.ws.readyState === w.ws.OPEN) w.ws.send(JSON.stringify({ jsonrpc: "2.0", method: "remote.changed", params: { sessions } }));
+      if (open) w.ws.send(JSON.stringify({ jsonrpc: "2.0", method: "remote.changed", params: { sessions } }));
     }
+  }
+
+  /**
+   * Invite `subject` into a session by name, as `session.invite` does: one the fake holds,
+   * or, with `kind: "private"`, somebody's private session it only lists (troupe #765).
+   */
+  invite(
+    sessionId: string,
+    subject: string,
+    role: "observe" | "control",
+    by: string,
+    meta: { kind?: "team" | "private"; title?: string; ownerName?: string; displayName?: string; byName?: string; offered?: boolean } = {},
+  ): Invited {
+    const row = this.rows.get(sessionId);
+    const invited: Invited = {
+      session_id: sessionId,
+      subject,
+      display_name: meta.displayName ?? this.people.find((p) => p.subject === subject)?.display_name ?? subject,
+      role,
+      kind: meta.kind ?? "team",
+      title: meta.title ?? row?.title ?? null,
+      profile: meta.kind === "private" ? null : (row?.profile ?? null),
+      owner: row?.owner ?? by,
+      owner_name: meta.ownerName ?? row?.owner ?? by,
+      invited_by: by,
+      invited_by_name: meta.byName ?? meta.ownerName ?? by,
+      invited_at: new Date(Date.now() + ++this.counter).toISOString(),
+      ...(meta.kind === "private" ? { offered: meta.offered === true } : {}),
+    };
+    const of = this.invitations.get(sessionId) ?? new Map<string, Invited>();
+    of.set(subject, invited);
+    this.invitations.set(sessionId, of);
+    this.changed();
+    return invited;
+  }
+
+  /** A private session's owner offered it for steering, or withdrew it: its invitations say so. */
+  offered(sessionId: string, offered: boolean): void {
+    for (const i of this.invitations.get(sessionId)?.values() ?? []) i.offered = offered;
+    this.changed();
+  }
+
+  /** Take an invitation back, as `session.uninvite` does. */
+  uninvite(sessionId: string, subject: string): boolean {
+    const gone = this.invitations.get(sessionId)?.delete(subject) ?? false;
+    this.changed();
+    return gone;
+  }
+
+  /** The invitations to a person, as `invites.list` answers them. */
+  private invitesTo(subject: string): Array<Record<string, unknown>> {
+    return [...this.invitations.values()].flatMap((of) => {
+      const i = of.get(subject);
+      if (!i) return [];
+      const { subject: _who, display_name: _name, ...invitation } = i;
+      return [invitation];
+    });
+  }
+
+  /** Whom a session is shared with, as `session.invites` lists them. */
+  private inviteesOf(sessionId: string): Array<Record<string, unknown>> {
+    return [...(this.invitations.get(sessionId)?.values() ?? [])].map((i) => ({
+      subject: i.subject,
+      display_name: i.display_name,
+      email: this.people.find((p) => p.subject === i.subject)?.email ?? null,
+      role: i.role,
+      invited_by: i.invited_by,
+      invited_at: i.invited_at,
+    }));
   }
 
   static async start(opts: PlaneOptions): Promise<FakePlane> {
@@ -330,7 +520,10 @@ export class FakePlane {
   }
 
   /** A laptop's session, offered by `owner` and shared as `shares` says, its laptop online. */
-  relay(owner: string, params: { id?: string; ownerName?: string; workspace?: string; shares?: Relayed["shares"] } = {}): Relayed {
+  relay(
+    owner: string,
+    params: { id?: string; ownerName?: string; workspace?: string; shares?: Relayed["shares"]; private?: boolean } = {},
+  ): Relayed {
     const id = params.id ?? `s-laptop-${++this.counter}`;
     const offer: Relayed = {
       id,
@@ -340,6 +533,7 @@ export class FakePlane {
       shares: params.shares ?? [],
       offlineSince: null,
       offeredAt: new Date(Date.now() + this.counter).toISOString(),
+      ...(params.private ? { private: true } : {}),
     };
     this.relayed.set(id, offer);
     this.opts.worker.createSession(id, { profile: "build" });
@@ -378,6 +572,99 @@ export class FakePlane {
     return { ...own, hash: own.version ? `sha256:own-${own.version}` : null, bytes: new TextEncoder().encode(own.text).length, limit: 8192 };
   }
 
+  /** Whether this person may see this artifact: their own, the organisation's, a profile of theirs, or a link's. */
+  private mayRead(a: FakeArtifact, subject: string): boolean {
+    return this.roleOf(a, subject) !== null;
+  }
+
+  /** What this person is to it: its owner, an edit link's holder, or one who may view it. */
+  private roleOf(a: FakeArtifact, subject: string): "owner" | "edit" | "view" | null {
+    if (a.owner.subject === subject) return "owner";
+    const linked = this.linkRole(a, subject);
+    if (linked === "edit") return "edit";
+    if (linked === "view" || a.visibility === "organisation") return "view";
+    const profile = a.visibility.startsWith("profile:") ? a.visibility.slice("profile:".length) : null;
+    return profile !== null && (this.opts.profiles ?? ["dev", "ux"]).includes(profile) ? "view" : null;
+  }
+
+  private liveShare(sh: FakeArtifactShare): boolean {
+    return !sh.revoked_at && (!sh.expires_at || Date.parse(sh.expires_at) > Date.now());
+  }
+
+  private linkRole(a: FakeArtifact, subject: string): "edit" | "view" | null {
+    let role: "edit" | "view" | null = null;
+    for (const sh of this.shares.values()) {
+      if (sh.artifact !== a.id || !this.liveShare(sh) || !sh.uses.some((u) => u.subject === subject && !u.revoked)) continue;
+      role = sh.role === "edit" || role === "edit" ? "edit" : "view";
+    }
+    return role;
+  }
+
+  private isPublic(a: FakeArtifact): boolean {
+    return (this.opts.publicLinks ?? false) && a.public_links !== false && [...this.shares.values()].some((sh) => sh.artifact === a.id && sh.public && this.liveShare(sh));
+  }
+
+  private shareJson(sh: FakeArtifactShare): Record<string, unknown> {
+    const state = sh.revoked_at ? "revoked" : sh.expires_at && Date.parse(sh.expires_at) <= Date.now() ? "expired" : sh.public && !this.opts.publicLinks ? "switched off" : "live";
+    return {
+      id: sh.id,
+      role: sh.role,
+      public: sh.public,
+      state,
+      expires_at: sh.expires_at,
+      revoked_at: sh.revoked_at,
+      created_by: sh.created_by,
+      created_at: sh.created_at,
+      used_by: sh.uses.map((u) => ({ person: { subject: u.subject, display_name: u.subject }, first_used_at: u.at, last_used_at: u.at, revoked_at: u.revoked ? u.at : null })),
+    };
+  }
+
+  private publish(a: FakeArtifact, subject: string, files: FakeArtifactFile[], extra: Partial<FakeArtifactVersion> = {}): void {
+    const n = a.versions[a.versions.length - 1]!.n + 1;
+    a.versions.push({ n, files, published_by: { subject, display_name: subject }, published_at: new Date(Date.parse("2026-10-25T10:00:00Z") + n * 60_000).toISOString(), note: null, rolled_back_to: null, ...extra });
+  }
+
+  /** An artifact as `artifact.list` answers it to this person: never a file's content. */
+  private artifactJson(a: FakeArtifact, subject: string): Record<string, unknown> {
+    const latest = a.versions[a.versions.length - 1]!;
+    const { versions: _versions, ...shown } = a;
+    return {
+      ...shown,
+      mine: a.owner.subject === subject,
+      role: this.roleOf(a, subject),
+      version: latest.n,
+      current: a.pinned ?? latest.n,
+      pinned: a.pinned ?? null,
+      may_edit: ["owner", "edit"].includes(this.roleOf(a, subject) ?? ""),
+      public_links: a.public_links !== false,
+      public: this.isPublic(a),
+      bytes: latest.files.reduce((n, f) => n + new TextEncoder().encode(f.content).length, 0),
+      url: `https://artifacts.example.test/a/${a.id}/`,
+      published_at: latest.published_at,
+      may_delete: a.owner.subject === subject || this.opts.admin?.role(subject) === "platform_admin",
+    };
+  }
+
+  /** Its versions, newest first, each with its files described and none of what they hold. */
+  private artifactVersions(a: FakeArtifact): Array<Record<string, unknown>> {
+    return [...a.versions]
+      .sort((x, y) => y.n - x.n)
+      .map((v) => {
+        const files = v.files.map((f) => ({ path: f.path, sha256: `sha256:${a.id}-${v.n}-${f.path}`, content_type: f.content_type, bytes: new TextEncoder().encode(f.content).length }));
+        return {
+          n: v.n,
+          hash: `sha256:${a.id}-${v.n}`,
+          bytes: files.reduce((n, f) => n + f.bytes, 0),
+          files,
+          published_by: v.published_by,
+          published_at: v.published_at,
+          note: v.note ?? null,
+          rolled_back_to: v.rolled_back_to ?? null,
+          url: `https://artifacts.example.test/a/${a.id}/v${v.n}/`,
+        };
+      });
+  }
+
   private remoteRows(subject: string): Array<Record<string, unknown>> {
     return [...this.relayed.values()].flatMap((o) => {
       const role = this.relayRole(o, subject);
@@ -392,6 +679,7 @@ export class FakePlane {
           state: o.offlineSince ? "offline" : "online",
           offline_since: o.offlineSince,
           offered_at: o.offeredAt,
+          private: o.private === true,
           your_role: o.owner === subject ? "owner" : role,
           shares: o.owner === subject ? o.shares : null,
         },
@@ -644,6 +932,49 @@ export class FakePlane {
       case "remote.list":
         return { result: { sessions: this.remoteRows(subject) } };
 
+      // Inviting by name (troupe #765): the owner invites and takes back, anybody in the
+      // session reads whom it is shared with, and a person reads the invitations to them.
+      case "session.invite": {
+        const id = String(params["session_id"] ?? "");
+        const row = this.rows.get(id);
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner" } } };
+        const who = String(params["subject"] ?? "");
+        const person = this.people.find((p) => p.subject === who || p.email === who);
+        if (!person) return { error: { code: -32005, message: "not_found", data: { kind: "person", reason: "nobody of that name has signed in to this plane, so they cannot be invited yet" } } };
+        if (person.email.endsWith("@elsewhere.example.com")) {
+          return { error: { code: -32004, message: "forbidden", data: { person: person.subject, reason: "not on this profile's teams", profile: row.profile } } };
+        }
+        const role = params["role"] === "control" ? "control" : "observe";
+        const made = this.invite(id, person.subject, role, subject, { byName: name, ownerName: name, displayName: person.display_name });
+        return { result: { session_id: id, invite: this.inviteesOf(id).find((i) => i["subject"] === made.subject), pushed: true } };
+      }
+
+      case "session.uninvite": {
+        const id = String(params["session_id"] ?? "");
+        const row = this.rows.get(id);
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner" } } };
+        const who = String(params["subject"] ?? "");
+        const sub = this.people.find((p) => p.email === who)?.subject ?? who;
+        if (!this.uninvite(id, sub)) return { error: { code: -32005, message: "not_found", data: { kind: "invitation" } } };
+        return { result: { session_id: id, subject: sub, rekey_due: false, pushed: true } };
+      }
+
+      case "session.invites":
+        return { result: { session_id: params["session_id"], invites: this.inviteesOf(String(params["session_id"] ?? "")) } };
+
+      case "invites.list":
+        return { result: { invites: this.invitesTo(subject) } };
+
+      case "people.search": {
+        const q = String(params["query"] ?? "").toLowerCase();
+        const people = this.people.filter(
+          (p) => p.subject !== subject && [p.display_name, p.email, p.subject].some((s) => s.toLowerCase().startsWith(q)),
+        );
+        return { result: { people } };
+      }
+
       // A person's own clients, as the plane last saw them, against its policy now.
       case "me.clients":
         return { result: { clients: this.opts.clientsSeen ?? [] } };
@@ -684,6 +1015,158 @@ export class FakePlane {
         const now = { version: own.version + 1, text, changed_by: subject, changed_at: new Date().toISOString() };
         this.own.set(subject, now);
         return { result: { changed: true, entry: null, user: this.ownJson(now) } };
+      }
+
+      // Artifacts, as any signed-in person asks for them: the list, one with its versions, a
+      // one-time link to open it on the artifacts host, and its deletion by its owner or a
+      // platform admin's takedown. No answer carries what a file holds.
+      case "artifact.list": {
+        const enabled = this.opts.artifactsEnabled ?? true;
+        const rows = enabled
+          ? [...this.artifacts.values()]
+              .filter((a) => this.mayRead(a, subject))
+              .filter((a) => params["mine"] !== true || a.owner.subject === subject)
+              .filter((a) => params["shared"] !== true || (a.owner.subject !== subject && this.linkRole(a, subject) !== null))
+              .filter((a) => typeof params["visibility"] !== "string" || a.visibility === params["visibility"])
+              .map((a) => this.artifactJson(a, subject))
+              .sort((x, y) => String(y["published_at"]).localeCompare(String(x["published_at"])))
+          : [];
+        return {
+          result: { enabled, profiles, publish_organisation: this.opts.publishOrganisation ?? "everyone", public_links: this.opts.publicLinks ?? false, gallery_url: `${this.url}/console#/artifacts`, artifacts: rows },
+        };
+      }
+
+      case "artifact.get": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        const shares = a.owner.subject === subject ? { shares: [...this.shares.values()].filter((sh) => sh.artifact === a.id).map((sh) => this.shareJson(sh)), public_links_allowed: this.opts.publicLinks ?? false } : {};
+        return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a), ...shares } };
+      }
+
+      // A version, a rollback and a pin; one text file read for an editor and an edit's
+      // preview; links made, spent, listed and revoked; the owner's public-links switch.
+      case "artifact.put": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        if (!["owner", "edit"].includes(this.roleOf(a, subject) ?? "")) return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner, or somebody the owner gave an edit link, publishes a new version of an artifact" } } };
+        const newest = a.versions[a.versions.length - 1]!;
+        const base = typeof params["base"] === "number" ? params["base"] : null;
+        if (base !== null && base !== newest.n) return { error: { code: -32009, message: "conflict", data: { reason: `version ${newest.n} was published after version ${base}, which this edit was made on; open version ${newest.n} and make the edit again` } } };
+        const sent = ((params["files"] as Array<{ path: string; bytes: string; content_type?: string }> | undefined) ?? []).map((f) => ({ path: f.path, content_type: f.content_type ?? (f.path.endsWith(".md") ? "text/markdown" : "text/html"), content: Buffer.from(f.bytes, "base64").toString("utf8") }));
+        const kept = base === null ? [] : newest.files.filter((f) => !sent.some((x) => x.path === f.path));
+        this.publish(a, subject, [...kept, ...sent].sort((x, y) => x.path.localeCompare(y.path)), { note: typeof params["note"] === "string" ? params["note"] : null });
+        return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
+      }
+
+      case "artifact.rollback": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        if (!["owner", "edit"].includes(this.roleOf(a, subject) ?? "")) return { error: { code: -32004, message: "forbidden" } };
+        const old = a.versions.find((v) => v.n === params["version"]);
+        if (!old) return { error: { code: -32005, message: "not_found" } };
+        this.publish(a, subject, old.files, { note: `rolled back to v${old.n}`, rolled_back_to: old.n });
+        return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
+      }
+
+      case "artifact.pin": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        if (a.owner.subject !== subject) return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner pins a version of an artifact" } } };
+        a.pinned = typeof params["version"] === "number" ? params["version"] : null;
+        return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
+      }
+
+      case "artifact.read": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        const n = typeof params["version"] === "number" ? params["version"] : (a.pinned ?? a.versions[a.versions.length - 1]!.n);
+        const v = a.versions.find((x) => x.n === n);
+        const f = v?.files.find((x) => x.path === params["path"]);
+        if (!v || !f) return { error: { code: -32005, message: "not_found" } };
+        return { result: { id: a.id, version: v.n, path: f.path, content_type: f.content_type, text: f.content } };
+      }
+
+      case "artifact.preview": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        if (!["owner", "edit"].includes(this.roleOf(a, subject) ?? "")) return { error: { code: -32004, message: "forbidden" } };
+        const url = `https://artifacts.example.test/p/preview-${++this.counter}/`;
+        this.previews.push({ subject, id: a.id, base: Number(params["base"]), path: String(params["path"]), text: String(params["text"]), url });
+        return { result: { url, expires_in: 3600 } };
+      }
+
+      case "artifact.share": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        if (a.owner.subject !== subject) return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner shares an artifact" } } };
+        const pub = params["public"] === true;
+        if (pub && !this.opts.publicLinks) return { error: { code: -32004, message: "forbidden", data: { reason: "public links are switched off on this plane; an administrator turns them on with artifacts_public_links under Policy and settings" } } };
+        if (pub && typeof params["expires"] !== "string") return { error: { code: -32602, message: "invalid_params", data: { reason: "a public link needs an expiry (expires), at most 90 days away" } } };
+        const n = ++this.counter;
+        const sh: FakeArtifactShare = {
+          id: `share-${n}`,
+          artifact: a.id,
+          token: `token-${n}-abcdefghijklmnopqrstuvwxyz`,
+          role: params["role"] === "edit" ? "edit" : "view",
+          public: pub,
+          expires_at: typeof params["expires"] === "string" ? params["expires"] : null,
+          revoked_at: null,
+          created_by: subject,
+          created_at: "2026-10-25T12:00:00Z",
+          uses: [],
+        };
+        this.shares.set(sh.id, sh);
+        const url = `https://artifacts.example.test/s/${sh.token}${pub ? "/" : ""}`;
+        return { result: { token: sh.token, url, share: this.shareJson(sh) } };
+      }
+
+      case "artifact.unshare": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || a.owner.subject !== subject) return { error: { code: -32004, message: "forbidden" } };
+        if (typeof params["share"] === "string") {
+          const sh = this.shares.get(params["share"]);
+          if (!sh || sh.artifact !== a.id) return { error: { code: -32005, message: "not_found" } };
+          sh.revoked_at = "2026-10-25T13:00:00Z";
+          return { result: { revoked: true, id: a.id, share: sh.id } };
+        }
+        for (const sh of this.shares.values()) if (sh.artifact === a.id) for (const u of sh.uses) if (u.subject === params["person"]) u.revoked = true;
+        return { result: { revoked: true, id: a.id, person: params["person"] } };
+      }
+
+      case "artifact.redeem": {
+        const sh = [...this.shares.values()].find((x) => x.token === params["token"] && this.liveShare(x));
+        if (!sh || sh.uses.some((u) => u.subject === subject && u.revoked)) return { error: { code: -32005, message: "not_found", data: { reason: "this link has expired, was revoked, or is not one" } } };
+        if (!sh.uses.some((u) => u.subject === subject)) sh.uses.push({ subject, at: "2026-10-25T12:30:00Z", revoked: false });
+        const url = `https://artifacts.example.test/enter?ticket=t-${++this.counter}`;
+        this.opened.push({ subject, id: sh.artifact, version: null, url });
+        return { result: { id: sh.artifact, role: sh.role, url } };
+      }
+
+      case "artifact.public": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || a.owner.subject !== subject) return { error: { code: -32004, message: "forbidden" } };
+        a.public_links = params["enabled"] === true;
+        return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
+      }
+
+      case "artifact.open": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        const version = typeof params["version"] === "number" ? params["version"] : null;
+        if (version !== null && !a.versions.some((v) => v.n === version)) return { error: { code: -32005, message: "not_found" } };
+        const url = `https://artifacts.example.test/enter?ticket=t-${++this.counter}`;
+        this.opened.push({ subject, id: a.id, version, url });
+        return { result: { url, expires_in: 60 } };
+      }
+
+      case "artifact.delete": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        if (a.owner.subject !== subject && this.opts.admin?.role(subject) !== "platform_admin") {
+          return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner or a platform admin deletes an artifact" } } };
+        }
+        this.artifacts.delete(a.id);
+        return { result: { deleted: true, id: a.id } };
       }
 
       case "remote.open": {

@@ -18,7 +18,7 @@ defmodule Troupe.Gateway.Connection do
   # process would sit holding a closed port waiting for a client that has gone.
   use GenServer, restart: :temporary
 
-  alias Troupe.Gateway.{ACP, Daemon, Dispatch, Presence, Session, Transport, Writer}
+  alias Troupe.Gateway.{ACP, Daemon, Dispatch, LocalOnly, Presence, Session, Transport, Writer}
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.LLM.Identify
   alias Troupe.Protocol
@@ -56,6 +56,9 @@ defmodule Troupe.Gateway.Connection do
     scopes: [],
     capabilities: %{},
     client_info: %{},
+    # Whether the client is in Local only (`client_info.local_only`, then `client.mode`):
+    # the daemon makes no plane call for the sessions it runs (`Troupe.Gateway.LocalOnly`).
+    local_only: false,
     subscriptions: %{},
     next_subscription: 1,
     dropped_ephemerals: 0,
@@ -324,6 +327,21 @@ defmodule Troupe.Gateway.Connection do
     end
   end
 
+  # The client's Local only switch moved: about this connection too, and asked of nobody
+  # but its own client, so any seat may say it; it only ever narrows what the daemon does
+  # for this client. Turning it on puts the sessions it has open under it.
+  defp handle_message({:request, id, "client.mode", %{"local_only" => on?}}, state)
+       when is_boolean(on?) do
+    :ok = LocalOnly.client(self(), on?, open_sessions(state))
+    state = %{state | local_only: on?, client_info: Map.put(state.client_info, "local_only", on?)}
+    {:ok, send_control(state, {:result, id, %{"local_only" => on?}})}
+  end
+
+  defp handle_message({:request, id, "client.mode", _params}, state) do
+    error = Error.new(:invalid_params, %{field: "local_only", reason: "client.mode takes local_only, true or false"})
+    {:ok, send_control(state, {:error, id, error})}
+  end
+
   defp handle_message({:request, id, method, params}, %{protocol: :acp} = state) do
     case ACP.translate(method, params, state.acp) do
       # Something the connection can answer by itself: the handshake, and detaching.
@@ -502,6 +520,7 @@ defmodule Troupe.Gateway.Connection do
               client_info: Map.get(params, "clientInfo", %{})
           }
           |> schedule_expiry()
+          |> attached()
 
         {:ok, ACP.initialize(params), state}
 
@@ -527,6 +546,7 @@ defmodule Troupe.Gateway.Connection do
               client_info: Map.get(params, "client_info", %{})
           }
           |> schedule_expiry()
+          |> attached()
 
         {:ok, hello(principal, scopes, version, state), state}
 
@@ -784,8 +804,22 @@ defmodule Troupe.Gateway.Connection do
       connection: self(),
       next_subscription_id: "sub-#{state.next_subscription}",
       activate: state.endpoint.activate,
-      client: Identify.client(state.protocol, state.client_info)
+      client: Identify.client(state.protocol, state.client_info),
+      local_only: state.local_only
     }
+  end
+
+  # Said at `initialize`, additive: a client from before it sends no `local_only`, and is in
+  # none. Every connection is counted, since the daemon's own polls of the plane wait only
+  # while every client attached is in Local only.
+  defp attached(state) do
+    on? = state.client_info["local_only"] == true
+    :ok = LocalOnly.client(self(), on?)
+    %{state | local_only: on?}
+  end
+
+  defp open_sessions(state) do
+    for {_id, %{session_id: id}} <- state.subscriptions, is_binary(id), uniq: true, do: id
   end
 
   # -- subscriptions ----------------------------------------------------------

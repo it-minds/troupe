@@ -96,6 +96,18 @@ defmodule Troupe.Sessions.Sealer do
   def seal_now(server, timeout \\ 60_000), do: GenServer.call(server, :seal_now, timeout)
 
   @doc """
+  Seal what is pending under the key held now, and everything after under `key`, generation
+  `version`. How a daemon re-keys a private session forward once an invitation to it is
+  taken back: what was sealed before stays under the keys it was sealed under, and what
+  follows is under one the person removed is never given. Answers as `seal_now/2` does.
+  """
+  @spec rekey(GenServer.server(), binary(), pos_integer(), timeout()) ::
+          {:ok, map()} | {:error, term()}
+  def rekey(server, key, version, timeout \\ 60_000)
+      when byte_size(key) == 32 and is_integer(version) and version > 0,
+      do: GenServer.call(server, {:rekey, key, version}, timeout)
+
+  @doc """
   How far this session is sealed, for tests, the heartbeat and a daemon's listing.
 
   A sealer answers between seals, so a listing that must not wait out an upload passes a
@@ -194,6 +206,20 @@ defmodule Troupe.Sessions.Sealer do
         {:stop, {:shutdown, :stale_version}, {:error, :stale_version}, state}
 
       state ->
+        {:reply, {:ok, summary(state)}, state}
+    end
+  end
+
+  def handle_call({:rekey, key, version}, _from, state) do
+    case seal(state) do
+      %{fenced: true} = state ->
+        {:stop, {:shutdown, :stale_version}, {:error, :stale_version}, state}
+
+      # An upload that failed leaves its events pending, and they go under the new key at
+      # the next seal: kept from the person removed as well, which is the safe way round.
+      state ->
+        context = %{state.context | data_key: key, key_version: version}
+        state = %{state | context: context}
         {:reply, {:ok, summary(state)}, state}
     end
   end

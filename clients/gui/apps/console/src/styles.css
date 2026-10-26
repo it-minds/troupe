@@ -898,6 +898,42 @@ ul.plain li {
 .memory.card {
   margin-bottom: var(--space-5);
 }
+/* Two versions side by side: each column its own lines as written, a line with no partner blank. */
+.memory-version .side-by-side {
+  table-layout: fixed;
+  width: 100%;
+  margin-top: var(--space-2);
+}
+.memory-version .side-by-side td {
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.memory-version .side-by-side td.empty {
+  background: var(--bg-sunken);
+}
+/* Who wrote each line: the version and its author in a column beside the line itself. */
+.blame-lines {
+  width: 100%;
+  margin-top: var(--space-2);
+}
+.blame-lines th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--text-muted);
+  white-space: nowrap;
+  vertical-align: top;
+  padding-right: var(--space-4);
+}
+.blame-lines td {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* A running session whose last turn read an older version than the one in force. */
+.readers tr.behind td,
+.memory-mark {
+  color: var(--waiting-fg);
+}
 .preview .effects,
 .card .effects {
   margin: 0;
@@ -1251,4 +1287,143 @@ pre.manifest {
   margin: 0 0 var(--space-3);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Artifacts: a card per artifact, its title and kind where a thumbnail would be, since
+   nothing of what it holds is drawn here; and one artifact's versions with their files. */
+.artifact-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.artifact-card .thumb {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 120px;
+  padding: var(--space-4);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+.artifact-card .thumb:hover {
+  text-decoration: none;
+  background: var(--bg-hover);
+}
+
+.artifact-card .thumb-title {
+  font: var(--t-subheading);
+  overflow-wrap: anywhere;
+}
+
+.artifact-card .thumb-kind {
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+
+.artifact-card .card-meta {
+  margin: 0;
+  font: var(--t-ui-small);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.artifact-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.artifact-head h2 {
+  margin: 0;
+  font: var(--t-subheading);
+  overflow-wrap: anywhere;
+}
+
+.artifact-origin p {
+  margin: 0 0 var(--space-2);
+}
+
+.artifact-versions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-versions > li {
+  margin-bottom: var(--space-4);
+}
+
+.artifact-versions header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.artifact-versions header .version-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.artifact .actions select {
+  width: auto;
+}
+
+/* The editor: the text beside the artifacts host's own preview of it, framed. */
+.artifact-edit-panes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.artifact-preview iframe {
+  width: 100%;
+  min-height: 28rem;
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-none);
+  background: var(--bg-panel);
+}
+
+.artifact-links {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-links > li {
+  margin-bottom: var(--space-4);
+}
+
+.artifact-links header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.artifact-links header button {
+  margin-left: auto;
 }

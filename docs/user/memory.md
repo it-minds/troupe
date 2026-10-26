@@ -46,6 +46,23 @@ A save reaches the sessions running on the machine that saved it, and on the pla
 at their next turn, with a line saying your memory changed; your other machines read it
 within five minutes.
 
+## Which version a session ran under
+
+A session's log says, as each turn's instructions are read, which version of each document
+the turn ran under (the `instructions_loaded` event's `memory`, each document's level, name,
+version and hash), and `memory_changed` says when a later turn read a newer one.
+
+A session on the plane's pods asks the plane, as each turn begins, whether it holds the
+versions in force, and reads the new ones first if it does not. A session on your machine
+reads the copy your daemon keeps, which it asks the plane for every five minutes. Each of
+those asks tells the plane which version each session's last turn ran under, by version and
+hash and never the text, so your organisation's administrators can see on *Company memory*
+which running sessions are behind a save. Your own memory is not shown there.
+
+`troupe memory --status` prints which versions this machine holds, whether the plane has the
+same in force (it asks, and keeps the answer), and which each session running here read at
+its last turn: the place to start when a session seems not to follow what was saved.
+
 ## What an agent may write
 
 An agent may add to your own memory and to the repository's, and to nothing else:
@@ -60,5 +77,16 @@ An agent may add to your own memory and to the repository's, and to nothing else
 
 When your own memory is full, `remember` says so and names `troupe memory --edit`: make room
 there and ask again. With no plane signed in on this machine, `remember` to your own memory
-is refused with a sentence, and the agent can keep the fact in the repository instead. The
-desktop app in *Local only* does not reach the plane, and so does not edit it either.
+is refused with a sentence, and the agent can keep the fact in the repository instead. So is
+it in a session a client in *Local only* runs (the desktop app's switch, or `local_only:
+true` for `troupe`): the daemon sends nothing of that session to the plane. The desktop app
+in Local only does not edit your memory either.
+
+## Who wrote each line
+
+`troupe memory --blame` prints your own memory a line at a time with who wrote each: the
+version it came in and who saved it, or, for an agent's entry, the agent and the session it
+came from. In the console, *Who wrote each line* under a document does the same for the
+organisation's, a team's and a profile's, beside each line. It is worked out from the
+versions and the audit, which keep nothing more for it: blame, not history, and the versions
+list is the history.

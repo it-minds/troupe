@@ -75,6 +75,10 @@ export const callTimeouts: { defaultMs: number; byMethod: Record<string, number>
     "mcp.call": 120_000,
     "worktree.merge": 120_000,
     "fs.upload": 120_000,
+    // A sealed copy read segment by segment from object storage, and a session re-keyed:
+    // each at the key manager and the plane in turn (troupe #765).
+    "session.read_sealed": 120_000,
+    "session.uninvite": 120_000,
   },
 };
 
@@ -125,7 +129,8 @@ export interface ConnectOptions {
   url: string;
   /** Bearer token. Sent in `auth.token` on `initialize` so it works from a browser too. */
   token?: string | undefined;
-  clientInfo?: { name: string; version: string } | undefined;
+  /** `local_only`: the client is in Local only, and the daemon makes no plane call for its sessions. */
+  clientInfo?: { name: string; version: string; local_only?: boolean } | undefined;
   capabilities?: { tools?: boolean; blobs?: boolean } | undefined;
   /** Milliseconds to wait for the socket to open and for `initialize` to answer. */
   timeoutMs?: number | undefined;

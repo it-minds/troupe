@@ -843,14 +843,19 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # A private session is offered only with its person's yes (root #765): the daemon's
+  # refusal carries the sentence every client asks it in, and this asks it.
   def remote_steering(sid, {:offer, people}) do
+    {consent, people} = Troupe.Client.Steering.consent(people)
+
     with {:ok, share} <- Troupe.Client.Steering.share(people) do
       params = %{session_id: sid, share: share, command_id: Troupe.Remote.RPC.command_id()}
+      params = if consent, do: Map.put(params, :consent, consent), else: params
 
       case Link.call("remote.offer", params) do
         {:ok, %{"remote" => remote}} -> {:ok, Troupe.Client.Steering.offered(remote)}
         {:ok, _older} -> {:error, "this daemon does not offer sessions to the plane: update it"}
-        {:error, reason} -> {:error, refusal(reason)}
+        {:error, reason} -> asked_or_refused(refusal(reason))
       end
     end
   end
@@ -864,7 +869,46 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # A private session's invitations, made from this computer, which seals it (root #765):
+  # the daemon puts the session's key in the invitee's own slot and tells the plane where.
+  @impl true
+  def invites(sid, :list) do
+    case Link.call("session.invites", %{session_id: sid}) do
+      {:ok, %{"invites" => invites}} -> {:ok, Troupe.Client.Invites.line(invites)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  def invites(sid, {:invite, person, role}) do
+    params = %{
+      session_id: sid,
+      person: person,
+      role: role,
+      command_id: Troupe.Remote.RPC.command_id()
+    }
+
+    case Link.call("session.invite", params) do
+      {:ok, answer} -> {:ok, Troupe.Client.Invites.invited(answer, role)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  def invites(sid, {:uninvite, person}) do
+    params = %{session_id: sid, person: person, command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call("session.uninvite", params) do
+      {:ok, answer} -> {:ok, Troupe.Client.Invites.uninvited(answer, person)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
   # The daemon's sentence where it gave one, as it gave it.
+  defp asked_or_refused(said) do
+    if String.contains?(said, Troupe.Client.Steering.private_consent()),
+      do: {:ok, Troupe.Client.Steering.consent_question()},
+      else: {:error, said}
+  end
+
   defp refusal(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
   defp refusal(reason), do: message(reason)
 
@@ -1216,6 +1260,14 @@ defmodule Troupe.Client.Daemon do
   @doc "Who this computer's daemon records its sessions as: `identity.get`'s answer."
   @spec identity() :: {:ok, map()} | {:error, term()}
   def identity, do: Link.call("identity.get", %{})
+
+  @doc """
+  Publish an artifact on the plane as this daemon's person (`artifact.publish`, root #62):
+  the plane's answer, its `url` among it, or the daemon's sentence where it is signed out.
+  """
+  @spec publish_artifact(map()) :: {:ok, map()} | {:error, term()}
+  def publish_artifact(params),
+    do: Link.call("artifact.publish", Map.put(params, "command_id", Troupe.Remote.RPC.command_id()))
 
   @doc """
   Unlink this computer's daemon (`identity.unlink`), answering who it was linked to. The

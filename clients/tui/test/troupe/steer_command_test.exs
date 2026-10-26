@@ -12,9 +12,11 @@ defmodule Troupe.SteerCommandTest do
   import Troupe.TestHelpers
   import Troupe.TUIHelpers
 
+  alias ExRatatui.{CellSession, Frame}
   alias Troupe.{Client, Event}
   alias Troupe.Client.Steering
-  alias Troupe.UI.TUI.Model
+  alias Troupe.Protocol.Relay
+  alias Troupe.UI.TUI.{Model, Palette, View}
 
   test "/steer says it is not offered, and an offer with no plane signed in to is refused in words" do
     ws = tmp_workspace(%{})
@@ -38,6 +40,45 @@ defmodule Troupe.SteerCommandTest do
     eventually(fn ->
       Enum.any?(user_state(pid).model.notices, &(&1 =~ "add :observe for one who only follows it"))
     end)
+  end
+
+  test "a private session is offered only after its person's yes, asked in pink in the words every client shows" do
+    ws = tmp_workspace(%{})
+    {sid, _, _} = start_session!(workspace: ws, params: %{private: true}, script: [])
+    {pid, _session} = start_tui(sid)
+    eventually(fn -> Enum.any?(user_state(pid).commands, &(&1["name"] == "steer")) end)
+
+    type(pid, "/steer on")
+    press(pid, "enter")
+    eventually(fn -> List.first(user_state(pid).model.notices) == Steering.consent_question() end)
+
+    assert Steering.private_consent() == Relay.private_consent(),
+           "the terminal's copy of the daemon's words"
+
+    assert Steering.consent_question() =~ Relay.private_consent()
+    assert Steering.consent_question() =~ "/steer on yes offers it"
+
+    # Drawn as a person being needed.
+    reserved = rgb(Palette.roles().needs_you.dark.rgb)
+    cells = truecolor_cells(user_state(pid))
+    asked = cells_of(cells, "This session is private")
+    assert asked != [] and Enum.all?(asked, &(&1.fg == reserved))
+
+    # The yes goes to the daemon, which then needs a plane to offer it to.
+    type(pid, "/steer on yes")
+    press(pid, "enter")
+
+    eventually(fn ->
+      Enum.any?(user_state(pid).model.notices, &(&1 =~ "sign in to a plane first"))
+    end)
+
+    assert {"private", ""} = Steering.consent("yes")
+    assert {"private", "bea@example.com"} = Steering.consent("yes bea@example.com")
+    assert {nil, "bea@example.com"} = Steering.consent("bea@example.com")
+
+    assert Steering.line(%{"state" => "online", "shares" => [], "private" => true}) =~
+             "Offered to the plane, private, for you alone (online): what it says passes through " <>
+               "the plane unsealed while it is offered."
   end
 
   test "the people named, and the sentences an offer is said in" do
@@ -140,4 +181,26 @@ defmodule Troupe.SteerCommandTest do
     assert Steering.line(back) ==
              "Offered to the plane, for you alone (online, back after a restart). /steer off withdraws it."
   end
+
+  defp truecolor_cells(state) do
+    {width, height} = {420, 40}
+    theme = %{name: :afterglow, depth: :truecolor, mode: :dark, blink: false}
+    session = CellSession.new(width, height)
+    frame = %Frame{width: width, height: height}
+    :ok = CellSession.draw(session, View.render(Map.put(state, :theme, theme), frame))
+    CellSession.take_cells(session).cells
+  end
+
+  # The cells of every place `text` is drawn.
+  defp cells_of(cells, text) do
+    for {_row, row} <- Enum.group_by(cells, & &1.row),
+        row = Enum.sort_by(row, & &1.col),
+        line = Enum.map_join(row, & &1.symbol),
+        {at, _} <- :binary.matches(line, text),
+        cell <- Enum.slice(row, String.length(binary_part(line, 0, at)), String.length(text)),
+        cell.symbol != " ",
+        do: cell
+  end
+
+  defp rgb({r, g, b}), do: {:rgb, r, g, b}
 end

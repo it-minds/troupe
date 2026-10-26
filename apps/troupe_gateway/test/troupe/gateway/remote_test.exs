@@ -11,6 +11,8 @@ defmodule Troupe.Gateway.RemoteTest do
   alias Troupe.Gateway.{Connections, FakePlane, FakeRelay, Idle, Plane, Remote}
   alias Troupe.Keyring
   alias Troupe.Keyring.Memory
+  alias Troupe.Protocol.Relay
+  alias Troupe.Session.Log
 
   @ada "ada@example.test"
   @bea "bea@example.test"
@@ -41,11 +43,24 @@ defmodule Troupe.Gateway.RemoteTest do
     %{plane: plane, relay: relay, ada: ada}
   end
 
-  defp offer(ctx, session_id, share \\ []) do
-    Client.call(ctx.ada, "remote.offer", %{
-      "command_id" => Client.command_id(),
-      "session_id" => session_id,
-      "share" => share
+  defp offer(ctx, session_id, share \\ [], extra \\ %{}) do
+    Client.call(
+      ctx.ada,
+      "remote.offer",
+      Map.merge(
+        %{"command_id" => Client.command_id(), "session_id" => session_id, "share" => share},
+        extra
+      )
+    )
+  end
+
+  # A private session's invitation as the owner's daemon writes it in the log.
+  defp invited(session_id, subject, role) do
+    Log.append(session_id, ["root"], :session_invited, %{
+      "subject" => subject,
+      "display_name" => subject,
+      "role" => role,
+      "by" => @ada
     })
   end
 
@@ -90,12 +105,80 @@ defmodule Troupe.Gateway.RemoteTest do
       assert got["remote"]["state"] == "online"
     end
 
-    test "a private session is never offered", ctx do
+    test "a private session is offered only after its person's yes, to its control invitees, and says it is private",
+         ctx do
       %{session: session} = start_session(ctx, default: {:text, "ok"}, kind: :private)
+      invited(session.id, @bea, "control")
+      invited(session.id, @cy, "observe")
 
-      assert {:error, %{code: -32_004, data: %{"reason" => reason}}} = offer(ctx, session.id)
-      assert reason =~ "private session is never offered"
+      # Without the consent: refused in the words a client asks with, and nothing relayed.
+      assert {:error, %{code: -32_004, data: %{"consent" => "private", "reason" => reason}}} =
+               offer(ctx, session.id)
+
+      assert reason == Relay.private_consent()
+      assert reason =~ "passes through the plane unsealed"
       refute_receive {:relay, "relay.offer", _}, 300
+
+      # Nobody is named for one: its control invitees are whom it is shared with.
+      assert {:error, %{code: -32_602, data: %{"field" => "share"}}} =
+               offer(ctx, session.id, [%{"person" => @cy, "role" => "control"}], %{"consent" => "private"})
+
+      assert {:ok, %{"remote" => remote}} = offer(ctx, session.id, [], %{"consent" => "private"})
+      assert_receive {:relay, "relay.offer", params}, 5_000
+      assert params["session_id"] == session.id
+      assert params["private"] == true
+      assert params["share"] == [%{"person" => @bea, "role" => "control"}]
+
+      assert remote["private"] == true
+      assert [%{"subject" => @bea, "role" => "control"}] = remote["shares"]
+
+      {:ok, got} = Client.call(ctx.ada, "session.get", %{"session_id" => session.id})
+      assert got["remote"]["private"] == true
+      assert got["kind"] == "private"
+    end
+
+    test "a control invitee steers an offered private session; taking the invitation back or withdrawing ends it at once",
+         ctx do
+      %{session: session} = start_session(ctx, default: {:text, "done"}, kind: :private)
+      invited(session.id, @bea, "control")
+      {:ok, _} = offer(ctx, session.id, [], %{"consent" => "private"})
+      assert_receive {:relay, "relay.offer", _}, 5_000
+
+      hello = viewer(ctx, "v-bea", session.id, @bea, "control")
+      assert "control" in hello["scopes"]
+      ask(ctx, "v-bea", 1, "subscribe", %{"command_id" => "c-s", "topic" => "session:#{session.id}", "from_seq" => 0})
+
+      assert %{"result" => %{"accepted" => true}} =
+               ask(ctx, "v-bea", 2, "input.send", %{
+                 "command_id" => "c-1",
+                 "session_id" => session.id,
+                 "text" => "from Bea's desk"
+               })
+
+      accepted = await_event("v-bea", "input_accepted")
+      assert accepted["actor"]["subject"] == @bea
+      assert accepted["actor"]["via"] == "plane"
+
+      # Taken back here: the offer is shared anew with nobody, and her view closes now.
+      Log.append(session.id, ["root"], :session_uninvited, %{"subject" => @bea, "by" => @ada})
+      :ok = Remote.reshare(session.id)
+      taken_back = Relay.invitation_taken_back()
+      assert_receive {:relay_close, "v-bea", ^taken_back}, 5_000
+      assert_receive {:relay, "relay.offer", %{"share" => [], "private" => true}}, 5_000
+
+      # Invited again and steering, then withdrawn: every view closes with the sentence.
+      invited(session.id, @bea, "control")
+      :ok = Remote.reshare(session.id)
+      assert_receive {:relay, "relay.offer", %{"share" => [%{"person" => @bea}]}}, 5_000
+      viewer(ctx, "v-bea2", session.id, @bea, "control")
+
+      {:ok, %{"remote" => nil}} =
+        Client.call(ctx.ada, "remote.withdraw", %{"command_id" => Client.command_id(), "session_id" => session.id})
+
+      withdrawn = Relay.private_withdrawn()
+      assert_receive {:relay_close, "v-bea2", ^withdrawn}, 5_000
+      {:ok, got} = Client.call(ctx.ada, "session.get", %{"session_id" => session.id})
+      assert got["remote"] == nil
     end
 
     test "nothing is offered without a token to offer it with", ctx do

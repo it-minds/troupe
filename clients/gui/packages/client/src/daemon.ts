@@ -14,11 +14,13 @@
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
+import type { Artifact, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactUpload } from "./artifacts.js";
 import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { remoteOffer, syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
 import type { OwnMemory, OwnMemorySaved } from "./instructions.js";
+import type { Invitee, InviteRole, SealedRead } from "./invites.js";
 import type { MemoryBrief } from "./memory.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
 import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
@@ -330,6 +332,12 @@ export interface DaemonHooks {
   locate?: () => Promise<DaemonEndpoint | null>;
   /** A tool the client is hosting. Registered per session through `tools.register`. */
   onToolInvoke?: (invoke: ToolInvoke) => Promise<unknown>;
+  /**
+   * Whether the app is in *Local only*, asked at every dial: said in `initialize`'s
+   * `client_info.local_only`, so the daemon makes no plane call for the sessions this app
+   * runs, from the first request on a socket. A change while connected is `setLocalOnly`.
+   */
+  localOnly?: () => boolean;
 }
 
 /** Somebody watching one session's events alongside its view's owner. */
@@ -486,7 +494,7 @@ export class DaemonClient {
         {
           url: daemonUrl(this.at),
           token: this.at.token,
-          clientInfo: { name: "troupe-gui", version: "1" },
+          clientInfo: { name: "troupe-gui", version: "1", ...(this.hooks.localOnly?.() ? { local_only: true } : {}) },
           // Tools only when something is actually hosting them: a client that says it can
           // serve `tool.invoke` and then answers `method_not_found` is worse than one that
           // never offered.
@@ -690,13 +698,45 @@ export class DaemonClient {
   }
 
   /**
+   * Invite a person, by name or email, into a private session sealed on this computer
+   * (troupe #765): the daemon puts the session's key in their own slot at the key manager
+   * and tells the plane where. A pod session is invited at the plane (`PlaneClient.inviteToSession`).
+   */
+  inviteSession(sessionId: string, person: string, role: InviteRole): Promise<{ session_id: string; invite: Invitee }> {
+    return this.command("session.invite", { session_id: sessionId, person, role });
+  }
+
+  /** Take an invitation into a private session back, and seal what follows under a key they never get. */
+  uninviteSession(sessionId: string, person: string): Promise<{ session_id: string; subject: string; rekey_due: boolean }> {
+    return this.command("session.uninvite", { session_id: sessionId, person });
+  }
+
+  /** Whom a private session is shared with by name, as the plane says. */
+  sessionInvites(sessionId: string): Promise<{ session_id: string; invites: Invitee[] }> {
+    return this.call("session.invites", { session_id: sessionId });
+  }
+
+  /**
+   * A private session somebody invited this computer's person into, read from the plane's
+   * sealed copy with the keys in their own slot: its events after `afterSeq`. Nothing of it
+   * is kept on this computer.
+   */
+  readSealed(sessionId: string, afterSeq = 0): Promise<SealedRead> {
+    return this.call<SealedRead>("session.read_sealed", { session_id: sessionId, after_seq: afterSeq });
+  }
+
+  /**
    * Offer a session to the plane this computer is signed in to, so its person, and the
    * people named in `share`, can steer it from another device (troupe #58).
    * Offering again replaces the share. A private session is refused. The answer is what
    * the session's row then says of it.
    */
-  offerRemote(sessionId: string, share: Array<{ person: string; role: "observe" | "control" }> = []): Promise<{ session_id: string; remote: unknown }> {
-    return this.command("remote.offer", { session_id: sessionId, share });
+  offerRemote(
+    sessionId: string,
+    share: Array<{ person: string; role: "observe" | "control" }> = [],
+    consent?: "private",
+  ): Promise<{ session_id: string; remote: unknown }> {
+    return this.command("remote.offer", { session_id: sessionId, share, ...(consent ? { consent } : {}) });
   }
 
   /** Take an offer back: every view of the session from another device ends at once. */
@@ -1006,9 +1046,34 @@ export class DaemonClient {
     return this.call<OwnMemory>("me.memory");
   }
 
+  /**
+   * The app's Local only switch moved: tell the daemon, which from now on makes no plane
+   * call for the sessions this app runs while it is on, and puts the ones open here under
+   * it. A socket not open yet says it at its `initialize` (`localOnly`), so this asks only
+   * of one that is.
+   */
+  async setLocalOnly(on: boolean): Promise<void> {
+    if (!this.conn) return;
+    await this.conn.call("client.mode", { local_only: on });
+  }
+
   /** Save it, the whole text over the version it was edited from; the sessions here read it from their next turn. */
   putOwnMemory(text: string, version: number): Promise<OwnMemorySaved> {
     return this.command<OwnMemorySaved>("me.memory.put", { text, version });
+  }
+
+  /**
+   * Publish files as an artifact on the plane (troupe #62), as this daemon's person: a new
+   * one, or with `id` the next version of one of theirs. The daemon sends a version too large
+   * for one call by an upload handle. Refused with a sentence where it is signed in to no plane.
+   */
+  publishArtifact(params: { title: string; kind: ArtifactKind; visibility: string; files: ArtifactUpload[]; id?: string; note?: string; session_id?: string }): Promise<Artifact & { plane_url?: string }> {
+    return this.command<Artifact & { plane_url?: string }>("artifact.publish", params);
+  }
+
+  /** The person's own artifacts on the plane, and where the console's gallery is. */
+  artifacts(filter: ArtifactFilter = { mine: true }): Promise<ArtifactList & { plane_url?: string }> {
+    return this.call<ArtifactList & { plane_url?: string }>("artifact.list", { ...filter });
   }
 
   /** Forget one fact of a repository's memory, by its id; `memory.md` is written again without it. */

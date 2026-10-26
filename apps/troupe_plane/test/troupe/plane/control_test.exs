@@ -281,16 +281,29 @@ defmodule Troupe.Plane.ControlTest do
                call(worker, "session.memory.put", %{
                  "session_id" => "s-mem",
                  "scope" => "user",
-                 "append" => "Prefers small pull requests."
+                 "append" => "Prefers small pull requests.",
+                 "agent" => "build"
                })
 
       text = Memory.current(ada).text
       assert text =~ ~r/\ACall me Ada\.\n\n## \d{4}-\d{2}-\d{2}\n\n- Prefers small pull requests\.\z/
 
-      # The audit names the session the entry came from, and never the text.
+      # The audit names the session and the agent the entry came from, and never the text.
       [row | _] = Enum.filter(Audit.list(), &(&1.action == "memory.put"))
       assert row.detail["session"] == "s-mem"
+      assert row.detail["agent"] == "build"
       refute inspect(row) =~ "pull requests"
+
+      # And so who wrote the line: the person's own first line theirs, the entry the agent's.
+      assert [
+               %{"text" => "Call me Ada.", "version" => 1, "by" => "ada@example.test"} = mine,
+               %{"text" => "", "version" => 2},
+               %{"version" => 2},
+               %{"text" => "", "version" => 2},
+               %{"text" => "- Prefers small pull requests.", "version" => 2, "session" => "s-mem", "agent" => "build"}
+             ] = Memory.blame(ada)
+
+      refute Map.has_key?(mine, "session")
     end
 
     test "refuses every other level, and a session this pod does not hold", %{port: port} do
@@ -326,6 +339,63 @@ defmodule Troupe.Plane.ControlTest do
                call(mine, "session.memory.put", %{"session_id" => "s-ada-m", "epoch" => 7, "append" => "Late."})
 
       assert Repo.aggregate(Memory.Document, :count) == 0
+    end
+  end
+
+  # Issue #62: an agent of a pod's session publishes an artifact for the session's owner,
+  # counted against the session's team, recorded with its profile and the session.
+  describe "session.artifact.publish" do
+    setup do
+      Application.put_env(:troupe_plane, :artifacts, url: "https://artifacts.example.test")
+
+      on_exit(fn ->
+        Application.delete_env(:troupe_plane, :artifacts)
+        Troupe.ObjectStore.delete_prefix(Troupe.ObjectStore.from_env(), "artifacts/")
+      end)
+    end
+
+    test "publishes for the owner of a session this pod holds, and for nobody else", %{port: port} do
+      mine = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(mine, [])
+      theirs = enrolled(port, "dev-token", "troupe-w-dev-1")
+      answer_index(theirs, [])
+      [here, other] = Enum.sort_by(Fleet.list_workers("dev"), & &1.pod_name)
+
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      ada = person("ada@example.test", ["engineering"])
+      bo = person("bo@example.test", ["engineering"])
+      {:ok, _} = Sessions.create(%{id: "s-ada-a", owner_subject: ada.subject, profile: "dev", team_id: team.id})
+      {:ok, _} = Sessions.place("s-ada-a", here)
+      {:ok, _} = Sessions.create(%{id: "s-bo-a", owner_subject: bo.subject, profile: "dev", team_id: team.id})
+      {:ok, _} = Sessions.place("s-bo-a", other)
+
+      page = %{
+        "title" => "Pod report",
+        "kind" => "html",
+        "visibility" => "profile:dev",
+        "files" => [%{"path" => "index.html", "bytes" => Base.encode64("<h1>From a pod</h1>")}]
+      }
+
+      assert {:ok, artifact} =
+               call(mine, "session.artifact.publish", Map.merge(page, %{"session_id" => "s-ada-a", "agent" => "agent:build"}))
+
+      assert artifact["owner"]["subject"] == "ada@example.test"
+      assert artifact["team"] == "engineering"
+      assert artifact["origin"] == %{"session_id" => "s-ada-a", "agent" => "agent:build", "where" => "pod", "profile" => "dev"}
+
+      [row] = Enum.filter(Audit.list(), &(&1.action == "artifact.publish"))
+      assert row.actor == "ada@example.test"
+      assert row.detail["session"] == "s-ada-a"
+
+      # Another pod's session, a stale epoch, and a profile its owner is not covered by.
+      assert {:error, %{"message" => "not_found"}} =
+               call(mine, "session.artifact.publish", Map.put(page, "session_id", "s-bo-a"))
+
+      assert {:error, %{"message" => "conflict"}} =
+               call(mine, "session.artifact.publish", Map.merge(page, %{"session_id" => "s-ada-a", "epoch" => 9}))
+
+      assert {:error, %{"message" => "forbidden"}} =
+               call(mine, "session.artifact.publish", Map.merge(page, %{"session_id" => "s-ada-a", "visibility" => "profile:lab"}))
     end
   end
 

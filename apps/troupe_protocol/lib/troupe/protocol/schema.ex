@@ -203,7 +203,10 @@ defmodule Troupe.Protocol.Schema do
         "timed_out" => optional(:boolean),
         # A waited-for `delegate`'s: what its subagent reported it spent, in `turn`'s shape,
         # which is the parent's turn's too.
-        "spent" => optional(:object)
+        "spent" => optional(:object),
+        # A `publish_artifact`'s: what it published on the plane (#62), `id`, `version`,
+        # `url`, `title` and `visibility`.
+        "artifact" => optional(:object)
       },
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
@@ -223,12 +226,19 @@ defmodule Troupe.Protocol.Schema do
       # each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`,
       # `trimmed`, `skipped`, `imported_by`, `unfollowed` and `hash` (Decision 798), and
       # `reason`, in words, for a file left out (Decision 806).
-      # Written when the set or a file changed since the agent's last turn.
+      # Written when the set or a file changed since the agent's last turn. `memory` is each
+      # memory document read (#55), as the plane names it: `scope` (organisation, team,
+      # profile, user), `name`, `version` and `hash`, so the log says which version of each
+      # the turns from here run under. `local_only`, once, where the session's client put it
+      # under Local only: a sentence that it reads the memory the machine already holds and
+      # that nothing of it goes to the plane.
       "instructions_loaded" => %{
         "budget" => required(:integer),
         "used" => required(:integer),
         "files" => required(:array),
-        "searched" => optional({:array, :string})
+        "searched" => optional({:array, :string}),
+        "memory" => optional(:array),
+        "local_only" => optional(:string)
       },
       # The organisation's memory documents an agent reads changed while the session ran
       # (#55): a save on the plane reached it, and its next turn read the new ones. Each
@@ -601,6 +611,22 @@ defmodule Troupe.Protocol.Schema do
       },
       "share_revoked" => %{"id" => required(:string), "reason" => optional(:string)},
       "acl_granted" => %{"subject" => required(:string), "role" => required(:string)},
+      # A person invited into this session by name, or the invitation taken back (#765):
+      # whom, at which role (`observe` or `control`), and by whom. Durable, for the reason
+      # a share is: who was let in to read what was said is part of what happened.
+      "session_invited" => %{
+        "subject" => required(:string),
+        "role" => required(:string),
+        "by" => required(:string),
+        "display_name" => optional(:string),
+        "by_name" => optional(:string)
+      },
+      "session_uninvited" => %{
+        "subject" => required(:string),
+        "by" => required(:string),
+        "display_name" => optional(:string),
+        "by_name" => optional(:string)
+      },
       "acl_revoked" => %{"subject" => required(:string), "role" => required(:string)},
       # Client-hosted tools. Durable, all three, because a tool that ran on somebody's
       # laptop is part of what happened in this session and a replay that did not say so
@@ -719,6 +745,27 @@ defmodule Troupe.Protocol.Schema do
       # A private session another device sealed last, taken over on this one (Decision 785):
       # the daemon's only, since a pod holds no private session.
       "session.claim" => %{"command_id" => required(:string), "session_id" => required(:string)},
+      # A person invited by name into a private session sealed here, and the invitation
+      # taken back (#765): the daemon's, since only it holds the session's key. `role` is
+      # `observe` (the default) or `control`. A pod session is invited at the plane.
+      "session.invite" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "person" => required(:string),
+        "role" => optional(:string)
+      },
+      "session.uninvite" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "person" => required(:string)
+      },
+      "session.invites" => %{"session_id" => required(:string)},
+      # Somebody's private session shared with this machine's person, read from the plane's
+      # sealed copy with the keys in their own slot, after `after_seq`.
+      "session.read_sealed" => %{
+        "session_id" => required(:string),
+        "after_seq" => optional(:integer)
+      },
       # A second session from this one's conversation as it stands (Decision 812): the
       # daemon's; a pod session is forked through the plane's method of the same name.
       "session.fork" => %{
@@ -971,11 +1018,14 @@ defmodule Troupe.Protocol.Schema do
         "subject" => optional(:string)
       },
       # A laptop's session offered to the plane for steering from another device, shared
-      # with `[{person, role}]`, and taken back (#58): the daemon's only.
+      # with `[{person, role}]`, and taken back (#58): the daemon's only. A private one
+      # needs `consent: "private"`, its person's yes to its passing through the plane
+      # unsealed while it is offered (#765).
       "remote.offer" => %{
         "command_id" => required(:string),
         "session_id" => required(:string),
-        "share" => optional({:array, :object})
+        "share" => optional({:array, :object}),
+        "consent" => optional(:string)
       },
       "remote.withdraw" => %{
         "command_id" => required(:string),
@@ -1044,12 +1094,40 @@ defmodule Troupe.Protocol.Schema do
       },
       # The person's own memory document on the plane (#55), read and saved through the
       # daemon's sign-in: the whole `text` over the `version` edited, or one `append`ed entry.
-      "me.memory" => %{},
+      # `blame` adds `lines`, who wrote each line and from which session (#55).
+      "me.memory" => %{"blame" => optional(:boolean)},
+      # Where this machine's copy of the plane's memory stands, for the person's own
+      # debugging: what it holds, what is in force, what each session here last read.
+      "me.memory.status" => %{},
       "me.memory.put" => %{
         "command_id" => required(:string),
         "text" => optional(:string),
         "version" => optional(:integer),
         "append" => optional(:string)
+      },
+      # The client's Local only switch moved: the daemon makes no plane call
+      # for the sessions it runs while it is on. Said at `initialize` as
+      # `client_info.local_only`.
+      "client.mode" => %{"local_only" => required(:boolean)},
+      # A page, a document or a file published on the plane as the person (#62), through
+      # the daemon's sign-in: `files` each `{path, bytes}` (base64) and an optional
+      # `content_type`; `id` republishes one of theirs; `session_id` names where it came from.
+      "artifact.publish" => %{
+        "command_id" => required(:string),
+        "title" => required(:string),
+        "kind" => required(:string),
+        "visibility" => required(:string),
+        "files" => required(:array),
+        "id" => optional(:string),
+        "note" => optional(:string),
+        "session_id" => optional(:string)
+      },
+      # The person's own artifacts on the plane (#62), for a client's "Publish a new version
+      # of…": `mine`, `shared` or `visibility` narrows it, as the plane's `artifact.list`.
+      "artifact.list" => %{
+        "mine" => optional(:boolean),
+        "shared" => optional(:boolean),
+        "visibility" => optional(:string)
       },
       # A first run's questions (Decision 705) — the daemon's only, like the settings
       # they write; a worker answers `method_not_found`. `answer` is the named step's

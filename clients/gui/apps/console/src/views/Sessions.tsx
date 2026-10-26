@@ -1,5 +1,6 @@
 // Sessions, as metadata: who owns each, where it runs, what state it is in, what it holds,
-// whether somebody pinned it, and the branch and draft pull request it left on GitHub.
+// whether somebody pinned it, the branch and draft pull request it left on GitHub, and
+// whether a running one's last turn read an older version of its memory than the one in force.
 // Never what it said: no administrative method returns
 // that, so there is nothing here that could show it. Every session for a platform admin,
 // their teams' for a team admin, as `admin.sessions.list` answers each.
@@ -175,6 +176,12 @@ function SessionRow({ session: s, busy, onErase }: { session: AdminSessionRow; b
         <Status kind={st.kind} glyph={st.glyph}>
           {st.word}
         </Status>
+        {s.memory === "behind" && (
+          <span className="memory-mark" title="Its last turn read an older version of its memory than the one in force; it reads the new one at its next turn.">
+            {" "}
+            · memory: behind
+          </span>
+        )}
       </td>
       <td className="num">{bytes(s.object_bytes)}</td>
       <td className="num">{bytes(s.workspace_bytes)}</td>

@@ -31,6 +31,37 @@ defmodule Troupe.EditorTest do
              Editor.edit(Path.join(System.tmp_dir!(), "nothing.md"))
   end
 
+  # An app's alias in WindowsApps cannot be started as a program, so on Windows the editor
+  # falls back to cmd.exe's `start /wait`, which follows it, rather than the edit crashing.
+  test "an editor the system cannot start goes through cmd.exe's start, which waits for it" do
+    assert Editor.shell_line(
+             "C:\\Windows\\System32\\cmd.exe",
+             "C:/Users/ada/AppData/Local/Microsoft/WindowsApps/pwsh.exe",
+             ["-NoExit"],
+             "C:/Users/ada/AppData/Local/Temp/troupe-agent 1.md"
+           ) ==
+             ~s("C:\\Windows\\System32\\cmd.exe" /c start "" /wait ) <>
+               ~s("C:\\Users\\ada\\AppData\\Local\\Microsoft\\WindowsApps\\pwsh.exe" "-NoExit" ) <>
+               ~s("C:\\Users\\ada\\AppData\\Local\\Temp\\troupe-agent 1.md")
+  end
+
+  # The alias is listed in its directory and cannot be opened as a file, so the PATH lookup
+  # passes it by; the editor finds it by the listing, on Windows alone.
+  test "an app's alias on the PATH is found by its directory's listing, on Windows" do
+    dir = Path.join(System.tmp_dir!(), "troupe-alias-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    File.write!(Path.join(dir, "pwsh.exe"), "")
+    on_exit(fn -> File.rm_rf(dir) end)
+
+    nowhere = Path.join(dir, "nowhere")
+
+    assert Editor.app_alias("pwsh", [nowhere, dir], {:win32, :nt}) ==
+             String.replace(Path.join(dir, "pwsh.exe"), "/", "\\")
+
+    assert Editor.app_alias("code", [dir], {:win32, :nt}) == nil
+    assert Editor.app_alias("pwsh", [dir], {:unix, :linux}) == nil
+  end
+
   # On Windows a console program is started hidden, which a program with a window must
   # not be: the executable's header says which it is.
   test "a Windows executable's header says whether it has a window of its own" do

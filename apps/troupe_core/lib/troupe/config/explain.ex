@@ -502,7 +502,14 @@ defmodule Troupe.Config.Explain do
   defp json_value(%{value: {:unset_env, _var, raw}}, _spec), do: raw
   defp json_value(%{value: nil}, _spec), do: nil
   defp json_value(%{value: value}, %{secret: true}), do: Config.mask(value)
-  defp json_value(%{value: value}, _spec), do: value
+  defp json_value(%{value: value}, _spec), do: as_written(value)
+
+  # A list or a map can hold an unset `{env:VAR}` (an MCP server's `args`), which JSON
+  # cannot carry as the tuple it is kept as: its text as written, at any depth.
+  defp as_written({:unset_env, _var, raw}), do: raw
+  defp as_written(list) when is_list(list), do: Enum.map(list, &as_written/1)
+  defp as_written(%{} = map) when not is_struct(map), do: Map.new(map, fn {key, value} -> {key, as_written(value)} end)
+  defp as_written(value), do: value
 
   # -- validate -------------------------------------------------------------------
 

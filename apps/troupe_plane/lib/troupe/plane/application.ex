@@ -87,7 +87,20 @@ defmodule Troupe.Plane.Application do
       {Task.Supervisor, name: Troupe.Plane.Releases.Tasks},
       {Registry, keys: :unique, name: Troupe.Plane.Releases.Copies},
       Troupe.Plane.Web.Endpoint
-    ] ++ cluster()
+    ] ++ artifacts() ++ cluster()
+  end
+
+  # The artifacts host (#62): its own listener on its own port, so nothing of the plane's
+  # is ever answered on the origin where published pages run. None where the deployment
+  # gave it no port.
+  defp artifacts do
+    case Keyword.get(Application.get_env(:troupe_plane, :artifacts, []), :port) do
+      port when is_integer(port) ->
+        [{Bandit, plug: Troupe.Plane.Web.Artifacts, scheme: :http, ip: {0, 0, 0, 0}, port: port}]
+
+      _none ->
+        []
+    end
   end
 
   defp cluster do

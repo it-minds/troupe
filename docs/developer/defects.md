@@ -49,7 +49,6 @@ row, and on a page past 400 lines; a full page is closed and the next one,
 | [D56](defects/d008.md#d56---scim-and-the-subject-claim-small-leftovers-low) | SCIM and the subject claim: small leftovers | low |
 | [D57](defects/d008.md#d57---scim-what-is-left-after-356-low) | SCIM: what is left after #356 | low |
 | [D58](defects/d008.md#d58---the-desktop-app-and-a-failed-turn-what-354-left-low) | The desktop app and a failed turn: what #354 left | low |
-| [D59](defects/d008.md#d59---private-sessions-and-mcp-sessions-small-leftovers-of-074-low) | Private sessions and MCP sessions: small leftovers of 0.7.4 | low |
 | [D62](defects/d008.md#d62---start-at-login-small-leftovers-low) | Start at login: small leftovers | low |
 | [D63](defects/d063.md#d63---shared-settings-and-user-commands-small-leftovers-low) | Shared settings and user commands: small leftovers | low |
 | [D64](defects/d063.md#d64---small-leftovers-from-the-081-work-low) | Small leftovers from the 0.8.1 work | low |
@@ -113,7 +112,8 @@ row, and on a page past 400 lines; a full page is closed and the next one,
 | [D133](defects/d130.md#d133---offers-memory-refresh-the-signed-policy-and-the-picker-after-chunk-40-low) | Offers, memory refresh, the signed policy and the picker after chunk 40 | low |
 | [D134](defects/d130.md#d134---the-gates-desk-walk-the-charts-hand-steps-the-upgrade-test-and-the-seam-after-chunk-41-low) | The gate's desk walk, the chart's hand steps, the upgrade test and the seam after chunk 41 | low |
 | [D135](defects/d130.md#d135---signing-wired-the-last-hand-steps-the-docs-new-shape-and-the-seam-after-chunk-42-low) | Signing wired, the last hand steps, the docs' new shape and the seam after chunk 42 | low |
-| [D136](defects/d130.md#d136---a-persons-memory-the-drains-offers-after-a-restart-and-the-sweep-after-chunk-43-low) | A person's memory, the drains, offers after a restart and the sweep after chunk 43 | low |
+| [D136](defects/d130.md#d136---the-drains-offers-after-a-restart-and-the-sweep-after-chunk-43-low) | The drains, offers after a restart and the sweep after chunk 43 | low |
+| [D137](defects/d130.md#d137---memory-proven-artifacts-invites-and-the-sweep-after-chunk-44-low) | Memory proven, artifacts, invites and the sweep after chunk 44 | low |
 
 The pages: [D8 to D62](defects/d008.md), [D63 to D89](defects/d063.md),
 [D90 to D120](defects/d090.md), [D121 to D129](defects/d121.md) and

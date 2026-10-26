@@ -37,6 +37,12 @@ export interface AdminSessionRow {
   repository?: { owner: string; name: string; ref?: string | null } | null;
   /** What it did there, as its pod reported it; null until it has done something. */
   github?: SessionGitHub | null;
+  /**
+   * For a session running on a pod that has had a turn: whether that turn read the memory in
+   * force for it (`current`) or an older version (`behind`). Absent otherwise, and from a
+   * plane from before it.
+   */
+  memory?: "current" | "behind" | null;
   [k: string]: unknown;
 }
 
@@ -415,6 +421,10 @@ export interface AdminTeam extends TeamSpend {
    * Absent from a plane older than the field.
    */
   github?: TeamGitHub;
+  /** What the team's artifacts hold now, in bytes. Absent from a plane older than artifacts. */
+  artifact_bytes?: number;
+  /** The most the team's artifacts may hold, in bytes; 0 is no quota. Absent from a plane older than artifacts. */
+  artifact_quota_bytes?: number;
   admins: string[];
   grants: Array<{ profile: string; volume_mode: string | null }>;
   groups: AdminTeamGroup[];
@@ -956,6 +966,10 @@ export interface MemoryDocument {
   version: number | null;
   text: string;
   shown: MemoryVersion | null;
+  /** The version `diff` compares the one shown with: the one before it, or the one asked for. */
+  against?: number | null;
+  /** That version's text, for a side-by-side view. */
+  against_text?: string | null;
   diff: MemoryLine[];
   versions: MemoryVersion[];
   /**
@@ -963,6 +977,51 @@ export interface MemoryDocument {
    * its own, the one that extends nothing first. Absent from a plane from before them.
    */
   inherited?: MemoryInherited[];
+  /** The running sessions it reaches that have had a turn, and which of them are behind. Absent from a plane from before it. */
+  readers?: MemoryReaders;
+  /** The version shown line by line with who wrote each line (blame, not history). Absent from a plane from before it. */
+  lines?: MemoryBlameLine[];
+}
+
+/** One line of a memory document with who wrote it: the version it came in, who saved that, and an agent's entry's session and agent. */
+export interface MemoryBlameLine {
+  text: string;
+  version: number;
+  by?: string | null;
+  at?: string | null;
+  session?: string;
+  agent?: string;
+}
+
+/** Which version of one document the running sessions it reaches read at their last turn. */
+export interface MemoryReaders {
+  /** The version in force. */
+  version: number;
+  /** How many of `sessions` are behind it. */
+  behind: number;
+  sessions: MemoryReader[];
+}
+
+/** One running session, and the version of the document its last turn ran under. */
+export interface MemoryReader {
+  session_id: string;
+  /** `pod`: told at once by a nudge; `machine`: its daemon asks at its next poll. */
+  where: "pod" | "machine";
+  owner: string | null;
+  profile: string | null;
+  team: string | null;
+  /** The version its last turn read; 0 for none. */
+  version: number;
+  turn_at: string | null;
+  behind: boolean;
+}
+
+/** What a nudge did: told a pod's session, or why a machine's session is not told. */
+export interface MemoryNudged {
+  session_id: string;
+  where: "pod" | "machine";
+  told: boolean;
+  reason?: string;
 }
 
 /** A document a profile has from a profile it extends: that profile, and the version in force. */
@@ -981,6 +1040,8 @@ export interface MemoryPreview {
   unchanged: boolean;
   diff: MemoryLine[];
   effect: string;
+  /** The running sessions that read it now, as `admin.memory.get` has them. */
+  readers?: MemoryReaders;
 }
 
 /** A save: the version now in force, and the audit's diff. */
@@ -1367,8 +1428,18 @@ export class AdminApi {
   }
 
   /** One memory document: a version (the one in force where none is named), its change against the one before, and every version. */
-  memoryGet(scope: MemoryScope, name: string | null, version?: number): Promise<MemoryDocument> {
-    return this.rpc<MemoryDocument>("admin.memory.get", { scope, name, ...(version ? { version } : {}) });
+  memoryGet(scope: MemoryScope, name: string | null, version?: number, against?: number): Promise<MemoryDocument> {
+    return this.rpc<MemoryDocument>("admin.memory.get", { scope, name, ...(version ? { version } : {}), ...(against ? { against } : {}) });
+  }
+
+  /** Roll back to version `to`: its text saved as the next version over `version`, the one in force. */
+  memoryRollback(scope: MemoryScope, name: string | null, to: number, version: number): Promise<MemorySaved> {
+    return this.rpc<MemorySaved>("admin.memory.rollback", { scope, name, to, version });
+  }
+
+  /** Tell one running session the document reaches what it reads now, again. */
+  memoryNudge(scope: MemoryScope, name: string | null, sessionId: string): Promise<MemoryNudged> {
+    return this.rpc<MemoryNudged>("admin.memory.nudge", { scope, name, session_id: sessionId });
   }
 
   /** What saving a text as the document would do, written nowhere. */

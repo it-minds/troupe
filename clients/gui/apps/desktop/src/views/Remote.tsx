@@ -10,8 +10,8 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { RESTART_SENTENCE, offerRestartWords, remoteOffer, remoteWhen } from "@troupe/client";
-import type { DaemonClient, FleetRow, PresenceMember, RemoteOffer, RemotePerson } from "@troupe/client";
+import { PRIVATE_OFFER_SENTENCE, RESTART_SENTENCE, invitationWords, offerRestartWords, remoteOffer, remoteWhen, steerWords } from "@troupe/client";
+import type { DaemonClient, FleetRow, Invitation, PresenceMember, RemoteOffer, RemotePerson } from "@troupe/client";
 
 type Role = "observe" | "control";
 
@@ -54,15 +54,27 @@ export function presenceWords(offer: RemoteOffer): string {
 
 /**
  * This computer's offer in words: whether the plane has it, then whether it came back
- * after a restart or lasts only until one, as the terminal's `/steer` says it.
+ * after a restart or lasts only until one, as the terminal's `/steer` says it. A private
+ * session's says so first.
  */
 export function offerWords(offer: RemoteOffer): string {
-  return [presenceWords(offer), ...offerRestartWords(offer)].join(" · ");
+  return [...(offer.private ? ["Private"] : []), presenceWords(offer), ...offerRestartWords(offer)].join(" · ");
 }
 
 /**
- * This computer's session, offered to the plane or not. Only a local session has it: a
- * private one is sealed under its person's key and never offered.
+ * Who invited this person, and for a private session what the invitation lets them do now:
+ * "Ada invited you to steer it · offered · you can steer".
+ */
+export function inviteLine(i: Invitation): string {
+  const now = steerWords(i);
+  return now ? `${invitationWords(i)} · ${now}` : invitationWords(i);
+}
+
+/**
+ * This computer's session, offered to the plane or not. A private one is offered only after
+ * its person says yes to its passing through the plane unsealed while it is, in the words
+ * the terminal asks with; it is shared with the people invited into it with control, and
+ * withdrawing it makes it sealed-only again (troupe #765).
  */
 export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: DaemonClient; row: FleetRow; presence?: PresenceMember[] }): JSX.Element | null {
   const [offer, setOffer] = useState<RemoteOffer | null>(row.remote ?? null);
@@ -73,11 +85,14 @@ export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: Dae
   const [error, setError] = useState<string | null>(null);
   // Said once, as the offer is made, where nothing starts the daemon at login.
   const [restart, setRestart] = useState(false);
+  // A private session's question, asked before anything is offered.
+  const [asking, setAsking] = useState(false);
 
   // The listing catches up with what was done here, and with what another client did.
   useEffect(() => setOffer(row.remote ?? null), [row.remote]);
 
-  if (row.kind !== "local") return null;
+  if (row.kind !== "local" && row.kind !== "private") return null;
+  const isPrivate = row.kind === "private";
 
   const act = async (f: () => Promise<{ remote: unknown }>, offering = false): Promise<void> => {
     setBusy(true);
@@ -98,6 +113,11 @@ export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: Dae
 
   const offerIt = (): Promise<void> =>
     act(() => daemon.offerRemote(row.id, people(share).map((person) => ({ person, role }))), true);
+  // Only the person's yes offers a private session, to the people it invited with control.
+  const offerPrivate = (): Promise<void> => {
+    setAsking(false);
+    return act(() => daemon.offerRemote(row.id, [], "private"), true);
+  };
   const withdraw = (): Promise<void> => act(() => daemon.withdrawRemote(row.id));
   const steering = offer ? steeringWords({ ...offer, steering: steeringNow(offer.steering, presence) }) : null;
 
@@ -109,20 +129,34 @@ export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: Dae
             Offered · {offerWords(offer)}
           </span>
           {steering && <span className="steering">{steering}</span>}
-          <button className="tab" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={busy}>
-            Share
-          </button>
+          {!isPrivate && (
+            <button className="tab" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={busy}>
+              Share
+            </button>
+          )}
           <button className="tab" onClick={() => void withdraw()} disabled={busy}>
             Withdraw
           </button>
         </>
       ) : (
-        <button className="tab" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={busy}>
+        <button className="tab" onClick={() => (isPrivate ? setAsking((a) => !a) : setOpen((o) => !o))} aria-expanded={isPrivate ? asking : open} disabled={busy}>
           Steer from elsewhere
         </button>
       )}
 
-      {open && (
+      {isPrivate && asking && !offer && (
+        <div className="remote-consent" role="alertdialog" aria-label="Offer a private session">
+          <p>{PRIVATE_OFFER_SENTENCE}</p>
+          <button className="primary" onClick={() => void offerPrivate()} disabled={busy}>
+            Offer it
+          </button>
+          <button className="tab" onClick={() => setAsking(false)} disabled={busy}>
+            Keep it sealed
+          </button>
+        </div>
+      )}
+
+      {open && !isPrivate && (
         <form
           className="remote-share"
           onSubmit={(e) => {
@@ -173,6 +207,7 @@ export function RemoteLine({ row }: { row: FleetRow }): JSX.Element | null {
   return (
     <span className="remote-line" title="Steered from here through the plane">
       On {whose} · {presenceWords(row.remote)}
+      {row.remote.private ? " · private, passing through the plane unsealed while it is offered" : ""}
     </span>
   );
 }

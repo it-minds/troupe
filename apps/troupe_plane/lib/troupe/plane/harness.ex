@@ -25,6 +25,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.ObjectStore
 
   alias Troupe.Plane.{
+    Artifacts,
     Audit,
     Budget,
     Build,
@@ -37,6 +38,7 @@ defmodule Troupe.Plane.Harness do
     Fleet,
     GitHub,
     Identity,
+    Invites,
     Memory,
     Placement,
     Remote,
@@ -134,6 +136,16 @@ defmodule Troupe.Plane.Harness do
     "session.erase" => :control,
     "session.archive" => :control,
     "session.grant" => :control,
+    # Inviting a person by name into a session, and taking it back (#765): a pod session's
+    # grant made visible, a private session's key put in their own slot by its owner's machine.
+    "session.invite" => :control,
+    "session.uninvite" => :control,
+    "session.invites" => :observe,
+    "session.invite_slot" => :control,
+    "session.keys" => :observe,
+    "session.rekeyed" => :control,
+    "invites.list" => :observe,
+    "people.search" => :observe,
     "session.review" => :control,
     "trigger.fire" => :control,
     "session.spawn" => :control,
@@ -149,7 +161,30 @@ defmodule Troupe.Plane.Harness do
     "remote.list" => :observe,
     "remote.open" => :observe,
     # The laptop's daemon's own sign-in, asked with its person's token at its first offer.
-    "remote.grant" => :control
+    "remote.grant" => :control,
+    # Artifacts (#62): what the caller may see, one with its versions, a one-time address
+    # that opens it on the artifacts host, and publishing and deleting their own.
+    "artifact.list" => :observe,
+    "artifact.get" => :observe,
+    "artifact.open" => :observe,
+    "artifact.publish" => :control,
+    "artifact.delete" => :control,
+    # A new version, a rollback and a pin; one text file read for the console's editor and
+    # an edit previewed on the artifacts host; an upload handle for a version too large for
+    # one call; links that honour sign-in, spent by the person the plane signs in through
+    # one, and the owner's switch for its public links.
+    "artifact.put" => :control,
+    "artifact.rollback" => :control,
+    "artifact.pin" => :control,
+    "artifact.read" => :observe,
+    "artifact.preview" => :control,
+    "artifact.upload.begin" => :control,
+    "artifact.share" => :control,
+    "artifact.unshare" => :control,
+    "artifact.public" => :control,
+    # As `session.redeem`: its caller is not yet anybody on this artifact, and what the link
+    # gives them was decided when it was made.
+    "artifact.redeem" => :observe
   }
 
   @doc "Every method the plane answers, and the scope each needs."
@@ -335,9 +370,19 @@ defmodule Troupe.Plane.Harness do
   # team's, and their own last. Signed as the organisation's document is, since a machine
   # takes them as instructions and keeps a copy. Beside them, `user`: their own as they edit
   # it, with the version a save names, which is there for a document never saved or cleared.
-  defp handle("me.memory", _params, %{user: user}) do
-    {:ok,
-     Signing.signed("memory", %{"documents" => Memory.for_person(user), "user" => Memory.own(user)})}
+  #
+  # The poll carries what the machine's running sessions read at their last turn
+  # (`sessions`, each its id, when the turn began and each document's scope, name, version
+  # and hash), which the console's who-is-behind reads. Kept for the caller alone.
+  #
+  # `blame: true` adds `lines` to their own: who wrote each line, in which version, and from
+  # which session an agent's entry came (`Memory.blame/2`), for `troupe memory --blame`.
+  defp handle("me.memory", params, %{user: user}) do
+    :ok = Memory.machine(user, params["sessions"])
+    own = Memory.own(user)
+    own = if params["blame"] == true and is_binary(user.id), do: Map.put(own, "lines", Memory.blame(user)), else: own
+
+    {:ok, Signing.signed("memory", %{"documents" => Memory.for_person(user), "user" => own})}
   end
 
   # What saving a text as the person's own memory would do, written nowhere: the lines it
@@ -372,6 +417,78 @@ defmodule Troupe.Plane.Harness do
       {:ok, own_saved(user, saved)}
     end
   end
+
+  # Artifacts (`Artifacts`): every answer is what the caller may see, read now, and one
+  # they may not is not there. A client publishes for its person, naming the session it
+  # came from as provenance; a pod's agent publishes over its control link instead, where
+  # the plane reads the session off its own row.
+  defp handle("artifact.list", params, %{user: user} = context) do
+    Artifacts.list(user, Map.take(params, ["mine", "shared", "visibility"]),
+      platform_admin?: admin?(context)
+    )
+  end
+
+  defp handle("artifact.put", params, %{user: user} = context),
+    do: Artifacts.put(user, params, platform_admin?: admin?(context))
+
+  defp handle("artifact.rollback", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.rollback(id, params["version"], user, platform_admin?: admin?(context))
+
+  defp handle("artifact.pin", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.pin(id, params["version"], user, platform_admin?: admin?(context))
+
+  defp handle("artifact.read", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.read(id, user, params, platform_admin?: admin?(context))
+
+  defp handle("artifact.preview", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.preview(id, user, params, platform_admin?: admin?(context))
+
+  defp handle("artifact.upload.begin", params, %{user: user}),
+    do: Artifacts.begin_upload(user, params)
+
+  defp handle("artifact.share", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.share(id, user, params, platform_admin?: admin?(context))
+
+  defp handle("artifact.unshare", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.unshare(id, user, params, platform_admin?: admin?(context))
+
+  defp handle("artifact.public", %{"id" => id, "enabled" => enabled}, %{user: user} = context)
+       when is_boolean(enabled),
+       do: Artifacts.public_links(id, enabled, user, platform_admin?: admin?(context))
+
+  defp handle("artifact.redeem", %{"token" => token}, %{user: user}) when is_binary(token),
+    do: Artifacts.redeem_link(token, user)
+
+  defp handle("artifact.redeem", _params, _context),
+    do: {:error, Error.new(:invalid_params, %{reason: "artifact.redeem takes a link's token"})}
+
+  defp handle("artifact.public", _params, _context),
+    do:
+      {:error,
+       Error.new(:invalid_params, %{
+         reason: "artifact.public takes an artifact's id and enabled, true or false"
+       })}
+
+  defp handle("artifact.get", %{"id" => id}, %{user: user} = context),
+    do: Artifacts.get(id, user, platform_admin?: admin?(context))
+
+  defp handle("artifact.open", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.ticket(id, user, platform_admin?: admin?(context), version: params["version"])
+
+  defp handle("artifact.publish", params, %{user: user} = context) do
+    Artifacts.publish(user, params,
+      platform_admin?: admin?(context),
+      origin: Map.take(params, ["session_id", "agent"])
+    )
+  end
+
+  defp handle("artifact.delete", %{"id" => id}, %{user: user} = context),
+    do: Artifacts.delete(id, user, platform_admin?: admin?(context))
+
+  defp handle(method, _params, _context)
+       when method in ~w(artifact.get artifact.open artifact.delete artifact.rollback artifact.pin
+                         artifact.read artifact.preview artifact.share artifact.unshare),
+    do: {:error, Error.new(:invalid_params, %{reason: "#{method} takes an artifact's id"})}
 
   # Which version each of the caller's own clients last ran, and how that stands against
   # the plane's policy now: the line a person's own console shows, as an administrator's
@@ -796,7 +913,7 @@ defmodule Troupe.Plane.Harness do
   # before this.
   defp handle("session.presign", params, %{user: user}) do
     with {:ok, session_id} <- required_string(params, "session_id"),
-         {:ok, session} <- own_private(session_id, user),
+         {:ok, session} <- own_or_invited(session_id, user, params["method"]),
          :ok <- held(session, params["epoch"]),
          {:ok, method} <- presign_method(params["method"]),
          {:ok, keys} <- presign_keys(params, session) do
@@ -841,7 +958,7 @@ defmodule Troupe.Plane.Harness do
   # it stay unreadable to everybody here.
   defp handle("session.objects", params, %{user: user}) do
     with {:ok, session_id} <- required_string(params, "session_id"),
-         {:ok, session} <- own_private(session_id, user) do
+         {:ok, session} <- own_or_invited(session_id, user, "get") do
       prefix = "sessions/#{session.id}/"
       under = suffix_of(params["prefix"], prefix)
 
@@ -924,6 +1041,154 @@ defmodule Troupe.Plane.Harness do
         {:error, changeset} ->
           {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
       end
+    end
+  end
+
+  # -- inviting by name (#765) ------------------------------------------------
+
+  # The owner, or an admin of a pod session's team, invites a person the session's profile
+  # covers (`Invites.eligible/2`). A pod session's invitation is its grant made visible: the
+  # ACL row is written and pushed to the pod, which gives the log its line. A private
+  # session's carries where the owner's daemon put its key in the invitee's own slot, once
+  # for each key it has been sealed under (`keys`); the plane keeps the paths and cannot
+  # read what is there, so a private session is invited from the machine that seals it.
+  defp handle("session.invite", params, %{user: user}) do
+    with {:ok, session} <- inviting(params["session_id"], user),
+         {:ok, name} <- required_string(params, "subject"),
+         invitee = Invites.person(name),
+         :ok <- Invites.eligible(session, invitee),
+         {:ok, invite} <-
+           Invites.invite(
+             session,
+             invitee,
+             params["role"] || "observe",
+             user.subject,
+             params["keys"]
+           ) do
+      pushed =
+        if session.kind == "private" do
+          false
+        else
+          acl = push_acl_change(session, invitee.subject, Invites.acl_role(invite.role))
+          logged = announce_invite(session, "session_invited", invitee, invite.role, user)
+          acl and logged
+        end
+
+      {:ok,
+       %{
+         "session_id" => session.id,
+         "invite" =>
+           session.id |> Invites.rows_of() |> Enum.find(&(&1["subject"] == invitee.subject)),
+         "pushed" => pushed
+       }}
+    end
+  end
+
+  # Taking an invitation back ends every route it gave: a pod session's ACL row and the
+  # pod's mirror of it, so an open connection is refused at its next command; a private
+  # session's copies of its key in that person's slot, and the session is `rekey_due` until
+  # its owner's daemon seals what follows under a key they never get.
+  defp handle("session.uninvite", params, %{user: user}) do
+    with {:ok, session} <- inviting(params["session_id"], user),
+         {:ok, name} <- required_string(params, "subject"),
+         subject = invited_subject(session, name),
+         {:ok, _invite} <- Invites.uninvite(session, subject, user.subject) do
+      pushed =
+        if session.kind == "private" do
+          false
+        else
+          acl = push_acl_change(session, subject, nil)
+
+          logged =
+            announce_invite(session, "session_uninvited", Identity.get_user(subject), nil, user)
+
+          acl and logged
+        end
+
+      {:ok,
+       %{
+         "session_id" => session.id,
+         "subject" => subject,
+         "rekey_due" => session.kind == "private",
+         "pushed" => pushed
+       }}
+    end
+  end
+
+  # Whom a session is shared with by name, to anybody who may see it or is invited into it:
+  # everybody present is named.
+  defp handle("session.invites", params, %{user: user}) do
+    with {:ok, session} <- seen_or_invited(params["session_id"], user) do
+      {:ok, %{"session_id" => session.id, "invites" => Invites.rows_of(session.id)}}
+    end
+  end
+
+  # The invitations to the caller: Mine's and the desktop app's *Invited to you*.
+  defp handle("invites.list", _params, %{user: user}) do
+    {:ok, %{"invites" => Invites.to(user)}}
+  end
+
+  # A picker's prefix search: people who share a team with the caller, and, for a session
+  # they may invite into, the people its profile covers. Nobody else.
+  defp handle("people.search", params, %{user: user}) do
+    with {:ok, query} <- required_string(params, "query"),
+         {:ok, session} <- searched_session(params["session_id"], user) do
+      limit = if is_integer(params["limit"]), do: params["limit"], else: nil
+      {:ok, %{"people" => Invites.search(user, query, session, limit)}}
+    end
+  end
+
+  # Where the owner's daemon puts its private session's key for a person it is about to
+  # invite: under their own slot at the key manager, which its credential may create in and
+  # may not read. Asked first, so somebody the session may not be shared with is refused
+  # before anything is put anywhere.
+  defp handle("session.invite_slot", params, %{user: user}) do
+    with {:ok, session_id} <- required_string(params, "session_id"),
+         {:ok, session} <- own_private(session_id, user),
+         {:ok, name} <- required_string(params, "subject"),
+         invitee = Invites.person(name),
+         :ok <- Invites.eligible(session, invitee) do
+      {:ok,
+       %{
+         "session_id" => session.id,
+         "subject" => invitee.subject,
+         "display_name" => invitee.display_name,
+         "prefix" => KMS.invited_prefix(User.kms_name(invitee), session.id),
+         "key_version" => session.key_version
+       }}
+    end
+  end
+
+  # What an invitee's daemon reads a private session with: where its owner's daemon put each
+  # of the session's keys for this person, and an assertion for their own name at the key
+  # manager, whose credential reads their own slot and nobody else's.
+  defp handle("session.keys", params, %{user: user}) do
+    with {:ok, session_id} <- required_string(params, "session_id"),
+         {:ok, session} <- invited_private(session_id, user),
+         name = User.kms_name(user),
+         {:ok, grant} <- Connections.assertion(name, KMS.invited_prefix(name, session.id)) do
+      keys =
+        for key <- Invites.keys_for(session.id, user.subject),
+            do: %{"key_version" => key.key_version, "slot" => key.slot}
+
+      {:ok,
+       Map.merge(grant, %{
+         "session_id" => session.id,
+         "key_version" => session.key_version,
+         "last_seq" => session.last_seq,
+         "keys" => keys
+       })}
+    end
+  end
+
+  # The owner's daemon has sealed under a new key, after an invitation was taken back, and
+  # put it in the slot of everybody still invited.
+  defp handle("session.rekeyed", params, %{user: user}) do
+    with {:ok, session_id} <- required_string(params, "session_id"),
+         {:ok, session} <- own_private(session_id, user),
+         keys = params["keys"] || [],
+         {:ok, rekeyed} <- Invites.rekeyed(session, params["key_version"], keys) do
+      {:ok, session_json(rekeyed, user)}
     end
   end
 
@@ -1268,8 +1533,10 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  defp save_own(user, %{"append" => entry}) do
-    own_result(Memory.append_own(user, entry))
+  # The session and the agent a daemon names for an agent's entry are kept with the version
+  # as who wrote the line, the person's own word about their own machine.
+  defp save_own(user, %{"append" => entry} = params) do
+    own_result(Memory.append_own(user, entry, written_from(params)))
   end
 
   defp save_own(user, params) do
@@ -1282,6 +1549,13 @@ defmodule Troupe.Plane.Harness do
           invalid("version is the version the text was edited from, 0 for none", field: "version")
       end
     end
+  end
+
+  defp written_from(params) do
+    for {key, opt} <- [{"session", :session}, {"agent", :agent}],
+        value = params[key],
+        is_binary(value) and value != "" and byte_size(value) <= 128,
+        do: {opt, value}
   end
 
   defp own_result({:ok, saved}), do: {:ok, saved}
@@ -1409,6 +1683,113 @@ defmodule Troupe.Plane.Harness do
 
       _other ->
         {:error, Error.new(:not_found, %{session_id: session_id})}
+    end
+  end
+
+  # The owner's own, for anything; a person invited into it, for reading it and nothing
+  # else: a URL to fetch a segment, a listing, never one to write.
+  defp own_or_invited(session_id, user, method) do
+    case own_private(session_id, user) do
+      {:error, %Error{message: "forbidden"}} = refused when method in ["get", "head"] ->
+        with {:error, _not_invited} <- invited_private(session_id, user), do: refused
+
+      answer ->
+        answer
+    end
+  end
+
+  # A private session the caller holds an invitation into, while it is not erased. Not
+  # found to anybody else, whether it exists being itself something they should not learn.
+  defp invited_private(session_id, user) do
+    case Sessions.get(session_id) do
+      %Session{kind: "private", state: state} when state in ["erasure_pending", "erased"] ->
+        {:error, gone(session_id)}
+
+      %Session{kind: "private"} = session ->
+        if Invites.invitation(session.id, user.subject),
+          do: {:ok, session},
+          else: {:error, Error.new(:not_found, %{session_id: session_id})}
+
+      _other ->
+        {:error, Error.new(:not_found, %{session_id: session_id})}
+    end
+  end
+
+  # Who may invite into a session and take an invitation back: its owner, or an admin of a
+  # pod session's team (`administered/2`). Never one being erased.
+  defp inviting(session_id, user) do
+    case administered(session_id, user) do
+      {:ok, %Session{state: "erasure_pending"}} -> {:error, gone(session_id)}
+      answer -> answer
+    end
+  end
+
+  # The person an uninvite names: an invitee's subject as written, or their email.
+  defp invited_subject(session, name) do
+    if Invites.invitation(session.id, name) do
+      name
+    else
+      case Invites.person(name) do
+        %User{subject: subject} -> subject
+        nil -> name
+      end
+    end
+  end
+
+  defp seen_or_invited(session_id, user) do
+    with {:error, _hidden} = refused <- visible(session_id, user) do
+      case invited_private(session_id || "", user) do
+        {:ok, session} -> {:ok, session}
+        _other -> refused
+      end
+    end
+  end
+
+  # A search names a session only where the caller may invite into it.
+  defp searched_session(nil, _user), do: {:ok, nil}
+  defp searched_session(session_id, user), do: inviting(session_id, user)
+
+  # One person's role on a session, pushed to the pod holding it, as `push_acl/2` does; a
+  # `nil` role is the invitation taken back, which the pod's mirror holds as refused.
+  defp push_acl_change(%{worker_id: nil}, _subject, _role), do: false
+
+  defp push_acl_change(session, subject, role) do
+    change = %{"session_id" => session.id, "subject" => subject, "role" => role}
+
+    case Fleet.get_worker(session.worker_id) do
+      nil -> false
+      worker -> match?({:ok, _}, Router.push(worker, "acl.changed", %{"changes" => [change]}))
+    end
+  end
+
+  # The pod gives the session's log its line, `session_invited` or `session_uninvited`, as it
+  # does for a share. Best effort: a dormant session has no pod, and the row is the record.
+  defp announce_invite(%Session{worker_id: nil}, _type, _invitee, _role, _by), do: false
+
+  defp announce_invite(%Session{} = session, type, invitee, role, %User{} = by) do
+    case Fleet.get_worker(session.worker_id) do
+      nil ->
+        false
+
+      worker ->
+        invite =
+          %{
+            "subject" => (invitee && invitee.subject) || "",
+            "display_name" => invitee && invitee.display_name,
+            "role" => role,
+            "by" => by.subject,
+            "by_name" => by.display_name
+          }
+          |> Map.reject(fn {_key, value} -> is_nil(value) end)
+
+        match?(
+          {:ok, _pushed},
+          Router.push(worker, "invite.changed", %{
+            "session_id" => session.id,
+            "type" => type,
+            "invite" => invite
+          })
+        )
     end
   end
 
@@ -2786,6 +3167,8 @@ defmodule Troupe.Plane.Harness do
     user |> Identity.profiles_for() |> Enum.map(& &1.profile) |> Enum.uniq() |> Enum.sort()
   end
 
+  defp admin?(context), do: Map.get(context, :platform_admin?, false)
+
   # Resolved, not raw. What a client reads here it acts on — whether to offer a steer
   # button, when to expect a session to go dormant — and a column that the platform is
   # overriding would have the client showing an affordance the plane will refuse.
@@ -2925,6 +3308,10 @@ defmodule Troupe.Plane.Harness do
       "last_active_at" => session.last_active_at && DateTime.to_iso8601(session.last_active_at),
       "last_seq" => session.last_seq,
       "head_hash" => session.head_hash,
+      # How many keys a private session has been sealed under, and whether an invitation
+      # was taken back since the last: its owner's daemon seals under the next key then.
+      "key_version" => session.key_version,
+      "rekey_due" => session.rekey_due,
       "object_bytes" => session.object_bytes,
       "workspace_bytes" => session.workspace_bytes,
       "pinned" => session.pinned,

@@ -33,6 +33,7 @@ import type { SetupOutcome } from "./views/Onboarding";
 import { Review } from "./views/Review";
 import { Sessions } from "./views/Sessions";
 import { Session } from "./views/Session";
+import { Opened } from "./views/Invites";
 import { newSession, SignIn } from "./views/SignIn";
 import { StartSession } from "./views/StartSession";
 import { Eye, Wordmark } from "./views/brand";
@@ -166,7 +167,10 @@ export function App(): JSX.Element {
     // Let go of, not signed out of: the refresh token stays in its store, so turning
     // this off again signs straight back in. Signing out is a different button.
     if (on) setAuth(null);
-  }, []);
+    // The daemon keeps the promise for the sessions this app runs: it is told now, and a
+    // socket dialled later says it at its `initialize`.
+    void daemon.client?.setLocalOnly(on).catch(() => undefined);
+  }, [daemon.client]);
 
   // Offline, the plane is asked again every so often, and the app goes back to it the
   // moment it answers — with the sessions that ran here still in the one list, because
@@ -467,22 +471,24 @@ export function App(): JSX.Element {
         )}
 
         {where.screen === "session" && (
-          <Session
-            auth={planeAuth}
-            daemon={daemon.client}
-            machineUser={daemon.user?.subject ?? null}
-            row={row}
-            sessionId={where.id}
-            created={where.kind}
-            startedIn={where.workspace}
-            onBack={() => setWhere({ screen: "sessions" })}
-            onGo={(screen) => setWhere({ screen })}
-            onAgents={(agent) => setWhere({ screen: "agents", ...workspaceOf(row), ...(agent ? { agent } : {}) })}
-            onStarted={(id, kind, workspace) => {
-              refresh();
-              setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
-            }}
-          />
+          <Opened row={row} sessionId={where.id} daemon={daemon.client} onBack={() => setWhere({ screen: "sessions" })}>
+            <Session
+              auth={planeAuth}
+              daemon={daemon.client}
+              machineUser={daemon.user?.subject ?? null}
+              row={row}
+              sessionId={where.id}
+              created={where.kind}
+              startedIn={where.workspace}
+              onBack={() => setWhere({ screen: "sessions" })}
+              onGo={(screen) => setWhere({ screen })}
+              onAgents={(agent) => setWhere({ screen: "agents", ...workspaceOf(row), ...(agent ? { agent } : {}) })}
+              onStarted={(id, kind, workspace) => {
+                refresh();
+                setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
+              }}
+            />
+          </Opened>
         )}
       </main>
     </div>

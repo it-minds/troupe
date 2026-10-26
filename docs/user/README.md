@@ -110,6 +110,14 @@ flowchart LR
 | Your own program | anything that speaks [PROTOCOL.md](../../PROTOCOL.md) to a daemon or a pod | the protocol |
 | Another agent | a profile called through the A2A facade | [a2a.md](../a2a.md) |
 
+**Local only** is a promise the daemon keeps, not only the client: the desktop app's
+**Use this computer only**, or `local_only: true` in your own config for `troupe`
+([settings](configuration-settings.md)), tells the daemon when the client connects. For the
+sessions that client runs the daemon then calls no plane: `remember` to your own memory is
+refused and offers the repository's, a session is not offered for steering, and it reads
+the memory this machine already holds, as its first `instructions_loaded` says. While every
+client attached is in Local only, the daemon's own checks with the plane wait too.
+
 `troupe update` keeps `troupe` and the daemon current, checking each release's signature
 first, and the desktop app updates itself and the daemon beside it the same way
 ([updating](updating.md)). `troupe login <plane URL>` signs you in with a code you type in
@@ -165,8 +173,27 @@ you log in (`troupe-daemon login on`); otherwise it is shown as offered *until t
 machine restarts*, and comes back only once something starts the daemon again. `/steer
 off`, or *Withdraw*, ends every remote view at once; with
 the last one withdrawn, signing out or `troupe logout`, the daemon lets its sign-in go.
-Your team's administrators may turn offering off for the team. A private session is never
-offered.
+Your team's administrators may turn offering off for the team.
+
+**Offering a private session.** A private session is sealed under your own key, and the
+relay carries what an offered session says through the plane. So `/steer on`, or *Steer
+from elsewhere*, asks first, in the same words in the terminal and the desktop app: *This
+session is private: while it is offered, what it says and does passes through the plane
+unsealed, and the plane relays it to whoever you invited with control. The plane keeps none
+of it. Offer it?* Only a yes offers it (`/steer on yes`). It is then steered by the people
+you invited into it with `control` and nobody else, and listed as private on every device.
+Your computer goes on sealing it as before; the relay is in addition. Taking somebody's
+invitation back ends their steering at once, and `/steer off` makes it sealed only again:
+every view through the plane closes, and the people invited read the sealed copy on their
+own computers, as before ([sharing a session by name](sessions-shared.md)).
+
+**Sharing by name.** Invite a person into a session of yours, to follow it or to steer
+it: *Invite* in the session's head in the desktop app, or `/invite
+bea@example.com [observe|control]` in the terminal. It is in their list at once, under
+*Invited to you* on the console's *Mine*, and taking it back (`/uninvite`) closes their view.
+A private session's key goes from your computer into their own slot, where the plane cannot
+read it, and they read it in the desktop app on their computer
+([sharing a session by name](sessions-shared.md)).
 
 **Agent.** A session starts with `build`, or `plan` for a proposal first, which may
 delegate to others, waiting for each or letting it work in the background while it goes

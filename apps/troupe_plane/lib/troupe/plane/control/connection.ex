@@ -9,6 +9,10 @@ defmodule Troupe.Plane.Control.Connection do
   file is wrong. Memory is not session content: the documents a session reads go down with
   its activation, and the one thing that comes back is an entry an agent was asked to keep
   in its person's own memory (`session.memory.put`), which is that person's from then on.
+  Nor is an artifact an agent publishes for its person (`session.artifact.publish`): the
+  page or file they asked to have published, and nothing else of the session's.
+  As a turn begins a pod says which versions its session holds (`session.memory.read`):
+  each document's scope, name, version and hash, never its text.
 
   The first message must be `enrol`, carrying the pod's projected ServiceAccount token.
   Until Kubernetes has said which namespace that token belongs to, the connection has
@@ -39,6 +43,8 @@ defmodule Troupe.Plane.Control.Connection do
   use GenServer, restart: :temporary
 
   alias Troupe.Plane.{
+    Admin,
+    Artifacts,
     Audit,
     Budget,
     Bundles,
@@ -700,7 +706,7 @@ defmodule Troupe.Plane.Control.Connection do
          %Session{} = session <- session_of(params["session_id"], state.worker),
          :ok <- at_epoch(session, params["epoch"]),
          {:owner, %User{active: true} = owner} <- {:owner, Identity.get_user(session.owner_subject)} do
-      case Memory.append_own(owner, params["append"], session: session.id) do
+      case Memory.append_own(owner, params["append"], [session: session.id] ++ agent_of(params)) do
         {:ok, saved} ->
           {:ok, %{"entry" => saved.entry, "changed" => saved.changes != %{}, "version" => Memory.own(owner)["version"]}, state}
 
@@ -737,6 +743,57 @@ defmodule Troupe.Plane.Control.Connection do
 
       nil ->
         {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+    end
+  end
+
+  # An agent of a session on this pod publishing an artifact (`publish_artifact`) for the
+  # session's owner. As for the owner's memory, whose it is is read off the session row, so
+  # a pod publishes only for the person whose session it holds, counted against the
+  # session's team and recorded with its profile; what it may publish, and to whom, is that
+  # person's, as `artifact.publish` checks it for them. What crosses is the artifact itself,
+  # which its person asked for published, and nothing else of the session's.
+  defp dispatch("session.artifact.publish", params, state) do
+    with %Session{} = session <- session_of(params["session_id"], state.worker),
+         :ok <- at_epoch(session, params["epoch"]),
+         {:owner, %User{active: true} = owner} <- {:owner, Identity.get_user(session.owner_subject)} do
+      artifact =
+        Artifacts.publish(owner, Map.drop(params, ["session_id", "epoch", "agent"]),
+          session: session,
+          agent: params["agent"],
+          platform_admin?: Admin.actor_for(owner).role == :platform_admin
+        )
+
+      case artifact do
+        {:ok, published} -> {:ok, published, state}
+        {:error, %Error{} = error} -> {:error, error, state}
+      end
+    else
+      :stale_epoch ->
+        {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+
+      {:owner, _gone} ->
+        {:error, Error.new(:forbidden, %{reason: "the session's owner is deactivated"}), state}
+
+      nil ->
+        {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+      end
+    end
+
+  # A session on this pod beginning a turn says which memory documents it holds, by scope,
+  # name, version and hash and never their text. The plane keeps that as what the turn runs
+  # under and, where the session is behind the versions in force, answers with them, for the
+  # pod to give the session before the turn starts: a `session.memory` lost between two
+  # turns leaves no turn on the versions before it.
+  defp dispatch("session.memory.read", params, state) do
+    with %Session{} = session <- session_of(params["session_id"], state.worker),
+         :ok <- at_epoch(session, params["epoch"]) do
+      case Memory.turn(session, params["documents"]) do
+        {:current, _documents} -> {:ok, %{"session_id" => session.id, "current" => true}, state}
+        {:behind, documents} -> {:ok, %{"session_id" => session.id, "current" => false, "memory" => documents}, state}
+      end
+    else
+      :stale_epoch -> {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+      nil -> {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
     end
   end
 
@@ -868,6 +925,13 @@ defmodule Troupe.Plane.Control.Connection do
   defp own_reason(:no_person), do: "the session's owner has no memory of their own"
   defp own_reason(reason) when is_binary(reason), do: reason
   defp own_reason(reason), do: inspect(reason)
+
+  # The agent an entry came from, as the pod names it: kept beside the version as who wrote
+  # the line.
+  defp agent_of(%{"agent" => agent}) when is_binary(agent) and agent != "" and byte_size(agent) <= 128,
+    do: [agent: agent]
+
+  defp agent_of(_params), do: []
 
   defp fetch_bundle(%{"hash" => hash}, worker) when is_binary(hash) do
     Bundles.by_hash(hash, channel: channel_of(worker))

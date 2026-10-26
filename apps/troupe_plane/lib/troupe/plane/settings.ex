@@ -477,6 +477,42 @@ defmodule Troupe.Plane.Settings do
         "troupe update and the desktop app install from here, and only what the release key signed: a mirror " <>
           "cannot change a release, only fail to serve it. Empty means GitHub, which a closed network cannot reach.",
       effect: :immediate
+    },
+    # Artifacts (#62): pages and files people and agents publish, served from a host of
+    # their own. Whether there are any, and who may put one before the whole organisation.
+    %Setting{
+      key: "artifacts_enabled",
+      group: :artifacts,
+      type: :boolean,
+      fallback: true,
+      summary: "Whether people and agents may publish artifacts here, and anybody may open one.",
+      consequence:
+        "Off, every publish is refused, the gallery lists nothing and the artifacts host answers 404. " <>
+          "What was published stays in the object store and comes back when it is on again.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "artifacts_publish_organisation",
+      group: :artifacts,
+      type: :enum,
+      values: [:everyone, :platform_admins],
+      fallback: :everyone,
+      summary: "Who may publish an artifact the whole organisation sees.",
+      consequence:
+        "platform_admins refuses everybody else's organisation-wide publish and points them at a profile's " <>
+          "people instead. Artifacts published already keep their visibility.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "artifacts_public_links",
+      group: :artifacts,
+      type: :boolean,
+      fallback: false,
+      summary: "Whether an artifact's owner may make a public link, which opens it for anybody who has it, signed in or not.",
+      consequence:
+        "On, an owner may make view-only public links that expire within 90 days, and switch an artifact's off. " <>
+          "Off, none is made and every one made already stops opening; links that honour sign-in work either way.",
+      effect: :immediate
     }
   ]
 
@@ -501,6 +537,8 @@ defmodule Troupe.Plane.Settings do
      "The organisation's defaults for a person's local sessions, below their own settings: provider, URL and models. Never a key; each person pastes their own. And what those sessions may not go past, above everything a person sets."},
     {:sessions, "What a new session runs with",
      "Defaults for work started after the change. Running sessions keep what they were given."},
+    {:artifacts, "What people may publish",
+     "Pages and files people and agents publish for the organisation or a profile's people, served from a host of their own that can reach nothing else. Each team's storage quota is on its Limits tab."},
     {:sign_in, "Where people sign in",
      "The identity provider, on its own screen: saved behind a check against what the provider publishes, undone with reset, and never a lock-out because the break-glass door does not need a provider."},
     {:deployment, "What this plane was deployed with",

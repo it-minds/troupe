@@ -460,7 +460,7 @@ cat <<EOF
   console    http://plane.localtest.me:30080/console
   break-glass http://plane.localtest.me:30080/admin
   identity   http://dex.localtest.me:30080/dex   (ada@example.test / troupe)
-  workers    ws://<n>.${profile}.workers.localtest.me:30080/v1/socket
+  workers    ws://<n>-${profile}.workers.localtest.me:30080/v1/socket
 
 Log in and use it — the GUI at http://plane.localtest.me:30080/app, or the TUI from clients/tui:
 
