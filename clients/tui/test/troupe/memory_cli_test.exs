@@ -113,9 +113,8 @@ defmodule Troupe.MemoryCLITest do
         {:ok, @own}
 
       "me.memory.put", params ->
-        send(test, {:put, params}) &&
-          {:ok,
-           %{"changed" => true, "user" => %{@own | "version" => 4, "bytes" => 0, "text" => ""}}}
+        send(test, {:put, params})
+        {:ok, %{"changed" => true, "user" => %{@own | "version" => 4, "bytes" => 0, "text" => ""}}}
     end
 
     {0, said} = run(%{clear: true}, call)
