@@ -137,8 +137,8 @@ export type {
   RemoteOffer,
   RemotePerson,
 } from "./fleet.js";
-export { ArtifactApi, textBytes } from "./artifacts.js";
-export type { Artifact, ArtifactDetail, ArtifactFile, ArtifactFilter, ArtifactKind, ArtifactLinkUse, ArtifactList, ArtifactNewLink, ArtifactOrigin, ArtifactPerson, ArtifactPut, ArtifactRole, ArtifactShare, ArtifactText, ArtifactTicket, ArtifactUpload, ArtifactVersion } from "./artifacts.js";
+export { ArtifactApi, textBytes, visibilityWords } from "./artifacts.js";
+export type { Artifact, ArtifactDetail, ArtifactFile, ArtifactFilter, ArtifactKind, ArtifactLinkUse, ArtifactList, ArtifactNewLink, ArtifactOrigin, ArtifactPerson, ArtifactPut, ArtifactRole, ArtifactScope, ArtifactShare, ArtifactText, ArtifactTicket, ArtifactUpload, ArtifactVersion } from "./artifacts.js";
 export { openRemote, remoteRefusal, watchRemote, watchUrl, when as remoteWhen } from "./remote.js";
 export type { RemoteListRow, RemoteWatch, RemoteWatchOptions } from "./remote.js";
 export { AdminApi, bundleErrors, requiredRole } from "./admin.js";
@@ -241,6 +241,7 @@ export type {
   LookalikePerson,
   Manifest,
   PodDrained,
+  AdminArtifact,
   ProfileChoices,
   ProfilesExport,
   Provisioner,

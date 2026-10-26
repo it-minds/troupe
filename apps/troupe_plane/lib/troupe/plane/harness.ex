@@ -423,7 +423,7 @@ defmodule Troupe.Plane.Harness do
   # came from as provenance; a pod's agent publishes over its control link instead, where
   # the plane reads the session off its own row.
   defp handle("artifact.list", params, %{user: user} = context) do
-    Artifacts.list(user, Map.take(params, ["mine", "shared", "visibility"]),
+    Artifacts.list(user, Map.take(params, ["mine", "shared", "teams", "visibility"]),
       platform_admin?: admin?(context)
     )
   end

@@ -451,16 +451,17 @@ defmodule Troupe.Commands do
         example: "/upload notes.md"
       ),
       entry("publish", "workspace", "Publish a page, a document or a file for others to read",
-        usage: "/publish <path> <organisation | profile:<name>>",
-        args: [arg("path", true, "file"), arg("visibility", true, "text")],
+        usage: "/publish <path> [private | organisation | team:<name> | profile:<name>]",
+        args: [arg("path", true, "file"), arg("visibility", false, "text")],
         detail:
           "The file is read on this machine and published on your Troupe plane as an artifact, " <>
             "as the person this computer's daemon is signed in as: a page (.html), a Markdown " <>
-            "document (.md) or any other file. The whole organisation reads it, or the people " <>
-            "a profile is granted to, in the console's Artifacts, served from a host that can " <>
-            "reach nothing of yours. A page with stylesheets or scripts of its own is an " <>
-            "agent's to publish, with publish_artifact.",
-        example: "/publish report.html profile:dev"
+            "document (.md) or any other file. Yours alone unless you say otherwise, until you " <>
+            "share a link to it; or the whole organisation reads it, a team you are in, or the " <>
+            "people a profile is granted to, served from a host that can reach nothing of yours. " <>
+            "A team you are not in is refused, naming yours. A page with stylesheets or scripts " <>
+            "of its own is an agent's to publish, with publish_artifact.",
+        example: "/publish report.html team:core"
       ),
       entry("copy", "workspace", "Copy a transcript to the clipboard",
         usage: "/copy [window]",

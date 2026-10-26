@@ -1596,7 +1596,7 @@ evoked where nothing is set and there was a sign-in. */
           return reply(ws, id, null, { code: -32010, message: "unavailable", data: { reason: "this computer's daemon is not signed in to a Troupe plane, so there is nowhere to publish it; troupe login signs it in, or send the file itself" } });
         }
         if (method === "artifact.list") {
-          return reply(ws, id, { enabled: true, profiles: ["dev"], publish_organisation: "everyone", public_links: false, gallery_url: "https://plane.example.test/console#/artifacts", plane_url: "https://plane.example.test", artifacts: mine });
+          return reply(ws, id, { enabled: true, profiles: ["dev"], teams: ["core"], publish_organisation: "everyone", public_links: false, gallery_url: "https://plane.example.test/console#/artifacts", plane_url: "https://plane.example.test", artifacts: mine });
         }
         this.publishedArtifacts.push(params);
         const existing = mine.find((a) => a["id"] === params["id"]);

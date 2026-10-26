@@ -104,6 +104,20 @@ describe("Publish…", () => {
     expect(daemon.publishedArtifacts[0]).toMatchObject({ id: "art-ada-notes", title: "Notes", kind: "markdown", visibility: "organisation", note: "October's figures" });
   });
 
+  it("publishes for the person alone unless told otherwise, and offers their teams", async () => {
+    daemon.artifacts = [];
+    const d = await openPublish();
+    const who = await waitFor(() => [...d.querySelectorAll<HTMLSelectElement>("label select")].find((s) => s.closest("label")?.textContent?.startsWith("Who may open it")) ?? null, "who may open it");
+    await waitFor(() => d.querySelector('option[value="team:core"]'), "the teams the plane names");
+    expect(who.value).toBe("private");
+    expect(who.querySelector('option[value="team:core"]')?.textContent).toBe("The core team");
+    pick(d.querySelector<HTMLInputElement>('input[type="file"]')!, [new File(["# Mine"], "notes.md", { type: "text/markdown" })]);
+    type([...d.querySelectorAll<HTMLInputElement>("label input")].find((i) => i.closest("label")?.textContent?.startsWith("Title"))!, "Mine");
+    (await waitFor(() => (button("Publish", d)?.disabled === false ? button("Publish", d) : null), "the Publish button")).click();
+    await sees("version 1, for only you");
+    expect(daemon.publishedArtifacts[0]).toMatchObject({ title: "Mine", visibility: "private" });
+  });
+
   it("says the daemon's sentence where it is signed in to no plane", async () => {
     daemon.artifacts = null;
     await openPublish();

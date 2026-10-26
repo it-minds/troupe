@@ -74,7 +74,8 @@ defmodule Troupe.Gateway.Artifacts do
   def list(params) do
     with url when is_binary(url) <- Plane.url(),
          true <- Plane.linked?(),
-         {:ok, answer} <- Plane.call("artifact.list", Map.take(params, ~w(mine shared visibility))) do
+         {:ok, answer} <-
+           Plane.call("artifact.list", Map.take(params, ~w(mine shared teams visibility))) do
       {:ok, Map.put(answer, "plane_url", url)}
     else
       {:error, :unlinked} -> {:error, :signed_out}

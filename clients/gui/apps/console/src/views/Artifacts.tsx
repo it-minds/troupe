@@ -1,7 +1,10 @@
-// Artifacts: the pages and files a person, their organisation and their profiles' people
-// have published, for everybody who signs in, administrators too. A tab for their own, one
-// for those a link gave them, one for the organisation's and one for each profile they are
-// covered by; a card for each, and a page for one with its versions, newest first.
+// Artifacts: the pages and files a person, their organisation, their teams and their
+// profiles' people have published, for everybody who signs in, administrators too. A tab
+// for their own (the private ones among them), one for those a link gave them, one for the
+// organisation's, one for their teams' (one list, the team named on each card) and one for
+// each profile they are covered by; a card for each, and a page for one with its versions,
+// newest first. Which tab a row is under is the plane's to say (`scope`), not this
+// console's to work out.
 //
 // An artifact is never drawn here. Its card is its title and its kind, and its page says
 // what it is and where it came from; opening it asks the plane for a one-time link at the
@@ -12,15 +15,15 @@
 // sandboxed (`ArtifactEditor`).
 //
 // Nothing here is an administrative call: `artifact.*` are what any client of the person's
-// asks the plane as that person. Deleting is the owner's, or a platform admin's takedown of
-// somebody else's, which the confirm says it is. A new version (an edit, a rollback) is the
+// asks the plane as that person. Deleting is the owner's, or a takedown of somebody else's
+// by a platform admin or the admin of the team it is for, which the confirm says it is. A new version (an edit, a rollback) is the
 // owner's or an edit link's holder's; pinning the version its address serves, and the links
 // (`ArtifactLinks`), are the owner's. A link somebody followed lands on `#/artifacts/link/
 // <token>`, which spends it as the person signed in here and goes on to the artifact.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { ArtifactApi, TroupeRpcError } from "@troupe/client";
+import { ArtifactApi, TroupeRpcError, visibilityWords as audienceWords } from "@troupe/client";
 import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { go, href } from "../route";
@@ -30,7 +33,7 @@ import { ArtifactLinks } from "./ArtifactLinks";
 import { Empty, Fields, Loaded, Preview, Region, Status, bytes, count, when } from "./bits";
 
 /** Which artifacts a tab lists. */
-export type ArtifactTab = { kind: "mine" } | { kind: "shared" } | { kind: "organisation" } | { kind: "profile"; name: string };
+export type ArtifactTab = { kind: "mine" } | { kind: "shared" } | { kind: "organisation" } | { kind: "teams" } | { kind: "profile"; name: string };
 
 /**
  * What an address under `#/artifacts` names: a tab (`mine`, `shared`, `organisation`,
@@ -42,6 +45,7 @@ export function artifactPlace(path: string[]): { tab: ArtifactTab } | { id: stri
   if (!first || first === "mine") return { tab: { kind: "mine" } };
   if (first === "shared") return { tab: { kind: "shared" } };
   if (first === "organisation") return { tab: { kind: "organisation" } };
+  if (first === "teams") return { tab: { kind: "teams" } };
   if (first === "profile" && second) return { tab: { kind: "profile", name: second } };
   if (first === "link" && second) return { link: second };
   return { id: first };
@@ -51,6 +55,7 @@ function routeOf(tab: ArtifactTab): Route {
   if (tab.kind === "mine") return { page: "artifacts" };
   if (tab.kind === "shared") return { page: "artifacts", path: ["shared"] };
   if (tab.kind === "organisation") return { page: "artifacts", path: ["organisation"] };
+  if (tab.kind === "teams") return { page: "artifacts", path: ["teams"] };
   return { page: "artifacts", path: ["profile", tab.name] };
 }
 
@@ -58,6 +63,7 @@ function filterOf(tab: ArtifactTab): ArtifactFilter {
   if (tab.kind === "mine") return { mine: true };
   if (tab.kind === "shared") return { shared: true };
   if (tab.kind === "organisation") return { visibility: "organisation" };
+  if (tab.kind === "teams") return { teams: true };
   return { visibility: `profile:${tab.name}` };
 }
 
@@ -71,11 +77,10 @@ function kindWords(kind: string): string {
   return KIND[kind] ?? kind;
 }
 
-/** Who may open it, in words. */
-function visibilityWords(visibility: string): string {
-  if (visibility === "organisation") return "the whole organisation";
-  if (visibility.startsWith("profile:")) return `the ${visibility.slice("profile:".length)} profile's people`;
-  return visibility;
+/** Who may open it, in words: a private one is its owner's, and whoever a link of theirs reached. */
+function visibilityWords(a: Artifact): string {
+  if (a.visibility === "private") return a.mine ? "only you, and whoever you give a link" : "its owner alone, and whoever they gave a link";
+  return audienceWords(a.visibility);
 }
 
 function personWords(p: ArtifactPerson | null | undefined): string {
@@ -106,7 +111,7 @@ export function Artifacts({ tab }: { tab: ArtifactTab }): JSX.Element {
   const [load, reload] = useLoad(() => new ArtifactApi((m, p) => auth.rpc(m, p)).list(filterOf(tab)), [auth, key]);
   return (
     <div className="page artifacts">
-      <p className="lead">The pages and files published on this plane that you may open: your own, your organisation's, and those of each profile you work in.</p>
+      <p className="lead">The pages and files published on this plane that you may open: your own, your organisation's, your teams', and those of each profile you work in.</p>
       <Loaded load={load} what="the artifacts" retry={reload}>
         {(list) => (list.enabled ? <Gallery tab={tab} list={list} /> : <SwitchedOff />)}
       </Loaded>
@@ -119,6 +124,7 @@ function Gallery({ tab, list }: { tab: ArtifactTab; list: ArtifactList }): JSX.E
     { tab: { kind: "mine" }, label: "Mine" },
     { tab: { kind: "shared" }, label: "Shared with you" },
     { tab: { kind: "organisation" }, label: "Organisation" },
+    { tab: { kind: "teams" }, label: "Teams" },
     ...list.profiles.map((name) => ({ tab: { kind: "profile" as const, name }, label: name })),
   ];
   return (
@@ -131,7 +137,7 @@ function Gallery({ tab, list }: { tab: ArtifactTab; list: ArtifactList }): JSX.E
         ))}
       </nav>
       {list.artifacts.length === 0 ? (
-        <Empty title={tab.kind === "mine" ? "You have published nothing yet" : tab.kind === "shared" ? "Nobody has given you a link yet" : "Nothing published here yet"}>
+        <Empty title={tab.kind === "mine" ? "You have published nothing yet" : tab.kind === "shared" ? "Nobody has given you a link yet" : tab.kind === "teams" ? "Nothing published for a team of yours yet" : "Nothing published here yet"}>
           <p>
             An agent publishes a page or a file with its <code>publish_artifact</code> tool, and you can from the terminal client with <code>{"/publish <file>"}</code>.
           </p>
@@ -160,7 +166,7 @@ function Card({ artifact: a }: { artifact: Artifact }): JSX.Element {
         {a.mine ? "yours" : (a.owner.display_name ?? a.owner.subject)} · version {a.version} · {bytes(a.bytes)}
       </p>
       <p className="card-meta">
-        {a.mine ? `for ${visibilityWords(a.visibility)} · ` : ""}published {when(a.published_at)}
+        {a.mine || a.visibility.startsWith("team:") ? `for ${visibilityWords(a)} · ` : ""}published {when(a.published_at)}
       </p>
       {(a.public || a.pinned || a.role === "edit") && (
         <p className="card-meta">
@@ -262,7 +268,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
       <Fields
         rows={[
           ["Kind", kindWords(a.kind)],
-          ["Who may open it", visibilityWords(a.visibility)],
+          ["Who may open it", visibilityWords(a)],
           ["Owner", a.mine ? `you, ${personWords(a.owner)}` : personWords(a.owner)],
           ["Team", a.team ?? "—"],
           ["Version", a.pinned ? `${current}, pinned by its owner; the newest is ${a.version}` : `${a.version} of ${count(versions.length, "version")}`],

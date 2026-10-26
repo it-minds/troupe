@@ -749,6 +749,29 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.artifacts.list",
+      function: :artifacts_list,
+      summary:
+        "Published artifacts, newest first: every one for a platform admin, private ones included, and for a team admin the artifacts of the teams they administer (visibility team:<name>). Each its title, kind, visibility, owner, team, versions and bytes, never its content.",
+      risk: :read
+    },
+    %Method{
+      name: "admin.artifact.takedown",
+      function: :artifact_takedown,
+      summary:
+        "Take an artifact down: every version and byte deleted and its links stop opening, without asking its owner. A platform admin's for any artifact, a team admin's for their teams' own; another is not_found. Audited as artifact.delete with by: takedown.",
+      risk: :destructive,
+      confirm: "id",
+      arguments: [
+        %Argument{
+          name: "id",
+          type: :string,
+          required: true,
+          description: "The artifact's id, as admin.artifacts.list reports it."
+        }
+      ]
+    },
+    %Method{
       name: "admin.teams.list",
       function: :teams_list,
       summary: "Teams, with their grants, budgets, volumes, retention and spend.",

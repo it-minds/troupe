@@ -499,7 +499,7 @@ defmodule Troupe.Plane.Settings do
       fallback: :everyone,
       summary: "Who may publish an artifact the whole organisation sees.",
       consequence:
-        "platform_admins refuses everybody else's organisation-wide publish and points them at a profile's " <>
+        "platform_admins refuses everybody else's organisation-wide publish and points them at a team or a profile's " <>
           "people instead. Artifacts published already keep their visibility.",
       effect: :immediate
     },

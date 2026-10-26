@@ -220,6 +220,44 @@ defmodule Troupe.Tools.PublishArtifactTest do
            end)
   end
 
+  test "says nothing of who it is for and it is the person's alone; a team's is offered too",
+       context do
+    test = self()
+
+    Troupe.Artifacts.install(fn params, _ctx ->
+      send(test, {:published, params})
+      {:ok, published(params)}
+    end)
+
+    File.write!(Path.join(context.workspace, "notes.md"), "# Notes")
+    %{session: session} = start_session(context, steps: [])
+    args = %{"title" => "Notes", "kind" => "markdown", "files" => ["notes.md"]}
+
+    assert {:ok, said, _} = PublishArtifact.run(args, ctx(session, context))
+    assert_received {:published, %{"visibility" => "private"}}
+    assert said =~ "the person alone"
+
+    # A new version that says nothing keeps who it was for, which the plane knows.
+    assert {:ok, _, _} =
+             PublishArtifact.run(
+               Map.put(args, "id", "art-abcdefghijklmnop"),
+               ctx(session, context)
+             )
+
+    assert_received {:published, again}
+    refute Map.has_key?(again, "visibility")
+
+    assert {:ok, said, _} =
+             PublishArtifact.run(Map.put(args, "visibility", "team:core"), ctx(session, context))
+
+    assert said =~ "team core's members"
+
+    schema = PublishArtifact.schema()
+    refute "visibility" in schema["required"]
+    assert schema["properties"]["visibility"]["description"] =~ "team:<name>"
+    assert PublishArtifact.description() =~ "`private` (the default"
+  end
+
   defp ctx(session, context) do
     %Troupe.Tool.Ctx{
       session_id: session.id,
