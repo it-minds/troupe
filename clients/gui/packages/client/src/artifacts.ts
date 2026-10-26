@@ -29,6 +29,14 @@ export interface ArtifactOrigin {
   where?: "pod" | "laptop" | "person" | null;
 }
 
+/**
+ * The gallery tab an artifact is under for this caller, as the plane says it: `mine`,
+ * `private` (theirs, which only they open), `organisation`, `team:<name>`,
+ * `profile:<name>`, or `shared` (a link gave it them). A client tabs by it and works out
+ * nobody's membership itself.
+ */
+export type ArtifactScope = string;
+
 /** An artifact as `artifact.list` answers it, for this caller. */
 export interface Artifact {
   id: string;
@@ -37,7 +45,7 @@ export interface Artifact {
   /** `organisation`, `team:<name>`, `profile:<name>`, or `private` for its owner alone. */
   visibility: string;
   /** Which part of a gallery it is in for this caller (`scopeOf`); absent from a plane from before it. */
-  scope?: string;
+  scope?: ArtifactScope;
   owner: ArtifactPerson;
   /** Whether it is the caller's own. */
   mine: boolean;
@@ -120,6 +128,8 @@ export interface ArtifactList {
   enabled: boolean;
   /** The profiles the caller is covered by. */
   profiles: string[];
+  /** The teams the caller is in, which they may publish to as `team:<name>`. */
+  teams?: string[];
   /** Who may publish to the whole organisation. */
   publish_organisation: "everyone" | "platform_admins";
   /** Whether an administrator allows public links. */
@@ -132,12 +142,23 @@ export interface ArtifactList {
 
 /** Which artifacts a list asks for: none given is everything the caller may see. */
 export interface ArtifactFilter {
-  /** `organisation`, or `profile:<name>`. */
+  /** `private`, `organisation`, `team:<name>` or `profile:<name>`. */
   visibility?: string;
   /** Only the caller's own. */
   mine?: boolean;
   /** Only those a link gave the caller. */
   shared?: boolean;
+  /** Only the teams' own: those of the teams the caller is in or administers. */
+  teams?: boolean;
+}
+
+/** Who may open an artifact, in words: what every client of a person's says of a visibility. */
+export function visibilityWords(visibility: string): string {
+  if (visibility === "private") return "only you";
+  if (visibility === "organisation") return "the whole organisation";
+  if (visibility.startsWith("team:")) return `the ${visibility.slice("team:".length)} team`;
+  if (visibility.startsWith("profile:")) return `the ${visibility.slice("profile:".length)} profile's people`;
+  return visibility;
 }
 
 /** A one-time link to open an artifact on its host, good for `expires_in` seconds. */
@@ -189,7 +210,7 @@ export function textBytes(text: string): string {
 export type ArtifactAudience = "everyone" | "team" | "shared" | "private";
 
 /**
- * Which part of the gallery an `artifact.list` row is in (`scope`): `mine`, `organisation`,
+ * Which part of the gallery an `artifact.list` row is in (`scope`): `mine`, `private` (the caller's own private one), `organisation`,
  * `team:<name>`, `profile:<name>` or `shared`, a link's. A plane that does not say it yet is
  * read from the row: the caller's own, one a link gave them (the ids a `shared` listing
  * answered), or its visibility.

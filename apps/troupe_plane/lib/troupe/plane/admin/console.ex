@@ -44,7 +44,7 @@ defmodule Troupe.Plane.Admin.Console do
   # runs on, and who may do what.
   @watch ~w(overview sessions connections runs)a
   @configure ~w(profiles bundles triggers integrations)a
-  @operate ~w(pods hosts budgets)a
+  @operate ~w(pods hosts budgets published)a
   @govern ~w(teams identity signin policy clients organisation audit memory)a
 
   @doc "Every area of the console's map, in the order the map shows them."
@@ -122,6 +122,8 @@ defmodule Troupe.Plane.Admin.Console do
     host_set_enabled: {:area, :hosts},
     person_budget: {:area, :budgets},
     budget_explain: {:area, :budgets},
+    artifacts_list: {:area, :published},
+    artifact_takedown: {:area, :published},
 
     # -- Govern --------------------------------------------------------------
     teams_list: {:area, :teams},

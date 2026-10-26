@@ -1249,6 +1249,36 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # -- artifacts --------------------------------------------------------------
+
+  @doc """
+  Published artifacts, newest first, for the administrators' table: every one for a
+  platform admin, private ones too, since taking one down is theirs; for a team admin, the
+  artifacts of the teams they administer (`team:<name>`). Never what one holds.
+  """
+  @spec artifacts_list(actor()) :: result()
+  def artifacts_list(actor) do
+    with :ok <- require_admin(actor) do
+      {:ok, Artifacts.admin_list(if(actor.role == :platform_admin, do: :all, else: actor.teams))}
+    end
+  end
+
+  @doc """
+  Take an artifact down: every version and byte, and its links stop opening. A platform
+  admin's for any artifact, a team admin's for their team's; another's is not there.
+  Audited as `artifact.delete` with `by: takedown`.
+  """
+  @spec artifact_takedown(actor(), String.t()) :: result()
+  def artifact_takedown(actor, id) do
+    with :ok <- require_admin(actor),
+         %Identity.User{} = user <- Identity.get_user(actor.subject) do
+      Artifacts.delete(id, user, platform_admin?: actor.role == :platform_admin)
+    else
+      nil -> {:error, Error.new(:not_found, %{id: id})}
+      other -> other
+    end
+  end
+
   # -- teams ------------------------------------------------------------------
 
   @doc "Teams, with their grants, budgets, volumes and retention."

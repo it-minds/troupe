@@ -64,6 +64,7 @@ export const NAV: Group[] = [
       { id: "pods", label: "Workers and pods", built: true, teamAdmin: false, lead: "The pods behind each profile, with their state, version, bundle, sessions and disk." },
       { id: "hosts", label: "Provisioners and hosts", built: true, teamAdmin: false, lead: "What each provisioner guarantees, and the machines registered to run workers." },
       { id: "budgets", label: "Budgets", built: true, teamAdmin: true, lead: "Every team's spend against its ceiling, per-person caps, and which ceiling binds." },
+      { id: "published", label: "Published artifacts", built: true, teamAdmin: true, lead: "Every artifact published here, or a team admin's teams' own, with a takedown for each." },
     ],
   },
   {
@@ -86,7 +87,7 @@ export const MINE: Group = {
   label: "Mine",
   areas: [
     { id: "mine", label: "Mine", built: true, teamAdmin: true, lead: "Your sessions, the laptops' sessions offered to you, your clients' versions and your memory." },
-    { id: "artifacts", label: "Artifacts", built: true, teamAdmin: true, lead: "The pages and files you, your organisation and your profiles' people have published." },
+    { id: "artifacts", label: "Artifacts", built: true, teamAdmin: true, lead: "The pages and files you, your organisation, your teams and your profiles' people have published." },
   ],
 };
 

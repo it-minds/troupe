@@ -1,8 +1,9 @@
 defmodule Troupe.Tools.PublishArtifact do
   @moduledoc """
   Publishes a page, a Markdown document or a file from the workspace as an artifact on the
-  plane (#62), for the session's person: the organisation or a profile's people read it in
-  the console's gallery, served from the plane's artifacts host, where it can touch nothing.
+  plane (#62), for the session's person: theirs alone unless it says otherwise (they share
+  it with a link), or the organisation's, a team's members' or a profile's people's, read in
+  their galleries and served from the plane's artifacts host, where it can touch nothing.
 
   Confined as `remember`'s anchors are: every file a regular file inside the workspace, read
   as it is now. The files keep their paths below the directory they share, so a page's
@@ -36,7 +37,7 @@ defmodule Troupe.Tools.PublishArtifact do
 
     `files`: workspace paths; they keep their paths below the directory they share, so relative links still work. A page opens `index.html`; a document `index.md` or `README.md`. Pages run sandboxed: scripts only from the artifact's own .js files (no inline script), and nothing outside the artifact can be fetched. Keep it to a few megabytes.
 
-    `visibility`: `organisation`, or `profile:<name>` for the people a profile is granted to. `id`: one of yours, or one you were given an edit link to, to publish as the next version at the same address, with `note` saying what changed; the earlier versions are kept.
+    `visibility`: `private` (the default: the person alone, until they share a link), `organisation`, `team:<name>` for a team's members, or `profile:<name>` for a profile's people. `id`: one of yours, or one you were given an edit link to, to publish as the next version at the same address, with `note` saying what changed; the earlier versions are kept.
     """
     |> String.trim()
   end
@@ -48,7 +49,10 @@ defmodule Troupe.Tools.PublishArtifact do
       "properties" => %{
         "title" => %{"type" => "string"},
         "kind" => %{"type" => "string", "enum" => @kinds},
-        "visibility" => %{"type" => "string", "description" => "organisation, or profile:<name>"},
+        "visibility" => %{
+          "type" => "string",
+          "description" => "private (default), organisation, team:<name> or profile:<name>"
+        },
         "files" => %{"type" => "array", "items" => %{"type" => "string"}},
         "id" => %{
           "type" => "string",
@@ -56,7 +60,7 @@ defmodule Troupe.Tools.PublishArtifact do
         },
         "note" => %{"type" => "string", "description" => "What changed in this version, in a line."}
       },
-      "required" => ["title", "kind", "visibility", "files"]
+      "required" => ["title", "kind", "files"]
     }
   end
 
@@ -71,16 +75,12 @@ defmodule Troupe.Tools.PublishArtifact do
   def run(args, ctx) do
     with {:ok, title} <- Tool.fetch_string(args, "title"),
          {:ok, kind} <- kind(args),
-         {:ok, visibility} <- Tool.fetch_string(args, "visibility"),
+         {:ok, visibility} <- visibility(args),
          {:ok, paths} <- paths(args),
          {:ok, files} <- read(ctx, paths) do
       params =
-        %{
-          "title" => title,
-          "kind" => kind,
-          "visibility" => visibility,
-          "files" => Enum.map(files, &wire/1)
-        }
+        %{"title" => title, "kind" => kind, "files" => Enum.map(files, &wire/1)}
+        |> put_visibility(visibility)
         |> put_id(args["id"])
         |> put_note(args["note"])
 
@@ -106,6 +106,20 @@ defmodule Troupe.Tools.PublishArtifact do
       other -> {:error, {:invalid_args, "kind is html, markdown or file, not #{inspect(other)}"}}
     end
   end
+
+  # None said is the person alone for a new one, and who it was for already for a new
+  # version of one.
+  defp visibility(%{"visibility" => visibility}) when is_binary(visibility) and visibility != "",
+    do: {:ok, visibility}
+
+  defp visibility(%{"visibility" => other}) when not is_nil(other) and other != "",
+    do: {:error, {:invalid_args, "visibility is a string, not #{inspect(other)}"}}
+
+  defp visibility(%{"id" => id}) when is_binary(id) and id != "", do: {:ok, nil}
+  defp visibility(_args), do: {:ok, "private"}
+
+  defp put_visibility(params, nil), do: params
+  defp put_visibility(params, visibility), do: Map.put(params, "visibility", visibility)
 
   defp paths(%{"files" => [_ | _] = paths}) do
     if Enum.all?(paths, &is_binary/1),
@@ -207,7 +221,9 @@ defmodule Troupe.Tools.PublishArtifact do
       "Republish it with id #{artifact["id"]}"
   end
 
+  defp audience("private"), do: "the person alone, until they share a link to it"
   defp audience("organisation"), do: "the whole organisation"
+  defp audience("team:" <> name), do: "team #{name}'s members"
   defp audience("profile:" <> name), do: "profile #{name}'s people"
   defp audience(other), do: to_string(other)
 end

@@ -1689,7 +1689,7 @@ evoked where nothing is set and there was a sign-in. */
         }
         if (method === "artifact.list") {
           const rows = mine.filter((a) => (params["mine"] === true ? a["mine"] === true : params["shared"] === true ? a["shared"] === true : true));
-          return reply(ws, id, { enabled: true, profiles: ["dev"], publish_organisation: "everyone", public_links: false, gallery_url: "https://plane.example.test/console#/artifacts", plane_url: "https://plane.example.test", artifacts: rows });
+          return reply(ws, id, { enabled: true, profiles: ["dev"], teams: ["core"], publish_organisation: "everyone", public_links: false, gallery_url: "https://plane.example.test/console#/artifacts", plane_url: "https://plane.example.test", artifacts: rows });
         }
         if (method !== "artifact.publish") {
           this.artifactCalls.push({ method, params });

@@ -9,6 +9,9 @@
     "shared": {
       "type": "boolean"
     },
+    "teams": {
+      "type": "boolean"
+    },
     "visibility": {
       "type": "string"
     }

@@ -1643,14 +1643,19 @@ defmodule Troupe.UI.TUI.Server do
   # path is read here rather than on the worker: the worker has no access to this machine.
   # Its size is asked first, so a file larger than the daemon takes in a message is
   # refused without being read (D115).
-  # `/publish <path> <organisation | profile:<name>>` publishes one file from this machine as
-  # an artifact on the plane (root #62), as the person this computer's daemon is signed in
-  # as: a page (`.html`), a document (`.md`) or a file, titled by its own heading or title,
-  # else its name, and named as coming from this session. Read here, as `/upload` reads it.
+  # `/publish <path> [private | organisation | team:<name> | profile:<name>]` publishes one
+  # file from this machine as an artifact on the plane (root #62), as the person this
+  # computer's daemon is signed in as: a page (`.html`), a document (`.md`) or a file, titled
+  # by its own heading or title, else its name, and named as coming from this session; theirs
+  # alone where it says nothing else. Read here, as `/upload` reads it. A team they are not
+  # in is the plane's to refuse, naming theirs.
+  @publish_usage "/publish <path> [private | organisation | team:<name> | profile:<name>]"
+
   defp publish(sid, args) do
     case String.split(args, ~r/\s+/, trim: true) do
       [path, visibility | _] -> publish(sid, path, visibility)
-      _usage -> {:error, "usage: /publish <path> <organisation | profile:<name>>"}
+      [path] -> publish(sid, path, "private")
+      _usage -> {:error, "usage: " <> @publish_usage}
     end
   end
 
