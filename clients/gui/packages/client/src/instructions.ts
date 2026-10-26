@@ -9,6 +9,8 @@
 // After them comes the person's own memory from the plane (`person`), the one layer they
 // edit from here and an agent of theirs adds to with `remember`.
 
+import type { MemoryBlameLine, MemoryLine } from "./admin.js";
+
 /** One file or document `context.get` lists. */
 export interface InstructionFile {
   scope: string;
@@ -52,6 +54,34 @@ export interface OwnMemory {
   changed_by?: string | null;
   changed_at?: string | null;
   plane_url?: string;
+  /** Asked with `blame`: each line with who wrote it, the version it came in, and an agent's entry's session. */
+  lines?: MemoryBlameLine[];
+  /** The levels the person's sessions read before it, the organisation's and their teams', each with its text. */
+  documents?: Array<{ scope: string; name: string | null; version: number; hash?: string; updated_at?: string | null; text: string }>;
+}
+
+/** The person's own memory's history (`me.memory.history`): every version, one beside another. */
+export interface OwnMemoryHistory {
+  versions: Array<{ version: number; hash: string; bytes: number; changed_by: string | null; changed_at: string }>;
+  /** The version shown, null for a document never saved. */
+  version: number | null;
+  text: string;
+  against: number | null;
+  against_text: string | null;
+  diff: MemoryLine[];
+}
+
+/** Where this computer's copy of the plane's memory stands (`me.memory.status`). */
+export interface MemoryStatus {
+  plane_url: string | null;
+  fetched_at: string | null;
+  documents: Array<{ scope: string; name: string | null; version: number; hash: string }>;
+  problem: string | null;
+  in_force: Array<{ scope: string; name: string | null; version: number; hash: string }> | null;
+  /** Whether the copy had the versions in force; null where the plane was not asked, and `reason` says why. */
+  current: boolean | null;
+  reason: string | null;
+  sessions: Array<{ session_id: string; turn_at: string; documents: Array<{ scope: string; name: string | null; version: number; hash: string }>; current: boolean }>;
 }
 
 /** What a save of it answers: whether it changed anything, and the document as it now stands. */

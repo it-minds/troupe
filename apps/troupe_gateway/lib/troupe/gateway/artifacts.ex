@@ -15,7 +15,8 @@ defmodule Troupe.Gateway.Artifacts do
   and the publish names the handle instead of carrying the files.
 
   `list/1` is the person's own artifacts on the plane, for a client's "Publish a new version
-  of…", with where the console's gallery is.
+  of…", with where the console's gallery is. `forward/2` is what the desktop app's gallery
+  and viewer ask of one artifact, each the plane's method of the same name.
   """
 
   alias Troupe.Gateway.{LocalOnly, Memory, Plane}
@@ -75,6 +76,40 @@ defmodule Troupe.Gateway.Artifacts do
     with url when is_binary(url) <- Plane.url(),
          true <- Plane.linked?(),
          {:ok, answer} <- Plane.call("artifact.list", Map.take(params, ~w(mine shared visibility))) do
+      {:ok, Map.put(answer, "plane_url", url)}
+    else
+      {:error, :unlinked} -> {:error, :signed_out}
+      {:error, reason} -> {:error, reason}
+      _signed_out -> {:error, :signed_out}
+    end
+  end
+
+  # What a client's gallery and viewer ask of one artifact, each the plane's own method with
+  # the arguments it takes, nothing else of what the client sent: one with its versions, a
+  # ticket to open it or one version on its host, a view or edit link and its revoking, a
+  # rollback and a pin. The plane decides who may: the owner, an edit link's holder, a reader.
+  @forwarded %{
+    "artifact.get" => ~w(id),
+    "artifact.open" => ~w(id version),
+    "artifact.share" => ~w(id role expires),
+    "artifact.unshare" => ~w(id share person),
+    "artifact.rollback" => ~w(id version),
+    "artifact.pin" => ~w(id version)
+  }
+
+  @doc "The methods `forward/2` sends to the plane."
+  @spec forwarded() :: [String.t()]
+  def forwarded, do: Map.keys(@forwarded)
+
+  @doc """
+  One of `forwarded/0`, sent to the linked plane as this daemon's person: the plane's answer
+  with `plane_url`, or its refusal as it gave it (`{:rpc, error}`).
+  """
+  @spec forward(String.t(), map()) :: {:ok, map()} | {:error, :signed_out | term()}
+  def forward(method, params) when is_map_key(@forwarded, method) do
+    with url when is_binary(url) <- Plane.url(),
+         true <- Plane.linked?(),
+         {:ok, answer} <- Plane.call(method, Map.take(params, @forwarded[method])) do
       {:ok, Map.put(answer, "plane_url", url)}
     else
       {:error, :unlinked} -> {:error, :signed_out}

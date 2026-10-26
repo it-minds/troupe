@@ -321,8 +321,12 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
       assert {:ok, %{"linked" => true}} = link(ctx)
       assert eventually(fn -> match?({:ok, _}, PlaneMemory.read_cache()) end)
 
-      assert {:ok, %{"version" => 0, "text" => "", "plane_url" => url}} = Client.call(ctx.client, "me.memory", %{})
+      assert {:ok, %{"version" => 0, "text" => "", "plane_url" => url} = own} = Client.call(ctx.client, "me.memory", %{})
       assert url == ctx.plane.url
+
+      # Beside it, the levels its sessions read first, for the desktop app's Memory view.
+      assert [%{"scope" => "organisation", "text" => "Deploy on Tuesdays."}, %{"scope" => "team", "name" => "design", "version" => 5}] =
+               own["documents"]
 
       %{session: session, fake: fake} = session(ctx, [{:text, "one"}, {:text, "two"}])
       turn(session.id, "hello")
@@ -378,6 +382,38 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
 
       assert [%{data: %{"changes" => [%{"scope" => "user", "from" => nil, "to" => 1}]}}] =
                other.id |> Troupe.events() |> Enum.filter(&(&1.type == "memory_changed"))
+    end
+
+    # The desktop app's Memory view: the history of the person's own, and a rollback, which
+    # the sessions here read from their next turn as a save's.
+    test "me.memory.history and me.memory.rollback are the plane's, as the person", ctx do
+      assert {:error, %{message: "unavailable"}} = Client.call(ctx.client, "me.memory.history", %{})
+
+      _fingerprint = FakePlane.sign(ctx.plane.state)
+      FakePlane.memory_with(ctx.plane.state, @documents)
+      FakePlane.keep_own(ctx.plane.state)
+      assert {:ok, %{"linked" => true}} = link(ctx)
+
+      assert {:ok, %{"user" => %{"version" => 1}}} =
+               Client.call(ctx.client, "me.memory.put", %{"command_id" => Client.command_id(), "text" => "One.", "version" => 0})
+
+      assert {:ok, %{"versions" => [%{"version" => 1}], "text" => "One.", "plane_url" => url}} =
+               Client.call(ctx.client, "me.memory.history", %{"version" => 1})
+
+      assert url == ctx.plane.url
+      assert {"me.memory.history", %{"version" => 1}} = List.last(Enum.filter(FakePlane.calls(ctx.plane.state), &match?({"me.memory.history", _}, &1)))
+
+      assert {:ok, %{"user" => %{"version" => 2, "text" => "rolled back to v1"}}} =
+               Client.call(ctx.client, "me.memory.rollback", %{"command_id" => Client.command_id(), "to" => 1, "version" => 1})
+
+      # The copy here was asked for again, so the sessions here read it at their next turn.
+      assert eventually(fn ->
+               match?({:ok, %{"documents" => [_ | _] = docs}} when is_list(docs), PlaneMemory.read_cache()) and
+                 List.last(elem(PlaneMemory.read_cache(), 1)["documents"])["version"] == 2
+             end)
+
+      assert {:error, %{message: "conflict", data: %{"version" => 2}}} =
+               Client.call(ctx.client, "me.memory.rollback", %{"command_id" => Client.command_id(), "to" => 1, "version" => 1})
     end
 
     test "signed out, the daemon says so and remember offers the repository", ctx do

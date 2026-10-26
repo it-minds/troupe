@@ -231,7 +231,8 @@ defmodule Troupe.Gateway.Memory do
   @doc """
   The person's own document as the plane has it now, asked of the plane and kept as every
   answer of `me.memory` is: `version` (`0` for none), `text`, `bytes`, `limit`, who saved it
-  and when, and `plane_url`. `{:error, :signed_out}` with no plane token. `blame: true` adds
+  and when, and `plane_url`; and `documents`, the organisation's and the person's teams' as
+  the same answer carried them, each with its text, which their sessions read before it. `{:error, :signed_out}` with no plane token. `blame: true` adds
   `lines`: each line with who wrote it, the version it came in and the session an agent's
   entry came from (`troupe memory --blame`).
   """
@@ -257,6 +258,33 @@ defmodule Troupe.Gateway.Memory do
     with {:ok, url} <- signed_in(),
          {:ok, saved} <-
            plane_call("me.memory.put", Map.take(params, ["text", "version", "append", "session", "agent"])) do
+      _refreshed = refresh()
+      {:ok, Map.put(saved, "plane_url", url)}
+    end
+  end
+
+  @doc """
+  The history of the person's own document, as the plane has it: every version, one
+  version's text beside another's and the line diff between them (`version` and `against`,
+  the plane's `me.memory.history`), with `plane_url`.
+  """
+  @spec history(map()) :: {:ok, map()} | {:error, :signed_out | term()}
+  def history(params) when is_map(params) do
+    with {:ok, url} <- signed_in(),
+         {:ok, answer} <- plane_call("me.memory.history", Map.take(params, ["version", "against"])) do
+      {:ok, Map.put(answer, "plane_url", url)}
+    end
+  end
+
+  @doc """
+  Roll the person's own document back to version `to`, over `version`, the one in force as
+  they saw it: the plane saves that version's text as the next one. Then the copy here is
+  asked for again, as after a save, so the sessions running here read it from their next turn.
+  """
+  @spec rollback_own(map()) :: {:ok, map()} | {:error, :signed_out | term()}
+  def rollback_own(params) when is_map(params) do
+    with {:ok, url} <- signed_in(),
+         {:ok, saved} <- plane_call("me.memory.rollback", Map.take(params, ["to", "version"])) do
       _refreshed = refresh()
       {:ok, Map.put(saved, "plane_url", url)}
     end
@@ -318,7 +346,16 @@ defmodule Troupe.Gateway.Memory do
     end
   end
 
-  defp own_of(%{"user" => %{} = own}, url), do: {:ok, Map.put(own, "plane_url", url)}
+  # The person's own, and beside it the levels above it that their sessions read first (the
+  # organisation's and each of their teams'), as the plane answered them to this person: what
+  # the desktop app's Memory view sets the person's own entries against.
+  defp own_of(%{"user" => %{} = own} = answer, url) do
+    above =
+      for %{"scope" => scope} = document <- List.wrap(answer["documents"]), scope != "user",
+          do: Map.take(document, ["scope", "name", "version", "hash", "updated_at", "text"])
+
+    {:ok, own |> Map.put("plane_url", url) |> Map.put("documents", above)}
+  end
 
   defp own_of(_answer, _url),
     do: {:error, {:rpc, %{"code" => -32_601, "message" => "method_not_found"}}}

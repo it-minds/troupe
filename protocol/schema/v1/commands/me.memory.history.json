@@ -1,0 +1,16 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/me.memory.history.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "against": {
+      "type": "integer"
+    },
+    "version": {
+      "type": "integer"
+    }
+  },
+  "required": [],
+  "title": "me.memory.history",
+  "type": "object"
+}

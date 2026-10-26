@@ -620,6 +620,78 @@ defmodule Troupe.Gateway.FakePlane do
      }}
   end
 
+  # The viewer's methods (#62), as the plane answers them for the person: somebody else's
+  # artifact is not there to see, and its owner's controls are refused.
+  defp dispatch(_state, "artifact." <> _, %{"id" => "art-somebody-elses"} = params) do
+    if Map.has_key?(params, "version") and not Map.has_key?(params, "role"),
+      do: {:rpc_error, -32_004, "forbidden", %{"reason" => "only its owner pins an artifact"}},
+      else: {:rpc_error, -32_005, "not_found", %{"id" => "art-somebody-elses"}}
+  end
+
+  defp dispatch(_state, "artifact.get", %{"id" => id}) do
+    {:ok,
+     %{
+       "id" => id,
+       "title" => "Weekly",
+       "kind" => "html",
+       "visibility" => "organisation",
+       "version" => 1,
+       "mine" => true,
+       "versions" => [%{"n" => 1, "note" => nil, "url" => "https://artifacts.example.test/a/#{id}/v1/"}],
+       "shares" => []
+     }}
+  end
+
+  defp dispatch(_state, "artifact.open", %{"id" => _id}),
+    do: {:ok, %{"url" => "https://artifacts.example.test/enter?ticket=fake", "expires_in" => 60}}
+
+  defp dispatch(_state, "artifact.share", %{"id" => _id, "role" => role}) do
+    {:ok,
+     %{
+       "token" => "tok",
+       "url" => "https://artifacts.example.test/s/tok",
+       "share" => %{"id" => "sh-1", "role" => role, "public" => false, "state" => "live"}
+     }}
+  end
+
+  defp dispatch(_state, "artifact.unshare", %{"id" => id} = params),
+    do: {:ok, Map.merge(%{"revoked" => true, "id" => id}, Map.take(params, ["share", "person"]))}
+
+  defp dispatch(_state, method, %{"id" => id} = params) when method in ["artifact.rollback", "artifact.pin"],
+    do: {:ok, %{"id" => id, "version" => 2, "pinned" => if(method == "artifact.pin", do: params["version"])}}
+
+  # The person's own memory's history and a rollback, over what `keep_own/1` set.
+  defp dispatch(state, "me.memory.history", params) do
+    case Agent.get(state, &Map.get(&1, :own)) do
+      nil ->
+        {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory.history"}}
+
+      own ->
+        {:ok,
+         %{
+           "versions" => [%{"version" => own["version"], "changed_by" => "ada@example.test"}],
+           "version" => own["version"],
+           "text" => own["text"],
+           "against" => params["against"],
+           "against_text" => nil,
+           "diff" => [%{"op" => "add", "text" => own["text"]}]
+         }}
+    end
+  end
+
+  defp dispatch(state, "me.memory.rollback", %{"to" => to, "version" => version}) do
+    Agent.get_and_update(state, fn held ->
+      case Map.get(held, :own) do
+        %{"version" => ^version} ->
+          now = %{"version" => version + 1, "text" => "rolled back to v#{to}"}
+          {{:ok, %{"changed" => true, "entry" => nil, "user" => own_json(now)}}, Map.put(held, :own, now)}
+
+        own ->
+          {{:rpc_error, -32_006, "conflict", %{"reason" => "saved since", "version" => own && own["version"]}}, held}
+      end
+    end)
+  end
+
   defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
 
   defp take_back(state, id, subject) do

@@ -1105,6 +1105,15 @@ defmodule Troupe.Protocol.Schema do
         "version" => optional(:integer),
         "append" => optional(:string)
       },
+      # Its history, for the desktop app's Memory view: every version, `version`'s text (the
+      # one in force for none) beside `against`'s (the one before it for none), and the line
+      # diff; and a rollback to `to`, over `version`, the one in force as the client saw it.
+      "me.memory.history" => %{"version" => optional(:integer), "against" => optional(:integer)},
+      "me.memory.rollback" => %{
+        "command_id" => required(:string),
+        "to" => required(:integer),
+        "version" => required(:integer)
+      },
       # The client's Local only switch moved: the daemon makes no plane call
       # for the sessions it runs while it is on. Said at `initialize` as
       # `client_info.local_only`.
@@ -1128,6 +1137,34 @@ defmodule Troupe.Protocol.Schema do
         "mine" => optional(:boolean),
         "shared" => optional(:boolean),
         "visibility" => optional(:string)
+      },
+      # The desktop app's viewer (#62): each the plane's method of the same name, sent with
+      # the daemon's sign-in. One artifact with its versions; a one-time ticket that opens it,
+      # or `version`, on the artifacts host; a link (`role` view or edit) and its revoking, by
+      # `share` or `person`; a rollback to `version`; a pin of `version`, null for the newest.
+      "artifact.get" => %{"id" => required(:string)},
+      "artifact.open" => %{"id" => required(:string), "version" => optional(:integer)},
+      "artifact.share" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "role" => required(:string),
+        "expires" => optional(:string)
+      },
+      "artifact.unshare" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "share" => optional(:string),
+        "person" => optional(:string)
+      },
+      "artifact.rollback" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "version" => required(:integer)
+      },
+      "artifact.pin" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "version" => required({:nullable, :integer})
       },
       # A first run's questions (Decision 705) — the daemon's only, like the settings
       # they write; a worker answers `method_not_found`. `answer` is the named step's

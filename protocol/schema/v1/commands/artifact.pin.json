@@ -1,0 +1,26 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/artifact.pin.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "version": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "command_id",
+    "id",
+    "version"
+  ],
+  "title": "artifact.pin",
+  "type": "object"
+}
