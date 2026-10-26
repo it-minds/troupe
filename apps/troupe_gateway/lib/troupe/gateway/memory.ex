@@ -91,7 +91,8 @@ defmodule Troupe.Gateway.Memory do
   documents in force now where it could be asked (`in_force`, then kept as every answer is)
   and whether the copy was `current`, and each session running here with what its last turn
   read and whether that is `current` against the copy now. `reason` says why the plane was
-  not asked. `ask: false` (a client in Local only) asks nothing of the plane.
+  not asked. `ask: false` (a client in Local only) asks nothing of the plane. `held` is each
+  document as the copy holds it (`scope`, `name`, `version`, `text`), the person's own among them.
   """
   @spec status(keyword()) :: map()
   def status(opts \\ []) do
@@ -120,6 +121,9 @@ defmodule Troupe.Gateway.Memory do
       "fetched_at" => held && held["fetched_at"],
       "path" => Troupe.Paths.display(PlaneMemory.cache_path()),
       "documents" => held_stamps,
+      # Each document as the copy holds it, which the sessions here read: what a memory
+      # screen shows, read-only, where the plane is not asked.
+      "held" => held_levels(held),
       "problem" => problem,
       "sessions" =>
         Enum.map(Troupe.Session.PlaneMemory.reads(), &Map.put(&1, "current", same?(&1["documents"], now)))
@@ -134,6 +138,15 @@ defmodule Troupe.Gateway.Memory do
 
   defp asking(true), do: :ok
   defp asking(false), do: {:error, :local_only}
+
+  # Each document with its level, version, text and who saved it, and nothing else of it.
+  defp levels(documents) when is_list(documents),
+    do: Enum.map(documents, &Map.take(&1, ~w(scope name version text changed_by changed_at)))
+
+  defp levels(_none), do: []
+
+  defp held_levels(%{"documents" => documents}), do: levels(documents)
+  defp held_levels(_none), do: []
 
   defp documents_now do
     case PlaneMemory.read_cache() do
@@ -233,11 +246,13 @@ defmodule Troupe.Gateway.Memory do
   answer of `me.memory` is: `version` (`0` for none), `text`, `bytes`, `limit`, who saved it
   and when, and `plane_url`. `{:error, :signed_out}` with no plane token. `blame: true` adds
   `lines`: each line with who wrote it, the version it came in and the session an agent's
-  entry came from (`troupe memory --blame`).
+  entry came from (`troupe memory --blame`). `versions: true` adds `versions`: the newest
+  versions, each with its text, for a memory screen's history.
   """
   @spec own(keyword()) :: {:ok, map()} | {:error, :signed_out | term()}
   def own(opts \\ []) do
     ask = if opts[:blame], do: Map.put(asked(), "blame", true), else: asked()
+    ask = if opts[:versions], do: Map.put(ask, "versions", true), else: ask
 
     with {:ok, url} <- signed_in(),
          {:ok, answer} <- plane_call("me.memory", ask) do
@@ -318,7 +333,10 @@ defmodule Troupe.Gateway.Memory do
     end
   end
 
-  defp own_of(%{"user" => %{} = own}, url), do: {:ok, Map.put(own, "plane_url", url)}
+  # The organisation's and the person's teams' documents beside it, as the plane answered them
+  # (`documents`): what a memory screen lists level by level, read-only to the person.
+  defp own_of(%{"user" => %{} = own} = answer, url),
+    do: {:ok, own |> Map.put("plane_url", url) |> Map.put("documents", levels(answer["documents"]))}
 
   defp own_of(_answer, _url),
     do: {:error, {:rpc, %{"code" => -32_601, "message" => "method_not_found"}}}

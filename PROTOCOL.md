@@ -2047,7 +2047,11 @@ agent's `remember` with `level: "me"` reaches the same save from inside the daem
 `append` naming the `session` and the `agent` it came from. `me.memory {blame: true}` adds
 `lines`, each `{text, version, by, at}` and, for an agent's entry, `session` and `agent`:
 who wrote each line, derived from the versions and their audit rows (`troupe memory
---blame`, Decision 951).
+--blame`, Decision 951). `{versions: true}` adds `versions`, the newest fifty, each `{version,
+text, hash, bytes, changed_by, changed_at}`, for a memory screen's history. Beside the person's
+own, `documents` is every level the person reads as the plane answered it (`{scope, name,
+version, text}`, the organisation's, each team's and their own), which a memory screen lists
+entry by entry.
 
 Every ask the daemon makes of the plane's `me.memory`, at a link, at a poll and here, carries
 `sessions`: what each session running on the machine read at its last turn, by id, when that
@@ -2059,6 +2063,8 @@ versions the copy here holds (`problem`, in words, where the copy is refused), `
 plane's now, asked and kept as every answer is, and `current` whether the copy had them
 (`null`, with `reason`, where the plane was not asked: signed out, or unreachable), and
 `sessions`, each `{session_id, turn_at, documents, current}`, `current` against the copy now.
+`held` is each document as the copy holds it, `{scope, name, version, text}`: what a memory
+screen shows, read-only, where the plane is not asked.
 
 #### `artifact.publish`
 
@@ -2066,7 +2072,11 @@ An artifact published on the plane as the daemon's person (#62, Decisions 948 an
 
 #### `artifact.list`
 
-The person's own artifacts on the plane, through the daemon's sign-in (Decision 950), `observe`: `{mine?, shared?, visibility?}` → the plane's `artifact.list` with `plane_url`, which carries `gallery_url`, the console's gallery; `unavailable`, with a sentence, signed out. The desktop app's **Publish a new version of…** lists from it.
+The person's own artifacts on the plane, through the daemon's sign-in (Decision 950), `observe`: `{mine?, shared?, visibility?}` → the plane's `artifact.list` with `plane_url`, which carries `gallery_url`, the console's gallery; `unavailable`, with a sentence, signed out. The desktop app's **Publish a new version of…** lists from it, and the terminal's `/artifacts` and `troupe artifacts list`.
+
+#### `artifact.get`, `artifact.open`, `artifact.read`, `artifact.share`
+
+One of the person's artifacts asked of the plane through the daemon's sign-in (#62), each the plane's answer as it is: `artifact.get {id}` (`observe`) one with its versions; `artifact.open {id, version?}` (`observe`) `{url, expires_in}`, the one-time address that signs the person in on the artifacts host and opens it there, which a client opens in the browser and never fetches; `artifact.read {id, version?, path?}` (`observe`) one text file of a version, `{id, version, path, content_type, text}`, the entry where no path is named; `artifact.share {command_id, id, role?, expires?}` (`control`) `{token, url, share}`, a link to one of the person's own. `unavailable`, with a sentence, signed out; refused, as every `artifact.*` is, to a client in Local only. The terminal's `/artifacts` and `troupe artifacts` ask them.
 
 #### `setup.get`, `setup.answer`
 
@@ -2569,8 +2579,8 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `client.mode`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.invites`, `session.read_sealed`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get`, `me.memory.status`, `artifact.list` |
-| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`, `me.memory`, `me.memory.put`, `artifact.publish`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
+| `observe` | `initialize`, `client.mode`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.invites`, `session.read_sealed`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get`, `me.memory.status`, `artifact.list`, `artifact.get`, `artifact.open`, `artifact.read` |
+| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`, `me.memory`, `me.memory.put`, `artifact.publish`, `artifact.share`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `session.invite`, `session.uninvite`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `config.memory`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop`, `remote.offer`, `remote.withdraw` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all

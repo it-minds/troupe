@@ -1,0 +1,18 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/artifact.open.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "artifact.open",
+  "type": "object"
+}

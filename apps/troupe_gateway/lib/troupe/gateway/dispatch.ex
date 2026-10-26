@@ -209,6 +209,13 @@ defmodule Troupe.Gateway.Dispatch do
     "artifact.publish" => :control,
     # The person's own artifacts there, for "Publish a new version of…".
     "artifact.list" => :observe,
+    # One of them with its versions, a one-time address that opens it on the artifacts
+    # host, and one text file of a version, for a client's gallery; a link to one of the
+    # person's own, which is the owner's to make, as on the plane.
+    "artifact.get" => :observe,
+    "artifact.open" => :observe,
+    "artifact.read" => :observe,
+    "artifact.share" => :control,
     # Where this machine's copy of the plane's memory stands, and what each session here
     # last read: for the person's own debugging (`troupe memory --status`).
     "me.memory.status" => :observe,
@@ -1368,8 +1375,10 @@ defmodule Troupe.Gateway.Dispatch do
   # The person's own memory document, as the plane has it now (`Memory.own/0`), and their
   # save of it or an entry (`Memory.put_own/1`), sent with this daemon's sign-in and read by
   # the sessions running here from their next turn. Signed out, a sentence.
-  # `blame: true` adds who wrote each line and from which session (`lines`).
-  defp handle("me.memory", params, _context), do: own_memory(Memory.own(blame: params["blame"] == true))
+  # `blame: true` adds who wrote each line and from which session (`lines`); `versions: true`
+  # the document's versions with their text (`versions`).
+  defp handle("me.memory", params, _context),
+    do: own_memory(Memory.own(blame: params["blame"] == true, versions: params["versions"] == true))
 
   # Where this machine's copy stands against the plane, and what each session here read at
   # its last turn (`Memory.status/1`). Signed out, or asked by a client in Local only, it
@@ -1409,6 +1418,24 @@ defmodule Troupe.Gateway.Dispatch do
   # with where the console's gallery is. Signed out, a sentence.
   defp handle("artifact.list", params, _context) do
     case Artifacts.list(params) do
+      {:ok, answer} ->
+        {:ok, answer}
+
+      {:error, :signed_out} ->
+        {:error,
+         Error.new(:unavailable, %{
+           reason: "this computer's daemon is not signed in to a Troupe plane; troupe login signs it in"
+         })}
+
+      {:error, reason} ->
+        {:error, Error.new(:invalid_params, %{reason: Memory.sentence(reason)})}
+    end
+  end
+
+  # One artifact, the address that opens it, a text file of it, or a link to it, asked of
+  # the plane as the person (`Artifacts.forward/2`). Signed out, a sentence.
+  defp handle(method, params, _context) when method in ~w(artifact.get artifact.open artifact.read artifact.share) do
+    case Artifacts.forward(method, params) do
       {:ok, answer} ->
         {:ok, answer}
 

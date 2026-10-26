@@ -37,7 +37,10 @@ You change it in three places, each saving over the version you started from, so
 made elsewhere meanwhile is said rather than overwritten:
 
 - **`troupe memory`** prints it; `troupe memory --edit` opens it in your editor (`VISUAL`,
-  then `EDITOR`) and saves what you leave there; `troupe memory --clear` empties it.
+  then `EDITOR`) and saves what you leave there; `troupe memory --clear` empties it. Inside
+  the terminal client, `/memory` lists it entry by entry (each `## Topic`) beside your
+  organisation's and your teams', with what is in effect for each team, and adds, edits and
+  forgets your own ([the terminal client's screen](terminal-screen.md#memory)).
 - **The desktop app**: a session's *Instructions* pane lists it as *Your memory* and edits it
   in place, through this computer's daemon.
 - **The console**, under *Mine*: a change is previewed line by line before it is saved.

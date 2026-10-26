@@ -377,10 +377,13 @@ defmodule Troupe.Plane.Harness do
   #
   # `blame: true` adds `lines` to their own: who wrote each line, in which version, and from
   # which session an agent's entry came (`Memory.blame/2`), for `troupe memory --blame`.
+  # `versions: true` adds `versions` to it, each with its text, for the person's own history
+  # (`Memory.own_versions/1`), which the terminal's and the desktop app's memory screens show.
   defp handle("me.memory", params, %{user: user}) do
     :ok = Memory.machine(user, params["sessions"])
     own = Memory.own(user)
     own = if params["blame"] == true and is_binary(user.id), do: Map.put(own, "lines", Memory.blame(user)), else: own
+    own = if params["versions"] == true, do: Map.put(own, "versions", Memory.own_versions(user)), else: own
 
     {:ok, Signing.signed("memory", %{"documents" => Memory.for_person(user), "user" => own})}
   end

@@ -659,6 +659,23 @@ defmodule Troupe.Plane.Memory do
     }
   end
 
+  @own_versions 50
+
+  @doc """
+  The newest versions of a person's own document, newest first and at most fifty, each as
+  `summary/1` says it with its `text`: their history, to compare two and to save an old one
+  again. Asked only for the person themselves, as `own/1` is.
+  """
+  @spec own_versions(User.t()) :: [map()]
+  def own_versions(%User{id: id} = user) when is_binary(id) do
+    user
+    |> versions()
+    |> Enum.take(@own_versions)
+    |> Enum.map(&Map.put(summary(&1), "text", &1.text))
+  end
+
+  def own_versions(_nobody), do: []
+
   @doc """
   Save a person's own document as they wrote it, over `base` (the version they edited, `0`
   for none), as `put/4` saves any. Audited as `memory.put` on `user/<subject>`, with the

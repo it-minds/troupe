@@ -620,6 +620,29 @@ defmodule Troupe.Gateway.FakePlane do
      }}
   end
 
+  # One of them, the address that opens it, one text file and a link, as the plane answers
+  # each for the one it lists; anything else is not there.
+  defp dispatch(_state, method, %{"id" => "art-fakefakefakefake"} = params)
+       when method in ~w(artifact.get artifact.open artifact.read artifact.share) do
+    case method do
+      "artifact.get" ->
+        {:ok, %{"id" => params["id"], "title" => "Weekly", "version" => 1, "versions" => [%{"n" => 1}]}}
+
+      "artifact.open" ->
+        {:ok, %{"url" => "https://artifacts.example.test/enter?ticket=t-#{params["version"] || "current"}", "expires_in" => 60}}
+
+      "artifact.read" ->
+        {:ok, %{"id" => params["id"], "version" => 1, "path" => "index.md", "text" => "# Weekly"}}
+
+      "artifact.share" ->
+        {:ok, %{"token" => "tok", "url" => "https://artifacts.example.test/s/tok", "asked" => params}}
+    end
+  end
+
+  defp dispatch(_state, method, params)
+       when method in ~w(artifact.get artifact.open artifact.read artifact.share),
+       do: {:rpc_error, -32_005, "not_found", %{"id" => params["id"]}}
+
   defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
 
   defp take_back(state, id, subject) do

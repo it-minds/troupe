@@ -116,6 +116,10 @@ organisation's and one for each profile you are granted. A card shows the title 
 never the page itself. Open one and it shows who published which version and when, the
 session it came from, and **Open**, which opens the artifact in a new tab.
 
+In the terminal client, `/artifacts` lists them by who can see them and opens one in your
+browser; a Markdown one can be read there too, and `troupe artifacts` does the same from the
+command line ([the terminal client's screen](terminal-screen.md#artifacts)).
+
 The artifact is served from a host of its own, not the plane's. A page there runs sandboxed:
 its scripts are only its own `.js` files (no inline script), it cannot read a cookie or call
 the plane as you, and it cannot fetch anything from anywhere else. A page that relied on a

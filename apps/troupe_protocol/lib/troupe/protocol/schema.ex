@@ -1094,8 +1094,9 @@ defmodule Troupe.Protocol.Schema do
       },
       # The person's own memory document on the plane (#55), read and saved through the
       # daemon's sign-in: the whole `text` over the `version` edited, or one `append`ed entry.
-      # `blame` adds `lines`, who wrote each line and from which session (#55).
-      "me.memory" => %{"blame" => optional(:boolean)},
+      # `blame` adds `lines`, who wrote each line and from which session (#55); `versions`
+      # the newest versions with their text.
+      "me.memory" => %{"blame" => optional(:boolean), "versions" => optional(:boolean)},
       # Where this machine's copy of the plane's memory stands, for the person's own
       # debugging: what it holds, what is in force, what each session here last read.
       "me.memory.status" => %{},
@@ -1128,6 +1129,22 @@ defmodule Troupe.Protocol.Schema do
         "mine" => optional(:boolean),
         "shared" => optional(:boolean),
         "visibility" => optional(:string)
+      },
+      # One of them with its versions, a one-time address that opens it (a version of it
+      # where one is named) on the artifacts host, one text file of a version, and a link to
+      # one of the person's own (`role` `view` or `edit`), each the plane's as it answers it.
+      "artifact.get" => %{"id" => required(:string)},
+      "artifact.open" => %{"id" => required(:string), "version" => optional(:integer)},
+      "artifact.read" => %{
+        "id" => required(:string),
+        "version" => optional(:integer),
+        "path" => optional(:string)
+      },
+      "artifact.share" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "role" => optional(:string),
+        "expires" => optional(:string)
       },
       # A first run's questions (Decision 705) — the daemon's only, like the settings
       # they write; a worker answers `method_not_found`. `answer` is the named step's

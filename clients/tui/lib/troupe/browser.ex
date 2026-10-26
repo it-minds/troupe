@@ -11,10 +11,19 @@ defmodule Troupe.Browser do
   shows the URL instead, and the person opens it on this machine.
 
   The UI reaches it through `Troupe.Client.open_url/1`, as it reaches the clipboard.
+  `config :troupe, :open_url, fun` is given the URL instead, which is how the suite opens one
+  without a browser.
   """
 
   @spec open(String.t()) :: :ok | {:error, String.t()}
   def open(url) do
+    case Application.get_env(:troupe, :open_url) do
+      fun when is_function(fun, 1) -> fun.(url)
+      _ -> start(url)
+    end
+  end
+
+  defp start(url) do
     {program, args} = command(:os.type(), url)
 
     case Troupe.OS.Process.executable(program) do

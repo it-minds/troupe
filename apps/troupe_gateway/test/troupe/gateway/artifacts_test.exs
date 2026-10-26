@@ -163,6 +163,54 @@ defmodule Troupe.Gateway.ArtifactsTest do
              Enum.find(FakePlane.calls(ctx.plane.state), &match?({"artifact.list", _}, &1))
   end
 
+  test "one artifact, the address that opens it, a file of it and a link are asked of the plane through the daemon",
+       ctx do
+    id = "art-fakefakefakefake"
+
+    for method <- ~w(artifact.get artifact.open artifact.read) do
+      assert {:error, %{message: "unavailable", data: %{"reason" => reason}}} =
+               Client.call(ctx.client, method, %{"id" => id})
+
+      assert reason =~ "not signed in to a Troupe plane"
+    end
+
+    assert {:ok, %{"linked" => true}} = link(ctx)
+
+    assert {:ok, %{"versions" => [%{"n" => 1}]}} = Client.call(ctx.client, "artifact.get", %{"id" => id})
+
+    assert {:ok, %{"url" => "https://artifacts.example.test/enter?ticket=t-2"}} =
+             Client.call(ctx.client, "artifact.open", %{"id" => id, "version" => 2})
+
+    assert {:ok, %{"text" => "# Weekly"}} =
+             Client.call(ctx.client, "artifact.read", %{"id" => id, "path" => "index.md"})
+
+    assert {:ok, %{"url" => "https://artifacts.example.test/s/tok"}} =
+             Client.call(ctx.client, "artifact.share", %{
+               "command_id" => Client.command_id(),
+               "id" => id,
+               "role" => "view"
+             })
+
+    # Only what each method takes reaches the plane.
+    calls = FakePlane.calls(ctx.plane.state)
+    assert {"artifact.share", %{"id" => ^id, "role" => "view"} = shared} = Enum.find(calls, &match?({"artifact.share", _}, &1))
+    refute Map.has_key?(shared, "command_id")
+
+    # The plane's refusal comes back as its own.
+    assert {:error, %{message: "invalid_params", data: %{"reason" => _}}} =
+             Client.call(ctx.client, "artifact.get", %{"id" => "art-nobody"})
+
+    # A client in Local only asks the plane nothing about them.
+    assert {:ok, _} = Client.call(ctx.client, "client.mode", %{"local_only" => true})
+    before = length(FakePlane.calls(ctx.plane.state))
+
+    assert {:error, %{data: %{"reason" => reason}}} =
+             Client.call(ctx.client, "artifact.open", %{"id" => id})
+
+    assert reason =~ "Local only"
+    assert length(FakePlane.calls(ctx.plane.state)) == before
+  end
+
   test "a session's agent publishes through the daemon, naming the session and itself", ctx do
     assert {:ok, %{"linked" => true}} = link(ctx)
     File.write!(Path.join(ctx.workspace, "report.md"), "# Findings")

@@ -1,6 +1,6 @@
 defmodule Troupe.MemoryFactsTUITest do
   @moduledoc """
-  `/memory` lists memory's facts (#248, root Decision 839): kind by kind, each with its
+  `/memory facts` lists memory's facts (#248, root Decision 839): kind by kind, each with its
   status, "may no longer be true" in its own colour (not the reserved one), where the
   selected fact came from beside the list, and `x` forgets it. A daemon from before facts
   answers the line `/memory` always did.
@@ -48,7 +48,7 @@ defmodule Troupe.MemoryFactsTUITest do
     File.write!(Path.join(ws, "mix.exs"), @mix <> "# moved\n")
 
     {pid, session} = start_tui(sid)
-    type(pid, "/memory")
+    type(pid, "/memory facts")
     press(pid, "enter")
 
     eventually(fn -> user_state(pid).focus == :memory end)
@@ -102,7 +102,7 @@ defmodule Troupe.MemoryFactsTUITest do
   test "/memory with no facts says how they are written" do
     {sid, _, _ws} = start_session!(workspace: git_init!(tmp_workspace()))
     {pid, session} = start_tui(sid)
-    type(pid, "/memory")
+    type(pid, "/memory facts")
     press(pid, "enter")
 
     eventually(fn -> user_state(pid).focus == :memory end)
@@ -136,7 +136,7 @@ defmodule Troupe.MemoryFactsTUITest do
     assert Client.memory_facts(sid) == :no_facts
 
     {pid, session} = start_tui(sid)
-    type(pid, "/memory")
+    type(pid, "/memory facts")
     press(pid, "enter")
 
     eventually(fn -> screen_text(pid, session) =~ "the project brief is off" end)

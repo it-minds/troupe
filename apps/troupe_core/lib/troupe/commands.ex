@@ -462,6 +462,16 @@ defmodule Troupe.Commands do
             "agent's to publish, with publish_artifact.",
         example: "/publish report.html profile:dev"
       ),
+      entry("artifacts", "workspace", "What is published for you, by who can see it",
+        usage: "/artifacts",
+        detail:
+          "Everything published for you: for everyone at your organisation, your teams, shared " <>
+            "with you through a link, and only you, newest first, a version you have not opened " <>
+            "here marked new. Enter opens one in the browser, v another version of it, m reads a " <>
+            "Markdown one here; p publishes a file of the workspace and l copies a view link to " <>
+            "one of yours.",
+        example: "/artifacts"
+      ),
       entry("copy", "workspace", "Copy a transcript to the clipboard",
         usage: "/copy [window]",
         args: [window()],
@@ -471,16 +481,16 @@ defmodule Troupe.Commands do
             "copies on release.",
         example: "/copy 2"
       ),
-      entry("memory", "workspace", "The project brief: show, refresh or forget it",
-        usage: "/memory [refresh | forget]",
+      entry("memory", "workspace", "What the troupe remembers for you, and the project brief",
+        usage: "/memory [facts | refresh | forget]",
         args: [arg("action", false, "text")],
-        availability: "local",
         detail:
-          "The brief is made of facts, each anchored on the files it was read from; its " <>
-            "commands and conventions are read into every agent's prompt. /memory lists the " <>
-            "facts by kind, says which may no longer be true and where each came from, and " <>
-            "forgets one; /memory refresh asks the librarian to re-verify and rewrite them, " <>
-            "/memory forget deletes the whole brief.",
+          "/memory lists what every new session of yours starts knowing, entry by entry: in " <>
+            "effect for each of your teams, and for everyone at your organisation, each team and " <>
+            "only you, where you add, edit and forget your own. The project brief is made of " <>
+            "facts, each anchored on the files it was read from; /memory facts lists them by " <>
+            "kind and forgets one, /memory refresh asks the librarian to re-verify and rewrite " <>
+            "them, /memory forget deletes the whole brief.",
         example: "/memory refresh"
       ),
       entry(

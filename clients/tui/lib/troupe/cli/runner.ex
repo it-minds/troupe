@@ -135,6 +135,10 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :memory} = args} ->
         Troupe.CLI.Memory.run(args)
 
+      # The person's artifacts on the plane, through this machine's daemon (root #62).
+      {:ok, %{mode: :artifacts} = args} ->
+        Troupe.CLI.Artifacts.run(args.artifacts)
+
       {:ok, %{mode: :models} = args} ->
         case models_report(args) do
           {:ok, report} ->
@@ -295,6 +299,7 @@ defmodule Troupe.CLI.Runner do
         :bench,
         :config_pull,
         :memory,
+        :artifacts,
         :update
       ]
 

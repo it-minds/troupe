@@ -173,7 +173,7 @@ defmodule Troupe.DaemonClientTest do
       {:ok, _} = Link.call("identity.get", %{})
       held = hold_link_connection()
 
-      type(pid, "/memory")
+      type(pid, "/memory facts")
       enter = Task.async(fn -> caught(fn -> press(pid, "enter") end) end)
       drop_mid_call(held)
 
@@ -181,8 +181,8 @@ defmodule Troupe.DaemonClientTest do
       eventually(fn -> screen_text(pid, session) =~ "the daemon is not reachable" end)
       assert Process.alive?(pid)
 
-      # The next command connects again, and its answer replaces the line. `/memory` alone
-      # opens a page now (root Decision 839); `/memory forget` still answers on the line.
+      # The next command connects again, and its answer replaces the line. `/memory facts`
+      # opens a page; `/memory forget` still answers on the line.
       type(pid, "/memory forget")
       press(pid, "enter")
       eventually(fn -> not (screen_text(pid, session) =~ "not reachable") end)
