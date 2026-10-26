@@ -333,13 +333,21 @@ kc rollout status -n "$namespace" deployment/troupe-operator --timeout=300s
 # A Ready plane is not yet a reachable one: the ingress controller learns the new pods'
 # endpoints a few seconds after the rollout, and the first checks ask through the ingress.
 # So wait until the plane answers there with the build under test, not merely until it is
-# up, or the 0.28.0-beta release run's 503 comes back.
-plane_url="${TROUPE_E2E_PLANE_URL:-http://plane.localtest.me:30080}"
-echo "==> waiting for ${plane_url} to answer with ${expect_commit:0:7}"
+# up, or the 0.28.0-beta release run's 503 comes back. The ingress is asked the way the
+# e2e toolbox asks it: at the node's own port 80 with the plane's host name, since the
+# host's port mapping is not there on every machine.
+node_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${cluster}-control-plane" 2>/dev/null || true)"
+if [ -n "$node_ip" ]; then
+  probe=(curl -fsS --max-time 5 -H "Host: plane.localtest.me" "http://${node_ip}/.well-known/troupe")
+else
+  probe=(curl -fsS --max-time 5 "${TROUPE_E2E_PLANE_URL:-http://plane.localtest.me:30080}/.well-known/troupe")
+fi
+echo "==> waiting for the plane to answer through the ingress with ${expect_commit:0:7}"
 deadline=$((SECONDS + 180))
-until body="$(curl -fsS --max-time 5 "${plane_url}/.well-known/troupe" 2>/dev/null)" \n  && printf '%s' "$body" | grep -q "${expect_commit:0:7}"; do
+body=""
+until body="$("${probe[@]}" 2>/dev/null || true)" && printf '%s' "$body" | grep -q "${expect_commit:0:7}"; do
   if [ "$SECONDS" -ge "$deadline" ]; then
-    echo "kind-upgrade-check: ${plane_url} did not answer with ${expect_commit:0:7} within 180 s; last answer: ${body:-none}" >&2
+    echo "kind-upgrade-check: the plane did not answer through the ingress with ${expect_commit:0:7} within 180 s; last answer: ${body:-none}" >&2
     exit 2
   fi
   sleep 3
