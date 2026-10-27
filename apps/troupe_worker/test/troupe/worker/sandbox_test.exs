@@ -130,7 +130,12 @@ defmodule Troupe.Worker.SandboxTest do
 
       refute completed["content"] =~ "the other session's commit"
       assert completed["ok"] == false
-      assert completed["content"] =~ "not a git repository"
+      # The repository the gitfile names is outside the sandbox. git 2.43 says the
+      # workspace is "not a git repository"; git 2.56, on the runner image since
+      # 2026-10-25, says the gitfile "does not point to a valid repository". Either is
+      # the refusal this test is after.
+      assert completed["content"] =~
+               ~r/not a git repository|gitfile does not point to a valid repository/
     end
   end
 
