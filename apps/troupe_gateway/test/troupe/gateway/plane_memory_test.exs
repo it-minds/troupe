@@ -349,6 +349,11 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
       # A save from a machine that had not seen version 1 is told so.
       assert {:error, %{message: "conflict", data: %{"version" => 1}}} =
                Client.call(ctx.client, "me.memory.put", %{"command_id" => Client.command_id(), "text" => "x", "version" => 0})
+
+      # The copy here, which the sessions read, says what it holds of each level, the
+      # person's own among them, without asking the plane: a memory screen under Local only.
+      assert {:ok, %{"held" => held}} = Client.call(ctx.client, "me.memory.status", %{})
+      assert %{"version" => 1, "text" => "I write British English."} = Enum.find(held, &(&1["scope"] == "user"))
     end
 
     test "remember with level me lands in the person's document and a second session reads it at its next turn",

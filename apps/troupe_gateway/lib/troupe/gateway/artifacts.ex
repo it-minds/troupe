@@ -92,6 +92,8 @@ defmodule Troupe.Gateway.Artifacts do
   @forwarded %{
     "artifact.get" => ~w(id),
     "artifact.open" => ~w(id version),
+    # One text file of a version, for the terminal's frame.
+    "artifact.read" => ~w(id version path),
     "artifact.share" => ~w(id role expires),
     "artifact.unshare" => ~w(id share person),
     "artifact.rollback" => ~w(id version),

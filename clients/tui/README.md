@@ -148,6 +148,8 @@ What the screen shows once a session is open, and its keys and pages, are on
 - <a id="settings-page"></a>[Settings page](../../docs/user/terminal-screen.md#settings-page): every setting, its value and the file it came from.
 - <a id="watch-mode"></a>[Watch mode](../../docs/user/terminal-screen.md#watch-mode): `AI!`, `AI?` and `AI` comments in saved files.
 - <a id="agents"></a>[Agents](../../docs/user/terminal-screen.md#agents): the agent picker, and editing, copying and making agents.
+- <a id="artifacts"></a>[Artifacts](../../docs/user/terminal-screen.md#artifacts): what is published for you, by who can see it, opened in the browser or read here.
+- <a id="memory"></a>[Memory](../../docs/user/terminal-screen.md#memory): what every new session of yours starts knowing, entry by entry, and your own to change.
 
 ## Remote sessions
 

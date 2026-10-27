@@ -1148,6 +1148,12 @@ defmodule Troupe.Protocol.Schema do
       # `share` or `person`; a rollback to `version`; a pin of `version`, null for the newest.
       "artifact.get" => %{"id" => required(:string)},
       "artifact.open" => %{"id" => required(:string), "version" => optional(:integer)},
+      # One text file of a version (its entry where no path is named), for the terminal's frame.
+      "artifact.read" => %{
+        "id" => required(:string),
+        "version" => optional(:integer),
+        "path" => optional(:string)
+      },
       "artifact.share" => %{
         "command_id" => required(:string),
         "id" => required(:string),
