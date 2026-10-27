@@ -56,7 +56,7 @@ defmodule Troupe.Bench.Runner do
   end
 
   # What a host installs that changes the tools a session is offered, or how one reads.
-  @hosts [:artifacts, :user_memory]
+  @hosts [:artifacts, :artifacts_ready, :user_memory]
 
   @doc """
   Run `fun` with none of the hosts that change a session's tools installed, putting back

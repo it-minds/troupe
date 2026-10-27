@@ -152,7 +152,13 @@ defmodule Troupe.Config.Schema do
       ),
       spec("oauth", {:object, oauth_entry()}, "A server over HTTP that wants you signed in: how to sign in."),
       spec("permission", {:enum, ~w(ask auto)}, "`auto` runs its tools without asking.", default: "ask"),
-      spec("timeout_ms", {:integer, 1}, "How long one call may take.", default: 30_000)
+      spec("timeout_ms", {:integer, 1}, "How long one call may take.", default: 30_000),
+      spec(
+        "stores",
+        {:enum, ~w(files)},
+        "`files`: the server is where your organisation keeps files, which an agent puts a file you ask for in first."
+      ),
+      spec("files", {:list, :string}, "With `stores: files`, the tools that store a file. Unset: all of them.")
     ]
   end
 

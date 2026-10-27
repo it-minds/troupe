@@ -152,8 +152,11 @@ defmodule Troupe.CommandPaletteTest do
     {pid, _session} = start_tui(sid)
     eventually(fn -> user_state(pid).commands != [] end)
 
-    assert %{"availability" => "plane"} = Enum.find(user_state(pid).commands, &(&1["name"] == "artifacts"))
-    assert %{"availability" => "plane"} = Enum.find(user_state(pid).commands, &(&1["name"] == "publish"))
+    assert %{"availability" => "plane"} =
+             Enum.find(user_state(pid).commands, &(&1["name"] == "artifacts"))
+
+    assert %{"availability" => "plane"} =
+             Enum.find(user_state(pid).commands, &(&1["name"] == "publish"))
 
     press(pid, "/")
     type(pid, "artifacts")

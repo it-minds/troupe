@@ -20,7 +20,8 @@ defmodule Troupe.Tools.Remember do
 
   `level: "me"` writes to the person's own memory on the plane instead (#55): the one level
   above the repository an agent may write, and only by adding one entry, which the plane
-  puts under the day's heading below what is there (`Troupe.UserMemory`). The model names no
+  puts at the end of its `topic`'s `## <topic>` section, `Notes` where none is named, below
+  what is there (`Troupe.UserMemory`). The model names no
   path and no document there either, only the sentence; the organisation's, a team's and a
   profile's memory have no level here at all. Signed out, or with no plane, it is refused
   with a sentence that offers the repository's memory.
@@ -66,7 +67,7 @@ defmodule Troupe.Tools.Remember do
     if UserMemory.reachable?(),
       do:
         description() <>
-          "\n\n`level`: `repository` (the default), or `me` for the person's own memory, which every session of theirs reads on every machine: how they like to work, not facts about this code. With `me`, give only `claim`; it is added as one entry.",
+          "\n\n`level`: `repository` (the default), or `me` for the person's own memory, which every session of theirs reads on every machine: how they like to work, not facts about this code. With `me`, give only `claim` and a `topic` (a short heading such as `Tone`; `Notes` if none); it is added as one entry under it.",
       else: description()
   end
 
@@ -80,7 +81,8 @@ defmodule Troupe.Tools.Remember do
         "anchors" => %{"type" => "array", "items" => %{"type" => "string"}},
         "scope" => %{"type" => "string", "description" => "A glob; none is the whole repository."},
         "replaces" => %{"type" => "string"},
-        "level" => %{"enum" => @levels}
+        "level" => %{"enum" => @levels},
+        "topic" => %{"type" => "string"}
       }
     }
   end
@@ -144,12 +146,14 @@ defmodule Troupe.Tools.Remember do
   defp remember_for_person(args, ctx) do
     with :ok <- only_claim(args),
          :ok <- not_the_librarian(ctx),
-         {:ok, claim} <- claim(args) do
-      case UserMemory.append(claim, ctx) do
+         {:ok, claim} <- claim(args),
+         {:ok, topic} <- topic(args) do
+      case UserMemory.append(claim, ctx, topic) do
         {:ok, saved} ->
           {:ok,
-           "remembered in the person's own memory on the plane, version #{saved["version"]}: " <>
-             "\"#{saved["entry"] || claim}\". Every session of theirs reads it from its next turn"}
+           "remembered in the person's own memory on the plane, version #{saved["version"]}, " <>
+             "under #{saved["topic"] || topic || "Notes"}: \"#{saved["entry"] || claim}\". " <>
+             "Every session of theirs reads it from its next turn"}
 
         {:error, :signed_out} ->
           {:error,
@@ -160,6 +164,15 @@ defmodule Troupe.Tools.Remember do
         {:error, reason} ->
           {:error, "not remembered in the person's own memory: #{reason_text(reason)}"}
       end
+    end
+  end
+
+  # The `## <topic>` section of theirs the entry goes under; none is the plane's `Notes`.
+  defp topic(args) do
+    case Map.get(args, "topic") do
+      nil -> {:ok, nil}
+      topic when is_binary(topic) -> {:ok, if(String.trim(topic) == "", do: nil, else: String.trim(topic))}
+      _other -> {:error, "topic is the heading the entry goes under, as text; nothing was written"}
     end
   end
 

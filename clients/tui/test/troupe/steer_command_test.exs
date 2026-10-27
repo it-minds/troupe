@@ -51,7 +51,9 @@ defmodule Troupe.SteerCommandTest do
     type(pid, "/steer on")
     press(pid, "enter")
     # The daemon's own words, from its refusal's data: the terminal keeps no copy of them.
-    asked = Relay.private_consent() <> " /steer on yes offers it; anything else keeps it sealed only."
+    asked =
+      Relay.private_consent() <> " /steer on yes offers it; anything else keeps it sealed only."
+
     eventually(fn -> List.first(user_state(pid).model.notices) == asked end)
     assert Steering.consent_question(Relay.private_consent()) == asked
 

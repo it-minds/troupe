@@ -55,6 +55,31 @@ transport: `initialize` before the first call, and the session the server hands 
 it keeps one, carried on every call after, opened again once if the server has forgotten
 it, and ended when the Troupe session ends.
 
+### Where your organisation keeps files
+
+A server that stores files for your organisation (a SharePoint, a document space) says so
+with `"stores": "files"`, and `"files"` names which of its tools save one, all of them
+when it is left out:
+
+```json
+{
+  "mcpServers": {
+    "docs": {
+      "url": "https://mcp.example.com/mcp",
+      "oauth": {},
+      "stores": "files",
+      "files": ["upload_document"]
+    }
+  }
+}
+```
+
+An agent asked for a file puts it there first, before an [artifact](artifacts.md) or the
+workspace ([where a file goes](README.md#where-a-file-goes)); every session's prompt names
+the tools so marked. Nothing is read from a tool's name: a server without `stores` is not
+where files go, whatever its tools are called. The same two keys work in `config.yaml`'s
+`mcp:`, and a server you offer to a pod's session carries the marking with its tools.
+
 ### The layers, and the /mcp page
 
 The layers stack as the config files do: the workspace's file over yours over

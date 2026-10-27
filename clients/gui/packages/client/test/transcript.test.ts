@@ -62,6 +62,25 @@ describe("the transcript fold", () => {
     assert.equal(state.costMicros, 250);
   });
 
+  // A file the agent made for the person (troupe #765): a line of its own, with what the app
+  // needs to read it back and save it, and where it already is on a session on this machine.
+  it("draws a file_ready as a file line with its path, and where it is on this machine", () => {
+    seq = 0;
+    const state = foldAll([
+      durable("file_ready", { path: "out/report.md", size: 5, hash: "sha256:ab" }),
+      durable("file_ready", { path: "q3.csv", size: 2, hash: "sha256:cd", local_path: "/home/ada/repo/q3.csv" }),
+      durable("file_ready", { size: 1 }),
+    ]);
+
+    assert.deepEqual(
+      state.entries.map((e) => (e.kind === "file" ? [e.path, e.size, e.hash, e.localPath ?? null] : e.kind)),
+      [
+        ["out/report.md", 5, "sha256:ab", null],
+        ["q3.csv", 2, "sha256:cd", "/home/ada/repo/q3.csv"],
+      ],
+    );
+  });
+
   // A brief and a finish have parts (troupe Decision 847), which a client shows under their
   // names; a delegation from before briefs had them has its task alone.
   it("keeps a delegation's brief as its parts, in order, and reads a finish's the same way", () => {

@@ -860,7 +860,8 @@ defmodule Troupe.Client.Daemon do
         {:ok, _older} ->
           {:error, "this daemon does not offer sessions to the plane: update it"}
 
-        {:error, %{data: %{"consent" => "private", "reason" => sentence}}} when is_binary(sentence) ->
+        {:error, %{data: %{"consent" => "private", "reason" => sentence}}}
+        when is_binary(sentence) ->
           {:ok, Troupe.Client.Steering.consent_question(sentence)}
 
         # The daemon's sentence, as `Link.call/2` would have answered it.
@@ -1266,14 +1267,6 @@ defmodule Troupe.Client.Daemon do
   @doc "Who this computer's daemon records its sessions as: `identity.get`'s answer."
   @spec identity() :: {:ok, map()} | {:error, term()}
   def identity, do: Link.call("identity.get", %{})
-
-  @doc """
-  Publish an artifact on the plane as this daemon's person (`artifact.publish`, root #62):
-  the plane's answer, its `url` among it, or the daemon's sentence where it is signed out.
-  """
-  @spec publish_artifact(map()) :: {:ok, map()} | {:error, term()}
-  def publish_artifact(params),
-    do: Link.call("artifact.publish", Map.put(params, "command_id", Troupe.Remote.RPC.command_id()))
 
   @doc """
   Unlink this computer's daemon (`identity.unlink`), answering who it was linked to. The

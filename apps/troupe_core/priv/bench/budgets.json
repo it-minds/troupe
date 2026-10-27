@@ -1,15 +1,15 @@
 {
   "$comment": {
-    "tool_calls": "The tool set is pinned: the bench sets aside the hosts a daemon or a pod installs (Troupe.Artifacts, which offers publish_artifact, and Troupe.UserMemory, which gives remember its level) while a scenario runs, so the umbrella's mix troupe.bench, the TUI's suite and an installed troupe measure the same numbers. Measured on the 0.29.0 chunk (2026-10-27), each of the four prompt budgets is about 5% over: tool definitions 14787 bytes (15550), the first prompt 16612 (17450), the largest prompt 32109 (33750), the turn's input tokens 189998 (199500)."
+    "tool_calls": "The tool set is pinned: the bench sets aside the hosts a daemon or a pod installs (Troupe.Artifacts, which offers publish_artifact, and Troupe.UserMemory, which gives remember its level) while a scenario runs, so the umbrella's mix troupe.bench, the TUI's suite and an installed troupe measure the same numbers. On 0.29.0 every root's instructions begin with the harness's word on where a file goes (Decision 956) and write_file has deliverable. Measured on the 0.29.0 chunk's tip (2026-10-27), each of the four prompt budgets is about 5% over: tool definitions 14900 bytes (15650), the first prompt 17796 (18700), the largest prompt 33293 (35000), the turn's input tokens 199174 (209200)."
   },
   "tool_calls": {
     "model_calls": 31,
     "system_prompt_bytes": 1750,
-    "tool_definition_bytes": 15550,
-    "first_prompt_bytes": 17450,
-    "largest_prompt_bytes": 33750,
+    "tool_definition_bytes": 15650,
+    "first_prompt_bytes": 18700,
+    "largest_prompt_bytes": 35000,
     "growth_per_call_bytes": 550,
-    "turn_input_tokens": 199500,
+    "turn_input_tokens": 209200,
     "events_per_turn": 170
   },
   "cut_output": {

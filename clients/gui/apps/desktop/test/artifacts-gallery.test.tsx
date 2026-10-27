@@ -64,10 +64,10 @@ beforeEach(async () => {
   daemon = new FakeDaemon({ osUser: "alice" });
   await daemon.start();
   daemon.artifacts = [
-    row({ id: "art-weekly", title: "Weekly figures", published_at: now }),
-    row({ id: "art-core", title: "Core runbook", visibility: "profile:dev", published_at: lastWeek, version: 3, current: 3 }),
-    row({ id: "art-link", title: "Field interviews", visibility: "profile:research", shared: true, role: "view", published_at: longAgo }),
-    row({ id: "art-mine", title: "My notes", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, may_delete: true }),
+    row({ id: "art-weekly", title: "Weekly figures", scope: "organisation", published_at: now }),
+    row({ id: "art-core", title: "Core runbook", visibility: "profile:dev", scope: "profile:dev", published_at: lastWeek, version: 3, current: 3 }),
+    row({ id: "art-link", title: "Field interviews", visibility: "profile:research", scope: "shared", shared: true, role: "view", published_at: longAgo }),
+    row({ id: "art-mine", title: "My notes", scope: "mine", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, may_delete: true }),
   ];
   location.hash = `#daemon=${daemon.port}:${daemon.token}`;
 });
@@ -117,7 +117,7 @@ describe("the gallery", () => {
     expect(chip("All").textContent).toContain("4");
     expect(chip("Everyone").textContent).toContain("2");
     expect(chip("Your teams").textContent).toContain("1");
-    // A link's, read off the `shared` listing while the plane says no `scope` per row.
+    // A link's, as the plane says per row (`scope` `shared`).
     expect(chip("Shared with you").textContent).toContain("1");
 
     chip("Your teams").click();

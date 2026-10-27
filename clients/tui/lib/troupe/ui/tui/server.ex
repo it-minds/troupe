@@ -61,6 +61,7 @@ defmodule Troupe.UI.TUI.Server do
           agents: [String.t()],
           agent_rows: %{optional(String.t()) => map()},
           plane_linked: boolean() | nil,
+          plane_linked_at: integer() | nil,
           agents_page: Agents.page() | nil,
           switcher: AgentChooser.t() | nil,
           commands: [Client.command()],
@@ -246,6 +247,7 @@ defmodule Troupe.UI.TUI.Server do
     :ok = Client.subscribe(sid)
     :ok = Client.subscribe_settings()
     model = rebuild(sid)
+    ask_plane_link()
     # `troupe --prompt TEXT`: the command line opens holding it, the cursor after it, and
     # nothing is sent until Enter (Decision 150).
     prompt = Keyword.get(opts, :prompt) || ""
@@ -271,9 +273,11 @@ defmodule Troupe.UI.TUI.Server do
       # `agents.list`'s rows by name, for the palette's agent rows (TUI Decision 156): read
       # when the palette first opens, not before the first frame.
       agent_rows: %{},
-      # Whether this computer's daemon is signed in to a plane, as it last said: asked each
-      # time the palette opens, for the commands that need one; `nil` until it has answered.
+      # Whether this computer's daemon is signed in to a plane, as it last said, for the
+      # palette's commands that need one: asked as the screen opens, and again as the palette
+      # opens once the answer is a minute old; `nil` until it has answered.
       plane_linked: nil,
+      plane_linked_at: nil,
       agents_page: nil,
       # The one agent picker: Ctrl-N's and Tab's.
       switcher: nil,
@@ -480,9 +484,17 @@ defmodule Troupe.UI.TUI.Server do
 
   def handle_info({:agent_rows, _sid, _rows}, state), do: {:noreply, state, render?: false}
 
-  # Whether the daemon is signed in to a plane, asked as the palette opened.
-  def handle_info({:plane_linked, linked?}, state),
-    do: {:noreply, schedule_tick(%{state | plane_linked: linked?, dirty: true}), render?: false}
+  # Whether the daemon is signed in to a plane, asked as the screen or the palette opened.
+  def handle_info({:plane_linked, linked?}, state) do
+    state = %{
+      state
+      | plane_linked: linked?,
+        plane_linked_at: System.monotonic_time(:millisecond),
+        dirty: true
+    }
+
+    {:noreply, schedule_tick(state), render?: false}
+  end
 
   def handle_info(:repainted, state), do: {:noreply, %{state | repaint: false}, render?: true}
 
@@ -1063,7 +1075,8 @@ defmodule Troupe.UI.TUI.Server do
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
   @builtins ~w(new cancel dismiss merge discard goal loop steer invite uninvite sessions back hq observer files
-               scratch upload publish artifacts copy memory context watch settings models mcp skills help
+               scratch upload save publish artifacts copy memory context watch settings models mcp
+               skills help
                agents worktree workflow detail unlink quit)
 
   @doc false
@@ -1463,6 +1476,9 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("upload", args, state, _target),
     do: notice_of(upload(state.session_id, String.trim(args)))
 
+  defp builtin("save", args, state, _target),
+    do: notice_of(save(state.session_id, String.trim(args)))
+
   defp builtin("publish", args, state, _target),
     do: notice_of(publish(state.session_id, String.trim(args)))
 
@@ -1551,8 +1567,9 @@ defmodule Troupe.UI.TUI.Server do
     # The agent rows' badges are asked for the first time the palette opens, off the
     # screen's process: a daemon slow to answer never holds the palette (TUI Decision 156).
     if state.agent_rows == %{}, do: ask_agent_rows(state.session_id)
-    # And whether the daemon has a plane, which a sign-in or a sign-out elsewhere changes.
-    ask_plane_link()
+    # And whether the daemon has a plane, asked again where the answer is a minute old: a
+    # sign-in or a sign-out elsewhere changes it.
+    if stale_plane_link?(state), do: ask_plane_link()
 
     %{
       state
@@ -1731,9 +1748,9 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # Read, titled and kinded as `troupe artifacts` and the gallery's `p` do it
-  # (`Troupe.Client.Artifacts.publish/3`), named as coming from this session.
+  # (`Client.publish_file/3`), named as coming from this session.
   defp publish(sid, path, visibility) do
-    case Troupe.Client.Artifacts.publish(path, visibility, session_id: sid) do
+    case Client.publish_file(path, visibility, session_id: sid) do
       {:ok, artifact} ->
         {:ok,
          "published #{path} as #{artifact["id"]} version #{artifact["version"]}" <>
@@ -1761,6 +1778,35 @@ defmodule Troupe.UI.TUI.Server do
     else
       {:error, reason} when is_atom(reason) -> {:error, "#{path}: #{:file.format_error(reason)}"}
       {:error, reason} -> {:error, "#{path} not uploaded: #{to_message(reason)}"}
+    end
+  end
+
+  # `/save <path> [to]` is `/upload` the other way: a file of the session's workspace, read
+  # with `fs.read` wherever the session runs, written on this machine at `to` (a directory
+  # takes the file's name), or under its own name in the directory the TUI started in.
+  # What a pod session's `file_ready` offers.
+  defp save(_sid, ""), do: {:error, "usage: /save <path> [to]"}
+
+  defp save(sid, args) do
+    {path, to} = split_first(args)
+    name = Path.basename(path)
+
+    local =
+      case String.trim(to) do
+        "" -> Path.expand(name)
+        to -> to |> Path.expand() |> then(&if(File.dir?(&1), do: Path.join(&1, name), else: &1))
+      end
+
+    with {:ok, content} <- Client.fs_read(sid, path),
+         :ok <- File.mkdir_p(Path.dirname(local)),
+         :ok <- File.write(local, content) do
+      {:ok, "saved #{path} to #{local}"}
+    else
+      {:error, reason} when is_atom(reason) ->
+        {:error, "#{path} not saved: #{:file.format_error(reason)}"}
+
+      {:error, reason} ->
+        {:error, "#{path} not saved: #{to_message(reason)}"}
     end
   end
 
@@ -2851,6 +2897,11 @@ defmodule Troupe.UI.TUI.Server do
     {:ok, _task} = Task.start(fn -> send(server, {:agent_rows, sid, agent_rows(sid)}) end)
     :ok
   end
+
+  defp stale_plane_link?(%{plane_linked_at: nil}), do: true
+
+  defp stale_plane_link?(%{plane_linked_at: at}),
+    do: System.monotonic_time(:millisecond) - at > :timer.minutes(1)
 
   # Off the screen's process, as the agent rows are: a daemon slow to answer holds nothing.
   defp ask_plane_link do

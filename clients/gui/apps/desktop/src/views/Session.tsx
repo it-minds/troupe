@@ -43,6 +43,7 @@ import { useSessionView, useStartQuestions } from "../hooks";
 import type { SessionHandle } from "../hooks";
 import { curtainLine, DEFAULT_DETAIL, isDetail, layout } from "../frames";
 import type { Detail, Drawn } from "../frames";
+import { saveFile } from "../shell";
 import { AgentSwitch } from "./AgentSwitch";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
 import { AnswerRecord, QuestionPanel } from "./Question";
@@ -154,6 +155,23 @@ export function Session({
   // How much of each turn is open: the config ladder's `transcript.detail`, unless `/detail`
   // chose for this session (troupe #474).
   const detail = useDetail(daemon, workspace, sessionId);
+  // A file the agent made, saved on this computer: its bytes read with `fs.read` from
+  // wherever the session runs (a pod's workspace as a local checkout), then the system's
+  // save dialog. What happened, in a line for the transcript to say beside it.
+  const sessionView = view.view;
+  const saveReady = useCallback(
+    async (path: string): Promise<string> => {
+      if (!sessionView) return "not saved: the session is not open yet";
+      try {
+        const file = await sessionView.fsRead(path);
+        const where = await saveFile(path.split("/").pop() || path, file.content);
+        return where ? `saved to ${where}` : "not saved";
+      } catch (e) {
+        return `not saved: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+    [sessionView],
+  );
 
   // Ctrl-K (⌘K on a Mac) opens the command palette from anywhere on the screen, from the
   // moment it is drawn: a layout effect, since a passive one runs a while after the screen
@@ -255,6 +273,7 @@ export function Session({
             readBlob={view.readBlob}
             onSetup={onGo ? () => onGo("setup") : undefined}
             onScratch={setScratch}
+            onSave={saveReady}
           />
 
           {/* Sticky, so scrolling up to read the context never loses the decision. */}
@@ -713,6 +732,7 @@ function Stream({
   readBlob,
   onSetup,
   onScratch,
+  onSave,
 }: {
   state: TranscriptState;
   /** This app's own lines, each after the event it was said at. */
@@ -727,6 +747,8 @@ function Stream({
   onSetup?: (() => void) | undefined;
   /** Open the scratchpad on a document, by name. */
   onScratch: (name: string) => void;
+  /** Save a file the agent made, by its path in the session's workspace: what was said of it. */
+  onSave: (path: string) => Promise<string>;
 }): JSX.Element {
   // The turns a click on their strip opened (or shut, at `everything`), by key. Another
   // level draws every turn again, all of them as it says.
@@ -760,7 +782,9 @@ function Stream({
       {drawn.map((d, i) => (
         <Fragment key={`${d.entry.kind}-${d.entry.seq}`}>
           {d.strip && <StripLine strip={d.strip} onToggle={() => toggle(d.turn)} />}
-          {!d.hidden && <StreamEntry drawn={d} self={self} local={local} readBlob={readBlob} onSetup={onSetup} onScratch={onScratch} />}
+          {!d.hidden && (
+            <StreamEntry drawn={d} self={self} local={local} readBlob={readBlob} onSetup={onSetup} onScratch={onScratch} onSave={onSave} />
+          )}
           <NotesAt notes={notes} from={d.entry.seq} to={drawn[i + 1]?.entry.seq ?? Infinity} />
         </Fragment>
       ))}
@@ -799,6 +823,33 @@ function Stream({
   );
 }
 
+/**
+ * A file the agent made for the person (troupe #765): its path, where it already is when the
+ * session runs on this computer, and a Save… that reads it with `fs.read` from wherever the
+ * session runs and puts it where the person chooses. What happened is said on the line.
+ */
+function FileReady({ entry, onSave }: { entry: Extract<Entry, { kind: "file" }>; onSave: (path: string) => Promise<string> }): JSX.Element {
+  const [said, setSaid] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const save = async (): Promise<void> => {
+    setSaving(true);
+    try {
+      setSaid(await onSave(entry.path));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <p className="note file-ready">
+      File ready: <code>{entry.localPath ?? entry.path}</code>{" "}
+      <button className="link" disabled={saving} onClick={() => void save()}>
+        Save…
+      </button>
+      {said && <span className="micro muted"> {said}</span>}
+    </p>
+  );
+}
+
 /** This app's lines said at or after `from` and before `to`. */
 function NotesAt({ notes, from, to }: { notes: Note[]; from: number; to: number }): JSX.Element | null {
   const here = notes.filter((n) => n.after >= from && n.after < to);
@@ -822,6 +873,7 @@ type EntryProps = {
   readBlob: (blob: string) => Promise<string>;
   onSetup?: (() => void) | undefined;
   onScratch: (name: string) => void;
+  onSave: (path: string) => Promise<string>;
 };
 
 /**
@@ -837,7 +889,8 @@ function sameEntry(a: EntryProps, b: EntryProps): boolean {
     a.local === b.local &&
     a.readBlob === b.readBlob &&
     a.onSetup === b.onSetup &&
-    a.onScratch === b.onScratch
+    a.onScratch === b.onScratch &&
+    a.onSave === b.onSave
   );
 }
 
@@ -848,6 +901,7 @@ const StreamEntry = memo(function StreamEntry({
   readBlob,
   onSetup,
   onScratch,
+  onSave,
 }: EntryProps): JSX.Element | null {
   const { entry, level } = drawn;
   switch (entry.kind) {
@@ -890,6 +944,9 @@ const StreamEntry = memo(function StreamEntry({
 
     case "scratch":
       return <ScratchCard entry={entry} onOpen={onScratch} />;
+
+    case "file":
+      return <FileReady entry={entry} onSave={onSave} />;
 
     // A subagent's first message is the brief it was handed: from the agent that delegated,
     // never a person's turn, its parts under their names (troupe Decision 852). A brief

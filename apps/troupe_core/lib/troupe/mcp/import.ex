@@ -178,6 +178,8 @@ defmodule Troupe.MCP.Import do
           "oauth" => oauth,
           "permission" => permission(raw),
           "timeout_ms" => timeout(raw),
+          "stores" => stores(raw),
+          "files" => file_tools(raw),
           "disabled" => raw["disabled"] == true
         }
         |> Map.reject(fn {key, value} -> empty?(key, value) end)
@@ -533,6 +535,16 @@ defmodule Troupe.MCP.Import do
 
   defp timeout(%{"timeout_ms" => ms}) when is_integer(ms) and ms > 0, do: ms
   defp timeout(_raw), do: nil
+
+  # Where the organisation keeps files, declared (`stores: files`), and which of the
+  # server's tools do it (`files`, by name; none named is all of them).
+  defp stores(%{"stores" => "files"}), do: "files"
+  defp stores(_raw), do: nil
+
+  defp file_tools(%{"stores" => "files", "files" => names}) when is_list(names),
+    do: Enum.filter(names, &is_binary/1)
+
+  defp file_tools(_raw), do: nil
 
   defp warnings(name, raw, _entry) do
     # Claude Code's command that prints headers when a server is connected.

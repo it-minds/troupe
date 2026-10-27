@@ -65,11 +65,15 @@ defmodule Troupe.Worker.UserMemoryTest do
     [pod] = Fleet.list_workers("dev")
     {:ok, _} = PlaneSessions.place(context.session_id, pod)
 
-    assert {:ok, %{"entry" => "Prefers small pull requests.", "version" => 2}} =
+    assert {:ok, %{"entry" => "Prefers small pull requests.", "topic" => "Notes", "version" => 2}} =
              UserMemory.append("Prefers small pull requests.", %{session_id: context.session_id})
 
-    assert Memory.current(ada).text =~
-             ~r/\ACall me Ada\.\n\n## \d{4}-\d{2}-\d{2}\n\n- Prefers small pull requests\.\z/
+    # Under the topic the agent named, as the plane keeps topics.
+    assert {:ok, %{"topic" => "Reviews", "version" => 3}} =
+             UserMemory.append("Mornings only.", %{session_id: context.session_id}, "Reviews")
+
+    assert Memory.current(ada).text ==
+             "Call me Ada.\n\n## Notes\n\n- Prefers small pull requests.\n\n## Reviews\n\n- Mornings only."
 
     assert Memory.current(bo) == nil
 

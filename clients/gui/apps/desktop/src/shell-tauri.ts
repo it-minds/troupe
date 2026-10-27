@@ -96,6 +96,12 @@ async function openArtifactWindow(url: string, title: string, key: string): Prom
   await invoke("artifact_window_open", { url, title, key });
 }
 
+/** A file saved where the person chose in the system's dialog: `file_save`, a command of ours that writes only that path. */
+async function saveFile(name: string, content: string): Promise<string | null> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return (await invoke<string | null>("file_save", { name, content })) ?? null;
+}
+
 async function pickDirectory(): Promise<string | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const chosen = await open({ directory: true, multiple: false, title: "Choose a workspace" });
@@ -211,6 +217,7 @@ export async function installShell(): Promise<void> {
     pickDirectory,
     openAgentFile,
     openArtifactWindow,
+    saveFile,
     notifications: notifications(),
     updater: updater(),
   };

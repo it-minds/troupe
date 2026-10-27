@@ -33,6 +33,8 @@ defmodule Troupe.UI.TUI.MemoryPage do
     %{
       local_only: Client.local_only?(),
       levels: [],
+      effect: [],
+      organisation: nil,
       plane_url: nil,
       error: nil,
       tab: 0,
@@ -46,9 +48,10 @@ defmodule Troupe.UI.TUI.MemoryPage do
 
   @doc "Reads every level again: a save here or elsewhere, or an agent's entry, is on it."
   @spec load(t()) :: t()
+  # Under Local only, from this machine's copy, what is in effect as the sessions here read it.
   def load(%{local_only: true} = page) do
     case Client.memory_status() do
-      {:ok, %{held: held}} -> loaded(page, held, nil)
+      {:ok, %{held: held, in_effect: effect}} -> loaded(page, held, nil, {:copy, effect})
       {:error, reason} -> %{page | error: reason}
     end
   end
@@ -60,17 +63,18 @@ defmodule Troupe.UI.TUI.MemoryPage do
           Enum.reject(Elixir.List.wrap(own["documents"]), &(&1["scope"] == "user")) ++
             [
               %{"scope" => "user"}
-              |> Map.merge(Map.take(own, ~w(version text changed_by changed_at)))
+              |> Map.merge(Map.take(own, ~w(version text changed_by changed_at entries)))
             ]
 
-        loaded(page, documents, own["plane_url"])
+        page = %{page | organisation: get_in(own, ["organisation", "name"])}
+        loaded(page, documents, own["plane_url"], :ask)
 
       {:error, reason} ->
         %{page | levels: [], error: reason}
     end
   end
 
-  defp loaded(page, documents, url) do
+  defp loaded(page, documents, url, effect) do
     levels = Client.memory_levels(documents)
     teams = Enum.filter(levels, &(&1.rank == 1))
 
@@ -79,19 +83,28 @@ defmodule Troupe.UI.TUI.MemoryPage do
         do: page.team,
         else: teams |> Elixir.List.first() |> then(&(&1 && &1.id))
 
-    %{
-      page
-      | levels: levels,
-        plane_url: url,
-        error: nil,
-        team: team,
-        cursor: min(page.cursor, max(length(rows(%{page | levels: levels, team: team})) - 1, 0))
-    }
+    page = %{page | levels: levels, plane_url: url, error: nil, team: team}
+    page = in_effect(page, effect)
+    %{page | cursor: min(page.cursor, max(length(rows(page)) - 1, 0))}
+  end
+
+  # What is in effect, as the plane works it out for the team chosen, or as the copy here has it.
+  defp in_effect(page, {:copy, effect}),
+    do: %{page | effect: Client.memory_effect_rows(effect, page.levels)}
+
+  defp in_effect(page, _ask) do
+    case Client.memory_in_effect(page.levels, page.team) do
+      {:ok, rows} ->
+        %{page | effect: rows}
+
+      {:error, reason} ->
+        %{page | effect: [], status: "what is in effect could not be read: #{reason}"}
+    end
   end
 
   @doc "What the tab shows, as rows: an entry of a level, or a topic in effect."
   @spec rows(t()) :: [map()]
-  def rows(%{tab: 0} = page), do: Client.memory_in_effect(page.levels, page.team)
+  def rows(%{tab: 0} = page), do: page.effect
 
   def rows(page) do
     case level(page) do
@@ -153,7 +166,9 @@ defmodule Troupe.UI.TUI.MemoryPage do
   defp list_key(%{tab: 0} = page, %{code: "t"}) do
     teams = page.levels |> Enum.filter(&(&1.rank == 1)) |> Enum.map(& &1.id)
     index = Enum.find_index(teams, &(&1 == page.team)) || -1
-    {:ok, %{page | team: Enum.at(teams, rem(index + 1, max(length(teams), 1))), cursor: 0}}
+    page = %{page | team: Enum.at(teams, rem(index + 1, max(length(teams), 1))), cursor: 0}
+    # The copy here reads every team at once; the plane is asked for the team chosen.
+    {:ok, if(page.local_only, do: page, else: in_effect(page, :ask))}
   end
 
   defp list_key(page, %{code: "enter"}) do
@@ -356,7 +371,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
 
   defp save_entry(page, topic, words, was) do
     level = own(page)
-    save(page, Client.memory_put_entry(level.text, topic, words, was), "Saved “#{topic}”.")
+    save(page, Client.memory_put_entry(level.entries, topic, words, was), "Saved “#{topic}”.")
   end
 
   defp forget(page, %{entry: entry}) do
@@ -364,14 +379,21 @@ defmodule Troupe.UI.TUI.MemoryPage do
 
     save(
       %{page | mode: :list},
-      Client.memory_forget_entry(level.text, entry.topic),
+      Client.memory_forget_entry(level.entries, entry.topic),
       "Forgotten. New sessions will not start with “#{entry.topic}”."
     )
   end
 
-  # A save names the version it was made on; one saved elsewhere first is shown beside it.
-  defp save(page, text, said),
-    do: saved(page, Client.save_own_memory(text, own(page).version), said, text)
+  # A save sends the level's entries over the version it was read at, which the plane writes
+  # as sections; one saved elsewhere first is shown beside the text these would have been.
+  defp save(page, entries, said),
+    do:
+      saved(
+        page,
+        Client.save_own_memory_entries(entries, own(page).version),
+        said,
+        Client.memory_text(entries)
+      )
 
   # A rollback carries no text of the person's: its conflict shows the version saved since.
   defp saved(page, result, said, text) do
@@ -508,7 +530,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
     labels =
       ["In effect"] ++
         Enum.map(page.levels, fn level ->
-          {glyph, name} = glyph_name(level)
+          {glyph, name} = glyph_name(level, page.organisation)
           read = if editable?(page, level), do: "", else: " · read"
           "#{glyph} #{name} #{length(level.entries)}#{read}"
         end)
@@ -523,11 +545,12 @@ defmodule Troupe.UI.TUI.MemoryPage do
     |> Line.new()
   end
 
-  defp glyph_name(%{scope: "organisation"}), do: {"◉", "Everyone at your organisation"}
-  defp glyph_name(%{scope: "user"}), do: {"○", "Only you"}
-  defp glyph_name(%{name: name}), do: {"◎", name}
+  defp glyph_name(%{scope: "organisation"}, nil), do: {"◉", "Everyone at your organisation"}
+  defp glyph_name(%{scope: "organisation"}, name), do: {"◉", "Everyone at #{name}"}
+  defp glyph_name(%{scope: "user"}, _name), do: {"○", "Only you"}
+  defp glyph_name(%{name: name}, _name), do: {"◎", name}
 
-  defp title(_page, level), do: level |> glyph_name() |> elem(1)
+  defp title(page, level), do: level |> glyph_name(page && page[:organisation]) |> elem(1)
 
   defp lock(%{scope: "organisation"}), do: "platform administrators keep it, in the console"
   defp lock(%{name: name}), do: "#{name}'s team admins change it, in the console"
@@ -755,7 +778,12 @@ defmodule Troupe.UI.TUI.MemoryPage do
       |> Model.one_line()
 
     from = if page.tab == 0, do: " · from #{title(page, row.from)}", else: ""
-    meta = by_when(row.from.changed_by, row.from.changed_at)
+    # Who last changed the entry and when, as the plane read it off the blame, at every level.
+    meta =
+      if row.entry[:by] || row.entry[:at],
+        do: by_when(row.entry[:by], row.entry[:at]) <> used(row.entry[:used]),
+        else: by_when(row.from.changed_by, row.from.changed_at)
+
     room = max(width - String.length(topic) - String.length(from) - String.length(meta) - 10, 10)
     first = if String.length(first) > room, do: String.slice(first, 0, room - 1) <> "…", else: first
 
@@ -773,6 +801,9 @@ defmodule Troupe.UI.TUI.MemoryPage do
         ])
       end)
   end
+
+  defp used(n) when is_integer(n), do: " · used in #{n} session#{if n == 1, do: "", else: "s"}"
+  defp used(_none), do: ""
 
   defp by_when(by, at) do
     parts = Enum.reject([by, at && ArtifactsPage.ago(at)], &(&1 in [nil, ""]))

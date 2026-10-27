@@ -89,15 +89,17 @@ defmodule Troupe.Protocol.Memory do
 
   @doc """
   The documents of a list that a session reads, checked and in `scopes/0`'s order: each a
-  known scope, a version, and text that is not empty. A document past the limit, from a
-  plane that allows more, is kept to the limit, cut at a character, and marked `trimmed`.
-  Anything else in the list is left out.
+  known scope, a version, and text that is not empty. Within a scope they stay in the order
+  given, which is the plane's: a person's teams by name, a profile's chain the one that
+  extends nothing first, so the nearer comes later. A document past the limit, from a plane
+  that allows more, is kept to the limit, cut at a character, and marked `trimmed`. Anything
+  else in the list is left out.
   """
   @spec read([term()] | nil) :: [document()]
   def read(documents) when is_list(documents) do
     documents
     |> Enum.flat_map(&readable/1)
-    |> Enum.sort_by(&{Enum.find_index(@scopes, fn scope -> scope == &1["scope"] end), &1["name"] || ""})
+    |> Enum.sort_by(&Enum.find_index(@scopes, fn scope -> scope == &1["scope"] end))
   end
 
   def read(_none), do: []

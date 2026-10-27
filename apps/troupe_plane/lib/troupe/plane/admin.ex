@@ -70,6 +70,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Protocol.AgentDefinition
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
+  alias Troupe.Protocol.Memory.Entries
   alias Troupe.Protocol.ProviderTypes
 
   require Logger
@@ -2734,6 +2735,7 @@ defmodule Troupe.Plane.Admin do
          diff: Memory.diff(before && before.text, shown && shown.text),
          versions: owner |> Memory.versions() |> Enum.map(&Memory.summary/1),
          lines: memory_lines(owner, shown),
+         entries: memory_entries(owner, shown),
          inherited: memory_inherited(scope, owner),
          readers: memory_readers(owner)
        }}
@@ -2743,6 +2745,10 @@ defmodule Troupe.Plane.Admin do
   # Who wrote each line of the version shown, and from which session; nothing for none.
   defp memory_lines(_owner, nil), do: []
   defp memory_lines(owner, shown), do: Memory.blame(owner, shown.version)
+
+  # The version shown as its `## Topic` sections, each with who last changed it.
+  defp memory_entries(_owner, nil), do: []
+  defp memory_entries(owner, shown), do: Memory.InEffect.entries(owner, shown.version)
 
   # The version a version is compared with: the one named, or the one before it.
   defp memory_against(owner, shown, nil),
@@ -2791,10 +2797,10 @@ defmodule Troupe.Plane.Admin do
   when. Refused, as the save would be, for a text past the limit or for an actor who may
   not change the document.
   """
-  @spec memory_preview(actor(), String.t(), String.t() | nil, String.t() | nil) :: result()
-  def memory_preview(actor, scope, name, text) do
+  @spec memory_preview(actor(), String.t(), String.t() | nil, String.t() | nil, list() | nil) :: result()
+  def memory_preview(actor, scope, name, text, entries \\ nil) do
     with {:ok, owner} <- memory_writer(actor, scope, name),
-         :ok <- memory_text(text) do
+         {:ok, text} <- memory_text(text, entries) do
       current = Memory.current(owner)
       text = Troupe.Protocol.Memory.normalise(text)
 
@@ -2855,11 +2861,11 @@ defmodule Troupe.Plane.Admin do
   force makes no version. Audited as `memory.put` with the version, size and hash, before
   and after; every version's text is kept, so the audit names the versions to compare.
   """
-  @spec memory_put(actor(), String.t(), String.t() | nil, String.t() | nil, integer() | nil) ::
+  @spec memory_put(actor(), String.t(), String.t() | nil, String.t() | nil, integer() | nil, list() | nil) ::
           result()
-  def memory_put(actor, scope, name, text, version) do
+  def memory_put(actor, scope, name, text, version, entries \\ nil) do
     with {:ok, owner} <- memory_writer(actor, scope, name),
-         :ok <- memory_text(text) do
+         {:ok, text} <- memory_text(text, entries) do
       memory_save(actor, owner, text, version, %{})
     end
   end
@@ -2898,9 +2904,20 @@ defmodule Troupe.Plane.Admin do
   defp memory_fields(document),
     do: %{version: document.version, bytes: byte_size(document.text), hash: document.hash}
 
-  defp memory_text(text) do
+  # A save's document: `text` as written, or `entries` written as `## Topic` sections in
+  # their order, each heading as given (`Entries.render/1`).
+  defp memory_text(nil, entries) when not is_nil(entries) do
+    case Entries.cast(entries) do
+      {:ok, entries} -> memory_text(Entries.render(entries), nil)
+      {:error, reason} -> {:error, Error.new(:invalid_params, %{field: "entries", reason: reason})}
+    end
+  end
+
+  defp memory_text(nil, nil), do: {:error, Error.new(:invalid_params, %{missing: "text", reason: "give the document as text or as entries"})}
+
+  defp memory_text(text, _entries) do
     case Troupe.Protocol.Memory.check(text) do
-      :ok -> :ok
+      :ok -> {:ok, text}
       {:error, reason} -> {:error, Error.new(:invalid_params, %{field: "text", reason: reason})}
     end
   end

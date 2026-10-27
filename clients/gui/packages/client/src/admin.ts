@@ -14,6 +14,7 @@
 //     gets for a team that is not theirs — whether it exists is itself privileged.
 
 import type { AgentCheck } from "./agents.js";
+import type { MemoryEntry } from "./entries.js";
 
 /**
  * A session as `admin.sessions.list` describes it: who owns it, where it runs, what state
@@ -981,6 +982,8 @@ export interface MemoryDocument {
   readers?: MemoryReaders;
   /** The version shown line by line with who wrote each line (blame, not history). Absent from a plane from before it. */
   lines?: MemoryBlameLine[];
+  /** The version shown as its `## Topic` sections, each with who last changed it and how many sessions used it. Absent from a plane from before them. */
+  entries?: MemoryEntry[];
 }
 
 /** One line of a memory document with who wrote it: the version it came in, who saved that, and an agent's entry's session and agent. */

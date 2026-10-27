@@ -49,6 +49,7 @@ defmodule Troupe.Gateway.Memory do
   alias Troupe.PlaneKeys
   alias Troupe.PlaneMemory
   alias Troupe.Protocol.Memory, as: Shape
+  alias Troupe.Protocol.Memory.Entries
 
   require Logger
 
@@ -92,7 +93,8 @@ defmodule Troupe.Gateway.Memory do
   and whether the copy was `current`, and each session running here with what its last turn
   read and whether that is `current` against the copy now. `reason` says why the plane was
   not asked. `ask: false` (a client in Local only) asks nothing of the plane. `held` is each
-  document as the copy holds it (`scope`, `name`, `version`, `text`), the person's own among them.
+  document as the copy holds it (`scope`, `name`, `version`, `text` and its `entries`), the
+  person's own among them, and `in_effect` what the sessions here read of them, per topic.
   """
   @spec status(keyword()) :: map()
   def status(opts \\ []) do
@@ -124,6 +126,9 @@ defmodule Troupe.Gateway.Memory do
       # Each document as the copy holds it, which the sessions here read: what a memory
       # screen shows, read-only, where the plane is not asked.
       "held" => held_levels(held),
+      # What the sessions here read of it, per topic the closest level's entry and what it
+      # replaces, as the prompt takes them (every team of the person's at one rank).
+      "in_effect" => held |> held_levels() |> Entries.levels() |> Entries.in_effect() |> Entries.effect_json(),
       "problem" => problem,
       "sessions" =>
         Enum.map(Troupe.Session.PlaneMemory.reads(), &Map.put(&1, "current", same?(&1["documents"], now)))
@@ -139,9 +144,10 @@ defmodule Troupe.Gateway.Memory do
   defp asking(true), do: :ok
   defp asking(false), do: {:error, :local_only}
 
-  # Each document with its level, version and text, and nothing else of it.
+  # Each document with its level, version and text, and nothing else of it, and its entries
+  # read off the text here, without who wrote them: the plane is not asked.
   defp held_levels(%{"documents" => documents}) when is_list(documents),
-    do: Enum.map(documents, &Map.take(&1, ~w(scope name version text)))
+    do: Enum.map(documents, &(&1 |> Map.take(~w(scope name version text)) |> Map.put("entries", Entries.parse(&1["text"] || ""))))
 
   defp held_levels(_none), do: []
 
@@ -246,9 +252,14 @@ defmodule Troupe.Gateway.Memory do
   `lines`: each line with who wrote it, the version it came in and the session an agent's
   entry came from (`troupe memory --blame`).
   """
+  #
+  # Every document comes with its `entries`, one per `## Topic` section with who last changed
+  # it and when and in how many sessions it was used, and beside them `organisation`, its
+  # name: what the desktop app's Memory view and the terminal's `/memory` show.
   @spec own(keyword()) :: {:ok, map()} | {:error, :signed_out | term()}
   def own(opts \\ []) do
-    ask = if opts[:blame], do: Map.put(asked(), "blame", true), else: asked()
+    ask = Map.put(asked(), "entries", true)
+    ask = if opts[:blame], do: Map.put(ask, "blame", true), else: ask
 
     with {:ok, url} <- signed_in(),
          {:ok, answer} <- plane_call("me.memory", ask) do
@@ -258,16 +269,20 @@ defmodule Troupe.Gateway.Memory do
   end
 
   @doc """
-  Save the person's own document on the plane: `%{"text" => ..., "version" => n}` for their
-  edit, `%{"append" => entry}` for one entry. Then the copy here is asked for again, so the
-  sessions running here read it from their next turn. Answers the plane's: `changed`, the
-  `entry` as kept for an append, and `user`, the document as it now stands.
+  Save the person's own document on the plane: `%{"text" => ..., "version" => n}` or
+  `%{"entries" => [...], "version" => n}` for their edit, `%{"append" => entry, "topic" =>
+  topic}` for one entry. Then the copy here is asked for again, so the sessions running here
+  read it from their next turn. Answers the plane's: `changed`, the `entry` and `topic` as
+  kept for an append, and `user`, the document as it now stands.
   """
   @spec put_own(map()) :: {:ok, map()} | {:error, :signed_out | term()}
   def put_own(params) when is_map(params) do
     with {:ok, url} <- signed_in(),
          {:ok, saved} <-
-           plane_call("me.memory.put", Map.take(params, ["text", "version", "append", "session", "agent"])) do
+           plane_call(
+             "me.memory.put",
+             Map.take(params, ["text", "entries", "version", "append", "topic", "session", "agent"])
+           ) do
       _refreshed = refresh()
       {:ok, Map.put(saved, "plane_url", url)}
     end
@@ -306,9 +321,10 @@ defmodule Troupe.Gateway.Memory do
   keeps beside the version as who wrote the line. The plane's refusal comes back as its
   sentence. A session under Local only sends nothing, and says so.
   """
-  @spec append(String.t(), Troupe.Tool.Ctx.t()) :: {:ok, map()} | {:error, :signed_out | String.t()}
-  def append(entry, ctx) do
-    if LocalOnly.session?(ctx.session_id), do: {:error, local_only()}, else: send_entry(entry, ctx)
+  @spec append(String.t(), Troupe.Tool.Ctx.t(), String.t() | nil) ::
+          {:ok, map()} | {:error, :signed_out | String.t()}
+  def append(entry, ctx, topic \\ nil) do
+    if LocalOnly.session?(ctx.session_id), do: {:error, local_only()}, else: send_entry(entry, ctx, topic)
   end
 
   defp local_only do
@@ -317,9 +333,15 @@ defmodule Troupe.Gateway.Memory do
       "default), or ask them to turn Local only off"
   end
 
-  defp send_entry(entry, ctx) do
-    case put_own(%{"append" => entry, "session" => ctx.session_id, "agent" => agent(ctx)}) do
-      {:ok, saved} -> {:ok, %{"entry" => saved["entry"], "version" => get_in(saved, ["user", "version"])}}
+  defp send_entry(entry, ctx, topic) do
+    params =
+      %{"append" => entry, "session" => ctx.session_id, "agent" => agent(ctx)}
+      |> then(&if(topic, do: Map.put(&1, "topic", topic), else: &1))
+
+    case put_own(params) do
+      {:ok, saved} ->
+        {:ok, %{"entry" => saved["entry"], "topic" => saved["topic"], "version" => get_in(saved, ["user", "version"])}}
+
       {:error, :signed_out} -> {:error, :signed_out}
       {:error, reason} -> {:error, sentence(reason)}
     end
@@ -359,23 +381,85 @@ defmodule Troupe.Gateway.Memory do
   # The person's own, and beside it the levels above it that their sessions read first (the
   # organisation's and each of their teams'), as the plane answered them to this person: what
   # the desktop app's Memory view sets the person's own entries against.
+  #
+  # Each with its entries; a plane from before them answers none, and they are read here
+  # off the text, the same sections without who wrote them.
+  #
+  # A team of theirs with no document is there too, empty, so a client lists every team.
   defp own_of(%{"user" => %{} = own} = answer, url) do
     above =
       for %{"scope" => scope} = document <- List.wrap(answer["documents"]), scope != "user",
-          do: Map.take(document, ["scope", "name", "version", "hash", "updated_at", "text"])
+          do: document |> Map.take(["scope", "name", "version", "hash", "updated_at", "text", "entries"]) |> with_entries()
 
-    {:ok, own |> Map.put("plane_url", url) |> Map.put("documents", above)}
+    named = for %{"scope" => "team", "name" => name} <- above, do: name
+
+    empty =
+      for name <- List.wrap(answer["teams"]), is_binary(name), name not in named,
+          do: %{"scope" => "team", "name" => name, "version" => 0, "text" => "", "entries" => []}
+
+    above = Enum.sort_by(above ++ empty, &{Enum.find_index(Shape.scopes(), fn s -> s == &1["scope"] end), &1["name"] || ""})
+
+    {:ok,
+     own
+     |> with_entries()
+     |> Map.put("plane_url", url)
+     |> Map.put("documents", above)
+     |> Map.put("organisation", answer["organisation"])}
   end
 
   defp own_of(_answer, _url),
     do: {:error, {:rpc, %{"code" => -32_601, "message" => "method_not_found"}}}
+
+  defp with_entries(%{"entries" => entries} = document) when is_list(entries), do: document
+  defp with_entries(document), do: Map.put(document, "entries", Entries.parse(document["text"] || ""))
+
+  @doc """
+  What a new session of the person's in one of their teams (`team`, their first by name for
+  none) reads, on a worker profile they may use through it where `profile` names one: the
+  plane's `memory.in_effect`, as them, with `plane_url`.
+  """
+  @spec in_effect(map()) :: {:ok, map()} | {:error, :signed_out | term()}
+  def in_effect(params) when is_map(params) do
+    with {:ok, url} <- signed_in(),
+         {:ok, answer} <- plane_call("memory.in_effect", Map.take(params, ["team", "profile"])) do
+      {:ok, Map.put(answer, "plane_url", url)}
+    end
+  end
+
+  # What a level of the organisation's memory the person administers asks of the plane, as
+  # them: the plane's own answer, or its own refusal where they may not.
+  @admin_arguments %{
+    "admin.memory.get" => ~w(scope name version against),
+    "admin.memory.preview" => ~w(scope name text entries),
+    "admin.memory.put" => ~w(scope name text entries version)
+  }
+
+  @doc "The organisation's levels' methods the daemon sends on, as its person (`admin/2`)."
+  @spec admin_methods() :: [String.t()]
+  def admin_methods, do: Map.keys(@admin_arguments)
+
+  @doc """
+  One of `admin_methods/0`, sent to the plane as this daemon's person with the arguments it
+  takes and nothing else: what a team admin edits their team's memory with, and a platform
+  admin the organisation's, from their own app. The plane decides who may: a refusal comes
+  back as it gave it. A save asks for the copy here again, so the sessions running here read
+  it from their next turn.
+  """
+  @spec admin(String.t(), map()) :: {:ok, map()} | {:error, :signed_out | term()}
+  def admin(method, params) when is_map_key(@admin_arguments, method) do
+    with {:ok, url} <- signed_in(),
+         {:ok, answer} <- plane_call(method, Map.take(params, @admin_arguments[method])) do
+      _refreshed = if method == "admin.memory.put", do: refresh()
+      {:ok, Map.put(answer, "plane_url", url)}
+    end
+  end
 
   # -- the poll ---------------------------------------------------------------------
 
   @impl GenServer
   def init(opts) do
     # This daemon is where an agent's entry for its person's own memory goes.
-    :ok = Troupe.UserMemory.install(&__MODULE__.append/2)
+    :ok = Troupe.UserMemory.install(&__MODULE__.append/3)
 
     every =
       Keyword.get(opts, :poll_ms, Application.get_env(:troupe_gateway, :memory_poll_ms, @poll_ms))

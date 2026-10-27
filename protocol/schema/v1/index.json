@@ -1,5 +1,8 @@
 {
   "documents": [
+    "commands/admin.memory.get.json",
+    "commands/admin.memory.preview.json",
+    "commands/admin.memory.put.json",
     "commands/agents.changed.json",
     "commands/agents.delete.json",
     "commands/agents.get.json",
@@ -58,6 +61,7 @@
     "commands/memory.decline.json",
     "commands/memory.forget.json",
     "commands/memory.get.json",
+    "commands/memory.in_effect.json",
     "commands/onboard.apply.json",
     "commands/onboard.decline.json",
     "commands/onboard.plan.json",
@@ -129,6 +133,7 @@
     "events/config_note.json",
     "events/config_upgraded.json",
     "events/delegation_started.json",
+    "events/file_ready.json",
     "events/files_skipped.json",
     "events/fs_changed.json",
     "events/goal_cleared.json",
