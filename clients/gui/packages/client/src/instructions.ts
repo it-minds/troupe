@@ -10,6 +10,7 @@
 // edit from here and an agent of theirs adds to with `remember`.
 
 import type { MemoryBlameLine, MemoryLine } from "./admin.js";
+import type { MemoryEntry } from "./entries.js";
 
 /** One file or document `context.get` lists. */
 export interface InstructionFile {
@@ -56,8 +57,12 @@ export interface OwnMemory {
   plane_url?: string;
   /** Asked with `blame`: each line with who wrote it, the version it came in, and an agent's entry's session. */
   lines?: MemoryBlameLine[];
-  /** The levels the person's sessions read before it, the organisation's and their teams', each with its text. */
-  documents?: Array<{ scope: string; name: string | null; version: number; hash?: string; updated_at?: string | null; text: string }>;
+  /** Its `## Topic` sections as the plane reads them, each with who last changed it and when. */
+  entries?: MemoryEntry[];
+  /** The levels the person's sessions read before it, the organisation's and their teams', each with its text and its entries. */
+  documents?: Array<{ scope: string; name: string | null; version: number; hash?: string; updated_at?: string | null; text: string; entries?: MemoryEntry[] }>;
+  /** The organisation's name, for "Everyone at <name>". */
+  organisation?: { name: string } | null;
 }
 
 /** The person's own memory's history (`me.memory.history`): every version, one beside another. */
@@ -88,6 +93,8 @@ export interface MemoryStatus {
 export interface OwnMemorySaved {
   changed: boolean;
   entry?: string | null;
+  /** The topic an appended entry went under. */
+  topic?: string | null;
   user: OwnMemory;
 }
 

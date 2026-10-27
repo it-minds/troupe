@@ -95,6 +95,24 @@ describe("company memory", () => {
     );
   });
 
+  // Memory as entries: the document's `## Topic` sections as the plane reads them, read only.
+  it("lists the version shown as its entries, one per topic, and edits only the document", async () => {
+    fake.admin.memory.get("organisation")!.push({ version: 3, text: "Opening words.\n\n## Tone\n\nPlain English.", changed_by: "alice@example.com", changed_at: "2026-10-26T09:00:00Z" });
+    visit("#/memory");
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+
+    const org = () => card("The organisation's memory");
+    await waitFor(org, "the organisation's memory");
+    (await seesButton("Its entries, one per topic (2)", org()!)).click();
+    const table = await waitFor(() => org()?.querySelector<HTMLTableElement>('table[aria-label="Entries of organisation v3"]'), "the entries");
+    expect([...table.querySelectorAll("tr")].map((r) => [r.querySelector("th")!.textContent, r.querySelector("td")!.textContent])).toEqual([
+      ["General", "v3 alice@example.com · used in 0 sessions"],
+      ["Tone", "v3 alice@example.com · used in 0 sessions"],
+    ]);
+    expect(table.querySelector("input, textarea, button")).toBeNull();
+  });
+
   it("says when somebody else saved first, and saves nothing", async () => {
     visit("#/memory");
     await signedInAs(fake, PEOPLE.alice);

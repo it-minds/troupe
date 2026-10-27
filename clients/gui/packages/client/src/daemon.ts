@@ -20,6 +20,8 @@ import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsP
 import { remoteOffer, syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
 import type { MemoryStatus, OwnMemory, OwnMemoryHistory, OwnMemorySaved } from "./instructions.js";
+import type { MemoryDocument, MemorySaved } from "./admin.js";
+import type { MemoryEntry, MemoryInEffect } from "./entries.js";
 import type { Invitee, InviteRole, SealedRead } from "./invites.js";
 import type { MemoryBrief } from "./memory.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
@@ -1075,6 +1077,34 @@ export class DaemonClient {
   /** Save it, the whole text over the version it was edited from; the sessions here read it from their next turn. */
   putOwnMemory(text: string, version: number): Promise<OwnMemorySaved> {
     return this.command<OwnMemorySaved>("me.memory.put", { text, version });
+  }
+
+  /** Save it as entries, written by the plane as `## Topic` sections in this order, over the version it was edited from. */
+  putOwnMemoryEntries(entries: Array<Pick<MemoryEntry, "topic" | "body" | "heading">>, version: number): Promise<OwnMemorySaved> {
+    return this.command<OwnMemorySaved>("me.memory.put", { entries: entries.map((e) => ({ topic: e.topic, body: e.body, ...(e.heading === false ? { heading: false } : {}) })), version });
+  }
+
+  /**
+   * What a new session of the person's in one of their teams (their first by name for none)
+   * reads, on a worker profile where one is named: the plane's `memory.in_effect`, one list
+   * of topics, the closest level's entry on each with what it replaces.
+   */
+  memoryInEffect(params: { team?: string; profile?: string } = {}): Promise<MemoryInEffect> {
+    return this.call<MemoryInEffect>("memory.in_effect", { ...params });
+  }
+
+  /**
+   * A level of the organisation's memory, read through this daemon as the person: the
+   * plane's `admin.memory.get`, theirs to read where they administer it (a team admin their
+   * team's, a platform admin the organisation's) and the plane's refusal otherwise.
+   */
+  levelMemory(scope: "organisation" | "team" | "profile", name: string | null): Promise<MemoryDocument> {
+    return this.call<MemoryDocument>("admin.memory.get", name === null ? { scope } : { scope, name });
+  }
+
+  /** Save a level the person administers, as text or entries, over the version it was edited from. */
+  putLevelMemory(scope: "organisation" | "team" | "profile", name: string | null, doc: { text: string } | { entries: Array<Pick<MemoryEntry, "topic" | "body">> }, version: number): Promise<MemorySaved> {
+    return this.command<MemorySaved>("admin.memory.put", { scope, ...(name === null ? {} : { name }), ...doc, version });
   }
 
   /**

@@ -18,8 +18,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { besideRows, entriesText, entryWriter, inEffect, parseEntries, replacedBy, topicKey } from "@troupe/client";
-import type { DaemonClient, EntryLevel, MemoryEntry, MemoryStatus, OwnMemory, OwnMemoryHistory } from "@troupe/client";
+import { besideRows, replacedBy, topicKey } from "@troupe/client";
+import type { DaemonClient, EntryLevel, MemoryEntry, MemoryInEffect, MemoryStatus, OwnMemory, OwnMemoryHistory } from "@troupe/client";
 import { Loading, relative } from "./bits";
 
 type View = "effect" | string;
@@ -42,23 +42,27 @@ function message(e: unknown): string {
 
 const isConflict = (e: unknown): boolean => (e as { message?: unknown } | null)?.message === "conflict" || (e as { code?: unknown } | null)?.code === -32006;
 
-/** The levels a person's sessions read, lowest first: the organisation's, each team's, their own. */
+/**
+ * The levels a person's sessions read, lowest first: the organisation's, each team's, their
+ * own, each with its entries as the plane answered them (`me.memory`, one per `## Topic`).
+ */
 export function levelsOf(own: OwnMemory, teams: string[]): Level[] {
   const documents = own.documents ?? [];
   const organisation = documents.find((d) => d.scope === "organisation");
   const teamNames = [...new Set([...teams, ...documents.filter((d) => d.scope === "team" && d.name).map((d) => d.name!)])];
+  const everyone = own.organisation?.name ? `Everyone at ${own.organisation.name}` : "Everyone";
   return [
-    { key: "organisation", level: { scope: "organisation", name: null }, label: "Everyone", short: "EVERYONE", glyph: "◉", entries: parseEntries(organisation?.text ?? ""), editable: false },
+    { key: "organisation", level: { scope: "organisation", name: null }, label: everyone, short: "EVERYONE", glyph: "◉", entries: organisation?.entries ?? [], editable: false },
     ...teamNames.map((name): Level => ({
       key: `team:${name}`,
       level: { scope: "team", name },
       label: name,
       short: name.toUpperCase(),
       glyph: "◎",
-      entries: parseEntries(documents.find((d) => d.scope === "team" && d.name === name)?.text ?? ""),
+      entries: documents.find((d) => d.scope === "team" && d.name === name)?.entries ?? [],
       editable: false,
     })),
-    { key: "user", level: { scope: "user", name: null }, label: "Only you", short: "YOU", glyph: "○", entries: parseEntries(own.text), editable: true },
+    { key: "user", level: { scope: "user", name: null }, label: "Only you", short: "YOU", glyph: "○", entries: own.entries ?? [], editable: true },
   ];
 }
 
@@ -128,6 +132,28 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
 
   const levels = own ? levelsOf(own, teams) : [];
   const editable = levels.filter((l) => l.editable).map((l) => l.label);
+
+  // What a new session in the chosen team starts knowing, as the plane works it out
+  // (`memory.in_effect`): asked again whenever the team or what was read changes.
+  const teamNames = levels.filter((l) => l.level.scope === "team").map((l) => l.level.name!);
+  const effectTeam = team !== null && teamNames.includes(team) ? team : (teamNames[0] ?? null);
+  const [inEffect, setInEffect] = useState<MemoryInEffect | null>(null);
+  const [effectWhy, setEffectWhy] = useState<string | null>(null);
+  useEffect(() => {
+    if (!daemon || localOnly || !own) return;
+    let live = true;
+    daemon.memoryInEffect(effectTeam === null ? {} : { team: effectTeam }).then(
+      (e) => {
+        if (!live) return;
+        setEffectWhy(null);
+        setInEffect(e);
+      },
+      (e: unknown) => live && setEffectWhy(message(e)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [daemon, localOnly, own, effectTeam]);
   const head = (
     <header className="memory-head">
       <div className="lede">
@@ -167,8 +193,7 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
 
   const teamLevels = levels.filter((l) => l.level.scope === "team");
   const chosenTeam = teamLevels.find((l) => l.level.name === team) ?? teamLevels[0] ?? null;
-  const chain = levels.filter((l) => l.level.scope !== "team" || l === chosenTeam);
-  const effect = inEffect(chain.map((l) => ({ level: l.level, entries: l.entries })));
+  const effect = inEffect?.entries ?? [];
   const current = levels.find((l) => l.key === view) ?? null;
 
   return (
@@ -218,7 +243,11 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
             )}
             <span className="muted">starts knowing this:</span>
           </div>
-          {effect.length === 0 ? (
+          {effectWhy ? (
+            <p className="note">What is in effect: {effectWhy}</p>
+          ) : !inEffect ? (
+            <Loading what="Reading what is in effect…" />
+          ) : effect.length === 0 ? (
             <div className="empty">
               <p className="title">Nothing yet</p>
               <p className="muted">No level has a memory. Add one of your own under Only you.</p>
@@ -226,13 +255,13 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
           ) : (
             <ol className="entries">
               {effect.map((e, i) => {
-                const from = sourceOf(e.from, levels);
+                const from = sourceOf(e.level, levels);
                 return (
-                  <li key={`${e.topic}-${i}`} className={`entry is-${e.from.scope}`}>
+                  <li key={`${e.topic}-${i}`} className={`entry is-${e.level.scope}`}>
                     <div className="entry-body">
                       <div className="entry-top">
-                        <span className="topic">{e.topic || "No topic"}</span>
-                        <span className={`from micro is-${e.from.scope}`}>
+                        <span className="topic">{e.topic}</span>
+                        <span className={`from micro is-${e.level.scope}`}>
                           {from.glyph} FROM {from.short}
                         </span>
                       </div>
@@ -240,7 +269,7 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
                     </div>
                     {e.replaces.map((u, j) => (
                       <div key={j} className="replaces">
-                        <span className="micro">REPLACES {sourceOf(u.from, levels).short}</span>
+                        <span className="micro">REPLACES {sourceOf(u.level, levels).short}</span>
                         <s>{u.body}</s>
                       </div>
                     ))}
@@ -286,6 +315,12 @@ const NOTES: Record<EntryLevel["scope"], { note: string; lock: string; empty: st
     empty: "This team has no memory of its own",
     emptyBody: "Sessions in this team use your organisation's memory as it is.",
   },
+  profile: {
+    note: "Applies to every session on this worker profile's pods. Replaces your team's memory on the same topic.",
+    lock: "Platform administrators keep a worker profile's memory, on its page in the Troupe console.",
+    empty: "This profile has no memory of its own",
+    emptyBody: "Sessions on it use your team's memory as it is.",
+  },
   user: {
     note: "Applies to every session you start, in any team. Nobody else can see these, not even administrators.",
     lock: "",
@@ -321,14 +356,15 @@ function LevelView({
   const [conflict, setConflict] = useState<OwnMemory | null>(null);
   const [versions, setVersions] = useState(false);
   const notes = NOTES[level.level.scope];
-  const title = level.level.scope === "team" ? `Team ${level.label}` : level.level.scope === "organisation" ? "Everyone in your organisation" : "Only you";
+  const title = level.level.scope === "team" ? `Team ${level.label}` : level.level.scope === "organisation" ? level.label : "Only you";
   const scopeLine = level.level.scope === "user" ? "SAVES TO ONLY YOU · YOUR NEW SESSIONS IN ANY TEAM" : "";
 
+  // The whole document as entries over the version read: the plane writes them as sections.
   const save = (entries: MemoryEntry[], said: string): void => {
     setBusy(true);
     setError(null);
     daemon
-      .putOwnMemory(entriesText(entries), own.version)
+      .putOwnMemoryEntries(entries, own.version)
       .then((saved) => {
         setEditing(null);
         setForgetting(null);
@@ -349,15 +385,17 @@ function LevelView({
   let clash = "";
   if (editing && editing.topic.trim() !== "") {
     const key = topicKey(editing.topic);
-    const here = level.entries.findIndex((e, i) => i !== editing.index && e.topic !== "" && topicKey(e.topic) === key);
-    const lower = levels.find((l) => l.level.scope !== "user" && l.entries.some((e) => e.topic !== "" && topicKey(e.topic) === key));
+    const here = level.entries.findIndex((e, i) => i !== editing.index && e.heading !== false && topicKey(e.topic) === key);
+    const lower = levels.find((l) => l.level.scope !== "user" && l.entries.some((e) => e.heading !== false && topicKey(e.topic) === key));
     if (here >= 0) clash = `Only you already has a memory called “${level.entries[here]!.topic}”. Edit that one instead, or pick another topic.`;
     else if (lower) clash = `This will replace ${lower.level.scope === "team" ? `team ${lower.label}'s` : "your organisation's"} “${editing.topic.trim()}” for you.`;
   }
 
   const commit = (): void => {
     if (!editing || draftEmpty) return;
-    const entry = { topic: editing.topic.trim(), body: editing.body.trim() };
+    // The text before the first heading stays without one while it keeps its name.
+    const was = editing.index === null ? null : level.entries[editing.index];
+    const entry: MemoryEntry = { topic: editing.topic.trim(), body: editing.body.trim(), heading: !(was?.heading === false && was.topic === editing.topic.trim()) };
     const entries = editing.index === null ? [...level.entries, entry] : level.entries.map((e, i) => (i === editing.index ? entry : e));
     save(entries, editing.index === null ? "Saved. New sessions start with it; the sessions running here read it at their next turn." : "Saved. New sessions start with the new version.");
   };
@@ -449,21 +487,25 @@ function LevelView({
                   : closer.some((c) => c.scope === "user")
                     ? "REPLACED FOR YOU BY YOUR OWN"
                     : null;
-            const writer = level.level.scope === "user" ? entryWriter(entry, own.lines) : null;
+            // Who last changed it and when, at every level, as the plane reads it off the
+            // document's blame; and in how many sessions it was used since.
+            const writer = entry.by || entry.agent ? entry : null;
             const by = writer ? (writer.agent ? `${writer.agent.replace(/^agent:/, "").toUpperCase()} IN A SESSION` : (writer.by ?? "").toUpperCase()) : "";
+            const used = typeof entry.used === "number" ? ` · USED IN ${entry.used} SESSION${entry.used === 1 ? "" : "S"}` : "";
             if (editing?.index === i) return <li key={i} className={`entry is-${level.level.scope} editing`}>{form("Edit memory")}</li>;
             return (
               <li key={i} className={`entry is-${level.level.scope}`}>
                 <div className="entry-body">
                   <div className="entry-top">
-                    <span className="topic">{entry.topic || "No topic"}</span>
+                    <span className="topic">{entry.topic}</span>
                     {badge && <span className="replaced micro">{badge}</span>}
                   </div>
                   <p>{entry.body}</p>
                   <div className="entry-meta">
                     {writer && (
                       <span className="micro">
-                        {by} · {writer.at ? relative(Date.parse(writer.at)).toUpperCase() : `VERSION ${writer.version}`}
+                        {by} · {writer.at ? relative(Date.parse(writer.at)).toUpperCase() : `VERSION ${writer.version ?? "?"}`}
+                        {used}
                       </span>
                     )}
                     {level.editable && (
