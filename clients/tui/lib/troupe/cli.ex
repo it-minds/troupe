@@ -25,6 +25,7 @@ defmodule Troupe.CLI do
           | :config_trust_list
           | :config_pull
           | :memory
+          | :artifacts
           | :models
           | :doctor
           | :instructions_check
@@ -83,7 +84,8 @@ defmodule Troupe.CLI do
           edit: boolean(),
           clear: boolean(),
           status: boolean(),
-          blame: boolean()
+          blame: boolean(),
+          artifacts: map() | nil
         }
 
   @switches [
@@ -215,6 +217,20 @@ defmodule Troupe.CLI do
        ["memory", "--status"],
        ["memory", "--blame"]
      ]},
+    {"troupe artifacts list [--scope mine|organisation|team:NAME|profile:NAME|shared|private] [--json]",
+     "your artifacts on the plane, by who can see them, newest first; a version you have not opened here is new",
+     [["artifacts", "list"], ["artifacts", "list", "--scope", "team:design", "--json"]]},
+    {"troupe artifacts open|show ID [--version N]",
+     "open one in the browser, through the plane's one-time address; show prints its text (a Markdown one's source)",
+     [["artifacts", "open", "art-1"], ["artifacts", "show", "art-1", "--version", "2"]]},
+    {"troupe artifacts publish FILE [--to SCOPE] [--title TITLE]",
+     "publish a file of this machine, as /publish does: for SCOPE (organisation, team:NAME, profile:NAME), only you without one",
+     [
+       ["artifacts", "publish", "report.md"],
+       ["artifacts", "publish", "report.md", "--to", "organisation", "--title", "Weekly"]
+     ]},
+    {"troupe artifacts link ID", "a view link to one of your artifacts",
+     [["artifacts", "link", "art-1"]]},
     {"troupe models [--refresh]",
      "what each provider serves, its window and its price; asked again when stale, or now with --refresh",
      [["models", "--refresh"]]},
@@ -321,6 +337,14 @@ defmodule Troupe.CLI do
     end
   end
 
+  # `troupe artifacts …` takes options of its own, `--version` among them, which anywhere
+  # else is the program's.
+  def parse(["artifacts" | rest]) do
+    with {:ok, asked} <- Troupe.CLI.Artifacts.parse(rest),
+         {:ok, base} <- parse_argv([]),
+         do: {:ok, %{base | mode: :artifacts, artifacts: asked}}
+  end
+
   def parse(argv), do: parse_argv(argv)
 
   defp optional_values([flag, value | rest], flags, acc, values) when is_binary(value) do
@@ -387,7 +411,8 @@ defmodule Troupe.CLI do
       edit: Keyword.get(opts, :edit, false),
       clear: Keyword.get(opts, :clear, false),
       status: Keyword.get(opts, :status, false),
-      blame: Keyword.get(opts, :blame, false)
+      blame: Keyword.get(opts, :blame, false),
+      artifacts: nil
     }
 
     cond do

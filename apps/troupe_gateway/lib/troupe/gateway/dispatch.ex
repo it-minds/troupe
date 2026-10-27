@@ -226,6 +226,8 @@ defmodule Troupe.Gateway.Dispatch do
     # the plane gives it: reading one and opening it on its host, and the owner's controls.
     "artifact.get" => :observe,
     "artifact.open" => :observe,
+    # One text file of a version, which the terminal reads a Markdown artifact from.
+    "artifact.read" => :observe,
     "artifact.share" => :control,
     "artifact.unshare" => :control,
     "artifact.rollback" => :control,
@@ -300,7 +302,7 @@ defmodule Troupe.Gateway.Dispatch do
   # and after a create, whose session there was no id for before.
   @work ~w(input.send commands.run session.goal.set session.loop.start)
   @invites ~w(session.invite session.uninvite session.invites session.read_sealed)
-  @forwarded_artifacts ~w(artifact.get artifact.open artifact.share artifact.unshare artifact.rollback artifact.pin)
+  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.rollback artifact.pin)
 
   defp local_only("remote.offer", params, context) do
     cond do

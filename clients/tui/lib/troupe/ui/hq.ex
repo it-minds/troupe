@@ -24,7 +24,7 @@ defmodule Troupe.UI.HQ do
   alias Troupe.Client
   alias Troupe.UI.TUI.{Model, Theme, View}
 
-  @type column :: :teams | :profiles | :sessions
+  @type column :: :inbox | :teams | :profiles | :sessions
 
   @typedoc """
   The new-session wizard: which field is being filled, and what has been chosen
@@ -52,7 +52,9 @@ defmodule Troupe.UI.HQ do
           cursors: %{column() => non_neg_integer()},
           status: map(),
           error: String.t() | nil,
-          create: create() | nil
+          create: create() | nil,
+          invitations: [map()],
+          shared: non_neg_integer()
         }
 
   @doc "Opens HQ against a plane (or nothing, for a local-only machine)."
@@ -68,7 +70,9 @@ defmodule Troupe.UI.HQ do
       cursors: %{teams: 0, profiles: 0, sessions: 0},
       status: status(origin),
       error: nil,
-      create: nil
+      create: nil,
+      invitations: [],
+      shared: 0
     }
     |> load_teams()
     |> reload()
@@ -83,10 +87,12 @@ defmodule Troupe.UI.HQ do
     hq
     |> load_profiles(team)
     |> load_sessions(team)
+    |> load_inbox()
   end
 
   @doc "The row the cursor is on in a column."
   @spec selected(t(), column()) :: map() | nil
+  def selected(hq, :inbox), do: Enum.at(inbox(hq), cursor(hq, :inbox))
   def selected(hq, :teams), do: Enum.at(hq.teams, cursor(hq, :teams))
   def selected(hq, :profiles), do: Enum.at(hq.profiles, cursor(hq, :profiles))
   def selected(hq, :sessions), do: Enum.at(hq.sessions, cursor(hq, :sessions))
@@ -108,18 +114,19 @@ defmodule Troupe.UI.HQ do
 
   @doc """
   Handles a key. Returns `{:ok, hq}`, `{:open, hq, session_id}` when a session
-  was attached and should take the screen, or `:close`.
+  was attached and should take the screen, `{:artifacts, hq}` for the artifacts shared with
+  the person, or `:close`.
   """
-  @spec key(t(), map()) :: {:ok, t()} | {:open, t(), String.t()} | :close
+  @spec key(t(), map()) :: {:ok, t()} | {:open, t(), String.t()} | {:artifacts, t()} | :close
   def key(%{create: %{}} = hq, key), do: create_key(hq, key)
 
   def key(_hq, %{code: "esc"}), do: :close
 
   def key(hq, %{code: code}) when code in ["tab", "right", "l"],
-    do: {:ok, %{hq | column: next_column(hq.column, 1)}}
+    do: {:ok, %{hq | column: next_column(hq, 1)}}
 
   def key(hq, %{code: code}) when code in ["left", "h"],
-    do: {:ok, %{hq | column: next_column(hq.column, -1)}}
+    do: {:ok, %{hq | column: next_column(hq, -1)}}
 
   def key(hq, %{code: code}) when code in ["up", "k"], do: {:ok, move(hq, -1)}
   def key(hq, %{code: code}) when code in ["down", "j"], do: {:ok, move(hq, 1)}
@@ -128,6 +135,7 @@ defmodule Troupe.UI.HQ do
 
   def key(hq, %{code: "enter"}) do
     case hq.column do
+      :inbox -> open_inbox(hq)
       :teams -> {:ok, reload(hq)}
       :profiles -> {:ok, %{hq | column: :sessions}}
       :sessions -> open_selected(hq)
@@ -158,8 +166,21 @@ defmodule Troupe.UI.HQ do
     {banner, rect} = banner(hq, rect)
 
     case hq.create do
-      nil -> header ++ banner ++ columns(hq, rect, state)
+      nil -> header ++ banner ++ inbox_box(hq, rect, state)
       create -> header ++ banner ++ create_page(hq, create, rect)
+    end
+  end
+
+  defp inbox_box(hq, rect, state) do
+    case inbox(hq) do
+      [] ->
+        columns(hq, rect, state)
+
+      lines ->
+        [box, rest] =
+          Layout.split(rect, :vertical, [{:length, min(length(lines), 4) + 2}, {:fill, 1}])
+
+        [{inbox_list(hq), box} | columns(hq, rest, state)]
     end
   end
 
@@ -227,6 +248,11 @@ defmodule Troupe.UI.HQ do
       is_binary(suggest(hq)) ->
         [line, rest] = Layout.split(rect, :vertical, [{:length, 1}, {:fill, 1}])
         {[{%Paragraph{text: suggest(hq), style: Theme.style(:muted)}, line}], rest}
+
+      # What the last thing asked here answered, where it was not done.
+      is_binary(hq.error) ->
+        [line, rest] = Layout.split(rect, :vertical, [{:length, 1}, {:fill, 1}])
+        {[{%Paragraph{text: hq.error, style: Theme.style(:muted)}, line}], rest}
 
       true ->
         {[], rect}
@@ -579,6 +605,87 @@ defmodule Troupe.UI.HQ do
     %{hq | sessions: remote ++ local}
   end
 
+  ## What waits for the person: invitations and what is shared with them
+
+  @doc """
+  HQ's inbox, one line each: an invitation into a session (root #765), and how many
+  artifacts are shared with the person through a link, when any are (root #62).
+  """
+  @spec inbox(t()) :: [{:invitation, map()} | {:shared, pos_integer()}]
+  def inbox(hq) do
+    # A page made before these were kept has neither.
+    shared = Map.get(hq, :shared, 0)
+
+    Enum.map(Map.get(hq, :invitations, []), &{:invitation, &1}) ++
+      if(shared > 0, do: [{:shared, shared}], else: [])
+  end
+
+  defp load_inbox(%{origin: nil} = hq), do: hq
+
+  defp load_inbox(hq) do
+    invitations =
+      case Client.invitations(hq.origin) do
+        {:ok, invitations} -> invitations
+        {:error, _reason} -> hq.invitations
+      end
+
+    shared =
+      case Client.artifacts(%{"shared" => true}) do
+        {:ok, %{artifacts: rows}} -> Enum.count(rows, &(Client.audience_of(&1) == :shared))
+        {:error, _reason} -> hq.shared
+      end
+
+    %{hq | invitations: invitations, shared: shared}
+  end
+
+  # An invitation opens its session to follow, as Enter on a session does; a private one is
+  # read on the invitee's own machine by the desktop app, which holds its key.
+  defp open_inbox(hq) do
+    case selected(hq, :inbox) do
+      {:shared, _n} ->
+        {:artifacts, hq}
+
+      {:invitation, %{"kind" => "private"} = invite} ->
+        {:ok,
+         %{
+           hq
+           | error:
+               "“#{invite["title"] || invite["session_id"]}” is a private session: the desktop app reads it, with its key"
+         }}
+
+      {:invitation, invite} ->
+        case Client.open_session(hq.origin, invite["session_id"], :read) do
+          {:ok, session_id} -> {:open, %{hq | error: nil}, session_id}
+          {:error, reason} -> {:ok, %{hq | error: message(reason)}}
+        end
+
+      nil ->
+        {:ok, hq}
+    end
+  end
+
+  defp inbox_list(hq) do
+    items =
+      Enum.map(inbox(hq), fn
+        {:invitation, invite} ->
+          who = invite["invited_by_name"] || invite["invited_by"] || "someone"
+          role = if invite["role"] == "control", do: "steer", else: "follow"
+
+          "✉ #{who} invited you to #{role} “#{Model.one_line(invite["title"] || invite["session_id"] || "")}” · Enter opens it"
+
+        {:shared, n} ->
+          "◐ #{n} artifact#{if n == 1, do: "", else: "s"} shared with you · Enter opens /artifacts"
+      end)
+
+    %List{
+      items: items,
+      selected: cursor(hq, :inbox),
+      highlight_symbol: "▸ ",
+      highlight_style: highlight(hq, :inbox),
+      block: %Block{title: " for you ", borders: [:all], border_style: border(hq, :inbox)}
+    }
+  end
+
   # A plane that stopped answering should not empty the list: what it last said
   # is still the best description of what is out there.
   defp keep_remote(hq), do: Enum.filter(hq.sessions, &match?({:remote, _}, &1.origin))
@@ -619,6 +726,7 @@ defmodule Troupe.UI.HQ do
   defp cursor(hq, column) do
     count =
       case column do
+        :inbox -> length(inbox(hq))
         :teams -> length(hq.teams)
         :profiles -> length(hq.profiles)
         :sessions -> length(hq.sessions)
@@ -636,9 +744,14 @@ defmodule Troupe.UI.HQ do
     if column == :teams, do: reload(hq), else: hq
   end
 
-  defp next_column(column, step) do
-    columns = [:teams, :profiles, :sessions]
-    index = Enum.find_index(columns, &(&1 == column)) || 0
+  # The inbox is a column only while it has a line.
+  defp next_column(hq, step) do
+    columns =
+      if inbox(hq) == [],
+        do: [:teams, :profiles, :sessions],
+        else: [:inbox, :teams, :profiles, :sessions]
+
+    index = Enum.find_index(columns, &(&1 == hq.column)) || 0
     Enum.at(columns, rem(index + step + length(columns), length(columns)))
   end
 

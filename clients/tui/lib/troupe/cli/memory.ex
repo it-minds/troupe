@@ -180,13 +180,15 @@ defmodule Troupe.CLI.Memory do
     end
   end
 
-  defp written_by(%{"agent" => agent, "session" => session} = line) when is_binary(agent),
+  @doc "Who wrote one of `--blame`'s lines, as its column says it."
+  @spec written_by(map()) :: String.t()
+  def written_by(%{"agent" => agent, "session" => session} = line) when is_binary(agent),
     do: "v#{line["version"]} #{agent} in #{session}"
 
-  defp written_by(%{"session" => session} = line) when is_binary(session),
+  def written_by(%{"session" => session} = line) when is_binary(session),
     do: "v#{line["version"]} an agent in #{session}"
 
-  defp written_by(line), do: "v#{line["version"]} #{line["by"]}"
+  def written_by(line), do: "v#{line["version"]} #{line["by"]}"
 
   # `--status`: which versions this machine's daemon holds, against what the plane has in
   # force now, and what each session running here read at its last turn. For the person's
@@ -194,16 +196,24 @@ defmodule Troupe.CLI.Memory do
   defp status(say, call) do
     case call.("me.memory.status", %{}) do
       {:ok, status} ->
-        say.(held_line(status))
-        Enum.each(status["documents"] || [], &say.("  " <> document_line(&1)))
-        say.(standing_line(status))
-        Enum.each(status["sessions"] || [], &say.("  " <> session_line(&1)))
+        Enum.each(status_lines(status), say)
         0
 
       {:error, reason} ->
         say.("could not ask this machine's daemon: " <> describe(reason))
         1
     end
+  end
+
+  @doc """
+  What `--status` prints of a `me.memory.status` answer, line by line: the copy this machine
+  holds, whether it is current, and what each session here read. The memory screen's too.
+  """
+  @spec status_lines(map()) :: [String.t()]
+  def status_lines(status) do
+    [held_line(status)] ++
+      Enum.map(status["documents"] || [], &("  " <> document_line(&1))) ++
+      [standing_line(status)] ++ Enum.map(status["sessions"] || [], &("  " <> session_line(&1)))
   end
 
   defp held_line(%{"problem" => problem}) when is_binary(problem),
@@ -247,9 +257,12 @@ defmodule Troupe.CLI.Memory do
     "session #{id}, last turn #{at}: #{if read == "", do: "no memory", else: read} (#{word})"
   end
 
-  defp describe(reason) when is_binary(reason), do: reason
-  defp describe(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
-  defp describe(%{data: %{reason: reason}}) when is_binary(reason), do: reason
-  defp describe(%{"data" => %{"reason" => reason}}) when is_binary(reason), do: reason
-  defp describe(reason), do: inspect(reason)
+  @doc "A refusal, the daemon's sentence or the plane's, in words."
+  @spec describe(term()) :: String.t()
+  def describe(reason) when is_binary(reason), do: reason
+  def describe(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
+  def describe(%{data: %{reason: reason}}) when is_binary(reason), do: reason
+  def describe(%{"data" => %{"reason" => reason}}) when is_binary(reason), do: reason
+  def describe(%{message: message}) when is_binary(message), do: message
+  def describe(reason), do: inspect(reason)
 end

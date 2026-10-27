@@ -92,7 +92,8 @@ defmodule Troupe.Gateway.Memory do
   documents in force now where it could be asked (`in_force`, then kept as every answer is)
   and whether the copy was `current`, and each session running here with what its last turn
   read and whether that is `current` against the copy now. `reason` says why the plane was
-  not asked. `ask: false` (a client in Local only) asks nothing of the plane.
+  not asked. `ask: false` (a client in Local only) asks nothing of the plane. `held` is each
+  document as the copy holds it (`scope`, `name`, `version`, `text`), the person's own among them.
   """
   @spec status(keyword()) :: map()
   def status(opts \\ []) do
@@ -121,6 +122,9 @@ defmodule Troupe.Gateway.Memory do
       "fetched_at" => held && held["fetched_at"],
       "path" => Troupe.Paths.display(PlaneMemory.cache_path()),
       "documents" => held_stamps,
+      # Each document as the copy holds it, which the sessions here read: what a memory
+      # screen shows, read-only, where the plane is not asked.
+      "held" => held_levels(held),
       "problem" => problem,
       "sessions" =>
         Enum.map(Troupe.Session.PlaneMemory.reads(), &Map.put(&1, "current", same?(&1["documents"], now)))
@@ -135,6 +139,12 @@ defmodule Troupe.Gateway.Memory do
 
   defp asking(true), do: :ok
   defp asking(false), do: {:error, :local_only}
+
+  # Each document with its level, version and text, and nothing else of it.
+  defp held_levels(%{"documents" => documents}) when is_list(documents),
+    do: Enum.map(documents, &Map.take(&1, ~w(scope name version text)))
+
+  defp held_levels(_none), do: []
 
   defp documents_now do
     case PlaneMemory.read_cache() do

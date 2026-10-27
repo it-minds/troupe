@@ -18,7 +18,7 @@ defmodule Troupe.UI.TUI.View do
   alias ExRatatui.Widgets.Block.Title
   alias Troupe.Client
   alias Troupe.Settings
-  alias Troupe.UI.TUI.{AgentChooser, Agents, Input, Model, Theme}
+  alias Troupe.UI.TUI.{AgentChooser, Agents, ArtifactsPage, Input, MemoryPage, Model, Theme}
 
   # Command-box geometry. The focused box — the command line and an active
   # window's input — is a fixed `@input_rows` console rows: `@input_content`
@@ -117,6 +117,18 @@ defmodule Troupe.UI.TUI.View do
     Enum.drop(behind, -1) ++
       [command_line(state, cmd_rect, cmd_rect.height)] ++
       AgentChooser.render(chooser, area, cmd_rect.y, Agents.running(state))
+  end
+
+  defp draw(%{focus: focus} = state, frame) when focus in [:artifacts, :own_memory] do
+    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
+    [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
+
+    page =
+      if focus == :artifacts,
+        do: ArtifactsPage.render(state.artifacts_page, page_rect, state),
+        else: MemoryPage.render(state.memory_page, page_rect, state)
+
+    page ++ [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
   defp draw(%{focus: :memory} = state, frame) do
@@ -2531,6 +2543,15 @@ defmodule Troupe.UI.TUI.View do
   # A list's selected row: the light that is not a status, bold.
   defp selected, do: Theme.style(:accent, [:bold])
 
+  @doc """
+  Rows `offset` to `offset + height` of tagged lines wrapped at `width`, drawn as the pane
+  draws a transcript: a frame's rows on its surface, out to `width`. What a page shows a
+  document in, an artifact's or a memory's.
+  """
+  @spec frame_rows([Model.line()], pos_integer(), non_neg_integer(), pos_integer()) :: term()
+  def frame_rows(lines, width, offset, height),
+    do: styled(Model.rows(lines, width, offset, height), width)
+
   defp styled([]), do: ""
   defp styled(rows), do: Enum.map(rows, &styled_row/1)
 
@@ -2981,6 +3002,12 @@ defmodule Troupe.UI.TUI.View do
 
         :memory ->
           {"", " memory — ↑↓ move · x forgets the fact · r reload · Esc back "}
+
+        :artifacts ->
+          {"", ArtifactsPage.footer(state.artifacts_page)}
+
+        :own_memory ->
+          {"", MemoryPage.footer(state.memory_page)}
 
         :hq ->
           {hq_text(state), Troupe.UI.HQ.footer(state.hq)}

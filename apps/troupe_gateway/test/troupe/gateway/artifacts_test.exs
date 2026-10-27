@@ -163,14 +163,15 @@ defmodule Troupe.Gateway.ArtifactsTest do
              Enum.find(FakePlane.calls(ctx.plane.state), &match?({"artifact.list", _}, &1))
   end
 
-  # The desktop app's gallery and viewer: one artifact with its versions, a ticket to open it
-  # or one version on its host, a view link and its revoking, a rollback and a pin, each the
-  # plane's own method sent with the daemon's sign-in, its answer and its refusal as the
-  # plane gave them.
+  # The desktop app's gallery and viewer, and the terminal's: one artifact with its versions, a
+  # ticket to open it or one version on its host, one text file of a version, a view link and
+  # its revoking, a rollback and a pin, each the plane's own method sent with the daemon's
+  # sign-in, its answer and its refusal as the plane gave them.
   test "the viewer's methods are forwarded to the plane as the person, its refusals kept", ctx do
     forwarded = [
       {"artifact.get", %{"id" => "art-fakefakefakefake"}},
       {"artifact.open", %{"id" => "art-fakefakefakefake", "version" => 1}},
+      {"artifact.read", %{"id" => "art-fakefakefakefake", "version" => 1, "path" => "index.md"}},
       {"artifact.share", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "role" => "view"}},
       {"artifact.unshare", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "share" => "sh-1"}},
       {"artifact.rollback", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => 1}},
@@ -196,9 +197,11 @@ defmodule Troupe.Gateway.ArtifactsTest do
              Client.call(ctx.client, "artifact.open", %{"id" => "art-fakefakefakefake", "version" => 1})
 
     assert {:ok, %{"url" => "https://artifacts.example.test/s/" <> _, "share" => %{"role" => "view"}}} =
-             Client.call(ctx.client, "artifact.share", Enum.at(forwarded, 2) |> elem(1))
+             Client.call(ctx.client, "artifact.share", Enum.at(forwarded, 3) |> elem(1))
 
-    for {method, params} <- Enum.drop(forwarded, 3) do
+    assert {:ok, %{"text" => "# Weekly"}} = Client.call(ctx.client, "artifact.read", Enum.at(forwarded, 2) |> elem(1))
+
+    for {method, params} <- Enum.drop(forwarded, 4) do
       assert {:ok, _answer} = Client.call(ctx.client, method, params), method
     end
 
