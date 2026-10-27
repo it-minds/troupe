@@ -232,6 +232,8 @@ defmodule Troupe.Gateway.Dispatch do
     "artifact.unshare" => :control,
     "artifact.rollback" => :control,
     "artifact.pin" => :control,
+    # A put over a version that sends no files: the owner moving who may open it.
+    "artifact.put" => :control,
     # Where this machine's copy of the plane's memory stands, and what each session here
     # last read: for the person's own debugging (`troupe memory --status`).
     "me.memory.status" => :observe,
@@ -302,7 +304,7 @@ defmodule Troupe.Gateway.Dispatch do
   # and after a create, whose session there was no id for before.
   @work ~w(input.send commands.run session.goal.set session.loop.start)
   @invites ~w(session.invite session.uninvite session.invites session.read_sealed)
-  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.rollback artifact.pin)
+  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.rollback artifact.pin artifact.put)
 
   defp local_only("remote.offer", params, context) do
     cond do
@@ -1448,8 +1450,14 @@ defmodule Troupe.Gateway.Dispatch do
                "publish it; troupe login signs it in, or send the file itself"
          })}
 
-      {:error, reason} ->
-        {:error, Error.new(:invalid_params, %{reason: Memory.sentence(reason)})}
+      # What this machine could not read or send of it is the client's to fix.
+      {:error, reason} when is_binary(reason) ->
+        {:error, Error.new(:invalid_params, %{reason: reason})}
+
+      # The plane's refusal keeps its code and its data: a team the person is not in is
+      # `forbidden`, with the teams they are in.
+      {:error, _refused} = error ->
+        forwarded("artifact.publish", error)
     end
   end
 
@@ -1466,8 +1474,8 @@ defmodule Troupe.Gateway.Dispatch do
            reason: "this computer's daemon is not signed in to a Troupe plane; troupe login signs it in"
          })}
 
-      {:error, reason} ->
-        {:error, Error.new(:invalid_params, %{reason: Memory.sentence(reason)})}
+      {:error, _refused} = error ->
+        forwarded("artifact.list", error)
     end
   end
 

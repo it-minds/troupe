@@ -242,7 +242,29 @@ defmodule Troupe.Plane.RemoteTest do
       assert {:error, %{"message" => "not_found"}} = rpc(ctx, @bea, "remote.open", %{"session_id" => id})
       {:ok, %{"invites" => [invitation]}} = rpc(ctx, @bea, "invites.list", %{})
       assert invitation["offered"] == false
+      assert invitation["offline_since"] == nil
       assert invitation["role"] == "control"
+    end
+
+    # Its daemon killed, the offer is still listed offline until the laptop comes back; her
+    # invitation says the same from the plane's row, offline since then and not offered.
+    test "an offer whose laptop went is offline to its invitee, with the time, and not offered", ctx do
+      id = private!(ctx)
+      invite!(id, @bea, "control")
+      laptop = laptop!(ctx, @ada)
+      {:ok, _} = sync(laptop, id, [%{"person" => @bea, "role" => "control"}])
+      Client.close(laptop)
+
+      row =
+        eventually(fn ->
+          {:ok, %{"sessions" => [row]}} = rpc(ctx, @bea, "remote.list", %{})
+          row["state"] == "offline" and row
+        end)
+
+      {:ok, %{"invites" => [invitation]}} = rpc(ctx, @bea, "invites.list", %{})
+      assert invitation["offered"] == false
+      assert invitation["offline_since"] == row["offline_since"]
+      assert is_binary(invitation["offline_since"])
     end
   end
 

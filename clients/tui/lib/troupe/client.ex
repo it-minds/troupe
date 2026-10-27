@@ -660,10 +660,6 @@ defmodule Troupe.Client do
   @spec identity() :: {:ok, map()} | {:error, term()}
   def identity, do: Daemon.identity()
 
-  @doc "Publish an artifact on the plane through this computer's daemon, as its person."
-  @spec publish_artifact(map()) :: {:ok, map()} | {:error, term()}
-  def publish_artifact(params), do: Daemon.publish_artifact(params)
-
   ## A person's own things: artifacts and memory (root #62, #55)
 
   alias Troupe.Client.{Artifacts, OwnMemory}

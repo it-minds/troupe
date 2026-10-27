@@ -146,6 +146,7 @@ nav:
       - Monitoring: admin/monitoring.md
       - Routine tasks: admin/routine-tasks.md
       - Security, for a reviewer: admin/security.md
+      - "Security: a worker's isolation and egress": admin/security-worker.md
       - The A2A facade: a2a.md
       - What Troupe dials: egress-allowlist.md
   - Contributing:

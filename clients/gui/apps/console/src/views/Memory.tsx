@@ -10,7 +10,8 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { MemoryBlameLine, MemoryDocument, MemoryInherited, MemoryLine, MemoryPreview, MemoryReader, MemoryReaders, MemoryScope, MemorySaved } from "@troupe/client";
+import { besideRows, writtenBy } from "@troupe/client";
+import type { MemoryDocument, MemoryInherited, MemoryPreview, MemoryReader, MemoryReaders, MemoryScope, MemorySaved } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Loaded, Preview, Region, TextDiff, count, useChange, when } from "./bits";
 
@@ -249,7 +250,7 @@ function Readers({ doc, readers }: { doc: MemoryDocument; readers: MemoryReaders
                     {r.version === 0 ? "none" : `v${r.version}`}
                     {r.behind ? " · behind" : ""}
                   </td>
-                  <td>{when(r.turn_at)}</td>
+                  <td>{r.activated && !r.turn_at ? "activated, no turn yet" : when(r.turn_at)}</td>
                   <td>
                     {doc.editable && r.behind && (
                       <button type="button" onClick={() => nudge(r)}>
@@ -360,13 +361,6 @@ function Entries({ doc }: { doc: MemoryDocument }): JSX.Element {
   );
 }
 
-/** A line's side column: the version and who saved it, or the agent and session of an agent's entry. */
-export function writtenBy(line: MemoryBlameLine): string {
-  if (line.agent) return `v${line.version} ${line.agent} in ${line.session ?? "a session"}`;
-  if (line.session) return `v${line.version} an agent in ${line.session}`;
-  return `v${line.version} ${line.by ?? ""}`.trim();
-}
-
 /**
  * Two versions side by side: the older on the left and the one shown on the right, line for
  * line as the plane compared them, a line that went marked on the left and one that came on
@@ -398,29 +392,6 @@ function SideBySide({ doc }: { doc: MemoryDocument }): JSX.Element {
       </tbody>
     </table>
   );
-}
-
-/** The plane's line diff as two columns: a line kept on both sides, a run of lines gone beside the run that came. */
-export function besideRows(lines: MemoryLine[]): Array<{ left: string | null; right: string | null; changed: boolean }> {
-  const rows: Array<{ left: string | null; right: string | null; changed: boolean }> = [];
-  let gone: string[] = [];
-  let came: string[] = [];
-  const flush = (): void => {
-    for (let i = 0; i < Math.max(gone.length, came.length); i++) rows.push({ left: gone[i] ?? null, right: came[i] ?? null, changed: true });
-    gone = [];
-    came = [];
-  };
-  for (const l of lines) {
-    if (l.op === "same") {
-      flush();
-      rows.push({ left: l.text, right: l.text, changed: false });
-    } else if (l.op === "del") {
-      if (came.length > 0) flush();
-      gone.push(l.text);
-    } else came.push(l.text);
-  }
-  flush();
-  return rows;
 }
 
 function scope(of: MemoryScope): string {

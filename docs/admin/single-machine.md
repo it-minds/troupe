@@ -108,7 +108,7 @@ machine needs `TROUPE_BAO_TOKEN`, and the object store's credentials as a pod's
 signed, for the name it dials. Without it, a worker holding a machine's secret does not
 dial and logs why, and a plane sent a machine's secret in plaintext refuses it before
 looking at it and logs that it must be rotated
-([security.md §3](security.md#3-a-worker-isolation-and-egress)).
+([a worker's isolation and egress](security-worker.md)).
 
 The chart does not expose the control port outside the cluster: no Ingress, and its
 NetworkPolicy admits the port only from worker namespaces and the operator. Reaching

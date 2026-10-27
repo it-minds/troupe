@@ -413,6 +413,31 @@ defmodule Troupe.Plane.Memory do
   end
 
   @doc """
+  A pod's session was activated with `documents`, the memory its `session.activate` carried:
+  kept as what it holds, with no turn yet, so a session that has had none is among a
+  document's readers as activated until its first turn says what it read.
+  """
+  @spec activated(Sessions.Session.t(), [Shape.document()]) :: :ok
+  def activated(%Sessions.Session{} = session, documents) when is_list(documents) do
+    keep(%{
+      session_id: session.id,
+      owner_id: session.owner_id,
+      owner_subject: session.owner_subject,
+      where: "pod",
+      documents: Enum.map(documents, &Shape.stamp/1),
+      turn_at: nil,
+      seen_at: DateTime.utc_now()
+    })
+  end
+
+  @doc "What the plane keeps of a session's reads, gone with the session: for its erasure."
+  @spec forget_read(String.t()) :: :ok
+  def forget_read(session_id) when is_binary(session_id) do
+    _deleted = Repo.delete_all(from(r in Read, where: r.session_id == ^session_id))
+    :ok
+  end
+
+  @doc """
   What a person's machine says of the sessions running on it, with its poll of `me.memory`:
   each one's `session_id`, the stamps its last turn read (`documents`) and when that turn
   began (`turn_at`). At most #{@machine_sessions} a poll, and only for the person who sent
@@ -469,8 +494,8 @@ defmodule Troupe.Plane.Memory do
   of it their last turn ran under (`0` for none) and whether that is behind the version in
   force; and how many are behind. A pod's session is running while the plane has it active
   on a pod, a machine's while its daemon named it at a poll in the last fifteen minutes,
-  three polls. A session that has had no turn yet is not listed: it reads the version in
-  force at its first.
+  three polls. A pod's session activated and given no turn yet is listed as `activated`, with
+  the version its activation carried and no `turn_at`.
   """
   @spec readers(owner()) :: %{version: non_neg_integer(), behind: non_neg_integer(), sessions: [map()]}
   def readers(owner) do
@@ -486,7 +511,7 @@ defmodule Troupe.Plane.Memory do
 
         row
         |> Map.delete(:documents)
-        |> Map.merge(%{version: version || 0, behind: version != in_force})
+        |> Map.merge(%{version: version || 0, behind: version != in_force, activated: is_nil(row.turn_at)})
       end)
       |> Enum.sort_by(& &1.session_id)
 

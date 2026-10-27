@@ -936,7 +936,7 @@ export class FakeAdmin {
   /** Every version of every memory document, oldest first, by subject: `organisation`, `team/<name>`, `profile/<name>`. */
   readonly memory = new Map<string, Array<{ version: number; text: string; changed_by: string; changed_at: string }>>();
   /** By subject: the running sessions a document reaches, each with the version its last turn read. */
-  readonly memoryReaders = new Map<string, Array<{ session_id: string; where: "pod" | "machine"; owner: string; profile: string | null; team: string | null; version: number; turn_at: string }>>();
+  readonly memoryReaders = new Map<string, Array<{ session_id: string; where: "pod" | "machine"; owner: string; profile: string | null; team: string | null; version: number; turn_at: string | null; activated?: boolean }>>();
   /** By session id: whether its last turn read the memory in force for it, as the session listing marks. */
   readonly memoryStanding = new Map<string, "current" | "behind">();
   /** The sessions an administrator nudged, in order. */

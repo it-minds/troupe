@@ -4,6 +4,7 @@ defmodule Troupe.Daemon.CLI do
 
       troupe-daemon [run]               serve on this machine until idle or stopped
       troupe-daemon status              say whether one is running, and where
+      troupe-daemon stop                stop the one running here, between turns, and wait until it has
       troupe-daemon open [--url URL]    start it if need be, and open the web app connected to it
       troupe-daemon config              the resolved providers and models (keys masked)
       troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it
@@ -45,6 +46,7 @@ defmodule Troupe.Daemon.CLI do
 
   @type command ::
           :status
+          | :stop
           | {:open, String.t() | nil}
           | :config
           | {:config_explain, String.t() | nil, boolean()}
@@ -94,6 +96,7 @@ defmodule Troupe.Daemon.CLI do
 
   @spec parse([String.t()]) :: command()
   def parse(["status"]), do: :status
+  def parse(["stop"]), do: :stop
   def parse(["open"]), do: {:open, nil}
   def parse(["open", "--url", "-" <> _ = flag]), do: unknown(["open", "--url", flag])
   def parse(["open", "--url", url]), do: {:open, url}
@@ -154,6 +157,19 @@ defmodule Troupe.Daemon.CLI do
         IO.puts("troupe-daemon is not running")
         IO.puts(state_line())
         1
+    end
+  end
+
+  # Asked as `troupe update` asks it (`daemon.stop`): between turns, waiting while one is at
+  # work, and done once nothing answers. A daemon a TUI runs inside itself stays, and says so.
+  def main(:stop) do
+    case running() do
+      :not_running ->
+        IO.puts("troupe-daemon is not running")
+        0
+
+      {:ok, _endpoint} ->
+        stop_running()
     end
   end
 
@@ -621,6 +637,20 @@ defmodule Troupe.Daemon.CLI do
   defp skipped_lines(skipped),
     do: Enum.map(skipped, &"  skipped    #{&1["provider"]}: #{&1["reason"]}")
 
+  # 0 once it has gone; 1 where it stays (a TUI runs it inside itself) or would not say.
+  defp stop_running do
+    s = %{installed: version(), out: &IO.puts/1, sleep: &Process.sleep/1}
+
+    case Troupe.Update.quiet_daemon(s) do
+      :ok ->
+        if Daemon.running?(), do: 1, else: 0
+
+      {:error, sentence} ->
+        IO.puts(:stderr, sentence)
+        1
+    end
+  end
+
   defp running do
     with {:ok, endpoint} <- Endpoint.discover(),
          true <- Daemon.running?(endpoint: endpoint) do
@@ -654,6 +684,7 @@ defmodule Troupe.Daemon.CLI do
     """
     troupe-daemon [run]               serve on this machine until idle or stopped
     troupe-daemon status              say whether one is running, and where
+    troupe-daemon stop                stop the one running here, between turns, and wait until it has
     troupe-daemon open [--url URL]    start it if need be, and open the web app connected to it
     troupe-daemon config              the resolved providers and models (keys masked)
     troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it

@@ -46,6 +46,29 @@ function sentence(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/**
+ * Who may open an artifact, as a person chooses it here and in the gallery: only them, the
+ * organisation, each of their teams and each profile the plane names for them.
+ */
+export function VisibilityOptions({ teams, profiles }: { teams?: string[] | undefined; profiles?: string[] | undefined }): JSX.Element {
+  return (
+    <>
+      <option value="private">Only you, until you share a link</option>
+      <option value="organisation">The whole organisation</option>
+      {(teams ?? []).map((t) => (
+        <option key={`team:${t}`} value={`team:${t}`}>
+          The {t} team
+        </option>
+      ))}
+      {(profiles ?? []).map((p) => (
+        <option key={p} value={`profile:${p}`}>
+          The {p} profile's people
+        </option>
+      ))}
+    </>
+  );
+}
+
 export function Publish({
   daemon,
   sessionId,
@@ -171,18 +194,7 @@ export function Publish({
                 <label>
                   Who may open it
                   <select value={visibility} onChange={(e) => setVisibility(e.target.value)}>
-                    <option value="private">Only you, until you share a link</option>
-                    <option value="organisation">The whole organisation</option>
-                    {(list?.teams ?? []).map((t) => (
-                      <option key={`team:${t}`} value={`team:${t}`}>
-                        The {t} team
-                      </option>
-                    ))}
-                    {(list?.profiles ?? []).map((p) => (
-                      <option key={p} value={`profile:${p}`}>
-                        The {p} profile's people
-                      </option>
-                    ))}
+                    <VisibilityOptions teams={list?.teams} profiles={list?.profiles} />
                   </select>
                 </label>
               </>

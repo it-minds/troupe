@@ -149,10 +149,12 @@ defmodule Troupe.Plane.Artifacts.Mermaid do
     label = Regex.run(~r/\|([^|]*)\|/, op) |> then(&(&1 && clean(Enum.at(&1, 1))))
     core = String.replace(op, ~r/\|[^|]*\|/, "") |> String.trim()
 
-    inline_label =
-      case Regex.run(~r/\A(?:--|==)\s+(.+?)\s+(?:-->|==>)\z/, core) do
-        [_, text] -> clean(text)
-        nil -> nil
+    # An inline label's text is the label's: the edge is what closes it, so a dot in
+    # `-- v1.2 -->` does not make it dotted.
+    {inline_label, core} =
+      case Regex.run(~r/\A(?:--|==)\s+(.+?)\s+(-->|==>)\z/, core) do
+        [_, text, closing] -> {clean(text), closing}
+        nil -> {nil, core}
       end
 
     {edge_kind(core), label || inline_label}

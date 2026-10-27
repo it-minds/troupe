@@ -108,6 +108,13 @@ defmodule Troupe.Gateway.ArtifactsTest do
              publish(ctx, %{"title" => ""})
 
     assert reason =~ "needs a title"
+
+    # The plane's code, not one the daemon picks: a team the person is not in is forbidden,
+    # with the teams they are in for a client to offer.
+    assert {:error, %{message: "forbidden", data: %{"reason" => reason, "teams" => ["engineering"]}}} =
+             publish(ctx, %{"visibility" => "team:research"})
+
+    assert reason =~ "not in team research"
   end
 
   test "a version too large for one call goes by an upload handle, straight to the object store",
@@ -175,7 +182,10 @@ defmodule Troupe.Gateway.ArtifactsTest do
       {"artifact.share", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "role" => "view"}},
       {"artifact.unshare", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "share" => "sh-1"}},
       {"artifact.rollback", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => 1}},
-      {"artifact.pin", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => nil}}
+      {"artifact.pin", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => nil}},
+      # Who may open it, moved by its owner: a put over the newest version with no files.
+      {"artifact.put",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "base" => 1, "visibility" => "private"}}
     ]
 
     for {method, params} <- forwarded do

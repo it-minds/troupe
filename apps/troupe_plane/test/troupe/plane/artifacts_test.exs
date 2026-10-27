@@ -176,6 +176,11 @@ defmodule Troupe.Plane.ArtifactsTest do
           "visibility" => "organisation",
           "files" => [%{"path" => "index.html", "bytes" => "not base64!"}]
         },
+        # A part longer than the object store takes is refused before anything is written.
+        %{
+          "visibility" => "organisation",
+          "files" => page("x", [%{"path" => String.duplicate("a", 252) <> ".txt", "bytes" => "eA=="}])
+        },
         %{
           "visibility" => "organisation",
           "files" => [%{"path" => "notes.txt", "bytes" => "eA=="}]

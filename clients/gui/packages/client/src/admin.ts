@@ -1016,6 +1016,8 @@ export interface MemoryReader {
   /** The version its last turn read; 0 for none. */
   version: number;
   turn_at: string | null;
+  /** A pod's session activated with the documents in force and no turn yet: `turn_at` is null. */
+  activated?: boolean;
   behind: boolean;
 }
 

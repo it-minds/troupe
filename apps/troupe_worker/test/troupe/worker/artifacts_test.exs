@@ -107,6 +107,54 @@ defmodule Troupe.Worker.ArtifactsTest do
     PlaneHelper.stop_plane()
   end
 
+  # Past what one control message carries (8 MiB), as a daemon's does past about 2.5 MB of
+  # base64: the files go to the object store by a
+  # handle the plane gives for the session's owner, and the publish names the handle.
+  test "a version too large for one message goes by an upload handle, straight to the store",
+       context do
+    on_exit(fn -> ObjectStore.delete_prefix(ObjectStore.from_env(), "artifact-uploads/") end)
+
+    # Running on this pod, so the index the plane asks for after enrolling lists it, and the
+    # placement below is not taken back as a session the pod does not hold.
+    assert {:ok, _} = activate(context)
+    {:ok, ada} = Identity.upsert_user(%{subject: "ada@example.test", email: "ada@example.test"})
+    {:ok, group} = Identity.upsert_group(%{external_id: "engineering", display_name: "engineering"})
+    {:ok, team} = Identity.enable_team(group, %{name: "engineering"})
+
+    {:ok, _} =
+      PlaneSessions.create(%{
+        id: context.session_id,
+        owner_id: ada.id,
+        owner_subject: ada.subject,
+        profile: "dev",
+        team_id: team.id,
+        epoch: 1
+      })
+
+    [pod] = Fleet.list_workers("dev")
+    {:ok, _} = PlaneSessions.place(context.session_id, pod)
+    big = :binary.copy("x", 10 * 1024 * 1024)
+
+    params = %{
+      "title" => "Big from the pod",
+      "kind" => "html",
+      "visibility" => "organisation",
+      "files" => [
+        %{"path" => "index.html", "bytes" => Base.encode64("<h1>Big</h1>")},
+        %{"path" => "data.bin", "bytes" => Base.encode64(big)}
+      ]
+    }
+
+    assert {:ok, artifact} =
+             Artifacts.publish(params, %{session_id: context.session_id, agent_path: ["root"]})
+
+    assert artifact["owner"]["subject"] == "ada@example.test"
+    assert {:ok, ^big} = ObjectStore.get(ObjectStore.from_env(), "artifacts/#{artifact["id"]}/1/data.bin")
+
+    stop_supervised!(Link)
+    PlaneHelper.stop_plane()
+  end
+
   defp verify("dev-token") do
     {:ok,
      %{profile: "dev", namespace: "troupe-w-dev", pod_name: nil, service_account: "troupe-worker"}}

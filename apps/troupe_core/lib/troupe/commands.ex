@@ -25,7 +25,7 @@ defmodule Troupe.Commands do
   `availability` is a requirement the client judges, not a verdict: `always`; `window`
   (acts on a window: the activated one, or one named as an argument); `local` (a session
   on this machine: a pod has no checkout, watcher or brief of the person's); `plane`
-  (needs a plane). A client shows a command it cannot run greyed, with the reason, rather
+  (needs the client's daemon signed in to a plane, which the client asks it). A client shows a command it cannot run greyed, with the reason, rather
   than hiding it — that is how somebody learns the tool.
   """
 
@@ -463,6 +463,7 @@ defmodule Troupe.Commands do
       entry("publish", "workspace", "Publish a page, a document or a file for others to read",
         usage: "/publish <path> [private | organisation | team:<name> | profile:<name>]",
         args: [arg("path", true, "file"), arg("visibility", false, "text")],
+        availability: "plane",
         detail:
           "The file is read on this machine and published on your Troupe plane as an artifact, " <>
             "as the person this computer's daemon is signed in as: a page (.html), a Markdown " <>
@@ -475,6 +476,7 @@ defmodule Troupe.Commands do
       ),
       entry("artifacts", "workspace", "What is published for you, by who can see it",
         usage: "/artifacts",
+        availability: "plane",
         detail:
           "Everything published for you: for everyone at your organisation, your teams, shared " <>
             "with you through a link, and only you, newest first, a version you have not opened " <>

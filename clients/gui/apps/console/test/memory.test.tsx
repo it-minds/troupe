@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { writtenBy } from "../src/views/Memory";
+import { writtenBy } from "@troupe/client";
 import { PEOPLE, button, freshBrowser, render, says, sees, seesButton, seesField, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
@@ -212,6 +212,24 @@ describe("company memory", () => {
     type(await seesField("The organisation's memory", org()!), "We deploy on Thursdays.");
     button("Preview", org()!)!.click();
     await sees("2 running sessions read it now; 1 of them is behind version 2.", org);
+  });
+
+  // A pod's session the plane activated with the version in force reads it before its first
+  // turn: it is a reader, not behind, and its row says it has had no turn yet.
+  it("lists a session activated with no turn yet among those that read it", async () => {
+    fake.admin.memoryReaders.get("organisation")!.push({ session_id: "s-9e0d4b77", where: "pod", owner: "alice@example.com", profile: "dev", team: "core", version: 2, turn_at: null, activated: true });
+    visit("#/memory");
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+
+    const org = () => card("The organisation's memory");
+    await waitFor(org, "the organisation's memory");
+    const readers = () => org()?.querySelector<HTMLElement>('section.readers[aria-label="Who reads it"]') ?? null;
+    await sees("s-9e0d4b77", readers);
+    const row = [...readers()!.querySelectorAll("tr")].find((tr) => tr.textContent?.includes("s-9e0d4b77"))!;
+    expect(row.textContent).toContain("activated, no turn yet");
+    expect(row.textContent).not.toContain("behind");
+    expect(row.querySelector("button")).toBeNull();
   });
 
   it("sets two versions side by side, and rolls back to one as a new version with the audit's note", async () => {

@@ -72,7 +72,7 @@ defmodule Troupe.Gateway.Artifacts do
   def put(params) do
     with url when is_binary(url) <- Plane.url(),
          true <- Plane.linked?(),
-         {:ok, params} <- carried(Map.take(params, @keys)),
+         {:ok, params} <- carried(Map.take(params, @keys), &Plane.call("artifact.upload.begin", %{"files" => &1})),
          {:ok, artifact} <- Plane.call("artifact.publish", params) do
       {:ok, Map.put(artifact, "plane_url", url)}
     else
@@ -109,7 +109,9 @@ defmodule Troupe.Gateway.Artifacts do
     "artifact.share" => ~w(id role expires),
     "artifact.unshare" => ~w(id share person),
     "artifact.rollback" => ~w(id version),
-    "artifact.pin" => ~w(id version)
+    "artifact.pin" => ~w(id version),
+    # Who may open it, moved by its owner (or its title): a put over a version, no files sent.
+    "artifact.put" => ~w(id base visibility title note)
   }
 
   @doc "The methods `forward/2` sends to the plane."
@@ -133,22 +135,26 @@ defmodule Troupe.Gateway.Artifacts do
     end
   end
 
-  # Inline where it fits in one call; else by an upload handle, the files sent to the
-  # object store first and the publish naming the handle.
-  defp carried(%{"files" => files} = params) when is_list(files) do
+  @doc """
+  `params` as a publish sends them: inline where its files fit in one call; else by an
+  upload handle, `begin` asked for one with each file's path and size, the files sent to
+  the object store first and the publish naming the handle. A daemon begins with the plane's
+  `artifact.upload.begin`, a pod with `session.artifact.upload.begin` over its control link.
+  """
+  @spec carried(map(), ([map()] -> {:ok, map()} | {:error, term()})) :: {:ok, map()} | {:error, term()}
+  def carried(%{"files" => files} = params, begin) when is_list(files) do
     inline = files |> Enum.map(&byte_size(&1["bytes"] || "")) |> Enum.sum()
 
     if inline <= @inline_bytes,
       do: {:ok, params},
-      else: upload(params, files)
+      else: upload(params, files, begin)
   end
 
-  defp carried(params), do: {:ok, params}
+  def carried(params, _begin), do: {:ok, params}
 
-  defp upload(params, files) do
+  defp upload(params, files, begin) do
     with {:ok, decoded} <- decode(files),
-         {:ok, %{"upload" => handle, "urls" => urls}} <-
-           Plane.call("artifact.upload.begin", %{"files" => Enum.map(decoded, &announce/1)}),
+         {:ok, %{"upload" => handle, "urls" => urls}} <- begin.(Enum.map(decoded, &announce/1)),
          :ok <- send_all(decoded, urls) do
       {:ok, params |> Map.delete("files") |> Map.put("upload", handle)}
     end

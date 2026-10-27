@@ -1,19 +1,24 @@
 // "Publish…" (troupe #62): the palette's /publish opens a dialog that publishes files from
 // this computer on the plane through the daemon's sign-in, as a new artifact or as a new
 // version of one of the person's own with a note, and links the console's gallery. Signed
-// out, the daemon's sentence is said. Against the fake daemon.
+// out, the daemon's sentence is said. Against the fake daemon, signed in to a plane: under Local
+// only the daemon publishes and lists nothing, which the gallery's own test shows.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
+import { webTokenStore } from "@troupe/client";
 import { App } from "../src/App";
 import { kindOf } from "../src/views/Publish";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
+import { startHarness } from "../../../packages/client/test/support/harness.js";
+import type { Harness } from "../../../packages/client/test/support/harness.js";
 import { button, render, says, sees, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
 
 let daemon: FakeDaemon;
+let harness: Harness | null = null;
 let unmount: (() => void) | null = null;
 
 function key(target: EventTarget, key: string, init: KeyboardEventInit = {}): void {
@@ -36,7 +41,6 @@ function pick(input: HTMLInputElement, files: File[]): void {
 
 beforeEach(async () => {
   localStorage.clear();
-  localStorage.setItem("troupe.pref.localOnly", "yes");
   startOnTheList();
   daemon = new FakeDaemon({ osUser: "ada" });
   await daemon.start();
@@ -48,10 +52,27 @@ afterEach(async () => {
   unmount?.();
   unmount = null;
   location.hash = "";
+  await harness?.stop();
+  harness = null;
   await daemon.stop();
 });
 
-async function openPublish(): Promise<HTMLElement> {
+async function signedIn(): Promise<void> {
+  harness = await startHarness();
+  await harness.signIn({ store: webTokenStore() });
+  localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
+  localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");
+}
+
+/** This computer's daemon signed in to the plane, as `identity.get` then says. */
+function daemonLinked(): void {
+  daemon.linked = { subject: "alice@example.com", display_name: "Alice", plane_url: "https://plane.example.test" };
+}
+
+/** The palette open on a session, filtered to /publish: its input. */
+async function publishRow(signIn = true, linked = true): Promise<HTMLInputElement> {
+  if (signIn) await signedIn();
+  if (linked) daemonLinked();
   unmount = render(<App />).unmount;
   await waitFor(() => says("/home/ada/notes"), "the daemon's session in the list");
   button("Start a session")!.click();
@@ -64,6 +85,11 @@ async function openPublish(): Promise<HTMLElement> {
   const input = palette.querySelector<HTMLInputElement>("input")!;
   type(input, "publish");
   await waitFor(() => [...document.querySelectorAll(".palette .row .name")].map((e) => e.textContent).join() === "/publish", "the publish row");
+  return input;
+}
+
+async function openPublish(signIn = true): Promise<HTMLElement> {
+  const input = await publishRow(signIn);
   key(input, "Enter");
   return waitFor(dialog, "the Publish dialog");
 }
@@ -118,13 +144,47 @@ describe("Publish…", () => {
     expect(daemon.publishedArtifacts[0]).toMatchObject({ title: "Mine", visibility: "private" });
   });
 
-  it("says the daemon's sentence where it is signed in to no plane", async () => {
+  it("says the daemon's sentence where the plane answers it has no sign-in", async () => {
     daemon.artifacts = null;
     await openPublish();
     await sees("not signed in to a Troupe plane");
   });
 
-  it("calls picked files a page, a document or a file as the plane will open them", () => {
+  // /publish needs a plane: greyed, with why, where this computer's daemon is known to be
+  // signed in to none, and run where it is signed in. The app is on this computer alone in
+  // both, so the daemon's own sign-in is all that differs.
+  it("greys /publish where this computer's daemon is signed in to no plane", async () => {
+    daemon.artifacts = [];
+    localStorage.setItem("troupe.pref.localOnly", "yes");
+    const input = await publishRow(false, false);
+    const row = await waitFor(() => (document.querySelector(".palette .row")?.textContent?.includes("needs a plane: sign in to a Troupe plane first") ? document.querySelector(".palette .row") : null), "the row greyed with why");
+    expect(row!.textContent).toContain("/publish");
+    key(input, "Enter");
+    await sees("Not here: needs a plane: sign in to a Troupe plane first.");
+    expect(dialog()).toBeNull();
+    expect(daemon.calls.some((c) => c.method === "identity.get")).toBe(true);
+  });
+
+  it("runs /publish where this computer's daemon is signed in to a plane", async () => {
+    daemon.artifacts = [];
+    localStorage.setItem("troupe.pref.localOnly", "yes");
+    const input = await publishRow(false, true);
+    await waitFor(() => daemon.calls.some((c) => c.method === "identity.get"), "the palette asking whether the daemon is signed in");
+    key(input, "Enter");
+    await waitFor(dialog, "the Publish dialog");
+  });
+
+  it("under Local only, says the daemon's refusal: nothing is published on the plane or listed from it", async () => {
+    daemon.artifacts = [];
+    localStorage.setItem("troupe.pref.localOnly", "yes");
+    const input = await publishRow(false, true);
+    key(input, "Enter");
+    await waitFor(dialog, "the Publish dialog");
+    await sees("nothing is published on the plane or listed from it (artifact.list)");
+    expect(daemon.publishedArtifacts).toEqual([]);
+  });
+
+  it("calls picked files a page,a document or a file as the plane will open them", () => {
     expect(kindOf(["index.html", "a.css"])).toBe("html");
     expect(kindOf(["notes.md"])).toBe("markdown");
     expect(kindOf(["report.pdf"])).toBe("file");
