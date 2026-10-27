@@ -119,7 +119,9 @@ defmodule Troupe.Client.OwnMemory do
 
   defp level_of(%{} = named, levels) do
     id = level_id(named)
-    Enum.find(levels, &(&1.id == id)) || level(named, if(named["scope"] == "profile", do: 1, else: 2))
+
+    Enum.find(levels, &(&1.id == id)) ||
+      level(named, if(named["scope"] == "profile", do: 1, else: 2))
   end
 
   defp level_of(_none, levels), do: List.last(levels)
@@ -177,7 +179,12 @@ defmodule Troupe.Client.OwnMemory do
   @spec save_entries([map()], non_neg_integer()) ::
           {:ok, map()} | {:conflict, map()} | {:error, String.t()}
   def save_entries(entries, version) do
-    params = %{"command_id" => Protocol.command_id(), "entries" => wire(entries), "version" => version}
+    params = %{
+      "command_id" => Protocol.command_id(),
+      "entries" => wire(entries),
+      "version" => version
+    }
+
     saved(Link.call("me.memory.put", params))
   end
 
@@ -247,7 +254,8 @@ defmodule Troupe.Client.OwnMemory do
   --status` prints of it, and each document as the copy holds it (`held`), which is all the
   screen shows where the plane is not asked.
   """
-  @spec status() :: {:ok, %{lines: [String.t()], held: [map()], in_effect: [map()]}} | {:error, String.t()}
+  @spec status() ::
+          {:ok, %{lines: [String.t()], held: [map()], in_effect: [map()]}} | {:error, String.t()}
   def status do
     case Link.call("me.memory.status", %{}) do
       {:ok, status} ->
@@ -258,7 +266,8 @@ defmodule Troupe.Client.OwnMemory do
            in_effect: List.wrap(status["in_effect"])
          }}
 
-      {:error, reason} -> {:error, Artifacts.reason(reason)}
+      {:error, reason} ->
+        {:error, Artifacts.reason(reason)}
     end
   end
 

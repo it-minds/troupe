@@ -89,12 +89,16 @@ defmodule Troupe.UI.TUI.MemoryPage do
   end
 
   # What is in effect, as the plane works it out for the team chosen, or as the copy here has it.
-  defp in_effect(page, {:copy, effect}), do: %{page | effect: Client.memory_effect_rows(effect, page.levels)}
+  defp in_effect(page, {:copy, effect}),
+    do: %{page | effect: Client.memory_effect_rows(effect, page.levels)}
 
   defp in_effect(page, _ask) do
     case Client.memory_in_effect(page.levels, page.team) do
-      {:ok, rows} -> %{page | effect: rows}
-      {:error, reason} -> %{page | effect: [], status: "what is in effect could not be read: #{reason}"}
+      {:ok, rows} ->
+        %{page | effect: rows}
+
+      {:error, reason} ->
+        %{page | effect: [], status: "what is in effect could not be read: #{reason}"}
     end
   end
 
@@ -383,7 +387,13 @@ defmodule Troupe.UI.TUI.MemoryPage do
   # A save sends the level's entries over the version it was read at, which the plane writes
   # as sections; one saved elsewhere first is shown beside the text these would have been.
   defp save(page, entries, said),
-    do: saved(page, Client.save_own_memory_entries(entries, own(page).version), said, Client.memory_text(entries))
+    do:
+      saved(
+        page,
+        Client.save_own_memory_entries(entries, own(page).version),
+        said,
+        Client.memory_text(entries)
+      )
 
   # A rollback carries no text of the person's: its conflict shows the version saved since.
   defp saved(page, result, said, text) do
@@ -773,6 +783,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
       if row.entry[:by] || row.entry[:at],
         do: by_when(row.entry[:by], row.entry[:at]) <> used(row.entry[:used]),
         else: by_when(row.from.changed_by, row.from.changed_at)
+
     room = max(width - String.length(topic) - String.length(from) - String.length(meta) - 10, 10)
     first = if String.length(first) > room, do: String.slice(first, 0, room - 1) <> "…", else: first
 

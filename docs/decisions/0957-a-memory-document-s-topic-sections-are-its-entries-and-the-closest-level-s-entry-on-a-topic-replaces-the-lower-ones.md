@@ -28,6 +28,7 @@ paths:
   - clients/gui/apps/console/src/views/Memory.tsx
   - clients/tui/lib/troupe/client/own_memory.ex
   - clients/tui/lib/troupe/ui/tui/memory_page.ex
+  - clients/tui/lib/mix/tasks/troupe.xref.ex
   - PROTOCOL.md
   - docs/user/memory.md
   - docs/admin/console.md
@@ -168,7 +169,10 @@ each entry, when and in how many sessions it was used at every level; the client
 in-effect (`packages/client/src/entries.ts`) go, leaving the types, the topic comparison its
 clash warnings use and the side-by-side rows. The gallery's `scopeOf` and its second listing
 go too: every plane row says its `scope` since Decision 953. The terminal's `/memory` reads the
-same answers and saves entries; `Troupe.Client.MemoryEntries` goes. The console's Company
+same answers and saves entries; `Troupe.Client.MemoryEntries` goes. The terminal may call
+`Troupe.Protocol.Memory.Entries` (`mix troupe.xref`'s list of the harness's doors): a pure
+module of the protocol, as `Troupe.Protocol.Glob` is, for comparing topics and writing the
+text a conflict shows beside the other version, never for working out what is in effect. The console's Company
 memory keeps its document editor and gains only *Its entries*, a read-only list.
 
 ## Left
