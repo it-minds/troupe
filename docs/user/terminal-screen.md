@@ -2,8 +2,8 @@
 
 What [`troupe`](../../clients/tui/README.md), the terminal client, puts on the screen once a
 session is open, and the keys and pages it has: the keys, reading a transcript, colours,
-tokens and cost, the observer, the command palette, the settings page, watch mode and the
-agent picker. Installing it, the command lines and sessions on a plane are on
+tokens and cost, the observer, the command palette, the settings page, watch mode, the
+agent picker, your artifacts and your memory. Installing it, the command lines and sessions on a plane are on
 [its own page](../../clients/tui/README.md).
 
 ## Keys
@@ -219,3 +219,42 @@ says what answers to the name after. `n` is the picker's everywhere it opens. A 
 back to the picker on what was saved, so Enter, or `b`, starts on it at once. A bundle's agents, and every agent on a pod, are read-only here
 and say where they are changed. What a definition holds, and the built-ins, are on
 [agents, commands and workflows](agents.md).
+
+## Artifacts
+
+`/artifacts` lists what is published for you on the plane, through this computer's daemon
+and its sign-in ([artifacts](artifacts.md)), in the desktop app's words: **All**, **◉
+Everyone at** your organisation, **◎ Your teams** (a team's and a profile's), **◐ Shared
+with you** (through a link) and **○ Only you**, ←/→ or `1`–`5`. A row is its title,
+kind, version, who published it and when, and `new` on a version you have not opened on
+this machine. `/` filters; Enter opens it in your browser through the plane's one-time
+address, never in the terminal; `v` lists its versions to open one; `m` reads a Markdown
+one here, drawn as a reply is, in a frame, which past 500 lines is cut and offers the
+browser; `p` publishes a file of the workspace as `/publish` does, for you alone where
+you name nobody; `l` copies a view link to one of yours, through the terminal (OSC 52)
+where it takes it, else the clipboard, and shows it either way; `r` reads the list again;
+Esc goes back. Under Local only the page says the plane is not asked, and asks it nothing.
+HQ has a line for what is shared with you, and one per invitation into a session.
+`troupe artifacts list`, `open`, `show`, `publish` and `link` are the same from the
+command line ([the command reference](cli-reference.md)).
+
+## Memory
+
+`/memory` is what every new session of yours starts knowing ([memory](memory.md)), entry by
+entry: each `## Topic` of a level's memory. **In effect** shows, for one of your teams (`t`
+picks another), the closest level's entry on each topic and what it replaces: yours over
+your team's, your team's over the organisation's. **◉ Everyone at** your organisation, **◎**
+each of your teams and **○ Only you** list each level's; one you cannot change here says
+`· read`, and says who can. Enter reads an entry whole. On a level you can change (Only
+you; a team's you administer; the organisation's if you are a platform admin), `a` adds
+one, its topic typed on the page and its words in your editor (`VISUAL`, then `EDITOR`) or,
+with neither set, in a box here (Ctrl-S saves); `e` edits one and `f` forgets one after a
+confirm line. A topic the level has already is refused, and one a lower level has is said
+to be replaced. The line under says where it saves to and, on a team's or the
+organisation's, how many running sessions it reaches. A save names the version it was made
+on: one saved elsewhere first is shown beside yours, and `l` reloads it. On Only you, `h`
+lists the versions (Space marks one, Enter shows two side by side, `r` saves an old
+one again), `b` who wrote each line, `s` where this machine's copy stands. A save, an
+agent's entry or one from another machine is on the page when it arrives. Under Local only
+every level is read from this machine's copy and nothing is changed. `/memory facts` is the
+repository brief's facts, as before.

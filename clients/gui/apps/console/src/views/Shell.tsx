@@ -19,6 +19,7 @@ import { Wordmark } from "./brand";
 import { ArtifactLink, ArtifactPage, Artifacts, artifactPlace } from "./Artifacts";
 import { Audit } from "./Audit";
 import { Budgets } from "./Budgets";
+import { PublishedArtifacts } from "./PublishedArtifacts";
 import { Bundles, Channel, Version } from "./Bundles";
 import { ClientVersions } from "./ClientVersions";
 import { Connections } from "./Connections";
@@ -198,6 +199,7 @@ function Screen({ route }: { route: Route }): JSX.Element {
   if (route.page === "pods") return <Pods />;
   if (route.page === "hosts") return <Hosts />;
   if (route.page === "budgets") return <Budgets />;
+  if (route.page === "published") return <PublishedArtifacts />;
   if (route.page === "connections") return <Connections />;
   return <Unbuilt area={area(route.page)!} />;
 }

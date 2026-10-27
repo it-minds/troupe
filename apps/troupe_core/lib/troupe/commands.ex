@@ -25,7 +25,7 @@ defmodule Troupe.Commands do
   `availability` is a requirement the client judges, not a verdict: `always`; `window`
   (acts on a window: the activated one, or one named as an argument); `local` (a session
   on this machine: a pod has no checkout, watcher or brief of the person's); `plane`
-  (needs a plane). A client shows a command it cannot run greyed, with the reason, rather
+  (needs the client's daemon signed in to a plane, which the client asks it). A client shows a command it cannot run greyed, with the reason, rather
   than hiding it — that is how somebody learns the tool.
   """
 
@@ -450,17 +450,40 @@ defmodule Troupe.Commands do
             "session leaves it.",
         example: "/upload notes.md"
       ),
+      entry("save", "workspace", "Save a file of the session's workspace on this machine",
+        usage: "/save <path> [to]",
+        args: [arg("path", true, "text"), arg("to", false, "file")],
+        detail:
+          "The file is read where the session runs, a pod's workspace as much as a local " <>
+            "checkout, and written on this machine: at `to`, in it when it is a directory, or " <>
+            "under its own name where the terminal started. What a file an agent made for you " <>
+            "says to run when the session is on a pod.",
+        example: "/save report.md ~/Documents"
+      ),
       entry("publish", "workspace", "Publish a page, a document or a file for others to read",
-        usage: "/publish <path> <organisation | profile:<name>>",
-        args: [arg("path", true, "file"), arg("visibility", true, "text")],
+        usage: "/publish <path> [private | organisation | team:<name> | profile:<name>]",
+        args: [arg("path", true, "file"), arg("visibility", false, "text")],
+        availability: "plane",
         detail:
           "The file is read on this machine and published on your Troupe plane as an artifact, " <>
             "as the person this computer's daemon is signed in as: a page (.html), a Markdown " <>
-            "document (.md) or any other file. The whole organisation reads it, or the people " <>
-            "a profile is granted to, in the console's Artifacts, served from a host that can " <>
-            "reach nothing of yours. A page with stylesheets or scripts of its own is an " <>
-            "agent's to publish, with publish_artifact.",
-        example: "/publish report.html profile:dev"
+            "document (.md) or any other file. Yours alone unless you say otherwise, until you " <>
+            "share a link to it; or the whole organisation reads it, a team you are in, or the " <>
+            "people a profile is granted to, served from a host that can reach nothing of yours. " <>
+            "A team you are not in is refused, naming yours. A page with stylesheets or scripts " <>
+            "of its own is an agent's to publish, with publish_artifact.",
+        example: "/publish report.html team:core"
+      ),
+      entry("artifacts", "workspace", "What is published for you, by who can see it",
+        usage: "/artifacts",
+        availability: "plane",
+        detail:
+          "Everything published for you: for everyone at your organisation, your teams, shared " <>
+            "with you through a link, and only you, newest first, a version you have not opened " <>
+            "here marked new. Enter opens one in the browser, v another version of it, m reads a " <>
+            "Markdown one here; p publishes a file of the workspace and l copies a view link to " <>
+            "one of yours.",
+        example: "/artifacts"
       ),
       entry("copy", "workspace", "Copy a transcript to the clipboard",
         usage: "/copy [window]",
@@ -471,16 +494,16 @@ defmodule Troupe.Commands do
             "copies on release.",
         example: "/copy 2"
       ),
-      entry("memory", "workspace", "The project brief: show, refresh or forget it",
-        usage: "/memory [refresh | forget]",
+      entry("memory", "workspace", "What the troupe remembers for you, and the project brief",
+        usage: "/memory [facts | refresh | forget]",
         args: [arg("action", false, "text")],
-        availability: "local",
         detail:
-          "The brief is made of facts, each anchored on the files it was read from; its " <>
-            "commands and conventions are read into every agent's prompt. /memory lists the " <>
-            "facts by kind, says which may no longer be true and where each came from, and " <>
-            "forgets one; /memory refresh asks the librarian to re-verify and rewrite them, " <>
-            "/memory forget deletes the whole brief.",
+          "/memory lists what every new session of yours starts knowing, entry by entry: in " <>
+            "effect for each of your teams, and for everyone at your organisation, each team and " <>
+            "only you, where you add, edit and forget your own. The project brief is made of " <>
+            "facts, each anchored on the files it was read from; /memory facts lists them by " <>
+            "kind and forgets one, /memory refresh asks the librarian to re-verify and rewrite " <>
+            "them, /memory forget deletes the whole brief.",
         example: "/memory refresh"
       ),
       entry(

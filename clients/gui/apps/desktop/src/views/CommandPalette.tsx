@@ -27,7 +27,7 @@ import type { SessionHandle } from "../hooks";
 import { loopError } from "./Goal";
 
 /** The screens a command can leave the session for; `setup` is also where a refused key sends people. */
-export type PaletteScreen = "sessions" | "local" | "appearance" | "setup";
+export type PaletteScreen = "sessions" | "local" | "appearance" | "setup" | "memory";
 
 export interface PaletteActions {
   go: (screen: PaletteScreen) => void;
@@ -48,6 +48,12 @@ export interface PaletteActions {
   agentRows?: (() => Promise<AgentRow[]>) | undefined;
   /** "Publish…": files from this computer on the plane, through its daemon's sign-in, where there is a daemon. */
   publish?: (() => void) | undefined;
+  /**
+   * Whether this computer's daemon is signed in to a plane (`identity.get`'s `linked`), asked
+   * once as the palette opens: a command that needs a plane is greyed only where it is known
+   * to be signed in to none.
+   */
+  planeLinked?: (() => Promise<boolean>) | undefined;
 }
 
 interface RunContext extends PaletteActions {
@@ -168,9 +174,10 @@ async function runDefined({ view }: RunContext, name: string, args: string): Pro
   return undefined;
 }
 
-function reasonFor(entry: CommandEntry, local: boolean, agent: AgentRow | undefined): string | null {
+function reasonFor(entry: CommandEntry, local: boolean, agent: AgentRow | undefined, linked: boolean | null): string | null {
   if (entry.availability === "local" && !local) return "only for a session on this computer";
-  if (entry.availability === "plane") return "needs a plane";
+  // Never while it is not known yet: a row greyed for a moment would read as a refusal.
+  if (entry.availability === "plane" && linked === false) return "needs a plane: sign in to a Troupe plane first";
   // The daemon's own reason first: an agent no session could run here (a model the
   // provider does not serve) cannot run from the terminal client either.
   if (entry.source === "agent" && agent?.available === false) return `${entry.name} cannot run here: ${agent.reason ?? "the daemon says it cannot"}`;
@@ -311,7 +318,18 @@ export function CommandPalette({
   const [notice, setNotice] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  const { agentRows } = actions;
+  const [linked, setLinked] = useState<boolean | null>(null);
+  const { agentRows, planeLinked } = actions;
+
+  useEffect(() => {
+    let live = true;
+    void planeLinked?.()
+      .then((l) => live && setLinked(l))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [planeLinked]);
 
   // The list is the harness's, read when the palette opens: agents come and go with the
   // workspace, and nothing here is worth caching over that.
@@ -349,8 +367,8 @@ export function CommandPalette({
     () =>
       (commands ?? [])
         .filter((c) => matches(c, word))
-        .map((entry) => ({ entry, reason: reasonFor(entry, local, entry.source === "agent" ? agents.get(entry.name) : undefined) })),
-    [commands, word, local, agents],
+        .map((entry) => ({ entry, reason: reasonFor(entry, local, entry.source === "agent" ? agents.get(entry.name) : undefined, linked) })),
+    [commands, word, local, agents, linked],
   );
 
   // A new filter starts on the row that matches it exactly, so "q" + Enter is /quit.

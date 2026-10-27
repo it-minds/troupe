@@ -77,6 +77,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
   alias Troupe.Session.{Approvals, Blobs, Log, Memory, Organisation, Questions, Shell}
+  alias Troupe.Session.MCP, as: SessionMCP
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Tools.{Delegate, Finish, Output, Patch, ReadFile, ReadOutput, Show}
@@ -1427,8 +1428,10 @@ defmodule Troupe.Agent.Server do
           |> fold_child_reports()
           |> take_organisation()
           |> take_memory()
-          |> load_instructions()
           |> hold_turn_tools()
+
+        # After the hold, so the harness's word names the tools this turn offers.
+        state = load_instructions(state)
 
         {state, attached} = attach_turn_context(state)
         definition = effective_definition(state)
@@ -1934,7 +1937,7 @@ defmodule Troupe.Agent.Server do
 
   defp load_instructions(%State{} = state) do
     focus = Instructions.focus(state.conversation)
-    loaded = Instructions.load(state.workspace.root_real, state.config, focus)
+    loaded = Instructions.load(state.workspace.root_real, state.config, focus, harness: harness(state))
     local_only? = state.agent_path == ["root"] and Troupe.LocalOnly.session?(state.session_id)
     say_local_only? = local_only? and not state.local_only_said
 
@@ -1948,6 +1951,38 @@ defmodule Troupe.Agent.Server do
   end
 
   defp instructions_due(%State{} = state), do: %{state | instructions_due: true}
+
+  # The root's word on where a file goes (`Instructions.Harness`), with what is open for one
+  # in this session: the tools this turn offers it that store files, whether an artifact can
+  # be published from here, and where the workspace is. A subagent has none: the agent that
+  # delegated says what its task delivers, and where.
+  defp harness(%State{agent_path: ["root"]} = state) do
+    tools = Tools.available(effective_definition(state), base_ctx(state, ""))
+
+    artifact =
+      if Enum.any?(tools, &(Troupe.Tool.name(&1) == "publish_artifact")),
+        do: Troupe.Artifacts.ready(state.session_id),
+        else: :none
+
+    where =
+      case Troupe.Session.resolved(state.session_id) do
+        %{kind: :team} -> :pod
+        _local -> :local
+      end
+
+    open = %{
+      file_tools: Instructions.Harness.file_tools(tools),
+      # A store's server still starting is said, not waited for: its tools join at the
+      # next turn, and this one is not held up for it.
+      starting: SessionMCP.starting_stores(state.session_id),
+      artifact: artifact,
+      where: where
+    }
+
+    %{text: Instructions.Harness.text(open), open: Instructions.Harness.json(open)}
+  end
+
+  defp harness(_child), do: nil
 
   # The organisation's memory a save on the plane gave the session since this agent's
   # configuration was resolved (`Troupe.Session.PlaneMemory`), taken as a turn begins and

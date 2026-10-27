@@ -114,6 +114,7 @@ row, and on a page past 400 lines; a full page is closed and the next one,
 | [D135](defects/d130.md#d135---signing-wired-the-last-hand-steps-the-docs-new-shape-and-the-seam-after-chunk-42-low) | Signing wired, the last hand steps, the docs' new shape and the seam after chunk 42 | low |
 | [D136](defects/d130.md#d136---the-drains-offers-after-a-restart-and-the-sweep-after-chunk-43-low) | The drains, offers after a restart and the sweep after chunk 43 | low |
 | [D137](defects/d130.md#d137---memory-proven-artifacts-invites-and-the-sweep-after-chunk-44-low) | Memory proven, artifacts, invites and the sweep after chunk 44 | low |
+| [D138](defects/d130.md#d138---a-persons-things-in-a-persons-apps-what-chunk-45-left-low) | A person's things in a person's apps: what chunk 45 left | low |
 
 The pages: [D8 to D62](defects/d008.md), [D63 to D89](defects/d063.md),
 [D90 to D120](defects/d090.md), [D121 to D129](defects/d121.md) and

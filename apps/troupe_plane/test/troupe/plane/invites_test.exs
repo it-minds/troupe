@@ -28,6 +28,7 @@ defmodule Troupe.Plane.InvitesTest do
     Identity,
     Invites,
     PersonAuth,
+    Placement,
     Sessions,
     Tokens
   }
@@ -129,6 +130,46 @@ defmodule Troupe.Plane.InvitesTest do
                Harness.call("session.get", %{"session_id" => session.id}, as(bea))
 
       assert audited?(ada.subject, "session.invite", session.id)
+    end
+
+    test "a dormant session's invitation reaches its log at its next activation, once", %{port: port} do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", config_bundle_channel: "stable", replicas: 1})
+      team = team_with_grant("eng", "dev", name: "eng")
+      ada = person("ada@example.test", ["eng"])
+      bea = person("bea@example.test", ["eng"])
+      _pod = FakePod.enrol(port, "dev-token", "troupe-w-dev-0")
+
+      {:ok, session} =
+        Sessions.create(%{
+          id: SessionId.generate(),
+          owner_id: ada.id,
+          owner_subject: ada.subject,
+          team_id: team.id,
+          profile: "dev",
+          state: "dormant",
+          epoch: 1
+        })
+
+      # No pod holds it, so nobody is there to write the line now.
+      assert {:ok, %{"pushed" => false}} =
+               Harness.call("session.invite", %{"session_id" => session.id, "subject" => bea.subject}, as(ada))
+
+      refute_received {:pushed, "invite.changed", _}
+      open = %{"session_id" => session.id, "mode" => "activate"}
+      assert {:ok, _} = Harness.call("session.open", open, as(ada))
+      assert_receive {:pushed, "session.activate", _}, 5_000
+      assert_receive {:pushed, "invite.changed", pushed}, 5_000
+      assert pushed["session_id"] == session.id
+      assert pushed["type"] == "session_invited"
+      assert pushed["invite"]["subject"] == bea.subject
+      assert pushed["invite"]["by"] == ada.subject
+
+      # Said once: the next activation has nothing to say of it.
+      Placement.release("dev", session.id)
+      {:ok, _} = Sessions.dormant(session.id)
+      assert {:ok, _} = Harness.call("session.open", open, as(ada))
+      assert_receive {:pushed, "session.activate", _}, 5_000
+      refute_receive {:pushed, "invite.changed", _}, 300
     end
 
     test "nobody the profile does not cover is invited, and nothing is written", %{port: port} do
@@ -589,6 +630,46 @@ defmodule Troupe.Plane.InvitesTest do
                invite_private(ada, id, bea, "observe", [k1])
 
       assert {:ok, _} = invite_private(ada, id, bea, "observe", [k1, k2])
+    end
+
+    # The owner's daemon puts the copy before it asks; a refusal after that (here, she left
+    # the team in between) leaves a copy nobody but the plane may delete, and it does.
+    test "a copy put in the invitee's slot for an invitation the plane refuses is destroyed",
+         context do
+      requires_bao(context)
+      %{ada: ada, bea: bea, id: id, k1: k1, root: root, group: group} = private_session(context)
+      slot = put_for(ada, id, bea, 1, k1)
+      assert key_present?(root, slot)
+      {:ok, _} = Identity.set_memberships(bea, [])
+
+      assert {:error, %{message: "forbidden"}} =
+               Harness.call(
+                 "session.invite",
+                 %{"session_id" => id, "subject" => bea.subject, "keys" => [%{"key_version" => 1, "slot" => slot}]},
+                 as(ada)
+               )
+
+      refute key_present?(root, slot)
+      assert Invites.of_session(id) == []
+
+      # A copy an invitation already holds stays, whatever is refused of asking again.
+      {:ok, _} = Identity.set_memberships(bea, [group])
+      {:ok, _} = invite_private(ada, id, bea, "observe")
+      [%{slot: held}] = Invites.keys_for(id, bea.subject)
+
+      assert {:error, %{message: "invalid_params"}} =
+               Harness.call(
+                 "session.invite",
+                 %{
+                   "session_id" => id,
+                   "subject" => bea.subject,
+                   "role" => "admin",
+                   "keys" => [%{"key_version" => 1, "slot" => held}]
+                 },
+                 as(ada)
+               )
+
+      assert key_present?(root, held)
     end
 
     test "an erasure destroys every generation of its key and every copy in an invitee's slot",

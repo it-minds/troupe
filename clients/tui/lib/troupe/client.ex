@@ -660,9 +660,149 @@ defmodule Troupe.Client do
   @spec identity() :: {:ok, map()} | {:error, term()}
   def identity, do: Daemon.identity()
 
-  @doc "Publish an artifact on the plane through this computer's daemon, as its person."
-  @spec publish_artifact(map()) :: {:ok, map()} | {:error, term()}
-  def publish_artifact(params), do: Daemon.publish_artifact(params)
+  ## A person's own things: artifacts and memory (root #62, #55)
+
+  alias Troupe.Client.{Artifacts, OwnMemory}
+
+  @doc "Whether this run is in Local only (`local_only` in the person's config): the plane is not asked."
+  @spec local_only?() :: boolean()
+  def local_only?, do: Troupe.CLI.LocalOnly.on?()
+
+  @doc "What the person may see on the plane, through the daemon (`Troupe.Client.Artifacts.list/1`)."
+  @spec artifacts(map()) :: {:ok, map()} | {:error, String.t()}
+  def artifacts(params \\ %{}), do: Artifacts.list(params)
+
+  @doc "An audience's glyph and its name: ◉ Everyone at …, ◎ Your teams, ◐ Shared with you, ○ Only you."
+  @spec artifact_audience(Artifacts.audience(), String.t() | nil) :: {String.t(), String.t()}
+  def artifact_audience(audience, organisation \\ nil), do: Artifacts.label(audience, organisation)
+
+  @doc "The four audiences, in the gallery's order."
+  @spec artifact_audiences() :: [Artifacts.audience()]
+  def artifact_audiences, do: Artifacts.audiences()
+
+  @doc "A row's audience."
+  @spec audience_of(map()) :: Artifacts.audience()
+  def audience_of(row), do: Artifacts.audience_of(row)
+
+  @doc "One artifact with its versions."
+  @spec artifact(String.t()) :: {:ok, map()} | {:error, String.t()}
+  def artifact(id), do: Artifacts.get(id)
+
+  @doc "The one-time address that opens an artifact (a version of it) on the artifacts host."
+  @spec open_artifact(String.t(), pos_integer() | nil) :: {:ok, String.t()} | {:error, String.t()}
+  def open_artifact(id, version \\ nil), do: Artifacts.open(id, version)
+
+  @doc "One text file of an artifact's version, as the plane reads it."
+  @spec read_artifact(String.t(), pos_integer() | nil) :: {:ok, map()} | {:error, String.t()}
+  def read_artifact(id, version \\ nil), do: Artifacts.read(id, version)
+
+  @doc "A view link to one of the person's own artifacts."
+  @spec artifact_link(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def artifact_link(id), do: Artifacts.link(id)
+
+  @doc "Publish one file of this machine (`/publish`): `Troupe.Client.Artifacts.publish/3`."
+  @spec publish_file(Path.t(), String.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
+  def publish_file(path, visibility, opts \\ []), do: Artifacts.publish(path, visibility, opts)
+
+  @doc "When a timestamp was, as a person says it: `just now`, `2 h ago`, `yesterday`, or the date."
+  @spec ago(String.t() | nil) :: String.t()
+  def ago(at), do: Artifacts.ago(at)
+
+  @doc "Remember that the person opened a version of an artifact on this machine: it is no longer new to them."
+  @spec artifact_seen(String.t(), pos_integer()) :: :ok
+  def artifact_seen(id, version), do: Artifacts.seen(id, version)
+
+  @doc "The invitations to the person signed in at a plane (HQ's lines); none for this computer."
+  @spec invitations(origin() | nil) :: {:ok, [map()]} | {:error, String.t()}
+  def invitations({:remote, plane}), do: Remote.invitations(plane)
+  def invitations(_origin), do: {:ok, []}
+
+  @doc "The person's own memory on the plane, through the daemon: `Troupe.Client.OwnMemory.own/1`."
+  @spec own_memory(keyword()) :: {:ok, map()} | {:error, String.t()}
+  def own_memory(opts \\ []), do: OwnMemory.own(opts)
+
+  @doc "Save the person's own memory over the version it was edited from, or the version that came first."
+  @spec save_own_memory(String.t(), non_neg_integer()) ::
+          {:ok, map()} | {:conflict, map()} | {:error, String.t()}
+  def save_own_memory(text, version), do: OwnMemory.save(text, version)
+
+  @doc "The person's own memory's versions, and two of their texts side by side."
+  @spec memory_history(keyword()) :: {:ok, map()} | {:error, String.t()}
+  def memory_history(opts \\ []), do: OwnMemory.history(opts)
+
+  @doc "Roll the person's own memory back to a version, over the one in force as they saw it."
+  @spec rollback_own_memory(pos_integer(), non_neg_integer()) ::
+          {:ok, map()} | {:conflict, map()} | {:error, String.t()}
+  def rollback_own_memory(to, version), do: OwnMemory.rollback(to, version)
+
+  @doc "Where this machine's copy of the memory stands, as `troupe memory --status` says it."
+  @spec memory_status() :: {:ok, map()} | {:error, String.t()}
+  def memory_status, do: OwnMemory.status()
+
+  @doc "The memory levels the person reads, lowest first, each with its entries as the plane answered them."
+  @spec memory_levels([map()]) :: [map()]
+  defdelegate memory_levels(documents), to: OwnMemory, as: :levels
+
+  @doc "What a new session in a team starts knowing, as the plane works it out: the closest entry per topic and what it replaces."
+  @spec memory_in_effect([map()], String.t() | nil) :: {:ok, [map()]} | {:error, String.t()}
+  defdelegate memory_in_effect(levels, team), to: OwnMemory, as: :in_effect
+
+  @doc "In-effect entries as an answer carries them (the copy's, under Local only), as the page's rows."
+  @spec memory_effect_rows([map()], [map()]) :: [map()]
+  defdelegate memory_effect_rows(entries, levels), to: OwnMemory, as: :effect_rows
+
+  @doc "Whether a new entry on a topic clashes with one at its level, or would replace a lower one."
+  @spec memory_clash([map()], map(), String.t()) :: {:here | :lower, map(), map()} | nil
+  defdelegate memory_clash(levels, level, topic), to: OwnMemory, as: :clash
+
+  @doc "Which levels above their own the person may change, as `me.memory`'s `roles` say."
+  @spec memory_roles(map()) :: %{platform_admin: boolean(), team_admin: [String.t()]}
+  defdelegate memory_roles(own), to: OwnMemory, as: :roles
+
+  @doc "Whether the person may change a level with those roles."
+  @spec memory_may_change?(map(), map()) :: boolean()
+  defdelegate memory_may_change?(roles, level), to: OwnMemory, as: :may_change?
+
+  @doc "How many running sessions a save of a level above the person's own reaches, or the plane's refusal."
+  @spec memory_reach(map()) :: {:ok, non_neg_integer()} | {:error, String.t()}
+  defdelegate memory_reach(level), to: OwnMemory, as: :reach
+
+  @doc "Save a level above the person's own as entries over the version it was read at."
+  @spec save_level_memory_entries(map(), [map()]) ::
+          {:ok, map()} | {:conflict, map()} | {:error, String.t()}
+  defdelegate save_level_memory_entries(level, entries), to: OwnMemory, as: :save_level_entries
+
+  @doc "A level's entries with an entry written (in its place, or last)."
+  @spec memory_put_entry([map()], String.t(), String.t(), String.t() | nil) :: [map()]
+  defdelegate memory_put_entry(entries, topic, body, was), to: OwnMemory, as: :put_entry
+
+  @doc "A level's entries without the entry on a topic."
+  @spec memory_forget_entry([map()], String.t()) :: [map()]
+  defdelegate memory_forget_entry(entries, topic), to: OwnMemory, as: :forget_entry
+
+  @doc "Save the person's own as entries over the version they were read at."
+  @spec save_own_memory_entries([map()], non_neg_integer()) ::
+          {:ok, map()} | {:conflict, map()} | {:error, String.t()}
+  defdelegate save_own_memory_entries(entries, version), to: OwnMemory, as: :save_entries
+
+  @doc "The text the plane writes for these entries."
+  @spec memory_text([map()]) :: String.t()
+  defdelegate memory_text(entries), to: OwnMemory, as: :text_of
+
+  @doc "Who wrote a line of the person's memory, as `troupe memory --blame` says it."
+  @spec written_by(map()) :: String.t()
+  def written_by(line), do: OwnMemory.written_by(line)
+
+  @doc "Whether the person has an editor of their own (`VISUAL` or `EDITOR`)."
+  @spec editor?() :: boolean()
+  def editor?, do: OwnMemory.editor?()
+
+  @doc """
+  Copy a link where the person can paste it: through the terminal (OSC 52) where it takes
+  that, else this machine's clipboard. Answers how, or why neither could.
+  """
+  @spec copy_link(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def copy_link(text), do: Troupe.Clipboard.copy_through_terminal(text)
 
   @doc """
   Unlink this computer's daemon from the person it records sessions as, answering who that

@@ -14,12 +14,14 @@
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
-import type { Artifact, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactUpload } from "./artifacts.js";
+import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactTicket, ArtifactUpload } from "./artifacts.js";
 import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { remoteOffer, syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
-import type { OwnMemory, OwnMemorySaved } from "./instructions.js";
+import type { MemoryStatus, OwnMemory, OwnMemoryHistory, OwnMemorySaved } from "./instructions.js";
+import type { MemoryDocument, MemoryPreview, MemorySaved } from "./admin.js";
+import type { MemoryEntry, MemoryInEffect } from "./entries.js";
 import type { Invitee, InviteRole, SealedRead } from "./invites.js";
 import type { MemoryBrief } from "./memory.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
@@ -228,6 +230,8 @@ export interface ServerTool {
   name: string;
   description: string;
   schema: Record<string, unknown>;
+  /** Where your organisation keeps files, as the server's entry says (`stores: files`). */
+  files?: boolean;
 }
 
 /**
@@ -1042,8 +1046,23 @@ export class DaemonClient {
    * what every session of theirs reads after their organisation's. Refused with a sentence
    * where the daemon is signed in to no plane.
    */
-  ownMemory(): Promise<OwnMemory> {
-    return this.call<OwnMemory>("me.memory");
+  ownMemory(opts: { blame?: boolean } = {}): Promise<OwnMemory> {
+    return this.call<OwnMemory>("me.memory", opts.blame ? { blame: true } : {});
+  }
+
+  /** Its history: every version, `version`'s text (the one in force for none) beside `against`'s, and the line diff. */
+  ownMemoryHistory(params: { version?: number; against?: number } = {}): Promise<OwnMemoryHistory> {
+    return this.call<OwnMemoryHistory>("me.memory.history", { ...params });
+  }
+
+  /** Version `to`'s text again as the next version, over `version`, the one in force as it was read. */
+  rollbackOwnMemory(to: number, version: number): Promise<OwnMemorySaved> {
+    return this.command<OwnMemorySaved>("me.memory.rollback", { to, version });
+  }
+
+  /** Where this computer's copy of the plane's memory stands, and what each session here read at its last turn. */
+  memoryStatus(): Promise<MemoryStatus> {
+    return this.call<MemoryStatus>("me.memory.status");
   }
 
   /**
@@ -1062,6 +1081,39 @@ export class DaemonClient {
     return this.command<OwnMemorySaved>("me.memory.put", { text, version });
   }
 
+  /** Save it as entries, written by the plane as `## Topic` sections in this order, over the version it was edited from. */
+  putOwnMemoryEntries(entries: Array<Pick<MemoryEntry, "topic" | "body" | "heading">>, version: number): Promise<OwnMemorySaved> {
+    return this.command<OwnMemorySaved>("me.memory.put", { entries: entries.map((e) => ({ topic: e.topic, body: e.body, ...(e.heading === false ? { heading: false } : {}) })), version });
+  }
+
+  /**
+   * What a new session of the person's in one of their teams (their first by name for none)
+   * reads, on a worker profile where one is named: the plane's `memory.in_effect`, one list
+   * of topics, the closest level's entry on each with what it replaces.
+   */
+  memoryInEffect(params: { team?: string; profile?: string } = {}): Promise<MemoryInEffect> {
+    return this.call<MemoryInEffect>("memory.in_effect", { ...params });
+  }
+
+  /**
+   * A level of the organisation's memory, read through this daemon as the person: the
+   * plane's `admin.memory.get`, theirs to read where they administer it (a team admin their
+   * team's, a platform admin the organisation's) and the plane's refusal otherwise.
+   */
+  levelMemory(scope: "organisation" | "team" | "profile", name: string | null): Promise<MemoryDocument> {
+    return this.call<MemoryDocument>("admin.memory.get", name === null ? { scope } : { scope, name });
+  }
+
+  /** What saving a level the person administers would do, written nowhere: the plane's `admin.memory.preview`, with the running sessions it reaches. */
+  previewLevelMemory(scope: "organisation" | "team" | "profile", name: string | null, doc: { text: string } | { entries: Array<Pick<MemoryEntry, "topic" | "body" | "heading">> }): Promise<MemoryPreview> {
+    return this.call<MemoryPreview>("admin.memory.preview", { scope, ...(name === null ? {} : { name }), ...doc });
+  }
+
+  /** Save a level the person administers, as text or entries, over the version it was edited from. */
+  putLevelMemory(scope: "organisation" | "team" | "profile", name: string | null, doc: { text: string } | { entries: Array<Pick<MemoryEntry, "topic" | "body" | "heading">> }, version: number): Promise<MemorySaved> {
+    return this.command<MemorySaved>("admin.memory.put", { scope, ...(name === null ? {} : { name }), ...doc, version });
+  }
+
   /**
    * Publish files as an artifact on the plane (troupe #62), as this daemon's person: a new
    * one, or with `id` the next version of one of theirs. The daemon sends a version too large
@@ -1074,6 +1126,44 @@ export class DaemonClient {
   /** The person's own artifacts on the plane, and where the console's gallery is. */
   artifacts(filter: ArtifactFilter = { mine: true }): Promise<ArtifactList & { plane_url?: string }> {
     return this.call<ArtifactList & { plane_url?: string }>("artifact.list", { ...filter });
+  }
+
+  /** One artifact with its versions, and for its owner its links: the plane's `artifact.get`. */
+  artifact(id: string): Promise<ArtifactDetail> {
+    return this.call<ArtifactDetail>("artifact.get", { id });
+  }
+
+  /** A one-time address on the artifacts host that opens it, or one version of it, asked at the moment it is opened. */
+  openArtifact(id: string, version?: number): Promise<ArtifactTicket> {
+    return this.call<ArtifactTicket>("artifact.open", version === undefined ? { id } : { id, version });
+  }
+
+  /** A link to it, `view` or `edit`, its token shown this once. The owner's. */
+  shareArtifact(id: string, role: "view" | "edit" = "view"): Promise<ArtifactNewLink> {
+    return this.command<ArtifactNewLink>("artifact.share", { id, role });
+  }
+
+  /** Revoke a link by its id, or one person from every link to it. The owner's. */
+  unshareArtifact(id: string, which: { share: string } | { person: string }): Promise<{ revoked: boolean }> {
+    return this.command<{ revoked: boolean }>("artifact.unshare", { id, ...which });
+  }
+
+  /** Version `version`'s files again as the next version. */
+  rollbackArtifact(id: string, version: number): Promise<ArtifactDetail> {
+    return this.command<ArtifactDetail>("artifact.rollback", { id, version });
+  }
+
+  /**
+   * Who may open it, moved: the next version over `base`, the newest, carrying every file as
+   * it is (`artifact.put` with no files). The owner's alone.
+   */
+  moveArtifact(id: string, base: number, visibility: string): Promise<ArtifactDetail> {
+    return this.command<ArtifactDetail>("artifact.put", { id, base, visibility });
+  }
+
+  /** The version its address serves, or null for the newest. The owner's. */
+  pinArtifact(id: string, version: number | null): Promise<ArtifactDetail> {
+    return this.command<ArtifactDetail>("artifact.pin", { id, version });
   }
 
   /** Forget one fact of a repository's memory, by its id; `memory.md` is written again without it. */

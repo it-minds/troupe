@@ -141,6 +141,60 @@ defmodule Troupe.Gateway.LocalOnlyTest do
            )
   end
 
+  # A create with a prompt starts the first turn inside the create: the session is under
+  # its client's Local only before it starts, not after the create answers.
+  test "a session a Local-only client creates with its prompt is under Local only from its first turn",
+       ctx do
+    script = Path.join(Path.dirname(ctx.workspace), "fake.json")
+
+    File.write!(
+      script,
+      Jason.encode!(%{
+        "routes" => %{
+          "root" => [
+            %{"text" => "", "tools" => [%{"name" => "remember", "input" => %{"level" => "me", "claim" => "Prefers tabs."}}]},
+            %{"text" => "ok"}
+          ]
+        }
+      })
+    )
+
+    File.write!(Path.join(System.get_env("TROUPE_CONFIG_HOME"), "config.yaml"), """
+    provider: fake
+    models: {default: fake-model}
+    auto_approve: true
+    fake_script: #{script}
+    """)
+
+    assert {:ok, %{"session_id" => sid}} =
+             Client.call(ctx.local, "session.create", %{
+               "command_id" => Client.command_id(),
+               "workspace" => ctx.workspace,
+               "prompt" => "remember that I like tabs"
+             })
+
+    on_exit(fn -> Troupe.stop_session(sid) end)
+    assert eventually(fn -> Enum.any?(Troupe.events(sid), &(&1.type == "turn_ended")) end)
+    asked = length(FakePlane.calls(ctx.plane.state))
+
+    # Its first turn's remember is refused, and the turn said what it reads.
+    refused = completed(sid)
+    assert refused =~ "Local only"
+    assert [first | _] = for(e <- Troupe.events(sid), e.type == "instructions_loaded", do: e)
+    assert first.data["local_only"] =~ "Local only"
+
+    # The poll goes on for the client that is not in Local only, and reports nothing of it.
+    assert eventually(fn ->
+             FakePlane.calls(ctx.plane.state)
+             |> Enum.drop(asked)
+             |> Enum.any?(&match?({"me.memory", %{"sessions" => _}}, &1))
+           end)
+
+    refute Enum.any?(FakePlane.calls(ctx.plane.state), fn {_method, params} ->
+             inspect(params) =~ sid
+           end)
+  end
+
   test "the poll's report leaves a Local-only session out, an offer is refused, and its client's memory calls ask nothing",
        ctx do
     %{session: kept} = session(ctx, [{:text, "one"}])
@@ -176,6 +230,22 @@ defmodule Troupe.Gateway.LocalOnlyTest do
              Client.call(ctx.local, "me.memory", %{})
 
     assert own =~ "Local only"
+
+    # Its history and a rollback are the plane's as much.
+    # So are what is in effect in a team and the levels of the organisation's it administers.
+    for {method, params} <- [
+          {"me.memory.history", %{}},
+          {"me.memory.rollback", %{"to" => 1, "version" => 2}},
+          {"memory.in_effect", %{}},
+          {"admin.memory.get", %{"scope" => "team", "name" => "sales"}},
+          {"admin.memory.preview", %{"scope" => "team", "name" => "sales", "text" => "x"}},
+          {"admin.memory.put", %{"scope" => "team", "name" => "sales", "text" => "x", "version" => 1}}
+        ] do
+      assert {:error, %{message: "forbidden", data: %{"reason" => why}}} =
+               Client.call(ctx.local, method, Map.put(params, "command_id", Client.command_id()))
+
+      assert why =~ "Local only", method
+    end
 
     asked = length(FakePlane.calls(ctx.plane.state))
     assert {:ok, status} = Client.call(ctx.local, "me.memory.status", %{})
@@ -281,6 +351,14 @@ defmodule Troupe.Gateway.LocalOnlyTest do
     assert reason =~ "Local only"
 
     assert {:error, %{message: "forbidden"}} = Client.call(ctx.local, "artifact.list", %{})
+
+    # Nor the desktop app's gallery and viewer, which go to the plane through the daemon.
+    for method <- ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.rollback artifact.pin) do
+      assert {:error, %{message: "forbidden", data: %{"reason" => why}}} =
+               Client.call(ctx.local, method, %{"command_id" => Client.command_id(), "id" => "art-1"})
+
+      assert why =~ "Local only", method
+    end
 
     File.write!(Path.join(ctx.workspace, "report.md"), "# Weekly\n")
 

@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { writtenBy } from "../src/views/Memory";
+import { writtenBy } from "@troupe/client";
 import { PEOPLE, button, freshBrowser, render, says, sees, seesButton, seesField, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
@@ -93,6 +93,24 @@ describe("company memory", () => {
     expect(writtenBy({ text: "- Tabs.", version: 3, by: "ada@example.com", session: "20261025T101112-abc123", agent: "build" })).toBe(
       "v3 build in 20261025T101112-abc123",
     );
+  });
+
+  // Memory as entries: the document's `## Topic` sections as the plane reads them, read only.
+  it("lists the version shown as its entries, one per topic, and edits only the document", async () => {
+    fake.admin.memory.get("organisation")!.push({ version: 3, text: "Opening words.\n\n## Tone\n\nPlain English.", changed_by: "alice@example.com", changed_at: "2026-10-26T09:00:00Z" });
+    visit("#/memory");
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+
+    const org = () => card("The organisation's memory");
+    await waitFor(org, "the organisation's memory");
+    (await seesButton("Its entries, one per topic (2)", org()!)).click();
+    const table = await waitFor(() => org()?.querySelector<HTMLTableElement>('table[aria-label="Entries of organisation v3"]'), "the entries");
+    expect([...table.querySelectorAll("tr")].map((r) => [r.querySelector("th")!.textContent, r.querySelector("td")!.textContent])).toEqual([
+      ["General", "v3 alice@example.com · used in 0 sessions"],
+      ["Tone", "v3 alice@example.com · used in 0 sessions"],
+    ]);
+    expect(table.querySelector("input, textarea, button")).toBeNull();
   });
 
   it("says when somebody else saved first, and saves nothing", async () => {
@@ -194,6 +212,24 @@ describe("company memory", () => {
     type(await seesField("The organisation's memory", org()!), "We deploy on Thursdays.");
     button("Preview", org()!)!.click();
     await sees("2 running sessions read it now; 1 of them is behind version 2.", org);
+  });
+
+  // A pod's session the plane activated with the version in force reads it before its first
+  // turn: it is a reader, not behind, and its row says it has had no turn yet.
+  it("lists a session activated with no turn yet among those that read it", async () => {
+    fake.admin.memoryReaders.get("organisation")!.push({ session_id: "s-9e0d4b77", where: "pod", owner: "alice@example.com", profile: "dev", team: "core", version: 2, turn_at: null, activated: true });
+    visit("#/memory");
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+
+    const org = () => card("The organisation's memory");
+    await waitFor(org, "the organisation's memory");
+    const readers = () => org()?.querySelector<HTMLElement>('section.readers[aria-label="Who reads it"]') ?? null;
+    await sees("s-9e0d4b77", readers);
+    const row = [...readers()!.querySelectorAll("tr")].find((tr) => tr.textContent?.includes("s-9e0d4b77"))!;
+    expect(row.textContent).toContain("activated, no turn yet");
+    expect(row.textContent).not.toContain("behind");
+    expect(row.querySelector("button")).toBeNull();
   });
 
   it("sets two versions side by side, and rolls back to one as a new version with the audit's note", async () => {

@@ -70,6 +70,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Protocol.AgentDefinition
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
+  alias Troupe.Protocol.Memory.Entries
   alias Troupe.Protocol.ProviderTypes
 
   require Logger
@@ -1245,6 +1246,36 @@ defmodule Troupe.Plane.Admin do
       end
     else
       nil -> {:error, Error.new(:not_found, %{worker_id: worker_id})}
+      other -> other
+    end
+  end
+
+  # -- artifacts --------------------------------------------------------------
+
+  @doc """
+  Published artifacts, newest first, for the administrators' table: every one for a
+  platform admin, private ones too, since taking one down is theirs; for a team admin, the
+  artifacts of the teams they administer (`team:<name>`). Never what one holds.
+  """
+  @spec artifacts_list(actor()) :: result()
+  def artifacts_list(actor) do
+    with :ok <- require_admin(actor) do
+      {:ok, Artifacts.admin_list(if(actor.role == :platform_admin, do: :all, else: actor.teams))}
+    end
+  end
+
+  @doc """
+  Take an artifact down: every version and byte, and its links stop opening. A platform
+  admin's for any artifact, a team admin's for their team's; another's is not there.
+  Audited as `artifact.delete` with `by: takedown`.
+  """
+  @spec artifact_takedown(actor(), String.t()) :: result()
+  def artifact_takedown(actor, id) do
+    with :ok <- require_admin(actor),
+         %Identity.User{} = user <- Identity.get_user(actor.subject) do
+      Artifacts.delete(id, user, platform_admin?: actor.role == :platform_admin)
+    else
+      nil -> {:error, Error.new(:not_found, %{id: id})}
       other -> other
     end
   end
@@ -2704,6 +2735,7 @@ defmodule Troupe.Plane.Admin do
          diff: Memory.diff(before && before.text, shown && shown.text),
          versions: owner |> Memory.versions() |> Enum.map(&Memory.summary/1),
          lines: memory_lines(owner, shown),
+         entries: memory_entries(owner, shown),
          inherited: memory_inherited(scope, owner),
          readers: memory_readers(owner)
        }}
@@ -2713,6 +2745,10 @@ defmodule Troupe.Plane.Admin do
   # Who wrote each line of the version shown, and from which session; nothing for none.
   defp memory_lines(_owner, nil), do: []
   defp memory_lines(owner, shown), do: Memory.blame(owner, shown.version)
+
+  # The version shown as its `## Topic` sections, each with who last changed it.
+  defp memory_entries(_owner, nil), do: []
+  defp memory_entries(owner, shown), do: Memory.InEffect.entries(owner, shown.version)
 
   # The version a version is compared with: the one named, or the one before it.
   defp memory_against(owner, shown, nil),
@@ -2761,10 +2797,10 @@ defmodule Troupe.Plane.Admin do
   when. Refused, as the save would be, for a text past the limit or for an actor who may
   not change the document.
   """
-  @spec memory_preview(actor(), String.t(), String.t() | nil, String.t() | nil) :: result()
-  def memory_preview(actor, scope, name, text) do
+  @spec memory_preview(actor(), String.t(), String.t() | nil, String.t() | nil, list() | nil) :: result()
+  def memory_preview(actor, scope, name, text, entries \\ nil) do
     with {:ok, owner} <- memory_writer(actor, scope, name),
-         :ok <- memory_text(text) do
+         {:ok, text} <- memory_text(text, entries) do
       current = Memory.current(owner)
       text = Troupe.Protocol.Memory.normalise(text)
 
@@ -2825,11 +2861,11 @@ defmodule Troupe.Plane.Admin do
   force makes no version. Audited as `memory.put` with the version, size and hash, before
   and after; every version's text is kept, so the audit names the versions to compare.
   """
-  @spec memory_put(actor(), String.t(), String.t() | nil, String.t() | nil, integer() | nil) ::
+  @spec memory_put(actor(), String.t(), String.t() | nil, String.t() | nil, integer() | nil, list() | nil) ::
           result()
-  def memory_put(actor, scope, name, text, version) do
+  def memory_put(actor, scope, name, text, version, entries \\ nil) do
     with {:ok, owner} <- memory_writer(actor, scope, name),
-         :ok <- memory_text(text) do
+         {:ok, text} <- memory_text(text, entries) do
       memory_save(actor, owner, text, version, %{})
     end
   end
@@ -2868,9 +2904,20 @@ defmodule Troupe.Plane.Admin do
   defp memory_fields(document),
     do: %{version: document.version, bytes: byte_size(document.text), hash: document.hash}
 
-  defp memory_text(text) do
+  # A save's document: `text` as written, or `entries` written as `## Topic` sections in
+  # their order, each heading as given (`Entries.render/1`).
+  defp memory_text(nil, entries) when not is_nil(entries) do
+    case Entries.cast(entries) do
+      {:ok, entries} -> memory_text(Entries.render(entries), nil)
+      {:error, reason} -> {:error, Error.new(:invalid_params, %{field: "entries", reason: reason})}
+    end
+  end
+
+  defp memory_text(nil, nil), do: {:error, Error.new(:invalid_params, %{missing: "text", reason: "give the document as text or as entries"})}
+
+  defp memory_text(text, _entries) do
     case Troupe.Protocol.Memory.check(text) do
-      :ok -> :ok
+      :ok -> {:ok, text}
       {:error, reason} -> {:error, Error.new(:invalid_params, %{field: "text", reason: reason})}
     end
   end
@@ -2906,13 +2953,35 @@ defmodule Troupe.Plane.Admin do
      })}
   end
 
+  # A refusal says, in words, who may change the document, since a person's own app asks
+  # this as them and shows them the plane's sentence.
   defp memory_writer(actor, scope, name) do
     case memory_owner(actor, scope, name) do
       {:ok, owner, true} -> {:ok, owner}
-      {:ok, _owner, false} -> require_platform_admin(actor)
-      error -> error
+      {:ok, _owner, false} -> actor |> require_platform_admin() |> memory_refusal(scope, name)
+      error -> memory_refusal(error, scope, name)
     end
   end
+
+  defp memory_refusal({:error, %Error{message: token, data: data} = error}, scope, name)
+       when is_map(data) and not is_map_key(data, :reason) and
+              (token == "forbidden" or (token == "not_found" and scope == "team")) do
+    {:error, %{error | data: Map.put(data, :reason, memory_who(token, scope, name))}}
+  end
+
+  defp memory_refusal(other, _scope, _name), do: other
+
+  defp memory_who(_token, "organisation", _name),
+    do: "only a platform administrator changes the organisation's memory"
+
+  defp memory_who("not_found", "team", name),
+    do: "there is no team called #{name} that you administer, so its memory is not yours to change"
+
+  defp memory_who(_token, "team", name),
+    do: "only #{name}'s team admins and the platform administrators change #{name}'s memory"
+
+  defp memory_who(_token, _scope, _name),
+    do: "only a platform administrator changes a worker profile's memory"
 
   defp memory_name(:organisation), do: nil
   defp memory_name(%Identity.Team{name: name}), do: name

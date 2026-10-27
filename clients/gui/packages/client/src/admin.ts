@@ -14,6 +14,7 @@
 //     gets for a team that is not theirs — whether it exists is itself privileged.
 
 import type { AgentCheck } from "./agents.js";
+import type { MemoryEntry } from "./entries.js";
 
 /**
  * A session as `admin.sessions.list` describes it: who owns it, where it runs, what state
@@ -981,6 +982,8 @@ export interface MemoryDocument {
   readers?: MemoryReaders;
   /** The version shown line by line with who wrote each line (blame, not history). Absent from a plane from before it. */
   lines?: MemoryBlameLine[];
+  /** The version shown as its `## Topic` sections, each with who last changed it and how many sessions used it. Absent from a plane from before them. */
+  entries?: MemoryEntry[];
 }
 
 /** One line of a memory document with who wrote it: the version it came in, who saved that, and an agent's entry's session and agent. */
@@ -1013,6 +1016,8 @@ export interface MemoryReader {
   /** The version its last turn read; 0 for none. */
   version: number;
   turn_at: string | null;
+  /** A pod's session activated with the documents in force and no turn yet: `turn_at` is null. */
+  activated?: boolean;
   behind: boolean;
 }
 
@@ -1137,6 +1142,25 @@ export interface Host {
   secret?: string;
   /** The PEM of the CA the machine pins for the control port. */
   ca?: string;
+}
+
+/** An artifact as `admin.artifacts.list` answers it: who published it where, and its size, never what it holds. */
+export interface AdminArtifact {
+  id: string;
+  title: string;
+  kind: "html" | "markdown" | "file";
+  /** `private`, `organisation`, `team:<name>` or `profile:<name>`. */
+  visibility: string;
+  owner: { subject: string; display_name?: string | null } | null;
+  team: string | null;
+  origin: { session_id?: string | null; profile?: string | null; agent?: string | null; where?: string | null };
+  version: number;
+  /** The version in force, and every version, which is what counts against its team's quota. */
+  bytes: number;
+  total_bytes: number;
+  created_at: string;
+  published_at: string;
+  may_take_down: boolean;
 }
 
 /** What draining a pod did: how many sessions it held and moved, and what it cancelled. */
@@ -1342,6 +1366,16 @@ export class AdminApi {
   /** Drain a pod: no new sessions, and what it holds moves. Destructive: confirmed by its worker id. */
   drainPod(workerId: string): Promise<PodDrained> {
     return this.rpc<PodDrained>("admin.pod.drain", { worker_id: workerId });
+  }
+
+  /** Published artifacts for the administrators' table: every one for a platform admin, a team admin's teams' own. */
+  artifacts(): Promise<AdminArtifact[]> {
+    return this.rpc<AdminArtifact[]>("admin.artifacts.list", {});
+  }
+
+  /** Take an artifact down: every version and byte. Destructive: confirmed by its id. */
+  takeDownArtifact(id: string): Promise<{ deleted: boolean; id: string }> {
+    return this.rpc<{ deleted: boolean; id: string }>("admin.artifact.takedown", { id });
   }
 
   /** What each substrate guarantees, and what it does not. */

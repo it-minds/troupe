@@ -156,7 +156,7 @@ defmodule Troupe.Plane.ArtifactsTest do
 
     test "is refused where its shape is wrong, and nothing is kept", context do
       refused = [
-        %{"visibility" => "team:core"},
+        %{"visibility" => "everyone"},
         %{"visibility" => "organisation", "kind" => "pdf"},
         %{"visibility" => "organisation", "title" => "  "},
         %{"visibility" => "organisation", "files" => []},
@@ -175,6 +175,11 @@ defmodule Troupe.Plane.ArtifactsTest do
         %{
           "visibility" => "organisation",
           "files" => [%{"path" => "index.html", "bytes" => "not base64!"}]
+        },
+        # A part longer than the object store takes is refused before anything is written.
+        %{
+          "visibility" => "organisation",
+          "files" => page("x", [%{"path" => String.duplicate("a", 252) <> ".txt", "bytes" => "eA=="}])
         },
         %{
           "visibility" => "organisation",

@@ -179,9 +179,15 @@ defmodule Troupe.Plane.Admin.API do
   @memory_text %Argument{
     name: "text",
     type: :string,
-    required: true,
     description:
-      "The whole document, as Markdown or plain text, at most 8192 bytes. Empty clears it."
+      "The whole document, as Markdown or plain text, at most 8192 bytes. Empty clears it. Give text or entries."
+  }
+
+  @memory_entries %Argument{
+    name: "entries",
+    type: :array,
+    description:
+      "The whole document as entries in place of text: [{\"topic\": \"Tone\", \"body\": \"Plain English.\"}], written as ## Topic sections in this order, each heading as given; an entry with no topic is the text before the first heading, and only the first may be one. As admin.memory.get answers them."
   }
 
   @filter_properties [
@@ -745,6 +751,29 @@ defmodule Troupe.Plane.Admin.API do
           type: :string,
           required: true,
           description: "The worker's id, as admin.profiles.list reports it."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.artifacts.list",
+      function: :artifacts_list,
+      summary:
+        "Published artifacts, newest first: every one for a platform admin, private ones included, and for a team admin the artifacts of the teams they administer (visibility team:<name>). Each its title, kind, visibility, owner, team, versions and bytes, never its content.",
+      risk: :read
+    },
+    %Method{
+      name: "admin.artifact.takedown",
+      function: :artifact_takedown,
+      summary:
+        "Take an artifact down: every version and byte deleted and its links stop opening, without asking its owner. A platform admin's for any artifact, a team admin's for their teams' own; another is not_found. Audited as artifact.delete with by: takedown.",
+      risk: :destructive,
+      confirm: "id",
+      arguments: [
+        %Argument{
+          name: "id",
+          type: :string,
+          required: true,
+          description: "The artifact's id, as admin.artifacts.list reports it."
         }
       ]
     },
@@ -1470,7 +1499,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.memory.get",
       function: :memory_get,
       summary:
-        "One memory document: a version's text (the one in force where no version is named), every version with who saved it and when, and what the version shown changed against the one before it, or against the version named as against, line by line (op same, del or add). A profile's has inherited: the documents of the profiles it extends, which its sessions read before its own, each with the profile it is from. readers lists the running sessions it reaches that have had a turn: each session_id, where it runs (pod or machine), its owner, profile and team, the version of this document its last turn ran under (0 for none), when that turn began, and whether it is behind the version in force; behind counts them. lines is the version shown line by line, each with by (who saved the version it came in), version, at and, for an agent's entry, session and agent: who wrote each line, not the history.",
+        "One memory document: a version's text (the one in force where no version is named), every version with who saved it and when, and what the version shown changed against the one before it, or against the version named as against, line by line (op same, del or add). A profile's has inherited: the documents of the profiles it extends, which its sessions read before its own, each with the profile it is from. readers lists the running sessions it reaches that have had a turn: each session_id, where it runs (pod or machine), its owner, profile and team, the version of this document its last turn ran under (0 for none), when that turn began, and whether it is behind the version in force; behind counts them. lines is the version shown line by line, each with by (who saved the version it came in), version, at and, for an agent's entry, session and agent: who wrote each line, not the history. entries is the version shown as its ## Topic sections, each with topic, body, heading (false for the text before the first heading, called General), version, by and at (those of its newest line) and used, how many sessions read a version holding it since, approximately.",
       risk: :read,
       arguments: @memory_document ++
         [
@@ -1490,15 +1519,15 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.memory.preview",
       function: :memory_preview,
       summary:
-        "What saving a text as a memory document would do, written nowhere: the lines it changes against the version in force, its size against the limit, which sessions read it and when (effect), and the running sessions that read it now, each with the version its last turn ran under (readers, as admin.memory.get has them). Refused as the save would be.",
+        "What saving a text (or entries) as a memory document would do, written nowhere: the lines it changes against the version in force, its size against the limit, which sessions read it and when (effect), and the running sessions that read it now, each with the version its last turn ran under (readers, as admin.memory.get has them). Refused as the save would be.",
       risk: :read,
-      arguments: @memory_document ++ [@memory_text]
+      arguments: @memory_document ++ [@memory_text, @memory_entries]
     },
     %Method{
       name: "admin.memory.put",
       function: :memory_put,
       summary:
-        "Save a text as the next version of a memory document. The organisation's and a profile's are a platform admin's to change, a team's its team admins'. version names the version the text was edited from (0 for a document never saved): a save by somebody else since is refused as conflict, naming the version in force. An empty text clears the document; the same text as the one in force makes no version. Running sessions read it from their next turn, and signed-in machines within five minutes. Audited as memory.put.",
+        "Save a text, or entries written as its ## Topic sections, as the next version of a memory document. The organisation's and a profile's are a platform admin's to change, a team's its team admins'. version names the version the text was edited from (0 for a document never saved): a save by somebody else since is refused as conflict, naming the version in force. An empty text clears the document; the same text as the one in force makes no version. Running sessions read it from their next turn, and signed-in machines within five minutes. Audited as memory.put.",
       risk: :write,
       arguments:
         @memory_document ++
@@ -1509,7 +1538,8 @@ defmodule Troupe.Plane.Admin.API do
               type: :integer,
               description:
                 "The version the text was edited from, as admin.memory.get answered it; 0 for a document never saved."
-            }
+            },
+            @memory_entries
           ]
     },
     %Method{

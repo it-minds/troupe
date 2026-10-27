@@ -134,6 +134,24 @@ describe("the person's own servers, offered to a pod session", () => {
     }
   });
 
+  // Where the organisation keeps files (troupe #765): a tool of a server marked
+  // `stores: files` is said so again in the registration, and only that one.
+  it("say again which tool is where the organisation keeps files, and no other", async () => {
+    const notes = daemon.servers.find((s) => s.name === "notes")!;
+    notes.tools = [
+      { name: "save", description: "Save a document.", schema: { type: "object" }, files: true },
+      { name: "search", description: "Search my notes.", schema: { type: "object" } },
+    ];
+    await attach();
+    await until("the offer", settled("offered"));
+
+    const registration = worker.calls.filter((c) => c.method === "tools.register").at(-1)!;
+    assert.deepEqual(registration.params["tools"], [
+      { name: "notes.save", description: "Save a document.", schema: { type: "object" }, files: true },
+      { name: "notes.search", description: "Search my notes.", schema: { type: "object" } },
+    ]);
+  });
+
   it("are offered again on a socket that comes back, without asking twice, and a call sent again is made once", async () => {
     const a = await attach();
     await until("the offer", settled("offered"));

@@ -1,0 +1,16 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/memory.in_effect.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "profile": {
+      "type": "string"
+    },
+    "team": {
+      "type": "string"
+    }
+  },
+  "required": [],
+  "title": "memory.in_effect",
+  "type": "object"
+}

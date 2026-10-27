@@ -35,6 +35,11 @@ defmodule Troupe.MCP.Server do
     # not merely denied but absent from what a model can see.
     permission: :ask,
     tools: :all,
+    # Where the organisation keeps files (`stores: files`): the harness names this server's
+    # tools to its agents as where a file the person asks for goes first, all of them or
+    # those `files` names. Declared, never guessed from a tool's name.
+    stores: nil,
+    files: :all,
     # A person's own server that wants them signed in (Decision 741): where the daemon
     # keeps that sign-in, so `credential` is filled per call from it. Never set on a
     # pod, which holds nobody's sign-in.
@@ -63,6 +68,8 @@ defmodule Troupe.MCP.Server do
           timeout_ms: pos_integer(),
           permission: :ask | :auto,
           tools: :all | [String.t()],
+          stores: :files | nil,
+          files: :all | [String.t()],
           oauth: map() | nil,
           sessions: :ets.tid() | nil,
           headers: [{String.t(), String.t()}],
@@ -102,9 +109,24 @@ defmodule Troupe.MCP.Server do
       timeout_ms: config["timeout_ms"] || 30_000,
       permission: permission(config["permission"]),
       tools: allowlist(config["tools"]),
+      stores: stores(config["stores"]),
+      files: allowlist(config["files"]),
       headers: header_list(config["headers"])
     }
   end
+
+  # Only the one word: anything else stores nothing the harness would name.
+  defp stores(value) when value in ["files", :files], do: :files
+  defp stores(_value), do: nil
+
+  @doc """
+  Whether a tool of this server is where the organisation keeps files: the server says
+  `stores: files`, and its `files` names the tool or names none.
+  """
+  @spec stores_files?(t(), String.t()) :: boolean()
+  def stores_files?(%__MODULE__{stores: :files, files: :all}, _remote_name), do: true
+  def stores_files?(%__MODULE__{stores: :files, files: names}, remote_name), do: remote_name in names
+  def stores_files?(%__MODULE__{}, _remote_name), do: false
 
   # In name order, so two reads of one entry are one credential to `Troupe.MCP.Sessions`;
   # a name the client sends itself is left out, which `header_problem/1` refused already.

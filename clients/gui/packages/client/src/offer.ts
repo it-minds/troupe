@@ -63,7 +63,8 @@ export interface OfferOptions {
 
 /** One tool as the session is offered it, and where the call goes. */
 interface Offered {
-  spec: { name: string; description: string; schema: Record<string, unknown> };
+  /** `files`: where the organisation keeps files, which the session's harness names to its agent. */
+  spec: { name: string; description: string; schema: Record<string, unknown>; files?: true };
   server: string;
   tool: string;
 }
@@ -252,7 +253,11 @@ export class ServerOffer {
     const listed = await Promise.all(signedIn(servers).map((s) => this.daemon.serverTools({ name: s.name }).catch(() => null)));
     return listed.flatMap((r) =>
       r?.state === "ready"
-        ? r.tools.map((t) => ({ spec: { name: offeredName(r.server, t.name), description: t.description, schema: t.schema }, server: r.server, tool: t.name }))
+        ? r.tools.map((t) => ({
+            spec: { name: offeredName(r.server, t.name), description: t.description, schema: t.schema, ...(t.files === true ? { files: true as const } : {}) },
+            server: r.server,
+            tool: t.name,
+          }))
         : [],
     );
   }

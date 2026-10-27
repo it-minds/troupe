@@ -3,7 +3,10 @@ defmodule Troupe.Worker.Artifacts do
   Where `publish_artifact` sends what it publishes on a pod (#62): `session.artifact.publish`
   over the control link, naming the session and the agent and nothing about whose it is. The
   plane reads the owner off the session row, so a pod publishes only for the person whose
-  session it holds, counted against the session's team.
+  session it holds, counted against the session's team. Files past what one message carries
+  comfortably go to the object store first, by a handle `session.artifact.upload.begin` gives
+  for the session's owner, as a daemon's go by `artifact.upload.begin`
+  (`Troupe.Gateway.Artifacts.carried/2`): the pod reaches the store as it does to seal.
 
   Installed as `Troupe.Artifacts`'s host when the pod starts, beside the person's own memory
   (`Troupe.Worker.Connections`). A pod whose link is down has nowhere to send it, and the
@@ -25,9 +28,20 @@ defmodule Troupe.Worker.Artifacts do
       |> Map.put("session_id", ctx.session_id)
       |> put_agent(ctx)
 
-    case request(params) do
+    # Past what one message of the link carries comfortably, the files go to the object store
+    # by a handle the plane gives for the session's owner, as a daemon's do.
+    begin = &request("session.artifact.upload.begin", %{"session_id" => ctx.session_id, "files" => &1})
+
+    sent =
+      with {:ok, params} <- Troupe.Gateway.Artifacts.carried(params, begin),
+           do: request("session.artifact.publish", params)
+
+    case sent do
       {:ok, artifact} ->
         {:ok, artifact}
+
+      {:error, reason} when is_binary(reason) ->
+        {:error, reason}
 
       {:error, %Troupe.Protocol.Error{data: data, message: message}} ->
         {:error, reason(data, message)}
@@ -55,10 +69,10 @@ defmodule Troupe.Worker.Artifacts do
   defp reason(%{reason: reason}, _message) when is_binary(reason), do: reason
   defp reason(_data, message), do: "the plane refused it (#{message})"
 
-  defp request(params) do
+  defp request(method, params) do
     case Process.whereis(Link) do
       nil -> {:error, :no_link}
-      link -> Link.request(link, "session.artifact.publish", params)
+      link -> Link.request(link, method, params)
     end
   catch
     :exit, _gone -> {:error, :no_link}

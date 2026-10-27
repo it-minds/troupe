@@ -89,6 +89,7 @@ defmodule Troupe.Session.ClientTools do
           description: String.t(),
           schema: map(),
           default_permission: :auto | :ask | :deny,
+          files: boolean(),
           run: (map(), Troupe.Tool.Ctx.t() -> Troupe.Tool.result()),
           connection: pid(),
           actor: Event.Actor.t() | nil
@@ -433,6 +434,9 @@ defmodule Troupe.Session.ClientTools do
            # the tool, not to every call the model decides to make with it. A profile
            # that says otherwise still wins, as it does for a built-in.
            default_permission: Map.get(spec, :default_permission, :ask),
+           # The client says the tool is where the organisation keeps files: its server's
+           # entry is marked `stores: files`. Only the harness's word reads it.
+           files: Map.get(spec, :files) == true,
            run: spec.run,
            connection: connection,
            actor: actor

@@ -1,7 +1,8 @@
 // "Publish…": files from this computer published on the plane as an artifact (troupe #62),
 // as the person this computer's daemon is signed in as, through the daemon's sign-in, as
-// the terminal client's /publish does. A new artifact, for the whole organisation or a
-// profile's people; or "Publish a new version of…" one of the person's own, the next version
+// the terminal client's /publish does. A new artifact, the person's alone until they share a
+// link (the default), or for the whole organisation, a team they are in or a profile's
+// people; or "Publish a new version of…" one of the person's own, the next version
 // at the same address with a note, the earlier ones kept. The daemon sends what is too large
 // for one call by an upload handle. The gallery, in the console, is a link away.
 //
@@ -9,6 +10,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
+import { visibilityWords } from "@troupe/client";
 import type { Artifact, ArtifactKind, ArtifactList, ArtifactUpload, DaemonClient } from "@troupe/client";
 import { shell } from "../shell";
 
@@ -44,14 +46,48 @@ function sentence(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export function Publish({ daemon, sessionId, onClose }: { daemon: DaemonClient; sessionId?: string | undefined; onClose: () => void }): JSX.Element {
+/**
+ * Who may open an artifact, as a person chooses it here and in the gallery: only them, the
+ * organisation, each of their teams and each profile the plane names for them.
+ */
+export function VisibilityOptions({ teams, profiles }: { teams?: string[] | undefined; profiles?: string[] | undefined }): JSX.Element {
+  return (
+    <>
+      <option value="private">Only you, until you share a link</option>
+      <option value="organisation">The whole organisation</option>
+      {(teams ?? []).map((t) => (
+        <option key={`team:${t}`} value={`team:${t}`}>
+          The {t} team
+        </option>
+      ))}
+      {(profiles ?? []).map((p) => (
+        <option key={p} value={`profile:${p}`}>
+          The {p} profile's people
+        </option>
+      ))}
+    </>
+  );
+}
+
+export function Publish({
+  daemon,
+  sessionId,
+  target: chosenTarget,
+  onClose,
+}: {
+  daemon: DaemonClient;
+  sessionId?: string | undefined;
+  /** One of the person's own, chosen already: the gallery's "Publish a new version". */
+  target?: string | undefined;
+  onClose: () => void;
+}): JSX.Element {
   const [list, setList] = useState<ArtifactList & { plane_url?: string } | null>(null);
   const [listError, setListError] = useState<string | null>(null);
-  const [mode, setMode] = useState<"new" | "version">("new");
-  const [target, setTarget] = useState<string>("");
+  const [mode, setMode] = useState<"new" | "version">(chosenTarget ? "version" : "new");
+  const [target, setTarget] = useState<string>(chosenTarget ?? "");
   const [files, setFiles] = useState<File[]>([]);
   const [title, setTitle] = useState("");
-  const [visibility, setVisibility] = useState("organisation");
+  const [visibility, setVisibility] = useState("private");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,7 +141,7 @@ export function Publish({ daemon, sessionId, onClose }: { daemon: DaemonClient; 
         {done ? (
           <>
             <p className="copy">
-              {done.title} is published as {done.id}, version {done.version}, for {done.visibility === "organisation" ? "the whole organisation" : `the ${done.visibility.slice("profile:".length)} profile's people`}.
+              {done.title} is published as {done.id}, version {done.version}, for {visibilityWords(done.visibility)}.
             </p>
             <div className="actions">
               {gallery && (
@@ -158,12 +194,7 @@ export function Publish({ daemon, sessionId, onClose }: { daemon: DaemonClient; 
                 <label>
                   Who may open it
                   <select value={visibility} onChange={(e) => setVisibility(e.target.value)}>
-                    <option value="organisation">The whole organisation</option>
-                    {(list?.profiles ?? []).map((p) => (
-                      <option key={p} value={`profile:${p}`}>
-                        The {p} profile's people
-                      </option>
-                    ))}
+                    <VisibilityOptions teams={list?.teams} profiles={list?.profiles} />
                   </select>
                 </label>
               </>

@@ -15,7 +15,8 @@ defmodule Troupe.Gateway.Artifacts do
   and the publish names the handle instead of carrying the files.
 
   `list/1` is the person's own artifacts on the plane, for a client's "Publish a new version
-  of…", with where the console's gallery is.
+  of…", with where the console's gallery is. `forward/2` is what the desktop app's gallery
+  and viewer ask of one artifact, each the plane's method of the same name.
   """
 
   alias Troupe.Gateway.{LocalOnly, Memory, Plane}
@@ -26,9 +27,21 @@ defmodule Troupe.Gateway.Artifacts do
   # rest of the request.
   @inline_bytes 2_500_000
 
-  @doc "Install this daemon as where its sessions' artifacts go."
+  @doc """
+  Install this daemon as where its sessions' artifacts go, and as the answer to whether one
+  of them can publish now: when this daemon is signed in to a plane.
+  """
   @spec install() :: :ok
-  def install, do: Troupe.Artifacts.install(&__MODULE__.publish/2)
+  def install, do: Troupe.Artifacts.install(&__MODULE__.publish/2, ready: &__MODULE__.signed_in?/1)
+
+  @doc "Whether a session here can publish now: this daemon is signed in to a plane."
+  @spec signed_in?(String.t() | nil) :: boolean()
+  def signed_in?(_session_id) do
+    is_binary(Plane.url()) and Plane.linked?()
+  catch
+    # No plane process (a daemon still starting): nothing to publish to yet.
+    :exit, _reason -> false
+  end
 
   @doc "What `publish_artifact` sends from a session here: `put/1`, naming the session and its agent."
   @spec publish(map(), Troupe.Tool.Ctx.t()) :: {:ok, map()} | {:error, :signed_out | String.t()}
@@ -59,7 +72,7 @@ defmodule Troupe.Gateway.Artifacts do
   def put(params) do
     with url when is_binary(url) <- Plane.url(),
          true <- Plane.linked?(),
-         {:ok, params} <- carried(Map.take(params, @keys)),
+         {:ok, params} <- carried(Map.take(params, @keys), &Plane.call("artifact.upload.begin", %{"files" => &1})),
          {:ok, artifact} <- Plane.call("artifact.publish", params) do
       {:ok, Map.put(artifact, "plane_url", url)}
     else
@@ -74,7 +87,8 @@ defmodule Troupe.Gateway.Artifacts do
   def list(params) do
     with url when is_binary(url) <- Plane.url(),
          true <- Plane.linked?(),
-         {:ok, answer} <- Plane.call("artifact.list", Map.take(params, ~w(mine shared visibility))) do
+         {:ok, answer} <-
+           Plane.call("artifact.list", Map.take(params, ~w(mine shared teams visibility))) do
       {:ok, Map.put(answer, "plane_url", url)}
     else
       {:error, :unlinked} -> {:error, :signed_out}
@@ -83,22 +97,64 @@ defmodule Troupe.Gateway.Artifacts do
     end
   end
 
-  # Inline where it fits in one call; else by an upload handle, the files sent to the
-  # object store first and the publish naming the handle.
-  defp carried(%{"files" => files} = params) when is_list(files) do
+  # What a client's gallery and viewer ask of one artifact, each the plane's own method with
+  # the arguments it takes, nothing else of what the client sent: one with its versions, a
+  # ticket to open it or one version on its host, a view or edit link and its revoking, a
+  # rollback and a pin. The plane decides who may: the owner, an edit link's holder, a reader.
+  @forwarded %{
+    "artifact.get" => ~w(id),
+    "artifact.open" => ~w(id version),
+    # One text file of a version, for the terminal's frame.
+    "artifact.read" => ~w(id version path),
+    "artifact.share" => ~w(id role expires),
+    "artifact.unshare" => ~w(id share person),
+    "artifact.rollback" => ~w(id version),
+    "artifact.pin" => ~w(id version),
+    # Who may open it, moved by its owner (or its title): a put over a version, no files sent.
+    "artifact.put" => ~w(id base visibility title note)
+  }
+
+  @doc "The methods `forward/2` sends to the plane."
+  @spec forwarded() :: [String.t()]
+  def forwarded, do: Map.keys(@forwarded)
+
+  @doc """
+  One of `forwarded/0`, sent to the linked plane as this daemon's person: the plane's answer
+  with `plane_url`, or its refusal as it gave it (`{:rpc, error}`).
+  """
+  @spec forward(String.t(), map()) :: {:ok, map()} | {:error, :signed_out | term()}
+  def forward(method, params) when is_map_key(@forwarded, method) do
+    with url when is_binary(url) <- Plane.url(),
+         true <- Plane.linked?(),
+         {:ok, answer} <- Plane.call(method, Map.take(params, @forwarded[method])) do
+      {:ok, Map.put(answer, "plane_url", url)}
+    else
+      {:error, :unlinked} -> {:error, :signed_out}
+      {:error, reason} -> {:error, reason}
+      _signed_out -> {:error, :signed_out}
+    end
+  end
+
+  @doc """
+  `params` as a publish sends them: inline where its files fit in one call; else by an
+  upload handle, `begin` asked for one with each file's path and size, the files sent to
+  the object store first and the publish naming the handle. A daemon begins with the plane's
+  `artifact.upload.begin`, a pod with `session.artifact.upload.begin` over its control link.
+  """
+  @spec carried(map(), ([map()] -> {:ok, map()} | {:error, term()})) :: {:ok, map()} | {:error, term()}
+  def carried(%{"files" => files} = params, begin) when is_list(files) do
     inline = files |> Enum.map(&byte_size(&1["bytes"] || "")) |> Enum.sum()
 
     if inline <= @inline_bytes,
       do: {:ok, params},
-      else: upload(params, files)
+      else: upload(params, files, begin)
   end
 
-  defp carried(params), do: {:ok, params}
+  def carried(params, _begin), do: {:ok, params}
 
-  defp upload(params, files) do
+  defp upload(params, files, begin) do
     with {:ok, decoded} <- decode(files),
-         {:ok, %{"upload" => handle, "urls" => urls}} <-
-           Plane.call("artifact.upload.begin", %{"files" => Enum.map(decoded, &announce/1)}),
+         {:ok, %{"upload" => handle, "urls" => urls}} <- begin.(Enum.map(decoded, &announce/1)),
          :ok <- send_all(decoded, urls) do
       {:ok, params |> Map.delete("files") |> Map.put("upload", handle)}
     end

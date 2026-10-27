@@ -204,11 +204,36 @@ defmodule Troupe.Gateway.Dispatch do
     # sign-in (#55): what every session of theirs reads, on every machine.
     "me.memory" => :control,
     "me.memory.put" => :control,
+    # Its history (versions and their text, two side by side) and a rollback, for the
+    # desktop app's Memory view: the text is as much the person's as `me.memory`'s.
+    "me.memory.history" => :control,
+    "me.memory.rollback" => :control,
+    # What a new session of the person's in a team reads, as one list of topics; and the
+    # levels of the organisation's memory the person administers (a team admin their team's,
+    # a platform admin the organisation's), read and changed in their own app as them, the
+    # plane deciding who may. `control`, as the person's own memory is: the text is theirs
+    # to read, and a save is a save.
+    "memory.in_effect" => :control,
+    "admin.memory.get" => :control,
+    "admin.memory.preview" => :control,
+    "admin.memory.put" => :control,
     # A page or a file published on the plane as the person, through this daemon's sign-in
     # (#62): what a client's "Publish…" sends, the files read on this machine.
     "artifact.publish" => :control,
-    # The person's own artifacts there, for "Publish a new version of…".
+    # The person's own artifacts there, for "Publish a new version of…", and the gallery.
     "artifact.list" => :observe,
+    # The desktop app's viewer, each the plane's method of the same name with the scope
+    # the plane gives it: reading one and opening it on its host, and the owner's controls.
+    "artifact.get" => :observe,
+    "artifact.open" => :observe,
+    # One text file of a version, which the terminal reads a Markdown artifact from.
+    "artifact.read" => :observe,
+    "artifact.share" => :control,
+    "artifact.unshare" => :control,
+    "artifact.rollback" => :control,
+    "artifact.pin" => :control,
+    # A put over a version that sends no files: the owner moving who may open it.
+    "artifact.put" => :control,
     # Where this machine's copy of the plane's memory stands, and what each session here
     # last read: for the person's own debugging (`troupe memory --status`).
     "me.memory.status" => :observe,
@@ -279,6 +304,7 @@ defmodule Troupe.Gateway.Dispatch do
   # and after a create, whose session there was no id for before.
   @work ~w(input.send commands.run session.goal.set session.loop.start)
   @invites ~w(session.invite session.uninvite session.invites session.read_sealed)
+  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.rollback artifact.pin artifact.put)
 
   defp local_only("remote.offer", params, context) do
     cond do
@@ -288,9 +314,18 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  defp local_only(method, _params, %Context{local_only: true}) when method in ["me.memory", "me.memory.put"] do
+  defp local_only(method, _params, %Context{local_only: true})
+       when method in ["me.memory", "me.memory.put", "me.memory.history", "me.memory.rollback"] do
     refuse_local_only(
       "this client is in Local only, so the daemon does not ask the plane for your own memory; " <>
+        "turn Local only off to read or change it"
+    )
+  end
+
+  defp local_only(method, _params, %Context{local_only: true})
+       when method in ["memory.in_effect", "admin.memory.get", "admin.memory.preview", "admin.memory.put"] do
+    refuse_local_only(
+      "this client is in Local only, so the daemon does not ask the plane for its memory; " <>
         "turn Local only off to read or change it"
     )
   end
@@ -1102,8 +1137,14 @@ defmodule Troupe.Gateway.Dispatch do
       # The client that asked is the one the session names to the provider (Decision 787).
       config = [client: context.client] ++ List.wrap(overrides(Map.get(params, "config")))
 
+      # Its id is made here so the session is put under its client's Local only (or out of
+      # it) before it starts: a create with a prompt starts the first turn inside the start,
+      # and that turn is the client's work as much as any later one.
+      session_id = Troupe.Session.generate_id()
+      :ok = LocalOnly.worked(context.connection, session_id)
+
       opts =
-        [workspace: resolved.path, agent: profile, config_overrides: config]
+        [workspace: resolved.path, agent: profile, config_overrides: config, session_id: session_id]
         |> maybe_put(:task, task)
         |> maybe_put(:parent, parent)
         |> maybe_private(private?)
@@ -1379,11 +1420,20 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp handle("me.memory.put", params, _context) do
     case params do
-      %{"append" => entry} when is_binary(entry) -> own_memory(Memory.put_own(%{"append" => entry}))
+      %{"append" => entry} when is_binary(entry) -> own_memory(Memory.put_own(Map.take(params, ["append", "topic"])))
       %{"text" => text, "version" => v} when is_binary(text) and is_integer(v) -> own_memory(Memory.put_own(params))
-      _ -> {:error, Error.new(:invalid_params, %{reason: "me.memory.put takes text and version, or append"})}
+      %{"entries" => entries, "version" => v} when is_list(entries) and is_integer(v) -> own_memory(Memory.put_own(params))
+      _ -> {:error, Error.new(:invalid_params, %{reason: "me.memory.put takes text or entries and version, or append"})}
     end
   end
+
+  # What a new session of the person's in a team reads (`Memory.in_effect/1`), and the levels
+  # of the organisation's memory they administer (`Memory.admin/2`), the plane's as them.
+  defp handle("memory.in_effect", params, _context),
+    do: forwarded("memory.in_effect", Memory.in_effect(params))
+
+  defp handle("admin.memory." <> _ = method, params, _context) when method in ["admin.memory.get", "admin.memory.preview", "admin.memory.put"],
+    do: forwarded(method, Memory.admin(method, params))
 
   # An artifact published as the person (`Artifacts.put/1`), for a client's "Publish…": the
   # plane's answer with `plane_url`. Signed out, a sentence; the plane's refusal, its own.
@@ -1400,8 +1450,14 @@ defmodule Troupe.Gateway.Dispatch do
                "publish it; troupe login signs it in, or send the file itself"
          })}
 
-      {:error, reason} ->
-        {:error, Error.new(:invalid_params, %{reason: Memory.sentence(reason)})}
+      # What this machine could not read or send of it is the client's to fix.
+      {:error, reason} when is_binary(reason) ->
+        {:error, Error.new(:invalid_params, %{reason: reason})}
+
+      # The plane's refusal keeps its code and its data: a team the person is not in is
+      # `forbidden`, with the teams they are in.
+      {:error, _refused} = error ->
+        forwarded("artifact.publish", error)
     end
   end
 
@@ -1418,10 +1474,22 @@ defmodule Troupe.Gateway.Dispatch do
            reason: "this computer's daemon is not signed in to a Troupe plane; troupe login signs it in"
          })}
 
-      {:error, reason} ->
-        {:error, Error.new(:invalid_params, %{reason: Memory.sentence(reason)})}
+      {:error, _refused} = error ->
+        forwarded("artifact.list", error)
     end
   end
+
+  # The desktop app's viewer, each the plane's method of the same name (`Artifacts.forward/2`):
+  # its answer with `plane_url`, its refusal with the plane's own code. Signed out, a sentence.
+  defp handle("artifact." <> _ = method, params, _context) when method in @forwarded_artifacts,
+    do: forwarded(method, Artifacts.forward(method, params))
+
+  # The person's own memory's history and a rollback, for the desktop app's Memory view.
+  defp handle("me.memory.history", params, _context),
+    do: forwarded("me.memory.history", Memory.history(params))
+
+  defp handle("me.memory.rollback", params, _context),
+    do: forwarded("me.memory.rollback", Memory.rollback_own(params))
 
   defp handle("identity.get", _params, _context) do
     identity =
@@ -1999,6 +2067,32 @@ defmodule Troupe.Gateway.Dispatch do
   defp own_memory({:error, reason}),
     do: {:error, Error.new(:invalid_params, %{reason: Memory.sentence(reason)})}
 
+  # A method the daemon sends on to the plane as the person: the plane's answer, or its
+  # refusal under the plane's own code and data (`not_found`, `forbidden`, `conflict` with
+  # the version in force), so a client tells them apart as it would at the plane. Signed
+  # out, a sentence; a plane from before the method, or one not reached, `unavailable`.
+  defp forwarded(_method, {:ok, answer}), do: {:ok, answer}
+
+  defp forwarded(_method, {:error, :signed_out}) do
+    {:error,
+     Error.new(:unavailable, %{
+       reason: "this computer's daemon is not signed in to a Troupe plane; troupe login signs it in"
+     })}
+  end
+
+  defp forwarded(method, {:error, {:rpc, %{"code" => -32_601}}}),
+    do: {:error, Error.new(:unavailable, %{reason: "the plane has no #{method}; it is from before it"})}
+
+  defp forwarded(method, {:error, {:rpc, %{"code" => code} = refusal}}) when is_integer(code) do
+    case Error.token(code) do
+      :unknown -> forwarded(method, {:error, Memory.sentence({:rpc, refusal})})
+      token -> {:error, Error.new(token, refusal["data"] || %{reason: Memory.sentence({:rpc, refusal})})}
+    end
+  end
+
+  defp forwarded(_method, {:error, reason}),
+    do: {:error, Error.new(:unavailable, %{reason: Memory.sentence(reason)})}
+
   defp format_reason(reason) when is_binary(reason), do: reason
   defp format_reason(reason), do: inspect(reason)
 
@@ -2505,6 +2599,8 @@ defmodule Troupe.Gateway.Dispatch do
        description: Map.get(tool, "description", "A tool hosted by an attached client."),
        schema: Map.get(tool, "schema", %{"type" => "object"}),
        default_permission: permission(Map.get(tool, "permission")),
+       # Where the organisation keeps files, as the client's own server entry says.
+       files: Map.get(tool, "files") == true,
        run: fn args, ctx -> ClientTool.run(connection, name, args, ctx) end
      }}
   end

@@ -279,8 +279,12 @@ defmodule Troupe.Gateway.LocalSources do
     end
   end
 
-  defp tool_json(tool),
-    do: %{"name" => tool.remote_name, "description" => tool.description, "schema" => tool.schema}
+  # `files` where the server's entry says the tool is where the organisation keeps files,
+  # for the client to say so again when it offers the tool.
+  defp tool_json(tool) do
+    json = %{"name" => tool.remote_name, "description" => tool.description, "schema" => tool.schema}
+    if tool.files, do: Map.put(json, "files", true), else: json
+  end
 
   # What a session's own tool would answer: the text, or the `sign_in_required` note when
   # the sign-in has run out. A call the server could not take is `unavailable`, saying why.

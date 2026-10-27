@@ -51,6 +51,15 @@ defmodule Troupe.Client.Daemon.Link do
   def call(method, params), do: ask({:call, method, params}, @call_timeout + 5_000)
 
   @doc """
+  `call/2`, with a daemon's refusal kept whole: `{:error, %{message, code, data}}`, `message`
+  the sentence `call/2` answers, `code` the protocol's (`"forbidden"`) and `data` what the
+  daemon put beside it, such as the consent an offer of a private session wants, in its own
+  words. Anything else goes wrong as it does for `call/2`.
+  """
+  @spec call_with_data(String.t(), map()) :: {:ok, term()} | {:error, term()}
+  def call_with_data(method, params), do: ask({:call, method, params, :data}, @call_timeout + 5_000)
+
+  @doc """
   Call a daemon method on a connection of its own, made for the call and closed after it,
   from the calling process: for a read that can take a long while. The daemon answers one
   connection's calls in turn, so on the link such a call holds up every call behind it.
@@ -176,12 +185,15 @@ defmodule Troupe.Client.Daemon.Link do
     end
   end
 
-  def handle_call({:call, method, params}, _from, state) do
+  def handle_call({:call, method, params}, from, state),
+    do: handle_call({:call, method, params, :message}, from, state)
+
+  def handle_call({:call, method, params, kept}, _from, state) do
     case ensure_client(state) do
       {:ok, state} ->
         case request(state.client, method, params) do
           {:ok, result} -> {:reply, {:ok, result}, state}
-          {:error, %{} = error} -> {:reply, {:error, error_message(error)}, state}
+          {:error, %{} = error} -> {:reply, {:error, refusal(error, kept)}, state}
           {:error, :closed} -> {:reply, {:error, unreachable(method)}, forget_client(state)}
           {:error, reason} -> {:reply, {:error, reason}, state}
         end
@@ -444,6 +456,16 @@ defmodule Troupe.Client.Daemon.Link do
       end
 
     os <> "/" <> arch
+  end
+
+  defp refusal(error, :message), do: error_message(error)
+
+  defp refusal(error, :data) do
+    %{
+      message: error_message(error),
+      code: Map.get(error, :message),
+      data: if(is_map(Map.get(error, :data)), do: error.data, else: %{})
+    }
   end
 
   defp error_message(%{message: message, data: %{"reason" => reason}}) when is_binary(reason),

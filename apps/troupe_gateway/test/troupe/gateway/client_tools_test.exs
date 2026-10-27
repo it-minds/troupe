@@ -20,6 +20,7 @@ defmodule Troupe.Gateway.ClientToolsTest do
 
   use Troupe.Gateway.HarnessCase, async: false
 
+  alias Troupe.Instructions.Harness
   alias Troupe.Protocol.Error
   alias Troupe.Session.{ClientTools, Log}
 
@@ -168,6 +169,23 @@ defmodule Troupe.Gateway.ClientToolsTest do
   end
 
   describe "a registered tool" do
+    # Issue #765: the client says its server's tool is where the organisation keeps files,
+    # and the harness names it to the agent as where a file goes first; one not so marked
+    # is not, whatever it is called.
+    test "keeps whether its client marked it as where the organisation keeps files", context do
+      %{session: session} = start_session(context, default: {:text, "ok"})
+      ada = attach(context, @ada)
+
+      assert {:ok, _} = register(ada, session.id, tool: Map.put(@tool, "files", true))
+      assert [%{name: "client.notes.search", files: true}] = registered = ClientTools.list(session.id)
+      assert Harness.file_tools(registered) == ["client.notes.search"]
+
+      bob = attach(context, @bob)
+      %{session: other} = start_session(context, default: {:text, "ok"})
+      assert {:ok, _} = register(bob, other.id)
+      assert [%{files: false}] = ClientTools.list(other.id)
+    end
+
     test "is served by the client that registered it, logged, and taints the session",
          context do
       %{session: session} =

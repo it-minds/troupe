@@ -326,6 +326,19 @@ ask it to "answer here" to keep a long answer in the chat.
   a compaction is another ([bench.md](../developer/bench.md) has the measurement). That is
   why an agent uses it only when asked or for a long answer.
 
+## Where a file goes
+
+When you ask for a file (a document, a report, a spreadsheet, a page), the agent puts it
+where your organisation keeps files if one of its tools does that (an MCP server marked
+[`stores: files`](mcp.md#where-your-organisation-keeps-files)), else publishes it as an
+[artifact](artifacts.md) people can share, else makes it in the workspace and says where:
+on your machine it is already there, and from a pod's session the desktop app's **Save…**
+on the transcript's "File ready" line, or the TUI's `/save <path> [to]`, brings it here.
+Saying where ("put it on SharePoint", "just make the file") decides it, and so does an
+instruction file that says so; when more than one way is open and you named none, it asks
+you once, the ways as the options. Each session's `instructions_loaded` lists this as its
+`harness` layer, with what was open (Decision 956).
+
 ## What Troupe never does
 
 - **It never reads your session on the plane.** The plane holds who, which profile, which

@@ -1,0 +1,25 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/artifact.unshare.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "person": {
+      "type": "string"
+    },
+    "share": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "id"
+  ],
+  "title": "artifact.unshare",
+  "type": "object"
+}

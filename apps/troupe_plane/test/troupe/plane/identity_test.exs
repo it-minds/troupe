@@ -45,6 +45,18 @@ defmodule Troupe.Plane.IdentityTest do
 
       assert Identity.teams_for(user) |> Enum.map(& &1.id) == [team_one.id]
     end
+
+    # By name, so a person's first team, which an artifact with no team of its own counts
+    # against, is the same one every time rather than whichever id sorts first.
+    test "a person's teams come by name, once each" do
+      names = ~w(teal echo delta bravo alpha kilo)
+      user = person("idp|ada", names ++ ["alpha-again"])
+      for name <- names, do: team_with_grant(name, "dev", name: name)
+      {:ok, alpha} = Identity.upsert_group(%{external_id: "alpha-again", display_name: "alpha-again"})
+      {:ok, _link} = Identity.link_group(Identity.get_team("alpha"), alpha, "root")
+
+      assert Identity.teams_for(user) |> Enum.map(& &1.name) == Enum.sort(names)
+    end
   end
 
   describe "teams" do

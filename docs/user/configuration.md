@@ -326,6 +326,8 @@ a key by, in the desktop app and the TUI alike.
 | `mcp.<name>.oauth.issuer` | string |  | user; project if trusted |  | The authorization server, for a server that publishes no metadata naming one. |
 | `mcp.<name>.permission` | `ask` \| `auto` | `ask` | user; project if trusted |  | `auto` runs its tools without asking. |
 | `mcp.<name>.timeout_ms` | integer ≥ 1 | `30000` | user; project if trusted |  | How long one call may take. |
+| `mcp.<name>.stores` | `files` |  | user; project if trusted |  | `files`: the server is where your organisation keeps files, which an agent puts a file you ask for in first. |
+| `mcp.<name>.files` | list of strings |  | user; project if trusted |  | With `stores: files`, the tools that store a file. Unset: all of them. |
 
 ### Watching
 

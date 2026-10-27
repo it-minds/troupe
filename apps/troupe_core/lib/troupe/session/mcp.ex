@@ -82,6 +82,13 @@ defmodule Troupe.Session.MCP do
   def tools(session_id), do: call(session_id, :tools, [])
 
   @doc """
+  The servers marked `stores: files` that are still starting: their tools are not offered
+  yet, and join at the turn after they are ready.
+  """
+  @spec starting_stores(String.t()) :: [String.t()]
+  def starting_stores(session_id), do: call(session_id, :starting_stores, [])
+
+  @doc """
   What a client shows about the servers: name, layer, source, state, tool names, error.
   `state` is `connecting`, `ready`, `error`, `stopped`, `pending` (the workspace's
   question is unanswered), `disabled` or `sign_in` (the server wants the person signed
@@ -521,6 +528,15 @@ defmodule Troupe.Session.MCP do
     {:reply, listed, state}
   end
 
+  def handle_call(:starting_stores, _from, state) do
+    starting =
+      for {name, %{record: %{config: %{stores: :files}}} = entry} <- state.servers,
+          entry_status(state, name, entry).state == :connecting,
+          do: name
+
+    {:reply, Enum.sort(starting), state}
+  end
+
   def handle_call({:reload, name}, _from, state) do
     {records, warnings} = resolve(state, base_of(state))
     Enum.each(warnings, &Logger.warning("troupe: mcp: " <> &1))
@@ -682,7 +698,9 @@ defmodule Troupe.Session.MCP do
       "url" => config[:url],
       "headers" => config[:headers],
       "permission" => config[:permission] || :ask,
-      "timeout_ms" => config[:timeout_ms] || 30_000
+      "timeout_ms" => config[:timeout_ms] || 30_000,
+      "stores" => config[:stores],
+      "files" => config[:files]
     })
     |> Map.put(:pinned, true)
     |> with_oauth(config[:oauth], state_dir)

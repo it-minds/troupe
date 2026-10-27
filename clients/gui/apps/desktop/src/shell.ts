@@ -70,6 +70,20 @@ export interface TroupeShell {
    */
   openAgentFile?: (path: string) => Promise<void>;
   /**
+   * Show an artifact from its own host (troupe #62): a window of the shell's own at `url`,
+   * the one-time address `artifact.open` answered, granted nothing and kept on that host, one
+   * per `key` (the artifact's id). The app never fetches an artifact into its own origin; a
+   * browser build opens the address in a tab of its own instead.
+   */
+  openArtifactWindow?: (url: string, title: string, key: string) => Promise<void>;
+  /**
+   * Save a file the agent made for the person (troupe #765): the system's save dialog,
+   * named `name` to start with, and `content` written where they chose. Answers the path
+   * written, or null when they cancelled. A browser build downloads it instead
+   * (`saveFile` below).
+   */
+  saveFile?: (name: string, content: string) => Promise<string | null>;
+  /**
    * The operating system's notifications. A browser has its own `Notification`, and a
    * webview has one that does nothing: WebView2 refuses the permission unless the host
    * answers for it. So a shell brings its own, and `notify.ts` prefers it.
@@ -175,6 +189,24 @@ export function capabilities(): Capabilities {
     localSessions: Boolean(s?.findDaemon) || daemonHint() !== null,
     shellName: s?.name ?? null,
   };
+}
+
+/**
+ * Save a file on this computer: the shell's save dialog, or in a browser a download of it
+ * under `name`, which the browser puts where it puts downloads. Answers where it went, as
+ * far as the page can know, or null when the person cancelled.
+ */
+export async function saveFile(name: string, content: string): Promise<string | null> {
+  const s = shell();
+  if (s?.saveFile) return await s.saveFile(name, content);
+  const url = URL.createObjectURL(new Blob([content], { type: "application/octet-stream" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  // Let go of it once the browser has had time to start the download.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  return name;
 }
 
 /** The best store this host can offer. Never a worse one without saying so. */

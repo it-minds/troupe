@@ -577,6 +577,16 @@ defmodule Troupe.Protocol.Schema do
         "hash" => required(:string),
         "size" => required(:integer)
       },
+      # A file the agent made for the person (`write_file` with `deliverable: true`), for
+      # their client to offer to save: `path` as `fs.read` takes it, the `hash` that read
+      # answers, and on a session on the person's machine `local_path`, where it is there.
+      "file_ready" => %{
+        "path" => required(:string),
+        "size" => required(:integer),
+        "hash" => required(:string),
+        "title" => optional(:string),
+        "local_path" => optional(:string)
+      },
       # A document `show` wrote to the session's scratchpad, or replaced (Decision 870):
       # everything a client shows of it but its words, which `fs.read` of `path` returns.
       # `version` counts the writes of that name in the session, from 1; `call_id` is the
@@ -1094,16 +1104,57 @@ defmodule Troupe.Protocol.Schema do
       },
       # The person's own memory document on the plane (#55), read and saved through the
       # daemon's sign-in: the whole `text` over the `version` edited, or one `append`ed entry.
-      # `blame` adds `lines`, who wrote each line and from which session (#55).
+      # `blame` adds `lines`, who wrote each line and from which session (#55). Every document
+      # comes with its `entries`, one per `## Topic` section.
       "me.memory" => %{"blame" => optional(:boolean)},
       # Where this machine's copy of the plane's memory stands, for the person's own
       # debugging: what it holds, what is in force, what each session here last read.
       "me.memory.status" => %{},
+      # The whole document as `text` or as `entries` (`{topic, body}`, written as sections in
+      # order) over the `version` edited, or one `append`ed entry under `topic`.
       "me.memory.put" => %{
         "command_id" => required(:string),
         "text" => optional(:string),
+        "entries" => optional(:array),
         "version" => optional(:integer),
-        "append" => optional(:string)
+        "append" => optional(:string),
+        "topic" => optional(:string)
+      },
+      # What a new session of the person's in one of their teams reads, as one list of topics:
+      # per topic the closest level's entry and what it replaces. The plane's, as the person.
+      "memory.in_effect" => %{"team" => optional(:string), "profile" => optional(:string)},
+      # A level of the organisation's memory the person may change (a team admin their team's,
+      # a platform admin the organisation's), sent on to the plane as them: the plane's
+      # `admin.memory.get`, `admin.memory.preview` and `admin.memory.put`, and its refusal
+      # where they may not.
+      "admin.memory.get" => %{
+        "scope" => required(:string),
+        "name" => optional(:string),
+        "version" => optional(:integer),
+        "against" => optional(:integer)
+      },
+      "admin.memory.preview" => %{
+        "scope" => required(:string),
+        "name" => optional(:string),
+        "text" => optional(:string),
+        "entries" => optional(:array)
+      },
+      "admin.memory.put" => %{
+        "command_id" => required(:string),
+        "scope" => required(:string),
+        "name" => optional(:string),
+        "text" => optional(:string),
+        "entries" => optional(:array),
+        "version" => optional(:integer)
+      },
+      # Its history, for the desktop app's Memory view: every version, `version`'s text (the
+      # one in force for none) beside `against`'s (the one before it for none), and the line
+      # diff; and a rollback to `to`, over `version`, the one in force as the client saw it.
+      "me.memory.history" => %{"version" => optional(:integer), "against" => optional(:integer)},
+      "me.memory.rollback" => %{
+        "command_id" => required(:string),
+        "to" => required(:integer),
+        "version" => required(:integer)
       },
       # The client's Local only switch moved: the daemon makes no plane call
       # for the sessions it runs while it is on. Said at `initialize` as
@@ -1112,22 +1163,70 @@ defmodule Troupe.Protocol.Schema do
       # A page, a document or a file published on the plane as the person (#62), through
       # the daemon's sign-in: `files` each `{path, bytes}` (base64) and an optional
       # `content_type`; `id` republishes one of theirs; `session_id` names where it came from.
+      # No `visibility` is `private`, the owner's alone, for a new one, and as it was for a
+      # republish.
       "artifact.publish" => %{
         "command_id" => required(:string),
         "title" => required(:string),
         "kind" => required(:string),
-        "visibility" => required(:string),
+        "visibility" => optional(:string),
         "files" => required(:array),
         "id" => optional(:string),
         "note" => optional(:string),
         "session_id" => optional(:string)
       },
       # The person's own artifacts on the plane (#62), for a client's "Publish a new version
-      # of…": `mine`, `shared` or `visibility` narrows it, as the plane's `artifact.list`.
+      # of…": `mine`, `shared`, `teams` or `visibility` narrows it, as the plane's
+      # `artifact.list`.
       "artifact.list" => %{
         "mine" => optional(:boolean),
         "shared" => optional(:boolean),
+        "teams" => optional(:boolean),
         "visibility" => optional(:string)
+      },
+      # The desktop app's viewer (#62): each the plane's method of the same name, sent with
+      # the daemon's sign-in. One artifact with its versions; a one-time ticket that opens it,
+      # or `version`, on the artifacts host; a link (`role` view or edit) and its revoking, by
+      # `share` or `person`; a rollback to `version`; a pin of `version`, null for the newest.
+      "artifact.get" => %{"id" => required(:string)},
+      "artifact.open" => %{"id" => required(:string), "version" => optional(:integer)},
+      # One text file of a version (its entry where no path is named), for the terminal's frame.
+      "artifact.read" => %{
+        "id" => required(:string),
+        "version" => optional(:integer),
+        "path" => optional(:string)
+      },
+      "artifact.share" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "role" => required(:string),
+        "expires" => optional(:string)
+      },
+      "artifact.unshare" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "share" => optional(:string),
+        "person" => optional(:string)
+      },
+      "artifact.rollback" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "version" => required(:integer)
+      },
+      "artifact.pin" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "version" => required({:nullable, :integer})
+      },
+      # Who may open it moved by its owner, or its title: a version over `base` carrying
+      # every file of it, no files sent.
+      "artifact.put" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "base" => required(:integer),
+        "visibility" => optional(:string),
+        "title" => optional(:string),
+        "note" => optional(:string)
       },
       # A first run's questions (Decision 705) — the daemon's only, like the settings
       # they write; a worker answers `method_not_found`. `answer` is the named step's

@@ -9,6 +9,7 @@
 // (`session.read_sealed`), since only their own machine can open it.
 
 import { TroupeRpcError } from "./connection.js";
+import { when } from "./remote.js";
 
 /** What an invitation lets a person do: follow the session, or steer it as well. */
 export type InviteRole = "observe" | "control";
@@ -32,6 +33,11 @@ export interface Invitation {
    * invitation with control steers it. Null for a pod session, and from a plane before it.
    */
   offered?: boolean | null;
+  /**
+   * A private session's whose offer the plane still holds while its laptop is gone: since
+   * when it is offline, as `remote.list` says it, with `offered` false. Null otherwise.
+   */
+  offline_since?: string | null;
 }
 
 /** A person invited into a session, as `session.invites` lists them to anybody in it. */
@@ -95,7 +101,8 @@ export function invitationWords(i: Invitation): string {
  */
 export function steerWords(i: Invitation): string | null {
   if (i.kind !== "private" || i.role !== "control") return null;
-  return i.offered ? "offered · you can steer" : "not offered · read-only";
+  if (i.offered) return "offered · you can steer";
+  return i.offline_since ? `offline since ${when(i.offline_since)} · read-only` : "not offered · read-only";
 }
 
 /** What an open view says when the invitation it was opened under is taken back. */

@@ -15,7 +15,7 @@ defmodule Troupe.UI.TUI.Server do
   alias Troupe.Protocol.Glob
   alias Troupe.Settings
   alias Troupe.UI.HQ
-  alias Troupe.UI.TUI.{AgentChooser, Agents, Input, Model, Theme, View}
+  alias Troupe.UI.TUI.{AgentChooser, Agents, ArtifactsPage, Input, MemoryPage, Model, Theme, View}
 
   @tick_ms 33
   @mailbox_threshold 50
@@ -41,6 +41,8 @@ defmodule Troupe.UI.TUI.Server do
             | :scratch
             | :mcp
             | :memory
+            | :artifacts
+            | :own_memory
             | :hq
             | :palette
             | :agents
@@ -58,6 +60,8 @@ defmodule Troupe.UI.TUI.Server do
           win_pos: non_neg_integer(),
           agents: [String.t()],
           agent_rows: %{optional(String.t()) => map()},
+          plane_linked: boolean() | nil,
+          plane_linked_at: integer() | nil,
           agents_page: Agents.page() | nil,
           switcher: AgentChooser.t() | nil,
           commands: [Client.command()],
@@ -82,6 +86,8 @@ defmodule Troupe.UI.TUI.Server do
           scratch: scratch() | nil,
           mcp_cursor: non_neg_integer(),
           memory: memory() | nil,
+          artifacts_page: ArtifactsPage.t() | nil,
+          memory_page: MemoryPage.t() | nil,
           hq: HQ.t() | nil,
           shell: shell() | nil,
           theme: Theme.t(),
@@ -241,6 +247,7 @@ defmodule Troupe.UI.TUI.Server do
     :ok = Client.subscribe(sid)
     :ok = Client.subscribe_settings()
     model = rebuild(sid)
+    ask_plane_link()
     # `troupe --prompt TEXT`: the command line opens holding it, the cursor after it, and
     # nothing is sent until Enter (Decision 150).
     prompt = Keyword.get(opts, :prompt) || ""
@@ -266,6 +273,11 @@ defmodule Troupe.UI.TUI.Server do
       # `agents.list`'s rows by name, for the palette's agent rows (TUI Decision 156): read
       # when the palette first opens, not before the first frame.
       agent_rows: %{},
+      # Whether this computer's daemon is signed in to a plane, as it last said, for the
+      # palette's commands that need one: asked as the screen opens, and again as the palette
+      # opens once the answer is a minute old; `nil` until it has answered.
+      plane_linked: nil,
+      plane_linked_at: nil,
       agents_page: nil,
       # The one agent picker: Ctrl-N's and Tab's.
       switcher: nil,
@@ -297,6 +309,9 @@ defmodule Troupe.UI.TUI.Server do
       # full for a person whose browser did not open (troupe-remote Decision 741).
       mcp_sign_in: nil,
       memory: nil,
+      # `/artifacts` and `/memory`, the person's own things on the plane.
+      artifacts_page: nil,
+      memory_page: nil,
       hq: nil,
       shell: nil,
       # The person's theme, from `ui.theme` (`read_appearance/1`), and the value last said
@@ -388,6 +403,9 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   def handle_info({:troupe_event, event}, state) do
+    state =
+      if event.type in [:memory_changed, "memory_changed"], do: memory_heard(state), else: state
+
     {:noreply, state |> apply_event(event) |> Map.put(:dirty, true) |> schedule_tick(),
      render?: false}
   end
@@ -427,6 +445,9 @@ defmodule Troupe.UI.TUI.Server do
   # them again, so a model picked in the desktop app is on it without a key pressed, and a
   # changed `ui` key is read again, so a theme picked there is the one drawn here (#228),
   # as is `transcript.detail` (TUI Decision 161).
+  def handle_info({:troupe_settings_changed, %{"scope" => "memory"}}, %{memory_page: %{}} = state),
+    do: {:noreply, schedule_tick(memory_heard(state)), render?: false}
+
   def handle_info({:troupe_settings_changed, changed}, state) do
     ui? =
       changed
@@ -463,6 +484,18 @@ defmodule Troupe.UI.TUI.Server do
 
   def handle_info({:agent_rows, _sid, _rows}, state), do: {:noreply, state, render?: false}
 
+  # Whether the daemon is signed in to a plane, asked as the screen or the palette opened.
+  def handle_info({:plane_linked, linked?}, state) do
+    state = %{
+      state
+      | plane_linked: linked?,
+        plane_linked_at: System.monotonic_time(:millisecond),
+        dirty: true
+    }
+
+    {:noreply, schedule_tick(state), render?: false}
+  end
+
   def handle_info(:repainted, state), do: {:noreply, %{state | repaint: false}, render?: true}
 
   # The editor runs once the frame that says so is drawn (TUI Decision 156): it holds the
@@ -491,6 +524,33 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   def handle_info({:run_editor, _request}, state), do: {:noreply, state, render?: false}
+
+  def handle_info({:run_memory_editor, request}, %{memory_page: %{} = page} = state) do
+    nonce = 9 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+    path = Path.join(System.tmp_dir!(), "troupe-memory-#{nonce}.md")
+
+    {terminal?, outcome} =
+      case write_temp(path, request.text <> "\n") do
+        :ok ->
+          edited = edit_temp(path, state.mouse)
+          File.rm(path)
+          edited
+
+        {:error, _reason} = failed ->
+          {false, failed}
+      end
+
+    state = %{
+      state
+      | memory_page: MemoryPage.edited(page, request, outcome),
+        repaint: terminal?,
+        dirty: true
+    }
+
+    {:noreply, schedule_tick(state), render?: false}
+  end
+
+  def handle_info({:run_memory_editor, _request}, state), do: {:noreply, state, render?: false}
 
   def handle_info(:force_render, state),
     do: {:noreply, %{state | now: System.system_time(:millisecond), dirty: false}, render?: true}
@@ -632,6 +692,12 @@ defmodule Troupe.UI.TUI.Server do
   def handle_event(%Key{} = key, %{focus: :memory} = state),
     do: {:noreply, memory_key(key, %{state | quit_armed: false})}
 
+  def handle_event(%Key{} = key, %{focus: :artifacts} = state),
+    do: {:noreply, artifacts_key(key, %{state | quit_armed: false})}
+
+  def handle_event(%Key{} = key, %{focus: :own_memory} = state),
+    do: {:noreply, own_memory_key(key, %{state | quit_armed: false})}
+
   def handle_event(%Key{} = key, %{focus: :hq} = state),
     do: {:noreply, hq_key(key, %{state | quit_armed: false})}
 
@@ -690,6 +756,12 @@ defmodule Troupe.UI.TUI.Server do
       :memory ->
         {:noreply, state, render?: false}
 
+      :artifacts ->
+        {:noreply, state, render?: false}
+
+      :own_memory ->
+        {:noreply, %{state | memory_page: MemoryPage.paste(state.memory_page, content)}}
+
       :hq ->
         {:noreply, state, render?: false}
 
@@ -716,6 +788,8 @@ defmodule Troupe.UI.TUI.Server do
              :scratch,
              :mcp,
              :memory,
+             :artifacts,
+             :own_memory,
              :hq,
              :palette,
              :agents,
@@ -1001,7 +1075,8 @@ defmodule Troupe.UI.TUI.Server do
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
   @builtins ~w(new cancel dismiss merge discard goal loop steer invite uninvite sessions back hq observer files
-               scratch upload publish copy memory context watch settings models mcp skills help
+               scratch upload save publish artifacts copy memory context watch settings models mcp
+               skills help
                agents worktree workflow detail unlink quit)
 
   @doc false
@@ -1075,6 +1150,8 @@ defmodule Troupe.UI.TUI.Server do
       :mcp -> open_mcp(state)
       :agents -> open_agents(state)
       :memory -> open_memory(state)
+      :own_memory -> open_own_memory(state)
+      :artifacts -> open_artifacts(state)
       {:mcp, text} -> state |> notice(text) |> open_mcp(state.mcp_cursor)
       {:mcp_sign_in, _name, _url, _text} = signing -> signing_in(state, signing)
       {:hq, arg} -> open_hq(state, plane_arg(arg))
@@ -1338,14 +1415,19 @@ defmodule Troupe.UI.TUI.Server do
   # which is a command that starts one.
   defp builtin("agents", _args, _state, _target), do: :agents
 
-  # `/memory` alone opens the facts' page (root Decision 839); `refresh` and `forget` are
-  # the client's answer on the notice line.
+  # `/memory` alone opens what the troupe remembers for the person, level by level; `/memory
+  # facts` the repository brief's facts; `refresh` and `forget` are the brief's, answered on
+  # the notice line.
   defp builtin("memory", args, state, _target) do
     case String.trim(args) do
-      "" -> :memory
+      "" -> :own_memory
+      "facts" -> :memory
       args -> notice_of(Client.memory(state.session_id, args))
     end
   end
+
+  # The person's artifacts on the plane, by who can see them.
+  defp builtin("artifacts", _args, _state, _target), do: :artifacts
 
   defp builtin("context", _args, state, _target),
     do: notice_of(Client.instructions(state.session_id))
@@ -1393,6 +1475,9 @@ defmodule Troupe.UI.TUI.Server do
 
   defp builtin("upload", args, state, _target),
     do: notice_of(upload(state.session_id, String.trim(args)))
+
+  defp builtin("save", args, state, _target),
+    do: notice_of(save(state.session_id, String.trim(args)))
 
   defp builtin("publish", args, state, _target),
     do: notice_of(publish(state.session_id, String.trim(args)))
@@ -1482,6 +1567,9 @@ defmodule Troupe.UI.TUI.Server do
     # The agent rows' badges are asked for the first time the palette opens, off the
     # screen's process: a daemon slow to answer never holds the palette (TUI Decision 156).
     if state.agent_rows == %{}, do: ask_agent_rows(state.session_id)
+    # And whether the daemon has a plane, asked again where the answer is a minute old: a
+    # sign-in or a sign-out elsewhere changes it.
+    if stale_plane_link?(state), do: ask_plane_link()
 
     %{
       state
@@ -1643,70 +1731,36 @@ defmodule Troupe.UI.TUI.Server do
   # path is read here rather than on the worker: the worker has no access to this machine.
   # Its size is asked first, so a file larger than the daemon takes in a message is
   # refused without being read (D115).
-  # `/publish <path> <organisation | profile:<name>>` publishes one file from this machine as
-  # an artifact on the plane (root #62), as the person this computer's daemon is signed in
-  # as: a page (`.html`), a document (`.md`) or a file, titled by its own heading or title,
-  # else its name, and named as coming from this session. Read here, as `/upload` reads it.
+  # `/publish <path> [private | organisation | team:<name> | profile:<name>]` publishes one
+  # file from this machine as an artifact on the plane (root #62), as the person this
+  # computer's daemon is signed in as: a page (`.html`), a document (`.md`) or a file, titled
+  # by its own heading or title, else its name, and named as coming from this session; theirs
+  # alone where it says nothing else. Read here, as `/upload` reads it. A team they are not
+  # in is the plane's to refuse, naming theirs.
+  @publish_usage "/publish <path> [private | organisation | team:<name> | profile:<name>]"
+
   defp publish(sid, args) do
     case String.split(args, ~r/\s+/, trim: true) do
       [path, visibility | _] -> publish(sid, path, visibility)
-      _usage -> {:error, "usage: /publish <path> <organisation | profile:<name>>"}
+      [path] -> publish(sid, path, "private")
+      _usage -> {:error, "usage: " <> @publish_usage}
     end
   end
 
+  # Read, titled and kinded as `troupe artifacts` and the gallery's `p` do it
+  # (`Client.publish_file/3`), named as coming from this session.
   defp publish(sid, path, visibility) do
-    local = Path.expand(path)
-    name = Path.basename(local)
+    case Client.publish_file(path, visibility, session_id: sid) do
+      {:ok, artifact} ->
+        {:ok,
+         "published #{path} as #{artifact["id"]} version #{artifact["version"]}" <>
+           if(artifact["url"], do: ": #{artifact["url"]}", else: "")}
 
-    with {:ok, content} <- File.read(local),
-         kind = artifact_kind(name),
-         {:ok, artifact} <-
-           Client.publish_artifact(%{
-             "title" => artifact_title(kind, content, name),
-             "kind" => kind,
-             "visibility" => visibility,
-             "files" => [%{"path" => name, "bytes" => Base.encode64(content)}],
-             "session_id" => sid
-           }) do
-      {:ok,
-       "published #{path} as #{artifact["id"]} version #{artifact["version"]}" <>
-         if(artifact["url"], do: ": #{artifact["url"]}", else: "")}
-    else
-      {:error, reason} when is_atom(reason) -> {:error, "#{path}: #{:file.format_error(reason)}"}
-      {:error, reason} -> {:error, "#{path} not published: #{refusal(reason)}"}
-    end
-  end
-
-  # The daemon's sentence, or the plane's, whichever way the refusal came.
-  defp refusal(%{"data" => %{"reason" => reason}}) when is_binary(reason), do: reason
-  defp refusal(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
-  defp refusal(%{data: %{reason: reason}}) when is_binary(reason), do: reason
-  defp refusal(reason), do: to_message(reason)
-
-  defp artifact_kind(name) do
-    case name |> Path.extname() |> String.downcase() do
-      ext when ext in [".html", ".htm"] -> "html"
-      ext when ext in [".md", ".markdown"] -> "markdown"
-      _other -> "file"
-    end
-  end
-
-  defp artifact_title(kind, content, name) do
-    found =
-      case kind do
-        "html" ->
-          Regex.run(~r/<title[^>]*>\s*([^<]+?)\s*<\/title>/i, content, capture: :all_but_first)
-
-        "markdown" ->
-          Regex.run(~r/^#\s+(.+?)\s*$/m, content, capture: :all_but_first)
-
-        "file" ->
-          nil
-      end
-
-    case found do
-      [title] -> if String.valid?(title), do: title, else: name
-      _none -> name
+      # A file that could not be read says so as it is; a refusal, the daemon's or the plane's.
+      {:error, reason} ->
+        if String.starts_with?(reason, path <> ": "),
+          do: {:error, reason},
+          else: {:error, "#{path} not published: #{reason}"}
     end
   end
 
@@ -1724,6 +1778,35 @@ defmodule Troupe.UI.TUI.Server do
     else
       {:error, reason} when is_atom(reason) -> {:error, "#{path}: #{:file.format_error(reason)}"}
       {:error, reason} -> {:error, "#{path} not uploaded: #{to_message(reason)}"}
+    end
+  end
+
+  # `/save <path> [to]` is `/upload` the other way: a file of the session's workspace, read
+  # with `fs.read` wherever the session runs, written on this machine at `to` (a directory
+  # takes the file's name), or under its own name in the directory the TUI started in.
+  # What a pod session's `file_ready` offers.
+  defp save(_sid, ""), do: {:error, "usage: /save <path> [to]"}
+
+  defp save(sid, args) do
+    {path, to} = split_first(args)
+    name = Path.basename(path)
+
+    local =
+      case String.trim(to) do
+        "" -> Path.expand(name)
+        to -> to |> Path.expand() |> then(&if(File.dir?(&1), do: Path.join(&1, name), else: &1))
+      end
+
+    with {:ok, content} <- Client.fs_read(sid, path),
+         :ok <- File.mkdir_p(Path.dirname(local)),
+         :ok <- File.write(local, content) do
+      {:ok, "saved #{path} to #{local}"}
+    else
+      {:error, reason} when is_atom(reason) ->
+        {:error, "#{path} not saved: #{:file.format_error(reason)}"}
+
+      {:error, reason} ->
+        {:error, "#{path} not saved: #{to_message(reason)}"}
     end
   end
 
@@ -2282,6 +2365,10 @@ defmodule Troupe.UI.TUI.Server do
 
       {:open, _hq, session_id} ->
         %{state | hq: nil} |> adopt(session_id)
+
+      # HQ's line for what is shared with the person opens the artifacts there.
+      {:artifacts, _hq} ->
+        open_artifacts(%{state | hq: nil}, tab: :shared)
     end
   end
 
@@ -2811,6 +2898,24 @@ defmodule Troupe.UI.TUI.Server do
     :ok
   end
 
+  defp stale_plane_link?(%{plane_linked_at: nil}), do: true
+
+  defp stale_plane_link?(%{plane_linked_at: at}),
+    do: System.monotonic_time(:millisecond) - at > :timer.minutes(1)
+
+  # Off the screen's process, as the agent rows are: a daemon slow to answer holds nothing.
+  defp ask_plane_link do
+    server = self()
+
+    {:ok, _task} =
+      Task.start(fn ->
+        linked? = match?({:ok, %{"linked" => true}}, Client.identity())
+        send(server, {:plane_linked, linked?})
+      end)
+
+    :ok
+  end
+
   # `agents.list`'s rows by name, which the palette's agent rows carry their badges from.
   defp agent_rows(sid) do
     case Client.agents(sid, "agents.list") do
@@ -3045,6 +3150,56 @@ defmodule Troupe.UI.TUI.Server do
         end
     end
   end
+
+  ## The person's own things: artifacts and memory
+
+  defp open_artifacts(state, opts \\ []),
+    do: %{
+      put_cmd(state, "")
+      | focus: :artifacts,
+        artifacts_page: ArtifactsPage.open(state.session_id, state.workspace, opts)
+    }
+
+  defp artifacts_key(key, state) do
+    case ArtifactsPage.key(state.artifacts_page, key) do
+      :close -> %{state | focus: :command, artifacts_page: nil}
+      {:ok, page} -> %{state | artifacts_page: page}
+    end
+  end
+
+  defp open_own_memory(state),
+    do: %{put_cmd(state, "") | focus: :own_memory, memory_page: MemoryPage.open()}
+
+  # An entry's words in the person's own editor are written once the frame that says so is
+  # drawn, as an agent's are: the editor holds the terminal, or a window of its own.
+  defp own_memory_key(key, state) do
+    case MemoryPage.key(state.memory_page, key) do
+      :close ->
+        %{state | focus: :command, memory_page: nil}
+
+      {:ok, page} ->
+        %{state | memory_page: page}
+
+      {:edit, page, request} ->
+        send(self(), {:run_memory_editor, request})
+
+        %{
+          state
+          | memory_page: %{
+              page
+              | status:
+                  "editing “#{request.topic}” in your editor; save and close it to save it here"
+            }
+        }
+    end
+  end
+
+  # A save of the person's memory, here or anywhere, or an agent's entry, reaches this
+  # machine's copy and every client hears it: the page open on it reads it again.
+  defp memory_heard(%{memory_page: %{} = page} = state),
+    do: %{state | memory_page: MemoryPage.load(page), dirty: true}
+
+  defp memory_heard(state), do: state
 
   defp preview(state, entry) do
     path = mount_of(state.files.path) <> entry.path

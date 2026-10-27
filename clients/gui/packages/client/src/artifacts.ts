@@ -29,13 +29,23 @@ export interface ArtifactOrigin {
   where?: "pod" | "laptop" | "person" | null;
 }
 
+/**
+ * The gallery tab an artifact is under for this caller, as the plane says it: `mine`,
+ * `private` (theirs, which only they open), `organisation`, `team:<name>`,
+ * `profile:<name>`, or `shared` (a link gave it them). A client tabs by it and works out
+ * nobody's membership itself.
+ */
+export type ArtifactScope = string;
+
 /** An artifact as `artifact.list` answers it, for this caller. */
 export interface Artifact {
   id: string;
   title: string;
   kind: ArtifactKind;
-  /** `organisation`, or `profile:<name>`. */
+  /** `organisation`, `team:<name>`, `profile:<name>`, or `private` for its owner alone. */
   visibility: string;
+  /** Which part of a gallery it is in for this caller: `mine`, `private`, `organisation`, `team:<name>`, `profile:<name>` or `shared`. */
+  scope?: ArtifactScope;
   owner: ArtifactPerson;
   /** Whether it is the caller's own. */
   mine: boolean;
@@ -118,6 +128,8 @@ export interface ArtifactList {
   enabled: boolean;
   /** The profiles the caller is covered by. */
   profiles: string[];
+  /** The teams the caller is in, which they may publish to as `team:<name>`. */
+  teams?: string[];
   /** Who may publish to the whole organisation. */
   publish_organisation: "everyone" | "platform_admins";
   /** Whether an administrator allows public links. */
@@ -130,12 +142,23 @@ export interface ArtifactList {
 
 /** Which artifacts a list asks for: none given is everything the caller may see. */
 export interface ArtifactFilter {
-  /** `organisation`, or `profile:<name>`. */
+  /** `private`, `organisation`, `team:<name>` or `profile:<name>`. */
   visibility?: string;
   /** Only the caller's own. */
   mine?: boolean;
   /** Only those a link gave the caller. */
   shared?: boolean;
+  /** Only the teams' own: those of the teams the caller is in or administers. */
+  teams?: boolean;
+}
+
+/** Who may open an artifact, in words: what every client of a person's says of a visibility. */
+export function visibilityWords(visibility: string): string {
+  if (visibility === "private") return "only you";
+  if (visibility === "organisation") return "the whole organisation";
+  if (visibility.startsWith("team:")) return `the ${visibility.slice("team:".length)} team`;
+  if (visibility.startsWith("profile:")) return `the ${visibility.slice("profile:".length)} profile's people`;
+  return visibility;
 }
 
 /** A one-time link to open an artifact on its host, good for `expires_in` seconds. */
@@ -181,6 +204,27 @@ export function textBytes(text: string): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(binary);
+}
+
+/** Who an artifact is for, as a gallery groups them: everyone, a team's or a profile's people, a link's, or its owner alone. */
+export type ArtifactAudience = "everyone" | "team" | "shared" | "private";
+
+/**
+ * Who it is for: its visibility, or a link where that is how the caller has it, which the
+ * plane says per row (`scope` `shared`: `mine`, `private`, `organisation`, `team:<name>`,
+ * `profile:<name>` or `shared`).
+ */
+export function audienceOf(artifact: Artifact): ArtifactAudience {
+  if (artifact.visibility === "private") return "private";
+  if (artifact.scope === "shared") return "shared";
+  if (artifact.visibility === "organisation") return "everyone";
+  return "team";
+}
+
+/** The team's or the profile's name an artifact is for, or null. */
+export function audienceName(artifact: Artifact): string | null {
+  const m = /^(?:team|profile):(.+)$/.exec(artifact.visibility);
+  return m ? m[1]! : null;
 }
 
 /** The person's own calls on artifacts, one per method. */

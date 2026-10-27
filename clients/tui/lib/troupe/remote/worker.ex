@@ -781,11 +781,7 @@ defmodule Troupe.Remote.Worker do
       # tools this client hosts, and says so.
       send_request(state, {:internal, :initialize}, "initialize", %{
         protocol_version: Troupe.Remote.Discovery.wire_version(),
-        client_info: %{
-          name: "troupe",
-          version: to_string(Application.spec(:troupe, :vsn)),
-          platform: Troupe.Client.Daemon.Link.platform()
-        },
+        client_info: client_info(state),
         capabilities: if(state.plane_url, do: %{tools: true}, else: %{}),
         auth: %{token: token}
       })
@@ -793,6 +789,20 @@ defmodule Troupe.Remote.Worker do
       {:error, reason} -> state |> put_error(reason) |> schedule_reconnect()
       {:error, reason, state} -> state |> put_error(reason) |> schedule_reconnect()
     end
+  end
+
+  # A session on this machine's daemon is told what the rest of this client tells it
+  # (`Link.client_info/0`): its name, and Local only where it is on, since the input this
+  # connection gives the session is what puts it under Local only or takes it out. A pod's
+  # worker is told the client's name, version and platform, as before.
+  defp client_info(%{plane_url: nil}), do: Troupe.Client.Daemon.Link.client_info()
+
+  defp client_info(_state) do
+    %{
+      name: "troupe",
+      version: to_string(Application.spec(:troupe, :vsn)),
+      platform: Troupe.Client.Daemon.Link.platform()
+    }
   end
 
   # The plane mints session tokens; the client only reads `exp` to know when the

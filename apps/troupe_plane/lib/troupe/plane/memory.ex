@@ -39,14 +39,17 @@ defmodule Troupe.Plane.Memory do
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Memory.{Document, Read}
   alias Troupe.Protocol.Memory, as: Shape
+  alias Troupe.Protocol.Memory.Entries
 
   @type scope :: String.t()
 
   @typedoc "Whose a document is: the organisation's, a team, a profile by name, or a person."
   @type owner :: :organisation | Team.t() | String.t() | User.t()
 
-  # One entry an agent adds to a person's memory: a sentence or two, on one line.
+  # One entry an agent adds to a person's memory: a sentence or two, on one line, under a
+  # topic, `Notes` where the agent names none.
   @entry_bytes 1_024
+  @default_topic "Notes"
 
   # How many sessions one machine's poll may say it runs, and how long one it named counts
   # as running: three polls of five minutes.
@@ -410,6 +413,31 @@ defmodule Troupe.Plane.Memory do
   end
 
   @doc """
+  A pod's session was activated with `documents`, the memory its `session.activate` carried:
+  kept as what it holds, with no turn yet, so a session that has had none is among a
+  document's readers as activated until its first turn says what it read.
+  """
+  @spec activated(Sessions.Session.t(), [Shape.document()]) :: :ok
+  def activated(%Sessions.Session{} = session, documents) when is_list(documents) do
+    keep(%{
+      session_id: session.id,
+      owner_id: session.owner_id,
+      owner_subject: session.owner_subject,
+      where: "pod",
+      documents: Enum.map(documents, &Shape.stamp/1),
+      turn_at: nil,
+      seen_at: DateTime.utc_now()
+    })
+  end
+
+  @doc "What the plane keeps of a session's reads, gone with the session: for its erasure."
+  @spec forget_read(String.t()) :: :ok
+  def forget_read(session_id) when is_binary(session_id) do
+    _deleted = Repo.delete_all(from(r in Read, where: r.session_id == ^session_id))
+    :ok
+  end
+
+  @doc """
   What a person's machine says of the sessions running on it, with its poll of `me.memory`:
   each one's `session_id`, the stamps its last turn read (`documents`) and when that turn
   began (`turn_at`). At most #{@machine_sessions} a poll, and only for the person who sent
@@ -466,8 +494,8 @@ defmodule Troupe.Plane.Memory do
   of it their last turn ran under (`0` for none) and whether that is behind the version in
   force; and how many are behind. A pod's session is running while the plane has it active
   on a pod, a machine's while its daemon named it at a poll in the last fifteen minutes,
-  three polls. A session that has had no turn yet is not listed: it reads the version in
-  force at its first.
+  three polls. A pod's session activated and given no turn yet is listed as `activated`, with
+  the version its activation carried and no `turn_at`.
   """
   @spec readers(owner()) :: %{version: non_neg_integer(), behind: non_neg_integer(), sessions: [map()]}
   def readers(owner) do
@@ -483,7 +511,7 @@ defmodule Troupe.Plane.Memory do
 
         row
         |> Map.delete(:documents)
-        |> Map.merge(%{version: version || 0, behind: version != in_force})
+        |> Map.merge(%{version: version || 0, behind: version != in_force, activated: is_nil(row.turn_at)})
       end)
       |> Enum.sort_by(& &1.session_id)
 
@@ -681,8 +709,15 @@ defmodule Troupe.Plane.Memory do
         changes = Audit.diff(fields(before), fields(now))
 
         detail =
-          for {key, opt} <- [{"session", :session}, {"agent", :agent}], opts[opt], into: changes,
-            do: {key, opts[opt]}
+          for {key, opt} <- [
+                {"session", :session},
+                {"agent", :agent},
+                {"rolled_back_to", :rolled_back_to},
+                {"note", :note}
+              ],
+              opts[opt],
+              into: changes,
+              do: {key, opts[opt]}
 
         {:ok, _} = Audit.record(user.subject, "memory.put", subject(user), detail)
         _told = announce(user)
@@ -697,23 +732,27 @@ defmodule Troupe.Plane.Memory do
 
   @doc """
   Add one entry to a person's own document, as an agent of theirs does with `remember`:
-  under a heading of the day, `## 2026-10-25`, below whatever is there and never in place of
-  it. The entry is one line, white space folded, at most 1024 bytes. One that would take the
-  document past the limit is refused as `{:full, bytes}`, and nothing is written. Saved as
-  `save_own/4` saves, over the version just read, and read again when somebody saved in
+  a line `- <entry>` at the end of the section on `opts[:topic]` (`Notes` where none is
+  named), the section found as topics compare (`Troupe.Protocol.Memory.Entries.key/1`) and
+  made at the end of the document where there is none, and never in place of a word that is
+  there. The entry is one line, white space folded, at most 1024 bytes. One that would take
+  the document past the limit is refused as `{:full, bytes}`, and nothing is written. Saved
+  as `save_own/4` saves, over the version just read, and read again when somebody saved in
   between.
   """
   @spec append_own(User.t(), String.t(), keyword()) ::
-          {:ok, %{document: map() | nil, changes: map(), entry: String.t()}}
+          {:ok, %{document: map() | nil, changes: map(), entry: String.t(), topic: String.t()}}
           | {:error, {:full, non_neg_integer()} | :no_person | String.t()}
   def append_own(user, entry, opts \\ []) do
-    with {:ok, entry} <- entry(entry), do: append(user, entry, opts, 3)
+    with {:ok, entry} <- entry(entry),
+         {:ok, topic} <- topic(opts[:topic]),
+         {:ok, saved} <- append(user, entry, Keyword.put(opts, :topic, topic), 3),
+         do: {:ok, Map.put(saved, :topic, topic)}
   end
 
   defp append(%User{id: id} = user, entry, opts, attempts) when is_binary(id) do
     current = current(user)
-    today = Keyword.get_lazy(opts, :today, &Date.utc_today/0)
-    text = appended((current && current.text) || "", entry, today)
+    text = appended((current && current.text) || "", entry, opts[:topic])
 
     with :ok <- room(text),
          {:ok, saved} <- save_own(user, text, number(current), opts) do
@@ -739,21 +778,45 @@ defmodule Troupe.Plane.Memory do
 
   defp entry(_other), do: {:error, "an entry is text"}
 
-  # Below the last heading where it is the day's, under a new one where it is not.
-  defp appended("", entry, day), do: "## #{Date.to_iso8601(day)}\n\n- #{entry}"
+  # The topic an entry goes under: one line of at most 128 bytes, `Notes` for none.
+  defp topic(nil), do: {:ok, @default_topic}
 
-  defp appended(text, entry, day) do
-    heading = "## #{Date.to_iso8601(day)}"
+  defp topic(topic) when is_binary(topic) do
+    folded = topic |> String.split() |> Enum.join(" ")
 
-    last =
-      text
-      |> String.split("\n")
-      |> Enum.filter(&String.starts_with?(&1, "## "))
-      |> List.last()
+    cond do
+      folded == "" -> {:ok, @default_topic}
+      not String.valid?(folded) -> {:error, "a topic is UTF-8 text"}
+      byte_size(folded) > 128 -> {:error, "a topic holds at most 128 bytes; this one is #{byte_size(folded)}"}
+      true -> {:ok, folded}
+    end
+  end
 
-    if last == heading,
-      do: text <> "\n- " <> entry,
-      else: text <> "\n\n" <> heading <> "\n\n- " <> entry
+  defp topic(_other), do: {:error, "a topic is text"}
+
+  # At the end of the section on the topic, after its last line that is not blank; a new
+  # section at the end of the document where it has none. The rest of the text as it was.
+  defp appended("", entry, topic), do: "## #{topic}\n\n- #{entry}"
+
+  defp appended(text, entry, topic) do
+    lines = String.split(text, "\n")
+
+    section =
+      lines
+      |> Enum.with_index()
+      |> Entries.split(&elem(&1, 0))
+      |> Enum.find(fn {title, heading?, _lines} -> heading? and Entries.key(title) == Entries.key(topic) end)
+
+    case section do
+      nil ->
+        text <> "\n\n## " <> topic <> "\n\n- " <> entry
+
+      {_title, true, [{_heading, at} | body]} ->
+        last = body |> Enum.reject(&(String.trim(elem(&1, 0)) == "")) |> List.last()
+        {before, rest} = Enum.split(lines, if(last, do: elem(last, 1), else: at) + 1)
+        added = if last, do: ["- " <> entry], else: ["", "- " <> entry]
+        Enum.join(before ++ added ++ rest, "\n")
+    end
   end
 
   defp room(text) do

@@ -105,7 +105,7 @@ the AppArmor profile, "Can't mount proc" the pod's user namespace
 **Behind it:** Decisions 832 (bubblewrap), 890 (the worker's seccomp profile and user
 namespace), 898 (its AppArmor profile), 856 (the denied addresses), 752 and 758 (with and
 without Cilium), 753 (a role per profile), 889 (the cluster suite on pull requests); #625
-and #627 are what is left; [security.md §3](../admin/security.md#3-a-worker-isolation-and-egress).
+and #627 are what is left; [a worker's isolation and egress](../admin/security-worker.md).
 
 ## 3. A fresh Anthropic account finishes a session
 

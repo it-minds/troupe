@@ -10,7 +10,8 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { MemoryBlameLine, MemoryDocument, MemoryInherited, MemoryLine, MemoryPreview, MemoryReader, MemoryReaders, MemoryScope, MemorySaved } from "@troupe/client";
+import { besideRows, writtenBy } from "@troupe/client";
+import type { MemoryDocument, MemoryInherited, MemoryPreview, MemoryReader, MemoryReaders, MemoryScope, MemorySaved } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Loaded, Preview, Region, TextDiff, count, useChange, when } from "./bits";
 
@@ -118,6 +119,7 @@ function Document({
       )}
       {draft === null && doc.text !== "" && <pre className="prompt">{doc.text}</pre>}
       {draft === null && (doc.lines ?? []).length > 0 && <Blame doc={doc} />}
+      {draft === null && (doc.entries ?? []).length > 0 && <Entries doc={doc} />}
 
       {doc.editable && draft === null && (
         <div className="actions">
@@ -248,7 +250,7 @@ function Readers({ doc, readers }: { doc: MemoryDocument; readers: MemoryReaders
                     {r.version === 0 ? "none" : `v${r.version}`}
                     {r.behind ? " · behind" : ""}
                   </td>
-                  <td>{when(r.turn_at)}</td>
+                  <td>{r.activated && !r.turn_at ? "activated, no turn yet" : when(r.turn_at)}</td>
                   <td>
                     {doc.editable && r.behind && (
                       <button type="button" onClick={() => nudge(r)}>
@@ -328,11 +330,35 @@ function Blame({ doc }: { doc: MemoryDocument }): JSX.Element {
   );
 }
 
-/** A line's side column: the version and who saved it, or the agent and session of an agent's entry. */
-export function writtenBy(line: MemoryBlameLine): string {
-  if (line.agent) return `v${line.version} ${line.agent} in ${line.session ?? "a session"}`;
-  if (line.session) return `v${line.version} an agent in ${line.session}`;
-  return `v${line.version} ${line.by ?? ""}`.trim();
+/**
+ * The version shown as its entries (troupe #55), asked for: one per `## Topic`, as the plane
+ * reads them, each with who last changed it and in how many sessions it was used. Read only:
+ * the document above is what is edited.
+ */
+function Entries({ doc }: { doc: MemoryDocument }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const entries = doc.entries ?? [];
+  return (
+    <div className="blame">
+      <button type="button" className="link" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {open ? "Hide its entries" : `Its entries, one per topic (${entries.length})`}
+      </button>
+      {open && (
+        <table className="blame-lines" aria-label={`Entries of ${doc.subject} v${doc.version ?? 0}`}>
+          <tbody>
+            {entries.map((e, i) => (
+              <tr key={i}>
+                <th scope="row">{e.topic}</th>
+                <td className="mono">
+                  v{e.version ?? "?"} {e.agent ?? e.by ?? ""} · used in {count(e.used ?? 0, "session")}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -366,29 +392,6 @@ function SideBySide({ doc }: { doc: MemoryDocument }): JSX.Element {
       </tbody>
     </table>
   );
-}
-
-/** The plane's line diff as two columns: a line kept on both sides, a run of lines gone beside the run that came. */
-export function besideRows(lines: MemoryLine[]): Array<{ left: string | null; right: string | null; changed: boolean }> {
-  const rows: Array<{ left: string | null; right: string | null; changed: boolean }> = [];
-  let gone: string[] = [];
-  let came: string[] = [];
-  const flush = (): void => {
-    for (let i = 0; i < Math.max(gone.length, came.length); i++) rows.push({ left: gone[i] ?? null, right: came[i] ?? null, changed: true });
-    gone = [];
-    came = [];
-  };
-  for (const l of lines) {
-    if (l.op === "same") {
-      flush();
-      rows.push({ left: l.text, right: l.text, changed: false });
-    } else if (l.op === "del") {
-      if (came.length > 0) flush();
-      gone.push(l.text);
-    } else came.push(l.text);
-  }
-  flush();
-  return rows;
 }
 
 function scope(of: MemoryScope): string {

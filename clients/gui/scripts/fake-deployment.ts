@@ -65,6 +65,38 @@ await daemon.start();
 daemon.onboarding["/home/ada/repo"] = exampleOnboarding({ briefOutdated: true });
 daemon.memory["/home/ada/repo"] = { status: "fresh", built_at: "2026-10-08T09:00:00Z", facts: exampleFacts() };
 daemon.memory["/home/ada/project"] = { status: "absent" };
+// The person's artifacts and memory, for the app's Artifacts and Memory views (troupe #62,
+// #55): one of each audience, and memory at three levels with a topic two of them share.
+const day = (n: number): string => new Date(Date.now() - n * 24 * 3600 * 1000).toISOString();
+const artifact = (over: Record<string, unknown>): Record<string, unknown> => ({
+  kind: "html",
+  visibility: "organisation",
+  owner: { subject: "bob@example.com", display_name: "Bob" },
+  mine: false,
+  origin: { session_id: "20261026T090000-a1b2c3", profile: "dev", agent: "agent:writer", where: "laptop" },
+  team: "core",
+  version: 1,
+  current: 1,
+  pinned: null,
+  bytes: 48_213,
+  url: `https://artifacts.example.test/a/${String(over["id"])}/`,
+  created_at: day(30),
+  published_at: day(0),
+  may_delete: false,
+  ...over,
+});
+daemon.artifacts = [
+  artifact({ id: "art-weekly", title: "Weekly licence audit, October", kind: "markdown", version: 3, current: 3 }),
+  artifact({ id: "art-ledger", title: "Ledger migration plan", visibility: "profile:dev", published_at: day(2) }),
+  artifact({ id: "art-interviews", title: "Field interview guide", kind: "file", visibility: "profile:ux", shared: true, role: "view", published_at: day(4) }),
+  artifact({ id: "art-mine", title: "Placement loop benchmarks", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, published_at: day(12), may_delete: true }),
+];
+daemon.own = { version: 2, text: "## Tone\n\nKeep answers short. Full sentences when drafting for somebody else.\n\n## Tools\n\nUse pnpm, never npm." };
+daemon.ownVersions.push({ version: 1, text: "## Tone\n\nKeep answers short.", by: "alice@example.com", at: day(9) });
+daemon.ownAbove = [
+  { scope: "organisation", name: null, version: 4, text: "## Tone\n\nPlain English, short sentences, no exclamation marks.\n\n## Dates\n\nISO dates everywhere: 2026-10-26." },
+  { scope: "team", name: "core", version: 2, text: "## Releases\n\nA release is cut from main on Tuesdays, never on a Friday." },
+];
 const notes = daemon.seed("/home/ada/notes");
 // A scratchpad to look at (issue #472): a plan the agent showed and then wrote again, and
 // a table beside it.

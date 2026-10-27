@@ -1,0 +1,32 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/artifact.put.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "base": {
+      "type": "integer"
+    },
+    "command_id": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "note": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "visibility": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "base",
+    "command_id",
+    "id"
+  ],
+  "title": "artifact.put",
+  "type": "object"
+}

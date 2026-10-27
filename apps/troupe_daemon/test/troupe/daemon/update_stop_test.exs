@@ -65,6 +65,43 @@ defmodule Troupe.Daemon.UpdateStopTest do
     refute Troupe.Protocol.Daemon.running?()
   end
 
+  # The same ask, from a person: `troupe-daemon stop` stops the one running here between
+  # turns and exits 0 once it has gone, and 0 too where nothing is running.
+  test "troupe-daemon stop asks the running daemon to stop, and waits until it has gone" do
+    import ExUnit.CaptureIO
+    test = self()
+    assert CLI.parse(["stop"]) == :stop
+    assert CLI.usage() =~ "troupe-daemon stop"
+
+    assert capture_io(fn -> assert CLI.main(:stop) == 0 end) =~ "troupe-daemon is not running"
+
+    opts =
+      Keyword.merge(CLI.run_opts(),
+        idle_shutdown_ms: :timer.hours(1),
+        on_idle: fn -> send(test, :stop) end
+      )
+
+    start_supervised!({Troupe.Gateway.Daemon, opts})
+
+    task = Task.async(fn -> capture_io(fn -> send(test, {:status, CLI.main(:stop)}) end) end)
+    assert_receive :stop, 5_000
+    stop_supervised!(Troupe.Gateway.Daemon)
+
+    assert Task.await(task, 15_000) =~ "troupe-daemon stops now, between turns"
+    assert_received {:status, 0}
+  end
+
+  test "troupe-daemon stop exits 1 for a daemon a TUI runs inside itself, which it leaves" do
+    import ExUnit.CaptureIO
+
+    start_supervised!(
+      {Troupe.Gateway.Daemon, loopback: [enabled: true], idle_shutdown_ms: :timer.hours(1)}
+    )
+
+    assert capture_io(fn -> assert CLI.main(:stop) == 1 end) =~ "runs inside a troupe"
+    assert Troupe.Protocol.Daemon.running?()
+  end
+
   test "with no daemon running there is nothing to stop", %{s: s} do
     assert Update.quiet_daemon(s) == :ok
     refute_received {:out, _}

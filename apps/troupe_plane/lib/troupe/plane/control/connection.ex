@@ -698,17 +698,24 @@ defmodule Troupe.Plane.Control.Connection do
   # (`remember` to `me`). The one level an agent may write: the organisation's, a team's
   # and a profile's are read-only to every agent, and a pod asking to write one is refused
   # whoever asks. Whose memory is read off the session row, as the key manager's subject is,
-  # so a pod can add only to the owner of a session it holds, and only an entry under the
-  # day's heading, never the document in place of what is there. The text is the person's
-  # memory, which reaches this pod anyway with every activation.
+  # so a pod can add only to the owner of a session it holds, and only an entry at the end of
+  # a topic's section (`topic`, `Notes` for none), never the document in place of what is
+  # there. The text is the person's memory, which reaches this pod anyway with every
+  # activation.
   defp dispatch("session.memory.put", params, state) do
     with {:scope, "user"} <- {:scope, params["scope"] || "user"},
          %Session{} = session <- session_of(params["session_id"], state.worker),
          :ok <- at_epoch(session, params["epoch"]),
          {:owner, %User{active: true} = owner} <- {:owner, Identity.get_user(session.owner_subject)} do
-      case Memory.append_own(owner, params["append"], [session: session.id] ++ agent_of(params)) do
+      case Memory.append_own(owner, params["append"], [session: session.id, topic: params["topic"]] ++ agent_of(params)) do
         {:ok, saved} ->
-          {:ok, %{"entry" => saved.entry, "changed" => saved.changes != %{}, "version" => Memory.own(owner)["version"]}, state}
+          {:ok,
+           %{
+             "entry" => saved.entry,
+             "topic" => saved.topic,
+             "changed" => saved.changes != %{},
+             "version" => Memory.own(owner)["version"]
+           }, state}
 
         {:error, {:full, bytes}} ->
           {:error,
@@ -768,16 +775,24 @@ defmodule Troupe.Plane.Control.Connection do
         {:error, %Error{} = error} -> {:error, error, state}
       end
     else
-      :stale_epoch ->
-        {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
-
-      {:owner, _gone} ->
-        {:error, Error.new(:forbidden, %{reason: "the session's owner is deactivated"}), state}
-
-      nil ->
-        {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
-      end
+      refused -> pod_artifact_refusal(refused, params, state)
     end
+  end
+
+  # The files of a version too large for one message, sent to the object store first: an
+  # upload handle for the session's owner, which `session.artifact.publish` then names.
+  defp dispatch("session.artifact.upload.begin", params, state) do
+    with %Session{} = session <- session_of(params["session_id"], state.worker),
+         :ok <- at_epoch(session, params["epoch"]),
+         {:owner, %User{active: true} = owner} <- {:owner, Identity.get_user(session.owner_subject)} do
+      case Artifacts.begin_upload(owner, %{"files" => params["files"]}) do
+        {:ok, upload} -> {:ok, upload, state}
+        {:error, %Error{} = error} -> {:error, error, state}
+      end
+    else
+      refused -> pod_artifact_refusal(refused, params, state)
+    end
+  end
 
   # A session on this pod beginning a turn says which memory documents it holds, by scope,
   # name, version and hash and never their text. The plane keeps that as what the turn runs
@@ -917,6 +932,16 @@ defmodule Troupe.Plane.Control.Connection do
   end
 
   defp session_of(_session_id, _worker), do: nil
+
+  # Why a pod's artifact call for a session was refused before anything was looked at.
+  defp pod_artifact_refusal(:stale_epoch, _params, state),
+    do: {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+
+  defp pod_artifact_refusal({:owner, _gone}, _params, state),
+    do: {:error, Error.new(:forbidden, %{reason: "the session's owner is deactivated"}), state}
+
+  defp pod_artifact_refusal(nil, params, state),
+    do: {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
 
   defp at_epoch(_session, nil), do: :ok
   defp at_epoch(%Session{epoch: epoch}, epoch), do: :ok

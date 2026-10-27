@@ -48,6 +48,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Fleet.{Extends, Scaler}
   alias Troupe.Plane.Identity.User
+  alias Troupe.Plane.Memory.InEffect
   alias Troupe.Plane.Provision
   alias Troupe.Plane.Sessions.{ACL, Session, Share}
   alias Troupe.Plane.Settings
@@ -56,6 +57,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.{Canonical, ClientUpdate, Error, Origin, Principal, Relay, SessionId, Token}
+  alias Troupe.Protocol.Memory.Entries
   alias Troupe.Sessions.Fork
 
   require Logger
@@ -115,6 +117,11 @@ defmodule Troupe.Plane.Harness do
     # The person's own memory document, theirs alone to change.
     "me.memory.preview" => :observe,
     "me.memory.put" => :control,
+    # Its history, for the person's own app: every version, two side by side, a rollback.
+    "me.memory.history" => :observe,
+    "me.memory.rollback" => :control,
+    # What a new session of theirs in a team reads, as one list of topics.
+    "memory.in_effect" => :observe,
     "me.clients" => :observe,
     "me.connections.list" => :observe,
     "me.connections.grant" => :control,
@@ -334,7 +341,8 @@ defmodule Troupe.Plane.Harness do
        "kind" => user.kind,
        "teams" => Enum.map(Identity.teams_for(user), &team_json/1),
        "profiles" => granted_profiles(user),
-       "platform_admin" => Map.get(context, :platform_admin?, false)
+       "platform_admin" => Map.get(context, :platform_admin?, false),
+       "organisation" => organisation()
      }}
   end
 
@@ -377,12 +385,48 @@ defmodule Troupe.Plane.Harness do
   #
   # `blame: true` adds `lines` to their own: who wrote each line, in which version, and from
   # which session an agent's entry came (`Memory.blame/2`), for `troupe memory --blame`.
-  defp handle("me.memory", params, %{user: user}) do
+  #
+  # `entries: true` adds `entries` to each document and to their own: its `## Topic`
+  # sections, each with who last changed it and when and in how many sessions it was used
+  # (`InEffect.entries/2`). The poll does not ask it; a client showing memory does. Beside
+  # them, the organisation's name, for "Everyone at <name>", and `roles`: whether the caller
+  # is a platform admin and the teams they administer, so a client offers to change a level
+  # only to whoever the plane lets change it, and says who can otherwise. The plane still
+  # decides at every save.
+  defp handle("me.memory", params, %{user: user} = context) do
     :ok = Memory.machine(user, params["sessions"])
     own = Memory.own(user)
     own = if params["blame"] == true and is_binary(user.id), do: Map.put(own, "lines", Memory.blame(user)), else: own
+    documents = Memory.for_person(user)
 
-    {:ok, Signing.signed("memory", %{"documents" => Memory.for_person(user), "user" => own})}
+    answer = %{"documents" => documents, "user" => own, "organisation" => organisation()}
+
+    # With entries, every team of the caller's by name too, a team with no document among
+    # them, so a client lists each as a level of its own.
+    answer =
+      if params["entries"] == true,
+        do: %{
+          answer
+          | "documents" => Enum.map(documents, &with_entries(&1, user)),
+            "user" => Map.put(own, "entries", with_entries(%{"scope" => "user"}, user)["entries"])
+        }
+        |> Map.put("teams", user |> Identity.teams_for() |> Enum.map(& &1.name) |> Enum.sort())
+        |> Map.put("roles", memory_roles(user, context)),
+        else: answer
+
+    {:ok, Signing.signed("memory", answer)}
+  end
+
+  # What is in effect for a new session of the caller's in one of their teams (the one
+  # named, their first by name where none is), and on a worker profile they may use through
+  # it where one is named: one list of topics, the closest level's entry on each with what it
+  # replaces (`InEffect.in_effect/3`). Any person signed in, for themselves.
+  defp handle("memory.in_effect", params, %{user: user}) do
+    with :ok <- own_memory(user),
+         {:ok, team} <- effect_team(user, params["team"]),
+         {:ok, profile} <- effect_profile(user, team, params["profile"]) do
+      {:ok, user |> InEffect.in_effect(team, profile) |> Map.put("organisation", organisation())}
+    end
   end
 
   # What saving a text as the person's own memory would do, written nowhere: the lines it
@@ -418,12 +462,44 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # The person's own memory's history, theirs alone as the document is: every version with
+  # who saved it and when, newest first; `version`'s text (the one in force where none is
+  # named) beside `against`'s (the version before it where none is named), and the plane's
+  # line diff between them, as the console's editor has them for the organisation's levels.
+  defp handle("me.memory.history", params, %{user: user}) do
+    with :ok <- own_memory(user),
+         {:ok, shown} <- own_version(user, params["version"]),
+         {:ok, before} <- own_against(user, shown, params["against"]) do
+      {:ok,
+       %{
+         "versions" => user |> Memory.versions() |> Enum.map(&Memory.summary/1),
+         "version" => shown && shown.version,
+         "text" => (shown && shown.text) || "",
+         "against" => before && before.version,
+         "against_text" => before && before.text,
+         "diff" => Memory.diff(before && before.text, shown && shown.text)
+       }}
+    end
+  end
+
+  # A rollback of the person's own: version `to`'s text saved as the next version, over
+  # `version` as every save is, audited as `memory.put` with `rolled_back_to` and a note, so
+  # its lines keep who wrote them in the version brought back. Answered as `me.memory.put` is.
+  defp handle("me.memory.rollback", params, %{user: user}) do
+    with :ok <- own_memory(user),
+         {:ok, to} <- rollback_to(params["to"]),
+         {:ok, %{text: text}} <- own_version(user, to),
+         {:ok, saved} <- own_rollback(user, text, to, params["version"]) do
+      {:ok, own_saved(user, saved)}
+    end
+  end
+
   # Artifacts (`Artifacts`): every answer is what the caller may see, read now, and one
   # they may not is not there. A client publishes for its person, naming the session it
   # came from as provenance; a pod's agent publishes over its control link instead, where
   # the plane reads the session off its own row.
   defp handle("artifact.list", params, %{user: user} = context) do
-    Artifacts.list(user, Map.take(params, ["mine", "shared", "visibility"]),
+    Artifacts.list(user, Map.take(params, ["mine", "shared", "teams", "visibility"]),
       platform_admin?: admin?(context)
     )
   end
@@ -1054,33 +1130,19 @@ defmodule Troupe.Plane.Harness do
   # read what is there, so a private session is invited from the machine that seals it.
   defp handle("session.invite", params, %{user: user}) do
     with {:ok, session} <- inviting(params["session_id"], user),
-         {:ok, name} <- required_string(params, "subject"),
-         invitee = Invites.person(name),
-         :ok <- Invites.eligible(session, invitee),
-         {:ok, invite} <-
-           Invites.invite(
-             session,
-             invitee,
-             params["role"] || "observe",
-             user.subject,
-             params["keys"]
-           ) do
-      pushed =
-        if session.kind == "private" do
-          false
-        else
-          acl = push_acl_change(session, invitee.subject, Invites.acl_role(invite.role))
-          logged = announce_invite(session, "session_invited", invitee, invite.role, user)
-          acl and logged
-        end
+         {:ok, name} <- required_string(params, "subject") do
+      invitee = Invites.person(name)
 
-      {:ok,
-       %{
-         "session_id" => session.id,
-         "invite" =>
-           session.id |> Invites.rows_of() |> Enum.find(&(&1["subject"] == invitee.subject)),
-         "pushed" => pushed
-       }}
+      case invite(session, invitee, params, user) do
+        {:ok, _answer} = done ->
+          done
+
+        # A private session's key, put in the invitee's slot by its owner's daemon before it
+        # asked, is the plane's alone to delete there: refused, the copies go.
+        {:error, _refusal} = refused ->
+          Invites.discard_copies(session, invitee, params["keys"])
+          refused
+      end
     end
   end
 
@@ -1510,6 +1572,45 @@ defmodule Troupe.Plane.Harness do
     {:error, Error.new(:invalid_params, Map.merge(%{reason: reason}, Map.new(extra)))}
   end
 
+  # The organisation's name as its plane is called, for a client to say "Everyone at <name>".
+  defp organisation, do: %{"name" => Application.get_env(:troupe_plane, :oidc, [])[:plane_name] || "troupe"}
+
+  # A document of `me.memory`'s with its entries: the organisation's, a team of the caller's
+  # by name, or their own.
+  defp with_entries(%{"scope" => scope} = document, user) do
+    owner =
+      case scope do
+        "organisation" -> :organisation
+        "user" -> if is_binary(user.id), do: user
+        "team" -> Enum.find(Identity.teams_for(user), &(&1.name == document["name"]))
+        _other -> nil
+      end
+
+    entries = if owner && Memory.current(owner), do: InEffect.entries(owner), else: []
+    Map.put(document, "entries", entries)
+  end
+
+  defp effect_team(user, name) when is_nil(name) or is_binary(name) do
+    case InEffect.team_of(user, name) do
+      {:ok, team} -> {:ok, team}
+      {:error, :not_found} -> {:error, Error.new(:not_found, %{team: name, reason: "you are in no team called #{name}"})}
+    end
+  end
+
+  defp effect_team(_user, _name), do: invalid("team is a team's name", field: "team")
+
+  defp effect_profile(_user, _team, nil), do: {:ok, nil}
+
+  defp effect_profile(user, team, profile) when is_binary(profile) do
+    if team && Identity.may_use?(user, profile, team),
+      do: {:ok, profile},
+      else:
+        {:error,
+         Error.new(:not_found, %{profile: profile, reason: "you start no sessions on #{profile} through #{(team && team.name) || "a team"}"})}
+  end
+
+  defp effect_profile(_user, _team, _profile), do: invalid("profile is a worker profile's name", field: "profile")
+
   # A person's own memory is a person's: a service principal has no row to keep it under.
   defp own_memory(%User{id: id}) when is_binary(id), do: :ok
 
@@ -1517,8 +1618,19 @@ defmodule Troupe.Plane.Harness do
     do: {:error, Error.new(:forbidden, %{reason: "a service principal has no memory of its own"})}
 
   defp memory_text(params) do
-    with {:ok, text} <- memory_string(params, "text"), do: {:ok, Troupe.Protocol.Memory.normalise(text)}
+    with {:ok, text} <- memory_text_or_entries(params), do: {:ok, Troupe.Protocol.Memory.normalise(text)}
   end
+
+  # A save's document: `text` as written, or `entries`, written as sections in their order
+  # (`Troupe.Protocol.Memory.Entries.render/1`), each heading's text as given.
+  defp memory_text_or_entries(%{"entries" => entries} = params) when not is_map_key(params, "text") do
+    case Entries.cast(entries) do
+      {:ok, entries} -> memory_string(%{"text" => Entries.render(entries)}, "text")
+      {:error, reason} -> invalid(reason, field: "entries")
+    end
+  end
+
+  defp memory_text_or_entries(params), do: memory_string(params, "text")
 
   defp memory_string(params, key) do
     case Map.get(params, key) do
@@ -1536,11 +1648,11 @@ defmodule Troupe.Plane.Harness do
   # The session and the agent a daemon names for an agent's entry are kept with the version
   # as who wrote the line, the person's own word about their own machine.
   defp save_own(user, %{"append" => entry} = params) do
-    own_result(Memory.append_own(user, entry, written_from(params)))
+    own_result(Memory.append_own(user, entry, [topic: params["topic"]] ++ written_from(params)))
   end
 
   defp save_own(user, params) do
-    with {:ok, text} <- memory_string(params, "text") do
+    with {:ok, text} <- memory_text_or_entries(params) do
       case params["version"] do
         version when is_integer(version) and version >= 0 ->
           own_result(Memory.save_own(user, text, version))
@@ -1579,10 +1691,38 @@ defmodule Troupe.Plane.Harness do
   defp own_result({:error, :no_person}), do: own_memory(nil)
   defp own_result({:error, reason}) when is_binary(reason), do: invalid(reason)
 
+  # One version of the person's own: the one in force for none named, `not_found` for one
+  # there is not.
+  defp own_version(user, nil), do: {:ok, Memory.current(user)}
+
+  defp own_version(user, number) when is_integer(number) do
+    case Memory.version(user, number) do
+      nil -> {:error, Error.new(:not_found, %{version: number})}
+      found -> {:ok, found}
+    end
+  end
+
+  defp own_version(_user, _other), do: invalid("version is a number", field: "version")
+
+  defp own_against(user, shown, nil),
+    do: {:ok, if(shown && shown.version > 1, do: Memory.version(user, shown.version - 1))}
+
+  defp own_against(user, _shown, number), do: own_version(user, number)
+
+  defp rollback_to(to) when is_integer(to) and to > 0, do: {:ok, to}
+  defp rollback_to(_to), do: invalid("to is the number of the version to roll back to", field: "to")
+
+  defp own_rollback(user, text, to, base) when is_integer(base) and base >= 0,
+    do: own_result(Memory.save_own(user, text, base, rolled_back_to: to, note: "rolled back to v#{to}"))
+
+  defp own_rollback(_user, _text, _to, _base),
+    do: invalid("version is the version in force, which the rollback replaces", field: "version")
+
   defp own_saved(user, saved) do
     %{
       "changed" => saved.changes != %{},
       "entry" => Map.get(saved, :entry),
+      "topic" => Map.get(saved, :topic),
       "user" => Memory.own(user)
     }
   end
@@ -1749,6 +1889,38 @@ defmodule Troupe.Plane.Harness do
   defp searched_session(nil, _user), do: {:ok, nil}
   defp searched_session(session_id, user), do: inviting(session_id, user)
 
+  # The invitation made, once the person may be invited: a pod session's grant pushed to its
+  # pod and the log's line asked of it; a private session's, the keys it carries kept.
+  defp invite(session, invitee, params, user) do
+    with :ok <- Invites.eligible(session, invitee),
+         {:ok, invite} <-
+           Invites.invite(
+             session,
+             invitee,
+             params["role"] || "observe",
+             user.subject,
+             params["keys"]
+           ) do
+      pushed = session.kind != "private" and pushed_invite(session, invitee, invite, user)
+
+      {:ok,
+       %{
+         "session_id" => session.id,
+         "invite" =>
+           session.id |> Invites.rows_of() |> Enum.find(&(&1["subject"] == invitee.subject)),
+         "pushed" => pushed
+       }}
+    end
+  end
+
+  # A pod session's: the grant to its pod, and the log's line, kept as said once it is.
+  defp pushed_invite(session, invitee, invite, user) do
+    acl = push_acl_change(session, invitee.subject, Invites.acl_role(invite.role))
+    logged = announce_invite(session, "session_invited", invitee, invite.role, user)
+    if logged, do: Invites.announced(session.id, invitee.subject)
+    acl and logged
+  end
+
   # One person's role on a session, pushed to the pod holding it, as `push_acl/2` does; a
   # `nil` role is the invitation taken back, which the pod's mirror holds as refused.
   defp push_acl_change(%{worker_id: nil}, _subject, _role), do: false
@@ -1763,34 +1935,49 @@ defmodule Troupe.Plane.Harness do
   end
 
   # The pod gives the session's log its line, `session_invited` or `session_uninvited`, as it
-  # does for a share. Best effort: a dormant session has no pod, and the row is the record.
+  # does for a share. A dormant session has no pod: an invitation's line is then written at
+  # its next activation (`announce_pending/2`), and the row is the record meanwhile.
   defp announce_invite(%Session{worker_id: nil}, _type, _invitee, _role, _by), do: false
 
-  defp announce_invite(%Session{} = session, type, invitee, role, %User{} = by) do
+  defp announce_invite(%Session{} = session, type, invitee, role, by) do
     case Fleet.get_worker(session.worker_id) do
-      nil ->
-        false
-
-      worker ->
-        invite =
-          %{
-            "subject" => (invitee && invitee.subject) || "",
-            "display_name" => invitee && invitee.display_name,
-            "role" => role,
-            "by" => by.subject,
-            "by_name" => by.display_name
-          }
-          |> Map.reject(fn {_key, value} -> is_nil(value) end)
-
-        match?(
-          {:ok, _pushed},
-          Router.push(worker, "invite.changed", %{
-            "session_id" => session.id,
-            "type" => type,
-            "invite" => invite
-          })
-        )
+      nil -> false
+      worker -> push_invite(worker, session, type, invitee, role, by)
     end
+  end
+
+  defp push_invite(worker, session, type, invitee, role, by) do
+    invite =
+      %{
+        "subject" => (invitee && invitee.subject) || "",
+        "display_name" => invitee && invitee.display_name,
+        "role" => role,
+        "by" => by.subject,
+        "by_name" => Map.get(by, :display_name)
+      }
+      |> Map.reject(fn {_key, value} -> is_nil(value) end)
+
+    match?(
+      {:ok, _pushed},
+      Router.push(worker, "invite.changed", %{
+        "session_id" => session.id,
+        "type" => type,
+        "invite" => invite
+      })
+    )
+  end
+
+  # The lines a session's log did not get while no pod held it, now that one does.
+  defp announce_pending(worker, session) do
+    for invite <- Invites.unannounced(session.id) do
+      invitee = Identity.get_user(invite.subject) || %{subject: invite.subject, display_name: nil}
+      by = Identity.get_user(invite.invited_by) || %{subject: invite.invited_by}
+
+      if push_invite(worker, session, "session_invited", invitee, invite.role, by),
+        do: Invites.announced(session.id, invite.subject)
+    end
+
+    :ok
   end
 
   defp gone(session_id), do: Error.new(:not_found, %{session_id: session_id, reason: "erased"})
@@ -2164,6 +2351,7 @@ defmodule Troupe.Plane.Harness do
 
     case Router.push(worker, "session.activate", params) do
       {:ok, result} ->
+        activated(worker, session, params)
         {:ok, result}
 
       {:error, reason} ->
@@ -2421,6 +2609,7 @@ defmodule Troupe.Plane.Harness do
 
     case Router.push(worker, "session.activate", params) do
       {:ok, result} ->
+        activated(worker, session, params)
         {:ok, result}
 
       # The pod could not put the tree back and says why: the directory the session was
@@ -3136,6 +3325,14 @@ defmodule Troupe.Plane.Harness do
   defp memory_params(session, team),
     do: %{"memory" => Memory.for_session(team, session.profile, Identity.get_user(session.owner_subject))}
 
+  # A session the pod took holds the memory its activation carried, until its first turn
+  # says what it read: kept so, it is among the readers of each document before that turn.
+  # And its log is given the lines of the invitations made while no pod held it.
+  defp activated(worker, session, params) do
+    :ok = Memory.activated(session, params["memory"] || [])
+    :ok = announce_pending(worker, session)
+  end
+
   # Whether the profile lets a repository's agents and skills replace its bundle's and the
   # built-ins of the same name (Decision 826): `spec.repositoryOverridesBundle`, on only
   # when it is `true`.
@@ -3168,6 +3365,18 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp admin?(context), do: Map.get(context, :platform_admin?, false)
+
+  # Who may change which memory level, as `Admin.memory_put/6` decides it: a platform admin
+  # the organisation's, a team's admins that team's. A principal administers nothing.
+  defp memory_roles(%{kind: "service"}, _context),
+    do: %{"platform_admin" => false, "team_admin" => []}
+
+  defp memory_roles(user, context) do
+    %{
+      "platform_admin" => admin?(context),
+      "team_admin" => user |> Identity.teams_administered_by() |> Enum.map(& &1.name)
+    }
+  end
 
   # Resolved, not raw. What a client reads here it acts on — whether to offer a steer
   # button, when to expect a session to go dormant — and a column that the platform is

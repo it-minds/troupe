@@ -22,14 +22,20 @@ you.
 
 You choose when you publish:
 
+- `private`, the default when you say nothing: only you. Nobody else can find or open it, not
+  your teammates and not your team's administrator, until you give them a [link](#links).
 - `organisation`: everybody in your organisation. An administrator may keep this to platform
-  administrators, and then you publish to a profile's people instead.
-- `profile:<name>`: the people a worker profile is granted to. Someone who leaves the profile's
-  team stops seeing it at their next click.
+  administrators, and then you publish to a team or a profile's people instead.
+- `team:<name>`: the members of a team you are in. Publishing to a team you are not in is
+  refused, and the refusal names the teams you are in. It counts against that team's quota,
+  and the team's administrator may take it down.
+- `profile:<name>`: the people a worker profile is granted to.
 
-You always see your own. Anybody else sees it only through who it is for, or through a
+Someone who leaves a team, or a profile's team, stops seeing its artifacts at their next
+click. You always see your own. Anybody else sees it only through who it is for, or through a
 [link](#links) you gave them: not a guess at an address. A platform administrator can take
-one down.
+any artifact down, a private one too; that is the one thing anybody but you may do to a
+private one, and it is in the audit trail.
 
 ## Publishing
 
@@ -39,11 +45,15 @@ allows it. The files keep their paths below the directory they share, so a page'
 its stylesheet still work. To publish a new version, the agent names the artifact's `id`, and
 may say what changed in a `note`.
 
+An agent that names nobody publishes a private one.
+
 **You** publish one file from the terminal client with
-`/publish <path> <organisation | profile:<name>>`, for example `/publish report.html profile:dev`.
-In the desktop app, **Publish…** in the command palette (Ctrl-K, then `publish`) takes files
-from this computer: a new artifact, or **Publish a new version of…** one of yours, with a line
-on what changed. It links the console's gallery.
+`/publish <path> [private | organisation | team:<name> | profile:<name>]`, for example
+`/publish report.html team:core`; with no audience it is yours alone. In the desktop app,
+**Publish…** in the command palette (Ctrl-K, then `publish`) takes files from this computer: a
+new artifact, for **Only you** unless you pick the organisation, one of your teams or one of
+your profiles, or **Publish a new version of…** one of yours, with a line on what changed. It
+links the console's gallery.
 
 All of these go through this computer's daemon, as the person it is signed in as. Signed out,
 nothing is published, and the agent tells you where the file is so you can send it yourself.
@@ -111,10 +121,16 @@ administrator's setting off stops all of them.
 
 ## Reading
 
-The console's **Artifacts** has a tab for your own, one for those shared with you, one for the
-organisation's and one for each profile you are granted. A card shows the title and the kind,
-never the page itself. Open one and it shows who published which version and when, the
+The console's **Artifacts** has a tab for your own (your private ones among them), one for
+those shared with you, one for the organisation's, one for your teams' (each card names its
+team) and one for each profile you are granted. Which tab an artifact is under is the plane's
+to say, so every client tabs them alike. A card shows the title and the kind, never the page
+itself. Open one and it shows who published which version and when, the
 session it came from, and **Open**, which opens the artifact in a new tab.
+
+In the terminal client, `/artifacts` lists them by who can see them and opens one in your
+browser; a Markdown one can be read there too, and `troupe artifacts` does the same from the
+command line ([the terminal client's screen](terminal-screen.md#artifacts)).
 
 The artifact is served from a host of its own, not the plane's. A page there runs sandboxed:
 its scripts are only its own `.js` files (no inline script), it cannot read a cookie or call
@@ -123,3 +139,13 @@ script from the web, or on inline script, needs those moved into files of its ow
 
 Opening one signs you in to that host for an hour, through the plane. If you follow a link to
 an artifact while signed out, you are sent to the console to sign in first.
+
+**In the desktop app**, *Artifacts* in the rail is the same gallery, read through this
+computer's daemon: cards grouped by when, chips for who each is for (everyone, your teams and
+profiles, shared with you by a link, only you) and a search. A card new to you is one whose
+newest version this computer has not opened. The one you choose shows its versions, where it
+came from and who can see it; **Open** shows it in a window of its own, from its own host,
+and each version opens the same way. **Copy link** copies a view link for your own and the
+address for anybody else's. On your own you can also pin or roll back to a version, revoke a
+link and publish a new version. The app never loads an artifact into itself. Under *Local
+only* the gallery asks the plane nothing.
