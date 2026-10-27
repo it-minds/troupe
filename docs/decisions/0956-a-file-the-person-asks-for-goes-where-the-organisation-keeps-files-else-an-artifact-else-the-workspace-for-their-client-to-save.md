@@ -77,7 +77,10 @@ The paragraph is the same in every session and about 110 words, since every prom
 carries it. What follows it is per session, three lines, so the model is not guessing:
 
 - **Where the organisation keeps files**: the tools this turn offers whose config marks
-  them so, by name, or "no tool here does that".
+  them so, by name, or "no tool here does that". A marked server still starting (a stdio
+  one answers a moment after the session starts) is said to be, in `open.starting` too,
+  rather than waited for: waiting would hold the agent's process, and its cancel, for
+  seconds on every first turn that has one, where a line costs a dozen words and only then.
 - **An artifact**: `publish_artifact` where it can publish from here; "not from here" with
   why where the session is under Local only (Decision 951) or the daemon is not signed in
   to a plane; "no plane publishes one" where the host installed nowhere for one to go.

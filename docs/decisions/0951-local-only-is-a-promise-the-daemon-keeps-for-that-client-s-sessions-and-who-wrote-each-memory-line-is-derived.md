@@ -32,6 +32,7 @@ paths:
   - clients/tui/lib/troupe/cli/doctor.ex
   - clients/tui/lib/troupe/cli/memory.ex
   - clients/tui/lib/troupe/client/daemon/link.ex
+  - clients/tui/lib/troupe/remote/worker.ex
   - PROTOCOL.md
   - docs/user/README.md
   - docs/user/configuration-settings.md
@@ -72,7 +73,10 @@ the person's own config as the command starts.
 Local only gives it work, or the client that put it there turns Local only off.** The last
 client to give a session work is whose promise its next turn keeps. The mark is set before
 the work, so a turn the input starts is already under it, and after a create, whose id there
-was none of before. Turning Local only on puts the sessions the connection has open
+was none of before. (Amended, #765: a create is marked before the session starts, under an
+id the daemon makes for it, since a create with a prompt starts the first turn inside it;
+and every connection a client gives a session work on says Local only, the terminal's
+per-session one too, which had said nothing and so took the session out at each turn.) Turning Local only on puts the sessions the connection has open
 (subscribed) under it, which is what a person switching it on looking at a session expects.
 
 **It stays when the client disconnects.** A goal loop running after the window closed is

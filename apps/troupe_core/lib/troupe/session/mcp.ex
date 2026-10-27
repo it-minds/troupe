@@ -82,6 +82,13 @@ defmodule Troupe.Session.MCP do
   def tools(session_id), do: call(session_id, :tools, [])
 
   @doc """
+  The servers marked `stores: files` that are still starting: their tools are not offered
+  yet, and join at the turn after they are ready.
+  """
+  @spec starting_stores(String.t()) :: [String.t()]
+  def starting_stores(session_id), do: call(session_id, :starting_stores, [])
+
+  @doc """
   What a client shows about the servers: name, layer, source, state, tool names, error.
   `state` is `connecting`, `ready`, `error`, `stopped`, `pending` (the workspace's
   question is unanswered), `disabled` or `sign_in` (the server wants the person signed
@@ -519,6 +526,15 @@ defmodule Troupe.Session.MCP do
       |> Enum.sort_by(& &1.name)
 
     {:reply, listed, state}
+  end
+
+  def handle_call(:starting_stores, _from, state) do
+    starting =
+      for {name, %{record: %{config: %{stores: :files}}} = entry} <- state.servers,
+          entry_status(state, name, entry).state == :connecting,
+          do: name
+
+    {:reply, Enum.sort(starting), state}
   end
 
   def handle_call({:reload, name}, _from, state) do

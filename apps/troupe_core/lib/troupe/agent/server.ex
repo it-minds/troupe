@@ -77,6 +77,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
   alias Troupe.Session.{Approvals, Blobs, Log, Memory, Organisation, Questions, Shell}
+  alias Troupe.Session.MCP, as: SessionMCP
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Tools.{Delegate, Finish, Output, Patch, ReadFile, ReadOutput, Show}
@@ -1969,7 +1970,15 @@ defmodule Troupe.Agent.Server do
         _local -> :local
       end
 
-    open = %{file_tools: Instructions.Harness.file_tools(tools), artifact: artifact, where: where}
+    open = %{
+      file_tools: Instructions.Harness.file_tools(tools),
+      # A store's server still starting is said, not waited for: its tools join at the
+      # next turn, and this one is not held up for it.
+      starting: SessionMCP.starting_stores(state.session_id),
+      artifact: artifact,
+      where: where
+    }
+
     %{text: Instructions.Harness.text(open), open: Instructions.Harness.json(open)}
   end
 
