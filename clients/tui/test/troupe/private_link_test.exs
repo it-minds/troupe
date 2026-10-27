@@ -39,7 +39,7 @@ defmodule Troupe.PrivateLinkTest do
     assert Map.has_key?(FakeRemote.registered(remote), sid)
   end
 
-  # TUI Decision 168: the installer's `troupe login` is the daemon's sign-in too, before
+  # The installer's `troupe login` is the daemon's sign-in too, before
   # any session has opened; a daemon somebody else linked is left as it is.
   test "troupe login links the daemon on this machine with the token, where one is running" do
     {remote, url} = start_remote!(transport: :http)

@@ -68,7 +68,7 @@ defmodule Troupe.RemoteLoginTest do
       end
     end
 
-    # The desktop app reads and rotates the same file (root Decision 958), so a refresh
+    # The desktop app reads and rotates the same file, so a refresh
     # spends the token the file holds now, not the one this process read at login.
     test "a refresh spends the token another program rotated the file to, under the lock" do
       {remote, url} = start_remote!()

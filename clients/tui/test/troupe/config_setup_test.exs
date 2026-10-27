@@ -150,7 +150,7 @@ defmodule Troupe.ConfigSetupTest do
       assert_received {:pull, "https://plane.example"}
     end
 
-    # The sign-in is the machine's, shared with the desktop app (root Decision 958): a
+    # The sign-in is the machine's, shared with the desktop app: a
     # machine signed in already is offered that plane and not sent through the device
     # flow again.
     test "a plane this machine is signed in to already: offered as the default, and its settings pulled with no second sign-in" do

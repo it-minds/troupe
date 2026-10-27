@@ -402,7 +402,7 @@ defmodule Troupe.CLI.ConfigSetup do
   end
 
   # A machine signed in already, by `troupe login` or the desktop app (the sign-in is
-  # shared, root Decision 958), is offered that plane and not asked to sign in to it
+  # shared), is offered that plane and not asked to sign in to it
   # again: the plane's settings are pulled with the sign-in it has.
   defp from_plane(io) do
     signed_in = io.signed_in.()

@@ -194,7 +194,7 @@ function Connect({ daemon }: { daemon: DaemonState }): JSX.Element {
  * this machine — so nothing it records could be billed, listed by a plane, or opened
  * from another device. Linking is what makes a local session yours rather than this
  * login's, and it is the precondition for a private session. Signing in links a daemon
- * nobody has linked by itself (Decision 958); this is where that is undone, or done
+ * nobody has linked by itself; this is where that is undone, or done
  * again where the daemon was somebody else's.
  */
 function WhoAmI({

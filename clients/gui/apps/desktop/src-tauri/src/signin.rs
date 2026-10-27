@@ -1,7 +1,7 @@
 // The machine's sign-in: `credentials.json` in the Troupe config directory, the file
-// `troupe login` writes and `troupe` reads (TUI Decision 71), shared by the desktop app
+// `troupe login` writes and `troupe` reads, shared by the desktop app
 // so that one sign-in serves the terminal client, this app and, through either, the
-// daemon (Decision 958).
+// daemon.
 //
 // The file is the TUI's, in its shape: `current`, the plane opened by default, and one
 // entry per plane under `planes`, holding the identity provider's refresh token beside

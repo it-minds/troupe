@@ -11,7 +11,7 @@
 //   secretStore   the machine's sign-in: `credentials.json` in the Troupe config
 //                 directory, the file `troupe login` writes, readable by the person
 //                 alone, so the terminal client, this app and the daemon share one
-//                 sign-in (Decision 958). A tab's best offer is `localStorage`, which
+//                 sign-in. A tab's best offer is `localStorage`, which
 //                 is the one place a refresh token must not be. The OS credential
 //                 store, where earlier releases kept it, is read once to move a
 //                 sign-in over.

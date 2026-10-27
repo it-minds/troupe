@@ -7,11 +7,11 @@ defmodule Troupe.CLI.Remote do
   refresh token lands in the config dir as a user-only file, and the command
   says so — a credential file this machine could not lock down is worth a line
   of output, not a silent success. The file is the machine's sign-in: the
-  desktop app reads it too (root Decision 958).
+  desktop app reads it too.
 
   Signed in, login links the daemon on this machine as the person the plane
   names and hands it the plane token, starting the installed `troupe-daemon`
-  where none is running (TUI Decision 168): the installer's sign-in is then the
+  where none is running: the installer's sign-in is then the
   daemon's as well, before any window or session has opened. A daemon linked
   to somebody else is left as it is.
   """

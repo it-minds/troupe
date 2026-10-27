@@ -3,7 +3,7 @@
 //
 // Windows Credential Manager, the macOS Keychain, the Secret Service on Linux. A Linux
 // box with no keyring agent running has no store at all; `Unavailable` says so instead
-// of falling back to a file. Up to Decision 958 the identity provider's refresh token
+// of falling back to a file. Up to release 0.30 the identity provider's refresh token
 // lived here and nowhere else; it now lives in the TUI's `credentials.json`
 // (src/signin.rs), one sign-in for the terminal client, this app and the daemon, and
 // these commands remain so that a sign-in an earlier release kept here is moved there at

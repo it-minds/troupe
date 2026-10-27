@@ -29,9 +29,11 @@ defmodule Troupe.RemoteHelpers do
       _ = Tokens.logout(:all)
       stop(remote)
       # A TUI signed in links the daemon it attaches to as the person the plane names and
-      # hands it the plane token (issue #365), and the daemon this VM embeds outlives the
-      # test: the next one meets it as it would on a machine nobody has signed in on.
-      if Link.up?(), do: Link.call("identity.unlink", %{command_id: RPC.command_id()})
+      # hands it the plane token (issue #365), as `troupe login` does at once, and the label
+      # outlives the daemon this VM embeds, in `identity.json`: the next test meets the
+      # daemon, this one or one embedded again, as it would on a machine nobody has signed
+      # in on. So it is unlinked whether or not the daemon this test used is still up.
+      _ = Link.call("identity.unlink", %{command_id: RPC.command_id()})
     end)
 
     {remote, url}

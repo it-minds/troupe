@@ -167,7 +167,7 @@ describe("this computer linked by the sign-in, and a private session started", (
     unmount = render(<App />).unmount;
     await waitFor(() => says("/home/ada/notes"), "the daemon's sessions in the list");
 
-    // Linked by the sign-in, with nothing pressed (Decision 958); This computer says so.
+    // Linked by the sign-in, with nothing pressed; This computer says so.
     await waitFor(() => daemon.linked?.subject === "alice@example.com" && daemon.planeToken, "the link, with the token");
     expect(daemon.linked?.plane_url).toBe(harness.plane.baseUrl);
     expect(await honoured(daemon.planeToken)).toBe(true);

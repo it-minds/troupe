@@ -6,7 +6,7 @@
 // what is available.
 //
 // 1. Somewhere for the refresh token that is not `localStorage`: the sign-in shared
-//    with the TUI (`credentials.json`, Decision 958) in the desktop shell.
+//    with the TUI (`credentials.json`) in the desktop shell.
 // 2. (Stage 2) the local daemon: reading `daemon.json` for its loopback port and token,
 //    and starting it on demand. A browser cannot find them and has to be *told*:
 //    `troupe-daemon open` puts them on the address it opens, or a person types them.
@@ -221,7 +221,7 @@ export async function saveFile(name: string, content: string): Promise<string | 
  * Start at the plane this machine is signed in to, where this app was told none.
  *
  * A machine signed in already, by `troupe login` at the installer or in a terminal,
- * holds the sign-in this app reads too (Decision 958), so asking for the address again
+ * holds the sign-in this app reads too, so asking for the address again
  * would be asking for a second sign-in. A plane this app was told before is kept, and
  * local-only is a choice of its own, not touched here. Before the first render, which
  * reads the preference.

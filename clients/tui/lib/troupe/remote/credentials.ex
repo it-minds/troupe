@@ -17,7 +17,7 @@ defmodule Troupe.Remote.Credentials do
   of the person's plane token and not of somebody else's (issue #381).
 
   The file is the machine's sign-in, not this program's: the desktop app reads and
-  rotates the same token (root Decision 958), so one `troupe login` serves both and the
+  rotates the same token, so one `troupe login` serves both and the
   daemon either hands it to. A provider rotates the refresh token on every use and
   refuses the old one from then on, so whoever refreshes holds `credentials.lock` beside
   the file meanwhile (`with_lock/1`), reads the token afresh inside it, and writes the

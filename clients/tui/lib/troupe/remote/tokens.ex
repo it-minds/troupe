@@ -279,7 +279,7 @@ defmodule Troupe.Remote.Tokens do
     do: {:reply, {:error, :logged_out}, state}
 
   # Under the machine's lock, with the token the file holds now: the desktop app shares
-  # the file and rotates the token too (root Decision 958), so the one in memory may be
+  # the file and rotates the token too, so the one in memory may be
   # retired already, and one it took away with a sign-out is not spent at all.
   defp do_refresh(state, plane_url, plane) do
     Credentials.with_lock(fn ->

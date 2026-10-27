@@ -122,7 +122,7 @@ function samePlane(a: string | null | undefined, b: string): boolean {
  * with the token it was last handed, holds it in memory only, and cannot renew it. A
  * daemon nobody has linked is linked as this person, as `troupe login` links it: signing
  * in is the person asking, and a daemon left unlinked is one whose private sessions and
- * artifacts this app cannot reach (Decision 958). One linked to somebody else, or to this
+ * artifacts this app cannot reach. One linked to somebody else, or to this
  * person at another plane, is left as it is; This computer is where that is changed.
  */
 async function handOver(client: DaemonClient, auth: AuthSession | null, who: DaemonIdentity | null): Promise<DaemonIdentity | null> {
