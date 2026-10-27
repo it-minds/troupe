@@ -32,8 +32,7 @@
     "command_id",
     "files",
     "kind",
-    "title",
-    "visibility"
+    "title"
   ],
   "title": "artifact.publish",
   "type": "object"

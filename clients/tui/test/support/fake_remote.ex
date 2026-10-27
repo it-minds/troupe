@@ -1171,6 +1171,7 @@ defmodule Troupe.FakeRemote do
       "title" => params["title"],
       "kind" => params["kind"],
       "visibility" => params["visibility"],
+      "scope" => if(params["visibility"] == "private", do: "private", else: "mine"),
       "version" => 1,
       "mine" => true
     }

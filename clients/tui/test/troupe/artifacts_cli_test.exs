@@ -39,6 +39,7 @@ defmodule Troupe.ArtifactsCLITest do
       "title" => "My scratch",
       "kind" => "markdown",
       "visibility" => "private",
+      "scope" => "private",
       "mine" => true,
       "version" => 1
     }

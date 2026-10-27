@@ -6,10 +6,10 @@ defmodule Troupe.Client.Artifacts do
 
   The list is grouped by who can see each one, in the words the desktop app's gallery uses:
   *Everyone at* the organisation (◉), *Your teams* (◎, a team's or a profile's), *Shared with
-  you* (◐, reached through a link) and *Only you* (○). The plane says which of those a row is
-  (`scope`); a plane from before that is read from `visibility` and the profiles the list
-  names. A version the person has not opened on this machine is *new to you*, kept in the
-  state directory (`artifacts-seen.json`), never on the plane.
+  you* (◐, reached through a link) and *Only you* (○), as the plane says each row's `scope`:
+  the person's own are under who they are for. A version the person has not opened on this
+  machine is *new to you*, kept in the state directory (`artifacts-seen.json`), never on the
+  plane.
 
   `publish/3` is `/publish`'s and `troupe artifacts publish`'s: one file of this machine as a
   page (`.html`), a document (`.md`) or a file, titled by its own heading or title, else its
@@ -29,23 +29,14 @@ defmodule Troupe.Client.Artifacts do
 
   @doc """
   What the person may see, newest first: `%{artifacts, organisation, profiles, gallery_url}`,
-  each row with `audience` and `new` beside what the plane said of it.
+  each row with `new` beside what the plane said of it.
   """
   @spec list(map()) :: {:ok, map()} | {:error, String.t()}
   def list(params \\ %{}) do
     with {:ok, answer} <- call("artifact.list", params) do
       profiles = List.wrap(answer["profiles"])
       seen = seen()
-
-      rows =
-        for row <- List.wrap(answer["artifacts"]) do
-          scope = scope(row, profiles)
-
-          row
-          |> Map.put("scope", scope)
-          |> Map.put("audience", audience(scope))
-          |> Map.put("new", new?(row, seen))
-        end
+      rows = for row <- List.wrap(answer["artifacts"]), do: Map.put(row, "new", new?(row, seen))
 
       {:ok,
        %{
@@ -57,22 +48,6 @@ defmodule Troupe.Client.Artifacts do
        }}
     end
   end
-
-  @doc """
-  Which of the gallery's scopes a row is in: the plane's `scope` where it says one, else
-  read from `visibility`: `mine` for the person's own, `shared` for one they see only through
-  a link (a profile's they are not covered by, or another's `private`).
-  """
-  @spec scope(map(), [String.t()]) :: String.t()
-  def scope(%{"scope" => scope}, _profiles) when is_binary(scope), do: scope
-  def scope(%{"mine" => true}, _profiles), do: "mine"
-
-  def scope(%{"visibility" => "profile:" <> name = visibility}, profiles),
-    do: if(name in profiles, do: visibility, else: "shared")
-
-  def scope(%{"visibility" => "team:" <> _ = visibility}, _profiles), do: visibility
-  def scope(%{"visibility" => "organisation"}, _profiles), do: "organisation"
-  def scope(_row, _profiles), do: "shared"
 
   @doc "The audience a scope is shown under; the person's own are under who they are for."
   @spec audience(String.t(), String.t() | nil) :: audience()

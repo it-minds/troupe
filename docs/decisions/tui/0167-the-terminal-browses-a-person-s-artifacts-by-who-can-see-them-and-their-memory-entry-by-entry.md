@@ -60,10 +60,8 @@ as for every `artifact.*`; the terminal under `local_only` asks nothing at all a
 **Grouped by who can see it, in the desktop app's words.** The maintainer's design for the
 gallery names four audiences with a glyph each: ◉ *Everyone at* the organisation, ◎ *Your
 teams* (a team's and, under it, a profile's), ◐ *Shared with you* (through a link) and ○
-*Only you*; the tabs are those and *All*. The plane says a row's `scope`; from a plane before
-it the client reads `visibility` and the profiles the list names (a profile the person is not
-covered by, or another's `private`, is one a link gave them) — a shim to go once every plane
-answers `scope`. The slot named the tabs Mine, Organisation, Teams, Profiles and Shared;
+*Only you*; the tabs are those and *All*. The plane says a row's `scope` (root Decision 953), which
+the tab follows. The slot named the tabs Mine, Organisation, Teams, Profiles and Shared;
 the design's four replace them, a person's own shown under who it is for, *by you* on its
 row. *New to you* marks a version not opened on this machine, kept in the state directory
 (`artifacts-seen.json`), never on the plane: it is this machine's reading, not the person's.

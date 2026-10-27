@@ -41,13 +41,13 @@ defmodule Troupe.ArtifactsScreenTest do
       "owner" => %{"display_name" => "Cy"},
       "published_at" => @now
     },
-    # A plane from before `scope` says only who it is for: a profile the person is not on is
-    # one a link gave them.
+    # A profile the person is not on is one a link gave them.
     %{
       "id" => "a-shared",
       "title" => "Interview guide",
       "kind" => "markdown",
       "visibility" => "profile:ops",
+      "scope" => "shared",
       "version" => 1,
       "owner" => %{"display_name" => "Dee"},
       "published_at" => @now
@@ -57,6 +57,7 @@ defmodule Troupe.ArtifactsScreenTest do
       "title" => "My scratch",
       "kind" => "markdown",
       "visibility" => "private",
+      "scope" => "private",
       "mine" => true,
       "version" => 1,
       "published_at" => @now

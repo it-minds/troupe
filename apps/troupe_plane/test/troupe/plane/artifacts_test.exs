@@ -156,7 +156,7 @@ defmodule Troupe.Plane.ArtifactsTest do
 
     test "is refused where its shape is wrong, and nothing is kept", context do
       refused = [
-        %{"visibility" => "team:core"},
+        %{"visibility" => "everyone"},
         %{"visibility" => "organisation", "kind" => "pdf"},
         %{"visibility" => "organisation", "title" => "  "},
         %{"visibility" => "organisation", "files" => []},

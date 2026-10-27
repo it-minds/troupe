@@ -1121,21 +1121,25 @@ defmodule Troupe.Protocol.Schema do
       # A page, a document or a file published on the plane as the person (#62), through
       # the daemon's sign-in: `files` each `{path, bytes}` (base64) and an optional
       # `content_type`; `id` republishes one of theirs; `session_id` names where it came from.
+      # No `visibility` is `private`, the owner's alone, for a new one, and as it was for a
+      # republish.
       "artifact.publish" => %{
         "command_id" => required(:string),
         "title" => required(:string),
         "kind" => required(:string),
-        "visibility" => required(:string),
+        "visibility" => optional(:string),
         "files" => required(:array),
         "id" => optional(:string),
         "note" => optional(:string),
         "session_id" => optional(:string)
       },
       # The person's own artifacts on the plane (#62), for a client's "Publish a new version
-      # of…": `mine`, `shared` or `visibility` narrows it, as the plane's `artifact.list`.
+      # of…": `mine`, `shared`, `teams` or `visibility` narrows it, as the plane's
+      # `artifact.list`.
       "artifact.list" => %{
         "mine" => optional(:boolean),
         "shared" => optional(:boolean),
+        "teams" => optional(:boolean),
         "visibility" => optional(:string)
       },
       # The desktop app's viewer (#62): each the plane's method of the same name, sent with
