@@ -131,6 +131,9 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :config_pull} = args} ->
         Troupe.CLI.ModelConfig.pull(args.plane_url)
 
+      {:ok, %{mode: :config_key} = args} ->
+        Troupe.CLI.ConfigSetup.key(args.workspace)
+
       # The person's own memory on the plane, through this machine's daemon (root #55).
       {:ok, %{mode: :memory} = args} ->
         Troupe.CLI.Memory.run(args)

@@ -276,11 +276,102 @@ defmodule Troupe.CLI.ConfigSetup do
   end
 
   # A file through which no model can be asked: the report says why and names this
-  # command as the next step, so in a terminal the next step is here.
-  defp no_key(%{"path" => path}, io) do
+  # command as the next step, so in a terminal the next step is here. The organisation's
+  # word on where a key comes from goes first, since that is what is missing.
+  defp no_key(%{"path" => path} = settings, io) do
     io.say.(io.describe.())
+    say_key_help(settings, io)
     if io.interactive?, do: choose(Troupe.Paths.display(path), io), else: 0
   end
+
+  @doc """
+  `troupe config key`: paste a key for this machine's local sessions into the person's own
+  file, or `{env:VAR}` to read it from the environment. The organisation's word on where a
+  key comes from is said first, and so is a key it hands to everybody, which one pasted
+  here wins over. Returns the exit status.
+  """
+  @spec key(Path.t(), io() | nil) :: non_neg_integer()
+  def key(workspace, io \\ nil) do
+    io = io || io(workspace)
+
+    case io.call.("config.get", %{}) do
+      {:ok, settings} -> paste_key(settings, io, 1)
+      {:error, reason} -> daemon_down(reason, io)
+    end
+  end
+
+  # `skipped` is the status when nothing is pasted: a failure for the command that was
+  # asked for a key, and nothing of the kind after a pull, which did its own work.
+  defp paste_key(settings, io, skipped) do
+    say_key_help(settings, io)
+
+    if settings["api_key_source"] == "organisation",
+      do:
+        io.say.(
+          "Your organisation hands out a key, which sessions here use; one you paste wins over it."
+        )
+
+    cond do
+      not io.interactive? ->
+        io.say.(
+          "No terminal to ask on: put api_key in #{settings["path"]}, or TROUPE_API_KEY in the environment."
+        )
+
+        1
+
+      true ->
+        case blank_to_nil(io.secret.("API key, or {env:VAR} to read it from the environment: ")) do
+          nil ->
+            io.say.("no key saved; troupe config key takes one later")
+            skipped
+
+          key ->
+            save_key(key, io)
+        end
+    end
+  end
+
+  defp save_key(key, io) do
+    params = %{
+      "command_id" => Protocol.command_id(),
+      "key" => "api_key",
+      "value" => key,
+      "scope" => "user"
+    }
+
+    case io.call.("config.set", params) do
+      {:ok, saved} ->
+        io.say.("the key is saved in #{saved["path"]}")
+
+        if var = unset_variable(key),
+          do: io.say.("#{var} is not set in this environment; sessions have no key until it is")
+
+        0
+
+      {:error, reason} ->
+        io.say.("could not save the key: #{describe_error(reason)}")
+        1
+    end
+  end
+
+  defp say_key_help(%{"key_help" => help}, io) when is_binary(help) and help != "" do
+    io.say.("Where a key comes from, says your organisation: #{help}")
+  end
+
+  defp say_key_help(_settings, _io), do: :ok
+
+  # After the plane's defaults are pulled, the one thing they cannot bring is asked for
+  # here and now, where there is somebody to ask, rather than left for a later command.
+  defp key_after_pull(0, io) do
+    case io.call.("config.get", %{}) do
+      {:ok, %{"api_key_set" => true}} -> 0
+      {:ok, settings} when io.interactive? -> paste_key(settings, io, 0)
+      {:ok, settings} -> say_key_help(settings, io) && 0
+      {:error, _reason} -> 0
+    end
+  end
+
+  defp key_after_pull(status, _io), do: status
 
   defp daemon_down(reason, io) do
     io.say.(io.describe.())
@@ -416,10 +507,10 @@ defmodule Troupe.CLI.ConfigSetup do
 
       signed_in && Discovery.base(url) == signed_in ->
         io.say.("signed in to #{signed_in} already")
-        io.pull.(signed_in)
+        signed_in |> io.pull.() |> key_after_pull(io)
 
       true ->
-        if io.login.(url) == 0, do: io.pull.(url), else: 1
+        if io.login.(url) == 0, do: url |> io.pull.() |> key_after_pull(io), else: 1
     end
   end
 

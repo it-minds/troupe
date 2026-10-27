@@ -24,6 +24,7 @@ defmodule Troupe.CLI do
           | :config_untrust
           | :config_trust_list
           | :config_pull
+          | :config_key
           | :memory
           | :artifacts
           | :models
@@ -202,8 +203,11 @@ defmodule Troupe.CLI do
      [["config", "trust"], ["config", "trust", "--list"]]},
     {"troupe config untrust [PATH]", "take a workspace's trust back", [["config", "untrust"]]},
     {"troupe config pull [PLANE_URL]",
-     "fetch the organisation's defaults and limits from the plane now (never a key)",
+     "fetch the organisation's defaults and limits from the plane now (a key only where it hands one to everybody)",
      [["config", "pull"]]},
+    {"troupe config key",
+     "paste a key for local sessions into your own settings, or {env:VAR} to read it from the environment; the organisation's word on where a key comes from is shown first",
+     [["config", "key"]]},
     {"troupe memory [--edit | --clear | --status | --blame]",
      "your own memory on the plane, which every session of yours reads on every machine: " <>
        "show it, edit it in $EDITOR, or clear it; an agent of yours only ever adds to it. " <>
@@ -496,6 +500,7 @@ defmodule Troupe.CLI do
   defp parse_rest(["config"], base), do: {:ok, %{base | mode: :config}}
   defp parse_rest(["setup"], base), do: {:ok, %{base | mode: :setup}}
   defp parse_rest(["config", "pull"], base), do: {:ok, %{base | mode: :config_pull}}
+  defp parse_rest(["config", "key"], base), do: {:ok, %{base | mode: :config_key}}
 
   defp parse_rest(["config", "pull", url], base),
     do: {:ok, %{base | mode: :config_pull, plane_url: url}}

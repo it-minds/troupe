@@ -37,7 +37,8 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe config migrate [--write] [PATH]` | show, or make, the rewrite to the current spellings |
 | `troupe config trust [PATH]` | let a workspace's own files set the trusted keys; --list shows them |
 | `troupe config untrust [PATH]` | take a workspace's trust back |
-| `troupe config pull [PLANE_URL]` | fetch the organisation's defaults and limits from the plane now (never a key) |
+| `troupe config pull [PLANE_URL]` | fetch the organisation's defaults and limits from the plane now (a key only where it hands one to everybody) |
+| `troupe config key` | paste a key for local sessions into your own settings, or {env:VAR} to read it from the environment; the organisation's word on where a key comes from is shown first |
 | `troupe memory [--edit \| --clear \| --status \| --blame]` | your own memory on the plane, which every session of yours reads on every machine: show it, edit it in $EDITOR, or clear it; an agent of yours only ever adds to it. --status: which versions of the organisation's and your memory this machine holds, whether they are current, and what each session here read at its last turn. --blame: each line with who wrote it, and the agent and session of an agent's entry |
 | `troupe artifacts list [--scope mine\|organisation\|team:NAME\|profile:NAME\|shared\|private] [--json]` | your artifacts on the plane, by who can see them, newest first; a version you have not opened here is new |
 | `troupe artifacts open\|show ID [--version N]` | open one in the browser, through the plane's one-time address; show prints its text (a Markdown one's source) |

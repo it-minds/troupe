@@ -3418,7 +3418,10 @@ defmodule Troupe.Plane.Harness do
       "models" => models
     }
 
+    # Where a key comes from, in the organisation's words, beside the document rather than
+    # in it: a document holds only what a config file takes.
     Map.merge(old, %{
+      "key_help" => blank_to_nil(Settings.get("client_key_help")),
       "defaults" => client_defaults(old, models),
       "enforced" => Settings.get("client_enforced") || %{}
     })
@@ -3450,7 +3453,8 @@ defmodule Troupe.Plane.Harness do
   end
 
   # The organisation's defaults for `me.client_defaults` (Decision 869): only what is set,
-  # since a key left out is the machine's own to decide.
+  # since a key left out is the machine's own to decide. A key an administrator chose to
+  # hand to everybody (`client_key`) goes with them, below each person's own.
   defp client_defaults(old, models) do
     set = models |> Enum.reject(fn {_role, model} -> is_nil(model) end) |> Map.new()
 
@@ -3458,6 +3462,7 @@ defmodule Troupe.Plane.Harness do
       "provider" => old["provider"],
       "base_url" => old["provider"] && old["base_url"],
       "auth" => old["auth"],
+      "api_key" => blank_to_nil(Settings.get("client_key")),
       "models" => if(set == %{}, do: nil, else: set)
     }
     |> Map.reject(fn {_key, value} -> is_nil(value) end)

@@ -30,7 +30,12 @@ are in one document, a `defaults:` section and an `enforced:` section, and it re
 machine in one of two ways.
 
 **From a plane.** The *client defaults* settings ([configuration Part C](configuration.md#part-c--platform-settings)) are the defaults: provider, URL,
-how the key is sent, and the three models; never a key. `client_enforced` is the enforced
+how the key is sent, and the three models. The key is each person's own: `client_key_help`
+is your word on where one comes from, a URL to the gateway's key page or "open a ticket at
+the helpdesk", shown by the terminal and the desktop app wherever a key is asked for. An
+organisation that would rather hand one key to everybody stores it as `client_key`, a
+secret the console never shows again; it rides the defaults as `api_key`, below each
+person's own file, and anybody who can sign in can read it. `client_enforced` is the enforced
 set, a JSON object such as `{"approvals": "deny", "max_turns": 100}`, set on the console's
 **Organisation** screen or with `admin.setting.put`, audited like every setting. The plane answers both
 in `me.client_defaults` (as `defaults` and `enforced`, beside the fields older clients

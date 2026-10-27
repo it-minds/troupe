@@ -143,31 +143,62 @@ defmodule Troupe.ConfigSetupTest do
       assert position(text, "provider: openai") < position(text, "troupe login")
     end
 
-    test "a plane: sign in, then take its settings" do
-      answers = ["2", "https://plane.example"]
-      assert ConfigSetup.run("/w", io(daemon: settings(@nothing), answers: answers)) == 0
+    test "a plane: sign in, take its settings, then the key it cannot bring, with the organisation's word on where one comes from" do
+      test = self()
+      help = Map.put(@nothing, "key_help", "https://llm-gw.example/keys")
+
+      daemon = fn
+        "config.get", _ -> {:ok, help}
+        "setup.get", _ -> {:ok, %{"needed" => true, "completed" => nil}}
+        "config.set", params -> send(test, {:set, params}) && {:ok, %{"path" => @path}}
+      end
+
+      answers = ["2", "https://plane.example", "sk-mine"]
+      assert ConfigSetup.run("/w", io(daemon: daemon, answers: answers)) == 0
       assert_received {:login, "https://plane.example"}
       assert_received {:pull, "https://plane.example"}
+      assert_received {:secret, "API key, or {env:VAR} to read it from the environment: "}
+      assert_received {:set, %{"key" => "api_key", "value" => "sk-mine", "scope" => "user"}}
+      out = Enum.join(said(), "\n")
+      assert out =~ "Where a key comes from, says your organisation: https://llm-gw.example/keys"
+      assert out =~ "the key is saved in #{@path}"
+    end
+
+    test "a plane that hands out a key asks for none after the pull" do
+      provided =
+        Map.merge(@nothing, %{
+          "exists" => true,
+          "api_key_set" => true,
+          "api_key_source" => "organisation"
+        })
+
+      answers = ["2", "https://plane.example"]
+      assert ConfigSetup.run("/w", io(daemon: settings(provided), answers: answers)) == 0
+      refute_received {:secret, _}
     end
 
     # The sign-in is the machine's, shared with the desktop app: a
     # machine signed in already is offered that plane and not sent through the device
     # flow again.
     test "a plane this machine is signed in to already: offered as the default, and its settings pulled with no second sign-in" do
-      answers = ["2", ""]
+      # Enter at the key prompt after the pull saves none and is no failure: the pull did
+      # its work, and troupe config key takes one later.
+      answers = ["2", "", ""]
       io = io(daemon: settings(@nothing), answers: answers, signed_in: "https://plane.example")
       assert ConfigSetup.run("/w", io) == 0
       assert_received {:ask, "plane URL [https://plane.example]: "}
       refute_received {:login, _}
       assert_received {:pull, "https://plane.example"}
+      assert_received {:secret, _}
+      assert Enum.any?(said(), &(&1 =~ "troupe config key takes one later"))
 
-      answers = ["2", "https://plane.example/"]
+      answers = ["2", "https://plane.example/", ""]
       io = io(daemon: settings(@nothing), answers: answers, signed_in: "https://plane.example")
       assert ConfigSetup.run("/w", io) == 0
       refute_received {:login, _}
       assert_received {:pull, "https://plane.example"}
 
-      answers = ["2", "https://other.example"]
+      answers = ["2", "https://other.example", ""]
       io = io(daemon: settings(@nothing), answers: answers, signed_in: "https://plane.example")
       assert ConfigSetup.run("/w", io) == 0
       assert_received {:login, "https://other.example"}
@@ -526,6 +557,39 @@ defmodule Troupe.ConfigSetupTest do
   # -- a person and a daemon, played ------------------------------------------------
 
   # A daemon with the file's settings, on a machine whose first run is not done.
+  describe "troupe config key" do
+    test "says where a key comes from and saves what is pasted, into the person's own file" do
+      test = self()
+
+      daemon = fn
+        "config.get", _ -> {:ok, Map.put(@nothing, "key_help", "open a ticket at the helpdesk")}
+        "config.set", params -> send(test, {:set, params}) && {:ok, %{"path" => @path}}
+      end
+
+      assert ConfigSetup.key("/w", io(daemon: daemon, answers: ["{env:GATEWAY_KEY}"])) == 0
+
+      assert_received {:set,
+                       %{"key" => "api_key", "value" => "{env:GATEWAY_KEY}", "scope" => "user"}}
+
+      out = Enum.join(said(), "\n")
+      assert out =~ "open a ticket at the helpdesk"
+      assert out =~ "GATEWAY_KEY is not set in this environment"
+    end
+
+    test "says that the organisation's key is in use, and that one pasted wins; Enter changes nothing" do
+      provided = Map.merge(@nothing, %{"api_key_set" => true, "api_key_source" => "organisation"})
+      assert ConfigSetup.key("/w", io(daemon: settings(provided), answers: [""])) == 1
+      out = Enum.join(said(), "\n")
+      assert out =~ "Your organisation hands out a key"
+      assert out =~ "no key saved; troupe config key takes one later"
+    end
+
+    test "with no terminal says where to put one" do
+      assert ConfigSetup.key("/w", io(daemon: settings(@nothing), interactive?: false)) == 1
+      assert Enum.any?(said(), &(&1 =~ "put api_key in #{@path}"))
+    end
+  end
+
   defp settings(answer) do
     fn
       "config.get", _ -> {:ok, answer}
