@@ -164,9 +164,9 @@ defmodule Troupe.Gateway.ArtifactsTest do
   end
 
   # The desktop app's gallery and viewer, and the terminal's: one artifact with its versions, a
-  # ticket to open it or one version on its host, one text file of a version, a view link and its revoking, a rollback and a pin, each the
-  # plane's own method sent with the daemon's sign-in, its answer and its refusal as the
-  # plane gave them.
+  # ticket to open it or one version on its host, one text file of a version, a view link and
+  # its revoking, a rollback and a pin, each the plane's own method sent with the daemon's
+  # sign-in, its answer and its refusal as the plane gave them.
   test "the viewer's methods are forwarded to the plane as the person, its refusals kept", ctx do
     forwarded = [
       {"artifact.get", %{"id" => "art-fakefakefakefake"}},
