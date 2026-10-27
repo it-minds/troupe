@@ -86,6 +86,13 @@ as the placeholder.
 when a provider of that type has no key of its own, and only when the provider is the
 vendor's own endpoint. A gateway configured without a key is sent none.
 
+Signed in to a plane, your organisation may say where a key comes from, an address to
+mint one at or who to ask: `troupe config` says it wherever a key is missing, and so does
+the desktop app beside the key field. `troupe config key` takes a key, or `{env:VAR}`, into
+your own file without echo. An organisation that hands one key to everybody puts it in
+its defaults, which `troupe config` reports as the organisation's; a key of your own, in
+your file or the environment, still wins over it.
+
 ## Trusted workspaces
 
 The keys that decide what a session may do unasked, where requests go, what runs and

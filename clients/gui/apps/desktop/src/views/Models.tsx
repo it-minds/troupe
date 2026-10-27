@@ -24,6 +24,9 @@ import type { JSX } from "react";
 import {
   MODEL_ROLES,
   applyClientDefaults,
+  keyHelp,
+  keyHelpUrl,
+  providesKey,
   clientDefaults,
   configSetParams,
   describeOffer,
@@ -58,7 +61,30 @@ const KEY_SOURCES: Record<string, string> = {
   file: "Key saved",
   env: "Key from an environment variable",
   opencode: "Key from OpenCode's settings",
+  organisation: "Key from your organisation",
 };
+
+/**
+ * The organisation's word on where a key comes from, beside the key field: an address
+ * as a link, anything else as it was written. Nothing where it says nothing.
+ */
+function KeyHelp({ org, saved }: { org: ClientDefaults | null; saved: ModelConfig }): JSX.Element | null {
+  const help = keyHelp(org) ?? saved.key_help?.trim() ?? null;
+  if (!help) return null;
+  const url = keyHelpUrl(help);
+  return (
+    <p className="note" data-testid="key-help">
+      Where a key comes from, says your organisation:{" "}
+      {url ? (
+        <a href={url} target="_blank" rel="noreferrer">
+          {url}
+        </a>
+      ) : (
+        help
+      )}
+    </p>
+  );
+}
 
 function sameForm(a: ModelForm, b: ModelForm): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -197,7 +223,12 @@ export function Models({ client, auth }: { client: DaemonClient; auth: AuthSessi
     if (!org) return;
     edit(applyClientDefaults(form, org));
     setDiscovery(null);
-    setOutcome({ done: false, text: "Filled in from your organisation. It does not hand out keys — paste your own, then save." });
+    setOutcome({
+      done: false,
+      text: providesKey(org)
+        ? "Filled in from your organisation, which hands out a key: save, and sessions use it unless you paste your own."
+        : "Filled in from your organisation. It does not hand out keys — paste your own, then save.",
+    });
   };
 
   const types = providerTypes(saved);
@@ -267,7 +298,13 @@ export function Models({ client, auth }: { client: DaemonClient; auth: AuthSessi
         ) : (
           <label>
             API key{" "}
-            <small>{keyState ? "leave empty to keep the one that is saved" : "none is saved — sessions cannot reach a model without one"}</small>
+            <small>
+              {keyState
+                ? saved.api_key_source === "organisation"
+                  ? "your organisation's; one you paste wins over it"
+                  : "leave empty to keep the one that is saved"
+                : "none is saved — sessions cannot reach a model without one"}
+            </small>
             <input
               type="password"
               value={form.apiKey}
@@ -280,6 +317,7 @@ export function Models({ client, auth }: { client: DaemonClient; auth: AuthSessi
             />
           </label>
         )}
+        {!keyless && <KeyHelp org={org} saved={saved} />}
         <div className="inline-form" style={{ marginBottom: 0, alignItems: "center" }}>
           {keyState ? <Pill status="allowed">{keyState}</Pill> : !keyless && <Pill status="offline">No key</Pill>}
           {/* Only a key in the file can be removed from here. One from the environment

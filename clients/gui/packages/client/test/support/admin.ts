@@ -558,6 +558,8 @@ const SETTINGS: Setting[] = [
   { key: "client_model_default", group: "client_defaults", type: "string", summary: "The model that does the editing, as the provider names it.", consequence: "Pre-filled as the default model." },
   { key: "client_model_cheap", group: "client_defaults", type: "string", summary: "The cheaper model for exploring, summarising and quick questions.", consequence: "Pre-filled as the cheap model." },
   { key: "client_model_expensive", group: "client_defaults", type: "string", summary: "The premium model an orchestrating agent may ask for, if there is one.", consequence: "Pre-filled as the expensive model." },
+  { key: "client_key_help", group: "client_defaults", type: "string", summary: "How a person gets a key, in your words.", consequence: "Shown beside the key field wherever a key is asked for." },
+  { key: "client_key", group: "client_defaults", type: "string", secret: true, summary: "A key handed to everybody who signs in.", consequence: "Whoever can sign in to this plane can read it." },
   {
     key: "client_enforced",
     group: "client_defaults",

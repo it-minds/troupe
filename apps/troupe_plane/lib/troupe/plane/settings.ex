@@ -387,8 +387,10 @@ defmodule Troupe.Plane.Settings do
       effect: :restart
     },
     # What a person's own machine should talk to, offered to the clients through
-    # `me.client_defaults`. Never a key: whoever can sign in could read it, so the key
-    # stays each person's to paste into their own settings.
+    # `me.client_defaults`. The key is each person's own to paste, and the organisation says
+    # in `client_key_help` where one comes from; one that would rather hand a key to
+    # everybody who signs in stores it as `client_key`, knowing that whoever can sign in can
+    # read it.
     # Every type a machine may be set up with, from the one list of them the clients offer.
     %Setting{
       key: "client_provider",
@@ -445,6 +447,33 @@ defmodule Troupe.Plane.Settings do
       type: :string,
       summary: "The premium model an orchestrating agent may ask for, if there is one.",
       consequence: "Pre-filled as the expensive model; empty means the default model is used for that too.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "client_key_help",
+      group: :client_defaults,
+      type: :string,
+      summary:
+        "How a person gets a key, in your words: the address where they mint one, or who to ask, " <>
+          "such as \"open a ticket at the helpdesk\".",
+      consequence:
+        "Shown beside the key field in the terminal and the desktop app wherever a key is asked for, " <>
+          "and on This computer. An address is shown as a link. Empty says nothing.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "client_key",
+      group: :client_defaults,
+      type: :string,
+      secret: true,
+      summary:
+        "A key handed to everybody who signs in, for an organisation that does not want personal keys. " <>
+          "Empty means each person pastes their own.",
+      consequence:
+        "Whoever can sign in to this plane can read it, so it is one key for everybody, with that key's " <>
+          "limits and that key's bill. A machine takes it below its person's own settings, so a key " <>
+          "somebody pasted themselves still wins; it reaches signed-in machines within a minute and " <>
+          "goes from them when it is cleared.",
       effect: :immediate
     },
     # What people's own machines may not go past (Decision 869): a JSON object of the keys
@@ -534,7 +563,7 @@ defmodule Troupe.Plane.Settings do
     {:releases, "Where people's machines get releases",
      "The plane names it in the version policy it signs, so a machine on a closed network updates without reaching GitHub. Every release is still checked against the release key."},
     {:client_defaults, "What people's own machines talk to",
-     "The organisation's defaults for a person's local sessions, below their own settings: provider, URL and models. Never a key; each person pastes their own. And what those sessions may not go past, above everything a person sets."},
+     "The organisation's defaults for a person's local sessions, below their own settings: provider, URL and models, and where a key comes from, in your words; a key only if you choose to hand one to everybody. And what those sessions may not go past, above everything a person sets."},
     {:sessions, "What a new session runs with",
      "Defaults for work started after the change. Running sessions keep what they were given."},
     {:artifacts, "What people may publish",

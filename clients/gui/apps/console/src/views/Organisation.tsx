@@ -88,8 +88,14 @@ function DefaultRow({
   const [draft, setDraft] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<"put" | "reset" | null>(null);
   const value = setting.value ?? null;
+  // A secret is previewed as set or unset, never as what was typed.
+  const shown = setting.secret ? (setting.set ? "set" : null) : value;
   const lines: DiffLine[] =
-    previewing === "reset" ? changed({ [setting.key]: value }, { [setting.key]: setting.deployed ?? null }) : draft !== null ? changed({ [setting.key]: value }, { [setting.key]: draft }) : [];
+    previewing === "reset"
+      ? changed({ [setting.key]: shown }, { [setting.key]: setting.secret ? null : (setting.deployed ?? null) })
+      : draft !== null
+        ? changed({ [setting.key]: shown }, { [setting.key]: setting.secret ? (draft ? "set (new)" : null) : draft })
+        : [];
 
   return (
     <div className="row" aria-label={setting.key}>
@@ -97,11 +103,12 @@ function DefaultRow({
         <code className="key">{setting.key}</code>
         <p>{setting.summary}</p>
       </div>
-      <div className="value mono">{show(value)}</div>
+      {/* A secret's value never comes back from the plane: only whether one is set. */}
+      <div className="value mono">{setting.secret ? (setting.set ? "set" : "unset") : show(value)}</div>
       <Source setting={setting} />
       {editable && draft === null && previewing === null && (
         <div className="row-actions">
-          <button type="button" onClick={() => setDraft(String(value ?? ""))}>
+          <button type="button" onClick={() => setDraft(setting.secret ? "" : String(value ?? ""))}>
             Change
           </button>
           {setting.source === "stored" && (
@@ -131,7 +138,7 @@ function DefaultRow({
                   ))}
                 </select>
               ) : (
-                <input {...p} value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={false} />
+                <input {...p} type={setting.secret ? "password" : "text"} value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={false} autoComplete="off" />
               )
             }
           </Field>

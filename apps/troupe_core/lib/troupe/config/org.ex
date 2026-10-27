@@ -273,7 +273,10 @@ defmodule Troupe.Config.Org do
           "fetched_at" =>
             DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
           "defaults" => document["defaults"],
-          "enforced" => document["enforced"]
+          "enforced" => document["enforced"],
+          # Where a key comes from, in the organisation's words, for the clients to show
+          # beside the key field; beside the document, not in it.
+          "key_help" => key_help(answer)
         }
 
         # The plane's signature over it, so the copy is checked whenever it is read.
@@ -286,12 +289,29 @@ defmodule Troupe.Config.Org do
     end
   end
 
-  # Whole or not at all: beside it, then renamed over it.
+  defp key_help(%{"key_help" => help}) when is_binary(help) and help != "", do: help
+  defp key_help(_answer), do: nil
+
+  @doc """
+  What the organisation says about getting a key, from this machine's copy of its
+  document, or `nil` where it says nothing or there is no copy.
+  """
+  @spec key_help() :: String.t() | nil
+  def key_help do
+    case read_copy(cache_path()) do
+      {:ok, cached} -> key_help(cached)
+      _none -> nil
+    end
+  end
+
+  # Whole or not at all: beside it, then renamed over it. Readable by the owner alone,
+  # since an organisation that hands out a key puts it in the defaults.
   defp write(path, cached) do
     temporary = path <> ".#{System.unique_integer([:positive])}.tmp"
 
     with :ok <- File.mkdir_p(Path.dirname(path)),
          :ok <- File.write(temporary, Jason.encode!(cached, pretty: true) <> "\n"),
+         :ok <- Troupe.OwnerOnly.restrict(temporary),
          :ok <- File.rename(temporary, path) do
       :ok
     else

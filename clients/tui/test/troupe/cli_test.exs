@@ -220,6 +220,7 @@ defmodule Troupe.CLITest do
              CLI.parse(["config", "migrate", "--write"])
 
     assert {:ok, %{mode: :config_pull}} = CLI.parse(["config", "pull"])
+    assert {:ok, %{mode: :config_key}} = CLI.parse(["config", "key"])
     assert CLI.usage() =~ "troupe config --explain"
 
     assert {:ok, %{mode: :config_trust, path: nil}} = CLI.parse(["config", "trust"])

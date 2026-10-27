@@ -149,7 +149,9 @@ export interface ModelConfig {
   auth: ModelAuth | null;
   /** Whether a key is in effect. The key itself is never sent to a client. */
   api_key_set: boolean;
-  api_key_source: "file" | "env" | "opencode" | null;
+  api_key_source: "file" | "env" | "opencode" | "organisation" | null;
+  /** The organisation's word on where a key comes from, from the daemon's copy of its document. */
+  key_help?: string | null;
   models: Partial<Record<ModelRole, string | null>>;
   overrides: ConfigOverride[];
   /** The provider types a screen offers; absent from a daemon older than troupe #658. */
@@ -262,6 +264,27 @@ export interface ClientDefaults {
   base_url: string | null;
   auth: ModelAuth | null;
   models: Partial<Record<ModelRole, string | null>> | null;
+  /** The organisation's word on where a key comes from: a URL or a sentence; absent or null where it says nothing. */
+  key_help?: string | null;
+  /** The document a machine reads below its person's file; `api_key` in it is a key handed to everybody. */
+  defaults?: Record<string, unknown> | null;
+}
+
+/** Whether the organisation hands one key to everybody who signs in, which a machine takes below its person's own. */
+export function providesKey(defaults: ClientDefaults | null): boolean {
+  const key = defaults?.defaults?.["api_key"];
+  return typeof key === "string" && key !== "";
+}
+
+/** The organisation's key help, trimmed, or null; `keyHelpUrl` says whether it is an address to open. */
+export function keyHelp(defaults: ClientDefaults | null): string | null {
+  const help = defaults?.key_help?.trim();
+  return help ? help : null;
+}
+
+export function keyHelpUrl(help: string | null): string | null {
+  if (!help || !/^https?:\/\/\S+$/.test(help)) return null;
+  return help;
 }
 
 /** What the panel holds while somebody edits it. Strings throughout, because inputs are. */

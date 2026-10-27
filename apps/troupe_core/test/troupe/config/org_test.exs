@@ -10,7 +10,7 @@ defmodule Troupe.Config.OrgTest do
   use ExUnit.Case, async: false
 
   alias Troupe.Config
-  alias Troupe.Config.{Org, Schema, Settings}
+  alias Troupe.Config.{ModelSettings, Org, Schema, Settings}
   alias Troupe.PlaneKeys
   alias Troupe.Protocol.{Organisation, PlaneSignature}
 
@@ -26,6 +26,7 @@ defmodule Troupe.Config.OrgTest do
     managed = Path.join(base, "managed.yaml")
     cache = Path.join(base, "state/organisation.json")
     previous = Application.get_env(:troupe_core, :organisation)
+
     Application.put_env(:troupe_core, :organisation,
       managed_path: managed,
       cache_path: cache,
@@ -83,6 +84,41 @@ defmodule Troupe.Config.OrgTest do
     document = PlaneSignature.document("client_defaults", body, opts)
     signature = :crypto.sign(:eddsa, :none, document, [key.secret, :ed25519])
     PlaneSignature.envelope(document, signature, key.fingerprint)
+  end
+
+  describe "a key the organisation hands out" do
+    test "is a default below the person's own file, the copy is the owner's alone, and the help is kept",
+         ctx do
+      pulled!(%{
+        "key_help" => "https://llm-gw.example/keys",
+        "defaults" => %{
+          "provider" => "openai",
+          "base_url" => "https://llm-gw.example/v1",
+          "api_key" => "sk-everybody"
+        },
+        "enforced" => %{}
+      })
+
+      assert load!(ctx).api_key == "sk-everybody"
+      assert Bitwise.band(File.stat!(ctx.cache).mode, 0o077) == 0
+      assert Org.key_help() == "https://llm-gw.example/keys"
+
+      described = ModelSettings.describe()
+      assert described["api_key_set"] == true
+      assert described["api_key_source"] == "organisation"
+      assert described["key_help"] == "https://llm-gw.example/keys"
+
+      # The person's own key wins over the organisation's.
+      File.write!(ctx.user, "version: 1\napi_key: sk-mine\n")
+      assert load!(ctx).api_key == "sk-mine"
+
+      # Cleared on the plane, the key goes from the machine with the next pull.
+      pulled!(%{"key_help" => "", "defaults" => %{"provider" => "openai"}, "enforced" => %{}})
+      File.write!(ctx.user, "version: 1\n")
+      assert load!(ctx).api_key == nil
+      assert Org.key_help() == nil
+      assert ModelSettings.describe()["api_key_source"] == nil
+    end
   end
 
   describe "reproduction" do
@@ -186,10 +222,12 @@ defmodule Troupe.Config.OrgTest do
     # the key this machine pinned whenever it is read.
     test "a signed copy is used; one edited on this machine is refused with a sentence", ctx do
       key = signing_key!(ctx)
+
       answer = %{
         "defaults" => %{"models" => %{"default" => "plane-model"}},
         "enforced" => %{"max_turns" => 40}
       }
+
       assert {:ok, _} = Org.save(@plane, answer, ctx.cache, sign(key, answer))
 
       assert load!(ctx).max_turns == 40
@@ -204,6 +242,7 @@ defmodule Troupe.Config.OrgTest do
       assert {:error, why} = Org.read_cache(ctx.cache)
       assert why =~ "does not match the plane's signature: it was changed on this machine"
       layers = layers!(ctx)
+
       assert Enum.any?(
                layers.warnings,
                &(&1.message =~ "the organisation's document from #{@plane} does not match")
@@ -620,6 +659,7 @@ defmodule Troupe.Config.OrgTest do
         # The per-tool rules (#658): the three lists of rules.
         :rules ->
           assert {:object, children} = Schema.at([key]).type
+
           assert Enum.map(children, &{&1.key, &1.type}) ==
                    [{"deny", {:list, :rule}}, {"ask", {:list, :rule}}, {"allow", {:list, :rule}}]
 

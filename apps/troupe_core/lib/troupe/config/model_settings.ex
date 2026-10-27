@@ -22,7 +22,7 @@ defmodule Troupe.Config.ModelSettings do
   """
 
   alias Troupe.Config
-  alias Troupe.Config.{Migrate, OpenCode, Schema}
+  alias Troupe.Config.{Layers, Migrate, OpenCode, Org, Schema}
   alias Troupe.LLM.{Catalog, ProviderType}
   alias Troupe.LLM.Catalog.Store
   alias Troupe.Protocol.ProviderTypes
@@ -82,6 +82,9 @@ defmodule Troupe.Config.ModelSettings do
       "auth" => file_auth(file),
       "api_key_set" => key_source(file) != nil,
       "api_key_source" => key_source(file),
+      # Where a key comes from, in the organisation's words, for a screen to show beside
+      # the key field; nil where the organisation says nothing.
+      "key_help" => Org.key_help(),
       "models" => models,
       "overrides" => overrides(workspace),
       # What a screen offers to choose from, and what each choice asks for.
@@ -338,6 +341,8 @@ defmodule Troupe.Config.ModelSettings do
       present(file["auth_token"]) || present(file["api_key"])
   end
 
+  # The environment, the person's own file, or a key the organisation hands to everybody
+  # (its document's defaults), in the order the layers win.
   defp key_source(file) do
     cond do
       present(System.get_env("TROUPE_API_KEY")) || present(System.get_env("TROUPE_AUTH_TOKEN")) ->
@@ -346,10 +351,16 @@ defmodule Troupe.Config.ModelSettings do
       present(file["api_key"]) || present(file["auth_token"]) || keyed_provider?(file) ->
         "file"
 
+      organisation_key?() ->
+        "organisation"
+
       true ->
         nil
     end
   end
+
+  defp organisation_key?,
+    do: Enum.any?(Layers.organisation().layers, &present(&1.values["api_key"]))
 
   defp file_providers(file), do: if(is_map(file["providers"]), do: file["providers"], else: %{})
 

@@ -8,22 +8,8 @@
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import {
-  DaemonClient,
-  applyClientDefaults,
-  clientDefaults,
-  configKey,
-  configSetParams,
-  describeOffer,
-  describeOverride,
-  discoveryParams,
-  formFromConfig,
-  modelConfigError,
-  providerTypes,
-  servesKeys,
-  tokenCount,
-} from "../src/index.js";
-import type { ConfigChanged, DaemonEndpoint, ModelConfig, ModelForm } from "../src/index.js";
+import { DaemonClient, applyClientDefaults, clientDefaults, configKey, configSetParams, describeOffer, describeOverride, discoveryParams, formFromConfig, keyHelp, keyHelpUrl, modelConfigError, providerTypes, providesKey, servesKeys, tokenCount } from "../src/index.js";
+import type { ClientDefaults, ConfigChanged, DaemonEndpoint, ModelConfig, ModelForm } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 import { startHarness, type Harness } from "./support/harness.js";
 import { GATEWAY_DEFAULTS } from "./support/plane.js";
@@ -112,6 +98,21 @@ describe("the organisation's defaults", () => {
     });
     assert.equal(next.baseUrl, "https://proxy.example");
     assert.equal(next.models.default, "claude-opus-5");
+  });
+
+  it("say where a key comes from, and whether the organisation hands one out", () => {
+    const org = GATEWAY_DEFAULTS as ClientDefaults;
+    assert.equal(keyHelp(null), null);
+    assert.equal(keyHelp({ ...org, key_help: "  " }), null);
+    assert.equal(keyHelp({ ...org, key_help: " open a ticket at the helpdesk " }), "open a ticket at the helpdesk");
+    assert.equal(keyHelpUrl("open a ticket at the helpdesk"), null);
+    assert.equal(keyHelpUrl("https://llm-gw.example/keys"), "https://llm-gw.example/keys");
+    assert.equal(keyHelpUrl("https://llm-gw.example/keys and ask Bea"), null);
+    assert.equal(providesKey(org), false);
+    assert.equal(providesKey({ ...org, defaults: { provider: "openai" } }), false);
+    assert.equal(providesKey({ ...org, defaults: { provider: "openai", api_key: "sk-everybody" } }), true);
+    // The form never takes the organisation's key: the daemon reads it below the file.
+    assert.equal(applyClientDefaults(formFromConfig(saved), { ...org, defaults: { api_key: "sk-everybody" } }).apiKey, "");
   });
 
   it("change nothing when the organisation has set nothing", () => {

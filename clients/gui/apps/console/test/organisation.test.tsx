@@ -45,6 +45,26 @@ describe("the organisation's document", () => {
     await sees("the most it may be", () => enforced());
   });
 
+  it("shows the key handed to everybody as set or unset, edits it behind a password field, and previews it without the value", async () => {
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    await waitFor(() => row("client_key"), "the key's row");
+    await sees("unset", () => row("client_key"));
+    await sees("open a ticket", () => row("client_key_help")).catch(() => undefined);
+
+    button("Change", row("client_key")!)!.click();
+    const input = await waitFor(() => row("client_key")!.querySelector<HTMLInputElement>("input"), "the key's field");
+    expect(input.type).toBe("password");
+    type(input, "sk-everybody");
+    button("Preview", row("client_key")!)!.click();
+    await waitFor(() => says("What will happen", row("client_key")!), "the preview");
+    expect(says("sk-everybody", row("client_key")!)).toBe(false);
+    await sees("set (new)", () => row("client_key"));
+    button("Apply", row("client_key")!)!.click();
+    await waitFor(() => fake.admin.stored.get("client_key") === "sk-everybody", "the key stored");
+    await sees("set", () => row("client_key"));
+  });
+
   it("offers a key the plane lists that this console has never heard of", async () => {
     fake.admin.enforceable = [...ENFORCEABLE, { key: "max_cost_micros", kind: "ceiling", meaning: "the most it may be", type: "integer", min: 0 }];
     await signedInAs(fake, PEOPLE.alice);
