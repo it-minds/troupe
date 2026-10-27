@@ -294,7 +294,7 @@ defmodule Troupe.CommandAuditTest do
 
       for {line, said} <- [
             {"/watch", "watch mode runs where the files are"},
-            {"/memory", "the project brief lives on the worker"},
+            {"/memory facts", "the project brief lives on the worker"},
             {"/merge 1", "a remote session has no local worktree to merge"},
             {"/discard 1", "a remote session has no local worktree to discard"},
             {"/worktree fix it",
@@ -306,7 +306,7 @@ defmodule Troupe.CommandAuditTest do
       end
 
       # The palette greys them first, with the reason, and Enter on one says it.
-      for name <- ["watch", "memory", "merge", "discard", "worktree"] do
+      for name <- ["watch", "merge", "discard", "worktree"] do
         press(pid, "k", ["ctrl"])
         type(pid, name)
         {rows, cursor} = Troupe.UI.TUI.View.palette_view(user_state(pid))

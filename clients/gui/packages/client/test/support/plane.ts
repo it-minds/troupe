@@ -37,6 +37,8 @@ export interface PlaneOptions {
   /** Seconds a plane token is good for. */
   planeTokenLifetime?: number;
   profiles?: string[];
+  /** The teams every person signed in here is in, which `team:<name>` artifacts are for. */
+  teams?: string[];
   /**
    * What `me.client_defaults` answers. Defaults to an organisation that routes through
    * its own gateway; `{ configured: false }` is one whose administrator has set nothing.
@@ -582,9 +584,48 @@ export class FakePlane {
     if (a.owner.subject === subject) return "owner";
     const linked = this.linkRole(a, subject);
     if (linked === "edit") return "edit";
-    if (linked === "view" || a.visibility === "organisation") return "view";
-    const profile = a.visibility.startsWith("profile:") ? a.visibility.slice("profile:".length) : null;
-    return profile !== null && (this.opts.profiles ?? ["dev", "ux"]).includes(profile) ? "view" : null;
+    if (linked === "view" || this.forThem(a)) return "view";
+    return null;
+  }
+
+  /** Whether it is for somebody every person here is: the organisation, a profile, a team. A private one is for nobody. */
+  private forThem(a: FakeArtifact): boolean {
+    if (a.visibility === "organisation") return true;
+    if (a.visibility.startsWith("profile:")) return (this.opts.profiles ?? ["dev", "ux"]).includes(a.visibility.slice("profile:".length));
+    if (a.visibility.startsWith("team:")) return (this.opts.teams ?? ["core"]).includes(a.visibility.slice("team:".length));
+    return false;
+  }
+
+  /** The gallery tab it is under for this person, as the plane says it. */
+  private scopeOf(a: FakeArtifact, subject: string): string {
+    if (a.owner.subject === subject) return a.visibility === "private" ? "private" : "mine";
+    if (this.forThem(a)) return a.visibility;
+    return this.linkRole(a, subject) !== null ? "shared" : a.visibility;
+  }
+
+  /** Whether this person administers the team it is for. */
+  private administers(a: FakeArtifact, subject: string): boolean {
+    if (!a.visibility.startsWith("team:")) return false;
+    return this.opts.admin?.teams.get(a.visibility.slice("team:".length))?.admins.includes(subject) ?? false;
+  }
+
+  /** The administrators' table of artifacts and its takedown (`admin.artifacts.list`, `admin.artifact.takedown`). */
+  private adminArtifacts(subject: string, method: string, params: Record<string, unknown>): { result: unknown } | { error: { code: number; message: string; data?: unknown } } {
+    const role = this.opts.admin?.role(subject) ?? "none";
+    if (role === "none") return { error: { code: -32004, message: "forbidden", data: { required_role: "team_admin" } } };
+    const mayTake = (a: FakeArtifact) => role === "platform_admin" || this.administers(a, subject);
+    if (method === "admin.artifacts.list") {
+      const rows = [...this.artifacts.values()].filter(mayTake).map((a) => {
+        const latest = a.versions[a.versions.length - 1]!;
+        const bytes = latest.files.reduce((n, f) => n + new TextEncoder().encode(f.content).length, 0);
+        return { id: a.id, title: a.title, kind: a.kind, visibility: a.visibility, owner: a.owner, team: a.team, origin: a.origin, version: latest.n, bytes, total_bytes: bytes, created_at: a.created_at, published_at: latest.published_at, may_take_down: true };
+      });
+      return { result: rows.sort((x, y) => y.published_at.localeCompare(x.published_at)) };
+    }
+    const a = this.artifacts.get(String(params["id"] ?? ""));
+    if (!a || !mayTake(a)) return { error: { code: -32005, message: "not_found", data: { id: params["id"] } } };
+    this.artifacts.delete(a.id);
+    return { result: { deleted: true, id: a.id } };
   }
 
   private liveShare(sh: FakeArtifactShare): boolean {
@@ -631,6 +672,7 @@ export class FakePlane {
     return {
       ...shown,
       mine: a.owner.subject === subject,
+      scope: this.scopeOf(a, subject),
       role: this.roleOf(a, subject),
       version: latest.n,
       current: a.pinned ?? latest.n,
@@ -641,7 +683,7 @@ export class FakePlane {
       bytes: latest.files.reduce((n, f) => n + new TextEncoder().encode(f.content).length, 0),
       url: `https://artifacts.example.test/a/${a.id}/`,
       published_at: latest.published_at,
-      may_delete: a.owner.subject === subject || this.opts.admin?.role(subject) === "platform_admin",
+      may_delete: a.owner.subject === subject || this.opts.admin?.role(subject) === "platform_admin" || this.administers(a, subject),
     };
   }
 
@@ -774,7 +816,9 @@ export class FakePlane {
       const method = request.method ?? "";
       this.asked.push(method);
       let answer =
-        this.opts.admin && method.startsWith("admin.")
+        method === "admin.artifacts.list" || method === "admin.artifact.takedown"
+          ? this.adminArtifacts(held.subject, method, request.params ?? {})
+          : this.opts.admin && method.startsWith("admin.")
           ? await this.opts.admin.call(held.subject, method, request.params ?? {})
           : this.rpc(held.subject, held.name, method, request.params ?? {});
       // The version policy, with where releases are, signed where the plane has a key.
@@ -1027,12 +1071,13 @@ export class FakePlane {
               .filter((a) => this.mayRead(a, subject))
               .filter((a) => params["mine"] !== true || a.owner.subject === subject)
               .filter((a) => params["shared"] !== true || (a.owner.subject !== subject && this.linkRole(a, subject) !== null))
+              .filter((a) => params["teams"] !== true || (a.visibility.startsWith("team:") && (this.forThem(a) || this.opts.admin?.role(subject) === "platform_admin")))
               .filter((a) => typeof params["visibility"] !== "string" || a.visibility === params["visibility"])
               .map((a) => this.artifactJson(a, subject))
               .sort((x, y) => String(y["published_at"]).localeCompare(String(x["published_at"])))
           : [];
         return {
-          result: { enabled, profiles, publish_organisation: this.opts.publishOrganisation ?? "everyone", public_links: this.opts.publicLinks ?? false, gallery_url: `${this.url}/console#/artifacts`, artifacts: rows },
+          result: { enabled, profiles, teams: this.opts.teams ?? ["core"], publish_organisation: this.opts.publishOrganisation ?? "everyone", public_links: this.opts.publicLinks ?? false, gallery_url: `${this.url}/console#/artifacts`, artifacts: rows },
         };
       }
 
@@ -1162,7 +1207,7 @@ export class FakePlane {
       case "artifact.delete": {
         const a = this.artifacts.get(String(params["id"] ?? ""));
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
-        if (a.owner.subject !== subject && this.opts.admin?.role(subject) !== "platform_admin") {
+        if (a.owner.subject !== subject && this.opts.admin?.role(subject) !== "platform_admin" && !this.administers(a, subject)) {
           return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner or a platform admin deletes an artifact" } } };
         }
         this.artifacts.delete(a.id);

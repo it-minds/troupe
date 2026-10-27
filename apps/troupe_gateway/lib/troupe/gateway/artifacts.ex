@@ -87,7 +87,8 @@ defmodule Troupe.Gateway.Artifacts do
   def list(params) do
     with url when is_binary(url) <- Plane.url(),
          true <- Plane.linked?(),
-         {:ok, answer} <- Plane.call("artifact.list", Map.take(params, ~w(mine shared visibility))) do
+         {:ok, answer} <-
+           Plane.call("artifact.list", Map.take(params, ~w(mine shared teams visibility))) do
       {:ok, Map.put(answer, "plane_url", url)}
     else
       {:error, :unlinked} -> {:error, :signed_out}
@@ -103,6 +104,8 @@ defmodule Troupe.Gateway.Artifacts do
   @forwarded %{
     "artifact.get" => ~w(id),
     "artifact.open" => ~w(id version),
+    # One text file of a version, for the terminal's frame.
+    "artifact.read" => ~w(id version path),
     "artifact.share" => ~w(id role expires),
     "artifact.unshare" => ~w(id share person),
     "artifact.rollback" => ~w(id version),

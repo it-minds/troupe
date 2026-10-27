@@ -645,6 +645,10 @@ defmodule Troupe.Gateway.FakePlane do
   defp dispatch(_state, "artifact.open", %{"id" => _id}),
     do: {:ok, %{"url" => "https://artifacts.example.test/enter?ticket=fake", "expires_in" => 60}}
 
+  # One text file of a version, as the plane reads it for a client.
+  defp dispatch(_state, "artifact.read", %{"id" => id} = params),
+    do: {:ok, %{"id" => id, "version" => params["version"] || 1, "path" => params["path"] || "index.md", "text" => "# Weekly"}}
+
   defp dispatch(_state, "artifact.share", %{"id" => _id, "role" => role}) do
     {:ok,
      %{

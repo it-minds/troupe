@@ -297,7 +297,15 @@ defmodule Troupe.FakeRemote do
       challenges: MapSet.new(),
       client_tools: %{},
       invokes: %{},
-      next_invoke: 1
+      next_invoke: 1,
+      # A person's own things (root #62, #55): the artifacts they may see with the text of a
+      # Markdown one, the organisation's and their teams' memory documents and their own
+      # document's versions, newest first, and the invitations to them.
+      artifacts: Keyword.get(opts, :artifacts, []),
+      artifact_texts: Keyword.get(opts, :artifact_texts, %{}),
+      memory: Keyword.get(opts, :memory, []),
+      own_versions: Keyword.get(opts, :own_versions, []),
+      invites: Keyword.get(opts, :invites, [])
     }
 
     owner = self()
@@ -308,6 +316,20 @@ defmodule Troupe.FakeRemote do
   @impl true
   def handle_call(:url, _from, state), do: {:reply, "http://127.0.0.1:#{state.port}", state}
   def handle_call(:user_code, _from, state), do: {:reply, state.device.user_code, state}
+
+  def handle_call({:save_own, text}, _from, state) do
+    n = own_document(state)["version"] + 1
+
+    saved = %{
+      "version" => n,
+      "text" => text,
+      "bytes" => byte_size(text),
+      "changed_by" => "alice",
+      "changed_at" => "2026-10-26T11:00:00Z"
+    }
+
+    {:reply, :ok, %{state | own_versions: [saved | state.own_versions]}}
+  end
 
   def handle_call(:approve_device, _from, state),
     do: {:reply, :ok, put_in(state.device.approved?, true)}
@@ -1129,8 +1151,169 @@ defmodule Troupe.FakeRemote do
     end
   end
 
+  # A person's artifacts, as the plane answers them for the person signed in.
+  defp dispatch(state, _kind, "artifact.list", params, _pid) do
+    rows =
+      if params["shared"] == true,
+        do: Enum.filter(state.artifacts, &(&1["scope"] == "shared")),
+        else: state.artifacts
+
+    {{:ok,
+      %{"enabled" => true, "profiles" => ["dev"], "organisation" => "Example", "artifacts" => rows}},
+     state}
+  end
+
+  defp dispatch(state, _kind, "artifact.publish", params, _pid) do
+    id = "art-new#{length(state.artifacts)}"
+
+    row = %{
+      "id" => id,
+      "title" => params["title"],
+      "kind" => params["kind"],
+      "visibility" => params["visibility"],
+      "scope" => if(params["visibility"] == "private", do: "private", else: "mine"),
+      "version" => 1,
+      "mine" => true
+    }
+
+    {{:ok, Map.put(row, "url", "http://127.0.0.1:#{state.port}/a/#{id}/")},
+     %{state | artifacts: [row | state.artifacts]}}
+  end
+
+  defp dispatch(state, _kind, method, %{"id" => id} = params, _pid)
+       when method in ~w(artifact.get artifact.open artifact.read artifact.share) do
+    case Enum.find(state.artifacts, &(&1["id"] == id)) do
+      nil -> {{:error, -32_005, "not_found", %{"id" => id}}, state}
+      row -> {artifact(state, method, row, params), state}
+    end
+  end
+
+  # The person's own memory and who wrote it, and the levels above it.
+  defp dispatch(state, _kind, "me.memory", params, _pid) do
+    own =
+      state
+      |> own_document()
+      |> then(fn own ->
+        if params["blame"] == true,
+          do:
+            Map.put(
+              own,
+              "lines",
+              own["text"]
+              |> String.split("\n")
+              |> Enum.map(&%{"text" => &1, "version" => own["version"], "by" => "alice"})
+            ),
+          else: own
+      end)
+
+    documents =
+      state.memory ++
+        [own |> Map.take(~w(version text changed_by changed_at)) |> Map.put("scope", "user")]
+
+    {{:ok, %{"documents" => documents, "user" => own}}, state}
+  end
+
+  defp dispatch(state, _kind, "me.memory.put", %{"text" => text, "version" => base}, _pid) do
+    current = own_document(state)["version"]
+
+    if base == current do
+      saved = %{
+        "version" => current + 1,
+        "text" => text,
+        "bytes" => byte_size(text),
+        "changed_by" => "alice",
+        "changed_at" => "2026-10-26T10:00:00Z"
+      }
+
+      state = %{state | own_versions: [saved | state.own_versions]}
+      {{:ok, %{"changed" => true, "user" => own_document(state)}}, state}
+    else
+      {{:error, -32_009, "conflict", %{"version" => current}}, state}
+    end
+  end
+
+  # Its history: every version newest first, and two of them, as the plane answers it.
+  defp dispatch(state, _kind, "me.memory.history", params, _pid) do
+    text_of = fn n ->
+      Enum.find_value(state.own_versions, "", &(&1["version"] == n && &1["text"]))
+    end
+
+    shown = params["version"] || own_document(state)["version"]
+    against = params["against"] || shown - 1
+
+    {{:ok,
+      %{
+        "versions" => Enum.map(state.own_versions, &Map.delete(&1, "text")),
+        "version" => shown,
+        "text" => text_of.(shown),
+        "against" => against,
+        "against_text" => text_of.(against)
+      }}, state}
+  end
+
+  defp dispatch(state, kind, "me.memory.rollback", %{"to" => to, "version" => base}, pid) do
+    text = Enum.find_value(state.own_versions, "", &(&1["version"] == to && &1["text"]))
+    dispatch(state, kind, "me.memory.put", %{"text" => text, "version" => base}, pid)
+  end
+
+  defp dispatch(state, _kind, "invites.list", _params, _pid),
+    do: {{:ok, %{"invites" => state.invites}}, state}
+
   defp dispatch(state, _kind, _method, _params, _pid),
     do: {{:error, -32_601, "method not found"}, state}
+
+  defp own_document(%{own_versions: [newest | _]}),
+    do: Map.merge(%{"limit" => 8192, "bytes" => byte_size(newest["text"])}, newest)
+
+  defp own_document(_state), do: %{"version" => 0, "text" => "", "bytes" => 0, "limit" => 8192}
+
+  defp artifact(_state, "artifact.get", row, _params),
+    do:
+      {:ok,
+       Map.put_new(row, "versions", [
+         %{"n" => row["version"], "published_by" => %{"display_name" => "Bea"}}
+       ])}
+
+  defp artifact(state, "artifact.open", row, params),
+    do:
+      {:ok,
+       %{
+         "url" =>
+           "http://127.0.0.1:#{state.port}/enter?ticket=t-#{row["id"]}-#{params["version"] || "current"}",
+         "expires_in" => 60
+       }}
+
+  defp artifact(state, "artifact.read", row, params) do
+    case state.artifact_texts[row["id"]] do
+      nil ->
+        {:error, -32_602, "invalid_params",
+         %{"reason" => "#{row["id"]} is not text, so it is not one to edit here"}}
+
+      text ->
+        {:ok,
+         %{
+           "id" => row["id"],
+           "version" => params["version"] || row["version"],
+           "path" => "index.md",
+           "text" => text
+         }}
+    end
+  end
+
+  defp artifact(state, "artifact.share", %{"mine" => true} = row, params),
+    do:
+      {:ok,
+       %{
+         "token" => "tok",
+         "url" => "http://127.0.0.1:#{state.port}/s/tok-#{row["id"]}-#{params["role"]}"
+       }}
+
+  defp artifact(_state, "artifact.share", _row, _params),
+    do: {:error, -32_003, "forbidden", %{"reason" => "only its owner makes links to it"}}
+
+  @doc "Saves the person's own memory as another machine would, so the next save over the old version conflicts."
+  @spec save_own(pid(), String.t()) :: :ok
+  def save_own(remote, text), do: GenServer.call(remote, {:save_own, text})
 
   defp pod_agent do
     %{

@@ -37,6 +37,42 @@ defmodule Troupe.Clipboard do
     end
   end
 
+  @doc """
+  Copies `text` through the terminal itself where it takes OSC 52 (`osc52?/1`), which works
+  over ssh as no clipboard command does, and with this machine's clipboard command where it
+  does not. Answers `"the terminal"` or the command that took it.
+
+  `config :troupe, osc52_writer: fun` is given the sequence instead of standard output, which
+  is how the suite reads what would be written.
+  """
+  @spec copy_through_terminal(String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
+  def copy_through_terminal(text, env \\ System.get_env()) when is_binary(text) do
+    if osc52?(env) do
+      sequence = "\e]52;c;" <> Base.encode64(text) <> "\a"
+
+      case Application.get_env(:troupe, :osc52_writer) do
+        fun when is_function(fun, 1) -> fun.(sequence)
+        _ -> IO.write(sequence)
+      end
+
+      {:ok, "the terminal"}
+    else
+      copy(text)
+    end
+  end
+
+  @doc """
+  Whether the terminal takes OSC 52, as its environment says it: Windows Terminal, iTerm2,
+  WezTerm, kitty, Alacritty, foot and Ghostty do. A terminal that says nothing is not
+  assumed to.
+  """
+  @spec osc52?(map()) :: boolean()
+  def osc52?(env) do
+    is_binary(env["WT_SESSION"]) or
+      env["TERM_PROGRAM"] in ["iTerm.app", "WezTerm", "ghostty"] or
+      env["TERM"] in ["xterm-kitty", "alacritty", "foot", "xterm-ghostty"]
+  end
+
   @doc "The clipboard command this machine would use, or nil when it has none."
   @spec command() :: String.t() | nil
   def command do

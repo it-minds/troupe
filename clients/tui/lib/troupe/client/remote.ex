@@ -297,6 +297,20 @@ defmodule Troupe.Client.Remote do
     end
   end
 
+  @doc """
+  The invitations to the person signed in at `plane` (`invites.list`): each the session, its
+  title, whose it is, the role and who invited them, newest first. A plane from before
+  invitations lists none.
+  """
+  @spec invitations(String.t()) :: {:ok, [map()]} | {:error, String.t()}
+  def invitations(plane) do
+    case call(plane, "invites.list", %{}) do
+      {:ok, %{"invites" => invites}} when is_list(invites) -> {:ok, invites}
+      {:ok, _other} -> {:ok, []}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
   # The plane's sentence where it gave one: who may not be invited, and why.
   defp refusal(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
   defp refusal(%{"data" => %{"reason" => reason}}) when is_binary(reason), do: reason

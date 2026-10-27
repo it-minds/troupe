@@ -37,7 +37,9 @@ You change it in three places, each saving over the version you started from, so
 made elsewhere meanwhile is said rather than overwritten:
 
 - **`troupe memory`** prints it; `troupe memory --edit` opens it in your editor (`VISUAL`,
-  then `EDITOR`) and saves what you leave there; `troupe memory --clear` empties it.
+  then `EDITOR`) and saves what you leave there; `troupe memory --clear` empties it. Inside
+  the terminal client, `/memory` is the same page as the desktop app's *Memory*, entry by
+  entry ([the terminal client's screen](terminal-screen.md#memory)).
 - **The desktop app**: *Memory* in the rail, through this computer's daemon (below). A
   session's *Instructions* pane lists it as *Your memory* and opens *Memory* for it.
 - **The console**, under *Mine*: a change is previewed line by line before it is saved.
