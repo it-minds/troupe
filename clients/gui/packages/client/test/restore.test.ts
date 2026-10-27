@@ -84,6 +84,34 @@ describe("a reload keeps you signed in", () => {
     assert.ok(h.idp.refreshTokens.has((await store.read(key()))!));
   });
 
+  it("holds a store's own lock around the refresh, reading and writing the token inside it", async () => {
+    // A store other programs rotate too — the desktop app's sign-in, shared with the
+    // terminal client — brings a lock they all honour; the token is read once it is
+    // held and the rotated one written before it is let go.
+    const inner = memoryTokenStore();
+    const trace: string[] = [];
+    const store: TokenStore = {
+      read: (k) => (trace.push("read"), inner.read(k)),
+      write: (k, v) => (trace.push("write"), inner.write(k, v)),
+      clear: (k) => inner.clear(k),
+      async lock(_k, f) {
+        trace.push("lock");
+        try {
+          return await f();
+        } finally {
+          trace.push("unlock");
+        }
+      },
+    };
+    await h.signIn({ store });
+    trace.length = 0;
+
+    const restored = await reload(store).restore();
+    assert.ok(restored);
+    assert.deepEqual(trace, ["lock", "read", "write", "unlock"]);
+    assert.ok(h.idp.refreshTokens.has((await store.read(key()))!));
+  });
+
   it("says why the provider refused, and forgets only the token it refused", async (t) => {
     const logged = warnings(t);
     const store = memoryTokenStore();

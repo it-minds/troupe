@@ -150,6 +150,30 @@ defmodule Troupe.ConfigSetupTest do
       assert_received {:pull, "https://plane.example"}
     end
 
+    # The sign-in is the machine's, shared with the desktop app: a
+    # machine signed in already is offered that plane and not sent through the device
+    # flow again.
+    test "a plane this machine is signed in to already: offered as the default, and its settings pulled with no second sign-in" do
+      answers = ["2", ""]
+      io = io(daemon: settings(@nothing), answers: answers, signed_in: "https://plane.example")
+      assert ConfigSetup.run("/w", io) == 0
+      assert_received {:ask, "plane URL [https://plane.example]: "}
+      refute_received {:login, _}
+      assert_received {:pull, "https://plane.example"}
+
+      answers = ["2", "https://plane.example/"]
+      io = io(daemon: settings(@nothing), answers: answers, signed_in: "https://plane.example")
+      assert ConfigSetup.run("/w", io) == 0
+      refute_received {:login, _}
+      assert_received {:pull, "https://plane.example"}
+
+      answers = ["2", "https://other.example"]
+      io = io(daemon: settings(@nothing), answers: answers, signed_in: "https://plane.example")
+      assert ConfigSetup.run("/w", io) == 0
+      assert_received {:login, "https://other.example"}
+      assert_received {:pull, "https://other.example"}
+    end
+
     test "a provider set up here: the key's reference is saved, the model is picked from the list" do
       System.put_env("TROUPE_TEST_SETUP_KEY", "k-from-env")
       on_exit(fn -> System.delete_env("TROUPE_TEST_SETUP_KEY") end)
@@ -540,6 +564,7 @@ defmodule Troupe.ConfigSetupTest do
         send(test, {:pull, url})
         0
       end,
+      signed_in: fn -> Keyword.get(opts, :signed_in, nil) end,
       describe: fn -> "REPORT" end,
       opencode: fn -> Keyword.get(opts, :opencode, %{names: [], default: nil}) end,
       local_file?: fn -> Keyword.get(opts, :local_file?, false) end,

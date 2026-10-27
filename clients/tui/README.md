@@ -164,13 +164,17 @@ troupe login https://plane.example
 It reads the plane's `/.well-known/troupe`, runs the OAuth device flow against the issuer
 it names, and prints a code to enter in a browser. The refresh token lands in
 `credentials.json` in your config directory ([where](../../docs/user/configuration/files.md)),
-readable by your account alone (`0600` on Unix, an ACL naming only you on Windows).
-`troupe whoami` says who you are and which teams you are in; `troupe logout` forgets one
-plane, `troupe logout --all` every one.
+readable by your account alone (`0600` on Unix, an ACL naming only you on Windows). The
+file is the machine's sign-in, not the terminal's: the desktop app reads and renews the
+same token, and whichever program renews it holds `credentials.lock` beside it meanwhile,
+so the other spends the renewed token rather than a retired one. `troupe whoami` says who
+you are and which teams you are in; `troupe logout` forgets one plane, `troupe logout
+--all` every one, for the desktop app as well.
 
-Signed in, `troupe` links the daemon on this machine to you at that plane and hands it the
-plane token, when it attaches, a minute before the token runs out and after the daemon
-restarted; the daemon keeps it in memory only and seals a
+`troupe login` links the daemon on this machine to you at that plane there and then and
+hands it the plane token, starting the installed `troupe-daemon` where none is running.
+Signed in, `troupe` hands the token over again when it attaches, a minute before the token
+runs out and after the daemon restarted; the daemon keeps it in memory only and seals a
 [private session](../../docs/user/README.md#words-you-will-meet) with it (`troupe
 --private`, `troupe run --private`). A daemon somebody else linked is left as it is.
 

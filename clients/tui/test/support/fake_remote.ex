@@ -102,6 +102,10 @@ defmodule Troupe.FakeRemote do
   @spec plane_tokens(pid()) :: MapSet.t()
   def plane_tokens(remote), do: GenServer.call(remote, :plane_tokens)
 
+  @doc "The refresh tokens the token endpoint was shown, newest first."
+  @spec refresh_grants(pid()) :: [String.t()]
+  def refresh_grants(remote), do: GenServer.call(remote, :refresh_grants)
+
   @doc "Drops every worker connection, as a network partition or a worker restart would."
   @spec kill_workers(pid()) :: :ok
   def kill_workers(remote), do: GenServer.call(remote, :kill_workers)
@@ -287,6 +291,8 @@ defmodule Troupe.FakeRemote do
       private: %{},
       device: %{code: "DEV-CODE", user_code: "WXYZ-1234", approved?: false},
       refresh_broken?: false,
+      # The refresh tokens presented to the token endpoint, newest first.
+      refresh_grants: [],
       seq: Map.new(sessions, fn {id, session} -> {id, highest(session.events)} end),
       # The worker that really has a session, where `move/4` said it is not the one the
       # plane names; and the workers that refuse connections.
@@ -405,6 +411,7 @@ defmodule Troupe.FakeRemote do
   end
 
   def handle_call(:plane_tokens, _from, state), do: {:reply, state.plane_tokens, state}
+  def handle_call(:refresh_grants, _from, state), do: {:reply, state.refresh_grants, state}
 
   def handle_call(:kill_workers, _from, state) do
     for {pid, %{kind: :worker}} <- state.connections, do: send(pid, :die)
@@ -1902,7 +1909,8 @@ defmodule Troupe.FakeRemote do
         {:reply, {400, %{"error" => "invalid_grant"}}, state}
 
       params["grant_type"] == "refresh_token" ->
-        {:reply, {200, tokens()}, state}
+        {:reply, {200, tokens()},
+         %{state | refresh_grants: [params["refresh_token"] | state.refresh_grants]}}
 
       not state.device.approved? ->
         {:reply, {400, %{"error" => "authorization_pending"}}, state}

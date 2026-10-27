@@ -8,9 +8,13 @@
 //
 // Three things, and a process is needed for each:
 //
-//   secretStore   the OS credential store — Windows Credential Manager, the macOS
-//                 Keychain, the Secret Service on Linux. A tab's best offer is
-//                 `localStorage`, which is the one place a refresh token must not be.
+//   secretStore   the machine's sign-in: `credentials.json` in the Troupe config
+//                 directory, the file `troupe login` writes, readable by the person
+//                 alone, so the terminal client, this app and the daemon share one
+//                 sign-in. A tab's best offer is `localStorage`, which
+//                 is the one place a refresh token must not be. The OS credential
+//                 store, where earlier releases kept it, is read once to move a
+//                 sign-in over.
 //   openExternal  a webview does nothing useful with `target="_blank"`, and the device
 //                 grant is unusable unless its link reaches a real browser.
 //   fetchImpl     HTTP from outside the webview, so a plane needs no CORS entry for
@@ -37,26 +41,61 @@ export function inTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+/** The plane a store key names: `AuthSession` keys the refresh token `refresh:<plane>`. */
+function planeOf(key: string): string {
+  return key.startsWith("refresh:") ? key.slice("refresh:".length) : key;
+}
+
 /**
- * The OS credential store, reached through three commands rather than a filesystem
- * plugin: a command can hold exactly one key and no path, which is a narrower thing to
+ * The sign-in shared with the TUI, reached through commands rather than a filesystem
+ * plugin: a command can hold exactly one plane and no path, which is a narrower thing to
  * have granted than "read and write files".
+ *
+ * A sign-in an earlier release kept in the OS credential store is moved into the file the
+ * first time it is asked for and the file has none, and cleared from the store, so that
+ * one copy rotates and no stale one is left to be refused. The lock is the machine's
+ * (`credentials.lock`), held by whichever client is refreshing: providers rotate the
+ * token on use, and two clients refreshing one token at once would have the second
+ * refused, and the sign-in with it.
  */
-function keychainStore(): TokenStore {
+function signInStore(): TokenStore {
   return {
     async read(key: string) {
       const { invoke } = await import("@tauri-apps/api/core");
-      return await invoke<string | null>("secret_get", { key });
+      const plane = planeOf(key);
+      const shared = await invoke<string | null>("signin_get", { planeUrl: plane });
+      if (shared) return shared;
+      const kept = await invoke<string | null>("secret_get", { key }).catch(() => null);
+      if (!kept) return null;
+      await invoke("signin_set", { planeUrl: plane, refreshToken: kept });
+      await invoke("secret_delete", { key }).catch(() => undefined);
+      return kept;
     },
     async write(key: string, value: string) {
       const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("secret_set", { key, value });
+      await invoke("signin_set", { planeUrl: planeOf(key), refreshToken: value });
     },
     async clear(key: string) {
       const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("secret_delete", { key });
+      await invoke("signin_clear", { planeUrl: planeOf(key) });
+      await invoke("secret_delete", { key }).catch(() => undefined);
+    },
+    async lock<T>(_key: string, f: () => Promise<T>) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("signin_lock");
+      try {
+        return await f();
+      } finally {
+        await invoke("signin_unlock").catch(() => undefined);
+      }
     },
   };
+}
+
+/** The plane this machine is signed in to by default: `credentials.json`'s `current`. */
+async function signedInPlane(): Promise<string | null> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return (await invoke<string | null>("signin_current")) ?? null;
 }
 
 /**
@@ -205,7 +244,9 @@ export async function installShell(): Promise<void> {
     name: "Troupe Desktop",
     version: await getVersion().catch(() => "0.0.0"),
     ...(platform ? { platform } : {}),
-    secretStore: keychainStore(),
+    secretStore: signInStore(),
+    secrets: "config-file",
+    signedInPlane,
     openExternal: (url) => openUrl(url),
     fetchImpl: rustFetch as typeof fetch,
     // Not inferred: a webview has a `location` and Web Crypto, so it looks like a

@@ -44,6 +44,7 @@ export function newSession(planeUrl: string): AuthSession {
 }
 
 const SECRETS: Record<string, string> = {
+  "config-file": "Your sign-in is kept in your Troupe config directory, readable by your account alone, and shared with troupe in the terminal and the daemon on this computer.",
   "os-keychain": "Your sign-in is kept in this computer's credential store.",
   "browser-storage":
     "This is the browser version. Your sign-in is kept in this browser, where anything else running on this address could read it. The desktop app keeps it in the computer's own credential store.",

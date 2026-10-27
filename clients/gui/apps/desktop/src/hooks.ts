@@ -117,18 +117,22 @@ function samePlane(a: string | null | undefined, b: string): boolean {
 }
 
 /**
- * Hand the daemon this app's plane token, where the daemon is linked to the person signed
- * in here at this plane (issue #365). The daemon signs nobody in: it registers and seals a
- * private session with the token it was last handed, holds it in memory only, and cannot
- * renew it. A daemon linked to somebody else, or not linked, is left as it is: linking is
- * the person's own choice, on This computer.
+ * Hand the daemon this app's plane token, linking it to the person signed in here at this
+ * plane (issue #365). The daemon signs nobody in: it registers and seals a private session
+ * with the token it was last handed, holds it in memory only, and cannot renew it. A
+ * daemon nobody has linked is linked as this person, as `troupe login` links it: signing
+ * in is the person asking, and a daemon left unlinked is one whose private sessions and
+ * artifacts this app cannot reach. One linked to somebody else, or to this
+ * person at another plane, is left as it is; This computer is where that is changed.
  */
 async function handOver(client: DaemonClient, auth: AuthSession | null, who: DaemonIdentity | null): Promise<DaemonIdentity | null> {
-  if (!auth?.me || !who?.linked || who.subject !== auth.me.subject || !samePlane(who.plane_url, auth.planeUrl)) return null;
+  if (!auth?.me) return null;
+  if (who?.linked && (who.subject !== auth.me.subject || !samePlane(who.plane_url, auth.planeUrl))) return null;
   const token = await auth.token();
+  const name = who?.linked ? who.display_name : auth.me.display_name;
   return client.linkIdentity({
-    subject: who.subject,
-    ...(who.display_name ? { display_name: who.display_name } : {}),
+    subject: auth.me.subject,
+    ...(name ? { display_name: name } : {}),
     plane_url: auth.planeUrl,
     plane_token: token,
   });

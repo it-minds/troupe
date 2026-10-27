@@ -39,6 +39,42 @@ defmodule Troupe.PrivateLinkTest do
     assert Map.has_key?(FakeRemote.registered(remote), sid)
   end
 
+  # The installer's `troupe login` is the daemon's sign-in too, before
+  # any session has opened; a daemon somebody else linked is left as it is.
+  test "troupe login links the daemon on this machine with the token, where one is running" do
+    {remote, url} = start_remote!(transport: :http)
+    # The daemon this VM embeds, as a machine with a daemon running has one; linked to
+    # nobody, whatever an earlier test's renewal left on it.
+    {:ok, _} = Link.call("identity.unlink", %{command_id: RPC.command_id()})
+
+    lines = login!(remote, url)
+
+    assert Enum.any?(lines, &String.contains?(&1, "the daemon on this machine is linked to Alice"))
+    identity = linked(url)
+    assert identity["subject"] == "alice"
+    assert daemon_token() in FakeRemote.plane_tokens(remote)
+  end
+
+  test "troupe login leaves a daemon linked to somebody else as it is" do
+    {remote, url} = start_remote!(transport: :http)
+    {:ok, _} = Link.call("identity.unlink", %{command_id: RPC.command_id()})
+
+    {:ok, _} =
+      Link.call("identity.link", %{
+        command_id: RPC.command_id(),
+        subject: "bob",
+        display_name: "Bob",
+        plane_url: url
+      })
+
+    lines = login!(remote, url)
+
+    assert Enum.any?(lines, &String.contains?(&1, "linked to somebody else"))
+    assert {:ok, %{"subject" => "bob"}} = Link.call("identity.get", %{})
+    assert FakeRemote.plane_tokens(remote) |> MapSet.size() == 1
+    refute daemon_token() in FakeRemote.plane_tokens(remote)
+  end
+
   test "a renewed token is handed over before the one the daemon holds runs out" do
     # A plane token good for two seconds past the minute before its end that the TUI
     # renews it in.

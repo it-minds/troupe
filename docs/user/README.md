@@ -122,6 +122,11 @@ client attached is in Local only, the daemon's own checks with the plane wait to
 first, and the desktop app updates itself and the daemon beside it the same way
 ([updating](updating.md)). `troupe login <plane URL>` signs you in with a code you type in
 your browser; you sign in where you always do, and Troupe never has a password of its own.
+That sign-in is the machine's: the installer's `troupe config` runs it, the desktop app
+opens signed in with it and starts at that plane, and the daemon is linked to you at it
+there and then, so a private session and its artifacts are yours from either client. A
+sign-in made in the desktop app is `troupe`'s the same way, and signing out in one is
+signing out in both.
 
 ## Words you will meet
 
@@ -143,7 +148,7 @@ plane it is sealed at.
 
 **Private session.** A session on your machine sealed under your own key, listed by the
 plane and opened from another device: `troupe --private`, or *Keep it private* in the
-desktop app once *This computer* uses your account. Your client hands the daemon its
+desktop app, which uses your account on this computer once you sign in. Your client hands the daemon its
 sign-in to the plane, again as it renews it and after the daemon restarts, and the daemon
 keeps it in memory only; one started while it had none is sealed once it has. Signing out
 (`troupe logout`, or *Sign out* in the desktop app) takes it back, and nothing is sealed

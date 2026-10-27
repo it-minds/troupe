@@ -15,6 +15,14 @@ defmodule Troupe.Remote.Credentials do
   Beside the token, `sub`: who the plane said the person is at the last exchange. A
   label, not a credential, and what `troupe logout` tells the daemon, so that it lets go
   of the person's plane token and not of somebody else's (issue #381).
+
+  The file is the machine's sign-in, not this program's: the desktop app reads and
+  rotates the same token, so one `troupe login` serves both and the
+  daemon either hands it to. A provider rotates the refresh token on every use and
+  refuses the old one from then on, so whoever refreshes holds `credentials.lock` beside
+  the file meanwhile (`with_lock/1`), reads the token afresh inside it, and writes the
+  rotated one before letting go; the other program waits its turn and spends the new
+  token rather than the retired one. A lock a dead process left goes stale after a minute.
   """
 
   alias Troupe.Paths
@@ -29,12 +37,71 @@ defmodule Troupe.Remote.Credentials do
           optional(:saved_at) => integer()
         }
 
+  # How long another program's refresh is waited for, and how old a lock is before it is
+  # taken for one a dead process left.
+  @lock_wait_ms 15_000
+  @lock_stale_ms 60_000
+
   @doc """
   The credential file's path, beside `config.yaml`; on Windows one an older build kept
   under `~\\.config\\troupe` is moved here (`Troupe.Paths.config_file/2`).
   """
   @spec path() :: String.t()
   def path, do: Paths.config_file("credentials.json")
+
+  @doc "The lock file's path: taken by whichever program is refreshing the token."
+  @spec lock_path() :: String.t()
+  def lock_path, do: Path.join(Paths.config_dir(), "credentials.lock")
+
+  @doc """
+  Run `fun` while nothing else on this machine refreshes the token: the desktop app
+  holds the same lock around its own refresh. Waits up to fifteen seconds for the other
+  holder, breaks a lock older than a minute, and past the wait goes ahead anyway, since
+  a sign-in that cannot be renewed is the worse outcome. Always let go of afterwards.
+  """
+  @spec with_lock((-> result)) :: result when result: term()
+  def with_lock(fun) do
+    lock = lock_path()
+    File.mkdir_p!(Path.dirname(lock))
+    acquire(lock, System.monotonic_time(:millisecond) + @lock_wait_ms)
+
+    try do
+      fun.()
+    after
+      _ = File.rm(lock)
+    end
+  end
+
+  defp acquire(lock, deadline) do
+    case File.open(lock, [:write, :exclusive]) do
+      {:ok, device} ->
+        File.close(device)
+
+      {:error, :eexist} ->
+        if stale?(lock) or System.monotonic_time(:millisecond) > deadline do
+          _ = File.rm(lock)
+        else
+          Process.sleep(50)
+        end
+
+        acquire(lock, deadline)
+
+      # A directory that cannot hold the lock cannot hold the file either; the refresh
+      # goes ahead and says so where it writes.
+      {:error, _reason} ->
+        :ok
+    end
+  end
+
+  defp stale?(lock) do
+    case File.stat(lock, time: :posix) do
+      {:ok, %File.Stat{mtime: mtime}} ->
+        System.os_time(:second) - mtime > div(@lock_stale_ms, 1_000)
+
+      {:error, _} ->
+        false
+    end
+  end
 
   @doc "Every plane this machine is logged in to, newest first."
   @spec list() :: [entry()]

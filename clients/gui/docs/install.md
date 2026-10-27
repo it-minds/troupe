@@ -85,8 +85,13 @@ might be made to.
 ## What you get and what you do not
 
 Working: everything the browser build does, plus the one thing it cannot — the refresh
-token in the operating system's credential store, so a relaunch does not mean signing in
-again. The sign-in screen says which store it got, so there is no guessing.
+token kept outside the page, in `credentials.json` in your Troupe config directory
+(`~/.config/troupe`, `%APPDATA%\troupe` on Windows), readable by your account alone, so
+a relaunch does not mean signing in again. It is the file `troupe login` writes, so the
+terminal client and the desktop app share one sign-in, and a machine signed in by the
+installer opens the app signed in and at that plane. A sign-in an earlier release kept in
+the operating system's credential store is moved there at the next launch. The sign-in
+screen says where it is kept, so there is no guessing.
 
 The shell also runs the *device* grant rather than the browser build's authorization-code
 flow: a desktop app has no redirect to come back from, and the device grant is exactly

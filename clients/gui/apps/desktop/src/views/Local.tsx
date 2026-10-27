@@ -193,7 +193,9 @@ function Connect({ daemon }: { daemon: DaemonState }): JSX.Element {
  * Unlinked, it calls you by the operating system's username, which means nothing off
  * this machine — so nothing it records could be billed, listed by a plane, or opened
  * from another device. Linking is what makes a local session yours rather than this
- * login's, and it is the precondition for a private session.
+ * login's, and it is the precondition for a private session. Signing in links a daemon
+ * nobody has linked by itself; this is where that is undone, or done
+ * again where the daemon was somebody else's.
  */
 function WhoAmI({
   daemon,
@@ -255,7 +257,8 @@ function WhoAmI({
         <>
           <p className="copy">
             Sessions started here are recorded under this computer&apos;s login, which means nothing anywhere else. Using your account
-            instead is what lets a session on this machine be listed by the platform and opened from another device.
+            instead is what lets a session on this machine be listed by the platform and opened from another device. Signing in does
+            this by itself; this is for a daemon that was linked to somebody else, or that could not be reached then.
           </p>
           <button className="primary" onClick={() => void act(true)} disabled={busy}>
             {busy ? "Working…" : `Use my account (${me.display_name ?? me.subject})`}
