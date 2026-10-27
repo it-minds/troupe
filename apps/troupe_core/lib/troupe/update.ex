@@ -1,7 +1,8 @@
 defmodule Troupe.Update do
   @moduledoc """
   `troupe update`: a release, checked, then swapped in for the troupe and the
-  troupe-daemon the installers put on this machine (#66, Decision 865).
+  troupe-daemon the installers put on this machine (#66, Decision 865), and for the
+  desktop app and the VS Code extension where the installers put those too (Decision 959).
 
       troupe update --check            what is installed, the latest release, and what an update would do
       troupe update [--version X]      install the latest release, or X
@@ -45,12 +46,28 @@ defmodule Troupe.Update do
   `--version` that moves it back. The release is still checked against the release key
   exactly as without a plane: a plane can hold a version back or name one, and cannot make
   this install anything the key did not sign, nor walk a machine back to an old release.
+
+  **Every component the installers put here** (Decision 959). An install picks its
+  components once; from then on one update moves all of them. Beside troupe and
+  troupe-daemon: the desktop app, where `install.sh`/`install.ps1` put it (the AppImage
+  beside the programs on Linux, `~/Applications/Troupe.app` on macOS, the per-user setup
+  on Windows), replaced from the release's own AppImage, disk image or setup, held to the
+  manifest as the rest; and the VS Code extension, where `code` lists it, installed again
+  from the release's `troupe.vsix`. Each is replaced after troupe and troupe-daemon, and a
+  failure there leaves those two in place and is said. A desktop app that is running keeps
+  running the old build until it is restarted, and is told so. `--rollback` puts back the
+  AppImage or the app bundle kept as `.previous`; the Windows setup and the extension keep
+  no previous and are said to.
   """
 
   alias Troupe.Protocol.{Client, ClientUpdate, Daemon}
   alias Troupe.Release.{Keys, Manifest, Minisign}
 
   @repo "it-minds/troupe"
+  # The VS Code extension's id, as `code --list-extensions` names it.
+  @extension "objective-mj.troupe"
+  # The desktop app's per-user uninstall entry on Windows, which its setup writes.
+  @uninstall_key "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Troupe"
   # A manifest and its signature are a few kilobytes; anything much bigger is not one.
   @small 1_048_576
 
@@ -62,12 +79,17 @@ defmodule Troupe.Update do
   `opts`: `:version` (the release asked for), `:installed` (this troupe's version),
   `:plane` (`%{url: plane, versions: %{"tui" => policy, "daemon" => policy}, release_url:
   url}`, what a plane signed in to says, or `nil`), and, standing in for the machine in tests,
-  `:release_url`, `:repo`, `:keys`, `:target`, `:tui`, `:lib`, `:windows?`, `:out` (a line
-  printed), `:fetch`, `:daemon` (what quiets the daemon) and `:sleep`.
+  `:release_url`, `:repo`, `:keys`, `:target`, `:tui`, `:lib`, `:desktop` (where the
+  desktop app is: `%{kind: :appimage | :mac_app | :windows_setup, path: ...}`), `:vscode`
+  (VS Code's command line, or nil), `:windows?`, `:out` (a line printed), `:fetch`,
+  `:run` (a program run to completion: `{:ok, output, status}`), `:daemon` (what quiets
+  the daemon) and `:sleep`.
   """
   @spec run(action(), keyword()) :: non_neg_integer()
   def run(action, opts \\ []) do
     s = settings(opts)
+    # Asked once: the extension's version is a program run, the desktop app's a file read.
+    s = Map.put(s, :installed_now, installed(s))
 
     result =
       case action do
@@ -104,9 +126,12 @@ defmodule Troupe.Update do
       target: Keyword.get_lazy(opts, :target, &Manifest.target/0),
       tui: Keyword.get_lazy(opts, :tui, fn -> tui_path(windows?) end),
       lib: Keyword.get_lazy(opts, :lib, fn -> lib_dir(windows?) end),
+      desktop: Keyword.get_lazy(opts, :desktop, fn -> desktop_install(windows?) end),
+      vscode: Keyword.get_lazy(opts, :vscode, fn -> code_cli(windows?) end),
       windows?: windows?,
       out: Keyword.get(opts, :out, &IO.puts/1),
       fetch: Keyword.get(opts, :fetch, &fetch/2),
+      run: Keyword.get(opts, :run, &run_program/1),
       daemon: Keyword.get(opts, :daemon, &quiet_daemon/1),
       sleep: Keyword.get(opts, :sleep, &Process.sleep/1)
     }
@@ -165,19 +190,170 @@ defmodule Troupe.Update do
   defp daemon_bin(lib, true), do: Path.join(lib, "bin/troupe-daemon.cmd")
   defp daemon_bin(lib, false), do: Path.join(lib, "bin/troupe-daemon")
 
+  defp installed(%{installed_now: %{} = inst}), do: inst
+
   defp installed(s) do
     %{
       tui: if(File.regular?(s.tui), do: s.installed || "unknown version"),
-      daemon: daemon_version(s.lib, s.windows?)
+      daemon: daemon_version(s.lib, s.windows?),
+      desktop: desktop_version(s.desktop, s),
+      vscode: extension_version(s.vscode, s)
     }
   end
+
+  # -- the desktop app and the VS Code extension (Decision 959) -------------------
+
+  # Where the installers put the desktop app: `install.sh` puts the AppImage beside the
+  # programs and the app bundle under `~/Applications`; `install.ps1` runs the per-user
+  # setup, whose uninstall entry is what says it is there and which version.
+  defp desktop_install(true), do: %{kind: :windows_setup, path: nil}
+
+  defp desktop_install(false) do
+    case :os.type() do
+      {:unix, :darwin} ->
+        %{kind: :mac_app, path: Path.join(System.user_home!(), "Applications/Troupe.app")}
+
+      _ ->
+        %{
+          kind: :appimage,
+          path: Path.join(bin_dir(false), "troupe-desktop"),
+          entry: Path.join(data_dir(), "applications/troupe.desktop")
+        }
+    end
+  end
+
+  defp data_dir, do: env("XDG_DATA_HOME") || Path.join(System.user_home!(), ".local/share")
+
+  @doc """
+  The version of the desktop app the installers put here, or `nil` where there is none:
+  the AppImage's from the `.version` file beside it or the menu entry's comment, the app
+  bundle's from its `Info.plist`, the Windows setup's from its uninstall entry.
+  """
+  @spec desktop_version(map() | nil, map()) :: String.t() | nil
+  def desktop_version(%{kind: :appimage, path: path} = desktop, _s) do
+    if File.regular?(path) do
+      case File.read(path <> ".version") do
+        {:ok, version} when byte_size(version) > 0 -> String.trim(version)
+        _ -> entry_version(desktop[:entry]) || "unknown version"
+      end
+    end
+  end
+
+  def desktop_version(%{kind: :mac_app, path: app}, _s) do
+    plist = Path.join(app, "Contents/Info.plist")
+
+    if File.regular?(plist) do
+      case Regex.run(
+             ~r{<key>CFBundleShortVersionString</key>\s*<string>([^<]+)</string>},
+             File.read!(plist)
+           ) do
+        [_, version] -> String.trim(version)
+        _ -> "unknown version"
+      end
+    end
+  end
+
+  def desktop_version(%{kind: :windows_setup}, s) do
+    case s.run.(["reg", "query", @uninstall_key, "/v", "DisplayVersion"]) do
+      {:ok, output, 0} ->
+        case Regex.run(~r/DisplayVersion\s+REG_SZ\s+(\S+)/, output) do
+          [_, version] -> version
+          _ -> "unknown version"
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  def desktop_version(_none, _s), do: nil
+
+  # `Comment=The Troupe desktop app, release 0.28.0-beta`, as the installer writes the entry.
+  defp entry_version(nil), do: nil
+
+  defp entry_version(entry) do
+    with {:ok, text} <- File.read(entry),
+         [_, version] <- Regex.run(~r/^Comment=.*\brelease (\S+)\s*$/m, text) do
+      version
+    else
+      _ -> nil
+    end
+  end
+
+  # VS Code's command line, as the installers find it: `TROUPE_VSCODE_CLI`, `code` on the
+  # PATH, or where the macOS and Windows setups put it.
+  defp code_cli(windows?) do
+    local = System.get_env("LOCALAPPDATA", "")
+    programs = System.get_env("ProgramFiles", "")
+
+    candidates =
+      if windows? do
+        [
+          env("TROUPE_VSCODE_CLI"),
+          Troupe.Executable.find("code.cmd"),
+          Path.join(local, "Programs/Microsoft VS Code/bin/code.cmd"),
+          Path.join(programs, "Microsoft VS Code/bin/code.cmd")
+        ]
+      else
+        [
+          env("TROUPE_VSCODE_CLI"),
+          Troupe.Executable.find("code"),
+          "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+          Path.join(
+            System.user_home!(),
+            "Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+          )
+        ]
+      end
+
+    Enum.find(candidates, &(is_binary(&1) and &1 != "" and File.regular?(&1)))
+  end
+
+  @doc """
+  The version of the VS Code extension `code` lists, or `nil` where there is no `code` or
+  it is not installed.
+  """
+  @spec extension_version(String.t() | nil, map()) :: String.t() | nil
+  def extension_version(nil, _s), do: nil
+
+  def extension_version(code, s) do
+    case s.run.([code, "--list-extensions", "--show-versions"]) do
+      {:ok, output, 0} -> output |> String.split("\n") |> Enum.find_value(&extension_line/1)
+      _ -> nil
+    end
+  end
+
+  # `objective-mj.troupe@0.29.0`, the line `code` lists the extension on.
+  defp extension_line(line) do
+    case line |> String.trim() |> String.split("@") do
+      [id, version] -> if String.downcase(id) == @extension, do: version
+      _ -> nil
+    end
+  end
+
+  # A program run to completion, under the reaper as every OS process is.
+  defp run_program([program | args] = argv) do
+    case Troupe.Reaper.run(File.cwd!(), argv, timeout_ms: 600_000) do
+      {:ok, output, status} when is_integer(status) ->
+        {:ok, output, status}
+
+      {:ok, _output, :timeout} ->
+        {:error, "#{program} did not finish"}
+
+      {:error, reason} ->
+        {:error, "#{program} #{Enum.join(args, " ")}: #{Troupe.Reaper.explain(reason)}"}
+    end
+  end
+
+  # The desktop app's version drops the pre-release part (`scripts/version.exs`), so the
+  # release's desktop app is numbered after the version before its first dash.
+  defp to_version("desktop", version), do: version |> String.split("-") |> hd()
+  defp to_version(_component, version), do: version
 
   # -- --check ------------------------------------------------------------------
 
   defp check(s) do
-    inst = installed(s)
-    s.out.("  troupe         #{inst.tui || "not installed"}  #{s.tui}")
-    s.out.("  troupe-daemon  #{inst.daemon || "not installed"}  #{s.lib}")
+    Enum.each(installed_lines(installed(s), s), s.out)
     if s.plane, do: s.out.("  plane          #{s.plane.url} #{plane_says(s)}")
 
     with {:ok, rel} <- release(s) do
@@ -198,6 +374,16 @@ defmodule Troupe.Update do
 
       :ok
     end
+  end
+
+  # What is installed, one line each: the version or "not installed", and where.
+  defp installed_lines(inst, s) do
+    [
+      "  troupe         #{inst.tui || "not installed"}  #{s.tui}",
+      "  troupe-daemon  #{inst.daemon || "not installed"}  #{s.lib}",
+      "  the desktop app  #{inst.desktop || "not installed"}  #{desktop_where(s)}",
+      "  the VS Code extension  #{inst.vscode || "not installed"}  #{s.vscode || "no code command line"}"
+    ]
   end
 
   # -- the release ----------------------------------------------------------------
@@ -327,7 +513,8 @@ defmodule Troupe.Update do
   # version: the terminal's, where troupe is installed and the plane names one, and
   # otherwise the daemon's. With none, the latest, as without a plane.
   defp planned(%{plane: %{} = plane, version: nil} = s) do
-    components = if installed(s).tui, do: ["tui", "daemon"], else: ["daemon", "tui"]
+    components =
+      if installed(s).tui, do: ["tui", "daemon", "desktop"], else: ["daemon", "tui", "desktop"]
 
     case Enum.find_value(components, &policy(plane, &1)["recommended"]) do
       nil -> s
@@ -358,7 +545,7 @@ defmodule Troupe.Update do
   defp served(version, %{plane: plane} = s) do
     inst = installed(s)
 
-    [{"tui", inst.tui}, {"daemon", inst.daemon}]
+    [{"tui", inst.tui}, {"daemon", inst.daemon}, {"desktop", inst.desktop}]
     |> Enum.reject(fn {_component, from} -> is_nil(from) end)
     |> Enum.reduce_while(:ok, fn {component, _from}, :ok ->
       policy = policy(plane, component)
@@ -404,14 +591,20 @@ defmodule Troupe.Update do
 
     candidates =
       Enum.reject(
-        [{"troupe-daemon", "daemon", inst.daemon}, {"troupe", "tui", inst.tui}],
+        [
+          {"troupe-daemon", "daemon", inst.daemon},
+          {"troupe", "tui", inst.tui},
+          {"the desktop app", "desktop", inst.desktop},
+          {"the VS Code extension", "vscode", inst.vscode}
+        ],
         &is_nil(elem(&1, 2))
       )
 
     cond do
       candidates == [] ->
         {:error,
-         "no troupe at #{s.tui} and no troupe-daemon in #{s.lib}: troupe update replaces what the installers put there"}
+         "no troupe at #{s.tui}, no troupe-daemon in #{s.lib}, no desktop app and no VS Code " <>
+           "extension: troupe update replaces what the installers put there"}
 
       s.target == nil ->
         {:error, "this machine is not one a release is built for"}
@@ -423,7 +616,9 @@ defmodule Troupe.Update do
 
   defp steps(candidates, rel, s) do
     candidates
-    |> Enum.filter(fn {_name, _component, from} -> wanted?(from, rel.version, s.named?) end)
+    |> Enum.filter(fn {_name, component, from} ->
+      wanted?(from, to_version(component, rel.version), s.named?)
+    end)
     |> Enum.reduce_while({:ok, []}, &add_step(&1, &2, rel, s))
     |> case do
       {:ok, steps} -> {:ok, %{steps: steps, version: rel.version}}
@@ -431,16 +626,44 @@ defmodule Troupe.Update do
     end
   end
 
+  # troupe and troupe-daemon a release lacks for this machine stop the update; the desktop
+  # app and the extension are extras, left as they are and said.
   defp add_step({name, component, from}, {:ok, steps}, rel, s) do
-    case Manifest.find(rel.manifest, component, s.target) do
-      nil ->
+    case artifact(rel, component, s) do
+      nil when component in ["tui", "daemon"] ->
         {:halt, {:error, "release #{rel.version} has no #{name} for #{s.target}"}}
+
+      nil ->
+        s.out.(
+          "  #{name} #{from} is left as it is: release #{rel.version} has none for this computer"
+        )
+
+        {:cont, {:ok, steps}}
 
       artifact ->
         step = %{name: name, component: component, from: from, artifact: artifact}
         {:cont, {:ok, steps ++ [step]}}
     end
   end
+
+  # The desktop app's files are named by the installers' kind: the AppImage, the disk
+  # image or the setup, never the updater's bundle beside them; the extension's is one.
+  defp artifact(rel, "desktop", s) do
+    {target, suffix} =
+      case s.desktop[:kind] do
+        :appimage -> {"linux_x86_64", ".AppImage"}
+        :mac_app -> {"macos_universal", ".dmg"}
+        :windows_setup -> {"windows_x86_64", "-setup.exe"}
+      end
+
+    Enum.find(
+      rel.manifest.artifacts,
+      &(&1.component == "desktop" and &1.target == target and String.ends_with?(&1.file, suffix))
+    )
+  end
+
+  defp artifact(rel, "vscode", _s), do: Manifest.find(rel.manifest, "vscode", nil)
+  defp artifact(rel, component, s), do: Manifest.find(rel.manifest, component, s.target)
 
   # The latest release replaces only what is older; a version asked for by name replaces
   # whatever is not it, older or newer.
@@ -474,19 +697,46 @@ defmodule Troupe.Update do
     end
   end
 
+  # troupe and troupe-daemon first, together, as before; then each extra on its own. An
+  # extra that fails leaves the two in place and is said, since it is not theirs to undo.
   defp install(plan, rel, s) do
-    Enum.each(plan.steps, &s.out.("  #{&1.name}  #{&1.from} -> #{rel.version}"))
+    Enum.each(
+      plan.steps,
+      &s.out.("  #{&1.name}  #{&1.from} -> #{to_version(&1.component, rel.version)}")
+    )
+
+    {core, extras} = Enum.split_with(plan.steps, &(&1.component in ["tui", "daemon"]))
 
     with {:ok, staged} <- download(plan.steps, rel, s),
          :ok <- quiet(staged, s),
-         :ok <- swap_in(staged, s) do
-      Enum.each(staged, fn step -> s.out.(installed_line(step, rel.version, s)) end)
-      s.out.("Done. troupe update --rollback puts what was there before back.")
-      :ok
+         :ok <- swap_in(Enum.filter(staged, &(&1 in core)), s) do
+      Enum.each(core, fn step -> s.out.(installed_line(step, rel.version, s)) end)
+      failed = Enum.reject(extras, &install_extra(&1, rel, s))
+      clean_staging(extras, s)
+
+      if failed == [] do
+        s.out.("Done. troupe update --rollback puts what was there before back.")
+        :ok
+      else
+        {:error,
+         Enum.map_join(failed, "; ", &"#{&1.name} was not replaced") <> "; the rest is installed"}
+      end
     else
       {:error, why} ->
         clean_staging(plan.steps, s)
         {:error, why}
+    end
+  end
+
+  defp install_extra(step, rel, s) do
+    case swap_extra_in(step, s) do
+      :ok ->
+        s.out.(installed_line(step, rel.version, s))
+        true
+
+      {:error, why} ->
+        s.out.("#{step.name} #{step.from} is left as it is: #{why}")
+        false
     end
   end
 
@@ -496,6 +746,21 @@ defmodule Troupe.Update do
 
   defp installed_line(%{component: "tui", from: from}, version, s),
     do: "troupe #{version} is #{s.tui} (#{from} kept as #{Path.basename(s.tui)}.previous)"
+
+  defp installed_line(%{component: "desktop", from: from}, version, %{
+         desktop: %{kind: :windows_setup}
+       }),
+       do:
+         "the desktop app #{to_version("desktop", version)} is set up (#{from} before; its setup keeps no previous)"
+
+  defp installed_line(%{component: "desktop", from: from}, version, s),
+    do:
+      "the desktop app #{to_version("desktop", version)} is #{s.desktop.path} (#{from} kept as " <>
+        "#{Path.basename(s.desktop.path)}.previous); one that is running keeps the old build until it is restarted"
+
+  defp installed_line(%{component: "vscode", from: from}, version, s),
+    do:
+      "the VS Code extension #{version} is installed with #{s.vscode} (#{from} before; open windows take it when VS Code restarts)"
 
   defp download(steps, rel, s) do
     Enum.reduce_while(steps, {:ok, []}, fn step, {:ok, staged} ->
@@ -522,6 +787,18 @@ defmodule Troupe.Update do
 
   defp download_path(%{component: "daemon"}, s), do: s.lib <> ".new.tar.gz"
   defp download_path(%{component: "tui"}, s), do: s.tui <> ".new"
+
+  defp download_path(%{component: "desktop"}, %{desktop: %{kind: :appimage, path: path}}),
+    do: path <> ".new"
+
+  defp download_path(%{component: "desktop"}, %{desktop: %{kind: :mac_app, path: app}}),
+    do: app <> ".new.dmg"
+
+  defp download_path(%{component: "desktop", artifact: %{file: file}}, _s),
+    do: Path.join(System.tmp_dir!(), file)
+
+  defp download_path(%{component: "vscode", artifact: %{file: file}}, _s),
+    do: Path.join(System.tmp_dir!(), "troupe-update-" <> file)
 
   # The daemon's archive unpacked beside the release it replaces, and checked to be one;
   # the TUI made executable. Nothing in place is touched yet.
@@ -554,14 +831,169 @@ defmodule Troupe.Update do
     if s.windows?, do: :ok, else: File.chmod(path, 0o755)
   end
 
+  defp prepare(%{component: "desktop"}, path, %{desktop: %{kind: :appimage}}),
+    do: File.chmod(path, 0o755)
+
+  defp prepare(_extra, _path, _s), do: :ok
+
   defp clean_staging(steps, s) do
     for step <- steps do
       _ = File.rm(download_path(step, s))
       if step.component == "daemon", do: File.rm_rf(s.lib <> ".new")
+
+      if step.component == "desktop" and s.desktop[:kind] == :mac_app,
+        do: File.rm_rf(s.desktop.path <> ".new")
     end
 
     :ok
   end
+
+  # -- the extras swapped in -------------------------------------------------------
+
+  # The AppImage as troupe is: the old one kept beside it, the new renamed into place in
+  # one step, and its version written beside it and into the menu entry's comment.
+  defp swap_extra_in(
+         %{component: "desktop", artifact: artifact} = step,
+         %{desktop: %{kind: :appimage, path: path}} = s
+       ) do
+    previous = path <> ".previous"
+    _ = File.rm(previous)
+
+    with :ok <- link_or_copy(path, previous),
+         :ok <-
+           rename(
+             download_path(step, s),
+             path,
+             s,
+             "the new desktop app could not be moved into #{path}"
+           ) do
+      version = to_version("desktop", artifact_version(artifact))
+      _ = File.write(previous <> ".version", (step.from || "unknown version") <> "\n")
+      _ = File.write(path <> ".version", version <> "\n")
+      _ = stamp_entry(s.desktop[:entry], version)
+      :ok
+    end
+  end
+
+  # The disk image opened, its app copied beside the one it replaces, which is kept as
+  # `.previous`, and the copy renamed into place; the image is let go of either way.
+  defp swap_extra_in(%{component: "desktop"} = step, %{desktop: %{kind: :mac_app, path: app}} = s) do
+    dmg = download_path(step, s)
+    mount = app <> ".new.mount"
+    staging = app <> ".new"
+    _ = File.rm_rf(staging)
+    File.mkdir_p!(mount)
+
+    result =
+      with {:ok, _out, 0} <-
+             s.run.([
+               "hdiutil",
+               "attach",
+               "-nobrowse",
+               "-readonly",
+               "-quiet",
+               "-mountpoint",
+               mount,
+               dmg
+             ]),
+           {:ok, bundle} <- bundle_in(mount, dmg),
+           {:ok, _} <- File.cp_r(bundle, staging) do
+        :ok
+      else
+        {:ok, output, status} ->
+          {:error,
+           "hdiutil could not open #{Path.basename(dmg)} (#{status}): #{String.trim(output)}"}
+
+        {:error, reason, _file} ->
+          {:error, "#{dmg} could not be copied: #{:file.format_error(reason)}"}
+
+        {:error, why} when is_binary(why) ->
+          {:error, why}
+
+        {:error, reason} ->
+          {:error, "#{dmg} could not be copied: #{inspect(reason)}"}
+      end
+
+    _ = s.run.(["hdiutil", "detach", "-quiet", mount])
+    _ = File.rmdir(mount)
+
+    with :ok <- result,
+         :ok <- remove_dir(app <> ".previous"),
+         :ok <- rename(app, app <> ".previous", s, "#{app} could not be moved aside") do
+      staging
+      |> rename(app, s, "the new desktop app could not be moved into #{app}")
+      |> undoing(fn -> File.rename(app <> ".previous", app) end)
+    end
+  end
+
+  # The release's setup, run silently as the installer runs it: per user, replacing the
+  # one there, closing a running app itself.
+  defp swap_extra_in(%{component: "desktop"} = step, %{desktop: %{kind: :windows_setup}} = s) do
+    setup = download_path(step, s)
+
+    case s.run.([setup, "/S"]) do
+      {:ok, _output, 0} ->
+        :ok
+
+      {:ok, output, status} ->
+        {:error,
+         "#{Path.basename(setup)} exited with #{status}#{said(output)}; close Troupe if it is running and run troupe update again"}
+
+      {:error, why} ->
+        {:error, why}
+    end
+  end
+
+  defp swap_extra_in(%{component: "vscode"} = step, s) do
+    vsix = download_path(step, s)
+
+    case s.run.([s.vscode, "--install-extension", vsix, "--force"]) do
+      {:ok, _output, 0} ->
+        :ok
+
+      {:ok, output, status} ->
+        {:error, "#{s.vscode} --install-extension exited with #{status}#{said(output)}"}
+
+      {:error, why} ->
+        {:error, why}
+    end
+  end
+
+  defp said(output) do
+    case String.trim(output) do
+      "" -> ""
+      text -> " (#{text |> String.split("\n") |> List.last()})"
+    end
+  end
+
+  defp bundle_in(mount, dmg) do
+    case mount |> File.ls() |> elem(1) |> Enum.find(&String.ends_with?(&1, ".app")) do
+      nil -> {:error, "#{Path.basename(dmg)} contains no .app"}
+      name -> {:ok, Path.join(mount, name)}
+    end
+  end
+
+  defp artifact_version(%{file: file}) do
+    case Regex.run(~r/_(\d+\.\d+\.\d+[^_]*)_/, file) do
+      [_, version] -> version
+      _ -> "unknown version"
+    end
+  end
+
+  # `Comment=The Troupe desktop app, release X`: the line the installer wrote, kept true.
+  defp stamp_entry(nil, _version), do: :ok
+
+  defp stamp_entry(entry, version) do
+    with {:ok, text} <- File.read(entry) do
+      File.write(entry, Regex.replace(~r/^(Comment=.*\brelease )\S+/m, text, "\\g{1}#{version}"))
+    end
+  end
+
+  defp desktop_where(%{desktop: %{kind: :windows_setup}}),
+    do: "the per-user setup (Settings > Apps)"
+
+  defp desktop_where(%{desktop: %{path: path}}) when is_binary(path), do: path
+  defp desktop_where(_s), do: "nowhere"
 
   defp quiet(steps, s) do
     if Enum.any?(steps, &(&1.component == "daemon")), do: s.daemon.(s), else: :ok
@@ -721,26 +1153,78 @@ defmodule Troupe.Update do
   defp rollback(s) do
     daemon? = File.dir?(s.lib) and File.dir?(s.lib <> ".previous")
     tui? = File.regular?(s.tui) and File.regular?(s.tui <> ".previous")
+    desktop? = desktop_previous?(s)
 
-    if daemon? or tui?,
-      do: roll_back(daemon?, tui?, s),
+    if daemon? or tui? or desktop?,
+      do: roll_back(daemon?, tui?, desktop?, s),
       else:
         {:error,
-         "nothing to roll back to: there is no #{s.tui}.previous and no #{s.lib}.previous"}
+         "nothing to roll back to: there is no #{s.tui}.previous, no #{s.lib}.previous and no desktop app kept as .previous"}
   end
 
-  defp roll_back(daemon?, tui?, s) do
+  defp roll_back(daemon?, tui?, desktop?, s) do
     if daemon?, do: s.out.(daemon_rollback_line(s))
 
     if tui?,
       do: s.out.("  troupe         #{Path.basename(s.tui)} <-> #{Path.basename(s.tui)}.previous")
 
+    if desktop?,
+      do:
+        s.out.(
+          "  the desktop app  #{Path.basename(s.desktop.path)} <-> #{Path.basename(s.desktop.path)}.previous"
+        )
+
     with :ok <- quiet_for(daemon?, s),
          :ok <- exchange_daemon(daemon?, s),
-         :ok <- rollback_tui(tui?, daemon?, s) do
+         :ok <- rollback_tui(tui?, daemon?, s),
+         :ok <- rollback_desktop(desktop?, s) do
       s.out.("Rolled back. troupe update --rollback again puts back what was there.")
       :ok
     end
+  end
+
+  # The AppImage or the app bundle kept beside the one installed; the Windows setup and
+  # the extension keep none, which `--check` and an update say.
+  defp desktop_previous?(%{desktop: %{kind: :appimage, path: path}}),
+    do: File.regular?(path) and File.regular?(path <> ".previous")
+
+  defp desktop_previous?(%{desktop: %{kind: :mac_app, path: app}}),
+    do: File.dir?(app) and File.dir?(app <> ".previous")
+
+  defp desktop_previous?(_s), do: false
+
+  defp rollback_desktop(false, _s), do: :ok
+
+  # The two files trade places, and so do the versions kept beside them; the menu entry
+  # says the one now in place.
+  defp rollback_desktop(true, %{desktop: %{kind: :appimage, path: path}} = s) do
+    with :ok <- exchange(path, path <> ".previous", s, false) do
+      now = File.read(path <> ".previous.version")
+      before = File.read(path <> ".version")
+      _ = write_version(path <> ".version", now)
+      _ = write_version(path <> ".previous.version", before)
+
+      _ =
+        stamp_entry(
+          s.desktop[:entry],
+          String.trim(elem(write_version(path <> ".version", now), 1))
+        )
+
+      :ok
+    end
+  end
+
+  defp rollback_desktop(true, %{desktop: %{kind: :mac_app, path: app}} = s),
+    do: exchange(app, app <> ".previous", s, true)
+
+  defp write_version(file, {:ok, version}) do
+    _ = File.write(file, version)
+    {:ok, version}
+  end
+
+  defp write_version(file, _none) do
+    _ = File.write(file, "unknown version\n")
+    {:ok, "unknown version\n"}
   end
 
   defp daemon_rollback_line(s) do

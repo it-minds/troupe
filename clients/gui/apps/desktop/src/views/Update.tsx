@@ -17,6 +17,19 @@ function daemonLine(offer: UpdateOffer): string | null {
 }
 
 /**
+ * The rest of what the installers put here, replaced with the app (Decision 959): the
+ * terminal client and the VS Code extension, each a line, or why it is left as it is.
+ */
+function besideLines(offer: UpdateOffer): string[] {
+  const lines: string[] = [];
+  if (offer.tui) lines.push(`troupe ${offer.tui.from} is replaced with it; a terminal already open keeps the old one until it is started again.`);
+  else if (offer.tui_note) lines.push(offer.tui_note);
+  if (offer.extension) lines.push(`The VS Code extension ${offer.extension.from} is installed again from it; open VS Code windows take it when they restart.`);
+  else if (offer.extension_note) lines.push(offer.extension_note);
+  return lines;
+}
+
+/**
  * The plane signing with a key other than the one this computer pinned (#657): both
  * fingerprints, and the person's yes, after they have checked the new one with the plane's
  * administrators. Until then nothing it signs is acted on.
@@ -57,6 +70,12 @@ export function UpdateBanner({ updates }: { updates: Updates }): JSX.Element | n
         <>
           {lead && <p>{lead}</p>}
           {offered && daemonLine(offered) && <p className="micro">{daemonLine(offered)}</p>}
+          {offered &&
+            besideLines(offered).map((line) => (
+              <p key={line} className="micro">
+                {line}
+              </p>
+            ))}
           {updates.canUpdate && (required || offered) && (
             <button className="link" onClick={updates.update}>
               {required ? "Update now" : "Update"}
@@ -88,7 +107,9 @@ export function UpdateBanner({ updates }: { updates: Updates }): JSX.Element | n
           {required && <p>{required}</p>}
           <p>
             Troupe {phase.offer.version} is downloaded and checked against the release key. Restarting closes this window
-            {phase.offer.daemon ? " and replaces troupe-daemon once no turn is at work" : ""}; sessions keep their place.
+            {phase.offer.daemon ? " and replaces troupe-daemon once no turn is at work" : ""}
+            {phase.offer.tui ? ", replaces troupe" : ""}
+            {phase.offer.extension ? ", installs the VS Code extension" : ""}; sessions keep their place.
           </p>
           <button className="link" onClick={updates.restart}>
             Restart now

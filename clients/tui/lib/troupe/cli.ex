@@ -275,12 +275,13 @@ defmodule Troupe.CLI do
        "`config`, `models`, `login on|off`, `version`",
      [["daemon"], ["daemon", "status"], ["daemon", "open"]]},
     {"troupe update [--check] [--version X]",
-     "install the latest release, or X, over this troupe and troupe-daemon: its signature checked " <>
+     "install the latest release, or X, over this troupe and troupe-daemon, and over the desktop app " <>
+       "and the VS Code extension where the installers put those: its signature checked " <>
        "against the release key this build carries, each file against the signed manifest, the daemon " <>
        "replaced between turns; --check says what is installed, the latest release and what an update would do",
      [["update"], ["update", "--check"], ["update", "--version", "0.13.0"]]},
     {"troupe update --rollback",
-     "put the troupe and troupe-daemon from before the last update back",
+     "put the troupe, troupe-daemon and desktop app (its AppImage or app bundle) from before the last update back",
      [["update", "--rollback"]]},
     {"troupe --version", "print the version", [["--version"]]},
     {"troupe --help", "print the command lines and the commands inside a session", [["--help"]]}

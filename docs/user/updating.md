@@ -1,8 +1,11 @@
 # Updating Troupe
 
-`troupe update` replaces the `troupe` and the `troupe-daemon` the installers put on your
-machine with a newer release, after checking that the release is one Troupe's release key
-signed. Nothing it cannot check is installed.
+`troupe update` replaces what the installers put on your machine with a newer release:
+`troupe`, `troupe-daemon`, and the desktop app and the VS Code extension where you
+installed those, after checking that the release is one Troupe's release key signed.
+Nothing it cannot check is installed. The desktop app's own update does the same the other
+way round, replacing `troupe-daemon`, `troupe` and the extension beside it. An install
+picks its components once; from then on one update, from either side, moves all of them.
 
 ```sh
 troupe update --check            # what is installed, the latest release, and what an update would do
@@ -37,9 +40,24 @@ troupe update --rollback         # put back what the last update replaced
    one is kept as `troupe.previous` (`troupe.exe.previous` on Windows, where a running program
    is moved aside rather than replaced). The daemon's release directory is unpacked next to
    the old one and renamed into its place; the old one is kept as `troupe-daemon.previous`.
+6. **Then the rest the installers put here.** The desktop app, where `install.sh` or
+   `install.ps1` installed it: on Linux the release's AppImage replaces the one beside the
+   programs (`~/.local/bin/troupe-desktop`, the old one kept as `troupe-desktop.previous`);
+   on macOS the app in the release's disk image replaces `~/Applications/Troupe.app` (the
+   old one kept as `Troupe.app.previous`); on Windows the release's setup runs silently, per
+   user, as the installer ran it, and closes the app if it is running. A desktop app that is
+   running on Linux or macOS keeps running the old build until you restart it, and
+   `troupe update` says so. The VS Code extension, where `code` lists it: installed again
+   from the release's `troupe.vsix` with `code --install-extension`; open VS Code windows
+   take it when they restart. Each of these is held to the signed manifest as the rest. One
+   that cannot be replaced is said and left as it is, and `troupe` and `troupe-daemon` stay
+   installed; a release with no desktop app for your computer leaves yours alone.
 
 `troupe update --rollback` swaps each back: the troupe and the troupe-daemon from before the
-last update, the daemon again only between turns. Run again, it swaps forward.
+last update, the daemon again only between turns, and the desktop app's AppImage or app
+bundle kept as `.previous`. The Windows setup and the extension keep no previous: that
+release's own setup, or `code --install-extension` with its `.vsix`, moves them back. Run
+again, it swaps forward.
 
 The latest release replaces only what is older than it; `--version` replaces either way. It
 updates what the installers installed, where they installed it (`TROUPE_BIN_DIR` and
@@ -49,8 +67,9 @@ its installer again.
 
 ## The desktop app
 
-The desktop app updates itself, and the `troupe-daemon` the installers put beside it, from
-the same signed releases. It looks when it starts and once a day after:
+The desktop app updates itself, and the `troupe-daemon`, the `troupe` and the VS Code
+extension the installers put beside it, from the same signed releases. It looks when it
+starts and once a day after:
 
 - **What it looks for.** Signed in to a plane, the version the plane recommends for the
   desktop app, from where the plane says releases are (GitHub's unless it names another);
@@ -75,6 +94,15 @@ the same signed releases. It looks when it starts and once a day after:
   `troupe-daemon.previous`, as `troupe update` keeps it, so `troupe update --rollback` and
   the installers find it. A daemon a running `troupe` started inside itself is that
   `troupe`'s, and is left running.
+- **The terminal and the extension beside it.** Where the installers put a `troupe` older
+  than the release (`%LOCALAPPDATA%\Programs\troupe`, `~/.local/bin`), it is replaced in
+  the same step and the old one kept as `troupe.previous`, as `troupe update` keeps it; a
+  terminal already open keeps the old one until it is started again. Where `code` lists
+  the VS Code extension older than the release, it is installed again from the release's
+  `troupe.vsix` first of all, since `code` failing changes nothing else; open VS Code
+  windows take it when they restart. The offer says which of these go with it, or why one
+  is left as it is: a plane that blocks the release's `troupe`, or a release with none for
+  this computer.
 - **Never backwards.** A release older than the app is not offered. On a version the plane
   has blocked whose recommended one is older, the app says so and leaves the choice to you:
   that release's own installer moves you back.
