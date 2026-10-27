@@ -22,13 +22,14 @@ defmodule Troupe.Agent.Hold do
     @moduledoc "A tool a turn was offered, as its `llm_request` wrote it down."
 
     @enforce_keys [:name, :description, :schema]
-    defstruct [:name, :description, :schema, default_permission: :ask]
+    defstruct [:name, :description, :schema, default_permission: :ask, files: false]
 
     @type t :: %__MODULE__{
             name: String.t(),
             description: String.t(),
             schema: map(),
-            default_permission: :auto | :ask | :deny
+            default_permission: :auto | :ask | :deny,
+            files: boolean()
           }
   end
 
@@ -94,7 +95,13 @@ defmodule Troupe.Agent.Hold do
       "schema" => Troupe.Tool.schema(tool),
       "default_permission" => Atom.to_string(Troupe.Tool.default_permission(tool))
     }
+    |> put_files(tool)
   end
+
+  # Where the organisation keeps files (the harness names it), written only where it is, so
+  # a hold of any other tool reads and hashes as it always did.
+  defp put_files(json, %{files: true}), do: Map.put(json, "files", true)
+  defp put_files(json, _tool), do: json
 
   # The tools that come and go are values, whose description is what they say; a module
   # among them says its own.
@@ -106,7 +113,8 @@ defmodule Troupe.Agent.Hold do
       name: json["name"],
       description: json["description"],
       schema: json["schema"],
-      default_permission: Map.get(@permissions, json["default_permission"], :ask)
+      default_permission: Map.get(@permissions, json["default_permission"], :ask),
+      files: json["files"] == true
     }
   end
 

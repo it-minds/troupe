@@ -450,6 +450,16 @@ defmodule Troupe.Commands do
             "session leaves it.",
         example: "/upload notes.md"
       ),
+      entry("save", "workspace", "Save a file of the session's workspace on this machine",
+        usage: "/save <path> [to]",
+        args: [arg("path", true, "text"), arg("to", false, "file")],
+        detail:
+          "The file is read where the session runs, a pod's workspace as much as a local " <>
+            "checkout, and written on this machine: at `to`, in it when it is a directory, or " <>
+            "under its own name where the terminal started. What a file an agent made for you " <>
+            "says to run when the session is on a pod.",
+        example: "/save report.md ~/Documents"
+      ),
       entry("publish", "workspace", "Publish a page, a document or a file for others to read",
         usage: "/publish <path> <organisation | profile:<name>>",
         args: [arg("path", true, "file"), arg("visibility", true, "text")],

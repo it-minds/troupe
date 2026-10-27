@@ -35,11 +35,42 @@ defmodule Troupe.Artifacts do
   def reachable?, do: is_function(Application.get_env(:troupe_core, :artifacts), 2)
 
   @doc """
-  Install `fun` as where artifacts go, for the host that can reach the plane, and give its
-  sessions `publish_artifact`.
+  Whether `publish_artifact` can publish from this session now, as the harness tells its
+  agent where a file goes: `:none` where this host installed nowhere for one to go,
+  `{:closed, why}` for a session under Local only or a host that is not signed in to a plane
+  (the host's `ready` says), else `:open`. Whether the plane takes artifacts at all is the
+  plane's to say when one is sent.
   """
-  @spec install((map(), Troupe.Tool.Ctx.t() -> {:ok, published()} | {:error, term()})) :: :ok
-  def install(fun) when is_function(fun, 2) do
+  @spec ready(String.t() | nil) :: :open | :none | {:closed, String.t()}
+  def ready(session_id) do
+    cond do
+      not reachable?() -> :none
+      Troupe.LocalOnly.session?(session_id) -> {:closed, "this session is under Local only"}
+      not signed_in?(session_id) -> {:closed, "the person is not signed in to a plane here"}
+      true -> :open
+    end
+  end
+
+  defp signed_in?(session_id) do
+    case Application.get_env(:troupe_core, :artifacts_ready) do
+      fun when is_function(fun, 1) -> fun.(session_id) == true
+      _none -> true
+    end
+  end
+
+  @doc """
+  Install `fun` as where artifacts go, for the host that can reach the plane, and give its
+  sessions `publish_artifact`. `ready:` is how the host says whether a session can publish
+  now (signed in to a plane); without one it always can, as a pod's session can.
+  """
+  @spec install((map(), Troupe.Tool.Ctx.t() -> {:ok, published()} | {:error, term()}), keyword()) ::
+          :ok
+  def install(fun, opts \\ []) when is_function(fun, 2) do
+    case Keyword.get(opts, :ready) do
+      ready when is_function(ready, 1) -> Application.put_env(:troupe_core, :artifacts_ready, ready)
+      nil -> Application.delete_env(:troupe_core, :artifacts_ready)
+    end
+
     Application.put_env(:troupe_core, :artifacts, fun)
     tools = Application.get_env(:troupe_core, :extra_tools, [])
 
@@ -53,6 +84,7 @@ defmodule Troupe.Artifacts do
   @spec uninstall() :: :ok
   def uninstall do
     Application.delete_env(:troupe_core, :artifacts)
+    Application.delete_env(:troupe_core, :artifacts_ready)
 
     Application.put_env(
       :troupe_core,

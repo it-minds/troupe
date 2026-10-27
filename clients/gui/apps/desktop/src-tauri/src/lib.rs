@@ -29,6 +29,7 @@
 mod agent_file;
 mod artifact_window;
 mod daemon;
+mod file_save;
 mod notify;
 mod plane_word;
 mod release;
@@ -60,6 +61,7 @@ pub fn run() {
             artifact_window::artifact_window_open,
             daemon::daemon_endpoint,
             daemon::daemon_start,
+            file_save::file_save,
             notify::notify_show,
             update::update_check,
             update::update_download,

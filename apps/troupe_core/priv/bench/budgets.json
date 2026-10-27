@@ -1,15 +1,15 @@
 {
   "$comment": {
-    "tool_calls": "The four prompt budgets are set for the largest tool set a session is offered: in a VM whose daemon installed its hosts, as the TUI's suite and an installed troupe do, remember carries its level (237 bytes) and publish_artifact is offered (1431 bytes), both added on 0.28.0. Measured there on 0.28.0, each budget is about 5% over: tool definitions 15873 bytes (16700), the first prompt 17698 (18600), the largest prompt 33195 (34900), the turn's input tokens 198419 (208400). Without those hosts (the umbrella's mix troupe.bench) the numbers are 14787, 16612, 32109 and 189998."
+    "tool_calls": "The four prompt budgets are set for the largest tool set a session is offered: in a VM whose daemon installed its hosts, as the TUI's suite and an installed troupe do, remember carries its level and publish_artifact is offered, both added on 0.28.0. On 0.29.0 every root's instructions begin with the harness's word on where a file goes (about 1150 bytes in the first prompt, Decision 956) and write_file has deliverable (87 bytes of tool definitions). Measured there on 0.29.0, each budget is about 5% over: tool definitions 16542 bytes (17400), the first prompt 19419 (20400), the largest prompt 34916 (36700), the turn's input tokens 211749 (222400). Without those hosts (the umbrella's mix troupe.bench) the numbers are 14874, 17770, 33267 and 198977."
   },
   "tool_calls": {
     "model_calls": 31,
     "system_prompt_bytes": 1750,
-    "tool_definition_bytes": 16700,
-    "first_prompt_bytes": 18600,
-    "largest_prompt_bytes": 34900,
+    "tool_definition_bytes": 17400,
+    "first_prompt_bytes": 20400,
+    "largest_prompt_bytes": 36700,
     "growth_per_call_bytes": 550,
-    "turn_input_tokens": 208400,
+    "turn_input_tokens": 222400,
     "events_per_turn": 170
   },
   "cut_output": {

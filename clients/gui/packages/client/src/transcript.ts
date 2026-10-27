@@ -190,6 +190,12 @@ export type Entry =
    * line, in the terminal client's words (`turnLine`). A subagent's is its task's.
    */
   | { kind: "turn"; seq: number; agent: string[]; turn: TurnCost; text: string }
+  /**
+   * A file the agent made for the person (`file_ready`, `write_file` with `deliverable`):
+   * `path` in the session's workspace, as `fs.read` reads it, with the `hash` that read
+   * answers; `localPath` where it already is when the session runs on this machine.
+   */
+  | { kind: "file"; seq: number; agent: string[]; path: string; size: number; hash: string; title: string | undefined; localPath: string | undefined }
   /** Lifecycle: started, switched, compacted, done, cancelled, dormant, resumed, errors. */
   | { kind: "system"; seq: number; agent: string[]; type: string; text: string };
 
@@ -1025,6 +1031,24 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
                 : en,
         ),
       };
+    }
+
+    // A file the agent made for the person (troupe issue #765): a line with the file's path,
+    // which the app offers to save.
+    case "file_ready": {
+      const path = str(d.data["path"]);
+      if (!path) return next;
+      const size = typeof d.data["size"] === "number" ? d.data["size"] : 0;
+      const file: Entry = {
+        kind: "file",
+        ...base,
+        path,
+        size,
+        hash: str(d.data["hash"]),
+        title: str(d.data["title"]) || undefined,
+        localPath: str(d.data["local_path"]) || undefined,
+      };
+      return { ...next, entries: [...state.entries, file] };
     }
 
     // A document written to the scratchpad (issue #472): the session's list of them, and

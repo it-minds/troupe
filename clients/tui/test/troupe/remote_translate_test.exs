@@ -35,6 +35,27 @@ defmodule Troupe.RemoteTranslateTest do
     events
   end
 
+  # A file the agent made for the person (root issue #765): where it is on this machine, or
+  # on a pod the path and the command that saves it here. A headless run prints the line.
+  test "a file_ready is a line with where the file is, or how to save it from a pod" do
+    local = %{
+      "path" => "out/q3.md",
+      "size" => 5,
+      "hash" => "sha256:ab",
+      "local_path" => "/home/ada/repo/out/q3.md"
+    }
+
+    assert [%{type: :remote_note, data: %{text: "file ready: /home/ada/repo/out/q3.md"}}] =
+             translate(durable("file_ready", local))
+
+    pod = Map.delete(local, "local_path")
+
+    assert [%{type: :remote_note, data: %{text: text}}] = translate(durable("file_ready", pod))
+
+    assert text ==
+             "file ready in the session's workspace: out/q3.md; /save out/q3.md saves it on this machine"
+  end
+
   # `troupe run build …` printed `spawned /root`: the session's own agent is `root` on the
   # wire, and its window is named for the profile it was started with, as the window the
   # worker opens before any event is.

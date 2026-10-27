@@ -274,6 +274,20 @@ defmodule Troupe.CommandAuditTest do
       refute Enum.any?(FakeRemote.calls(remote), &match?({"input.send", _}, &1))
     end
 
+    # A file the pod's agent made, saved on this machine (root issue #765): read with fs.read
+    # where the session runs, written into the directory named, under its own name.
+    test "/save reads a file of the pod's workspace and writes it here" do
+      {_remote, _sid, pid} = on_a_pod()
+      dir = Path.join(System.tmp_dir!(), "troupe-save-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      saved = Path.join(dir, "report.md")
+      assert answer(pid, "/save out/report.md " <> dir) == "saved out/report.md to #{saved}"
+      assert File.read!(saved) == "hello from the worker\n"
+      assert answer(pid, "/save") == "usage: /save <path> [to]"
+    end
+
     # What only a session on this machine can do says why on a pod, typed or picked.
     test "a local-only command says why it cannot run there" do
       {_remote, _sid, pid} = on_a_pod()

@@ -2557,6 +2557,8 @@ defmodule Troupe.Gateway.Dispatch do
        description: Map.get(tool, "description", "A tool hosted by an attached client."),
        schema: Map.get(tool, "schema", %{"type" => "object"}),
        default_permission: permission(Map.get(tool, "permission")),
+       # Where the organisation keeps files, as the client's own server entry says.
+       files: Map.get(tool, "files") == true,
        run: fn args, ctx -> ClientTool.run(connection, name, args, ctx) end
      }}
   end

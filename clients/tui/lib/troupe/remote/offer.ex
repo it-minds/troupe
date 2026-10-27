@@ -94,11 +94,15 @@ defmodule Troupe.Remote.Offer do
       {:ok, %{"state" => "ready", "tools" => tools}} when is_list(tools) ->
         for %{"name" => tool} = listed <- tools do
           %{
-            spec: %{
-              name: name(server, tool),
-              description: listed["description"] || "",
-              schema: listed["schema"] || %{"type" => "object"}
-            },
+            spec:
+              %{
+                name: name(server, tool),
+                description: listed["description"] || "",
+                schema: listed["schema"] || %{"type" => "object"}
+              }
+              # Where the organisation keeps files, as the server's own entry says
+              # (`stores: files`): the session's harness names it to its agent.
+              |> Map.merge(if listed["files"] == true, do: %{files: true}, else: %{}),
             server: server,
             tool: tool
           }

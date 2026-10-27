@@ -376,13 +376,26 @@ defmodule Troupe.MCP.Local do
       timeout_ms: entry["timeout_ms"] || @default_timeout
     }
 
-    {config, oauth_refusal} = config |> with_headers(headers, read) |> with_oauth(oauth, read)
+    {config, oauth_refusal} =
+      config |> with_stores(entry) |> with_headers(headers, read) |> with_oauth(oauth, read)
 
     case refusal(name, unset, config) || oauth_refusal(name, oauth_refusal, config) do
       nil -> config
       why -> Map.put(config, :refused, why)
     end
   end
+
+  # Where the organisation keeps files: `stores: "files"`, and `files` naming which of its
+  # tools do, or none for all of them. Under `:stores` (and `:files`) only where the entry
+  # says so, so every other server's config, and its fingerprint, is what it always was.
+  defp with_stores(config, %{"stores" => "files"} = entry) do
+    case entry["files"] do
+      names when is_list(names) -> Map.merge(config, %{stores: :files, files: Enum.filter(names, &is_binary/1)})
+      _all -> Map.put(config, :stores, :files)
+    end
+  end
+
+  defp with_stores(config, _entry), do: config
 
   # Headers for a server over HTTP (Decision 820), read as every other string is, under
   # `:headers` only where there are some, so every other server's config — and its
