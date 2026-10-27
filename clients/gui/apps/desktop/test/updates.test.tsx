@@ -53,7 +53,19 @@ class Updater implements ShellUpdater {
 }
 
 function offer(version: string, extra: Partial<UpdateOffer> = {}): () => Promise<UpdateCheck> {
-  return async () => ({ state: "offer", version, current: VERSION, source: "https://example.test/r", daemon: null, daemon_note: null, ...extra });
+  return async () => ({
+    state: "offer",
+    version,
+    current: VERSION,
+    source: "https://example.test/r",
+    daemon: null,
+    daemon_note: null,
+    tui: null,
+    tui_note: null,
+    extension: null,
+    extension_note: null,
+    ...extra,
+  });
 }
 
 const code = (): HTMLElement | null => document.querySelector<HTMLElement>(".usercode");
@@ -230,6 +242,24 @@ describe("the app's own update", () => {
     await waitFor(() => updater.installs.length > 0, "the install, once the turn ended");
     expect(updater.installs).toEqual([true]);
     expect(daemon.stopsAsked).toBeGreaterThan(0);
+  });
+
+  it("says which of the rest the installers put here go with it: the terminal and the VS Code extension", async () => {
+    const updater = new Updater();
+    updater.answer = offer("99.0.0", {
+      tui: { from: "0.13.0-beta", to: "99.0.0", at: "/home/ada/.local/bin/troupe" },
+      extension: { from: "0.13.0", to: "99.0.0", at: "/usr/bin/code" },
+      daemon_note: "troupe-daemon 0.13.0-beta is left as it is: release 99.0.0 has no daemon for this computer",
+    });
+    daemon = await onThisComputer(updater);
+
+    await waitFor(() => button("Update", banner() ?? document.body), "the offer");
+    await sees("troupe 0.13.0-beta is replaced with it; a terminal already open keeps the old one");
+    await sees("The VS Code extension 0.13.0 is installed again from it");
+    await sees("troupe-daemon 0.13.0-beta is left as it is");
+    button("Update", banner()!)!.click();
+    await waitFor(() => button("Restart now", banner()!), "the question before restarting");
+    await sees("replaces troupe, installs the VS Code extension; sessions keep their place.");
   });
 
   it("does not restart before this computer's daemon has said what is at work", async () => {

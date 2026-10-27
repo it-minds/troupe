@@ -329,6 +329,250 @@ defmodule Troupe.UpdateTest do
     assert_unchanged(ctx)
   end
 
+  # -- every component the installers put here -----------------------------------
+
+  # The AppImage beside the programs, and its menu entry, as install.sh leaves them.
+  defp appimage!(ctx, version) do
+    path = Path.join(ctx.root, "bin/troupe-desktop")
+    entry = Path.join(ctx.root, "applications/troupe.desktop")
+    File.mkdir_p!(Path.dirname(entry))
+    File.write!(path, "desktop #{version}\n")
+    File.chmod!(path, 0o755)
+
+    File.write!(
+      entry,
+      "[Desktop Entry]\nType=Application\nName=Troupe\nComment=The Troupe desktop app, release #{version}\nExec=#{path}\n"
+    )
+
+    %{kind: :appimage, path: path, entry: entry}
+  end
+
+  # VS Code's command line as a stub: it lists the extension at `version`, and records an
+  # install, answering as `code` does.
+  defp code_stub(test, version) do
+    fn
+      ["/fake/code", "--list-extensions", "--show-versions"] ->
+        {:ok, "objective-mj.troupe@#{version}\nms-python.python@2024.1.0\n", 0}
+
+      ["/fake/code", "--install-extension", vsix, "--force"] ->
+        send(test, {:installed_extension, vsix, File.read!(vsix)})
+        {:ok, "Extension 'troupe.vsix' was successfully installed.\n", 0}
+    end
+  end
+
+  test "extras: checked, replaced after the core, and the AppImage rolled back", ctx do
+    test = self()
+    desktop = appimage!(ctx, "1.0.0")
+    url = release!(ctx, "1.1.0-beta", desktop: :appimage, vsix: true)
+    opts = opts(ctx, url, desktop: desktop, vscode: "/fake/code", run: code_stub(test, "1.0.0"))
+
+    assert Update.run(:check, opts) == 0
+    out = lines()
+
+    assert Enum.any?(
+             out,
+             &(&1 =~ ~r/the desktop app\s+1\.0\.0\s+#{Regex.escape(desktop.path)}/)
+           )
+
+    assert Enum.any?(out, &(&1 =~ ~r/the VS Code extension\s+1\.0\.0\s+\/fake\/code/))
+
+    assert "troupe update would install 1.1.0-beta over troupe-daemon 1.0.0 and troupe 1.0.0 and the desktop app 1.0.0 and the VS Code extension 1.0.0." in out
+
+    assert Update.run(:update, opts) == 0
+    out = lines()
+    assert File.read!(ctx.tui) == "troupe 1.1.0-beta\n"
+    assert Update.daemon_version(ctx.lib, false) == "1.1.0-beta"
+    # The desktop app's version drops the pre-release part, as its files are named.
+    assert "  the desktop app  1.0.0 -> 1.1.0" in out
+    assert File.read!(desktop.path) == "desktop 1.1.0\n"
+    assert File.read!(desktop.path <> ".previous") == "desktop 1.0.0\n"
+    assert File.read!(desktop.path <> ".version") == "1.1.0\n"
+    assert File.read!(desktop.entry) =~ "release 1.1.0\n"
+    assert Update.desktop_version(desktop, %{}) == "1.1.0"
+    assert_received {:installed_extension, vsix, "vsix 1.1.0-beta\n"}
+    refute File.exists?(vsix)
+    refute File.exists?(desktop.path <> ".new")
+    assert Enum.any?(out, &(&1 =~ "keeps the old build until it is restarted"))
+
+    assert Enum.any?(
+             out,
+             &(&1 =~ "the VS Code extension 1.1.0-beta is installed with /fake/code")
+           )
+
+    assert List.last(out) =~ "troupe update --rollback"
+
+    # Rolled back, the AppImage and its version trade places; the extension keeps none.
+    assert Update.run(:rollback, opts) == 0
+    assert File.read!(desktop.path) == "desktop 1.0.0\n"
+    assert File.read!(desktop.path <> ".previous") == "desktop 1.1.0\n"
+    assert File.read!(desktop.path <> ".version") == "1.0.0\n"
+    assert File.read!(desktop.entry) =~ "release 1.0.0\n"
+    assert File.read!(ctx.tui) == "troupe 1.0.0\n"
+    refute_received {:installed_extension, _, _}
+
+    assert Update.run(:rollback, opts) == 0
+    assert File.read!(desktop.path) == "desktop 1.1.0\n"
+    assert Update.desktop_version(desktop, %{}) == "1.1.0"
+  end
+
+  test "extras: a release with no desktop app here leaves it, says so, installs the rest", ctx do
+    desktop = appimage!(ctx, "1.0.0")
+    url = release!(ctx, "1.1.0", vsix: false)
+    opts = opts(ctx, url, desktop: desktop)
+
+    assert Update.run(:update, opts) == 0
+    out = lines()
+
+    assert "  the desktop app 1.0.0 is left as it is: release 1.1.0 has none for this computer" in out
+
+    assert File.read!(ctx.tui) == "troupe 1.1.0\n"
+    assert File.read!(desktop.path) == "desktop 1.0.0\n"
+    refute File.exists?(desktop.path <> ".previous")
+  end
+
+  test "extras: an extension that will not install is said, the core stays installed", ctx do
+    url = release!(ctx, "1.1.0", vsix: true)
+
+    run = fn
+      ["/fake/code", "--list-extensions", "--show-versions"] ->
+        {:ok, "objective-mj.troupe@1.0.0\n", 0}
+
+      ["/fake/code", "--install-extension", _vsix, "--force"] ->
+        {:ok, "Failed Installing Extensions: EACCES\n", 1}
+    end
+
+    opts = opts(ctx, url, vscode: "/fake/code", run: run)
+    assert Update.run(:update, opts) == 1
+    out = lines()
+    assert File.read!(ctx.tui) == "troupe 1.1.0\n"
+    assert Update.daemon_version(ctx.lib, false) == "1.1.0"
+
+    assert Enum.any?(
+             out,
+             &(&1 =~
+                 "the VS Code extension 1.0.0 is left as it is: /fake/code --install-extension exited with 1 (Failed Installing Extensions: EACCES)")
+           )
+
+    assert List.last(out) =~ "the VS Code extension was not replaced; the rest is installed"
+  end
+
+  test "extras: an extension at the release's version is left alone, none listed is not installed",
+       ctx do
+    url = release!(ctx, "1.1.0", vsix: true)
+
+    run = fn ["/fake/code", "--list-extensions", "--show-versions"] ->
+      {:ok, "objective-mj.troupe@1.1.0\n", 0}
+    end
+
+    assert Update.run(:update, opts(ctx, url, vscode: "/fake/code", run: run)) == 0
+    refute Enum.any?(lines(), &(&1 =~ "VS Code extension"))
+
+    run = fn ["/fake/code", "--list-extensions", "--show-versions"] ->
+      {:ok, "ms-python.python@2024.1.0\n", 0}
+    end
+
+    assert Update.run(:check, opts(ctx, url, vscode: "/fake/code", run: run)) == 0
+    assert Enum.any?(lines(), &(&1 =~ ~r/the VS Code extension\s+not installed/))
+  end
+
+  test "extras: the macOS app bundle is copied out of the disk image, the old one kept", ctx do
+    test = self()
+    app = Path.join(ctx.root, "Applications/Troupe.app")
+
+    plist = fn version ->
+      "<plist><dict><key>CFBundleShortVersionString</key>\n<string>#{version}</string></dict></plist>"
+    end
+
+    File.mkdir_p!(Path.join(app, "Contents"))
+    File.write!(Path.join(app, "Contents/Info.plist"), plist.("1.0.0"))
+    desktop = %{kind: :mac_app, path: app}
+    url = release!(ctx, "1.1.0", desktop: :dmg)
+
+    run = fn
+      ["hdiutil", "attach", "-nobrowse", "-readonly", "-quiet", "-mountpoint", mount, dmg] ->
+        assert File.read!(dmg) == "desktop 1.1.0\n"
+        File.mkdir_p!(Path.join(mount, "Troupe.app/Contents"))
+        File.write!(Path.join(mount, "Troupe.app/Contents/Info.plist"), plist.("1.1.0"))
+        {:ok, "", 0}
+
+      ["hdiutil", "detach", "-quiet", mount] ->
+        send(test, {:detached, mount})
+        File.rm_rf!(Path.join(mount, "Troupe.app"))
+        {:ok, "", 0}
+    end
+
+    opts = opts(ctx, url, desktop: desktop, run: run)
+    assert Update.run(:check, opts) == 0
+    assert Enum.any?(lines(), &(&1 =~ ~r/the desktop app\s+1\.0\.0\s+#{Regex.escape(app)}/))
+
+    assert Update.run(:update, opts) == 0
+    assert Update.desktop_version(desktop, %{}) == "1.1.0"
+    assert Update.desktop_version(%{kind: :mac_app, path: app <> ".previous"}, %{}) == "1.0.0"
+    assert_received {:detached, _mount}
+    refute File.exists?(app <> ".new")
+    refute File.exists?(app <> ".new.dmg")
+    refute File.exists?(app <> ".new.mount")
+
+    assert Update.run(:rollback, opts) == 0
+    assert Update.desktop_version(desktop, %{}) == "1.0.0"
+    assert Update.desktop_version(%{kind: :mac_app, path: app <> ".previous"}, %{}) == "1.1.0"
+  end
+
+  test "extras: on Windows the release's setup runs silently and keeps no previous", ctx do
+    test = self()
+    url = release!(ctx, "1.1.0", desktop: :setup)
+
+    run = fn
+      ["reg", "query", key, "/v", "DisplayVersion"] ->
+        assert key =~ "Uninstall\\Troupe"
+
+        {:ok, "\r\nHKEY_CURRENT_USER\\...\\Troupe\r\n    DisplayVersion    REG_SZ    1.0.0\r\n",
+         0}
+
+      [setup, "/S"] ->
+        send(test, {:setup, setup, File.read!(setup)})
+        {:ok, "", 0}
+    end
+
+    opts = opts(ctx, url, desktop: %{kind: :windows_setup, path: nil}, windows?: true, run: run)
+    assert Update.run(:update, opts) == 0
+    out = lines()
+    assert_received {:setup, setup, "desktop 1.1.0\n"}
+    assert Path.basename(setup) == "Troupe_1.1.0_x64-setup.exe"
+    refute File.exists?(setup)
+
+    assert Enum.any?(
+             out,
+             &(&1 =~
+                 "the desktop app 1.1.0 is set up (1.0.0 before; its setup keeps no previous)")
+           )
+
+    # A setup that would not run leaves troupe and troupe-daemon installed and says so.
+    url = release!(ctx, "1.2.0", desktop: :setup)
+
+    run = fn
+      ["reg", "query", _key, "/v", "DisplayVersion"] ->
+        {:ok, "    DisplayVersion    REG_SZ    1.1.0\r\n", 0}
+
+      [_setup, "/S"] ->
+        {:ok, "", 2}
+    end
+
+    assert Update.run(
+             :update,
+             opts(ctx, url,
+               desktop: %{kind: :windows_setup, path: nil},
+               windows?: true,
+               run: run
+             )
+           ) == 1
+
+    assert Enum.any?(
+             lines(),
+             &(&1 =~ "exited with 2; close Troupe if it is running and run troupe update again")
+           )
+  end
+
   test "--rollback with nothing to go back to says so", ctx do
     assert Update.run(:rollback, opts(ctx, nil)) == 1
     assert Enum.any?(lines(), &(&1 =~ "nothing to roll back to"))
@@ -368,6 +612,10 @@ defmodule Troupe.UpdateTest do
         target: "linux_x86_64",
         tui: ctx.tui,
         lib: ctx.lib,
+        # Never this machine's desktop app or VS Code: a test names its own or none.
+        desktop: nil,
+        vscode: nil,
+        run: fn argv -> flunk("no program was expected to run, and #{inspect(argv)} was") end,
         windows?: false,
         out: &send(test, {:out, &1}),
         daemon: fn _s ->
@@ -395,11 +643,28 @@ defmodule Troupe.UpdateTest do
     refute File.exists?(ctx.lib <> ".previous")
   end
 
-  # A release of a troupe and a troupe-daemon for linux_x86_64, signed.
+  # A release of a troupe and a troupe-daemon for linux_x86_64, signed; with `desktop:`
+  # the desktop app's files the installers use (`:appimage`, `:dmg`, `:setup`, or a list),
+  # and with `vsix: true` the VS Code extension.
   defp release!(ctx, version, extra \\ []) do
     dir = Path.join(ctx.root, "release-#{version}-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
     File.write!(Path.join(dir, "troupe-#{version}-linux_x86_64"), "troupe #{version}\n")
+    desktop = version |> String.split("-") |> hd()
+
+    for kind <- List.wrap(Keyword.get(extra, :desktop, [])) do
+      name =
+        case kind do
+          :appimage -> "Troupe_#{desktop}_amd64.AppImage"
+          :dmg -> "Troupe_#{desktop}_universal.dmg"
+          :setup -> "Troupe_#{desktop}_x64-setup.exe"
+        end
+
+      File.write!(Path.join(dir, name), "desktop #{desktop}\n")
+    end
+
+    if Keyword.get(extra, :vsix, false),
+      do: File.write!(Path.join(dir, "troupe.vsix"), "vsix #{version}\n")
 
     tree = Path.join(ctx.root, "tree-#{System.unique_integer([:positive])}")
     daemon_tree!(tree, version)

@@ -1,4 +1,6 @@
-// The desktop app's own update, and the daemon's beside it (#66, Decision 874).
+// The desktop app's own update, and beside it the daemon's (#66, Decision 874), the
+// terminal client's and the VS Code extension's, wherever the installers put those:
+// an install picks its components once, and one update moves them all.
 //
 // Three commands, one step each, so that the page can ask the person between them:
 //
@@ -8,10 +10,13 @@
 //                    Nothing is downloaded but the manifest and the update's signature.
 //   update_download  downloads the app's update, which Tauri's updater checks against the
 //                    release key, and checks it again against the signed manifest's size
-//                    and sha256; and the daemon's release, checked and unpacked beside the
-//                    one it replaces. Nothing in place is touched.
-//   update_install   swaps the daemon's release in, as `troupe update` does (Decision 865),
-//                    and hands the app's update to Tauri's updater, which restarts the app.
+//                    and sha256; the daemon's release, checked and unpacked beside the one
+//                    it replaces; the terminal client, checked and put beside the one it
+//                    replaces; and the extension's `.vsix`, checked. Nothing in place is
+//                    touched.
+//   update_install   installs the extension with `code`, swaps the daemon's release and
+//                    the terminal client in, as `troupe update` does (Decision 865), and
+//                    hands the app's update to Tauri's updater, which restarts the app.
 //
 // A release that cannot be checked is refused with a sentence, and nothing changes. The
 // page asks the daemon to stop between turns (`daemon.stop`) before it calls the last one,
@@ -19,6 +24,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -46,6 +52,8 @@ struct Pending {
     update: Update,
     app: Artifact,
     daemon: Option<DaemonStep>,
+    tui: Option<TuiStep>,
+    extension: Option<ExtensionStep>,
     bytes: Option<Vec<u8>>,
 }
 
@@ -55,6 +63,28 @@ struct DaemonStep {
     artifact: Artifact,
     staged: bool,
 }
+
+/// The terminal client the installers put beside the daemon: where it is, and the release's
+/// file for it, put beside it as `<path>.new` once staged.
+#[derive(Clone)]
+struct TuiStep {
+    path: PathBuf,
+    artifact: Artifact,
+    staged: bool,
+}
+
+/// The VS Code extension `code` lists: the command line that installs it, and the
+/// release's `.vsix`, kept in the temporary directory once staged.
+#[derive(Clone)]
+struct ExtensionStep {
+    code: PathBuf,
+    artifact: Artifact,
+    vsix: PathBuf,
+    staged: bool,
+}
+
+/// The VS Code extension's id, as `code --list-extensions` names it.
+const EXTENSION: &str = "objective-mj.troupe";
 
 /// What the page passes to a check: the version a plane recommends, and the plane's policy
 /// for each kind of client, as `me.client_versions` answers it.
@@ -95,7 +125,7 @@ impl PlaneWord {
 pub enum Checked {
     /// Nothing newer: `version` is the release found, `current` this build.
     Current { version: String, current: String },
-    Offer(Offer),
+    Offer(Box<Offer>),
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -108,6 +138,12 @@ pub struct Offer {
     pub daemon: Option<DaemonOffer>,
     /// Why the daemon here is left as it is, when one is and that is not because it is current.
     pub daemon_note: Option<String>,
+    /// The terminal client the installers put here, replaced with it.
+    pub tui: Option<ComponentOffer>,
+    pub tui_note: Option<String>,
+    /// The VS Code extension `code` lists, installed again from the release.
+    pub extension: Option<ComponentOffer>,
+    pub extension_note: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -115,6 +151,14 @@ pub struct DaemonOffer {
     pub from: String,
     pub to: String,
     pub lib: String,
+}
+
+/// One more component an update replaces: from which version to which, and where it is.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct ComponentOffer {
+    pub from: String,
+    pub to: String,
+    pub at: String,
 }
 
 fn env(name: &str) -> Option<String> {
@@ -252,7 +296,11 @@ fn asked_for(manifest: &Manifest, source: &Source) -> Result<(), String> {
 /// A plane's word on a version for one component: never a blocked one, never below its
 /// minimum (Decision 868).
 fn served(plane: &PlaneWord, component: &str, version: &str) -> Result<(), String> {
-    let name = if component == "desktop" { "the desktop app" } else { "troupe-daemon" };
+    let name = match component {
+        "desktop" => "the desktop app",
+        "tui" => "troupe",
+        _ => "troupe-daemon",
+    };
     match release::judge(&plane.policy(component), version) {
         Judgement::Blocked => Err(format!("the plane at {} blocks {name} {version}; nothing is installed", plane.url)),
         Judgement::BelowMinimum => Err(format!(
@@ -449,6 +497,238 @@ fn undo_daemon(lib: &Path) {
     let _ = std::fs::rename(sibling(lib, ".previous"), lib);
 }
 
+// -- the terminal client and the VS Code extension -----------------------------------
+
+/// Where the installers put the programs: `TROUPE_BIN_DIR`, else
+/// `%LOCALAPPDATA%\Programs\troupe` on Windows and `~/.local/bin` elsewhere.
+fn bin_dir() -> Option<PathBuf> {
+    if let Some(dir) = env("TROUPE_BIN_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").map(|l| PathBuf::from(l).join("Programs").join("troupe"))
+    } else {
+        daemon::home().map(|h| h.join(".local").join("bin"))
+    }
+}
+
+fn tui_path() -> Option<PathBuf> {
+    bin_dir().map(|b| b.join(if cfg!(windows) { "troupe.exe" } else { "troupe" }))
+}
+
+/// A program run to completion with no window, its output and status.
+fn run_quiet(program: &Path, args: &[&str]) -> Result<(String, i32), String> {
+    let mut command = Command::new(program);
+    command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = command.output().map_err(|e| format!("{} could not be run: {e}", program.display()))?;
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    Ok((text, output.status.code().unwrap_or(-1)))
+}
+
+/// The version `troupe --version` prints (`troupe 0.29.0-beta`), or "unknown version" for
+/// a program that is there and says something else; `None` where none is installed.
+fn tui_version(path: &Path) -> Option<String> {
+    if !path.is_file() {
+        return None;
+    }
+    Some(match run_quiet(path, &["--version"]) {
+        Ok((output, 0)) => tui_version_of(&output),
+        _ => "unknown version".to_string(),
+    })
+}
+
+fn tui_version_of(output: &str) -> String {
+    output
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("troupe ").map(|v| v.trim().to_string()))
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "unknown version".to_string())
+}
+
+/// VS Code's command line, as the installers find it: `TROUPE_VSCODE_CLI`, `code` on the
+/// PATH, or where the macOS and Windows setups put it.
+fn code_cli() -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(given) = env("TROUPE_VSCODE_CLI") {
+        candidates.push(PathBuf::from(given));
+    }
+    let name = if cfg!(windows) { "code.cmd" } else { "code" };
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            candidates.push(dir.join(name));
+        }
+    }
+    if cfg!(windows) {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            candidates.push(PathBuf::from(local).join("Programs").join("Microsoft VS Code").join("bin").join("code.cmd"));
+        }
+        if let Some(programs) = std::env::var_os("ProgramFiles") {
+            candidates.push(PathBuf::from(programs).join("Microsoft VS Code").join("bin").join("code.cmd"));
+        }
+    } else {
+        candidates.push(PathBuf::from("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"));
+        if let Some(h) = daemon::home() {
+            candidates.push(h.join("Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"));
+        }
+    }
+    candidates.into_iter().find(|c| c.is_file())
+}
+
+/// The extension's version as `code --list-extensions --show-versions` lists it, or
+/// `None` where it is not installed or `code` does not answer.
+fn extension_version(code: &Path) -> Option<String> {
+    match run_quiet(code, &["--list-extensions", "--show-versions"]) {
+        Ok((output, 0)) => extension_version_of(&output),
+        _ => None,
+    }
+}
+
+fn extension_version_of(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let (id, version) = line.trim().split_once('@')?;
+        (id.eq_ignore_ascii_case(EXTENSION) && !version.is_empty()).then(|| version.to_string())
+    })
+}
+
+/// The terminal client's part of an update: replaced where the installers put one older
+/// than the release, and the plane, if there is one, serves the release's terminal.
+fn tui_step(manifest: &Manifest, platform: &Platform, plane: Option<&PlaneWord>, path: Option<PathBuf>, from: Option<String>) -> (Option<TuiStep>, Option<ComponentOffer>, Option<String>) {
+    let (Some(path), Some(from)) = (path, from) else { return (None, None, None) };
+    let to = &manifest.version;
+    if !release::wanted(&from, to) {
+        return (None, None, None);
+    }
+    if let Some(plane) = plane {
+        if let Err(why) = served(plane, "tui", to) {
+            return (None, None, Some(format!("troupe {from} is left as it is: {}", why.trim_end_matches("; nothing is installed"))));
+        }
+    }
+    let Some(artifact) = manifest.find("tui", &platform.target()).cloned() else {
+        return (None, None, Some(format!("troupe {from} is left as it is: release {to} has no troupe for this computer")));
+    };
+    let offer = ComponentOffer { from, to: to.clone(), at: path.display().to_string() };
+    (Some(TuiStep { path, artifact, staged: false }), Some(offer), None)
+}
+
+/// The extension's part: installed again from the release where `code` lists one older.
+fn extension_step(manifest: &Manifest, code: Option<PathBuf>, from: Option<String>) -> (Option<ExtensionStep>, Option<ComponentOffer>, Option<String>) {
+    let (Some(code), Some(from)) = (code, from) else { return (None, None, None) };
+    let to = &manifest.version;
+    if !release::wanted(&from, to) {
+        return (None, None, None);
+    }
+    let Some(artifact) = manifest.file("troupe.vsix").cloned() else {
+        return (None, None, Some(format!("the VS Code extension {from} is left as it is: release {to} has none")));
+    };
+    let vsix = std::env::temp_dir().join(format!("troupe-update-{}-{}", std::process::id(), artifact.file));
+    let offer = ComponentOffer { from, to: to.clone(), at: code.display().to_string() };
+    (Some(ExtensionStep { code, artifact, vsix, staged: false }), Some(offer), None)
+}
+
+/// The terminal client downloaded, checked, and put beside the one it replaces as
+/// `<path>.new`, made executable. Nothing in place is touched.
+async fn stage_tui(client: &reqwest::Client, base: &str, step: &TuiStep) -> Result<(), String> {
+    let url = format!("{base}/{}", step.artifact.file);
+    let bytes = get(client, &url, None)
+        .await?
+        .ok_or_else(|| format!("{url} is not there, though the signed manifest names it; nothing is installed"))?;
+    release::check_bytes(&step.artifact, &bytes).map_err(|why| format!("{why}; nothing is installed"))?;
+    let new = sibling(&step.path, ".new");
+    std::fs::write(&new, &bytes).map_err(|e| format!("{} could not be written: {e}; nothing is installed", new.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755));
+    }
+    Ok(())
+}
+
+/// The extension's `.vsix` downloaded and checked, kept until `code` installs it.
+async fn stage_extension(client: &reqwest::Client, base: &str, step: &ExtensionStep) -> Result<(), String> {
+    let url = format!("{base}/{}", step.artifact.file);
+    let bytes = get(client, &url, None)
+        .await?
+        .ok_or_else(|| format!("{url} is not there, though the signed manifest names it; nothing is installed"))?;
+    release::check_bytes(&step.artifact, &bytes).map_err(|why| format!("{why}; nothing is installed"))?;
+    std::fs::write(&step.vsix, &bytes).map_err(|e| format!("{} could not be written: {e}; nothing is installed", step.vsix.display()))
+}
+
+/// The staged terminal client in, the old one kept as `<path>.previous`, as `troupe update`
+/// keeps it: on Unix the old file is linked to that name and the new one
+/// replaces it in one rename; on Windows a running program cannot be replaced but can be
+/// renamed, so it is moved aside first, and one a terminal still runs is set aside under a
+/// stamped name for a later update to remove.
+fn swap_tui_in(path: &Path) -> Result<(), String> {
+    let previous = sibling(path, ".previous");
+    let new = sibling(path, ".new");
+    clear_set_aside(path);
+    if previous.exists() && std::fs::remove_file(&previous).is_err() {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        rename(&previous, &sibling(path, &format!(".in-use-{stamp}")), &format!("{} could not be removed or set aside; nothing changed", previous.display()))?;
+    }
+    if cfg!(windows) {
+        rename(path, &previous, &format!("{} could not be moved aside; nothing changed", path.display()))?;
+        if let Err(why) = rename(&new, path, &format!("the new troupe could not be moved into {}", path.display())) {
+            let _ = std::fs::rename(&previous, path);
+            return Err(format!("{why}; nothing changed"));
+        }
+    } else {
+        if std::fs::hard_link(path, &previous).is_err() {
+            std::fs::copy(path, &previous).map_err(|e| format!("{} could not be kept as {}: {e}; nothing changed", path.display(), previous.display()))?;
+        }
+        rename(&new, path, &format!("the new troupe could not be moved into {}; nothing changed", path.display()))?;
+    }
+    Ok(())
+}
+
+/// The swap undone, when the app's own update cannot follow it.
+fn undo_tui(path: &Path) {
+    let previous = sibling(path, ".previous");
+    if cfg!(windows) {
+        let _ = std::fs::rename(path, sibling(path, ".new"));
+        let _ = std::fs::rename(&previous, path);
+    } else {
+        let _ = std::fs::rename(path, sibling(path, ".new"));
+        let _ = std::fs::copy(&previous, path);
+    }
+}
+
+/// Files an earlier update set aside because a terminal still ran them, removed where
+/// they are free now.
+fn clear_set_aside(path: &Path) {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str())) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let file = entry.file_name();
+        let file = file.to_string_lossy();
+        if file.starts_with(&format!("{name}.")) && file.contains(".in-use-") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// The extension installed with `code`, which replaces the one listed; the `.vsix` goes
+/// either way.
+fn install_extension(step: &ExtensionStep) -> Result<(), String> {
+    let result = match run_quiet(&step.code, &["--install-extension", &step.vsix.display().to_string(), "--force"]) {
+        Ok((_output, 0)) => Ok(()),
+        Ok((output, status)) => {
+            let said = output.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
+            Err(format!("{} --install-extension exited with {status}{}; nothing changed", step.code.display(), if said.is_empty() { String::new() } else { format!(" ({said})") }))
+        }
+        Err(why) => Err(format!("{why}; nothing changed")),
+    };
+    let _ = std::fs::remove_file(&step.vsix);
+    result
+}
+
 /// Wait for a daemon that said it stops to be gone: nothing answering where `daemon.json`
 /// says it listens, asked every quarter second for a minute.
 fn daemon_gone() -> Result<(), String> {
@@ -510,10 +790,32 @@ pub async fn update_check(app: AppHandle, updates: State<'_, Updates>, params: O
     let (signature, key) = signature_of(&client, &source.base, &manifest, &artifact, &keys).await?;
     let update = tauri_update(&app, &source.base, &version, &key, &artifact.file, signature).await?;
     let (daemon, daemon_offer, daemon_note) = daemon_step(&manifest, &platform, plane.as_ref(), lib_dir());
+    // The terminal's and the extension's versions are programs run, off this thread.
+    let (tui_at, tui_from, code_at, code_from) = tauri::async_runtime::spawn_blocking(|| {
+        let tui_at = tui_path();
+        let tui_from = tui_at.as_deref().and_then(tui_version);
+        let code_at = code_cli();
+        let code_from = code_at.as_deref().and_then(extension_version);
+        (tui_at, tui_from, code_at, code_from)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let (tui, tui_offer, tui_note) = tui_step(&manifest, &platform, plane.as_ref(), tui_at, tui_from);
+    let (extension, extension_offer, extension_note) = extension_step(&manifest, code_at, code_from);
 
-    let offer = Offer { version, current, source: source.base.clone(), daemon: daemon_offer, daemon_note };
-    *updates.0.lock().unwrap() = Some(Pending { base: source.base, update, app: artifact, daemon, bytes: None });
-    Ok(Checked::Offer(offer))
+    let offer = Offer {
+        version,
+        current,
+        source: source.base.clone(),
+        daemon: daemon_offer,
+        daemon_note,
+        tui: tui_offer,
+        tui_note,
+        extension: extension_offer,
+        extension_note,
+    };
+    *updates.0.lock().unwrap() = Some(Pending { base: source.base, update, app: artifact, daemon, tui, extension, bytes: None });
+    Ok(Checked::Offer(Box::new(offer)))
 }
 
 #[derive(Clone, Serialize)]
@@ -525,10 +827,10 @@ struct Progress {
 /// Download what the last check offered and check it; nothing in place changes.
 #[tauri::command]
 pub async fn update_download(app: AppHandle, updates: State<'_, Updates>) -> Result<(), String> {
-    let (update, artifact, base, daemon) = {
+    let (update, artifact, base, daemon, tui, extension) = {
         let pending = updates.0.lock().unwrap();
         let p = pending.as_ref().ok_or("no update was found to download; check for one first")?;
-        (p.update.clone(), p.app.clone(), p.base.clone(), p.daemon.clone())
+        (p.update.clone(), p.app.clone(), p.base.clone(), p.daemon.clone(), p.tui.clone(), p.extension.clone())
     };
 
     let mut received: u64 = 0;
@@ -548,10 +850,21 @@ pub async fn update_download(app: AppHandle, updates: State<'_, Updates>) -> Res
         .map_err(|e| format!("{} is not what the release key signed for {} ({e}); nothing is installed", artifact.file, update.version))?;
     release::check_bytes(&artifact, &bytes).map_err(|why| format!("{why}; nothing is installed"))?;
 
+    let http = client(true)?;
     let mut staged = false;
     if let Some(step) = &daemon {
-        stage_daemon(&client(true)?, &base, step).await?;
+        stage_daemon(&http, &base, step).await?;
         staged = true;
+    }
+    let mut tui_staged = false;
+    if let Some(step) = &tui {
+        stage_tui(&http, &base, step).await?;
+        tui_staged = true;
+    }
+    let mut extension_staged = false;
+    if let Some(step) = &extension {
+        stage_extension(&http, &base, step).await?;
+        extension_staged = true;
     }
 
     let mut pending = updates.0.lock().unwrap();
@@ -559,22 +872,41 @@ pub async fn update_download(app: AppHandle, updates: State<'_, Updates>) -> Res
     if let Some(step) = p.daemon.as_mut() {
         step.staged = staged;
     }
+    if let Some(step) = p.tui.as_mut() {
+        step.staged = tui_staged;
+    }
+    if let Some(step) = p.extension.as_mut() {
+        step.staged = extension_staged;
+    }
     p.bytes = Some(bytes);
     Ok(())
 }
 
-/// Install what was downloaded: the daemon's release swapped in, then the app's update,
-/// which restarts the app. `daemon_stopped` is the page's word that it asked the daemon to
-/// stop between turns and it said it would; that daemon is waited for. One a terminal runs
-/// inside itself, or none, is not.
+/// Install what was downloaded: the extension with `code`, the daemon's release and the
+/// terminal client swapped in, then the app's update, which restarts the app.
+/// `daemon_stopped` is the page's word that it asked the daemon to stop between turns and
+/// it said it would; that daemon is waited for. One a terminal runs inside itself, or
+/// none, is not. The extension goes first, since `code` failing changes nothing else; a
+/// terminal client that cannot follow the daemon puts the daemon back, and an app update
+/// that cannot follow puts both back.
 #[tauri::command]
 pub async fn update_install(app: AppHandle, updates: State<'_, Updates>, daemon_stopped: bool) -> Result<(), String> {
-    let (update, bytes, daemon) = {
+    let (update, bytes, daemon, tui, extension) = {
         let pending = updates.0.lock().unwrap();
         let p = pending.as_ref().ok_or("no update was downloaded; nothing is installed")?;
         let bytes = p.bytes.clone().ok_or("the update is not downloaded yet; nothing is installed")?;
-        (p.update.clone(), bytes, p.daemon.clone().filter(|d| d.staged))
+        (
+            p.update.clone(),
+            bytes,
+            p.daemon.clone().filter(|d| d.staged),
+            p.tui.clone().filter(|t| t.staged),
+            p.extension.clone().filter(|x| x.staged),
+        )
     };
+
+    if let Some(step) = extension {
+        tauri::async_runtime::spawn_blocking(move || install_extension(&step)).await.map_err(|e| e.to_string())??;
+    }
 
     if let Some(step) = &daemon {
         if daemon_stopped {
@@ -583,8 +915,20 @@ pub async fn update_install(app: AppHandle, updates: State<'_, Updates>, daemon_
         swap_daemon_in(&step.lib)?;
     }
 
-    // The daemon first: when the app cannot follow it, the daemon goes back as it was.
+    if let Some(step) = &tui {
+        if let Err(why) = swap_tui_in(&step.path) {
+            if let Some(step) = &daemon {
+                undo_daemon(&step.lib);
+            }
+            return Err(why);
+        }
+    }
+
+    // The daemon and the terminal first: when the app cannot follow them, both go back.
     if let Err(e) = update.install(&bytes) {
+        if let Some(step) = &tui {
+            undo_tui(&step.path);
+        }
         if let Some(step) = &daemon {
             undo_daemon(&step.lib);
         }
@@ -650,6 +994,95 @@ mod tests {
             signed: None,
             release: None,
         }
+    }
+
+    // -- the terminal client and the extension --------------------------------------
+
+    #[test]
+    fn the_terminal_s_version_and_the_extension_s_are_read_as_the_programs_print_them() {
+        assert_eq!(tui_version_of("troupe 0.29.0-beta\n"), "0.29.0-beta");
+        assert_eq!(tui_version_of("something else\n"), "unknown version");
+        assert_eq!(extension_version_of("ms-python.python@2024.1.0\nObjective-MJ.troupe@0.28.0\n"), Some("0.28.0".into()));
+        assert_eq!(extension_version_of("ms-python.python@2024.1.0\n"), None);
+        assert_eq!(tui_version(Path::new("/nowhere/troupe")), None);
+    }
+
+    #[test]
+    fn the_terminal_beside_the_app_is_replaced_when_it_is_older_and_left_when_the_plane_blocks_it() {
+        let dir = scratch("tui-older");
+        let path = dir.join("troupe");
+        std::fs::write(&path, "the terminal 0.14.0-beta\n").unwrap();
+        let platform = Platform::this();
+        let release = manifest("0.15.0-beta", vec![artifact("tui", &platform.target(), "troupe-0.15.0-beta", b"t")]);
+
+        let (step, offer, note) = tui_step(&release, &platform, None, Some(path.clone()), Some("0.14.0-beta".into()));
+        assert!(step.is_some());
+        assert_eq!(offer, Some(ComponentOffer { from: "0.14.0-beta".into(), to: "0.15.0-beta".into(), at: path.display().to_string() }));
+        assert_eq!(note, None);
+
+        let (step, offer, note) = tui_step(&release, &platform, None, Some(path.clone()), Some("0.15.0-beta".into()));
+        assert!(step.is_none() && offer.is_none() && note.is_none());
+
+        let blocking = PlaneWord {
+            url: "https://plane.example.test".into(),
+            versions: HashMap::from([("tui".to_string(), Policy { blocked: vec!["0.15.0-beta".into()], ..Default::default() })]),
+            signed: None,
+            release: None,
+        };
+        let (step, offer, note) = tui_step(&release, &platform, Some(&blocking), Some(path.clone()), Some("0.14.0-beta".into()));
+        assert!(step.is_none() && offer.is_none());
+        assert!(note.unwrap().contains("blocks troupe 0.15.0-beta"));
+
+        let bare = manifest("0.15.0-beta", vec![]);
+        let (_step, _offer, note) = tui_step(&bare, &platform, None, Some(path), Some("0.14.0-beta".into()));
+        assert!(note.unwrap().contains("has no troupe for this computer"));
+
+        let (step, offer, note) = tui_step(&release, &platform, None, None, None);
+        assert!(step.is_none() && offer.is_none() && note.is_none());
+    }
+
+    #[test]
+    fn the_extension_is_installed_again_where_code_lists_an_older_one() {
+        let release = manifest("0.15.0-beta", vec![artifact("vscode", "", "troupe.vsix", b"v")]);
+        let code = PathBuf::from("/fake/code");
+        let (step, offer, note) = extension_step(&release, Some(code.clone()), Some("0.14.0".into()));
+        assert!(step.is_some());
+        assert_eq!(offer.map(|o| (o.from, o.to)), Some(("0.14.0".into(), "0.15.0-beta".into())));
+        assert_eq!(note, None);
+
+        let (step, _offer, _note) = extension_step(&release, Some(code.clone()), Some("0.15.0-beta".into()));
+        assert!(step.is_none());
+
+        let bare = manifest("0.15.0-beta", vec![]);
+        let (step, _offer, note) = extension_step(&bare, Some(code), Some("0.14.0".into()));
+        assert!(step.is_none());
+        assert!(note.unwrap().contains("release 0.15.0-beta has none"));
+
+        let (step, offer, note) = extension_step(&release, None, None);
+        assert!(step.is_none() && offer.is_none() && note.is_none());
+    }
+
+    #[test]
+    fn the_terminal_is_swapped_in_with_the_old_kept_and_put_back_when_the_app_cannot_follow() {
+        let dir = scratch("tui-swap");
+        let path = dir.join("troupe");
+        std::fs::write(&path, "the terminal 0.14.0-beta\n").unwrap();
+        std::fs::write(sibling(&path, ".new"), "the terminal 0.15.0-beta\n").unwrap();
+        std::fs::write(sibling(&path, ".in-use-1"), "an old one\n").unwrap();
+
+        swap_tui_in(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "the terminal 0.15.0-beta\n");
+        assert_eq!(std::fs::read_to_string(sibling(&path, ".previous")).unwrap(), "the terminal 0.14.0-beta\n");
+        assert!(!sibling(&path, ".new").exists());
+        assert!(!sibling(&path, ".in-use-1").exists());
+
+        undo_tui(&path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "the terminal 0.14.0-beta\n");
+        assert_eq!(std::fs::read_to_string(sibling(&path, ".new")).unwrap(), "the terminal 0.15.0-beta\n");
+
+        // A second update keeps only the one before it.
+        swap_tui_in(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(sibling(&path, ".previous")).unwrap(), "the terminal 0.14.0-beta\n");
     }
 
     #[test]
