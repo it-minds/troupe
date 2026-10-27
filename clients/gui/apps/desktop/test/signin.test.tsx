@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
+import { adoptSignedInPlane } from "../src/shell";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
@@ -47,6 +48,24 @@ async function approveTheCode(): Promise<void> {
   await waitFor(code, "the code to enter");
   harness.idp.approve("ada@example.com", "Ada");
 }
+
+describe("a machine signed in already, by troupe login", () => {
+  it("is where the app starts, unless it was told a plane before", async () => {
+    window.troupe = { name: "Test shell", version: "0", signInFlow: "device", signedInPlane: async () => harness.plane.baseUrl };
+    await adoptSignedInPlane();
+    expect(localStorage.getItem("troupe.pref.planeUrl")).toBe(harness.plane.baseUrl);
+
+    localStorage.setItem("troupe.pref.planeUrl", "https://told.example");
+    await adoptSignedInPlane();
+    expect(localStorage.getItem("troupe.pref.planeUrl")).toBe("https://told.example");
+
+    // A shell that cannot say, or a machine signed in nowhere, leaves the question open.
+    localStorage.removeItem("troupe.pref.planeUrl");
+    window.troupe = { name: "Test shell", version: "0", signInFlow: "device", signedInPlane: async () => null };
+    await adoptSignedInPlane();
+    expect(localStorage.getItem("troupe.pref.planeUrl")).toBeNull();
+  });
+});
 
 describe("signing in to a plane", () => {
   it("after a first run that named the plane, signs in to it without asking for the address again", async () => {

@@ -42,14 +42,16 @@ defmodule Troupe.CLI.ConfigSetup do
   alias Troupe.Client.Daemon.Link
   alias Troupe.Protocol.Client, as: Protocol
   alias Troupe.Protocol.ProviderTypes
+  alias Troupe.Remote.{Credentials, Discovery}
 
   @typedoc """
   Everything this touches outside itself, so a test can play a person and a daemon:
   `say` prints a line, `ask` reads one (`nil` at end of input), `secret` reads one
   without echo, `call` is a daemon request, `login` and `pull` are the commands of the
-  same names, `describe` is the full report, `opencode` the providers opencode's settings
-  declare, as the daemon finds them to offer the copy (`setup.get`'s `detected`),
-  `usable?` whether the settings in force can ask a model, and
+  same names, `signed_in` the plane this machine is signed in to, `describe` is the full
+  report, `opencode` the providers opencode's settings declare, as the daemon finds them to
+  offer the copy (`setup.get`'s `detected`), `usable?` whether the settings in force can ask
+  a model, and
   `troupe_daemon?` and `troupe_daemon` whether there is a standalone daemon binary and
   `troupe daemon ARGS` run through it. `not_terminal` names standard input or output when
   either is not a terminal, `screen` runs the full-screen setup on the flow `setup.get`
@@ -64,6 +66,7 @@ defmodule Troupe.CLI.ConfigSetup do
           call: (String.t(), map() -> {:ok, map()} | {:error, term()}),
           login: (String.t() -> non_neg_integer()),
           pull: (String.t() -> non_neg_integer()),
+          signed_in: (-> String.t() | nil),
           describe: (-> String.t()),
           opencode: (-> %{names: [String.t()], default: String.t() | nil}),
           local_file?: (-> boolean()),
@@ -398,13 +401,24 @@ defmodule Troupe.CLI.ConfigSetup do
     io.say.("Then troupe config shows what Troupe will use.")
   end
 
+  # A machine signed in already, by `troupe login` or the desktop app (the sign-in is
+  # shared, root Decision 958), is offered that plane and not asked to sign in to it
+  # again: the plane's settings are pulled with the sign-in it has.
   defp from_plane(io) do
-    case io.ask.("plane URL: ") do
-      url when url in [nil, ""] ->
+    signed_in = io.signed_in.()
+    prompt = if signed_in, do: "plane URL [#{signed_in}]: ", else: "plane URL: "
+    url = blank_to_nil(io.ask.(prompt)) || signed_in
+
+    cond do
+      is_nil(url) ->
         io.say.("no plane given; nothing changed")
         1
 
-      url ->
+      signed_in && Discovery.base(url) == signed_in ->
+        io.say.("signed in to #{signed_in} already")
+        io.pull.(signed_in)
+
+      true ->
         if io.login.(url) == 0, do: io.pull.(url), else: 1
     end
   end
@@ -681,6 +695,12 @@ defmodule Troupe.CLI.ConfigSetup do
       call: &Link.call/2,
       login: &RemoteCLI.login/1,
       pull: &ModelConfig.pull/1,
+      signed_in: fn ->
+        case Credentials.fetch() do
+          {:ok, %{plane_url: url, refresh_token: token}} when is_binary(token) -> url
+          _ -> nil
+        end
+      end,
       describe: fn -> describe(workspace) end,
       opencode: &opencode/0,
       local_file?: fn -> File.regular?(Troupe.Config.user_path()) end,

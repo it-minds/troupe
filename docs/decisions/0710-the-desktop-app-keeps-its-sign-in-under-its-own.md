@@ -2,7 +2,7 @@
 number: 710
 title: The desktop app keeps its sign-in under its own bundle identifier
 date: 2026-09-27
-status: accepted
+status: superseded
 issue: 224
 paths:
   - clients/gui/apps/desktop/src-tauri/src/secrets.rs

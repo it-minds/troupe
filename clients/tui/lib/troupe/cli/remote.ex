@@ -6,15 +6,27 @@ defmodule Troupe.CLI.Remote do
   screen first, then the poll blocks until the browser half is done. The
   refresh token lands in the config dir as a user-only file, and the command
   says so — a credential file this machine could not lock down is worth a line
-  of output, not a silent success.
+  of output, not a silent success. The file is the machine's sign-in: the
+  desktop app reads it too (root Decision 958).
+
+  Signed in, login links the daemon on this machine as the person the plane
+  names and hands it the plane token, starting the installed `troupe-daemon`
+  where none is running (TUI Decision 168): the installer's sign-in is then the
+  daemon's as well, before any window or session has opened. A daemon linked
+  to somebody else is left as it is.
   """
 
   alias Troupe.Client
+  alias Troupe.Client.Daemon.Link
   alias Troupe.PlaneKeys
   alias Troupe.Protocol
   alias Troupe.Remote.{Auth, Credentials, Discovery, HTTP, RPC, Tokens}
 
-  @doc "Runs the device flow against a plane and stores the refresh token."
+  @doc """
+  Runs the device flow against a plane, stores the refresh token and links the daemon
+  on this machine. `daemon:` goes to `Troupe.Protocol.Daemon.connect/1`; `spawn: false`
+  links a running daemon only.
+  """
   @spec login(String.t(), keyword()) :: non_neg_integer()
   def login(plane_url, opts \\ []) do
     say = Keyword.get(opts, :say, &IO.puts/1)
@@ -25,6 +37,7 @@ defmodule Troupe.CLI.Remote do
          {:ok, path} <- Tokens.put_login(discovery.plane_url, discovery, tokens) do
       say.("signed in; credentials saved to #{Troupe.Paths.display(path)}#{permissions(path)}")
       pin(discovery.plane_url, say)
+      link_daemon(discovery.plane_url, Keyword.get(opts, :daemon, []), say)
       identity(discovery.plane_url, say)
     else
       {:error, reason} -> fail(say, reason)
@@ -341,6 +354,64 @@ defmodule Troupe.CLI.Remote do
     case Credentials.fetch(url) do
       {:ok, entry} -> [{url, entry.sub}]
       :error -> []
+    end
+  end
+
+  # The daemon on this machine, linked as the person just signed in and handed the plane
+  # token, so that private sessions and their artifacts are reachable from any client
+  # from now on, not from the next `troupe` session on. A daemon linked to somebody else,
+  # or to this person at another plane, is theirs and is left as it is, as `Link` leaves
+  # it. Where none is running the installed `troupe-daemon` is started, as `troupe`
+  # would start one; a machine with none installed is told, and `troupe` links the daemon
+  # it embeds when it next opens.
+  defp link_daemon(plane_url, daemon_opts, say) do
+    info = %{"name" => "troupe", "version" => to_string(Application.spec(:troupe, :vsn) || "dev")}
+
+    with {:ok, person} <- Tokens.person(plane_url),
+         {:ok, client} <- Protocol.Daemon.connect([client_info: info] ++ daemon_opts) do
+      try do
+        link_at(client, person, plane_url, say)
+      after
+        Protocol.Client.close(client)
+      end
+    else
+      {:error, :not_running} ->
+        say.("no daemon is running here; troupe links the one it starts when it next opens")
+
+      {:error, :no_daemon_command} ->
+        say.(
+          "no troupe-daemon is installed here; troupe links the one it starts when it next opens"
+        )
+
+      {:error, reason} ->
+        say.("could not reach the daemon on this machine to link it: #{inspect(reason)}")
+    end
+
+    :ok
+  end
+
+  defp link_at(client, person, plane_url, say) do
+    with {:ok, identity} <- Protocol.Client.call(client, "identity.get", %{}),
+         :ok <- Link.ours(identity, person.subject, plane_url),
+         {:ok, linked} <-
+           Protocol.Client.call(
+             client,
+             "identity.link",
+             Link.link_params(person, identity, plane_url)
+           ) do
+      say.(
+        "the daemon on this machine is linked to #{linked["display_name"] || linked["subject"]} at #{plane_url}, " <>
+          "and holds the plane token; private sessions started here sync"
+      )
+    else
+      {:error, :not_ours} ->
+        say.("the daemon on this machine is linked to somebody else, and was left as it is")
+
+      {:error, :no_subject} ->
+        say.("the plane named nobody to link the daemon as; it was left as it is")
+
+      {:error, error} ->
+        say.("the daemon on this machine could not be linked: #{daemon_error(error)}")
     end
   end
 

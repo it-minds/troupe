@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { adoptSignedInPlane } from "./shell";
 import { applyAppearance, storedMode, storedTheme } from "./theme";
 import "./styles.css";
 
@@ -12,6 +13,7 @@ async function start(): Promise<void> {
   if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
     const { installShell } = await import("./shell-tauri");
     await installShell();
+    await adoptSignedInPlane();
   }
   // Before the first render, not during it: the ground a person chose is on the
   // document by the time anything is painted, so nobody watches the app change colour

@@ -1,8 +1,10 @@
 // The desktop shell. It holds no application logic: the GUI is the same web bundle a
 // browser loads, and this process exists to give it the three things a tab cannot have.
 //
-//   the credential store   where the identity provider's refresh token lives, and the
-//                          only thing the GUI keeps across launches
+//   the sign-in            the identity provider's refresh token, in the TUI's
+//                          `credentials.json`, so one sign-in serves the terminal
+//                          client, this app and the daemon (src/signin.rs); the OS
+//                          credential store only to move an earlier sign-in out of
 //   an opener              a webview does nothing with `target="_blank"`, and the
 //                          device grant is unusable unless its link reaches a browser
 //   an HTTP client         outside the webview, so a plane needs no CORS entry for
@@ -35,6 +37,7 @@ mod plane_word;
 mod release;
 mod secrets;
 mod update;
+mod signin;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -59,6 +62,12 @@ pub fn run() {
             secrets::secret_delete,
             agent_file::agent_file_open,
             artifact_window::artifact_window_open,
+            signin::signin_get,
+            signin::signin_set,
+            signin::signin_clear,
+            signin::signin_current,
+            signin::signin_lock,
+            signin::signin_unlock,
             daemon::daemon_endpoint,
             daemon::daemon_start,
             file_save::file_save,

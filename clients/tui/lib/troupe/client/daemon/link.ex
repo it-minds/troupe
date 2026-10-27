@@ -349,7 +349,7 @@ defmodule Troupe.Client.Daemon.Link do
          {:ok, person} <- Tokens.person(plane),
          :ok <- not_previous(person, previous),
          {:ok, identity} <- call("identity.get", %{}),
-         :ok <- ours(identity, person, plane),
+         :ok <- ours(identity, person.subject, plane),
          {:ok, _linked} <- call("identity.link", link_params(person, identity, plane)) do
       {:ok, person.renew_at}
     end
@@ -366,19 +366,24 @@ defmodule Troupe.Client.Daemon.Link do
   defp not_previous(%{subject: subject}, subject) when is_binary(subject), do: {:error, :not_ours}
   defp not_previous(_person, _previous), do: :ok
 
-  # Unlinked, or linked to this person at this plane already: a daemon somebody else
-  # linked, or linked at another plane, is theirs to change.
-  defp ours(_identity, %{subject: nil}, _plane), do: {:error, :no_subject}
-  defp ours(%{"linked" => false}, _person, _plane), do: :ok
+  @doc """
+  Whether `identity`, as the daemon answers `identity.get`, is this person's to link:
+  unlinked, or linked to `subject` at `plane` already. A daemon somebody else linked, or
+  linked at another plane, is theirs to change. `troupe login` asks the same question.
+  """
+  @spec ours(map(), String.t() | nil, String.t()) :: :ok | {:error, :no_subject | :not_ours}
+  def ours(_identity, nil, _plane), do: {:error, :no_subject}
+  def ours(%{"linked" => false}, _subject, _plane), do: :ok
 
-  defp ours(%{"subject" => subject, "plane_url" => url}, %{subject: subject}, plane)
-       when is_binary(url) do
+  def ours(%{"subject" => subject, "plane_url" => url}, subject, plane) when is_binary(url) do
     if Discovery.base(url) == plane, do: :ok, else: {:error, :not_ours}
   end
 
-  defp ours(_identity, _person, _plane), do: {:error, :not_ours}
+  def ours(_identity, _subject, _plane), do: {:error, :not_ours}
 
-  defp link_params(person, identity, plane) do
+  @doc "The `identity.link` params that hand `person`'s plane token over, keeping the name the daemon has."
+  @spec link_params(Tokens.person(), map(), String.t()) :: map()
+  def link_params(person, identity, plane) do
     %{
       command_id: RPC.command_id(),
       subject: person.subject,

@@ -12,7 +12,7 @@ import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, nav, render, says, sleep, startOnTheList, type, waitFor } from "./support";
+import { button, nav, render, says, sees, seesButton, sleep, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -67,6 +67,28 @@ function goToThisComputer(): void {
   const settings = [...document.querySelectorAll<HTMLButtonElement>(".rail button")].find((b) => b.textContent?.includes("This computer"));
   settings!.click();
 }
+
+describe("a daemon nobody has linked", () => {
+  it("is linked as the person signed in here, with the plane token, when the app connects", async () => {
+    expect(daemon.linked).toBeNull();
+    location.hash = `#daemon=${daemon.port}:${daemon.token}`;
+    unmount = render(<App />).unmount;
+
+    await waitFor(() => daemon.planeToken, "the plane token handed to the daemon");
+    expect(await honoured(daemon.planeToken)).toBe(true);
+    expect(daemon.linked).toMatchObject({ subject: "alice@example.com", display_name: "Alice", plane_url: harness.plane.baseUrl });
+  });
+
+  it("is left as it is when it is linked to this person at another plane", async () => {
+    daemon.linked = { subject: "alice@example.com", display_name: "Alice", plane_url: "https://other.example" };
+    location.hash = `#daemon=${daemon.port}:${daemon.token}`;
+    unmount = render(<App />).unmount;
+    await waitFor(() => says("/home/ada/notes"), "the daemon's sessions in the list");
+    await sleep(500);
+    expect(daemon.planeTokens).toEqual([]);
+    expect(daemon.linked?.plane_url).toBe("https://other.example");
+  });
+});
 
 describe("a daemon linked to the person signed in here", () => {
   it("is handed the plane token when the app connects, and the renewed one when it is renewed", async () => {
@@ -139,18 +161,19 @@ describe("signing out", () => {
   });
 });
 
-describe("linking this computer and starting a private session", () => {
-  it("hands the token with the link, and asks the daemon for a private session where it reads it", async () => {
+describe("this computer linked by the sign-in, and a private session started", () => {
+  it("is linked with the token as the app connects, and asks the daemon for a private session where it reads it", async () => {
     location.hash = `#daemon=${daemon.port}:${daemon.token}`;
     unmount = render(<App />).unmount;
     await waitFor(() => says("/home/ada/notes"), "the daemon's sessions in the list");
-    expect(daemon.planeTokens).toEqual([]);
 
-    goToThisComputer();
-    (await waitFor(() => button("Use my account (Alice)"), "the control that links this computer")).click();
+    // Linked by the sign-in, with nothing pressed (Decision 958); This computer says so.
     await waitFor(() => daemon.linked?.subject === "alice@example.com" && daemon.planeToken, "the link, with the token");
     expect(daemon.linked?.plane_url).toBe(harness.plane.baseUrl);
     expect(await honoured(daemon.planeToken)).toBe(true);
+    goToThisComputer();
+    await sees("Sessions started here are recorded as Alice");
+    await seesButton("Stop using my account here");
 
     nav("Sessions")!.click();
     (await waitFor(() => button("Start a session"), "the list's start button")).click();

@@ -352,6 +352,7 @@ function Show-ModelSettings {
   Write-Host "      api_key: `"{env:ANTHROPIC_API_KEY}`""
   if ($Tui) {
     Write-Host "  Or take your organisation's settings: troupe login <plane-url>, then troupe config pull."
+    Write-Host "  That one sign-in is the desktop app's and the daemon's as well."
   } else {
     Write-Host "  $report then shows what Troupe will use."
   }

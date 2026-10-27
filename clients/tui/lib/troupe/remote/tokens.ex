@@ -278,7 +278,23 @@ defmodule Troupe.Remote.Tokens do
   defp do_refresh(state, _plane_url, %{refresh_token: nil}),
     do: {:reply, {:error, :logged_out}, state}
 
+  # Under the machine's lock, with the token the file holds now: the desktop app shares
+  # the file and rotates the token too (root Decision 958), so the one in memory may be
+  # retired already, and one it took away with a sign-out is not spent at all.
   defp do_refresh(state, plane_url, plane) do
+    Credentials.with_lock(fn ->
+      case Credentials.fetch(plane_url) do
+        {:ok, %{refresh_token: token}} when is_binary(token) and token != "" ->
+          refresh_with(state, plane_url, %{plane | refresh_token: token})
+
+        _signed_out ->
+          {:reply, {:error, :logged_out},
+           put_plane(state, plane_url, %{plane | refresh_token: nil})}
+      end
+    end)
+  end
+
+  defp refresh_with(state, plane_url, plane) do
     with {:ok, tokens} <- Auth.refresh(plane.discovery, plane.refresh_token),
          {:ok, credential} <- credential(plane_url, tokens) do
       plane =

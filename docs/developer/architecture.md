@@ -217,13 +217,17 @@ in the [GUI README](../../clients/gui/README.md). What its code settles:
   idempotent, and the code comes off the address bar either way. The redirect URI is the
   origin plus the base path with no trailing slash, registered as a single-page application.
 - **Storage**: the provider's refresh token is the only persisted secret
-  (`localStorage` `troupe.auth.refresh:<planeUrl>`, or the desktop shell's credential
-  store); the PKCE verifier sits in `sessionStorage` `troupe.auth.pending` between leaving
-  and coming back; preferences are `troupe.pref.*`. Plane and pod tokens live in memory.
+  (`localStorage` `troupe.auth.refresh:<planeUrl>`, or, in the desktop shell, the TUI's
+  `credentials.json`: one sign-in for both clients, Decision 958); the PKCE verifier sits
+  in `sessionStorage` `troupe.auth.pending` between leaving and coming back; preferences
+  are `troupe.pref.*`, and the shell seeds `planeUrl` from the file's `current` plane at
+  start. Plane and pod tokens live in memory.
 - **The stored refresh token is spent one caller at a time** (#53). A Web Lock is held per
   plane, across tabs, or a queue within the page where there are no locks, and the token
   is read inside it, so StrictMode's double effect, or two tabs, never spend a rotating
-  token twice. A 400 or 401 is a refusal: its reason is logged, and the store is cleared
+  token twice. A store shared with other programs brings a lock of its own (`TokenStore.lock`,
+  the shell's `credentials.lock`), held inside the Web Lock, so the TUI renewing the
+  same token waits its turn. A 400 or 401 is a refusal: its reason is logged, and the store is cleared
   only if it still holds the refused token. A 5xx keeps the token. A sign-in that brings
   no refresh token is warned about: the provider lacks `offline_access`, and the next
   reload will ask again.

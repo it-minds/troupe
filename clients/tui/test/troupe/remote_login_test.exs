@@ -68,6 +68,58 @@ defmodule Troupe.RemoteLoginTest do
       end
     end
 
+    # The desktop app reads and rotates the same file (root Decision 958), so a refresh
+    # spends the token the file holds now, not the one this process read at login.
+    test "a refresh spends the token another program rotated the file to, under the lock" do
+      {remote, url} = start_remote!()
+      login!(remote, url)
+      plane = Discovery.base(url)
+      {:ok, entry} = Credentials.fetch(plane)
+      {:ok, _} = Credentials.put(plane, %{entry | refresh_token: "rotated-by-the-desktop-app"})
+
+      assert {:ok, _token} = Tokens.refresh(plane)
+      assert ["rotated-by-the-desktop-app" | _] = FakeRemote.refresh_grants(remote)
+      refute File.exists?(Credentials.lock_path())
+    end
+
+    test "a refresh after another program signed the machine out is a sign-out here too" do
+      {remote, url} = start_remote!()
+      login!(remote, url)
+      plane = Discovery.base(url)
+      {:ok, _} = Credentials.delete(plane)
+
+      assert {:error, :logged_out} = Tokens.refresh(plane)
+      assert FakeRemote.refresh_grants(remote) == []
+    end
+
+    test "the lock is held once at a time, and one a dead process left is broken" do
+      lock = Credentials.lock_path()
+      File.mkdir_p!(Path.dirname(lock))
+      test = self()
+
+      holder =
+        spawn_link(fn ->
+          Credentials.with_lock(fn ->
+            send(test, :held)
+            Process.sleep(300)
+          end)
+        end)
+
+      assert_receive :held
+      started = System.monotonic_time(:millisecond)
+      assert :done = Credentials.with_lock(fn -> :done end)
+      assert System.monotonic_time(:millisecond) - started >= 250
+      refute Process.alive?(holder) and File.exists?(lock)
+
+      # Left by a process that died holding it, two minutes ago.
+      File.write!(lock, "")
+      File.touch!(lock, System.os_time(:second) - 120)
+      started = System.monotonic_time(:millisecond)
+      assert :done = Credentials.with_lock(fn -> :done end)
+      assert System.monotonic_time(:millisecond) - started < 2_000
+      refute File.exists?(lock)
+    end
+
     test "logout forgets the plane" do
       {remote, url} = start_remote!()
       login!(remote, url)

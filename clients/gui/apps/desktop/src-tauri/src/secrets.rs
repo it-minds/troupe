@@ -1,10 +1,13 @@
-// The operating system's credential store, and the only thing the GUI is allowed to
-// keep across launches: the identity provider's refresh token.
+// The operating system's credential store: Windows Credential Manager, the macOS
+// Keychain, the Secret Service on Linux.
 //
 // Windows Credential Manager, the macOS Keychain, the Secret Service on Linux. A Linux
 // box with no keyring agent running has no store at all; `Unavailable` says so instead
-// of falling back to a file, because a refresh token on disk is exactly what the spec
-// forbids. The app signs in again each launch there and tells the person why.
+// of falling back to a file. Up to Decision 958 the identity provider's refresh token
+// lived here and nowhere else; it now lives in the TUI's `credentials.json`
+// (src/signin.rs), one sign-in for the terminal client, this app and the daemon, and
+// these commands remain so that a sign-in an earlier release kept here is moved there at
+// the next launch, and cleared once it is.
 //
 // Credential Manager holds at most 2560 bytes in one entry, which the keyring crate
 // writes a password into as UTF-16: 1280 units. A longer value is kept in parts, in the

@@ -5,7 +5,8 @@
 // between them — so the views never branch on which one they are running in, they ask
 // what is available.
 //
-// 1. The OS credential store, so the refresh token is not sitting in `localStorage`.
+// 1. Somewhere for the refresh token that is not `localStorage`: the sign-in shared
+//    with the TUI (`credentials.json`, Decision 958) in the desktop shell.
 // 2. (Stage 2) the local daemon: reading `daemon.json` for its loopback port and token,
 //    and starting it on demand. A browser cannot find them and has to be *told*:
 //    `troupe-daemon open` puts them on the address it opens, or a person types them.
@@ -29,8 +30,15 @@ export interface TroupeShell {
    * the plane's record of who runs which version says where. A browser has none to say.
    */
   readonly platform?: string;
-  /** A store backed by the OS keychain. */
+  /** A store the page cannot reach by itself: the machine's shared sign-in, or an OS keychain. */
   secretStore?: TokenStore;
+  /** Which one `secretStore` is, for the sign-in screen to say. The keychain when unsaid. */
+  readonly secrets?: "os-keychain" | "config-file";
+  /**
+   * The plane this machine is signed in to already, by `troupe login` or an earlier run
+   * of this app, which is where the sign-in screen starts; null where there is none.
+   */
+  signedInPlane?: () => Promise<string | null>;
   /**
    * Open a URL in the person's real browser.
    *
@@ -167,7 +175,7 @@ export function shell(): TroupeShell | null {
 
 export interface Capabilities {
   /** How the refresh token is being kept, in words a person can act on. */
-  secrets: "os-keychain" | "browser-storage" | "memory";
+  secrets: "config-file" | "os-keychain" | "browser-storage" | "memory";
   /** Whether the local daemon can be found without being told where it is. */
   localSessions: boolean;
   shellName: string | null;
@@ -183,7 +191,7 @@ export function capabilities(): Capabilities {
     }
   })();
   return {
-    secrets: s?.secretStore ? "os-keychain" : hasStorage ? "browser-storage" : "memory",
+    secrets: s?.secretStore ? (s.secrets ?? "os-keychain") : hasStorage ? "browser-storage" : "memory",
     // A shell finds the daemon; a browser build may have been told where it is
     // (`daemonHint`). Either way there are local sessions to show.
     localSessions: Boolean(s?.findDaemon) || daemonHint() !== null,
@@ -207,6 +215,22 @@ export async function saveFile(name: string, content: string): Promise<string | 
   // Let go of it once the browser has had time to start the download.
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
   return name;
+}
+
+/**
+ * Start at the plane this machine is signed in to, where this app was told none.
+ *
+ * A machine signed in already, by `troupe login` at the installer or in a terminal,
+ * holds the sign-in this app reads too (Decision 958), so asking for the address again
+ * would be asking for a second sign-in. A plane this app was told before is kept, and
+ * local-only is a choice of its own, not touched here. Before the first render, which
+ * reads the preference.
+ */
+export async function adoptSignedInPlane(): Promise<void> {
+  const at = shell()?.signedInPlane;
+  if (!at || prefs.get("planeUrl")) return;
+  const plane = await at().catch(() => null);
+  if (plane) prefs.set("planeUrl", plane);
 }
 
 /** The best store this host can offer. Never a worse one without saying so. */

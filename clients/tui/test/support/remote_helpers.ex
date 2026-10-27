@@ -52,10 +52,13 @@ defmodule Troupe.RemoteHelpers do
     :ok = FakeRemote.approve_device(remote)
     me = self()
 
+    # A running daemon is linked, the one this VM embeds where a test has one; none is
+    # spawned from the PATH, which a developer's machine may well have one on.
     code =
       Troupe.CLI.Remote.login(url,
         sleep: fn _ms -> :ok end,
-        say: fn line -> send(me, {:said, line}) end
+        say: fn line -> send(me, {:said, line}) end,
+        daemon: [spawn: false]
       )
 
     assert code == 0, "login failed"

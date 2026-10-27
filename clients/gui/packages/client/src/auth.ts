@@ -19,6 +19,12 @@ export interface TokenStore {
   read(key: string): Promise<string | null>;
   write(key: string, value: string): Promise<void>;
   clear(key: string): Promise<void>;
+  /**
+   * Run `f` while nothing else that shares this store refreshes the key's token: a store
+   * other programs read and rotate too, as the desktop app's shared sign-in is, holds a
+   * lock they honour across processes. A store nothing else shares needs none.
+   */
+  lock?<T>(key: string, f: () => Promise<T>): Promise<T>;
 }
 
 export function memoryTokenStore(): TokenStore {
@@ -331,31 +337,37 @@ export class AuthSession {
    * would have one of them refused, and the refused one would clear the store, taking
    * the token the other had just been given with it: a reload that signs the person out.
    * Inside the lock the token is read afresh, so whoever goes second spends the one the
-   * first was given.
+   * first was given. A store shared with other programs brings a lock of its own, held
+   * inside this one, so the terminal client refreshing the same token waits its turn too.
    */
   private refreshStored(): Promise<IdpTokens | null> {
-    return exclusively(`troupe.auth.${this.key}`, async () => {
-      const refresh = await this.store.read(this.key);
-      if (!refresh) return null;
-      const d = await this.discover();
-      let tokens: IdpTokens;
-      try {
-        tokens = await reachable(this.planeUrl, this.origin, () => this.plane.refreshIdp(d, refresh));
-      } catch (e) {
-        if (!refused(e)) throw e; // the plane, the network, or a provider that did not answer
-        // Said out loud, because the only other trace is the sign-in screen, and that
-        // looks the same whatever the provider's reason was.
-        this.refusal = providerSaid(e);
-        console.warn(`troupe: the identity provider refused the stored sign-in for ${this.planeUrl}, so it has been forgotten (${this.refusal})`);
-        // Only the token that was refused: anything else in the store now was put there
-        // since, by a sign-in or a tab that does not share this lock.
-        if ((await this.store.read(this.key)) === refresh) await this.store.clear(this.key);
-        return null;
-      }
-      this.refusal = null;
-      if (tokens.refresh_token) await this.keep(tokens.refresh_token);
-      return tokens;
-    });
+    const store = this.store;
+    return exclusively(`troupe.auth.${this.key}`, () =>
+      store.lock ? store.lock(this.key, () => this.refreshHeld()) : this.refreshHeld(),
+    );
+  }
+
+  private async refreshHeld(): Promise<IdpTokens | null> {
+    const refresh = await this.store.read(this.key);
+    if (!refresh) return null;
+    const d = await this.discover();
+    let tokens: IdpTokens;
+    try {
+      tokens = await reachable(this.planeUrl, this.origin, () => this.plane.refreshIdp(d, refresh));
+    } catch (e) {
+      if (!refused(e)) throw e; // the plane, the network, or a provider that did not answer
+      // Said out loud, because the only other trace is the sign-in screen, and that
+      // looks the same whatever the provider's reason was.
+      this.refusal = providerSaid(e);
+      console.warn(`troupe: the identity provider refused the stored sign-in for ${this.planeUrl}, so it has been forgotten (${this.refusal})`);
+      // Only the token that was refused: anything else in the store now was put there
+      // since, by a sign-in or a tab that does not share this lock.
+      if ((await this.store.read(this.key)) === refresh) await this.store.clear(this.key);
+      return null;
+    }
+    this.refusal = null;
+    if (tokens.refresh_token) await this.keep(tokens.refresh_token);
+    return tokens;
   }
 
   /** Forget the refresh token and the plane token. The provider's session is its own. */

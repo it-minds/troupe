@@ -541,6 +541,7 @@ model_settings() {
   say "      api_key: \"{env:ANTHROPIC_API_KEY}\""
   if [ "$with_tui" = 1 ]; then
     say "  Or take your organisation's settings: troupe login <plane-url>, then troupe config pull."
+    say "  That one sign-in is the desktop app's and the daemon's as well."
   else
     say "  $report then shows what Troupe will use."
   fi
