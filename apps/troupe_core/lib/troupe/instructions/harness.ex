@@ -27,9 +27,12 @@ defmodule Troupe.Instructions.Harness do
   What is open in a session: the tools that store files (by the name the model calls), and
   for an artifact `:open`, `{:closed, why}` (a sentence) or `:none` where nothing here
   publishes one; `where` is `:local` for a session on the person's machine, `:pod` for one
-  on a server.
+  on a server. `starting` names the servers marked `stores: files` still starting this
+  turn, whose tools are not offered until the next: said rather than waited for, so no turn
+  is held up and the agent can tell the person.
   """
   @type open :: %{
+          optional(:starting) => [String.t()],
           file_tools: [String.t()],
           artifact: :open | :none | {:closed, String.t()},
           where: :local | :pod
@@ -51,7 +54,7 @@ defmodule Troupe.Instructions.Harness do
   which ways each turn was told of.
   """
   @spec json(open()) :: map()
-  def json(%{file_tools: tools, artifact: artifact, where: where}) do
+  def json(%{file_tools: tools, artifact: artifact, where: where} = open) do
     artifact =
       case artifact do
         {:closed, why} -> %{"state" => "closed", "why" => why}
@@ -59,7 +62,11 @@ defmodule Troupe.Instructions.Harness do
       end
 
     %{"file_tools" => tools, "artifact" => artifact, "where" => to_string(where)}
+    |> Map.merge(starting_json(Map.get(open, :starting, [])))
   end
+
+  defp starting_json([]), do: %{}
+  defp starting_json(servers), do: %{"starting" => servers}
 
   @doc """
   The tools of a list that store files: an MCP server's tool its config marks so (`files`
@@ -74,10 +81,23 @@ defmodule Troupe.Instructions.Harness do
   defp stores_files?(%{files: true}), do: true
   defp stores_files?(_tool), do: false
 
+  defp store_line(%{file_tools: [], starting: [_ | _] = starting}),
+    do: "- where the organisation keeps files: not yet; #{servers(starting)} starting, its tools join at the next turn"
+
   defp store_line(%{file_tools: []}), do: "- where the organisation keeps files: no tool here does that"
 
-  defp store_line(%{file_tools: names}),
-    do: "- where the organisation keeps files: " <> Enum.map_join(names, ", ", &"`#{&1}`")
+  defp store_line(%{file_tools: names} = open) do
+    starting =
+      case Map.get(open, :starting, []) do
+        [] -> ""
+        servers -> "; #{servers(servers)} still starting"
+      end
+
+    "- where the organisation keeps files: " <> Enum.map_join(names, ", ", &"`#{&1}`") <> starting
+  end
+
+  defp servers([one]), do: "the #{one} server is"
+  defp servers(many), do: "the #{Enum.join(many, ", ")} servers are"
 
   defp artifact_line(%{artifact: :open}), do: "- an artifact: `publish_artifact`"
   defp artifact_line(%{artifact: {:closed, why}}), do: "- an artifact: not from here, #{why}"
