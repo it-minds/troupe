@@ -28,6 +28,7 @@ defmodule Mix.Tasks.Troupe.Xref do
 
       Troupe.Protocol.Client, .Daemon, .Endpoint   finding, starting and talking to a daemon
       Troupe.Protocol.Glob                          escaping a path a glob starts from
+      Troupe.Protocol.Memory.Entries                a memory document's `## Topic` sections, read as the plane reads them
       Troupe.Config                                 the configuration the daemon reads too
       Troupe.Config.Schema                          the key table: each setting's label, type and help
       Troupe.Commands                               the command table, which `troupe --help` prints
@@ -76,6 +77,7 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.Protocol.Daemon,
     Troupe.Protocol.Endpoint,
     Troupe.Protocol.Glob,
+    Troupe.Protocol.Memory.Entries,
     Troupe.Config,
     Troupe.Config.Schema,
     Troupe.Commands,

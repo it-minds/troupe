@@ -232,7 +232,15 @@ defmodule Troupe.Gateway.LocalOnlyTest do
     assert own =~ "Local only"
 
     # Its history and a rollback are the plane's as much.
-    for {method, params} <- [{"me.memory.history", %{}}, {"me.memory.rollback", %{"to" => 1, "version" => 2}}] do
+    # So are what is in effect in a team and the levels of the organisation's it administers.
+    for {method, params} <- [
+          {"me.memory.history", %{}},
+          {"me.memory.rollback", %{"to" => 1, "version" => 2}},
+          {"memory.in_effect", %{}},
+          {"admin.memory.get", %{"scope" => "team", "name" => "sales"}},
+          {"admin.memory.preview", %{"scope" => "team", "name" => "sales", "text" => "x"}},
+          {"admin.memory.put", %{"scope" => "team", "name" => "sales", "text" => "x", "version" => 1}}
+        ] do
       assert {:error, %{message: "forbidden", data: %{"reason" => why}}} =
                Client.call(ctx.local, method, Map.put(params, "command_id", Client.command_id()))
 

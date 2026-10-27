@@ -1213,6 +1213,29 @@ defmodule Troupe.FakeRemote do
     {{:ok, %{"documents" => documents, "user" => own}}, state}
   end
 
+  # The document as entries, which the plane writes as sections in their order.
+  defp dispatch(state, kind, "me.memory.put", %{"entries" => entries, "version" => base}, pid) do
+    {:ok, entries} = Troupe.Protocol.Memory.Entries.cast(entries)
+    text = Troupe.Protocol.Memory.Entries.render(entries)
+    dispatch(state, kind, "me.memory.put", %{"text" => text, "version" => base}, pid)
+  end
+
+  # What a new session in a team reads, as the plane works it out: the organisation's, the
+  # team's (the first by name where none is named), the person's own, closest per topic.
+  defp dispatch(state, _kind, "memory.in_effect", params, _pid) do
+    alias Troupe.Protocol.Memory.Entries
+
+    teams = state.memory |> Enum.filter(&(&1["scope"] == "team")) |> Enum.sort_by(& &1["name"])
+    team = Enum.find(teams, &(&1["name"] == params["team"])) || List.first(teams)
+    own = state |> own_document() |> Map.take(~w(version text)) |> Map.put("scope", "user")
+
+    documents =
+      Enum.filter(state.memory, &(&1["scope"] == "organisation")) ++ List.wrap(team) ++ [own]
+
+    effect = documents |> Entries.levels() |> Entries.in_effect() |> Entries.effect_json()
+    {{:ok, %{"team" => team && team["name"], "entries" => effect}}, state}
+  end
+
   defp dispatch(state, _kind, "me.memory.put", %{"text" => text, "version" => base}, _pid) do
     current = own_document(state)["version"]
 

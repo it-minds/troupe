@@ -41,6 +41,29 @@ defmodule Troupe.Tools.RememberMeTest do
     assert Facts.list(context.workspace) == []
   end
 
+  test "an entry goes under the topic the agent names, and the call says which", context do
+    test = self()
+
+    Troupe.UserMemory.install(fn entry, _ctx, topic ->
+      send(test, {:appended, entry, topic})
+      {:ok, %{"entry" => entry, "topic" => topic || "Notes", "version" => 5}}
+    end)
+
+    %{session: session} = start_session(context, steps: [])
+    ctx = ctx(session, context)
+
+    assert {:ok, said} = Remember.run(%{"level" => "me", "claim" => "Quotes in euros.", "topic" => " Prices "}, ctx)
+    assert_received {:appended, "Quotes in euros.", "Prices"}
+    assert said =~ "version 5, under Prices"
+
+    assert {:ok, said} = Remember.run(%{"level" => "me", "claim" => "Likes tabs."}, ctx)
+    assert_received {:appended, "Likes tabs.", nil}
+    assert said =~ "under Notes"
+
+    assert {:error, _} = Remember.run(%{"level" => "me", "claim" => "x", "topic" => 3}, ctx)
+    assert Remember.schema()["properties"]["topic"] == %{"type" => "string"}
+  end
+
   test "the level is described only where an entry has somewhere to go", context do
     %{session: session} = start_session(context, steps: [])
     ctx = ctx(session, context)

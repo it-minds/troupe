@@ -1,7 +1,7 @@
 defmodule Troupe.LocalOnlyHeadlessTest do
   @moduledoc """
-  Local only reaches a session the terminal runs on this machine's daemon (root #765, root
-  Decision 951): with `local_only: true` in the person's own config, the session is under
+  Local only reaches a session the terminal runs on this machine's daemon (root #765): with
+  `local_only: true` in the person's own config, the session is under
   Local only from its first turn, the one its prompt starts as it is created, and stays
   under it when a headless `troupe resume` gives it a turn. The connection that gives a
   session its input is its window's own, not the link's, and it says Local only too; one

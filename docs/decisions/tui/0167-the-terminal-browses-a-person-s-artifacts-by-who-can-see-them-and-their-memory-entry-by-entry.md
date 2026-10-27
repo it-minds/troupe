@@ -13,7 +13,6 @@ paths:
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/client/artifacts.ex
   - clients/tui/lib/troupe/client/own_memory.ex
-  - clients/tui/lib/troupe/client/memory_entries.ex
   - clients/tui/lib/troupe/client/remote.ex
   - clients/tui/lib/troupe/cli/artifacts.ex
   - clients/tui/lib/troupe/cli/memory.ex
@@ -35,7 +34,6 @@ symbols:
   - Troupe.UI.TUI.MemoryPage
   - Troupe.Client.Artifacts
   - Troupe.Client.OwnMemory
-  - Troupe.Client.MemoryEntries
   - Troupe.CLI.Artifacts
 gist: "/artifacts by audience (◉◎◐○), opened in the browser via artifact.open, Markdown in frames ≤500 lines; /memory entries per level + in effect; daemon only; HQ inbox"
 ---
@@ -93,7 +91,8 @@ replacing the lower ones'. `/memory` is the terminal form of the design's page: 
 replaces), then ◉ the organisation's, ◎ each team's and ○ Only you, a level the person
 cannot change here marked `· read`. Until the plane answers entries, the client reads them
 from each level's text (`Troupe.Client.MemoryEntries`) and saves Only you's whole text over
-its version — a shim to go when it does. It reads the levels from the daemon's `me.memory`
+its version — a shim to go when it does. (It went with root Decision 957: the page reads the
+plane's entries and `memory.in_effect`, and saves entries.) It reads the levels from the daemon's `me.memory`
 (`documents`) and the history from `me.memory.history` and `me.memory.rollback`, root
 Decision 954's; the daemon's `me.memory.status` now carries the copy's texts (`held`), which
 is all the page reads under Local only, where it is read-only.

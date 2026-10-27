@@ -118,6 +118,7 @@ function Document({
       )}
       {draft === null && doc.text !== "" && <pre className="prompt">{doc.text}</pre>}
       {draft === null && (doc.lines ?? []).length > 0 && <Blame doc={doc} />}
+      {draft === null && (doc.entries ?? []).length > 0 && <Entries doc={doc} />}
 
       {doc.editable && draft === null && (
         <div className="actions">
@@ -319,6 +320,37 @@ function Blame({ doc }: { doc: MemoryDocument }): JSX.Element {
                   {writtenBy(l)}
                 </th>
                 <td>{l.text}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The version shown as its entries (troupe #55), asked for: one per `## Topic`, as the plane
+ * reads them, each with who last changed it and in how many sessions it was used. Read only:
+ * the document above is what is edited.
+ */
+function Entries({ doc }: { doc: MemoryDocument }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const entries = doc.entries ?? [];
+  return (
+    <div className="blame">
+      <button type="button" className="link" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {open ? "Hide its entries" : `Its entries, one per topic (${entries.length})`}
+      </button>
+      {open && (
+        <table className="blame-lines" aria-label={`Entries of ${doc.subject} v${doc.version ?? 0}`}>
+          <tbody>
+            {entries.map((e, i) => (
+              <tr key={i}>
+                <th scope="row">{e.topic}</th>
+                <td className="mono">
+                  v{e.version ?? "?"} {e.agent ?? e.by ?? ""} · used in {count(e.used ?? 0, "session")}
+                </td>
               </tr>
             ))}
           </tbody>

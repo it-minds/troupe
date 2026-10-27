@@ -454,6 +454,68 @@ defmodule Troupe.InstructionsPromptTest do
            ] = files(event)
   end
 
+  # Memory as entries: on a `## Topic` two levels both have, the closest's section is read,
+  # saying what it replaces, and the lower ones' are left out; the organisation's sections
+  # no closer level has stay first, and `instructions_loaded.memory` says what was replaced.
+  test "on a topic a closer level also has, the closest's section is read and says what it replaces",
+       context do
+    cache = Troupe.PlaneMemory.cache_path()
+
+    documents = [
+      %{
+        "scope" => "organisation",
+        "name" => nil,
+        "version" => 4,
+        "hash" => "sha256:o",
+        "text" => "We are a consultancy.\n\n## Tone\n\nPlain English.\n\n## Prices\n\nThe rate card.\n\n## Dates\n\nISO dates."
+      },
+      %{"scope" => "team", "name" => "sales", "version" => 2, "hash" => "sha256:t", "text" => "## Prices\n\nThe framework agreement."},
+      %{"scope" => "user", "name" => nil, "version" => 3, "hash" => "sha256:u", "text" => "## tone\n\nShort answers."}
+    ]
+
+    {:ok, _} = Troupe.PlaneMemory.save("https://plane.example.test", %{"documents" => documents}, cache)
+    on_exit(fn -> File.rm(cache) end)
+
+    %{session: session, fake: fake} =
+      start_session(context, config_overrides: @per_turn, steps: [{:text, "ok"}])
+
+    :ok = Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "hello")
+    await_event(session.id, :turn_ended)
+
+    [request] = Fake.requests(fake)
+
+    at = fn text ->
+      {at, _} = :binary.match(request.system, text)
+      at
+    end
+
+    refute request.system =~ "Plain English."
+    refute request.system =~ "The rate card."
+    assert at.("We are a consultancy.") < at.("## Dates\n\nISO dates.")
+    assert at.("## Dates\n\nISO dates.") < at.("## Prices\n\nPrices: this replaces the organisation's.\n\nThe framework agreement.")
+    assert at.("The framework agreement.") < at.("# The person's own memory")
+    assert at.("# The person's own memory") < at.("## tone\n\ntone: this replaces the organisation's.\n\nShort answers.")
+
+    assert [event] = events_of_type(session.id, :instructions_loaded)
+
+    assert [
+             %{
+               "scope" => "organisation",
+               "version" => 4,
+               "replaced" => [
+                 %{"topic" => "Tone", "by" => [%{"scope" => "user", "name" => nil}]},
+                 %{"topic" => "Prices", "by" => [%{"scope" => "team", "name" => "sales"}]}
+               ]
+             },
+             %{"scope" => "team", "name" => "sales"} = team,
+             %{"scope" => "user"} = own
+           ] = event.data["memory"]
+
+    refute Map.has_key?(team, "replaced")
+    refute Map.has_key?(own, "replaced")
+  end
+
   test "the prompt names exactly the files the provenance lists", context do
     write_file(context, "AGENTS.md", "root\n")
     write_file(context, "CLAUDE.md", "an alias nobody reads\n")

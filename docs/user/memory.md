@@ -19,8 +19,38 @@ later one wins, so the narrower comes later:
 
 The first three are your organisation's word. An administrator writes them in the console
 (*Company memory*, or the profile's page), and a session reads them as instructions that
-apply as written. Your own comes after them: it is how you like to work, and the
-organisation's instructions still come first.
+apply as written. Your own comes after them: it is how you like to work. The organisation's
+instructions still come first, except on a topic you wrote about yourself (below).
+
+## Entries and topics
+
+Each document is Markdown, and each `## Topic` section of it is one **entry**: the heading
+is its topic, the lines under it are what it says. Text before the first heading is the
+entry called *General*. Topics are compared by their words, so `## Tone`, `## tone` and
+`##  TONE` are one topic.
+
+**On a topic, the closest level wins.** Where two levels both have an entry on a topic, a
+session reads only the closer one's, which says in one line what it replaces: your own over
+a worker profile's, a profile's over a team's, a team's over your organisation's. So if your
+organisation's memory has `## Tone` and so does yours, your sessions follow yours on tone,
+and your organisation's tone section is not in their prompt at all. Topics only one level
+has are read as they are, the organisation's first. *General* is no topic: it is never
+replaced. Two teams of yours on the same topic both stay, on your own machine, which reads
+all of your teams'.
+
+`instructions_loaded` says which sections a turn left out and whose replaced them (each
+document's `replaced`), and the desktop app's *In effect for you* lists, for one of your
+teams, the winner on each topic with what it replaces struck through.
+
+**Forgetting an entry** removes its section and saves the document as a new version: new
+sessions stop starting with it, and the sessions already running keep it until they next
+sleep and wake, or until their next turn reads the new version. Nothing is soft-deleted:
+the old version keeps the text, as every version does, and a rollback brings it back.
+
+**Used in *n* sessions**, beside an entry, counts the sessions whose last turn read a version
+of the document that held it since it came in. It is approximate: the plane keeps one row per
+session, the version its last turn read (and a week of a machine's), so a session whose turns
+all came before the entry, or one silent for a week, is not counted.
 
 Each document on the plane holds at most 8192 bytes, about two thousand tokens. Each save is
 a new version, kept with who saved it; the audit records each save's version, size and hash,
@@ -48,12 +78,15 @@ A save reaches the sessions running on the machine that saved it, and on the pla
 at their next turn, with a line saying your memory changed; your other machines read it
 within five minutes.
 
-**In the desktop app**, *Memory* reads each level as entries, one per `## Topic` heading of
-its document. *In effect for you* shows what a new session in one of your teams starts
-knowing: on each topic the closest level's entry, yours over your team's over your
-organisation's, with what it replaces struck through. *Only you* is yours to add to, edit
-and forget, saved as the whole document over the version you read; the other levels are
-marked *READ* and are changed in the console by those who keep them. Its *Versions* drawer
+**In the desktop app**, *Memory* reads each level as entries, as the plane answers them
+(above), each with who last changed it, when, and in how many sessions it was used. *In
+effect for you* shows what a new session in one of your teams starts knowing, as the plane
+works it out (`memory.in_effect`): on each topic the closest level's entry, with what it
+replaces struck through. *Only you* is yours to add to, edit and forget, saved as entries
+over the version you read; the other levels are marked *READ* there and are changed in the
+console by those who keep them. A team admin's or a platform admin's client may also change
+the levels they keep through this computer's daemon, which sends `admin.memory.*` to the
+plane as them; the plane refuses anybody else. Its *Versions* drawer
 lists every version, sets any two side by side, rolls back to one, shows who wrote each line,
 and says whether this computer's copy is current and what each session running here read.
 An entry an agent adds while it is open appears in it. Under *Local only* it asks the plane
@@ -82,8 +115,10 @@ An agent may add to your own memory and to the repository's, and to nothing else
 
 - **`remember`** writes a fact about the repository by default, as it always has.
 - **`remember` with `level: "me"`** adds one entry to your own memory: a sentence or two,
-  folded onto one line, under a heading of the day, below what is there. It never changes or
-  removes a word you wrote; only you do. The session's transcript shows the call and what it
+  folded onto one line, as `- <entry>` at the end of the section on the `topic` it names
+  (`## Notes` where it names none), making the section where you have none. It never changes
+  or removes a word you wrote; only you do. Sections under a date, from agents before topics,
+  stay as they were. The session's transcript shows the call and what it
   wrote. Ask an agent to remember something about how you work, and it may use it.
 - **The organisation's, a team's and a profile's memory are read-only to every agent.**
   `remember` has no level for them, and the plane refuses a write to any of them from a pod.

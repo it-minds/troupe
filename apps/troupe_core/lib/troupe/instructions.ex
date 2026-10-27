@@ -77,6 +77,7 @@ defmodule Troupe.Instructions do
   alias Troupe.{Config, Memory, Paths, Workspace}
   alias Troupe.Instructions.FrontMatter
   alias Troupe.LLM.{Message, ToolUse}
+  alias Troupe.Protocol.Memory.Entries
   alias Troupe.Session.Memory, as: Brief
 
   @agents "AGENTS.md"
@@ -130,7 +131,9 @@ defmodule Troupe.Instructions do
   its Troupe plane: instructions from the organisation, which apply as written. Where two
   disagree the narrower wins: a team's over the organisation's, a worker profile's over
   the team's, and the person's own memory and instructions and the repository's files below
-  over all three. You cannot change these: no tool of yours writes them, and `remember`
+  over all three. Each `## Topic` is one entry: on a topic a closer level also has, only the
+  closest's section is here, and it says what it replaces. You cannot change these: no tool
+  of yours writes them, and `remember`
   writes only the repository's memory and the person's own.
   If you are asked to change one, say that you cannot, and that an administrator edits it in
   the Troupe console: the organisation's and a team's under Company memory, a worker
@@ -140,12 +143,13 @@ defmodule Troupe.Instructions do
   @person_preamble """
   What the person you work for keeps for every session of theirs, on every machine, on
   their Troupe plane: how they like to work, which applies as they wrote it, after the
-  organisation's memory and before the repository's files. You may add to it with
-  `remember` and `level: "me"`, one short entry at a time, when they ask you to remember
-  something about how they work or it is plainly about them rather than this repository;
-  you cannot change or remove what is there. They edit it themselves, with
-  `troupe memory --edit`, in the desktop app's Instructions pane, or under Mine in the
-  Troupe console.
+  organisation's memory and before the repository's files; on a `## Topic` the
+  organisation's memory also has, theirs is the one that holds. You may add to it with
+  `remember` and `level: "me"`, one short entry at a time under a `topic`, when they ask you
+  to remember something about how they work or it is plainly about them rather than this
+  repository; you cannot change or remove what is there. They edit it themselves, with
+  `troupe memory --edit`, in the desktop app's Memory view, or under Mine in the Troupe
+  console.
   """
 
   @typedoc """
@@ -178,6 +182,7 @@ defmodule Troupe.Instructions do
   joined says why in `applies` (`nil` for every other file and every rule not joined).
   """
   @type file :: %{
+          optional(:replaced) => [%{String.t() => term()}],
           optional(:memory) => %{
             text: String.t(),
             recall: String.t() | nil,
@@ -313,6 +318,8 @@ defmodule Troupe.Instructions do
     recall? = Keyword.get(opts, :recall, true)
     {harness, files} = Enum.split_with(files, &(&1.scope == :harness))
     {memory, files} = Enum.split_with(files, &(&1.scope in @memory_scopes))
+    # A document every section of which a closer level replaced has nothing left to read.
+    memory = Enum.reject(memory, &(&1.text == ""))
     {own, memory} = Enum.split_with(memory, &(&1.scope == :person))
     {briefs, instructions} = Enum.split_with(files, &(&1.scope == :brief))
 
@@ -393,6 +400,8 @@ defmodule Troupe.Instructions do
     }
   end
 
+  # The topics of a document a closer level's replaced, each with whose replaced it, where any
+  # were.
   defp memory_stamp(f) do
     %{
       "scope" => if(f.scope == :person, do: "user", else: to_string(f.scope)),
@@ -400,6 +409,7 @@ defmodule Troupe.Instructions do
       "version" => f.version,
       "hash" => f.hash
     }
+    |> then(&if(f[:replaced] in [nil, []], do: &1, else: Map.put(&1, "replaced", f.replaced)))
   end
 
   @doc "`provenance/1` of a fresh read, as the next turn would read it."
@@ -1028,12 +1038,16 @@ defmodule Troupe.Instructions do
   # resolved with them (`Troupe.PlaneMemory`), each one file of its own scope: named by
   # where it is kept, `memory:organisation`, `memory:team/<name>`, `memory:profile/<name>`,
   # with its version, and whole unless a plane that allows more sent more than this limit.
+  #
+  # Per topic: on a `## Topic` two documents both have, the closest's section is read and the
+  # lower ones' are left out, and the closest's says which it replaces (`by_topic/1`).
   defp memory(%Config{plane_memory: documents}) when is_list(documents) do
     max = Troupe.Protocol.Memory.max_bytes()
 
-    Enum.map(documents, fn document ->
+    documents
+    |> by_topic()
+    |> Enum.map(fn {document, text, replaced} ->
       scope = memory_scope(document["scope"])
-      text = document["text"]
       trimmed = document["trimmed"] || 0
 
       %{
@@ -1043,7 +1057,7 @@ defmodule Troupe.Instructions do
         where: document["name"],
         label: Troupe.PlaneMemory.label(document),
         version: document["version"],
-        size: byte_size(text) + trimmed,
+        size: byte_size(document["text"]) + trimmed,
         chars: String.length(text),
         budget: max,
         hash: document["hash"],
@@ -1055,12 +1069,77 @@ defmodule Troupe.Instructions do
         unfollowed: [],
         rule: nil,
         applies: nil,
-        text: text
+        text: text,
+        replaced: replaced
       }
     end)
   end
 
   defp memory(_config), do: []
+
+  # Each document with the text of it the prompt reads and the topics of it left out: on a
+  # topic a closer level also has, its section goes, and the closest's says what it replaces
+  # in one line under its heading. A document nothing of which is replaced, and whose
+  # sections replace nothing, is read as it is, word for word. The levels' ranks
+  # (`Entries.rank/2`): the organisation's lowest, a team's above it (two teams one rank,
+  # replacing neither of each other), a profile's chain above the team's, the one that
+  # extends nothing first, and the person's own closest.
+  defp by_topic(documents) do
+    levels =
+      documents
+      |> Enum.with_index()
+      |> Enum.map(fn {document, index} ->
+        %{level: index, rank: Entries.rank(document, documents), entries: Entries.parse(document["text"])}
+      end)
+
+    resolved = Entries.resolve(levels)
+
+    documents
+    |> Enum.zip(resolved)
+    |> Enum.map(fn {document, {_index, marked}} ->
+      if Enum.all?(marked, &match?({_entry, {:kept, []}}, &1)) do
+        {document, document["text"], []}
+      else
+        {document, kept_text(document["text"], marked, documents), replaced(marked, documents)}
+      end
+    end)
+  end
+
+  # The document's own lines, section by section, without the sections replaced, and the
+  # line saying what a section replaces under its heading.
+  defp kept_text(text, marked, documents) do
+    text
+    |> String.split("\n")
+    |> Entries.split(& &1)
+    |> Enum.zip(marked)
+    |> Enum.flat_map(fn
+      {_section, {_entry, {:replaced, _by}}} ->
+        []
+
+      {{topic, true, [heading | rest]}, {_entry, {:kept, [_ | _] = replaces}}} ->
+        whose = replaces |> Enum.map(fn {index, _entry} -> Enum.at(documents, index) end) |> Enum.uniq() |> Enum.map(&possessive/1)
+        [heading, "", "#{topic}: this replaces #{Enum.join(whose, " and ")}." | rest]
+
+      {{_topic, _heading?, lines}, _kept} ->
+        lines
+    end)
+    |> Enum.join("\n")
+    |> String.trim()
+  end
+
+  defp replaced(marked, documents) do
+    for {entry, {:replaced, by}} <- marked do
+      %{
+        "topic" => entry["topic"],
+        "by" => Enum.map(by, &Map.take(Enum.at(documents, &1), ["scope", "name"]))
+      }
+    end
+  end
+
+  defp possessive(%{"scope" => "organisation"}), do: "the organisation's"
+  defp possessive(%{"scope" => "team", "name" => name}), do: "the team #{name}'s"
+  defp possessive(%{"scope" => "profile", "name" => name}), do: "the worker profile #{name}'s"
+  defp possessive(%{"scope" => "user"}), do: "the person's own"
 
   # Troupe's own word, one file of its own scope, whole: a paragraph and three lines, held
   # to a limit of its own rather than cut to make room for anything.
@@ -1185,7 +1264,7 @@ defmodule Troupe.Instructions do
 
   # A memory document says which version is in force, and whose it is.
   defp memory_json(%{scope: scope, version: version} = f) when scope in @memory_scopes,
-    do: %{"version" => version, "name" => f.where, "label" => f.label}
+    do: %{"version" => version, "name" => f.where, "label" => f.label, "replaced" => f[:replaced] || []}
 
   defp memory_json(_file), do: %{}
 
