@@ -329,7 +329,7 @@ defmodule Troupe.UpdateTest do
     assert_unchanged(ctx)
   end
 
-  # -- every component the installers put here (Decision 959) --------------------
+  # -- every component the installers put here -----------------------------------
 
   # The AppImage beside the programs, and its menu entry, as install.sh leaves them.
   defp appimage!(ctx, version) do

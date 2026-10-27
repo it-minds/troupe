@@ -2,7 +2,7 @@ defmodule Troupe.Update do
   @moduledoc """
   `troupe update`: a release, checked, then swapped in for the troupe and the
   troupe-daemon the installers put on this machine (#66, Decision 865), and for the
-  desktop app and the VS Code extension where the installers put those too (Decision 959).
+  desktop app and the VS Code extension where the installers put those too.
 
       troupe update --check            what is installed, the latest release, and what an update would do
       troupe update [--version X]      install the latest release, or X
@@ -47,7 +47,7 @@ defmodule Troupe.Update do
   exactly as without a plane: a plane can hold a version back or name one, and cannot make
   this install anything the key did not sign, nor walk a machine back to an old release.
 
-  **Every component the installers put here** (Decision 959). An install picks its
+  **Every component the installers put here.** An install picks its
   components once; from then on one update moves all of them. Beside troupe and
   troupe-daemon: the desktop app, where `install.sh`/`install.ps1` put it (the AppImage
   beside the programs on Linux, `~/Applications/Troupe.app` on macOS, the per-user setup
@@ -201,7 +201,7 @@ defmodule Troupe.Update do
     }
   end
 
-  # -- the desktop app and the VS Code extension (Decision 959) -------------------
+  # -- the desktop app and the VS Code extension ----------------------------------
 
   # Where the installers put the desktop app: `install.sh` puts the AppImage beside the
   # programs and the app bundle under `~/Applications`; `install.ps1` runs the per-user

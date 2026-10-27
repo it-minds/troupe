@@ -17,7 +17,7 @@ function daemonLine(offer: UpdateOffer): string | null {
 }
 
 /**
- * The rest of what the installers put here, replaced with the app (Decision 959): the
+ * The rest of what the installers put here, replaced with the app: the
  * terminal client and the VS Code extension, each a line, or why it is left as it is.
  */
 function besideLines(offer: UpdateOffer): string[] {

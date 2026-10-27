@@ -244,7 +244,7 @@ describe("the app's own update", () => {
     expect(daemon.stopsAsked).toBeGreaterThan(0);
   });
 
-  it("says which of the rest the installers put here go with it: the terminal and the VS Code extension (Decision 959)", async () => {
+  it("says which of the rest the installers put here go with it: the terminal and the VS Code extension", async () => {
     const updater = new Updater();
     updater.answer = offer("99.0.0", {
       tui: { from: "0.13.0-beta", to: "99.0.0", at: "/home/ada/.local/bin/troupe" },

@@ -119,7 +119,7 @@ export interface UpdateOffer {
   daemon: { from: string; to: string; lib: string } | null;
   /** Why the daemon here is left as it is, when it is. */
   daemon_note: string | null;
-  /** The terminal client the installers put here, replaced with it (Decision 959). */
+  /** The terminal client the installers put here, replaced with it. */
   tui: { from: string; to: string; at: string } | null;
   tui_note: string | null;
   /** The VS Code extension `code` lists, installed again from the release. */

@@ -1,6 +1,6 @@
 // The desktop app's own update, and beside it the daemon's (#66, Decision 874), the
-// terminal client's and the VS Code extension's, wherever the installers put those
-// (Decision 959): an install picks its components once, and one update moves them all.
+// terminal client's and the VS Code extension's, wherever the installers put those:
+// an install picks its components once, and one update moves them all.
 //
 // Three commands, one step each, so that the page can ask the person between them:
 //
@@ -138,7 +138,7 @@ pub struct Offer {
     pub daemon: Option<DaemonOffer>,
     /// Why the daemon here is left as it is, when one is and that is not because it is current.
     pub daemon_note: Option<String>,
-    /// The terminal client the installers put here, replaced with it (Decision 959).
+    /// The terminal client the installers put here, replaced with it.
     pub tui: Option<ComponentOffer>,
     pub tui_note: Option<String>,
     /// The VS Code extension `code` lists, installed again from the release.
@@ -497,7 +497,7 @@ fn undo_daemon(lib: &Path) {
     let _ = std::fs::rename(sibling(lib, ".previous"), lib);
 }
 
-// -- the terminal client and the VS Code extension (Decision 959) --------------------
+// -- the terminal client and the VS Code extension -----------------------------------
 
 /// Where the installers put the programs: `TROUPE_BIN_DIR`, else
 /// `%LOCALAPPDATA%\Programs\troupe` on Windows and `~/.local/bin` elsewhere.
@@ -661,7 +661,7 @@ async fn stage_extension(client: &reqwest::Client, base: &str, step: &ExtensionS
 }
 
 /// The staged terminal client in, the old one kept as `<path>.previous`, as `troupe update`
-/// keeps it (Decision 865): on Unix the old file is linked to that name and the new one
+/// keeps it: on Unix the old file is linked to that name and the new one
 /// replaces it in one rename; on Windows a running program cannot be replaced but can be
 /// renamed, so it is moved aside first, and one a terminal still runs is set aside under a
 /// stamped name for a later update to remove.
@@ -996,7 +996,7 @@ mod tests {
         }
     }
 
-    // -- the terminal client and the extension (Decision 959) -----------------------
+    // -- the terminal client and the extension --------------------------------------
 
     #[test]
     fn the_terminal_s_version_and_the_extension_s_are_read_as_the_programs_print_them() {
