@@ -196,7 +196,7 @@ export interface FakeServer {
   /** A server that wants the person signed in (troupe-remote Decision 741). */
   oauth?: { client_id: string; scopes?: string[] };
   /** What `mcp.tools` lists for it; one `search` tool when absent. */
-  tools?: Array<{ name: string; description: string; schema: Record<string, unknown> }>;
+  tools?: Array<{ name: string; description: string; schema: Record<string, unknown>; files?: boolean }>;
 }
 
 /** A call the fake made to one of the person's servers for `mcp.call`, with the credential it sent. */
@@ -567,6 +567,8 @@ export class FakeDaemon {
   permissions: Array<Record<string, unknown>> = [];
   /** The two layers of `mcp.json` and `skills/`, as the seven `mcp.*`/`skills.*` methods keep them. */
   servers: FakeServer[] = [];
+  /** Files of the sessions' workspaces `fs.read` answers, by path, beside the scratchpad's. */
+  readonly files = new Map<string, string>();
   /** Sign-ins by server name (troupe-remote Decision 741); a server with `oauth` and no entry is signed out. */
   signIns: Record<string, FakeAuth> = {};
   /** What the provider says to a sign-out, by server name: 
@@ -1514,7 +1516,9 @@ evoked where nothing is set and there was a sign-in. */
 
       case "fs.read": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
-        const doc = session.scratch.read(String(params["path"] ?? ""));
+        const path = String(params["path"] ?? "");
+        const file = this.files.get(path);
+        const doc = session.scratch.read(path) ?? (file === undefined ? null : { path, content: file, size: file.length, hash: "sha256:fake" });
         return doc ? reply(ws, id, doc) : reply(ws, id, null, { code: -32005, message: "not_found" });
       }
 

@@ -244,6 +244,25 @@ session the next time it wakes, restarts no pod, and applies to `ssh` profiles t
 session awake when it changes keeps what it had until then. The platform's
 `managed_mcp_servers_only` refuses the same offer on every profile at once.
 
+## Where the organisation keeps files
+
+A server of the bundle that stores the organisation's files (a SharePoint, a document
+space) is marked `"stores": "files"`, with `"files": ["upload_document"]` naming the tools
+that save one, all of them when left out
+([bundles](bundles-and-triggers.md#1-config-bundles)):
+
+```json
+{"name": "docs", "url": "https://mcp.example.com/mcp", "credential_mode": "person",
+ "stores": "files", "files": ["upload_document"]}
+```
+
+An agent on the profile asked for a file puts it there first, before an artifact or the
+workspace, and names the tools in what it was told was open
+([where a file goes](../user/README.md#where-a-file-goes), Decision 956). Nothing is
+inferred from a tool's name. Writing to the store is the server's: Troupe calls the tool
+as it calls any other, under the same permission. A `files` without `stores` is refused at
+publish.
+
 ## Per-tool rules on a profile
 
 A profile may carry the per-tool rules a person's config carries

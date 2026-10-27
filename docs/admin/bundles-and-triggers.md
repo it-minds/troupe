@@ -82,6 +82,8 @@ Decision 910).
 | `timeout_ms` | per call | 30000 |
 | `permission` | `ask` or `auto`; an agent definition may tighten it | `ask` |
 | `tools` | allowlist applied at discovery: an unlisted tool is absent, not denied | `all` |
+| `stores` | `files`: where the organisation keeps files, which an agent asked for a file uses first ([profile options](profile-options.md#where-the-organisation-keeps-files)) | unset |
+| `files` | with `stores: files`, the tools that save a file | all of them |
 
 On publish the plane projects each server onto the profile's resource. A `profile`-mode
 server with a `credential_ref` gets `secretRef: {name: "troupe-mcp-<server>", key: "token"}`,

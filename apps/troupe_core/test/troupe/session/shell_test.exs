@@ -30,7 +30,10 @@ defmodule Troupe.Session.ShellTest do
     await_event(session.id, :turn_ended, 10_000)
   end
 
-  defp texts(request), do: Enum.map(request.messages, &{&1.role, Message.text(&1)})
+  # Each message's words, without the turn's context the harness puts after the person's
+  # (its word on where a file goes is in every session's): what these are about is the rest.
+  defp texts(request),
+    do: Enum.map(request.messages, &{&1.role, String.replace(Message.text(&1), ~r/\n?<turn_context>.*<\/turn_context>/s, "")})
 
   test "the next call is given the command and its output, before what the person says next",
        context do

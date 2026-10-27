@@ -27,9 +27,21 @@ defmodule Troupe.Gateway.Artifacts do
   # rest of the request.
   @inline_bytes 2_500_000
 
-  @doc "Install this daemon as where its sessions' artifacts go."
+  @doc """
+  Install this daemon as where its sessions' artifacts go, and as the answer to whether one
+  of them can publish now: when this daemon is signed in to a plane.
+  """
   @spec install() :: :ok
-  def install, do: Troupe.Artifacts.install(&__MODULE__.publish/2)
+  def install, do: Troupe.Artifacts.install(&__MODULE__.publish/2, ready: &__MODULE__.signed_in?/1)
+
+  @doc "Whether a session here can publish now: this daemon is signed in to a plane."
+  @spec signed_in?(String.t() | nil) :: boolean()
+  def signed_in?(_session_id) do
+    is_binary(Plane.url()) and Plane.linked?()
+  catch
+    # No plane process (a daemon still starting): nothing to publish to yet.
+    :exit, _reason -> false
+  end
 
   @doc "What `publish_artifact` sends from a session here: `put/1`, naming the session and its agent."
   @spec publish(map(), Troupe.Tool.Ctx.t()) :: {:ok, map()} | {:error, :signed_out | String.t()}

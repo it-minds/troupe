@@ -230,6 +230,8 @@ export interface ServerTool {
   name: string;
   description: string;
   schema: Record<string, unknown>;
+  /** Where your organisation keeps files, as the server's entry says (`stores: files`). */
+  files?: boolean;
 }
 
 /**

@@ -624,6 +624,11 @@ defmodule Troupe.Remote.Translate do
       type when type in ["fs.changed", "fs_changed"] ->
         {[emit.(:fs_changed, %{paths: paths(data)})], memory}
 
+      # A file the agent made for the person (`write_file` with `deliverable`, root issue
+      # #765): on this machine where it is; on a pod, the command that saves it here.
+      "file_ready" ->
+        {[emit.(:remote_note, %{text: file_ready(data)})], memory}
+
       # A document `show` put on the session's scratchpad (root Decision 870): a card where
       # the call was, and a row of `/scratch` (TUI Decision 159).
       "scratch_updated" ->
@@ -1025,6 +1030,15 @@ defmodule Troupe.Remote.Translate do
       end
 
     what <> then
+  end
+
+  # A file the agent made for the person: where it is, on a session on this machine; on a
+  # pod, the path in the session's workspace and the command that saves it here.
+  defp file_ready(%{"local_path" => local}) when is_binary(local), do: "file ready: #{local}"
+
+  defp file_ready(data) do
+    path = to_string(data["path"] || "")
+    "file ready in the session's workspace: #{path}; /save #{path} saves it on this machine"
   end
 
   # A person's own tools offered to the session (PROTOCOL.md section 8): who offered them and

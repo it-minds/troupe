@@ -1,6 +1,7 @@
 defmodule Troupe.Protocol.BundleTest do
   use ExUnit.Case, async: true
 
+  alias Troupe.MCP.Server
   alias Troupe.Protocol.Bundle
 
   @skill_md """
@@ -359,6 +360,38 @@ defmodule Troupe.Protocol.BundleTest do
 
         assert reason =~ "client_credentials and #{field} together"
       end
+    end
+  end
+
+  # Issue #765: a server that is where the organisation keeps files says so, and which of
+  # its tools save one; the worker's servers carry it, and the harness names those tools.
+  describe "a server where the organisation keeps files" do
+    defp docs(fields),
+      do: %{"schema" => 1, "mcp_servers" => [Map.merge(%{"name" => "docs", "url" => "https://mcp.docs.example/mcp"}, fields)]}
+
+    test "is marked stores: files, with the tools that save one, and reaches the worker so" do
+      assert {:ok, parsed} = Bundle.validate(docs(%{"stores" => "files", "files" => ["upload"]}))
+      assert [%{stores: :files, files: ["upload"]}] = parsed.mcp_servers
+      assert [%{"stores" => "files", "files" => ["upload"]} = config] = Bundle.mcp_server_configs(parsed)
+
+      server = Server.from_config(config)
+      assert Server.stores_files?(server, "upload")
+      refute Server.stores_files?(server, "search")
+
+      assert {:ok, %{mcp_servers: [%{stores: :files, files: :all}]}} = Bundle.validate(docs(%{"stores" => "files"}))
+      assert {:ok, %{mcp_servers: [%{stores: nil}]} = plain} = Bundle.validate(docs(%{}))
+      refute Map.has_key?(hd(Bundle.mcp_server_configs(plain)), "stores")
+    end
+
+    test "is told apart only by the word: anything else, or files without it, is refused" do
+      assert {:error, [reason]} = Bundle.validate(docs(%{"stores" => "documents"}))
+      assert reason =~ "stores is files or unset"
+
+      assert {:error, [reason]} = Bundle.validate(docs(%{"files" => ["upload"]}))
+      assert reason =~ "needs stores: files"
+
+      assert {:error, [reason]} = Bundle.validate(docs(%{"stores" => "files", "files" => "upload"}))
+      assert reason =~ "files is a list"
     end
   end
 end

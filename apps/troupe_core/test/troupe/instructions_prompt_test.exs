@@ -69,13 +69,13 @@ defmodule Troupe.InstructionsPromptTest do
     assert [
              %{"scope" => "root", "path" => ^path, "status" => "whole", "skipped" => []} = root,
              %{"scope" => "brief", "status" => "absent", "chars" => 0}
-           ] = before.data["files"]
+           ] = files(before)
 
     assert root["size"] == byte_size(@haiku)
     assert root["chars"] == String.length(String.trim(@haiku))
     assert root["share"] == Float.round(root["chars"] / 16_000, 3)
     assert root["hash"] == "sha256:" <> Base.encode16(:crypto.hash(:sha256, @haiku), case: :lower)
-    assert after_edit.data["files"] |> hd() |> Map.get("hash") != root["hash"]
+    assert files(after_edit) |> hd() |> Map.get("hash") != root["hash"]
   end
 
   # Decision 828: other tools' files are brought in once by `troupe onboard`, and a session
@@ -116,7 +116,7 @@ defmodule Troupe.InstructionsPromptTest do
                  "reason" => "not read: run troupe onboard"
                },
                %{"scope" => "brief"}
-             ] = event.data["files"]
+             ] = files(event)
 
       Troupe.stop_session(session.id)
     end
@@ -169,7 +169,7 @@ defmodule Troupe.InstructionsPromptTest do
              %{"scope" => "nested", "path" => ^nested},
              %{"scope" => "brief"}
            ] =
-             second.data["files"]
+             files(second)
 
     assert Path.join(Path.expand(context.workspace), "frontend/app") in second.data["searched"]
   end
@@ -204,7 +204,7 @@ defmodule Troupe.InstructionsPromptTest do
              %{"path" => ^root, "status" => "whole", "chars" => 26},
              %{"path" => ^style, "imported_by" => ^root, "status" => "trimmed", "trimmed" => 36},
              %{"scope" => "brief"}
-           ] = event.data["files"]
+           ] = files(event)
   end
 
   test "an instruction file or a brief that is a link to outside the repository, or outside " <>
@@ -251,7 +251,7 @@ defmodule Troupe.InstructionsPromptTest do
                "reason" => "not read: outside the repository"
              },
              %{"scope" => "brief", "status" => "outside", "size" => 0, "hash" => nil}
-           ] = event.data["files"]
+           ] = files(event)
   end
 
   # Decision 806: Copilot reads its file at the repository root only, so one below it does
@@ -296,7 +296,7 @@ defmodule Troupe.InstructionsPromptTest do
                "reason" => "not read: Copilot's file counts only at the root"
              },
              %{"scope" => "brief"}
-           ] = second.data["files"]
+           ] = files(second)
   end
 
   test "your own AGENTS.md may import from your config directory", context do
@@ -346,7 +346,7 @@ defmodule Troupe.InstructionsPromptTest do
     assert brief =~ "# Project brief"
     assert brief =~ "A brief."
 
-    assert Enum.map(events_of_type(session.id, :instructions_loaded), & &1.data["files"]) == [
+    assert Enum.map(events_of_type(session.id, :instructions_loaded), &files/1) == [
              Instructions.provenance(context.workspace, Troupe.Config.load(context.workspace))[
                "files"
              ]
@@ -401,7 +401,7 @@ defmodule Troupe.InstructionsPromptTest do
              %{"scope" => "team", "name" => "design", "version" => 1},
              %{"scope" => "user"},
              %{"scope" => "root"} | _
-           ] = event.data["files"]
+           ] = files(event)
   end
 
   # Issue #55's user level: the person's own memory from the plane comes after the
@@ -451,7 +451,7 @@ defmodule Troupe.InstructionsPromptTest do
              %{"scope" => "person", "path" => "memory:user", "version" => 2, "label" => "your own memory"},
              %{"scope" => "user"},
              %{"scope" => "root"} | _
-           ] = event.data["files"]
+           ] = files(event)
   end
 
   # Memory as entries: on a `## Topic` two levels both have, the closest's section is read,
@@ -637,7 +637,7 @@ defmodule Troupe.InstructionsPromptTest do
                "reason" => "applies when a file matching src/**/*.ts is read or edited"
              },
              %{"scope" => "brief"}
-           ] = first.data["files"]
+           ] = files(first)
 
     assert db_reason =~ "requested by description only"
 
@@ -652,6 +652,10 @@ defmodule Troupe.InstructionsPromptTest do
                "rule" => %{"apply" => "globs", "globs" => ["src/**/*.ts"]}
              },
              %{"scope" => "brief"}
-           ] = second.data["files"]
+           ] = files(second)
   end
+
+  # The files an `instructions_loaded` lists after the harness's own word, which a root's
+  # comes first with (`Troupe.Instructions.Harness`): these tests are about the rest.
+  defp files(%{data: %{"files" => [%{"scope" => "harness", "path" => "harness"} | files]}}), do: files
 end
