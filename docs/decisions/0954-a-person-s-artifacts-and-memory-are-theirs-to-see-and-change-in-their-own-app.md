@@ -128,7 +128,11 @@ again. The entries are parsed and the in-effect list computed in the client
 (`packages/client/src/entries.ts`) until the plane answers entries itself; then that shim goes.
 
 The organisation's and the teams' levels are *READ* here for everybody for now: changing them
-is `admin.memory.*`, which the daemon does not forward. The Instructions pane no longer edits
+is `admin.memory.*`, which the daemon does not forward. (It does since Decision 957: the view
+now offers *Add a memory*, *Edit* and *Forget* on the organisation's level to a platform admin
+and on a team's to its admins, as `me.memory`'s `roles` say, saved through `admin.memory.put`
+after `admin.memory.preview` says how many running sessions it reaches; everybody else keeps
+*READ* with who can change it.) The Instructions pane no longer edits
 the person's memory in place; it lists it as a layer and opens *Memory* (this narrows Decision
 943's "the desktop app's Instructions pane, edited in place" to the Memory view).
 

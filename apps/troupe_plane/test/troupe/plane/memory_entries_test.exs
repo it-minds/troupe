@@ -117,6 +117,32 @@ defmodule Troupe.Plane.MemoryEntriesTest do
       assert Memory.current(:organisation) == nil
     end
 
+    test "a refusal says who may change the level, which a person's own app shows them", context do
+      put = fn params, actor -> API.call("admin.memory.put", Map.put(params, "version", 0), actor) end
+      entries = [%{"topic" => "Tone", "body" => "Loud."}]
+
+      assert {:error, %{message: "forbidden", data: %{required_role: "platform_admin", reason: org}}} =
+               put.(%{"scope" => "organisation", "entries" => entries}, context.mette)
+
+      assert org == "only a platform administrator changes the organisation's memory"
+
+      assert {:error, %{message: "forbidden", data: %{reason: team}}} =
+               put.(%{"scope" => "team", "name" => "sales", "entries" => entries}, Admin.actor_for(context.ada))
+
+      assert team == "only sales's team admins and the platform administrators change sales's memory"
+
+      # Another team's admin is told no such team of theirs, never whether it exists.
+      assert {:error, %{message: "not_found", data: %{reason: other}}} =
+               put.(%{"scope" => "team", "name" => "design", "entries" => entries}, context.mette)
+
+      assert other =~ "no team called design that you administer"
+
+      assert {:error, %{message: "forbidden", data: %{reason: preview}}} =
+               API.call("admin.memory.preview", %{"scope" => "organisation", "entries" => entries}, context.mette)
+
+      assert preview == org
+    end
+
     test "say in how many sessions they were used since they came in", context do
       {:ok, _} = Admin.memory_put(context.root, "organisation", nil, "## Tone\n\nPlain.", 0)
       v1 = Memory.current(:organisation)
@@ -166,6 +192,21 @@ defmodule Troupe.Plane.MemoryEntriesTest do
       # Every team of hers, design's with no document among them.
       assert answer["teams"] == ["design", "sales"]
       assert answer["user"]["text"] == "## Tone\n\nKeep answers short."
+      # A member administers nothing; the poll's answer says nothing of roles.
+      assert answer["roles"] == %{"platform_admin" => false, "team_admin" => []}
+      refute Map.has_key?(plain, "roles")
+    end
+
+    test "me.memory says which levels the person may change: a team's admins theirs, a platform admin the organisation's",
+         context do
+      mette = Identity.get_user(context.mette.subject)
+      root = Identity.get_user(context.root.subject)
+
+      assert {:ok, %{"roles" => %{"platform_admin" => false, "team_admin" => ["sales"]}}} =
+               Harness.call("me.memory", %{"entries" => true}, as(mette))
+
+      assert {:ok, %{"roles" => %{"platform_admin" => true, "team_admin" => []}}} =
+               Harness.call("me.memory", %{"entries" => true}, %{user: root, platform_admin?: true})
     end
   end
 

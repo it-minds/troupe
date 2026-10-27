@@ -100,12 +100,12 @@ defmodule Troupe.MemoryScreenTest do
     assert text =~ "replaces Everyone at your organisation’s: Write plain English."
     press(pid, "esc")
 
-    # A team's is read here: its admins change it in the console.
+    # A team's is read here by a member: only its admins change it.
     press(pid, "3")
     press(pid, "a")
 
     assert screen_text(pid, session) =~
-             "design is read here: design's team admins change it, in the console"
+             "design is read here: only design's team admins can change it"
 
     # Only you: edited in the editor, over the version it was made on.
     press(pid, "4")
@@ -120,7 +120,7 @@ defmodule Troupe.MemoryScreenTest do
     press(pid, "enter")
 
     assert screen_text(pid, session) =~
-             "Only you already has a memory called “tone”. Edit that one instead"
+             "Only you already has a memory called “Tone”. Edit that one instead"
 
     press(pid, "esc")
 

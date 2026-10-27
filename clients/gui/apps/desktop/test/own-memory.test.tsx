@@ -96,7 +96,7 @@ describe("the Memory view", () => {
     (await seesButton("Add a memory", screen)).click();
     const form = await waitFor(() => screen.querySelector<HTMLElement>('[aria-label="New memory"]'), "the form");
     type(form.querySelector<HTMLInputElement>("input")!, "dates");
-    await sees("This will replace your organisation's “dates” for you.");
+    await sees("This will replace Everyone at Example’s “Dates” for you.");
     type(form.querySelector<HTMLInputElement>("input")!, "Language");
     type(form.querySelector<HTMLTextAreaElement>("textarea")!, "British English.");
     await sees("SAVES TO ONLY YOU · YOUR NEW SESSIONS IN ANY TEAM");
@@ -167,6 +167,116 @@ describe("the Memory view", () => {
     daemon.own = { version: 3, text: `${MINE}\n\n## 2026-10-26\n\n- Prefers small pull requests.` };
     daemon.announceMemory(["memory:user"]);
     await waitFor(() => entries(screen).some((e) => e.includes("Prefers small pull requests.")), "the agent's entry");
+  });
+
+  it("lets a team admin change their team's level through admin.memory.put, saying first what it reaches", async () => {
+    daemon.memoryRoles = { platform_admin: false, team_admin: ["core"] };
+    const screen = await openMemory();
+    await waitFor(() => level(screen, "core") && !level(screen, "core").textContent?.includes("READ"), "core changeable");
+    expect(screen.querySelector(".can-change")?.textContent).toContain("Only you · core");
+    expect(level(screen, "Everyone at Example").textContent).toContain("· READ");
+
+    level(screen, "Everyone").click();
+    await sees("Platform administrators can change this.");
+    expect(button("Add a memory", screen)).toBeNull();
+
+    level(screen, "core").click();
+    (await seesButton("Add a memory", screen)).click();
+    const form = await waitFor(() => screen.querySelector<HTMLElement>('[aria-label="New memory"]'), "the form");
+    // Topics compare as the plane compares them, case and spacing aside.
+    type(form.querySelector<HTMLInputElement>("input")!, "  TONE ");
+    await sees("This will replace Everyone at Example’s “Tone” for everyone in core.");
+    type(form.querySelector<HTMLInputElement>("input")!, "prices");
+    await sees("Team core already has a memory called “Prices”. Edit that one instead, or pick another topic.");
+    type(form.querySelector<HTMLInputElement>("input")!, "Delivery");
+    type(form.querySelector<HTMLTextAreaElement>("textarea")!, "The delivery plan fits on two pages.");
+    await sees("SAVES TO CORE · NEW SESSIONS IN CORE");
+    await sees("Reaches 2 running sessions at their next turn.");
+    expect(daemon.levelCalls[0]).toMatchObject({ method: "admin.memory.preview", scope: "team", name: "core" });
+
+    button("Save", form)!.click();
+    await sees("Saved to Team core.");
+    expect(daemon.levelCalls.find((c) => c["method"] === "admin.memory.put")).toMatchObject({
+      scope: "team",
+      name: "core",
+      version: 2,
+      entries: [
+        { topic: "Prices", body: "Use the framework agreement's prices." },
+        { topic: "Delivery", body: "The delivery plan fits on two pages." },
+      ],
+    });
+    await waitFor(() => entries(screen).some((e) => e.includes("The delivery plan fits on two pages.")), "the team's new entry read again");
+    // Who changed it and when, and how many sessions used it, at the team's level too.
+    expect(entries(screen).find((e) => e.includes("Delivery"))).toContain("ALICE@EXAMPLE.COM");
+    expect(entries(screen).find((e) => e.includes("Delivery"))).toContain("USED IN 3 SESSIONS");
+    expect(daemon.ownPuts).toEqual([]);
+  });
+
+  it("lets a platform admin change the organisation's, a conflict showing both, and forget an entry there", async () => {
+    daemon.memoryRoles = { platform_admin: true, team_admin: [] };
+    const screen = await openMemory();
+    await waitFor(() => level(screen, "Everyone at Example") && !level(screen, "Everyone at Example").textContent?.includes("READ"), "the organisation changeable");
+    expect(screen.querySelector(".can-change")?.textContent).toContain("Only you · Everyone at Example");
+    level(screen, "core").click();
+    await sees("Only core's team admins can change this.");
+
+    level(screen, "Everyone").click();
+    const dates = (): HTMLElement => [...screen.querySelectorAll<HTMLElement>(".entries > li")].find((l) => l.textContent?.includes("Dates"))!;
+    await waitFor(() => dates(), "the organisation's Dates");
+    button("Edit", dates())!.click();
+    const edit = await waitFor(() => screen.querySelector<HTMLElement>('[aria-label="Edit memory"]'), "the edit form");
+    await sees("SAVES TO EVERYONE AT EXAMPLE · NEW SESSIONS IN EVERY TEAM");
+    await sees("Reaches 2 running sessions at their next turn.");
+    // Somebody saves it elsewhere first.
+    const org = daemon.ownAbove.find((d) => d.scope === "organisation")!;
+    org.version = 5;
+    org.text = "## Tone\n\nPlain English, short sentences.\n\n## Dates\n\nDanish dates.";
+    type(edit.querySelector<HTMLTextAreaElement>("textarea")!, "Dates as 26 October 2026.");
+    button("Save", edit)!.click();
+    await sees("Version 5 was saved somewhere else since you read it.");
+    const conflict = screen.querySelector<HTMLElement>(".conflict")!;
+    expect(conflict.textContent).toContain("YOURS, NOT SAVED");
+    expect(conflict.textContent).toContain("## Dates\n\nDates as 26 October 2026.");
+    expect(conflict.textContent).toContain("Danish dates.");
+    (await seesButton("Reload version 5", screen)).click();
+    await waitFor(() => entries(screen).some((e) => e.includes("Danish dates.")), "version 5 read");
+
+    button("Forget", dates())!.click();
+    const ask = await waitFor(() => screen.querySelector<HTMLElement>('[role="alertdialog"]'), "the confirm");
+    await sees("Forget “Dates”? New sessions stop starting with it.");
+    button("Forget", ask)!.click();
+    await sees("Forgotten. New sessions will not start with “Dates”.");
+    expect(daemon.levelCalls.filter((c) => c["method"] === "admin.memory.put").at(-1)).toMatchObject({ scope: "organisation", version: 5, entries: [{ topic: "Tone" }] });
+    expect(org).toMatchObject({ version: 6, text: "## Tone\n\nPlain English, short sentences." });
+  });
+
+  it("keeps the levels above read only for a member, and a role taken away since is refused in the plane's words", async () => {
+    let screen = await openMemory();
+    await waitFor(() => level(screen, "core"), "the levels");
+    expect(screen.querySelector(".can-change")?.textContent).toBe("YOU CAN CHANGEOnly you");
+    level(screen, "core").click();
+    await sees("Only core's team admins can change this.");
+    expect(button("Add a memory", screen)).toBeNull();
+    expect(button("Edit", screen)).toBeNull();
+    unmount?.();
+    unmount = null;
+
+    // The app was told she administers core, and the plane has since taken it away.
+    daemon.memoryRoles = { platform_admin: false, team_admin: ["core"] };
+    daemon.planeRoles = { platform_admin: false, team_admin: [] };
+    unmount = render(<App />).unmount;
+    (await waitFor(() => nav("Memory"), "the Memory entry")).click();
+    screen = await waitFor(() => document.querySelector<HTMLElement>(".memory-screen"), "the Memory view");
+    level(await waitFor(() => level(screen, "core") && screen, "the levels"), "core").click();
+    (await seesButton("Add a memory", screen)).click();
+    const form = await waitFor(() => screen.querySelector<HTMLElement>('[aria-label="New memory"]'), "the form");
+    await sees("only core's team admins and the platform administrators change core's memory");
+    type(form.querySelector<HTMLInputElement>("input")!, "Delivery");
+    type(form.querySelector<HTMLTextAreaElement>("textarea")!, "Two pages.");
+    button("Save", form)!.click();
+    await waitFor(() => !button("Save", form)?.disabled, "the save answered");
+    await sees("only core's team admins and the platform administrators change core's memory");
+    expect(daemon.ownAbove.find((d) => d.name === "core")).toMatchObject({ version: 2, text: TEAM });
   });
 
   it("asks the plane nothing under Local only and says why it is read only", async () => {

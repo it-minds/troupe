@@ -4263,6 +4263,16 @@ pre.instruction {
   min-width: 0;
   color: var(--text-muted);
 }
+/* What a save on a level above the person's own reaches, on a line under where it saves to. */
+.memory-screen .reach {
+  flex: 1 1 100%;
+  min-width: 0;
+  color: var(--text-muted);
+}
+.memory-screen .forget .scope {
+  flex: 1 1 100%;
+  color: var(--text-muted);
+}
 .memory-screen .forget {
   display: flex;
   flex-wrap: wrap;
@@ -4287,6 +4297,16 @@ pre.instruction {
   padding: var(--space-3) var(--space-4);
   border-left: var(--bw-marker) solid var(--queued-bd);
   background: var(--bg-panel);
+}
+/* The person's edit and the version saved since, side by side. */
+.memory-screen .conflict .beside {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+.memory-screen .conflict .beside pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .versions-drawer {
   display: flex;

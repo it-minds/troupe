@@ -305,6 +305,12 @@ defmodule Troupe.FakeRemote do
       artifact_texts: Keyword.get(opts, :artifact_texts, %{}),
       memory: Keyword.get(opts, :memory, []),
       own_versions: Keyword.get(opts, :own_versions, []),
+      # What `me.memory` says of the person's roles (nil: nothing, as a plane from before
+      # them), what the plane decides `admin.memory.*` by where that differs (a role taken
+      # away since), and the audit rows its saves wrote.
+      memory_roles: Keyword.get(opts, :memory_roles),
+      plane_roles: Keyword.get(opts, :plane_roles),
+      memory_audit: [],
       invites: Keyword.get(opts, :invites, [])
     }
 
@@ -374,6 +380,19 @@ defmodule Troupe.FakeRemote do
   end
 
   def handle_call(:calls, _from, state), do: {:reply, Enum.reverse(state.calls), state}
+  def handle_call(:memory_audit, _from, state), do: {:reply, state.memory_audit, state}
+  def handle_call(:memory, _from, state), do: {:reply, state.memory, state}
+
+  def handle_call({:save_level, scope, name, text}, _from, state) do
+    memory =
+      Enum.map(state.memory, fn doc ->
+        if doc["scope"] == scope and doc["name"] == name,
+          do: %{doc | "version" => doc["version"] + 1, "text" => text},
+          else: doc
+      end)
+
+    {:reply, :ok, %{state | memory: memory}}
+  end
 
   def handle_call({:offer, rows, open}, _from, state),
     do: {:reply, :ok, state |> Map.put(:offered, rows) |> Map.put(:opener, open)}
@@ -1210,7 +1229,117 @@ defmodule Troupe.FakeRemote do
       state.memory ++
         [own |> Map.take(~w(version text changed_by changed_at)) |> Map.put("scope", "user")]
 
-    {{:ok, %{"documents" => documents, "user" => own}}, state}
+    # Asked with entries, as a client's screen asks it: each level's entries with who last
+    # changed it, when and in how many sessions it was used, and the person's roles.
+    answer =
+      if params["entries"] == true,
+        do: %{
+          "documents" => Enum.map(documents, &with_entries/1),
+          "user" => with_entries(own),
+          "roles" => state.memory_roles
+        },
+        else: %{"documents" => documents, "user" => own}
+
+    {{:ok, answer |> Enum.reject(fn {_k, v} -> is_nil(v) end) |> Map.new()}, state}
+  end
+
+  # A level of the organisation's memory, as the plane answers its admin methods to the
+  # person: a platform admin the organisation's, a team's admins theirs, anybody else the
+  # plane's sentence. A save is over the version read and writes an audit row.
+  defp dispatch(state, _kind, "admin.memory." <> _ = method, params, _pid)
+       when method in ["admin.memory.get", "admin.memory.preview", "admin.memory.put"] do
+    alias Troupe.Protocol.Memory.Entries
+
+    roles = state.plane_roles || state.memory_roles || %{}
+    scope = params["scope"]
+    name = params["name"]
+    doc = Enum.find(state.memory, &(&1["scope"] == scope and &1["name"] == name))
+
+    may? =
+      roles["platform_admin"] == true or
+        (scope == "team" and name in List.wrap(roles["team_admin"]))
+
+    cond do
+      method == "admin.memory.get" ->
+        {{:ok,
+          %{
+            "scope" => scope,
+            "name" => name,
+            "version" => doc && doc["version"],
+            "text" => (doc && doc["text"]) || "",
+            "versions" => [
+              %{"version" => doc && doc["version"], "changed_by" => doc && doc["changed_by"]}
+            ]
+          }}, state}
+
+      not may? and scope == "organisation" ->
+        {{:error, -32_004, "forbidden",
+          %{
+            "required_role" => "platform_admin",
+            "reason" => "only a platform administrator changes the organisation's memory"
+          }}, state}
+
+      not may? ->
+        {{:error, -32_004, "forbidden",
+          %{
+            "required_role" => "team_admin",
+            "reason" =>
+              "only #{name}'s team admins and the platform administrators change #{name}'s memory"
+          }}, state}
+
+      method == "admin.memory.preview" ->
+        {{:ok,
+          %{
+            "version" => doc && doc["version"],
+            "effect" => "Its sessions read it from their next turn.",
+            "readers" => %{
+              "version" => 0,
+              "behind" => 0,
+              "sessions" => [
+                %{"session_id" => "s-1"},
+                %{"session_id" => "s-2"},
+                %{"session_id" => "s-3"}
+              ]
+            }
+          }}, state}
+
+      params["version"] != ((doc && doc["version"]) || 0) ->
+        {{:error, -32_006, "conflict",
+          %{
+            "version" => (doc && doc["version"]) || 0,
+            "reason" =>
+              "#{scope} was saved by somebody else since; version #{(doc && doc["version"]) || 0} is in force now"
+          }}, state}
+
+      true ->
+        {:ok, entries} = Entries.cast(params["entries"])
+        text = Entries.render(entries)
+        from = (doc && doc["version"]) || 0
+
+        now = %{
+          "scope" => scope,
+          "name" => name,
+          "version" => from + 1,
+          "text" => text,
+          "changed_by" => "alice"
+        }
+
+        memory = Enum.reject(state.memory, &(&1 == doc)) ++ [now]
+        subject = if scope == "team", do: "team/#{name}", else: scope
+
+        row = %{
+          "action" => "memory.put",
+          "actor" => "alice",
+          "subject" => subject,
+          "version" => %{"from" => from, "to" => from + 1}
+        }
+
+        {{:ok,
+          %{
+            "document" => %{"version" => from + 1},
+            "changes" => %{"version" => %{"from" => from, "to" => from + 1}}
+          }}, %{state | memory: memory, memory_audit: [row | state.memory_audit]}}
+    end
   end
 
   # The document as entries, which the plane writes as sections in their order.
@@ -1289,6 +1418,37 @@ defmodule Troupe.FakeRemote do
     do: Map.merge(%{"limit" => 8192, "bytes" => byte_size(newest["text"])}, newest)
 
   defp own_document(_state), do: %{"version" => 0, "text" => "", "bytes" => 0, "limit" => 8192}
+
+  # A document's entries as the plane answers them: each with the version, who saved it,
+  # when, and in how many sessions it was used.
+  defp with_entries(document) do
+    entries =
+      (document["text"] || "")
+      |> Troupe.Protocol.Memory.Entries.parse()
+      |> Enum.map(
+        &Map.merge(&1, %{
+          "version" => document["version"],
+          "by" => document["changed_by"] || "lead@example.test",
+          "at" => "2026-10-26T08:00:00Z",
+          "used" => 3
+        })
+      )
+
+    Map.put(document, "entries", entries)
+  end
+
+  @doc "The audit rows the fake plane's memory saves wrote, newest first."
+  @spec memory_audit(pid()) :: [map()]
+  def memory_audit(remote), do: GenServer.call(remote, :memory_audit)
+
+  @doc "The memory documents the fake plane holds now."
+  @spec memory(pid()) :: [map()]
+  def memory(remote), do: GenServer.call(remote, :memory)
+
+  @doc "Saves a level of the organisation's memory as another administrator would, so the next save over the old version conflicts."
+  @spec save_level(pid(), String.t(), String.t() | nil, String.t()) :: :ok
+  def save_level(remote, scope, name, text),
+    do: GenServer.call(remote, {:save_level, scope, name, text})
 
   defp artifact(_state, "artifact.get", row, _params),
     do:
