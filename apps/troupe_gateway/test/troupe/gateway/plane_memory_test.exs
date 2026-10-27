@@ -401,6 +401,7 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
       _fingerprint = FakePlane.sign(ctx.plane.state)
       FakePlane.memory_with(ctx.plane.state, [%{"scope" => "organisation", "name" => nil, "version" => 2, "hash" => "sha256:o", "text" => "## Tone\n\nPlain English."}])
       FakePlane.keep_own(ctx.plane.state)
+      FakePlane.teams_with(ctx.plane.state, ["sales"])
       assert {:ok, %{"linked" => true}} = link(ctx)
 
       assert {:ok, %{"user" => %{"version" => 1, "text" => "## Tone\n\nShort answers."}}} =
@@ -412,8 +413,13 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
 
       assert {:ok, own} = Client.call(ctx.client, "me.memory", %{})
       assert [%{"topic" => "Tone", "body" => "Short answers."}] = own["entries"]
-      assert [%{"scope" => "organisation", "entries" => [%{"topic" => "Tone", "body" => "Plain English."}]}] = own["documents"]
-      assert {"me.memory", %{"entries" => true}} = List.last(Enum.filter(FakePlane.calls(ctx.plane.state), &match?({"me.memory", _}, &1)))
+      # A team of hers with no document is a level too, empty.
+      assert [
+               %{"scope" => "organisation", "entries" => [%{"topic" => "Tone", "body" => "Plain English."}]},
+               %{"scope" => "team", "name" => "sales", "version" => 0, "text" => "", "entries" => []}
+             ] = own["documents"]
+      # Asked with entries for a client; the poll in between asks without.
+      assert Enum.any?(FakePlane.calls(ctx.plane.state), &match?({"me.memory", %{"entries" => true}}, &1))
 
       assert {:ok, %{"entries" => [%{"topic" => "Tone", "replaces" => [%{"body" => "Plain English."}]}], "plane_url" => url}} =
                Client.call(ctx.client, "memory.in_effect", %{"team" => "sales"})

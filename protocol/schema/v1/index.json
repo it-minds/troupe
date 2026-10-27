@@ -1,5 +1,8 @@
 {
   "documents": [
+    "commands/admin.memory.get.json",
+    "commands/admin.memory.preview.json",
+    "commands/admin.memory.put.json",
     "commands/agents.changed.json",
     "commands/agents.delete.json",
     "commands/agents.get.json",
@@ -57,6 +60,7 @@
     "commands/memory.decline.json",
     "commands/memory.forget.json",
     "commands/memory.get.json",
+    "commands/memory.in_effect.json",
     "commands/onboard.apply.json",
     "commands/onboard.decline.json",
     "commands/onboard.plan.json",

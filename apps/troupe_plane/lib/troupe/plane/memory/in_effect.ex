@@ -110,12 +110,7 @@ defmodule Troupe.Plane.Memory.InEffect do
       "team" => team && team.name,
       "profile" => profile,
       "levels" => Enum.map(levels, &Map.merge(&1.level, %{"version" => &1.version, "entries" => length(&1.entries)})),
-      "entries" =>
-        Enum.map(Entries.in_effect(levels), fn %{level: level, entry: entry, replaces: replaces} ->
-          entry
-          |> Map.put("level", level)
-          |> Map.put("replaces", Enum.map(replaces, fn {lower, e} -> %{"level" => lower, "topic" => e["topic"], "body" => e["body"]} end))
-        end)
+      "entries" => levels |> Entries.in_effect() |> Entries.effect_json()
     }
   end
 

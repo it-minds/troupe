@@ -163,6 +163,8 @@ defmodule Troupe.Plane.MemoryEntriesTest do
              ] = answer["documents"]
 
       assert [%{"topic" => "Tone", "body" => "Keep answers short.", "by" => "ada@example.test"}] = answer["user"]["entries"]
+      # Every team of hers, design's with no document among them.
+      assert answer["teams"] == ["design", "sales"]
       assert answer["user"]["text"] == "## Tone\n\nKeep answers short."
     end
   end

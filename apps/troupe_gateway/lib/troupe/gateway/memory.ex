@@ -93,7 +93,8 @@ defmodule Troupe.Gateway.Memory do
   and whether the copy was `current`, and each session running here with what its last turn
   read and whether that is `current` against the copy now. `reason` says why the plane was
   not asked. `ask: false` (a client in Local only) asks nothing of the plane. `held` is each
-  document as the copy holds it (`scope`, `name`, `version`, `text`), the person's own among them.
+  document as the copy holds it (`scope`, `name`, `version`, `text` and its `entries`), the
+  person's own among them, and `in_effect` what the sessions here read of them, per topic.
   """
   @spec status(keyword()) :: map()
   def status(opts \\ []) do
@@ -125,6 +126,9 @@ defmodule Troupe.Gateway.Memory do
       # Each document as the copy holds it, which the sessions here read: what a memory
       # screen shows, read-only, where the plane is not asked.
       "held" => held_levels(held),
+      # What the sessions here read of it, per topic the closest level's entry and what it
+      # replaces, as the prompt takes them (every team of the person's at one rank).
+      "in_effect" => held |> held_levels() |> Entries.levels() |> Entries.in_effect() |> Entries.effect_json(),
       "problem" => problem,
       "sessions" =>
         Enum.map(Troupe.Session.PlaneMemory.reads(), &Map.put(&1, "current", same?(&1["documents"], now)))
@@ -140,9 +144,10 @@ defmodule Troupe.Gateway.Memory do
   defp asking(true), do: :ok
   defp asking(false), do: {:error, :local_only}
 
-  # Each document with its level, version and text, and nothing else of it.
+  # Each document with its level, version and text, and nothing else of it, and its entries
+  # read off the text here, without who wrote them: the plane is not asked.
   defp held_levels(%{"documents" => documents}) when is_list(documents),
-    do: Enum.map(documents, &Map.take(&1, ~w(scope name version text)))
+    do: Enum.map(documents, &(&1 |> Map.take(~w(scope name version text)) |> Map.put("entries", Entries.parse(&1["text"] || ""))))
 
   defp held_levels(_none), do: []
 
@@ -379,10 +384,20 @@ defmodule Troupe.Gateway.Memory do
   #
   # Each with its entries; a plane from before them answers none, and they are read here
   # off the text, the same sections without who wrote them.
+  #
+  # A team of theirs with no document is there too, empty, so a client lists every team.
   defp own_of(%{"user" => %{} = own} = answer, url) do
     above =
       for %{"scope" => scope} = document <- List.wrap(answer["documents"]), scope != "user",
           do: document |> Map.take(["scope", "name", "version", "hash", "updated_at", "text", "entries"]) |> with_entries()
+
+    named = for %{"scope" => "team", "name" => name} <- above, do: name
+
+    empty =
+      for name <- List.wrap(answer["teams"]), is_binary(name), name not in named,
+          do: %{"scope" => "team", "name" => name, "version" => 0, "text" => "", "entries" => []}
+
+    above = Enum.sort_by(above ++ empty, &{Enum.find_index(Shape.scopes(), fn s -> s == &1["scope"] end), &1["name"] || ""})
 
     {:ok,
      own

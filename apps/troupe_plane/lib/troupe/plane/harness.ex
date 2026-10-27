@@ -396,12 +396,21 @@ defmodule Troupe.Plane.Harness do
     own = if params["blame"] == true and is_binary(user.id), do: Map.put(own, "lines", Memory.blame(user)), else: own
     documents = Memory.for_person(user)
 
-    {documents, own} =
-      if params["entries"] == true,
-        do: {Enum.map(documents, &with_entries(&1, user)), Map.put(own, "entries", with_entries(%{"scope" => "user"}, user)["entries"])},
-        else: {documents, own}
+    answer = %{"documents" => documents, "user" => own, "organisation" => organisation()}
 
-    {:ok, Signing.signed("memory", %{"documents" => documents, "user" => own, "organisation" => organisation()})}
+    # With entries, every team of the caller's by name too, a team with no document among
+    # them, so a client lists each as a level of its own.
+    answer =
+      if params["entries"] == true,
+        do: %{
+          answer
+          | "documents" => Enum.map(documents, &with_entries(&1, user)),
+            "user" => Map.put(own, "entries", with_entries(%{"scope" => "user"}, user)["entries"])
+        }
+        |> Map.put("teams", user |> Identity.teams_for() |> Enum.map(& &1.name) |> Enum.sort()),
+        else: answer
+
+    {:ok, Signing.signed("memory", answer)}
   end
 
   # What is in effect for a new session of the caller's in one of their teams (the one

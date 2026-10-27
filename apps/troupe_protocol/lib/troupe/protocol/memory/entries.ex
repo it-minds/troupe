@@ -243,6 +243,45 @@ defmodule Troupe.Protocol.Memory.Entries do
     end)
   end
 
+  @doc """
+  The rank of one of the documents a session reads, among them (`Troupe.Protocol.Memory`'s
+  documents, in their order): the organisation's 0, a team's 1 (two teams one rank), a worker
+  profile's 2 and up along its chain, the one that extends nothing first, and the person's
+  own the closest of all.
+  """
+  @spec rank(map(), [map()]) :: integer()
+  def rank(%{"scope" => "organisation"}, _documents), do: 0
+  def rank(%{"scope" => "team"}, _documents), do: 1
+  def rank(%{"scope" => "user"}, _documents), do: 1_000
+
+  def rank(%{"scope" => "profile"} = document, documents),
+    do: 2 + (documents |> Enum.filter(&(&1["scope"] == "profile")) |> Enum.find_index(&(&1 == document)))
+
+  @doc "These documents as levels for `resolve/1` and `in_effect/1`, each named by its `scope` and `name`."
+  @spec levels([map()]) :: [level()]
+  def levels(documents) do
+    Enum.map(documents, fn document ->
+      %{
+        level: %{"scope" => document["scope"], "name" => document["name"]},
+        rank: rank(document, documents),
+        entries: document["entries"] || parse(document["text"])
+      }
+    end)
+  end
+
+  @doc """
+  `in_effect/1` as an answer carries it: each entry with its `level` and `replaces`, each
+  of those `{level, topic, body}`.
+  """
+  @spec effect_json([%{level: term(), entry: entry(), replaces: [{term(), entry()}]}]) :: [map()]
+  def effect_json(effect) do
+    Enum.map(effect, fn %{level: level, entry: entry, replaces: replaces} ->
+      entry
+      |> Map.put("level", level)
+      |> Map.put("replaces", Enum.map(replaces, fn {lower, e} -> %{"level" => lower, "topic" => e["topic"], "body" => e["body"]} end))
+    end)
+  end
+
   defp in_slot?({:topic, topic}, _where, entry), do: heading?(entry) and key(entry["topic"]) == topic
   defp in_slot?({:general, where}, where, _entry), do: true
   defp in_slot?(_slot, _where, _entry), do: false

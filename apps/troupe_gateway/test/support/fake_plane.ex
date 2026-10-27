@@ -123,6 +123,10 @@ defmodule Troupe.Gateway.FakePlane do
   @spec keep_own(pid()) :: :ok
   def keep_own(state), do: Agent.update(state, &Map.put(&1, :own, %{"version" => 0, "text" => ""}))
 
+  @doc "The person's teams, by name, which `me.memory` asked with `entries` names."
+  @spec teams_with(pid(), [String.t()]) :: :ok
+  def teams_with(state, teams), do: Agent.update(state, &Map.put(&1, :teams, teams))
+
   @doc "The person's own document as this plane holds it."
   @spec own(pid()) :: map() | nil
   def own(state), do: Agent.get(state, &Map.get(&1, :own))
@@ -430,11 +434,17 @@ defmodule Troupe.Gateway.FakePlane do
     end
   end
 
-  defp dispatch(state, "me.memory", _params) do
+  # Asked with `entries`, it names the person's teams too, where `teams_with/2` set them; the
+  # documents' entries it leaves for the daemon to read off the text, as a plane from before
+  # them would.
+  defp dispatch(state, "me.memory", params) do
+    names = Agent.get(state, &Map.get(&1, :teams))
+    teams = if is_list(names) and params["entries"] == true, do: %{"teams" => names}, else: %{}
+
     case Agent.get(state, &{Map.get(&1, :memory), Map.get(&1, :own)}) do
       {nil, nil} -> {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory"}}
-      {documents, nil} -> {:ok, signed(state, "memory", %{"documents" => documents})}
-      {documents, own} -> {:ok, signed(state, "memory", %{"documents" => List.wrap(documents) ++ own_documents(own), "user" => own_json(own)})}
+      {documents, nil} -> {:ok, signed(state, "memory", Map.merge(%{"documents" => documents}, teams))}
+      {documents, own} -> {:ok, signed(state, "memory", Map.merge(%{"documents" => List.wrap(documents) ++ own_documents(own), "user" => own_json(own)}, teams))}
     end
   end
 

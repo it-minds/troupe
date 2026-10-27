@@ -1069,16 +1069,16 @@ defmodule Troupe.Instructions do
   # Each document with the text of it the prompt reads and the topics of it left out: on a
   # topic a closer level also has, its section goes, and the closest's says what it replaces
   # in one line under its heading. A document nothing of which is replaced, and whose
-  # sections replace nothing, is read as it is, word for word. The levels' ranks: the
-  # organisation's lowest, a team's above it (two teams one rank, replacing neither of each
-  # other), a profile's chain above the team's, the one that extends nothing first, and the
-  # person's own closest.
+  # sections replace nothing, is read as it is, word for word. The levels' ranks
+  # (`Entries.rank/2`): the organisation's lowest, a team's above it (two teams one rank,
+  # replacing neither of each other), a profile's chain above the team's, the one that
+  # extends nothing first, and the person's own closest.
   defp by_topic(documents) do
     levels =
       documents
       |> Enum.with_index()
       |> Enum.map(fn {document, index} ->
-        %{level: index, rank: rank(document, documents), entries: Entries.parse(document["text"])}
+        %{level: index, rank: Entries.rank(document, documents), entries: Entries.parse(document["text"])}
       end)
 
     resolved = Entries.resolve(levels)
@@ -1093,13 +1093,6 @@ defmodule Troupe.Instructions do
       end
     end)
   end
-
-  defp rank(%{"scope" => "organisation"}, _documents), do: 0
-  defp rank(%{"scope" => "team"}, _documents), do: 1
-  defp rank(%{"scope" => "user"}, _documents), do: 1_000
-
-  defp rank(%{"scope" => "profile"} = document, documents),
-    do: 2 + Enum.find_index(Enum.filter(documents, &(&1["scope"] == "profile")), &(&1 == document))
 
   # The document's own lines, section by section, without the sections replaced, and the
   # line saying what a section replaces under its heading.

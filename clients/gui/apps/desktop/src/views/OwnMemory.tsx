@@ -3,12 +3,14 @@
 // The organisation's is the lowest level, a team's is closer, the person's own the closest;
 // on a topic the closest level's entry replaces the lower ones.
 //
-// "In effect for you" is what a new session in one of their teams starts knowing: the
-// winner on each topic, with what it replaces struck through. Each level is listed on its
-// own; the person changes their own here (adding, editing and forgetting entries, saved as
-// the whole document over the version they read, through this computer's daemon, which
-// hands the new version to the sessions running here for their next turn). The levels above
-// are read here and kept in the console by those who may change them.
+// The plane reads the entries and works out what is in effect; the app shows both as it
+// answers them (`me.memory`, `memory.in_effect`). "In effect for you" is what a new session
+// in one of their teams starts knowing: the winner on each topic, with what it replaces
+// struck through. Each level is listed on its own, each entry with who last changed it and
+// in how many sessions it was used; the person changes their own here (adding, editing and
+// forgetting entries, saved as entries over the version they read, through this computer's
+// daemon, which hands the new version to the sessions running here for their next turn).
+// The levels above are read here and kept in the console by those who may change them.
 //
 // The person's own level has a Versions drawer: every version, any two side by side, a
 // rollback to one, who wrote each line, where this computer's copy stands and what each
