@@ -698,17 +698,24 @@ defmodule Troupe.Plane.Control.Connection do
   # (`remember` to `me`). The one level an agent may write: the organisation's, a team's
   # and a profile's are read-only to every agent, and a pod asking to write one is refused
   # whoever asks. Whose memory is read off the session row, as the key manager's subject is,
-  # so a pod can add only to the owner of a session it holds, and only an entry under the
-  # day's heading, never the document in place of what is there. The text is the person's
-  # memory, which reaches this pod anyway with every activation.
+  # so a pod can add only to the owner of a session it holds, and only an entry at the end of
+  # a topic's section (`topic`, `Notes` for none), never the document in place of what is
+  # there. The text is the person's memory, which reaches this pod anyway with every
+  # activation.
   defp dispatch("session.memory.put", params, state) do
     with {:scope, "user"} <- {:scope, params["scope"] || "user"},
          %Session{} = session <- session_of(params["session_id"], state.worker),
          :ok <- at_epoch(session, params["epoch"]),
          {:owner, %User{active: true} = owner} <- {:owner, Identity.get_user(session.owner_subject)} do
-      case Memory.append_own(owner, params["append"], [session: session.id] ++ agent_of(params)) do
+      case Memory.append_own(owner, params["append"], [session: session.id, topic: params["topic"]] ++ agent_of(params)) do
         {:ok, saved} ->
-          {:ok, %{"entry" => saved.entry, "changed" => saved.changes != %{}, "version" => Memory.own(owner)["version"]}, state}
+          {:ok,
+           %{
+             "entry" => saved.entry,
+             "topic" => saved.topic,
+             "changed" => saved.changes != %{},
+             "version" => Memory.own(owner)["version"]
+           }, state}
 
         {:error, {:full, bytes}} ->
           {:error,

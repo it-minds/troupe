@@ -13,6 +13,7 @@ import type { OpenBaoCheck } from "../../src/admin.js";
 import { parseAgent } from "../../src/agents.js";
 import { checkRuleSet } from "../../src/rules.js";
 import { BUILTIN_AGENTS, checkAgent } from "./agents.js";
+import { parse as parseEntries } from "./entries.js";
 import { older } from "./plane.js";
 import { PROVIDER_TYPES } from "./provider-types.js";
 import { MAX_DEPTH, WRITTEN_KEYS, composeBundle, empty as emptyResolved, fieldsOf, merge as mergeExtends, rowOf } from "./extends.js";
@@ -1783,6 +1784,8 @@ export class FakeAdmin {
             inherited: params["scope"] === "profile" ? this.memoryInherited(String(params["name"])) : [],
             readers: this.readersOf(found.subject),
             lines: shown ? memoryBlame(versions, shown.version) : [],
+            // Its `## Topic` sections, as the plane reads them, with who saved the version shown.
+            entries: shown ? parseEntries(shown.text).map((e) => ({ ...e, version: shown.version, by: shown.changed_by, at: shown.changed_at, used: 0 })) : [],
           },
         };
       }

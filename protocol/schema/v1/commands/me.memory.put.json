@@ -9,7 +9,13 @@
     "command_id": {
       "type": "string"
     },
+    "entries": {
+      "type": "array"
+    },
     "text": {
+      "type": "string"
+    },
+    "topic": {
       "type": "string"
     },
     "version": {

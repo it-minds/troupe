@@ -743,25 +743,38 @@ defmodule Troupe.Client do
   @spec memory_status() :: {:ok, map()} | {:error, String.t()}
   def memory_status, do: OwnMemory.status()
 
-  @doc "The memory levels the person reads, lowest first, each with its `## Topic` entries."
-  @spec memory_levels([map()]) :: [Troupe.Client.MemoryEntries.level()]
-  defdelegate memory_levels(documents), to: Troupe.Client.MemoryEntries, as: :levels
+  @doc "The memory levels the person reads, lowest first, each with its entries as the plane answered them."
+  @spec memory_levels([map()]) :: [map()]
+  defdelegate memory_levels(documents), to: OwnMemory, as: :levels
 
-  @doc "What a new session in a team starts knowing: the closest entry per topic and what it replaces."
-  @spec memory_in_effect([map()], String.t() | nil) :: [map()]
-  defdelegate memory_in_effect(levels, team), to: Troupe.Client.MemoryEntries, as: :in_effect
+  @doc "What a new session in a team starts knowing, as the plane works it out: the closest entry per topic and what it replaces."
+  @spec memory_in_effect([map()], String.t() | nil) :: {:ok, [map()]} | {:error, String.t()}
+  defdelegate memory_in_effect(levels, team), to: OwnMemory, as: :in_effect
+
+  @doc "In-effect entries as an answer carries them (the copy's, under Local only), as the page's rows."
+  @spec memory_effect_rows([map()], [map()]) :: [map()]
+  defdelegate memory_effect_rows(entries, levels), to: OwnMemory, as: :effect_rows
 
   @doc "Whether a new entry on a topic clashes with one at its level, or would replace a lower one."
   @spec memory_clash([map()], map(), String.t()) :: {:here | :lower, map()} | nil
-  defdelegate memory_clash(levels, level, topic), to: Troupe.Client.MemoryEntries, as: :clash
+  defdelegate memory_clash(levels, level, topic), to: OwnMemory, as: :clash
 
-  @doc "A document's text with an entry written (in its place, or last)."
-  @spec memory_put_entry(String.t(), String.t(), String.t(), String.t() | nil) :: String.t()
-  defdelegate memory_put_entry(text, topic, body, was), to: Troupe.Client.MemoryEntries, as: :put
+  @doc "A level's entries with an entry written (in its place, or last)."
+  @spec memory_put_entry([map()], String.t(), String.t(), String.t() | nil) :: [map()]
+  defdelegate memory_put_entry(entries, topic, body, was), to: OwnMemory, as: :put_entry
 
-  @doc "A document's text without the entry on a topic."
-  @spec memory_forget_entry(String.t(), String.t()) :: String.t()
-  defdelegate memory_forget_entry(text, topic), to: Troupe.Client.MemoryEntries, as: :forget
+  @doc "A level's entries without the entry on a topic."
+  @spec memory_forget_entry([map()], String.t()) :: [map()]
+  defdelegate memory_forget_entry(entries, topic), to: OwnMemory, as: :forget_entry
+
+  @doc "Save the person's own as entries over the version they were read at."
+  @spec save_own_memory_entries([map()], non_neg_integer()) ::
+          {:ok, map()} | {:conflict, map()} | {:error, String.t()}
+  defdelegate save_own_memory_entries(entries, version), to: OwnMemory, as: :save_entries
+
+  @doc "The text the plane writes for these entries."
+  @spec memory_text([map()]) :: String.t()
+  defdelegate memory_text(entries), to: OwnMemory, as: :text_of
 
   @doc "Who wrote a line of the person's memory, as `troupe memory --blame` says it."
   @spec written_by(map()) :: String.t()

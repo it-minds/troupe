@@ -285,8 +285,8 @@ defmodule Troupe.Plane.ControlTest do
                  "agent" => "build"
                })
 
-      text = Memory.current(ada).text
-      assert text =~ ~r/\ACall me Ada\.\n\n## \d{4}-\d{2}-\d{2}\n\n- Prefers small pull requests\.\z/
+      # Under `Notes`, the topic an entry goes under where the agent names none.
+      assert Memory.current(ada).text == "Call me Ada.\n\n## Notes\n\n- Prefers small pull requests."
 
       # The audit names the session and the agent the entry came from, and never the text.
       [row | _] = Enum.filter(Audit.list(), &(&1.action == "memory.put"))

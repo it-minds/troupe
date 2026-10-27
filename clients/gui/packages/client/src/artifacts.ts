@@ -44,7 +44,7 @@ export interface Artifact {
   kind: ArtifactKind;
   /** `organisation`, `team:<name>`, `profile:<name>`, or `private` for its owner alone. */
   visibility: string;
-  /** Which part of a gallery it is in for this caller (`scopeOf`); absent from a plane from before it. */
+  /** Which part of a gallery it is in for this caller: `mine`, `private`, `organisation`, `team:<name>`, `profile:<name>` or `shared`. */
   scope?: ArtifactScope;
   owner: ArtifactPerson;
   /** Whether it is the caller's own. */
@@ -210,21 +210,13 @@ export function textBytes(text: string): string {
 export type ArtifactAudience = "everyone" | "team" | "shared" | "private";
 
 /**
- * Which part of the gallery an `artifact.list` row is in (`scope`): `mine`, `private` (the caller's own private one), `organisation`,
- * `team:<name>`, `profile:<name>` or `shared`, a link's. A plane that does not say it yet is
- * read from the row: the caller's own, one a link gave them (the ids a `shared` listing
- * answered), or its visibility.
+ * Who it is for: its visibility, or a link where that is how the caller has it, which the
+ * plane says per row (`scope` `shared`: `mine`, `private`, `organisation`, `team:<name>`,
+ * `profile:<name>` or `shared`).
  */
-export function scopeOf(artifact: Artifact, shared: ReadonlySet<string> = new Set()): string {
-  if (typeof artifact.scope === "string" && artifact.scope !== "") return artifact.scope;
-  if (artifact.mine) return "mine";
-  return shared.has(artifact.id) ? "shared" : artifact.visibility;
-}
-
-/** Who it is for: its visibility, or a link where that is how the caller has it. */
-export function audienceOf(artifact: Artifact, shared: ReadonlySet<string> = new Set()): ArtifactAudience {
+export function audienceOf(artifact: Artifact): ArtifactAudience {
   if (artifact.visibility === "private") return "private";
-  if (scopeOf(artifact, shared) === "shared") return "shared";
+  if (artifact.scope === "shared") return "shared";
   if (artifact.visibility === "organisation") return "everyone";
   return "team";
 }

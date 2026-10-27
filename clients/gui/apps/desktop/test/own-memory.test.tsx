@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
-import { entriesText, inEffect, parseEntries, webTokenStore } from "@troupe/client";
+import { webTokenStore } from "@troupe/client";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
@@ -73,8 +73,10 @@ describe("the Memory view", () => {
     expect(screen.querySelector(".entries > li s")?.textContent).toBe("Plain English, short sentences.");
     expect(entries(screen)[1]).toContain("Dates◉ FROM EVERYONE");
     expect(entries(screen)[2]).toContain("Prices◎ FROM CORE");
+    // The plane works out what is in effect, for the team chosen; the app computes nothing.
+    expect(daemon.inEffectAsked).toContainEqual({ team: "core" });
 
-    expect(level(screen, "Everyone").textContent).toContain("2· READ");
+    expect(level(screen, "Everyone at Example").textContent).toContain("2· READ");
     expect(level(screen, "core").textContent).toContain("1· READ");
     expect(level(screen, "Only you").textContent).not.toContain("READ");
     await sees("LOWEST ‹ CLOSEST");
@@ -83,6 +85,9 @@ describe("the Memory view", () => {
     await sees("READ ONLY");
     await waitFor(() => entries(screen).some((e) => e.includes("REPLACED IN YOU")), "the organisation's Tone replaced");
     expect(button("Add a memory", screen)).toBeNull();
+    // Who last changed each entry of a level above the person's own, and how many sessions used it.
+    expect(entries(screen)[0]).toContain("ROOT@EXAMPLE.COM");
+    expect(entries(screen)[0]).toContain("USED IN 3 SESSIONS");
   });
 
   it("adds to, edits and forgets the person's own, saving the whole document over the version read", async () => {
@@ -97,7 +102,9 @@ describe("the Memory view", () => {
     await sees("SAVES TO ONLY YOU · YOUR NEW SESSIONS IN ANY TEAM");
     button("Save", form)!.click();
     await sees("Saved. New sessions start with it");
-    expect(daemon.ownPuts[0]).toMatchObject({ version: 2, text: "## Tone\n\nKeep answers short.\n\n## Language\n\nBritish English." });
+    // Sent as entries, which the plane writes as sections in order.
+    expect(daemon.ownPuts[0]).toMatchObject({ version: 2, entries: [{ topic: "Tone", body: "Keep answers short." }, { topic: "Language", body: "British English." }] });
+    expect(daemon.own?.text).toBe("## Tone\n\nKeep answers short.\n\n## Language\n\nBritish English.");
 
     await waitFor(() => entries(screen).length === 2, "two of the person's own");
     const tone = (): HTMLElement => [...screen.querySelectorAll<HTMLElement>(".entries > li")].find((l) => l.textContent?.includes("Tone"))!;
@@ -106,7 +113,7 @@ describe("the Memory view", () => {
     type(edit.querySelector<HTMLTextAreaElement>("textarea")!, "Keep answers very short.");
     button("Save", edit)!.click();
     await sees("Saved. New sessions start with the new version.");
-    expect(daemon.ownPuts[1]).toMatchObject({ version: 3, text: "## Tone\n\nKeep answers very short.\n\n## Language\n\nBritish English." });
+    expect(daemon.ownPuts[1]).toMatchObject({ version: 3, entries: [{ topic: "Tone", body: "Keep answers very short." }, { topic: "Language", body: "British English." }] });
 
     button("Forget", tone())!.click();
     const ask = await waitFor(() => screen.querySelector<HTMLElement>('[role="alertdialog"]'), "the confirm");
@@ -173,23 +180,3 @@ describe("the Memory view", () => {
   });
 });
 
-describe("a document as entries", () => {
-  it("reads `## Topic` sections, writes them back, and lets the closest level win a topic", () => {
-    const org = parseEntries("Preamble.\n\n## Tone\n\nPlain.\n\n## Dates\nISO.");
-    expect(org).toEqual([
-      { topic: "", body: "Preamble." },
-      { topic: "Tone", body: "Plain." },
-      { topic: "Dates", body: "ISO." },
-    ]);
-    expect(parseEntries(entriesText(org))).toEqual(org);
-    const effect = inEffect([
-      { level: { scope: "user", name: null }, entries: [{ topic: "tone ", body: "Short." }] },
-      { level: { scope: "organisation", name: null }, entries: org },
-    ]);
-    expect(effect.map((e) => [e.topic, e.body, e.from.scope, e.replaces.map((r) => r.body)])).toEqual([
-      ["", "Preamble.", "organisation", []],
-      ["tone ", "Short.", "user", ["Plain."]],
-      ["Dates", "ISO.", "organisation", []],
-    ]);
-  });
-});

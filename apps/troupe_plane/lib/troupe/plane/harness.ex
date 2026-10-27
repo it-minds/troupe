@@ -48,6 +48,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Fleet.{Extends, Scaler}
   alias Troupe.Plane.Identity.User
+  alias Troupe.Plane.Memory.InEffect
   alias Troupe.Plane.Provision
   alias Troupe.Plane.Sessions.{ACL, Session, Share}
   alias Troupe.Plane.Settings
@@ -56,6 +57,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.{Canonical, ClientUpdate, Error, Origin, Principal, Relay, SessionId, Token}
+  alias Troupe.Protocol.Memory.Entries
   alias Troupe.Sessions.Fork
 
   require Logger
@@ -118,6 +120,8 @@ defmodule Troupe.Plane.Harness do
     # Its history, for the person's own app: every version, two side by side, a rollback.
     "me.memory.history" => :observe,
     "me.memory.rollback" => :control,
+    # What a new session of theirs in a team reads, as one list of topics.
+    "memory.in_effect" => :observe,
     "me.clients" => :observe,
     "me.connections.list" => :observe,
     "me.connections.grant" => :control,
@@ -337,7 +341,8 @@ defmodule Troupe.Plane.Harness do
        "kind" => user.kind,
        "teams" => Enum.map(Identity.teams_for(user), &team_json/1),
        "profiles" => granted_profiles(user),
-       "platform_admin" => Map.get(context, :platform_admin?, false)
+       "platform_admin" => Map.get(context, :platform_admin?, false),
+       "organisation" => organisation()
      }}
   end
 
@@ -380,12 +385,44 @@ defmodule Troupe.Plane.Harness do
   #
   # `blame: true` adds `lines` to their own: who wrote each line, in which version, and from
   # which session an agent's entry came (`Memory.blame/2`), for `troupe memory --blame`.
+  #
+  # `entries: true` adds `entries` to each document and to their own: its `## Topic`
+  # sections, each with who last changed it and when and in how many sessions it was used
+  # (`InEffect.entries/2`). The poll does not ask it; a client showing memory does. Beside
+  # them, the organisation's name, for "Everyone at <name>".
   defp handle("me.memory", params, %{user: user}) do
     :ok = Memory.machine(user, params["sessions"])
     own = Memory.own(user)
     own = if params["blame"] == true and is_binary(user.id), do: Map.put(own, "lines", Memory.blame(user)), else: own
+    documents = Memory.for_person(user)
 
-    {:ok, Signing.signed("memory", %{"documents" => Memory.for_person(user), "user" => own})}
+    answer = %{"documents" => documents, "user" => own, "organisation" => organisation()}
+
+    # With entries, every team of the caller's by name too, a team with no document among
+    # them, so a client lists each as a level of its own.
+    answer =
+      if params["entries"] == true,
+        do: %{
+          answer
+          | "documents" => Enum.map(documents, &with_entries(&1, user)),
+            "user" => Map.put(own, "entries", with_entries(%{"scope" => "user"}, user)["entries"])
+        }
+        |> Map.put("teams", user |> Identity.teams_for() |> Enum.map(& &1.name) |> Enum.sort()),
+        else: answer
+
+    {:ok, Signing.signed("memory", answer)}
+  end
+
+  # What is in effect for a new session of the caller's in one of their teams (the one
+  # named, their first by name where none is), and on a worker profile they may use through
+  # it where one is named: one list of topics, the closest level's entry on each with what it
+  # replaces (`InEffect.in_effect/3`). Any person signed in, for themselves.
+  defp handle("memory.in_effect", params, %{user: user}) do
+    with :ok <- own_memory(user),
+         {:ok, team} <- effect_team(user, params["team"]),
+         {:ok, profile} <- effect_profile(user, team, params["profile"]) do
+      {:ok, user |> InEffect.in_effect(team, profile) |> Map.put("organisation", organisation())}
+    end
   end
 
   # What saving a text as the person's own memory would do, written nowhere: the lines it
@@ -1545,6 +1582,45 @@ defmodule Troupe.Plane.Harness do
     {:error, Error.new(:invalid_params, Map.merge(%{reason: reason}, Map.new(extra)))}
   end
 
+  # The organisation's name as its plane is called, for a client to say "Everyone at <name>".
+  defp organisation, do: %{"name" => Application.get_env(:troupe_plane, :oidc, [])[:plane_name] || "troupe"}
+
+  # A document of `me.memory`'s with its entries: the organisation's, a team of the caller's
+  # by name, or their own.
+  defp with_entries(%{"scope" => scope} = document, user) do
+    owner =
+      case scope do
+        "organisation" -> :organisation
+        "user" -> if is_binary(user.id), do: user
+        "team" -> Enum.find(Identity.teams_for(user), &(&1.name == document["name"]))
+        _other -> nil
+      end
+
+    entries = if owner && Memory.current(owner), do: InEffect.entries(owner), else: []
+    Map.put(document, "entries", entries)
+  end
+
+  defp effect_team(user, name) when is_nil(name) or is_binary(name) do
+    case InEffect.team_of(user, name) do
+      {:ok, team} -> {:ok, team}
+      {:error, :not_found} -> {:error, Error.new(:not_found, %{team: name, reason: "you are in no team called #{name}"})}
+    end
+  end
+
+  defp effect_team(_user, _name), do: invalid("team is a team's name", field: "team")
+
+  defp effect_profile(_user, _team, nil), do: {:ok, nil}
+
+  defp effect_profile(user, team, profile) when is_binary(profile) do
+    if team && Identity.may_use?(user, profile, team),
+      do: {:ok, profile},
+      else:
+        {:error,
+         Error.new(:not_found, %{profile: profile, reason: "you start no sessions on #{profile} through #{(team && team.name) || "a team"}"})}
+  end
+
+  defp effect_profile(_user, _team, _profile), do: invalid("profile is a worker profile's name", field: "profile")
+
   # A person's own memory is a person's: a service principal has no row to keep it under.
   defp own_memory(%User{id: id}) when is_binary(id), do: :ok
 
@@ -1552,8 +1628,19 @@ defmodule Troupe.Plane.Harness do
     do: {:error, Error.new(:forbidden, %{reason: "a service principal has no memory of its own"})}
 
   defp memory_text(params) do
-    with {:ok, text} <- memory_string(params, "text"), do: {:ok, Troupe.Protocol.Memory.normalise(text)}
+    with {:ok, text} <- memory_text_or_entries(params), do: {:ok, Troupe.Protocol.Memory.normalise(text)}
   end
+
+  # A save's document: `text` as written, or `entries`, written as sections in their order
+  # (`Troupe.Protocol.Memory.Entries.render/1`), each heading's text as given.
+  defp memory_text_or_entries(%{"entries" => entries} = params) when not is_map_key(params, "text") do
+    case Entries.cast(entries) do
+      {:ok, entries} -> memory_string(%{"text" => Entries.render(entries)}, "text")
+      {:error, reason} -> invalid(reason, field: "entries")
+    end
+  end
+
+  defp memory_text_or_entries(params), do: memory_string(params, "text")
 
   defp memory_string(params, key) do
     case Map.get(params, key) do
@@ -1571,11 +1658,11 @@ defmodule Troupe.Plane.Harness do
   # The session and the agent a daemon names for an agent's entry are kept with the version
   # as who wrote the line, the person's own word about their own machine.
   defp save_own(user, %{"append" => entry} = params) do
-    own_result(Memory.append_own(user, entry, written_from(params)))
+    own_result(Memory.append_own(user, entry, [topic: params["topic"]] ++ written_from(params)))
   end
 
   defp save_own(user, params) do
-    with {:ok, text} <- memory_string(params, "text") do
+    with {:ok, text} <- memory_text_or_entries(params) do
       case params["version"] do
         version when is_integer(version) and version >= 0 ->
           own_result(Memory.save_own(user, text, version))
@@ -1645,6 +1732,7 @@ defmodule Troupe.Plane.Harness do
     %{
       "changed" => saved.changes != %{},
       "entry" => Map.get(saved, :entry),
+      "topic" => Map.get(saved, :topic),
       "user" => Memory.own(user)
     }
   end

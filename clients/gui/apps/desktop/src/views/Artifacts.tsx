@@ -122,7 +122,6 @@ export function Artifacts({
   onOpenSession?: ((id: string) => void) | undefined;
 }): JSX.Element {
   const [list, setList] = useState<ArtifactList | null>(null);
-  const [shared, setShared] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -135,12 +134,8 @@ export function Artifacts({
     let live = true;
     setError(null);
     daemon.artifacts({}).then(
-      async (l) => {
-        // A plane that does not say `scope` per row yet: the links' are asked for apart.
-        const links = l.artifacts.some((a) => a.scope === undefined) ? await daemon.artifacts({ shared: true }).catch(() => null) : null;
-        if (!live) return;
-        setShared(new Set(links?.artifacts.map((a) => a.id) ?? []));
-        setList(l);
+      (l) => {
+        if (live) setList(l);
       },
       (e: unknown) => live && setError(sentence(e)),
     );
@@ -182,8 +177,8 @@ export function Artifacts({
   const q = query.trim().toLowerCase();
   const matches = (a: Artifact): boolean => !q || [a.title, who(a.owner, a.mine), a.owner?.subject ?? "", a.origin?.session_id ?? ""].join(" ").toLowerCase().includes(q);
   const searched = list.artifacts.filter(matches);
-  const shown = searched.filter((a) => filter === "all" || audienceOf(a, shared) === filter);
-  const count = (f: Filter): number => searched.filter((a) => f === "all" || audienceOf(a, shared) === f).length;
+  const shown = searched.filter((a) => filter === "all" || audienceOf(a) === filter);
+  const count = (f: Filter): number => searched.filter((a) => f === "all" || audienceOf(a) === f).length;
   const current = list.artifacts.find((a) => a.id === selected) ?? null;
   const groups = (["Today", "This week", "Earlier"] as const).map((day) => ({ day, items: shown.filter((a) => dayOf(a.published_at) === day) })).filter((g) => g.items.length > 0);
 
@@ -217,7 +212,7 @@ export function Artifacts({
               </h2>
               <div className="cards">
                 {g.items.map((a) => {
-                  const audience = audienceOf(a, shared);
+                  const audience = audienceOf(a);
                   const fresh = !a.mine && (seen[a.id] ?? 0) < a.version;
                   return (
                     <button key={a.id} type="button" className="card" aria-current={a.id === selected ? "true" : undefined} onClick={() => setSelected(a.id)}>
@@ -267,7 +262,7 @@ export function Artifacts({
             key={current.id}
             daemon={daemon}
             artifact={current}
-            audience={audienceOf(current, shared)}
+            audience={audienceOf(current)}
             gallery={list.gallery_url ?? null}
             onOpened={(version) => {
               markSeen(current.id, version);

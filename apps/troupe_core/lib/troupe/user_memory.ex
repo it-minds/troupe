@@ -10,21 +10,28 @@ defmodule Troupe.UserMemory do
   sign-in, has nowhere to send it, and says so, so the agent can offer the repository's
   memory instead.
 
-  What is sent is one entry, never a document: the plane puts it under the day's heading,
-  below what is there, and nothing an agent sends replaces a word of it.
+  What is sent is one entry and its topic, never a document: the plane puts it at the end of
+  the topic's `## <topic>` section, making the section where there is none, and nothing an
+  agent sends replaces a word of it.
   """
 
-  @typedoc "What the plane did with the entry: the entry as kept, and the version now in force."
+  @typedoc "What the plane did with the entry: the entry as kept, its topic, and the version now in force."
   @type saved :: %{String.t() => term()}
 
+  @typedoc "Where an entry goes: the entry, the session's context, and the topic it is under."
+  @type host :: (String.t(), Troupe.Tool.Ctx.t(), String.t() | nil -> {:ok, saved()} | {:error, term()})
+
   @doc """
-  Add `entry` to the session's person's own memory on the plane. `{:error, :signed_out}` where
-  this host has no plane to send it to; `{:error, sentence}` where the plane refused it.
+  Add `entry` under `topic` (`nil` for the plane's default, `Notes`) to the session's person's
+  own memory on the plane. `{:error, :signed_out}` where this host has no plane to send it
+  to; `{:error, sentence}` where the plane refused it.
   """
-  @spec append(String.t(), Troupe.Tool.Ctx.t()) ::
+  @spec append(String.t(), Troupe.Tool.Ctx.t(), String.t() | nil) ::
           {:ok, saved()} | {:error, :signed_out | String.t()}
-  def append(entry, ctx) when is_binary(entry) do
+  def append(entry, ctx, topic \\ nil) when is_binary(entry) do
     case Application.get_env(:troupe_core, :user_memory) do
+      fun when is_function(fun, 3) -> fun.(entry, ctx, topic)
+      # A host from before topics takes the entry alone.
       fun when is_function(fun, 2) -> fun.(entry, ctx)
       _none -> {:error, :signed_out}
     end
@@ -32,10 +39,13 @@ defmodule Troupe.UserMemory do
 
   @doc "Whether this host installed somewhere for an entry to go."
   @spec reachable?() :: boolean()
-  def reachable?, do: is_function(Application.get_env(:troupe_core, :user_memory), 2)
+  def reachable? do
+    fun = Application.get_env(:troupe_core, :user_memory)
+    is_function(fun, 3) or is_function(fun, 2)
+  end
 
   @doc "Install `fun` as where entries go, for the host that can reach the plane."
-  @spec install((String.t(), Troupe.Tool.Ctx.t() -> {:ok, saved()} | {:error, term()})) :: :ok
-  def install(fun) when is_function(fun, 2),
+  @spec install(host() | (String.t(), Troupe.Tool.Ctx.t() -> {:ok, saved()} | {:error, term()})) :: :ok
+  def install(fun) when is_function(fun, 3) or is_function(fun, 2),
     do: Application.put_env(:troupe_core, :user_memory, fun)
 end
