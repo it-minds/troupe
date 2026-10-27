@@ -141,31 +141,35 @@ defmodule Troupe.Protocol.Memory.Entries do
     body = entry["body"] || ""
     general? = entry["heading"] == false or topic in [nil, ""]
 
-    cond do
-      not is_binary(body) ->
-        {:error, "entry #{index + 1}'s body is text"}
-
-      not (is_nil(topic) or is_binary(topic)) ->
-        {:error, "entry #{index + 1}'s topic is text"}
-
-      general? and index > 0 ->
-        {:error, "only the first entry may be without a topic: entry #{index + 1} has none"}
-
-      is_binary(topic) and String.contains?(topic, "\n") ->
-        {:error, "entry #{index + 1}'s topic is one line"}
-
-      body |> String.split("\n") |> Enum.any?(&Regex.match?(@heading, &1)) ->
-        {:error, "entry #{index + 1}'s body has a ## heading in it; make that an entry of its own"}
-
-      general? ->
-        {:ok, %{"topic" => @general, "body" => body, "heading" => false}}
-
-      true ->
-        {:ok, %{"topic" => String.trim(topic), "body" => body, "heading" => true}}
+    with :ok <- typed(topic, body, index),
+         :ok <- placed(general?, topic, index),
+         :ok <- headless(body, index) do
+      if general?,
+        do: {:ok, %{"topic" => @general, "body" => body, "heading" => false}},
+        else: {:ok, %{"topic" => String.trim(topic), "body" => body, "heading" => true}}
     end
   end
 
   defp cast_one(_other, index), do: {:error, "entry #{index + 1} is {topic, body}"}
+
+  defp typed(_topic, body, index) when not is_binary(body), do: {:error, "entry #{index + 1}'s body is text"}
+  defp typed(topic, _body, index) when not (is_nil(topic) or is_binary(topic)), do: {:error, "entry #{index + 1}'s topic is text"}
+  defp typed(_topic, _body, _index), do: :ok
+
+  defp placed(true, _topic, index) when index > 0,
+    do: {:error, "only the first entry may be without a topic: entry #{index + 1} has none"}
+
+  defp placed(false, topic, index) do
+    if String.contains?(topic, "\n"), do: {:error, "entry #{index + 1}'s topic is one line"}, else: :ok
+  end
+
+  defp placed(_general?, _topic, _index), do: :ok
+
+  defp headless(body, index) do
+    if body |> String.split("\n") |> Enum.any?(&Regex.match?(@heading, &1)),
+      do: {:error, "entry #{index + 1}'s body has a ## heading in it; make that an entry of its own"},
+      else: :ok
+  end
 
   @doc "A topic as two entries are compared by it: its words, case and spacing aside."
   @spec key(String.t()) :: String.t()
@@ -198,7 +202,8 @@ defmodule Troupe.Protocol.Memory.Entries do
         {:kept, []}
 
       closest[topic] > rank ->
-        {:replaced, for(%{level: level, rank: r, entries: es} <- levels, r == closest[topic], on?(es, topic), do: level)}
+        by = for %{level: level, rank: r, entries: es} <- levels, r == closest[topic], on?(es, topic), do: level
+        {:replaced, by}
 
       true ->
         replaced =
@@ -229,13 +234,7 @@ defmodule Troupe.Protocol.Memory.Entries do
 
     levels
     |> Enum.with_index()
-    |> Enum.flat_map(fn {%{entries: entries}, at} ->
-      entries
-      |> Enum.with_index()
-      |> Enum.map(fn {entry, index} ->
-        if heading?(entry), do: {:topic, key(entry["topic"])}, else: {:general, {at, index}}
-      end)
-    end)
+    |> Enum.flat_map(fn {%{entries: entries}, at} -> slots(entries, at) end)
     |> Enum.uniq()
     |> Enum.flat_map(fn slot ->
       for {where, entry, replaces} <- kept, in_slot?(slot, where, entry),
@@ -279,6 +278,15 @@ defmodule Troupe.Protocol.Memory.Entries do
       entry
       |> Map.put("level", level)
       |> Map.put("replaces", Enum.map(replaces, fn {lower, e} -> %{"level" => lower, "topic" => e["topic"], "body" => e["body"]} end))
+    end)
+  end
+
+  # Where each entry of a level goes in the one list: a topic's slot, or General's own.
+  defp slots(entries, at) do
+    entries
+    |> Enum.with_index()
+    |> Enum.map(fn {entry, index} ->
+      if heading?(entry), do: {:topic, key(entry["topic"])}, else: {:general, {at, index}}
     end)
   end
 

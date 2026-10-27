@@ -43,6 +43,7 @@ defmodule Troupe.Gateway.FakePlane do
   use Agent
 
   alias Troupe.ObjectStore
+  alias Troupe.Protocol.Memory.Entries
   alias Troupe.Protocol.PlaneSignature
 
   @spec start_link(keyword()) :: Agent.on_start()
@@ -809,8 +810,10 @@ defmodule Troupe.Gateway.FakePlane do
     {:ok, %{"version" => own["version"] + 1, "text" => text}, entry}
   end
 
-  defp own_put(own, %{"entries" => entries} = params),
-    do: own_put(own, params |> Map.delete("entries") |> Map.put("text", Troupe.Protocol.Memory.Entries.render(elem(Troupe.Protocol.Memory.Entries.cast(entries), 1))))
+  defp own_put(own, %{"entries" => entries} = params) do
+    {:ok, entries} = Entries.cast(entries)
+    own_put(own, params |> Map.delete("entries") |> Map.put("text", Entries.render(entries)))
+  end
 
   defp own_put(%{"version" => version}, %{"text" => text, "version" => version}),
     do: {:ok, %{"version" => version + 1, "text" => text}, nil}

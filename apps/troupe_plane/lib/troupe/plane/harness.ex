@@ -56,8 +56,8 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.{Tokens, Triggers}
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Protocol.Bundle, as: Document
-  alias Troupe.Protocol.Memory.Entries
   alias Troupe.Protocol.{Canonical, ClientUpdate, Error, Origin, Principal, Relay, SessionId, Token}
+  alias Troupe.Protocol.Memory.Entries
   alias Troupe.Sessions.Fork
 
   require Logger

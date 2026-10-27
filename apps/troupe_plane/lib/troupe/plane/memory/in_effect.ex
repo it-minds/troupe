@@ -131,7 +131,7 @@ defmodule Troupe.Plane.Memory.InEffect do
 
     case name do
       nil -> {:ok, List.first(teams)}
-      name -> if team = Enum.find(teams, &(&1.name == name)), do: {:ok, team}, else: {:error, :not_found}
+      name -> teams |> Enum.find(&(&1.name == name)) |> then(&if(&1, do: {:ok, &1}, else: {:error, :not_found}))
     end
   end
 end

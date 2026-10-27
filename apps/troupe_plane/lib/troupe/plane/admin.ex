@@ -70,6 +70,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Protocol.AgentDefinition
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
+  alias Troupe.Protocol.Memory.Entries
   alias Troupe.Protocol.ProviderTypes
 
   require Logger
@@ -2904,10 +2905,10 @@ defmodule Troupe.Plane.Admin do
     do: %{version: document.version, bytes: byte_size(document.text), hash: document.hash}
 
   # A save's document: `text` as written, or `entries` written as `## Topic` sections in
-  # their order, each heading as given (`Troupe.Protocol.Memory.Entries.render/1`).
+  # their order, each heading as given (`Entries.render/1`).
   defp memory_text(nil, entries) when not is_nil(entries) do
-    case Troupe.Protocol.Memory.Entries.cast(entries) do
-      {:ok, entries} -> memory_text(Troupe.Protocol.Memory.Entries.render(entries), nil)
+    case Entries.cast(entries) do
+      {:ok, entries} -> memory_text(Entries.render(entries), nil)
       {:error, reason} -> {:error, Error.new(:invalid_params, %{field: "entries", reason: reason})}
     end
   end

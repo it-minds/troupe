@@ -115,8 +115,10 @@ defmodule Troupe.Protocol.MemoryEntriesTest do
         level({:team, "b"}, 1, "## Tone\n\nB's.")
       ]
 
-      assert [%{level: {:team, "a"}, replaces: [{:organisation, _}]}, %{level: {:team, "b"}, replaces: [{:organisation, _}]}] =
-               Entries.in_effect(levels)
+      assert [
+               %{level: {:team, "a"}, replaces: [{:organisation, _}]},
+               %{level: {:team, "b"}, replaces: [{:organisation, _}]}
+             ] = Entries.in_effect(levels)
     end
   end
 
