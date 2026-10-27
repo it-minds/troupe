@@ -208,6 +208,15 @@ defmodule Troupe.Gateway.Dispatch do
     # desktop app's Memory view: the text is as much the person's as `me.memory`'s.
     "me.memory.history" => :control,
     "me.memory.rollback" => :control,
+    # What a new session of the person's in a team reads, as one list of topics; and the
+    # levels of the organisation's memory the person administers (a team admin their team's,
+    # a platform admin the organisation's), read and changed in their own app as them, the
+    # plane deciding who may. `control`, as the person's own memory is: the text is theirs
+    # to read, and a save is a save.
+    "memory.in_effect" => :control,
+    "admin.memory.get" => :control,
+    "admin.memory.preview" => :control,
+    "admin.memory.put" => :control,
     # A page or a file published on the plane as the person, through this daemon's sign-in
     # (#62): what a client's "Publish…" sends, the files read on this machine.
     "artifact.publish" => :control,
@@ -305,6 +314,14 @@ defmodule Troupe.Gateway.Dispatch do
        when method in ["me.memory", "me.memory.put", "me.memory.history", "me.memory.rollback"] do
     refuse_local_only(
       "this client is in Local only, so the daemon does not ask the plane for your own memory; " <>
+        "turn Local only off to read or change it"
+    )
+  end
+
+  defp local_only(method, _params, %Context{local_only: true})
+       when method in ["memory.in_effect", "admin.memory.get", "admin.memory.preview", "admin.memory.put"] do
+    refuse_local_only(
+      "this client is in Local only, so the daemon does not ask the plane for its memory; " <>
         "turn Local only off to read or change it"
     )
   end
@@ -1393,11 +1410,20 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp handle("me.memory.put", params, _context) do
     case params do
-      %{"append" => entry} when is_binary(entry) -> own_memory(Memory.put_own(%{"append" => entry}))
+      %{"append" => entry} when is_binary(entry) -> own_memory(Memory.put_own(Map.take(params, ["append", "topic"])))
       %{"text" => text, "version" => v} when is_binary(text) and is_integer(v) -> own_memory(Memory.put_own(params))
-      _ -> {:error, Error.new(:invalid_params, %{reason: "me.memory.put takes text and version, or append"})}
+      %{"entries" => entries, "version" => v} when is_list(entries) and is_integer(v) -> own_memory(Memory.put_own(params))
+      _ -> {:error, Error.new(:invalid_params, %{reason: "me.memory.put takes text or entries and version, or append"})}
     end
   end
+
+  # What a new session of the person's in a team reads (`Memory.in_effect/1`), and the levels
+  # of the organisation's memory they administer (`Memory.admin/2`), the plane's as them.
+  defp handle("memory.in_effect", params, _context),
+    do: forwarded("memory.in_effect", Memory.in_effect(params))
+
+  defp handle("admin.memory." <> _ = method, params, _context) when method in ["admin.memory.get", "admin.memory.preview", "admin.memory.put"],
+    do: forwarded(method, Memory.admin(method, params))
 
   # An artifact published as the person (`Artifacts.put/1`), for a client's "Publish…": the
   # plane's answer with `plane_url`. Signed out, a sentence; the plane's refusal, its own.

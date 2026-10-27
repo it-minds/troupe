@@ -692,6 +692,45 @@ defmodule Troupe.Gateway.FakePlane do
     end)
   end
 
+  # What is in effect for the person in a team, as the plane answers it: a fixed answer for
+  # the team `sales`, `not_found` for any other.
+  defp dispatch(_state, "memory.in_effect", params) do
+    case params["team"] do
+      team when team in [nil, "sales"] ->
+        {:ok,
+         %{
+           "team" => "sales",
+           "profile" => params["profile"],
+           "organisation" => %{"name" => "Example"},
+           "levels" => [%{"scope" => "organisation", "name" => nil, "version" => 1, "entries" => 1}],
+           "entries" => [
+             %{
+               "topic" => "Tone",
+               "body" => "Short answers.",
+               "level" => %{"scope" => "user", "name" => nil},
+               "replaces" => [%{"level" => %{"scope" => "organisation", "name" => nil}, "topic" => "Tone", "body" => "Plain English."}]
+             }
+           ]
+         }}
+
+      team ->
+        {:rpc_error, -32_005, "not_found", %{"team" => team, "reason" => "you are in no team called #{team}"}}
+    end
+  end
+
+  # A level of the organisation's memory: the team `sales`'s is this person's to change, the
+  # organisation's is not, as the plane decides it.
+  defp dispatch(_state, "admin.memory." <> _ = method, %{"scope" => "team", "name" => "sales"} = params) do
+    case method do
+      "admin.memory.get" -> {:ok, %{"scope" => "team", "name" => "sales", "version" => 1, "text" => "## Prices\n\nFramework.", "entries" => [%{"topic" => "Prices", "body" => "Framework."}]}}
+      "admin.memory.preview" -> {:ok, %{"version" => 1, "bytes" => 10, "diff" => [], "entries" => params["entries"]}}
+      "admin.memory.put" -> {:ok, %{"document" => %{"version" => 2}, "changes" => %{"version" => %{"from" => 1, "to" => 2}}}}
+    end
+  end
+
+  defp dispatch(_state, "admin.memory." <> _, params),
+    do: {:rpc_error, -32_004, "forbidden", %{"reason" => "only a platform admin changes #{params["scope"]}'s memory"}}
+
   defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
 
   defp take_back(state, id, subject) do
@@ -740,11 +779,24 @@ defmodule Troupe.Gateway.FakePlane do
 
   defp own_put(nil, _params), do: {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory.put"}}
 
-  defp own_put(own, %{"append" => entry}) do
-    heading = "## " <> Date.to_iso8601(Date.utc_today())
-    above = if own["text"] == "", do: "", else: own["text"] <> "\n\n"
-    {:ok, %{"version" => own["version"] + 1, "text" => above <> heading <> "\n\n- " <> entry}, entry}
+  # Under the topic's heading, at the end where it is the last one, as a new section where
+  # it is not: enough of the plane's rule for a test to see the topic land.
+  defp own_put(own, %{"append" => entry} = params) do
+    heading = "## " <> (params["topic"] || "Notes")
+    last = own["text"] |> String.split("\n") |> Enum.filter(&String.starts_with?(&1, "## ")) |> List.last()
+
+    text =
+      cond do
+        own["text"] == "" -> heading <> "\n\n- " <> entry
+        last == heading -> own["text"] <> "\n- " <> entry
+        true -> own["text"] <> "\n\n" <> heading <> "\n\n- " <> entry
+      end
+
+    {:ok, %{"version" => own["version"] + 1, "text" => text}, entry}
   end
+
+  defp own_put(own, %{"entries" => entries} = params),
+    do: own_put(own, params |> Map.delete("entries") |> Map.put("text", Troupe.Protocol.Memory.Entries.render(elem(Troupe.Protocol.Memory.Entries.cast(entries), 1))))
 
   defp own_put(%{"version" => version}, %{"text" => text, "version" => version}),
     do: {:ok, %{"version" => version + 1, "text" => text}, nil}

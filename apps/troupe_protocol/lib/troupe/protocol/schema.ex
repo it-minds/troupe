@@ -1094,16 +1094,48 @@ defmodule Troupe.Protocol.Schema do
       },
       # The person's own memory document on the plane (#55), read and saved through the
       # daemon's sign-in: the whole `text` over the `version` edited, or one `append`ed entry.
-      # `blame` adds `lines`, who wrote each line and from which session (#55).
+      # `blame` adds `lines`, who wrote each line and from which session (#55). Every document
+      # comes with its `entries`, one per `## Topic` section.
       "me.memory" => %{"blame" => optional(:boolean)},
       # Where this machine's copy of the plane's memory stands, for the person's own
       # debugging: what it holds, what is in force, what each session here last read.
       "me.memory.status" => %{},
+      # The whole document as `text` or as `entries` (`{topic, body}`, written as sections in
+      # order) over the `version` edited, or one `append`ed entry under `topic`.
       "me.memory.put" => %{
         "command_id" => required(:string),
         "text" => optional(:string),
+        "entries" => optional(:array),
         "version" => optional(:integer),
-        "append" => optional(:string)
+        "append" => optional(:string),
+        "topic" => optional(:string)
+      },
+      # What a new session of the person's in one of their teams reads, as one list of topics:
+      # per topic the closest level's entry and what it replaces. The plane's, as the person.
+      "memory.in_effect" => %{"team" => optional(:string), "profile" => optional(:string)},
+      # A level of the organisation's memory the person may change (a team admin their team's,
+      # a platform admin the organisation's), sent on to the plane as them: the plane's
+      # `admin.memory.get`, `admin.memory.preview` and `admin.memory.put`, and its refusal
+      # where they may not.
+      "admin.memory.get" => %{
+        "scope" => required(:string),
+        "name" => optional(:string),
+        "version" => optional(:integer),
+        "against" => optional(:integer)
+      },
+      "admin.memory.preview" => %{
+        "scope" => required(:string),
+        "name" => optional(:string),
+        "text" => optional(:string),
+        "entries" => optional(:array)
+      },
+      "admin.memory.put" => %{
+        "command_id" => required(:string),
+        "scope" => required(:string),
+        "name" => optional(:string),
+        "text" => optional(:string),
+        "entries" => optional(:array),
+        "version" => optional(:integer)
       },
       # Its history, for the desktop app's Memory view: every version, `version`'s text (the
       # one in force for none) beside `against`'s (the one before it for none), and the line

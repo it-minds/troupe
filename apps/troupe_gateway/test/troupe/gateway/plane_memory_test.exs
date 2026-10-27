@@ -364,13 +364,15 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
 
       %{session: writer} =
         session(ctx, [
-          {:tools, [{"remember", %{"level" => "me", "claim" => "Prefers small pull requests."}}]},
+          {:tools, [{"remember", %{"level" => "me", "claim" => "Prefers small pull requests.", "topic" => "Pull requests"}}]},
           {:text, "Noted."}
         ])
 
       turn(writer.id, "remember that I like small pull requests")
 
-      assert FakePlane.own(ctx.plane.state)["text"] =~ ~r/## \d{4}-\d{2}-\d{2}\n\n- Prefers small pull requests\./
+      # Under the topic the agent named, sent on to the plane as `me.memory.put`'s `topic`.
+      assert FakePlane.own(ctx.plane.state)["text"] == "## Pull requests\n\n- Prefers small pull requests."
+      assert Enum.any?(FakePlane.calls(ctx.plane.state), &match?({"me.memory.put", %{"append" => _, "topic" => "Pull requests"}}, &1))
 
       assert Enum.any?(Troupe.events(writer.id), fn event ->
                event.type == "tool_call_completed" and inspect(event.data) =~ "person's own memory on the plane, version 1"
@@ -382,6 +384,63 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
 
       assert [%{data: %{"changes" => [%{"scope" => "user", "from" => nil, "to" => 1}]}}] =
                other.id |> Troupe.events() |> Enum.filter(&(&1.type == "memory_changed"))
+    end
+
+    # Memory as entries: every document with its `## Topic` sections (read off the text here
+    # where the plane answered none), a save of entries, what is in effect in a team, and the
+    # levels of the organisation's the person administers, each the plane's as them.
+    test "me.memory carries every document's entries, me.memory.put takes entries, and in_effect and admin.memory are the plane's",
+         ctx do
+      assert {:error, %{message: "unavailable"}} = Client.call(ctx.client, "memory.in_effect", %{})
+
+      _fingerprint = FakePlane.sign(ctx.plane.state)
+      FakePlane.memory_with(ctx.plane.state, [%{"scope" => "organisation", "name" => nil, "version" => 2, "hash" => "sha256:o", "text" => "## Tone\n\nPlain English."}])
+      FakePlane.keep_own(ctx.plane.state)
+      assert {:ok, %{"linked" => true}} = link(ctx)
+
+      assert {:ok, %{"user" => %{"version" => 1, "text" => "## Tone\n\nShort answers."}}} =
+               Client.call(ctx.client, "me.memory.put", %{
+                 "command_id" => Client.command_id(),
+                 "entries" => [%{"topic" => "Tone", "body" => "Short answers."}],
+                 "version" => 0
+               })
+
+      assert {:ok, own} = Client.call(ctx.client, "me.memory", %{})
+      assert [%{"topic" => "Tone", "body" => "Short answers."}] = own["entries"]
+      assert [%{"scope" => "organisation", "entries" => [%{"topic" => "Tone", "body" => "Plain English."}]}] = own["documents"]
+      assert {"me.memory", %{"entries" => true}} = List.last(Enum.filter(FakePlane.calls(ctx.plane.state), &match?({"me.memory", _}, &1)))
+
+      assert {:ok, %{"entries" => [%{"topic" => "Tone", "replaces" => [%{"body" => "Plain English."}]}], "plane_url" => url}} =
+               Client.call(ctx.client, "memory.in_effect", %{"team" => "sales"})
+
+      assert url == ctx.plane.url
+      assert {:error, %{message: "not_found"}} = Client.call(ctx.client, "memory.in_effect", %{"team" => "design"})
+
+      assert {:ok, %{"entries" => [%{"topic" => "Prices"}]}} =
+               Client.call(ctx.client, "admin.memory.get", %{"scope" => "team", "name" => "sales"})
+
+      assert {:ok, %{"document" => %{"version" => 2}}} =
+               Client.call(ctx.client, "admin.memory.put", %{
+                 "command_id" => Client.command_id(),
+                 "scope" => "team",
+                 "name" => "sales",
+                 "entries" => [%{"topic" => "Prices", "body" => "Framework agreement."}],
+                 "version" => 1
+               })
+
+      assert {"admin.memory.put", %{"scope" => "team", "name" => "sales", "version" => 1, "entries" => [_]} = sent} =
+               List.last(Enum.filter(FakePlane.calls(ctx.plane.state), &match?({"admin.memory.put", _}, &1)))
+
+      refute Map.has_key?(sent, "command_id")
+
+      # The plane's own refusal, with its code, where the person may not change the level.
+      assert {:error, %{message: "forbidden"}} =
+               Client.call(ctx.client, "admin.memory.put", %{
+                 "command_id" => Client.command_id(),
+                 "scope" => "organisation",
+                 "text" => "Loud.",
+                 "version" => 0
+               })
     end
 
     # The desktop app's Memory view: the history of the person's own, and a rollback, which

@@ -14,18 +14,23 @@ defmodule Troupe.Worker.UserMemory do
 
   @doc "Install this pod as where an agent's entry for its person's own memory goes."
   @spec install() :: :ok
-  def install, do: Troupe.UserMemory.install(&__MODULE__.append/2)
+  def install, do: Troupe.UserMemory.install(&__MODULE__.append/3)
 
-  @doc "Send one entry for the owner of the session `ctx` names; the plane's answer or its refusal."
-  @spec append(String.t(), Troupe.Tool.Ctx.t()) :: {:ok, map()} | {:error, String.t()}
-  def append(entry, ctx) do
+  @doc """
+  Send one entry, under `topic` (`nil` for the plane's `Notes`), for the owner of the session
+  `ctx` names; the plane's answer or its refusal.
+  """
+  @spec append(String.t(), Troupe.Tool.Ctx.t(), String.t() | nil) :: {:ok, map()} | {:error, String.t()}
+  def append(entry, ctx, topic \\ nil) do
     # The agent is named so the plane keeps who wrote the line; whose memory it is, it reads
     # off the session.
-    params = %{"session_id" => ctx.session_id, "scope" => "user", "append" => entry, "agent" => agent(ctx)}
+    params =
+      %{"session_id" => ctx.session_id, "scope" => "user", "append" => entry, "agent" => agent(ctx)}
+      |> then(&if(topic, do: Map.put(&1, "topic", topic), else: &1))
 
     case request(params) do
       {:ok, answer} ->
-        {:ok, %{"entry" => answer["entry"], "version" => answer["version"]}}
+        {:ok, %{"entry" => answer["entry"], "topic" => answer["topic"], "version" => answer["version"]}}
 
       {:error, %Troupe.Protocol.Error{data: data, message: message}} ->
         {:error, reason(data, message)}

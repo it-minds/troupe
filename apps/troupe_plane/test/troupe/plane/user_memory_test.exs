@@ -90,19 +90,20 @@ defmodule Troupe.Plane.UserMemoryTest do
       assert Memory.current(context.ada).text == "One."
     end
 
-    test "an entry is added under the day's heading, never in place of what is there", context do
-      {:ok, _} = put(context.ada, %{"text" => "Call me Ada.", "version" => 0})
-
+    test "an entry is added at the end of its topic's section, never in place of what is there",
+         context do
+      # A day's heading an agent wrote before topics stays as it was.
       {:ok, _} =
-        Memory.append_own(context.ada, "Prefers\nsmall   pull requests.", today: ~D[2026-10-24])
+        put(context.ada, %{
+          "text" => "Call me Ada.\n\n## 2026-10-24\n\n- Prefers small pull requests.\n\n## Prices\n\nIn euros.",
+          "version" => 0
+        })
 
-      {:ok, _} =
-        Memory.append_own(context.ada, "Runs the tests before pushing.", today: ~D[2026-10-24])
+      {:ok, saved} = Memory.append_own(context.ada, "Runs the tests\nbefore   pushing.")
+      assert {saved.entry, saved.topic} == {"Runs the tests before pushing.", "Notes"}
 
-      {:ok, saved} =
-        Memory.append_own(context.ada, "Reviews in the morning.", today: ~D[2026-10-25])
-
-      assert saved.entry == "Reviews in the morning."
+      {:ok, _} = Memory.append_own(context.ada, "Never below the rate card.", topic: "  prices ")
+      {:ok, _} = Memory.append_own(context.ada, "Reviews in the morning.", topic: "Notes")
 
       assert Memory.current(context.ada).text == """
              Call me Ada.
@@ -110,12 +111,25 @@ defmodule Troupe.Plane.UserMemoryTest do
              ## 2026-10-24
 
              - Prefers small pull requests.
+
+             ## Prices
+
+             In euros.
+             - Never below the rate card.
+
+             ## Notes
+
              - Runs the tests before pushing.
-
-             ## 2026-10-25
-
              - Reviews in the morning.\
              """
+
+      assert {:ok, %{"topic" => "Client names", "user" => %{"text" => text}}} =
+               put(context.ada, %{"append" => "Use their spelling.", "topic" => "Client names"})
+
+      assert text =~ "\n\n## Client names\n\n- Use their spelling."
+
+      assert {:error, "a topic holds at most 128 bytes" <> _} =
+               Memory.append_own(context.ada, "x", topic: String.duplicate("t", 129))
 
       assert {:error, "nothing to remember: the entry is empty"} =
                Memory.append_own(context.ada, "  \n ")
