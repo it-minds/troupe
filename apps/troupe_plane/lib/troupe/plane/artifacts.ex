@@ -51,6 +51,7 @@ defmodule Troupe.Plane.Artifacts do
   @max_files 500
   @max_title 200
   @max_path 512
+  @max_segment 255
   @max_note 500
 
   # A ticket is a link the console opens at once: a minute is long enough to load a tab and
@@ -159,7 +160,7 @@ defmodule Troupe.Plane.Artifacts do
          :ok <- may_move(artifact, visibility, role, user, admin?),
          {:ok, note} <- note(params["note"]),
          {:ok, base} <- base(artifact, params["base"]),
-         {:ok, sent} <- incoming(params, user),
+         {:ok, sent} <- incoming_over(base, params, user),
          files = carry(base, sent),
          {:ok, _entry} <- entry(artifact.kind, files),
          {:ok, team_id} <- team_of(artifact, user, visibility, opts[:session]) do
@@ -447,7 +448,7 @@ defmodule Troupe.Plane.Artifacts do
 
   @doc """
   A path as an artifact keeps it, or why it is refused: relative, `/`-separated, no empty,
-  `.` or `..` segment, and not starting with a segment the host's addresses take (`v<n>`).
+  `.` or `..` segment nor one past 255 bytes, and not starting with a segment the host's addresses take (`v<n>`).
   """
   @spec normalise_path(term()) :: {:ok, String.t()} | {:error, String.t()}
   def normalise_path(path) when is_binary(path) do
@@ -469,6 +470,9 @@ defmodule Troupe.Plane.Artifacts do
        &"#{inspect(&1)} has characters a path may not"},
       {&Enum.any?(String.split(&1, "/"), fn part -> part in ["", ".", ".."] end),
        &"#{&1} has an empty, . or .. part"},
+      # The object store's own limit on one part of a key, said before anything is written.
+      {&Enum.any?(String.split(&1, "/"), fn part -> byte_size(part) > @max_segment end),
+       fn _ -> "each part of a path between its / is at most #{@max_segment} bytes" end},
       {&(hd(String.split(&1, "/")) =~ ~r/\Av\d+\z/),
        &"#{&1} starts with #{hd(String.split(&1, "/"))}, which the artifact's addresses use for its versions"}
     ]
@@ -628,6 +632,7 @@ defmodule Troupe.Plane.Artifacts do
     end
   end
 
+  # The first of their teams by name, so the same one every time.
   defp first_team(user) do
     case Identity.teams_for(user) do
       [team | _] -> team.id
@@ -760,6 +765,13 @@ defmodule Troupe.Plane.Artifacts do
     do: Uploads.take(handle, user, store(), &checked_file/3)
 
   defp incoming(params, _user), do: files(params["files"])
+
+  # Over a base, a put may send no files at all: every one of the base's is carried, which
+  # is how its owner moves who may open it, or retitles it, without sending it again.
+  defp incoming_over(%Version{}, params, _user) when not is_map_key(params, "files") and not is_map_key(params, "upload"),
+    do: {:ok, []}
+
+  defp incoming_over(_base, params, user), do: incoming(params, user)
 
   # The team a new version counts against: the team it is for, where it is a team's, which
   # takes every byte of it there; else the artifact's, while there is one.

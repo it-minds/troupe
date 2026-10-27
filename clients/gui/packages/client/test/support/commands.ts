@@ -131,7 +131,7 @@ export const COMMANDS: CommandEntry[] = [
     summary: "Publish a page, a document or a file for others to read",
     usage: "/publish <path> <organisation | profile:<name>>",
     args: [arg("path", true, "file"), arg("visibility", true, "text")],
-    availability: "always",
+    availability: "plane",
     source: "builtin",
     detail: "The file is read on this machine and published on your Troupe plane as an artifact.",
     example: "/publish report.html profile:dev",

@@ -145,6 +145,27 @@ defmodule Troupe.CommandPaletteTest do
     assert user_state(pid).cmd_text == "/cancel "
   end
 
+  # A command that needs a plane is greyed by what the daemon says of its sign-in, asked as
+  # the palette opens: here it is signed in to none; signed in, the same row runs.
+  test "a command that needs a plane is greyed while the daemon is signed in to none, and only then" do
+    {sid, _, _} = start_session!(script: [])
+    {pid, _session} = start_tui(sid)
+    eventually(fn -> user_state(pid).commands != [] end)
+
+    assert %{"availability" => "plane"} = Enum.find(user_state(pid).commands, &(&1["name"] == "artifacts"))
+    assert %{"availability" => "plane"} = Enum.find(user_state(pid).commands, &(&1["name"] == "publish"))
+
+    press(pid, "/")
+    type(pid, "artifacts")
+    eventually(fn -> user_state(pid).plane_linked == false end)
+    {rows, cursor} = Troupe.UI.TUI.View.palette_view(user_state(pid))
+    assert {:no, "needs a plane: troupe login first"} = Enum.at(rows, cursor).status
+
+    {rows, cursor} = Troupe.UI.TUI.View.palette_view(%{user_state(pid) | plane_linked: true})
+    assert Enum.at(rows, cursor).status == :ok
+    press(pid, "esc")
+  end
+
   test "/help opens the palette, and Ctrl-K does on an empty line" do
     {sid, _, _} = start_session!(script: [])
     {pid, _session} = start_tui(sid)

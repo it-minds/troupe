@@ -40,7 +40,7 @@ defmodule Troupe.Plane.Erasure do
   alias Troupe.KMS
   alias Troupe.ObjectStore
   alias Troupe.Plane.Control.Router
-  alias Troupe.Plane.{Drain, Fleet, Identity, Invites, Repo, Sessions}
+  alias Troupe.Plane.{Drain, Fleet, Identity, Invites, Memory, Repo, Sessions}
   alias Troupe.Plane.Identity.Team
   alias Troupe.Plane.Sessions.{Session, Tombstone}
   alias Troupe.Plane.Tokens.Credential
@@ -91,6 +91,8 @@ defmodule Troupe.Plane.Erasure do
     # leaves data nobody believes exists.
     with {:ok, tombstone} <- write_tombstone(session, opts) do
       Invites.forget(session.id)
+      # What it last read of the memory goes too, rather than waiting a week in the readers.
+      Memory.forget_read(session.id)
       # Off its pod, giving back its slot and its budget slice. The pod's `session.erase`
       # stops a running session without reporting it dormant, so nothing else would.
       Drain.park(session)

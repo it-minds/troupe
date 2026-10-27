@@ -91,6 +91,12 @@ async function signedIn(): Promise<void> {
   localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");
 }
 
+/** Choose in a select, the way React hears it. */
+function choose(select: HTMLSelectElement, value: string): void {
+  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, value);
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
 const gallery = (): HTMLElement => document.querySelector<HTMLElement>(".repertoire")!;
 const aside = (): HTMLElement | null => document.querySelector<HTMLElement>('[aria-label="Artifact details"]');
 const titles = (): string[] => [...gallery().querySelectorAll(".card .title")].map((e) => e.textContent ?? "");
@@ -188,6 +194,45 @@ describe("the gallery", () => {
       ["artifact.unshare", "sh-1"],
     ]);
     await seesButton("Publish a new version", details);
+  });
+
+  // Who may open it changes here, not in the console: the next version, every file carried,
+  // and the plane's refusal said as it gave it.
+  it("lets its owner change who can see it in the app, as the next version with the same files", async () => {
+    await signedIn();
+    await openGallery();
+    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("My notes")), "the person's own card")).click();
+    const details = await waitFor(aside, "the aside");
+    const who = await waitFor(() => [...details.querySelectorAll<HTMLSelectElement>("label select")].find((s) => s.closest("label")?.textContent?.startsWith("Who may open it")) ?? null, "who may open it");
+    expect(who.value).toBe("organisation");
+    expect([...who.options].map((o) => o.value)).toEqual(["private", "organisation", "team:core", "profile:dev"]);
+    await waitFor(() => button("Change who can see it", details)?.disabled === true, "the change offered only once another is chosen");
+
+    choose(who, "team:core");
+    (await seesButton("Change who can see it", details)).click();
+    await sees("Moved: My notes is for the core team now, as version 3 with the same files.");
+    expect(daemon.artifactCalls.find((c) => c.method === "artifact.put")?.params).toMatchObject({ id: "art-mine", base: 2, visibility: "team:core" });
+    expect(daemon.artifactCalls.find((c) => c.method === "artifact.put")?.params).not.toHaveProperty("files");
+    expect(daemon.artifacts!.find((a) => a["id"] === "art-mine")).toMatchObject({ visibility: "team:core", version: 3 });
+    expect(windows).toHaveLength(0); // no console page opened
+
+    // Another's artifact offers no choice at all.
+    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Weekly figures")), "another's card")).click();
+    await waitFor(() => aside()?.textContent?.includes("Weekly figures"), "its aside");
+    expect(button("Change who can see it", aside()!)).toBeNull();
+  });
+
+  it("says the plane's refusal of a move in its own words", async () => {
+    await signedIn();
+    await openGallery();
+    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("My notes")), "the person's own card")).click();
+    const details = await waitFor(aside, "the aside");
+    // Published elsewhere since the gallery was read: the base is no longer the newest.
+    daemon.artifacts!.find((a) => a["id"] === "art-mine")!["version"] = 5;
+    const who = await waitFor(() => [...details.querySelectorAll<HTMLSelectElement>("label select")].find((s) => s.closest("label")?.textContent?.startsWith("Who may open it")) ?? null, "who may open it");
+    choose(who, "private");
+    (await seesButton("Change who can see it", details)).click();
+    await sees("version 5 was published since; reload it and try again");
   });
 
   it("asks nothing under Local only, and says so", async () => {

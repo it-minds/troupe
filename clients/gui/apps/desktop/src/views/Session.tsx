@@ -150,6 +150,7 @@ export function Session({
   // The palette's agent rows carry their facts from the daemon's `agents.list` for this
   // workspace (troupe #565); a session on the platform has its commands.list alone.
   const agentRows = useMemo(() => (daemon && workspace ? () => daemon.listAgents(workspace).then((r) => r.agents) : undefined), [daemon, workspace]);
+  const planeLinked = useMemo(() => (daemon ? () => daemon.identity().then((i) => i.linked === true) : undefined), [daemon]);
   // How much of each turn is open: the config ladder's `transcript.detail`, unless `/detail`
   // chose for this session (troupe #474).
   const detail = useDetail(daemon, workspace, sessionId);
@@ -191,6 +192,7 @@ export function Session({
             ...(here && onAgents ? { agents: () => onAgents() } : {}),
             ...(agentRows ? { agentRows } : {}),
             ...(daemon ? { publish: () => setPublishing(true) } : {}),
+            ...(planeLinked ? { planeLinked } : {}),
           }}
         />
       )}

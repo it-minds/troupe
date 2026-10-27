@@ -14,11 +14,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
-import { audienceName, audienceOf } from "@troupe/client";
+import { audienceName, audienceOf, visibilityWords } from "@troupe/client";
 import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, DaemonClient } from "@troupe/client";
 import { shell } from "../shell";
 import { Loading, relative } from "./bits";
-import { Publish } from "./Publish";
+import { Publish, VisibilityOptions } from "./Publish";
 
 type Filter = "all" | ArtifactAudience;
 
@@ -268,7 +268,8 @@ export function Artifacts({
             daemon={daemon}
             artifact={current}
             audience={audienceOf(current, shared)}
-            gallery={list.gallery_url ?? null}
+            teams={list.teams}
+            profiles={list.profiles}
             onOpened={(version) => {
               markSeen(current.id, version);
               setSeen(seenVersions());
@@ -287,7 +288,8 @@ function Aside({
   daemon,
   artifact,
   audience,
-  gallery,
+  teams,
+  profiles,
   onOpened,
   onChanged,
   onOpenSession,
@@ -295,7 +297,8 @@ function Aside({
   daemon: DaemonClient;
   artifact: Artifact;
   audience: ArtifactAudience;
-  gallery: string | null;
+  teams: string[] | undefined;
+  profiles: string[] | undefined;
   onOpened: (version: number) => void;
   onChanged: () => void;
   onOpenSession?: ((id: string) => void) | undefined;
@@ -307,6 +310,7 @@ function Aside({
   const [busy, setBusy] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [asked, setAsked] = useState(0);
+  const [moveTo, setMoveTo] = useState(artifact.visibility);
   const owner = artifact.mine || artifact.role === "owner";
 
   useEffect(() => {
@@ -392,10 +396,27 @@ function Aside({
           {AUDIENCE[audience].glyph} {words.long}
         </p>
         <p className="muted">{words.note}</p>
-        {owner && gallery && (
-          <button type="button" onClick={() => void openExternal(`${gallery}/${artifact.id}`)}>
-            Change who can see it
-          </button>
+        {owner && (
+          <div className="move-visibility">
+            <label>
+              Who may open it
+              <select value={moveTo} disabled={busy} onChange={(e) => setMoveTo(e.target.value)}>
+                <VisibilityOptions teams={teams} profiles={profiles} />
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={busy || moveTo === artifact.visibility}
+              onClick={() =>
+                void act(
+                  () => daemon.moveArtifact(artifact.id, artifact.version, moveTo),
+                  `Moved: ${artifact.title} is for ${visibilityWords(moveTo)} now, as version ${artifact.version + 1} with the same files.`,
+                )
+              }
+            >
+              Change who can see it
+            </button>
+          </div>
         )}
       </section>
 

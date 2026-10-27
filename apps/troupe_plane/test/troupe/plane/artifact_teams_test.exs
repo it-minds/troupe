@@ -121,12 +121,10 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
       both = person("fay@example.test", ["engineering", "research"])
       {:ok, artifact} = publish(both, %{"visibility" => "organisation"})
 
-      # An organisation's counts against one of its publisher's teams; moved to the other,
-      # every byte of it goes there.
-      {from, to} =
-        if artifact["team"] == "engineering",
-          do: {context.engineering, context.research},
-          else: {context.research, context.engineering}
+      # An organisation's counts against the first of its publisher's teams by name; moved to
+      # the other, every byte of it goes there.
+      assert artifact["team"] == "engineering"
+      {from, to} = {context.engineering, context.research}
 
       assert {:ok, moved} =
                publish(both, %{"id" => artifact["id"], "visibility" => "team:#{to.name}"})
@@ -134,6 +132,35 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
       assert moved["team"] == to.name
       assert Artifacts.usage(to) == 22
       assert Artifacts.usage(from) == 0
+    end
+
+    test "its owner moves it with a put that sends no files, as a version carrying them all",
+         context do
+      {:ok, artifact} = publish(context.ada, %{"visibility" => "organisation"})
+      id = artifact["id"]
+
+      assert {:ok, moved} =
+               call(context.ada, "artifact.put", %{"id" => id, "base" => 1, "visibility" => "team:engineering"})
+
+      assert moved["visibility"] == "team:engineering"
+      assert moved["version"] == 2
+
+      assert {:ok, %{"versions" => [second, first]}} = call(context.ada, "artifact.get", %{"id" => id})
+      assert Enum.map(second["files"], & &1["sha256"]) == Enum.map(first["files"], & &1["sha256"])
+
+      # Without a base there is nothing to carry, and a put with no files is refused as before;
+      # and an edit made on a version since replaced is a conflict, as any put's is.
+      assert {:error, %{message: "invalid_params"}} =
+               call(context.ada, "artifact.put", %{"id" => id, "visibility" => "private"})
+
+      assert {:error, %{message: "conflict"}} =
+               call(context.ada, "artifact.put", %{"id" => id, "base" => 1, "visibility" => "private"})
+
+      # Only its owner moves it.
+      assert {:error, %{message: message}} =
+               call(context.bo, "artifact.put", %{"id" => id, "base" => 2, "visibility" => "private"})
+
+      assert message in ["forbidden", "not_found"]
     end
   end
 

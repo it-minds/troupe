@@ -123,13 +123,22 @@ export function besideRows(lines: MemoryLine[]): Array<{ left: string | null; ri
     came = [];
   };
   for (const line of lines) {
-    if (line.op === "del") gone.push(line.text);
-    else if (line.op === "add") came.push(line.text);
-    else {
+    if (line.op === "same") {
       flush();
       rows.push({ left: line.text, right: line.text, changed: false });
-    }
+    } else if (line.op === "del") {
+      // A line gone after lines that came starts a run of its own: it was not their pair.
+      if (came.length > 0) flush();
+      gone.push(line.text);
+    } else came.push(line.text);
   }
   flush();
   return rows;
+}
+
+/** A line's side column: the version and who saved it, or the agent and session of an agent's entry. */
+export function writtenBy(line: MemoryBlameLine): string {
+  if (line.agent) return `v${line.version} ${line.agent} in ${line.session ?? "a session"}`;
+  if (line.session) return `v${line.version} an agent in ${line.session}`;
+  return `v${line.version} ${line.by ?? ""}`.trim();
 }

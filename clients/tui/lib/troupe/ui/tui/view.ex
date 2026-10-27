@@ -1537,8 +1537,13 @@ defmodule Troupe.UI.TUI.View do
       else: :ok
   end
 
-  defp availability(%{"availability" => "plane"}, _return_to, _state),
-    do: {:no, "needs a plane: troupe login first"}
+  # As the daemon last said when the palette opened: greyed only once it has said it is
+  # signed in to none, not while it has not yet answered.
+  defp availability(%{"availability" => "plane"}, _return_to, state) do
+    if Map.get(state, :plane_linked) == false,
+      do: {:no, "needs a plane: troupe login first"},
+      else: :ok
+  end
 
   defp availability(_entry, _return_to, _state), do: :ok
 

@@ -768,16 +768,24 @@ defmodule Troupe.Plane.Control.Connection do
         {:error, %Error{} = error} -> {:error, error, state}
       end
     else
-      :stale_epoch ->
-        {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
-
-      {:owner, _gone} ->
-        {:error, Error.new(:forbidden, %{reason: "the session's owner is deactivated"}), state}
-
-      nil ->
-        {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
-      end
+      refused -> pod_artifact_refusal(refused, params, state)
     end
+  end
+
+  # The files of a version too large for one message, sent to the object store first: an
+  # upload handle for the session's owner, which `session.artifact.publish` then names.
+  defp dispatch("session.artifact.upload.begin", params, state) do
+    with %Session{} = session <- session_of(params["session_id"], state.worker),
+         :ok <- at_epoch(session, params["epoch"]),
+         {:owner, %User{active: true} = owner} <- {:owner, Identity.get_user(session.owner_subject)} do
+      case Artifacts.begin_upload(owner, %{"files" => params["files"]}) do
+        {:ok, upload} -> {:ok, upload, state}
+        {:error, %Error{} = error} -> {:error, error, state}
+      end
+    else
+      refused -> pod_artifact_refusal(refused, params, state)
+    end
+  end
 
   # A session on this pod beginning a turn says which memory documents it holds, by scope,
   # name, version and hash and never their text. The plane keeps that as what the turn runs
@@ -917,6 +925,16 @@ defmodule Troupe.Plane.Control.Connection do
   end
 
   defp session_of(_session_id, _worker), do: nil
+
+  # Why a pod's artifact call for a session was refused before anything was looked at.
+  defp pod_artifact_refusal(:stale_epoch, _params, state),
+    do: {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+
+  defp pod_artifact_refusal({:owner, _gone}, _params, state),
+    do: {:error, Error.new(:forbidden, %{reason: "the session's owner is deactivated"}), state}
+
+  defp pod_artifact_refusal(nil, params, state),
+    do: {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
 
   defp at_epoch(_session, nil), do: :ok
   defp at_epoch(%Session{epoch: epoch}, epoch), do: :ok

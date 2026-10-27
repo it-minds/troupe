@@ -398,12 +398,12 @@ defmodule Troupe.Plane.ArtifactVersionsTest do
 
       assert {:ok, []} = ObjectStore.list(context.store, "artifacts/#{id}/2/")
 
-      # And a store that refuses one file midway takes back the ones it took: the store
-      # keeps a path's part to 255 bytes, which a path within the artifact's own limit passes.
+      # And a path's part past the 255 bytes the store keeps one to is refused before any
+      # file is written, rather than by the store midway.
       Repo.update_all(Team, set: [artifact_quota_bytes: 0])
       long = "zzz/" <> String.duplicate("a", 300) <> ".md"
 
-      assert {:error, %{message: "unavailable"}} =
+      assert {:error, %{message: "invalid_params"}} =
                call(context.ada, "artifact.put", %{
                  "id" => id,
                  "files" => [file("index.md", "# 2"), file(long, "no")]

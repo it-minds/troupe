@@ -70,6 +70,30 @@ defmodule Troupe.BenchTest do
     assert Bench.markdown(report) =~ "FAILED tool_calls/model_calls."
   end
 
+  # A daemon's hosts give a session tools a test VM's harness has not (`remember`'s level,
+  # `publish_artifact`), and one budget is to fit wherever the bench runs: the umbrella, the
+  # terminal's suite, an installed troupe. So the bench measures with none of them, and puts
+  # back what the VM had once it is done.
+  test "the tool set measured is the same whatever hosts this VM installed", %{report: report} do
+    bare = value(scenario(report, "tool_calls"), "tool_definition_bytes")
+    publish = fn _params, _ctx -> {:ok, %{}} end
+    append = fn _entry, _ctx -> {:ok, %{}} end
+    :ok = Troupe.Artifacts.install(publish)
+    :ok = Troupe.UserMemory.install(append)
+
+    try do
+      hosted = Bench.run(only: ["tool_calls"])
+      assert value(scenario(hosted, "tool_calls"), "tool_definition_bytes") == bare
+
+      assert Application.get_env(:troupe_core, :artifacts) == publish
+      assert Application.get_env(:troupe_core, :user_memory) == append
+      assert Troupe.Tools.PublishArtifact in Application.get_env(:troupe_core, :extra_tools)
+    after
+      Troupe.Artifacts.uninstall()
+      Application.delete_env(:troupe_core, :user_memory)
+    end
+  end
+
   test "a budget for a measure nobody takes fails rather than holding nothing" do
     report = Bench.run(budgets: %{"replay" => %{"seconds" => 1}}, only: ["replay"])
 

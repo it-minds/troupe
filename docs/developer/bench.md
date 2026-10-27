@@ -65,7 +65,10 @@ A budget is a **maximum**. A failed run ends `FAILED` and names each failure as
 The numbers are the same on every run of one build on one machine. Between machines they
 can differ by a few hundred bytes, since the system prompt names the platform and the
 `shell` tool names the host and the shell it found, among others, and the budgets are set
-above both.
+above both. The tool set does not differ: while a scenario runs, the bench sets aside the
+hosts a daemon or a pod installs into its VM (`Troupe.Artifacts`, which offers
+`publish_artifact`, and `Troupe.UserMemory`, which gives `remember` its level), so the
+umbrella, the terminal's suite and an installed `troupe` measure the same tools.
 
 | scenario | what it shows |
 |---|---|

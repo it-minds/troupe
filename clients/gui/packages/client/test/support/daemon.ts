@@ -1677,11 +1677,12 @@ evoked where nothing is set and there was a sign-in. */
       case "artifact.share":
       case "artifact.unshare":
       case "artifact.rollback":
-      case "artifact.pin": {
+      case "artifact.pin":
+      case "artifact.put": {
         const mine = this.artifacts;
-        // Refused under Local only as the daemon refuses them; publish and list are left to the
-        // tests from before that, which drive "Publish…" in an app opened on this computer alone.
-        if (client.localOnly && method !== "artifact.publish" && method !== "artifact.list") {
+        // Refused under Local only as the daemon refuses every one of them: an artifact is
+        // published on the plane and listed from it.
+        if (client.localOnly) {
           return reply(ws, id, null, { code: -32004, message: "forbidden", data: { local_only: true, reason: `Local only is on for this client or this session, so nothing is published on the plane or listed from it (${method})` } });
         }
         if (!mine) {
@@ -1719,6 +1720,18 @@ evoked where nothing is set and there was a sign-in. */
             case "artifact.pin":
               found["pinned"] = params["version"] ?? null;
               return reply(ws, id, { ...found });
+            // Who may open it, moved by its owner as the next version with every file carried.
+            case "artifact.put": {
+              if (!owner) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { id: found["id"], reason: "who may open an artifact is its owner's to change; an edit link publishes versions of it" } });
+              if (params["base"] !== found["version"]) return reply(ws, id, null, { code: -32006, message: "conflict", data: { id: found["id"], reason: `version ${String(found["version"])} was published since; reload it and try again` } });
+              const to = String(params["visibility"] ?? found["visibility"]);
+              if (to.startsWith("team:") && !["core"].includes(to.slice("team:".length))) {
+                return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: `you are not in team ${to.slice("team:".length)}, so you cannot publish to its people; you are in team:core` } });
+              }
+              Object.assign(found, { visibility: to, version: Number(found["version"]) + 1, current: Number(found["version"]) + 1 });
+              if ("scope" in found) found["scope"] = to === "private" ? "private" : "mine";
+              return reply(ws, id, { ...found });
+            }
           }
         }
         this.publishedArtifacts.push(params);

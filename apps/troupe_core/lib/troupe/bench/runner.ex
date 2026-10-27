@@ -15,6 +15,12 @@ defmodule Troupe.Bench.Runner do
   directory is in) reaches the prompt being measured, and nothing the run writes lands
   among theirs. They are put back afterwards.
   That is process-wide, so scenarios run one at a time.
+
+  The tool set is pinned the same way: the hosts a daemon or a pod installs into this VM
+  (`Troupe.Artifacts`, which adds `publish_artifact`, and `Troupe.UserMemory`, which gives
+  `remember` its level) are set aside while a scenario runs and put back afterwards, so the
+  umbrella's `mix troupe.bench`, the terminal's suite and an installed `troupe bench`
+  measure one tool set, and one budget fits them all.
   """
 
   alias Troupe.Bench.{Model, Scenario}
@@ -40,11 +46,37 @@ defmodule Troupe.Bench.Runner do
 
     # In a process of its own, so the session's events and the model's notes die with
     # it rather than waiting in the caller's mailbox.
-    with_env(isolation(dir), fn ->
-      fn -> attempt(scenario, work, dir) end
-      |> Task.async()
-      |> Task.await(:infinity)
-    end)
+    with_env(isolation(dir), fn -> without_hosts(fn -> apart(scenario, work, dir) end) end)
+  end
+
+  defp apart(scenario, work, dir) do
+    fn -> attempt(scenario, work, dir) end
+    |> Task.async()
+    |> Task.await(:infinity)
+  end
+
+  # What a host installs that changes the tools a session is offered, or how one reads.
+  @hosts [:artifacts, :user_memory]
+
+  @doc """
+  Run `fun` with none of the hosts that change a session's tools installed, putting back
+  what was there before, however it ends.
+  """
+  @spec without_hosts((-> result)) :: result when result: term()
+  def without_hosts(fun) do
+    previous = Map.new([:extra_tools | @hosts], &{&1, Application.fetch_env(:troupe_core, &1)})
+    Enum.each(@hosts, &Application.delete_env(:troupe_core, &1))
+    extra = Application.get_env(:troupe_core, :extra_tools, [])
+    Application.put_env(:troupe_core, :extra_tools, List.delete(extra, Troupe.Tools.PublishArtifact))
+
+    try do
+      fun.()
+    after
+      Enum.each(previous, fn
+        {key, {:ok, value}} -> Application.put_env(:troupe_core, key, value)
+        {key, :error} -> Application.delete_env(:troupe_core, key)
+      end)
+    end
   end
 
   defp attempt(scenario, work, dir) do

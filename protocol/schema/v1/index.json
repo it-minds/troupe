@@ -12,6 +12,7 @@
     "commands/artifact.open.json",
     "commands/artifact.pin.json",
     "commands/artifact.publish.json",
+    "commands/artifact.put.json",
     "commands/artifact.read.json",
     "commands/artifact.rollback.json",
     "commands/artifact.share.json",

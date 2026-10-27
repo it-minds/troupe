@@ -13,7 +13,7 @@ defmodule Troupe.Plane.MemoryReadTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Audit, FakePod, Fleet, Harness, Memory, Sessions}
+  alias Troupe.Plane.{Admin, Audit, Erasure, FakePod, Fleet, Harness, Memory, Sessions}
   alias Troupe.Plane.Control.{Connections, Listener}
 
   @moduletag timeout: 60_000
@@ -85,6 +85,34 @@ defmodule Troupe.Plane.MemoryReadTest do
 
       assert Memory.read_of("s-mine") == nil
       assert Memory.read_of("s-theirs") == nil
+    end
+  end
+
+  describe "a pod's session before its first turn, and after its erasure" do
+    test "is among the readers as activated, with what its activation carried", context do
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+      _team = team_with_grant("engineering", "dev", name: "engineering")
+      ada = person("ada@example.test", ["engineering"])
+      {:ok, _} = Memory.put(:organisation, "Everyone.", "root@example.test", 0)
+
+      assert {:ok, %{"session_id" => id}} =
+               Harness.call(
+                 "session.create",
+                 %{"profile" => "dev", "team" => "engineering"},
+                 %{user: ada, platform_admin?: false}
+               )
+
+      assert_receive {:pushed, "session.activate", %{"memory" => [_organisation]}}, 5_000
+
+      {:ok, doc} = Admin.memory_get(context.root, "organisation", nil, nil, nil)
+
+      assert [%{session_id: ^id, where: "pod", version: 1, behind: false, activated: true, turn_at: nil}] =
+               doc.readers.sessions
+
+      # Its erasure takes what it read with it, rather than leaving it a week for the prune.
+      assert Memory.read_of(id)
+      {:ok, _tombstone} = Erasure.erase(id, actor: "root@example.test")
+      assert Memory.read_of(id) == nil
     end
   end
 

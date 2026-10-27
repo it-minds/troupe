@@ -560,7 +560,10 @@ defmodule Troupe.Gateway.FakePlane do
 
   # An artifact published (#62): the plane's answer, as its id, the next version of one
   # named, and an address on an artifacts host; a page with no title is refused, as the
-  # plane refuses it.
+  # plane refuses it, and one for a team the person is not in is forbidden.
+  defp dispatch(_state, "artifact.publish", %{"visibility" => "team:research"}),
+    do: {:rpc_error, -32_004, "forbidden", %{"reason" => "you are not in team research", "teams" => ["engineering"]}}
+
   defp dispatch(_state, "artifact.publish", %{"title" => title} = params) when is_binary(title) and title != "" do
     id = params["id"] || "art-fakefakefakefake"
 
@@ -663,6 +666,10 @@ defmodule Troupe.Gateway.FakePlane do
 
   defp dispatch(_state, method, %{"id" => id} = params) when method in ["artifact.rollback", "artifact.pin"],
     do: {:ok, %{"id" => id, "version" => 2, "pinned" => if(method == "artifact.pin", do: params["version"])}}
+
+  # A put over a base with no files: a version carrying them all, with what it moved.
+  defp dispatch(_state, "artifact.put", %{"id" => id, "base" => base} = params),
+    do: {:ok, %{"id" => id, "version" => base + 1, "visibility" => params["visibility"] || "organisation"}}
 
   # The person's own memory's history and a rollback, over what `keep_own/1` set.
   defp dispatch(state, "me.memory.history", params) do

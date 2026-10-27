@@ -1131,7 +1131,9 @@ defmodule Troupe.Plane.Identity do
   def teams_for(%User{} = user) do
     # Through the links, and `distinct` because a person in two of a team's groups is in
     # the team *once*. Without it they get every team twice and a listing shows their
-    # budget as two budgets.
+    # budget as two budgets. Ordered by name afterwards: `distinct` on the id orders by the id
+    # first, and the first team, which an artifact with no team of its own counts against,
+    # would be whichever id sorted first.
     Repo.all(
       from(t in Team,
         join: l in TeamGroupLink,
@@ -1139,10 +1141,10 @@ defmodule Troupe.Plane.Identity do
         join: m in Membership,
         on: m.group_id == l.group_id,
         where: m.user_id == ^user.id,
-        distinct: t.id,
-        order_by: t.name
+        distinct: t.id
       )
     )
+    |> Enum.sort_by(& &1.name)
   end
 
   @doc """

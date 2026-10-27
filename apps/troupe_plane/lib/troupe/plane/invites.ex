@@ -53,7 +53,10 @@ defmodule Troupe.Plane.Invites do
   require Logger
 
   defmodule Invite do
-    @moduledoc "One invitation: into which session, whom, at which role, by whom and when."
+    @moduledoc """
+    One invitation: into which session, whom, at which role, by whom and when, and when a pod
+    session's log was given its line (`nil` until a pod holding it has).
+    """
 
     use Ecto.Schema
 
@@ -67,6 +70,7 @@ defmodule Troupe.Plane.Invites do
       field(:role, :string)
       field(:invited_by, :string)
       field(:invited_at, :utc_datetime_usec)
+      field(:announced_at, :utc_datetime_usec)
 
       timestamps(type: :utc_datetime_usec)
     end
@@ -76,7 +80,7 @@ defmodule Troupe.Plane.Invites do
     @spec changeset(t(), map()) :: Ecto.Changeset.t()
     def changeset(invite, attrs) do
       invite
-      |> cast(attrs, [:session_id, :subject, :role, :invited_by, :invited_at])
+      |> cast(attrs, [:session_id, :subject, :role, :invited_by, :invited_at, :announced_at])
       |> validate_required([:session_id, :subject, :role, :invited_by, :invited_at])
       |> validate_inclusion(:role, ["observe", "control"])
       |> unique_constraint([:session_id, :subject])
@@ -271,7 +275,9 @@ defmodule Troupe.Plane.Invites do
         subject: invitee.subject,
         role: role,
         invited_by: by,
-        invited_at: DateTime.utc_now()
+        invited_at: DateTime.utc_now(),
+        # Its line is still to be written, at once or at the session's next activation.
+        announced_at: nil
       }
 
       Repo.transaction(fn -> write_invite(session, attrs, keys) end)
@@ -551,6 +557,57 @@ defmodule Troupe.Plane.Invites do
     end
   end
 
+  @doc "The pod holding a session wrote `subject`'s invitation's line in its log."
+  @spec announced(String.t(), String.t()) :: :ok
+  def announced(session_id, subject) do
+    _updated =
+      Repo.update_all(
+        from(i in Invite, where: i.session_id == ^session_id and i.subject == ^subject),
+        set: [announced_at: DateTime.utc_now()]
+      )
+
+    :ok
+  end
+
+  @doc """
+  A pod session's invitations whose line its log has not been given, made while no pod held
+  it: what its next activation writes.
+  """
+  @spec unannounced(String.t()) :: [Invite.t()]
+  def unannounced(session_id) do
+    Repo.all(
+      from(i in Invite,
+        where: i.session_id == ^session_id and is_nil(i.announced_at),
+        order_by: [asc: i.invited_at]
+      )
+    )
+  end
+
+  @doc """
+  Destroy the copies of a private session's key its owner's daemon put in `invitee`'s slot
+  for an invitation the plane then refused: only the plane may delete there, so nothing
+  else would. A path outside the invitee's own slot is not touched, nor one an invitation
+  already holds.
+  """
+  @spec discard_copies(Session.t(), User.t() | nil, term()) :: :ok
+  def discard_copies(%Session{kind: "private"} = session, %User{} = invitee, keys) when is_list(keys) do
+    prefix = KMS.invited_prefix(User.kms_name(invitee), session.id)
+    held = MapSet.new(keys_for(session.id, invitee.subject), & &1.slot)
+
+    for %{"slot" => slot} <- keys, in_slot?(slot, prefix), not MapSet.member?(held, slot) do
+      with {:error, reason} <- destroy_slot(slot) do
+        Logger.warning(
+          "troupe plane: a refused invitation's copy of #{session.id}'s key for #{invitee.subject} " <>
+            "was not destroyed: " <> inspect(reason)
+        )
+      end
+    end
+
+    :ok
+  end
+
+  def discard_copies(_session, _invitee, _keys), do: :ok
+
   @doc """
   Everything about a session's invitations, once its key and every copy are gone: the rows,
   and every invitee told it is no longer theirs to see.
@@ -679,9 +736,24 @@ defmodule Troupe.Plane.Invites do
       "invited_by" => invite.invited_by,
       "invited_by_name" => by && by.display_name,
       "invited_at" => DateTime.to_iso8601(invite.invited_at),
-      "offered" => if(session.kind == "private", do: Remote.offered?(session.id))
+      "offered" => if(session.kind == "private", do: Remote.offered?(session.id)),
+      "offline_since" => offline_since(session)
     }
   end
+
+  # A private session's offer whose laptop went (its daemon killed, the machine asleep) is
+  # still the plane's row until the laptop says otherwise: offline since then, as
+  # `remote.list` shows it, and not offered.
+  defp offline_since(%Session{kind: "private", id: id}) do
+    with %Remote.Offer{} = offer <- Remote.get(id),
+         {"offline", %DateTime{} = since} <- Remote.presence(offer) do
+      DateTime.to_iso8601(since)
+    else
+      _online_or_none -> nil
+    end
+  end
+
+  defp offline_since(_session), do: nil
 
   # -- telling the people it concerns -----------------------------------------------
 

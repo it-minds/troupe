@@ -60,6 +60,7 @@ defmodule Troupe.UI.TUI.Server do
           win_pos: non_neg_integer(),
           agents: [String.t()],
           agent_rows: %{optional(String.t()) => map()},
+          plane_linked: boolean() | nil,
           agents_page: Agents.page() | nil,
           switcher: AgentChooser.t() | nil,
           commands: [Client.command()],
@@ -270,6 +271,9 @@ defmodule Troupe.UI.TUI.Server do
       # `agents.list`'s rows by name, for the palette's agent rows (TUI Decision 156): read
       # when the palette first opens, not before the first frame.
       agent_rows: %{},
+      # Whether this computer's daemon is signed in to a plane, as it last said: asked each
+      # time the palette opens, for the commands that need one; `nil` until it has answered.
+      plane_linked: nil,
       agents_page: nil,
       # The one agent picker: Ctrl-N's and Tab's.
       switcher: nil,
@@ -475,6 +479,10 @@ defmodule Troupe.UI.TUI.Server do
     do: {:noreply, schedule_tick(%{state | agent_rows: rows, dirty: true}), render?: false}
 
   def handle_info({:agent_rows, _sid, _rows}, state), do: {:noreply, state, render?: false}
+
+  # Whether the daemon is signed in to a plane, asked as the palette opened.
+  def handle_info({:plane_linked, linked?}, state),
+    do: {:noreply, schedule_tick(%{state | plane_linked: linked?, dirty: true}), render?: false}
 
   def handle_info(:repainted, state), do: {:noreply, %{state | repaint: false}, render?: true}
 
@@ -1543,6 +1551,8 @@ defmodule Troupe.UI.TUI.Server do
     # The agent rows' badges are asked for the first time the palette opens, off the
     # screen's process: a daemon slow to answer never holds the palette (TUI Decision 156).
     if state.agent_rows == %{}, do: ask_agent_rows(state.session_id)
+    # And whether the daemon has a plane, which a sign-in or a sign-out elsewhere changes.
+    ask_plane_link()
 
     %{
       state
@@ -1720,59 +1730,20 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # Read, titled and kinded as `troupe artifacts` and the gallery's `p` do it
+  # (`Troupe.Client.Artifacts.publish/3`), named as coming from this session.
   defp publish(sid, path, visibility) do
-    local = Path.expand(path)
-    name = Path.basename(local)
+    case Troupe.Client.Artifacts.publish(path, visibility, session_id: sid) do
+      {:ok, artifact} ->
+        {:ok,
+         "published #{path} as #{artifact["id"]} version #{artifact["version"]}" <>
+           if(artifact["url"], do: ": #{artifact["url"]}", else: "")}
 
-    with {:ok, content} <- File.read(local),
-         kind = artifact_kind(name),
-         {:ok, artifact} <-
-           Client.publish_artifact(%{
-             "title" => artifact_title(kind, content, name),
-             "kind" => kind,
-             "visibility" => visibility,
-             "files" => [%{"path" => name, "bytes" => Base.encode64(content)}],
-             "session_id" => sid
-           }) do
-      {:ok,
-       "published #{path} as #{artifact["id"]} version #{artifact["version"]}" <>
-         if(artifact["url"], do: ": #{artifact["url"]}", else: "")}
-    else
-      {:error, reason} when is_atom(reason) -> {:error, "#{path}: #{:file.format_error(reason)}"}
-      {:error, reason} -> {:error, "#{path} not published: #{refusal(reason)}"}
-    end
-  end
-
-  # The daemon's sentence, or the plane's, whichever way the refusal came.
-  defp refusal(%{"data" => %{"reason" => reason}}) when is_binary(reason), do: reason
-  defp refusal(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
-  defp refusal(%{data: %{reason: reason}}) when is_binary(reason), do: reason
-  defp refusal(reason), do: to_message(reason)
-
-  defp artifact_kind(name) do
-    case name |> Path.extname() |> String.downcase() do
-      ext when ext in [".html", ".htm"] -> "html"
-      ext when ext in [".md", ".markdown"] -> "markdown"
-      _other -> "file"
-    end
-  end
-
-  defp artifact_title(kind, content, name) do
-    found =
-      case kind do
-        "html" ->
-          Regex.run(~r/<title[^>]*>\s*([^<]+?)\s*<\/title>/i, content, capture: :all_but_first)
-
-        "markdown" ->
-          Regex.run(~r/^#\s+(.+?)\s*$/m, content, capture: :all_but_first)
-
-        "file" ->
-          nil
-      end
-
-    case found do
-      [title] -> if String.valid?(title), do: title, else: name
-      _none -> name
+      # A file that could not be read says so as it is; a refusal, the daemon's or the plane's.
+      {:error, reason} ->
+        if String.starts_with?(reason, path <> ": "),
+          do: {:error, reason},
+          else: {:error, "#{path} not published: #{reason}"}
     end
   end
 
@@ -2878,6 +2849,19 @@ defmodule Troupe.UI.TUI.Server do
   defp ask_agent_rows(sid) do
     server = self()
     {:ok, _task} = Task.start(fn -> send(server, {:agent_rows, sid, agent_rows(sid)}) end)
+    :ok
+  end
+
+  # Off the screen's process, as the agent rows are: a daemon slow to answer holds nothing.
+  defp ask_plane_link do
+    server = self()
+
+    {:ok, _task} =
+      Task.start(fn ->
+        linked? = match?({:ok, %{"linked" => true}}, Client.identity())
+        send(server, {:plane_linked, linked?})
+      end)
+
     :ok
   end
 

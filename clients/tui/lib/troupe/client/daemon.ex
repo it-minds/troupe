@@ -844,7 +844,8 @@ defmodule Troupe.Client.Daemon do
   end
 
   # A private session is offered only with its person's yes (root #765): the daemon's
-  # refusal carries the sentence every client asks it in, and this asks it.
+  # refusal carries, in its data, the consent it wants and the sentence every client asks
+  # it in, and this asks it.
   def remote_steering(sid, {:offer, people}) do
     {consent, people} = Troupe.Client.Steering.consent(people)
 
@@ -852,10 +853,22 @@ defmodule Troupe.Client.Daemon do
       params = %{session_id: sid, share: share, command_id: Troupe.Remote.RPC.command_id()}
       params = if consent, do: Map.put(params, :consent, consent), else: params
 
-      case Link.call("remote.offer", params) do
-        {:ok, %{"remote" => remote}} -> {:ok, Troupe.Client.Steering.offered(remote)}
-        {:ok, _older} -> {:error, "this daemon does not offer sessions to the plane: update it"}
-        {:error, reason} -> asked_or_refused(refusal(reason))
+      case Link.call_with_data("remote.offer", params) do
+        {:ok, %{"remote" => remote}} ->
+          {:ok, Troupe.Client.Steering.offered(remote)}
+
+        {:ok, _older} ->
+          {:error, "this daemon does not offer sessions to the plane: update it"}
+
+        {:error, %{data: %{"consent" => "private", "reason" => sentence}}} when is_binary(sentence) ->
+          {:ok, Troupe.Client.Steering.consent_question(sentence)}
+
+        # The daemon's sentence, as `Link.call/2` would have answered it.
+        {:error, %{message: said}} when is_binary(said) ->
+          {:error, said}
+
+        {:error, reason} ->
+          {:error, refusal(reason)}
       end
     end
   end
@@ -900,13 +913,6 @@ defmodule Troupe.Client.Daemon do
       {:ok, answer} -> {:ok, Troupe.Client.Invites.uninvited(answer, person)}
       {:error, reason} -> {:error, refusal(reason)}
     end
-  end
-
-  # The daemon's sentence where it gave one, as it gave it.
-  defp asked_or_refused(said) do
-    if String.contains?(said, Troupe.Client.Steering.private_consent()),
-      do: {:ok, Troupe.Client.Steering.consent_question()},
-      else: {:error, said}
   end
 
   defp refusal(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason

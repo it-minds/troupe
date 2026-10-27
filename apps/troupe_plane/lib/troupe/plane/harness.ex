@@ -1089,33 +1089,19 @@ defmodule Troupe.Plane.Harness do
   # read what is there, so a private session is invited from the machine that seals it.
   defp handle("session.invite", params, %{user: user}) do
     with {:ok, session} <- inviting(params["session_id"], user),
-         {:ok, name} <- required_string(params, "subject"),
-         invitee = Invites.person(name),
-         :ok <- Invites.eligible(session, invitee),
-         {:ok, invite} <-
-           Invites.invite(
-             session,
-             invitee,
-             params["role"] || "observe",
-             user.subject,
-             params["keys"]
-           ) do
-      pushed =
-        if session.kind == "private" do
-          false
-        else
-          acl = push_acl_change(session, invitee.subject, Invites.acl_role(invite.role))
-          logged = announce_invite(session, "session_invited", invitee, invite.role, user)
-          acl and logged
-        end
+         {:ok, name} <- required_string(params, "subject") do
+      invitee = Invites.person(name)
 
-      {:ok,
-       %{
-         "session_id" => session.id,
-         "invite" =>
-           session.id |> Invites.rows_of() |> Enum.find(&(&1["subject"] == invitee.subject)),
-         "pushed" => pushed
-       }}
+      case invite(session, invitee, params, user) do
+        {:ok, _answer} = done ->
+          done
+
+        # A private session's key, put in the invitee's slot by its owner's daemon before it
+        # asked, is the plane's alone to delete there: refused, the copies go.
+        {:error, _refusal} = refused ->
+          Invites.discard_copies(session, invitee, params["keys"])
+          refused
+      end
     end
   end
 
@@ -1811,6 +1797,38 @@ defmodule Troupe.Plane.Harness do
   defp searched_session(nil, _user), do: {:ok, nil}
   defp searched_session(session_id, user), do: inviting(session_id, user)
 
+  # The invitation made, once the person may be invited: a pod session's grant pushed to its
+  # pod and the log's line asked of it; a private session's, the keys it carries kept.
+  defp invite(session, invitee, params, user) do
+    with :ok <- Invites.eligible(session, invitee),
+         {:ok, invite} <-
+           Invites.invite(
+             session,
+             invitee,
+             params["role"] || "observe",
+             user.subject,
+             params["keys"]
+           ) do
+      pushed = session.kind != "private" and pushed_invite(session, invitee, invite, user)
+
+      {:ok,
+       %{
+         "session_id" => session.id,
+         "invite" =>
+           session.id |> Invites.rows_of() |> Enum.find(&(&1["subject"] == invitee.subject)),
+         "pushed" => pushed
+       }}
+    end
+  end
+
+  # A pod session's: the grant to its pod, and the log's line, kept as said once it is.
+  defp pushed_invite(session, invitee, invite, user) do
+    acl = push_acl_change(session, invitee.subject, Invites.acl_role(invite.role))
+    logged = announce_invite(session, "session_invited", invitee, invite.role, user)
+    if logged, do: Invites.announced(session.id, invitee.subject)
+    acl and logged
+  end
+
   # One person's role on a session, pushed to the pod holding it, as `push_acl/2` does; a
   # `nil` role is the invitation taken back, which the pod's mirror holds as refused.
   defp push_acl_change(%{worker_id: nil}, _subject, _role), do: false
@@ -1825,34 +1843,49 @@ defmodule Troupe.Plane.Harness do
   end
 
   # The pod gives the session's log its line, `session_invited` or `session_uninvited`, as it
-  # does for a share. Best effort: a dormant session has no pod, and the row is the record.
+  # does for a share. A dormant session has no pod: an invitation's line is then written at
+  # its next activation (`announce_pending/2`), and the row is the record meanwhile.
   defp announce_invite(%Session{worker_id: nil}, _type, _invitee, _role, _by), do: false
 
-  defp announce_invite(%Session{} = session, type, invitee, role, %User{} = by) do
+  defp announce_invite(%Session{} = session, type, invitee, role, by) do
     case Fleet.get_worker(session.worker_id) do
-      nil ->
-        false
-
-      worker ->
-        invite =
-          %{
-            "subject" => (invitee && invitee.subject) || "",
-            "display_name" => invitee && invitee.display_name,
-            "role" => role,
-            "by" => by.subject,
-            "by_name" => by.display_name
-          }
-          |> Map.reject(fn {_key, value} -> is_nil(value) end)
-
-        match?(
-          {:ok, _pushed},
-          Router.push(worker, "invite.changed", %{
-            "session_id" => session.id,
-            "type" => type,
-            "invite" => invite
-          })
-        )
+      nil -> false
+      worker -> push_invite(worker, session, type, invitee, role, by)
     end
+  end
+
+  defp push_invite(worker, session, type, invitee, role, by) do
+    invite =
+      %{
+        "subject" => (invitee && invitee.subject) || "",
+        "display_name" => invitee && invitee.display_name,
+        "role" => role,
+        "by" => by.subject,
+        "by_name" => Map.get(by, :display_name)
+      }
+      |> Map.reject(fn {_key, value} -> is_nil(value) end)
+
+    match?(
+      {:ok, _pushed},
+      Router.push(worker, "invite.changed", %{
+        "session_id" => session.id,
+        "type" => type,
+        "invite" => invite
+      })
+    )
+  end
+
+  # The lines a session's log did not get while no pod held it, now that one does.
+  defp announce_pending(worker, session) do
+    for invite <- Invites.unannounced(session.id) do
+      invitee = Identity.get_user(invite.subject) || %{subject: invite.subject, display_name: nil}
+      by = Identity.get_user(invite.invited_by) || %{subject: invite.invited_by}
+
+      if push_invite(worker, session, "session_invited", invitee, invite.role, by),
+        do: Invites.announced(session.id, invite.subject)
+    end
+
+    :ok
   end
 
   defp gone(session_id), do: Error.new(:not_found, %{session_id: session_id, reason: "erased"})
@@ -2226,6 +2259,7 @@ defmodule Troupe.Plane.Harness do
 
     case Router.push(worker, "session.activate", params) do
       {:ok, result} ->
+        activated(worker, session, params)
         {:ok, result}
 
       {:error, reason} ->
@@ -2483,6 +2517,7 @@ defmodule Troupe.Plane.Harness do
 
     case Router.push(worker, "session.activate", params) do
       {:ok, result} ->
+        activated(worker, session, params)
         {:ok, result}
 
       # The pod could not put the tree back and says why: the directory the session was
@@ -3197,6 +3232,14 @@ defmodule Troupe.Plane.Harness do
   # empty list takes away what was there.
   defp memory_params(session, team),
     do: %{"memory" => Memory.for_session(team, session.profile, Identity.get_user(session.owner_subject))}
+
+  # A session the pod took holds the memory its activation carried, until its first turn
+  # says what it read: kept so, it is among the readers of each document before that turn.
+  # And its log is given the lines of the invitations made while no pod held it.
+  defp activated(worker, session, params) do
+    :ok = Memory.activated(session, params["memory"] || [])
+    :ok = announce_pending(worker, session)
+  end
 
   # Whether the profile lets a repository's agents and skills replace its bundle's and the
   # built-ins of the same name (Decision 826): `spec.repositoryOverridesBundle`, on only

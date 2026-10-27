@@ -1176,6 +1176,16 @@ defmodule Troupe.Protocol.Schema do
         "id" => required(:string),
         "version" => required({:nullable, :integer})
       },
+      # Who may open it moved by its owner, or its title: a version over `base` carrying
+      # every file of it, no files sent.
+      "artifact.put" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "base" => required(:integer),
+        "visibility" => optional(:string),
+        "title" => optional(:string),
+        "note" => optional(:string)
+      },
       # A first run's questions (Decision 705) — the daemon's only, like the settings
       # they write; a worker answers `method_not_found`. `answer` is the named step's
       # answer, whose shape the step decides; the key goes in through it and never

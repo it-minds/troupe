@@ -1116,6 +1116,14 @@ export class DaemonClient {
     return this.command<ArtifactDetail>("artifact.rollback", { id, version });
   }
 
+  /**
+   * Who may open it, moved: the next version over `base`, the newest, carrying every file as
+   * it is (`artifact.put` with no files). The owner's alone.
+   */
+  moveArtifact(id: string, base: number, visibility: string): Promise<ArtifactDetail> {
+    return this.command<ArtifactDetail>("artifact.put", { id, base, visibility });
+  }
+
   /** The version its address serves, or null for the newest. The owner's. */
   pinArtifact(id: string, version: number | null): Promise<ArtifactDetail> {
     return this.command<ArtifactDetail>("artifact.pin", { id, version });

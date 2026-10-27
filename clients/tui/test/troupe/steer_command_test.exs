@@ -50,13 +50,18 @@ defmodule Troupe.SteerCommandTest do
 
     type(pid, "/steer on")
     press(pid, "enter")
-    eventually(fn -> List.first(user_state(pid).model.notices) == Steering.consent_question() end)
+    # The daemon's own words, from its refusal's data: the terminal keeps no copy of them.
+    asked = Relay.private_consent() <> " /steer on yes offers it; anything else keeps it sealed only."
+    eventually(fn -> List.first(user_state(pid).model.notices) == asked end)
+    assert Steering.consent_question(Relay.private_consent()) == asked
 
-    assert Steering.private_consent() == Relay.private_consent(),
-           "the terminal's copy of the daemon's words"
+    params = %{session_id: sid, share: [], command_id: Troupe.Remote.RPC.command_id()}
 
-    assert Steering.consent_question() =~ Relay.private_consent()
-    assert Steering.consent_question() =~ "/steer on yes offers it"
+    assert {:error, %{data: %{"consent" => "private", "reason" => reason}, message: said}} =
+             Troupe.Client.Daemon.Link.call_with_data("remote.offer", params)
+
+    assert reason == Relay.private_consent()
+    assert said =~ reason
 
     # Drawn as a person being needed.
     reserved = rgb(Palette.roles().needs_you.dark.rgb)

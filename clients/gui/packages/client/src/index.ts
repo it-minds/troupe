@@ -138,7 +138,7 @@ export type {
   RemotePerson,
 } from "./fleet.js";
 export { ArtifactApi, audienceName, audienceOf, scopeOf, textBytes, visibilityWords } from "./artifacts.js";
-export { besideRows, entriesText, entryWriter, inEffect, parseEntries, replacedBy, topicKey } from "./entries.js";
+export { besideRows, entriesText, entryWriter, inEffect, parseEntries, replacedBy, topicKey, writtenBy } from "./entries.js";
 export type { EntryLevel, InEffect, MemoryEntry } from "./entries.js";
 export type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactFile, ArtifactFilter, ArtifactKind, ArtifactLinkUse, ArtifactList, ArtifactNewLink, ArtifactOrigin, ArtifactPerson, ArtifactPut, ArtifactRole, ArtifactScope, ArtifactShare, ArtifactText, ArtifactTicket, ArtifactUpload, ArtifactVersion } from "./artifacts.js";
 export { openRemote, remoteRefusal, watchRemote, watchUrl, when as remoteWhen } from "./remote.js";

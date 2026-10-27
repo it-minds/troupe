@@ -10,6 +10,7 @@ Unix socket, loopback TCP or a loopback WebSocket, and emits the same events a p
 ```
 troupe-daemon [run]               serve on this machine until idle or stopped
 troupe-daemon status              say whether one is running, and where
+troupe-daemon stop                stop the one running here, between turns, and wait until it has
 troupe-daemon open [--url URL]    start it if need be, and open the web app connected to it
 troupe-daemon config              the resolved providers and models (keys masked)
 troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it
@@ -154,6 +155,10 @@ has one clock, and the three modules that keep them (`Troupe.Session.ClientTools
 | a session sleeps, watched | idle or waiting on a person, with somebody following it but not reading it — a `fleet` subscriber, watch mode | `TROUPE_SESSION_IDLE_MINUTES` (`:troupe_core, :session_idle_ms`) | 30 min |
 | a session sleeps, unwatched | the same, with nobody watching it | `TROUPE_SESSION_DETACHED_MINUTES` (`:troupe_core, :detached_idle_ms`) | 2 min |
 | the daemon exits | no client connected, no session awake and none offered for steering from another device; never for one started at login ([above](#start-at-login)) | `TROUPE_DAEMON_IDLE_MINUTES` (`:troupe_daemon, :idle_shutdown_ms`) | 10 min |
+
+`troupe-daemon stop` does not wait for the last rung: it asks the daemon running here to
+stop between turns, as `troupe update` does, waits while a turn is at work and until
+nothing answers, and leaves a daemon a TUI runs inside itself, exiting 1.
 
 `0` means never on the minute clocks. A session that sleeps stops its tree and keeps its
 log: the next command that acts on it — input, an answer, an approval — brings it back,

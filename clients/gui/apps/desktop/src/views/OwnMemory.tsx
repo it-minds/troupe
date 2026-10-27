@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { besideRows, entriesText, entryWriter, inEffect, parseEntries, replacedBy, topicKey } from "@troupe/client";
+import { besideRows, entriesText, entryWriter, inEffect, parseEntries, replacedBy, topicKey, writtenBy } from "@troupe/client";
 import type { DaemonClient, EntryLevel, MemoryEntry, MemoryStatus, OwnMemory, OwnMemoryHistory } from "@troupe/client";
 import { Loading, relative } from "./bits";
 
@@ -666,7 +666,7 @@ function Versions({
             {(own.lines ?? []).map((l, i) => (
               <tr key={i}>
                 <th scope="row" title={l.at ?? undefined}>
-                  {l.agent ? `v${l.version} ${l.agent} in ${l.session ?? "a session"}` : l.session ? `v${l.version} an agent in ${l.session}` : `v${l.version} ${l.by ?? ""}`.trim()}
+                  {writtenBy(l)}
                 </th>
                 <td>{l.text}</td>
               </tr>

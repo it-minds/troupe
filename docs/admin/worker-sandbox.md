@@ -27,7 +27,7 @@ worker:
 
 - **`Localhost`**, the default, is the profile the chart ships: the runtime's default plus
   the calls bubblewrap makes its namespaces with
-  ([security.md §3](security.md#3-a-worker-isolation-and-egress) says what it allows and
+  ([a worker's isolation and egress](security-worker.md) says what it allows and
   why). The kubelet reads it from the node, so it must be on every node that runs workers.
   The `seccomp` container of the chart's DaemonSet `troupe-worker-profiles`, one per node,
   copies it there from a ConfigMap and waits, ready while the file is in place. It mounts
@@ -64,7 +64,7 @@ Where a node enforces AppArmor, as Ubuntu's do, two things of AppArmor's stop bu
 `worker.appArmor` gives the worker container a profile of its own that answers both
 without touching the node's sysctl: the runtime's default with bubblewrap's mounts and
 `pivot_root` allowed, under which a worker is confined when it makes the namespace, so the
-restriction does not apply ([security.md §3](security.md#3-a-worker-isolation-and-egress)
+restriction does not apply ([a worker's isolation and egress](security-worker.md)
 says what it allows and denies). The default needs nothing from you:
 
 ```yaml
