@@ -141,6 +141,60 @@ defmodule Troupe.Gateway.LocalOnlyTest do
            )
   end
 
+  # A create with a prompt starts the first turn inside the create: the session is under
+  # its client's Local only before it starts, not after the create answers.
+  test "a session a Local-only client creates with its prompt is under Local only from its first turn",
+       ctx do
+    script = Path.join(Path.dirname(ctx.workspace), "fake.json")
+
+    File.write!(
+      script,
+      Jason.encode!(%{
+        "routes" => %{
+          "root" => [
+            %{"text" => "", "tools" => [%{"name" => "remember", "input" => %{"level" => "me", "claim" => "Prefers tabs."}}]},
+            %{"text" => "ok"}
+          ]
+        }
+      })
+    )
+
+    File.write!(Path.join(System.get_env("TROUPE_CONFIG_HOME"), "config.yaml"), """
+    provider: fake
+    models: {default: fake-model}
+    auto_approve: true
+    fake_script: #{script}
+    """)
+
+    assert {:ok, %{"session_id" => sid}} =
+             Client.call(ctx.local, "session.create", %{
+               "command_id" => Client.command_id(),
+               "workspace" => ctx.workspace,
+               "prompt" => "remember that I like tabs"
+             })
+
+    on_exit(fn -> Troupe.stop_session(sid) end)
+    assert eventually(fn -> Enum.any?(Troupe.events(sid), &(&1.type == "turn_ended")) end)
+    asked = length(FakePlane.calls(ctx.plane.state))
+
+    # Its first turn's remember is refused, and the turn said what it reads.
+    refused = completed(sid)
+    assert refused =~ "Local only"
+    assert [first | _] = for(e <- Troupe.events(sid), e.type == "instructions_loaded", do: e)
+    assert first.data["local_only"] =~ "Local only"
+
+    # The poll goes on for the client that is not in Local only, and reports nothing of it.
+    assert eventually(fn ->
+             FakePlane.calls(ctx.plane.state)
+             |> Enum.drop(asked)
+             |> Enum.any?(&match?({"me.memory", %{"sessions" => _}}, &1))
+           end)
+
+    refute Enum.any?(FakePlane.calls(ctx.plane.state), fn {_method, params} ->
+             inspect(params) =~ sid
+           end)
+  end
+
   test "the poll's report leaves a Local-only session out, an offer is refused, and its client's memory calls ask nothing",
        ctx do
     %{session: kept} = session(ctx, [{:text, "one"}])

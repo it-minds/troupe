@@ -239,6 +239,42 @@ defmodule Troupe.WhereAFileGoesTest do
     assert Harness.paragraph() |> String.split() |> length() <= 120
   end
 
+  # A stdio server answers `initialize` a moment after the session starts, so on the first
+  # turn its tools are not offered yet: the line says it is starting rather than that no
+  # tool stores files, and the turn is not held up for it.
+  test "a store's server still starting is said to be, and the turn does not wait for it", context do
+    # As `config.yaml`'s `mcp:` reads `stores: files`: a server that never answers
+    # `initialize`, so it is starting for the whole turn.
+    server = %{
+      command: "sleep",
+      args: ["30"],
+      env: %{},
+      cd: nil,
+      url: nil,
+      permission: :ask,
+      timeout_ms: 30_000,
+      stores: :files
+    }
+
+    %{session: session, fake: fake} =
+      start_session(context,
+        config_overrides: [mcp: %{"docs" => server}],
+        steps: [{:text_and_tools, "Done.", [{"finish", finished("done")}]}]
+      )
+
+    :ok = Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "write the Q3 report")
+    await_event(session.id, :agent_done, 10_000)
+
+    assert prompt_text(hd(Fake.requests(fake))) =~
+             "- where the organisation keeps files: not yet; the docs server is starting, its tools join at the next turn"
+
+    assert %{"starting" => ["docs"], "file_tools" => []} = harness_of(session.id)["open"]
+
+    assert Harness.text(%{file_tools: ["mcp.a.save"], starting: ["b", "c"], artifact: :none, where: :local}) =~
+             "`mcp.a.save`; the b, c servers are still starting"
+  end
+
   test "a person's offered tool marked files, and a held one, store files; nothing else does" do
     offered = %{name: "client.wiki.save", files: true}
     held = %Troupe.Agent.Hold.Tool{name: "mcp.docs.save", description: "", schema: %{}, files: true}

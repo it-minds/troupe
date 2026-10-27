@@ -1137,8 +1137,14 @@ defmodule Troupe.Gateway.Dispatch do
       # The client that asked is the one the session names to the provider (Decision 787).
       config = [client: context.client] ++ List.wrap(overrides(Map.get(params, "config")))
 
+      # Its id is made here so the session is put under its client's Local only (or out of
+      # it) before it starts: a create with a prompt starts the first turn inside the start,
+      # and that turn is the client's work as much as any later one.
+      session_id = Troupe.Session.generate_id()
+      :ok = LocalOnly.worked(context.connection, session_id)
+
       opts =
-        [workspace: resolved.path, agent: profile, config_overrides: config]
+        [workspace: resolved.path, agent: profile, config_overrides: config, session_id: session_id]
         |> maybe_put(:task, task)
         |> maybe_put(:parent, parent)
         |> maybe_private(private?)
