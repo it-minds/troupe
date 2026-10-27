@@ -84,7 +84,17 @@ defmodule Troupe.WhereAFileGoesTest do
     assert prompt =~ "- an artifact: not from here, no plane publishes one"
     assert_received {:called, "mcp.docs.upload", %{"name" => "q3.md"}}
 
-    assert %{"scope" => "harness", "path" => "harness", "status" => "whole"} = harness_of(session.id)
+    assert %{
+             "scope" => "harness",
+             "path" => "harness",
+             "status" => "whole",
+             "open" => %{
+               "file_tools" => ["mcp.docs.upload"],
+               "artifact" => %{"state" => "none"},
+               "where" => "local"
+             }
+           } = harness_of(session.id)
+
     assert events_of_type(session.id, :question_asked) == []
   end
 
@@ -137,6 +147,9 @@ defmodule Troupe.WhereAFileGoesTest do
       )
 
     assert prompt =~ "- an artifact: not from here, this session is under Local only"
+
+    assert %{"state" => "closed", "why" => "this session is under Local only"} =
+             harness_of(session.id)["open"]["artifact"]
 
     assert prompt =~
              "- the workspace, always: this session runs on the person's machine, so the file is already there"

@@ -1969,11 +1969,8 @@ defmodule Troupe.Agent.Server do
         _local -> :local
       end
 
-    Instructions.Harness.text(%{
-      file_tools: Instructions.Harness.file_tools(tools),
-      artifact: artifact,
-      where: where
-    })
+    open = %{file_tools: Instructions.Harness.file_tools(tools), artifact: artifact, where: where}
+    %{text: Instructions.Harness.text(open), open: Instructions.Harness.json(open)}
   end
 
   defp harness(_child), do: nil

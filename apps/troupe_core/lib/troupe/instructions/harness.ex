@@ -46,6 +46,22 @@ defmodule Troupe.Instructions.Harness do
   end
 
   @doc """
+  What is open, as `instructions_loaded` lists it beside the layer: `file_tools`, `artifact`
+  (`open`, `none`, or `closed` with `why`) and `where` (`local` or `pod`), so the log says
+  which ways each turn was told of.
+  """
+  @spec json(open()) :: map()
+  def json(%{file_tools: tools, artifact: artifact, where: where}) do
+    artifact =
+      case artifact do
+        {:closed, why} -> %{"state" => "closed", "why" => why}
+        state -> %{"state" => to_string(state)}
+      end
+
+    %{"file_tools" => tools, "artifact" => artifact, "where" => to_string(where)}
+  end
+
+  @doc """
   The tools of a list that store files: an MCP server's tool its config marks so (`files`
   on the tool, from the server's `stores: files`), or a person's offered tool their client
   marked `files`. By name, in the list's order.

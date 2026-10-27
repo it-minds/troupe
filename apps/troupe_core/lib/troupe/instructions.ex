@@ -245,8 +245,9 @@ defmodule Troupe.Instructions do
   those on the way to the workspace, and they are what a rule's globs match.
   `searched` is every directory looked in, whether or not it had one.
 
-  `harness:` is Troupe's own word for this agent (`Troupe.Instructions.Harness.text/1`),
-  read first of all and outside the files' budget; without it there is none.
+  `harness:` is Troupe's own word for this agent, `%{text, open}`
+  (`Troupe.Instructions.Harness.text/1` and `json/1`), read first of all and outside the
+  files' budget; without it there is none.
   """
   @spec load(Path.t(), Config.t() | nil, [Path.t()], keyword()) :: t()
   def load(workspace, config, focus \\ [], opts \\ []) do
@@ -1065,9 +1066,10 @@ defmodule Troupe.Instructions do
   # to a limit of its own rather than cut to make room for anything.
   @harness_max_chars 2_000
 
-  defp harness(text) when is_binary(text) and text != "" do
+  defp harness(%{text: text, open: open}) when is_binary(text) and text != "" do
     [
       %{
+        open: open,
         scope: :harness,
         path: "harness",
         directory: nil,
@@ -1174,7 +1176,12 @@ defmodule Troupe.Instructions do
       "applies" => f.applies
     }
     |> Map.merge(memory_json(f))
+    |> Map.merge(open_json(f))
   end
+
+  # The harness's word says what was open for a file in the session it was read for.
+  defp open_json(%{scope: :harness, open: open}), do: %{"open" => open}
+  defp open_json(_file), do: %{}
 
   # A memory document says which version is in force, and whose it is.
   defp memory_json(%{scope: scope, version: version} = f) when scope in @memory_scopes,

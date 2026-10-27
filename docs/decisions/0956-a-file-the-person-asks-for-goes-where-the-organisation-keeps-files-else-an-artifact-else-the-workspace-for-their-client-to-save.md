@@ -39,6 +39,7 @@ paths:
   - clients/gui/apps/desktop/src/shell-tauri.ts
   - clients/gui/apps/desktop/src-tauri/src/file_save.rs
   - clients/gui/apps/desktop/src-tauri/capabilities/default.json
+  - clients/gui/apps/desktop/test/file-ready.test.tsx
   - PROTOCOL.md
   - docs/user/README.md
   - docs/user/mcp.md
@@ -63,7 +64,8 @@ and nothing told the person's client a file was meant for them.
 
 **Every root agent's instructions start with a fixed paragraph of the harness's
 (`Troupe.Instructions.Harness`), then what is open in that session.** It is a layer of its
-own, `scope: harness`, `path: harness`, listed first in `instructions_loaded` and before the
+own, `scope: harness`, `path: harness`, listed first in `instructions_loaded` (with `open`,
+what it said was open, so the log says which ways a turn was told of) and before the
 organisation's memory in the prompt, outside the files' budget and never cut. Being first
 is what lets every layer after it say otherwise: the paragraph says an instruction after
 it decides outright, so an organisation's memory or an `AGENTS.md` that says "reports go to
@@ -151,5 +153,10 @@ the artifact closed and why; under Local only, the workspace line and `file_read
 path, size, hash and `local_path`; the person naming the store, no question; two ways open
 and none named, one question with both as options, and the chosen way called; the paragraph
 at most 120 words; a person's offered tool and a held tool marked `files` named, nothing
-else. The offline bench's budgets were measured with the paragraph and raised by that plus
+else. `Troupe.Protocol.BundleTest` (the marking parsed, carried to the worker, refused in
+any other spelling), `Troupe.Gateway.ClientToolsTest` (a registration keeps `files`), the
+TUI's `remote_translate_test.exs` and `command_audit_test.exs` (the line on a laptop and a
+pod; `/save` from a pod), the client library's `transcript.test.ts` and
+`own-servers.test.ts`, and the desktop app's `file-ready.test.tsx` (the line, its Save…
+through `fs.read` and the shell's dialog). The offline bench's budgets were measured with the paragraph and raised by that plus
 five per cent (`budgets.json`'s `$comment`).
