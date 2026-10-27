@@ -128,6 +128,10 @@ defmodule Troupe.Gateway.FakePlane do
   @spec teams_with(pid(), [String.t()]) :: :ok
   def teams_with(state, teams), do: Agent.update(state, &Map.put(&1, :teams, teams))
 
+  @doc "Which levels the person may change, which `me.memory` asked with `entries` says (`roles`)."
+  @spec roles_with(pid(), map()) :: :ok
+  def roles_with(state, roles), do: Agent.update(state, &Map.put(&1, :roles, roles))
+
   @doc "The person's own document as this plane holds it."
   @spec own(pid()) :: map() | nil
   def own(state), do: Agent.get(state, &Map.get(&1, :own))
@@ -441,6 +445,8 @@ defmodule Troupe.Gateway.FakePlane do
   defp dispatch(state, "me.memory", params) do
     names = Agent.get(state, &Map.get(&1, :teams))
     teams = if is_list(names) and params["entries"] == true, do: %{"teams" => names}, else: %{}
+    roles = Agent.get(state, &Map.get(&1, :roles))
+    teams = if is_map(roles) and params["entries"] == true, do: Map.put(teams, "roles", roles), else: teams
 
     case Agent.get(state, &{Map.get(&1, :memory), Map.get(&1, :own)}) do
       {nil, nil} -> {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory"}}

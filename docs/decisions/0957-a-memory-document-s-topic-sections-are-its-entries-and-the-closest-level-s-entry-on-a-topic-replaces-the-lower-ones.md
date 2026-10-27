@@ -178,7 +178,9 @@ memory keeps its document editor and gains only *Its entries*, a read-only list.
 ## Left
 
 The app's and the terminal's screens for changing the organisation's and a team's levels over
-`admin.memory.*`; a fallback for a plane from before `memory.in_effect` (the daemon says it is
+`admin.memory.*` (since drawn, by role: `me.memory {entries: true}` answers `roles`, whether
+the caller is a platform admin and the teams they administer, and a refusal of a level's save
+says in `data.reason` who may change it); a fallback for a plane from before `memory.in_effect` (the daemon says it is
 `unavailable`); rules inside memory; an agent writing above the person's level.
 
 ## Proof

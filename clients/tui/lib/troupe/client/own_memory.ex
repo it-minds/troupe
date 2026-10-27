@@ -8,6 +8,11 @@ defmodule Troupe.Client.OwnMemory do
   A save names the version it was edited from; one made elsewhere since is a `conflict`,
   answered with the version in force, never an overwrite. Rolling back is saving an old
   version's text over the one in force, a version of its own.
+
+  A level above the person's own is saved here too where `me.memory`'s `roles` say they may
+  change it (the organisation's for a platform admin, a team's for its admins), through the
+  daemon's forwarded `admin.memory.preview` and `admin.memory.put` as them: the plane
+  decides, and its refusal is its own sentence.
   """
 
   alias Troupe.CLI.Memory
@@ -127,22 +132,120 @@ defmodule Troupe.Client.OwnMemory do
   defp level_of(_none, levels), do: List.last(levels)
 
   @doc """
-  Whether a new entry on `topic` at `level` clashes: `{:here, level}` where that level has one
-  already, `{:lower, level}` where it would replace a lower level's, or `nil`. Topics compare
-  by their words, case and spacing aside, as the plane compares them.
+  Whether a new entry on `topic` at `level` clashes: `{:here, level, entry}` where that level
+  has one already, `{:lower, level, entry}` where it would replace a lower level's, or `nil`.
+  Topics compare by their words, case and spacing aside, as the plane compares them.
   """
-  @spec clash([map()], map(), String.t()) :: {:here | :lower, map()} | nil
+  @spec clash([map()], map(), String.t()) :: {:here | :lower, map(), map()} | nil
   def clash(levels, level, topic) do
     k = Entries.key(topic)
-    has = fn l -> Enum.any?(l.entries, &(&1.key == k)) end
+    on = fn l -> Enum.find(l.entries, &(&1.key == k)) end
 
     cond do
       k == "" -> nil
-      has.(level) -> {:here, level}
-      lower = Enum.find(levels, &(&1.rank < level.rank and has.(&1))) -> {:lower, lower}
+      entry = on.(level) -> {:here, level, entry}
+      lower = Enum.find(levels, &(&1.rank < level.rank and on.(&1))) -> {:lower, lower, on.(lower)}
       true -> nil
     end
   end
+
+  @doc """
+  Which levels above their own the person may change, as `me.memory`'s `roles` say: the
+  organisation's for a platform admin, a team's for its admins. Nobody's where the plane
+  says nothing of roles. The plane still decides at every save.
+  """
+  @spec roles(map()) :: %{platform_admin: boolean(), team_admin: [String.t()]}
+  def roles(%{"roles" => %{} = roles}),
+    do: %{
+      platform_admin: roles["platform_admin"] == true,
+      team_admin: Enum.filter(List.wrap(roles["team_admin"]), &is_binary/1)
+    }
+
+  def roles(_own), do: %{platform_admin: false, team_admin: []}
+
+  @doc "Whether the person may change `level` with these `roles`: their own always."
+  @spec may_change?(map(), map()) :: boolean()
+  def may_change?(_roles, %{scope: "user"}), do: true
+  def may_change?(%{platform_admin: admin?}, %{scope: "organisation"}), do: admin?
+  def may_change?(%{team_admin: teams}, %{scope: "team", name: name}), do: name in teams
+  def may_change?(_roles, _level), do: false
+
+  @doc """
+  What saving `level` as it stands would reach, written nowhere (`admin.memory.preview`, the
+  plane's as the person): how many running sessions read it at their next turn, or the
+  plane's sentence where the person may not change it.
+  """
+  @spec reach(map()) :: {:ok, non_neg_integer()} | {:error, String.t()}
+  def reach(level) do
+    params = level |> level_params() |> Map.put("entries", wire(level.entries))
+
+    case Link.call("admin.memory.preview", params) do
+      {:ok, %{"readers" => %{"sessions" => sessions}}} when is_list(sessions) ->
+        {:ok, length(sessions)}
+
+      {:ok, _answer} ->
+        {:ok, 0}
+
+      {:error, reason} ->
+        {:error, Artifacts.reason(reason)}
+    end
+  end
+
+  @doc """
+  Save a level above the person's own, the organisation's or a team's, as `entries` over the
+  version it was read at (`admin.memory.put`, the plane's as the person, which decides who
+  may): `{:ok, %{"version", "changed"}}`, `{:conflict, newest}` with the version in force and
+  its text, or the plane's sentence.
+  """
+  @spec save_level_entries(map(), [map()]) ::
+          {:ok, map()} | {:conflict, map()} | {:error, String.t()}
+  def save_level_entries(level, entries) do
+    params =
+      level
+      |> level_params()
+      |> Map.merge(%{
+        "command_id" => Protocol.command_id(),
+        "entries" => wire(entries),
+        "version" => level.version
+      })
+
+    case Link.call("admin.memory.put", params) do
+      {:ok, %{} = saved} ->
+        {:ok,
+         %{
+           "version" => get_in(saved, ["document", "version"]) || level.version,
+           "changed" => saved["changes"] not in [nil, %{}]
+         }}
+
+      {:error, "conflict" <> _} ->
+        newest(level)
+
+      {:error, reason} ->
+        {:error, Artifacts.reason(reason)}
+    end
+  end
+
+  # The version in force of a level, as the plane has it, for a conflict to show beside.
+  defp newest(level) do
+    case Link.call("admin.memory.get", level_params(level)) do
+      {:ok, doc} ->
+        last = doc |> Map.get("versions") |> List.wrap() |> List.first() || %{}
+
+        {:conflict,
+         %{
+           "version" => doc["version"] || 0,
+           "text" => doc["text"] || "",
+           "changed_by" => last["changed_by"],
+           "changed_at" => last["changed_at"]
+         }}
+
+      {:error, reason} ->
+        {:error, Artifacts.reason(reason)}
+    end
+  end
+
+  defp level_params(%{scope: "team", name: name}), do: %{"scope" => "team", "name" => name}
+  defp level_params(%{scope: scope}), do: %{"scope" => scope}
 
   @doc "A level's entries with the one on `topic` (or on `was`, renamed) written as `body`: in its place, or last."
   @spec put_entry([map()], String.t(), String.t(), String.t() | nil) :: [map()]

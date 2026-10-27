@@ -63,6 +63,12 @@ export interface OwnMemory {
   documents?: Array<{ scope: string; name: string | null; version: number; hash?: string; updated_at?: string | null; text: string; entries?: MemoryEntry[] }>;
   /** The organisation's name, for "Everyone at <name>". */
   organisation?: { name: string } | null;
+  /**
+   * Which levels above their own the person may change, as the plane says: the organisation's
+   * for a platform admin, a team's for its admins. Absent from a plane from before it, which
+   * lets nobody change them here. The plane still decides at every save.
+   */
+  roles?: { platform_admin: boolean; team_admin: string[] };
 }
 
 /** The person's own memory's history (`me.memory.history`): every version, one beside another. */

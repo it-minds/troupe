@@ -20,7 +20,7 @@ import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsP
 import { remoteOffer, syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
 import type { MemoryStatus, OwnMemory, OwnMemoryHistory, OwnMemorySaved } from "./instructions.js";
-import type { MemoryDocument, MemorySaved } from "./admin.js";
+import type { MemoryDocument, MemoryPreview, MemorySaved } from "./admin.js";
 import type { MemoryEntry, MemoryInEffect } from "./entries.js";
 import type { Invitee, InviteRole, SealedRead } from "./invites.js";
 import type { MemoryBrief } from "./memory.js";
@@ -1104,8 +1104,13 @@ export class DaemonClient {
     return this.call<MemoryDocument>("admin.memory.get", name === null ? { scope } : { scope, name });
   }
 
+  /** What saving a level the person administers would do, written nowhere: the plane's `admin.memory.preview`, with the running sessions it reaches. */
+  previewLevelMemory(scope: "organisation" | "team" | "profile", name: string | null, doc: { text: string } | { entries: Array<Pick<MemoryEntry, "topic" | "body" | "heading">> }): Promise<MemoryPreview> {
+    return this.call<MemoryPreview>("admin.memory.preview", { scope, ...(name === null ? {} : { name }), ...doc });
+  }
+
   /** Save a level the person administers, as text or entries, over the version it was edited from. */
-  putLevelMemory(scope: "organisation" | "team" | "profile", name: string | null, doc: { text: string } | { entries: Array<Pick<MemoryEntry, "topic" | "body">> }, version: number): Promise<MemorySaved> {
+  putLevelMemory(scope: "organisation" | "team" | "profile", name: string | null, doc: { text: string } | { entries: Array<Pick<MemoryEntry, "topic" | "body" | "heading">> }, version: number): Promise<MemorySaved> {
     return this.command<MemorySaved>("admin.memory.put", { scope, ...(name === null ? {} : { name }), ...doc, version });
   }
 

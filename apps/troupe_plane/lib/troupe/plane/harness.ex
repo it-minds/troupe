@@ -389,8 +389,11 @@ defmodule Troupe.Plane.Harness do
   # `entries: true` adds `entries` to each document and to their own: its `## Topic`
   # sections, each with who last changed it and when and in how many sessions it was used
   # (`InEffect.entries/2`). The poll does not ask it; a client showing memory does. Beside
-  # them, the organisation's name, for "Everyone at <name>".
-  defp handle("me.memory", params, %{user: user}) do
+  # them, the organisation's name, for "Everyone at <name>", and `roles`: whether the caller
+  # is a platform admin and the teams they administer, so a client offers to change a level
+  # only to whoever the plane lets change it, and says who can otherwise. The plane still
+  # decides at every save.
+  defp handle("me.memory", params, %{user: user} = context) do
     :ok = Memory.machine(user, params["sessions"])
     own = Memory.own(user)
     own = if params["blame"] == true and is_binary(user.id), do: Map.put(own, "lines", Memory.blame(user)), else: own
@@ -407,7 +410,8 @@ defmodule Troupe.Plane.Harness do
           | "documents" => Enum.map(documents, &with_entries(&1, user)),
             "user" => Map.put(own, "entries", with_entries(%{"scope" => "user"}, user)["entries"])
         }
-        |> Map.put("teams", user |> Identity.teams_for() |> Enum.map(& &1.name) |> Enum.sort()),
+        |> Map.put("teams", user |> Identity.teams_for() |> Enum.map(& &1.name) |> Enum.sort())
+        |> Map.put("roles", memory_roles(user, context)),
         else: answer
 
     {:ok, Signing.signed("memory", answer)}
@@ -3318,6 +3322,18 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp admin?(context), do: Map.get(context, :platform_admin?, false)
+
+  # Who may change which memory level, as `Admin.memory_put/6` decides it: a platform admin
+  # the organisation's, a team's admins that team's. A principal administers nothing.
+  defp memory_roles(%{kind: "service"}, _context),
+    do: %{"platform_admin" => false, "team_admin" => []}
+
+  defp memory_roles(user, context) do
+    %{
+      "platform_admin" => admin?(context),
+      "team_admin" => user |> Identity.teams_administered_by() |> Enum.map(& &1.name)
+    }
+  end
 
   # Resolved, not raw. What a client reads here it acts on — whether to offer a steer
   # button, when to expect a session to go dormant — and a column that the platform is

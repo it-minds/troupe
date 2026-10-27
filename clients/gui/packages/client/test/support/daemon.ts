@@ -645,6 +645,14 @@ evoked where nothing is set and there was a sign-in. */
   ownAbove: Array<{ scope: string; name: string | null; version: number; text: string; by?: string }> = [];
   /** Every `memory.in_effect` asked, in order. */
   readonly inEffectAsked: Array<Record<string, unknown>> = [];
+  /** What `me.memory` says of the person's roles (`roles`); null for a plane that says nothing of them. */
+  memoryRoles: { platform_admin: boolean; team_admin: string[] } | null = null;
+  /** The roles the plane decides `admin.memory.*` by, where they differ from what `me.memory` said (a role taken away since). */
+  planeRoles: { platform_admin: boolean; team_admin: string[] } | null = null;
+  /** Every `admin.memory.preview` and `admin.memory.put` the daemon sent on, in order, with its method. */
+  readonly levelCalls: Array<Record<string, unknown>> = [];
+  /** How many running sessions a level's preview says it reaches. */
+  levelReaders = 2;
   /** What `me.memory.status` says each session here read at its last turn. */
   memoryReads: Array<Record<string, unknown>> = [];
   /** Every forwarded `artifact.*` call (get, open, share, unshare, rollback, pin), in order. */
@@ -1674,7 +1682,7 @@ evoked where nothing is set and there was a sign-in. */
           const lines = params["blame"] === true ? own.text.split("\n").filter((l) => l !== "").map((text) => ({ text, version: own.version, by: "alice@example.com", at: "2026-10-26T08:00:00Z" })) : undefined;
           // Every document with its entries, as the plane answers them through the daemon.
           const documents = this.ownAbove.map((d) => ({ ...d, entries: entriesOf(d.text, d.version, d.by ?? (d.scope === "organisation" ? "root@example.com" : "lead@example.com")) }));
-          return reply(ws, id, { ...json(own), entries: entriesOf(own.text, own.version, "alice@example.com"), documents, organisation: { name: "Example" }, ...(lines ? { lines } : {}) });
+          return reply(ws, id, { ...json(own), entries: entriesOf(own.text, own.version, "alice@example.com"), documents, organisation: { name: "Example" }, ...(this.memoryRoles ? { roles: this.memoryRoles } : {}), ...(lines ? { lines } : {}) });
         }
         if (method === "me.memory.history") {
           const of = (n: unknown): { version: number; text: string } | undefined => this.ownVersions.find((v) => v.version === n);
@@ -1710,6 +1718,54 @@ evoked where nothing is set and there was a sign-in. */
         if (text === own.text) return reply(ws, id, { changed: false, entry: null, user: json(own) });
         keep(text);
         return reply(ws, id, { changed: true, entry: null, user: json(this.own!) });
+      }
+
+      // A level of the organisation's memory, sent on to the plane as the person: the plane
+      // decides who may, a platform admin the organisation's and a team's admins theirs, and
+      // anybody else is told its sentence, as the real plane's refusal says it.
+      case "admin.memory.get":
+      case "admin.memory.preview":
+      case "admin.memory.put": {
+        if (client.localOnly) {
+          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { local_only: true, reason: "this client is in Local only, so the daemon does not ask the plane for its memory; turn Local only off to read or change it" } });
+        }
+        if (!this.own) {
+          return reply(ws, id, null, { code: -32010, message: "unavailable", data: { reason: "this computer's daemon is not signed in to a Troupe plane; troupe login signs it in" } });
+        }
+        const roles = this.planeRoles ?? this.memoryRoles ?? { platform_admin: false, team_admin: [] };
+        const scope = String(params["scope"]);
+        const name = typeof params["name"] === "string" ? params["name"] : null;
+        if (scope === "organisation" && !roles.platform_admin && method !== "admin.memory.get") {
+          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { required_role: "platform_admin", reason: "only a platform administrator changes the organisation's memory" } });
+        }
+        if (scope === "team" && !roles.platform_admin && !roles.team_admin.includes(name ?? "")) {
+          return roles.team_admin.length > 0
+            ? reply(ws, id, null, { code: -32005, message: "not_found", data: { team: name, reason: `there is no team called ${name} that you administer, so its memory is not yours to change` } })
+            : reply(ws, id, null, { code: -32004, message: "forbidden", data: { required_role: "team_admin", reason: `only ${name}'s team admins and the platform administrators change ${name}'s memory` } });
+        }
+        let doc = this.ownAbove.find((d) => d.scope === scope && d.name === name);
+        if (method === "admin.memory.get") {
+          return reply(ws, id, { scope, name, version: doc?.version ?? null, text: doc?.text ?? "", entries: entriesOf(doc?.text ?? "", doc?.version ?? 0, doc?.by ?? "lead@example.com"), versions: [], diff: [], plane_url: "https://plane.example.test" });
+        }
+        this.levelCalls.push({ method, ...params });
+        const text = (Array.isArray(params["entries"]) ? render(params["entries"] as Array<{ topic?: string; body?: string }>) : String(params["text"] ?? "")).replace(/\r\n/g, "\n").trimEnd();
+        if (method === "admin.memory.preview") {
+          const sessions = Array.from({ length: this.levelReaders }, (_, i) => ({ session_id: `s-${i + 1}`, where: "pod", owner: null, profile: null, version: doc?.version ?? 0, behind: false }));
+          return reply(ws, id, { subject: scope, version: doc?.version ?? null, bytes: text.length, limit: 8192, unchanged: text === (doc?.text ?? ""), diff: [], effect: "Its sessions read it from their next turn.", readers: { version: doc?.version ?? 0, behind: 0, sessions }, plane_url: "https://plane.example.test" });
+        }
+        if (params["version"] !== (doc?.version ?? 0)) {
+          return reply(ws, id, null, { code: -32006, message: "conflict", data: { reason: `${scope === "team" ? `team/${name}` : scope} was saved by somebody else since version ${String(params["version"])}; version ${doc?.version ?? 0} is in force now`, version: doc?.version ?? 0 } });
+        }
+        if (text === (doc?.text ?? "")) return reply(ws, id, { document: doc ? { version: doc.version } : null, changes: {}, plane_url: "https://plane.example.test" });
+        const from = doc?.version ?? 0;
+        if (!doc) {
+          doc = { scope, name, version: 0, text: "" };
+          this.ownAbove.push(doc);
+        }
+        doc.version = from + 1;
+        doc.text = text;
+        doc.by = "alice@example.com";
+        return reply(ws, id, { document: { version: doc.version }, changes: { version: { from, to: doc.version } }, plane_url: "https://plane.example.test" });
       }
 
       // An artifact published on the plane through this daemon's sign-in, and the person's

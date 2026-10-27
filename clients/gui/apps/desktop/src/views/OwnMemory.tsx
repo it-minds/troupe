@@ -10,7 +10,11 @@
 // in how many sessions it was used; the person changes their own here (adding, editing and
 // forgetting entries, saved as entries over the version they read, through this computer's
 // daemon, which hands the new version to the sessions running here for their next turn).
-// The levels above are read here and kept in the console by those who may change them.
+// A level above is changed here too by whoever the plane lets change it, as `me.memory`'s
+// `roles` say: a platform admin the organisation's, a team's admins that team's, through the
+// daemon's forwarded `admin.memory.preview` and `admin.memory.put` as them. Everybody else
+// reads it, with who can change it; the console's document editor is the administrators'
+// other way.
 //
 // The person's own level has a Versions drawer: every version, any two side by side, a
 // rollback to one, who wrote each line, where this computer's copy stands and what each
@@ -34,7 +38,14 @@ interface Level {
   glyph: string;
   entries: MemoryEntry[];
   editable: boolean;
+  /** The version in force, 0 for none: what a save names it was edited from. */
+  version: number;
+  /** How close it is: the organisation's 0, a team's 1, the person's own 3. */
+  rank: number;
 }
+
+/** A level's name in a sentence: "Everyone at Example", "Team core", "Only you". */
+const titleOf = (l: Level): string => (l.level.scope === "team" ? `Team ${l.label}` : l.label);
 
 function message(e: unknown): string {
   const data = (e as { data?: { reason?: unknown } } | null)?.data;
@@ -47,24 +58,42 @@ const isConflict = (e: unknown): boolean => (e as { message?: unknown } | null)?
 /**
  * The levels a person's sessions read, lowest first: the organisation's, each team's, their
  * own, each with its entries as the plane answered them (`me.memory`, one per `## Topic`).
+ * Their own is theirs to change; the organisation's a platform admin's, and a team's its
+ * admins', as the plane's `roles` say.
  */
 export function levelsOf(own: OwnMemory, teams: string[]): Level[] {
   const documents = own.documents ?? [];
   const organisation = documents.find((d) => d.scope === "organisation");
   const teamNames = [...new Set([...teams, ...documents.filter((d) => d.scope === "team" && d.name).map((d) => d.name!)])];
   const everyone = own.organisation?.name ? `Everyone at ${own.organisation.name}` : "Everyone";
+  const administers = own.roles?.team_admin ?? [];
   return [
-    { key: "organisation", level: { scope: "organisation", name: null }, label: everyone, short: "EVERYONE", glyph: "◉", entries: organisation?.entries ?? [], editable: false },
-    ...teamNames.map((name): Level => ({
-      key: `team:${name}`,
-      level: { scope: "team", name },
-      label: name,
-      short: name.toUpperCase(),
-      glyph: "◎",
-      entries: documents.find((d) => d.scope === "team" && d.name === name)?.entries ?? [],
-      editable: false,
-    })),
-    { key: "user", level: { scope: "user", name: null }, label: "Only you", short: "YOU", glyph: "○", entries: own.entries ?? [], editable: true },
+    {
+      key: "organisation",
+      level: { scope: "organisation", name: null },
+      label: everyone,
+      short: "EVERYONE",
+      glyph: "◉",
+      entries: organisation?.entries ?? [],
+      editable: own.roles?.platform_admin === true,
+      version: organisation?.version ?? 0,
+      rank: 0,
+    },
+    ...teamNames.map((name): Level => {
+      const document = documents.find((d) => d.scope === "team" && d.name === name);
+      return {
+        key: `team:${name}`,
+        level: { scope: "team", name },
+        label: name,
+        short: name.toUpperCase(),
+        glyph: "◎",
+        entries: document?.entries ?? [],
+        editable: administers.includes(name),
+        version: document?.version ?? 0,
+        rank: 1,
+      };
+    }),
+    { key: "user", level: { scope: "user", name: null }, label: "Only you", short: "YOU", glyph: "○", entries: own.entries ?? [], editable: true, version: own.version, rank: 3 },
   ];
 }
 
@@ -133,7 +162,8 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
   }, [daemon, read]);
 
   const levels = own ? levelsOf(own, teams) : [];
-  const editable = levels.filter((l) => l.editable).map((l) => l.label);
+  // Only you first, then the levels above it the person may change, lowest first.
+  const editable = [...levels.filter((l) => l.editable && l.level.scope === "user"), ...levels.filter((l) => l.editable && l.level.scope !== "user")].map((l) => l.label);
 
   // What a new session in the chosen team starts knowing, as the plane works it out
   // (`memory.in_effect`): asked again whenever the team or what was read changes.
@@ -292,7 +322,11 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
           levels={levels}
           status={status}
           onSaved={(saved, said) => {
-            setOwn({ ...saved, ...(own.documents ? { documents: own.documents } : {}) });
+            setOwn({ ...saved, ...(own.documents ? { documents: own.documents } : {}), ...(own.roles ? { roles: own.roles } : {}), ...(own.organisation ? { organisation: own.organisation } : {}) });
+            setToast(said);
+            read();
+          }}
+          onLevelSaved={(said) => {
             setToast(said);
             read();
           }}
@@ -304,36 +338,56 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
   );
 }
 
-const NOTES: Record<EntryLevel["scope"], { note: string; lock: string; empty: string; emptyBody: string }> = {
+const NOTES: Record<EntryLevel["scope"], { note: string; empty: string; emptyBody: string }> = {
   organisation: {
     note: "The baseline. Every session in every team starts with these unless a team or a person says otherwise.",
-    lock: "Platform administrators keep your organisation's memory, in the Troupe console. Ask one of them if something here is wrong or out of date.",
     empty: "No organisation memory yet",
     emptyBody: "Sessions start with your teams' memory and your own.",
   },
   team: {
     note: "Applies to every session of this team. Replaces your organisation's memory on the same topic.",
-    lock: "This team's administrators keep its memory, in the Troupe console.",
     empty: "This team has no memory of its own",
     emptyBody: "Sessions in this team use your organisation's memory as it is.",
   },
   profile: {
     note: "Applies to every session on this worker profile's pods. Replaces your team's memory on the same topic.",
-    lock: "Platform administrators keep a worker profile's memory, on its page in the Troupe console.",
     empty: "This profile has no memory of its own",
     emptyBody: "Sessions on it use your team's memory as it is.",
   },
   user: {
     note: "Applies to every session you start, in any team. Nobody else can see these, not even administrators.",
-    lock: "",
     empty: "Nothing personal yet",
     emptyBody: "Tell the troupe how you like to work: length of answers, language, what to skip. It applies in every team.",
   },
 };
 
+/** Who can change a level the person only reads, as the plane decides it. */
+function lockOf(level: Level): string {
+  if (level.level.scope === "organisation") return "Platform administrators can change this. Ask one of them if something here is wrong or out of date.";
+  if (level.level.scope === "team") return `Only ${level.label}'s team admins can change this. Ask one of them if something here is wrong or out of date.`;
+  return "Platform administrators can change a worker profile's memory.";
+}
+
+/** Where a save goes and which new sessions start with it. */
+function scopeLineOf(level: Level): string {
+  if (level.level.scope === "user") return "SAVES TO ONLY YOU · YOUR NEW SESSIONS IN ANY TEAM";
+  if (level.level.scope === "organisation") return `SAVES TO ${level.label.toUpperCase()} · NEW SESSIONS IN EVERY TEAM`;
+  return `SAVES TO ${level.short} · NEW SESSIONS IN ${level.short}`;
+}
+
+/** Entries as a save sends them; the text before the first heading keeps none. */
+const wire = (entries: MemoryEntry[]): Array<Pick<MemoryEntry, "topic" | "body" | "heading">> =>
+  entries.map((e) => ({ topic: e.topic, body: e.body, ...(e.heading === false ? { heading: false } : {}) }));
+
 type Editing = { index: number | null; topic: string; body: string } | null;
 
-/** One level's entries: read, or for the person's own, added to, edited and forgotten. */
+/** A save someone else's came before: the version in force, and what this one would have written. */
+type Conflict = { version: number; text: string; mine: string };
+
+/**
+ * One level's entries: read, or where the person may change it, added to, edited and
+ * forgotten: their own through `me.memory.put`, a level above through `admin.memory.put`.
+ */
 function LevelView({
   daemon,
   own,
@@ -341,6 +395,7 @@ function LevelView({
   levels,
   status,
   onSaved,
+  onLevelSaved,
   onReload,
 }: {
   daemon: DaemonClient;
@@ -349,48 +404,80 @@ function LevelView({
   levels: Level[];
   status: MemoryStatus | null;
   onSaved: (saved: OwnMemory, said: string) => void;
+  onLevelSaved: (said: string) => void;
   onReload: () => void;
 }): JSX.Element {
   const [editing, setEditing] = useState<Editing>(null);
   const [forgetting, setForgetting] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [conflict, setConflict] = useState<OwnMemory | null>(null);
+  const [conflict, setConflict] = useState<Conflict | null>(null);
   const [versions, setVersions] = useState(false);
+  const [reach, setReach] = useState<number | null>(null);
   const notes = NOTES[level.level.scope];
-  const title = level.level.scope === "team" ? `Team ${level.label}` : level.level.scope === "organisation" ? level.label : "Only you";
-  const scopeLine = level.level.scope === "user" ? "SAVES TO ONLY YOU · YOUR NEW SESSIONS IN ANY TEAM" : "";
+  const title = titleOf(level);
+  const scopeLine = scopeLineOf(level);
+  const mine = level.level.scope === "user";
+  const above = level.level.scope === "organisation" || level.level.scope === "team" ? level.level.scope : null;
+  const open = editing !== null || forgetting !== null;
+  const asRead = JSON.stringify(wire(level.entries));
+
+  // Before a save on a level above the person's own, what it would reach: the plane's
+  // preview, written nowhere, its running readers counted. A refusal is the plane's sentence.
+  useEffect(() => {
+    if (!open || !above) return;
+    let live = true;
+    daemon.previewLevelMemory(above, level.level.name, { entries: JSON.parse(asRead) as ReturnType<typeof wire> }).then(
+      (p) => live && setReach(p.readers?.sessions.length ?? null),
+      (e: unknown) => {
+        if (!live) return;
+        setReach(null);
+        setError(message(e));
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [daemon, open, above, level.level.name, asRead]);
 
   // The whole document as entries over the version read: the plane writes them as sections.
-  const save = (entries: MemoryEntry[], said: string): void => {
+  const save = (entries: MemoryEntry[], said: string, draft: string): void => {
     setBusy(true);
     setError(null);
-    daemon
-      .putOwnMemoryEntries(entries, own.version)
-      .then((saved) => {
-        setEditing(null);
-        setForgetting(null);
-        onSaved(saved.user, saved.changed ? said : "Nothing changed; nothing was saved.");
-      })
-      .catch(async (e: unknown) => {
-        if (isConflict(e)) {
-          setConflict(await daemon.ownMemory().catch(() => null));
-          setError(message(e));
-        } else {
-          setError(message(e));
-        }
-      })
-      .finally(() => setBusy(false));
+    const done = (): void => {
+      setEditing(null);
+      setForgetting(null);
+    };
+    const refused = async (e: unknown): Promise<void> => {
+      if (isConflict(e)) {
+        const theirs = above ? await daemon.levelMemory(above, level.level.name).catch(() => null) : await daemon.ownMemory().catch(() => null);
+        if (theirs) setConflict({ version: theirs.version ?? 0, text: theirs.text, mine: draft });
+      }
+      setError(message(e));
+    };
+    const sent = above
+      ? daemon.putLevelMemory(above, level.level.name, { entries: wire(entries) }, level.version).then((saved) => {
+          done();
+          onLevelSaved(Object.keys(saved.changes ?? {}).length > 0 ? said : "Nothing changed; nothing was saved.");
+        })
+      : daemon.putOwnMemoryEntries(wire(entries), own.version).then((saved) => {
+          done();
+          onSaved(saved.user, saved.changed ? said : "Nothing changed; nothing was saved.");
+        });
+    sent.catch(refused).finally(() => setBusy(false));
   };
 
   const draftEmpty = !editing || editing.topic.trim() === "" || editing.body.trim() === "";
+  // A topic compares as the plane compares it, case and spacing aside: one this level has is
+  // refused, and one a lower level has is said to be replaced for whoever this level reaches.
   let clash = "";
   if (editing && editing.topic.trim() !== "") {
     const key = topicKey(editing.topic);
-    const here = level.entries.findIndex((e, i) => i !== editing.index && e.heading !== false && topicKey(e.topic) === key);
-    const lower = levels.find((l) => l.level.scope !== "user" && l.entries.some((e) => e.heading !== false && topicKey(e.topic) === key));
-    if (here >= 0) clash = `Only you already has a memory called “${level.entries[here]!.topic}”. Edit that one instead, or pick another topic.`;
-    else if (lower) clash = `This will replace ${lower.level.scope === "team" ? `team ${lower.label}'s` : "your organisation's"} “${editing.topic.trim()}” for you.`;
+    const same = (e: MemoryEntry): boolean => e.heading !== false && topicKey(e.topic) === key;
+    const here = level.entries.findIndex((e, i) => i !== editing.index && same(e));
+    const lower = levels.filter((l) => l.rank < level.rank).find((l) => l.entries.some(same));
+    if (here >= 0) clash = `${title} already has a memory called “${level.entries[here]!.topic}”. Edit that one instead, or pick another topic.`;
+    else if (lower) clash = `This will replace ${titleOf(lower)}’s “${lower.entries.find(same)!.topic}” for ${mine ? "you" : `everyone in ${level.label}`}.`;
   }
 
   const commit = (): void => {
@@ -399,8 +486,14 @@ function LevelView({
     const was = editing.index === null ? null : level.entries[editing.index];
     const entry: MemoryEntry = { topic: editing.topic.trim(), body: editing.body.trim(), heading: !(was?.heading === false && was.topic === editing.topic.trim()) };
     const entries = editing.index === null ? [...level.entries, entry] : level.entries.map((e, i) => (i === editing.index ? entry : e));
-    save(entries, editing.index === null ? "Saved. New sessions start with it; the sessions running here read it at their next turn." : "Saved. New sessions start with the new version.");
+    const said = mine
+      ? editing.index === null
+        ? "Saved. New sessions start with it; the sessions running here read it at their next turn."
+        : "Saved. New sessions start with the new version."
+      : `Saved to ${title}. New sessions start with it; the sessions running read it at their next turn.`;
+    save(entries, said, entry.heading === false ? entry.body : `## ${entry.topic}\n\n${entry.body}`);
   };
+  const reachLine = reach === null ? "" : `Reaches ${reach} running session${reach === 1 ? "" : "s"} at their next turn.`;
 
   const form = (label: string): JSX.Element => (
     <div className="entry-form" aria-label={label}>
@@ -423,6 +516,7 @@ function LevelView({
           Cancel
         </button>
         <span className="micro scope">{scopeLine}</span>
+        {reachLine && <span className="micro reach">{reachLine}</span>}
       </div>
     </div>
   );
@@ -440,7 +534,7 @@ function LevelView({
               Add a memory
             </button>
           )}
-          {level.level.scope === "user" && (
+          {mine && (
             <button type="button" aria-expanded={versions} onClick={() => setVersions((v) => !v)}>
               Versions
             </button>
@@ -449,14 +543,23 @@ function LevelView({
       </div>
       {!level.editable && (
         <p className="read-only">
-          <span className="micro">READ ONLY</span> {notes.lock}
+          <span className="micro">READ ONLY</span> {lockOf(level)}
         </p>
       )}
       {error && <p className="note error">{error}</p>}
       {conflict && (
         <div className="conflict" role="alert">
-          <p>Version {conflict.version} was saved somewhere else since you read it. It says:</p>
-          <pre className="mono">{conflict.text || "(nothing)"}</pre>
+          <p>Version {conflict.version} was saved somewhere else since you read it. Yours was not saved; both are here.</p>
+          <div className="beside">
+            <div>
+              <span className="micro">YOURS, NOT SAVED</span>
+              <pre className="mono">{conflict.mine || "(nothing)"}</pre>
+            </div>
+            <div>
+              <span className="micro">VERSION {conflict.version}, SAVED SINCE</span>
+              <pre className="mono">{conflict.text || "(nothing)"}</pre>
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => {
@@ -470,7 +573,7 @@ function LevelView({
           </button>
         </div>
       )}
-      {versions && level.level.scope === "user" && <Versions daemon={daemon} own={own} status={status} onRolledBack={(saved, said) => onSaved(saved, said)} />}
+      {versions && mine && <Versions daemon={daemon} own={own} status={status} onRolledBack={(saved, said) => onSaved(saved, said)} />}
       {editing && editing.index === null && form("New memory")}
       {level.entries.length === 0 && !editing ? (
         <div className="empty">
@@ -531,11 +634,19 @@ function LevelView({
                 {forgetting === i && (
                   <div className="forget" role="alertdialog" aria-label="Forget this memory">
                     <p>Forget “{entry.topic || "this memory"}”? New sessions stop starting with it. Sessions already running keep it until their next turn.</p>
+                    {!mine && <span className="micro scope">{scopeLine}</span>}
+                    {!mine && reachLine && <span className="micro reach">{reachLine}</span>}
                     <button
                       type="button"
                       className="danger"
                       disabled={busy}
-                      onClick={() => save(level.entries.filter((_, j) => j !== i), `Forgotten. New sessions will not start with “${entry.topic || "it"}”.`)}
+                      onClick={() =>
+                        save(
+                          level.entries.filter((_, j) => j !== i),
+                          `Forgotten. New sessions will not start with “${entry.topic || "it"}”.`,
+                          `Forget “${entry.topic || "this memory"}”`,
+                        )
+                      }
                     >
                       Forget
                     </button>

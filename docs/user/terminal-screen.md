@@ -245,12 +245,15 @@ entry: each `## Topic` of a level's memory. **In effect** shows, for one of your
 picks another), the closest level's entry on each topic and what it replaces: yours over
 your team's, your team's over the organisation's. **◉ Everyone at** your organisation, **◎**
 each of your teams and **○ Only you** list each level's; one you cannot change here says
-`· read`. Enter reads an entry whole. On Only you, `a` adds one, its topic typed on the page
-and its words in your editor (`VISUAL`, then `EDITOR`) or, with neither set, in a box
-here (Ctrl-S saves); `e` edits one and `f` forgets one after a confirm line. A topic Only you
-has already is refused, and one a lower level has is said to be replaced. A save names the
-version it was made on: one saved elsewhere first is shown beside yours, and `l` reloads
-it. `h` lists the versions (Space marks one, Enter shows two side by side, `r` saves an old
+`· read`, and says who can. Enter reads an entry whole. On a level you can change (Only
+you; a team's you administer; the organisation's if you are a platform admin), `a` adds
+one, its topic typed on the page and its words in your editor (`VISUAL`, then `EDITOR`) or,
+with neither set, in a box here (Ctrl-S saves); `e` edits one and `f` forgets one after a
+confirm line. A topic the level has already is refused, and one a lower level has is said
+to be replaced. The line under says where it saves to and, on a team's or the
+organisation's, how many running sessions it reaches. A save names the version it was made
+on: one saved elsewhere first is shown beside yours, and `l` reloads it. On Only you, `h`
+lists the versions (Space marks one, Enter shows two side by side, `r` saves an old
 one again), `b` who wrote each line, `s` where this machine's copy stands. A save, an
 agent's entry or one from another machine is on the page when it arrives. Under Local only
 every level is read from this machine's copy and nothing is changed. `/memory facts` is the

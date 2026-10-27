@@ -2953,13 +2953,35 @@ defmodule Troupe.Plane.Admin do
      })}
   end
 
+  # A refusal says, in words, who may change the document, since a person's own app asks
+  # this as them and shows them the plane's sentence.
   defp memory_writer(actor, scope, name) do
     case memory_owner(actor, scope, name) do
       {:ok, owner, true} -> {:ok, owner}
-      {:ok, _owner, false} -> require_platform_admin(actor)
-      error -> error
+      {:ok, _owner, false} -> actor |> require_platform_admin() |> memory_refusal(scope, name)
+      error -> memory_refusal(error, scope, name)
     end
   end
+
+  defp memory_refusal({:error, %Error{message: token, data: data} = error}, scope, name)
+       when is_map(data) and not is_map_key(data, :reason) and
+              (token == "forbidden" or (token == "not_found" and scope == "team")) do
+    {:error, %{error | data: Map.put(data, :reason, memory_who(token, scope, name))}}
+  end
+
+  defp memory_refusal(other, _scope, _name), do: other
+
+  defp memory_who(_token, "organisation", _name),
+    do: "only a platform administrator changes the organisation's memory"
+
+  defp memory_who("not_found", "team", name),
+    do: "there is no team called #{name} that you administer, so its memory is not yours to change"
+
+  defp memory_who(_token, "team", name),
+    do: "only #{name}'s team admins and the platform administrators change #{name}'s memory"
+
+  defp memory_who(_token, _scope, _name),
+    do: "only a platform administrator changes a worker profile's memory"
 
   defp memory_name(:organisation), do: nil
   defp memory_name(%Identity.Team{name: name}), do: name

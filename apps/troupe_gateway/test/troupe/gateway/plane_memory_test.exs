@@ -420,6 +420,12 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
              ] = own["documents"]
       # Asked with entries for a client; the poll in between asks without.
       assert Enum.any?(FakePlane.calls(ctx.plane.state), &match?({"me.memory", %{"entries" => true}}, &1))
+      # A plane that says nothing of roles lets nobody change a level above the person's own.
+      assert own["roles"] == %{"platform_admin" => false, "team_admin" => []}
+      FakePlane.roles_with(ctx.plane.state, %{"platform_admin" => false, "team_admin" => ["sales", 7]})
+
+      assert {:ok, %{"roles" => %{"platform_admin" => false, "team_admin" => ["sales"]}}} =
+               Client.call(ctx.client, "me.memory", %{})
 
       assert {:ok, %{"entries" => [%{"topic" => "Tone", "replaces" => [%{"body" => "Plain English."}]}], "plane_url" => url}} =
                Client.call(ctx.client, "memory.in_effect", %{"team" => "sales"})

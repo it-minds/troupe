@@ -756,8 +756,25 @@ defmodule Troupe.Client do
   defdelegate memory_effect_rows(entries, levels), to: OwnMemory, as: :effect_rows
 
   @doc "Whether a new entry on a topic clashes with one at its level, or would replace a lower one."
-  @spec memory_clash([map()], map(), String.t()) :: {:here | :lower, map()} | nil
+  @spec memory_clash([map()], map(), String.t()) :: {:here | :lower, map(), map()} | nil
   defdelegate memory_clash(levels, level, topic), to: OwnMemory, as: :clash
+
+  @doc "Which levels above their own the person may change, as `me.memory`'s `roles` say."
+  @spec memory_roles(map()) :: %{platform_admin: boolean(), team_admin: [String.t()]}
+  defdelegate memory_roles(own), to: OwnMemory, as: :roles
+
+  @doc "Whether the person may change a level with those roles."
+  @spec memory_may_change?(map(), map()) :: boolean()
+  defdelegate memory_may_change?(roles, level), to: OwnMemory, as: :may_change?
+
+  @doc "How many running sessions a save of a level above the person's own reaches, or the plane's refusal."
+  @spec memory_reach(map()) :: {:ok, non_neg_integer()} | {:error, String.t()}
+  defdelegate memory_reach(level), to: OwnMemory, as: :reach
+
+  @doc "Save a level above the person's own as entries over the version it was read at."
+  @spec save_level_memory_entries(map(), [map()]) ::
+          {:ok, map()} | {:conflict, map()} | {:error, String.t()}
+  defdelegate save_level_memory_entries(level, entries), to: OwnMemory, as: :save_level_entries
 
   @doc "A level's entries with an entry written (in its place, or last)."
   @spec memory_put_entry([map()], String.t(), String.t(), String.t() | nil) :: [map()]

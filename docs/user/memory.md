@@ -82,15 +82,35 @@ within five minutes.
 (above), each with who last changed it, when, and in how many sessions it was used. *In
 effect for you* shows what a new session in one of your teams starts knowing, as the plane
 works it out (`memory.in_effect`): on each topic the closest level's entry, with what it
-replaces struck through. *Only you* is yours to add to, edit and forget, saved as entries
-over the version you read; the other levels are marked *READ* there and are changed in the
-console by those who keep them. A team admin's or a platform admin's client may also change
-the levels they keep through this computer's daemon, which sends `admin.memory.*` to the
-plane as them; the plane refuses anybody else. Its *Versions* drawer
-lists every version, sets any two side by side, rolls back to one, shows who wrote each line,
-and says whether this computer's copy is current and what each session running here read.
-An entry an agent adds while it is open appears in it. Under *Local only* it asks the plane
-nothing and says what this computer holds.
+replaces struck through. Who can change which level is your role on the plane:
+
+| You are | You can change |
+| --- | --- |
+| a member | *Only you* |
+| a team admin | *Only you*, and the level of each team you administer |
+| a platform admin | *Only you*, and *Everyone at* your organisation |
+
+*YOU CAN CHANGE* at the top lists yours. On each of them *Add a memory*, *Edit* and
+*Forget* save the level as entries over the version you read; a topic the level has already
+is refused, and one a lower level has is said to be replaced for whoever the level reaches
+(topics compare as the plane compares them, case and spacing aside). The line under the form
+says where it saves to and which new sessions start with it, and on a team's or the
+organisation's level, as the plane previews it, how many running sessions it reaches at
+their next turn. A level saved elsewhere since shows your edit beside the version saved,
+with a reload. The other levels are marked *READ*, with who can change them: the
+organisation's its platform admins, a team's its team admins. The plane decides at every
+save, so a role taken away since is refused in its own words. *Only you* also has a
+*Versions* drawer: it lists every version, sets any two side by side, rolls back to one,
+shows who wrote each line, and says whether this computer's copy is current and what each
+session running here read. An entry an agent adds while it is open appears in it. Under
+*Local only* it asks the plane nothing and says what this computer holds.
+
+**In the terminal**, `/memory` is the same by role: on the ◉ organisation's and each ◎
+team's tab, `a`, `e` and `f` add, edit and forget where you may change that level, and the
+tab says `· read` where you may not, with who can. The clash warnings, the line saying
+where a save goes and what it reaches, and who last changed each entry and in how many
+sessions it was used are the desktop app's. The versions, `h`, and who wrote each line,
+`b`, are *Only you*'s.
 
 ## Which version a session ran under
 

@@ -255,7 +255,8 @@ defmodule Troupe.Gateway.Memory do
   #
   # Every document comes with its `entries`, one per `## Topic` section with who last changed
   # it and when and in how many sessions it was used, and beside them `organisation`, its
-  # name: what the desktop app's Memory view and the terminal's `/memory` show.
+  # name, and `roles`, which levels the person may change: what the desktop app's Memory view
+  # and the terminal's `/memory` show.
   @spec own(keyword()) :: {:ok, map()} | {:error, :signed_out | term()}
   def own(opts \\ []) do
     ask = Map.put(asked(), "entries", true)
@@ -404,11 +405,22 @@ defmodule Troupe.Gateway.Memory do
      |> with_entries()
      |> Map.put("plane_url", url)
      |> Map.put("documents", above)
-     |> Map.put("organisation", answer["organisation"])}
+     |> Map.put("organisation", answer["organisation"])
+     |> Map.put("roles", roles(answer["roles"]))}
   end
 
   defp own_of(_answer, _url),
     do: {:error, {:rpc, %{"code" => -32_601, "message" => "method_not_found"}}}
+
+  # Which levels the person may change, as the plane says (`roles`): the organisation's for a
+  # platform admin, a team's for its admins. A plane from before it says nothing, so nobody's.
+  defp roles(%{} = roles),
+    do: %{
+      "platform_admin" => roles["platform_admin"] == true,
+      "team_admin" => Enum.filter(List.wrap(roles["team_admin"]), &is_binary/1)
+    }
+
+  defp roles(_none), do: %{"platform_admin" => false, "team_admin" => []}
 
   defp with_entries(%{"entries" => entries} = document) when is_list(entries), do: document
   defp with_entries(document), do: Map.put(document, "entries", Entries.parse(document["text"] || ""))

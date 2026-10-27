@@ -24,6 +24,7 @@ paths:
   - apps/troupe_gateway/lib/troupe/gateway/memory.ex
   - clients/tui/test/troupe/artifacts_screen_test.exs
   - clients/tui/test/troupe/memory_screen_test.exs
+  - clients/tui/test/troupe/memory_levels_screen_test.exs
   - clients/tui/test/troupe/artifacts_cli_test.exs
   - clients/tui/test/troupe/hq_inbox_test.exs
   - docs/user/terminal-screen.md
@@ -107,7 +108,9 @@ own); `b` is who wrote each line, `troupe memory --blame`'s column; `s` is `--st
 lines. A `memory_changed` in the session, or the daemon's `config.changed` for memory, reads
 the page again. The organisation's and a team's are read-only here in this slice: a team
 admin's and a platform admin's saves go through the console until the daemon forwards
-theirs. `/memory facts` is the brief's page as `/memory` was (this amends root Decision
+theirs. (It does, by root Decision 957: now `a`, `e` and `f` change the organisation's for a
+platform admin and a team's for its admins, as `me.memory`'s `roles` say, through the
+forwarded `admin.memory.preview` and `admin.memory.put`, `memory_levels_screen_test.exs`.) `/memory facts` is the brief's page as `/memory` was (this amends root Decision
 839, which put the facts at `/memory` alone), `refresh` and `forget` as before; `/memory`
 no longer needs a session on this machine, so the command table drops its `local`.
 

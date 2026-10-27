@@ -6,13 +6,17 @@ defmodule Troupe.UI.TUI.MemoryPage do
   on each topic, and what it replaces), ◉ *Everyone at* the organisation, ◎ each of their
   teams, ○ *Only you*; a level they cannot change here says `· read`.
 
-  On *Only you*: `a` adds an entry (its topic on the page, then its words in `$EDITOR`, or in
-  a box here when no editor is set), `e` edits one, `f` forgets one after a confirm line; a
-  topic the level has already is refused and one a lower level has is said to replace it;
-  `h` lists the versions, two side by side, `r` rolls back to one; `b` shows who wrote each
-  line; `s` where this machine's copy stands. A save names the version it was made on, and
-  one saved elsewhere first is shown beside the person's own, `l` reloading it. Under Local
-  only every level is read from this machine's copy and nothing is changed.
+  On a level the person may change — *Only you* always, the organisation's for a platform
+  admin, a team's for its admins, as `me.memory`'s `roles` say — `a` adds an entry (its topic
+  on the page, then its words in `$EDITOR`, or in a box here when no editor is set), `e`
+  edits one, `f` forgets one after a confirm line; a topic the level has already is refused
+  and one a lower level has is said to replace it; the line under says where it saves to
+  and, on a level above Only you, how many running sessions it reaches (the plane's
+  `admin.memory.preview`). On Only you, `h` lists the versions, two side by side, `r` rolls
+  back to one; `b` shows who wrote each line; `s` where this machine's copy stands. A save
+  names the version it was made on, and one saved elsewhere first is shown beside the
+  person's own, `l` reloading it. Under Local only every level is read from this machine's
+  copy and nothing is changed.
 
   Page state and keys; the server owns the process, the frame and the editor's hand-off.
   Everything it asks goes through `Troupe.Client`, to this computer's daemon.
@@ -35,6 +39,8 @@ defmodule Troupe.UI.TUI.MemoryPage do
       levels: [],
       effect: [],
       organisation: nil,
+      roles: Client.memory_roles(%{}),
+      reach: nil,
       plane_url: nil,
       error: nil,
       tab: 0,
@@ -66,7 +72,12 @@ defmodule Troupe.UI.TUI.MemoryPage do
               |> Map.merge(Map.take(own, ~w(version text changed_by changed_at entries)))
             ]
 
-        page = %{page | organisation: get_in(own, ["organisation", "name"])}
+        page = %{
+          page
+          | organisation: get_in(own, ["organisation", "name"]),
+            roles: Client.memory_roles(own)
+        }
+
         loaded(page, documents, own["plane_url"], :ask)
 
       {:error, reason} ->
@@ -116,10 +127,10 @@ defmodule Troupe.UI.TUI.MemoryPage do
   defp level(%{tab: 0}), do: nil
   defp level(page), do: Enum.at(page.levels, page.tab - 1)
 
-  # Only the person's own is changed here, and never under Local only.
+  # The person's own, and a level above it the plane's roles say they may change; never
+  # under Local only.
   defp editable?(%{local_only: true}, _level), do: false
-  defp editable?(_page, %{scope: "user"}), do: true
-  defp editable?(_page, _level), do: false
+  defp editable?(page, level), do: Client.memory_may_change?(page.roles, level)
 
   defp own(page), do: Enum.find(page.levels, &(&1.scope == "user"))
 
@@ -194,11 +205,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
          %{page | status: "Local only: the plane is not asked, so your memory is read-only here"}}
 
       page.tab == 0 and code in ["a", "e", "f"] ->
-        {:ok,
-         %{
-           page
-           | status: "a, e and f change Only you's entries: #{length(page.levels) + 1} opens it"
-         }}
+        {:ok, %{page | status: "a, e and f change a level's entries: #{changeable(page)}"}}
 
       code in ["h", "b", "r"] and page.tab != length(page.levels) ->
         {:ok,
@@ -217,19 +224,31 @@ defmodule Troupe.UI.TUI.MemoryPage do
 
   defp list_key(page, _key), do: {:ok, page}
 
-  defp own_key(page, %{code: "a"}), do: {:ok, %{page | mode: {:topic, ""}, status: nil}}
+  # The tabs the person may change entries on, as a key names each: "2 Everyone at …, 4 Only you".
+  defp changeable(page) do
+    page.levels
+    |> Enum.with_index(2)
+    |> Enum.filter(fn {level, _n} -> editable?(page, level) end)
+    |> Enum.map_join(", ", fn {level, n} -> "#{n} #{title(page, level)}" end)
+  end
+
+  defp own_key(page, %{code: "a"}),
+    do: {:ok, %{reached(page) | mode: {:topic, ""}}}
 
   defp own_key(page, %{code: "e"}) do
     case Enum.at(rows(page), page.cursor) do
       nil -> {:ok, page}
-      %{entry: entry} -> body(page, entry.topic || "", entry.body, entry.topic)
+      %{entry: entry} -> body(reached(page), entry.topic || "", entry.body, entry.topic)
     end
   end
 
   defp own_key(page, %{code: "f"}) do
     case Enum.at(rows(page), page.cursor) do
-      %{entry: %{topic: topic}} = row when is_binary(topic) -> {:ok, %{page | mode: {:forget, row}}}
-      _none -> {:ok, page}
+      %{entry: %{topic: topic}} = row when is_binary(topic) ->
+        {:ok, %{reached(page) | mode: {:forget, row}}}
+
+      _none ->
+        {:ok, page}
     end
   end
 
@@ -259,6 +278,29 @@ defmodule Troupe.UI.TUI.MemoryPage do
 
   defp own_key(page, %{code: "r"}), do: own_key(page, %{code: "h"})
 
+  # Before a change to a level above Only you, what saving it reaches, as the plane previews
+  # it, written nowhere; where the plane refuses the person, its sentence instead.
+  defp reached(page) do
+    case level(page) do
+      %{scope: "user"} ->
+        %{page | reach: nil, status: nil}
+
+      level ->
+        case Client.memory_reach(level) do
+          {:ok, n} ->
+            %{
+              page
+              | reach:
+                  "reaches #{n} running session#{if n == 1, do: "", else: "s"} at their next turn",
+                status: nil
+            }
+
+          {:error, reason} ->
+            %{page | reach: nil, status: reason}
+        end
+    end
+  end
+
   defp tab(page, step) do
     count = length(page.levels) + 1
     %{page | tab: rem(page.tab + step + count, count), cursor: 0, status: nil, mode: :list}
@@ -274,25 +316,26 @@ defmodule Troupe.UI.TUI.MemoryPage do
     do: {:ok, %{page | mode: {:topic, String.slice(t, 0..-2//1)}}}
 
   defp topic_key(%{mode: {:topic, t}} = page, %{code: "enter"}) do
-    level = own(page)
+    level = level(page)
 
     case Client.memory_clash(page.levels, level, t) do
       _ when t == "" ->
         {:ok, page}
 
-      {:here, _level} ->
+      {:here, _level, entry} ->
         {:ok,
          %{
            page
            | status:
-               "Only you already has a memory called “#{String.trim(t)}”. Edit that one instead, or pick another topic."
+               "#{named(page, level)} already has a memory called “#{entry.topic}”. Edit that one instead, or pick another topic."
          }}
 
-      {:lower, lower} ->
+      {:lower, lower, entry} ->
         body(
           %{
             page
-            | status: "This will replace #{title(page, lower)}’s “#{String.trim(t)}” for you."
+            | status:
+                "This will replace #{named(page, lower)}’s “#{entry.topic}” for #{reaches_whom(page, level)}."
           },
           String.trim(t),
           "",
@@ -311,9 +354,10 @@ defmodule Troupe.UI.TUI.MemoryPage do
 
   defp topic_key(page, _key), do: {:ok, page}
 
-  # The entry's words: in the person's own editor, or in a box here when they have none.
+  # The entry's words: in the person's own editor, or in a box here when they have none. The
+  # request names the level it is for, which the save goes to whatever the tab is by then.
   defp body(page, topic, text, was) do
-    request = %{topic: topic, was: was, text: text}
+    request = %{topic: topic, was: was, text: text, level: level(page).id}
 
     if Client.editor?(),
       do: {:edit, %{page | mode: :list}, request},
@@ -333,7 +377,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
         %{page | status: "an entry needs words; nothing was saved"}
 
       true ->
-        save_entry(page, request.topic, words, request.was)
+        save_entry(page, request, words)
     end
   end
 
@@ -369,53 +413,89 @@ defmodule Troupe.UI.TUI.MemoryPage do
 
   def paste(page, _text), do: page
 
-  defp save_entry(page, topic, words, was) do
-    level = own(page)
-    save(page, Client.memory_put_entry(level.entries, topic, words, was), "Saved “#{topic}”.")
+  defp save_entry(page, request, words) do
+    level = Enum.find(page.levels, &(&1.id == request[:level])) || own(page)
+
+    save(
+      page,
+      level,
+      Client.memory_put_entry(level.entries, request.topic, words, request.was),
+      "Saved “#{request.topic}”."
+    )
   end
 
-  defp forget(page, %{entry: entry}) do
-    level = own(page)
+  defp forget(page, %{entry: entry} = row) do
+    level = level(page) || row.from
 
     save(
       %{page | mode: :list},
+      level,
       Client.memory_forget_entry(level.entries, entry.topic),
       "Forgotten. New sessions will not start with “#{entry.topic}”."
     )
   end
 
   # A save sends the level's entries over the version it was read at, which the plane writes
-  # as sections; one saved elsewhere first is shown beside the text these would have been.
-  defp save(page, entries, said),
+  # as sections: the person's own through `me.memory.put`, a level above through
+  # `admin.memory.put`, the plane deciding who may. One saved elsewhere first is shown beside
+  # the text these would have been.
+  defp save(page, %{scope: "user"} = level, entries, said),
     do:
       saved(
         page,
-        Client.save_own_memory_entries(entries, own(page).version),
+        Client.save_own_memory_entries(entries, level.version),
         said,
-        Client.memory_text(entries)
+        Client.memory_text(entries),
+        level
+      )
+
+  defp save(page, level, entries, said),
+    do:
+      saved(
+        page,
+        Client.save_level_memory_entries(level, entries),
+        said,
+        Client.memory_text(entries),
+        level
       )
 
   # A rollback carries no text of the person's: its conflict shows the version saved since.
-  defp saved(page, result, said, text) do
+  defp saved(page, result, said, text, level) do
     case result do
       {:ok, %{"changed" => false}} ->
-        %{page | mode: :list, status: "it was as it is; nothing was saved"}
+        %{page | mode: :list, reach: nil, status: "it was as it is; nothing was saved"}
 
       {:ok, now} ->
         %{
-          load(%{page | mode: :list})
-          | status:
-              "#{said} Version #{now["version"]}: your new sessions start with it, and the sessions running here read it from their next turn."
+          load(%{page | mode: :list, reach: nil})
+          | status: "#{said} Version #{now["version"]}: #{who_reads(page, level)}"
         }
 
       {:conflict, theirs} ->
         mine = text || "(a roll back, not saved)"
-        %{page | mode: {:conflict, %{mine: mine, theirs: theirs}}, status: nil}
+
+        %{
+          page
+          | mode: {:conflict, %{mine: mine, theirs: theirs, title: named(page, level)}},
+            status: nil
+        }
 
       {:error, reason} ->
         %{page | mode: :list, status: "not saved: #{reason}"}
     end
   end
+
+  defp who_reads(_page, %{scope: "user"}),
+    do:
+      "your new sessions start with it, and the sessions running here read it from their next turn."
+
+  defp who_reads(_page, %{scope: "organisation"}),
+    do:
+      "new sessions in every team start with it, and the sessions running read it at their next turn."
+
+  defp who_reads(_page, %{name: name}),
+    do:
+      "new sessions in #{name} start with it, and its sessions running read it at their next turn."
 
   defp history_key(page, %{code: "esc"}), do: {:ok, %{page | mode: :list}}
 
@@ -477,7 +557,8 @@ defmodule Troupe.UI.TUI.MemoryPage do
                page,
                Client.rollback_own_memory(n, own(page).version),
                "Rolled back to version #{n}.",
-               nil
+               nil,
+               own(page)
              )}
     end
   end
@@ -491,8 +572,9 @@ defmodule Troupe.UI.TUI.MemoryPage do
   @doc "The page in `rect`."
   @spec render(t(), Rect.t(), map()) :: [{term(), Rect.t()}]
   def render(page, rect, _state) do
+    # The status has room for where a save goes, what it reaches and what was said.
     [tabs_rect, note_rect, body_rect, status_rect] =
-      Layout.split(rect, :vertical, [{:length, 1}, {:length, 1}, {:fill, 1}, {:length, 2}])
+      Layout.split(rect, :vertical, [{:length, 1}, {:length, 1}, {:fill, 1}, {:length, 3}])
 
     [
       {%Paragraph{text: tabs_line(page)}, tabs_rect},
@@ -552,8 +634,15 @@ defmodule Troupe.UI.TUI.MemoryPage do
 
   defp title(page, level), do: level |> glyph_name(page && page[:organisation]) |> elem(1)
 
-  defp lock(%{scope: "organisation"}), do: "platform administrators keep it, in the console"
-  defp lock(%{name: name}), do: "#{name}'s team admins change it, in the console"
+  # A level's name in a sentence: "Everyone at …", "Team design", "Only you".
+  defp named(_page, %{scope: "team", name: name}) when is_binary(name), do: "Team #{name}"
+  defp named(page, level), do: title(page, level)
+
+  defp reaches_whom(_page, %{scope: "user"}), do: "you"
+  defp reaches_whom(page, level), do: "everyone in #{title(page, level)}"
+
+  defp lock(%{scope: "organisation"}), do: "only platform administrators can change it"
+  defp lock(%{name: name}), do: "only #{name}'s team admins can change it"
 
   defp note(%{local_only: true}),
     do:
@@ -810,18 +899,38 @@ defmodule Troupe.UI.TUI.MemoryPage do
     if parts == [], do: "", else: " · " <> Enum.join(parts, " · ")
   end
 
-  defp save_line(_page), do: "saves to Only you · your new sessions in any team · Ctrl-S"
+  # Where a save goes and which new sessions start with it, for the level being changed.
+  defp save_line(page) do
+    case level(page) do
+      %{scope: "organisation"} = level ->
+        "saves to #{title(page, level)} · new sessions in every team · Ctrl-S"
+
+      %{scope: "team", name: name} ->
+        "saves to #{name} · new sessions in #{name} · Ctrl-S"
+
+      _own ->
+        "saves to Only you · your new sessions in any team · Ctrl-S"
+    end
+  end
+
+  # What a save on a level above Only you reaches, on its own line, and what was said.
+  defp under(page),
+    do: [page.reach, page.status] |> Enum.reject(&is_nil/1) |> Enum.map_join("", &("\n" <> &1))
 
   defp status_text(%{mode: {:topic, t}} = page),
-    do: "topic: #{t}▏   #{save_line(page)}" <> if(page.status, do: "\n" <> page.status, else: "")
+    do: "topic: #{t}▏   #{save_line(page)}" <> under(page)
 
-  defp status_text(%{mode: {:forget, row}}),
+  defp status_text(%{mode: {:box, _}, reach: reach} = page) when is_binary(reach),
+    do: String.trim_leading(under(page))
+
+  defp status_text(%{mode: {:forget, row}} = page),
     do:
-      "Forget “#{row.entry.topic}”? New sessions stop starting with it. Sessions already running keep it until they sleep. y forgets · n keeps it"
+      "Forget “#{row.entry.topic}”? New sessions stop starting with it. Sessions already running keep it until they sleep. y forgets · n keeps it" <>
+        under(page)
 
   defp status_text(%{mode: {:conflict, c}}),
     do:
-      "Not saved: your memory was saved somewhere else since, version #{c.theirs["version"]}. Both are here; l reloads it."
+      "Not saved: #{if c.title == "Only you", do: "your memory", else: c.title} was saved somewhere else since, version #{c.theirs["version"]}. Both are here; l reloads it."
 
   defp status_text(%{status: status}) when is_binary(status), do: status
   defp status_text(_page), do: ""
