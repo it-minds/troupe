@@ -311,23 +311,21 @@ defmodule Troupe.CLI.ConfigSetup do
           "Your organisation hands out a key, which sessions here use; one you paste wins over it."
         )
 
-    cond do
-      not io.interactive? ->
-        io.say.(
-          "No terminal to ask on: put api_key in #{settings["path"]}, or TROUPE_API_KEY in the environment."
-        )
+    if io.interactive? do
+      case blank_to_nil(io.secret.("API key, or {env:VAR} to read it from the environment: ")) do
+        nil ->
+          io.say.("no key saved; troupe config key takes one later")
+          skipped
 
-        1
+        key ->
+          save_key(key, io)
+      end
+    else
+      io.say.(
+        "No terminal to ask on: put api_key in #{settings["path"]}, or TROUPE_API_KEY in the environment."
+      )
 
-      true ->
-        case blank_to_nil(io.secret.("API key, or {env:VAR} to read it from the environment: ")) do
-          nil ->
-            io.say.("no key saved; troupe config key takes one later")
-            skipped
-
-          key ->
-            save_key(key, io)
-        end
+      1
     end
   end
 

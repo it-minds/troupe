@@ -229,9 +229,8 @@ whether members may control sessions and a person's monthly ceiling hold for eve
 at once), **sessions** (managed permission rules and MCP servers only, the default
 bundle channel), **sign in** (issuer, client, endpoints, scopes — the console's **Identity
 provider** card — and `subject_claim`, shown there and not editable), **client defaults**
-(the provider and models people's own machines take as their organisation's defaults;
-`client_key_help`, where a person gets a key, in your words; `client_key`, a key handed to
-everybody who signs in, for an organisation that does not want personal keys; and
+(the provider and models people's own machines take as their organisation's defaults,
+`client_key_help` and `client_key`, where a key comes from and one handed to everybody, and
 `client_enforced`, what those machines may not go past: [Part F](client-config.md#defaults-and-limits-for-peoples-machines)),
 and **deployment** keys that are shown but only change with a rollout.
 
