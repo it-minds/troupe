@@ -682,7 +682,9 @@ defmodule Troupe.Session.MCP do
       "url" => config[:url],
       "headers" => config[:headers],
       "permission" => config[:permission] || :ask,
-      "timeout_ms" => config[:timeout_ms] || 30_000
+      "timeout_ms" => config[:timeout_ms] || 30_000,
+      "stores" => config[:stores],
+      "files" => config[:files]
     })
     |> Map.put(:pinned, true)
     |> with_oauth(config[:oauth], state_dir)

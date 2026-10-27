@@ -119,7 +119,9 @@ defmodule Troupe.Protocol.Bundle do
           header: String.t(),
           timeout_ms: pos_integer(),
           permission: :ask | :auto,
-          tools: :all | [String.t()]
+          tools: :all | [String.t()],
+          stores: :files | nil,
+          files: :all | [String.t()]
         }
   @typedoc """
   One third-party ACP agent a profile's sessions may delegate to.
@@ -258,8 +260,17 @@ defmodule Troupe.Protocol.Bundle do
         "permission" => Atom.to_string(server.permission),
         "tools" => if(server.tools == :all, do: "all", else: server.tools)
       }
+      |> put_stores(server)
     end)
   end
+
+  # Where the organisation keeps files, only on a server the bundle marks so.
+  defp put_stores(config, %{stores: :files} = server) do
+    files = Map.get(server, :files, :all)
+    Map.merge(config, %{"stores" => "files", "files" => if(files == :all, do: "all", else: files)})
+  end
+
+  defp put_stores(config, _server), do: config
 
   @doc """
   Write a bundle's agents and skills under `dir`: `agents/<name>.md` and
@@ -675,7 +686,9 @@ defmodule Troupe.Protocol.Bundle do
          :ok <- one_credential(name, mode, raw),
          {:ok, ref} <- credential(name, mode, raw),
          {:ok, permission} <- permission(name, raw["permission"]),
-         {:ok, tools} <- tools(name, raw["tools"]) do
+         {:ok, tools} <- tools(name, raw["tools"]),
+         {:ok, stores} <- stores(name, raw["stores"]),
+         {:ok, files} <- file_tools(name, stores, raw["files"]) do
       {:ok,
        %{
          name: name,
@@ -685,12 +698,33 @@ defmodule Troupe.Protocol.Bundle do
          header: raw["header"] || @default_header,
          timeout_ms: positive(raw["timeout_ms"]) || @default_timeout_ms,
          permission: permission,
-         tools: tools
+         tools: tools,
+         stores: stores,
+         files: files
        }}
     end
   end
 
   defp server(other, _), do: {:error, "mcp server #{inspect(other)} needs a name and a url"}
+
+  # Where the organisation keeps files (`stores: files`), and which of the server's tools do
+  # it (`files`, by name; unset is all of them). Declared here, never guessed from a name.
+  defp stores(_name, nil), do: {:ok, nil}
+  defp stores(_name, "files"), do: {:ok, :files}
+
+  defp stores(name, other),
+    do: {:error, "mcp server #{name}: stores is files or unset, not #{inspect(other)}"}
+
+  defp file_tools(_name, _stores, nil), do: {:ok, :all}
+
+  defp file_tools(name, nil, _files),
+    do: {:error, "mcp server #{name}: files names the tools that store files, and needs stores: files"}
+
+  defp file_tools(name, :files, files) do
+    if is_list(files) and files != [] and Enum.all?(files, &is_binary/1),
+      do: {:ok, files},
+      else: {:error, "mcp server #{name}: files is a list of the server's tool names"}
+  end
 
   defp url_ok(name, url) do
     case URI.parse(url) do

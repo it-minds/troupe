@@ -577,6 +577,16 @@ defmodule Troupe.Protocol.Schema do
         "hash" => required(:string),
         "size" => required(:integer)
       },
+      # A file the agent made for the person (`write_file` with `deliverable: true`), for
+      # their client to offer to save: `path` as `fs.read` takes it, the `hash` that read
+      # answers, and on a session on the person's machine `local_path`, where it is there.
+      "file_ready" => %{
+        "path" => required(:string),
+        "size" => required(:integer),
+        "hash" => required(:string),
+        "title" => optional(:string),
+        "local_path" => optional(:string)
+      },
       # A document `show` wrote to the session's scratchpad, or replaced (Decision 870):
       # everything a client shows of it but its words, which `fs.read` of `path` returns.
       # `version` counts the writes of that name in the session, from 1; `call_id` is the

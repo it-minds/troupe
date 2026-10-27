@@ -1,0 +1,29 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/file_ready.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "hash": {
+      "type": "string"
+    },
+    "local_path": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "size": {
+      "type": "integer"
+    },
+    "title": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "hash",
+    "path",
+    "size"
+  ],
+  "title": "file_ready",
+  "type": "object"
+}

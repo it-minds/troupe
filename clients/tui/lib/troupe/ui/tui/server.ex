@@ -1055,7 +1055,8 @@ defmodule Troupe.UI.TUI.Server do
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
   @builtins ~w(new cancel dismiss merge discard goal loop steer invite uninvite sessions back hq observer files
-               scratch upload publish artifacts copy memory context watch settings models mcp skills help
+               scratch upload save publish artifacts copy memory context watch settings models mcp
+               skills help
                agents worktree workflow detail unlink quit)
 
   @doc false
@@ -1455,6 +1456,9 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("upload", args, state, _target),
     do: notice_of(upload(state.session_id, String.trim(args)))
 
+  defp builtin("save", args, state, _target),
+    do: notice_of(save(state.session_id, String.trim(args)))
+
   defp builtin("publish", args, state, _target),
     do: notice_of(publish(state.session_id, String.trim(args)))
 
@@ -1790,6 +1794,35 @@ defmodule Troupe.UI.TUI.Server do
     else
       {:error, reason} when is_atom(reason) -> {:error, "#{path}: #{:file.format_error(reason)}"}
       {:error, reason} -> {:error, "#{path} not uploaded: #{to_message(reason)}"}
+    end
+  end
+
+  # `/save <path> [to]` is `/upload` the other way: a file of the session's workspace, read
+  # with `fs.read` wherever the session runs, written on this machine at `to` (a directory
+  # takes the file's name), or under its own name in the directory the TUI started in.
+  # What a pod session's `file_ready` offers.
+  defp save(_sid, ""), do: {:error, "usage: /save <path> [to]"}
+
+  defp save(sid, args) do
+    {path, to} = split_first(args)
+    name = Path.basename(path)
+
+    local =
+      case String.trim(to) do
+        "" -> Path.expand(name)
+        to -> to |> Path.expand() |> then(&if(File.dir?(&1), do: Path.join(&1, name), else: &1))
+      end
+
+    with {:ok, content} <- Client.fs_read(sid, path),
+         :ok <- File.mkdir_p(Path.dirname(local)),
+         :ok <- File.write(local, content) do
+      {:ok, "saved #{path} to #{local}"}
+    else
+      {:error, reason} when is_atom(reason) ->
+        {:error, "#{path} not saved: #{:file.format_error(reason)}"}
+
+      {:error, reason} ->
+        {:error, "#{path} not saved: #{to_message(reason)}"}
     end
   end
 

@@ -412,14 +412,16 @@ defmodule Troupe.BenchLiveTest do
                "system_prompt" => "stable"
              }
 
-      for name <- ["follow_up", "task_list"] do
+      # `task_list`'s first turn has a context too: the harness's word on where a file goes,
+      # which every root's instructions start with; `follow_up`'s first had its files already.
+      for {name, contexts} <- [{"follow_up", 2}, {"task_list", 3}] do
         [run] = scenario(report, name)["runs"]
 
         assert %{"system_changes" => 0, "tools_changes" => 0, "thinking_resent" => 0} =
                  run["prefix"],
                name
 
-        assert run["prefix"]["turn_contexts"] == 2, name
+        assert run["prefix"]["turn_contexts"] == contexts, name
       end
 
       requests = FakeOpenAI.requests(fake)
@@ -653,13 +655,14 @@ defmodule Troupe.BenchLiveTest do
       assert [200, 200, 400, 200, 200, 400, 200, 200] =
                Enum.map(requests, & &1.status)
 
-      # Stable, the list goes with the turn, and nothing in front of what was sent changes.
+      # Stable, the list goes with the turn, and nothing in front of what was sent changes;
+      # the first turn's context is the harness's word on where a file goes.
       {stable, requests} = runs["stable"]
 
       assert %{"system_changes" => 0, "tools_changes" => 0, "thinking_resent" => 0} =
                stable["prefix"]
 
-      assert stable["prefix"]["turn_contexts"] == 2
+      assert stable["prefix"]["turn_contexts"] == 3
       assert Enum.all?(requests, &(&1.status == 200 and &1.thinking == :kept))
       assert [_one] = requests |> Enum.map(& &1.system) |> Enum.uniq()
     end

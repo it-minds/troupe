@@ -14,6 +14,10 @@ defmodule Troupe.Instructions do
   Every one applies; where two disagree the nearer wins, which is why the nearer comes
   later in the prompt.
 
+  First of all, for a root agent, Troupe's own word (`Troupe.Instructions.Harness`): where a
+  file the person asks for goes, and what is open for it in this session. It is listed as
+  the `harness` scope, outside the files' budget, and every layer after it may say otherwise.
+
   Before all of them come the organisation's memory documents (`Troupe.PlaneMemory`): the
   organisation's, a team's and a worker profile's, from the plane, in their own section
   that says they are the organisation's word and no agent's to change. Then the person's own
@@ -145,11 +149,12 @@ defmodule Troupe.Instructions do
   """
 
   @typedoc """
-  One scope, in the order they are read: the organisation's, a team's and a worker
+  One scope, in the order they are read: Troupe's own word (`harness`), the organisation's, a team's and a worker
   profile's memory documents, the person's own file, the repository root's, a directory
   between the root and where the session works, and the brief.
   """
-  @type scope :: :organisation | :team | :profile | :person | :user | :root | :nested | :brief
+  @type scope ::
+          :harness | :organisation | :team | :profile | :person | :user | :root | :nested | :brief
 
   @typedoc """
   One file in force. `size` is its bytes on disk; `chars` what reached the prompt, which
@@ -239,9 +244,13 @@ defmodule Troupe.Instructions do
   to the workspace or absolute: the directories on the way to each are read as well as
   those on the way to the workspace, and they are what a rule's globs match.
   `searched` is every directory looked in, whether or not it had one.
+
+  `harness:` is Troupe's own word for this agent, `%{text, open}`
+  (`Troupe.Instructions.Harness.text/1` and `json/1`), read first of all and outside the
+  files' budget; without it there is none.
   """
-  @spec load(Path.t(), Config.t() | nil, [Path.t()]) :: t()
-  def load(workspace, config, focus \\ []) do
+  @spec load(Path.t(), Config.t() | nil, [Path.t()], keyword()) :: t()
+  def load(workspace, config, focus \\ [], opts \\ []) do
     workspace = Path.expand(workspace)
     budget = max_chars(config)
     {root, directories} = directories(workspace, focus)
@@ -274,11 +283,11 @@ defmodule Troupe.Instructions do
 
     # The organisation's memory before everything, outside the files' budget: each document
     # is held to its own limit on the plane, and none is cut to make room for a file.
-    files = memory(config) ++ files
+    files = harness(opts[:harness]) ++ memory(config) ++ files
 
     used =
       files
-      |> Enum.reject(&(&1.scope in [:brief | @memory_scopes]))
+      |> Enum.reject(&(&1.scope in [:harness, :brief | @memory_scopes]))
       |> Enum.map(& &1.chars)
       |> Enum.sum()
 
@@ -302,6 +311,7 @@ defmodule Troupe.Instructions do
 
   def to_prompt(%{files: files}, opts) do
     recall? = Keyword.get(opts, :recall, true)
+    {harness, files} = Enum.split_with(files, &(&1.scope == :harness))
     {memory, files} = Enum.split_with(files, &(&1.scope in @memory_scopes))
     {own, memory} = Enum.split_with(memory, &(&1.scope == :person))
     {briefs, instructions} = Enum.split_with(files, &(&1.scope == :brief))
@@ -317,7 +327,8 @@ defmodule Troupe.Instructions do
         _ -> "# Instruction files\n#{@preamble}\n" <> Enum.join(blocks, "\n\n")
       end
 
-    [memory_section(memory), own_section(own), section | Enum.map(briefs, &brief_text(&1, recall?))]
+    Enum.map(harness, & &1.text) ++
+      [memory_section(memory), own_section(own), section | Enum.map(briefs, &brief_text(&1, recall?))]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
   end
@@ -1051,6 +1062,37 @@ defmodule Troupe.Instructions do
 
   defp memory(_config), do: []
 
+  # Troupe's own word, one file of its own scope, whole: a paragraph and three lines, held
+  # to a limit of its own rather than cut to make room for anything.
+  @harness_max_chars 2_000
+
+  defp harness(%{text: text, open: open}) when is_binary(text) and text != "" do
+    [
+      %{
+        open: open,
+        scope: :harness,
+        path: "harness",
+        directory: nil,
+        where: nil,
+        size: byte_size(text),
+        chars: String.length(text),
+        budget: @harness_max_chars,
+        hash: hash(text),
+        status: :whole,
+        reason: nil,
+        trimmed: 0,
+        skipped: [],
+        imported_by: nil,
+        unfollowed: [],
+        rule: nil,
+        applies: nil,
+        text: text
+      }
+    ]
+  end
+
+  defp harness(_none), do: []
+
   defp memory_scope("user"), do: :person
   defp memory_scope(scope), do: String.to_existing_atom(scope)
 
@@ -1134,7 +1176,12 @@ defmodule Troupe.Instructions do
       "applies" => f.applies
     }
     |> Map.merge(memory_json(f))
+    |> Map.merge(open_json(f))
   end
+
+  # The harness's word says what was open for a file in the session it was read for.
+  defp open_json(%{scope: :harness, open: open}), do: %{"open" => open}
+  defp open_json(_file), do: %{}
 
   # A memory document says which version is in force, and whose it is.
   defp memory_json(%{scope: scope, version: version} = f) when scope in @memory_scopes,

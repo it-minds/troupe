@@ -306,7 +306,8 @@ defmodule Troupe.Agent.ScratchCompactionTest do
     test "the tail goes with the pointer and without its thinking, and nothing is refused",
          context do
       # Long enough that the call after it crosses the threshold; the stand-in counts four
-      # bytes a token, and the first call's prompt is about 4,000.
+      # bytes a token, and the first call's prompt is about 4,000, with the harness's word on
+      # where a file goes (some 250 tokens, which the window has room for).
       long = @plan <> String.duplicate("A line of the plan that takes up room.\n", 200)
 
       # The step is the number of answers the conversation has: two from the first turns,
@@ -334,7 +335,7 @@ defmodule Troupe.Agent.ScratchCompactionTest do
         api_key: "test-key",
         model: "claude-sonnet-5-5",
         thinking_binding: "error",
-        context_window: 6_000,
+        context_window: 6_300,
         compact_at: 0.85
       ]
 

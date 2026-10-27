@@ -544,11 +544,20 @@ defmodule Troupe.Config do
 
       {name,
        server
+       |> with_stores(entry)
        |> with_headers(name, entry["headers"])
        |> with_oauth(name, entry["oauth"])
        |> with_refusal(refused[name])}
     end)
   end
+
+  # Where the organisation keeps files, read as `mcp.json`'s `stores` and `files` are: only
+  # where the entry says so, so every other server is what it always was.
+  defp with_stores(server, %{"stores" => "files", "files" => [_ | _] = names}),
+    do: Map.merge(server, %{stores: :files, files: names})
+
+  defp with_stores(server, %{"stores" => "files"}), do: Map.put(server, :stores, :files)
+  defp with_stores(server, _entry), do: server
 
   # Headers for a server over HTTP (Decision 820), read as `mcp.json`'s are: only where
   # there are some, so every other server is what it always was.

@@ -295,9 +295,17 @@ defmodule Troupe.MCP.Stdio do
           "\n\nProvided by the #{name} MCP server.",
       schema: listed["inputSchema"] || %{"type" => "object", "properties" => %{}},
       default_permission: Map.get(state.config, :permission, :ask),
+      files: stores_files?(state.config, remote),
       run: fn args, _ctx -> call_tool(session_id, name, remote, args) end
     }
   end
+
+  # Where the organisation keeps files, as the server's entry declares it (`stores: files`,
+  # and `files` naming the tools, or none for all of them).
+  defp stores_files?(%{stores: :files} = config, remote),
+    do: Map.get(config, :files, :all) == :all or remote in config.files
+
+  defp stores_files?(_config, _remote), do: false
 
   defp render(%{"content" => blocks}) when is_list(blocks) do
     blocks

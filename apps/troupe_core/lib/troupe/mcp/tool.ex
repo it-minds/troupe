@@ -17,7 +17,18 @@ defmodule Troupe.MCP.Tool do
   alias Troupe.MCP.{Client, OAuth, Server}
 
   @enforce_keys [:name, :description, :schema, :run]
-  defstruct [:name, :description, :schema, :run, :server, :remote_name, default_permission: :ask]
+  # `files`: the server's config says this tool is where the organisation keeps files
+  # (`stores: files`), which the harness names to the agent; nothing else reads it.
+  defstruct [
+    :name,
+    :description,
+    :schema,
+    :run,
+    :server,
+    :remote_name,
+    default_permission: :ask,
+    files: false
+  ]
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -26,7 +37,8 @@ defmodule Troupe.MCP.Tool do
           run: (map(), Troupe.Tool.Ctx.t() -> Troupe.Tool.result()),
           server: String.t(),
           remote_name: String.t(),
-          default_permission: :auto | :ask | :deny
+          default_permission: :auto | :ask | :deny,
+          files: boolean()
         }
 
   @doc "Build a Troupe tool from one entry of a server's `tools/list`."
@@ -41,6 +53,7 @@ defmodule Troupe.MCP.Tool do
       description: description_of(server, listed),
       schema: listed["inputSchema"] || %{"type" => "object", "properties" => %{}},
       default_permission: server.permission,
+      files: Server.stores_files?(server, remote_name),
       run: fn args, ctx -> call(server, remote_name, args, ctx) end
     }
   end

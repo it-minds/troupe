@@ -128,6 +128,7 @@
     "events/config_note.json",
     "events/config_upgraded.json",
     "events/delegation_started.json",
+    "events/file_ready.json",
     "events/files_skipped.json",
     "events/fs_changed.json",
     "events/goal_cleared.json",
