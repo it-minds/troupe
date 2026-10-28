@@ -64,25 +64,37 @@ export function useFleet(
   auth: AuthSession | null,
   daemon: DaemonClient | null,
   intervalMs = 4_000,
-): { snapshot: FleetSnapshot; store: FleetStore | null; refresh: () => void } {
-  const store = useMemo(() => (auth || daemon ? new FleetStore() : null), [Boolean(auth), Boolean(daemon)]);
+): { snapshot: FleetSnapshot; store: FleetStore; refresh: () => void } {
+  // One store for as long as the app runs. A source that comes later — this computer's
+  // daemon a moment after the plane, the plane after a sign-in — is added to it and asked
+  // alone, not given a new store that asks every source again: a second ask of the plane's
+  // relay list, out while its watch is pushing, is answered with a list older than the push.
+  const store = useMemo(() => new FleetStore(), []);
   const [snapshot, setSnapshot] = useState<FleetSnapshot>({ rows: [], sources: {}, loading: Boolean(auth || daemon) });
+  // The sources, one set per sign-in and one per daemon, so that a render changes nothing.
+  const planeSources = useMemo(
+    () =>
+      auth
+        ? [
+            new PlaneSource(auth.plane, () => auth.token()),
+            // Laptop sessions offered for steering from another device: the person's own
+            // from their other computers, and those shared with them.
+            new RemoteSource(auth.plane, () => auth.token(), { name: "troupe-gui", version: __TROUPE_VERSION__ }),
+          ]
+        : null,
+    [auth],
+  );
+  const daemonSource = useMemo(() => (daemon ? new DaemonSource(daemon) : null), [daemon]);
 
   useEffect(() => {
-    if (!store) return;
-    if (auth) store.addSource(new PlaneSource(auth.plane, () => auth.token()));
-    else store.removeSource("plane");
-    // Laptop sessions offered for steering from another device: the person's own from
-    // their other computers, and those shared with them.
-    if (auth) store.addSource(new RemoteSource(auth.plane, () => auth.token(), { name: "troupe-gui", version: __TROUPE_VERSION__ }));
-    else store.removeSource("remote");
-    if (daemon) store.addSource(new DaemonSource(daemon));
+    if (planeSources) for (const s of planeSources) store.addSource(s);
+    else for (const id of ["plane", "remote"]) store.removeSource(id);
+    if (daemonSource) store.addSource(daemonSource);
     else store.removeSource("daemon");
-    void store.refresh();
-  }, [store, auth, daemon]);
+    void store.refreshUnheard();
+  }, [store, planeSources, daemonSource]);
 
   useEffect(() => {
-    if (!store) return;
     const off = store.subscribe(setSnapshot);
     const stop = store.poll(intervalMs);
     return () => {
@@ -91,7 +103,7 @@ export function useFleet(
     };
   }, [store, intervalMs]);
 
-  return { snapshot, store, refresh: useCallback(() => void store?.refresh(), [store]) };
+  return { snapshot, store, refresh: useCallback(() => void store.refresh(), [store]) };
 }
 
 /** Who sessions on this computer are recorded as, and what to call them. */

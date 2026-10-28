@@ -447,6 +447,11 @@ export class FleetStore {
   private readonly live = new Set<string>();
   /** When each source last answered or was told, for the safety net. */
   private readonly heard = new Map<string, number>();
+  /**
+   * How many lists each watched source has pushed, so an ask that was out when a push
+   * came can tell that its answer is the older of the two.
+   */
+  private readonly pushes = new Map<string, number>();
 
   constructor(sources: FleetSource[] = []) {
     for (const s of sources) this.addSource(s);
@@ -455,7 +460,12 @@ export class FleetStore {
   addSource(source: FleetSource): void {
     const before = this.sources.find((s) => s.id === source.id);
     this.sources = [...this.sources.filter((s) => s.id !== source.id), source];
-    if (before !== source) this.unwatch(source.id);
+    if (before !== source) {
+      // Another source under the same name, say a plane signed in to as somebody else,
+      // has not been heard from, whatever the one before it said.
+      this.unwatch(source.id);
+      this.heard.delete(source.id);
+    }
     if (this.watching) this.watchOne(source);
   }
 
@@ -476,6 +486,7 @@ export class FleetStore {
     const stop = source.watch(
       (rows) => {
         if (!this.sources.includes(source)) return;
+        this.pushes.set(source.id, (this.pushes.get(source.id) ?? 0) + 1);
         this.bySource.set(source.id, rows);
         this.heard.set(source.id, Date.now());
         this.snapshot = { ...this.snapshot, sources: { ...this.snapshot.sources, [source.id]: { at: Date.now(), error: null } } };
@@ -511,6 +522,17 @@ export class FleetStore {
   }
 
   /**
+   * Ask the sources nothing has been heard from yet, and those alone: what a source added
+   * after the others needs, without asking the others again. One asked again while its
+   * watch is pushing gets an answer that may be older than the push. A round already out
+   * is waited for first rather than joined, since it was asked before this source was.
+   */
+  async refreshUnheard(): Promise<void> {
+    if (this.inFlight) await this.inFlight;
+    return this.ask((s) => !this.heard.has(s.id));
+  }
+
+  /**
    * The poll's round: every source but a watched one whose watch is up, which is asked
    * only once the safety net is due.
    */
@@ -534,7 +556,13 @@ export class FleetStore {
     await Promise.all(
       this.sources.filter(which).map(async (s) => {
         try {
-          this.bySource.set(s.id, await s.list());
+          const pushed = this.pushes.get(s.id) ?? 0;
+          const listed = await s.list();
+          // A push that came while the ask was out is the newer list: the plane sent it
+          // after it answered the ask, or the answer took the longer road. The answer's
+          // list would put a laptop back online after the push said it went, until the
+          // next push, so it is dropped and the push kept; the source was heard either way.
+          if ((this.pushes.get(s.id) ?? 0) === pushed) this.bySource.set(s.id, listed);
           this.heard.set(s.id, Date.now());
           next[s.id] = { at: Date.now(), error: null };
         } catch (e) {

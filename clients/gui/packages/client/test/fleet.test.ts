@@ -143,6 +143,65 @@ describe("the fleet store", () => {
     assert.equal(team.calls, 1, "a patch went back to the server");
   });
 
+  it("keeps a list a watched source pushed while an ask of it was still out", async () => {
+    // A source that is told what changes and also asked: the ask's answer is held until
+    // the test lets it go, as a plane's answer is held by the road it travels.
+    const got: { answer?: (rows: FleetRow[]) => void; push?: (rows: FleetRow[]) => void } = {};
+    const remote: FleetSource = {
+      id: "remote",
+      kind: "remote",
+      list: () => new Promise<FleetRow[]>((resolve) => (got.answer = resolve)),
+      watch: (push, live) => {
+        got.push = push;
+        live(true);
+        return () => undefined;
+      },
+    };
+    const store = new FleetStore([remote]);
+    const stop = store.poll(60_000);
+    const asked = store.refresh();
+    assert.ok(got.push && got.answer, "the source is watched and asked");
+    got.push([row("s-laptop", "remote", { state: "offline" })]);
+    assert.equal(store.current.rows[0]!.state, "offline", "the push is on the list at once");
+
+    got.answer([row("s-laptop", "remote", { state: "active" })]);
+    await asked;
+    assert.equal(store.current.rows[0]!.state, "offline", "the older answer did not put the laptop back online");
+    assert.equal(store.current.sources["remote"]?.error, null, "the ask still counted as hearing from the source");
+
+    // An answer with no push in the meantime is the list, as it always was.
+    const again = store.refresh();
+    got.answer([row("s-laptop", "remote", { state: "active" })]);
+    await again;
+    assert.equal(store.current.rows[0]!.state, "active");
+    stop();
+  });
+
+  it("asks a source added later alone, and one that replaces another under its name", async () => {
+    const team = new StubSource("plane", "team");
+    team.rows = [row("a", "team")];
+    const store = new FleetStore([team]);
+    await store.refresh();
+    assert.equal(team.calls, 1);
+
+    const local = new StubSource("daemon", "local");
+    local.rows = [row("b", "local")];
+    store.addSource(local);
+    await store.refreshUnheard();
+    assert.equal(local.calls, 1, "the new source was asked");
+    assert.equal(team.calls, 1, "the one heard from already was not");
+    assert.deepEqual(store.current.rows.map((r) => r.id).sort(), ["a", "b"]);
+
+    // The same plane, signed in to as somebody else: a source of its own, not yet heard.
+    const other = new StubSource("plane", "team");
+    other.rows = [row("c", "team")];
+    store.addSource(other);
+    await store.refreshUnheard();
+    assert.equal(other.calls, 1);
+    assert.equal(local.calls, 1);
+    assert.deepEqual(store.current.rows.map((r) => r.id).sort(), ["b", "c"]);
+  });
+
   it("filters, counts approvals and sums cost", () => {
     const rows = [
       row("a", "team", { status: "waiting", pendingApprovals: 2, costMicros: 100 }),
