@@ -2,11 +2,12 @@ defmodule Troupe.ArtifactsScreenTest do
   @moduledoc """
   `/artifacts` (root #62): the person's artifacts on the plane by who can see them, in the
   desktop app's words and glyphs, through this computer's daemon linked to `FakeRemote` as
-  `troupe login` links it. Each tab; Enter opens one in the browser through the plane's
-  one-time address and it is no longer new; `v` another version; `m` a Markdown one in a
-  frame here, cut past 500 lines with the browser offered; `l` a view link to one of the
-  person's own; `p` publishes a file of the workspace; under Local only nothing is asked.
-  Drawn on the headless renderer.
+  `troupe login` links it. Each tab; a team's row says the team, whose every member it is;
+  Enter opens one in the browser through the plane's one-time address and it is no longer
+  new; `v` another version; `m` a Markdown one in a frame here, cut past 500 lines with the
+  browser offered; `l` a view link to one of the person's own, a team's among them; `p`
+  publishes a file of the workspace, a team's where a team is named unless `me` follows;
+  under Local only nothing is asked. Drawn on the headless renderer.
   """
 
   use ExUnit.Case, async: false
@@ -31,6 +32,7 @@ defmodule Troupe.ArtifactsScreenTest do
       "owner" => %{"display_name" => "Bea"},
       "published_at" => @now
     },
+    # A team's: every member owns it, the person among them, so its row says the team.
     %{
       "id" => "a-team",
       "title" => "Design notes",
@@ -38,7 +40,11 @@ defmodule Troupe.ArtifactsScreenTest do
       "visibility" => "team:design",
       "scope" => "team:design",
       "version" => 3,
+      "mine" => true,
+      "role" => "owner",
       "owner" => %{"display_name" => "Cy"},
+      "owner_team" => "design",
+      "may_transfer" => true,
       "published_at" => @now
     },
     # A profile the person is not on is one a link gave them.
@@ -111,9 +117,10 @@ defmodule Troupe.ArtifactsScreenTest do
     assert text =~ "3 ◎ Your teams 1"
     assert text =~ "4 ◐ Shared with you 1"
     assert text =~ "5 ○ Only you 1"
-    assert text =~ ~r/◎  new Design notes\s+markdown v3\s+Cy\s+2 h ago\s+design/
-    # The person's own is never new to them.
+    assert text =~ ~r/◎      Design notes\s+markdown v3\s+team design\s+2 h ago\s+design/
+    # The person's own is never new to them, and a team's is theirs.
     assert text =~ ~r/○      My scratch/
+    assert text =~ ~r/◉  new Quarterly report\s+page\s+v2\s+Bea/
 
     for {key, shown, hidden} <- [
           {"2", "Quarterly report", "Design notes"},
@@ -176,6 +183,11 @@ defmodule Troupe.ArtifactsScreenTest do
     press(pid, "l")
     assert eventually(fn -> screen_text(pid, session) =~ "/s/tok-a-mine-view" end)
 
+    # A team's is every member's: the person makes links to it as to their own.
+    press(pid, "3")
+    press(pid, "l")
+    assert eventually(fn -> screen_text(pid, session) =~ "/s/tok-a-team-view" end)
+
     # p: `/publish`'s line, a file of the workspace, Only you where nothing is named.
     press(pid, "p")
     type(pid, "notes.md")
@@ -193,6 +205,28 @@ defmodule Troupe.ArtifactsScreenTest do
     assert sent["session_id"] == sid
     assert screen_text(pid, session) =~ "5 ○ Only you 2"
     assert File.exists?(Path.join(ws, "notes.md"))
+
+    # For a team it is the team's, and the line says so, unless `me` follows.
+    press(pid, "p")
+    type(pid, "notes.md team:Core")
+    press(pid, "enter")
+
+    assert eventually(fn ->
+             screen_text(pid, session) =~ "published notes.md as art-new5 version 1 (team Core's)"
+           end)
+
+    assert %{"owner" => "team", "visibility" => "team:Core"} = last_publish(remote)
+
+    press(pid, "p")
+    type(pid, "notes.md team:Core me")
+    press(pid, "enter")
+
+    assert eventually(fn ->
+             screen_text(pid, session) =~ "published notes.md as art-new6 version 1\n"
+           end)
+
+    assert %{"owner" => "me"} = last_publish(remote)
+    assert screen_text(pid, session) =~ "3 ◎ Your teams 3"
 
     press(pid, "esc")
     eventually(fn -> user_state(pid).focus == :command end)
@@ -212,6 +246,13 @@ defmodule Troupe.ArtifactsScreenTest do
     assert screen_text(pid, session) =~ "Local only: the plane is not asked."
     refute screen_text(pid, session) =~ "Quarterly report"
     refute Enum.any?(FakeRemote.calls(remote), &match?({"artifact.list", _}, &1))
+  end
+
+  defp last_publish(remote) do
+    {"artifact.publish", sent} =
+      FakeRemote.calls(remote) |> Enum.reverse() |> Enum.find(&match?({"artifact.publish", _}, &1))
+
+    sent
   end
 
   defp reattach do

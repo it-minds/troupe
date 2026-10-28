@@ -3,15 +3,17 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   `/artifacts` (root #62): the person's artifacts on the plane, by who can
   see them, in the desktop app's words and glyphs — All, ◉ Everyone at the organisation,
   ◎ Your teams (a team's and a profile's), ◐ Shared with you (through a link), ○ Only you —
-  each row its title, kind, version, who published it and when, with *new* on a version the
-  person has not opened on this machine.
+  each row its title, kind, version, whose it is (`team finance` for a team's, which every
+  member of the team owns; `you`; or who published it) and when, with *new* on a version
+  the person has not opened on this machine.
 
   An artifact is shown where it can touch nothing of the person's: in the browser, through
   the plane's one-time address (`Enter`, `v` for another version). A Markdown one is also
   read here (`m`), rendered as the transcript renders a reply, in a frame; one past 500 lines
   is cut there, and its last line offers the browser. `p` publishes a file of the workspace
-  as `/publish` does, `l` copies a view link to one of the person's own, `/` filters, `r`
-  reads the list again, Esc goes back. Under Local only nothing is asked, and the page says so.
+  as `/publish` does (a team's where a team is named, unless `me` follows), `l` copies a view
+  link to one of the person's own, `/` filters, `r` reads the list again, Esc goes back.
+  Under Local only nothing is asked, and the page says so.
 
   It holds page state and answers keys; the server owns the process and the frame, as with
   HQ. Everything it asks goes through `Troupe.Client`, to this computer's daemon.
@@ -97,7 +99,8 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
     end)
   end
 
-  defp haystack(row), do: Enum.join([row["title"], row["kind"], by(row), row["visibility"]], " ")
+  defp haystack(row),
+    do: Enum.join([row["title"], row["kind"], Client.artifact_owner(row), row["visibility"]], " ")
 
   defp selected(page), do: Enum.at(visible(page), page.cursor)
 
@@ -300,8 +303,9 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
 
   ## Publishing and links
 
-  # `p`: `/publish`'s line, typed on the page — a path in the workspace and who it is for,
-  # Only you where nothing is named.
+  # `p`: `/publish`'s line, typed on the page — a path in the workspace, who it is for,
+  # Only you where nothing is named, and `me` where a team publication is to stay the
+  # person's own rather than the team's.
   defp prompt_key(page, %{code: "esc"}), do: {:ok, %{page | prompt: nil}}
 
   defp prompt_key(page, %{code: "backspace"}),
@@ -314,12 +318,14 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
 
       [path | rest] ->
         visibility = Elixir.List.first(rest) || "private"
+        owner = Enum.at(rest, 1)
         local = Path.expand(path, page.workspace)
 
         status =
-          case Client.publish_file(local, visibility, session_id: page.session_id) do
+          case Client.publish_file(local, visibility, session_id: page.session_id, owner: owner) do
             {:ok, artifact} ->
-              "published #{path} as #{artifact["id"]} version #{artifact["version"]}"
+              "published #{path} as #{artifact["id"]} version #{artifact["version"]}" <>
+                if(artifact["owner_team"], do: " (team #{artifact["owner_team"]}'s)", else: "")
 
             {:error, reason} ->
               "#{path} not published: #{reason}"
@@ -358,7 +364,11 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
         end
 
       row ->
-        %{page | status: "“#{row["title"]}” is #{by(row)}'s: only its owner makes links to it"}
+        %{
+          page
+          | status:
+              "“#{row["title"]}” is #{Client.artifact_owner(row)}'s: only its owner makes links to it"
+        }
     end
   end
 
@@ -382,7 +392,8 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   def footer(%{local_only: true}), do: " artifacts — Local only: the plane is not asked · Esc back "
 
   def footer(%{prompt: text}) when is_binary(text),
-    do: " publish — a path and who it is for · Enter publishes · Esc cancels "
+    do:
+      " publish — a path, who it is for, me to keep a team's yours · Enter publishes · Esc cancels "
 
   def footer(%{filtering: true}), do: " filter — type to narrow · Enter keeps it · Esc clears "
   def footer(%{frame: %{}}), do: " ↑↓ PgUp PgDn scroll · Enter opens it in the browser · Esc back "
@@ -518,7 +529,7 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
     rest =
       String.pad_trailing(kind_word(row["kind"]), 9) <>
         String.pad_trailing(v(row["current"] || row["version"]), 5) <>
-        String.pad_trailing(clip(by(row), 16), 17) <>
+        String.pad_trailing(clip(Client.artifact_owner(row), 16), 17) <>
         String.pad_trailing(ago(row["published_at"]), 14) <> clip(where(row), 16)
 
     new =
@@ -544,16 +555,12 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
     do:
       "publish: " <>
         text <>
-        "▏  (a path, then private, organisation, team:<name> or profile:<name>; Only you when none)"
+        "▏  (a path, then private, organisation, team:<name> or profile:<name>; Only you when none; " <>
+        "then me where a team's is to stay yours)"
 
   defp status_text(%{filtering: true} = page), do: "/" <> page.filter <> "▏"
   defp status_text(%{status: status}) when is_binary(status), do: status
   defp status_text(_page), do: ""
-
-  defp by(%{"mine" => true}), do: "you"
-  defp by(%{"owner" => %{"display_name" => name}}) when is_binary(name), do: name
-  defp by(%{"owner" => %{"subject" => subject}}) when is_binary(subject), do: subject
-  defp by(_row), do: "someone"
 
   defp kind_word("html"), do: "page"
   defp kind_word("markdown"), do: "markdown"

@@ -111,7 +111,8 @@ defmodule Troupe.Gateway.ArtifactsTest do
 
     # The plane's code, not one the daemon picks: a team the person is not in is forbidden,
     # with the teams they are in for a client to offer.
-    assert {:error, %{message: "forbidden", data: %{"reason" => reason, "teams" => ["engineering"]}}} =
+    assert {:error,
+            %{message: "forbidden", data: %{"reason" => reason, "teams" => ["engineering"]}}} =
              publish(ctx, %{"visibility" => "team:research"})
 
     assert reason =~ "not in team research"
@@ -166,26 +167,39 @@ defmodule Troupe.Gateway.ArtifactsTest do
              Client.call(ctx.client, "artifact.list", %{"mine" => true})
 
     assert gallery =~ "#/artifacts"
+
     assert {"artifact.list", %{"mine" => true}} =
              Enum.find(FakePlane.calls(ctx.plane.state), &match?({"artifact.list", _}, &1))
   end
 
   # The desktop app's gallery and viewer, and the terminal's: one artifact with its versions, a
   # ticket to open it or one version on its host, one text file of a version, a view link and
-  # its revoking, a rollback and a pin, each the plane's own method sent with the daemon's
-  # sign-in, its answer and its refusal as the plane gave them.
+  # its revoking, a rollback, a pin and a transfer to a team, each the plane's own method sent
+  # with the daemon's sign-in, its answer and its refusal as the plane gave them.
   test "the viewer's methods are forwarded to the plane as the person, its refusals kept", ctx do
     forwarded = [
       {"artifact.get", %{"id" => "art-fakefakefakefake"}},
       {"artifact.open", %{"id" => "art-fakefakefakefake", "version" => 1}},
       {"artifact.read", %{"id" => "art-fakefakefakefake", "version" => 1, "path" => "index.md"}},
-      {"artifact.share", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "role" => "view"}},
-      {"artifact.unshare", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "share" => "sh-1"}},
-      {"artifact.rollback", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => 1}},
-      {"artifact.pin", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => nil}},
+      {"artifact.share",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "role" => "view"}},
+      {"artifact.unshare",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "share" => "sh-1"}},
+      {"artifact.rollback",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => 1}},
+      {"artifact.pin",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => nil}},
       # Who may open it, moved by its owner: a put over the newest version with no files.
       {"artifact.put",
-       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "base" => 1, "visibility" => "private"}}
+       %{
+         "command_id" => Client.command_id(),
+         "id" => "art-fakefakefakefake",
+         "base" => 1,
+         "visibility" => "private"
+       }},
+      # Whose it is, handed to a team the person is in.
+      {"artifact.transfer",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "to" => "team:core"}}
     ]
 
     for {method, params} <- forwarded do
@@ -203,13 +217,19 @@ defmodule Troupe.Gateway.ArtifactsTest do
 
     assert url == ctx.plane.url
 
-    assert {:ok, %{"url" => "https://artifacts.example.test/enter?ticket=" <> _, "expires_in" => 60}} =
-             Client.call(ctx.client, "artifact.open", %{"id" => "art-fakefakefakefake", "version" => 1})
+    assert {:ok,
+            %{"url" => "https://artifacts.example.test/enter?ticket=" <> _, "expires_in" => 60}} =
+             Client.call(ctx.client, "artifact.open", %{
+               "id" => "art-fakefakefakefake",
+               "version" => 1
+             })
 
-    assert {:ok, %{"url" => "https://artifacts.example.test/s/" <> _, "share" => %{"role" => "view"}}} =
+    assert {:ok,
+            %{"url" => "https://artifacts.example.test/s/" <> _, "share" => %{"role" => "view"}}} =
              Client.call(ctx.client, "artifact.share", Enum.at(forwarded, 3) |> elem(1))
 
-    assert {:ok, %{"text" => "# Weekly"}} = Client.call(ctx.client, "artifact.read", Enum.at(forwarded, 2) |> elem(1))
+    assert {:ok, %{"text" => "# Weekly"}} =
+             Client.call(ctx.client, "artifact.read", Enum.at(forwarded, 2) |> elem(1))
 
     for {method, params} <- Enum.drop(forwarded, 4) do
       assert {:ok, _answer} = Client.call(ctx.client, method, params), method

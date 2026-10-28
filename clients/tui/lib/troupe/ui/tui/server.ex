@@ -79,6 +79,7 @@ defmodule Troupe.UI.TUI.Server do
           size: {non_neg_integer(), non_neg_integer()},
           answer: answer() | nil,
           gate: map() | nil,
+          audience: map() | nil,
           settings: settings() | nil,
           observer: %{cursor: non_neg_integer()} | nil,
           sessions: sessions() | nil,
@@ -297,8 +298,11 @@ defmodule Troupe.UI.TUI.Server do
       selection: nil,
       settings: nil,
       answer: nil,
-      # The draft of an answer to a delegation at the gate (TUI Decision 157).
+      # The draft of an answer to a delegation at the gate (TUI Decision 157), or to an
+      # agent's publication: whom it is for, picked from `audience`, the person's teams
+      # and profiles as the daemon last said them when an agent asked.
       gate: nil,
+      audience: nil,
       observer: nil,
       sessions: nil,
       files: nil,
@@ -1737,23 +1741,33 @@ defmodule Troupe.UI.TUI.Server do
   # by its own heading or title, else its name, and named as coming from this session; theirs
   # alone where it says nothing else. Read here, as `/upload` reads it. A team they are not
   # in is the plane's to refuse, naming theirs.
-  @publish_usage "/publish <path> [private | organisation | team:<name> | profile:<name>]"
+  @publish_usage "/publish <path> [private | organisation | team:<name> | profile:<name>] [me | team]"
 
   defp publish(sid, args) do
     case String.split(args, ~r/\s+/, trim: true) do
-      [path, visibility | _] -> publish(sid, path, visibility)
-      [path] -> publish(sid, path, "private")
-      _usage -> {:error, "usage: " <> @publish_usage}
+      [path, visibility, owner | _] when owner in ["me", "team"] ->
+        publish(sid, path, visibility, owner)
+
+      [path, visibility | _] ->
+        publish(sid, path, visibility, nil)
+
+      [path] ->
+        publish(sid, path, "private", nil)
+
+      _usage ->
+        {:error, "usage: " <> @publish_usage}
     end
   end
 
   # Read, titled and kinded as `troupe artifacts` and the gallery's `p` do it
-  # (`Client.publish_file/3`), named as coming from this session.
-  defp publish(sid, path, visibility) do
-    case Client.publish_file(path, visibility, session_id: sid) do
+  # (`Client.publish_file/3`), named as coming from this session. A team's publication is
+  # the team's unless `me` was said, so the answer says whose it became.
+  defp publish(sid, path, visibility, owner) do
+    case Client.publish_file(path, visibility, session_id: sid, owner: owner) do
       {:ok, artifact} ->
         {:ok,
          "published #{path} as #{artifact["id"]} version #{artifact["version"]}" <>
+           if(artifact["owner_team"], do: " (team #{artifact["owner_team"]}'s)", else: "") <>
            if(artifact["url"], do: ": #{artifact["url"]}", else: "")}
 
       # A file that could not be read says so as it is; a refusal, the daemon's or the plane's.
@@ -3644,6 +3658,9 @@ defmodule Troupe.UI.TUI.Server do
       %{delegation: %{}} = item ->
         gate_key(state, item, code)
 
+      %{publication: %{}} = item ->
+        publish_key(state, item, code)
+
       %{call_id: call_id} ->
         decision = %{"y" => :allow, "n" => :deny, "a" => :allow_session}[code]
 
@@ -3688,9 +3705,14 @@ defmodule Troupe.UI.TUI.Server do
   # budget question is one such (Decision 120).
   defp window_key(%Key{code: <<d>>}, path, %{win_text: ""} = state) when d in ?1..?9 do
     w = Map.fetch!(state.model.windows, path)
+    viewed = state.pane.agent || path
 
-    case pending_of(w, state.pane.agent || path, [:question, :budget]) do
-      %{options: options} = q when options != [] ->
+    # An agent's publication on screen takes the digit first: whom it is for.
+    case {answerable(w, viewed), pending_of(w, viewed, [:question, :budget])} do
+      {%{publication: %{}} = item, _question} ->
+        publish_pick(state, item, d - ?1)
+
+      {_approval, %{options: options} = q} when options != [] ->
         case Enum.at(options, d - ?1) do
           nil -> state
           %{label: label} -> choose(state, q, label)
@@ -3814,6 +3836,43 @@ defmodule Troupe.UI.TUI.Server do
       {:error, reason} ->
         state |> Map.put(:gate, %{draft | step: nil}) |> follow() |> notice(approval_error(reason))
     end
+  end
+
+  # An agent's publication: `y` publishes it for whom the person picked (the agent's
+  # proposal until they pick), `a` the same and unasked for the session, which an agent that
+  # named nobody is not given, since there is nothing to repeat; `n` denies it. With nobody
+  # picked there is no answer to send: the harness would refuse it, so it is refused here.
+  defp publish_key(state, item, code) do
+    draft = Model.publish_draft(Map.get(state, :gate), item, Map.get(state, :audience))
+    nameless? = item.publication["visibility"] == nil
+
+    case {code, Model.publish_answer(draft)} do
+      {"n", _answer} ->
+        answer_gate(state, item, draft, :deny, %{})
+
+      {_yes, nil} ->
+        notice(
+          state,
+          "say whom it is for: a digit picks one of the audiences in the window, then y"
+        )
+
+      {"a", _answer} when nameless? ->
+        notice(state, "an agent that named nobody is answered once: a digit picks whom for, then y")
+
+      {"y", answer} ->
+        answer_gate(state, item, draft, :allow, answer)
+
+      {"a", answer} ->
+        answer_gate(state, item, draft, :allow_session, answer)
+    end
+  end
+
+  defp publish_pick(state, item, n) do
+    draft = Model.publish_draft(Map.get(state, :gate), item, Map.get(state, :audience))
+
+    if n < length(draft.choices),
+      do: Map.put(state, :gate, %{draft | choice: n}),
+      else: state
   end
 
   # A part to edit goes into the box as it stands, to be changed in place; an agent to
@@ -4202,11 +4261,32 @@ defmodule Troupe.UI.TUI.Server do
       end
 
     state =
-      %{state | model: model} |> shell_ended(event) |> watch_triggered(event) |> left_window(event)
+      %{state | model: model}
+      |> shell_ended(event)
+      |> watch_triggered(event)
+      |> left_window(event)
+      |> audience_asked(event)
 
     state = if trees_moved?(event), do: refresh_worktrees(state), else: state
     if event.type == :remote_status, do: recheck_loop(state), else: state
   end
+
+  # An agent's publication asks whom it is for, which is chosen from the person's teams and
+  # profiles: read from the daemon as the request arrives, so the box can offer them with
+  # the proposal picked, and read again at each request, since teams change. Where the
+  # daemon cannot say (signed out, Local only) the box offers only you, the organisation
+  # and what the agent proposed.
+  defp audience_asked(state, %{type: :approval_requested, data: %{publication: %{}}}) do
+    case Client.artifacts() do
+      {:ok, %{teams: teams, profiles: profiles, organisation: organisation}} ->
+        %{state | audience: %{teams: teams, profiles: profiles, organisation: organisation}}
+
+      {:error, _reason} ->
+        %{state | audience: %{teams: [], profiles: [], organisation: nil}}
+    end
+  end
+
+  defp audience_asked(state, _event), do: state
 
   # A saved comment started a branch in the daemon (root Decision 844): its window opens
   # as one started here does, and the line under the screen says which file and comment
