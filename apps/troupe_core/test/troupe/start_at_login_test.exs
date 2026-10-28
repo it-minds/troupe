@@ -189,6 +189,61 @@ defmodule Troupe.StartAtLoginTest do
     end
   end
 
+  describe "refreshing an entry as the daemon starts" do
+    test "one in an older shape that starts this daemon is written again in place", ctx do
+      opts = opts(ctx, :startup_folder)
+      file = StartAtLogin.path(:startup_folder, opts)
+      File.mkdir_p!(Path.dirname(file))
+
+      # The entry a daemon before this one wrote: a console minimised to the taskbar.
+      File.write!(
+        file,
+        ~s(@echo off\r\nset "TROUPE_DAEMON_IDLE_MINUTES=0"\r\n) <>
+          ~s(start "troupe-daemon" /min cmd /c ""\\opt\\troupe dir\\bin\\troupe-daemon" run"\r\n)
+      )
+
+      assert StartAtLogin.refresh(opts) == {:ok, :rewritten}
+      assert File.read!(file) == StartAtLogin.entry(:startup_folder, @command)
+      assert File.read!(file) =~ "run --detached"
+    end
+
+    test "a current one is left as it is, a foreign file is left alone, none is none", ctx do
+      opts = opts(ctx, :systemd)
+      unit = StartAtLogin.path(:systemd, opts)
+
+      assert StartAtLogin.refresh(opts) == {:ok, :absent}
+
+      assert {:ok, _} = StartAtLogin.enable(opts)
+      File.touch!(unit, {{2020, 1, 1}, {0, 0, 0}})
+      assert StartAtLogin.refresh(opts) == {:ok, :current}
+      assert File.stat!(unit).mtime == {{2020, 1, 1}, {0, 0, 0}}
+
+      # Somebody else's unit at that path, starting something else: not this entry.
+      File.write!(unit, "[Service]\nExecStart=/usr/bin/other-daemon run\n")
+      assert {:ok, {:left, why}} = StartAtLogin.refresh(opts)
+      assert why =~ "does not start /opt/troupe dir/bin/troupe-daemon"
+      assert File.read!(unit) == "[Service]\nExecStart=/usr/bin/other-daemon run\n"
+    end
+
+    test "with no troupe-daemon to name, the entry is left and the answer says why", ctx do
+      opts = [
+        kind: :autostart,
+        env: ctx.env,
+        command: nil,
+        find: fn _ -> nil end,
+        release_root: ctx.home
+      ]
+
+      file = StartAtLogin.path(:autostart, opts)
+      File.mkdir_p!(Path.dirname(file))
+      File.write!(file, "[Desktop Entry]\nExec=troupe-daemon run\n")
+
+      assert {:ok, {:left, why}} = StartAtLogin.refresh(opts)
+      assert why =~ "troupe-daemon is not on the PATH"
+      assert File.read!(file) == "[Desktop Entry]\nExec=troupe-daemon run\n"
+    end
+  end
+
   describe "the troupe-daemon it starts" do
     test "is found on the PATH, else is the release's own wrapper", ctx do
       # `command: nil` sets aside the suite's own (test_helper.exs).

@@ -578,6 +578,28 @@ defmodule Troupe.Daemon.CLI do
   def browse_line(target, _os_type, _browser), do: {:exec, "xdg-open", [target]}
 
   @doc """
+  Write the login entry again where an update left it in an older shape: once, as the
+  daemon starts, since the daemon is the first thing that runs after an update and nobody
+  runs `login on` again. One line in the log when it did; nothing otherwise.
+  """
+  @spec refresh_login() :: :ok
+  def refresh_login do
+    case StartAtLogin.refresh() do
+      {:ok, :rewritten} ->
+        path = StartAtLogin.status()["path"]
+        Logger.info("the login entry #{path} was written again, in this version's shape")
+
+      {:ok, _as_it_was} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("the login entry could not be written again: #{reason}")
+    end
+
+    :ok
+  end
+
+  @doc """
   Say where the daemon that has just started is listening.
 
   Runs in the daemon's own tree, after the daemon. A daemon started by a client is

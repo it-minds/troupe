@@ -9,6 +9,7 @@ paths:
   - apps/troupe_core/test/troupe/start_at_login_test.exs
   - apps/troupe_daemon/lib/troupe/daemon/release.ex
   - apps/troupe_daemon/lib/troupe/daemon/cli.ex
+  - apps/troupe_daemon/lib/troupe/daemon/application.ex
   - apps/troupe_daemon/rel/env.bat.eex
   - apps/troupe_daemon/rel/vm.args.eex
   - apps/troupe_daemon/test/troupe/daemon/release_test.exs
@@ -18,6 +19,8 @@ paths:
   - docs/developer/gate-walk-rows.md
 symbols:
   - Troupe.StartAtLogin.entry/2
+  - Troupe.StartAtLogin.refresh/1
+  - Troupe.Daemon.CLI.refresh_login/0
   - Troupe.Daemon.Release.wrapper/1
   - Troupe.Daemon.Release.detached_vm_args/1
 gist: "The Windows login entry runs `troupe-daemon run --detached` (erl -detached via detached.vm.args, switched in env.bat), no console, no script host; eval never detaches"
@@ -70,11 +73,24 @@ only files, `TROUPE_DAEMON_IDLE_MINUTES=0`, the setup step).
   started it (802). `ELIXIR_ERL_OPTIONS=-detached` around the start: the VM hands its
   environment to every program it starts, so an agent's `mix test` would detach too.
   A `.lnk` with "run minimised": needs COM to write, and minimises rather than hides.
-- **An entry from before.** `troupe-daemon login on` writes the entry again (762: the
-  second time picks up a moved binary), which is also how an older entry becomes this
-  one; the installer leaves an entry it finds alone, so an upgrade does not do it.
+- **An entry from before refreshes itself.** A machine that had the entry before this
+  change would keep its console after an update until somebody ran `login on` again, and
+  nobody would. So the daemon, as it starts to serve (`Troupe.Daemon.Application`'s
+  one-off task, after the "listening at" line), runs `Troupe.StartAtLogin.refresh/1`
+  once: where an entry of this platform's kind is there, starts the `troupe-daemon` an
+  entry would start now (the command as that kind's entry spells it is in the text) and
+  is not what `entry/2` writes now, it is written again at the same path, and one line
+  says so in the log. A current entry is not written (its time stays); a file at that
+  path that starts something else is somebody else's and is left, as is any entry when
+  no `troupe-daemon` can be found; the answer says which. Still only files, nothing
+  started, every kind alike since any entry's shape can change. The daemon is the first
+  thing that runs after an update on every platform, which is why it is there and not in
+  an update step: `Troupe.Update`, `install.sh` and `install.ps1` have no hook after a
+  new daemon is in place, and the installer leaves an entry it finds alone.
 - **Proof:** `start_at_login_test.exs` (the Windows entry's exact text: `run --detached`,
-  no bare `run` that would keep a console, a path beyond ASCII still read as UTF-8),
+  no bare `run` that would keep a console, a path beyond ASCII still read as UTF-8; an
+  entry in the old shape rewritten in place, a current one left with its time, a foreign
+  file and an entry with no `troupe-daemon` to name left with the reason),
   `release_test.exs` (the wrapper's `run --detached`, refused with anything else, `eval`
   never detached, every VM reading the null device; `detached.vm.args` derived from
   `vm.args`), the daemon's `cli_test.exs` and the TUI's setup screen tests. Not run on
