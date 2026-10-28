@@ -2063,7 +2063,11 @@ answers none, without who wrote them), and beside them `organisation: {name}` (D
 and `roles: {platform_admin, team_admin}`, as the plane says them, both false and empty from
 a plane that says nothing of them.
 `me.memory.put` also takes `{command_id, entries, version}`, the document as entries
-`[{topic, body}]`, and `{command_id, append, topic}`.
+`[{topic, body}]`, and `{command_id, append, topic}`. A plane from before entries reads
+`text` alone and refuses them with `invalid_params` naming `text` in `data.missing`; the
+daemon passes that on, the plane's data with a sentence, as it does a level's refusal
+(`admin.memory.preview`, `admin.memory.put`), and a client then sends the entries rendered as
+`text`, as the plane would have written them.
 
 #### `memory.in_effect`, `admin.memory.get`, `admin.memory.preview`, `admin.memory.put`
 

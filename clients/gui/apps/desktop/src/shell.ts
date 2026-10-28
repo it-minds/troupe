@@ -47,6 +47,14 @@ export interface TroupeShell {
    */
   openExternal?: (url: string) => Promise<void>;
   /**
+   * Put text on the clipboard from outside the page.
+   *
+   * A webview's own `navigator.clipboard` writes only inside the click that asked and
+   * refuses one that comes after an `await` (WebKit, on Linux and macOS), and the link
+   * Copy link puts there is one the daemon mints first, so the page's write comes too late.
+   */
+  copyText?: (text: string) => Promise<void>;
+  /**
    * HTTP from outside the webview.
    *
    * A shell has an origin of its own — `tauri://localhost` — so a plane would have to

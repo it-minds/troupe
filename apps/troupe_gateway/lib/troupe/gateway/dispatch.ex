@@ -2064,6 +2064,12 @@ defmodule Troupe.Gateway.Dispatch do
   defp own_memory({:error, {:rpc, %{"message" => "conflict", "data" => data}}}),
     do: {:error, Error.new(:conflict, %{reason: data["reason"], version: data["version"]})}
 
+  # The plane's own data stays beside the sentence (a `missing` field names what the plane
+  # did not find), so a client can tell a plane from before entries, which reads `text` alone,
+  # from one refusing the document, and send the text instead.
+  defp own_memory({:error, {:rpc, %{"data" => %{} = data}} = reason}),
+    do: {:error, Error.new(:invalid_params, Map.put(data, "reason", Memory.sentence(reason)))}
+
   defp own_memory({:error, reason}),
     do: {:error, Error.new(:invalid_params, %{reason: Memory.sentence(reason)})}
 

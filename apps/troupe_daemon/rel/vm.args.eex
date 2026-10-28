@@ -1,5 +1,7 @@
 ## Flags for the daemon's VM: `bin/troupe_daemon start`, and the `eval` behind every other
-## `troupe-daemon` command. A release is built on the platform it runs on.
+## `troupe-daemon` command. A release is built on the platform it runs on. The release
+## also carries `detached.vm.args`, this file with `-detached` after it, for `start
+## --detached` (`Troupe.Daemon.Release`).
 <%= if match?({:win32, _}, :os.type()) do %>
 ## Windows (#231, root Decision 719). The VM shares a console, the one `troupe-daemon run`
 ## was typed in or the one `troupe daemon run` runs in, and reads none of it.

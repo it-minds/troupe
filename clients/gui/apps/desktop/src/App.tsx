@@ -10,7 +10,7 @@
 // be signed in: in local mode there is no `auth`, the screens that only a plane can fill
 // are not offered, and nothing here calls a plane.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import { awaitingYou, onThisComputer } from "@troupe/client";
 import type { AuthSession, FleetRow, SessionKind } from "@troupe/client";
@@ -78,6 +78,42 @@ function NotKept({ auth }: { auth: AuthSession | null }): JSX.Element | null {
   );
 }
 
+/**
+ * This computer's daemon became ready after the screen on show was entered: it linked to
+ * the person, or its socket opened again. A screen asks the daemon once at its start and
+ * again when the client arrives, so a client that comes late is no loss; but one that was
+ * there and not yet linked refused the first ask as not signed in, and one that opened
+ * again may be a daemon that restarted and holds other sessions and no token. The screen
+ * cannot tell, and the app does not remount it uninvited, which would lose whatever the
+ * person is in the middle of. So it says so and offers the refresh, which is a remount of
+ * that one screen; the banner goes at the refresh and at the next screen.
+ */
+function DaemonReady({ onRefresh }: { onRefresh: () => void }): JSX.Element {
+  return (
+    <div className="banner ready" role="status">
+      <p>This computer's daemon is ready now; this screen opened before it was.</p>
+      <button className="link" onClick={onRefresh}>
+        Refresh
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Which screen `where` is, so a move can be told from a re-render: the rail's entry for
+ * the screen already on show, pressed again, is not a new screen.
+ */
+function placeOf(where: Where): string {
+  switch (where.screen) {
+    case "session":
+      return `session ${where.id}`;
+    case "agents":
+      return `agents ${where.workspace ?? ""} ${where.agent ?? ""}`;
+    default:
+      return where.screen;
+  }
+}
+
 /** The workspace a session on this computer works in, for the agents manager it opens. */
 function workspaceOf(row: { kind: SessionKind; raw: unknown } | undefined): { workspace?: string } {
   const workspace = row && onThisComputer(row.kind) ? (row.raw as { workspace?: unknown } | null)?.workspace : undefined;
@@ -112,6 +148,15 @@ export function App(): JSX.Element {
   const [where, setWhere] = useState<Where>(startScreen);
   // Given the sign-in, so the daemon is handed the plane token it seals with (#365).
   const daemon = useDaemon(auth);
+  // How ready the daemon was when the screen on show was entered, and how many times
+  // the person has asked for that screen again since. A move resets the former; a
+  // refresh bumps the latter, which remounts the screen.
+  const place = placeOf(where);
+  const readiness = { opened: daemon.opened, linked: Boolean(daemon.identity?.linked) };
+  const [entered, setEntered] = useState({ place, ...readiness, remount: 0 });
+  if (entered.place !== place) setEntered({ place, ...readiness, remount: entered.remount });
+  const readySince = daemon.opened > entered.opened || (readiness.linked && !entered.linked);
+  const refreshScreen = (): void => setEntered({ place, ...readiness, remount: entered.remount + 1 });
   // The theme, light or dark and notifications follow the person through the daemon (troupe #57).
   useSharedPrefs(daemon.client);
   // What the plane makes of this version, and the app's own update (Decision 874). A
@@ -415,105 +460,110 @@ export function App(): JSX.Element {
           </div>
         )}
 
-        {where.screen === "sessions" && (
-          <Sessions
-            rows={snapshot.rows}
-            loading={snapshot.loading}
-            error={planeError}
-            onOpen={(id) => setWhere({ screen: "session", id })}
-            onStart={() => setWhere({ screen: "new" })}
-            onClaim={claim}
-          />
-        )}
+        {readySince && <DaemonReady onRefresh={refreshScreen} />}
 
-        {where.screen === "new" && (
-          <StartSession
-            auth={planeAuth}
-            daemon={daemon.client}
-            linked={Boolean(daemon.identity?.linked)}
-            onClose={() => setWhere({ screen: "sessions" })}
-            onCreated={(id, kind, workspace) => {
-              refresh();
-              setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
-            }}
-          />
-        )}
+        {/* Keyed so a refresh is a remount of the screen alone, never of the window. */}
+        <Fragment key={entered.remount}>
+          {where.screen === "sessions" && (
+            <Sessions
+              rows={snapshot.rows}
+              loading={snapshot.loading}
+              error={planeError}
+              onOpen={(id) => setWhere({ screen: "session", id })}
+              onStart={() => setWhere({ screen: "new" })}
+              onClaim={claim}
+            />
+          )}
 
-        {where.screen === "local" && (
-          <Local
-            daemon={daemon}
-            auth={planeAuth}
-            me={planeAuth?.me ? { subject: planeAuth.me.subject, display_name: planeAuth.me.display_name } : null}
-            planeUrl={planeAuth?.planeUrl ?? ""}
-            localOnly={localOnly}
-            onLocalOnly={setLocalOnly}
-          />
-        )}
-
-        {where.screen === "agents" && (
-          <Agents
-            key={`${where.workspace ?? ""}:${where.agent ?? ""}`}
-            client={daemon.client}
-            rows={snapshot.rows}
-            workspace={where.workspace}
-            agent={where.agent}
-            planeUrl={planeAuth?.planeUrl ?? null}
-            onOpenSession={(id) => setWhere({ screen: "session", id })}
-            onStarted={(id, kind, workspace) => {
-              refresh();
-              setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
-            }}
-          />
-        )}
-
-        {where.screen === "review" && planeAuth && (
-          <Review auth={planeAuth} admin={adminApi} daemon={daemon.client} teams={planeAuth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
-        )}
-
-        {where.screen === "artifacts" && (
-          <Artifacts
-            daemon={daemon.client}
-            localOnly={localOnly}
-            onOpenSession={(id) => (snapshot.rows.some((r) => r.id === id) ? setWhere({ screen: "session", id }) : undefined)}
-          />
-        )}
-
-        {where.screen === "memory" && <MemoryScreen daemon={daemon.client} localOnly={localOnly} teams={planeAuth?.me?.teams ?? []} />}
-
-        {where.screen === "appearance" && <AppearanceSettings {...appearance} />}
-
-        {where.screen === "setup" && <SetupScreen client={daemon.client} opened={daemon.opened} onDone={setupDone} />}
-
-        {where.screen === "approvals" && (
-          <Approvals
-            auth={planeAuth}
-            daemon={daemon.client}
-            rows={snapshot.rows}
-            onOpen={(id) => setWhere({ screen: "session", id })}
-            onAnswered={refresh}
-          />
-        )}
-
-        {where.screen === "session" && (
-          <Opened row={row} sessionId={where.id} daemon={daemon.client} onBack={() => setWhere({ screen: "sessions" })}>
-            <Session
+          {where.screen === "new" && (
+            <StartSession
               auth={planeAuth}
               daemon={daemon.client}
-              machineUser={daemon.user?.subject ?? null}
-              row={row}
-              sessionId={where.id}
-              created={where.kind}
-              startedIn={where.workspace}
-              onBack={() => setWhere({ screen: "sessions" })}
-              onGo={(screen) => setWhere({ screen })}
-              onAgents={(agent) => setWhere({ screen: "agents", ...workspaceOf(row), ...(agent ? { agent } : {}) })}
+              linked={Boolean(daemon.identity?.linked)}
+              onClose={() => setWhere({ screen: "sessions" })}
+              onCreated={(id, kind, workspace) => {
+                refresh();
+                setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
+              }}
+            />
+          )}
+
+          {where.screen === "local" && (
+            <Local
+              daemon={daemon}
+              auth={planeAuth}
+              me={planeAuth?.me ? { subject: planeAuth.me.subject, display_name: planeAuth.me.display_name } : null}
+              planeUrl={planeAuth?.planeUrl ?? ""}
+              localOnly={localOnly}
+              onLocalOnly={setLocalOnly}
+            />
+          )}
+
+          {where.screen === "agents" && (
+            <Agents
+              key={`${where.workspace ?? ""}:${where.agent ?? ""}`}
+              client={daemon.client}
+              rows={snapshot.rows}
+              workspace={where.workspace}
+              agent={where.agent}
+              planeUrl={planeAuth?.planeUrl ?? null}
+              onOpenSession={(id) => setWhere({ screen: "session", id })}
               onStarted={(id, kind, workspace) => {
                 refresh();
                 setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
               }}
             />
-          </Opened>
-        )}
+          )}
+
+          {where.screen === "review" && planeAuth && (
+            <Review auth={planeAuth} admin={adminApi} daemon={daemon.client} teams={planeAuth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
+          )}
+
+          {where.screen === "artifacts" && (
+            <Artifacts
+              daemon={daemon.client}
+              localOnly={localOnly}
+              onOpenSession={(id) => (snapshot.rows.some((r) => r.id === id) ? setWhere({ screen: "session", id }) : undefined)}
+            />
+          )}
+
+          {where.screen === "memory" && <MemoryScreen daemon={daemon.client} localOnly={localOnly} teams={planeAuth?.me?.teams ?? []} />}
+
+          {where.screen === "appearance" && <AppearanceSettings {...appearance} />}
+
+          {where.screen === "setup" && <SetupScreen client={daemon.client} opened={daemon.opened} onDone={setupDone} />}
+
+          {where.screen === "approvals" && (
+            <Approvals
+              auth={planeAuth}
+              daemon={daemon.client}
+              rows={snapshot.rows}
+              onOpen={(id) => setWhere({ screen: "session", id })}
+              onAnswered={refresh}
+            />
+          )}
+
+          {where.screen === "session" && (
+            <Opened row={row} sessionId={where.id} daemon={daemon.client} onBack={() => setWhere({ screen: "sessions" })}>
+              <Session
+                auth={planeAuth}
+                daemon={daemon.client}
+                machineUser={daemon.user?.subject ?? null}
+                row={row}
+                sessionId={where.id}
+                created={where.kind}
+                startedIn={where.workspace}
+                onBack={() => setWhere({ screen: "sessions" })}
+                onGo={(screen) => setWhere({ screen })}
+                onAgents={(agent) => setWhere({ screen: "agents", ...workspaceOf(row), ...(agent ? { agent } : {}) })}
+                onStarted={(id, kind, workspace) => {
+                  refresh();
+                  setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
+                }}
+              />
+            </Opened>
+          )}
+        </Fragment>
       </main>
     </div>
   );

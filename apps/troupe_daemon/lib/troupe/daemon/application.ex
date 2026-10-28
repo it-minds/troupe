@@ -31,9 +31,15 @@ defmodule Troupe.Daemon.Application do
     System.get_env("RELEASE_NAME") != nil or System.get_env("TROUPE_DAEMON_SERVE") == "1"
   end
 
-  # Say where the daemon is listening, once, after it is. `:temporary`: a line that was
-  # printed is not a crash to restart.
+  # Say where the daemon is listening, once, after it is, and then write the login entry
+  # again if an update left it in an older shape. `:temporary`: a line that was printed is
+  # not a crash to restart.
   defp announcer do
-    %{id: :announce, start: {Task, :start_link, [&CLI.announce/0]}, restart: :temporary}
+    %{id: :announce, start: {Task, :start_link, [&announce/0]}, restart: :temporary}
+  end
+
+  defp announce do
+    CLI.announce()
+    CLI.refresh_login()
   end
 end

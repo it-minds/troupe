@@ -203,7 +203,7 @@ from releases the release key signed, without anyone reinstalling.
    `~/.config/systemd/user/troupe-daemon.service` (and its link in `default.target.wants/`)
    on Linux with systemd, `~/.config/autostart/troupe-daemon.desktop` without (`~/.config`
    being `$XDG_CONFIG_HOME` when set). Reboot, log in, open no client: `troupe-daemon
-   status` says it is running (on Windows in a console minimised to the taskbar), and
+   status` says it is running (on Windows with no window: the entry runs it detached), and
    still does fifteen minutes later, where one a client started would have stopped after
    ten. Then `troupe-daemon login off`: the entry is gone, `troupe-daemon login status`
    says it does not start at login, and after the next reboot `troupe-daemon status` says

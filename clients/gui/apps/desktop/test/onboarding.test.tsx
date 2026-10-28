@@ -415,7 +415,7 @@ describe("each screen", () => {
     const on = render(<Daemon flow={windows} {...idle} onAnswer={onAnswer} />);
     await shown("It starts at login now, from C:\\Users\\ada\\Startup\\troupe-daemon.cmd");
     expect(pressed("Start it when I log in")).toBe(true);
-    await sees("console window minimised to the taskbar");
+    await sees("runs it with no window");
     await sees("and the entry there now is removed");
     button("Only when an app needs it")!.click();
     await waitFor(() => pressed("Only when an app needs it") || null, "off pressed");

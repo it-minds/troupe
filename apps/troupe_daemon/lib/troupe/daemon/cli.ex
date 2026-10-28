@@ -2,7 +2,7 @@ defmodule Troupe.Daemon.CLI do
   @moduledoc """
   What `troupe-daemon` does with its arguments.
 
-      troupe-daemon [run]               serve on this machine until idle or stopped
+      troupe-daemon [run] [--detached]  serve on this machine until idle or stopped; --detached (Windows) with no console
       troupe-daemon status              say whether one is running, and where
       troupe-daemon stop                stop the one running here, between turns, and wait until it has
       troupe-daemon open [--url URL]    start it if need be, and open the web app connected to it
@@ -31,6 +31,8 @@ defmodule Troupe.Daemon.CLI do
   `status` first so that it says where the running one is and exits 0 instead — which is
   what ten terminals starting at once want.
   """
+
+  require Logger
 
   alias Troupe.Config
   alias Troupe.Config.ModelSettings
@@ -255,8 +257,11 @@ defmodule Troupe.Daemon.CLI do
   def main({:login, :on}) do
     case StartAtLogin.enable() do
       {:ok, status} ->
+        # The Startup folder's entry runs the daemon detached, with no window; the other
+        # platforms' entries are run by a service manager that gives it none.
+        detached = if status["kind"] == "startup_folder", do: " --detached, with no window", else: ""
         IO.puts("troupe-daemon starts at login: #{status["path"]}")
-        IO.puts("  runs       #{status["command"]} run, and stays up until you log out")
+        IO.puts("  runs       #{status["command"]} run#{detached}, and stays up until you log out")
         IO.puts("  from       your next login; nothing is started now")
         0
 
@@ -573,6 +578,28 @@ defmodule Troupe.Daemon.CLI do
   def browse_line(target, _os_type, _browser), do: {:exec, "xdg-open", [target]}
 
   @doc """
+  Write the login entry again where an update left it in an older shape: once, as the
+  daemon starts, since the daemon is the first thing that runs after an update and nobody
+  runs `login on` again. One line in the log when it did; nothing otherwise.
+  """
+  @spec refresh_login() :: :ok
+  def refresh_login do
+    case StartAtLogin.refresh() do
+      {:ok, :rewritten} ->
+        path = StartAtLogin.status()["path"]
+        Logger.info("the login entry #{path} was written again, in this version's shape")
+
+      {:ok, _as_it_was} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("the login entry could not be written again: #{reason}")
+    end
+
+    :ok
+  end
+
+  @doc """
   Say where the daemon that has just started is listening.
 
   Runs in the daemon's own tree, after the daemon. A daemon started by a client is
@@ -582,8 +609,12 @@ defmodule Troupe.Daemon.CLI do
   def announce do
     case running() do
       {:ok, endpoint} ->
-        IO.puts("troupe-daemon #{version()} listening at #{Endpoint.describe(endpoint)}")
+        listening = "troupe-daemon #{version()} listening at #{Endpoint.describe(endpoint)}"
+        IO.puts(listening)
         Enum.each(where(), &IO.puts/1)
+        # A daemon started detached (the Windows login entry's) has no console to print
+        # to: the log is where its start is seen.
+        Logger.info(listening)
 
       :not_running ->
         IO.puts(
@@ -682,7 +713,7 @@ defmodule Troupe.Daemon.CLI do
   @spec usage() :: String.t()
   def usage do
     """
-    troupe-daemon [run]               serve on this machine until idle or stopped
+    troupe-daemon [run] [--detached]  serve on this machine until idle or stopped; --detached (Windows) with no console
     troupe-daemon status              say whether one is running, and where
     troupe-daemon stop                stop the one running here, between turns, and wait until it has
     troupe-daemon open [--url URL]    start it if need be, and open the web app connected to it

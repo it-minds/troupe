@@ -4,6 +4,8 @@
 // the closest level's entry with the lower ones it replaces. The plane's own is
 // `Troupe.Protocol.Memory.Entries`; this is enough of it for a fake to answer as it does.
 
+import { renderEntries } from "../../src/entries.js";
+
 export interface FakeEntry {
   topic: string;
   body: string;
@@ -43,17 +45,8 @@ export function parse(text: string): FakeEntry[] {
   return entries;
 }
 
-/** The text of a document holding these entries, as the plane writes them. */
-export function render(entries: Array<{ topic?: string | null; body?: string; heading?: boolean }>): string {
-  return entries
-    .map((e) => {
-      const body = (e.body ?? "").trim();
-      if (e.heading === false || !e.topic) return body;
-      return body === "" ? `## ${e.topic.trim()}` : `## ${e.topic.trim()}\n\n${body}`;
-    })
-    .filter((part) => part !== "")
-    .join("\n\n");
-}
+/** The text of a document holding these entries, as the plane writes them: the client's own copy of the plane's rule. */
+export const render = renderEntries;
 
 const key = (topic: string): string => topic.trim().replace(/\s+/g, " ").toLowerCase();
 

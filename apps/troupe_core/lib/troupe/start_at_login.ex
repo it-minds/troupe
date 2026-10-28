@@ -1,14 +1,19 @@
 defmodule Troupe.StartAtLogin do
   @moduledoc """
   Whether `troupe-daemon` starts when this person logs in: the one place that writes the
-  login entry, removes it and says whether it is there (Decision 762). `troupe-daemon
-  login on|off|status` and the first run's `daemon` step (`Troupe.Setup`) both come here.
+  login entry, removes it and says whether it is there, so that every client and the
+  installers agree on where it is. `troupe-daemon login on|off|status` and the first run's
+  `daemon` step (`Troupe.Setup`) both come here.
 
   The entry is the platform's own per-user one, and none needs an administrator:
 
     * Windows: `troupe-daemon.cmd` in the user's Startup folder
-      (`%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup`), which starts the
-      daemon in a console minimised to the taskbar, where it can be seen and closed.
+      (`%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup`), which runs
+      `troupe-daemon run --detached`: the VM is started with no console at all, which is
+      the runtime's own way to run a daemon (`erl -detached`), so no window stays open and
+      no script host or hidden shell is involved. It is seen in Task Manager's Startup
+      list and as `erl.exe`, stopped with `troupe-daemon stop` or by logging out, and its
+      log is `daemon.log` in the state directory.
     * macOS: a launchd agent, `~/Library/LaunchAgents/com.objective-mj.troupe.daemon.plist`,
       run at load.
     * Linux with systemd: a `systemd --user` unit,
@@ -24,6 +29,12 @@ defmodule Troupe.StartAtLogin do
 
   Only files are written. Nothing is loaded into launchd or systemd here, so turning it on
   takes effect at the next login, and turning it off stops nothing that is running.
+
+  An entry is what this version writes: `refresh/1`, which the daemon runs once as it
+  starts, writes an entry again in place when it starts this `troupe-daemon` but not in
+  the shape `entry/2` gives now, since nobody runs `login on` again after an update. One
+  that starts something else is somebody else's and is left alone, as is one whose
+  `troupe-daemon` cannot be found.
 
   Options, over the `:troupe_core, :start_at_login` application environment (which is how
   a test suite keeps every call away from the real login items): `:kind`, one of `kinds/0`;
@@ -178,6 +189,66 @@ defmodule Troupe.StartAtLogin do
   defp enable_unit(_kind, _file, _opts), do: :ok
 
   @doc """
+  Write the entry again where it is there, starts the `troupe-daemon` an entry would start
+  now, and is not what `entry/2` writes now: `:rewritten`. `:current` when it is that
+  already (nothing is written, so its time stays), `:absent` when there is none, and
+  `{:left, why}` for a file that starts something else, which is not this entry to
+  rewrite, or when there is no `troupe-daemon` to name. Nothing is started, and a
+  systemd unit's link stays as it was.
+  """
+  @spec refresh(keyword()) ::
+          {:ok, :absent | :current | :rewritten | {:left, String.t()}} | {:error, String.t()}
+  def refresh(opts \\ []) do
+    opts = options(opts)
+    kind = kind(opts)
+    file = path(kind, opts)
+
+    case read(file) do
+      {:ok, :absent} ->
+        {:ok, :absent}
+
+      {:ok, text} ->
+        case command(opts) do
+          {:ok, command} -> refresh(kind, file, text, command)
+          {:error, reason} -> {:ok, {:left, reason}}
+        end
+
+      other ->
+        other
+    end
+  end
+
+  defp refresh(kind, file, text, command) do
+    cond do
+      text == entry(kind, command) ->
+        {:ok, :current}
+
+      String.contains?(text, spelled(kind, command)) ->
+        with :ok <- write(file, entry(kind, command)), do: {:ok, :rewritten}
+
+      true ->
+        {:ok, {:left, "#{Troupe.Paths.display(file)} does not start #{command}"}}
+    end
+  end
+
+  defp read(file) do
+    case File.read(file) do
+      {:ok, text} -> {:ok, text}
+      {:error, :enoent} -> {:ok, :absent}
+      {:error, reason} -> {:error, could_not("read", file, reason)}
+    end
+  end
+
+  # The command as the entry of `kind` spells it, which is how an entry that starts it is
+  # told from a file somebody else put at that path.
+  defp spelled(:startup_folder, command),
+    do: command |> String.replace("/", "\\") |> String.replace("%", "%%")
+
+  defp spelled(:launch_agent, command), do: xml(command)
+  defp spelled(:systemd, command), do: systemd_word(command)
+  defp spelled(:autostart, command), do: desktop_word(command)
+
+  @doc """
   Remove the entry, and on Linux either kind of it, so one written before systemd was
   there goes too. Nothing there is not a failure.
   """
@@ -252,12 +323,23 @@ defmodule Troupe.StartAtLogin do
     # with an ø in it) is read as UTF-8 only once the page is switched. `%` is a
     # variable there, and `start` runs a batch file under `cmd /k`, which would leave
     # the window open after the daemon exits, so it is `cmd /c` explicitly.
-    path = command |> String.replace("/", "\\") |> String.replace("%", "%%")
+    #
+    # `run --detached` has the wrapper start the VM detached from any console, so the
+    # daemon itself has no window. Explorer still gives a Startup item that is a batch
+    # file a console of its own: `start` returns at once, so that one is gone in a blink,
+    # and the inner one, minimised, lasts the second or two the wrapper takes to look
+    # for a running daemon and hand the VM its flags, then closes when the VM's launcher
+    # returns. Nothing stays on the taskbar.
+    path = spelled(:startup_folder, command)
     utf8 = if path =~ ~r/[^\x00-\x7F]/u, do: ["chcp 65001 >nul"], else: []
 
     (["@echo off", "rem Starts #{@name} when you log in. `#{@name} login off` removes this file."] ++
        utf8 ++
-       [~s(set "#{@idle}=0"), ~s(start "#{@name}" /min cmd /c ""#{path}" run"), ""])
+       [
+         ~s(set "#{@idle}=0"),
+         ~s(start "#{@name}" /min cmd /c ""#{path}" run --detached"),
+         ""
+       ])
     |> Enum.join("\r\n")
   end
 

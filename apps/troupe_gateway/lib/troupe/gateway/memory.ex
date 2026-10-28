@@ -356,6 +356,12 @@ defmodule Troupe.Gateway.Memory do
   @spec sentence(term()) :: String.t()
   def sentence({:rpc, %{"data" => %{"reason" => reason}}}) when is_binary(reason), do: reason
   def sentence({:rpc, %{"code" => -32_601}}), do: "the plane keeps no memory of a person's own; it is from before it"
+
+  # A refusal naming the field the plane wanted says so, so a plane from before an argument
+  # (one that reads `text` alone, sent `entries`) is told apart from any other refusal.
+  def sentence({:rpc, %{"data" => %{"missing" => field}}}) when is_binary(field),
+    do: "the plane refused it: #{field} is missing"
+
   def sentence({:rpc, %{"message" => message}}), do: "the plane refused it (#{message})"
   def sentence(:unauthorized), do: "the plane did not take this machine's sign-in; sign in again"
   def sentence({:update_required, sentence}), do: sentence

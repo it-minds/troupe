@@ -16,6 +16,14 @@ defmodule Troupe.Daemon.Release do
   person and a client use: `run` is the release's `start`, everything else is `eval` into
   `Troupe.Daemon.CLI.eval/1`. It resolves the release root from its own location, so the
   installer can put a symlink to it on the `PATH`.
+
+  **The detached flags.** On Windows `troupe-daemon run --detached` is how the login entry
+  starts the daemon: the VM detached from any console, `erl -detached`, the runtime's own
+  way to run a daemon, with no window and no script host. The release script cannot be
+  given a VM flag for one command, so `releases/<vsn>/detached.vm.args` is `vm.args` with
+  `-detached` at the end, and the release's `env.bat` points `RELEASE_VM_ARGS` at it when
+  the command line is `start --detached`. `eval` keeps `vm.args`: a `status` run detached
+  would answer nothing.
   """
 
   alias Mix.Tasks.Compile.Reaper
@@ -62,7 +70,31 @@ defmodule Troupe.Daemon.Release do
     File.write!(sh, wrapper_sh())
     File.chmod!(sh, 0o755)
     File.write!(Path.join([release.path, "bin", "troupe-daemon.cmd"]), wrapper_cmd())
+
+    vm_args = Path.join(release.version_path, "vm.args")
+
+    File.write!(
+      Path.join(release.version_path, "detached.vm.args"),
+      detached_vm_args(File.read!(vm_args))
+    )
+
     release
+  end
+
+  @doc """
+  `detached.vm.args`: the release's rendered `vm.args`, `-detached` after it. One file
+  derived from the other, so a flag added to `vm.args` reaches a detached daemon too.
+  """
+  @spec detached_vm_args(String.t()) :: String.t()
+  def detached_vm_args(vm_args) do
+    String.trim_trailing(vm_args) <>
+      """
+
+
+      ## `troupe-daemon run --detached`: the flags above, and the VM detached from any
+      ## console, so a daemon started at login has no window. Not for `eval`.
+      -detached
+      """
   end
 
   # The sibling app's source: an `in_umbrella` dependency of this project, so its path
@@ -117,14 +149,20 @@ defmodule Troupe.Daemon.Release do
     """
   end
 
-  # Untested here: this repository is built and checked on Linux runners and a WSL
-  # laptop. The Windows release job runs it.
+  # Not run here: this repository is built and checked on Linux runners and a WSL
+  # laptop. The Windows release job runs it; `release_test.exs` reads it.
   #
   # Every VM it starts reads the null device, not the console: with `+Bc` in `vm.args`
   # (`rel/vm.args.eex`) a VM given the console turns Ctrl-C into a key for the whole
-  # console, which nothing here reads, and the daemon could no longer be stopped with it
-  # (root Decision 719).
-  defp wrapper_cmd do
+  # console, which nothing here reads, and the daemon could no longer be stopped with it.
+  #
+  # `run --detached` is `start --detached`, which the release's `env.bat` turns into the
+  # detached VM flags; `run` takes that option and no other. The `run` branch is a label
+  # rather than a parenthesised block because `cmd` expands `%errorlevel%` when it parses
+  # a block, before anything in it has run.
+  @doc false
+  @spec wrapper_cmd() :: String.t()
+  def wrapper_cmd do
     ~S"""
     @echo off
     rem troupe-daemon: the local Troupe harness. `run` serves; everything else asks.
@@ -133,16 +171,23 @@ defmodule Troupe.Daemon.Release do
     set "rel=%root%\bin\troupe_daemon.bat"
     set "cmd=%~1"
     if "%cmd%"=="" set "cmd=run"
-    if "%cmd%"=="run" (
-      call "%rel%" eval "Troupe.Daemon.CLI.eval(System.argv())" -- status <nul >nul 2>&1
-      if not errorlevel 1 (
-        call "%rel%" eval "Troupe.Daemon.CLI.eval(System.argv())" -- status <nul
-        exit /b 0
-      )
-      call "%rel%" start <nul
-      exit /b %errorlevel%
-    )
+    if "%cmd%"=="run" goto run
     call "%rel%" eval "Troupe.Daemon.CLI.eval(System.argv())" -- %* <nul
+    exit /b %errorlevel%
+
+    :run
+    set "detached="
+    if "%~2"=="--detached" set "detached=--detached"
+    if not "%~2"=="" if not defined detached (
+      1>&2 echo troupe-daemon run takes --detached and nothing else
+      exit /b 1
+    )
+    call "%rel%" eval "Troupe.Daemon.CLI.eval(System.argv())" -- status <nul >nul 2>&1
+    if not errorlevel 1 (
+      call "%rel%" eval "Troupe.Daemon.CLI.eval(System.argv())" -- status <nul
+      exit /b 0
+    )
+    call "%rel%" start %detached% <nul
     exit /b %errorlevel%
     """
   end

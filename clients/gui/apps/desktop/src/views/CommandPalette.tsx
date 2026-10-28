@@ -23,6 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import type { AgentLayer, AgentRow, CommandEntry } from "@troupe/client";
+import { copyText } from "../clipboard";
 import type { SessionHandle } from "../hooks";
 import { loopError } from "./Goal";
 
@@ -121,7 +122,7 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
   // the person's own, from files on this computer, through its daemon's sign-in.
   publish: ({ publish }) => (publish ? void publish() : "publishing goes through this computer's daemon, and there is none here"),
   copy: async ({ transcript }) => {
-    await navigator.clipboard.writeText(transcript());
+    await copyText(transcript());
     return "copied the transcript";
   },
   help: () => "",
