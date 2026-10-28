@@ -23,6 +23,7 @@ import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { AuthSession, PlaneUnreachableError } from "@troupe/client";
 import type { DeviceAuthorization, Discovery } from "@troupe/client";
+import { copyText } from "../clipboard";
 import { throughTheGate } from "../mode";
 import { capabilities, likelyPlaneUrl, prefs, redirectUri, shell, tokenStore } from "../shell";
 import { Wordmark } from "./brand";
@@ -119,11 +120,32 @@ export function SignIn({
     };
   }, [onSignedIn, signInNow]);
 
+  // What became of the device link: why the browser could not be opened for it, or that
+  // it was copied. A click that does nothing is the one thing this screen must not do,
+  // since the link is the whole sign-in.
+  const [link, setLink] = useState<string | null>(null);
+  const deviceLink = (code: DeviceAuthorization): string => code.verification_uri_complete ?? code.verification_uri;
+  const openDevice = (code: DeviceAuthorization): void => {
+    const open = shell()?.openExternal;
+    if (!open) return;
+    setLink(null);
+    open(deviceLink(code)).catch((e: unknown) => setLink(`Your browser could not be opened for it: ${describe(e)} Copy the link and open it yourself.`));
+  };
+  const copyDevice = async (code: DeviceAuthorization): Promise<void> => {
+    try {
+      await copyText(deviceLink(code));
+      setLink("Link copied.");
+    } catch (e) {
+      setLink(`Not copied: ${describe(e)}`);
+    }
+  };
+
   const signIn = async (url: string = planeUrl): Promise<void> => {
     setBusy(true);
     setError(null);
     setUnreachable(false);
     setDevice(null);
+    setLink(null);
     prefs.set("planeUrl", url);
     const auth = newSession(url);
     try {
@@ -145,9 +167,7 @@ export function SignIn({
       await auth.signIn({
         onDeviceCode: (code) => {
           setDevice(code);
-          void shell()
-            ?.openExternal?.(code.verification_uri_complete ?? code.verification_uri)
-            .catch(() => undefined);
+          openDevice(code);
         },
         onStatus: setStatus,
       });
@@ -198,23 +218,30 @@ export function SignIn({
           <p>
             Open{" "}
             <a
-              href={device.verification_uri_complete ?? device.verification_uri}
+              href={deviceLink(device)}
               target="_blank"
               rel="noreferrer noopener"
               onClick={(e) => {
                 // A webview does nothing with target="_blank", and this link is the
                 // whole device grant. Where there is a shell, hand it over.
-                const open = shell()?.openExternal;
-                if (!open) return;
+                if (!shell()?.openExternal) return;
                 e.preventDefault();
-                void open(device.verification_uri_complete ?? device.verification_uri);
+                openDevice(device);
               }}
             >
-              {device.verification_uri}
-            </a>{" "}
-            and enter this code:
+              {/* The whole link, code and all where the provider gives one, so that
+                  copying it by hand loses nothing. */}
+              {deviceLink(device)}
+            </a>
+            {device.verification_uri_complete ? " (the code is in it)" : " and enter this code:"}
           </p>
           <code className="usercode">{device.user_code}</code>
+          <p className="actions">
+            <button type="button" className="link" onClick={() => void copyDevice(device)}>
+              Copy link
+            </button>
+          </p>
+          {link && <p className={link === "Link copied." ? "muted" : "note error"}>{link}</p>}
           <p className="muted">{status}</p>
         </section>
       )}
