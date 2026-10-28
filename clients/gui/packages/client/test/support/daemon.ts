@@ -653,6 +653,15 @@ evoked where nothing is set and there was a sign-in. */
   readonly levelCalls: Array<Record<string, unknown>> = [];
   /** How many running sessions a level's preview says it reaches. */
   levelReaders = 2;
+  /**
+   * A plane from before entries (0.28 and earlier), which reads a memory document as `text`
+   * alone: a save or preview sent with `entries` is refused with `invalid_params` naming
+   * `text` as missing, as the daemon passes the plane's refusal on; one sent with `text` is
+   * taken.
+   */
+  planeReadsOnlyText = false;
+  /** What the plane refuses every memory save and preview with, as `invalid_params` data; null for none. */
+  memoryRefusal: Record<string, unknown> | null = null;
   /** What `me.memory.status` says each session here read at its last turn. */
   memoryReads: Array<Record<string, unknown>> = [];
   /** Every forwarded `artifact.*` call (get, open, share, unshare, rollback, pin), in order. */
@@ -1714,6 +1723,12 @@ evoked where nothing is set and there was a sign-in. */
           return reply(ws, id, { changed: true, entry: null, user: json(this.own!) });
         }
         this.ownPuts.push(params);
+        // The real daemon answers the plane's refusal of the person's own under invalid_params,
+        // the plane's data kept and a sentence beside it.
+        if (this.planeReadsOnlyText && typeof params["text"] !== "string") {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { missing: "text", reason: "the plane refused it: text is missing" } });
+        }
+        if (this.memoryRefusal) return reply(ws, id, null, { code: -32602, message: "invalid_params", data: this.memoryRefusal });
         const text = (Array.isArray(params["entries"]) ? render(params["entries"] as Array<{ topic?: string; body?: string }>) : String(params["text"] ?? "")).replace(/\r\n/g, "\n").trimEnd();
         if (text === own.text) return reply(ws, id, { changed: false, entry: null, user: json(own) });
         keep(text);
@@ -1748,6 +1763,11 @@ evoked where nothing is set and there was a sign-in. */
           return reply(ws, id, { scope, name, version: doc?.version ?? null, text: doc?.text ?? "", entries: entriesOf(doc?.text ?? "", doc?.version ?? 0, doc?.by ?? "lead@example.com"), versions: [], diff: [], plane_url: "https://plane.example.test" });
         }
         this.levelCalls.push({ method, ...params });
+        // A level's refusal is the plane's as it gave it, code and data.
+        if (this.planeReadsOnlyText && typeof params["text"] !== "string") {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { missing: "text" } });
+        }
+        if (this.memoryRefusal) return reply(ws, id, null, { code: -32602, message: "invalid_params", data: this.memoryRefusal });
         const text = (Array.isArray(params["entries"]) ? render(params["entries"] as Array<{ topic?: string; body?: string }>) : String(params["text"] ?? "")).replace(/\r\n/g, "\n").trimEnd();
         if (method === "admin.memory.preview") {
           const sessions = Array.from({ length: this.levelReaders }, (_, i) => ({ session_id: `s-${i + 1}`, where: "pod", owner: null, profile: null, version: doc?.version ?? 0, behind: false }));

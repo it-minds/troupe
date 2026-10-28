@@ -21,6 +21,7 @@ import { remoteOffer, syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
 import type { MemoryStatus, OwnMemory, OwnMemoryHistory, OwnMemorySaved } from "./instructions.js";
 import type { MemoryDocument, MemoryPreview, MemorySaved } from "./admin.js";
+import { renderEntries } from "./entries.js";
 import type { MemoryEntry, MemoryInEffect } from "./entries.js";
 import type { Invitee, InviteRole, SealedRead } from "./invites.js";
 import type { MemoryBrief } from "./memory.js";
@@ -1083,7 +1084,26 @@ export class DaemonClient {
 
   /** Save it as entries, written by the plane as `## Topic` sections in this order, over the version it was edited from. */
   putOwnMemoryEntries(entries: Array<Pick<MemoryEntry, "topic" | "body" | "heading">>, version: number): Promise<OwnMemorySaved> {
-    return this.command<OwnMemorySaved>("me.memory.put", { entries: entries.map((e) => ({ topic: e.topic, body: e.body, ...(e.heading === false ? { heading: false } : {}) })), version });
+    return this.entriesOrText(entries, (doc) => this.command<OwnMemorySaved>("me.memory.put", { ...doc, version }));
+  }
+
+  /**
+   * A save or preview as entries, sent again as text to a plane that reads only text. A
+   * plane from before entries (0.28 and earlier) knows a memory document as `text` alone
+   * and refuses a call carrying `entries` with `invalid_params` saying `text` is missing,
+   * which the daemon passes on as the plane said it; so that an app newer than the plane
+   * still edits memory, the same call goes again with the entries rendered as the plane
+   * would have written them. Exactly that refusal and no other: a refusal of the document
+   * itself (too long, a `## ` heading inside a body) reaches the screen as it is.
+   */
+  private async entriesOrText<T>(entries: Array<Pick<MemoryEntry, "topic" | "body" | "heading">>, send: (doc: EntriesOrText) => Promise<T>): Promise<T> {
+    const sent = entries.map((e) => ({ topic: e.topic, body: e.body, ...(e.heading === false ? { heading: false } : {}) }));
+    try {
+      return await send({ entries: sent });
+    } catch (e) {
+      if (!planeReadsOnlyText(e)) throw e;
+      return send({ text: renderEntries(sent) });
+    }
   }
 
   /**
@@ -1105,13 +1125,15 @@ export class DaemonClient {
   }
 
   /** What saving a level the person administers would do, written nowhere: the plane's `admin.memory.preview`, with the running sessions it reaches. */
-  previewLevelMemory(scope: "organisation" | "team" | "profile", name: string | null, doc: { text: string } | { entries: Array<Pick<MemoryEntry, "topic" | "body" | "heading">> }): Promise<MemoryPreview> {
-    return this.call<MemoryPreview>("admin.memory.preview", { scope, ...(name === null ? {} : { name }), ...doc });
+  previewLevelMemory(scope: "organisation" | "team" | "profile", name: string | null, doc: EntriesOrText): Promise<MemoryPreview> {
+    const preview = (sent: EntriesOrText): Promise<MemoryPreview> => this.call<MemoryPreview>("admin.memory.preview", { scope, ...(name === null ? {} : { name }), ...sent });
+    return "entries" in doc ? this.entriesOrText(doc.entries, preview) : preview(doc);
   }
 
   /** Save a level the person administers, as text or entries, over the version it was edited from. */
-  putLevelMemory(scope: "organisation" | "team" | "profile", name: string | null, doc: { text: string } | { entries: Array<Pick<MemoryEntry, "topic" | "body" | "heading">> }, version: number): Promise<MemorySaved> {
-    return this.command<MemorySaved>("admin.memory.put", { scope, ...(name === null ? {} : { name }), ...doc, version });
+  putLevelMemory(scope: "organisation" | "team" | "profile", name: string | null, doc: EntriesOrText, version: number): Promise<MemorySaved> {
+    const put = (sent: EntriesOrText): Promise<MemorySaved> => this.command<MemorySaved>("admin.memory.put", { scope, ...(name === null ? {} : { name }), ...sent, version });
+    return "entries" in doc ? this.entriesOrText(doc.entries, put) : put(doc);
   }
 
   /**
@@ -1208,6 +1230,19 @@ export class DaemonSource implements FleetSource {
     const { sessions } = await this.daemon.listSessions();
     return sessions.map((s) => rowFromDaemon(s, this.id));
   }
+}
+
+/** A memory document as a save or preview sends it: its whole text, or its entries for the plane to write as sections. */
+export type EntriesOrText = { text: string } | { entries: Array<Pick<MemoryEntry, "topic" | "body" | "heading">> };
+
+/**
+ * Whether a refusal is a plane's that reads a memory document as `text` alone, from
+ * before entries: `invalid_params` whose data names `text` as what is missing, as the
+ * plane's handler says of a call that carries no `text`. No other refusal, so a plane
+ * refusing the document for what it holds is not asked again.
+ */
+export function planeReadsOnlyText(e: unknown): boolean {
+  return e instanceof TroupeRpcError && e.code === ErrorCodes.invalid_params && e.data?.["missing"] === "text";
 }
 
 /**
