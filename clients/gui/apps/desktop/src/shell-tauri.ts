@@ -17,6 +17,8 @@
 //                 sign-in over.
 //   openExternal  a webview does nothing useful with `target="_blank"`, and the device
 //                 grant is unusable unless its link reaches a real browser.
+//   copyText      WebKit lets the page write the clipboard only inside the click that
+//                 asked, and a link the daemon mints first arrives after it.
 //   fetchImpl     HTTP from outside the webview, so a plane needs no CORS entry for
 //                 `tauri://localhost` — an origin every installation would otherwise
 //                 have to be told about.
@@ -229,10 +231,11 @@ function updater(): ShellUpdater {
  */
 export async function installShell(): Promise<void> {
   if (!inTauri()) return;
-  const [{ getVersion }, { fetch: rustFetch }, { openUrl }] = await Promise.all([
+  const [{ getVersion }, { fetch: rustFetch }, { openUrl }, { writeText }] = await Promise.all([
     import("@tauri-apps/api/app"),
     import("@tauri-apps/plugin-http"),
     import("@tauri-apps/plugin-opener"),
+    import("@tauri-apps/plugin-clipboard-manager"),
   ]);
 
   // Where the app runs, as the daemon's own handshake with a plane says it.
@@ -248,6 +251,7 @@ export async function installShell(): Promise<void> {
     secrets: "config-file",
     signedInPlane,
     openExternal: (url) => openUrl(url),
+    copyText: (text) => writeText(text),
     fetchImpl: rustFetch as typeof fetch,
     // Not inferred: a webview has a `location` and Web Crypto, so it looks like a
     // browser to `AuthSession`, while its origin is one no provider will have
