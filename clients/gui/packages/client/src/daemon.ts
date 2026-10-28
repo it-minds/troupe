@@ -14,7 +14,7 @@
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
-import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactTicket, ArtifactUpload } from "./artifacts.js";
+import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactOwner, ArtifactTicket, ArtifactTransferTo, ArtifactUpload } from "./artifacts.js";
 import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { remoteOffer, syncState } from "./fleet.js";
@@ -1138,10 +1138,12 @@ export class DaemonClient {
 
   /**
    * Publish files as an artifact on the plane (troupe #62), as this daemon's person: a new
-   * one, or with `id` the next version of one of theirs. The daemon sends a version too large
-   * for one call by an upload handle. Refused with a sentence where it is signed in to no plane.
+   * one, or with `id` the next version of one of theirs. `owner` says whose a new one is:
+   * left out, one for a team is that team's and any other the person's. The daemon sends a
+   * version too large for one call by an upload handle. Refused with a sentence where it is
+   * signed in to no plane.
    */
-  publishArtifact(params: { title: string; kind: ArtifactKind; visibility: string; files: ArtifactUpload[]; id?: string; note?: string; session_id?: string }): Promise<Artifact & { plane_url?: string }> {
+  publishArtifact(params: { title: string; kind: ArtifactKind; visibility: string; files: ArtifactUpload[]; owner?: ArtifactOwner; id?: string; note?: string; session_id?: string }): Promise<Artifact & { plane_url?: string }> {
     return this.command<Artifact & { plane_url?: string }>("artifact.publish", params);
   }
 
@@ -1186,6 +1188,15 @@ export class DaemonClient {
   /** The version its address serves, or null for the newest. The owner's. */
   pinArtifact(id: string, version: number | null): Promise<ArtifactDetail> {
     return this.command<ArtifactDetail>("artifact.pin", { id, version });
+  }
+
+  /**
+   * Give it to a team the person is in, or take it back from the team that owns it, as the
+   * plane's `artifact.transfer`, forwarded as `artifact.pin` is: the owning person gives,
+   * an admin of the owning team takes back and becomes its owner.
+   */
+  transferArtifact(id: string, to: ArtifactTransferTo): Promise<ArtifactDetail> {
+    return this.command<ArtifactDetail>("artifact.transfer", { id, to });
   }
 
   /** Forget one fact of a repository's memory, by its id; `memory.md` is written again without it. */

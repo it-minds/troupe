@@ -1152,6 +1152,8 @@ export interface AdminArtifact {
   /** `private`, `organisation`, `team:<name>` or `profile:<name>`. */
   visibility: string;
   owner: { subject: string; display_name?: string | null } | null;
+  /** The team that owns it, every member its owner; null for a person's. */
+  owner_team?: string | null;
   team: string | null;
   origin: { session_id?: string | null; profile?: string | null; agent?: string | null; where?: string | null };
   version: number;

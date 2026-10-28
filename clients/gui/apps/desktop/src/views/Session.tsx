@@ -46,6 +46,7 @@ import type { Detail, Drawn } from "../frames";
 import { saveFile } from "../shell";
 import { AgentSwitch } from "./AgentSwitch";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
+import type { Audiences } from "./Approval";
 import { AnswerRecord, QuestionPanel } from "./Question";
 import { CommandPalette } from "./CommandPalette";
 import type { PaletteScreen } from "./CommandPalette";
@@ -133,6 +134,9 @@ export function Session({
   const readOnly = row?.state === "read_only" || row?.yourRole === "viewer" || row?.yourRole === "observe";
   const dormant = row?.state === "dormant";
   const open = openApprovals(view.state);
+  // Whom a publication may be for, asked only once an agent asks to publish: through the
+  // daemon's sign-in as the person's artifacts are listed, or what the plane said of them.
+  const audiences = useAudiences(daemon, auth, open.some((e) => e.publication !== undefined));
   // Everyone else here, by name: who could answer an approval first, and who reads
   // what is sent.
   const others = presentMembers(view.state).filter((p) => p.subject !== self).map((p) => p.display_name ?? p.subject);
@@ -286,6 +290,7 @@ export function Session({
               onAnswer={(d, a) => view.respond(entry.callId, d, a)}
               onDefinition={here ? onAgents : undefined}
               onceOnly={kind === "remote"}
+              audiences={audiences}
             />
           ))}
 
@@ -1415,4 +1420,28 @@ function ReadOnly(): JSX.Element {
       <p className="muted">Ask its owner to give you access if you need to take part.</p>
     </div>
   );
+}
+
+/**
+ * The person's teams and profiles, for a publication's gate: the daemon's `artifact.list`
+ * names them as the plane does for its sign-in, and failing that the plane's own `me`.
+ * Asked once, when the first publication asks, and null until an answer comes.
+ */
+function useAudiences(daemon: DaemonClient | null, auth: AuthSession | null, wanted: boolean): Audiences | null {
+  const [audiences, setAudiences] = useState<Audiences | null>(null);
+  useEffect(() => {
+    if (!wanted || audiences) return;
+    let live = true;
+    const fromMe = (): Audiences | null => (auth?.me ? { teams: auth.me.teams, profiles: auth.me.profiles } : null);
+    if (daemon) {
+      daemon.artifacts({ mine: true }).then(
+        (l) => live && setAudiences({ teams: l.teams ?? [], profiles: l.profiles ?? [] }),
+        () => live && setAudiences(fromMe()),
+      );
+    } else setAudiences(fromMe());
+    return () => {
+      live = false;
+    };
+  }, [daemon, auth, wanted, audiences]);
+  return audiences;
 }

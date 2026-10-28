@@ -37,6 +37,16 @@ export interface ArtifactOrigin {
  */
 export type ArtifactScope = string;
 
+/**
+ * Whose a new artifact is: the publisher's own, the team it is published for, or a named
+ * team of theirs. A publication for `team:<name>` is that team's unless the publisher says
+ * `me`; any other is the publisher's.
+ */
+export type ArtifactOwner = "me" | "team" | `team:${string}`;
+
+/** Where a transfer sends an artifact: to a team of the owner's, or back to the caller. */
+export type ArtifactTransferTo = "me" | `team:${string}`;
+
 /** An artifact as `artifact.list` answers it, for this caller. */
 export interface Artifact {
   id: string;
@@ -46,8 +56,20 @@ export interface Artifact {
   visibility: string;
   /** Which part of a gallery it is in for this caller: `mine`, `private`, `organisation`, `team:<name>`, `profile:<name>` or `shared`. */
   scope?: ArtifactScope;
+  /** The person who first published it, which a team's keeps. */
   owner: ArtifactPerson;
-  /** Whether it is the caller's own. */
+  /**
+   * The team that owns it, or null for one a person owns. Every member of the team is its
+   * owner: `role` is `owner` and `mine` true for each of them, and a member leaving the
+   * team changes nothing of the artifact. Absent from a plane from before team ownership.
+   */
+  owner_team?: string | null;
+  /**
+   * Whether this caller may give it to a team (the owning person, or a platform admin) or
+   * take it back from one (an admin of the owning team, or a platform admin).
+   */
+  may_transfer?: boolean;
+  /** Whether it is the caller's own: theirs, or their team's. */
   mine: boolean;
   /** What the caller is to it now. */
   role?: ArtifactRole | null;
@@ -152,6 +174,21 @@ export interface ArtifactFilter {
   teams?: boolean;
 }
 
+/** Whether a team owns it, which its members read whatever it is for. */
+export function teamOwned(artifact: Pick<Artifact, "owner_team">): boolean {
+  return typeof artifact.owner_team === "string" && artifact.owner_team !== "";
+}
+
+/**
+ * Whose it is, in words: the team that owns it, with "you are a member" where the caller
+ * is one; "you" for the caller's own; otherwise the person who published it.
+ */
+export function ownerWords(artifact: Pick<Artifact, "owner" | "owner_team" | "mine">): string {
+  if (teamOwned(artifact)) return `the ${artifact.owner_team} team${artifact.mine ? " (you are a member)" : ""}`;
+  if (artifact.mine) return "you";
+  return artifact.owner?.display_name || artifact.owner?.subject || "somebody";
+}
+
 /** Who may open an artifact, in words: what every client of a person's says of a visibility. */
 export function visibilityWords(visibility: string): string {
   if (visibility === "private") return "only you";
@@ -180,6 +217,20 @@ export interface ArtifactPut {
   base?: number;
   note?: string;
   title?: string;
+}
+
+/** A publish: a new artifact, or with `id` the next version of one; whose it is by `owner`. */
+export interface ArtifactPublish {
+  title: string;
+  kind: ArtifactKind;
+  /** `private` (the default), `organisation`, `team:<name>` or `profile:<name>`. */
+  visibility?: string;
+  files: ArtifactUpload[];
+  /** Whose the new artifact is; left out, a team publication is the team's and any other the publisher's. */
+  owner?: ArtifactOwner;
+  id?: string;
+  note?: string;
+  session_id?: string;
 }
 
 /** One text file of a version, for an editor. */
@@ -291,5 +342,19 @@ export class ArtifactApi {
   /** The owner's switch for this artifact's public links. */
   publicLinks(id: string, enabled: boolean): Promise<ArtifactDetail> {
     return this.rpc<ArtifactDetail>("artifact.public", { id, enabled });
+  }
+
+  /** A new artifact, or with `id` the next version of one; `owner` says whose a new one is. */
+  publish(publish: ArtifactPublish): Promise<Artifact> {
+    return this.rpc<Artifact>("artifact.publish", publish);
+  }
+
+  /**
+   * Give it to a team the owner is in (`team:<name>`), or take it back from the team that
+   * owns it (`me`, for an admin of that team or a platform admin: the caller becomes its
+   * owner). Refused `forbidden` for anybody else.
+   */
+  transfer(id: string, to: ArtifactTransferTo): Promise<ArtifactDetail> {
+    return this.rpc<ArtifactDetail>("artifact.transfer", { id, to });
   }
 }

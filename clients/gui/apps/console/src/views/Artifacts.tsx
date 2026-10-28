@@ -18,12 +18,15 @@
 // asks the plane as that person. Deleting is the owner's, or a takedown of somebody else's
 // by a platform admin or the admin of the team it is for, which the confirm says it is. A new version (an edit, a rollback) is the
 // owner's or an edit link's holder's; pinning the version its address serves, and the links
-// (`ArtifactLinks`), are the owner's. A link somebody followed lands on `#/artifacts/link/
+// (`ArtifactLinks`), are the owner's. An artifact a team owns is every member's: the plane
+// says so per row (`mine`, `role`), and the page says the team is whose it is. The owning
+// person gives one of theirs to a team they are in, and an admin of the owning team takes
+// it back (`artifact.transfer`). A link somebody followed lands on `#/artifacts/link/
 // <token>`, which spends it as the person signed in here and goes on to the artifact.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { ArtifactApi, TroupeRpcError, visibilityWords as audienceWords } from "@troupe/client";
+import { ArtifactApi, TroupeRpcError, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
 import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { go, href } from "../route";
@@ -84,8 +87,12 @@ function kindWords(kind: string): string {
 
 /** Who may open it, in words: a private one is its owner's, and whoever a link of theirs reached. */
 function visibilityWords(a: Artifact): string {
-  if (a.visibility === "private") return a.mine ? "only you, and whoever you give a link" : "its owner alone, and whoever they gave a link";
-  return audienceWords(a.visibility);
+  if (a.visibility === "private") {
+    if (teamOwned(a)) return `the ${a.owner_team} team, whose it is, and whoever ${a.mine ? "you" : "they"} give a link`;
+    return a.mine ? "only you, and whoever you give a link" : "its owner alone, and whoever they gave a link";
+  }
+  const words = audienceWords(a.visibility);
+  return teamOwned(a) && a.visibility !== `team:${a.owner_team}` ? `${words}, and the ${a.owner_team} team, whose it is` : words;
 }
 
 function personWords(p: ArtifactPerson | null | undefined): string {
@@ -168,7 +175,7 @@ function Card({ artifact: a }: { artifact: Artifact }): JSX.Element {
         <span className="thumb-kind">{kindWords(a.kind)}</span>
       </a>
       <p className="card-meta">
-        {a.mine ? "yours" : (a.owner.display_name ?? a.owner.subject)} · version {a.version} · {bytes(a.bytes)}
+        {teamOwned(a) ? `the ${a.owner_team} team's` : a.mine ? "yours" : (a.owner.display_name ?? a.owner.subject)} · version {a.version} · {bytes(a.bytes)}
       </p>
       <p className="card-meta">
         {a.mine || a.visibility.startsWith("team:") ? `for ${visibilityWords(a)} · ` : ""}published {when(a.published_at)}
@@ -214,15 +221,23 @@ export function ArtifactPage({ id }: { id: string }): JSX.Element {
 }
 
 function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () => void }): JSX.Element {
-  const { notify, reserveTab } = useConsole();
+  const { me, notify, reserveTab } = useConsole();
   const api = useArtifacts();
   const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
+  // What failed, for the sentence: opening it, or something done to it.
+  const [failed, setFailed] = useState("open it");
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [switched, setSwitched] = useState<string>("current");
   const [acting, setActing] = useState(false);
+  const myTeams = me.teams.map((t) => t.name);
+  const [giveTo, setGiveTo] = useState(myTeams[0] ?? "");
   const takedown = !a.mine;
+  const ofTeam = teamOwned(a);
+  // The owning person gives it to a team of theirs; an admin of the owning team takes it back.
+  const mayGive = !ofTeam && a.may_transfer === true && myTeams.length > 0;
+  const mayTakeBack = ofTeam && a.may_transfer === true;
   const versions = [...a.versions].sort((x, y) => y.n - x.n);
   const current = a.current ?? a.version;
   const editable = a.may_edit === true && (a.kind === "html" || a.kind === "markdown") && editableFiles(versions[0]?.files ?? []).length > 0;
@@ -235,6 +250,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
     const tab = reserveTab();
     setOpening(what);
     setError(null);
+    setFailed("open it");
     api.open(a.id, version).then(
       (ticket) => {
         setOpening(null);
@@ -248,9 +264,10 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
     );
   };
 
-  const act = (work: Promise<unknown>, done: string): void => {
+  const act = (work: Promise<unknown>, done: string, doing = "change it"): void => {
     setActing(true);
     setError(null);
+    setFailed(doing);
     work.then(
       () => {
         setActing(false);
@@ -274,10 +291,10 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
         rows={[
           ["Kind", kindWords(a.kind)],
           ["Who may open it", visibilityWords(a)],
-          ["Owner", a.mine ? `you, ${personWords(a.owner)}` : personWords(a.owner)],
+          ["Owner", ofTeam ? `${ownerWords(a)}; ${personWords(a.owner)} first published it` : a.mine ? `you, ${personWords(a.owner)}` : personWords(a.owner)],
           ["Team", a.team ?? "—"],
           ["Version", a.pinned ? `${current}, pinned by its owner; the newest is ${a.version}` : `${a.version} of ${count(versions.length, "version")}`],
-          ["You", a.mine ? "its owner" : a.role === "edit" ? "may publish new versions, through a link" : "may open it"],
+          ["You", a.mine ? (ofTeam ? `an owner, as every member of ${a.owner_team} is` : "its owner") : a.role === "edit" ? "may publish new versions, through a link" : "may open it"],
           ["Size", bytes(a.bytes)],
           ["Published", when(a.published_at)],
           ["First published", when(a.created_at)],
@@ -313,9 +330,39 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
         )}
         <span className="hint">It opens in a tab of its own, on the artifacts host.</span>
       </div>
+      {(mayGive || mayTakeBack) && (
+        <div className="actions" aria-label="Whose it is">
+          {mayGive && (
+            <>
+              <label>
+                Give to team
+                <select value={giveTo} disabled={acting} onChange={(e) => setGiveTo(e.target.value)}>
+                  {myTeams.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" disabled={acting || giveTo === ""} onClick={() => act(api.transfer(a.id, `team:${giveTo}`), `${a.title} is the ${giveTo} team's now: every member of it is its owner.`, "give it to the team")}>
+                Give it to the team
+              </button>
+              <span className="hint">Anyone on the team can then change, share or delete it; its admin can take it back.</span>
+            </>
+          )}
+          {mayTakeBack && (
+            <>
+              <button type="button" disabled={acting} onClick={() => act(api.transfer(a.id, "me"), `${a.title} is yours now, not the ${a.owner_team} team's.`, "take it back")}>
+                Take back
+              </button>
+              <span className="hint">It becomes yours alone, and the team's members lose the owner's controls.</span>
+            </>
+          )}
+        </div>
+      )}
       {error !== null && (
         <p className="field-error" role="alert">
-          Could not open it: {describeError(error)}
+          Could not {failed}: {describeError(error)}
         </p>
       )}
       {editing && (

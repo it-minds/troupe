@@ -11,13 +11,19 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { BRIEF_PARTS, ruleScope } from "@troupe/client";
-import type { DelegationGate, Entry, GateAnswer } from "@troupe/client";
+import { BRIEF_PARTS, ruleScope, visibilityWords } from "@troupe/client";
+import type { DelegationGate, Entry, GateAnswer, PublicationGate } from "@troupe/client";
 import { Pill } from "./bits";
 import { Mask } from "./brand";
 
 export type Decision = "allow" | "deny" | "allow_session";
 type Approval = Extract<Entry, { kind: "approval" }>;
+
+/** The audiences a person may publish for: their teams and the profiles they are covered by, as the plane names them. */
+export interface Audiences {
+  teams: string[];
+  profiles: string[];
+}
 
 /** A brief's parts by the names a person reads them by (troupe Decision 847). */
 const PART_NAMES: Record<string, string> = {
@@ -31,6 +37,7 @@ const PART_NAMES: Record<string, string> = {
 /** Four words, phrased as a question, in the reader's language and not the protocol's. */
 function headline(tool: string): string {
   if (tool === "delegate") return "Hand work to a subagent?";
+  if (tool === "publish_artifact") return "Publish this?";
   if (/shell|bash|command|exec/i.test(tool)) return "Run a command?";
   if (/write|edit|patch|apply/i.test(tool)) return "Change a file?";
   if (/delete|remove|rm/i.test(tool)) return "Delete a file?";
@@ -90,6 +97,7 @@ export function ApprovalPanel({
   onAnswer,
   onDefinition,
   onceOnly = false,
+  audiences,
 }: {
   entry: Approval;
   /** False on a read-only session: the buttons are absent, not disabled. */
@@ -104,7 +112,13 @@ export function ApprovalPanel({
    * once, and allowing it for the rest of the session is the laptop's person's to do there.
    */
   onceOnly?: boolean;
+  /** Whom a publication may be for: the person's teams and profiles, once the plane said them. */
+  audiences?: Audiences | null | undefined;
 }): JSX.Element {
+  // An agent's publication asks whom it is for and whose it is before anything is published.
+  if (entry.publication && entry.decision === undefined) {
+    return <PublishPanel entry={entry} publication={entry.publication} audiences={audiences ?? null} canAnswer={canAnswer} others={others} onAnswer={onAnswer} onceOnly={onceOnly} />;
+  }
   // A delegation a person asked to see first has five answers, not three (troupe Decision 850).
   if (entry.delegation && entry.decision === undefined) {
     return (
@@ -460,6 +474,172 @@ function DelegationPanel({
   );
 }
 
+/** One choice of whom a publication is for and, for a new artifact, whose it is, keyed as `visibility|owner`. */
+interface AudienceChoice {
+  key: string;
+  visibility: string;
+  /** Absent for a new version, whose owner a version never changes. */
+  owner: "me" | "team" | undefined;
+  label: string;
+}
+
+/** What the owner of a new artifact is when the agent said nothing: the team's for a team, else the publisher's. */
+function defaultOwner(visibility: string | null): "me" | "team" {
+  return visibility !== null && visibility.startsWith("team:") ? "team" : "me";
+}
+
+/** A choice's key: the visibility, and for a new artifact whose it is. */
+function keyOf(visibility: string, owner: "me" | "team" | undefined): string {
+  return owner === undefined ? visibility : `${visibility}|${owner}`;
+}
+
+/**
+ * The choices a person has: only them, the organisation, each team they are in (for a new
+ * artifact, the team's own or theirs alone; a new version keeps whose it is, so one choice
+ * a team), each profile; and whatever the agent proposed, even one the plane has not
+ * named for them yet, so the proposal is never lost while the list loads.
+ */
+export function audienceChoices(audiences: Audiences | null, proposed: { visibility: string | null; owner: "me" | "team" | null }, republish = false): AudienceChoice[] {
+  const me = republish ? undefined : "me";
+  const choices: AudienceChoice[] = [
+    { key: keyOf("private", me), visibility: "private", owner: me, label: "Only you" },
+    { key: keyOf("organisation", me), visibility: "organisation", owner: me, label: "The whole organisation" },
+  ];
+  for (const t of audiences?.teams ?? []) {
+    if (republish) choices.push({ key: `team:${t}`, visibility: `team:${t}`, owner: undefined, label: `Team ${t}` });
+    else {
+      choices.push({ key: `team:${t}|team`, visibility: `team:${t}`, owner: "team", label: `Team ${t}, owned by the team` });
+      choices.push({ key: `team:${t}|me`, visibility: `team:${t}`, owner: "me", label: `Team ${t}, owned by you` });
+    }
+  }
+  for (const p of audiences?.profiles ?? []) choices.push({ key: keyOf(`profile:${p}`, me), visibility: `profile:${p}`, owner: me, label: `The ${p} profile's people` });
+  if (proposed.visibility !== null) {
+    const owner = republish ? undefined : (proposed.owner ?? defaultOwner(proposed.visibility));
+    const key = keyOf(proposed.visibility, owner);
+    if (!choices.some((c) => c.key === key)) {
+      const v = proposed.visibility;
+      const label = v.startsWith("team:") ? `Team ${v.slice("team:".length)}${owner === undefined ? "" : `, owned by ${owner === "team" ? "the team" : "you"}`}` : visibilityWords(v).replace(/^(\w)/, (m) => m.toUpperCase());
+      choices.push({ key, visibility: v, owner, label });
+    }
+  }
+  return choices;
+}
+
+/**
+ * An agent's publication before it is published: what it is (its title, kind and how many
+ * files), and whom it is for as a choice the person makes. The agent's proposal is chosen
+ * already; where it proposed nobody, nothing is, and Allow waits for a choice. Allow sends
+ * the choice; Deny sends nothing; letting the agent publish unasked for the session is
+ * offered only where it proposed an audience, since there is nothing to allow again.
+ */
+function PublishPanel({
+  entry,
+  publication,
+  audiences,
+  canAnswer,
+  others,
+  onAnswer,
+  onceOnly,
+}: {
+  entry: Approval;
+  publication: PublicationGate;
+  audiences: Audiences | null;
+  canAnswer: boolean;
+  others: string[];
+  onAnswer: (decision: Decision, answer?: GateAnswer) => Promise<void>;
+  onceOnly: boolean;
+}): JSX.Element {
+  // A new version keeps whose the artifact is: only whom it is for is asked.
+  const republish = publication.id !== null;
+  const proposedKey = publication.visibility === null ? null : keyOf(publication.visibility, republish ? undefined : (publication.owner ?? defaultOwner(publication.visibility)));
+  const [chosen, setChosen] = useState<string | null>(proposedKey);
+  const [busy, setBusy] = useState<Decision | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const choices = audienceChoices(audiences, publication, republish);
+  const choice = choices.find((c) => c.key === chosen) ?? null;
+
+  const send = async (decision: Decision, answer: GateAnswer = {}): Promise<void> => {
+    if (busy) return;
+    setBusy(decision);
+    setError(null);
+    try {
+      await onAnswer(decision, answer);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const what = publication.kind === "html" ? "A page" : publication.kind === "markdown" ? "A document" : "A file";
+  const files = publication.files === 1 ? "1 file" : `${publication.files} files`;
+  // Whom it is for and whose it is, as keys beside the decision, as a delegation's answer is sent.
+  const answerOf: GateAnswer | undefined = choice ? { visibility: choice.visibility, ...(choice.owner === undefined ? {} : { owner: choice.owner }) } : undefined;
+
+  return (
+    <section className="approval publication" aria-label={`Publish ${publication.title}`}>
+      <header>
+        <Mask size={26} />
+        <Pill status="waiting" />
+        <h2>{headline(entry.tool)}</h2>
+      </header>
+      <p className="consequence">
+        {publication.id ? "The session wants to publish a new version of an artifact. " : "The session wants to publish an artifact. "}
+        Nothing is published until you say whom it is for.
+      </p>
+      <dl className="facts gate">
+        <dt>Title</dt>
+        <dd>{publication.title}</dd>
+        <dt>What</dt>
+        <dd>
+          {what}, {files}
+        </dd>
+        {publication.id && (
+          <>
+            <dt>Of</dt>
+            <dd>{publication.id}</dd>
+          </>
+        )}
+        {publication.note && (
+          <>
+            <dt>Note</dt>
+            <dd>{publication.note}</dd>
+          </>
+        )}
+      </dl>
+      <fieldset className="audience-choices" disabled={!canAnswer || busy !== null}>
+        <legend>Who may open it</legend>
+        {choices.map((c) => (
+          <label key={c.key} className="inline">
+            <input type="radio" name={`publish-${entry.callId}`} value={c.key} checked={chosen === c.key} onChange={() => setChosen(c.key)} /> {c.label}
+          </label>
+        ))}
+        {publication.visibility === null && <p className="also">The agent did not say whom it is for.</p>}
+        {publication.visibility !== null && chosen !== proposedKey && <p className="also">The agent proposed {choices.find((c) => c.key === proposedKey)?.label.toLowerCase() ?? visibilityWords(publication.visibility)}.</p>}
+      </fieldset>
+      {others.length > 0 && <p className="also">{others.join(", ")} can answer this too. The first answer counts.</p>}
+      {error && <p className="also error">{error}</p>}
+      {canAnswer ? (
+        <div className="answers">
+          <button className="allow" disabled={busy !== null || !answerOf} onClick={() => void send("allow", answerOf)}>
+            {busy === "allow" ? "Publishing…" : onceOnly ? "Allow once" : "Allow"}
+          </button>
+          <button className="deny" disabled={busy !== null} onClick={() => void send("deny")}>
+            {busy === "deny" ? "Denying…" : "Deny"}
+          </button>
+          {!onceOnly && publication.visibility !== null && (
+            <button className="scoped" disabled={busy !== null || !answerOf} onClick={() => void send("allow_session", answerOf)}>
+              Allow, and let it publish unasked for this session
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="also">You can read this session but not answer for it.</p>
+      )}
+    </section>
+  );
+}
+
 /** What an approval becomes in the stream once it has been answered. Never deleted. */
 export function DecisionRecord({ entry, self }: { entry: Approval; self: string | undefined }): JSX.Element {
   const by = entry.resolvedBy ?? self;
@@ -467,9 +647,11 @@ export function DecisionRecord({ entry, self }: { entry: Approval; self: string 
   const verb = entry.decision === "deny" ? "Denied" : entry.decision === "allow_session" ? "Allowed for this session" : "Allowed";
   const said = entry.answered;
   // A delegation's answer says what it changed: where it went, which parts, the word back.
+  // A publication's says whom it went to and whose it is.
   const detail = said
     ? [
         said.agent && entry.delegation && said.agent !== entry.delegation.agent ? `sent to ${said.agent}` : null,
+        said.visibility && entry.publication ? `for ${visibilityWords(said.visibility)}${said.owner === "team" ? ", the team's" : ""}` : null,
         said.edited && said.edited.length > 0 ? `edited ${said.edited.map((p) => PART_NAMES[p] ?? p).join(", ").toLowerCase()}` : null,
         said.reason ? `said: ${said.reason}` : null,
       ].filter(Boolean)
