@@ -62,7 +62,7 @@ defmodule Troupe.UI.Setup do
   # A login entry as a person on that platform would recognise it (`Daemon.tsx`).
   @entries %{
     "startup_folder" =>
-      "an entry in your Startup folder, which runs it in a console window minimised to the taskbar; closing that window stops it",
+      "an entry in your Startup folder, which runs it with no window; troupe-daemon stop stops it",
     "launch_agent" => "a launchd agent in your LaunchAgents folder",
     "systemd" => "a systemd user unit",
     "autostart" => "an autostart entry, which your desktop session starts"

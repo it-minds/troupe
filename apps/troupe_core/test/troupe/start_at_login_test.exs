@@ -1,7 +1,7 @@
 defmodule Troupe.StartAtLoginTest do
   @moduledoc """
-  Starting the daemon at login (Decision 762): each platform's entry written into a
-  scratch home, what it starts and how, and its removal. Nothing here reaches the login
+  Starting the daemon at login: each platform's entry written into a scratch home, what it
+  starts and how, and its removal. Nothing here reaches the login
   items of the person running the suite: `HOME`, `APPDATA` and `XDG_CONFIG_HOME` are given
   as options pointing at a scratch directory, and nothing is loaded into launchd or
   systemd.
@@ -57,7 +57,8 @@ defmodule Troupe.StartAtLoginTest do
   end
 
   describe "on Windows" do
-    test "a command file in the Startup folder starts the daemon minimised, to stay up", ctx do
+    test "a command file in the Startup folder starts the daemon with no window, to stay up",
+         ctx do
       opts = opts(ctx, :startup_folder)
       file = StartAtLogin.path(:startup_folder, opts)
 
@@ -69,17 +70,21 @@ defmodule Troupe.StartAtLoginTest do
       assert status["path"] == Troupe.Paths.display(file)
       assert status["command"] == Troupe.Paths.display(@command)
 
+      # The daemon is `run --detached`: a VM with no console, not a window minimised to
+      # the taskbar. `start /min cmd /c` is only for the moment the wrapper itself takes.
       assert File.read!(file) ==
                Enum.join(
                  [
                    "@echo off",
                    "rem Starts troupe-daemon when you log in. `troupe-daemon login off` removes this file.",
                    ~s(set "TROUPE_DAEMON_IDLE_MINUTES=0"),
-                   ~s(start "troupe-daemon" /min cmd /c ""\\opt\\troupe dir\\bin\\troupe-daemon" run"),
+                   ~s(start "troupe-daemon" /min cmd /c ""\\opt\\troupe dir\\bin\\troupe-daemon" run --detached"),
                    ""
                  ],
                  "\r\n"
                )
+
+      refute File.read!(file) =~ ~r/ run"/, "the daemon would keep a console window"
 
       assert {:ok, %{"at_login" => false}} = StartAtLogin.disable(opts)
       refute File.exists?(file)
@@ -90,7 +95,7 @@ defmodule Troupe.StartAtLoginTest do
     test "a path beyond ASCII is read as UTF-8, and a percent sign as itself" do
       text = StartAtLogin.entry(:startup_folder, "C:/Users/Søren/50%/troupe-daemon.cmd")
       assert text =~ "\r\nchcp 65001 >nul\r\n"
-      assert text =~ ~s(cmd /c ""C:\\Users\\Søren\\50%%\\troupe-daemon.cmd" run")
+      assert text =~ ~s(cmd /c ""C:\\Users\\Søren\\50%%\\troupe-daemon.cmd" run --detached")
     end
   end
 

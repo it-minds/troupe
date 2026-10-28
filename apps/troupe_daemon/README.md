@@ -8,7 +8,7 @@ it: a session on your machine runs here, speaks [PROTOCOL.md](../../PROTOCOL.md)
 Unix socket, loopback TCP or a loopback WebSocket, and emits the same events a pod does.
 
 ```
-troupe-daemon [run]               serve on this machine until idle or stopped
+troupe-daemon [run] [--detached]  serve on this machine until idle or stopped; --detached (Windows) with no console
 troupe-daemon status              say whether one is running, and where
 troupe-daemon stop                stop the one running here, between turns, and wait until it has
 troupe-daemon open [--url URL]    start it if need be, and open the web app connected to it
@@ -31,9 +31,12 @@ Clients start it themselves: `Troupe.Protocol.Daemon` (Elixir) and the desktop s
 `troupe-daemon` on the `PATH` and spawn `run` when nothing answers. `run` is idempotent —
 a second one on a machine with a daemon already up says where it is and exits 0. On
 Windows a daemon a client starts runs in a console window of its own, minimised to the
-taskbar, as one started at login does: closing the terminal it was started from leaves it
-running, and closing its own window stops it
+taskbar: closing the terminal it was started from leaves it running, and closing its own
+window stops it
 ([Decision 802](../../docs/decisions/0802-a-started-daemon-has-its-own-console-and-open-asks-the-plane.md)).
+One started at login has no window at all: `run --detached` starts the VM detached from
+any console, the runtime's own `erl -detached`
+([Decision 962](../../docs/decisions/0962-on-windows-the-daemon-started-at-login-runs-detached-from-any-console.md)).
 
 ## Install
 
@@ -85,7 +88,7 @@ Each platform gets its own per-user entry, and none needs an administrator
 
 | Platform | The entry |
 |---|---|
-| Windows | `troupe-daemon.cmd` in your Startup folder (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`); the daemon runs in a console window minimised to the taskbar, and closing that window stops it |
+| Windows | `troupe-daemon.cmd` in your Startup folder (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`), which runs `troupe-daemon run --detached`: no window, the daemon's VM detached from any console; `troupe-daemon stop` stops it, its log is `daemon.log` in the state directory, and Task Manager's Startup list shows the entry |
 | macOS | a launchd agent, `~/Library/LaunchAgents/com.objective-mj.troupe.daemon.plist` |
 | Linux with systemd | a user unit, `~/.config/systemd/user/troupe-daemon.service`, enabled for `default.target` |
 | Linux without systemd | an autostart entry, `~/.config/autostart/troupe-daemon.desktop`, which a desktop session starts |
@@ -93,7 +96,9 @@ Each platform gets its own per-user entry, and none needs an administrator
 The entry runs `troupe-daemon run` — the one on the `PATH`, as a client finds it — with
 `TROUPE_DAEMON_IDLE_MINUTES=0`, so a daemon started at login stays up until you log out
 rather than exiting when idle. Turning it on takes effect at the next login and starts
-nothing now; turning it off removes the file and stops nothing that is running.
+nothing now; turning it off removes the file and stops nothing that is running. An entry
+written by an earlier daemon on Windows still opens a minimised console window:
+`troupe-daemon login on` again writes the current one.
 
 ### The web app
 

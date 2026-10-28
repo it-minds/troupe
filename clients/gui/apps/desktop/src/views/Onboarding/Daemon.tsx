@@ -10,7 +10,7 @@ import type { StepProps } from "./Step";
 
 /** The entry as a person on that platform would recognise it. */
 const ENTRY_WORDS: Record<SetupDaemon["kind"], string> = {
-  startup_folder: "an entry in your Startup folder, which runs it in a console window minimised to the taskbar; closing that window stops it",
+  startup_folder: "an entry in your Startup folder, which runs it with no window; troupe-daemon stop stops it",
   launch_agent: "a launchd agent in your LaunchAgents folder",
   systemd: "a systemd user unit",
   autostart: "an autostart entry, which your desktop session starts",
