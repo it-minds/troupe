@@ -425,8 +425,9 @@ defmodule Troupe.Plane.AdminTest do
     end
   end
 
-  # What the LiveView pages for these proved, kept as answers now that the console draws
-  # them: the console is an API client, so the claims are about what the plane answers.
+  # What the plane's own console pages for these once proved, kept as answers now that the
+  # console draws them: the console is an API client, so the claims are about what the
+  # plane answers.
   describe "what the console's areas read" do
     test "every host anything dials, against the policy that decides, with where it was declared",
          context do

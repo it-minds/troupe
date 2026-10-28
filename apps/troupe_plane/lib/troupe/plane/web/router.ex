@@ -4,6 +4,7 @@ defmodule Troupe.Plane.Web.Router do
 
       GET  /                           the connection guide, for a browser
       GET  /docs                       what Troupe is, for a browser
+      GET  /admin, /admin/<page>       where the console the plane once served went
       GET  /healthz                    liveness, for Kubernetes
       GET  /.well-known/troupe         where to log in, and what to call this plane
       GET  /.well-known/jwks.json      the keys workers verify session tokens against
@@ -21,6 +22,7 @@ defmodule Troupe.Plane.Web.Router do
       *    /scim/v2/...                users and groups, pushed by the identity provider
       GET  /v1/relay                   a laptop's connection while it offers sessions
       GET  /v1/relay/session           a person steering one of them from another device
+      POST /auth/breakglass            the break-glass token, for a plane token that is a platform admin
       POST /auth/relay                 a laptop daemon's own grant, for that connection's token
       POST /auth/relay/release         the daemon letting the grant go
 
@@ -43,6 +45,7 @@ defmodule Troupe.Plane.Web.Router do
 
   alias Troupe.Plane.{
     Admin,
+    Breakglass,
     Build,
     Harness,
     Identity,
@@ -59,7 +62,7 @@ defmodule Troupe.Plane.Web.Router do
   alias Troupe.Plane.Admin.API, as: AdminAPI
   alias Troupe.Plane.GitHub.Webhook, as: GitHubWebhook
   alias Troupe.Plane.SCIM.Connector
-  alias Troupe.Plane.Web.{BodyLimit, Docs, Index, RawBody}
+  alias Troupe.Plane.Web.{AdminMoved, BodyLimit, Docs, Index, RawBody}
   alias Troupe.Protocol.{ClientUpdate, Error, JSONRPC, Token}
 
   require Logger
@@ -144,17 +147,22 @@ defmodule Troupe.Plane.Web.Router do
       "device_authorization_endpoint" => config(:device_authorization_endpoint),
       "token_endpoint" => config(:token_endpoint),
       "scopes" => config(:scopes, @default_scopes),
+      # Whether `POST /auth/breakglass` exists, which is how the console knows to offer
+      # the door at sign-in. It says a door exists and nothing about the token; the door
+      # itself still answers 404 where there is none.
+      "breakglass" => Breakglass.configured?(),
       "plane" => %{
         "name" => config(:plane_name, "troupe"),
         "rpc" => "/rpc",
         "jwks" => "/.well-known/jwks.json",
         # The key what it tells clients is signed with (#657), which they pin at sign-in.
         "signing_key" => "/.well-known/troupe-signing-key",
-        # Where the web app is, for `troupe-daemon open` (Decision 802): null without one.
+        # Where the web app is, for `troupe-daemon open`: an address it can open wherever
+        # the app is mounted rather than the chart's usual place, and null without one.
         "app" => app_address(conn),
         "protocol_version" => Troupe.Protocol.version(),
-      # The same facts the footer shows, so a deploy check and a browser cannot disagree.
-      "build" => Build.to_json()
+        # The same facts the footer shows, so a deploy check and a browser cannot disagree.
+        "build" => Build.to_json()
       }
     })
   end
@@ -238,6 +246,49 @@ defmodule Troupe.Plane.Web.Router do
     end
   end
 
+  # The break-glass token in, a plane token out: the one door, for the console and
+  # `troupe admin` on a plane whose identity provider cannot let anybody in. The token is
+  # a platform admin in no team, carries the `breakglass` claim so `me` and every page can
+  # say so, and ends at its `exp` with nothing to refresh it. Both outcomes are audited
+  # with the address before the answer is written; a wrong token is refused in the same
+  # words whatever was wrong with it; and where no token is configured the path is a 404
+  # like any other that does not exist, which is checked before the token is looked at so
+  # a body without one cannot tell the two apart.
+  post "/auth/breakglass" do
+    address = conn.remote_ip |> :inet.ntoa() |> to_string()
+
+    with true <- Breakglass.configured?(),
+         {:ok, subject, _expires_at} <- Breakglass.verify(conn.body_params["token"]) do
+      Breakglass.record(:granted, address)
+
+      case Tokens.mint(Breakglass.claims(subject),
+             audience: plane_audience(),
+             lifetime: Breakglass.lifetime_seconds()
+           ) do
+        {:ok, jwt, payload} ->
+          send_json(conn, 200, %{
+            "token" => jwt,
+            "expires_at" => payload["exp"] |> DateTime.from_unix!() |> DateTime.to_iso8601(),
+            "subject" => subject
+          })
+
+        {:error, reason} ->
+          Logger.error("troupe plane: break-glass token could not be minted: #{inspect(reason)}")
+          send_json(conn, 503, %{"error" => "unavailable", "reason" => "no signer"})
+      end
+    else
+      false ->
+        send_resp(conn, 404, "")
+
+      {:error, :not_configured} ->
+        send_resp(conn, 404, "")
+
+      {:error, :bad_token} ->
+        Breakglass.record(:refused, address)
+        send_json(conn, 403, %{"error" => "refused"})
+    end
+  end
+
   # A laptop's daemon's own sign-in for steering (#58): the grant `remote.grant` gave it,
   # for a token of the laptop's door alone, `/v1/relay`. A grant the plane does not hold,
   # one released or idle too long, is 401; one whose person's team forbids offering, 403.
@@ -310,6 +361,14 @@ defmodule Troupe.Plane.Web.Router do
   # about that anywhere.
   post "/mcp/session" do
     case authenticate(conn) do
+      # The agent's door, and a break-glass token is no agent's credential: it has no
+      # session to be inside of, so it is refused here as it is for every harness method.
+      {:ok, %Identity.User{kind: "breakglass"}} ->
+        send_json(conn, 403, %{
+          "error" => "forbidden",
+          "reason" => "a break-glass token administers and no more"
+        })
+
       {:ok, user} ->
         # The door vouches for the source. An agent calling `trigger_fire` here is an
         # `agent` firing, which a caller at `/rpc` may not claim for itself.
@@ -451,6 +510,15 @@ defmodule Troupe.Plane.Web.Router do
     end
   end
 
+  # The addresses the plane's own console had. It is an app of its own now, so each of
+  # these goes to the same place there, and where no console is deployed `/admin` says
+  # how the plane is administered instead. `/admin/breakglass` was the form the
+  # break-glass token was typed into; the console's sign-in screen offers the door now.
+  get("/admin", do: AdminMoved.index(conn))
+  get("/admin/breakglass", do: AdminMoved.breakglass(conn))
+  get("/admin/:page", do: AdminMoved.moved(conn, page, nil))
+  get("/admin/:page/:within", do: AdminMoved.moved(conn, page, within))
+
   match _ do
     send_json(conn, 404, %{"error" => "not found"})
   end
@@ -484,12 +552,21 @@ defmodule Troupe.Plane.Web.Router do
 
     # One endpoint, two contexts. An admin method is answered by `Plane.Admin` with an
     # admin actor; everything else by `Plane.Harness` as the person. A client that used
-    # `/rpc` for both is a client using public APIs for both, which is the rule.
+    # `/rpc` for both is a client using public APIs for both, which is the rule. A
+    # break-glass token has the first context and, of the second, `me` alone: it is
+    # nobody's machine and owns no session, and a harness method that looked one up by
+    # its subject could find a person's.
     result =
-      if AdminAPI.admin_method?(method) do
-        AdminAPI.call(method, params, Admin.actor_for(user))
-      else
-        Harness.call(method, params, %{user: user, platform_admin?: platform_admin?(user)})
+      cond do
+        AdminAPI.admin_method?(method) ->
+          AdminAPI.call(method, params, Admin.actor_for(user))
+
+        Breakglass.user?(user) and method != "me" ->
+          {:error,
+           Error.new(:forbidden, %{reason: "a break-glass token administers and no more"})}
+
+        true ->
+          Harness.call(method, params, %{user: user, platform_admin?: platform_admin?(user)})
       end
 
     case result do
@@ -520,18 +597,26 @@ defmodule Troupe.Plane.Web.Router do
   # same verifier workers use, because a token that two components disagree about is a
   # token nobody can reason about. The subject is resolved on every request — a person
   # to their row, a `svc:` subject to its principal — so a principal disabled a minute
-  # ago is refused now rather than when its token expires.
+  # ago is refused now rather than when its token expires. A break-glass token is the
+  # one caller with no row: its user is built from the claims, and its expiry is the only
+  # thing that ends it.
   defp authenticate(conn) do
     with {:ok, jwt} <- bearer(conn),
          {:ok, jwks} <- Tokens.jwks(),
          {:ok, claims} <- Token.verify(jwt, jwks, audience: plane_audience()),
-         %Identity.User{} = user <- Identity.get_user(claims["sub"]) do
+         %Identity.User{} = user <- user_for(claims) do
       {:ok, user}
     else
       nil -> {:error, Error.new(:unauthenticated, %{reason: "no such user"})}
       {:error, %Error{} = error} -> {:error, error}
       {:error, reason} -> {:error, Error.new(:unauthenticated, %{reason: to_string(reason)})}
     end
+  end
+
+  defp user_for(claims) do
+    if Breakglass.token?(claims),
+      do: Breakglass.user(claims),
+      else: Identity.get_user(claims["sub"])
   end
 
   defp bearer(conn) do

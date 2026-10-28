@@ -18,7 +18,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/gitops/report.ex
   - apps/troupe_plane/lib/troupe/plane/provision.ex
   - apps/troupe_plane/lib/troupe/plane/settings.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/layout.ex
   - clients/gui/apps/console/src/views/Profiles.tsx
   - clients/gui/apps/console/src/views/Pods.tsx
   - apps/troupe_plane/priv/repo/migrations/20260929000035_gitops_sources.exs

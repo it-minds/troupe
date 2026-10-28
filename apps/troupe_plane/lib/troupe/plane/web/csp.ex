@@ -10,17 +10,17 @@ defmodule Troupe.Plane.Web.CSP do
   here, and this header is where that is said to the browser:
 
     * **Scripts from this origin's files and nothing else.** No inline script, no event
-      handler attribute, no `javascript:` URL, no `eval`, no other origin. The console's
-      LiveView is `app.js`; the front page's one script switches its webfonts on.
-    * **Styles may be inline.** The front page carries its stylesheet in a `<style>`, the
-      sign-in pages and the console write `style` attributes, and a LiveView patch sets
-      them on the budget bar; none of that can run anything. The webfonts' stylesheet and
-      files come from their one host, as the pages already said.
+      handler attribute, no `javascript:` URL, no `eval`, no other origin. The one script
+      the plane's pages load switches their webfonts on.
+    * **Styles may be inline.** The front page carries its stylesheet in a `<style>` and
+      the short pages under `/admin` write `style` attributes; none of that can run
+      anything. The webfonts' stylesheet and files come from their one host, as the pages
+      already said.
     * **This host and nothing else** for a connection, an image, a frame's parent (none),
       a form's target, a `<base>` (none) and a plugin (none).
 
-  First in the endpoint, before the static files and before the split between the console
-  and the API, so a stylesheet, a 404 and a JSON answer carry it as a page does. The app
+  First in the endpoint, before the static files and before the router, so a stylesheet,
+  a 404 and a JSON answer carry it as a page does. The app
   at `/app/` is served by the GUI image, not by this endpoint, and its own server sends
   the app's copy of the policy (`clients/gui/docker/headers.conf`).
 

@@ -20,7 +20,7 @@ there, as the code's own comments give it.
 
 | Library | Where | Reason |
 |---|---|---|
-| `phoenix`, `phoenix_live_view`, `phoenix_html` | plane | the console: every page is a view of live state, and polling it from a browser would be a second event system. The API itself is a `Plug.Router` |
+| `phoenix`, `phoenix_html` | plane | the endpoint around the API's `Plug.Router`: the listener's configuration, static files and the error page, which Phoenix encodes with `Phoenix.HTML.Engine`. The console that was a LiveView here is an app of its own |
 | `bandit`, `plug`, `websock_adapter` | plane, gateway, a2a | one HTTP server across the umbrella; the pod's WebSocket |
 | `mint_web_socket`, `req` | protocol and clients | the client side of the WebSocket on the HTTP stack already underneath `req`; `req` for OpenBao, S3, the plane |
 | `ecto_sql`, `postgrex` | plane | the index, ledger, audit trail, identity, settings — never session content |

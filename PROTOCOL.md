@@ -3273,6 +3273,16 @@ has connected, the tool answers a result the model can read —
 well as `{"id_token"}`, and answers the same plane token with `kind: "service"`, `team`
 and `profiles` claims.
 
+`POST /auth/breakglass` takes `{"token": …}`, the deployment's break-glass token, and
+answers `{token, expires_at, subject}`: a plane token for the break-glass subject, carrying
+`breakglass: true`, that is a platform admin in no team until it expires, with nothing to
+refresh it; `expires_at` is ISO 8601, UTC, at most the fifteen minutes any plane token
+lasts. It answers the `admin.*` methods and `me`, and every other method is `forbidden`. A wrong token is 403 `{"error": "refused"}`,
+and both outcomes are audited as `admin.breakglass` with the caller's address. A plane
+with no token configured answers 404 with no body, and `GET /.well-known/troupe` says
+`breakglass: false` there and `true` where the door exists. `me` answers `breakglass:
+true` for the token and `false` for everybody else, so a client can mark what it shows.
+
 ### Client versions
 
 A plane holds, per component — `tui` (the terminal, `troupe`), `daemon`

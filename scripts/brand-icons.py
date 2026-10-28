@@ -13,7 +13,7 @@ three stroke weights the kits use: 3.4 at 16px with the eyes flattened to bars,
 pasted onto a browser chrome we do not control and the dark mark reads on both.
 
 Requires Pillow. It is not part of the build: run it when the mark changes and
-commit what it writes, the same bargain as `mix troupe.admin.assets`.
+commit what it writes, the same bargain as `mix troupe.theme`.
 """
 
 from pathlib import Path

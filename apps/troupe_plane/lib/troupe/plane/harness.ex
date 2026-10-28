@@ -342,6 +342,9 @@ defmodule Troupe.Plane.Harness do
        "teams" => Enum.map(Identity.teams_for(user), &team_json/1),
        "profiles" => granted_profiles(user),
        "platform_admin" => Map.get(context, :platform_admin?, false),
+       # True for a break-glass token's caller and for nobody else, so a client can mark
+       # every page it shows while the token lasts.
+       "breakglass" => user.kind == "breakglass",
        "organisation" => organisation()
      }}
   end

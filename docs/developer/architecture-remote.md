@@ -16,7 +16,7 @@ session's events nor its storage:
 flowchart TB
   client["troupe, the desktop app,<br/>or a browser at /app"]
   idp["Identity provider"]
-  plane["troupe-plane<br/>/rpc · /auth/exchange · /mcp · /admin"]
+  plane["troupe-plane<br/>/rpc · /auth/exchange · /mcp"]
   op["troupe-operator"]
   pod["worker pods, troupe-w-&lt;profile&gt;<br/>/v1/socket"]
   pg[("PostgreSQL")]
@@ -190,9 +190,10 @@ condition, and the plane claims egress by hostname only where that condition say
 ### 6.4 The admin surface
 
 Every administrative action goes through `Troupe.Plane.Admin`; the console, the `admin.*`
-JSON-RPC methods and the MCP server at `/mcp` are renderings of it. A LiveView may call
-nothing else in the plane, and a parity test asserts every function has an API method and
-an MCP tool, so nothing the console can do is out of reach of a program or a model. For a
+JSON-RPC methods and the MCP server at `/mcp` are renderings of it. The console is a client
+of those methods and nothing else (the plane serves no administrative pages of its own), and
+a parity test asserts every function has an API method and an MCP tool, so nothing the
+console can do is out of reach of a program or a model. For a
 model the method's summary and typed arguments *are* the interface, and a destructive tool
 takes a `confirm` argument repeating the identifier. `/mcp` also accepts the identity
 provider's own token, because an MCP client does OAuth against the provider and has no
@@ -202,7 +203,8 @@ server.
 `platform_admin` is membership of an identity-provider group, never granted in Troupe,
 because a role Troupe could grant would be a way to escalate inside it. `team_admin` is
 assigned per team. Neither can read session content: no admin method returns events.
-Break-glass is a separate, audited console login for a lock-out, with no more access.
+Break-glass is a separate, audited way into the console for a lock-out: a token exchanged
+at `POST /auth/breakglass` for a short-lived plane token, with no more access.
 
 Profiles are applied **directly** (server-side apply of the whole resource) or held **by
 GitOps**: a repository holds the `WorkerProfile`, `TroupePolicy` and `Trigger` resources

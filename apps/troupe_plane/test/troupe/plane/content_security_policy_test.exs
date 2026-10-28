@@ -12,17 +12,15 @@ defmodule Troupe.Plane.ContentSecurityPolicyTest do
   documents it serves needing nothing the header refuses.
 
   Over a real socket against the running endpoint rather than the bare `Router`, because
-  the static files, the console's router and a 404 are all the endpoint's, and a header
-  set in one router would leave the others without it. The app at `/app/` is the GUI
-  image's own server; its copy of the policy is checked by the GUI's
+  the static files and a 404 are the endpoint's as much as the router's answers are, and a
+  header set in the router alone would leave them without it. The app at `/app/` is
+  served by the GUI image's own server; its copy of the policy is checked by the GUI's
   `content-security-policy.test.tsx`.
   """
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Phoenix.HTML.Safe
   alias Troupe.Plane.Web.{Docs, Endpoint, ErrorHTML, Index}
-  alias Troupe.Plane.Web.Live.Root
 
   @moduletag timeout: 60_000
 
@@ -44,14 +42,15 @@ defmodule Troupe.Plane.ContentSecurityPolicyTest do
     on_exit(fn ->
       Application.put_env(:troupe_plane, :oidc, previous)
       Application.delete_env(:troupe_plane, :breakglass)
+      Application.delete_env(:troupe_plane, :console_url)
     end)
 
     %{url: "http://127.0.0.1:#{port}"}
   end
 
   # One of each kind of response this host gives: the front door, its static files, the
-  # API's answers and refusals, a 404, the console's own files, its sign-in redirect, a
-  # LiveView route without a session, and the pages the sign-in renders itself.
+  # API's answers and refusals, a 404, the break-glass door's refusal, and the redirects
+  # from the addresses the plane's own console had.
   @responses [
     {:get, "/", 200},
     {:get, "/docs", 200},
@@ -62,13 +61,11 @@ defmodule Troupe.Plane.ContentSecurityPolicyTest do
     {:get, "/.well-known/oauth-protected-resource", 200},
     {:post, "/rpc", 401},
     {:post, "/mcp", 401},
+    {:post, "/auth/breakglass", 403},
     {:get, "/no-such-page", 404},
-    {:get, "/admin/static/app.js", 200},
-    {:get, "/admin/static/console.css", 200},
-    {:get, "/admin/login", 302},
     {:get, "/admin", 302},
-    {:get, "/admin/denied", 200},
-    {:get, "/admin/breakglass", 200}
+    {:get, "/admin/workers", 302},
+    {:get, "/admin/breakglass", 302}
   ]
 
   describe "the header" do
@@ -123,9 +120,9 @@ defmodule Troupe.Plane.ContentSecurityPolicyTest do
     end
 
     test "connects to this host and nowhere else", context do
-      # The plane's own pages talk to the plane: the console's LiveView socket and nothing
-      # besides. The daemon's loopback is the app's to reach, under the app's own policy.
-      assert context |> request(:get, "/admin/login") |> policy() |> Map.get("connect-src") ==
+      # The plane's own pages talk to the plane and nothing besides. The daemon's loopback
+      # is the app's to reach, under the app's own policy.
+      assert context |> request(:get, "/docs") |> policy() |> Map.get("connect-src") ==
                ["'self'"]
     end
 
@@ -153,20 +150,21 @@ defmodule Troupe.Plane.ContentSecurityPolicyTest do
   # checked for a `<script>` with a body, an event-handler attribute and a `javascript:`
   # URL, and every script it loads must be this origin's.
   describe "the documents" do
-    test "the front door and the sign-in pages carry no inline script", context do
-      for path <- ["/", "/docs", "/admin/denied", "/admin/breakglass"] do
+    test "the front door carries no inline script", context do
+      for path <- ["/", "/docs"] do
         assert_no_inline_script(path, request(context, :get, path).body)
       end
     end
 
-    test "the console's document carries no inline script" do
-      document =
-        %{inner_content: {:safe, "<main></main>"}}
-        |> Root.root()
-        |> Safe.to_iodata()
-        |> IO.iodata_to_binary()
+    test "the pages a plane without a console serves at /admin carry no inline script",
+         context do
+      Application.put_env(:troupe_plane, :console_url, "")
 
-      assert_no_inline_script("the console's root", document)
+      for path <- ["/admin", "/admin/breakglass"] do
+        response = request(context, :get, path)
+        assert response.status == 200
+        assert_no_inline_script(path, response.body)
+      end
     end
 
     test "the error page carries no inline script" do

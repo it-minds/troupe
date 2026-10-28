@@ -337,15 +337,13 @@ jobs:
       - run: mix format --check-formatted
       - run: mix credo --strict
 
-      # Files that are generated and committed: the console's bundle, its design tokens,
-      # the theme stylesheet a browser is served, and the config.yaml schema with its key
-      # reference. Each task's own moduledoc says CI checks it with `--check` — so a token
-      # changed without regenerating fails here rather than reaching a browser as a colour
-      # that is slightly wrong, and a config key cannot be added without its schema.
+      # Files that are generated and committed: the theme stylesheet a browser is served,
+      # and the config.yaml schema with its key reference. Each task's own moduledoc says
+      # CI checks it with `--check` — so a token changed without regenerating fails here
+      # rather than reaching a browser as a colour that is slightly wrong, and a config key
+      # cannot be added without its schema.
       - name: Generated assets are current
         run: |
-          MIX_ENV=test mix troupe.admin.assets --check
-          MIX_ENV=test mix troupe.admin.tokens --check
           MIX_ENV=test mix troupe.theme --check
           MIX_ENV=test mix troupe.config.schema --check
 

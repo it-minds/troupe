@@ -27,6 +27,9 @@ interface Row {
   created_at: number;
 }
 
+/** The subject a break-glass token signs in as, as the plane's `Troupe.Plane.Breakglass.subject()` names it. */
+export const BREAKGLASS_SUBJECT = "breakglass";
+
 export interface PlaneOptions {
   idp: FakeIdp;
   worker: FakeWorker;
@@ -69,6 +72,14 @@ export interface PlaneOptions {
   publishOrganisation?: "everyone" | "platform_admins";
   /** Whether an administrator allows public links (`artifacts_public_links`). */
   publicLinks?: boolean;
+  /**
+   * The break-glass token the plane holds, which `POST /auth/breakglass` exchanges for a
+   * plane token of the break-glass subject, a platform admin with no teams. None is a
+   * plane with no door: discovery says `breakglass: false` and the route is not found.
+   */
+  breakglass?: string;
+  /** Seconds a break-glass plane token is good for; short, for a test of its expiry. */
+  breakglassLifetime?: number;
 }
 
 /** A file of an artifact's version, with what it holds, which no answer carries. */
@@ -267,7 +278,7 @@ export class FakePlane {
 
   private readonly opts: PlaneOptions;
   private url = "";
-  private tokens = new Map<string, { subject: string; name: string; exp: number }>();
+  private tokens = new Map<string, { subject: string; name: string; exp: number; breakglass?: boolean }>();
   private counter = 0;
   /** The plane's own signing key, once `sign()` gives it one (#657). */
   private signing: { publicKey: string; privateKey: CryptoKey; fingerprint: string } | null = null;
@@ -751,7 +762,7 @@ export class FakePlane {
 
     // The allowlist, as the plane implements it: exact match, echoed back only to a
     // request that presented it, never `*`, and only on the routes a browser calls.
-    const browserRoute = path === "/rpc" || path === "/auth/exchange" || path.startsWith("/.well-known/");
+    const browserRoute = path === "/rpc" || path === "/auth/exchange" || path === "/auth/breakglass" || path.startsWith("/.well-known/");
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (this.corsOrigins.length > 0 && browserRoute) {
       headers["vary"] = "origin";
@@ -781,6 +792,7 @@ export class FakePlane {
         token_endpoint: this.opts.idp.tokenEndpoint,
         scopes: ["openid", "profile", "email", "offline_access", "groups"],
         plane: { name: "fake", rpc: "/rpc", jwks: "/.well-known/jwks.json", protocol_version: "1" },
+        breakglass: typeof this.opts.breakglass === "string",
       });
     }
 
@@ -808,6 +820,24 @@ export class FakePlane {
       });
     }
 
+    // The break-glass door, as the plane serves it: a door that is not configured is a path
+    // that does not exist; a wrong token is refused; the right one is a plane token for
+    // the break-glass subject, who administers as a platform admin with no teams.
+    if (path === "/auth/breakglass") {
+      if (typeof this.opts.breakglass !== "string") {
+        res.writeHead(404, headers);
+        res.end();
+        return;
+      }
+      const parsed = JSON.parse(body || "{}") as { token?: unknown };
+      if (parsed.token !== this.opts.breakglass) return json(403, { error: "refused" });
+      const token = `bg-${++this.counter}`;
+      const exp = Math.floor(Date.now() / 1000) + (this.opts.breakglassLifetime ?? 900);
+      this.tokens.set(token, { subject: BREAKGLASS_SUBJECT, name: "Break-glass administrator", exp, breakglass: true });
+      this.opts.admin?.platformAdmins.add(BREAKGLASS_SUBJECT);
+      return json(200, { token, expires_at: new Date(exp * 1000).toISOString(), subject: BREAKGLASS_SUBJECT });
+    }
+
     if (path === "/rpc") {
       const auth = (req.headers["authorization"] as string | undefined) ?? "";
       const held = this.tokens.get(auth.replace(/^Bearer /i, ""));
@@ -816,7 +846,9 @@ export class FakePlane {
       const method = request.method ?? "";
       this.asked.push(method);
       let answer =
-        method === "admin.artifacts.list" || method === "admin.artifact.takedown"
+        method === "me" && held.breakglass
+          ? { result: { subject: held.subject, display_name: held.name, kind: "breakglass", teams: [], profiles: [], platform_admin: true, breakglass: true } }
+          : method === "admin.artifacts.list" || method === "admin.artifact.takedown"
           ? this.adminArtifacts(held.subject, method, request.params ?? {})
           : this.opts.admin && method.startsWith("admin.")
           ? await this.opts.admin.call(held.subject, method, request.params ?? {})

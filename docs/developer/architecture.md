@@ -42,7 +42,12 @@ here but the protocol. One `VERSION` versions everything ([build.md §4](build.m
 | `troupe_plane` never calls `troupe_core` or `troupe_gateway` | "the plane does not run agents" |
 | `troupe_operator` never calls core, gateway or plane | "the operator holds cluster privileges and has no public surface" |
 | `troupe_daemon` calls only protocol, core and gateway | "the daemon is the harness and a command line, and nothing of the platform" |
-| `Troupe.Plane.Web.Live.*` calls only `Troupe.Plane.Admin` among `Troupe.Plane.*` | "a LiveView is an admin API client and gets no private access" |
+
+The plane serves no administrative pages of its own: the console (`clients/gui/apps/console`)
+is a client of `admin.*` over `/rpc` like any other, so there is no in-plane UI for a rule
+to hold apart from `Troupe.Plane.Admin`. The LiveView app that once lived at `/admin`, and
+the rule that held it to the admin API, went when the console covered it; what is left at
+`/admin` is a redirect (`web/admin_moved.ex`).
 
 Every cross-app call must also be declared `in_umbrella` in the caller's `mix.exs`.
 Test-only reverse dependencies pass because only `lib/` beams are read. The TUI has its own
@@ -261,6 +266,6 @@ in the [GUI README](../../clients/gui/README.md). What its code settles:
   clients and the CRD parsers, because they are contracts the plane and workers both hold.
 - `apps/troupe_protocol/test/troupe/policy_test.exs` imports `Troupe.Operator.Fixtures`
   without declaring the dependency ([testing.md §1](testing.md#1-running)).
-- `troupe_plane`'s `web/live/status.ex` reads its states from `priv/design/statuses.json`,
-  which `mix troupe.admin.tokens` writes, not from `docs/design/admin/tokens.json`
-  directly: the image build does not see `docs/`.
+- `troupe_plane` reads what it needs of the design (the front page's theme, which
+  `mix troupe.theme` writes to `priv/static/theme.css`) from `priv/`, not from
+  `clients/gui/docs/design/themes/` directly: the image build does not see `docs/`.

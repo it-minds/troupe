@@ -270,9 +270,10 @@ defmodule Troupe.Plane.Settings do
       type: :string,
       app_key: [:oidc, :client_secret],
       secret: true,
-      summary: "The client secret used to redeem an authorization code for the console.",
+      summary:
+        "The client secret the plane's own sign-in once redeemed an authorization code with. No longer read: the console signs in as a public client.",
       consequence:
-        "Never shown once saved. Without it the console's own sign-in cannot complete, though the CLI's device flow still can. Stored as it is — a secret the plane has to present cannot be hashed — so it is exactly as protected as the database.",
+        "None. The plane presents it to nothing now; it is kept this release so a value already stored still lists and can be reset, and goes in the next. Never shown once saved.",
       effect: :immediate
     },
     %Setting{
@@ -383,7 +384,7 @@ defmodule Troupe.Plane.Settings do
       secret: true,
       summary: "The token that opens the break-glass door.",
       consequence:
-        "Deployment only, and never shown. Unset means the door is not there at all: /admin/breakglass answers 404 like any other path that does not exist.",
+        "Deployment only, and never shown. Unset means the door is not there at all: /auth/breakglass answers 404 like any other path that does not exist, and discovery says breakglass: false.",
       effect: :restart
     },
     # What a person's own machine should talk to, offered to the clients through

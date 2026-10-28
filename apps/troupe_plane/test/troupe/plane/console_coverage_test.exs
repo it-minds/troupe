@@ -23,7 +23,7 @@ defmodule Troupe.Plane.ConsoleCoverageTest do
 
   # The same exemption `AdminParityTest` makes, for the same reason: these work out *who is
   # asking* rather than doing anything on their behalf.
-  @not_actions [actor_for: 1, actor_for_session: 1, actor_for_subject: 1, admin?: 1]
+  @not_actions [actor_for: 1, actor_for_subject: 1, admin?: 1]
 
   # The same filter `AdminParityTest` applies, because the two tests are about one list and
   # a stricter copy here would fail about functions that test has already accounted for.

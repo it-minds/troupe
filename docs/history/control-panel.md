@@ -1,7 +1,9 @@
 # The console — one surface that configures the product
 
 *A record: the plan the console was built from, written in September 2026 and kept for
-the console's open work (#56). The console as it is now is in the admin track,
+the console's open work (#56). The LiveView console it keeps at `/admin` for the day the
+provider is down has since gone too: the console at `/console` is the one surface, and
+break-glass opens it (Decision 961). The console as it is now is in the admin track,
 [profiles and policy](../admin/profiles-and-policy.md) and
 [bundles, triggers and budgets](../admin/bundles-and-triggers.md).*
 

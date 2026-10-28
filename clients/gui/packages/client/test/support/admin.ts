@@ -1578,7 +1578,7 @@ export class FakeAdmin {
             ? { name: "Platform admins", ok: false, detail: `${candidate} has never arrived in the ${claim} claim of anybody's token. Either the group id is wrong, or the provider is not sending group claims, or nobody in it has signed in yet.`, took_ms: 0 }
             : { name: "Platform admins", ok: members.length > 0, detail: `${members.length} person/people known here carry ${candidate} in the ${claim} claim${you ? ", including you." : ", and you are not one of them."}`, took_ms: 0 };
         const checks = [...this.providerChecks(this.signInValues()), adminCheck];
-        return { result: { checks, ok: checks.every((c) => c.ok), group: candidate, redirect_uri: `${this.baseUrl()}/admin/callback` } };
+        return { result: { checks, ok: checks.every((c) => c.ok), group: candidate, redirect_uri: `${this.baseUrl()}/console` } };
       }
 
       case "admin.provider.get":
@@ -3168,7 +3168,7 @@ export class FakeAdmin {
     return {
       settings: SETTINGS.filter((s) => s.group === "sign_in").map((s) => this.describe(s)),
       urls: {
-        redirect: `${base}/admin/callback`,
+        redirect: `${base}/console`,
         discovery: `${base}/.well-known/troupe`,
         jwks: `${base}/.well-known/jwks.json`,
         resource_metadata: `${base}/.well-known/oauth-protected-resource`,

@@ -9,7 +9,7 @@ defmodule Troupe.Plane.ScimConnectorTest do
   administrator said so, and never by merging into a team that happens to share its name.
   """
 
-  use Troupe.Plane.PanelCase, async: false
+  use Troupe.Plane.AdminCase, async: false
 
   alias Troupe.Plane.{Admin, Audit, Identity, Settings}
   alias Troupe.Plane.SCIM.Connector

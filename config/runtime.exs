@@ -305,15 +305,17 @@ if config_env() == :prod do
     # `jwt_path` for a client token under `role`. There is no default token: a plane
     # with neither fails to sign and says why, rather than trying a development root
     # token against the cluster's key manager.
-    # The break-glass door into the panel. Absent means there is no door: the routes
-    # answer 404 and nothing about the deployment says otherwise. Set it only where
-    # somebody has decided they want one, and put it in a Secret rather than a values
-    # file — `Troupe.Plane.Web.Breakglass` says what it does and does not buy.
+    # The break-glass door, `POST /auth/breakglass`, which the console's sign-in screen
+    # offers. Absent means there is no door: the route answers 404 and nothing about the
+    # deployment says otherwise. Set it only where somebody has decided they want one,
+    # and put it in a Secret rather than a values file — `Troupe.Plane.Breakglass` says
+    # what it does and does not buy. The lifetime is capped at the fifteen minutes any
+    # plane token may last, which is the default.
     config :troupe_plane, :breakglass,
       token: presence.(System.get_env("TROUPE_BREAKGLASS_TOKEN")),
       subject: System.get_env("TROUPE_BREAKGLASS_SUBJECT", "breakglass"),
       lifetime_seconds:
-        String.to_integer(System.get_env("TROUPE_BREAKGLASS_LIFETIME_SECONDS", "3600"))
+        String.to_integer(System.get_env("TROUPE_BREAKGLASS_LIFETIME_SECONDS", "900"))
 
     config :troupe_plane, :transit,
       address: System.get_env("TROUPE_BAO_ADDR", "http://openbao.troupe-system.svc:8200"),
@@ -418,9 +420,10 @@ if config_env() == :prod do
       # default; an empty value is a plane that ships without one, and the index then
       # offers no door rather than one that answers 404.
       app_url: System.get_env("TROUPE_APP_URL", "/app"),
-      # And where the administrative console is, which the index's console door and the
-      # LiveView console's landing page point at. The chart serves it at `/console` on
-      # this host; an empty value is a plane without one, and both then keep `/admin`.
+      # And where the administrative console is, which the index's console door and
+      # `/admin` point at. The chart serves it at `/console` on this host; an empty value
+      # is a plane without one, and `/admin` then says the plane is administered over
+      # the admin API.
       console_url: System.get_env("TROUPE_CONSOLE_URL", "/console"),
       # And where the terminal client is published. Nothing here builds one — this
       # repository is deployed to a cluster and installs on no machine — so there is no

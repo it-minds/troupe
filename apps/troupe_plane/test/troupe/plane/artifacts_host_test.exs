@@ -215,25 +215,6 @@ defmodule Troupe.Plane.ArtifactsHostTest do
       assert get(context, "/enter?ticket=forged").status == 403
       assert get(context, "/enter").status == 403
     end
-
-    test "the plane's own cookie is its host's alone, so a browser never sends it here" do
-      previous = Application.get_env(:troupe_plane, :oidc)
-      on_exit(fn -> Application.put_env(:troupe_plane, :oidc, previous) end)
-
-      Application.put_env(:troupe_plane, :oidc,
-        issuer: "https://issuer.example.test",
-        client_id: "troupe",
-        authorization_endpoint: "https://issuer.example.test/authorize",
-        device_authorization_endpoint: "https://issuer.example.test/device",
-        token_endpoint: "https://issuer.example.test/token"
-      )
-
-      {:ok, {_address, port}} = Endpoint.server_info(:http)
-      response = Req.get!("http://127.0.0.1:#{port}/admin/login", redirect: false, retry: false)
-      [set_cookie] = Req.Response.get_header(response, "set-cookie")
-      assert set_cookie =~ "_troupe_plane="
-      refute set_cookie |> String.downcase() =~ "domain="
-    end
   end
 
   describe "what it serves" do

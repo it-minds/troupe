@@ -20,7 +20,7 @@ import { SignIn } from "./views/SignIn";
 import { Shell } from "./views/Shell";
 import { Wordmark } from "./views/brand";
 
-type Phase = { kind: "signed-out" } | { kind: "resolving"; auth: AuthSession } | { kind: "failed"; auth: AuthSession; error: unknown } | { kind: "ready"; auth: AuthSession; standing: Standing; discovery: Discovery | null };
+type Phase = { kind: "signed-out"; notice: string | null } | { kind: "resolving"; auth: AuthSession } | { kind: "failed"; auth: AuthSession; error: unknown } | { kind: "ready"; auth: AuthSession; standing: Standing; discovery: Discovery | null };
 
 export function App({
   navigate,
@@ -30,7 +30,7 @@ export function App({
   /** Open an artifact's link in a tab of its own. A test catches the address instead. */
   openTab?: (url: string) => void;
 } = {}): JSX.Element {
-  const [phase, setPhase] = useState<Phase>({ kind: "signed-out" });
+  const [phase, setPhase] = useState<Phase>({ kind: "signed-out", notice: null });
   const [toast, setToast] = useState<string | null>(null);
 
   const onSignedIn = useCallback((auth: AuthSession) => setPhase({ kind: "resolving", auth }), []);
@@ -48,6 +48,22 @@ export function App({
     };
   }, [phase]);
 
+  // A break-glass session ends at its token's expiry with nothing to renew it. The console
+  // goes back to its sign-in then, saying so, rather than leaving a page whose every call
+  // fails: the session says when it ends, and is asked for its token at that moment, so
+  // the screen does not wait for the next click to find out.
+  useEffect(() => {
+    if (phase.kind !== "ready" || !phase.auth.isBreakGlass) return;
+    const { auth } = phase;
+    const off = auth.onEnded((why) => setPhase({ kind: "signed-out", notice: why }));
+    const until = (auth.me?.expires_at ?? 0) * 1000 - Date.now();
+    const t = setTimeout(() => void auth.token().catch(() => undefined), Math.min(Math.max(until, 0) + 50, 2 ** 31 - 1));
+    return () => {
+      off();
+      clearTimeout(t);
+    };
+  }, [phase]);
+
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 6000);
@@ -56,7 +72,7 @@ export function App({
 
   const signOut = useCallback(() => {
     if (phase.kind === "signed-out") return;
-    void phase.auth.signOut().then(() => setPhase({ kind: "signed-out" }));
+    void phase.auth.signOut().then(() => setPhase({ kind: "signed-out", notice: null }));
   }, [phase]);
 
   const signed = useMemo<Signed | null>(() => {
@@ -77,7 +93,7 @@ export function App({
     };
   }, [phase, signOut, openTab, navigate]);
 
-  if (phase.kind === "signed-out") return <SignIn onSignedIn={onSignedIn} {...(navigate ? { navigate } : {})} />;
+  if (phase.kind === "signed-out") return <SignIn onSignedIn={onSignedIn} notice={phase.notice} {...(navigate ? { navigate } : {})} />;
 
   if (phase.kind === "resolving") {
     return (

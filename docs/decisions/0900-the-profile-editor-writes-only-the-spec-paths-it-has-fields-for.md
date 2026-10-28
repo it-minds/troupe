@@ -5,7 +5,6 @@ date: 2026-10-13
 status: accepted
 paths:
   - clients/gui/apps/console/src/views/Profiles.tsx
-  - apps/troupe_plane/test/troupe/plane/panel_test.exs
 gist: "A save changes only the form's own spec paths; other spec fields and MCP row fields go back as loaded, the plane-written ones never"
 ---
 

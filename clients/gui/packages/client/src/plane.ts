@@ -14,6 +14,8 @@ export interface Discovery {
   token_endpoint: string;
   scopes: string[];
   plane: { name: string; rpc: string; jwks: string; protocol_version: string; [k: string]: unknown };
+  /** Whether the plane has a break-glass door (`POST /auth/breakglass`); absent from a plane older than it. */
+  breakglass?: boolean;
   [k: string]: unknown;
 }
 
@@ -80,6 +82,17 @@ export interface Me {
   teams: Team[];
   profiles: string[];
   platform_admin?: boolean;
+  /** Signed in with the plane's break-glass token rather than through the identity provider. */
+  breakglass?: boolean;
+  [k: string]: unknown;
+}
+
+/** What `POST /auth/breakglass` answers: a plane token for the break-glass subject, and when it ends. */
+export interface BreakGlassAnswer {
+  token: string;
+  /** ISO 8601, UTC. */
+  expires_at: string;
+  subject: string;
   [k: string]: unknown;
 }
 
@@ -308,6 +321,21 @@ export class PlaneClient {
     });
     if (!res.ok) throw new PlaneHttpError("exchange", res.status, await res.text());
     return (await res.json()) as PlaneCredential;
+  }
+
+  /**
+   * `POST /auth/breakglass {token}` → a plane token for the break-glass subject. The plane
+   * answers 403 to a token it does not hold and 404 where no door is configured, both of
+   * which arrive here as a `PlaneHttpError` with that status.
+   */
+  async breakGlass(breakglassToken: string): Promise<BreakGlassAnswer> {
+    const res = await this.fetchImpl(`${this.baseUrl}/auth/breakglass`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ token: breakglassToken }),
+    });
+    if (!res.ok) throw new PlaneHttpError("breakglass", res.status, await res.text());
+    return (await res.json()) as BreakGlassAnswer;
   }
 
   /** One JSON-RPC request over `POST /rpc`, bearer-authenticated with a plane token. */

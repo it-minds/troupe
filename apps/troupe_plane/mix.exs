@@ -32,20 +32,17 @@ defmodule Troupe.Plane.MixProject do
   defp deps do
     [
       {:troupe_protocol, in_umbrella: true},
+      # The endpoint around the router: the listener's configuration, static files and the
+      # error page. The console that was a LiveView here is an app of its own now.
       {:phoenix, "~> 1.8"},
-      # The admin panel. LiveView rather than a JSON front end because every page here is
-      # a view of live cluster state — pods coming and going, a drain in progress — and
-      # polling it from a browser would be a second event system beside the one the plane
-      # already has.
-      {:phoenix_live_view, "~> 1.0"},
+      # Not for a template: the endpoint's error page returns a string, and Phoenix encodes
+      # an HTML-format answer with `Phoenix.HTML.Engine`, which lives here.
       {:phoenix_html, "~> 4.1"},
-      # What `Phoenix.LiveViewTest` parses rendered pages with.
-      {:lazy_html, ">= 0.1.0", only: :test},
       {:bandit, "~> 1.12"},
       # The two sockets a laptop's offered session is relayed over (#58).
       {:websock_adapter, "~> 0.6"},
       # The plane's HTTP surface is a handful of routes, so it is `Plug.Router` rather
-      # than Phoenix. Stage 3's admin panel is what brings Phoenix in.
+      # than Phoenix's.
       {:plug, "~> 1.16"},
       {:ecto_sql, "~> 3.14"},
       {:postgrex, "~> 0.22"},

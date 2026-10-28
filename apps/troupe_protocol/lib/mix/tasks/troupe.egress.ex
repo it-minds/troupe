@@ -14,9 +14,8 @@ defmodule Mix.Tasks.Troupe.Egress do
   at the moment somebody first needs it. Generated from the declarations, the document
   cannot be more optimistic than the code.
 
-  `--check` in CI, the same shape as `mix troupe.admin.assets --check` and
-  `mix troupe.admin.tokens --check`: the committed bytes cannot drift from what they are
-  generated from.
+  `--check` in CI, the same shape as `mix troupe.theme --check`: the committed bytes
+  cannot drift from what they are generated from.
   """
 
   use Mix.Task

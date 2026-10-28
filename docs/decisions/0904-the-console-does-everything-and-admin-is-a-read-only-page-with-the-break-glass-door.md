@@ -2,20 +2,16 @@
 number: 904
 title: "The console draws every area the LiveView console had, and `/admin` is a read-only page and the break-glass door, whose one change is putting sign-in and the admin settings back to the deployment's"
 date: 2026-10-16
-status: accepted
+status: superseded
 issue: 56
 supersedes:
   - 892
   - 901
 paths:
-  - apps/troupe_plane/lib/troupe/plane/web/admin_router.ex
   - apps/troupe_plane/lib/troupe/plane/web/admin_moved.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/overview.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/layout.ex
   - apps/troupe_plane/lib/troupe/plane/web/index.ex
   - apps/troupe_plane/lib/troupe/plane/admin/console.ex
   - apps/troupe_plane/lib/troupe/plane/github.ex
-  - apps/troupe_plane/test/troupe/plane/panel_test.exs
   - apps/troupe_plane/test/troupe/plane/console_coverage_test.exs
   - apps/troupe_plane/test/troupe/plane/console_walkthrough_test.exs
   - clients/gui/apps/console/src/nav.ts

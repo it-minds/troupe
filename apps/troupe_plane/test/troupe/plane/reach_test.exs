@@ -14,7 +14,7 @@ defmodule Troupe.Plane.ReachTest do
   `admin.profile.put`, and the bundle that names a channel's MCP servers.
   """
 
-  use Troupe.Plane.PanelCase, async: false
+  use Troupe.Plane.AdminCase, async: false
 
   alias Troupe.Plane.{Admin, Bundles, Fleet, Identity}
 

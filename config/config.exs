@@ -54,7 +54,6 @@ config :troupe_plane, Troupe.Plane.Web.Endpoint,
   # endpoint without one; a production release that used it would be signing cookies with
   # a value printed in this repository, which `runtime.exs` refuses to let happen.
   secret_key_base: String.duplicate("troupe-development-secret-not-for-a-cluster", 3),
-  live_view: [signing_salt: "troupe-plane-live"],
   pubsub_server: Troupe.Plane.PubSub,
   render_errors: [formats: [html: Troupe.Plane.Web.ErrorHTML], layout: false]
 

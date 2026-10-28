@@ -38,8 +38,8 @@ defmodule Troupe.Plane.Application do
       # What an operator may change without a deploy, remembered for five seconds. Before
       # anything that reads a setting, which by the second line is everything.
       Troupe.Plane.Settings,
-      # LiveView needs one, and it is the plane's own rather than a shared cluster topic:
-      # what it carries is one browser's view of one page.
+      # The plane's own, rather than a shared cluster topic: a drain waiting on a worker,
+      # an invite changing, a laptop's offered session, each on one node's bus.
       {Phoenix.PubSub, name: Troupe.Plane.PubSub},
       # Where the cluster-unique actors live. One per node; the actors themselves are
       # registered with `:global`, so exactly one of each exists across all of them.

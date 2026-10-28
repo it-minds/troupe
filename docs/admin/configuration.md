@@ -90,11 +90,11 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_OIDC_ISSUER`, `TROUPE_OIDC_CLIENT_ID` | none | the identity provider and app registration (required) | `plane.oidc.issuer`, `clientId` |
 | `TROUPE_OIDC_DEVICE_URL`, `TROUPE_OIDC_TOKEN_URL` | none | endpoints published to clients (required) | `plane.oidc.deviceUrl`, `tokenUrl` |
 | `TROUPE_OIDC_AUTHORIZE_URL` | `<issuer>/authorize` | where the console sends the browser | `plane.oidc.authorizeUrl` |
-| `TROUPE_OIDC_CLIENT_SECRET` | unset | redeems the console's authorization code; device flow works without | `plane.oidc.secretName`/`secretKey` |
+| `TROUPE_OIDC_CLIENT_SECRET` | unset | read by nothing: the console and the GUI redeem their own codes as a public client. Accepted this release so a deployment that sets it still starts; the next release drops it, with `client_secret` on the **Sign-in** screen | `plane.oidc.secretName`/`secretKey` |
 | `TROUPE_OIDC_SCOPES` | `openid profile email offline_access` | scopes advertised and asked for. Not `groups`: Entra refuses it (`AADSTS650053`) | `plane.oidc.scopes` |
 | `TROUPE_OIDC_MCP_SCOPE` | `<base_url>/mcp/admin` | the scope MCP clients are told to ask for | `plane.oidc.mcpScope` |
 | `TROUPE_OIDC_SUBJECT_CLAIM` | `sub` | the claim that is the person, in sign-in and as SCIM's `externalId`: `oid` for Entra ID. Deployment only; switching it moves each known person once, at their next sign-in ([§ Which claim is the person](#which-claim-is-the-person)) | `plane.oidc.subjectClaim` |
-| `TROUPE_BREAKGLASS_TOKEN`, `_SUBJECT`, `_LIFETIME_SECONDS` | unset, `breakglass`, `3600` | the emergency console door; unset, its routes 404 | `plane.breakglass.*` |
+| `TROUPE_BREAKGLASS_TOKEN`, `_SUBJECT`, `_LIFETIME_SECONDS` | unset, `breakglass`, `900` (the most any plane token lasts) | the break-glass door, `POST /auth/breakglass`, which the console's sign-in screen uses ([roles-and-permissions.md §4](roles-and-permissions.md#4-break-glass)); unset, it answers 404 | `plane.breakglass.*` |
 | `TROUPE_BAO_ADDR` | `http://openbao.troupe-system.svc:8200` | OpenBao: transit signing, destroying an erased session's key, and the assertions a person's daemon logs in with | `bao.address` |
 | `TROUPE_BAO_TOKEN` | unset | a static token (development); set, no Kubernetes login is tried | `bao.tokenSecretName`/`tokenSecretKey` |
 | `TROUPE_BAO_AUTH_PATH`, `TROUPE_BAO_ROLE`, `TROUPE_BAO_JWT_PATH` | `kubernetes`, `troupe-plane`, `/var/run/secrets/troupe/bao-token` | Kubernetes auth with a projected token (audience `troupe-kms`) | `bao.authPath`, `bao.planeRole` |
@@ -300,7 +300,7 @@ are the operator's copies of those ([below](#a-worker-namespaces-secrets)).
 |---|---|---|---|
 | `troupe-plane-database` | `troupe-system` | `url` | always |
 | `troupe-plane-secret-key-base` | `troupe-system` | `value` (≥ 64 bytes) | always |
-| `troupe-plane-oidc` | `troupe-system` | `client-secret` | console sign-in, unless the client secret is saved on the console's **Sign-in** screen instead (both copyable overlays leave `plane.oidc.secretName` empty) |
+| `troupe-plane-oidc` | `troupe-system` | `client-secret` | no longer: nothing reads it since every client signs in as a public client; still mounted when named, until the next release drops `plane.oidc.secretName` |
 | `troupe-object-store` | `troupe-system`, copied into every `troupe-w-<profile>` | `access-key-id`, `secret-access-key` | the plane's index rebuild and private sessions; every session on a worker |
 | break-glass (your name) | `troupe-system` | `token` | only when the door is wanted |
 | `troupe-plane-scim` | `troupe-system` | `token` | the deployment's SCIM token, with `plane.scim.enabled` |

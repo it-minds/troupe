@@ -62,7 +62,7 @@ box() { ./scripts/toolbox "$@"; }
 step "compile --warnings-as-errors" box bash -c 'MIX_ENV=test mix compile --force --warnings-as-errors'
 step "format --check-formatted"     box mix format --check-formatted
 step "credo --strict"               ./scripts/credo
-step "generated assets are current" box bash -c 'MIX_ENV=test mix troupe.admin.assets --check && MIX_ENV=test mix troupe.admin.tokens --check && MIX_ENV=test mix troupe.theme --check && MIX_ENV=test mix troupe.config.schema --check'
+step "generated assets are current" box bash -c 'MIX_ENV=test mix troupe.theme --check && MIX_ENV=test mix troupe.config.schema --check'
 step "boundaries"                   box bash -c 'MIX_ENV=test mix troupe.boundaries'
 # Every decision file in docs/decisions/: its fields, a number of its own, and `paths`
 # globs that match something (Decision 790).

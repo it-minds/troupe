@@ -57,6 +57,13 @@ defmodule Troupe.Plane.CORSTest do
       assert header(response, "access-control-allow-origin") == [@tauri]
     end
 
+    test "the break-glass door is answered too, since a console on its own origin opens it",
+         context do
+      assert {:ok, %{status: 204} = response} = preflight(context, "/auth/breakglass", @gui)
+      assert header(response, "access-control-allow-origin") == [@gui]
+      assert header(response, "access-control-allow-methods") == ["GET, POST, OPTIONS"]
+    end
+
     test "an origin not on the list gets no CORS answer at all", context do
       assert {:ok, %{status: 404} = response} =
                preflight(context, "/rpc", "https://evil.example.test")

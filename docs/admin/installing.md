@@ -84,7 +84,7 @@ plane:
     clientId: troupe
     deviceUrl: https://login.example.com/device
     tokenUrl: https://login.example.com/token
-    secretName: troupe-plane-oidc       # for console sign-in
+    # no client secret: the console and the GUI sign in as a public client
 objectStore:
   endpoint: https://s3.example.com
   bucket: troupe-sessions
@@ -135,7 +135,7 @@ has not finished or the tag did not move.
 
 Besides the API, the plane's host serves `/`, the page a person gets when they are handed
 the URL, which says what this host is and the ways in; `/docs`, the concepts; `/console`, the
-console ([console.md](console.md)); `/admin`, its read-only overview and break-glass door; and `/healthz`, for Kubernetes. `plane.appUrl` says where the graphical client is
+console ([console.md](console.md)); `/admin`, which sends an old bookmark to the console; and `/healthz`, for Kubernetes. `plane.appUrl` says where the graphical client is
 (the chart's own at `/app` by default; a team with its own client sets `gui.enabled: false`
 and points it there), and `plane.cliUrl` where the terminal client is published (empty,
 the page says to ask an administrator).
@@ -146,7 +146,8 @@ Sign in at `https://troupe.example.com/console`. You are a platform admin becaus
 the group `platformAdminGroup` names, so **a wrong group locks everybody out, including
 you**. The console checks a group before saving it — how many people would administer the
 platform afterwards, and whether you are one — and `TROUPE_BREAKGLASS_TOKEN`, if you set
-one, opens `/admin/breakglass` ([roles-and-permissions.md §4](roles-and-permissions.md#4-break-glass)).
+one, is **Break glass** on the console's sign-in screen
+([roles-and-permissions.md §4](roles-and-permissions.md#4-break-glass)).
 
 ## 5. The rest is the console
 
