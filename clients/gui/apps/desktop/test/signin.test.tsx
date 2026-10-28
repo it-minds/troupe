@@ -49,6 +49,33 @@ async function approveTheCode(): Promise<void> {
   harness.idp.approve("ada@example.com", "Ada");
 }
 
+describe("the device code's link", () => {
+  it("carries the code, says when the browser could not be opened for it, and is copied whole", async () => {
+    const copied: string[] = [];
+    window.troupe = {
+      name: "Test shell",
+      version: "0",
+      signInFlow: "device",
+      copyText: async (text: string) => void copied.push(text),
+      openExternal: async () => {
+        throw new Error("Not allowed to open url");
+      },
+    };
+    localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
+    unmount = render(<App />).unmount;
+    (await waitFor(() => button("Sign in"), "the sign-in button")).click();
+    const shown = await waitFor(code, "the code to enter");
+    const link = await waitFor(() => document.querySelector<HTMLAnchorElement>(".device a"), "the link");
+    expect(link.textContent).toContain(`?code=${shown.textContent}`);
+    expect(link.href).toBe(link.textContent);
+    await sees("Your browser could not be opened for it: Not allowed to open url");
+
+    (await waitFor(() => button("Copy link"), "the copy button")).click();
+    await sees("Link copied.");
+    expect(copied).toEqual([link.href]);
+  });
+});
+
 describe("a machine signed in already, by troupe login", () => {
   it("is where the app starts, unless it was told a plane before", async () => {
     window.troupe = { name: "Test shell", version: "0", signInFlow: "device", signedInPlane: async () => harness.plane.baseUrl };
