@@ -1229,6 +1229,13 @@ defmodule Troupe.Protocol.Schema do
         "id" => required(:string),
         "version" => required({:nullable, :integer})
       },
+      # Whose it is, moved: to a team the person is in (`team:<name>`), or back to the
+      # caller (`me`) by an administrator of the owning team.
+      "artifact.transfer" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "to" => required(:string)
+      },
       # Who may open it moved by its owner, or its title: a version over `base` carrying
       # every file of it, no files sent.
       "artifact.put" => %{

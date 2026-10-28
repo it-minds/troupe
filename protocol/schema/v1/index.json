@@ -19,6 +19,7 @@
     "commands/artifact.read.json",
     "commands/artifact.rollback.json",
     "commands/artifact.share.json",
+    "commands/artifact.transfer.json",
     "commands/artifact.unshare.json",
     "commands/blob.get.json",
     "commands/client.mode.json",
