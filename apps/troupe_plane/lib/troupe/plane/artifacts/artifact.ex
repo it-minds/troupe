@@ -2,6 +2,10 @@ defmodule Troupe.Plane.Artifacts.Artifact do
   @moduledoc """
   One artifact (`Troupe.Plane.Artifacts`): whose it is, who may see it, where it came from,
   and the version its address serves. Its versions are `Troupe.Plane.Artifacts.Version`s.
+
+  Whose it is is `owner`, the person who published it first, unless `owner_team` names a
+  team: then every member and administrator of that team owns it, and the person is kept
+  only as who to hand it back to when the team is deleted (the key is nulled, not the row).
   """
 
   use Ecto.Schema
@@ -11,6 +15,9 @@ defmodule Troupe.Plane.Artifacts.Artifact do
 
   schema "artifacts" do
     belongs_to(:owner, Troupe.Plane.Identity.User)
+    # The team that owns it, or nil for the person's alone.
+    belongs_to(:owner_team, Troupe.Plane.Identity.Team)
+    # The team its bytes count against.
     belongs_to(:team, Troupe.Plane.Identity.Team)
     field(:title, :string)
     field(:kind, :string)

@@ -37,6 +37,30 @@ click. You always see your own. Anybody else sees it only through who it is for,
 any artifact down, a private one too; that is the one thing anybody but you may do to a
 private one, and it is in the audit trail.
 
+## A team's artifact
+
+An artifact can belong to a team instead of to you. Then everybody in the team, and the
+team's administrators, own it together: each of them publishes versions, edits, pins, moves
+who may open it, makes and revokes links and deletes it, as you do with your own, and it is
+under **Mine** in each of their galleries, whoever it is for. Someone leaving the team
+changes nothing for the artifact; someone joining has it at once. Each version still says
+who published it, and the artifact's page still names the person who published it first.
+
+- **Publishing to a team makes it the team's.** `team:<name>` as the audience makes the
+  artifact that team's unless you say otherwise: `owner: "me"` on the agent's tool, from the
+  terminal client or in the desktop app keeps it yours, for the team to read. You can also
+  give a team an artifact for nobody but its members, with `private` and
+  `owner: "team:<name>"`.
+- **Giving one to a team.** Your own artifact goes to a team you are in with **Transfer** on
+  its page (`artifact.transfer`). A platform administrator can give any artifact to any
+  team.
+- **Taking one back.** The team's administrator, or a platform administrator, takes a team's
+  artifact back and becomes its owner. A member who is not the team's administrator cannot;
+  the team's artifacts are not theirs to hand out. A team that is removed hands each of its
+  artifacts back to the person who published it.
+
+Giving and taking back are in the audit trail, with where the artifact came from and went.
+
 ## Publishing
 
 **An agent** publishes with its `publish_artifact` tool, naming a title, the kind, who reads
@@ -74,7 +98,8 @@ page in the console lists them newest first, each with who published it, when, a
   the newest again.
 
 Who may publish a version: the owner, and anybody the owner gave an [edit link](#links). Only
-the owner pins one, changes who it is for, deletes it, or makes and revokes links.
+the owner pins one, changes who it is for, deletes it, or makes and revokes links. Where a
+[team owns it](#a-teams-artifact), every member is its owner.
 
 ## Editing in the console
 

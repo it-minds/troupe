@@ -166,7 +166,8 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
 
   describe "who sees a team's" do
     test "its members list, get and open it; nobody else", context do
-      {:ok, artifact} = publish(context.ada, %{"visibility" => "team:engineering"})
+      # Ada's own, for the team: published as hers, not the team's.
+      {:ok, artifact} = publish(context.ada, %{"visibility" => "team:engineering", "owner" => "me"})
       id = artifact["id"]
 
       assert {:ok,
@@ -199,7 +200,7 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
     end
 
     test "every row says its scope, and teams narrows to the teams' own", context do
-      {:ok, team} = publish(context.ada, %{"title" => "Team", "visibility" => "team:engineering"})
+      {:ok, team} = publish(context.ada, %{"title" => "Team", "visibility" => "team:engineering", "owner" => "me"})
       {:ok, org} = publish(context.ada, %{"title" => "Org", "visibility" => "organisation"})
       {:ok, dev} = publish(context.ada, %{"title" => "Dev", "visibility" => "profile:dev"})
       {:ok, own} = publish(context.bo, %{"title" => "Bo's", "visibility" => "team:engineering"})
@@ -239,10 +240,11 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
 
   describe "taking a team's down" do
     test "is its owner's, the team's administrator's or a platform administrator's", context do
-      {:ok, first} = publish(context.ada, %{"visibility" => "team:engineering"})
-      {:ok, second} = publish(context.ada, %{"visibility" => "team:engineering"})
+      {:ok, first} = publish(context.ada, %{"visibility" => "team:engineering", "owner" => "me"})
+      {:ok, second} = publish(context.ada, %{"visibility" => "team:engineering", "owner" => "me"})
 
-      # A member who is not its owner may not; another team's administrator does not see it.
+      # A member who is not its owner may not, since Ada kept it hers; another team's
+      # administrator does not see it.
       assert {:error, %{message: "forbidden"}} =
                call(context.bo, "artifact.delete", %{"id" => first["id"]})
 
