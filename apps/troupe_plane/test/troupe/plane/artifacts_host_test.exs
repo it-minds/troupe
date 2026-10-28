@@ -186,7 +186,7 @@ defmodule Troupe.Plane.ArtifactsHostTest do
       assert response.body =~ "<h1>Probe</h1>"
     end
 
-    test "a signed-out viewer is sent to the console to sign in, and a forged cookie is signed out",
+    test "a signed-out viewer is sent to the console's door for the artifact, and a forged cookie is signed out",
          context do
       id = context.artifact["id"]
 
@@ -198,9 +198,20 @@ defmodule Troupe.Plane.ArtifactsHostTest do
         response = get(context, "/a/#{id}/", cookie)
         assert response.status == 302
 
+        # The door that signs them in and comes back here, not the page about it.
         assert header(response, "location") ==
-                 "https://plane.example.test/console#/artifacts/#{id}"
+                 "https://plane.example.test/console#/artifacts/open/#{id}"
       end
+
+      # A version's address comes back to that version; a file's, to its version's entry.
+      assert header(get(context, "/a/#{id}/v1/", nil), "location") ==
+               "https://plane.example.test/console#/artifacts/open/#{id}/v1"
+
+      assert header(get(context, "/a/#{id}/v1/style.css", nil), "location") ==
+               "https://plane.example.test/console#/artifacts/open/#{id}/v1"
+
+      assert header(get(context, "/a/#{id}/style.css", nil), "location") ==
+               "https://plane.example.test/console#/artifacts/open/#{id}"
     end
 
     test "a ticket opens once", context do

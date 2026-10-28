@@ -26,8 +26,9 @@ defmodule Troupe.Plane.Web.Artifacts do
   the artifact now, as `Artifacts.visible/3` reads it at every request. The cookie comes from
   `/enter`, which takes a ticket the plane signed for a signed-in person a minute ago and
   nobody has redeemed, so the only way onto this host is through the plane. A viewer with no
-  cookie, or an expired one, is sent to the console, which signs them in and opens the
-  artifact again with a fresh ticket.
+  cookie, or an expired one, is sent to the console's door for that artifact (and that
+  version), which signs them in and comes straight back here with a fresh ticket, rather
+  than to the artifact's page in the console, which is a page about it and not it.
 
   **A link** (`/s/<token>`) is the same door: a viewer signed in here is given its role and
   opens the artifact; anybody else is sent to the console with the link, which signs them in
@@ -179,7 +180,8 @@ defmodule Troupe.Plane.Web.Artifacts do
         end
 
       :error ->
-        sign_in(conn, id)
+        {version, _path} = address(rest)
+        sign_in(conn, id, version)
     end
   end
 
@@ -234,9 +236,12 @@ defmodule Troupe.Plane.Web.Artifacts do
   # What a viewer reads is theirs to read now, and not a cache's.
   defp private(conn), do: put_resp_header(conn, "cache-control", "private, no-cache")
 
-  # Signed out: the console, which signs the viewer in at the plane and opens the artifact
-  # again with a ticket. A plane with no address of its own says where to go instead.
-  defp sign_in(conn, id) do
+  # Signed out: the console's door for this artifact (`#/artifacts/open/<id>[/v<n>]`),
+  # which signs the viewer in at the plane and comes back here with a ticket, to the version
+  # they asked for. Not the artifact's page there: a person who followed an address to an
+  # artifact wants the artifact, and the page is for whoever is already in the console. A
+  # plane with no console says where to go instead.
+  defp sign_in(conn, id, version) do
     case console_url() do
       nil ->
         text(
@@ -246,8 +251,13 @@ defmodule Troupe.Plane.Web.Artifacts do
         )
 
       console ->
+        at = if is_integer(version), do: "/v#{version}", else: ""
+
         conn
-        |> put_resp_header("location", "#{console}#/artifacts/#{URI.encode_www_form(id)}")
+        |> put_resp_header(
+          "location",
+          "#{console}#/artifacts/open/#{URI.encode_www_form(id)}#{at}"
+        )
         |> send_resp(302, "")
     end
   end
