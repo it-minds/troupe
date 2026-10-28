@@ -69,7 +69,7 @@ allows it. The files keep their paths below the directory they share, so a page'
 its stylesheet still work. To publish a new version, the agent names the artifact's `id`, and
 may say what changed in a `note`.
 
-An agent that names nobody publishes a private one.
+An agent names an audience only when you told it one; otherwise the approval asks you whom the artifact is for (you alone, the organisation, a team or a profile) and, for a new team artifact, whether it is the team's or yours, and nothing in your permission rules or `--auto-approve` answers that for you.
 
 **You** publish one file from the terminal client with
 `/publish <path> [private | organisation | team:<name> | profile:<name>]`, for example
