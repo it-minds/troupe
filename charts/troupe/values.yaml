@@ -283,19 +283,21 @@ plane:
     subjectClaim: ""
     secretName: troupe-plane-oidc
     secretKey: client-secret
-  # A way into the panel when the identity provider cannot let you in — a misconfigured
+  # A way into the console when the identity provider cannot let you in — a misconfigured
   # client, an expired signing key, or the first five minutes of an installation before
-  # any group exists to be a platform admin of. Leave `secretName` empty and there is no
-  # door at all: the routes answer 404.
+  # any group exists to be a platform admin of: a token the console's sign-in screen
+  # takes under "Break glass". Leave `secretName` empty and there is no door at all: the
+  # route answers 404.
   #
-  # A break-glass session is a platform admin and nothing more, lasts `lifetimeSeconds`,
-  # is written to the audit log both when it succeeds and when it is refused, and says so
-  # on every page while it is open.
+  # A break-glass session is a platform admin and nothing more, lasts `lifetimeSeconds`
+  # (at most the fifteen minutes any plane token lasts; nothing renews it), is written to
+  # the audit log both when it succeeds and when it is refused, and says so on every page
+  # while it is open.
   breakglass:
     secretName: ""
     secretKey: token
     subject: breakglass
-    lifetimeSeconds: 3600
+    lifetimeSeconds: 900
   scim:
     enabled: false
     secretName: troupe-plane-scim
@@ -408,8 +410,9 @@ gui:
 # and team admins, on the plane's own host, talking to the plane's `admin.*` methods and
 # nothing else. It is built into the GUI's image and served by the same Deployment (which
 # runs while either is enabled), with an Ingress of its own, so `gui.enabled: false` keeps
-# the console and `console.enabled: false` keeps the GUI. It is the plane's console: the
-# page at `/admin` only reads, and holds the break-glass sign-in and a link here.
+# the console and `console.enabled: false` keeps the GUI. It is the plane's one
+# administrative surface: `/admin` redirects here, and break-glass is a door on its
+# sign-in screen.
 #
 # Signing in is the plane's own sign-in with PKCE, so the identity provider must allow
 # `https://<plane.host><basePath>` as a single-page application's redirect URI.

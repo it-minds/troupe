@@ -251,15 +251,19 @@ Nobody is a platform admin because `platform_admin_group` or `groups_claim` is w
 
 1. Turn break-glass on if it is not: a Secret with key `token`
    (`openssl rand -base64 48`), `plane.breakglass.secretName` naming it, `helm upgrade`.
-2. Open `https://<plane>/admin/breakglass` and enter the token. You are a platform admin
-   for the lifetime, marked on the page and in the audit log. The page shows the identity
-   check, and sign-in as the plane holds it.
+2. Open `https://<plane>/console`, choose **Break glass** and enter the token. You are a
+   platform admin with no teams for the token's lifetime, marked on every screen and in
+   the audit log; **Sign-in** shows the identity check and sign-in as the plane holds it.
 3. Where the wrong value was saved in the console, put it back to the deployment's there
-   (*back to the deployment*). Where the deployment's own value is wrong, set
-   `plane.platformAdminGroup` or `plane.groupsClaim` and roll; the page sets nothing
-   itself.
+   (**Policy and settings**, *back to the deployment*), or save the right one behind the
+   same check. Where the deployment's own value is wrong, set `plane.platformAdminGroup`
+   or `plane.groupsClaim` and roll.
 4. Sign in normally to confirm; turn break-glass off (`secretName: ""`, upgrade, delete the
    Secret).
+
+On a plane deployed without the console, `POST /auth/breakglass` with
+`{"token": "..."}` answers a plane token, and `troupe admin` or a `/rpc` call makes the
+same change with it ([roles-and-permissions.md §4](roles-and-permissions.md#4-break-glass)).
 
 ## SCIM
 
@@ -286,11 +290,11 @@ people one value, and is what to fix.
 ## The identity provider
 
 The console's **Sign-in** screen (`admin.provider.get`, `admin.provider.check`,
-`admin.provider.put`, `admin.provider.reset`) changes the issuer, client, secret,
-endpoints and scopes behind a check against what the provider publishes; it overrides the
-deployment until reset. To rotate the client secret in the deployment instead, update
-`troupe-plane-oidc` and `kubectl -n troupe-system rollout restart deployment/troupe-plane`.
-Only console sign-in uses the secret.
+`admin.provider.put`, `admin.provider.reset`) changes the issuer, client, endpoints and
+scopes behind a check against what the provider publishes; it overrides the deployment
+until reset. No secret is involved any more: every client signs in as a public client, so
+there is nothing to rotate. The `client_secret` setting and the `troupe-plane-oidc` Secret
+are still accepted this release and read by nothing; the next release drops them.
 
 ## Rotate object-store credentials
 

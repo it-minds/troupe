@@ -15,7 +15,6 @@ paths:
   - clients/gui/apps/console/src/views/bits.tsx
   - clients/gui/apps/console/src/plane.ts
   - apps/troupe_plane/lib/troupe/plane/web/index.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/overview.ex
   - charts/troupe/templates/plane-deployment.yaml
   - docs/admin/console.md
 gist: "Console door = TROUPE_CONSOLE_URL (/console), /admin stays; losing edits typed; write's audit row read back; every admin.* reached or in owed.ts"

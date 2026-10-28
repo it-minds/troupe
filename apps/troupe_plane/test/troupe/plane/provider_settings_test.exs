@@ -64,14 +64,14 @@ defmodule Troupe.Plane.ProviderSettingsTest do
   description, saved behind a check, undone with reset, and never a credential in an answer.
 
   What is being protected: a value saved on the console has to win in every place the
-  provider is read — the discovery document clients start from, the console's own
-  authorize request, the verifier's issuer — or a plane would sign people in against one
-  provider and tell its clients about another. And the thing that made these read-only,
+  provider is read — the discovery document clients start from, which the console's own
+  sign-in reads too, and the verifier's issuer — or a plane would sign people in against
+  one provider and tell its clients about another. And the thing that made these read-only,
   the lock-out, has to stay impossible to do by accident: a candidate the provider does
   not stand behind is refused unless somebody says save anyway.
   """
 
-  use Troupe.Plane.PanelCase, async: false
+  use Troupe.Plane.AdminCase, async: false
 
   alias Troupe.Plane.{Admin, Audit, Identity, OIDC, Settings}
   alias Troupe.Plane.Web.Router
@@ -138,12 +138,13 @@ defmodule Troupe.Plane.ProviderSettingsTest do
                Admin.provider_get(context.root)
 
       assert Enum.all?(settings, &(&1.source in [:deployed, :unset]))
-      assert urls.redirect == "https://plane.example.test/admin/callback"
+      # The redirect the provider has to have registered is the console's own address: it
+      # signs in as a public client from its page, and the plane redeems nothing itself.
+      assert urls.redirect == "https://plane.example.test/console"
       assert urls.discovery == "https://plane.example.test/.well-known/troupe"
     end
 
-    test "a stored provider wins in the discovery document, the verifier and the console's own sign-in",
-         context do
+    test "a stored provider wins in the discovery document and the verifier", context do
       assert {:ok, %{changes: changes}} =
                Admin.provider_put(context.root, candidate(context.fake))
 
@@ -159,14 +160,6 @@ defmodule Troupe.Plane.ProviderSettingsTest do
 
       # The verifier's issuer.
       assert OIDC.configured().issuer == context.fake
-
-      # The console's own authorize request: the browser is sent to the stored provider,
-      # as the stored client, with the scopes the discovery document publishes.
-      conn = get(context.conn, "/admin/login")
-      location = conn |> Plug.Conn.get_resp_header("location") |> hd()
-      assert location =~ context.fake <> "/authorize?"
-      assert location =~ "client_id=console-client"
-      assert location =~ "offline_access"
 
       # And the settings say where each came from.
       {:ok, %{settings: settings}} = Admin.provider_get(context.root)

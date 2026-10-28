@@ -10,7 +10,7 @@ defmodule Troupe.Plane.TeamDisableTest do
   the one thing that survives — the sessions — is named as kept rather than left out.
   """
 
-  use Troupe.Plane.PanelCase, async: false
+  use Troupe.Plane.AdminCase, async: false
 
   alias Troupe.Plane.{Admin, Audit, Identity, Principals, Sessions, Triggers}
   alias Troupe.Protocol.Error

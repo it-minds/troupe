@@ -3,9 +3,9 @@
 The console is where platform admins and team admins set Troupe up and watch it run, and
 where anybody the plane knows steers the laptop sessions offered to them from a browser. It
 is an app of its own (#56), beside the GUI rather than part of it, at `/console` on the
-plane's host. The plane's own pages at `/admin` are a read-only overview and the break-glass door,
-for the day the console cannot be used. This page says where the console is and what it
-does.
+plane's host, and it is the one administrative surface the plane has: the plane serves no
+pages of its own for administrators, and `/admin`, where it once did, sends the browser
+here. This page says where the console is and what it does.
 
 ## Where it is
 
@@ -13,10 +13,11 @@ At `/console` on the plane's own host: `https://troupe.example.com/console`. The
 serves it from the GUI's image, with an Ingress of its own (`console.enabled`, on by
 default, and `console.basePath`, [configuration.md](configuration.md)), so it is there
 whether or not the GUI is, and turning it off leaves the GUI alone. The plane's index at `/`
-and the page at `/admin` link to it (`TROUPE_CONSOLE_URL`, which the chart sets from
-`console.basePath`). A plane deployed with the console turned off is administered with
-`troupe admin`, over `/rpc` or with the admin MCP tools at `/mcp`, which answer the same
-methods to the same roles; its `/admin` page says so.
+links to it, and `/admin` and every page address under it redirect to it
+(`TROUPE_CONSOLE_URL`, which the chart sets from `console.basePath`). A plane deployed with
+the console turned off is administered with `troupe admin`, over `/rpc` or with the admin
+MCP tools at `/mcp`, which answer the same methods to the same roles; its `/admin` is a
+short page saying so.
 
 It needs no CORS entry and no worker origin: it is on the plane's origin and opens no
 socket to a worker, only the plane's own (`/v1/relay/watch` for the list of what is offered
@@ -41,21 +42,26 @@ console lands there once the provider sends the browser back, not on its first s
 The sign-in lasts as long as the browser tab: a reload keeps it, and a new tab signs in
 again, which against a provider you are already signed in to is a moment's redirect.
 
-## When the console cannot be used: `/admin`
+## When the provider cannot let you in: break glass
 
 The console signs in through the identity provider, so on the day the provider cannot let
-anybody in (a client secret saved wrong, a group nobody carries, a tenant outage) the way in
-is the plane's own page, `https://troupe.example.com/admin`, through the break-glass door at
-`/admin/breakglass` ([roles-and-permissions.md §4](roles-and-permissions.md#4-break-glass)).
+anybody in (a registration saved wrong, a group nobody carries, a tenant outage, a fresh
+installation with no admin group yet) the way in is the break-glass token. **Break glass**
+on the sign-in screen takes it, and the plane answers a plane token for the break-glass
+subject (`POST /auth/breakglass`,
+[roles-and-permissions.md §4](roles-and-permissions.md#4-break-glass)). The console then
+opens as a platform admin with no teams, marked on every screen, for the token's lifetime
+and no longer: nothing refreshes it, and once it has run out the next call is refused and
+the sign-in screen is back. What is wrong is put right where it is set, as any platform
+admin would: **Sign-in** for the provider, **Policy and settings** for
+`platform_admin_group` and `groups_claim`, each with *back to the deployment*; a value the
+deployment itself has wrong is changed in the deployment and rolled. Every change is in the
+audit trail under the break-glass subject.
 
-That page reads and does not edit. It shows the fleet, each profile and each team's spend,
-and links to the console. In a break-glass session it also shows sign-in as the plane holds
-it and the identity check, and offers one thing: putting the sign-in settings, and the two
-settings that decide who administers (`platform_admin_group`, `groups_claim`), back to what
-the deployment says. Nothing is typed there; a value the deployment itself has wrong is
-changed in the deployment and rolled. Each reset is in the audit trail, by the break-glass
-subject. Every other address under `/admin` that used to be a page is sent to the same place
-in the console.
+The sign-in screen offers **Break glass** only on a plane whose door is configured, which
+`/.well-known/troupe` says (`breakglass`). The door is the plane's, not the console's: on a
+plane deployed without the console, the token `POST /auth/breakglass` answers is a plane
+token like any other, and `troupe admin` and a `/rpc` caller use it as a bearer.
 
 ## What it does
 

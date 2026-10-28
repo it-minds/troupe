@@ -2,12 +2,13 @@ defmodule Troupe.Plane.FrontPageAssetsTest do
   @moduledoc """
   The two public pages ask for files and obey two rules about colour; all of it is here.
 
-  Sibling of `console_assets_test.exs`, and for the same reason it exists: nothing else
-  checks the contract between a document and the file system. `web_test.exs` fetches `/`
-  and `/docs` over a socket, but it mounts the bare `Router` — the static plug lives on
-  the `Endpoint`, so a stylesheet a page names and the endpoint does not serve would pass
-  every test in that file and render as unstyled HTML in front of whoever was handed the
-  plane's URL.
+  It exists because nothing else checks the contract between a document and the file
+  system. `web_test.exs` fetches `/` and `/docs` over a socket, but it mounts the bare
+  `Router` — the static plug lives on the `Endpoint`, so a stylesheet a page names and the
+  endpoint does not serve would pass every test in that file and render as unstyled HTML
+  in front of whoever was handed the plane's URL. The plane's own console, which had a
+  document and files of its own under `/admin/static`, is gone; these two pages are the
+  only documents the plane serves with a stylesheet.
 
   Every check runs over **both** documents. When `/docs` was added, the asset and colour
   checks here knew only about `Troupe.Plane.Web.Index`, which would have left the second
@@ -126,12 +127,12 @@ defmodule Troupe.Plane.FrontPageAssetsTest do
       end
     end
 
-    test "the two static mounts stay separate" do
-      # The console's own allowlist is checked by `console_assets_test.exs`; what matters
-      # here is that adding the public mount did not fold the two together. A single mount
-      # would mean the public stylesheet is only reachable behind `/admin`.
-      assert allowlist("/admin/static") == ~w(app.js tokens.css console.css)
-      refute "theme.css" in allowlist("/admin/static")
+    test "the one static mount serves the front page's files and nothing else" do
+      # The console that lived here had a second mount under `/admin/static`; with it gone
+      # the allowlist is exactly what the two pages ask for, so a file that lands in
+      # `priv/static` is not served because it is there.
+      assert allowlist("/static") == ~w(theme.css brand webfonts.js)
+      refute File.exists?(Path.join(@static_root, "app.js"))
     end
 
     # The allowlist checks above read the source. This one runs the real pipeline, which is
@@ -150,8 +151,8 @@ defmodule Troupe.Plane.FrontPageAssetsTest do
       end
     end
 
-    test "a file outside the allowlist is not served just because it is in priv/static" do
-      conn = Endpoint.call(Plug.Test.conn(:get, "/static/app.js"), [])
+    test "a file the allowlist does not name is not served from priv/static" do
+      conn = Endpoint.call(Plug.Test.conn(:get, "/static/repo/migrations"), [])
 
       refute conn.status == 200
     end

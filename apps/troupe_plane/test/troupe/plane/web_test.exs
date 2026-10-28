@@ -63,7 +63,7 @@ defmodule Troupe.Plane.WebTest do
       assert body =~ "<!DOCTYPE html>"
       assert body =~ "troupe login"
       assert body =~ "/rpc"
-      assert body =~ ~s(href="/admin")
+      assert body =~ ~s(href="/console")
       assert body =~ ~s(href="/app")
     end
 
@@ -114,20 +114,19 @@ defmodule Troupe.Plane.WebTest do
 
       refute body =~ ~s(href="/app")
       assert body =~ "No graphical client is mounted"
-      assert body =~ ~s(href="/admin")
+      assert body =~ ~s(href="/console")
     end
 
-    # The console is an app of its own beside the plane: the console door goes to it, and
-    # the plane's own read-only page stays linked as the way in when it cannot be used.
-    test "points the console door at the console, and keeps /admin as the way in when it cannot be used",
-         context do
+    # The console is an app of its own beside the plane, and the one administrative
+    # surface: the console door goes to it, and nothing on the page links the address the
+    # plane's own console had.
+    test "points the console door at the console, and nowhere else", context do
       assert {:ok, %{status: 200, body: body}} = get(context, "/")
 
       assert body =~
                ~r{<a class="door" href="/console">\s*<span class="door-title">Admin console</span>}
 
-      assert body =~ ~s(<a href="/admin">/admin</a> is a read-only overview)
-      assert body =~ "the way in through the" and body =~ "break-glass door"
+      refute body =~ ~s(href="/admin")
     end
 
     test "follows the console to wherever the deployment mounts it", context do
@@ -147,10 +146,9 @@ defmodule Troupe.Plane.WebTest do
       assert {:ok, %{body: body}} = get(context, "/")
 
       assert body =~
-               ~r{<a class="door" href="/admin">\s*<span class="door-title">Admin overview</span>}
+               ~r{<a class="door" href="/admin">\s*<span class="door-title">Administering this plane</span>}
 
       refute body =~ ~s(href="/console")
-      refute body =~ "is a read-only overview, and the way in"
       assert body =~ "administered with troupe admin"
     end
 
@@ -177,6 +175,67 @@ defmodule Troupe.Plane.WebTest do
 
     test "still 404s everything that is not a route", context do
       assert {:ok, %{status: 404}} = get(context, "/nope")
+    end
+  end
+
+  # The plane served its own console at `/admin` once, and the addresses it had are in
+  # runbooks and bookmarks. Each goes to the same place in the console, which is the one
+  # administrative surface now; on a plane without one, `/admin` says how it is
+  # administered instead, so nobody is sent to a 404 or to a console that is not there.
+  describe "the addresses the plane's own console had" do
+    setup do
+      on_exit(fn -> Application.delete_env(:troupe_plane, :console_url) end)
+    end
+
+    test "/admin is the console's overview", context do
+      assert {:ok, %{status: 302} = response} = get(context, "/admin")
+      assert location(response) == "/console#/overview"
+    end
+
+    test "/admin/breakglass is the console's sign-in screen, where the door is offered",
+         context do
+      assert {:ok, %{status: 302} = response} = get(context, "/admin/breakglass")
+      assert location(response) == "/console"
+    end
+
+    test "each page goes to the area that does its work, and a profile to its page", context do
+      assert {:ok, %{status: 302} = response} = get(context, "/admin/workers")
+      assert location(response) == "/console#/pods"
+
+      assert {:ok, %{status: 302} = response} = get(context, "/admin/workers/dev")
+      assert location(response) == "/console#/profiles/dev"
+
+      assert {:ok, %{status: 302} = response} = get(context, "/admin/triggers/core")
+      assert location(response) == "/console#/triggers/core"
+
+      assert {:ok, %{status: 404}} = get(context, "/admin/nothing-of-the-sort")
+    end
+
+    test "follows the console to wherever the deployment mounts it", context do
+      Application.put_env(:troupe_plane, :console_url, "https://console.example.test/troupe")
+
+      assert {:ok, %{status: 302} = response} = get(context, "/admin")
+      assert location(response) == "https://console.example.test/troupe#/overview"
+
+      assert {:ok, %{status: 302} = response} = get(context, "/admin/breakglass")
+      assert location(response) == "https://console.example.test/troupe"
+    end
+
+    test "on a plane without the console, /admin says how it is administered", context do
+      Application.put_env(:troupe_plane, :console_url, "")
+
+      assert {:ok, %{status: 200, body: body, headers: headers}} = get(context, "/admin")
+      assert ["text/html" <> _] = headers["content-type"]
+      assert body =~ "This plane has no console"
+      assert body =~ "troupe admin"
+      assert body =~ "POST /auth/breakglass"
+      refute body =~ "/console"
+
+      assert {:ok, %{status: 200, body: body}} = get(context, "/admin/breakglass")
+      assert body =~ "POST /auth/breakglass"
+
+      assert {:ok, %{status: 302} = response} = get(context, "/admin/workers")
+      assert location(response) == "/admin"
     end
   end
 
@@ -600,7 +659,18 @@ defmodule Troupe.Plane.WebTest do
   end
 
   defp get(context, path) do
-    Req.request(method: :get, url: context.url <> path, decode_body: true, retry: false)
+    Req.request(
+      method: :get,
+      url: context.url <> path,
+      decode_body: true,
+      retry: false,
+      redirect: false
+    )
+  end
+
+  defp location(response) do
+    [location] = Req.Response.get_header(response, "location")
+    location
   end
 
   defp post(context, path, body, headers \\ []) do

@@ -261,6 +261,29 @@ label code {
   background: var(--error-bg);
   color: var(--text-body);
 }
+.signin form.breakglass {
+  padding-top: var(--space-5);
+  border-top: var(--bw-hairline) solid var(--border-hairline);
+}
+.signin form.breakglass h2 {
+  font: var(--t-heading);
+}
+.signin form.breakglass p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.banner.breakglass {
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--waiting-bd);
+  border-left-width: var(--bw-marker);
+  background: var(--waiting-bg);
+  color: var(--text-body);
+}
+.banner.breakglass p {
+  margin: 0;
+  max-width: var(--measure-reading);
+}
 
 .wordmark {
   display: inline-flex;

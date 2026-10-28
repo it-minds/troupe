@@ -35,7 +35,7 @@ const go = (verb: string) => [...document.querySelectorAll<HTMLButtonElement>(".
 describe("the identity provider", () => {
   it("says what the registration needs, every value with where it came from, and a secret as set", async () => {
     await open();
-    await waitFor(() => says("Single sign-on") && says("https://troupe.example.com/admin/callback"), "the provider");
+    await waitFor(() => says("Single sign-on") && says("https://troupe.example.com/console"), "the provider");
     await sees("https://idp.example.com", sso());
     await sees("set · never shown", sso());
     expect(says("deployed-client-secret")).toBe(false);

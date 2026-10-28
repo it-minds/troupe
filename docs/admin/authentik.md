@@ -121,11 +121,10 @@ use names on both sides.
 |---|---|
 | Name | `troupe` |
 | Authorization flow | `<your explicit-consent or implicit-consent flow>` |
-| Client type | Confidential |
+| Client type | Public |
 | Client ID | generated, copy it |
-| Client secret | generated, copy it |
 | **Grant types** | `authorization_code`, `urn:ietf:params:oauth:grant-type:device_code`, `refresh_token` |
-| Redirect URIs | `https://troupe.example.com/admin/callback` |
+| Redirect URIs | `https://troupe.example.com/console` and `https://troupe.example.com/app` |
 | **Signing key** | any certificate. Not optional |
 | Subject mode | Based on the User's UUID |
 | Issuer mode | Per provider |
@@ -137,7 +136,7 @@ Five of those are load-bearing and each fails in its own way:
   endpoint answers `The request is otherwise malformed`, while only the server log says
   `Invalid grant_type for provider`. The device code grant belongs in the list because
   the CLI and the TUI sign in with it, not only the console.
-- **Without a signing key the ID token is HS256**, signed with the client secret. This
+- **Without a signing key the ID token is HS256**, signed with a shared secret. This
   plane accepts `ES256` and `RS256` only (`token.ex`, `check_signature/2`), so every
   sign-in is refused with a bad signature. It fails closed, which is the right direction,
   and it fails completely.
@@ -145,8 +144,10 @@ Five of those are load-bearing and each fails in its own way:
   and this plane derives the discovery URL from the issuer. There is no discovery
   document at the root: `https://auth.example.com/.well-known/openid-configuration`
   answers 404.
-- **Redirect URIs are matched exactly.** The value above is `base_url` plus
-  `/admin/callback` and nothing else (`web/admin_auth.ex`, `redirect_uri/0`).
+- **Redirect URIs are matched exactly.** The values above are the console's and the GUI's
+  own addresses, `base_url` plus `/console` and `/app` with the chart's defaults, and
+  nothing else; the plane has no redirect URI of its own. The console's sign-in screen
+  names the one it sent when the provider refuses it.
 - **Without `offline_access` on the provider there is no refresh token.** The plane
   asks for it (section 2), but Authentik drops a requested scope the provider does not
   carry, and issues a refresh token only for this one. Sign-in still works; staying
@@ -161,7 +162,7 @@ Five of those are load-bearing and each fails in its own way:
 | Name | `Troupe` |
 | Slug | `troupe`, and it appears in the issuer, so choose it once |
 | Provider | the provider from 1b |
-| Launch URL | `https://troupe.example.com/admin` |
+| Launch URL | `https://troupe.example.com/console` |
 
 **Access is decided here, not on the provider.** Bind the group that may use Troupe to
 the *application*. A provider with no application binding lets in whoever can reach the
@@ -192,7 +193,7 @@ values.
 |---|---|
 | `issuer` | `https://auth.example.com/application/o/troupe/` |
 | `client_id` | from 1b |
-| `client_secret` | from 1b |
+| `client_secret` | blank: read by nothing since the plane stopped redeeming codes itself, and gone next release |
 | `authorization_endpoint` | `https://auth.example.com/application/o/authorize/` |
 | `device_authorization_endpoint` | `https://auth.example.com/application/o/device/` |
 | `token_endpoint` | `https://auth.example.com/application/o/token/` |
@@ -204,8 +205,7 @@ for when) are on the console's **Policy and settings**, under who administers th
 which saves the group behind the same check.
 
 The same values go in the chart if you would rather the deployment hold them:
-`plane.oidc.*`, the client secret in the `troupe-plane-oidc` Secret, and
-`plane.groupsClaim` and `plane.platformAdminGroup`. The console overrides the deployment
+`plane.oidc.*`, and `plane.groupsClaim` and `plane.platformAdminGroup`. The console overrides the deployment
 and never replaces it, so a value set here can always be put back with *back to the
 deployment*.
 
@@ -225,9 +225,9 @@ that setting is gated on a check that counts the people this plane has *seen* ca
 the candidate group. Nobody has been seen yet. A new plane with no provider before
 Authentik starts at step 2, and needs break-glass all the same.
 
-1. **Confirm the break-glass token is set** on the plane. Without it, step 4 has no way in
-   and the repair is a database write. `/admin/breakglass` answering 404 means it is not
-   set.
+1. **Confirm the break-glass token is set** on the plane. Without it, step 5 has no way in
+   and the repair is a database write. `/.well-known/troupe` saying `"breakglass": false`
+   means it is not set.
 2. **Create the Authentik objects.** SSO only. No SCIM provider yet.
 3. **Point the plane at Authentik.** The console's **Sign-in** screen, or `plane.oidc.*` and a rollout.
    Everyone signed in at this moment keeps their console session until it expires and
@@ -236,11 +236,12 @@ Authentik starts at step 2, and needs break-glass all the same.
    an administrator, and none of their old sessions. That is expected. What matters is
    that their groups are now rows here.
 5. **Make the admin group the deployment's**: set `plane.platformAdminGroup` to its UUID
-   and roll. Then open `/admin/breakglass` with the token: its identity check now passes,
-   because the person from step 4 is known to carry the group. If `platform_admin_group`
-   was changed in the console, the stored value still wins, so put it back to the
-   deployment's there; that page sets no value itself
-   ([console.md](console.md#when-the-console-cannot-be-used-admin)).
+   and roll. Then open the console, choose **Break glass** and enter the token: the
+   identity check on **Sign-in** now passes, because the person from step 4 is known to
+   carry the group. If `platform_admin_group` was changed in the console, the stored value
+   still wins, so put it back to the deployment's on **Policy and settings**, or save the
+   UUID there behind the same check
+   ([console.md](console.md#when-the-provider-cannot-let-you-in-break-glass)).
 6. **That person signs in again.** They are a platform admin.
 7. **Enable teams** from the groups on the Teams screen, and grant profiles.
 
@@ -330,5 +331,5 @@ worth checking on your own instance, because they vary by version and configurat
   of your directory's size.
 - **Whether the device code flow is usable**, as opposed to routed.
 - **The desktop app's redirect URI**, which is not in section 1b. The browser GUI's is
-  its own address, `https://troupe.example.com/app` with the chart's default, and belongs
-  in 1b's Redirect URIs beside `/admin/callback`.
+  its own address, `https://troupe.example.com/app` with the chart's default, and is in
+  1b's Redirect URIs beside the console's.

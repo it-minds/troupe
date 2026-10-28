@@ -8,7 +8,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/web/csp.ex
   - apps/troupe_plane/lib/troupe/plane/web/endpoint.ex
   - apps/troupe_plane/lib/troupe/plane/web/page.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/root.ex
   - apps/troupe_plane/priv/static/webfonts.js
   - apps/troupe_plane/test/troupe/plane/content_security_policy_test.exs
   - clients/gui/docker/headers.conf

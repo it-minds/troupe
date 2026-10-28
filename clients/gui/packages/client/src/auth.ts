@@ -8,9 +8,15 @@
 //
 // Providers rotate the refresh token on every use, so the new one replaces the old one
 // the moment it arrives — a rotation that is not persisted is a sign-in lost.
+//
+// The break-glass session is the one exception to both: it holds a plane token the plane
+// minted for its break-glass token, with no refresh token behind it and nothing written
+// down. It is the way in on the day the identity provider signs nobody in, so it leans on
+// the provider for nothing, and it ends when its token does, so a door opened in a hurry
+// does not stay open.
 
 import { PlaneClient, PlaneHttpError } from "./plane.js";
-import type { DeviceAuthorization, Discovery, IdpTokens, PlaneCredential } from "./plane.js";
+import type { BreakGlassAnswer, DeviceAuthorization, Discovery, IdpTokens, PlaneCredential } from "./plane.js";
 import { beginRedirect, completeRedirect, hasRedirectAnswer, scrubRedirect } from "./pkce.js";
 import type { BeginRedirectOptions } from "./pkce.js";
 
@@ -216,6 +222,8 @@ export class AuthSession {
   private unkept: string | null = null;
   private readonly forcedFlow: "redirect" | "device" | null;
   private readonly listeners = new Set<(credential: PlaneCredential) => void>();
+  private breakglass = false;
+  private readonly ended = new Set<(why: string) => void>();
 
   constructor(opts: AuthSessionOptions) {
     this.planeUrl = opts.planeUrl.replace(/\/+$/, "");
@@ -225,6 +233,60 @@ export class AuthSession {
     this.origin = opts.origin === undefined ? currentOrigin() : opts.origin;
     this.now = opts.now ?? (() => Date.now());
     this.forcedFlow = opts.flow ?? null;
+  }
+
+  /**
+   * Sign in through the plane's break-glass door: `POST /auth/breakglass` with the
+   * break-glass token, for a plane token that is the whole session. The plane answers 403
+   * to a token it does not hold and 404 where no door is configured, and each is said in
+   * a sentence; a `PlaneHttpError` with any other status is passed through. The plane's
+   * `me` is asked once after the exchange, so `me` says what it says of the break-glass
+   * subject, `breakglass: true` included.
+   *
+   * Nothing is persisted, so a `restore()` on this plane finds nothing: a reload asks for
+   * the break-glass token again, which is the point of a door opened in an emergency.
+   */
+  static async breakGlass(planeUrl: string, breakglassToken: string, opts: Omit<AuthSessionOptions, "planeUrl" | "store" | "flow"> = {}): Promise<AuthSession> {
+    const session = new AuthSession({ ...opts, planeUrl, store: memoryTokenStore() });
+    let answer: BreakGlassAnswer;
+    try {
+      answer = await reachable(session.planeUrl, session.origin, () => session.plane.breakGlass(breakglassToken));
+    } catch (e) {
+      if (e instanceof PlaneHttpError && e.status === 403) throw new Error("The plane refused this break-glass token.");
+      if (e instanceof PlaneHttpError && e.status === 404) throw new Error(`This plane has no break-glass door: nothing at ${session.planeUrl}/auth/breakglass.`);
+      throw e;
+    }
+    const expiresAt = typeof answer.expires_at === "number" ? answer.expires_at : Math.floor(Date.parse(answer.expires_at) / 1000);
+    if (!Number.isFinite(expiresAt)) throw new Error(`the plane answered the break-glass exchange with no readable expiry: ${JSON.stringify(answer.expires_at)}`);
+    const me = await reachable(session.planeUrl, session.origin, () => session.plane.me(answer.token));
+    session.breakglass = true;
+    session.credential = {
+      ...me,
+      token: answer.token,
+      expires_at: expiresAt,
+      subject: answer.subject,
+      teams: [],
+      profiles: me.profiles ?? [],
+      breakglass: true,
+    };
+    session.notify(session.credential);
+    return session;
+  }
+
+  /** Signed in through the break-glass door rather than the identity provider. */
+  get isBreakGlass(): boolean {
+    return this.breakglass;
+  }
+
+  /**
+   * Hear when this session ends by itself, with the sentence `token()` throws from then
+   * on. Today only the break-glass session does: its token expires and nothing renews it,
+   * so a page that hears of it goes back to its sign-in rather than showing one failed
+   * call after another. Returns the unsubscribe.
+   */
+  onEnded(listener: (why: string) => void): () => void {
+    this.ended.add(listener);
+    return () => void this.ended.delete(listener);
   }
 
   /** The key the refresh token is stored under; one per plane, so two are independent. */
@@ -380,9 +442,30 @@ export class AuthSession {
    * A plane token good for at least the renewal margin, renewed from the stored refresh
    * token if the one in hand is close to running out. Concurrent callers share one
    * renewal rather than racing the provider's rotation.
+   *
+   * A break-glass session has no refresh token and no margin: its token is answered up
+   * to its expiry, and from then on this throws, once telling whoever listens with
+   * `onEnded` that the session is over.
    */
   async token(): Promise<string> {
     const c = this.credential;
+    if (this.breakglass) {
+      if (c && c.expires_at * 1000 > this.now()) return c.token;
+      const why = c
+        ? `The break-glass session ended at ${new Date(c.expires_at * 1000).toISOString()}: nothing renews it. Sign in again.`
+        : "The break-glass session has been signed out. Sign in again.";
+      if (c) {
+        this.credential = null;
+        for (const listener of this.ended) {
+          try {
+            listener(why);
+          } catch {
+            // A listener's failure is its own; the session is over either way.
+          }
+        }
+      }
+      throw new Error(why);
+    }
     if (c && c.expires_at * 1000 - this.now() > this.renewMargin * 1000) return c.token;
     if (this.renewing) return (await this.renewing).token;
     this.renewing = this.renew().finally(() => {
@@ -441,6 +524,11 @@ export class AuthSession {
     if (!idToken) throw new Error("the identity provider returned no id token");
     const credential = await reachable(this.planeUrl, this.origin, () => this.plane.exchange(idToken));
     this.credential = credential;
+    this.notify(credential);
+    return credential;
+  }
+
+  private notify(credential: PlaneCredential): void {
     for (const listener of this.listeners) {
       try {
         listener(credential);
@@ -448,7 +536,6 @@ export class AuthSession {
         // A listener's failure is its own; the token is taken either way.
       }
     }
-    return credential;
   }
 
   /** One authenticated plane call, with the token renewed first if it is due. */

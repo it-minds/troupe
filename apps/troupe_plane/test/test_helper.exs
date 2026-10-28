@@ -15,7 +15,6 @@ Application.put_env(:troupe_plane, Troupe.Plane.Web.Endpoint,
   server: true,
   http: [ip: {127, 0, 0, 1}, port: 0],
   secret_key_base: String.duplicate("troupe-test-secret-key-base-padding", 3),
-  live_view: [signing_salt: "troupe-plane-test"],
   pubsub_server: Troupe.Plane.PubSub,
   render_errors: [formats: [html: Troupe.Plane.Web.ErrorHTML], layout: false]
 )

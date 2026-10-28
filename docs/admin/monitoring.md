@@ -36,10 +36,8 @@ deployed, the rollout has not finished or the image tag did not move.
 The console at `/console` ([console.md](console.md)) opens on the overview: what needs attention,
 per profile its pods and load, per team its spend against its budget, and session counts,
 read again every ten seconds. Workers and pods, sessions, bundles (with adoption per pod),
-triggers, audit and settings each have a screen. `/admin` is a read-only overview of the same,
-refreshed every two seconds, and the break-glass door. Every page is a
-call into `Troupe.Plane.Admin`, and `admin.overview` returns the same map to `/rpc` and
-`/mcp`.
+triggers, audit and settings each have a screen. Every screen is a call into
+`Troupe.Plane.Admin`, and `admin.overview` returns the same map to `/rpc` and `/mcp`.
 
 ## 4. Audit log
 
@@ -62,8 +60,7 @@ operator, workers and A2A log in Elixir's default text format. Lines worth alert
 |---|---|
 | `no OpenBao credential (...)` | the plane can neither sign tokens nor publish its JWKS |
 | `troupe worker: no OpenBao token (...)` | a worker pod could not log in under the role it names; a role per profile that was never made reads `refused with HTTP 400` |
-| `break-glass panel login from <ip>` / `break-glass token refused from <ip>` | the door was used or probed |
-| `admin sign-in refused (<step>) — <reason>` | which console login step failed, and why |
+| `break-glass token accepted from <ip>` / `break-glass token refused from <ip>` | the door (`POST /auth/breakglass`) was used or probed |
 | `no TroupePolicy is configured or reachable; every MCP host is allowed` | the plane has no Kubernetes connection; bundle egress checks are open |
 | `<ns>/<pod> stopped heartbeating; ...` | a pod missed its 15 s lease |
 | `ledger drift of N micros — ...` | the reconcile found disagreement |
@@ -125,13 +122,13 @@ operator replaces it within seconds, if the pod has stopped being Ready.
 | `PolicyViolation: NoPolicy` on every profile | `policy.name` is not `default`, and nothing sets `TROUPE_POLICY_NAME` |
 | A profile keeps a pod more than its sessions need | a scale-down lowers the count only once the pods above it hold no active session. `did not drain for a scale-down: {:stranded, [...]}` in the plane's log names a session the pod never reported dormant; the pod stays until it is |
 | Pods stay on the old image, `UpgradePending: True` | a pod is replaced once it holds no active session, one at a time; the message says which pod waits and for what. `waits to be drained` for long: its sessions are still in use, so `admin.pod.drain` it to roll it now. A pod the plane recorded in `troupe.dev/drained` that is still Ready: drain it again ([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)) |
-| Console sign-in lands on `/admin/denied`, listing the groups carried | the admin group is not among them, or `groups_claim` names the wrong claim |
-| "token endpoint answered 200 without an id_token" | `openid` not in scope, or the registration cannot issue id tokens |
+| The console signs you in but shows only *Mine* | the admin group is not among the groups the token carries, or `groups_claim` names the wrong claim; **Sign-in**'s identity check says how many people carry it |
+| The exchange says the token has no `id_token` | `openid` not in scope, or the registration cannot issue id tokens |
 | Every sign-in fails before a password, `AADSTS650053` | `groups` asked for as a scope; take it out of `plane.oidc.scopes` |
 | `/.well-known/jwks.json` 503; `troupe login` fails at exchange | no OpenBao credential: no static token and the projected token unreadable or refused |
 | `/mcp` 401 with a valid provider token | its `aud` is none of the client id, `api://<client id>`, `<base_url>/mcp`, or the issuer differs (v1 against v2 endpoints) |
 | MCP OAuth fails after consent, `AADSTS9010010` | the advertised scope and the client's `resource` name different resources; expose `<base_url>/mcp/admin` or set `plane.oidc.mcpScope` |
-| Console redirect URI is `http://localhost:4000/admin/callback` | `TROUPE_BASE_URL` unset in a hand-written manifest |
+| The provider refuses the console's or the GUI's redirect URI | `<base_url>/console` or `<base_url>/app` is not registered as a single-page application's ([integrations.md](integrations.md)) |
 | `troupe.ledger.reconcile` says `:no_gateway_configured` | `:troupe_plane, :gateway` is set by nothing here |
 | Workers cannot write to a bucket outside `us-east-1`, the plane can | the worker pods have no `TROUPE_OBJECT_REGION` and sign for `us-east-1`: an operator from before it passed `objectStore.region` on to them |
 | Plane replicas do not cluster during a rolling image upgrade | the Erlang cookie is baked into each image build |

@@ -3,6 +3,7 @@ export { TroupeConnection, TroupeRpcError, TroupeConnectionClosed, TroupeCallTim
 export type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
 export { PlaneClient, PlaneHttpError, normalizeEndpoint } from "./plane.js";
 export type {
+  BreakGlassAnswer,
   Discovery,
   DeviceAuthorization,
   IdpTokens,

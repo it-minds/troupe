@@ -16,7 +16,6 @@ defmodule Troupe.Plane.TriggersTest do
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.Sessions.ACL
   alias Troupe.Plane.Triggers.{Cron, Revision, Scheduler, Template}
-  alias Troupe.Plane.Web.Live.Status
 
   defmodule Receiver do
     @moduledoc false
@@ -723,7 +722,6 @@ defmodule Troupe.Plane.TriggersTest do
       assert [{run, _trigger, session}] = Triggers.runs(context.team, trigger: "nightly")
       assert session.failed_reason == "agent_failed"
       assert Triggers.state_of(run, session) == "failed"
-      assert Status.from_session(session) == :broken
 
       # Told once: the dormancy report is the row's last word, not a second ending.
       refute_receive {:notified, _}, 300

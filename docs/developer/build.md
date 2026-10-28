@@ -74,8 +74,6 @@ skips, and `shell` does not run. A release sets the two Linux triples.
 | Generated | Written by | Checked in CI by |
 |---|---|---|
 | `protocol/schema/v1/**` | `mix troupe.schema.gen` from `Troupe.Protocol.Schema` | `mix troupe.schema.diff` (add-only), then regenerate and `git diff --exit-code` |
-| `apps/troupe_plane/priv/static/app.js` | `mix troupe.admin.assets`, from the Phoenix, Phoenix HTML and LiveView bundles in `deps/` | `--check` in the `lint` job |
-| `apps/troupe_plane/priv/static/tokens.css`, `priv/design/statuses.json` | `mix troupe.admin.tokens`, from `docs/design/admin/tokens.json` | `--check` |
 | `apps/troupe_plane/priv/static/theme.css` | `mix troupe.theme` (Signal by default), from `clients/gui/docs/design/themes/*.tokens.json` | `--check` |
 | `apps/troupe_plane/priv/static/brand/{favicon.ico,apple-touch-icon.png}` | `python scripts/brand-icons.py` (Pillow), when the mark changes | a test that they exist |
 | `protocol/schema/config/v1.json`, and `docs/user/configuration.md` between its markers | `mix troupe.config.schema`, from the key table in `Troupe.Config.Schema` the loader validates against | `--check`, in the `lint` job, `dev-check` and `scripts/ci` |
@@ -87,8 +85,8 @@ skips, and `shell` does not run. A release sets the two Linux triples.
 | `clients/gui/apps/desktop/src-tauri/icons/*` | `pnpm icons`, from `mark.ts` and the Signal tokens: every icon the bundler wants, the NSIS images and the dmg background (Decision 703) | `pnpm icons:check`, on the pixels |
 | `test/fixtures/logs/<version>/` | `mix troupe.fixtures.record <version>`, meant for every release, though only 0.2.0 and 0.3.0 have been recorded; refuses to overwrite | `fold_test.exs` replays every version |
 
-There is no npm or esbuild in the umbrella: the console's JavaScript is the UMD bundles
-shipped inside the Phoenix packages, concatenated.
+There is no npm or esbuild in the umbrella: the plane serves no JavaScript of its own
+beyond the front page's, and the console is built in `clients/gui`.
 
 ## 4. Version
 

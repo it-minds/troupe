@@ -11,7 +11,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/gitops/triggers.ex
   - apps/troupe_plane/lib/troupe/plane/triggers.ex
   - apps/troupe_plane/lib/troupe/plane/triggers/trigger.ex
-  - apps/troupe_plane/lib/troupe/plane/web/live/layout.ex
   - clients/gui/apps/console/src/views/Triggers.tsx
   - clients/gui/apps/console/src/views/Pods.tsx
   - apps/troupe_plane/priv/repo/migrations/20260930000036_gitops_triggers.exs

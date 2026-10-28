@@ -37,16 +37,15 @@ defmodule Mix.Tasks.Troupe.Boundaries do
   ]
 
   # A rule about *modules* rather than apps: every module under the first prefix may call
-  # only the listed modules among those under the second.
+  # only the listed modules among those under the second, as
+  # `{"Elixir.Troupe.Plane.Web.Live.", [Troupe.Plane.Admin], "Elixir.Troupe.Plane.", why}`.
   #
   # The app-level rules say what an app may know about; this says what a part of an app
-  # may. The panel is inside the plane and could reach anything in it, and the whole
-  # arrangement of `Plane.Admin` rests on it not doing so: a LiveView that called `Fleet`
-  # directly would be a private path into the plane that no other client has.
-  @module_rules [
-    {"Elixir.Troupe.Plane.Web.Live.", [Troupe.Plane.Admin], "Elixir.Troupe.Plane.",
-     "a LiveView is an admin API client and gets no private access"}
-  ]
+  # may. None at present: the one there was held the plane's own console, a LiveView, to
+  # `Plane.Admin` alone, so that no page of the plane's had a private path into it that
+  # no other client has, and that console is an app of its own now. The check stays for
+  # the next part of an app that must be a client of another part.
+  @module_rules []
 
   @impl Mix.Task
   def run(_args) do

@@ -75,17 +75,28 @@ A credential a team owns, subject `svc:<team>/<name>`, for work nobody starts by
 
 ## 4. Break-glass
 
-A way into the plane's own page at `/admin` when the identity provider cannot let you in: a
-misconfigured client, a tenant outage, a fresh installation with no admin group yet. The page
-reads; what it can change is sign-in and the two settings that decide who administers, each
-back to what the deployment says ([console.md](console.md#when-the-console-cannot-be-used-admin)).
+A way in when the identity provider cannot let you in: a misconfigured registration, a
+tenant outage, a fresh installation with no admin group yet. One token, held in a Secret, is
+exchanged for a short-lived plane token; the console's sign-in screen does the exchange
+(**Break glass**, [console.md](console.md#when-the-provider-cannot-let-you-in-break-glass))
+and a terminal does it by hand. There is no page of the plane's own behind it.
 
-- Grants a platform admin with no teams, marked on every page. It cannot read a session.
-- `GET`/`POST /admin/breakglass`; the token is compared in constant time. Unset, both routes
-  answer 404 like a path that does not exist.
-- Lives `TROUPE_BREAKGLASS_LIFETIME_SECONDS` (3600); the expiry travels in the cookie.
+- `POST /auth/breakglass` with `{"token": "<the break-glass token>"}` answers `200` with
+  `token` (a plane token), `expires_at` and `subject`. The token offered is compared in
+  constant time, and a wrong one is `403 {"error": "refused"}`. Unset, the route answers
+  404 like a path that does not exist, and `/.well-known/troupe` says `"breakglass": false`.
+- The plane token carries the claim `breakglass`, and every `/rpc` and `/mcp` call made
+  with it is the platform admin with no teams, marked so in `me` so a client can say it on
+  every screen. It cannot read a session, as no administrator can.
+- Lives `TROUPE_BREAKGLASS_LIFETIME_SECONDS` from the exchange, at most the fifteen
+  minutes any plane token may last, which is the default; the expiry is the token's, and
+  nothing refreshes it. When it runs out the console is back at sign-in, and the token is
+  typed again.
+- Administers and no more: `admin.*` and `me` answer it, and every other method at `/rpc`
+  and the agent's door at `/mcp/session` are `forbidden`.
 - Audited as `admin.breakglass` on success and on refusal, with the remote address, under
-  the actor `TROUPE_BREAKGLASS_SUBJECT` (`breakglass`).
+  the actor `TROUPE_BREAKGLASS_SUBJECT` (`breakglass`), which is the actor its changes are
+  recorded under too.
 - On: a Secret with key `token`, `plane.breakglass.secretName` naming it, `helm upgrade`.
   Off: `secretName: ""` and upgrade. Both are rollouts.
 
@@ -134,8 +145,9 @@ with `personalTools: forbid` refuses it on its pods, and the platform's
 
 | Surface | Credential | Actor |
 |---|---|---|
-| Console `/admin/*` | a signed cookie carrying the subject only; `/admin/login` → provider → `/admin/callback` (authorization code with the client secret) | resolved on every LiveView mount; break-glass, else admin, else refused. Profile pages are platform admin only |
-| Console `/console` ([console.md](console.md)) | the plane token below, from the provider's authorization code with PKCE in the page and `/auth/exchange`; kept for the browser tab | as `POST /rpc`: the role is worked out on every `admin.*` call, so no token says "administrator"; anybody the plane knows signs in, and a person with no administrative role is a member, shown only *Mine* |
+| Console `/console` ([console.md](console.md)) | the plane token below, from the provider's authorization code with PKCE in the page and `/auth/exchange`, or from the break-glass door; kept for the browser tab | as `POST /rpc`: the role is worked out on every `admin.*` call, so no token says "administrator"; anybody the plane knows signs in, and a person with no administrative role is a member, shown only *Mine* |
+| `POST /auth/breakglass` (§4) | the break-glass token, in the body | the platform admin with no teams, as a plane token marked `breakglass` that lasts the configured lifetime and is not refreshed |
+| `/admin`, `/admin/<page>` | none | nothing is served: a redirect to the console, or on a plane without one a page saying the plane is administered over the admin API |
 | `GET /v1/relay/watch` | a plane token, in `initialize`; renewed with `auth.refresh` | the person: told the laptop sessions offered to them (`remote.changed`) as that changes, and nobody else's |
 | `POST /rpc` | `Bearer <plane token>`, `aud` = `TROUPE_PLANE_AUDIENCE`, JWKS from OpenBao | subject resolved per request; `admin.*` to the admin API, everything else to the harness as the person |
 | `POST /mcp` | a plane token, or the provider's own token with `aud` in `client_id`, `api://<client_id>`, `<base_url>/mcp` | a 401 carries `WWW-Authenticate … resource_metadata=` for OAuth-capable clients |

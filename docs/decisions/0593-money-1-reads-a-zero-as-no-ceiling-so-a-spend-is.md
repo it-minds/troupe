@@ -4,7 +4,6 @@ title: "`money/1` reads a zero as \"no ceiling\", so a spend is never rendered t
 date: 2026-09-17
 status: accepted
 paths:
-  - apps/troupe_plane/lib/troupe/plane/web/live/layout.ex
   - clients/gui/apps/console/src/views/Budgets.tsx
 gist: "`money/1` reads a zero as \"no ceiling\", so a spend is never rendered through it"
 ---

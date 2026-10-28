@@ -277,9 +277,9 @@ spec:
             # this host (`gui:`), else nothing — and the index offers no door.
             - name: TROUPE_APP_URL
               value: {{ .Values.plane.appUrl | default (ternary (include "troupe.gui.base" .) "" .Values.gui.enabled) | quote }}
-            # Where the index's console door and the read-only page at `/admin` point:
-            # the console this chart serves on this host (`console:`), or nothing, and
-            # both then say the plane is administered over the admin API.
+            # Where the index's console door and `/admin` point: the console this chart
+            # serves on this host (`console:`), or nothing, and `/admin` then says the
+            # plane is administered over the admin API.
             - name: TROUPE_CONSOLE_URL
               value: {{ ternary (include "troupe.console.base" .) "" .Values.console.enabled | quote }}
             # And where the terminal client is published. This cluster does not host it;
@@ -394,9 +394,10 @@ spec:
                   key: {{ .Values.plane.scim.secretKey }}
             {{- end }}
             {{- if .Values.plane.breakglass.secretName }}
-            # The break-glass door into the panel. Rendered only where a secret is named,
-            # because absent means the routes answer 404 — see
-            # `Troupe.Plane.Web.Breakglass` for what it does and does not buy.
+            # The break-glass door, `POST /auth/breakglass`, which the console's sign-in
+            # screen offers. Rendered only where a secret is named, because absent means
+            # the route answers 404 — see `Troupe.Plane.Breakglass` for what it does and
+            # does not buy.
             - name: TROUPE_BREAKGLASS_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -522,8 +523,8 @@ metadata:
     # this is the plane's own.
     cert-manager.io/cluster-issuer: {{ .Values.plane.certIssuer | quote }}
     {{- end }}
-    # The read-only page at `/admin` and its break-glass sign-in are LiveView, so their
-    # socket is a long-lived WebSocket rather than a request.
+    # A relayed session (`/v1/relay`) is a long-lived WebSocket rather than a request,
+    # idle while a model thinks.
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     # Nothing a client sends the plane is large: a JSON-RPC call, a profile, a login

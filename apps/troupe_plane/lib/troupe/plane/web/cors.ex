@@ -13,8 +13,10 @@ defmodule Troupe.Plane.Web.CORS do
   router exists to prevent.
 
   Only the routes a browser client calls: the discovery document, the JWKS, the login
-  exchange and `/rpc`. SCIM is pushed by the identity provider, `/healthz` by the
-  kubelet, and neither is a browser. An empty allowlist is the plug doing nothing at
+  exchange, the break-glass door and `/rpc`. The door is on the list because the day it
+  matters is the day the identity provider is down, and a console on its own origin that
+  could not preflight it would report the plane unreachable instead. SCIM is pushed by
+  the identity provider, `/healthz` by the kubelet, and neither is a browser. An empty allowlist is the plug doing nothing at
   all, which is how a plane that serves only the CLI runs.
   """
 
@@ -43,6 +45,7 @@ defmodule Troupe.Plane.Web.CORS do
 
   defp browser_route?(%Plug.Conn{path_info: ["rpc"]}), do: true
   defp browser_route?(%Plug.Conn{path_info: ["auth", "exchange"]}), do: true
+  defp browser_route?(%Plug.Conn{path_info: ["auth", "breakglass"]}), do: true
   defp browser_route?(%Plug.Conn{path_info: [".well-known", _document]}), do: true
   defp browser_route?(_conn), do: false
 

@@ -45,7 +45,7 @@ the NIF's crates from its own Cargo.lock, the rest from a list kept in the scrip
 
 ## Elixir: the umbrella and the TUI (Hex)
 
-54 packages, from `mix.lock` and `clients/tui/mix.lock`, development and test
+49 packages, from `mix.lock` and `clients/tui/mix.lock`, development and test
 tools included.
 
 | package | licence |
@@ -56,24 +56,20 @@ tools included.
 | `bunt` | MIT |
 | `burrito` | MIT |
 | `castore` | Apache-2.0 |
-| `cc_precompiler` | Apache-2.0 |
 | `credo` | MIT |
 | `db_connection` | Apache-2.0 |
 | `decimal` | Apache-2.0 |
 | `ecto` | Apache-2.0 |
 | `ecto_sql` | Apache-2.0 |
-| `elixir_make` | Apache-2.0 |
 | `ex_ratatui` | MIT |
 | `ezstd` | MIT |
 | `file_system` | Apache-2.0 |
 | `finch` | MIT |
-| `fine` | Apache-2.0 |
 | `hpax` | Apache-2.0 |
 | `inflex` | Apache 2.0 |
 | `jason` | Apache-2.0 |
 | `jose` | MIT |
 | `k8s` | MIT |
-| `lazy_html` | Apache-2.0 |
 | `libcluster` | MIT |
 | `mime` | Apache-2.0 |
 | `mint` | Apache-2.0 |
@@ -84,7 +80,6 @@ tools included.
 | `owl` | Apache-2.0 |
 | `phoenix` | MIT |
 | `phoenix_html` | MIT |
-| `phoenix_live_view` | MIT |
 | `phoenix_pubsub` | MIT |
 | `phoenix_template` | MIT |
 | `plug` | Apache-2.0 |

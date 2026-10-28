@@ -39,7 +39,7 @@ defmodule Troupe.Plane.BodyLimitTest do
           {"/scim/v2/Users", "application/scim+json"},
           {"/webhook/github", "application/json"},
           {"/auth/exchange", "application/json"},
-          {"/admin/breakglass", "application/x-www-form-urlencoded"}
+          {"/auth/breakglass", "application/json"}
         ] do
       assert "HTTP/1.1 413" <> _ = head_only(context, path, type, @limit + 1, 10_000),
              "#{path} did not answer 413 before its body"

@@ -1,13 +1,19 @@
 # Troupe admin console — design
 
+*The LiveView console this document describes, the plane's own pages at `/admin`, is gone:
+the console at `/console` (`clients/gui/apps/console/`, [console.md](../../admin/console.md))
+is the one administrative surface, and break-glass opens it rather than a page of the
+plane's. What stays current here is the status system and the rules for a screen that
+belongs; the mockup is the record of what the console was built to.*
+
 The platform console for Troupe. This document is the reasoning behind `admin/tokens.json` and `admin/example.dc.html`, and the rules for building a new screen that belongs.
 
 Files:
 
-- `admin/tokens.json` — the system as data. `mix troupe.admin.tokens` turns it into the console's `apps/troupe_plane/priv/static/tokens.css` and `priv/design/statuses.json`, which `Troupe.Plane.Web.Live.Status` reads; CI checks both are current.
+- `admin/tokens.json` — the system as data: the record of the tokens the LiveView console was generated from. Nothing generates from it now; the plane's front page takes its theme from `clients/gui/docs/design/themes/` through `mix troupe.theme`.
 - `admin/example.dc.html` — all nine surfaces, self-contained, opens directly in a browser. Includes a broken state (Overview, Integrations, Audit integrity failure), a pending state (bundle rollout, committed profile change), a waiting state (`dev-standard`), a draining machine, and a console-offline banner you can toggle from the top bar.
 
-The sections below are the design and its mockup. The console in `clients/gui/apps/console/` is built to it (the plane's read-only page at `/admin` keeps the earlier LiveView build of the status system); where the two differ (an erase panel rather than a dialog, an audit page with its integrity check below the log rather than tabs, no changed-cell flash yet) the console is what ships, and the admin track ([profiles and policy](../../admin/profiles-and-policy.md)) says how it works.
+The sections below are the design and its mockup. The console in `clients/gui/apps/console/` is built to it; where the two differ (an erase panel rather than a dialog, an audit page with its integrity check below the log rather than tabs, no changed-cell flash yet) the console is what ships, and the admin track ([profiles and policy](../../admin/profiles-and-policy.md)) says how it works.
 
 It is a sibling of the user client ([its design](../../../clients/gui/docs/design/DESIGN.md)), not a reskin of it. §1 says where they diverged when both were drawn; the client has since moved to Afterglow (Figtree and DM Mono, square corners, pink as its reserved colour), and the console has not. What the two share, that document argues and this one only applies: structure from hairlines and alignment, no gradients, mono for anything literal, sentence-case labels, a status never carried by colour alone, the focus ring, and copy that names the consequence.
 

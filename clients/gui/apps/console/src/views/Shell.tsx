@@ -6,6 +6,11 @@
 // At a narrow width the map goes above the screen, folded behind one button, so the screen
 // a person opened is what they see first rather than eighteen links; choosing an area
 // folds it again.
+//
+// A break-glass session carries a banner on every screen. The person is a platform
+// administrator because they presented a token, not because anybody named them one, and
+// the audit will show the break-glass subject rather than a person: both are worth having
+// in front of whoever is acting, on every page, with when the session ends.
 
 import { useEffect, useMemo, useState } from "react";
 import type { JSX } from "react";
@@ -139,6 +144,7 @@ export function Shell(): JSX.Element {
         </div>
       </nav>
       <main className="main">
+        {signed.me.breakglass && <BreakGlassBanner until={signed.auth.me?.expires_at ?? null} />}
         <header className="head">
           <span className="crumb">{crumb}</span>
           <h1>{title}</h1>
@@ -146,6 +152,20 @@ export function Shell(): JSX.Element {
         <Screen route={here} />
       </main>
     </div>
+  );
+}
+
+/** Why this person is a platform admin here, and until when. */
+function BreakGlassBanner({ until }: { until: number | null }): JSX.Element {
+  const ends = until ? new Date(until * 1000).toLocaleString() : null;
+  return (
+    <section className="banner breakglass" role="note" aria-label="Break-glass session">
+      <p>
+        <strong>Break-glass session.</strong> You are a platform administrator here because you presented the plane's break-glass token, not because
+        anybody named you one; the audit records what you do as the break-glass subject.
+        {ends ? ` This session ends at ${ends}, and nothing renews it.` : " Nothing renews this session."}
+      </p>
+    </section>
   );
 }
 

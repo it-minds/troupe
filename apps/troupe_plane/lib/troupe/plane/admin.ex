@@ -2,13 +2,13 @@ defmodule Troupe.Plane.Admin do
   @moduledoc """
   Everything an administrator can do, in one place.
 
-  The panel, the admin JSON-RPC and the MCP tool list are three renderings of this module
-  and nothing else. That is the Forbidden list's "any client, including our own panel,
-  using anything but public APIs" made structural rather than remembered: a LiveView that
-  reached into `Fleet` or `Identity` directly would be a private path into the plane, and
-  a panel with a button no other client can press would be a feature only one kind of
-  operator has. `Troupe.Plane.AdminParityTest` enumerates this module and asserts each
-  function has both a method and a tool.
+  The console, the admin JSON-RPC and the MCP tool list are three renderings of this
+  module and nothing else. That is the Forbidden list's "any client, including our own
+  console, using anything but public APIs" made structural rather than remembered: a
+  console that reached into `Fleet` or `Identity` directly would be a private path into
+  the plane, and a console with a button no other client can press would be a feature
+  only one kind of operator has. `Troupe.Plane.AdminParityTest` enumerates this module
+  and asserts each function has both a method and a tool.
 
   ## Two roles
 
@@ -76,9 +76,10 @@ defmodule Troupe.Plane.Admin do
   require Logger
 
   @type actor :: %{
-          subject: String.t(),
-          role: :platform_admin | :team_admin | :none,
-          teams: [String.t()]
+          :subject => String.t(),
+          :role => :platform_admin | :team_admin | :none,
+          :teams => [String.t()],
+          optional(:breakglass) => boolean()
         }
   @type result :: {:ok, term()} | {:error, Error.t()}
 
@@ -97,6 +98,13 @@ defmodule Troupe.Plane.Admin do
     # of its own team: a credential that could create more of itself would be the
     # escalation the whole arrangement refuses.
     %{subject: user.subject, role: :none, teams: []}
+  end
+
+  def actor_for(%Identity.User{kind: "breakglass"} = user) do
+    # From the token's claims and nothing in the database: the door was checked when the
+    # token was minted, and what it makes you holds until the token expires. `breakglass`
+    # rides on the actor so `me` and a page can say so.
+    %{"subject" => user.subject} |> Breakglass.actor() |> Map.put(:breakglass, true)
   end
 
   def actor_for(%Identity.User{} = user) do
@@ -124,9 +132,9 @@ defmodule Troupe.Plane.Admin do
   @doc """
   The actor for a subject, or `nil` if that subject administers nothing.
 
-  What a surface calls when all it has is a name — a cookie, a token — rather than a
-  loaded user. The lookup is here rather than in each surface so that a LiveView, the API
-  and the CLI cannot disagree about who somebody is.
+  What a surface calls when all it has is a name rather than a loaded user. The lookup is
+  here rather than in each surface so that the API and the CLI cannot disagree about who
+  somebody is.
   """
   @spec actor_for_subject(String.t() | nil) :: actor() | nil
   def actor_for_subject(subject) when is_binary(subject) do
@@ -137,32 +145,6 @@ defmodule Troupe.Plane.Admin do
   end
 
   def actor_for_subject(_subject), do: nil
-
-  @doc """
-  Who a console session is, break-glass included.
-
-  The console's only way to ask, because a LiveView reaches the plane through this
-  module and nowhere else. Both answers are worked out on every call rather than carried
-  in the cookie: a person whose admin role was taken away loses the console at their next
-  page, and a break-glass session that has run out of time loses it at the same moment.
-
-  The actor carries `breakglass` so a page can say so — the design requires a session
-  opened with the token to be marked on every page, and a flag the caller has to fetch
-  separately is a flag a page can forget.
-  """
-  @spec actor_for_session(map()) :: actor() | nil
-  def actor_for_session(session) when is_map(session) do
-    if Breakglass.live?(session) do
-      session |> Breakglass.actor() |> Map.put(:breakglass, true)
-    else
-      case actor_for_subject(session["subject"]) do
-        nil -> nil
-        actor -> Map.put(actor, :breakglass, false)
-      end
-    end
-  end
-
-  def actor_for_session(_session), do: nil
 
   # -- overview ---------------------------------------------------------------
 
@@ -760,7 +742,7 @@ defmodule Troupe.Plane.Admin do
   @doc """
   The size classes a profile may be, in the order a console offers them.
 
-  Here rather than read from `Fleet.SizeClass` by whoever is rendering: a LiveView is an
+  Here rather than read from `Fleet.SizeClass` by whoever is rendering: the console is an
   admin API client and gets no private access, and a model asking over MCP should be able
   to find out what the two words mean without being told them out of band.
   """
@@ -2462,10 +2444,17 @@ defmodule Troupe.Plane.Admin do
   defp presence(""), do: nil
   defp presence(value), do: value
 
+  # The redirect URI the provider has to have registered is the console's own address: it
+  # signs in as a public client from its page, and the code comes back to where the page
+  # is. The plane redeems nothing itself any more, so a plane without a console has no
+  # redirect to register.
   defp redirect_uri do
-    case Settings.get("base_url") do
-      nil -> nil
-      base -> String.trim_trailing(base, "/") <> "/admin/callback"
+    with console when console != "" <-
+           Application.get_env(:troupe_plane, :console_url, "/console"),
+         url when is_binary(url) <- Artifacts.console_url() do
+      String.trim_trailing(url, "/")
+    else
+      _none -> nil
     end
   end
 
@@ -3284,7 +3273,7 @@ defmodule Troupe.Plane.Admin do
       # What the provider's registration has to know about this plane. Reported rather
       # than checked, because the provider is the only thing that knows what is registered.
       urls: %{
-        redirect: at(base, "/admin/callback"),
+        redirect: redirect_uri(),
         discovery: at(base, "/.well-known/troupe"),
         jwks: at(base, "/.well-known/jwks.json"),
         resource_metadata: at(base, "/.well-known/oauth-protected-resource")

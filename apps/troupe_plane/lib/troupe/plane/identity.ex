@@ -1128,6 +1128,10 @@ defmodule Troupe.Plane.Identity do
     end
   end
 
+  # A break-glass caller has no row and so no membership; the door makes a platform admin
+  # of nobody's team, and a query keyed on a missing id would raise rather than say so.
+  def teams_for(%User{kind: "breakglass"}), do: []
+
   def teams_for(%User{} = user) do
     # Through the links, and `distinct` because a person in two of a team's groups is in
     # the team *once*. Without it they get every team twice and a listing shows their
@@ -1156,6 +1160,7 @@ defmodule Troupe.Plane.Identity do
   """
   @spec group_ids_for(User.t()) :: [String.t()]
   def group_ids_for(%User{kind: "service"}), do: []
+  def group_ids_for(%User{kind: "breakglass"}), do: []
 
   def group_ids_for(%User{} = user) do
     Repo.all(
@@ -1563,6 +1568,9 @@ defmodule Troupe.Plane.Identity do
         ]
   def profiles_for(%User{kind: "service", principal: principal}),
     do: Principals.profiles_for(principal)
+
+  # Nothing to create on: a break-glass token administers, and is in no team.
+  def profiles_for(%User{kind: "breakglass"}), do: []
 
   def profiles_for(%User{} = user) do
     Repo.all(

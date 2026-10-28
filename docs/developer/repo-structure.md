@@ -47,15 +47,16 @@ and `priv/` where it ships data, and shares the root's `_build`, `deps`, `mix.lo
 | `apps/troupe_core/native/reaper/reaper.zig` | the process-tree reaper, one source for every target |
 | `apps/troupe_core/lib/mix/tasks/` | `compile.reaper`, `troupe.boundaries`, `troupe.fixtures.record`, `troupe.bench`, `troupe.prefix`, `troupe.config.schema` |
 | `apps/troupe_protocol/lib/mix/tasks/` | `troupe.schema.gen`, `troupe.schema.diff`, `troupe.egress`, `troupe.release.check`, `troupe.decisions`, `compile.troupe_version` |
-| `apps/troupe_plane/lib/mix/tasks/` | `troupe.admin.assets`, `troupe.admin.tokens`, `troupe.theme`, `troupe.index.rebuild`, `troupe.ledger.reconcile` |
+| `apps/troupe_plane/lib/mix/tasks/` | `troupe.theme`, `troupe.index.rebuild`, `troupe.ledger.reconcile` |
 | `apps/troupe_plane/priv/repo/migrations/` | the database |
-| `apps/troupe_plane/priv/static/` | the console's and front page's assets, mostly generated |
-| `apps/troupe_plane/lib/troupe/plane/admin/api.ex` | the admin method table |
+| `apps/troupe_plane/priv/static/` | the front page's assets, mostly generated |
+| `apps/troupe_plane/lib/troupe/plane/admin/api.ex` | the admin method table; the plane has no administrative pages of its own, and `web/admin_moved.ex` sends `/admin` to the console (`clients/gui/apps/console/`) |
+| `apps/troupe_plane/lib/troupe/plane/breakglass.ex` | the break-glass door behind `POST /auth/breakglass` |
 | `apps/troupe_operator/lib/mix/tasks/troupe.e2e.ex` | the cluster suite |
 | `apps/troupe_gateway/test/conformance/` | the Python conformance client, a test fixture |
 | `apps/troupe_daemon/` | its own `config/runtime.exs` and README |
 | `charts/troupe/crds/` | `WorkerProfile`, `TeamVolume`, `TroupePolicy`, `Trigger`, hand-written; the admission policy is a template |
-| `docs/design/admin/tokens.json` | the console's design tokens |
+| `docs/design/admin/tokens.json` | the design tokens the plane's LiveView console was generated from, kept as the record of it ([design/admin](../design/admin/DESIGN.md)) |
 | `clients/gui/docs/design/themes/*.tokens.json` | the four themes: the GUI's and the TUI's, and the front page's (Signal), one copy |
 
 Generated files and what writes them: [build.md §3](build.md#3-generated-committed-files).
@@ -65,4 +66,4 @@ Generated files and what writes them: [build.md §3](build.md#3-generated-commit
 `docker/Dockerfile` copies `mix.exs`, `mix.lock`, each `apps/*/mix.exs`, `config/` and
 `apps/`. `.dockerignore` removes `clients/`, `_build`, `deps`, `priv/reaper`, every
 `test/`, `fixtures`, `docs`, `charts`, `dev`, `scripts` and `*.md` — which is why
-`statuses.json` is vendored into the plane rather than read from `docs/`.
+`theme.css` is generated into the plane's `priv/` rather than read from `docs/`.

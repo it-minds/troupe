@@ -848,7 +848,7 @@ defmodule Troupe.Plane.Sessions do
 
   # Through the team's links, because a team is a union of groups rather than one. The
   # raw table names are deliberate — `Sessions` may not reach into `Identity`'s schemas
-  # any more than a LiveView may reach into `Admin`'s — and `distinct` is load-bearing: a
+  # any more than the console may reach into `Admin`'s — and `distinct` is load-bearing: a
   # person in two of a team's groups would otherwise put the team in this list twice, and
   # every listing would show their sessions twice.
   defp member_team_ids(%User{id: id}) when is_binary(id) do

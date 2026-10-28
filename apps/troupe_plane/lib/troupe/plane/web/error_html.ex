@@ -6,9 +6,10 @@ defmodule Troupe.Plane.Web.ErrorHTML do
   render it is an error page that fails when it is most needed. No stack trace and no
   detail: this is reachable without authenticating, and what went wrong inside the plane
   is not something an anonymous request is owed.
-  """
 
-  use Phoenix.Component
+  A plain function and a string: the endpoint's `render_errors` asks this module for
+  `render/2` and nothing else, so it needs no view or component library behind it.
+  """
 
   alias Plug.Conn.Status
 

@@ -16,9 +16,8 @@ defmodule Troupe.Plane.Admin.Console do
   ## The console is the one at `/console`
 
   The areas are the console's map (`clients/gui/apps/console/src/nav.ts`), in its four
-  groups. The LiveView pages under `/admin` are the break-glass page and nothing else, and
-  place nothing: what a break-glass session can do there is read, and put back what the
-  deployment says about signing in.
+  groups. The plane serves no page of its own under `/admin` any more: each address there
+  goes to the console, so there is nothing else a method could be placed on.
 
   Two tests hold this to the console. `Troupe.Plane.ConsoleCoverageTest` fails on a method
   with no placement, and on a placement on an area the map does not have. The console's own

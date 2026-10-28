@@ -5,6 +5,12 @@
 // sending back, then tries the one this tab already holds; either way no questions. A deep
 // link opened signed out is where the console lands once the provider sends the browser
 // back, not its first screen.
+//
+// Below the provider's button, and only on a plane whose discovery says it has one, is the
+// break-glass door: the plane's break-glass token, typed, for a session that leans on the
+// provider for nothing. It is the way in on the day the provider signs nobody in, which is
+// exactly the day the button above it does not work, so it lives on this screen and not
+// behind it.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
@@ -16,16 +22,22 @@ import { Field } from "./bits";
 export function SignIn({
   onSignedIn,
   navigate = (url) => globalThis.location.assign(url),
+  notice = null,
 }: {
   onSignedIn: (auth: AuthSession) => void;
   /** Leave for the provider. A test catches the address instead of going. */
   navigate?: (url: string) => void;
+  /** Why the last session ended, when it ended by itself: said here, where the person lands. */
+  notice?: string | null;
 }): JSX.Element {
   const [planeUrl, setPlaneUrl] = useState(likelyPlaneUrl);
   const [restoring, setRestoring] = useState(true);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(notice);
+  const [door, setDoor] = useState(false);
+  const [glass, setGlass] = useState("");
+  const [breaking, setBreaking] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -64,6 +76,32 @@ export function SignIn({
     };
   }, [onSignedIn]);
 
+  // Whether this plane has a break-glass door is its discovery's to say, asked once the
+  // address stands still: on a deployment at load, in development a moment after typing.
+  // A plane that does not answer has no door to show, and says nothing here: the button
+  // above says what is wrong once it is pressed.
+  useEffect(() => {
+    if (restoring) return;
+    const url = planeUrl.trim();
+    if (!/^https?:\/\/\S+$/.test(url)) {
+      setDoor(false);
+      return;
+    }
+    let live = true;
+    const t = setTimeout(() => {
+      newSession(url)
+        .discover()
+        .then(
+          (found) => live && setDoor(found.breakglass === true),
+          () => live && setDoor(false),
+        );
+    }, 300);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [planeUrl, restoring]);
+
   const signIn = async (): Promise<void> => {
     setBusy(true);
     setError(null);
@@ -82,6 +120,19 @@ export function SignIn({
       setError(describe(e));
       setBusy(false);
       setStatus("");
+    }
+  };
+
+  const breakGlass = async (): Promise<void> => {
+    setBreaking(true);
+    setError(null);
+    const url = planeUrl.trim();
+    rememberPlane(url);
+    try {
+      onSignedIn(await AuthSession.breakGlass(url, glass));
+    } catch (e) {
+      setError(describe(e));
+      setBreaking(false);
     }
   };
 
@@ -117,6 +168,28 @@ export function SignIn({
         </button>
       </form>
       {error && <SignInError message={error} />}
+      {door && (
+        <form
+          className="breakglass"
+          aria-labelledby="breakglass-title"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void breakGlass();
+          }}
+        >
+          <h2 id="breakglass-title">Break glass</h2>
+          <p>
+            For the day the identity provider cannot sign anybody in. This door takes the plane's break-glass token, which its administrators hold
+            outside the provider, and opens the console as a platform administrator until the session the plane answers runs out. Every use is recorded.
+          </p>
+          <Field label="Break-glass token">
+            {(p) => <input {...p} type="password" value={glass} onChange={(e) => setGlass(e.target.value)} autoComplete="off" spellCheck={false} disabled={breaking || busy} />}
+          </Field>
+          <button type="submit" disabled={breaking || busy || !glass.trim()}>
+            {breaking ? "Opening the door…" : "Break glass"}
+          </button>
+        </form>
+      )}
       <footer>
         <p>The plane's own sign-in, through its identity provider. Your sign-in lasts as long as this tab.</p>
       </footer>

@@ -84,7 +84,7 @@ plane, the operator and the GUI, then creates a `WorkerProfile` and its namespac
 
 | Thing | Address |
 |---|---|
-| plane, console | `http://plane.localtest.me:30080`, `/console` (`/admin` is the read-only break-glass page) |
+| plane, console | `http://plane.localtest.me:30080`, `/console` (`/admin` redirects there) |
 | identity | `http://dex.localtest.me:30080/dex`, user `ada@example.test`, password `troupe` |
 | workers | `ws://<ordinal>-<profile>.workers.localtest.me:30080/v1/socket` |
 

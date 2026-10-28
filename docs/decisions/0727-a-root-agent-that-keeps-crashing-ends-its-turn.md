@@ -16,7 +16,6 @@ paths:
   - apps/troupe_core/lib/troupe/sessions/index.ex
   - apps/troupe_core/test/troupe/agent/crash_loop_test.exs
   - apps/troupe_gateway/test/troupe/gateway/daemon_test.exs
-  - apps/troupe_plane/lib/troupe/plane/web/live/status.ex
   - apps/troupe_plane/test/troupe/plane/triggers_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - apps/troupe_worker/lib/troupe/worker/session/manager.ex
