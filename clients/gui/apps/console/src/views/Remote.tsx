@@ -334,7 +334,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
                   disabled={(audiences[a.callId] ?? proposedKey(pub) ?? "") === ""}
                   onClick={() => {
                     const [visibility, owner] = (audiences[a.callId] ?? proposedKey(pub) ?? "").split("|");
-                    void act((x) => x.view.respondApproval(a.callId, "allow", { answer: { visibility: visibility ?? "private", ...(owner === undefined ? {} : { owner: owner === "team" ? "team" : "me" }) } }));
+                    void act((x) => x.view.respondApproval(a.callId, "allow", { visibility: visibility ?? "private", ...(owner === undefined ? {} : { owner: owner === "team" ? "team" : "me" }) }));
                   }}
                 >
                   Allow once

@@ -455,25 +455,17 @@ export interface PublicationGate {
 }
 
 /**
- * A publication's answer: whom it is for and, for a new artifact, whose it is, chosen or
- * confirmed by the person. A new version keeps whose the artifact is, so its answer names
- * no owner: one sent is refused, since only a transfer moves an artifact.
- */
-export interface PublicationAnswer {
-  /** `private`, `organisation`, `team:<name>` or `profile:<name>`. */
-  visibility: string;
-  owner?: "me" | "team";
-}
-
-/**
- * What an answer may carry besides its word, as `approval.respond` sends it: for a
- * delegation the agent it goes to and the parts of the brief edited; for a publication
- * its `answer`; a word back with a denial.
+ * What an answer may carry besides its word, as `approval.respond` sends it, each a key
+ * beside `decision`: for a delegation the agent it goes to and the parts of the brief
+ * edited; for a publication whom it is for (`visibility`: `private`, `organisation`,
+ * `team:<name>` or `profile:<name>`) and, for a new artifact, whose it is (`owner`; a new
+ * version keeps whose it is, and the harness drops one sent); a word back with a denial.
  */
 export interface GateAnswer {
   agent?: string;
   brief?: Partial<Record<(typeof BRIEF_PARTS)[number], string>>;
-  answer?: PublicationAnswer;
+  visibility?: string;
+  owner?: "me" | "team";
   reason?: string;
 }
 

@@ -62,7 +62,7 @@ describe("the publication gate", () => {
 
     (await seesButton("Allow")).click();
     await waitFor(() => answers.length === 1, "the answer");
-    expect(answers[0]).toEqual(["allow", { answer: { visibility: "team:core", owner: "team" } }]);
+    expect(answers[0]).toEqual(["allow", { visibility: "team:core", owner: "team" }]);
   });
 
   it("waits for a choice where the agent proposed nobody, and offers no allow for the session", async () => {
@@ -77,7 +77,7 @@ describe("the publication gate", () => {
     await waitFor(() => !button("Allow")!.disabled, "Allow enabled");
     button("Allow")!.click();
     await waitFor(() => answers.length === 1, "the answer");
-    expect(answers[0]).toEqual(["allow", { answer: { visibility: "private", owner: "me" } }]);
+    expect(answers[0]).toEqual(["allow", { visibility: "private", owner: "me" }]);
   });
 
   it("keeps a team's artifact the person's own instead, says what was proposed, and lets it publish unasked", async () => {
@@ -88,7 +88,7 @@ describe("the publication gate", () => {
     await sees("The agent proposed team core, owned by the team.");
     (await seesButton("Allow, and let it publish unasked for this session")).click();
     await waitFor(() => answers.length === 1, "the answer");
-    expect(answers[0]).toEqual(["allow_session", { answer: { visibility: "team:core", owner: "me" } }]);
+    expect(answers[0]).toEqual(["allow_session", { visibility: "team:core", owner: "me" }]);
   });
 
   it("denies with nothing else, and offers the proposal while the audiences are still unknown", async () => {
@@ -120,7 +120,7 @@ describe("the publication gate", () => {
     expect(radio("Team core, owned by the team")).toBeNull();
     (await seesButton("Allow")).click();
     await waitFor(() => answers.length === 1, "the answer");
-    expect(answers[0]).toEqual(["allow", { answer: { visibility: "team:core" } }]);
+    expect(answers[0]).toEqual(["allow", { visibility: "team:core" }]);
   });
 
   it("offers each team twice, each profile once, and the proposal besides", () => {

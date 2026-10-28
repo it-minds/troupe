@@ -1485,9 +1485,11 @@ evoked where nothing is set and there was a sign-in. */
         return reply(ws, id, { accepted: true });
       }
 
-      // A publication's gate, answered: `allow` with whom it is for and whose it is, held to
-      // the audiences there are; `allow_session` only where the agent proposed an audience;
-      // `deny` with a word back. The decision says what the person chose and what they changed.
+      // A publication's gate, answered as the harness answers it: `visibility` and `owner`
+      // are keys beside `decision`, as a delegation's `agent` and `brief` are, and a nested
+      // object is ignored; a word back goes with a denial alone; an owner on a new version
+      // is dropped; an allow for the session where the agent proposed nobody is acted on
+      // as an allow. The decision says what the person chose and what they changed.
       case "approval.respond": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
         const callId = String(params["call_id"] ?? "");
@@ -1502,23 +1504,28 @@ evoked where nothing is set and there was a sign-in. */
         if (decision === "deny") {
           if (typeof params["reason"] === "string" && params["reason"] !== "") decided["reason"] = params["reason"];
         } else {
-          if (decision === "allow_session" && proposed["visibility"] === null) return invalid("the agent proposed nobody to publish for, so this cannot be allowed for the session: choose whom it is for");
-          const answer = (params["answer"] ?? {}) as Record<string, unknown>;
-          const visibility = typeof answer["visibility"] === "string" ? answer["visibility"] : null;
-          const owner = answer["owner"] === "me" || answer["owner"] === "team" ? answer["owner"] : null;
+          if (params["reason"] !== undefined && params["reason"] !== null) return invalid("a word back goes with a denial");
+          const sent = params["visibility"];
+          if (sent === undefined || sent === null) {
+            if (proposed["visibility"] === null) return invalid("say whom it is for: visibility is private, organisation, team:<name> or profile:<name>");
+          } else if (typeof sent !== "string" || !/^(private|organisation|team:.+|profile:.+)$/.test(sent)) {
+            return invalid(`visibility is private, organisation, team:<name> or profile:<name>, not ${JSON.stringify(sent)}`);
+          }
+          const visibility = typeof sent === "string" ? sent : String(proposed["visibility"]);
           const republish = typeof proposed["id"] === "string";
-          if (visibility === null || (owner === null && !republish)) return invalid("an allowed publication names whom it is for (answer.visibility) and whose it is (answer.owner: me or team)");
-          if (!/^(private|organisation|team:.+|profile:.+)$/.test(visibility)) return invalid(`visibility must be private, organisation, team:<name> or profile:<name>, not ${visibility}`);
-          // A new version keeps whose the artifact is: an owner on a republish is refused as the plane refuses it.
-          if (republish && answer["owner"] !== undefined && answer["owner"] !== null) return invalid("whose an artifact is does not change with a version; artifact.transfer moves it");
-          if (owner === "team" && !visibility.startsWith("team:")) return invalid("owner team needs a team to publish for");
-          const edited = [...(visibility !== proposed["visibility"] ? ["visibility"] : []), ...(!republish && owner !== (proposed["owner"] ?? (visibility.startsWith("team:") ? "team" : "me")) ? ["owner"] : [])];
+          const sentOwner = params["owner"];
+          if (!republish && sentOwner !== undefined && sentOwner !== null && sentOwner !== "me" && sentOwner !== "team") return invalid(`owner is me or team, not ${JSON.stringify(sentOwner)}`);
+          const proposedOwner = proposed["owner"] ?? (visibility.startsWith("team:") ? "team" : "me");
+          const owner = sentOwner === "me" || sentOwner === "team" ? sentOwner : proposedOwner;
+          const edited = [...(visibility !== proposed["visibility"] ? ["visibility"] : []), ...(!republish && owner !== proposedOwner ? ["owner"] : [])];
+          // An allow for the session where the agent proposed nobody is an allow of this one.
+          if (decision === "allow_session" && proposed["visibility"] === null) decided["decision"] = "allow";
           decided = republish ? { ...decided, visibility, edited } : { ...decided, visibility, owner, edited };
         }
-        asked.answer = { decision, ...decided };
+        asked.answer = { ...decided };
         session.pendingApprovals = Math.max(0, session.pendingApprovals - 1);
         session.log.append("approval_decided", decided, actor);
-        return reply(ws, id, { decision });
+        return reply(ws, id, { decision: decided["decision"] });
       }
 
       case "question.answer": {

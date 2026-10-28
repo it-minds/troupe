@@ -89,7 +89,6 @@ export type {
   DelegationGate,
   GateAnswer,
   GateAnswered,
-  PublicationAnswer,
   PublicationGate,
   TranscriptState,
   PendingInput,

@@ -154,9 +154,10 @@ describe("the publication gate, on the fake daemon", () => {
     assert.equal(gate.tool, "publish_artifact");
     assert.deepEqual(gate.publication, { title: "Weekly figures", kind: "html", files: 3, visibility: "team:core", owner: "team", id: null, note: null });
 
-    assert.equal(await refused(view.respondApproval(gate.callId, "allow")), "invalid_params", "an allow with no answer");
-    assert.equal(await refused(view.respondApproval(gate.callId, "allow", { answer: { visibility: "organisation", owner: "team" } })), "invalid_params", "a team's for no team");
-    await view.respondApproval(gate.callId, "allow", { answer: { visibility: "team:core", owner: "me" } });
+    assert.equal(await refused(view.respondApproval(gate.callId, "allow", { visibility: "everyone" })), "invalid_params", "no such audience");
+    assert.equal(await refused(view.respondApproval(gate.callId, "allow", { visibility: "team:core", owner: "us" as "me" })), "invalid_params", "no such owner");
+    assert.equal(await refused(view.respondApproval(gate.callId, "allow", { visibility: "team:core", owner: "me", reason: "fine" })), "invalid_params", "a word back goes with a denial");
+    await view.respondApproval(gate.callId, "allow", { visibility: "team:core", owner: "me" });
     await until(() => gate.callId in Object.fromEntries(approvals(state).filter((a) => a.decision).map((a) => [a.callId, true])), "the decision");
     const decided = approvals(state)[0]!;
     assert.equal(decided.decision, "allow");
@@ -174,14 +175,14 @@ describe("the publication gate, on the fake daemon", () => {
     await until(() => approvals(state).length === 1, "the gate");
     const gate = approvals(state)[0]!;
     assert.equal(gate.publication?.id, "art-1");
-    assert.equal(await refused(view.respondApproval(gate.callId, "allow", { answer: { visibility: "team:core", owner: "team" } })), "invalid_params");
-    await view.respondApproval(gate.callId, "allow", { answer: { visibility: "organisation" } });
+    // An owner on a new version is dropped, not refused.
+    await view.respondApproval(gate.callId, "allow", { visibility: "organisation", owner: "team" });
     await until(() => approvals(state)[0]!.decision !== undefined, "the decision");
     assert.deepEqual(approvals(state)[0]!.answered, { visibility: "organisation", edited: ["visibility"] });
     await client.close(session.id, listener);
   });
 
-  it("cannot be allowed for the session when the agent proposed nobody, and a denial carries a word back", async () => {
+  it("takes the proposal where the answer names nobody, is allowed once for the session where the agent proposed nobody, and a denial carries a word back", async () => {
     const session = daemon.seed("/home/ada/repo");
     const first = daemon.askPublish(session.id, { title: "Notes", kind: "markdown", files: 1 });
     daemon.askPublish(session.id, { title: "Later", kind: "file", files: 1, visibility: "private" });
@@ -193,12 +194,19 @@ describe("the publication gate, on the fake daemon", () => {
     assert.equal(open!.publication?.visibility, null);
     assert.equal(first.data["call_id"], open!.callId);
 
-    assert.equal(await refused(view.respondApproval(open!.callId, "allow_session", { answer: { visibility: "private", owner: "me" } })), "invalid_params");
+    assert.equal(await refused(view.respondApproval(open!.callId, "allow")), "invalid_params", "nobody proposed and nobody named");
     await view.respondApproval(open!.callId, "deny", { reason: "not yet" });
-    await view.respondApproval(later!.callId, "allow_session", { answer: { visibility: "private", owner: "me" } });
+    await view.respondApproval(later!.callId, "allow_session");
     await until(() => approvals(state).every((a) => a.decision !== undefined), "both decided");
     assert.deepEqual(approvals(state)[0]!.answered, { reason: "not yet" });
-    assert.deepEqual(approvals(state)[1]!.answered, { visibility: "private", owner: "me", edited: [] });
+    assert.equal(approvals(state)[1]!.decision, "allow_session");
+    assert.deepEqual(approvals(state)[1]!.answered, { visibility: "private", owner: "me", edited: [] }, "the proposal, where the answer named nobody");
+
+    const third = daemon.askPublish(session.id, { title: "Third", kind: "file", files: 1 });
+    await until(() => approvals(state).length === 3, "the third gate");
+    await view.respondApproval(String(third.data["call_id"]), "allow_session", { visibility: "private", owner: "me" });
+    await until(() => approvals(state)[2]!.decision !== undefined, "decided");
+    assert.equal(approvals(state)[2]!.decision, "allow", "for the session with nobody proposed is an allow of this one");
     await client.close(session.id, listener);
   });
 });

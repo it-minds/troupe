@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import { BRIEF_PARTS, ruleScope, visibilityWords } from "@troupe/client";
-import type { DelegationGate, Entry, GateAnswer, PublicationAnswer, PublicationGate } from "@troupe/client";
+import type { DelegationGate, Entry, GateAnswer, PublicationGate } from "@troupe/client";
 import { Pill } from "./bits";
 import { Mask } from "./brand";
 
@@ -558,12 +558,12 @@ function PublishPanel({
   const choices = audienceChoices(audiences, publication, republish);
   const choice = choices.find((c) => c.key === chosen) ?? null;
 
-  const send = async (decision: Decision, answer?: PublicationAnswer): Promise<void> => {
+  const send = async (decision: Decision, answer: GateAnswer = {}): Promise<void> => {
     if (busy) return;
     setBusy(decision);
     setError(null);
     try {
-      await onAnswer(decision, answer ? { answer } : {});
+      await onAnswer(decision, answer);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -573,7 +573,8 @@ function PublishPanel({
 
   const what = publication.kind === "html" ? "A page" : publication.kind === "markdown" ? "A document" : "A file";
   const files = publication.files === 1 ? "1 file" : `${publication.files} files`;
-  const answerOf: PublicationAnswer | undefined = choice ? { visibility: choice.visibility, ...(choice.owner === undefined ? {} : { owner: choice.owner }) } : undefined;
+  // Whom it is for and whose it is, as keys beside the decision, as a delegation's answer is sent.
+  const answerOf: GateAnswer | undefined = choice ? { visibility: choice.visibility, ...(choice.owner === undefined ? {} : { owner: choice.owner }) } : undefined;
 
   return (
     <section className="approval publication" aria-label={`Publish ${publication.title}`}>
