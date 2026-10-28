@@ -225,6 +225,28 @@ describe("an artifact's links", () => {
   });
 });
 
+describe("an artifact's own address, followed while signed out", () => {
+  // The artifacts host sends a signed-out viewer to `#/artifacts/open/<id>`: signed in, this
+  // tab goes straight back to the artifact with a ticket, not to its page in the console.
+  it("goes straight back to the artifact once signed in, at the version asked for", async () => {
+    await open("#/artifacts/open/art-carol-notes", PEOPLE.carol);
+    await waitFor(() => followed.length === 1, "gone on to the artifact");
+    expect(followed[0]).toMatch(/^https:\/\/artifacts\.example\.test\/enter\?ticket=/);
+    expect(fake.plane.opened[0]).toMatchObject({ id: "art-carol-notes" });
+    expect(fake.plane.opened[0]!.version ?? null).toBeNull();
+
+    visit("#/artifacts/open/art-carol-notes/v1");
+    await waitFor(() => followed.length === 2, "gone on to version 1");
+    expect(fake.plane.opened[1]).toMatchObject({ id: "art-carol-notes", version: 1 });
+  });
+
+  it("says so, with the way to its page, when the plane will not open it to this person", async () => {
+    await open("#/artifacts/open/art-carol-private", PEOPLE.bob);
+    await sees("This artifact cannot be opened");
+    expect(followed).toEqual([]);
+  });
+});
+
 describe("the tab an Open asks for", () => {
   it("is opened at the click, before the plane answers, and pointed at the link or closed", () => {
     const tab = { opener: {} as unknown, location: { replace: vi.fn() }, close: vi.fn() };

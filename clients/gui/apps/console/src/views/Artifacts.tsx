@@ -37,17 +37,22 @@ export type ArtifactTab = { kind: "mine" } | { kind: "shared" } | { kind: "organ
 
 /**
  * What an address under `#/artifacts` names: a tab (`mine`, `shared`, `organisation`,
- * `profile/<name>`), a link somebody followed (`link/<token>`), or one artifact by its id,
- * which the plane never makes one of those words.
+ * `profile/<name>`), a link somebody followed (`link/<token>`), an artifact to go straight
+ * on to once signed in (`open/<id>[/v<n>]`, where the artifacts host sends a signed-out
+ * viewer of it), or one artifact by its id, which the plane never makes one of those words.
  */
-export function artifactPlace(path: string[]): { tab: ArtifactTab } | { id: string } | { link: string } {
-  const [first, second] = path;
+export function artifactPlace(path: string[]): { tab: ArtifactTab } | { id: string } | { link: string } | { open: { id: string; version?: number } } {
+  const [first, second, third] = path;
   if (!first || first === "mine") return { tab: { kind: "mine" } };
   if (first === "shared") return { tab: { kind: "shared" } };
   if (first === "organisation") return { tab: { kind: "organisation" } };
   if (first === "teams") return { tab: { kind: "teams" } };
   if (first === "profile" && second) return { tab: { kind: "profile", name: second } };
   if (first === "link" && second) return { link: second };
+  if (first === "open" && second) {
+    const version = third && /^v[1-9]\d*$/.test(third) ? Number(third.slice(1)) : undefined;
+    return { open: version === undefined ? { id: second } : { id: second, version } };
+  }
   return { id: first };
 }
 
@@ -439,6 +444,42 @@ export function ArtifactLink({ token }: { token: string }): JSX.Element {
       ) : (
         <Empty title="This link opens nothing">
           It has expired, its owner revoked it, or it is not a link to an artifact: {describeError(error)} <a href={href({ page: "artifacts" })}>Your artifacts</a>
+        </Empty>
+      )}
+    </div>
+  );
+}
+
+/**
+ * An artifact's own address, followed while signed out: the artifacts host sent the person
+ * here to sign in, and this tab goes straight back to the artifact on its host, at the
+ * version they asked for, with a ticket asked for as them. The artifact's page in the
+ * console is where they can go instead when the plane will not open it to them.
+ */
+export function ArtifactOpen({ id, version }: { id: string; version?: number | undefined }): JSX.Element {
+  const { follow } = useConsole();
+  const api = useArtifacts();
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => {
+    let live = true;
+    api.open(id, version).then(
+      (ticket) => live && follow(ticket.url),
+      (e: unknown) => live && setError(e),
+    );
+    return () => {
+      live = false;
+    };
+    // Asked once, for the address the person came with.
+  }, [id, version]);
+  return (
+    <div className="page artifact">
+      {error === null ? (
+        <p className="lead" role="status">
+          Opening the artifact…
+        </p>
+      ) : (
+        <Empty title="This artifact cannot be opened">
+          It does not exist, it was deleted, or it is not one you may open: {describeError(error)} <a href={href({ page: "artifacts", path: [id] })}>Its page</a>
         </Empty>
       )}
     </div>

@@ -137,8 +137,9 @@ its scripts are only its own `.js` files (no inline script), it cannot read a co
 the plane as you, and it cannot fetch anything from anywhere else. A page that relied on a
 script from the web, or on inline script, needs those moved into files of its own.
 
-Opening one signs you in to that host for an hour, through the plane. If you follow a link to
-an artifact while signed out, you are sent to the console to sign in first.
+Opening one signs you in to that host for an hour, through the plane. If you open an
+artifact's address, or follow a link to one, while signed out, you are sent to the console to
+sign in first, and it brings you straight back to the artifact.
 
 **In the desktop app**, *Artifacts* in the rail is the same gallery, read through this
 computer's daemon: cards grouped by when, chips for who each is for (everyone, your teams and
