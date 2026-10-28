@@ -36,12 +36,12 @@ describe("an artifact a team owns, on the fake plane", () => {
   const signIn = (subject: string): Promise<AuthSession> => h.signIn({ subject });
 
   before(async () => {
-    // Ada and Dan are in core (Dan its admin); Bob is in design, its admin; Alice is a
-    // platform admin in core; Carol is in no team at all.
+    // Ada and Erin are in core; Dan administers core without being in it; Bob is in design,
+    // its admin; Alice is a platform admin in core; Carol is in no team at all.
     h = await startHarness({
       plane: {
         admin: exampleAdmin(),
-        memberOf: { "ada@example.com": ["core"], "dan@example.com": ["core"], "alice@example.com": ["core"], "bob@example.com": ["design"], "carol@example.com": [] },
+        memberOf: { "ada@example.com": ["core"], "erin@example.com": ["core"], "dan@example.com": [], "alice@example.com": ["core"], "bob@example.com": ["design"], "carol@example.com": [] },
       },
     });
   });
@@ -53,7 +53,11 @@ describe("an artifact a team owns, on the fake plane", () => {
     h.plane.artifacts.set("art-own", artifact("art-own", ada, { title: "Ada's draft", visibility: "team:core", team: "core" }));
   });
 
-  it("is every member's: owner, mine, under Mine, seen whatever it is for; and a non-member's not at all", async () => {
+  it("is every member's and its admins': owner, mine, under Mine, seen whatever it is for; and a non-member's not at all", async () => {
+    const erin = apiOf(await signIn("erin@example.com"));
+    const member = await erin.get("art-team");
+    assert.equal(member.role, "owner");
+    assert.equal(member.may_transfer, false, "a member who is no admin cannot take it back");
     const dan = apiOf(await signIn("dan@example.com"));
     const got = await dan.get("art-team");
     assert.equal(got.role, "owner");
@@ -94,6 +98,8 @@ describe("an artifact a team owns, on the fake plane", () => {
     assert.equal(taken.owner_team, null);
     assert.equal(taken.owner.subject, "dan@example.com");
     assert.equal(taken.mine, true);
+    assert.ok(Array.isArray(taken.versions), "the answer is artifact.get's, versions and all");
+    assert.equal(await refused(dan.transfer("art-team", "me")), "invalid_params", "nothing to take back from a person's own");
 
     const adaApi = apiOf(await signIn("ada@example.com"));
     assert.equal(await refused(adaApi.get("art-team")), "not_found", "a private one is Dan's now");
@@ -117,6 +123,7 @@ describe("an artifact a team owns, on the fake plane", () => {
     assert.equal(plain.owner_team, null);
     assert.equal(plain.visibility, "private");
     assert.equal(await refused(adaApi.publish({ title: "Nobody's team", kind: "html", files, owner: "team" })), "invalid_params");
+    assert.equal(await refused(adaApi.publish({ title: "For core", kind: "html", files, id: teams.id, owner: "me" })), "invalid_params", "a version never changes whose it is");
   });
 });
 
@@ -155,6 +162,22 @@ describe("the publication gate, on the fake daemon", () => {
     assert.equal(decided.decision, "allow");
     assert.deepEqual(decided.answered, { visibility: "team:core", owner: "me", edited: ["owner"] });
     assert.deepEqual(daemon.publications.get(gate.callId)?.answer?.["edited"], ["owner"]);
+    await client.close(session.id, listener);
+  });
+
+  it("asks only whom a new version is for, and refuses an owner on it", async () => {
+    const session = daemon.seed("/home/ada/repo");
+    daemon.askPublish(session.id, { title: "Weekly figures", kind: "html", files: 1, visibility: "team:core", id: "art-1", note: "Week 44" });
+    let state = emptyTranscript;
+    const listener = (e: TroupeEvent): void => void (state = fold(state, e));
+    const view = await client.open(session.id, {}, listener);
+    await until(() => approvals(state).length === 1, "the gate");
+    const gate = approvals(state)[0]!;
+    assert.equal(gate.publication?.id, "art-1");
+    assert.equal(await refused(view.respondApproval(gate.callId, "allow", { answer: { visibility: "team:core", owner: "team" } })), "invalid_params");
+    await view.respondApproval(gate.callId, "allow", { answer: { visibility: "organisation" } });
+    await until(() => approvals(state)[0]!.decision !== undefined, "the decision");
+    assert.deepEqual(approvals(state)[0]!.answered, { visibility: "organisation", edited: ["visibility"] });
     await client.close(session.id, listener);
   });
 

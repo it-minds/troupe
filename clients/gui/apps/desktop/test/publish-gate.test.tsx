@@ -109,8 +109,23 @@ describe("the publication gate", () => {
     await sees("edited owner");
   });
 
+  it("asks only whom a new version is for, and sends no owner", async () => {
+    const { answers, onAnswer } = answering();
+    ({ unmount } = render(<ApprovalPanel entry={gated({ id: "art-1", note: "Week 44", visibility: "team:core", owner: null })} canAnswer others={[]} onAnswer={onAnswer} audiences={audiences} />));
+
+    await sees("publish a new version of an artifact");
+    await sees("Week 44");
+    const team = await waitFor(() => radio("Team core"), "one choice a team");
+    expect(team.checked).toBe(true);
+    expect(radio("Team core, owned by the team")).toBeNull();
+    (await seesButton("Allow")).click();
+    await waitFor(() => answers.length === 1, "the answer");
+    expect(answers[0]).toEqual(["allow", { answer: { visibility: "team:core" } }]);
+  });
+
   it("offers each team twice, each profile once, and the proposal besides", () => {
     const keys = audienceChoices(audiences, { visibility: "team:ops", owner: null }).map((c) => c.key);
     expect(keys).toEqual(["private|me", "organisation|me", "team:core|team", "team:core|me", "team:design|team", "team:design|me", "profile:dev|me", "team:ops|team"]);
+    expect(audienceChoices(audiences, { visibility: "team:ops", owner: null }, true).map((c) => c.key)).toEqual(["private", "organisation", "team:core", "team:design", "profile:dev", "team:ops"]);
   });
 });

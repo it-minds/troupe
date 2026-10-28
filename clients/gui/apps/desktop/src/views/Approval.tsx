@@ -474,11 +474,12 @@ function DelegationPanel({
   );
 }
 
-/** One choice of whom a publication is for and whose it is, keyed as `visibility|owner`. */
+/** One choice of whom a publication is for and, for a new artifact, whose it is, keyed as `visibility|owner`. */
 interface AudienceChoice {
   key: string;
   visibility: string;
-  owner: "me" | "team";
+  /** Absent for a new version, whose owner a version never changes. */
+  owner: "me" | "team" | undefined;
   label: string;
 }
 
@@ -487,27 +488,37 @@ function defaultOwner(visibility: string | null): "me" | "team" {
   return visibility !== null && visibility.startsWith("team:") ? "team" : "me";
 }
 
+/** A choice's key: the visibility, and for a new artifact whose it is. */
+function keyOf(visibility: string, owner: "me" | "team" | undefined): string {
+  return owner === undefined ? visibility : `${visibility}|${owner}`;
+}
+
 /**
- * The choices a person has: only them, the organisation, each team they are in (the team's
- * own, or theirs alone), each profile; and whatever the agent proposed, even one the plane
- * has not named for them yet, so the proposal is never lost while the list loads.
+ * The choices a person has: only them, the organisation, each team they are in (for a new
+ * artifact, the team's own or theirs alone; a new version keeps whose it is, so one choice
+ * a team), each profile; and whatever the agent proposed, even one the plane has not
+ * named for them yet, so the proposal is never lost while the list loads.
  */
-export function audienceChoices(audiences: Audiences | null, proposed: { visibility: string | null; owner: "me" | "team" | null }): AudienceChoice[] {
+export function audienceChoices(audiences: Audiences | null, proposed: { visibility: string | null; owner: "me" | "team" | null }, republish = false): AudienceChoice[] {
+  const me = republish ? undefined : "me";
   const choices: AudienceChoice[] = [
-    { key: "private|me", visibility: "private", owner: "me", label: "Only you" },
-    { key: "organisation|me", visibility: "organisation", owner: "me", label: "The whole organisation" },
+    { key: keyOf("private", me), visibility: "private", owner: me, label: "Only you" },
+    { key: keyOf("organisation", me), visibility: "organisation", owner: me, label: "The whole organisation" },
   ];
   for (const t of audiences?.teams ?? []) {
-    choices.push({ key: `team:${t}|team`, visibility: `team:${t}`, owner: "team", label: `Team ${t}, owned by the team` });
-    choices.push({ key: `team:${t}|me`, visibility: `team:${t}`, owner: "me", label: `Team ${t}, owned by you` });
+    if (republish) choices.push({ key: `team:${t}`, visibility: `team:${t}`, owner: undefined, label: `Team ${t}` });
+    else {
+      choices.push({ key: `team:${t}|team`, visibility: `team:${t}`, owner: "team", label: `Team ${t}, owned by the team` });
+      choices.push({ key: `team:${t}|me`, visibility: `team:${t}`, owner: "me", label: `Team ${t}, owned by you` });
+    }
   }
-  for (const p of audiences?.profiles ?? []) choices.push({ key: `profile:${p}|me`, visibility: `profile:${p}`, owner: "me", label: `The ${p} profile's people` });
+  for (const p of audiences?.profiles ?? []) choices.push({ key: keyOf(`profile:${p}`, me), visibility: `profile:${p}`, owner: me, label: `The ${p} profile's people` });
   if (proposed.visibility !== null) {
-    const owner = proposed.owner ?? defaultOwner(proposed.visibility);
-    const key = `${proposed.visibility}|${owner}`;
+    const owner = republish ? undefined : (proposed.owner ?? defaultOwner(proposed.visibility));
+    const key = keyOf(proposed.visibility, owner);
     if (!choices.some((c) => c.key === key)) {
       const v = proposed.visibility;
-      const label = v.startsWith("team:") ? `Team ${v.slice("team:".length)}, owned by ${owner === "team" ? "the team" : "you"}` : visibilityWords(v).replace(/^(\w)/, (m) => m.toUpperCase());
+      const label = v.startsWith("team:") ? `Team ${v.slice("team:".length)}${owner === undefined ? "" : `, owned by ${owner === "team" ? "the team" : "you"}`}` : visibilityWords(v).replace(/^(\w)/, (m) => m.toUpperCase());
       choices.push({ key, visibility: v, owner, label });
     }
   }
@@ -538,11 +549,13 @@ function PublishPanel({
   onAnswer: (decision: Decision, answer?: GateAnswer) => Promise<void>;
   onceOnly: boolean;
 }): JSX.Element {
-  const proposedKey = publication.visibility === null ? null : `${publication.visibility}|${publication.owner ?? defaultOwner(publication.visibility)}`;
+  // A new version keeps whose the artifact is: only whom it is for is asked.
+  const republish = publication.id !== null;
+  const proposedKey = publication.visibility === null ? null : keyOf(publication.visibility, republish ? undefined : (publication.owner ?? defaultOwner(publication.visibility)));
   const [chosen, setChosen] = useState<string | null>(proposedKey);
   const [busy, setBusy] = useState<Decision | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const choices = audienceChoices(audiences, publication);
+  const choices = audienceChoices(audiences, publication, republish);
   const choice = choices.find((c) => c.key === chosen) ?? null;
 
   const send = async (decision: Decision, answer?: PublicationAnswer): Promise<void> => {
@@ -560,7 +573,7 @@ function PublishPanel({
 
   const what = publication.kind === "html" ? "A page" : publication.kind === "markdown" ? "A document" : "A file";
   const files = publication.files === 1 ? "1 file" : `${publication.files} files`;
-  const answerOf = choice ? { visibility: choice.visibility, owner: choice.owner } : undefined;
+  const answerOf: PublicationAnswer | undefined = choice ? { visibility: choice.visibility, ...(choice.owner === undefined ? {} : { owner: choice.owner }) } : undefined;
 
   return (
     <section className="approval publication" aria-label={`Publish ${publication.title}`}>

@@ -618,9 +618,9 @@ export class FakePlane {
     return this.opts.admin?.role(subject) === "platform_admin" || (this.opts.admin?.teams.get(team)?.admins.includes(subject) ?? false);
   }
 
-  /** Whether this person owns it: the person who published it, or any member of the team that owns it. */
+  /** Whether this person owns it: the person who published it, or any member or administrator of the team that owns it. */
   private owns(a: FakeArtifact, subject: string): boolean {
-    if (a.owner_team) return this.teamsOf(subject).includes(a.owner_team);
+    if (a.owner_team) return this.teamsOf(subject).includes(a.owner_team) || (this.opts.admin?.teams.get(a.owner_team)?.admins.includes(subject) ?? false);
     return a.owner.subject === subject;
   }
 
@@ -671,8 +671,8 @@ export class FakePlane {
   private transfer(a: FakeArtifact, subject: string, name: string, to: unknown): { result: unknown } | { error: { code: number; message: string; data?: unknown } } {
     const forbidden = (reason: string) => ({ error: { code: -32004, message: "forbidden", data: { id: a.id, reason } } });
     if (to === "me") {
-      if (!a.owner_team) return forbidden("it is a person's already; only the team that owns an artifact gives it back");
-      if (!this.teamAdmin(a.owner_team, subject)) return forbidden(`only an admin of team ${a.owner_team} or a platform admin takes an artifact back from the team`);
+      if (!a.owner_team) return { error: { code: -32602, message: "invalid_params", data: { id: a.id, reason: "this artifact is not a team's, so there is nothing to take back" } } };
+      if (!this.teamAdmin(a.owner_team, subject)) return forbidden(`only an administrator of team ${a.owner_team}, or a platform administrator, takes an artifact back from the team`);
       a.owner = { subject, display_name: name };
       a.owner_team = null;
       return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
@@ -702,6 +702,7 @@ export class FakePlane {
       const a = this.artifacts.get(params["id"]);
       if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
       if (!["owner", "edit"].includes(this.roleOf(a, subject) ?? "")) return { error: { code: -32004, message: "forbidden" } };
+      if (params["owner"] !== undefined && params["owner"] !== null) return { error: { code: -32602, message: "invalid_params", data: { reason: "whose an artifact is does not change with a version; artifact.transfer moves it" } } };
       this.publish(a, subject, files, { note: typeof params["note"] === "string" ? params["note"] : null });
       return { result: this.artifactJson(a, subject) };
     }
@@ -1258,6 +1259,7 @@ export class FakePlane {
         const a = this.artifacts.get(String(params["id"] ?? ""));
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
         if (!["owner", "edit"].includes(this.roleOf(a, subject) ?? "")) return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner, or somebody the owner gave an edit link, publishes a new version of an artifact" } } };
+        if (params["owner"] !== undefined && params["owner"] !== null) return { error: { code: -32602, message: "invalid_params", data: { reason: "whose an artifact is does not change with a version; artifact.transfer moves it" } } };
         const newest = a.versions[a.versions.length - 1]!;
         const base = typeof params["base"] === "number" ? params["base"] : null;
         if (base !== null && base !== newest.n) return { error: { code: -32009, message: "conflict", data: { reason: `version ${newest.n} was published after version ${base}, which this edit was made on; open version ${newest.n} and make the edit again` } } };

@@ -454,11 +454,15 @@ export interface PublicationGate {
   note: string | null;
 }
 
-/** A publication's answer: whom it is for and whose it is, chosen or confirmed by the person. */
+/**
+ * A publication's answer: whom it is for and, for a new artifact, whose it is, chosen or
+ * confirmed by the person. A new version keeps whose the artifact is, so its answer names
+ * no owner: one sent is refused, since only a transfer moves an artifact.
+ */
 export interface PublicationAnswer {
   /** `private`, `organisation`, `team:<name>` or `profile:<name>`. */
   visibility: string;
-  owner: "me" | "team";
+  owner?: "me" | "team";
 }
 
 /**

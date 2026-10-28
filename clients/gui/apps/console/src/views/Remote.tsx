@@ -166,23 +166,31 @@ export function RemoteSessions({ load, reload }: { load: Load<RemoteRow[]>; relo
  * each team (the team's own, or theirs alone) and each profile; the agent's proposal first,
  * and offered even where the plane has not named it for them.
  */
-function audienceOptions(me: { teams: Array<{ name: string }>; profiles: string[] }, proposed: { visibility: string | null; owner: "me" | "team" | null }): Array<{ key: string; label: string }> {
+function audienceOptions(me: { teams: Array<{ name: string }>; profiles: string[] }, proposed: { visibility: string | null; owner: "me" | "team" | null; id: string | null }): Array<{ key: string; label: string }> {
+  // A new version keeps whose the artifact is, so only whom it is for is offered.
+  const own = proposed.id === null ? "|me" : "";
   const options = [
-    { key: "private|me", label: "Only you" },
-    { key: "organisation|me", label: "The whole organisation" },
-    ...me.teams.flatMap((t) => [
-      { key: `team:${t.name}|team`, label: `Team ${t.name}, owned by the team` },
-      { key: `team:${t.name}|me`, label: `Team ${t.name}, owned by you` },
-    ]),
-    ...me.profiles.map((p) => ({ key: `profile:${p}|me`, label: `The ${p} profile's people` })),
+    { key: `private${own}`, label: "Only you" },
+    { key: `organisation${own}`, label: "The whole organisation" },
+    ...me.teams.flatMap((t) =>
+      proposed.id === null
+        ? [
+            { key: `team:${t.name}|team`, label: `Team ${t.name}, owned by the team` },
+            { key: `team:${t.name}|me`, label: `Team ${t.name}, owned by you` },
+          ]
+        : [{ key: `team:${t.name}`, label: `Team ${t.name}` }],
+    ),
+    ...me.profiles.map((p) => ({ key: `profile:${p}${own}`, label: `The ${p} profile's people` })),
   ];
   const key = proposedKey(proposed);
-  if (key && !options.some((o) => o.key === key)) options.push({ key, label: `${proposed.visibility}, ${key.endsWith("|team") ? "owned by the team" : "owned by you"}` });
+  if (key && !options.some((o) => o.key === key)) options.push({ key, label: proposed.id === null ? `${proposed.visibility}, ${key.endsWith("|team") ? "owned by the team" : "owned by you"}` : String(proposed.visibility) });
   return options;
 }
 
-function proposedKey(proposed: { visibility: string | null; owner: "me" | "team" | null }): string | null {
+/** The proposal's key: its visibility, and for a new artifact whose it is (`visibility|owner`). */
+function proposedKey(proposed: { visibility: string | null; owner: "me" | "team" | null; id: string | null }): string | null {
   if (proposed.visibility === null) return null;
+  if (proposed.id !== null) return proposed.visibility;
   return `${proposed.visibility}|${proposed.owner ?? (proposed.visibility.startsWith("team:") ? "team" : "me")}`;
 }
 
@@ -326,7 +334,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
                   disabled={(audiences[a.callId] ?? proposedKey(pub) ?? "") === ""}
                   onClick={() => {
                     const [visibility, owner] = (audiences[a.callId] ?? proposedKey(pub) ?? "").split("|");
-                    void act((x) => x.view.respondApproval(a.callId, "allow", { answer: { visibility: visibility ?? "private", owner: owner === "team" ? "team" : "me" } }));
+                    void act((x) => x.view.respondApproval(a.callId, "allow", { answer: { visibility: visibility ?? "private", ...(owner === undefined ? {} : { owner: owner === "team" ? "team" : "me" }) } }));
                   }}
                 >
                   Allow once

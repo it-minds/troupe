@@ -1506,11 +1506,14 @@ evoked where nothing is set and there was a sign-in. */
           const answer = (params["answer"] ?? {}) as Record<string, unknown>;
           const visibility = typeof answer["visibility"] === "string" ? answer["visibility"] : null;
           const owner = answer["owner"] === "me" || answer["owner"] === "team" ? answer["owner"] : null;
-          if (visibility === null || owner === null) return invalid("an allowed publication names whom it is for (answer.visibility) and whose it is (answer.owner: me or team)");
+          const republish = typeof proposed["id"] === "string";
+          if (visibility === null || (owner === null && !republish)) return invalid("an allowed publication names whom it is for (answer.visibility) and whose it is (answer.owner: me or team)");
           if (!/^(private|organisation|team:.+|profile:.+)$/.test(visibility)) return invalid(`visibility must be private, organisation, team:<name> or profile:<name>, not ${visibility}`);
+          // A new version keeps whose the artifact is: an owner on a republish is refused as the plane refuses it.
+          if (republish && answer["owner"] !== undefined && answer["owner"] !== null) return invalid("whose an artifact is does not change with a version; artifact.transfer moves it");
           if (owner === "team" && !visibility.startsWith("team:")) return invalid("owner team needs a team to publish for");
-          const edited = [...(visibility !== proposed["visibility"] ? ["visibility"] : []), ...(owner !== (proposed["owner"] ?? (visibility.startsWith("team:") ? "team" : "me")) ? ["owner"] : [])];
-          decided = { ...decided, visibility, owner, edited };
+          const edited = [...(visibility !== proposed["visibility"] ? ["visibility"] : []), ...(!republish && owner !== (proposed["owner"] ?? (visibility.startsWith("team:") ? "team" : "me")) ? ["owner"] : [])];
+          decided = republish ? { ...decided, visibility, edited } : { ...decided, visibility, owner, edited };
         }
         asked.answer = { decision, ...decided };
         session.pendingApprovals = Math.max(0, session.pendingApprovals - 1);
@@ -1910,12 +1913,17 @@ evoked where nothing is set and there was a sign-in. */
               return reply(ws, id, { ...found });
             // Between the person and a team: given to a team of theirs, or taken back by its admin.
             case "artifact.transfer": {
-              if (found["may_transfer"] !== true) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { id: found["id"], reason: "only its owner gives an artifact to a team, and only an admin of that team takes it back" } });
               const to = String(params["to"] ?? "");
-              if (to === "me") Object.assign(found, { owner_team: null, owner: { subject: "alice@example.com", display_name: "Alice" }, mine: true, role: "owner", may_transfer: true });
-              else if (to.startsWith("team:")) Object.assign(found, { owner_team: to.slice("team:".length), mine: true, role: "owner", may_transfer: false });
-              else return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: "to must be me or team:<name>" } });
-              return reply(ws, id, { ...found });
+              if (to === "me") {
+                if (!found["owner_team"]) return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { id: found["id"], reason: "this artifact is not a team's, so there is nothing to take back" } });
+                if (found["may_transfer"] !== true) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { id: found["id"], reason: `only an administrator of team ${String(found["owner_team"])}, or a platform administrator, takes an artifact back from the team` } });
+                Object.assign(found, { owner_team: null, owner: { subject: "alice@example.com", display_name: "Alice" }, mine: true, role: "owner", may_transfer: true });
+              } else if (to.startsWith("team:")) {
+                if (found["may_transfer"] !== true || found["owner_team"]) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { id: found["id"], reason: "only its owner gives an artifact to a team" } });
+                Object.assign(found, { owner_team: to.slice("team:".length), mine: true, role: "owner", may_transfer: false });
+              } else return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: "to must be me or team:<name>" } });
+              // The same answer as artifact.get: the artifact with its versions.
+              return reply(ws, id, { ...found, versions });
             }
             // Who may open it, moved by its owner as the next version with every file carried.
             case "artifact.put": {
@@ -1933,6 +1941,9 @@ evoked where nothing is set and there was a sign-in. */
         }
         this.publishedArtifacts.push(params);
         const existing = mine.find((a) => a["id"] === params["id"]);
+        if (existing && params["owner"] !== undefined && params["owner"] !== null) {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: "whose an artifact is does not change with a version; artifact.transfer moves it" } });
+        }
         const published = existing
           ? Object.assign(existing, { version: Number(existing["version"]) + 1 })
           : { id: `art-fake${mine.length + 1}`, title: params["title"], kind: params["kind"], visibility: params["visibility"], version: 1, mine: true, owner_team: this.ownerTeamOf(params) };
