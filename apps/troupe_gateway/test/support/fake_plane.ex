@@ -124,6 +124,13 @@ defmodule Troupe.Gateway.FakePlane do
   @spec keep_own(pid()) :: :ok
   def keep_own(state), do: Agent.update(state, &Map.put(&1, :own, %{"version" => 0, "text" => ""}))
 
+  @doc """
+  Read a memory document as `text` alone from now on, as a plane from before entries does:
+  a save or preview sent `entries` is refused with `invalid_params` naming `text` as missing.
+  """
+  @spec read_text_only(pid()) :: :ok
+  def read_text_only(state), do: Agent.update(state, &Map.put(&1, :text_only, true))
+
   @doc "The person's teams, by name, which `me.memory` asked with `entries` names."
   @spec teams_with(pid(), [String.t()]) :: :ok
   def teams_with(state, teams), do: Agent.update(state, &Map.put(&1, :teams, teams))
@@ -457,7 +464,7 @@ defmodule Troupe.Gateway.FakePlane do
 
   defp dispatch(state, "me.memory.put", params) do
     Agent.get_and_update(state, fn held ->
-      case own_put(Map.get(held, :own), params) do
+      case own_put(Map.get(held, :own), params, Map.get(held, :text_only, false)) do
         {:ok, now, entry} ->
           {{:ok, %{"changed" => true, "entry" => entry, "user" => own_json(now)}}, Map.put(held, :own, now)}
 
@@ -748,8 +755,11 @@ defmodule Troupe.Gateway.FakePlane do
 
   # A level of the organisation's memory: the team `sales`'s is this person's to change, the
   # organisation's is not, as the plane decides it.
-  defp dispatch(_state, "admin.memory." <> _ = method, %{"scope" => "team", "name" => "sales"} = params) do
+  defp dispatch(state, "admin.memory." <> _ = method, %{"scope" => "team", "name" => "sales"} = params) do
+    text_only = Agent.get(state, &Map.get(&1, :text_only, false))
+
     case method do
+      _put_or_preview when text_only and is_map_key(params, "entries") -> text_missing()
       "admin.memory.get" -> {:ok, %{"scope" => "team", "name" => "sales", "version" => 1, "text" => "## Prices\n\nFramework.", "entries" => [%{"topic" => "Prices", "body" => "Framework."}]}}
       "admin.memory.preview" -> {:ok, %{"version" => 1, "bytes" => 10, "diff" => [], "entries" => params["entries"]}}
       "admin.memory.put" -> {:ok, %{"document" => %{"version" => 2}, "changes" => %{"version" => %{"from" => 1, "to" => 2}}}}
@@ -804,6 +814,12 @@ defmodule Troupe.Gateway.FakePlane do
       end)
     end)
   end
+
+  # A plane that reads text alone did not find it in a call that carries entries.
+  defp text_missing, do: {:rpc_error, -32_602, "invalid_params", %{"missing" => "text"}}
+
+  defp own_put(own, %{"entries" => _} = _params, true) when own != nil, do: text_missing()
+  defp own_put(own, params, _text_only), do: own_put(own, params)
 
   defp own_put(nil, _params), do: {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory.put"}}
 

@@ -49,6 +49,36 @@ export interface MemoryInEffect {
   plane_url?: string;
 }
 
+/** An entry as a save sends it: its topic and body, and `heading: false` for the text before the first heading. */
+export type EntryDraft = { topic?: string | null; body?: string; heading?: boolean };
+
+/**
+ * The text of a document holding these entries, as the plane writes them: each as
+ * `## Topic`, a blank line and its body, a blank line between two, General (no topic, or
+ * `heading: false`) as its body alone; a body's blank lines at either end go, and an entry
+ * with nothing in it goes. The plane's own rule (`Troupe.Protocol.Memory.Entries.render/1`),
+ * line for line, so a client that must send `text` to a plane from before entries sends what
+ * a newer one would have written.
+ */
+export function renderEntries(entries: EntryDraft[]): string {
+  const blank = (line: string): boolean => line.trim() === "";
+  return entries
+    .map((entry) => {
+      const lines = (typeof entry.body === "string" ? entry.body : "").split("\n");
+      let from = 0;
+      let to = lines.length;
+      while (from < to && blank(lines[from]!)) from++;
+      while (to > from && blank(lines[to - 1]!)) to--;
+      const body = lines.slice(from, to).join("\n");
+      const heading = entry.heading !== false && typeof entry.topic === "string";
+      if (!heading) return body;
+      const topic = (entry.topic as string).trim();
+      return body === "" ? `## ${topic}` : `## ${topic}\n\n${body}`;
+    })
+    .filter((part) => part !== "")
+    .join("\n\n");
+}
+
 /** A topic as two entries are compared by it: its words, case and spacing aside, as the plane compares them. */
 export function topicKey(topic: string): string {
   return topic.trim().replace(/\s+/g, " ").toLowerCase();

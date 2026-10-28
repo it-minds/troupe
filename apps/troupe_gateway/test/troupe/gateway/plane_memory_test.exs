@@ -460,6 +460,43 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
                })
     end
 
+    # A plane from before entries (0.28 and earlier) reads `text` alone: its refusal of a save
+    # sent `entries` reaches the client with the plane's data, `missing: "text"`, the person's
+    # own under invalid_params with a sentence naming the field, a level's as the plane gave
+    # it, so the client can send the text instead.
+    test "a plane that reads text alone refuses entries naming text as missing, and takes the text", ctx do
+      _fingerprint = FakePlane.sign(ctx.plane.state)
+      FakePlane.keep_own(ctx.plane.state)
+      FakePlane.read_text_only(ctx.plane.state)
+      assert {:ok, %{"linked" => true}} = link(ctx)
+
+      entries = [%{"topic" => "Tone", "body" => "Short answers."}]
+      put = fn params ->
+        Client.call(ctx.client, "me.memory.put", Map.put(params, "command_id", Client.command_id()))
+      end
+
+      assert {:error, %{message: "invalid_params", data: data}} = put.(%{"entries" => entries, "version" => 0})
+      assert data == %{"missing" => "text", "reason" => "the plane refused it: text is missing"}
+
+      assert {:ok, %{"user" => %{"version" => 1, "text" => "## Tone\n\nShort answers."}}} =
+               put.(%{"text" => "## Tone\n\nShort answers.", "version" => 0})
+
+      level = %{"scope" => "team", "name" => "sales"}
+      put_level = fn params ->
+        params = Map.put(params, "command_id", Client.command_id())
+        Client.call(ctx.client, "admin.memory.put", Map.merge(level, params))
+      end
+
+      assert {:error, %{message: "invalid_params", data: %{"missing" => "text"}}} =
+               Client.call(ctx.client, "admin.memory.preview", Map.put(level, "entries", entries))
+
+      assert {:error, %{message: "invalid_params", data: %{"missing" => "text"}}} =
+               put_level.(%{"entries" => entries, "version" => 1})
+
+      assert {:ok, %{"document" => %{"version" => 2}}} =
+               put_level.(%{"text" => "## Prices\n\nFramework agreement.", "version" => 1})
+    end
+
     # The desktop app's Memory view: the history of the person's own, and a rollback, which
     # the sessions here read from their next turn as a save's.
     test "me.memory.history and me.memory.rollback are the plane's, as the person", ctx do
