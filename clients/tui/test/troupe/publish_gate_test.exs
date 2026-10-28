@@ -154,7 +154,13 @@ defmodule Troupe.PublishGateTest do
 
     decided(remote, "c3", "allow_session")
     ask(remote, "c4", @publication)
-    eventually(fn -> screen_text(pid, screen) =~ "PUBLISH “Quarterly report”" end)
+    # The box for c3 carries the same title: wait until it has gone and c4's, a new
+    # artifact's, is the one on screen, or the n lands on nothing.
+    eventually(fn ->
+      text = screen_text(pid, screen)
+      text =~ "PUBLISH “Quarterly report”" and not (text =~ "a new version of art-1")
+    end)
+
     press(pid, "n")
     sent = responded(remote, "c4")
     assert sent["decision"] == "deny"
