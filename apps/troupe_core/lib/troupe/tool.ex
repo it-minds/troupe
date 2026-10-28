@@ -40,6 +40,11 @@ defmodule Troupe.Tool.Ctx do
     # Decision 876), which the `skill` tool lists for the rest of the turn; `nil` before it,
     # which is the skills on disk now.
     turn_skills: nil,
+    # What the person answered at the gate beyond their word, for a call they changed
+    # there: a publication's `visibility`, `owner` and `edited`. Empty for a call nobody
+    # changed. The tool runs with their choice laid over its arguments already; this is
+    # what lets it say so.
+    answer: %{},
     depth: 0,
     max_depth: 3,
     budget: nil,
@@ -64,6 +69,7 @@ defmodule Troupe.Tool.Ctx do
           binds_thinking: boolean(),
           turn_tools: [Troupe.Tool.handle()] | nil,
           turn_skills: Troupe.Skills.found() | nil,
+          answer: %{optional(String.t()) => term()},
           depth: non_neg_integer(),
           max_depth: pos_integer(),
           budget: Troupe.Budget.t() | nil,
@@ -148,6 +154,10 @@ defmodule Troupe.Tool.Result do
     do: "The tool #{tool} is not available in the current profile."
 
   def describe({:denied, tool}), do: "Permission to run #{tool} was denied by the user."
+
+  # A publication's no with the person's word back, as a delegation's reaches its agent.
+  def describe({:denied, tool, reason}),
+    do: "Permission to run #{tool} was denied by the user, who said: #{reason}"
 
   def describe({:denied_unattended, tool}),
     do:
@@ -246,7 +256,8 @@ defmodule Troupe.Tool do
 
     * `must_ask?/1` — a call a person must answer whatever the profile's permission or
       the session's `auto_approve` says (a profile's `deny` still denies):
-      `onboard_write` into the config directory, whose files decide what runs.
+      `onboard_write` into the config directory, whose files decide what runs, and
+      `publish_artifact` with no `visibility`, whose audience is the person's to choose.
 
     * `available?/1` — whether a session has the tool at all, for a tool a host registers
       that only some of its sessions can use: a worker's GitHub tools, for a session

@@ -24,13 +24,15 @@ defmodule Troupe.Worker.Artifacts do
   def publish(params, ctx) do
     params =
       params
-      |> Map.take(~w(title kind visibility files id note))
+      |> Map.take(~w(title kind visibility owner files id note))
+      |> Troupe.Gateway.Artifacts.own_only_new()
       |> Map.put("session_id", ctx.session_id)
       |> put_agent(ctx)
 
     # Past what one message of the link carries comfortably, the files go to the object store
     # by a handle the plane gives for the session's owner, as a daemon's do.
-    begin = &request("session.artifact.upload.begin", %{"session_id" => ctx.session_id, "files" => &1})
+    begin =
+      &request("session.artifact.upload.begin", %{"session_id" => ctx.session_id, "files" => &1})
 
     sent =
       with {:ok, params} <- Troupe.Gateway.Artifacts.carried(params, begin),

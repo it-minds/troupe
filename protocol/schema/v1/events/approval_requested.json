@@ -18,6 +18,9 @@
     "delegation": {
       "type": "object"
     },
+    "publication": {
+      "type": "object"
+    },
     "rule": {
       "type": "object"
     },

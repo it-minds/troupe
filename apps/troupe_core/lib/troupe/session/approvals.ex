@@ -34,6 +34,23 @@ defmodule Troupe.Session.Approvals do
   (`brief`, held to the brief's shape), or a word back to the agent that delegated
   (`reason`, with a denial). `allow_session` lets that agent run unasked for the session,
   rather than every delegation. The caller hears `{:allow, answer}` or `{:deny, answer}`.
+
+  A publication (`tool: "publish_artifact"`) is the other request whose answer carries
+  more than a word, with what the gate shows under `publication`: the title, the kind, the
+  files' count, and the `visibility` and `owner` the model proposed, `nil` where it proposed
+  none. Whom an artifact is for is the person's to say: the answer takes `visibility`
+  (`private`, `organisation`, `team:<name>` or `profile:<name>`, its shape alone, since
+  membership is the plane's to refuse) and `owner` (`me` or `team`; dropped on a republish,
+  whose owner does not change with a version), and an `allow` that
+  names no visibility where the model named none is refused, in a sentence, with the
+  request still waiting. `allow_session` on one of those is this call's `allow`: a standing
+  permission to publish for an audience not yet chosen would be nobody's choice. The
+  decision names the `visibility` and `owner` the call ran with and which of them the
+  person `edited`, and the caller hears `{:allow, answer}` with them, to run the call as
+  the person aimed it.
+
+  Every answer is checked synchronously against its request, so a wrong one, a bare word
+  among them, is refused to whoever sent it rather than dropped.
   """
 
   use GenServer
@@ -65,8 +82,9 @@ defmodule Troupe.Session.Approvals do
   @type decision :: :allow | :deny | :allow_session
 
   @typedoc """
-  What a delegation's answer carries besides its word (Decision 850), string-keyed as the
-  protocol sends it: `agent`, `brief` and `reason`, each only where given.
+  What an answer carries besides its word, string-keyed as the protocol sends it: a
+  delegation's `agent`, `brief` and `reason`, a publication's `visibility`, `owner` and
+  `reason`, each only where given.
   """
   @type answer :: %{optional(String.t()) => term()}
 
@@ -93,17 +111,18 @@ defmodule Troupe.Session.Approvals do
   catch
     # The gate restarting is not a reason to crash the tool task; it is a denial the
     # model can read and work around.
-    :exit, _ -> if delegation?(req), do: {:deny, %{}}, else: :deny
+    :exit, _ -> if answered?(req), do: {:deny, %{}}, else: :deny
   end
 
   @doc """
   Answer an outstanding request. First response wins.
 
-  `answer` is what a delegation's answer carries besides its word (Decision 850). Given,
-  it is checked against the request before anything is decided, and a wrong one is
-  answered `{:error, sentence}` with the request still waiting: an agent that is not one
-  of the subagents offered, a brief missing a part, any of them on a request that is not a
-  delegation's.
+  `answer` is what a delegation's or a publication's answer carries besides its word. It
+  is checked against the request before anything is decided, and a wrong one is answered
+  `{:error, sentence}` with the request still waiting: an agent that is not one of the
+  subagents offered, a brief missing a part, a publication allowed for nobody in
+  particular, any of them on a request that is not that kind. A plain word is checked the
+  same way, since a bare `allow` to a publication nobody has aimed is the wrong answer too.
   """
   @spec decide(
           String.t(),
@@ -113,16 +132,7 @@ defmodule Troupe.Session.Approvals do
           answer()
         ) ::
           :ok | {:error, String.t()}
-  def decide(session_id, call_id, decision, actor \\ nil, answer \\ %{})
-
-  def decide(session_id, call_id, decision, actor, answer) when map_size(answer) == 0 do
-    GenServer.cast(
-      Troupe.Registry.approvals(session_id),
-      {:decide, call_id, decision, actor, %{}}
-    )
-  end
-
-  def decide(session_id, call_id, decision, actor, answer) do
+  def decide(session_id, call_id, decision, actor \\ nil, answer \\ %{}) do
     GenServer.call(
       Troupe.Registry.approvals(session_id),
       {:decide, call_id, decision, actor, answer}
@@ -187,6 +197,7 @@ defmodule Troupe.Session.Approvals do
         agent_path: data["agent_path"] || event.agent
       }
       |> put_delegation(data["delegation"])
+      |> put_publication(data["publication"])
       |> put_rule(data["rule"])
 
     %{state | awaiting: Map.put(state.awaiting, req.call_id, req)}
@@ -230,6 +241,11 @@ defmodule Troupe.Session.Approvals do
     {answer_for(data["decision"]), Map.take(data, ~w(agent brief reason edited))}
   end
 
+  # A publication's likewise: whom it is for and whose it is, as the person aimed it.
+  defp decided_answer(%{"tool" => "publish_artifact"} = data) do
+    {answer_for(data["decision"]), Map.take(data, ~w(visibility owner edited))}
+  end
+
   defp decided_answer(data), do: answer_for(data["decision"])
 
   # What `allow_session` lets through from then on: a tool, or for a delegation the agent
@@ -244,6 +260,11 @@ defmodule Troupe.Session.Approvals do
 
   defp put_delegation(req, _none), do: req
 
+  defp put_publication(req, publication) when is_map(publication),
+    do: Map.put(req, :publication, publication)
+
+  defp put_publication(req, _none), do: req
+
   defp put_rule(req, rule) when is_map(rule), do: Map.put(req, :rule, rule)
   defp put_rule(req, _none), do: req
 
@@ -254,7 +275,7 @@ defmodule Troupe.Session.Approvals do
   def handle_call({:request, req}, from, state) do
     cond do
       state.auto_approve == true and not always?(req) and not delegation?(req) ->
-        {:reply, :allow, state}
+        {:reply, reply(req, :allow, %{}), state}
 
       MapSet.member?(state.session_allows, request_key(req)) and not always?(req) ->
         {:reply, reply(req, :allow, %{}), state}
@@ -310,8 +331,8 @@ defmodule Troupe.Session.Approvals do
 
   def handle_call(:auto_approve?, _from, state), do: {:reply, state.auto_approve, state}
 
-  # An answer that carries more than its word is checked against the request first, and a
-  # wrong one leaves the request waiting for a right one.
+  # Every answer is checked against the request first, and a wrong one leaves the request
+  # waiting for a right one.
   def handle_call({:decide, call_id, decision, actor, answer}, _from, state) do
     case asked(state, call_id) do
       nil ->
@@ -319,25 +340,21 @@ defmodule Troupe.Session.Approvals do
 
       req ->
         case check_answer(req, decision, answer) do
-          {:ok, answer} -> {:reply, :ok, answer_request(state, call_id, decision, actor, answer)}
-          {:error, sentence} -> {:reply, {:error, sentence}, state}
+          {:ok, answer} ->
+            {:reply, :ok,
+             answer_request(state, call_id, for_this_call(req, decision), actor, answer)}
+
+          {:error, sentence} ->
+            {:reply, {:error, sentence}, state}
         end
     end
   end
 
-  @impl GenServer
-  def handle_cast({:decide, call_id, decision, actor, answer}, state) do
-    # Only a plain word comes this way, which a delegation reads as "this agent, this brief".
-    answer =
-      with %{delegation: _} = req <- asked(state, call_id),
-           {:ok, checked} <- check_answer(req, decision, answer) do
-        checked
-      else
-        _ -> answer
-      end
-
-    {:noreply, answer_request(state, call_id, decision, actor, answer)}
-  end
+  # A publication the model aimed at nobody takes no standing permission: the person chose
+  # an audience for this call, and "always" would let the next call publish for one not
+  # yet chosen. It is this call's allow.
+  defp for_this_call(%{publication: %{"visibility" => nil}}, :allow_session), do: :allow
+  defp for_this_call(_req, decision), do: decision
 
   defp answer_request(state, call_id, decision, actor, answer) do
     case Map.pop(state.pending, call_id) do
@@ -393,18 +410,22 @@ defmodule Troupe.Session.Approvals do
     }
   end
 
-  # -- a delegation's answer (Decision 850) ---------------------------------------
+  # -- a delegation's and a publication's answers ----------------------------------
 
   defp delegation?(req), do: Map.has_key?(req, :delegation)
+  defp publication?(req), do: Map.has_key?(req, :publication)
+
+  # A request whose answer carries more than its word, and whose caller hears it.
+  defp answered?(req), do: delegation?(req) or publication?(req)
 
   defp request_key(%{delegation: %{"agent" => agent}}), do: {"delegate", agent}
   defp request_key(req), do: req.tool
 
   # What the caller waiting on a request hears.
-  defp reply(%{delegation: _}, decision, answer),
-    do: {if(decision == :deny, do: :deny, else: :allow), answer}
-
-  defp reply(_req, decision, _answer), do: if(decision == :deny, do: :deny, else: :allow)
+  defp reply(req, decision, answer) do
+    word = if decision == :deny, do: :deny, else: :allow
+    if answered?(req), do: {word, answer}, else: word
+  end
 
   # A plain answer to a plain request; for a delegation, what the answer carries, held to
   # the request: an agent among the subagents it offered, a brief of the same shape, a
@@ -422,10 +443,89 @@ defmodule Troupe.Session.Approvals do
     end
   end
 
+  # A publication's: whom it is for, in one of the four shapes (whether the person is in
+  # the team is the plane's to refuse, at publish), whose it is, and a word back only with
+  # a no. An allow must name an audience, the model's where it proposed one and the person
+  # said nothing, and is refused where neither did: an artifact is published for somebody.
+  defp check_answer(%{publication: publication}, decision, answer) do
+    with :ok <- publication_keys(answer),
+         {:ok, visibility} <- check_visibility(publication, decision, answer["visibility"]),
+         {:ok, owner} <- check_owner(publication, decision, answer["owner"]),
+         {:ok, reason} <- check_reason(decision, answer["reason"]) do
+      {:ok,
+       %{"visibility" => visibility, "owner" => owner, "reason" => reason}
+       |> Map.reject(fn {_key, value} -> is_nil(value) end)
+       |> with_aimed(publication, decision)}
+    end
+  end
+
   defp check_answer(_req, _decision, answer) when map_size(answer) == 0, do: {:ok, %{}}
 
-  defp check_answer(req, _decision, _answer),
-    do: {:error, "agent, brief and reason answer a delegation, and this asks about #{req.tool}"}
+  defp check_answer(req, _decision, answer) do
+    if Map.keys(answer) -- ~w(visibility owner reason) == [],
+      do:
+        {:error,
+         "visibility, owner and reason answer a publication, and this asks about #{req.tool}"},
+      else:
+        {:error, "agent, brief and reason answer a delegation, and this asks about #{req.tool}"}
+  end
+
+  defp publication_keys(answer) do
+    case Map.keys(answer) -- ~w(visibility owner reason) do
+      [] ->
+        :ok
+
+      keys ->
+        {:error,
+         "a publication's answer takes visibility, owner and reason, not #{Enum.join(keys, ", ")}"}
+    end
+  end
+
+  @audiences "private, organisation, team:<name> or profile:<name>"
+
+  defp check_visibility(_publication, :deny, _visibility), do: {:ok, nil}
+
+  defp check_visibility(%{"visibility" => proposed}, _decision, nil) when is_binary(proposed),
+    do: {:ok, proposed}
+
+  defp check_visibility(_publication, _decision, nil),
+    do: {:error, "say whom it is for: visibility is #{@audiences}"}
+
+  defp check_visibility(_publication, _decision, visibility) do
+    if audience?(visibility),
+      do: {:ok, visibility},
+      else: {:error, "visibility is #{@audiences}, not #{inspect(visibility)}"}
+  end
+
+  defp audience?(visibility) when visibility in ~w(private organisation), do: true
+  defp audience?("team:" <> name), do: name != ""
+  defp audience?("profile:" <> name), do: name != ""
+  defp audience?(_other), do: false
+
+  defp check_owner(_publication, :deny, _owner), do: {:ok, nil}
+
+  # Whose an artifact is does not change with a version, so a republish takes no owner:
+  # one given is dropped rather than sent for the plane to refuse.
+  defp check_owner(%{"id" => id}, _decision, _owner) when is_binary(id), do: {:ok, nil}
+  defp check_owner(publication, _decision, nil), do: {:ok, publication["owner"]}
+  defp check_owner(_publication, _decision, owner) when owner in ~w(me team), do: {:ok, owner}
+
+  defp check_owner(_publication, _decision, other),
+    do: {:error, "owner is me or team, not #{inspect(other)}"}
+
+  # Which of the audience and the owner the person changed from the model's proposal, an
+  # audience chosen where the model proposed none among them: what the tool says it ran as.
+  defp with_aimed(answer, _publication, :deny), do: answer
+
+  defp with_aimed(answer, publication, _decision) do
+    edited =
+      for key <- ~w(visibility owner),
+          Map.has_key?(answer, key),
+          answer[key] != publication[key],
+          do: key
+
+    Map.put(answer, "edited", edited)
+  end
 
   defp known_keys(answer) do
     case Map.keys(answer) -- ~w(agent brief reason) do
@@ -531,13 +631,21 @@ defmodule Troupe.Session.Approvals do
     }
   end
 
-  # The request as it is asked: a delegation's with what the gate shows (Decision 850), and
-  # one a per-tool rule asks with that rule (#658), so the person sees why it asks.
+  # The request as it is asked: a delegation's with what the gate shows (Decision 850), a
+  # publication's with what the person aims, and one a per-tool rule asks with that rule
+  # (#658), so the person sees why it asks.
   defp requested(%{delegation: delegation} = req),
     do: Map.put(describe(req), "delegation", delegation)
 
-  defp requested(%{rule: rule} = req) when is_map(rule), do: Map.put(describe(req), "rule", rule)
-  defp requested(req), do: describe(req)
+  defp requested(%{publication: publication} = req),
+    do: req |> requested_rule() |> Map.put("publication", publication)
+
+  defp requested(req), do: requested_rule(req)
+
+  defp requested_rule(%{rule: rule} = req) when is_map(rule),
+    do: Map.put(describe(req), "rule", rule)
+
+  defp requested_rule(req), do: describe(req)
 
   # A request that must be asked (`always: true`), and a delegation a person asked to see,
   # stay for their answers.
@@ -549,7 +657,7 @@ defmodule Troupe.Session.Approvals do
 
     Enum.each(released, fn {_id, entry} ->
       Process.demonitor(entry.monitor, [:flush])
-      GenServer.reply(entry.from, :allow)
+      GenServer.reply(entry.from, reply(entry.req, :allow, %{}))
     end)
 
     %{state | pending: Map.new(kept)}

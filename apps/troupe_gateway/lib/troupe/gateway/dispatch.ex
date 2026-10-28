@@ -61,7 +61,15 @@ defmodule Troupe.Gateway.Dispatch do
     @moduledoc "Who is calling, and what they are allowed to do."
 
     @enforce_keys [:principal, :scopes, :connection]
-    defstruct [:principal, :scopes, :connection, :next_subscription_id, :activate, :client, local_only: false]
+    defstruct [
+      :principal,
+      :scopes,
+      :connection,
+      :next_subscription_id,
+      :activate,
+      :client,
+      local_only: false
+    ]
 
     # `client`: which client this connection is, a word from `Troupe.LLM.Identify.clients/0`;
     # a session it creates or wakes names it to the provider (Decision 787). `local_only`:
@@ -323,7 +331,12 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   defp local_only(method, _params, %Context{local_only: true})
-       when method in ["memory.in_effect", "admin.memory.get", "admin.memory.preview", "admin.memory.put"] do
+       when method in [
+              "memory.in_effect",
+              "admin.memory.get",
+              "admin.memory.preview",
+              "admin.memory.put"
+            ] do
     refuse_local_only(
       "this client is in Local only, so the daemon does not ask the plane for its memory; " <>
         "turn Local only off to read or change it"
@@ -366,7 +379,10 @@ defmodule Troupe.Gateway.Dispatch do
   defp local_only(_method, _params, _context), do: :ok
 
   defp refuse_offer(why),
-    do: refuse_local_only(why <> ", so it is not offered to the plane for steering from another device")
+    do:
+      refuse_local_only(
+        why <> ", so it is not offered to the plane for steering from another device"
+      )
 
   # An offered session's events go to the plane for whoever steers it from elsewhere, so a
   # client in Local only gives it no work until the offer is withdrawn.
@@ -383,10 +399,14 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp given_work(session_id, context), do: LocalOnly.worked(context.connection, session_id)
 
-  defp refuse_local_only(reason), do: {:error, Error.new(:forbidden, %{local_only: true, reason: reason})}
+  defp refuse_local_only(reason),
+    do: {:error, Error.new(:forbidden, %{local_only: true, reason: reason})}
 
-  defp created({:ok, %{} = result} = outcome, method, context) when method in ["session.create", "session.fork"] do
-    if is_binary(result["session_id"]), do: LocalOnly.worked(context.connection, result["session_id"])
+  defp created({:ok, %{} = result} = outcome, method, context)
+       when method in ["session.create", "session.fork"] do
+    if is_binary(result["session_id"]),
+      do: LocalOnly.worked(context.connection, result["session_id"])
+
     outcome
   end
 
@@ -443,8 +463,11 @@ defmodule Troupe.Gateway.Dispatch do
   # report as the field it needed.
   defp session_ids(params) do
     case Enum.find(named_sessions(params), &malformed?/1) do
-      nil -> :ok
-      {field, _id} -> {:error, Error.new(:invalid_params, %{field: field, reason: "not a session id"})}
+      nil ->
+        :ok
+
+      {field, _id} ->
+        {:error, Error.new(:invalid_params, %{field: field, reason: "not a session id"})}
     end
   end
 
@@ -662,7 +685,9 @@ defmodule Troupe.Gateway.Dispatch do
       {documents, from} = session_memory(session_id, config.plane_memory)
       config = %{config | plane_memory: documents}
 
-      provenance = Troupe.Instructions.provenance(workspace, config, instruction_focus(session_id))
+      provenance =
+        Troupe.Instructions.provenance(workspace, config, instruction_focus(session_id))
+
       {:ok, if(from, do: Map.put(provenance, "memory_from", from), else: provenance)}
     end
   end
@@ -967,7 +992,8 @@ defmodule Troupe.Gateway.Dispatch do
 
       case Troupe.start_loop(session_id, actor(context), opts) do
         {:ok, loop} ->
-          {:ok, %{"accepted" => true, "loop_id" => loop.id, "max_iterations" => loop.max_iterations}}
+          {:ok,
+           %{"accepted" => true, "loop_id" => loop.id, "max_iterations" => loop.max_iterations}}
 
         {:error, :no_goal} ->
           {:error,
@@ -1006,8 +1032,9 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  # A delegation's answer may carry more than its word (Decision 850): `agent` to send it
-  # to another subagent, `brief` with the parts the person edited, `reason` with a no. A
+  # An answer may carry more than its word: a delegation's `agent` to send it to another
+  # subagent and `brief` with the parts the person edited (Decision 850), a publication's
+  # `visibility` and `owner` for whom it is and whose it is, and `reason` with a no. A
   # wrong one is refused with the sentence that says why, and the request waits on.
   defp handle("approval.respond", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
@@ -1016,7 +1043,9 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, decision} <- parse_decision(decision),
          :ok <- activate(session_id, context) do
       answer =
-        params |> Map.take(~w(agent brief reason)) |> Map.reject(fn {_k, v} -> is_nil(v) end)
+        params
+        |> Map.take(~w(agent brief reason visibility owner))
+        |> Map.reject(fn {_k, v} -> is_nil(v) end)
 
       case Troupe.approve(session_id, call_id, decision, actor(context), answer) do
         :ok -> {:ok, %{"accepted" => true}}
@@ -1144,7 +1173,12 @@ defmodule Troupe.Gateway.Dispatch do
       :ok = LocalOnly.worked(context.connection, session_id)
 
       opts =
-        [workspace: resolved.path, agent: profile, config_overrides: config, session_id: session_id]
+        [
+          workspace: resolved.path,
+          agent: profile,
+          config_overrides: config,
+          session_id: session_id
+        ]
         |> maybe_put(:task, task)
         |> maybe_put(:parent, parent)
         |> maybe_private(private?)
@@ -1410,7 +1444,8 @@ defmodule Troupe.Gateway.Dispatch do
   # save of it or an entry (`Memory.put_own/1`), sent with this daemon's sign-in and read by
   # the sessions running here from their next turn. Signed out, a sentence.
   # `blame: true` adds who wrote each line and from which session (`lines`).
-  defp handle("me.memory", params, _context), do: own_memory(Memory.own(blame: params["blame"] == true))
+  defp handle("me.memory", params, _context),
+    do: own_memory(Memory.own(blame: params["blame"] == true))
 
   # Where this machine's copy stands against the plane, and what each session here read at
   # its last turn (`Memory.status/1`). Signed out, or asked by a client in Local only, it
@@ -1420,10 +1455,20 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp handle("me.memory.put", params, _context) do
     case params do
-      %{"append" => entry} when is_binary(entry) -> own_memory(Memory.put_own(Map.take(params, ["append", "topic"])))
-      %{"text" => text, "version" => v} when is_binary(text) and is_integer(v) -> own_memory(Memory.put_own(params))
-      %{"entries" => entries, "version" => v} when is_list(entries) and is_integer(v) -> own_memory(Memory.put_own(params))
-      _ -> {:error, Error.new(:invalid_params, %{reason: "me.memory.put takes text or entries and version, or append"})}
+      %{"append" => entry} when is_binary(entry) ->
+        own_memory(Memory.put_own(Map.take(params, ["append", "topic"])))
+
+      %{"text" => text, "version" => v} when is_binary(text) and is_integer(v) ->
+        own_memory(Memory.put_own(params))
+
+      %{"entries" => entries, "version" => v} when is_list(entries) and is_integer(v) ->
+        own_memory(Memory.put_own(params))
+
+      _ ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason: "me.memory.put takes text or entries and version, or append"
+         })}
     end
   end
 
@@ -1432,8 +1477,9 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("memory.in_effect", params, _context),
     do: forwarded("memory.in_effect", Memory.in_effect(params))
 
-  defp handle("admin.memory." <> _ = method, params, _context) when method in ["admin.memory.get", "admin.memory.preview", "admin.memory.put"],
-    do: forwarded(method, Memory.admin(method, params))
+  defp handle("admin.memory." <> _ = method, params, _context)
+       when method in ["admin.memory.get", "admin.memory.preview", "admin.memory.put"],
+       do: forwarded(method, Memory.admin(method, params))
 
   # An artifact published as the person (`Artifacts.put/1`), for a client's "Publish…": the
   # plane's answer with `plane_url`. Signed out, a sentence; the plane's refusal, its own.
@@ -1471,7 +1517,8 @@ defmodule Troupe.Gateway.Dispatch do
       {:error, :signed_out} ->
         {:error,
          Error.new(:unavailable, %{
-           reason: "this computer's daemon is not signed in to a Troupe plane; troupe login signs it in"
+           reason:
+             "this computer's daemon is not signed in to a Troupe plane; troupe login signs it in"
          })}
 
       {:error, _refused} = error ->
@@ -1749,8 +1796,15 @@ defmodule Troupe.Gateway.Dispatch do
          %{} = described <- Settings.describe_session(session_id, opts) do
       {:ok, Map.merge(described, explained(session_id, explain, params["key"], opts))}
     else
-      {:error, _} = error -> error
-      nil -> {:error, Error.new(:not_found, %{session_id: session_id, reason: "the session is not running here"})}
+      {:error, _} = error ->
+        error
+
+      nil ->
+        {:error,
+         Error.new(:not_found, %{
+           session_id: session_id,
+           reason: "the session is not running here"
+         })}
     end
   end
 
@@ -1772,7 +1826,11 @@ defmodule Troupe.Gateway.Dispatch do
     answer =
       announcing(scope, workspace, fn ->
         with {:ok, written} <- Settings.set(key, params["value"], scope, workspace) do
-          {:ok, workspace |> ModelSettings.describe() |> settings(workspace) |> Map.put("written", written)}
+          {:ok,
+           workspace
+           |> ModelSettings.describe()
+           |> settings(workspace)
+           |> Map.put("written", written)}
         end
       end)
 
@@ -1819,8 +1877,11 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  defp keep_document(plane_url, document) when is_map(document), do: keep_organisation(plane_url, document)
-  defp keep_document(_plane_url, _other), do: {:error, "document must be the plane's me.client_defaults answer, an object"}
+  defp keep_document(plane_url, document) when is_map(document),
+    do: keep_organisation(plane_url, document)
+
+  defp keep_document(_plane_url, _other),
+    do: {:error, "document must be the plane's me.client_defaults answer, an object"}
 
   # One writer for both ways a plane's document arrives and the poll that asks for it again
   # (`Policy`): kept as the plane signed it, every client told which keys changed, and every
@@ -1847,9 +1908,14 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp served_key(url) do
     case PlaneKeys.fetch(url) do
-      {:ok, served} -> {:ok, served}
-      :unsigned -> {:error, Error.new(:invalid_params, %{reason: "#{url} signs nothing: no key to accept"})}
-      {:error, why} -> {:error, Error.new(:unavailable, %{reason: why})}
+      {:ok, served} ->
+        {:ok, served}
+
+      :unsigned ->
+        {:error, Error.new(:invalid_params, %{reason: "#{url} signs nothing: no key to accept"})}
+
+      {:error, why} ->
+        {:error, Error.new(:unavailable, %{reason: why})}
     end
   end
 
@@ -1864,7 +1930,8 @@ defmodule Troupe.Gateway.Dispatch do
   defp settings_result({:ok, result}, workspace), do: {:ok, settings(result, workspace)}
   defp settings_result(error, _workspace), do: settings_result(error)
 
-  defp settings(model_settings, workspace), do: Map.merge(model_settings, Settings.describe(workspace))
+  defp settings(model_settings, workspace),
+    do: Map.merge(model_settings, Settings.describe(workspace))
 
   defp explain_param(%{"explain" => explain}) when explain in ["text", "json"], do: {:ok, explain}
   defp explain_param(%{"explain" => nil}), do: {:ok, nil}
@@ -1921,7 +1988,10 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, answer} <- answer_object(Map.get(params, "answer")) do
       case Setup.answer(step, answer, subject: context.principal["subject"]) do
         {:ok, %{step: "done", session: %{} = wanted} = flow} ->
-          {:ok, flow |> Troupe.Setup.report() |> Map.put("session", first_session(wanted, params, context))}
+          {:ok,
+           flow
+           |> Troupe.Setup.report()
+           |> Map.put("session", first_session(wanted, params, context))}
 
         {:ok, flow} ->
           {:ok, Troupe.Setup.report(flow)}
@@ -1934,7 +2004,9 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp answer_object(nil), do: {:ok, %{}}
   defp answer_object(answer) when is_map(answer), do: {:ok, answer}
-  defp answer_object(_other), do: {:error, Error.new(:invalid_params, %{reason: "answer must be an object"})}
+
+  defp answer_object(_other),
+    do: {:error, Error.new(:invalid_params, %{reason: "answer must be an object"})}
 
   # The first session's command id is named after the answer's; an answer sent without one
   # still makes its session.
@@ -1947,8 +2019,11 @@ defmodule Troupe.Gateway.Dispatch do
     }
 
     case handle("session.create", create, context) do
-      {:ok, created} -> Map.merge(wanted, created)
-      {:error, %Error{data: data}} -> Map.put(wanted, "error", to_string(data[:reason] || data["reason"] || "refused"))
+      {:ok, created} ->
+        Map.merge(wanted, created)
+
+      {:error, %Error{data: data}} ->
+        Map.put(wanted, "error", to_string(data[:reason] || data["reason"] || "refused"))
     end
   end
 
@@ -2043,7 +2118,9 @@ defmodule Troupe.Gateway.Dispatch do
   defp refresh_memory do
     case Memory.refresh() do
       {:error, reason} ->
-        Logger.info("troupe-daemon: the organisation's memory was not refreshed: #{format_reason(reason)}")
+        Logger.info(
+          "troupe-daemon: the organisation's memory was not refreshed: #{format_reason(reason)}"
+        )
 
       _kept_or_nothing ->
         :ok
@@ -2082,17 +2159,23 @@ defmodule Troupe.Gateway.Dispatch do
   defp forwarded(_method, {:error, :signed_out}) do
     {:error,
      Error.new(:unavailable, %{
-       reason: "this computer's daemon is not signed in to a Troupe plane; troupe login signs it in"
+       reason:
+         "this computer's daemon is not signed in to a Troupe plane; troupe login signs it in"
      })}
   end
 
   defp forwarded(method, {:error, {:rpc, %{"code" => -32_601}}}),
-    do: {:error, Error.new(:unavailable, %{reason: "the plane has no #{method}; it is from before it"})}
+    do:
+      {:error,
+       Error.new(:unavailable, %{reason: "the plane has no #{method}; it is from before it"})}
 
   defp forwarded(method, {:error, {:rpc, %{"code" => code} = refusal}}) when is_integer(code) do
     case Error.token(code) do
-      :unknown -> forwarded(method, {:error, Memory.sentence({:rpc, refusal})})
-      token -> {:error, Error.new(token, refusal["data"] || %{reason: Memory.sentence({:rpc, refusal})})}
+      :unknown ->
+        forwarded(method, {:error, Memory.sentence({:rpc, refusal})})
+
+      token ->
+        {:error, Error.new(token, refusal["data"] || %{reason: Memory.sentence({:rpc, refusal})})}
     end
   end
 
@@ -2164,7 +2247,8 @@ defmodule Troupe.Gateway.Dispatch do
         {:error,
          Error.new(:invalid_params, %{
            field: "worktree_name",
-           reason: "one path segment of letters, digits, '.', '_' and '-', not starting with '.' or '-'"
+           reason:
+             "one path segment of letters, digits, '.', '_' and '-', not starting with '.' or '-'"
          })}
 
       {:error, reason} ->
@@ -2265,8 +2349,11 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp workspace_config(workspace) do
     case Troupe.Config.resolve(workspace) do
-      {:ok, config, _layers} -> {:ok, config}
-      {:error, error} -> {:error, Error.new(:invalid_params, %{field: "config", reason: Exception.message(error)})}
+      {:ok, config, _layers} ->
+        {:ok, config}
+
+      {:error, error} ->
+        {:error, Error.new(:invalid_params, %{field: "config", reason: Exception.message(error)})}
     end
   end
 
@@ -2310,8 +2397,11 @@ defmodule Troupe.Gateway.Dispatch do
   # one that is only whitespace is no goal at all rather than an empty one.
   defp goal_text(params) do
     case params |> Map.get("text") |> trimmed() do
-      "" -> {:error, Error.new(:invalid_params, %{field: "text", reason: "a goal needs some text"})}
-      text -> {:ok, text}
+      "" ->
+        {:error, Error.new(:invalid_params, %{field: "text", reason: "a goal needs some text"})}
+
+      text ->
+        {:ok, text}
     end
   end
 
@@ -2321,9 +2411,15 @@ defmodule Troupe.Gateway.Dispatch do
   # Absent is the config's cap; present, it is a whole number of iterations, at least one.
   defp loop_iterations(params) do
     case Map.get(params, "max_iterations") do
-      nil -> {:ok, nil}
-      n when is_integer(n) and n > 0 -> {:ok, n}
-      _ -> {:error, Error.new(:invalid_params, %{field: "max_iterations", reason: "a positive integer"})}
+      nil ->
+        {:ok, nil}
+
+      n when is_integer(n) and n > 0 ->
+        {:ok, n}
+
+      _ ->
+        {:error,
+         Error.new(:invalid_params, %{field: "max_iterations", reason: "a positive integer"})}
     end
   end
 
@@ -2785,7 +2881,9 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   defp unseen_json(nil), do: unseen_json(Unseen.none())
-  defp unseen_json(unseen), do: Map.new(unseen, fn {key, value} -> {Atom.to_string(key), value} end)
+
+  defp unseen_json(unseen),
+    do: Map.new(unseen, fn {key, value} -> {Atom.to_string(key), value} end)
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)

@@ -18,6 +18,9 @@
     "note": {
       "type": "string"
     },
+    "owner": {
+      "type": "string"
+    },
     "session_id": {
       "type": "string"
     },

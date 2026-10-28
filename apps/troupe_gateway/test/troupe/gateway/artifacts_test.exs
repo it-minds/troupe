@@ -102,7 +102,39 @@ defmodule Troupe.Gateway.ArtifactsTest do
     assert sent["title"] == "Weekly"
     assert sent["session_id"] == "20261025T120000-abcdef"
     refute Map.has_key?(sent, "command_id")
+    refute Map.has_key?(sent, "owner")
     assert [%{"path" => "index.html"}] = sent["files"]
+
+    # Whose a team publication is goes through as said: the plane makes it the team's
+    # unless told `me`.
+    assert {:ok, _artifact} = publish(ctx, %{"visibility" => "team:engineering", "owner" => "me"})
+
+    {"artifact.publish", sent} =
+      ctx.plane.state
+      |> FakePlane.calls()
+      |> Enum.filter(&match?({"artifact.publish", _}, &1))
+      |> List.last()
+
+    assert sent["visibility"] == "team:engineering"
+    assert sent["owner"] == "me"
+
+    # A new version keeps its owner: an `owner` sent with `id` is dropped, since the plane
+    # refuses one on a republish.
+    assert {:ok, %{"version" => 2}} =
+             publish(ctx, %{
+               "id" => "art-fakefakefakefake",
+               "visibility" => "team:engineering",
+               "owner" => "me"
+             })
+
+    {"artifact.publish", sent} =
+      ctx.plane.state
+      |> FakePlane.calls()
+      |> Enum.filter(&match?({"artifact.publish", _}, &1))
+      |> List.last()
+
+    assert sent["id"] == "art-fakefakefakefake"
+    refute Map.has_key?(sent, "owner")
 
     assert {:error, %{message: "invalid_params", data: %{"reason" => reason}}} =
              publish(ctx, %{"title" => ""})
@@ -111,7 +143,8 @@ defmodule Troupe.Gateway.ArtifactsTest do
 
     # The plane's code, not one the daemon picks: a team the person is not in is forbidden,
     # with the teams they are in for a client to offer.
-    assert {:error, %{message: "forbidden", data: %{"reason" => reason, "teams" => ["engineering"]}}} =
+    assert {:error,
+            %{message: "forbidden", data: %{"reason" => reason, "teams" => ["engineering"]}}} =
              publish(ctx, %{"visibility" => "team:research"})
 
     assert reason =~ "not in team research"
@@ -166,6 +199,7 @@ defmodule Troupe.Gateway.ArtifactsTest do
              Client.call(ctx.client, "artifact.list", %{"mine" => true})
 
     assert gallery =~ "#/artifacts"
+
     assert {"artifact.list", %{"mine" => true}} =
              Enum.find(FakePlane.calls(ctx.plane.state), &match?({"artifact.list", _}, &1))
   end
@@ -179,13 +213,22 @@ defmodule Troupe.Gateway.ArtifactsTest do
       {"artifact.get", %{"id" => "art-fakefakefakefake"}},
       {"artifact.open", %{"id" => "art-fakefakefakefake", "version" => 1}},
       {"artifact.read", %{"id" => "art-fakefakefakefake", "version" => 1, "path" => "index.md"}},
-      {"artifact.share", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "role" => "view"}},
-      {"artifact.unshare", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "share" => "sh-1"}},
-      {"artifact.rollback", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => 1}},
-      {"artifact.pin", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => nil}},
+      {"artifact.share",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "role" => "view"}},
+      {"artifact.unshare",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "share" => "sh-1"}},
+      {"artifact.rollback",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => 1}},
+      {"artifact.pin",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "version" => nil}},
       # Who may open it, moved by its owner: a put over the newest version with no files.
       {"artifact.put",
-       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "base" => 1, "visibility" => "private"}}
+       %{
+         "command_id" => Client.command_id(),
+         "id" => "art-fakefakefakefake",
+         "base" => 1,
+         "visibility" => "private"
+       }}
     ]
 
     for {method, params} <- forwarded do
@@ -203,13 +246,19 @@ defmodule Troupe.Gateway.ArtifactsTest do
 
     assert url == ctx.plane.url
 
-    assert {:ok, %{"url" => "https://artifacts.example.test/enter?ticket=" <> _, "expires_in" => 60}} =
-             Client.call(ctx.client, "artifact.open", %{"id" => "art-fakefakefakefake", "version" => 1})
+    assert {:ok,
+            %{"url" => "https://artifacts.example.test/enter?ticket=" <> _, "expires_in" => 60}} =
+             Client.call(ctx.client, "artifact.open", %{
+               "id" => "art-fakefakefakefake",
+               "version" => 1
+             })
 
-    assert {:ok, %{"url" => "https://artifacts.example.test/s/" <> _, "share" => %{"role" => "view"}}} =
+    assert {:ok,
+            %{"url" => "https://artifacts.example.test/s/" <> _, "share" => %{"role" => "view"}}} =
              Client.call(ctx.client, "artifact.share", Enum.at(forwarded, 3) |> elem(1))
 
-    assert {:ok, %{"text" => "# Weekly"}} = Client.call(ctx.client, "artifact.read", Enum.at(forwarded, 2) |> elem(1))
+    assert {:ok, %{"text" => "# Weekly"}} =
+             Client.call(ctx.client, "artifact.read", Enum.at(forwarded, 2) |> elem(1))
 
     for {method, params} <- Enum.drop(forwarded, 4) do
       assert {:ok, _answer} = Client.call(ctx.client, method, params), method
@@ -252,7 +301,8 @@ defmodule Troupe.Gateway.ArtifactsTest do
                  %{
                    "title" => "Findings",
                    "kind" => "markdown",
-                   "visibility" => "profile:dev",
+                   "visibility" => "team:engineering",
+                   "owner" => "team",
                    "files" => ["report.md"]
                  }}
               ]},
@@ -279,6 +329,8 @@ defmodule Troupe.Gateway.ArtifactsTest do
 
     assert sent["session_id"] == session.id
     assert sent["agent"] =~ "agent:"
+    assert sent["visibility"] == "team:engineering"
+    assert sent["owner"] == "team"
     assert [%{"path" => "report.md", "bytes" => bytes}] = sent["files"]
     assert Base.decode64!(bytes) == "# Findings"
 

@@ -13,7 +13,7 @@ defmodule Troupe.Tools do
   alias Troupe.Session.{Approvals, ClientTools}
   alias Troupe.{Skills, Tool}
   alias Troupe.Tool.{Ctx, Result}
-  alias Troupe.Tools.GoalComplete
+  alias Troupe.Tools.{GoalComplete, PublishArtifact}
 
   @builtins [
     Troupe.Tools.ReadFile,
@@ -414,11 +414,7 @@ defmodule Troupe.Tools do
 
     case permission(tool, name, args, definition, ctx) do
       {ask, rule} when ask in [:ask, :must_ask] ->
-        case ask(ctx, name, args, ask == :must_ask, rule) do
-          :allow -> execute(tool, args, ctx)
-          :deny -> Result.error(ctx.call_id, name, {:denied, name})
-          {:deny, :unattended} -> Result.error(ctx.call_id, name, {:denied_unattended, name})
-        end
+        answered(tool, name, args, ctx, ask(ctx, name, args, ask == :must_ask, rule))
 
       {:auto, _rule} ->
         execute(tool, args, ctx)
@@ -458,19 +454,48 @@ defmodule Troupe.Tools do
     end
   end
 
+  # The call as the gate answered it. A publication the person aimed there runs for whom
+  # they chose, their `visibility` and `owner` laid over the model's, and is told they
+  # chose: the one answer here that carries more than a word, since a delegation's call is
+  # deferred to the agent rather than run in a task. A no to one carries their word back.
+  defp answered(tool, _name, args, ctx, :allow), do: execute(tool, args, ctx)
+
+  defp answered(tool, _name, args, ctx, {:allow, given}),
+    do: execute(tool, PublishArtifact.as_answered(args, given), %{ctx | answer: given})
+
+  defp answered(_tool, name, _args, ctx, {:deny, :unattended}),
+    do: Result.error(ctx.call_id, name, {:denied_unattended, name})
+
+  defp answered(_tool, name, _args, ctx, {:deny, %{"reason" => reason}}),
+    do: Result.error(ctx.call_id, name, {:denied, name, reason})
+
+  defp answered(_tool, name, _args, ctx, _denied),
+    do: Result.error(ctx.call_id, name, {:denied, name})
+
   defp ask(ctx, name, args, always?, rule) do
-    Approvals.request(ctx.session_id, %{
-      call_id: ctx.call_id,
-      tool: name,
-      args: args,
-      agent_path: ctx.agent_path,
-      always: always?
-    }
-    |> put_rule(rule))
+    Approvals.request(
+      ctx.session_id,
+      %{
+        call_id: ctx.call_id,
+        tool: name,
+        args: args,
+        agent_path: ctx.agent_path,
+        always: always?
+      }
+      |> put_rule(rule)
+      |> put_publication(name, args)
+    )
   end
 
   defp put_rule(req, nil), do: req
   defp put_rule(req, rule), do: Map.put(req, :rule, Permissions.to_json(rule))
+
+  # A publication asks with what the gate shows and the person aims: the title, the kind,
+  # the files' count, and the audience and owner the model proposed, or none.
+  defp put_publication(req, "publish_artifact", args),
+    do: Map.put(req, :publication, PublishArtifact.publication(args))
+
+  defp put_publication(req, _name, _args), do: req
 
   @doc """
   Run a tool and normalise whatever it returns into a `Result`.

@@ -216,6 +216,9 @@ keep typing while it runs.
 **Approval.** Writing or editing a file and running a shell command ask first: the session
 stops that one call and waits for allow, deny or allow-for-this-session. Anyone attached
 with control rights can answer; the first answer wins and everyone is told who gave it.
+Publishing an [artifact](artifacts.md) asks too, and the approval is where you say whom it
+is for: the agent proposes an audience only when you named one, and otherwise you choose
+it there, whatever your permission rules or `--auto-approve` say.
 
 **Budget.** Limits on turns, tokens and time, plus your team's money budget on the plane.
 When one is reached the agent says which and asks, or stops; it never silently continues.
