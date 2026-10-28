@@ -77,10 +77,12 @@ defmodule Troupe.Worker.ArtifactsTest do
     [pod] = Fleet.list_workers("dev")
     {:ok, _} = PlaneSessions.place(context.session_id, pod)
 
+    # `owner` goes through to the plane as said; whose it makes the artifact is its own.
     params = %{
       "title" => "From the pod",
       "kind" => "html",
       "visibility" => "organisation",
+      "owner" => "me",
       "files" => [%{"path" => "index.html", "bytes" => Base.encode64("<h1>Pod</h1>")}]
     }
 
@@ -96,6 +98,14 @@ defmodule Troupe.Worker.ArtifactsTest do
 
     assert {:ok, "<h1>Pod</h1>"} =
              ObjectStore.get(ObjectStore.from_env(), "artifacts/#{artifact["id"]}/1/index.html")
+
+    # A new version keeps its owner: the `owner` a republish carries is dropped before the
+    # plane, which refuses one, sees it.
+    assert {:ok, %{"version" => 2}} =
+             Artifacts.publish(
+               Map.merge(params, %{"id" => artifact["id"], "note" => "again"}),
+               %{session_id: context.session_id, agent_path: ["root"]}
+             )
 
     # A session this pod does not hold is not one it can publish for.
     assert {:error, reason} =
@@ -118,7 +128,10 @@ defmodule Troupe.Worker.ArtifactsTest do
     # placement below is not taken back as a session the pod does not hold.
     assert {:ok, _} = activate(context)
     {:ok, ada} = Identity.upsert_user(%{subject: "ada@example.test", email: "ada@example.test"})
-    {:ok, group} = Identity.upsert_group(%{external_id: "engineering", display_name: "engineering"})
+
+    {:ok, group} =
+      Identity.upsert_group(%{external_id: "engineering", display_name: "engineering"})
+
     {:ok, team} = Identity.enable_team(group, %{name: "engineering"})
 
     {:ok, _} =
@@ -149,7 +162,9 @@ defmodule Troupe.Worker.ArtifactsTest do
              Artifacts.publish(params, %{session_id: context.session_id, agent_path: ["root"]})
 
     assert artifact["owner"]["subject"] == "ada@example.test"
-    assert {:ok, ^big} = ObjectStore.get(ObjectStore.from_env(), "artifacts/#{artifact["id"]}/1/data.bin")
+
+    assert {:ok, ^big} =
+             ObjectStore.get(ObjectStore.from_env(), "artifacts/#{artifact["id"]}/1/data.bin")
 
     stop_supervised!(Link)
     PlaneHelper.stop_plane()

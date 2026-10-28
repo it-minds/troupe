@@ -30,10 +30,16 @@
       },
       "type": "array"
     },
+    "owner": {
+      "type": "string"
+    },
     "reason": {
       "type": "string"
     },
     "tool": {
+      "type": "string"
+    },
+    "visibility": {
       "type": "string"
     }
   },

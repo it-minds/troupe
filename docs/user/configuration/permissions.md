@@ -61,7 +61,8 @@ patterns more specific than the shorter.
 **What each does.** A `deny` refuses the call before it runs and tells the model the rule
 and its file. An `ask` asks you, and the question says which rule asked. An `allow` runs a
 call that would have asked, except one that must always ask (a write into your config
-directory) and every call in a branch an `AI!` comment started, unless
+directory, and a `publish_artifact` that does not say whom the artifact is for, which you
+choose at the approval) and every call in a branch an `AI!` comment started, unless
 `watch_auto_approve` is on. With `approvals: deny` an allowed call runs, as one an agent
 marks `auto` does, and every other call that asks is refused.
 

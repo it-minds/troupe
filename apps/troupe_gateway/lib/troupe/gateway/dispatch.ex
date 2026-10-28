@@ -1006,8 +1006,9 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  # A delegation's answer may carry more than its word (Decision 850): `agent` to send it
-  # to another subagent, `brief` with the parts the person edited, `reason` with a no. A
+  # An answer may carry more than its word: a delegation's `agent` to send it to another
+  # subagent and `brief` with the parts the person edited (Decision 850), a publication's
+  # `visibility` and `owner` for whom it is and whose it is, and `reason` with a no. A
   # wrong one is refused with the sentence that says why, and the request waits on.
   defp handle("approval.respond", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
@@ -1016,7 +1017,9 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, decision} <- parse_decision(decision),
          :ok <- activate(session_id, context) do
       answer =
-        params |> Map.take(~w(agent brief reason)) |> Map.reject(fn {_k, v} -> is_nil(v) end)
+        params
+        |> Map.take(~w(agent brief reason visibility owner))
+        |> Map.reject(fn {_k, v} -> is_nil(v) end)
 
       case Troupe.approve(session_id, call_id, decision, actor(context), answer) do
         :ok -> {:ok, %{"accepted" => true}}
