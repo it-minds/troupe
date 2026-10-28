@@ -254,7 +254,9 @@ defmodule Troupe.Gateway.Remote do
     if :ets.whereis(@table) == :undefined,
       do: :ets.new(@table, [:named_table, :set, :public, read_concurrency: true])
 
-    path = Keyword.get_lazy(opts, :path, fn -> Path.join(Troupe.Paths.state_dir(), @file_name) end)
+    path =
+      Keyword.get_lazy(opts, :path, fn -> Path.join(Troupe.Paths.state_dir(), @file_name) end)
+
     {offers, device} = read(path)
 
     state = %__MODULE__{
@@ -283,7 +285,9 @@ defmodule Troupe.Gateway.Remote do
     with {:ok, session} <- offerable(state, session_id, subject, consent),
          {:ok, share} <- share_param(share),
          {:ok, share} <- share_of(session, share) do
-      request = {:offer, from, session_id, workspace_label(session), share, subject, private?(session)}
+      request =
+        {:offer, from, session_id, workspace_label(session), share, subject, private?(session)}
+
       {:noreply, publish(when_online(%{state | refused: nil}, request))}
     else
       {:error, %Error{} = error} -> {:reply, {:error, error}, state}
@@ -294,7 +298,12 @@ defmodule Troupe.Gateway.Remote do
     case Map.fetch(state.offers, session_id) do
       {:ok, %{"private" => true} = offer} ->
         shares = invited_shares(session_id)
-        state = %{state | offers: Map.put(state.offers, session_id, Map.put(offer, "shares", shares))}
+
+        state = %{
+          state
+          | offers: Map.put(state.offers, session_id, Map.put(offer, "shares", shares))
+        }
+
         state = narrow_viewers(state, session_id)
         persist(state)
 
@@ -389,7 +398,10 @@ defmodule Troupe.Gateway.Remote do
         {:noreply, publish(dial(%{state | sign_in: Map.delete(sign_in, :stored)}))}
 
       {:error, reason} ->
-        Logger.warning("troupe-daemon: the plane gave no sign-in for steering: #{describe_reason(reason)}")
+        Logger.warning(
+          "troupe-daemon: the plane gave no sign-in for steering: #{describe_reason(reason)}"
+        )
+
         state = fail_waiting(%{state | status: :offline, since: now()}, reason)
         state = if refusal?(reason), do: %{state | refused: reason}, else: schedule_retry(state)
         {:noreply, publish(state)}
@@ -420,18 +432,27 @@ defmodule Troupe.Gateway.Remote do
             sign_in: Map.merge(state.sign_in, auth)
         }
 
-        Logger.info("troupe-daemon: connected to the plane's relay to offer sessions for steering")
+        Logger.info(
+          "troupe-daemon: connected to the plane's relay to offer sessions for steering"
+        )
+
         state = state |> schedule_renew() |> sync()
         {:noreply, publish(drain_waiting(state))}
 
       {:error, {:grant_refused, status, reason} = refused} ->
-        Logger.warning("troupe-daemon: the plane refused this device's sign-in for steering (#{status}): #{reason}")
+        Logger.warning(
+          "troupe-daemon: the plane refused this device's sign-in for steering (#{status}): #{reason}"
+        )
+
         state = fail_waiting(%{forget(state) | status: :offline, since: now()}, refused)
         state = if status == 403, do: %{state | refused: refused}, else: schedule_retry(state)
         {:noreply, publish(state)}
 
       {:error, reason} ->
-        Logger.warning("troupe-daemon: the plane's relay could not be reached: #{inspect(reason)}")
+        Logger.warning(
+          "troupe-daemon: the plane's relay could not be reached: #{inspect(reason)}"
+        )
+
         state = fail_waiting(state, reason)
         {:noreply, publish(schedule_retry(%{state | status: :offline, since: now()}))}
     end
@@ -448,7 +469,8 @@ defmodule Troupe.Gateway.Remote do
   # socket; the plane's warning two minutes before asks for the same.
   def handle_info(:renew, state), do: {:noreply, renew(%{state | renew: nil})}
 
-  def handle_info({:troupe_notification, "auth.expiring", _params}, state), do: {:noreply, renew(state)}
+  def handle_info({:troupe_notification, "auth.expiring", _params}, state),
+    do: {:noreply, renew(state)}
 
   def handle_info({:renewed, ref, result}, %{renewing: ref} = state) do
     state = %{state | renewing: nil}
@@ -459,13 +481,19 @@ defmodule Troupe.Gateway.Remote do
         {:noreply, schedule_renew(%{state | sign_in: Map.merge(state.sign_in, auth)})}
 
       {:error, {:grant_refused, status, reason} = refused} ->
-        Logger.warning("troupe-daemon: the plane refused this device's sign-in for steering (#{status}): #{reason}")
+        Logger.warning(
+          "troupe-daemon: the plane refused this device's sign-in for steering (#{status}): #{reason}"
+        )
+
         state = state |> hang_up() |> forget()
         state = if status == 403, do: %{state | refused: refused}, else: schedule_retry(state)
         {:noreply, publish(state)}
 
       {:error, reason} ->
-        Logger.info("troupe-daemon: the sign-in for steering was not renewed yet: #{inspect(reason)}")
+        Logger.info(
+          "troupe-daemon: the sign-in for steering was not renewed yet: #{inspect(reason)}"
+        )
+
         {:noreply, %{state | renew: Process.send_after(self(), :renew, @renew_retry_ms)}}
     end
   end
@@ -519,10 +547,17 @@ defmodule Troupe.Gateway.Remote do
   end
 
   # The plane's names for the people a private session is shared anew with.
-  def handle_info({:answered, :reshare, _from, session_id, _subject, {:ok, %{"shares" => shares}}}, state) do
+  def handle_info(
+        {:answered, :reshare, _from, session_id, _subject, {:ok, %{"shares" => shares}}},
+        state
+      ) do
     case Map.fetch(state.offers, session_id) do
       {:ok, offer} ->
-        {:noreply, publish(%{state | offers: Map.put(state.offers, session_id, Map.put(offer, "shares", shares))})}
+        {:noreply,
+         publish(%{
+           state
+           | offers: Map.put(state.offers, session_id, Map.put(offer, "shares", shares))
+         })}
 
       :error ->
         {:noreply, state}
@@ -558,7 +593,8 @@ defmodule Troupe.Gateway.Remote do
 
   # Nothing the plane asks of the daemon is a request; an unknown one is answered so the
   # plane is not left waiting.
-  def handle_info({:troupe_request, id, method, _params}, %{link: link} = state) when is_pid(link) do
+  def handle_info({:troupe_request, id, method, _params}, %{link: link} = state)
+      when is_pid(link) do
     Client.respond_error(link, id, "#{method} is not something this daemon does")
     {:noreply, state}
   end
@@ -636,7 +672,8 @@ defmodule Troupe.Gateway.Remote do
   # A private session is shared with the people its log says are invited with `control`,
   # and nobody else: the consent its person gave names them.
   defp share_of(%{kind: "private", id: session_id}, []) do
-    {:ok, Enum.map(invited_shares(session_id), &%{"person" => &1["subject"], "role" => &1["role"]})}
+    {:ok,
+     Enum.map(invited_shares(session_id), &%{"person" => &1["subject"], "role" => &1["role"]})}
   end
 
   defp share_of(%{kind: "private"}, _named) do
@@ -658,7 +695,11 @@ defmodule Troupe.Gateway.Remote do
     |> Enum.filter(fn {_subject, invite} -> invite["role"] == "control" end)
     |> Enum.sort()
     |> Enum.map(fn {subject, invite} ->
-      %{"subject" => subject, "display_name" => invite["display_name"] || subject, "role" => "control"}
+      %{
+        "subject" => subject,
+        "display_name" => invite["display_name"] || subject,
+        "role" => "control"
+      }
     end)
   end
 
@@ -682,7 +723,8 @@ defmodule Troupe.Gateway.Remote do
       _unlinked ->
         {:error,
          Error.new(:unavailable, %{
-           reason: "sign in to a plane first: a session is offered to the plane you are signed in to"
+           reason:
+             "sign in to a plane first: a session is offered to the plane you are signed in to"
          })}
     end
   end
@@ -690,7 +732,8 @@ defmodule Troupe.Gateway.Remote do
   defp owned(%{owner: owner}, subject) when owner in [nil, subject], do: :ok
 
   defp owned(%{owner: owner}, _subject) do
-    {:error, Error.new(:forbidden, %{reason: "the session is #{owner}'s, who offers it at their own link"})}
+    {:error,
+     Error.new(:forbidden, %{reason: "the session is #{owner}'s, who offers it at their own link"})}
   end
 
   defp share_param(nil), do: {:ok, []}
@@ -750,11 +793,13 @@ defmodule Troupe.Gateway.Remote do
 
   defp waiting_error({:grant_refused, _status, reason}) do
     Error.new(:unavailable, %{
-      reason: "the plane no longer takes this device's sign-in (#{reason}); offer it again to sign in again"
+      reason:
+        "the plane no longer takes this device's sign-in (#{reason}); offer it again to sign in again"
     })
   end
 
-  defp waiting_error({:update_required, sentence}), do: Error.new(:unavailable, %{reason: sentence})
+  defp waiting_error({:update_required, sentence}),
+    do: Error.new(:unavailable, %{reason: sentence})
 
   defp waiting_error(:unlinked) do
     Error.new(:unavailable, %{
@@ -763,7 +808,10 @@ defmodule Troupe.Gateway.Remote do
   end
 
   defp waiting_error(reason),
-    do: Error.new(:unavailable, %{reason: "the plane could not be reached: #{describe_reason(reason)}"})
+    do:
+      Error.new(:unavailable, %{
+        reason: "the plane could not be reached: #{describe_reason(reason)}"
+      })
 
   # A refusal the plane will give again whenever it is asked: a team that does not allow
   # offering. Asked again at the next offer or link, and not on a timer.
@@ -780,9 +828,10 @@ defmodule Troupe.Gateway.Remote do
   # A dial with something to offer and a sign-in to offer it with: the daemon's own, or a
   # client's token to ask the plane for one.
   defp maybe_dial(state) do
-    if owned_offers(state) != %{} and state.refused == nil and (state.sign_in != nil or client_linked?()),
-      do: connect(state),
-      else: state
+    if owned_offers(state) != %{} and state.refused == nil and
+         (state.sign_in != nil or client_linked?()),
+       do: connect(state),
+       else: state
   end
 
   defp connect(%{status: :online} = state), do: state
@@ -801,7 +850,10 @@ defmodule Troupe.Gateway.Remote do
         device = state.device
         keyring = state.keyring
 
-        Task.start(fn -> send(owner, {:granted, ref, ask_grant(url, subject, device, keyring)}) end)
+        Task.start(fn ->
+          send(owner, {:granted, ref, ask_grant(url, subject, device, keyring)})
+        end)
+
         %{state | connecting: ref, status: :connecting}
 
       {:ok, _no_subject} ->
@@ -834,7 +886,8 @@ defmodule Troupe.Gateway.Remote do
 
     # The plane's own `/v1/relay`, unless something stands in for it (a test's).
     relay =
-      state.relay_url || Application.get_env(:troupe_gateway, :relay_url) || relay_url(sign_in.url)
+      state.relay_url || Application.get_env(:troupe_gateway, :relay_url) ||
+        relay_url(sign_in.url)
 
     Task.start(fn ->
       result =
@@ -987,7 +1040,8 @@ defmodule Troupe.Gateway.Remote do
   defp schedule_retry(state) do
     state = cancel_retry(state)
 
-    if owned_offers(state) != %{} and state.refused == nil and (state.sign_in != nil or client_linked?()) do
+    if owned_offers(state) != %{} and state.refused == nil and
+         (state.sign_in != nil or client_linked?()) do
       retry = Process.send_after(self(), :retry, state.backoff)
       %{state | retry: retry, backoff: min(state.backoff * 2, @max_backoff_ms)}
     else
@@ -1014,7 +1068,8 @@ defmodule Troupe.Gateway.Remote do
         synced = %{
           "session_id" => id,
           "workspace" => id |> Troupe.get_session() |> workspace_label(),
-          "share" => Enum.map(offer["shares"], &%{"person" => &1["subject"], "role" => &1["role"]})
+          "share" =>
+            Enum.map(offer["shares"], &%{"person" => &1["subject"], "role" => &1["role"]})
         }
 
         if offer["private"] == true, do: Map.put(synced, "private", true), else: synced
@@ -1076,7 +1131,10 @@ defmodule Troupe.Gateway.Remote do
   end
 
   defp call_plane(_state, _method, _params, {:offer, from, _id, _subject}) do
-    GenServer.reply(from, {:error, Error.new(:unavailable, %{reason: "the plane is not connected"})})
+    GenServer.reply(
+      from,
+      {:error, Error.new(:unavailable, %{reason: "the plane is not connected"})}
+    )
   end
 
   defp call_plane(_state, _method, _params, _tag), do: :ok
@@ -1117,7 +1175,9 @@ defmodule Troupe.Gateway.Remote do
   defp open_viewer(state, _params), do: state
 
   defp refuse_viewer(state, id, reason) do
-    if state.link, do: Client.notify(state.link, "relay.close", %{"viewer" => id, "reason" => reason})
+    if state.link,
+      do: Client.notify(state.link, "relay.close", %{"viewer" => id, "reason" => reason})
+
     state
   end
 
@@ -1151,7 +1211,9 @@ defmodule Troupe.Gateway.Remote do
   defp narrow(_session_id, _method, result), do: result
 
   defp close_viewers(state, session_id, reason) do
-    {closing, kept} = Enum.split_with(state.viewers, fn {_id, v} -> v.session_id == session_id end)
+    {closing, kept} =
+      Enum.split_with(state.viewers, fn {_id, v} -> v.session_id == session_id end)
+
     Enum.each(closing, fn {id, viewer} -> close_viewer(state, id, viewer, reason) end)
     %{state | viewers: Map.new(kept)}
   end
@@ -1180,7 +1242,9 @@ defmodule Troupe.Gateway.Remote do
       end)
 
     reason =
-      if offer["private"] == true, do: Relay.invitation_taken_back(), else: "no longer shared with you"
+      if offer["private"] == true,
+        do: Relay.invitation_taken_back(),
+        else: "no longer shared with you"
 
     Enum.each(gone, fn {id, viewer} -> close_viewer(state, id, viewer, reason) end)
     %{state | viewers: Map.new(kept)}
@@ -1188,35 +1252,48 @@ defmodule Troupe.Gateway.Remote do
 
   # -- the record -------------------------------------------------------------
 
+  # Every relayed command is held to this table from the viewer's own process (the
+  # endpoint's guard reads `role/2`), so the rows are written over in place and only then
+  # the stale ones removed: emptying the table first left a gap in which a command found
+  # no row and was refused as no longer shared, for a person whose share stood.
   defp publish(state) do
-    :ets.delete_all_objects(@table)
-
-    Enum.each(state.offers, fn {id, offer} ->
-      steering =
-        state.viewers
-        |> Map.values()
-        |> Enum.filter(&(&1.session_id == id))
-        |> Enum.map(fn v ->
-          %{"subject" => v.principal["subject"], "display_name" => v.principal["display_name"], "role" => v.role}
-        end)
-        |> Enum.uniq()
-
-      described = %{
-        "owner" => offer["owner"],
-        "shares" => offer["shares"],
-        "offered_at" => offer["offered_at"],
-        "state" => Atom.to_string(state.status),
-        "since" => if(state.status != :online, do: state.since),
-        "steering" => steering,
-        "restored" => MapSet.member?(state.restored, id),
-        "private" => offer["private"] == true
-      }
-
-      :ets.insert(@table, {id, described})
-    end)
-
+    rows = Enum.map(state.offers, fn {id, offer} -> {id, described(state, id, offer)} end)
+    :ets.insert(@table, rows)
     :ets.insert(@table, {:offering, state.sign_in != nil and owned_offers(state) != %{}})
+    kept = MapSet.new(rows, &elem(&1, 0))
+
+    for {id, _described} <- :ets.tab2list(@table),
+        is_binary(id),
+        not MapSet.member?(kept, id),
+        do: :ets.delete(@table, id)
+
     state
+  end
+
+  defp described(state, id, offer) do
+    steering =
+      state.viewers
+      |> Map.values()
+      |> Enum.filter(&(&1.session_id == id))
+      |> Enum.map(fn v ->
+        %{
+          "subject" => v.principal["subject"],
+          "display_name" => v.principal["display_name"],
+          "role" => v.role
+        }
+      end)
+      |> Enum.uniq()
+
+    %{
+      "owner" => offer["owner"],
+      "shares" => offer["shares"],
+      "offered_at" => offer["offered_at"],
+      "state" => Atom.to_string(state.status),
+      "since" => if(state.status != :online, do: state.since),
+      "steering" => steering,
+      "restored" => MapSet.member?(state.restored, id),
+      "private" => offer["private"] == true
+    }
   end
 
   defp read(path) do
@@ -1247,7 +1324,8 @@ defmodule Troupe.Gateway.Remote do
     end
   end
 
-  defp device, do: "d-" <> (12 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
+  defp device,
+    do: "d-" <> (12 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
 
   defp relay_url(plane_url) do
     uri = URI.parse(String.trim_trailing(plane_url, "/"))
@@ -1260,7 +1338,9 @@ defmodule Troupe.Gateway.Remote do
   defp plane_error(other),
     do: Error.new(:unavailable, %{reason: "the plane did not answer: #{describe_reason(other)}"})
 
-  defp describe_reason(%Error{message: message, data: %{"reason" => reason}}), do: "#{message}: #{reason}"
+  defp describe_reason(%Error{message: message, data: %{"reason" => reason}}),
+    do: "#{message}: #{reason}"
+
   defp describe_reason(%Error{message: message}), do: message
   defp describe_reason(reason), do: inspect(reason)
 
