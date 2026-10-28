@@ -72,7 +72,7 @@ may say what changed in a `note`.
 An agent names an audience only when you told it one; otherwise the approval asks you whom the artifact is for (you alone, the organisation, a team or a profile) and, for a new team artifact, whether it is the team's or yours, and nothing in your permission rules or `--auto-approve` answers that for you.
 
 **You** publish one file from the terminal client with
-`/publish <path> [private | organisation | team:<name> | profile:<name>]`, for example
+`/publish <path> [private | organisation | team:<name> [me | team] | profile:<name>]`, for example
 `/publish report.html team:core`; with no audience it is yours alone. In the desktop app,
 **Publish…** in the command palette (Ctrl-K, then `publish`) takes files from this computer: a
 new artifact, for **Only you** unless you pick the organisation, one of your teams or one of
