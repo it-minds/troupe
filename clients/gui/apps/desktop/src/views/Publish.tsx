@@ -2,7 +2,8 @@
 // as the person this computer's daemon is signed in as, through the daemon's sign-in, as
 // the terminal client's /publish does. A new artifact, the person's alone until they share a
 // link (the default), or for the whole organisation, a team they are in or a profile's
-// people; or "Publish a new version of…" one of the person's own, the next version
+// people; one for a team is the team's, every member its owner, unless the person keeps it
+// their own. Or "Publish a new version of…" one of the person's own, the next version
 // at the same address with a note, the earlier ones kept. The daemon sends what is too large
 // for one call by an upload handle. The gallery, in the console, is a link away.
 //
@@ -88,6 +89,8 @@ export function Publish({
   const [files, setFiles] = useState<File[]>([]);
   const [title, setTitle] = useState("");
   const [visibility, setVisibility] = useState("private");
+  // Whether one published for a team is the team's: on unless the person says otherwise.
+  const [teamOwned, setTeamOwned] = useState(true);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,6 +112,7 @@ export function Publish({
   const paths = files.map((f) => f.name);
   const kind = chosen ? chosen.kind : kindOf(paths);
   const ready = files.length > 0 && (mode === "version" ? chosen !== null : title.trim() !== "");
+  const forTeam = !chosen && visibility.startsWith("team:");
 
   const publish = async (): Promise<void> => {
     setBusy(true);
@@ -120,6 +124,7 @@ export function Publish({
         kind,
         visibility: chosen ? chosen.visibility : visibility,
         files: sent,
+        ...(forTeam ? { owner: teamOwned ? "team" : "me" } : {}),
         ...(chosen ? { id: chosen.id } : {}),
         ...(chosen && note.trim() ? { note: note.trim() } : {}),
         ...(sessionId ? { session_id: sessionId } : {}),
@@ -141,7 +146,8 @@ export function Publish({
         {done ? (
           <>
             <p className="copy">
-              {done.title} is published as {done.id}, version {done.version}, for {visibilityWords(done.visibility)}.
+              {done.title} is published as {done.id}, version {done.version}, for {visibilityWords(done.visibility)}
+              {done.owner_team ? `, owned by the ${done.owner_team} team` : ""}.
             </p>
             <div className="actions">
               {gallery && (
@@ -197,6 +203,11 @@ export function Publish({
                     <VisibilityOptions teams={list?.teams} profiles={list?.profiles} />
                   </select>
                 </label>
+                {forTeam && (
+                  <label className="inline">
+                    <input type="checkbox" checked={teamOwned} onChange={(e) => setTeamOwned(e.target.checked)} /> Owned by the team: anyone on it can change or delete it
+                  </label>
+                )}
               </>
             )}
             {mode === "version" && (

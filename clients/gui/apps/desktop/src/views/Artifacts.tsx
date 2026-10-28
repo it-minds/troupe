@@ -2,7 +2,9 @@
 // that they may open, through this computer's daemon and its sign-in, as the gallery in the
 // console has them. A grid of cards grouped by when, filtered by who each is for (everyone,
 // your teams and profiles, a link's, only you) and by a search; the one chosen in an aside
-// with its versions, where it came from, who can see it, and for its owner the controls.
+// with its versions, where it came from, who can see it, whose it is, and for its owner the
+// controls. An artifact a team owns is every member's: each has the owner's controls, and
+// the owning person gives one of theirs to a team, or the team's admin takes it back.
 //
 // Nothing of an artifact's content is drawn here: a card is its title, its kind and its
 // size, and opening one shows it from the artifacts host in a window of the shell's own,
@@ -14,7 +16,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
-import { audienceName, audienceOf, visibilityWords } from "@troupe/client";
+import { audienceName, audienceOf, teamOwned, visibilityWords } from "@troupe/client";
 import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, DaemonClient } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { shell } from "../shell";
@@ -80,20 +82,28 @@ function who(person: { subject: string; display_name?: string | null } | undefin
   return person?.display_name || person?.subject || "somebody";
 }
 
-/** Who can see it, in a sentence, and what that means. */
+/** Whose it is, for a card's byline: the team that owns it, or the person. */
+function whose(a: Artifact): string {
+  return teamOwned(a) ? `Team ${a.owner_team}` : who(a.owner, a.mine);
+}
+
+/** Who can see it, in a sentence, and what that means. A team's is its members' whatever it is for. */
 function audienceWords(a: Artifact, audience: ArtifactAudience): { long: string; note: string } {
   const name = audienceName(a);
+  const members = teamOwned(a) ? ` Members of ${a.owner_team}, whose it is, can open it too.` : "";
   switch (audience) {
     case "everyone":
       return { long: "Everyone in your organisation", note: "Anyone who can sign in to your Troupe plane can open it." };
     case "team":
       return a.visibility.startsWith("profile:")
-        ? { long: `The ${name} profile's people`, note: `People granted the ${name} profile can open it. Nobody else can find it.` }
-        : { long: `Everyone on ${name}`, note: `Members of ${name} can open it. People outside the team cannot find it.` };
+        ? { long: `The ${name} profile's people`, note: `People granted the ${name} profile can open it. Nobody else can find it.${members}` }
+        : { long: `Everyone on ${name}`, note: `Members of ${name} can open it. People outside the team cannot find it.${a.owner_team && a.owner_team !== name ? members : ""}` };
     case "shared":
-      return { long: "Shared with you by a link", note: `${who(a.owner, false)} made a link to it, and you opened it; you keep what the link gives you until it is revoked.` };
+      return { long: "Shared with you by a link", note: `${whose(a)} made a link to it, and you opened it; you keep what the link gives you until it is revoked.` };
     case "private":
-      return { long: "Only you", note: "Nobody else can find or open it. Make a link when you are ready to share it." };
+      return teamOwned(a)
+        ? { long: `Only the ${a.owner_team} team`, note: `Members of ${a.owner_team}, whose it is, can find and open it; nobody else can. Make a link when you are ready to share it.` }
+        : { long: "Only you", note: "Nobody else can find or open it. Make a link when you are ready to share it." };
   }
 }
 
@@ -176,7 +186,7 @@ export function Artifacts({
   if (!list) return <div className="repertoire">{head}<Loading what="Asking the plane for your artifacts…" /></div>;
 
   const q = query.trim().toLowerCase();
-  const matches = (a: Artifact): boolean => !q || [a.title, who(a.owner, a.mine), a.owner?.subject ?? "", a.origin?.session_id ?? ""].join(" ").toLowerCase().includes(q);
+  const matches = (a: Artifact): boolean => !q || [a.title, whose(a), who(a.owner, a.mine), a.owner?.subject ?? "", a.origin?.session_id ?? ""].join(" ").toLowerCase().includes(q);
   const searched = list.artifacts.filter(matches);
   const shown = searched.filter((a) => filter === "all" || audienceOf(a) === filter);
   const count = (f: Filter): number => searched.filter((a) => f === "all" || audienceOf(a) === f).length;
@@ -227,7 +237,7 @@ export function Artifacts({
                         <span className="title">{a.title}</span>
                         {fresh && <span className="visually-hidden">New to you.</span>}
                         <span className="byline">
-                          {who(a.owner, a.mine)} · {relative(Date.parse(a.published_at))}
+                          {whose(a)} · {relative(Date.parse(a.published_at))}
                         </span>
                         <span className="tags">
                           <span className={`audience-pill is-${audience}`}>
@@ -307,7 +317,13 @@ function Aside({
   const [publishing, setPublishing] = useState(false);
   const [asked, setAsked] = useState(0);
   const [moveTo, setMoveTo] = useState(artifact.visibility);
+  const [giveTo, setGiveTo] = useState(teams?.[0] ?? "");
+  // A member of the team that owns it is its owner, as the plane says it (`role`, `mine`).
   const owner = artifact.mine || artifact.role === "owner";
+  const ofTeam = teamOwned(artifact);
+  // The owning person gives it to a team of theirs; the owning team's admin takes it back.
+  const mayGive = !ofTeam && artifact.may_transfer === true && (teams?.length ?? 0) > 0;
+  const mayTakeBack = ofTeam && artifact.may_transfer === true;
 
   useEffect(() => {
     let live = true;
@@ -423,10 +439,50 @@ function Aside({
       </section>
 
       <section>
+        <h3 className="screen">Whose it is</h3>
+        <p className="owner-line">{ofTeam ? `Team ${artifact.owner_team}${artifact.mine ? " (you are a member)" : ""}` : who(artifact.owner, artifact.mine)}</p>
+        <p className="muted">
+          {ofTeam
+            ? `Anyone on ${artifact.owner_team} can publish versions, change who can see it, share and delete it; a member leaving the team changes nothing.${!artifact.mine && artifact.owner ? ` ${who(artifact.owner, false)} first published it.` : ""}`
+            : artifact.mine
+              ? "Only you have its owner's controls."
+              : `Only ${who(artifact.owner, false)} has its owner's controls.`}
+        </p>
+        {mayGive && (
+          <div className="move-visibility">
+            <label>
+              Give to team
+              <select value={giveTo} disabled={busy} onChange={(e) => setGiveTo(e.target.value)} aria-label="Give to team">
+                {(teams ?? []).map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={busy || giveTo === ""}
+              onClick={() => void act(() => daemon.transferArtifact(artifact.id, `team:${giveTo}`), `Given: ${artifact.title} is the ${giveTo} team's now, and every member of it is its owner.`)}
+            >
+              Give it to the team
+            </button>
+          </div>
+        )}
+        {mayTakeBack && (
+          <div className="move-visibility">
+            <button type="button" disabled={busy} onClick={() => void act(() => daemon.transferArtifact(artifact.id, "me"), `Taken back: ${artifact.title} is yours now, not the ${artifact.owner_team} team's.`)}>
+              Take back
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section>
         <h3 className="screen">Where it came from</h3>
         <dl className="origin">
           <dt>BY</dt>
-          <dd>{who(artifact.owner, artifact.mine)}</dd>
+          <dd>{who(artifact.owner, artifact.mine && !ofTeam)}</dd>
           {artifact.origin?.session_id && (
             <>
               <dt>SESSION</dt>

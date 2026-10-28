@@ -664,8 +664,13 @@ evoked where nothing is set and there was a sign-in. */
   memoryRefusal: Record<string, unknown> | null = null;
   /** What `me.memory.status` says each session here read at its last turn. */
   memoryReads: Array<Record<string, unknown>> = [];
-  /** Every forwarded `artifact.*` call (get, open, share, unshare, rollback, pin), in order. */
+  /** Every forwarded `artifact.*` call (get, open, share, unshare, rollback, pin, transfer), in order. */
   readonly artifactCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  /**
+   * The approvals the agent's publications raised here (`publish_artifact`, with what the
+   * gate shows under `publication`), by call id, and what each was answered with.
+   */
+  readonly publications = new Map<string, { sessionId: string; publication: Record<string, unknown>; answer: Record<string, unknown> | null }>();
   /** The links made to the person's artifacts. */
   readonly artifactShares: Array<Record<string, unknown>> = [];
   /**
@@ -845,6 +850,32 @@ evoked where nothing is set and there was a sign-in. */
     });
     this.sessions.set(id, session);
     return session;
+  }
+
+  /**
+   * Whose a new artifact a publish makes: the team it is for unless the publisher says
+   * `me`, a named team, or nobody's team.
+   */
+  private ownerTeamOf(params: Record<string, unknown>): string | null {
+    const visibility = String(params["visibility"] ?? "private");
+    const owner = params["owner"] ?? (visibility.startsWith("team:") ? "team" : "me");
+    if (owner === "team") return visibility.startsWith("team:") ? visibility.slice("team:".length) : null;
+    if (typeof owner === "string" && owner.startsWith("team:")) return owner.slice("team:".length);
+    return null;
+  }
+
+  /**
+   * Make a session's agent ask before it publishes: an `approval_requested` for
+   * `publish_artifact` carrying what the gate shows (`publication`: title, kind, file count,
+   * whom and whose it proposed, the artifact it is a new version of, and its note).
+   */
+  askPublish(sessionId: string, publication: Record<string, unknown>): LoggedEvent {
+    const session = this.sessions.get(sessionId)!;
+    const callId = `publish-${this.publications.size + 1}`;
+    const shown = { title: "Untitled", kind: "html", files: 1, visibility: null, owner: null, id: null, note: null, ...publication };
+    this.publications.set(callId, { sessionId, publication: shown, answer: null });
+    session.pendingApprovals += 1;
+    return session.log.append("approval_requested", { call_id: callId, tool: "publish_artifact", args: { title: shown.title, kind: shown.kind }, agent_path: ["root"], publication: shown });
   }
 
   /** Make a session ask something — the agent's `ask_user`, or the harness's budget question under a `budget-<n>` id. */
@@ -1454,6 +1485,39 @@ evoked where nothing is set and there was a sign-in. */
         return reply(ws, id, { accepted: true });
       }
 
+      // A publication's gate, answered: `allow` with whom it is for and whose it is, held to
+      // the audiences there are; `allow_session` only where the agent proposed an audience;
+      // `deny` with a word back. The decision says what the person chose and what they changed.
+      case "approval.respond": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const callId = String(params["call_id"] ?? "");
+        const asked = this.publications.get(callId);
+        if (!asked || asked.sessionId !== session.id) return reply(ws, id, null, { code: -32005, message: "not_found", data: { call_id: callId } });
+        if (asked.answer) return reply(ws, id, { resolved_by: this.principal.subject });
+        const decision = String(params["decision"] ?? "deny");
+        const invalid = (reason: string) => reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason } });
+        const actor = { kind: "user", subject: this.principal.subject };
+        const proposed = asked.publication;
+        let decided: Record<string, unknown> = { call_id: callId, tool: "publish_artifact", decision, actor: this.principal.subject };
+        if (decision === "deny") {
+          if (typeof params["reason"] === "string" && params["reason"] !== "") decided["reason"] = params["reason"];
+        } else {
+          if (decision === "allow_session" && proposed["visibility"] === null) return invalid("the agent proposed nobody to publish for, so this cannot be allowed for the session: choose whom it is for");
+          const answer = (params["answer"] ?? {}) as Record<string, unknown>;
+          const visibility = typeof answer["visibility"] === "string" ? answer["visibility"] : null;
+          const owner = answer["owner"] === "me" || answer["owner"] === "team" ? answer["owner"] : null;
+          if (visibility === null || owner === null) return invalid("an allowed publication names whom it is for (answer.visibility) and whose it is (answer.owner: me or team)");
+          if (!/^(private|organisation|team:.+|profile:.+)$/.test(visibility)) return invalid(`visibility must be private, organisation, team:<name> or profile:<name>, not ${visibility}`);
+          if (owner === "team" && !visibility.startsWith("team:")) return invalid("owner team needs a team to publish for");
+          const edited = [...(visibility !== proposed["visibility"] ? ["visibility"] : []), ...(owner !== (proposed["owner"] ?? (visibility.startsWith("team:") ? "team" : "me")) ? ["owner"] : [])];
+          decided = { ...decided, visibility, owner, edited };
+        }
+        asked.answer = { decision, ...decided };
+        session.pendingApprovals = Math.max(0, session.pendingApprovals - 1);
+        session.log.append("approval_decided", decided, actor);
+        return reply(ws, id, { decision });
+      }
+
       case "question.answer": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
         const actor = { kind: "user", subject: this.principal.subject };
@@ -1798,6 +1862,7 @@ evoked where nothing is set and there was a sign-in. */
       case "artifact.unshare":
       case "artifact.rollback":
       case "artifact.pin":
+      case "artifact.transfer":
       case "artifact.put": {
         const mine = this.artifacts;
         // Refused under Local only as the daemon refuses every one of them: an artifact is
@@ -1843,6 +1908,15 @@ evoked where nothing is set and there was a sign-in. */
             case "artifact.pin":
               found["pinned"] = params["version"] ?? null;
               return reply(ws, id, { ...found });
+            // Between the person and a team: given to a team of theirs, or taken back by its admin.
+            case "artifact.transfer": {
+              if (found["may_transfer"] !== true) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { id: found["id"], reason: "only its owner gives an artifact to a team, and only an admin of that team takes it back" } });
+              const to = String(params["to"] ?? "");
+              if (to === "me") Object.assign(found, { owner_team: null, owner: { subject: "alice@example.com", display_name: "Alice" }, mine: true, role: "owner", may_transfer: true });
+              else if (to.startsWith("team:")) Object.assign(found, { owner_team: to.slice("team:".length), mine: true, role: "owner", may_transfer: false });
+              else return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: "to must be me or team:<name>" } });
+              return reply(ws, id, { ...found });
+            }
             // Who may open it, moved by its owner as the next version with every file carried.
             case "artifact.put": {
               if (!owner) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { id: found["id"], reason: "who may open an artifact is its owner's to change; an edit link publishes versions of it" } });
@@ -1861,7 +1935,7 @@ evoked where nothing is set and there was a sign-in. */
         const existing = mine.find((a) => a["id"] === params["id"]);
         const published = existing
           ? Object.assign(existing, { version: Number(existing["version"]) + 1 })
-          : { id: `art-fake${mine.length + 1}`, title: params["title"], kind: params["kind"], visibility: params["visibility"], version: 1, mine: true };
+          : { id: `art-fake${mine.length + 1}`, title: params["title"], kind: params["kind"], visibility: params["visibility"], version: 1, mine: true, owner_team: this.ownerTeamOf(params) };
         if (!existing) mine.push(published);
         return reply(ws, id, { ...published, url: `https://artifacts.example.test/a/${String(published["id"])}/`, plane_url: "https://plane.example.test" });
       }
