@@ -180,7 +180,7 @@ export function App(): JSX.Element {
   // session is what a notification says (notify.ts).
   const onScreen = where.screen === "session" ? where.id : null;
   useEffect(() => {
-    if (onScreen) store?.patch(onScreen, { unseen: null });
+    if (onScreen) store.patch(onScreen, { unseen: null });
   }, [onScreen, store]);
   // A notification the person answered leads to its session (notify.ts).
   const openSession = useCallback((id: string) => setWhere({ screen: "session", id }), []);
