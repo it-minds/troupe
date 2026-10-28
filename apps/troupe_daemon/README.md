@@ -97,8 +97,9 @@ The entry runs `troupe-daemon run` — the one on the `PATH`, as a client finds 
 `TROUPE_DAEMON_IDLE_MINUTES=0`, so a daemon started at login stays up until you log out
 rather than exiting when idle. Turning it on takes effect at the next login and starts
 nothing now; turning it off removes the file and stops nothing that is running. An entry
-written by an earlier daemon on Windows still opens a minimised console window:
-`troupe-daemon login on` again writes the current one.
+from an earlier daemon (on Windows one that opened a minimised console window) is written
+again in this version's shape the first time the daemon starts after an update, and the
+daemon's log says so; one that starts another install's daemon is left alone.
 
 ### The web app
 
