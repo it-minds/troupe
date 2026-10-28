@@ -102,7 +102,7 @@ tools included.
 
 ## The GUI and the VS Code extension (pnpm)
 
-227 packages, from `clients/gui/pnpm-lock.yaml` and `clients/vscode/pnpm-lock.yaml`,
+228 packages, from `clients/gui/pnpm-lock.yaml` and `clients/vscode/pnpm-lock.yaml`,
 build and test tools included; the VS Code extension's are all build and test tools. A
 package's builds for one operating system and processor, such as esbuild's, are checked
 and not listed: each is under its parent's licence, and which of them are installed
@@ -149,6 +149,7 @@ depends on the machine.
 | `@secretlint/types` | MIT |
 | `@tauri-apps/api` | Apache-2.0 OR MIT |
 | `@tauri-apps/cli` | Apache-2.0 OR MIT |
+| `@tauri-apps/plugin-clipboard-manager` | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-dialog` | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-http` | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-notification` | MIT OR Apache-2.0 |
@@ -341,7 +342,7 @@ depends on the machine.
 
 ## The desktop app (Cargo)
 
-498 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
+530 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
 platform, build dependencies included.
 
 | package | licence |
@@ -353,6 +354,7 @@ platform, build dependencies included.
 | `android_system_properties` | MIT OR Apache-2.0 |
 | `anyhow` | MIT OR Apache-2.0 |
 | `arbitrary` | MIT OR Apache-2.0 |
+| `arboard` | MIT OR Apache-2.0 |
 | `async-broadcast` | MIT OR Apache-2.0 |
 | `async-channel` | Apache-2.0 OR MIT |
 | `async-executor` | Apache-2.0 OR MIT |
@@ -381,6 +383,7 @@ platform, build dependencies included.
 | `bumpalo` | MIT OR Apache-2.0 |
 | `bytemuck` | Zlib OR Apache-2.0 OR MIT |
 | `byteorder` | Unlicense OR MIT |
+| `byteorder-lite` | Unlicense OR MIT |
 | `bytes` | MIT |
 | `cairo-rs` | MIT |
 | `cairo-sys-rs` | MIT |
@@ -396,6 +399,7 @@ platform, build dependencies included.
 | `cfg_aliases` | MIT |
 | `chacha20` | MIT OR Apache-2.0 |
 | `chrono` | MIT OR Apache-2.0 |
+| `clipboard-win` | BSL-1.0 |
 | `combine` | MIT |
 | `concurrent-queue` | Apache-2.0 OR MIT |
 | `cookie` | MIT OR Apache-2.0 |
@@ -409,6 +413,7 @@ platform, build dependencies included.
 | `crc32fast` | MIT OR Apache-2.0 |
 | `crossbeam-channel` | MIT OR Apache-2.0 |
 | `crossbeam-utils` | MIT OR Apache-2.0 |
+| `crunchy` | MIT |
 | `crypto-common` | MIT OR Apache-2.0 |
 | `cssparser` | MPL-2.0 |
 | `cssparser-macros` | MPL-2.0 |
@@ -435,6 +440,7 @@ platform, build dependencies included.
 | `dlopen2_derive` | MIT |
 | `document-features` | MIT OR Apache-2.0 |
 | `dom_query` | MIT |
+| `downcast-rs` | MIT/Apache-2.0 |
 | `dpi` | Apache-2.0 AND MIT |
 | `dtoa` | MIT OR Apache-2.0 |
 | `dtoa-short` | MPL-2.0 |
@@ -449,13 +455,16 @@ platform, build dependencies included.
 | `equivalent` | Apache-2.0 OR MIT |
 | `erased-serde` | MIT OR Apache-2.0 |
 | `errno` | MIT OR Apache-2.0 |
+| `error-code` | BSL-1.0 |
 | `event-listener` | Apache-2.0 OR MIT |
 | `event-listener-strategy` | Apache-2.0 OR MIT |
 | `fastrand` | Apache-2.0 OR MIT |
+| `fax` | MIT |
 | `fdeflate` | MIT OR Apache-2.0 |
 | `field-offset` | MIT OR Apache-2.0 |
 | `filetime` | MIT/Apache-2.0 |
 | `find-msvc-tools` | MIT OR Apache-2.0 |
+| `fixedbitset` | MIT OR Apache-2.0 |
 | `flate2` | MIT OR Apache-2.0 |
 | `fnv` | Apache-2.0 / MIT |
 | `foldhash` | Zlib |
@@ -480,6 +489,7 @@ platform, build dependencies included.
 | `gdkx11` | MIT |
 | `gdkx11-sys` | MIT |
 | `generic-array` | MIT |
+| `gethostname` | Apache-2.0 |
 | `getrandom` | MIT OR Apache-2.0 |
 | `gio` | MIT |
 | `gio-sys` | MIT |
@@ -492,6 +502,7 @@ platform, build dependencies included.
 | `gtk-sys` | MIT |
 | `gtk3-macros` | MIT |
 | `h2` | MIT |
+| `half` | MIT OR Apache-2.0 |
 | `hashbrown` | MIT OR Apache-2.0 |
 | `heck` | MIT OR Apache-2.0 |
 | `hermit-abi` | MIT OR Apache-2.0 |
@@ -517,6 +528,7 @@ platform, build dependencies included.
 | `ident_case` | MIT/Apache-2.0 |
 | `idna` | MIT OR Apache-2.0 |
 | `idna_adapter` | Apache-2.0 OR MIT |
+| `image` | MIT OR Apache-2.0 |
 | `indexmap` | Apache-2.0 OR MIT |
 | `infer` | MIT |
 | `ipnet` | MIT OR Apache-2.0 |
@@ -560,6 +572,7 @@ platform, build dependencies included.
 | `minisign-verify` | MIT |
 | `miniz_oxide` | MIT OR Zlib OR Apache-2.0 |
 | `mio` | MIT |
+| `moxcms` | BSD-3-Clause OR Apache-2.0 |
 | `muda` | Apache-2.0 OR MIT |
 | `multiversion` | MIT OR Apache-2.0 |
 | `multiversion-macros` | MIT OR Apache-2.0 |
@@ -568,6 +581,7 @@ platform, build dependencies included.
 | `ndk-context` | MIT OR Apache-2.0 |
 | `ndk-sys` | MIT OR Apache-2.0 |
 | `new_debug_unreachable` | MIT |
+| `nom` | MIT |
 | `notify-rust` | MIT OR Apache-2.0 |
 | `num-conv` | MIT OR Apache-2.0 |
 | `num-traits` | MIT OR Apache-2.0 |
@@ -596,6 +610,7 @@ platform, build dependencies included.
 | `openssl-probe` | MIT OR Apache-2.0 |
 | `option-ext` | MPL-2.0 |
 | `ordered-stream` | MIT OR Apache-2.0 |
+| `os_pipe` | MIT |
 | `osakit` | MIT OR Apache-2.0 |
 | `pango` | MIT |
 | `pango-sys` | MIT |
@@ -603,6 +618,7 @@ platform, build dependencies included.
 | `parking_lot` | MIT OR Apache-2.0 |
 | `parking_lot_core` | MIT OR Apache-2.0 |
 | `percent-encoding` | MIT OR Apache-2.0 |
+| `petgraph` | MIT OR Apache-2.0 |
 | `phf` | MIT |
 | `phf_codegen` | MIT |
 | `phf_generator` | MIT |
@@ -626,6 +642,8 @@ platform, build dependencies included.
 | `proc-macro2` | MIT OR Apache-2.0 |
 | `psl-types` | MIT/Apache-2.0 |
 | `publicsuffix` | MIT/Apache-2.0 |
+| `pxfm` | BSD-3-Clause OR Apache-2.0 |
+| `quick-error` | MIT/Apache-2.0 |
 | `quick-xml` | MIT |
 | `quinn` | MIT OR Apache-2.0 |
 | `quinn-proto` | MIT OR Apache-2.0 |
@@ -715,6 +733,7 @@ platform, build dependencies included.
 | `tauri-codegen` | Apache-2.0 OR MIT |
 | `tauri-macros` | Apache-2.0 OR MIT |
 | `tauri-plugin` | Apache-2.0 OR MIT |
+| `tauri-plugin-clipboard-manager` | Apache-2.0 OR MIT |
 | `tauri-plugin-dialog` | Apache-2.0 OR MIT |
 | `tauri-plugin-fs` | Apache-2.0 OR MIT |
 | `tauri-plugin-http` | Apache-2.0 OR MIT |
@@ -731,6 +750,7 @@ platform, build dependencies included.
 | `tendril` | MIT OR Apache-2.0 |
 | `thiserror` | MIT OR Apache-2.0 |
 | `thiserror-impl` | MIT OR Apache-2.0 |
+| `tiff` | MIT |
 | `time` | MIT OR Apache-2.0 |
 | `time-core` | MIT OR Apache-2.0 |
 | `time-macros` | MIT OR Apache-2.0 |
@@ -754,6 +774,7 @@ platform, build dependencies included.
 | `tracing-attributes` | MIT |
 | `tracing-core` | MIT |
 | `tray-icon` | MIT OR Apache-2.0 |
+| `tree_magic_mini` | MIT |
 | `try-lock` | MIT |
 | `typeid` | MIT OR Apache-2.0 |
 | `typenum` | MIT OR Apache-2.0 |
@@ -779,6 +800,12 @@ platform, build dependencies included.
 | `wasm-bindgen-macro-support` | MIT OR Apache-2.0 |
 | `wasm-bindgen-shared` | MIT OR Apache-2.0 |
 | `wasm-streams` | MIT OR Apache-2.0 |
+| `wayland-backend` | MIT |
+| `wayland-client` | MIT |
+| `wayland-protocols` | MIT |
+| `wayland-protocols-wlr` | MIT |
+| `wayland-scanner` | MIT |
+| `wayland-sys` | MIT |
 | `web-sys` | MIT OR Apache-2.0 |
 | `web-time` | MIT OR Apache-2.0 |
 | `web_atoms` | MIT OR Apache-2.0 |
@@ -789,6 +816,7 @@ platform, build dependencies included.
 | `webview2-com` | MIT |
 | `webview2-com-macros` | MIT |
 | `webview2-com-sys` | MIT |
+| `weezl` | MIT OR Apache-2.0 |
 | `winapi` | MIT/Apache-2.0 |
 | `winapi-i686-pc-windows-gnu` | MIT/Apache-2.0 |
 | `winapi-util` | Unlicense OR MIT |
@@ -820,10 +848,13 @@ platform, build dependencies included.
 | `winnow` | MIT |
 | `winreg` | MIT |
 | `wit-bindgen` | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| `wl-clipboard-rs` | MIT OR Apache-2.0 |
 | `writeable` | Unicode-3.0 |
 | `wry` | Apache-2.0 OR MIT |
 | `x11` | MIT |
 | `x11-dl` | MIT |
+| `x11rb` | MIT OR Apache-2.0 |
+| `x11rb-protocol` | MIT OR Apache-2.0 |
 | `xattr` | MIT OR Apache-2.0 |
 | `yoke` | Unicode-3.0 |
 | `yoke-derive` | Unicode-3.0 |
@@ -843,6 +874,8 @@ platform, build dependencies included.
 | `zip` | MIT |
 | `zlib-rs` | Zlib |
 | `zmij` | MIT |
+| `zune-core` | MIT OR Apache-2.0 OR Zlib |
+| `zune-jpeg` | MIT OR Apache-2.0 OR Zlib |
 | `zvariant` | MIT |
 | `zvariant_derive` | MIT |
 | `zvariant_utils` | MIT |

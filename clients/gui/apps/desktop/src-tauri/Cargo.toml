@@ -29,6 +29,10 @@ serde_json = "1"
 tauri-plugin-http = "~2.8"
 # `target="_blank"` does nothing in a webview and the device grant needs a real browser.
 tauri-plugin-opener = "2"
+# The clipboard, written from outside the page. WebKit lets a page write it only inside
+# the click that asked, never after an `await`, and the link Copy link puts there is one the
+# daemon mints first. `~2.5`, the minor of its JavaScript half in package.json.
+tauri-plugin-clipboard-manager = "~2.5"
 # A workspace is a directory on this computer, and the browser build can only ask for a
 # path typed in. The native picker is the difference between the two builds here.
 tauri-plugin-dialog = "2"

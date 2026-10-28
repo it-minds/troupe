@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
 import { audienceName, audienceOf, visibilityWords } from "@troupe/client";
 import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, DaemonClient } from "@troupe/client";
+import { copyText } from "../clipboard";
 import { shell } from "../shell";
 import { Loading, relative } from "./bits";
 import { Publish, VisibilityOptions } from "./Publish";
@@ -348,12 +349,18 @@ function Aside({
     setError(null);
     try {
       const url = owner ? (await daemon.shareArtifact(artifact.id, "view")).url : artifact.url;
-      await navigator.clipboard.writeText(url);
+      await copyText(url);
       setCopied(true);
       if (owner) setAsked((n) => n + 1);
     } catch (e) {
-      setError(sentence(e));
+      setError(`Not copied: ${sentence(e)}`);
     }
+  };
+
+  // Its address in the person's browser, which signs them in; a shell that refuses says why here.
+  const browse = (): void => {
+    setError(null);
+    openExternal(artifact.url).catch((e: unknown) => setError(`Not opened: ${sentence(e)}`));
   };
 
   const words = audienceWords(artifact, audience);
@@ -378,7 +385,7 @@ function Aside({
         <button type="button" onClick={() => void copy()}>
           {copied ? "Link copied" : "Copy link"}
         </button>
-        <button type="button" onClick={() => void openExternal(artifact.url)}>
+        <button type="button" onClick={browse}>
           Open in browser
         </button>
       </div>
