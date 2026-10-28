@@ -260,7 +260,10 @@ defmodule Troupe.UI.TUI.View do
           turn_lines: side == nil,
           now: state.now,
           # A laptop's session steered through the plane answers an approval once.
-          once_only: Model.relayed?(state.model)
+          once_only: Model.relayed?(state.model),
+          # Whom a publication can be for: the person's teams and profiles, as the server
+          # learnt them when the agent asked.
+          audience: Map.get(state, :audience)
         }
 
         pairs = Model.transcript_blocks(w, agent, view)
@@ -594,6 +597,12 @@ defmodule Troupe.UI.TUI.View do
   # no `a`, which would allow for the rest of the session.
   defp pending_summary(%{kind: :approval, delegation: %{"agent" => agent}}, once?, _where),
     do: "delegation to #{agent} (y / e / s / n#{if once?, do: "", else: " / a"} in the window)"
+
+  # An agent's publication is answered with whom it is for, picked by digit in the window.
+  defp pending_summary(%{kind: :approval, publication: %{} = publication}, once?, _where),
+    do:
+      "publication: #{Model.one_line(publication["title"] || "untitled")} " <>
+        "(a digit picks whom for, y / n#{if once? or publication["visibility"] == nil, do: "", else: " / a"} in the window)"
 
   defp pending_summary(%{kind: :approval, name: name}, once?, where),
     do: "approval: #{name} (#{if once?, do: "y / n", else: "y / n / a"}#{where})"
@@ -2462,7 +2471,12 @@ defmodule Troupe.UI.TUI.View do
     w = g.window
     agents = length(Model.agent_paths(w))
     delegation? = Enum.any?(w.pending, &match?(%{kind: :approval, delegation: %{}}, &1))
-    approval? = not delegation? and Enum.any?(w.pending, &(&1.kind in [:approval, :budget]))
+    publication? = Enum.any?(w.pending, &match?(%{kind: :approval, publication: %{}}, &1))
+
+    approval? =
+      not delegation? and not publication? and
+        Enum.any?(w.pending, &(&1.kind in [:approval, :budget]))
+
     once? = Model.relayed?(state.model)
     verb = if turn_open?(g), do: "closes", else: "opens"
     selection? = Map.get(state, :selection) != nil
@@ -2480,6 +2494,8 @@ defmodule Troupe.UI.TUI.View do
       # A delegation at the gate (TUI Decision 157): run, edit, switch, deny, always.
       {delegation? and once?, ["y/e/s/n delegation", "y/e/s/n", "y/e/s/n"]},
       {delegation? and not once?, ["y/e/s/n/a delegation", "y/e/s/n/a", "y/e/s/n/a"]},
+      # An agent's publication: a digit picks whom it is for, then y publishes.
+      {publication?, ["1-9 whom for · y/n publish", "1-9 · y/n publish", "1-9 y/n"]},
       {armed?(state, w.path, "x"), ["x again cancels & removes", "x again cancels", "x again"]},
       {armed?(state, w.path, "d"), ["d again dismisses", "d again dismisses", "d again"]},
       {not armed?(state, w.path, "x") and w.state in [:running, :needs_input],

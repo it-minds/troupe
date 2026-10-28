@@ -440,9 +440,17 @@ defmodule Troupe.Remote.Worker do
       do: {:reply, :ok, decide(state, decision != :deny)}
 
   # A delegation's answer carries more than its word (root Decision 850): `agent`, `brief`
-  # and `reason`, sent as they are given.
+  # and `reason`, sent as they are given; a publication's carries whom it is for and whose
+  # (`visibility`, `owner`) the same way, beside the decision.
   def handle_call({:approve, call_id, decision, answer}, from, state) do
-    keys = %{"agent" => :agent, "brief" => :brief, "reason" => :reason}
+    keys = %{
+      "agent" => :agent,
+      "brief" => :brief,
+      "reason" => :reason,
+      "visibility" => :visibility,
+      "owner" => :owner
+    }
+
     given = for {key, value} <- answer, Map.has_key?(keys, key), into: %{}, do: {keys[key], value}
 
     activating(

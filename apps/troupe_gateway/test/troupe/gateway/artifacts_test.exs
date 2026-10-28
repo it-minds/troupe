@@ -206,8 +206,8 @@ defmodule Troupe.Gateway.ArtifactsTest do
 
   # The desktop app's gallery and viewer, and the terminal's: one artifact with its versions, a
   # ticket to open it or one version on its host, one text file of a version, a view link and
-  # its revoking, a rollback and a pin, each the plane's own method sent with the daemon's
-  # sign-in, its answer and its refusal as the plane gave them.
+  # its revoking, a rollback, a pin and a transfer to a team, each the plane's own method sent
+  # with the daemon's sign-in, its answer and its refusal as the plane gave them.
   test "the viewer's methods are forwarded to the plane as the person, its refusals kept", ctx do
     forwarded = [
       {"artifact.get", %{"id" => "art-fakefakefakefake"}},
@@ -228,7 +228,10 @@ defmodule Troupe.Gateway.ArtifactsTest do
          "id" => "art-fakefakefakefake",
          "base" => 1,
          "visibility" => "private"
-       }}
+       }},
+      # Whose it is, handed to a team the person is in.
+      {"artifact.transfer",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "to" => "team:core"}}
     ]
 
     for {method, params} <- forwarded do

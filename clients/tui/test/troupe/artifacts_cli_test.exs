@@ -1,8 +1,10 @@
 defmodule Troupe.ArtifactsCLITest do
   @moduledoc """
   `troupe artifacts` (root #62): list by scope (and as JSON), open in the browser, show a
-  Markdown one's text, publish a file as `/publish` does, and a view link, through this
-  machine's daemon linked to `FakeRemote`; under Local only, refused before anything is asked.
+  Markdown one's text, publish a file as `/publish` does (a team's where a team is named,
+  the person's own with `--owner me`), hand one to a team and take it back (`transfer`), and
+  a view link, through this machine's daemon linked to `FakeRemote`; the listing says whose
+  each is and which the person may transfer; under Local only, refused before anything is asked.
   """
 
   use ExUnit.Case, async: false
@@ -25,6 +27,7 @@ defmodule Troupe.ArtifactsCLITest do
       "version" => 2,
       "owner" => %{"display_name" => "Bea"}
     },
+    # A team's: every member owns it, the person among them, so it is theirs and never new.
     %{
       "id" => "a-team",
       "title" => "Design notes",
@@ -32,7 +35,11 @@ defmodule Troupe.ArtifactsCLITest do
       "visibility" => "team:design",
       "scope" => "team:design",
       "version" => 3,
-      "owner" => %{"display_name" => "Cy"}
+      "mine" => true,
+      "role" => "owner",
+      "owner" => %{"display_name" => "Cy"},
+      "owner_team" => "design",
+      "may_transfer" => true
     },
     %{
       "id" => "a-mine",
@@ -63,6 +70,27 @@ defmodule Troupe.ArtifactsCLITest do
     assert {:ok, %{artifacts: %{verb: :publish, file: "r.md", to: "organisation", title: "Weekly"}}} =
              CLI.parse(~w(artifacts publish r.md --to organisation --title Weekly))
 
+    assert {:ok, %{artifacts: %{verb: :publish, file: "r.md", to: "team:core", owner: "me"}}} =
+             CLI.parse(~w(artifacts publish r.md --to team:core --owner me))
+
+    assert {:error, "--owner team needs --to team:<name>" <> _} =
+             CLI.parse(~w(artifacts publish r.md --owner team))
+
+    assert {:error, "--owner is me or team" <> _} =
+             CLI.parse(~w(artifacts publish r.md --to team:core --owner them))
+
+    assert {:ok, %{artifacts: %{verb: :transfer, id: "a-1", to: "team:core"}}} =
+             CLI.parse(~w(artifacts transfer a-1 --to team:core))
+
+    assert {:ok, %{artifacts: %{verb: :transfer, id: "a-1", to: "me"}}} =
+             CLI.parse(~w(artifacts transfer a-1 --to me))
+
+    assert {:error, "troupe artifacts transfer needs --to" <> _} =
+             CLI.parse(~w(artifacts transfer a-1))
+
+    assert {:error, "--to is team:<name> or me" <> _} =
+             CLI.parse(~w(artifacts transfer a-1 --to organisation))
+
     assert {:error, "troupe artifacts link takes no --json"} =
              CLI.parse(~w(artifacts link a-1 --json))
 
@@ -91,16 +119,26 @@ defmodule Troupe.ArtifactsCLITest do
     on_exit(fn -> Application.delete_env(:troupe, :open_url) end)
 
     {0, said} = run(%{verb: :list})
-    assert said =~ "◉ Everyone at Example\n  new Quarterly report · html · v2 · Bea"
-    assert said =~ "◎ Your teams\n  new Design notes · markdown · v3 · Cy"
-    assert said =~ "○ Only you\n      My scratch · markdown · v1 · you"
+    assert said =~ "◉ Everyone at Example\n  new Quarterly report · html · v2 · Bea · a-org\n"
+    # A team's says the team, not who first published it, and that it may be handed on.
+    assert said =~
+             "◎ Your teams\n      Design notes · markdown · v3 · team design · a-team · transferable"
+
+    assert said =~ "○ Only you\n      My scratch · markdown · v1 · you · a-mine · transferable"
 
     {0, said} = run(%{verb: :list, scope: "team:design"})
     assert said =~ "Design notes"
     refute said =~ "Quarterly report"
 
     {0, said} = run(%{verb: :list, scope: "private", json: true})
-    assert [%{"id" => "a-mine", "audience" => "private", "by" => "you"}] = Jason.decode!(said)
+
+    assert [%{"id" => "a-mine", "audience" => "private", "by" => "you", "may_transfer" => true}] =
+             Jason.decode!(said)
+
+    {0, said} = run(%{verb: :list, scope: "team:design", json: true})
+
+    assert [%{"id" => "a-team", "by" => "team design", "owner_team" => "design"}] =
+             Jason.decode!(said)
 
     assert {1, "troupe artifacts: --scope is mine, organisation" <> _} =
              run(%{verb: :list, scope: "everyone"})
@@ -121,6 +159,43 @@ defmodule Troupe.ArtifactsCLITest do
       FakeRemote.calls(remote) |> Enum.find(&match?({"artifact.publish", _}, &1))
 
     assert %{"visibility" => "private", "title" => "Weekly", "kind" => "markdown"} = sent
+    refute Map.has_key?(sent, "owner")
+
+    # For a team it is the team's unless --owner me, and the line says whose it became.
+    {0, said} = run(%{verb: :publish, file: Path.join(ws, "report.md"), to: "team:Core"})
+    assert said =~ "report.md as art-new4 version 1 (team Core's)"
+    assert %{"owner" => "team"} = last_publish(remote)
+
+    {0, said} =
+      run(%{verb: :publish, file: Path.join(ws, "report.md"), to: "team:Core", owner: "me"})
+
+    assert said =~ "report.md as art-new5 version 1:"
+    assert %{"owner" => "me"} = last_publish(remote)
+
+    # transfer: to a team the person is in, and back; whose it is follows in the listing.
+    {0, said} = run(%{verb: :transfer, id: "a-mine", to: "team:Core"})
+    assert said == "a-mine is now team Core's"
+
+    {"artifact.transfer", sent} =
+      FakeRemote.calls(remote) |> Enum.find(&match?({"artifact.transfer", _}, &1))
+
+    assert %{"id" => "a-mine", "to" => "team:Core"} = sent
+    {0, said} = run(%{verb: :list, scope: "private"})
+    assert said =~ "My scratch · markdown · v1 · team Core"
+
+    {0, said} = run(%{verb: :transfer, id: "a-mine", to: "me"})
+    assert said == "a-mine is now yours"
+
+    {1, said} = run(%{verb: :transfer, id: "a-mine", to: "me"})
+
+    assert said =~
+             "a-mine not transferred: this artifact is not a team's, so there is nothing to take back"
+
+    {1, said} = run(%{verb: :transfer, id: "a-mine", to: "team:sales"})
+    assert said =~ "a-mine not transferred: you are not in team sales"
+
+    {1, said} = run(%{verb: :transfer, id: "a-org", to: "team:Core"})
+    assert said =~ "only its owner gives an artifact to a team"
 
     {0, said} = run(%{verb: :link, id: "a-mine"})
     assert said =~ "/s/tok-a-mine-view"
@@ -135,6 +210,13 @@ defmodule Troupe.ArtifactsCLITest do
 
     {1, said} = run(%{verb: :list})
     assert said =~ "troupe artifacts calls a plane, and Local only is on"
+  end
+
+  defp last_publish(remote) do
+    {"artifact.publish", sent} =
+      FakeRemote.calls(remote) |> Enum.reverse() |> Enum.find(&match?({"artifact.publish", _}, &1))
+
+    sent
   end
 
   defp run(asked) do

@@ -42,7 +42,8 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe memory [--edit \| --clear \| --status \| --blame]` | your own memory on the plane, which every session of yours reads on every machine: show it, edit it in $EDITOR, or clear it; an agent of yours only ever adds to it. --status: which versions of the organisation's and your memory this machine holds, whether they are current, and what each session here read at its last turn. --blame: each line with who wrote it, and the agent and session of an agent's entry |
 | `troupe artifacts list [--scope mine\|organisation\|team:NAME\|profile:NAME\|shared\|private] [--json]` | your artifacts on the plane, by who can see them, newest first; a version you have not opened here is new |
 | `troupe artifacts open\|show ID [--version N]` | open one in the browser, through the plane's one-time address; show prints its text (a Markdown one's source) |
-| `troupe artifacts publish FILE [--to SCOPE] [--title TITLE]` | publish a file of this machine, as /publish does: for SCOPE (organisation, team:NAME, profile:NAME), only you without one |
+| `troupe artifacts publish FILE [--to SCOPE] [--title TITLE] [--owner me\|team]` | publish a file of this machine, as /publish does: for SCOPE (organisation, team:NAME, profile:NAME), only you without one; a team publication is the team's, every member its owner, unless --owner me |
+| `troupe artifacts transfer ID --to team:NAME\|me` | hand one of yours to a team you are in, or take a team's back (its admins, or a platform admin); the listing says whose each is and transferable where you may |
 | `troupe artifacts link ID` | a view link to one of your artifacts |
 | `troupe models [--refresh]` | what each provider serves, its window and its price; asked again when stale, or now with --refresh |
 | `troupe models --json [--workspace DIR] [--refresh]` | the same as one JSON object for a program: models, roles, catalog, providers; never a key |

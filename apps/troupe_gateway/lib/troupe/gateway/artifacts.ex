@@ -129,7 +129,10 @@ defmodule Troupe.Gateway.Artifacts do
     "artifact.rollback" => ~w(id version),
     "artifact.pin" => ~w(id version),
     # Who may open it, moved by its owner (or its title): a put over a version, no files sent.
-    "artifact.put" => ~w(id base visibility title note)
+    "artifact.put" => ~w(id base visibility title note),
+    # Whose it is: handed to a team the person is in, or taken back (`to: "me"`) by an admin
+    # of that team or a platform admin; the plane decides, as for every method here.
+    "artifact.transfer" => ~w(id to)
   }
 
   @doc "The methods `forward/2` sends to the plane."
