@@ -148,7 +148,10 @@ defmodule Troupe.Agent.Server do
   """
   @spec switch_profile(pid(), String.t(), keyword()) ::
           {:ok, Definition.t()}
-          | {:error, {:unknown_agent, String.t()} | {:not_primary, String.t()}}
+          | {:error,
+             {:unknown_agent, String.t()}
+             | {:not_primary, String.t()}
+             | {:function_agent, String.t()}}
   def switch_profile(pid, name, opts \\ []) do
     definitions = pid |> definitions() |> Definitions.reload()
 
@@ -161,8 +164,13 @@ defmodule Troupe.Agent.Server do
   end
 
   # A person runs a primary agent, in a session or a branch; a subagent is an agent's to
-  # delegate to (`Definitions.primaries/1`).
+  # delegate to (`Definitions.primaries/1`), and a function agent the harness's to start
+  # for its one job, which a session switched to it would not be doing.
   defp primary(%Definition{mode: :primary}), do: :ok
+
+  defp primary(%Definition{mode: :function} = definition),
+    do: {:error, {:function_agent, Definition.function_refusal(definition)}}
+
   defp primary(%Definition{name: name}), do: {:error, {:not_primary, name}}
 
   @doc """

@@ -1499,24 +1499,39 @@ defmodule Troupe.Client.Daemon do
   # renders the plan (troupe-remote Decision 648), and `orchestrate` runs it.
   defp branch_profile(_sid, "workflow"), do: {:ok, "orchestrate", "always", :workflow}
 
-  # A name that is no primary agent is an unknown command; agents the daemon did not list
-  # are not a list of none, and the line says the daemon did not answer instead.
+  # A name that is no primary agent, nor a function agent a command starts for its job
+  # (`/ask`, `/quick`), is an unknown command; agents the daemon did not list are not a list
+  # of none, and the line says the daemon did not answer instead.
   defp branch_profile(sid, name) do
-    case profiles({:local, workspace(sid)}, nil) do
-      {:ok, profiles} ->
-        primaries = Enum.map(profiles, & &1.name)
-
-        if name in primaries do
+    case branch_agents(workspace(sid)) do
+      {:ok, names} ->
+        if name in names do
           {:ok, name, "auto", :agent}
         else
           {:error,
            "unknown command /#{name}; available: " <>
-             Enum.map_join(Enum.uniq(primaries ++ ["worktree", "workflow"]), ", ", &("/" <> &1))}
+             Enum.map_join(Enum.uniq(names ++ ["worktree", "workflow"]), ", ", &("/" <> &1))}
         end
 
       {:error, reason} ->
         {:error,
          "the daemon did not answer with the agents here, so /#{name} was not started (#{reason})"}
+    end
+  end
+
+  # Every agent a branch command may start: the primaries and the function agents, which
+  # `agents.list` gives with the subagents; a daemon from before modes said only primaries.
+  defp branch_agents(workspace) do
+    case Link.call("agents.list", %{workspace: workspace, subagents: true}) do
+      {:ok, %{"agents" => agents}} ->
+        {:ok,
+         for(agent <- agents, agent["mode"] in [nil, "primary", "function"], do: agent["name"])}
+
+      {:ok, other} ->
+        {:error, "unexpected agents.list answer: #{inspect(other)}"}
+
+      {:error, reason} ->
+        {:error, message(reason)}
     end
   end
 

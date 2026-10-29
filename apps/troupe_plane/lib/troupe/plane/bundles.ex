@@ -59,11 +59,21 @@ defmodule Troupe.Plane.Bundles do
     raise CompileError, description: "no built-in agent definitions in #{@builtin_dir}"
   end
 
-  @builtin_primaries ~w(build plan)
-
   # Their files as shipped, for the console's builder to copy from: a new agent is better
   # started from one that works than from a blank page.
   @builtin_definitions Map.new(@builtin_files, &{Path.basename(&1, ".md"), File.read!(&1)})
+
+  # Each built-in's mode as its file declares it, read with the parser the pod reads it
+  # with, so the primaries offered here are the ones a pod's `primaries/1` has and the two
+  # cannot disagree: a function agent (`answer`, `librarian`), which the harness starts for
+  # its one job, is no session's agent on either side.
+  @builtin_modes (for {name, text} <- @builtin_definitions, into: %{} do
+                    {:ok, parsed} = Troupe.Protocol.AgentDefinition.parse(name, text)
+                    {name, parsed.mode}
+                  end)
+
+  @builtin_primaries for name <- @builtin_agents, @builtin_modes[name] == :primary, do: name
+  @builtin_functions for name <- @builtin_agents, @builtin_modes[name] == :function, do: name
 
   @type projection :: %{String.t() => map()}
 
@@ -75,9 +85,16 @@ defmodule Troupe.Plane.Bundles do
   @spec builtin_definitions() :: %{String.t() => String.t()}
   def builtin_definitions, do: @builtin_definitions
 
-  @doc "The primaries a session may start as when the bundle defines none of its own."
+  @doc """
+  The primaries a session may start as when the bundle defines none of its own: the
+  built-ins whose file says `mode: primary`.
+  """
   @spec builtin_primaries() :: [String.t()]
   def builtin_primaries, do: @builtin_primaries
+
+  @doc "The built-ins the harness starts for a job of their own (`mode: function`)."
+  @spec builtin_functions() :: [String.t()]
+  def builtin_functions, do: @builtin_functions
 
   @doc """
   Check a document the way publishing will.
@@ -380,6 +397,20 @@ defmodule Troupe.Plane.Bundles do
   end
 
   @doc """
+  The function agents a session on this bundle has: the bundle's own, then the built-in
+  ones whose names it does not take. No session runs one as its agent; the harness starts
+  one for its job, so a grant does not narrow them and only the profile's rule removes one.
+  """
+  @spec functions(Document.t() | nil) :: [String.t()]
+  def functions(nil), do: @builtin_functions
+
+  def functions(%{agents: agents}) do
+    own = for %{name: name, parsed: %{mode: :function}} <- agents, do: name
+    taken = Enum.map(agents, & &1.name)
+    own ++ (@builtin_functions -- taken)
+  end
+
+  @doc """
   What a session created on `channel` will have, for a client choosing.
 
   The current version's number and hash, the primaries it may start as, its skills with
@@ -418,6 +449,7 @@ defmodule Troupe.Plane.Bundles do
       bundle_version: nil,
       bundle_hash: nil,
       agents: @builtin_primaries |> AgentRule.keep(rule) |> narrow(entitlements, "agent"),
+      functions: AgentRule.keep(@builtin_functions, rule),
       skills: [],
       mcp_servers: [],
       acp_agents: []
@@ -433,6 +465,7 @@ defmodule Troupe.Plane.Bundles do
       bundle_version: bundle.version,
       bundle_hash: bundle.hash,
       agents: parsed |> primaries() |> AgentRule.keep(rule) |> narrow(entitlements, "agent"),
+      functions: parsed |> functions() |> AgentRule.keep(rule),
       skills: narrow_by(skills, & &1.name, entitlements, "skill"),
       mcp_servers: narrow(for(server <- servers_of(parsed), do: server.name), entitlements, "mcp_server"),
       acp_agents: narrow(for(agent <- acp_agents_of(parsed), do: agent.name), entitlements, "acp_agent")

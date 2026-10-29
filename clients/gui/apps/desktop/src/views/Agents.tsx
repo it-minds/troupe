@@ -569,7 +569,7 @@ function AgentDetail({
           <LayerWord layer={layer} /> <span className="mono micro">{def.path ?? "no file: the bundle's"}</span>
         </dd>
         <dt>Mode</dt>
-        <dd>{def.mode === "primary" ? "primary: a session or a branch runs it" : "subagent: an agent delegates to it"}</dd>
+        <dd>{def.mode === "primary" ? "primary: a session or a branch runs it" : def.mode === "function" ? "function: the harness runs it for one job" : "subagent: an agent delegates to it"}</dd>
         <dt>Model</dt>
         <dd className="mono">{def.model ?? "the session's"}</dd>
         <dt>Tools</dt>

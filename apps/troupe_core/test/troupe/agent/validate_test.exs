@@ -168,7 +168,7 @@ defmodule Troupe.Agent.ValidateTest do
   end
 
   test "the parser's errors in words, as a file that does not load is listed with" do
-    assert Validate.describe({:bad_mode, "main"}) =~ "mode must be primary or subagent"
+    assert Validate.describe({:bad_mode, "main"}) =~ "mode must be primary, subagent or function"
     assert Validate.describe({:bad_permission, "shell", "yes"}) =~ "auto, ask or deny"
     assert Validate.describe(:eacces) =~ "cannot be read"
   end

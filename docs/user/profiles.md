@@ -34,9 +34,13 @@ Beside them, the agents that exist and that your session will **not** have, each
 - **grant**: your team's grant on the profile leaves it out.
 
 Shown so that an agent you expected and do not find is explained, rather than left for you
-to guess whether it was ever there. A few agents Troupe runs by itself on your own machine
-(the ones that answer an `AI?` comment, for instance) are not a pod session's to start, and
-are in neither list.
+to guess whether it was ever there.
+
+A third list, **What the harness may run here**, is the function agents: the ones Troupe
+starts by itself for one job, each with its line, such as `answer` for an `AI?` comment or
+the librarian that writes the project brief ([agents](agents.md#agents)). No session
+starts as one, and no team's grant takes one away; one the profile's rule takes away is in
+the not-here list with **profile** as the reason, and its job is not done there.
 
 Agents and skills a repository brings with it are not listed: they arrive with the clone,
 and the profile decides whether they may replace its own ([agents](agents.md)).

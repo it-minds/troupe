@@ -35,16 +35,65 @@ defmodule Troupe do
   (`%{version, hash, channel, dir}`), `:kind` (`:local` or `:team`), `:origin`,
   `:parent` (the session id this one is a branch of), `:hold_auto` (no agent's `auto` and
   no MCP server's `permission: auto` applies: a branch a saved comment started).
+
+  An `:agent` the session's definitions do not have is `{:error, {:unknown_agent, name}}`,
+  or `{:error, {:not_on_profile, name}}` where the profile's agents rule took it away, and
+  nothing starts. A branch refused so says it in its parent's log, once for each sentence:
+  a librarian a profile denies is a job the harness does not do there, which the person
+  hears about rather than finds missing.
   """
   @spec start_session(keyword()) :: {:ok, session()} | {:error, term()}
   def start_session(opts \\ []) do
     with {:ok, session_opts} <- Session.build_opts(opts),
-         # Read before the tree starts. The tree appends on its way up — `agent_started`
-         # among others — so by the time the first durable event is written the log is
-         # not empty, and "is this a reopen" has to be asked of what was on disk before
-         # any of this run's events were.
-         previously <- previous_events(session_opts),
-         {:ok, pid} <- Sessions.start_session(session_opts) do
+         :ok <- Session.defined(session_opts) do
+      start_built(session_opts)
+    else
+      {:error, {kind, name} = reason} when kind in [:unknown_agent, :not_on_profile] ->
+        noted(Keyword.get(opts, :parent), kind, name)
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Said under the parent's root as a `config_note`, as what the configuration did to the
+  # session; not said again while the parent's log already says it, so a watcher that
+  # meets the same missing agent at every comment fills no log with it.
+  defp noted(nil, _kind, _name), do: :ok
+
+  defp noted(parent, kind, name) do
+    message = not_started(kind, name)
+
+    said? =
+      Enum.any?(events(parent), &(&1.type == "config_note" and &1.data["message"] == message))
+
+    unless said? do
+      Log.append(parent, Session.root_path(), :config_note, %{
+        "key" => "agents",
+        "message" => message
+      })
+    end
+
+    :ok
+  catch
+    :exit, _not_running -> :ok
+  end
+
+  defp not_started(:not_on_profile, name),
+    do: "#{name} was not started: this profile's agents rule takes it away, so its job is not done here"
+
+  defp not_started(:unknown_agent, name),
+    do: "#{name} was not started: no agent of that name is defined here"
+
+  defp start_built(session_opts) do
+    # Read before the tree starts. The tree appends on its way up — `agent_started` among
+    # others — so by the time the first durable event is written the log is not empty, and
+    # "is this a reopen" has to be asked of what was on disk before any of this run's
+    # events were.
+    previously = previous_events(session_opts)
+
+    with {:ok, pid} <- Sessions.start_session(session_opts) do
       session_id = Keyword.fetch!(session_opts, :session_id)
       workspace = Keyword.fetch!(session_opts, :workspace)
       # The agent it runs: the one its root was last switched to, which its replay comes
@@ -339,7 +388,11 @@ defmodule Troupe do
   """
   @spec switch_profile(String.t(), String.t(), keyword()) ::
           {:ok, Troupe.Agent.Definition.t()}
-          | {:error, :no_session | {:unknown_agent, String.t()} | {:not_primary, String.t()}}
+          | {:error,
+             :no_session
+             | {:unknown_agent, String.t()}
+             | {:not_primary, String.t()}
+             | {:function_agent, String.t()}}
   def switch_profile(session_id, name, opts \\ []),
     do: with_root(session_id, &Agent.switch_profile(&1, name, opts))
 

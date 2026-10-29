@@ -112,12 +112,16 @@ defmodule Troupe.UI.ProfileView do
 
   # -- Agents ------------------------------------------------------------------
 
+  # Three lists: what a session may start as and delegate to, the function agents the
+  # harness may run there for a job of their own (none of them a session's agent), and
+  # what is not there and why.
   defp agents(page) do
     offered = List.wrap(page["agents"])
+    functions = List.wrap(page["functions"])
     missing = List.wrap(page["agents_not_here"])
 
     width =
-      (offered ++ missing)
+      (offered ++ functions ++ missing)
       |> Enum.map(&String.length(to_string(&1["name"])))
       |> Enum.max(fn -> 0 end)
 
@@ -129,13 +133,32 @@ defmodule Troupe.UI.ProfileView do
         agents -> Enum.map(agents, &agent_line(&1, width))
       end
 
+    harness =
+      case functions do
+        [] ->
+          []
+
+        agents ->
+          [{:sub, "  What the harness may run here"} | Enum.map(agents, &function_line(&1, width))]
+      end
+
     not_here =
       case missing do
         [] -> []
         agents -> [{:sub, "  Not here"} | Enum.map(agents, &missing_line(&1, width))]
       end
 
-    here ++ not_here
+    here ++ harness ++ not_here
+  end
+
+  defp function_line(agent, width) do
+    description = agent["description"] |> to_string() |> Model.one_line()
+    built_in = if agent["from"] == "builtin", do: " (built in)", else: ""
+
+    {:line,
+     String.trim_trailing(
+       "  " <> String.pad_trailing(to_string(agent["name"]), width) <> description <> built_in
+     )}
   end
 
   defp agent_line(agent, width) do

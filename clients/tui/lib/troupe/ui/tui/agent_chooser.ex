@@ -499,6 +499,7 @@ defmodule Troupe.UI.TUI.AgentChooser do
   end
 
   defp mode_word("subagent"), do: "subagent"
+  defp mode_word("function"), do: "function"
   defp mode_word(_primary), do: "primary"
 
   defp stands_in(%{"overrides" => [_ | _] = files}),

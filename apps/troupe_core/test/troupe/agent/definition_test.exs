@@ -135,12 +135,37 @@ defmodule Troupe.Agent.DefinitionTest do
       assert Definition.allows_tool?(explore, "grep")
     end
 
-    test "primaries and subagents are partitioned", %{defs: defs} do
-      assert Enum.map(Definitions.primaries(defs), & &1.name) ==
-               ["answer", "ask", "build", "librarian", "orchestrate", "plan", "quick"]
+    test "primaries, function agents and subagents are partitioned", %{defs: defs} do
+      assert Enum.map(Definitions.primaries(defs), & &1.name) == ["build", "orchestrate", "plan"]
+
+      assert Enum.map(Definitions.functions(defs), & &1.name) ==
+               ["answer", "ask", "librarian", "quick"]
 
       assert Enum.map(Definitions.subagents(defs), & &1.name) ==
                ["explore", "general", "implementer", "reviewer"]
+    end
+
+    test "a function agent is fetched by name though no list a person picks from has it",
+         %{defs: defs} do
+      for name <- ["answer", "ask", "librarian", "quick"] do
+        assert {:ok, %Definition{mode: :function} = definition} = Definitions.fetch(defs, name)
+        assert Definition.function?(definition)
+        refute name in Enum.map(Definitions.primaries(defs), & &1.name)
+        refute name in Enum.map(Definitions.subagents(defs), & &1.name)
+      end
+    end
+
+    test "a function agent named as a session's agent is refused with what it is for",
+         %{defs: defs} do
+      assert Definition.function_refusal(Definitions.fetch!(defs, "librarian")) ==
+               "librarian is a function agent the harness runs for the project brief's survey; " <>
+                 "it does not carry a session"
+
+      own = %Definition{name: "triage", mode: :function, prompt: "", description: "Sorts issues."}
+
+      assert Definition.function_refusal(own) ==
+               "triage is a function agent the harness runs for its own job (Sorts issues.); " <>
+                 "it does not carry a session"
     end
   end
 

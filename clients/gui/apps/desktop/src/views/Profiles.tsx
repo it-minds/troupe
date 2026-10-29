@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { TroupeRpcError, accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, profileSummary, ruleAccessWords, whoseWords } from "@troupe/client";
+import { FUNCTIONS_HEADING, TroupeRpcError, accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, profileSummary, ruleAccessWords, whoseWords } from "@troupe/client";
 import type { AuthSession, ProfileView } from "@troupe/client";
 import { useProfiles } from "../hooks";
 import { Loading, Table } from "./bits";
@@ -133,6 +133,20 @@ function ProfileSections({ view }: { view: ProfileView }): JSX.Element {
               </tr>
             ))}
           </Table>
+        )}
+        {(view.functions ?? []).length > 0 && (
+          <>
+            <p className="note">{FUNCTIONS_HEADING}</p>
+            <Table head={["Agent", "What it does", "From"]}>
+              {(view.functions ?? []).map((a) => (
+                <tr key={a.name}>
+                  <td className="mono">{a.name}</td>
+                  <td>{a.description ?? ""}</td>
+                  <td>{whoseWords(a.from)}</td>
+                </tr>
+              ))}
+            </Table>
+          </>
         )}
         {view.agents_not_here.length > 0 && (
           <>

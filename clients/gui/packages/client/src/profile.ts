@@ -16,10 +16,21 @@ export interface ProfileViewAgent {
   from: "bundle" | "builtin" | string;
 }
 
+/**
+ * A function agent the harness may run on the profile for a job of its own (`answer` for an
+ * `AI?` comment, the librarian): no session runs one as its agent, so it is in neither of the
+ * other lists unless the profile's rule took it away.
+ */
+export interface ProfileViewFunction {
+  name: string;
+  description: string | null;
+  from: "bundle" | "builtin" | string;
+}
+
 /** An agent that is not there, and which rule took it away: the profile's own, or the team's grant. */
 export interface ProfileViewMissing {
   name: string;
-  mode: "primary" | "subagent" | string;
+  mode: "primary" | "subagent" | "function" | string;
   from: "bundle" | "builtin" | string;
   why: "profile" | "grant" | string;
 }
@@ -78,6 +89,8 @@ export interface ProfileView {
   teams: string[];
   model: ProfileViewModel;
   agents: ProfileViewAgent[];
+  /** The function agents the harness may run there; absent from a plane before them. */
+  functions?: ProfileViewFunction[];
   agents_not_here: ProfileViewMissing[];
   skills: string[];
   tools: { rules: ProfileViewRule[]; mcp: ProfileViewServer[] };
@@ -86,6 +99,9 @@ export interface ProfileView {
   terms: Record<string, unknown> | null;
   [k: string]: unknown;
 }
+
+/** The heading the function agents are shown under, in both apps and the terminal. */
+export const FUNCTIONS_HEADING = "What the harness may run here";
 
 /** Whose access a server is called with, as a phrase after "called". */
 export function accessWords(access: string): string {

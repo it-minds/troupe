@@ -140,7 +140,9 @@ defmodule Troupe.CommandModeTest do
 
     {:ok, agents} = Client.profiles({:local, ws})
     names = Enum.map(agents, & &1.name)
-    assert "quick" in names
+    assert "build" in names
+    # A function agent is the harness's to start for its job (`/quick`), never a pick here.
+    refute "quick" in names
 
     type(pid, "write the note")
     press(pid, "n", ["ctrl"])
@@ -149,16 +151,16 @@ defmodule Troupe.CommandModeTest do
     # The default agent is the one selected, and what it is told is on screen: the
     # instruction `agents.get` serves, or on a daemon from before it the description.
     for _ <- 1..length(names), do: press(pid, "up")
-    steps = Enum.find_index(names, &(&1 == "quick"))
+    steps = Enum.find_index(names, &(&1 == "build"))
     for _ <- 1..steps//1, do: press(pid, "down")
 
-    assert %{"name" => "quick"} =
+    assert %{"name" => "build"} =
              Enum.at(user_state(pid).switcher.rows, user_state(pid).switcher.cursor)
 
-    {:ok, quick} = Client.agent_definition(sid, "quick")
-    said = (quick.prompt || quick.description) |> String.split("\n", trim: true) |> hd()
+    {:ok, build} = Client.agent_definition(sid, "build")
+    said = (build.prompt || build.description) |> String.split("\n", trim: true) |> hd()
     text = screen_text(pid, session)
-    assert text =~ "quick — its instruction"
+    assert text =~ "build — its instruction"
     assert text =~ String.slice(said, 0, 40)
 
     press(pid, "enter")
@@ -166,13 +168,13 @@ defmodule Troupe.CommandModeTest do
     assert screen_text(pid, session) =~ "a worktree of its own"
     press(pid, "w")
 
-    spawned = await_event("quick-1", :branch_spawned)
-    assert spawned.data.name == "quick"
+    spawned = await_event("build-1", :branch_spawned)
+    assert spawned.data.name == "build"
     assert spawned.data.isolation == :worktree
     assert spawned.data.prompt == "write the note"
     assert user_state(pid).focus == :command
-    created = await_event("quick-1", :worktree_created)
-    await_state("quick-1", :done, 10_000)
+    created = await_event("build-1", :worktree_created)
+    await_state("build-1", :done, 10_000)
     assert File.read!(Path.join(created.data.path, "note.txt")) == "one\ntwo\n"
 
     # The worktree's row: its branch, ahead of and behind the checkout's, the two lines
@@ -182,7 +184,7 @@ defmodule Troupe.CommandModeTest do
         text = screen_text(pid, session)
 
         text =~ "worktrees" and text =~ created.data.git_branch and text =~ "↑0 ↓0" and
-          text =~ "+2 −0" and text =~ "dirty" and text =~ "quick-1 · alive" and
+          text =~ "+2 −0" and text =~ "dirty" and text =~ "build-1 · alive" and
           text =~ "this session's checkout"
       end,
       10_000

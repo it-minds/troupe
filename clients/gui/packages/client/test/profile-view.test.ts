@@ -20,6 +20,8 @@ test("the plane answers a granted profile with what a session gets, and what is 
   assert.deepEqual(dev.teams, ["core"]);
   assert.deepEqual(dev.agents.map((a) => `${a.name}:${a.mode}:${a.from}`), ["reviewer:subagent:bundle", "build:primary:builtin", "plan:primary:builtin", "explore:subagent:builtin"]);
   assert.deepEqual(dev.agents_not_here, []);
+  // The harness's own jobs are a third list, in neither of the others.
+  assert.deepEqual(dev.functions?.map((a) => `${a.name}:${a.from}`), ["answer:builtin", "librarian:builtin"]);
   const wiki = dev.tools.mcp.find((s) => s.name === "wiki")!;
   assert.deepEqual([wiki.access, wiki.offered, wiki.why], ["system", false, "grant"]);
   assert.deepEqual(dev.tools.mcp.find((s) => s.name === "github")!.tools, "all");
@@ -29,7 +31,9 @@ test("the plane answers a granted profile with what a session gets, and what is 
   assert.deepEqual(dev.limits.budgets, { profile: 200_000_000, team: 500_000_000, you: 150_000_000 });
 
   const ux = await auth.plane.profile(token, "ux");
-  assert.deepEqual(ux.agents_not_here.map((a) => `${a.name}:${a.why}`), ["build:profile", "plan:grant"]);
+  assert.deepEqual(ux.agents_not_here.map((a) => `${a.name}:${a.why}`), ["build:profile", "plan:grant", "librarian:profile"]);
+  // A librarian the profile's rule denies is not among what the harness may run there.
+  assert.deepEqual(ux.functions?.map((a) => a.name), ["answer"]);
   assert.deepEqual(ux.model.key, null);
 });
 

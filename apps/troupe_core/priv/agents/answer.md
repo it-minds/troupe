@@ -1,6 +1,6 @@
 ---
 description: Answers an `AI?` question about the code in as few turns as possible. Cheap model, read-only.
-mode: primary
+mode: function
 model: cheap
 tools:
   - read_file

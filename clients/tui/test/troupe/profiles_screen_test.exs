@@ -74,6 +74,10 @@ defmodule Troupe.ProfilesScreenTest do
     assert text =~ "Not here"
     assert text =~ ~r/deploy\s+primary\s+the profile leaves it out/
     assert text =~ ~r/review\s+subagent\s+your team's grant leaves it out/
+    # The harness's own jobs, each with its line; the librarian the rule denies is not here.
+    assert text =~ "What the harness may run here"
+    assert text =~ ~r/answer\s+Answers an AI\? question about the code \(built in\)/
+    assert text =~ ~r/librarian\s+function\s+the profile leaves it out/
 
     assert text =~ "deny  shell(git push)   the profile"
     assert text =~ ~r/ask   web_fetch\s+the profile/

@@ -14,7 +14,7 @@ defmodule Troupe.Gateway.Dispatch do
   effect.
   """
 
-  alias Troupe.Agent.{Definitions, Local}
+  alias Troupe.Agent.{Definition, Definitions, Local}
   alias Troupe.Config.{Explain, ModelSettings, Org, Settings}
 
   alias Troupe.Gateway.{
@@ -900,8 +900,8 @@ defmodule Troupe.Gateway.Dispatch do
 
   # A session's agent, its root's, which is a branch's too: a branch is a session (Decision
   # 646). Read from its file now, so an agent saved a moment ago is one to switch to, and
-  # applied at the turn boundary; a name nothing defines, or a subagent's, is refused with
-  # nothing written (Decision 841). The effect is `profile_switched`, carrying this
+  # applied at the turn boundary; a name nothing defines, a subagent's or a function agent's
+  # is refused with nothing written. The effect is `profile_switched`, carrying this
   # `command_id`.
   defp handle("profile.switch", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
@@ -929,6 +929,9 @@ defmodule Troupe.Gateway.Dispatch do
                "#{name} is a subagent, which an agent delegates to: a session or a branch " <>
                  "runs a primary agent"
            })}
+
+        {:error, {:function_agent, sentence}} ->
+          {:error, Error.new(:invalid_params, %{field: "profile", reason: sentence})}
 
         {:error, :no_session} ->
           {:error, Error.new(:unavailable, %{reason: "the session is not running"})}
@@ -1164,7 +1167,7 @@ defmodule Troupe.Gateway.Dispatch do
         |> maybe_put(:parent, parent)
         |> maybe_private(private?)
 
-      case Troupe.start_session(opts) do
+      case session_agent(profile, parent, resolved.path) || Troupe.start_session(opts) do
         {:ok, session} ->
           {:ok,
            %{
@@ -1179,6 +1182,12 @@ defmodule Troupe.Gateway.Dispatch do
              # the coupling the whole idea avoids.
              "syncing" => private? and start_sealing(session.id, resolved.path)
            }}
+
+        {:error, {:function_agent, sentence}} ->
+          {:error, Error.new(:invalid_params, %{field: "profile", reason: sentence})}
+
+        {:error, {kind, _name} = reason} when kind in [:unknown_agent, :not_on_profile] ->
+          {:error, Error.new(:invalid_params, %{field: "profile", reason: start_error(reason)})}
 
         {:error, reason} ->
           {:error, Error.new(:invalid_params, %{field: "workspace", reason: start_error(reason)})}
@@ -2162,6 +2171,22 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # A function agent is the harness's to start for one job, as a branch of the session it
+  # serves (`/ask`, the librarian): a session of its own, which a person would then carry
+  # on with, is refused, saying what it is for. Named as a branch's agent it starts.
+  defp session_agent(nil, _parent, _path), do: nil
+  defp session_agent(_name, parent, _path) when is_binary(parent), do: nil
+
+  defp session_agent(name, nil, path) do
+    case path |> Path.expand() |> Definitions.load() |> Definitions.fetch(name) do
+      {:ok, %Definition{mode: :function} = definition} ->
+        {:error, {:function_agent, Definition.function_refusal(definition)}}
+
+      _other ->
+        nil
+    end
+  end
+
   # A branch names the session it forks from; the daemon must know that session, or the
   # link would point at nothing the moment anybody read it back.
   defp parent_of(params) do
@@ -2242,6 +2267,11 @@ defmodule Troupe.Gateway.Dispatch do
     do: {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
 
   defp start_error({:not_a_directory, path}), do: "#{path} is not a directory"
+  defp start_error({:unknown_agent, name}), do: "there is no agent named #{name} here"
+
+  defp start_error({:not_on_profile, name}),
+    do: "#{name} is not on this profile: its agents rule takes it away"
+
   # Names the file, the key and the fix, which is all a person needs to act on it.
   defp start_error(%Troupe.Config.Error{} = error), do: Exception.message(error)
   # Naming the alternatives, because the name people reach for is the gateway they talk
@@ -2536,9 +2566,17 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  # What the session's command table is built from: its primary agents and its workspace.
+  # What the session's command table is built from: its primary agents, the function agents
+  # a command starts in a branch for their one job (`/ask`, `/quick`), and its workspace. A
+  # pod's session, pinned to a bundle, starts no branches, so there a function agent is no
+  # command.
   defp table_opts(session_id, session) do
-    agents = session_id |> session_definitions(session) |> Definitions.primaries()
+    definitions = session_definitions(session_id, session)
+
+    functions =
+      if Definitions.pin(definitions), do: [], else: Definitions.functions(definitions)
+
+    agents = Definitions.primaries(definitions) ++ functions
     [agents: agents, workspace: Path.expand(session.workspace)]
   end
 

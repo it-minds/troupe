@@ -175,8 +175,9 @@ defmodule Troupe.Onboard.AgentsAndCommands do
     Map.merge(commands, primaries)
   end
 
-  defp primary?(%Definition{mode: mode}), do: mode == :primary
-  defp primary?(%{definition: %Definition{mode: mode}}), do: mode == :primary
+  # A function agent is a command too (`/ask` starts one in a branch), so its name is taken.
+  defp primary?(%Definition{mode: mode}), do: mode in [:primary, :function]
+  defp primary?(%{definition: %Definition{mode: mode}}), do: mode in [:primary, :function]
 
   defp whose(%Definition{name: name}), do: "Troupe's built-in #{name} agent"
 

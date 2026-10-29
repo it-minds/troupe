@@ -17,8 +17,8 @@ export type {
   ProfileOffering,
   WorkerPod,
 } from "./plane.js";
-export { accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, moneyWords, profileSummary, ruleAccessWords, whoseWords } from "./profile.js";
-export type { ProfileView, ProfileViewAgent, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, RuleAccess, ServerAccess } from "./profile.js";
+export { FUNCTIONS_HEADING, accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, moneyWords, profileSummary, ruleAccessWords, whoseWords } from "./profile.js";
+export type { ProfileView, ProfileViewAgent, ProfileViewFunction, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, RuleAccess, ServerAccess } from "./profile.js";
 export { SessionView, createLocalSession, turnCompleted } from "./session.js";
 export type { SessionViewHooks, TurnResult } from "./session.js";
 export { AuthSession, PlaneUnreachableError, memoryTokenStore, webTokenStore, currentOrigin } from "./auth.js";

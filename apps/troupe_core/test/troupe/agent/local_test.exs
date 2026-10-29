@@ -154,7 +154,7 @@ defmodule Troupe.Agent.LocalTest do
       assert [%{kind: :agent, name: "broken", path: ^broken, reason: reason}] =
                Definitions.skipped(loaded)
 
-      assert reason =~ "not read: mode must be primary or subagent"
+      assert reason =~ "not read: mode must be primary, subagent or function"
     end
 
     test "a snapshot read again finds a file written since, stamped with the same trust",

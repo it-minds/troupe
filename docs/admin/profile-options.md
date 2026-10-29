@@ -318,6 +318,13 @@ reaches it under that name. The rule is the profile's statement that the agent i
 there, which is why it reaches subagents too. A name no agent has today is kept, since a
 bundle may gain it; `admin.profile.agents` marks each agent `offered` or not and lists
 such names in `unmatched`. A name in both lists, or one that is not a name, is refused.
+The function agents (`answer`, `ask`, `quick`, `librarian`: `mode: function`, which Troupe
+starts for a job of its own and no session runs as its agent) are agents too: a `deny:
+[librarian]` turns the project brief's survey off on the profile, and where Troupe would
+start one the rule removed it says so once in the session's log instead. No grant narrows
+a function agent; `profile.get` lists those left as `functions`, `admin.profile.agents`
+marks them `mode: function`, and the built-in primaries are the files' `mode: primary`
+ones (`build`, `orchestrate`, `plan`, Decision 970).
 
 **Two profiles, as most are written.** The lean one is the usual case: a profile for one
 job, whose bundle brings the one agent it needs, takes the coding agents Troupe ships away

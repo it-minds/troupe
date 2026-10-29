@@ -179,17 +179,12 @@ defmodule Troupe.SkillsTest do
 
       all = Definitions.load(context.workspace, bundle_dir: context.dir)
 
-      assert Enum.map(Definitions.primaries(all), & &1.name) ==
-               [
-                 "answer",
-                 "ask",
-                 "auditor",
-                 "build",
-                 "librarian",
-                 "orchestrate",
-                 "plan",
-                 "quick"
-               ]
+      assert Enum.map(Definitions.primaries(all), & &1.name) == [
+               "auditor",
+               "build",
+               "orchestrate",
+               "plan"
+             ]
 
       narrowed =
         Definitions.load(context.workspace, bundle_dir: context.dir, entitled: ["build"])

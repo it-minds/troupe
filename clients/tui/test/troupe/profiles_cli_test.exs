@@ -78,6 +78,7 @@ defmodule Troupe.ProfilesCLITest do
     assert said =~ "    severa · severa.example.com · as you, once you connect it · asked first"
     assert said =~ "    jira · jira.example.com · not offered: your team's grant does not offer it"
     assert said =~ "  review      subagent  your team's grant leaves it out"
+    assert said =~ "  What the harness may run here"
 
     # The same lines the headless printer makes of the answer.
     {:ok, answer} = Troupe.Client.profile_page("code")
@@ -86,7 +87,8 @@ defmodule Troupe.ProfilesCLITest do
     {0, json} = run(%{name: "code", json: true})
     page = Jason.decode!(json)
     assert page["tools"]["mcp"] |> Enum.map(& &1["access"]) == ["yours", "system", "profile"]
-    assert page["agents_not_here"] |> Enum.map(& &1["why"]) == ["profile", "grant"]
+    assert page["agents_not_here"] |> Enum.map(& &1["why"]) == ["profile", "grant", "profile"]
+    assert page["functions"] |> Enum.map(& &1["name"]) == ["answer", "ask"]
 
     assert page["limits"]["budgets"] == %{
              "profile" => 50_000_000,

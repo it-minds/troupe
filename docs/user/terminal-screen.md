@@ -328,8 +328,9 @@ sessions`). Enter on a row, or `/profile <name>`, opens what that profile gives 
 yours, in a frame drawn as the settings page's is, in six groups in reading order:
 
 - **Agents**: each offered, with its mode and description (`(built in)` for one of
-  Troupe's own); then **Not here**, each with why: *the profile leaves it out*, or *your
-  team's grant leaves it out*.
+  Troupe's own); then **What the harness may run here**, the function agents Troupe
+  starts by itself for a job (`answer`, the librarian), each with its line; then **Not
+  here**, each with why: *the profile leaves it out*, or *your team's grant leaves it out*.
 - **Tools**: the rules, one a line, what they do to a tool and whose they are
   (`deny  shell(git push)   the profile`); then each MCP server with its host, whose access
   it runs with — *as you, once you connect it*, *as the profile*, or *as the profile's own

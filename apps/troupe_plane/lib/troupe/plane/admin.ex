@@ -860,8 +860,10 @@ defmodule Troupe.Plane.Admin do
       subagents =
         for %{mode: "subagent", name: sub} <- agents, AgentRule.allows?(rule, sub), do: sub
 
+      # The built-ins a bundle does not replace: the primaries a session may start as, and
+      # the function agents the harness runs for a job of their own (mode `function`).
       offered =
-        for builtin <- Bundles.builtin_primaries(),
+        for builtin <- Bundles.builtin_primaries() ++ Bundles.builtin_functions(),
             not Enum.any?(agents, &(&1.name == builtin)),
             text = Bundles.builtin_definitions()[builtin],
             is_binary(text),
@@ -873,7 +875,7 @@ defmodule Troupe.Plane.Admin do
         for agent <- agents ++ offered do
           agent
           |> Map.put(:delegate, delegates(agent, subagents))
-          |> Map.put(:teams, agent_teams(agent.name, name, grants))
+          |> Map.put(:teams, agent_teams(agent, name, grants))
           |> Map.put(:offered, AgentRule.allows?(rule, agent.name))
           |> Map.delete(:tools)
         end
@@ -968,7 +970,12 @@ defmodule Troupe.Plane.Admin do
 
   defp delegates(_agent, _subagents), do: nil
 
-  defp agent_teams(agent, profile, grants) do
+  # A grant narrows the agents a session may start as; a function agent is none of those,
+  # so every team the profile is granted to has it, unless the profile's rule took it.
+  defp agent_teams(%{mode: "function"}, _profile, grants),
+    do: grants |> Enum.map(&%{team: &1.team.name, may: true}) |> Enum.sort_by(& &1.team)
+
+  defp agent_teams(%{name: agent}, profile, grants) do
     grants
     |> Enum.map(fn grant ->
       rows = Identity.entitlements_for(grant.team, profile)

@@ -48,8 +48,9 @@ defmodule Troupe.Commands do
   def sections, do: @sections
 
   @doc """
-  Every command available in a session: the built-ins, then one entry per primary agent
-  in `agents:` (the definitions `agents.list` answers with), then, given a `workspace:`,
+  Every command available in a session: the built-ins, then one entry per agent in
+  `agents:` (the primaries `agents.list` answers with, and on a laptop the function agents
+  a command starts in a branch for their job, such as `/ask`), then, given a `workspace:`,
   the commands files define for it (`defined/1`), grouped by section in the order
   `sections/0` gives.
   """

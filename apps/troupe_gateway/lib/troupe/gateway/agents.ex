@@ -41,10 +41,11 @@ defmodule Troupe.Gateway.Agents do
   # (Decision 829), in a worktree one its main checkout has not committed, or one that
   # does not parse (Decision 841). Each row says what decides whether a person wants it.
   #
-  # The primaries alone unless `subagents` is true (Decision 852): every picker of what a
-  # session runs reads this list, and `profile.switch` and `session.create` refuse a
-  # subagent, so a manager asks for those too and the rest are answered as before. Each row
-  # says its `mode`, the primaries first.
+  # The primaries alone unless `subagents` is true: every picker of what a session runs
+  # reads this list, and `profile.switch` and `session.create` refuse a subagent and a
+  # function agent (one the harness starts for a job of its own), so a manager asks for
+  # those too and the rest are answered as before. Each row says its `mode`, the primaries
+  # first.
   #
   # Named by a session rather than a workspace, the rows are that session's own agents,
   # read again from their files as a switch reads them: on a pod its bundle's, the

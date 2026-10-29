@@ -11,6 +11,12 @@ defmodule Troupe.Agent.Definition do
   Precedence is project `.troupe/agents/` over the global config dir's `agents/` over
   a bundle's `agents/` over the built-ins below.
 
+  `mode` is `:primary` (a person picks it for a session or a branch), `:subagent` (an
+  agent delegates to it) or `:function` (the harness starts it by name for one job, as
+  the watcher starts `answer` for an `AI?` comment, and no picker or delegation offers
+  it). A function agent is still an agent of the session's definitions, so a profile's
+  rule that removes one removes the job too.
+
   The parsing itself lives in `Troupe.Protocol.AgentDefinition`, because the plane
   checks a definition at publish and does not depend on this app. This struct is what
   the harness runs under; the parser's map is what both sides agree a file means.
@@ -59,7 +65,7 @@ defmodule Troupe.Agent.Definition do
     acp: nil
   ]
 
-  @type mode :: :primary | :subagent
+  @type mode :: :primary | :subagent | :function
   @type permission :: :auto | :ask | :deny
   @type source :: :builtin | :bundle | :global | :project
   @type note :: %{key: String.t(), reason: String.t()}
@@ -81,6 +87,18 @@ defmodule Troupe.Agent.Definition do
           path: Path.t() | nil,
           acp: map() | nil
         }
+
+  @doc "Whether the harness starts this agent for a job of its own, never a person's pick."
+  @spec function?(t()) :: boolean()
+  def function?(%__MODULE__{mode: mode}), do: mode == :function
+
+  @doc """
+  The sentence a request is refused with when it names this function agent as a session's
+  agent (`Troupe.Protocol.AgentDefinition.function_refusal/2`).
+  """
+  @spec function_refusal(t()) :: String.t()
+  def function_refusal(%__MODULE__{name: name, description: description}),
+    do: AgentDefinition.function_refusal(name, description)
 
   @doc "Whether this delegate is a subprocess somebody else wrote rather than a prompt."
   @spec acp?(t()) :: boolean()

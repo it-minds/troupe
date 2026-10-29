@@ -93,7 +93,7 @@ defmodule Troupe.Plane.HarnessTest do
       assert {:ok, %{"profiles" => [bare]}} = Harness.call("profiles.list", %{}, context(user))
       assert bare["channel"] == "stable"
       assert bare["bundle_version"] == nil
-      assert bare["agents"] == ["build", "plan"]
+      assert bare["agents"] == ["build", "orchestrate", "plan"]
       assert bare["skills"] == []
       assert bare["mcp_servers"] == []
 
@@ -128,7 +128,7 @@ defmodule Troupe.Plane.HarnessTest do
       assert profile["bundle_hash"] == bundle.hash
       # The bundle's primary, then the built-ins it does not replace; the subagent is
       # not something a session starts as.
-      assert profile["agents"] == ["pr-reviewer", "build", "plan"]
+      assert profile["agents"] == ["pr-reviewer", "build", "orchestrate", "plan"]
       assert profile["skills"] == [%{"name" => "review", "description" => "How we review"}]
       assert profile["mcp_servers"] == ["jira"]
     end

@@ -19,7 +19,7 @@ defmodule Troupe.Protocol.AgentCheck do
   model is not checked, with a warning.
 
   - **Errors:** the frontmatter is not YAML; a key no agent has; `mode` missing or not
-    `primary` or `subagent`; `tools` or `skills` not `all` or a list of names; a tool that
+    `primary`, `subagent` or `function`; `tools` or `skills` not `all` or a list of names; a tool that
     does not exist; a permission that is not `auto`, `ask` or `deny`; a permission that
     grants (`auto` or `ask`) a tool `tools` does not list, which could never apply (a
     `deny` of one says what leaving it out says, and the built-ins do it to make the denial
@@ -99,7 +99,8 @@ defmodule Troupe.Protocol.AgentCheck do
   def describe({:bad_frontmatter, reason}),
     do: "its frontmatter is not YAML (#{yaml_error(reason)})"
 
-  def describe({:bad_mode, mode}), do: "mode must be primary or subagent, not #{inspect(mode)}"
+  def describe({:bad_mode, mode}),
+    do: "mode must be primary, subagent or function, not #{inspect(mode)}"
 
   def describe({:bad_tools, tools}),
     do: "tools must be all or a list of names, not #{inspect(tools)}"
@@ -193,11 +194,11 @@ defmodule Troupe.Protocol.AgentCheck do
       error(
         "mode",
         "mode is missing: primary for an agent a session or branch runs, subagent for one " <>
-          "an agent delegates to"
+          "an agent delegates to, function for one the harness starts for a job of its own"
       )
     ]
 
-  defp mode({:ok, mode}) when mode in ["primary", "subagent"], do: []
+  defp mode({:ok, mode}) when mode in ["primary", "subagent", "function"], do: []
   defp mode({:ok, other}), do: [error("mode", describe({:bad_mode, other}))]
 
   defp tools(nil, _tool), do: []
