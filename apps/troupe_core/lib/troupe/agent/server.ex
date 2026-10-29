@@ -897,7 +897,11 @@ defmodule Troupe.Agent.Server do
     {:keep_state, %{state | llm_monitor: monitor} |> State.watch(monitor, {:llm, ref})}
   end
 
+  def thinking(:info, {:llm_first_byte, ref}, %State{llm_ref: ref} = state),
+    do: {:keep_state, first_byte(state)}
+
   def thinking(:info, {:llm_delta, ref, delta}, %State{llm_ref: ref} = state) do
+    state = first_byte(state)
     publish(state, %{type: :llm_delta, data: Delta.to_json(delta)})
     {:keep_state, accumulate_delta(state, delta)}
   end
@@ -905,26 +909,33 @@ defmodule Troupe.Agent.Server do
   # What the provider has reported of the call so far, a running total: the response's
   # replaces it, and a call given up on is counted by it (Decision 788).
   def thinking(:info, {:llm_usage, ref, %Usage{} = usage}, %State{llm_ref: ref} = state),
-    do: {:keep_state, %{state | llm_usage: usage}}
+    do: {:keep_state, %{first_byte(state) | llm_usage: usage}}
 
   def thinking(:info, {:llm_done, ref, %Response{} = response}, %State{llm_ref: ref} = state) do
-    state = state |> clear_llm() |> record_response(response)
+    state = state |> stream_ended("answered", response.stop_reason) |> clear_llm() |> record_response(response)
     handle_response(state, response)
   end
 
   def thinking(:info, {:llm_error, ref, reason}, %State{llm_ref: ref} = state) do
-    state = clear_llm(state)
+    classified = Provider.classify(reason)
+    described = Provider.describe_error(classified)
+    state = state |> stream_ended("failed", described) |> clear_llm()
 
-    case Provider.classify(reason) do
+    case classified do
       {:context_overflow, _detail} = overflow -> context_overflow(state, overflow)
-      classified -> llm_failed(state, Provider.describe_error(classified))
+      _other -> llm_failed(state, described)
     end
   end
 
-  def thinking(:info, {:llm_timeout, ref}, %State{llm_ref: ref} = state) do
-    {state, stopped} = stop_llm(state)
-    llm_failed(state, Provider.describe_error({:timeout, state.config.llm_timeout_ms}), stopped)
-  end
+  def thinking(:info, {:llm_timeout, ref}, %State{llm_ref: ref} = state),
+    do: given_up(state, Provider.describe_error({:timeout, state.config.llm_timeout_ms}))
+
+  # Not a byte came in `llm_first_byte_ms`: the call is stopped as one that outlasts
+  # `llm_timeout_ms` is, and the turn fails with a sentence naming the host. A reply that
+  # has begun is not held to this; it may pause for as long as the whole call is given.
+  def thinking(:info, {:llm_first_byte_timeout, ref}, %State{llm_ref: ref, llm_first_byte_timer: timer} = state)
+      when timer != nil,
+      do: given_up(state, first_byte_sentence(state))
 
   def thinking(:info, :cancel, state), do: cancel_everything(state)
 
@@ -1037,26 +1048,41 @@ defmodule Troupe.Agent.Server do
     {:keep_state, %{state | llm_monitor: monitor} |> State.watch(monitor, {:llm, ref})}
   end
 
-  def compacting(:info, {:llm_delta, ref, _delta}, %State{llm_ref: ref}) do
-    {:keep_state_and_data, []}
-  end
+  def compacting(:info, {:llm_first_byte, ref}, %State{llm_ref: ref} = state),
+    do: {:keep_state, first_byte(state)}
+
+  def compacting(:info, {:llm_delta, ref, _delta}, %State{llm_ref: ref} = state),
+    do: {:keep_state, first_byte(state)}
 
   def compacting(:info, {:llm_usage, ref, %Usage{} = usage}, %State{llm_ref: ref} = state),
-    do: {:keep_state, %{state | llm_usage: usage}}
+    do: {:keep_state, %{first_byte(state) | llm_usage: usage}}
 
   def compacting(:info, {:llm_done, ref, %Response{} = response}, %State{llm_ref: ref} = state) do
-    state = state |> clear_llm() |> apply_compaction(response)
+    state = state |> stream_ended("answered", response.stop_reason) |> clear_llm() |> apply_compaction(response)
     resume_after_compaction(state)
   end
 
-  def compacting(:info, {:llm_error, ref, reason}, %State{llm_ref: ref} = state),
-    do: summary_failed(clear_llm(state), reason)
+  def compacting(:info, {:llm_error, ref, reason}, %State{llm_ref: ref} = state) do
+    state = state |> stream_ended("failed", Provider.describe_error(reason)) |> clear_llm()
+    summary_failed(state, reason)
+  end
 
   # A summary that never comes fails as one refused does, after as long as any other
-  # model call is given (Decision 779), and is stopped as any other is (Decision 788).
+  # model call is given (Decision 779), and is stopped as any other is (Decision 788). One
+  # whose first byte never comes is given up on sooner, as a turn's call is.
   def compacting(:info, {:llm_timeout, ref}, %State{llm_ref: ref} = state) do
+    reason = {:timeout, state.config.llm_timeout_ms}
+    state = stream_ended(state, "failed", Provider.describe_error(reason))
     {state, _stopped} = stop_llm(state)
-    summary_failed(state, {:timeout, state.config.llm_timeout_ms})
+    summary_failed(state, reason)
+  end
+
+  def compacting(:info, {:llm_first_byte_timeout, ref}, %State{llm_ref: ref, llm_first_byte_timer: timer} = state)
+      when timer != nil do
+    reason = {:first_byte, state.llm_host, state.config.llm_first_byte_ms}
+    state = stream_ended(state, "failed", Provider.describe_error(reason))
+    {state, _stopped} = stop_llm(state)
+    summary_failed(state, reason)
   end
 
   def compacting(:info, :cancel, state), do: cancel_everything(state)
@@ -1422,6 +1448,8 @@ defmodule Troupe.Agent.Server do
         gate_halt(halt)
 
       :ok ->
+        info(state, "#{turn_label(state)} preparing")
+
         {state, held} =
           state
           |> fold_shell()
@@ -1465,20 +1493,12 @@ defmodule Troupe.Agent.Server do
           %{session_id: state.session_id, agent_path: state.agent_path, model: request.model}
         )
 
-        ref = Provider.start_stream(tasks(state), request.provider || state.provider, request, self())
-        timer = Process.send_after(self(), {:llm_timeout, ref}, request.timeout_ms)
-
-        state = %{
+        state =
           state
-          | llm_ref: ref,
-            llm_timer: timer,
-            llm_model: request.model,
-            llm_summariser: false,
-            llm_text: "",
-            llm_tool_names: %{},
-            prefix: prefix
-        }
+          |> send_request(request)
+          |> Map.merge(%{llm_summariser: false, llm_text: "", llm_tool_names: %{}, prefix: prefix})
 
+        info(state, "#{call_label(state)} asking #{request.model} at #{state.llm_host}")
         publish_state(state, :thinking)
         {:next_state, :thinking, state}
     end
@@ -1657,6 +1677,7 @@ defmodule Troupe.Agent.Server do
         type: ProviderType.atom(target.provider),
         api_version: target.api_version,
         timeout_ms: config.llm_timeout_ms,
+        first_byte_ms: config.llm_first_byte_ms,
         identify: config.identify != false,
         client: config.client
     }
@@ -3788,23 +3809,21 @@ defmodule Troupe.Agent.Server do
         |> aim(state, state.config.small_model)
 
       :ok = note_held(state, request)
-      ref = Provider.start_stream(tasks(state), request.provider || state.provider, request, self())
-      timer = Process.send_after(self(), {:llm_timeout, ref}, request.timeout_ms)
 
       # The conversation stays whole until the summary arrives: one that fails leaves it as
       # it was, which is what a replay of the log rebuilds (Decision 774).
-      state = %{
+      state =
         state
-        | llm_ref: ref,
-          llm_timer: timer,
-          llm_model: request.model,
+        |> send_request(request)
+        |> Map.merge(%{
           llm_summariser: true,
           compact_resume: resume,
           compact_reason: state.compact_reason || "threshold",
           compact_prompt: Spend.prompt_bytes(request, ""),
           llm_text: ""
-      }
+        })
 
+      info(state, "#{call_label(state)} asking #{request.model} at #{state.llm_host}")
       publish_state(state, :compacting)
       {:next_state, :compacting, state}
     end
@@ -4117,11 +4136,75 @@ defmodule Troupe.Agent.Server do
 
   defp clear_llm(state) do
     if state.llm_timer, do: Process.cancel_timer(state.llm_timer)
+    if state.llm_first_byte_timer, do: Process.cancel_timer(state.llm_first_byte_timer)
     if state.llm_monitor, do: Process.demonitor(state.llm_monitor, [:flush])
 
     state = if state.llm_monitor, do: State.unwatch(state, state.llm_monitor), else: state
-    %{state | llm_ref: nil, llm_timer: nil, llm_monitor: nil, llm_usage: nil}
+    %{state | llm_ref: nil, llm_timer: nil, llm_first_byte_timer: nil, llm_monitor: nil, llm_usage: nil}
   end
+
+  # -- a call in flight, as the daemon's log follows it --------------------------------
+
+  # The request goes out with two timers: the whole call's, and the first byte's, which a
+  # reply that has begun is not held to. Where it went is kept for the sentence a call
+  # nothing came from ends with.
+  defp send_request(state, %Request{} = request) do
+    ref = Provider.start_stream(tasks(state), request.provider || state.provider, request, self())
+    timer = Process.send_after(self(), {:llm_timeout, ref}, request.timeout_ms)
+    first_byte = Process.send_after(self(), {:llm_first_byte_timeout, ref}, request.first_byte_ms)
+
+    %{
+      state
+      | llm_ref: ref,
+        llm_timer: timer,
+        llm_first_byte_timer: first_byte,
+        llm_sent_at: System.monotonic_time(:millisecond),
+        llm_host: Request.host(request),
+        llm_model: request.model
+    }
+  end
+
+  # The first byte of the reply, whatever it carried: the first-byte limit is met, and
+  # the log says how long the host took. Said once; the rest of the stream is not.
+  defp first_byte(%State{llm_first_byte_timer: nil} = state), do: state
+
+  defp first_byte(%State{llm_first_byte_timer: timer} = state) do
+    Process.cancel_timer(timer)
+    info(state, "#{call_label(state)} first byte after #{elapsed_ms(state)} ms")
+    %{state | llm_first_byte_timer: nil}
+  end
+
+  # A call the agent gave up on, at either limit: stopped, counted, and the turn failed
+  # with the sentence.
+  defp given_up(state, described) do
+    state = stream_ended(state, "failed", described)
+    {state, stopped} = stop_llm(state)
+    llm_failed(state, described, stopped)
+  end
+
+  defp first_byte_sentence(state),
+    do: Provider.describe_error({:first_byte, state.llm_host, state.config.llm_first_byte_ms})
+
+  defp stream_ended(state, how, why) do
+    info(state, "#{call_label(state)} #{how} after #{elapsed_ms(state)} ms: #{why}")
+    state
+  end
+
+  defp elapsed_ms(%State{llm_sent_at: nil}), do: 0
+  defp elapsed_ms(%State{llm_sent_at: sent_at}), do: System.monotonic_time(:millisecond) - sent_at
+
+  # The call as the log names it: the budget's turn it is or will be, and whether it is
+  # the summariser's rather than the agent's own. A turn preparing is named by the turn
+  # alone: the flag is the last call's until the next goes out.
+  defp call_label(%State{llm_summariser: true} = state), do: turn_label(state) <> " summary"
+  defp call_label(state), do: turn_label(state)
+
+  defp turn_label(state), do: "turn #{state.budget.turns + 1}"
+
+  # Four lines a person can find in daemon.log for a turn that shows nothing: preparing,
+  # asking, the first byte, and the end. At `info`, which is the daemon's level, where
+  # `debug` would be dropped.
+  defp info(state, words), do: Logger.info("troupe: #{state.session_id} #{State.label(state)} #{words}")
 
   defp terminate_children(state) do
     sup = children_sup(state)

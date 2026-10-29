@@ -41,7 +41,7 @@ import type {
 } from "@troupe/client";
 import { useSessionView, useStartQuestions } from "../hooks";
 import type { SessionHandle } from "../hooks";
-import { curtainLine, DEFAULT_DETAIL, isDetail, layout } from "../frames";
+import { curtainLine, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
 import type { Detail, Drawn } from "../frames";
 import { saveFile } from "../shell";
 import { AgentSwitch } from "./AgentSwitch";
@@ -134,6 +134,9 @@ export function Session({
   const readOnly = row?.state === "read_only" || row?.yourRole === "viewer" || row?.yourRole === "observe";
   const dormant = row?.state === "dormant";
   const open = openApprovals(view.state);
+  // The clock, while a prompt or a request has drawn nothing: the composer's hint says so.
+  const waitNow = useNow(waitingOn(view.state, Date.now()) !== null);
+  const waiting = waitingWords(view.state, waitNow);
   // Whom a publication may be for, asked only once an agent asks to publish: through the
   // daemon's sign-in as the person's artifacts are listed, or what the plane said of them.
   const audiences = useAudiences(daemon, auth, open.some((e) => e.publication !== undefined));
@@ -312,6 +315,7 @@ export function Session({
               view={view}
               dormant={dormant}
               busy={isBusy(view.state)}
+              waiting={waiting}
               looping={loop?.state === "running"}
               live={view.status === "live"}
               others={others}
@@ -1317,6 +1321,7 @@ function Composer({
   view,
   dormant,
   busy,
+  waiting,
   looping,
   live,
   others,
@@ -1326,6 +1331,8 @@ function Composer({
   view: SessionHandle;
   dormant: boolean;
   busy: boolean;
+  /** A prompt or a request that has drawn nothing for a while, in words; null otherwise. */
+  waiting: string | null;
   /** A loop towards the goal is running: what is sent goes between two iterations. */
   looping: boolean;
   live: boolean;
@@ -1365,11 +1372,13 @@ function Composer({
           ? "This session is asleep. Sending wakes it, which takes about twenty seconds."
           : looping
             ? "A loop is working towards the goal. What you send goes between two of its iterations."
-            : busy
-              ? "The session is working. What you send is queued and goes next."
-              : !live
-                ? "Not connected. What you send is held and goes when the connection comes back."
-                : "Enter sends, Shift+Enter starts a new line."}
+            : waiting
+              ? waiting
+              : busy
+                ? "The session is working. What you send is queued and goes next."
+                : !live
+                  ? "Not connected. What you send is held and goes when the connection comes back."
+                  : "Enter sends, Shift+Enter starts a new line."}
       </p>
       <textarea
         value={draft}

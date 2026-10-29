@@ -89,6 +89,30 @@ you, in a window's tile, or in `troupe run --headless`, `troupe bench` or anythi
 `--json` prints. The design, which the desktop app follows too, is
 [docs/design/frames.md](../design/frames.md).
 
+From the moment you send a line the facts say what is waited on. Until the daemon sends
+the model request: `◐ the house lights go down — preparing (00:04)`, and from ten seconds
+on, with no flourish, `◐ the daemon has not sent the model request yet (00:14)`. After
+the request: `thinking (00:12)` as ever, and from twenty seconds with nothing back, `◐ no
+answer from api.anthropic.com yet (00:35)`, the host your configuration's `base_url` or
+provider names, never the key. The time counts from the line you sent, then from the
+request. At forty-five seconds either way, a box under that line says what was sent and
+when, what has happened since, the last event this screen heard, and what to do:
+
+```
+nothing has happened for 00:46
+▎ your prompt went to the daemon at 14:02:11
+▎ the daemon acknowledged it; it has not sent the model request
+▎ the last event here was input, at 14:02:11
+▎ Esc cancels the turn · `troupe doctor` asks the model for a token · the daemon's log is ~/.local/state/troupe/daemon.log
+```
+
+After the request the second line reads `the request went to api.anthropic.com at
+14:02:12; nothing has come back`. The box goes with the first byte of an answer or the
+turn's end; a tile says the facts alone, and `troupe run --headless` prints one line at
+the same forty-five seconds, once for the prompt and once for the request, and no more.
+A request the model refused leaves the window saying so, `model error: <the provider's
+sentence>`, under the turn and in its tile, until the next line you send.
+
 The activated pane follows the tail until you scroll (PgUp/PgDn, Home/End, ↑/↓ while
 nothing is typed, or the wheel); the title says where you are (`↕ 120–150/400 · 12 new`),
 and End, scrolling to the bottom, sending input or answering follows again. Tool output
@@ -99,6 +123,31 @@ on is the last thing in the transcript, diff and all, so it reads at any width. 
 switch between the branch's agents so a subagent's transcript can be read; input still
 goes to the branch root. With a pane open the window strip shrinks to a tray; clicking the
 active tile jumps back to the latest output.
+
+## When nothing happens after a prompt
+
+You typed a line, and nothing: no output, no error. The line under the turn says which of
+three things is going on, and the box that follows at forty-five seconds says what to do.
+
+- **`the daemon has not sent the model request yet`.** The daemon took your line and is
+  still preparing the turn, or is stuck before it: reading the workspace's instructions,
+  the memory, the organisation's files, or waiting on an MCP server. Esc cancels the turn.
+  The daemon's log says what it was doing: `daemon.log` in the state directory,
+  `~/.local/state/troupe/daemon.log` on Linux and macOS (`$XDG_STATE_HOME/troupe` when
+  that is set), `%LOCALAPPDATA%\troupe\daemon.log` on Windows; `troupe daemon status`
+  prints the directory as `state`.
+- **`no answer from <host> yet`.** The request went out and the model's host has sent
+  nothing back. The daemon gives up on its own after a while and the window then says
+  `model error:` with the reason; before that, `troupe doctor` in another terminal asks
+  the same provider for a token with your key and says in one line whether the key, the
+  address and the network are good. A gateway or a proxy that accepts the connection and
+  never answers looks exactly like this.
+- **`model error: <sentence>`.** The provider refused the request: the sentence is the
+  provider's, and the line under it says the next step where there is one (`troupe
+  config` for a missing key; the key to check for one refused).
+
+Nothing you type is lost: a line sent while the turn waits is queued and goes next, and
+Esc cancels the turn and keeps the session.
 
 ## Colours
 

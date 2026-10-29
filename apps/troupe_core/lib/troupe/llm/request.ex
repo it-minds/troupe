@@ -6,7 +6,7 @@ defmodule Troupe.LLM.Request do
   a base URL or an API key.
   """
 
-  alias Troupe.LLM.Message
+  alias Troupe.LLM.{Message, ProviderType}
 
   @enforce_keys [:model, :messages]
   defstruct [
@@ -62,6 +62,10 @@ defmodule Troupe.LLM.Request do
     # Azure OpenAI's `api-version`, when the provider names one.
     api_version: nil,
     timeout_ms: 300_000,
+    # How long the provider may take to send the first byte of its answer. Shorter than
+    # `timeout_ms`, which a reply that has begun may spend thinking: a call that has not
+    # begun at all is an address, a key or a proxy, not a model, and is said so sooner.
+    first_byte_ms: 60_000,
     max_retries: 4,
     # Who this call is for, as the gateway is to record it. Every request a worker makes
     # is tagged with the session owner as the end user, plus the team and the session, so
@@ -100,6 +104,7 @@ defmodule Troupe.LLM.Request do
           type: atom() | nil,
           api_version: String.t() | nil,
           timeout_ms: pos_integer(),
+          first_byte_ms: pos_integer(),
           max_retries: non_neg_integer(),
           attribution: map(),
           identify: boolean(),
@@ -111,6 +116,25 @@ defmodule Troupe.LLM.Request do
   @spec output_cap(t()) :: pos_integer()
   def output_cap(%__MODULE__{max_tokens: max, ceiling: nil}), do: max
   def output_cap(%__MODULE__{max_tokens: max, ceiling: ceiling}), do: min(max, ceiling)
+
+  @doc """
+  Where the call goes, as a sentence or a log line names it: the host of `base_url`, or of
+  the provider type's own endpoint when none is set, or the type's name where it has no
+  endpoint (`fake`). Never the key, never the path.
+  """
+  @spec host(t()) :: String.t()
+  def host(%__MODULE__{base_url: base_url, type: type}) do
+    url =
+      case base_url do
+        url when is_binary(url) and url != "" -> url
+        _none -> ProviderType.default_base_url(type)
+      end
+
+    case url && URI.parse(url).host do
+      host when is_binary(host) and host != "" -> host
+      _none -> to_string(type || "the provider")
+    end
+  end
 
   @doc "The whole system prompt as one text: `system`, then `system_tail` after a blank line."
   @spec system_text(t()) :: String.t() | nil

@@ -288,6 +288,15 @@ defmodule Troupe.Config.Schema do
           field: :llm_timeout_ms
         ),
         spec(
+          "llm_first_byte_ms",
+          {:integer, 1},
+          "How long the model may take to send its first byte before the call is given up on. " <>
+            "A call that has begun may pause for as long as `llm_timeout_ms` allows; " <>
+            "one that has not begun is given up on here, with a sentence naming the host.",
+          default: 60_000,
+          field: :llm_first_byte_ms
+        ),
+        spec(
           "identify",
           :boolean,
           "Every model call names Troupe: a User-Agent with the version and the client, LiteLLM's tags and the session's id to a gateway, " <>

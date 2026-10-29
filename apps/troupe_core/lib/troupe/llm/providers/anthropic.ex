@@ -133,12 +133,16 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
   # Req hands `into` the body of every response, whatever its status. Only a 200's is the
   # event stream; any other's is the provider's error, kept for `post/4` to read rather
-  # than fed to the parser, where it was lost (Decision 791).
-  defp handle_chunk(%Req.Response{status: status} = resp, chunk, _reply_to, _ref)
+  # than fed to the parser, where it was lost (Decision 791). Either way the first chunk
+  # says to the agent that the host answered, before anything is read from it.
+  defp handle_chunk(resp, chunk, reply_to, ref),
+    do: resp |> Provider.first_byte(reply_to, ref) |> read_chunk(chunk, reply_to, ref)
+
+  defp read_chunk(%Req.Response{status: status} = resp, chunk, _reply_to, _ref)
        when status != 200,
        do: Provider.collect_error(resp, chunk)
 
-  defp handle_chunk(resp, chunk, reply_to, ref) do
+  defp read_chunk(resp, chunk, reply_to, ref) do
     state = resp.private[:troupe] || %{acc: Collector.new(), sse: SSE.new()}
     {events, sse} = SSE.feed(state.sse, chunk)
     sink = %{reply_to: reply_to, ref: ref}

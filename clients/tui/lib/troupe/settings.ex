@@ -397,6 +397,38 @@ defmodule Troupe.Settings do
     |> Enum.reject(&match?({_heading, []}, &1))
   end
 
+  @doc """
+  The host a session's model calls go to, as its configuration names it: the `base_url`'s
+  host where one is set, else the provider type's own endpoint; `nil` where neither is
+  known (a pod's configuration is its plane's, a fake has no endpoint). Never the key:
+  this is what a screen says a request that draws nothing is waiting on.
+  """
+  @spec model_host(map() | nil) :: String.t() | nil
+  def model_host(%{base_url: url}) when is_binary(url) and url != "" do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) and host != "" -> host
+      _ -> url
+    end
+  end
+
+  def model_host(%{} = config) do
+    type = Map.get(config, :provider) || Map.get(config, :type)
+
+    case ProviderTypes.fetch(type) do
+      %{default_url: url} when is_binary(url) -> model_host(%{base_url: url})
+      _ -> nil
+    end
+  end
+
+  def model_host(_config), do: nil
+
+  @doc """
+  The daemon's log file, `daemon.log` in the state directory as the daemon names it, in
+  the platform's spelling: where a prompt that drew nothing is explained.
+  """
+  @spec daemon_log() :: String.t()
+  def daemon_log, do: Troupe.Paths.display(Path.join(Troupe.Paths.state_dir(), "daemon.log"))
+
   @doc "The help as flat lines, for a narrow screen."
   @spec help_lines([map()], [map()]) :: [String.t()]
   def help_lines(commands, rules \\ []) do

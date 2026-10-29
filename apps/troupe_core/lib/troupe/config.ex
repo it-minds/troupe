@@ -94,6 +94,9 @@ defmodule Troupe.Config do
             compact_at: 0.75,
             # How long one model call may take, and how long a stream may go quiet.
             llm_timeout_ms: 300_000,
+            # How long one may take to send its first byte: a host that says nothing is
+            # given up on sooner than a model that is thinking.
+            llm_first_byte_ms: 60_000,
             max_turns: 40,
             max_input_tokens: 2_000_000,
             max_output_tokens: 400_000,

@@ -153,9 +153,10 @@ defmodule Troupe.Config.LayersTest do
     end
 
     test "mouse and llm_timeout_ms are settings of their own, not a catch-all", ctx do
-      File.write!(ctx.user, "mouse: false\nllm_timeout_ms: 90000\n")
+      File.write!(ctx.user, "mouse: false\nllm_timeout_ms: 90000\nllm_first_byte_ms: 5000\n")
       config = load!(ctx)
-      assert {config.mouse, config.llm_timeout_ms, config.warnings} == {false, 90_000, []}
+      assert {config.mouse, config.llm_timeout_ms, config.llm_first_byte_ms, config.warnings} ==
+               {false, 90_000, 5_000, []}
     end
   end
 

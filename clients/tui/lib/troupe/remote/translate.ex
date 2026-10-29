@@ -299,8 +299,10 @@ defmodule Troupe.Remote.Translate do
       type when type in ["message.completed", "llm_response"] ->
         {[emit.(:assistant_message, message(data))], memory}
 
+      # The request carries the model it went to, which the window names when nothing
+      # comes back from it.
       "llm_request" ->
-        {[emit.(:agent_state, %{to: :thinking})], memory}
+        {[emit.(:agent_state, %{to: :thinking, model: data["model"]})], memory}
 
       # Its own event rather than a note, so the status line can say the model failed
       # instead of spinning on "starting" — which is all an idle agent looked like.

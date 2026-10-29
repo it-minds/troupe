@@ -15,6 +15,12 @@ defmodule Troupe.Doctor do
     * `model default`, `model cheap`, `model expensive` — each model the config names,
       among what its provider listed: one it does not serve fails, naming the ones
       nearest it that it does (Decision 778). No line when the provider listed nothing.
+    * `answer` — the default model is asked the smallest request its provider
+      takes, one short message for one token, as a session's turn asks it, through the
+      same adapter: `ok` with the round trip, `fail` with the sentence a turn would have
+      ended with (the key refused, the host not answering, nothing sent in 20 s). The
+      `fake` provider is asked nothing, and nor is one with no key, which the `provider`
+      line has failed on.
     * `identify` — what a session's model calls say about Troupe to the default model's
       provider, header by header as they go out, or `off` (Decision 787): the terminal
       UI's through `troupe`, the desktop app's through the daemon.
@@ -40,12 +46,16 @@ defmodule Troupe.Doctor do
   """
 
   alias Troupe.{Config, Executable, Reaper}
-  alias Troupe.LLM.{Catalog, Identify}
+  alias Troupe.LLM.{Catalog, Identify, Message, Provider, ProviderType, Request}
   alias Troupe.LLM.Catalog.Store
   alias Troupe.Protocol.{Daemon, Endpoint}
 
   @type state :: :ok | :warn | :fail
   @type check :: %{name: String.t(), state: state(), detail: String.t()}
+
+  # How long the model is given to answer one token: well over a round trip to any
+  # provider, well under the minute a turn waits for a first byte.
+  @answer_timeout_ms 20_000
 
   @doc """
   Run every check.
@@ -54,18 +64,21 @@ defmodule Troupe.Doctor do
   (the TUI's logins), joined with the daemon's linked plane; `:command`, the program
   printing the answer (`"troupe-daemon"` unless it says `"troupe"`); `:live`, `false`
   to skip the request to the provider and the planes; `:local_only`, `true` to ask no plane
-  and say why, for a client in Local only.
+  and say why, for a client in Local only; `:answer_timeout_ms`, how long the model is
+  given to answer the `answer` line (20 s), which a test shortens.
   """
   @spec run(keyword()) :: [check()]
   def run(opts \\ []) do
     workspace = Keyword.get(opts, :workspace) || File.cwd!()
     command = Keyword.get(opts, :command, "troupe-daemon")
     live? = Keyword.get(opts, :live, true)
+    answer_timeout = Keyword.get(opts, :answer_timeout_ms, @answer_timeout_ms)
     resolved = Config.resolve(workspace)
 
     [config_check(resolved), provider_check(resolved, command)] ++
       key_checks(resolved, live?) ++
       [
+        answer_check(resolved, live?, answer_timeout, client(command)),
         identify_check(resolved, client(command)),
         storage_check(),
         reaper_check(workspace),
@@ -377,6 +390,119 @@ defmodule Troupe.Doctor do
         "not confirmed: #{target.provider} would not list its models (#{reason})"
       )
 
+  # The request a turn makes, at its smallest, through the adapter a turn uses: a host that
+  # lists its models and still answers no completion (a proxy in front of one path, a key
+  # scoped to the other) fails here and nowhere earlier. Keyless hosts are asked without a
+  # key, as a turn asks them.
+  defp answer_check({:error, _error}, _live?, _timeout, _client),
+    do: check("answer", :fail, "not checked: the config files do not load")
+
+  defp answer_check({:ok, config, _layers}, live?, timeout_ms, client) do
+    target = Config.target(config, nil)
+
+    cond do
+      target.provider == "fake" ->
+        check("answer", :ok, "not asked: the fake provider asks nobody")
+
+      Config.key_problem(config) != nil ->
+        check("answer", :ok, "not asked: no key")
+
+      not live? ->
+        check("answer", :ok, "not tried")
+
+      true ->
+        ask_model(config, target, timeout_ms, client)
+    end
+  end
+
+  defp ask_model(config, target, timeout_ms, client) do
+    case Provider.adapter(target.provider) do
+      {:ok, adapter} ->
+        request = %Request{
+          model: target.model,
+          messages: [Message.user("Say hi.")],
+          max_tokens: 1,
+          base_url: target.base_url,
+          api_key: key_params(target)["api_key"],
+          auth: target.auth,
+          provider: adapter,
+          type: ProviderType.atom(target.provider),
+          api_version: target.api_version,
+          timeout_ms: timeout_ms,
+          first_byte_ms: timeout_ms,
+          # One try: what the line says is what one request got, now.
+          max_retries: 0,
+          identify: config.identify != false,
+          client: client
+        }
+
+        check("answer", answer_state(request, adapter, timeout_ms))
+
+      {:error, {:unknown_provider, name}} ->
+        check("answer", :fail, "not asked: no adapter speaks to #{inspect(name)}")
+    end
+  end
+
+  # The stream runs in a supervisor of its own, as it runs under an agent, and is stopped
+  # with it: the task that outlasts the wait is ended, which closes its request.
+  defp answer_state(request, adapter, timeout_ms) do
+    {:ok, sup} = Task.Supervisor.start_link()
+    started = System.monotonic_time(:millisecond)
+    ref = Provider.start_stream(sup, adapter, request, self())
+    {outcome, pid} = await_answer(ref, nil, started, timeout_ms, nil)
+    Supervisor.stop(sup)
+    flush_stream(ref, pid)
+
+    where = "#{request.model} at #{Request.host(request)}"
+
+    case outcome do
+      {:ok, ms} ->
+        {:ok, "#{where} answered in #{ms} ms"}
+
+      {:error, {:retries_exhausted, reason}} ->
+        {:fail, "#{where}: #{Provider.describe_error(reason)}"}
+
+      {:error, reason} ->
+        {:fail, "#{where}: #{Provider.describe_error(reason)}"}
+
+      {:timeout, nil} ->
+        {:fail, Provider.describe_error({:first_byte, Request.host(request), timeout_ms})}
+
+      {:timeout, first_byte_ms} ->
+        {:fail,
+         "the model at #{Request.host(request)} began answering after #{first_byte_ms} ms " <>
+           "and had not finished in #{div(timeout_ms, 1_000)} s"}
+    end
+  end
+
+  defp await_answer(ref, pid, started, timeout_ms, first_byte) do
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    receive do
+      {:llm_stream_started, ^ref, pid} -> await_answer(ref, pid, started, timeout_ms, first_byte)
+      {:llm_first_byte, ^ref} -> await_answer(ref, pid, started, timeout_ms, first_byte || elapsed)
+      {:llm_delta, ^ref, _delta} -> await_answer(ref, pid, started, timeout_ms, first_byte || elapsed)
+      {:llm_usage, ^ref, _usage} -> await_answer(ref, pid, started, timeout_ms, first_byte || elapsed)
+      {:llm_done, ^ref, _response} -> {{:ok, elapsed}, pid}
+      {:llm_error, ^ref, reason} -> {{:error, reason}, pid}
+      {:DOWN, _monitor, :process, ^pid, reason} when reason != :normal -> {{:error, {:stream_crashed, reason}}, pid}
+    after
+      max(timeout_ms - elapsed, 0) -> {{:timeout, first_byte}, pid}
+    end
+  end
+
+  # What the stream still sent, and the monitor `start_stream/4` took on it, after the
+  # line is decided: nobody else's messages.
+  defp flush_stream(ref, pid) do
+    receive do
+      {kind, ^ref} when is_atom(kind) -> flush_stream(ref, pid)
+      {kind, ^ref, _payload} when is_atom(kind) -> flush_stream(ref, pid)
+      {:DOWN, _monitor, :process, ^pid, _reason} -> flush_stream(ref, pid)
+    after
+      0 -> :ok
+    end
+  end
+
   # Built by the function the adapters build their headers with, so the two cannot differ.
   defp identify_check({:error, _error}, _client),
     do: check("identify", :fail, "not checked: the config files do not load")
@@ -540,4 +666,5 @@ defmodule Troupe.Doctor do
     do: "write a provider into #{Troupe.Paths.display(Config.user_path())}"
 
   defp check(name, state, detail), do: %{name: name, state: state, detail: detail}
+  defp check(name, {state, detail}), do: check(name, state, detail)
 end

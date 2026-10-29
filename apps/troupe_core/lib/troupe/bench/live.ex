@@ -87,6 +87,7 @@ defmodule Troupe.Bench.Live do
     :catalog,
     :fake_script,
     :llm_timeout_ms,
+    :llm_first_byte_ms,
     :thinking_binding,
     :system_prompt
   ]

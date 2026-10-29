@@ -145,7 +145,9 @@ Decision 915 is the long form.
 - `scripts/live-check task|delegate|loop`: one headless run against a real model, and
   what it has to show; the nightly runs all three against the gateway
   ([ci.md](ci.md#the-live-check)). With `TROUPE_PROVIDER=fake` and a
-  `TROUPE_FAKE_SCRIPT` it runs offline, which is how a change to it is tried first. Its
+  `TROUPE_FAKE_SCRIPT` it runs offline, which is how a change to it is tried first (a step
+  with `"delay_ms"` sends nothing for that long, which is how a client's waiting state and
+  the harness's `llm_first_byte_ms` are tried offline; `Troupe.LLM.Fake` lists the steps). Its
   cost column is the gateway's price, else the one `TROUPE_MODEL_PRICES` gives (*priced
   here*); a script with `"cost_micros": null` answers as a gateway streaming a response
   does, with no price, which is how that column is tried offline.

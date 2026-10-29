@@ -36,6 +36,13 @@ defmodule Troupe.UI.Headless.Printer do
   minute (`:reconnect_ms`) costs a script nothing; one that does not is a run that ended
   short, `1`, rather than a script waiting for ever on a rest that cannot come.
 
+  A prompt that draws nothing is said once, after `:stall_ms` (45 s): the daemon took
+  the line and has sent no model request, or the request went out and nothing has come
+  back from the model's host. One line each, never repeated, with what to run and where
+  the daemon's log is; the same thresholds and facts as the window's box, since a script's
+  log is read by the same person at the same 11pm. The clock starts again at the request,
+  and stops at the first byte (a delta, a reply, a model error) or the turn's end.
+
   A session starts working the moment it is created, and this process is started
   after that, so a quick run can have finished — and rested — before anything here
   subscribes. So what the session has already done is read back from its journal
@@ -52,6 +59,7 @@ defmodule Troupe.UI.Headless.Printer do
 
   @reconnect_ms 60_000
   @queued_ms 60_000
+  @stall_ms 45_000
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
 
@@ -107,7 +115,13 @@ defmodule Troupe.UI.Headless.Printer do
       # last turn's end can be stamped after `since` by the time it is read here.
       after_seq: Keyword.get(opts, :after_seq),
       # Set while the connection is down: the timer that ends the run if it stays down.
-      lost: nil
+      lost: nil,
+      # Set while a prompt or a request has drawn nothing yet: the timer that says so
+      # (see the moduledoc), and what the target was last heard doing.
+      stall: nil,
+      stall_ms: Keyword.get(opts, :stall_ms, @stall_ms),
+      doing: nil,
+      host: Keyword.get_lazy(opts, :host, fn -> host(sid) end)
     }
 
     # Subscribed first, read back second: anything published in between is in both,
@@ -131,7 +145,39 @@ defmodule Troupe.UI.Headless.Printer do
     {:noreply, rest(state, outcome)}
   end
 
+  def handle_info({:stalled, ref, on}, %{stall: {ref, on}} = state) do
+    s = div(state.stall_ms, 1000)
+    log = Model.daemon_log()
+    next = "`troupe doctor` asks the model for a token, and the daemon's log is #{log}"
+
+    case on do
+      :request ->
+        say(
+          state,
+          state.target,
+          "nothing has happened for #{s} s: the daemon took the prompt and has not sent " <>
+            "the model request; #{next}"
+        )
+
+      :answer ->
+        say(
+          state,
+          state.target,
+          "no answer from #{state.host} for #{s} s after the request; #{next}"
+        )
+    end
+    |> then(&{:noreply, %{&1 | stall: nil}})
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # Where the session's model calls go, for the line that says nothing came back from it.
+  defp host(sid) do
+    case Client.context(sid) do
+      {_workspace, config} -> Model.host_of(config) || "the model"
+      _ -> "the model"
+    end
+  end
 
   # The client says when the session's connection goes down and comes back up; a timer
   # runs while it is down.
@@ -154,10 +200,51 @@ defmodule Troupe.UI.Headless.Printer do
 
   defp handle_event(event, state) do
     case first_time(event, state) do
-      {:ok, state} -> if history?(event, state), do: state, else: react(event, print(event, state))
-      :seen -> state
+      {:ok, state} ->
+        if history?(event, state),
+          do: state,
+          else: event |> print(state) |> then(&react(event, &1)) |> then(&stall(event, &1))
+
+      :seen ->
+        state
     end
   end
+
+  # The target's prompt starts the clock on the daemon's model request; the request (the
+  # `thinking` it arrives as, told once) starts it again on the first byte; a byte, or
+  # the log's word that the turn is over, stops it. A copy of the prompt queued while the
+  # agent worked, or drawn here as it was sent, is not the turn starting.
+  defp stall(%{type: :input, agent_path: p, data: d}, %{target: p} = state) do
+    if Map.get(d, :queued, false) or Map.get(d, :optimistic, false),
+      do: state,
+      else: arm(state, :request)
+  end
+
+  defp stall(%{type: :agent_state, agent_path: p, seq: seq, data: %{to: to}}, %{target: p} = state) do
+    was = state.doing
+    state = %{state | doing: to}
+
+    cond do
+      to == :thinking and was != :thinking -> arm(state, :answer)
+      to in [:idle, :done] and is_integer(seq) -> disarm(state)
+      true -> state
+    end
+  end
+
+  defp stall(%{type: type, agent_path: p}, %{target: p} = state)
+       when type in [:llm_delta, :assistant_message, :llm_error],
+       do: disarm(state)
+
+  defp stall(_event, state), do: state
+
+  defp arm(state, on) do
+    state = disarm(state)
+    ref = make_ref()
+    Process.send_after(self(), {:stalled, ref, on}, state.stall_ms)
+    %{state | stall: {ref, on}}
+  end
+
+  defp disarm(state), do: %{state | stall: nil}
 
   # By its place in the log where it has one; by the stamp otherwise: what this client
   # wrote in the journal when it opened the session before carries no `seq`, and is

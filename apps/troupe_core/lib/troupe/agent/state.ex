@@ -62,6 +62,12 @@ defmodule Troupe.Agent.State do
     :llm_ref,
     :llm_monitor,
     :llm_timer,
+    # The first-byte timer of the call in flight, `nil` once a byte came; when the call
+    # went out (monotonic ms), for the log's lines; and the host it went to, for the
+    # sentence a call nothing came from ends with.
+    :llm_first_byte_timer,
+    :llm_sent_at,
+    :llm_host,
     # The model this turn asked for, kept so the response can be logged against it.
     # The answer does not always name the model that produced it, and the ledger's
     # question — what did this call cost, on what — needs both halves.
@@ -227,6 +233,9 @@ defmodule Troupe.Agent.State do
           llm_ref: reference() | nil,
           llm_monitor: reference() | nil,
           llm_timer: reference() | nil,
+          llm_first_byte_timer: reference() | nil,
+          llm_sent_at: integer() | nil,
+          llm_host: String.t() | nil,
           llm_model: String.t() | nil,
           done_reason: atom() | nil,
           turn_mode: :normal | :question | :loop | nil,
