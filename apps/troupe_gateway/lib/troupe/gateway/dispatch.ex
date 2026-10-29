@@ -214,6 +214,9 @@ defmodule Troupe.Gateway.Dispatch do
     # plane deciding who may. `control`, as the person's own memory is: the text is theirs
     # to read, and a save is a save.
     "memory.in_effect" => :control,
+    # What a profile the person may use gives a session of theirs, the plane's composition
+    # read as them: nothing in it is the machine's, so `observe`, as the plane has it.
+    "profile.get" => :observe,
     "admin.memory.get" => :control,
     "admin.memory.preview" => :control,
     "admin.memory.put" => :control,
@@ -321,6 +324,13 @@ defmodule Troupe.Gateway.Dispatch do
     refuse_local_only(
       "this client is in Local only, so the daemon does not ask the plane for your own memory; " <>
         "turn Local only off to read or change it"
+    )
+  end
+
+  defp local_only("profile.get", _params, %Context{local_only: true}) do
+    refuse_local_only(
+      "this client is in Local only, so the daemon does not ask the plane what a profile gives a session; " <>
+        "turn Local only off to read it"
     )
   end
 
@@ -1437,6 +1447,11 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("memory.in_effect", params, _context),
     do: forwarded("memory.in_effect", Memory.in_effect(params))
 
+  # What a profile gives a session of the person's, the plane's `profile.get` as them, with
+  # where the plane is. Signed out, a sentence; the plane's refusal, its own.
+  defp handle("profile.get", params, _context),
+    do: forwarded("profile.get", plane_answer("profile.get", Map.take(params, ~w(name team))))
+
   defp handle("admin.memory." <> _ = method, params, _context) when method in ["admin.memory.get", "admin.memory.preview", "admin.memory.put"],
     do: forwarded(method, Memory.admin(method, params))
 
@@ -2077,6 +2092,18 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp own_memory({:error, reason}),
     do: {:error, Error.new(:invalid_params, %{reason: Memory.sentence(reason)})}
+
+  defp plane_answer(method, params) do
+    with url when is_binary(url) <- Plane.url(),
+         true <- Plane.linked?(),
+         {:ok, answer} <- Plane.call(method, params) do
+      {:ok, Map.put(answer, "plane_url", url)}
+    else
+      {:error, :unlinked} -> {:error, :signed_out}
+      {:error, reason} -> {:error, reason}
+      _signed_out -> {:error, :signed_out}
+    end
+  end
 
   # A method the daemon sends on to the plane as the person: the plane's answer, or its
   # refusal under the plane's own code and data (`not_found`, `forbidden`, `conflict` with

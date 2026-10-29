@@ -136,6 +136,9 @@ The [glossary](../glossary.md) defines each of Troupe's words: a **plane**, a **
 **profile**, a **bundle**, a **trigger** and the rest. What follows is what you do with
 the ones you meet first.
 
+**Profile.** The kind of machine a session on your team's pods runs on; before starting one
+you can read what a profile gives it, as the plane enforces it ([profiles](profiles.md)).
+
 **Session.** One agent working in one directory, with a durable log: `active`, `dormant`
 (stopped, log kept, woken when used), `read_only`, or `erased`. In the TUI `/new` starts
 another beside it (`--private`, `--remote PROFILE`, or `--branch` for a fork that goes on

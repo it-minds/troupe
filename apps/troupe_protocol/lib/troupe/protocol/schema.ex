@@ -1137,6 +1137,9 @@ defmodule Troupe.Protocol.Schema do
       # What a new session of the person's in one of their teams reads, as one list of topics:
       # per topic the closest level's entry and what it replaces. The plane's, as the person.
       "memory.in_effect" => %{"team" => optional(:string), "profile" => optional(:string)},
+      # What a profile gives a session of the person's before they start one, sent on to the
+      # plane as them: its agents, skills, tools, model, reach, limits and team.
+      "profile.get" => %{"name" => required(:string), "team" => optional(:string)},
       # A level of the organisation's memory the person may change (a team admin their team's,
       # a platform admin the organisation's), sent on to the plane as them: the plane's
       # `admin.memory.get`, `admin.memory.preview` and `admin.memory.put`, and its refusal
