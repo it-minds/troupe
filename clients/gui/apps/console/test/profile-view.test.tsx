@@ -38,7 +38,7 @@ describe("what a member sees", () => {
       await sees("as the profile's own identity", member);
       await sees("search_issues, get_issue", member);
       await sees("git push *", member);
-      await sees("the organisation", member);
+      await sees("the profile", member);
       await sees("glm-5.2", member);
       await sees("profile $200.00", member);
       expect(member()!.querySelectorAll("input, select, textarea, button")).toHaveLength(0);

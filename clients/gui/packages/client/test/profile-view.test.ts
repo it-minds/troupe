@@ -25,7 +25,7 @@ test("the plane answers a granted profile with what a session gets, and what is 
   assert.deepEqual(dev.tools.mcp.find((s) => s.name === "github")!.tools, "all");
   assert.deepEqual(dev.model, { model: "glm-5.2", small_model: "qwen3.6-35b", provider: "openai", host: "llm-gw.example.com", key: "profile" });
   assert.deepEqual(dev.tools.rules.find((r) => r.tool === "bash" && r.pattern === "git push *"), { tool: "bash", pattern: "git push *", access: "ask", from: "profile" });
-  assert.ok(dev.tools.rules.some((r) => r.from === "organisation"));
+  assert.ok(dev.tools.rules.every((r) => r.from === "profile"), "a pod reads no organisation layer");
   assert.deepEqual(dev.limits.budgets, { profile: 200_000_000, team: 500_000_000, you: 150_000_000 });
 
   const ux = await auth.plane.profile(token, "ux");
@@ -70,5 +70,5 @@ test("the words: whose access, money, budgets, rules, why not, room and the one-
   assert.equal(capacityWords({ capacity: 8, active_sessions: 3 }), "room for 5 of 8");
   assert.equal(capacityWords({ capacity: 2, active_sessions: 2 }), "full: 2 of 2 running");
   const view = composeProfile(exampleProfiles()[0]!, { teams: ["core"] }, { capacity: 8, active_sessions: 0 }) as ProfileView;
-  assert.equal(profileSummary(view), "4 agents · github, jira · reads github.com, llm-gw.example.com and 1 more");
+  assert.equal(profileSummary(view), "4 agents · github, jira · reads api.githubcopilot.com, github.com and 3 more");
 });

@@ -51,7 +51,7 @@ describe("profiles", () => {
     unmount = render(<App />).unmount;
     (await waitFor(() => nav("Profiles"), "the rail's Profiles")).click();
     await sees("3 you may use");
-    await sees("4 agents · github, jira · reads github.com, llm-gw.example.com and 1 more");
+    await sees("4 agents · github, jira · reads api.githubcopilot.com, github.com and 3 more");
     await sees("room for 8 of 8");
     await sees("not yours to use");
 
@@ -68,7 +68,7 @@ describe("profiles", () => {
     const tools = await section("Tools");
     expect(tools.textContent).toContain("git push *");
     expect(tools.textContent).toContain("refused");
-    expect(tools.textContent).toContain("the organisation");
+    expect(tools.textContent).toContain("the profile");
     expect(tools.textContent).toContain("as you, once you connect it");
     expect(tools.textContent).toContain("as the profile");
     expect(tools.textContent).toContain("not offered: your team's grant leaves it out");

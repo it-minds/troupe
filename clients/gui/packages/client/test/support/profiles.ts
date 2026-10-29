@@ -132,8 +132,11 @@ export function composeProfile(
   caller: { teams: string[]; admin?: boolean },
   live: { capacity: number; active_sessions: number },
 ): ProfileView | null {
-  const teams = caller.teams.filter((t) => t in spec.grants).sort();
-  if (teams.length === 0 && !caller.admin) return null;
+  const mine = caller.teams.filter((t) => t in spec.grants).sort();
+  if (mine.length === 0 && !caller.admin) return null;
+  // An administrator is answered for no team and lists none, as the plane answers one who
+  // is in no team that may use it: the console's view, which no grant narrows.
+  const teams = caller.admin ? [] : mine;
   const team = caller.admin ? null : (teams[0] ?? null);
   const grant = team ? spec.grants[team]! : {};
   const rule = spec.agentRule ?? {};
@@ -154,7 +157,9 @@ export function composeProfile(
       small_model: spec.llm?.smallModel ?? null,
       provider: spec.llm?.provider ?? null,
       host: hostOf(spec.llm?.endpoint),
-      key: spec.llm ? (spec.llm.secretRef ? "profile" : "yours") : null,
+      // The profile's key only where it names an endpoint and a Secret; no profile setting
+      // gives a person's own key, so the plane never answers "yours".
+      key: spec.llm?.endpoint && spec.llm.secretRef ? "profile" : null,
     },
     agents: every.filter((a) => byRule(a.name) && byGrant(a.name)).map((a) => ({ name: a.name, mode: a.mode, description: a.description, from: a.from })),
     agents_not_here: every
@@ -162,13 +167,15 @@ export function composeProfile(
       .map((a) => ({ name: a.name, mode: a.mode, from: a.from, why: byRule(a.name) ? "grant" : "profile" })),
     skills: spec.bundle.skills,
     tools: {
-      rules: [...rules("profile", spec.permissions ?? {}), ...rules("organisation", ORGANISATION_RULES)],
+      // A pod reads no organisation layer, so every rule the plane lists is the profile's.
+      rules: rules("profile", spec.permissions ?? {}),
       mcp: spec.bundle.mcp_servers.map((s) => {
         const out = (grant.servers_out ?? []).includes(s.name);
         return { name: s.name, host: hostOf(s.url), access: ACCESS[s.credential_mode], permission: s.permission, tools: s.tools, offered: !out, why: out ? "grant" : null };
       }),
     },
-    reach: spec.egress ?? [],
+    // What the operator derives: the egress list, the model's host and each server's host.
+    reach: [...new Set([...(spec.egress ?? []), hostOf(spec.llm?.endpoint), ...spec.bundle.mcp_servers.map((s) => hostOf(s.url))].filter((h): h is string => Boolean(h)))].sort(),
     limits: {
       sessions_per_pod: spec.sessions_per_pod,
       max_sessions: spec.max_sessions,
