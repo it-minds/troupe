@@ -196,6 +196,36 @@ co-owner, and listing the plane's field managers in kustomize-controller's
 `--override-manager`, which hands their fields to Flux. `Troupe.Plane.GitopsTest` holds the
 plane to this against a model of server-side apply's field ownership.
 
+## Triggers from a repository on a direct plane
+
+A deployment may keep its triggers in a repository, applied to the plane's namespace as
+`Trigger` resources, and keep the plane in `direct` mode, with its profiles editable in the
+console. Such a plane lists the resources and never acts on one by itself; the chart's
+direct-mode Role gives it `get` and `list` on `triggers` and no write.
+
+- **Listed.** `admin.triggers.repository` and the console's Triggers page, under **In the
+  repository**, show the team's resources beside its rows: each one's source, generation,
+  and whether it would pass the plane's checks today, which are a gitops pass's
+  ([bundles-and-triggers.md](bundles-and-triggers.md#triggers-from-a-repository)) and one
+  more, that the principal may use the profile. Where it would not, the reason is said:
+  "metadata.name names the team admin, which this plane does not have", or
+  "svc:admin/x is not granted the profile dev".
+- **Copy.** `admin.trigger.copy {resource}` (**Copy**) makes the row from a resource that
+  passes. The row records the resource and the generation it was copied at; a webhook's key
+  is minted then and shown once. Audited as `trigger.copy`, with the diff and the revision a
+  put records. A row of the same name that nobody copied is taken over in place.
+- **Re-copy.** When the resource's generation moves past the copied one, the row reads
+  *repository changed*, with a field-by-field diff. Copying again (**Re-copy**) changes the
+  row in place: it keeps its URL, key, runs and revisions, and a document that moved is a
+  new revision. A console edit to a copied row reads *differs from the repository*, with the
+  same diff, so drift shows both ways.
+- **Gone.** A resource that is removed marks its row *gone from the repository*. The row
+  goes on running until an administrator deletes it.
+
+Nothing is automatic, and nothing about the row is the resource's but what a copy put
+there. Once every row is a clean copy, switching to `gitops` changes nothing: the first pass
+reads each resource into the row it was copied into, key and runs included.
+
 ## Switching a running plane
 
 **Direct to gitops.** Export the manifests, commit them, and let the applier apply them
