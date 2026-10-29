@@ -65,6 +65,7 @@ export function ProfileAgentsList({ name }: { name: string }): JSX.Element {
                         </td>
                         <td>
                           {a.mode}
+                          {a.offered === false && <span className="hint"> · not on this profile: its agents rule leaves it out</span>}
                           {a.mode === "primary" && a.delegate && a.delegate.length > 0 && <span className="hint"> · delegates to {a.delegate.join(", ")}</span>}
                           {typeof a.max_turns === "number" && <span className="hint"> · at most {a.max_turns} turns</span>}
                         </td>

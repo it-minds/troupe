@@ -20,6 +20,7 @@ defmodule Troupe.Plane.Fleet.Extends do
   | `github.denyPaths` | **added**, as the egress lists are |
   | `github.maxPushes`, `github.maxRuns`, `github.maxAttempts` | **narrow only**, as `max_sessions` is |
   | `permissions.deny`, `permissions.ask`, `permissions.allow` | **added**: a child adds rules and drops none of its parent's; each profile's are its own scope on the pods (`rules/1`), so the strictest holds and no child loosens a parent's `deny` or `ask` |
+  | `agents.allow`, `agents.deny` | **narrow only**: the child's `allow` is cut to the parent's where the parent has one (an empty cut stands), its `deny` is added, and a denied name leaves the `allow`, so a child never offers an agent its parent said is not there |
   | `image`, `size_class`, `provisioner`, every `llm` field but `secretRef`, `storage.storageClassName`, `configBundleChannel`, and any other spec field | **replaced** where the child sets it, the parent's where it does not |
   | `llm.secretRef`, `mcpIdentities` | **never inherited**: credentials are each profile's own, in its own namespace |
   | `warm_workers` | **never inherited**: how many of the child's own workers stay up |
@@ -42,6 +43,7 @@ defmodule Troupe.Plane.Fleet.Extends do
   alias Troupe.Plane.{Bundles, Fleet, Provision, Repo}
   alias Troupe.Plane.Bundles.Effective
   alias Troupe.Plane.Fleet.Profile
+  alias Troupe.Protocol.AgentRule
 
   @max_depth 4
 
@@ -84,6 +86,10 @@ defmodule Troupe.Plane.Fleet.Extends do
     # Per-tool rules: a child's are added to its parent's, and on the pods each profile's
     # are a scope of their own, the strictest holding (`rules/1`).
     "permissions" => {:each, %{"deny" => :added, "ask" => :added, "allow" => :added}},
+    # Which agents exist on the pods: a child can only narrow. Its `allow` is cut to the
+    # parent's where the parent has one, and its `deny` adds to the parent's, so no child
+    # offers an agent its parent said is not there (`Troupe.Protocol.AgentRule.compose/2`).
+    "agents" => :agent_rule,
     # A resource's own words for the parent and the budget, which are the row's columns.
     "extends" => :dropped,
     "budgetMicros" => :dropped
@@ -577,6 +583,21 @@ defmodule Troupe.Plane.Fleet.Extends do
 
   defp spec_field({:each, _rules}, path, parent, own, parent_from, from, name),
     do: spec_field(:replaced, path, parent, own, parent_from, from, name)
+
+  # The rule as one value, composed by the module both the plane and the pods read it
+  # with: the child's where only it has one, the parent's where only it has, both
+  # narrowed into one otherwise, written as a profile could have written it so the row's
+  # own check reads it. A child that wrote one is where the composed rule came from.
+  defp spec_field(:agent_rule, path, parent, own, parent_from, from, name) do
+    {value, source} =
+      case {AgentRule.from_json(parent), AgentRule.from_json(own)} do
+        {nil, nil} -> {nil, nil}
+        {_above, nil} -> {parent, parent_from[path]}
+        {above, mine} -> {AgentRule.json(AgentRule.compose(above, mine)), name}
+      end
+
+    {value, put_set(from, path, source), []}
+  end
 
   defp spec_field(rule, path, parent, own, parent_from, from, name) do
     {value, source} = field(rule, parent, parent_from[path], own, name)

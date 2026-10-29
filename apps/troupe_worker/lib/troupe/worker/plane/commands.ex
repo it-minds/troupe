@@ -702,6 +702,9 @@ defmodule Troupe.Worker.Plane.Commands do
            dir: nil,
            upgraded_from: nil,
            repository_overrides: params["repository_overrides_bundle"] == true,
+           # The profile's rule on which agents exist reaches a pod pinned to nothing
+           # too: the built-ins are what it offers, and the rule is about them as well.
+           agent_rule: params["agent_rule"],
            profile: params["profile"]
          }}
 
@@ -714,6 +717,10 @@ defmodule Troupe.Worker.Plane.Commands do
              dir: dir,
              upgraded_from: params["bundle_upgraded_from"],
              entitlements: params["entitlements"],
+             # The worker profile's rule on which agents exist on it, which the session
+             # applies to every definition it loads, subagents included; absent where the
+             # profile says nothing.
+             agent_rule: params["agent_rule"],
              repository_overrides: params["repository_overrides_bundle"] == true,
              # The plane's profile the session runs on, which a listing of its agents
              # names a bundle's agent's origin by (#594).

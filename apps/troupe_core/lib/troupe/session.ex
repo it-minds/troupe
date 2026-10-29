@@ -18,6 +18,7 @@ defmodule Troupe.Session do
   alias Troupe.{Config, Mounts, Registry, Skills, Workspace}
   alias Troupe.LLM.Fake
   alias Troupe.LLM.Provider
+  alias Troupe.Protocol.AgentRule
   alias Troupe.Session.{Organisation, PlaneMemory}
   alias Troupe.Watch.Branch
 
@@ -266,6 +267,7 @@ defmodule Troupe.Session do
           Definitions.load(workspace.root_real,
             bundle: bundle,
             entitled: entitled_agents(bundle),
+            agent_rule: agent_rule(bundle),
             acp_agents: acp_agents(bundle)
           )
         end)
@@ -430,6 +432,11 @@ defmodule Troupe.Session do
 
   defp entitled_agents(%{entitlements: %{"agents" => names}}) when is_list(names), do: names
   defp entitled_agents(_bundle), do: nil
+
+  # The worker profile's rule on which agents exist, as the activation carried it on the
+  # bundle; a laptop's bundle has none, and so has a profile that says nothing.
+  defp agent_rule(%{agent_rule: rule}), do: AgentRule.from_json(rule)
+  defp agent_rule(_bundle), do: nil
 
   # Narrowed before they become definitions, by the same set that narrows everything else.
   # An unnarrowed grant and a local session both record nothing, and nothing means every

@@ -25,6 +25,14 @@ defmodule Troupe.Agent.Definitions do
   main checkout's, of which only what the checkout has committed is read
   (`Troupe.Worktree`).
 
+  On a pod the worker profile may say which agents exist on it at all (`agent_rule:`,
+  `allow` and `deny` lists of names). It is applied last, after every layer is merged and
+  after the team's entitled set, and to every mode: a subagent the rule excludes is not
+  here any more than a primary is. The entitled set is a team's narrowing of what the
+  profile offers, which names primaries and leaves a bundle's own delegation alone; the
+  rule is the profile's statement that the agent does not exist on these pods, for
+  anybody, so there is nothing a primary could delegate to under that name either.
+
   A file that does not parse is not read either, and is listed in `skipped` with what is
   wrong with it in words (Decision 841), so a client can show it rather than the person
   finding it in the daemon's log.
@@ -37,6 +45,7 @@ defmodule Troupe.Agent.Definitions do
 
   alias Troupe.Agent.{Definition, Validate}
   alias Troupe.{Paths, Workspace, Worktree}
+  alias Troupe.Protocol.AgentRule
 
   @enforce_keys [:by_name]
   # `loaded` is how `load/2` read the snapshot and `trusted` how `trust/3` stamped it, so
@@ -150,6 +159,10 @@ defmodule Troupe.Agent.Definitions do
   `fetch/2`, not `primaries/1`, not the delegation tool's list. Filtering at the point
   the bundle is merged would have left a built-in of the same name standing in for it,
   which is a different agent answering to a name somebody was refused.
+
+  `agent_rule:` is the worker profile's rule on which agents exist on it
+  (`t:Troupe.Protocol.AgentRule.t/0`), or `nil` for none. Applied after `entitled:`, and
+  to subagents as well, for the reason the moduledoc gives.
   """
   @spec load(Path.t() | nil, keyword()) :: t()
   def load(workspace_root, opts \\ []) do
@@ -169,6 +182,7 @@ defmodule Troupe.Agent.Definitions do
       by_name
       |> merge_acp(acp)
       |> entitled(Keyword.get(opts, :entitled))
+      |> ruled(Keyword.get(opts, :agent_rule))
 
     %__MODULE__{
       by_name: by_name,
@@ -349,6 +363,17 @@ defmodule Troupe.Agent.Definitions do
     Map.filter(by_name, fn {name, definition} ->
       definition.mode != :primary or MapSet.member?(allowed, name)
     end)
+  end
+
+  # The profile's rule is applied to every mode, the subagents too, where the set above
+  # stops at primaries: the set is a team's narrowing of what the profile offers, and
+  # the rule is the profile saying the agent is not on these pods for anybody. So the
+  # delegate tool's list, `fetch/2` and `primaries/1` never see one it excludes, and no
+  # agent of another name can reach it by delegating.
+  defp ruled(by_name, nil), do: by_name
+
+  defp ruled(by_name, rule) do
+    Map.filter(by_name, fn {name, _definition} -> AgentRule.allows?(rule, name) end)
   end
 
   @doc "Build a snapshot directly from definitions. Tests and embedding."

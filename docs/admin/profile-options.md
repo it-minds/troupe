@@ -296,3 +296,40 @@ extends another has its parent's rules as well as its own, each a scope of its o
 pods, so a child adds rules and cannot loosen or drop its parent's. The console's profile
 editor edits a profile's own rules, and its page lists every rule in effect with the
 profile it came from.
+
+## Which agents a profile has
+
+A profile may say which agents exist on it, built-ins and its bundle's alike, by name
+(Decision 968):
+
+```yaml
+spec:
+  agents:
+    allow: ["answer", "ask", "admin-support"]   # only these, in every mode
+    deny: ["build"]                             # taken away; deny beats allow
+```
+
+`allow` present means only the names it lists exist on the profile's pods, primaries and
+subagents both; `deny` takes names away; absent is every agent the bundle and Troupe give,
+which is what every profile had before the field. An agent the rule excludes is not
+offered to a session, is refused by `session.create` with the primaries the profile could
+have offered, and is not loaded on the pod: it is in no delegate list, so no other agent
+reaches it under that name. The rule is the profile's statement that the agent is not
+there, which is why it reaches subagents too. A name no agent has today is kept, since a
+bundle may gain it; `admin.profile.agents` marks each agent `offered` or not and lists
+such names in `unmatched`. A name in both lists, or one that is not a name, is refused.
+
+**A grant narrows what is left.** A team's `entitlements` on its grant
+([bundles and triggers](bundles-and-triggers.md#1-config-bundles)) are resolved after the
+profile's rule, so a grant can leave a team fewer of the profile's agents and never one the
+profile said is not there. `session_created` records the resolved primaries as
+`entitlements.agents` and the rule itself as `agent_rule`; `session.activate` carries both
+at every activation, so a change reaches a session the next time it wakes and restarts no
+pod, as the per-tool rules do.
+
+**extends.** A profile that extends another has its parent's rule as well as its own and
+can only narrow: its `allow` is cut to the parent's where the parent has one, its `deny`
+adds to the parent's, and `status.effective` and `admin.profile.get`'s `effective` carry the
+composed rule. The console's profile page shows it in one line ("Agents: all but build");
+its editor has no field for it and carries it through a save as loaded, so it is written
+through `admin.profile.put` or a repository's manifest.

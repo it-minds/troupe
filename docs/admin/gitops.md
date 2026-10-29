@@ -50,7 +50,7 @@ What a profile takes from its resource:
 | channel | `spec.configBundleChannel`; absent is `stable` |
 | `budget_micros` | `spec.budgetMicros`; absent or 0 is none |
 | `extends` | `spec.extends`, the one profile this one extends ([below](#a-manifest-that-extends-another)) |
-| `spec` | the rest: `llm`, `egress`, `storage`, `resources`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, `github`, `permissions`, `mcpIdentities` |
+| `spec` | the rest: `llm`, `egress`, `storage`, `resources`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, `github`, `permissions`, `agents`, `mcpIdentities` |
 
 CPU, memory and disk are the manifest's to size, within the policy; the class the plane
 places and scales by is read off `sessionsPerPod`.

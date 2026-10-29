@@ -98,6 +98,13 @@ describe("a profile", () => {
     await sees("kept off these pods");
   });
 
+  it("says which agents exist on it, as its spec.agents rule reads, and carries the rule through a save", async () => {
+    await open("#/profiles/ux");
+    await waitFor(() => heading() === "ux" && says("Agents"), "ux");
+    await sees("all but build, implementer");
+    expect(keptOf({ agents: { deny: ["build"] }, orgMount: true })).toEqual({ agents: { deny: ["build"] } });
+  });
+
   it("says what the cluster says of it, a CA its namespace does not have yet included", async () => {
     await open("#/profiles/ux");
     await waitFor(() => heading() === "ux" && says("What the cluster says"), "ux");

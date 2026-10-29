@@ -1266,6 +1266,8 @@ export interface ProfileAgent {
   definition: string;
   /** Every team granted the profile, and whether its grant lets it run this agent. */
   teams: Array<{ team: string; may: boolean }>;
+  /** Whether the profile's `spec.agents` rule lets it exist there; one it excludes is in no agent's `delegate`. */
+  offered: boolean;
 }
 
 /** What `admin.profile.agents` answers. */
@@ -1277,6 +1279,10 @@ export interface ProfileAgents {
   /** Every agent Troupe ships, to copy from. */
   builtins: Array<{ name: string; mode: "primary" | "subagent"; description: string | null; definition: string }>;
   teams: string[];
+  /** The profile's `spec.agents` in effect, composed through what it extends; null where it says nothing. */
+  rule?: { allow: string[] | null; deny: string[] } | null;
+  /** Names the rule speaks of that are no agent the profile has today. */
+  unmatched?: string[];
 }
 
 export interface AdminFilter {
