@@ -5,6 +5,7 @@
 
 import { TroupeRpcError } from "./connection.js";
 import type { Invitation, Invitee, InviteRole, Person } from "./invites.js";
+import type { ProfileView } from "./profile.js";
 import type { JsonRpcError, JsonRpcResponse } from "./types.js";
 
 export interface Discovery {
@@ -397,6 +398,14 @@ export class PlaneClient {
 
   listProfiles(planeToken: string): Promise<{ profiles: ProfileOffering[] }> {
     return this.rpc(planeToken, "profiles.list", {});
+  }
+
+  /**
+   * What a profile the person may use gives a session on it, composed by the plane from
+   * what it enforces, before any session exists. `not_found` for a profile they may not use.
+   */
+  profile(planeToken: string, name: string): Promise<ProfileView> {
+    return this.rpc<ProfileView>(planeToken, "profile.get", { name });
   }
 
   listTeams(planeToken: string): Promise<{ teams: Team[] }> {

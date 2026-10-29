@@ -130,6 +130,23 @@ there and then, so a private session and its artifacts are yours from either cli
 sign-in made in the desktop app is `troupe`'s the same way, and signing out in one is
 signing out in both.
 
+## Profiles: what a session would get
+
+Before you start a session on your team's plane you can see what a profile gives it. In
+the desktop app, **Profiles** in the rail (there while you are signed in to a plane) lists
+each profile you may use with a line saying its agents, its MCP servers and the hosts it
+reads, and how much room it has now. A profile's page has six sections: **Agents** (each
+with its mode and what it does, then *Not here*: those the profile does not have and those
+your team's grant leaves out), **Tools** (the per-tool rules, the profile's and the
+organisation's, then each MCP server with its host, whose access it is called with, *as
+you, once you connect it*, *as the profile* or *as the profile's own identity*, whether a
+call is asked, and its tools; a server your grant leaves out is greyed), **Model**,
+**Reach** (the hosts its pods may reach), **Limits** (sessions per pod, the cap, room now
+and the profile's, the team's and your budgets) and **Who** (your teams that may use it,
+and the one a session runs under). *What this profile can reach* leads there from the start
+screen's profile picker and from a running team session's *Settings*. The plane works it
+all out from what it enforces (`profile.get`), so the page is what your session gets.
+
 ## Words you will meet
 
 The [glossary](../glossary.md) defines each of Troupe's words: a **plane**, a **team**, a
