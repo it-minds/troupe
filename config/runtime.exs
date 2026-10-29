@@ -56,14 +56,25 @@ enrolment = fn
         # `*.workers.<domain>` record and a single wildcard certificate cover every
         # profile. `Troupe.Operator.Names.host/3` composes the same name and says why;
         # the two must agree and cannot share a function across the app boundary.
-        if ordinal && profile && domain do
-          scheme = System.get_env("TROUPE_WORKERS_SCHEME", "wss")
-          port = presence.(System.get_env("TROUPE_WORKERS_PORT"))
-          authority = "#{ordinal}-#{profile}.#{domain}" <> if(port, do: ":#{port}", else: "")
+        #
+        # A registered machine has no Ingress and no ordinal in its name, so it is told
+        # the whole address instead: `TROUPE_WORKER_ENDPOINT`, the WebSocket URL a client
+        # reaches it at through whatever stands in front of it. Without either a worker
+        # enrols with no endpoint, and every session placed on it is handed nowhere to
+        # dial.
+        cond do
+          endpoint = presence.(System.get_env("TROUPE_WORKER_ENDPOINT")) ->
+            Map.put(claims, "endpoint", endpoint)
 
-          Map.put(claims, "endpoint", "#{scheme}://#{authority}/v1/socket")
-        else
-          claims
+          ordinal && profile && domain ->
+            scheme = System.get_env("TROUPE_WORKERS_SCHEME", "wss")
+            port = presence.(System.get_env("TROUPE_WORKERS_PORT"))
+            authority = "#{ordinal}-#{profile}.#{domain}" <> if(port, do: ":#{port}", else: "")
+
+            Map.put(claims, "endpoint", "#{scheme}://#{authority}/v1/socket")
+
+          true ->
+            claims
         end
       end)
 

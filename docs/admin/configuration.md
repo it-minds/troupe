@@ -110,7 +110,7 @@ Worker pods are created by the operator, so the chart sets none of these.
 | `TROUPE_WORKER_AUTOSTART` | unset | starts the worker (required) | yes |
 | `TROUPE_PLANE_CONTROL` | unset | `host[:port]` of the control listener | yes |
 | `TROUPE_POD_ORDINAL`, `TROUPE_PROFILE` | unset | the pod's name (its worker id) and profile | yes |
-| `TROUPE_WORKERS_DOMAIN`, `_SCHEME`, `_PORT` | unset, `wss`, unset | the advertised endpoint `<scheme>://<ordinal>-<profile>.<domain>[:port]/v1/socket` | yes |
+| `TROUPE_WORKERS_DOMAIN`, `_SCHEME`, `_PORT`; `TROUPE_WORKER_ENDPOINT` | unset, `wss`, unset; unset | the advertised endpoint `<scheme>://<ordinal>-<profile>.<domain>[:port]/v1/socket`; or the whole WebSocket URL, for a registered machine with no ordinal and no Ingress to compose one from, which wins where set ([plane-light.md](plane-light.md)) | yes; no |
 | `TROUPE_SESSIONS_PER_POD` | `4` | capacity claimed at enrolment | yes |
 | `TROUPE_MCP_SERVERS` | `[]` | JSON list of the profile's MCP servers | yes |
 | `TROUPE_MCP_IDENTITIES_PATH` | none | the file holding the profile's `mcpIdentities`, read again whenever a token is asked for ([profiles](profile-options.md#calling-an-mcp-server-as-the-profile)) | yes, when there are any |

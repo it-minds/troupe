@@ -1,0 +1,78 @@
+# The identity provider of a plane-light: Dex, with the people who may sign in.
+#
+# This is the file to edit. It is rendered into Dex's configuration every time the stack
+# starts: `__ISSUER__` becomes the stack's address, and the first administrator's email,
+# password hash and groups come from `.env`. A change here is `docker compose up -d`.
+#
+# Two kinds of people can sign in: static users listed below, and anybody a connector
+# admits. An office with Google Workspace, Entra, GitHub or any OIDC provider adds a
+# connector and keeps the static administrator as the way in when the provider is down.
+issuer: __ISSUER__
+
+storage:
+  type: sqlite3
+  config:
+    file: /var/dex/dex.db
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  # The clients sign in with the device flow, which needs no secret and no redirect to
+  # a terminal; the approval screen is skipped because the only client is Troupe's.
+  skipApprovalScreen: true
+  responseTypes: ["code"]
+
+staticClients:
+  - id: troupe
+    name: Troupe
+    public: true
+
+# Static users. The first is the administrator from `.env`. Another person is a line
+# like it with a bcrypt hash of their password: `scripts/plane-light hash` makes one, or
+# `docker run --rm caddy:2.10.2-alpine caddy hash-password --plaintext '<password>'`.
+# Groups are what Troupe reads: __ADMIN_GROUP__ makes somebody a platform admin, and
+# __TEAM_GROUP__ is the team the stack grants its profile to.
+enablePasswordDB: true
+staticPasswords:
+  - email: "__ADMIN_EMAIL__"
+    hash: "__ADMIN_HASH__"
+    username: "admin"
+    userID: "admin"
+    groups: ["__ADMIN_GROUP__", "__TEAM_GROUP__"]
+  # - email: "ada@example.test"
+  #   hash: "$2a$14$..."
+  #   username: "ada"
+  #   userID: "ada"
+  #   groups: ["__TEAM_GROUP__"]
+
+# Connectors to an identity provider the organisation already has. Dex's documentation
+# has every field; the two below are the common ones. A person a connector signs in
+# carries the groups the provider says, which is how they become a platform admin or
+# a member of the team: name the provider's groups above instead of these two.
+connectors: []
+#  - type: google
+#    id: google
+#    name: Google Workspace
+#    config:
+#      clientID: $GOOGLE_CLIENT_ID
+#      clientSecret: $GOOGLE_CLIENT_SECRET
+#      redirectURI: __ISSUER__/callback
+#      hostedDomains: [example.com]
+#      # Groups need a service account with domain-wide delegation:
+#      # serviceAccountFilePath: /etc/dex/google-sa.json
+#      # adminEmail: admin@example.com
+#  - type: github
+#    id: github
+#    name: GitHub
+#    config:
+#      clientID: $GITHUB_CLIENT_ID
+#      clientSecret: $GITHUB_CLIENT_SECRET
+#      redirectURI: __ISSUER__/callback
+#      orgs:
+#        - name: example-org
+#          teams: [platform-admins, engineers]
+#      # A team arrives as the group `example-org:engineers`.
+
+frontend:
+  issuer: Troupe

@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# Prove a plane-light on this machine: `deploy/plane-light/compose.yml` brought up as a
+# project of its own, on ports of its own, with images built from this checkout, and
+# `clients/gui/packages/client/test/e2e.plane-light.test.ts` run against it twice:
+# once as the box's first day (sign in, a session on the box's worker, an artifact, the
+# app and the console), and once after the whole stack has been stopped and started
+# again, which is what proves OpenBao unseals itself and the session is still there.
+# Then the project and its volumes are removed.
+#
+#   scripts/plane-light-check
+#
+# Needs Docker with compose, Node and the GUI's packages installed (`pnpm install` in
+# clients/gui), and public DNS for `localtest.me`, which resolves to 127.0.0.1 and is
+# what lets one URL mean the same thing to this script and to the plane's container.
+#
+#   TROUPE_PLANE_IMAGE, TROUPE_WORKER_IMAGE, TROUPE_GUI_IMAGE   images to run instead
+#                                                              of building them here
+#   TROUPE_LIGHT_CHECK_KEEP=1                                  leave the stack up on failure
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+root="$(pwd)"
+
+project=troupe-light-check
+port="${TROUPE_LIGHT_CHECK_PORT:-28080}"
+artifacts_port="${TROUPE_LIGHT_CHECK_ARTIFACTS_PORT:-28081}"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+# An `.env` of this check's own: every value `.env.example` says to change, changed to
+# something this run alone knows, and the hosts that resolve to this machine.
+env_file="$work/env"
+cat > "$env_file" <<EOF
+TROUPE_VERSION=$(cat VERSION)
+TROUPE_LIGHT_HOST=plane.localtest.me
+TROUPE_LIGHT_PORT=${port}
+TROUPE_LIGHT_ARTIFACTS_HOST=artifacts.localtest.me
+TROUPE_LIGHT_ARTIFACTS_PORT=${artifacts_port}
+TROUPE_LIGHT_ADMIN_EMAIL=admin@example.test
+TROUPE_LIGHT_ADMIN_PASSWORD=check-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')
+TROUPE_LIGHT_ADMIN_GROUP=troupe-platform-admins
+TROUPE_LIGHT_TEAM_GROUP=troupe-users
+TROUPE_BREAKGLASS_TOKEN=bg-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+TROUPE_SECRET_KEY_BASE=$(od -An -N48 -tx1 /dev/urandom | tr -d ' \n')
+POSTGRES_PASSWORD=pg-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+MINIO_ROOT_PASSWORD=minio-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+TROUPE_PROVIDER=fake
+TROUPE_MODEL=fake
+TROUPE_BASE_URL=
+TROUPE_API_KEY=
+TROUPE_LIGHT_SESSIONS=2
+${TROUPE_PLANE_IMAGE:+TROUPE_PLANE_IMAGE=${TROUPE_PLANE_IMAGE}}
+${TROUPE_WORKER_IMAGE:+TROUPE_WORKER_IMAGE=${TROUPE_WORKER_IMAGE}}
+${TROUPE_GUI_IMAGE:+TROUPE_GUI_IMAGE=${TROUPE_GUI_IMAGE}}
+EOF
+
+compose() {
+  docker compose --project-name "$project" --project-directory deploy/plane-light \
+    --env-file "$env_file" --file deploy/plane-light/compose.yml "$@"
+}
+
+# The services that stay up are waited on; the one-shots that exit 0 on purpose would
+# fail `--wait`, so their exit codes are read afterwards. The bootstrap is neither: it
+# waits for the first sign-in, which the test is.
+up() {
+  compose up --detach --wait --wait-timeout 600 "$@" \
+    postgres minio openbao dex plane gui proxy worker
+  for oneshot in minio-setup plane-migrate control-tls dex-config; do
+    if [ "$(compose ps --all --format '{{.ExitCode}}' "$oneshot")" != "0" ]; then
+      echo "plane-light-check: $oneshot failed; its log:" >&2
+      compose logs --no-color "$oneshot" | tail -40 >&2
+      return 1
+    fi
+  done
+}
+
+failed() {
+  echo
+  echo "plane-light-check: FAILED. The stack:" >&2
+  compose ps --all >&2 || true
+  for service in bootstrap plane worker openbao proxy dex; do
+    echo "---- $service" >&2
+    compose logs --no-color --tail=60 "$service" >&2 || true
+  done
+  if [ "${TROUPE_LIGHT_CHECK_KEEP:-}" = "1" ]; then
+    echo "plane-light-check: left up as project $project (TROUPE_LIGHT_CHECK_KEEP=1)" >&2
+  else
+    compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+  fi
+  exit 1
+}
+
+phase() {
+  local phase="$1"
+  (
+    cd clients/gui/packages/client
+    TROUPE_E2E_PLANE="http://plane.localtest.me:${port}" \
+    TROUPE_E2E_ARTIFACTS="http://artifacts.localtest.me:${artifacts_port}" \
+    TROUPE_E2E_USER=admin@example.test \
+    TROUPE_E2E_PASSWORD="$(sed -n 's/^TROUPE_LIGHT_ADMIN_PASSWORD=//p' "$env_file")" \
+    TROUPE_E2E_PHASE="$phase" \
+    TROUPE_E2E_STATE="$work/state.json" \
+      node --test --import tsx --test-reporter=spec test/e2e.plane-light.test.ts
+  )
+}
+
+step() { echo; echo "==> $*"; }
+
+# Nothing of an earlier run.
+compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+
+build=(--build)
+if [ -n "${TROUPE_PLANE_IMAGE:-}" ] && [ -n "${TROUPE_WORKER_IMAGE:-}" ] && [ -n "${TROUPE_GUI_IMAGE:-}" ]; then
+  build=(--no-build)
+fi
+
+step "1. The stack, from this checkout (${build[*]})"
+up "${build[@]}" || failed
+
+step "2. The box's first day"
+phase full || failed
+
+step "3. Stopped, and started again"
+compose down || failed
+up --no-build || failed
+
+step "4. Still unsealed, the session still there"
+phase restart || failed
+
+step "5. Down, volumes removed"
+compose down --volumes --remove-orphans
+
+echo
+echo "plane-light-check: ok (project $project on port $port, images: ${build[*]})"

@@ -11,6 +11,9 @@ whose CI runs on one box should be able to give that box to a profile and stop t
 > a cluster, and the guarantees Kubernetes provides are not there. Everything below says
 > which, where it matters.
 
+Without a cluster at all, [plane-light.md](plane-light.md) runs the plane and this
+worker on the one machine, from one compose file, and takes the steps below for you.
+
 ---
 
 ## What you give up, named one at a time
@@ -102,6 +105,11 @@ TROUPE_BAO_ADDR=https://bao.example.com TROUPE_BAO_TOKEN=… \
 A pod logs in to OpenBao with its projected token, which a machine does not have, so the
 machine needs `TROUPE_BAO_TOKEN`, and the object store's credentials as a pod's
 `troupe-object-store` Secret gives them ([configuration.md A.3](configuration.md#a3-worker-troupe_worker)).
+
+And `TROUPE_WORKER_ENDPOINT=wss://build-box.example.com/v1/socket`: the WebSocket URL a
+client dials this worker at, which a pod composes from its Ingress and a machine has to be
+told. Without it the machine enrols with no endpoint, and a session placed on it is handed
+nowhere to dial.
 
 **The control channel is TLS, and the machine checks whom it is talking to.** With
 `TROUPE_PLANE_CA_PATH` the worker dials with TLS and accepts only a certificate that CA

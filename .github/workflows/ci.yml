@@ -90,6 +90,7 @@ jobs:
       tui: ${{ steps.plan.outputs.tui }}
       gui: ${{ steps.plan.outputs.gui }}
       gui_e2e: ${{ steps.plan.outputs.gui_e2e }}
+      plane_light: ${{ steps.plan.outputs.plane_light }}
       desktop: ${{ steps.plan.outputs.desktop }}
       vscode: ${{ steps.plan.outputs.vscode }}
       native: ${{ steps.plan.outputs.native }}
@@ -155,6 +156,15 @@ jobs:
             gui_e2e:
               - clients/gui/packages/client/**
               - clients/gui/dev/**
+            # The plane-light stack and its proof; the images it builds and the apps in
+            # them are added in the plan below.
+            plane_light:
+              - deploy/plane-light/**
+              - scripts/plane-light
+              - scripts/plane-light-check
+              - clients/gui/packages/client/test/e2e.plane-light.test.ts
+              - clients/gui/packages/client/test/support/dex.ts
+              - clients/gui/Dockerfile
             # The desktop app's Rust: finding and starting the daemon, the update, the
             # sign-in's keychain entry.
             desktop:
@@ -257,6 +267,11 @@ jobs:
           gui=$(flag eval 'on shared || on gui')
           # The client against a plane built from this commit.
           gui_e2e=$(flag eval 'on shared || on gui_e2e || on chart || has troupe_plane || has troupe_gateway')
+          # The plane-light: on a pull request only when the stack itself changes, since
+          # three images from scratch is most of half an hour; a full run (the nightly)
+          # brings it up whatever changed, and that is where a plane or worker change
+          # that breaks it is found.
+          plane_light=$(flag eval 'on plane_light')
           desktop=$(flag eval 'on shared || on desktop')
           vscode=$(flag eval 'on shared || on vscode')
           # Native builds on a pull request that touches them; a full run leaves them to
@@ -283,6 +298,7 @@ jobs:
             echo "tui=$tui"
             echo "gui=$gui"
             echo "gui_e2e=$gui_e2e"
+            echo "plane_light=$plane_light"
             echo "desktop=$desktop"
             echo "vscode=$vscode"
             echo "native=$native"
@@ -298,7 +314,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| umbrella apps | \`$json\` |"
-            for k in chart protocol tui gui gui_e2e desktop vscode native images cluster keyring signing; do echo "| $k | ${!k} |"; done
+            for k in chart protocol tui gui gui_e2e plane_light desktop vscode native images cluster keyring signing; do echo "| $k | ${!k} |"; done
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Compile, format, credo, generated assets and boundaries: once, for the whole
@@ -948,6 +964,41 @@ jobs:
           docker compose -f dev/plane-stack.yml logs --no-color plane | tail -200
           docker compose -f dev/plane-stack.yml logs --no-color plane-migrate | tail -20
 
+  # A plane-light built from this commit (deploy/plane-light): the plane, the worker and
+  # the GUI images made here, brought up by `scripts/plane-light-check` with Postgres,
+  # MinIO, OpenBao, Dex and Caddy, signed in to through Dex, a session run on the box's
+  # own worker with a command in its sandbox, an artifact read back, then the whole stack
+  # stopped and started to show it comes back unsealed (docs/admin/plane-light.md).
+  # Three images from scratch is most of the time; the check itself is under a minute.
+  plane-light:
+    name: a plane-light built from this commit
+    needs: [changes]
+    if: needs.changes.outputs.plane_light == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: clients/gui/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .tool-versions
+          cache: pnpm
+          cache-dependency-path: clients/gui/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: clients/gui
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Builds the three images, runs both phases, prints every service's log on a
+      # failure and removes the project and its volumes either way.
+      - name: The stack, and the check against it
+        run: scripts/plane-light-check
+
   # The VS Code extension (clients/vscode): its unit tests, which put the line it types
   # through each shell the runner has; its suite inside a real VS Code, downloaded, against
   # a fake `troupe`, where the shell is bash on Linux and PowerShell on Windows; and the
@@ -1092,7 +1143,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, desktop, vscode, native, cluster, keyring, signing]
+    needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, plane-light, desktop, vscode, native, cluster, keyring, signing]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:

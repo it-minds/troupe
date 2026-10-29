@@ -1,0 +1,45 @@
+# The one door of a plane-light: what the chart gives three Ingresses, in one file.
+#
+# Plain HTTP on purpose. TLS is a reverse proxy of your own in front of these two ports,
+# with the box's real certificate; this one knows no hostname and asks for none.
+
+{
+	auto_https off
+	admin off
+}
+
+# The plane, the app, the console, the identity provider and the worker, on one port.
+:8080 {
+	# The GUI image serves the app at its root with asset URLs under /app, so the
+	# prefix is stripped on the way in, as the chart's Ingress rewrites it.
+	redir /app /app/
+	handle_path /app/* {
+		reverse_proxy gui:8080
+	}
+
+	# The console is served under /console inside the image: passed through as is.
+	redir /console /console/
+	handle /console/* {
+		reverse_proxy gui:8080
+	}
+
+	# Dex serves its issuer under /dex itself.
+	handle /dex/* {
+		reverse_proxy dex:5556
+	}
+
+	# A session's WebSocket, which the plane hands a client the address of. The plane
+	# serves nothing under this path, so the one port carries both.
+	handle /v1/socket {
+		reverse_proxy worker:4000
+	}
+
+	handle {
+		reverse_proxy plane:4000
+	}
+}
+
+# Published artifacts, read on a port and a hostname of their own.
+:8081 {
+	reverse_proxy plane:4003
+}
