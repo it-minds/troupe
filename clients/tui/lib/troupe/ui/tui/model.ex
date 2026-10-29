@@ -195,7 +195,27 @@ defmodule Troupe.UI.TUI.Model do
           unconfirmed: %{optional(String.t()) => String.t()},
           drawn_inputs: %{optional(String.t()) => String.t()},
           warnings: %{optional(atom()) => map()},
-          curtain: %{optional(atom()) => pos_integer()}
+          curtain: %{optional(atom()) => pos_integer()},
+          host: String.t() | nil,
+          wait: wait()
+        }
+
+  @typedoc """
+  What the window's own agent has been waited on since its turn's prompt, as the events
+  stamped it: when the prompt was sent (`sent_at`, the first copy of the input, by its
+  command id), when the daemon's model request went out (`request_at`, the `thinking` it
+  arrives as, with the model it named), when the first byte of an answer came (`byte_at`,
+  a delta, a reply or a model error), and the last event the window heard, whatever it
+  was. A request older than the prompt is the last turn's, and a byte older than the
+  request answered the last one: the phases are read by comparing the three.
+  """
+  @type wait :: %{
+          sent_at: integer() | nil,
+          cid: String.t() | nil,
+          request_at: integer() | nil,
+          byte_at: integer() | nil,
+          model: String.t() | nil,
+          last: {atom(), integer()} | nil
         }
 
   defstruct session_id: nil,
@@ -205,6 +225,9 @@ defmodule Troupe.UI.TUI.Model do
             notices: [],
             watch: %{enabled: false, backend: nil},
             remote: nil,
+            # The host the session's model calls go to, as this machine's configuration
+            # names it (never the key): what a request that draws nothing is said to wait on.
+            host: nil,
             files_version: 0,
             # Bumped by each `scratch_updated`: an open `/scratch` lists again from it.
             scratch_version: 0,
@@ -222,6 +245,14 @@ defmodule Troupe.UI.TUI.Model do
   @highlight_cap 400
   @theme :base16_ocean_dark
   @no_spend %{calls: 0, cost_micros: 0, unpriced: 0}
+  @no_wait %{sent_at: nil, cid: nil, request_at: nil, byte_at: nil, model: nil, last: nil}
+  # How long a prompt may go without the daemon's model request, and a request without a
+  # byte back, before the curtain line stops being a flourish and says so; and how long
+  # before the pane draws the box that says what was sent, what has happened and what to
+  # do. The harness's own first-byte limit is longer than the box, so the box comes first.
+  @no_request_ms 10_000
+  @no_answer_ms 20_000
+  @wait_box_ms 45_000
 
   @spec new(String.t(), String.t()) :: t()
   def new(sid, workspace), do: %__MODULE__{session_id: sid, workspace: workspace}
@@ -279,7 +310,9 @@ defmodule Troupe.UI.TUI.Model do
           # The lines drawn for inputs the agent has not yet taken, by command id.
           drawn_inputs: %{},
           warnings: %{},
-          curtain: %{}
+          curtain: %{},
+          host: m.host,
+          wait: @no_wait
         }
 
         order = if e.agent_path in m.order, do: m.order, else: m.order ++ [e.agent_path]
@@ -336,9 +369,16 @@ defmodule Troupe.UI.TUI.Model do
   # branch that needs you" honest whichever way the last request went away: a killed
   # subagent never answers its own, and a `y` on a budget question resumes the turn.
   defp settle(w, %Event{} = e) do
-    w = w |> begun(e) |> turn(e)
+    w = w |> heard(e) |> begun(e) |> turn(e)
     %{w | state: window_state(w)}
   end
+
+  # The last event the window heard, and when: what the box that says nothing has
+  # happened can name, so a person sees whether anything at all reaches this screen.
+  defp heard(w, %Event{type: type, ts: ts}) when is_integer(ts),
+    do: %{w | wait: Map.put(Map.get(w, :wait, @no_wait), :last, {type, ts})}
+
+  defp heard(w, _e), do: w
 
   defp window_state(%{pending: [_ | _]}), do: :needs_input
   defp window_state(%{outcome: :done}), do: :done_unread
@@ -427,6 +467,7 @@ defmodule Troupe.UI.TUI.Model do
         |> update_agent(path, fn a -> %{a | ended_at: nil} end)
         |> working()
         |> new_curtain(path)
+        |> sent(path, d, ts)
 
       :input when d.source in [:user, :watch] ->
         w
@@ -436,6 +477,7 @@ defmodule Troupe.UI.TUI.Model do
         |> unconfirmed(d)
         |> working()
         |> new_curtain(path)
+        |> sent(path, d, ts)
 
       # A remote session renders your own input before the server has seen it;
       # `input.accepted` carrying the same command id is what confirms it.
@@ -523,6 +565,7 @@ defmodule Troupe.UI.TUI.Model do
             %{a | streaming: a.streaming <> d.text}
           end
         end)
+        |> byte(path, ts)
 
       # An agent has ended when the log says it is done (`agent_done`): a subagent that
       # finished, or one a restart closed, says nothing more and shows no spinner.
@@ -531,6 +574,7 @@ defmodule Troupe.UI.TUI.Model do
         errors = if d.to in [nil, :idle], do: errors, else: Map.delete(errors, path)
 
         w
+        |> requested(path, d, ts)
         |> curtain_phase(path, d.to)
         |> Map.merge(%{
           activity: Map.put(w.activity, path, d.to),
@@ -559,6 +603,7 @@ defmodule Troupe.UI.TUI.Model do
 
         w =
           w
+          |> byte(path, ts)
           |> ensure_agent(path)
           |> update_agent(path, fn a ->
             %{
@@ -697,12 +742,17 @@ defmodule Troupe.UI.TUI.Model do
 
       # With the next step under it where there is one: on a first run with no key, the
       # first turn is where a person learns that `troupe config` sets a provider up.
+      # The request is over, so nothing waits on it any more, and the agent is stopped
+      # from this moment: the line under the turn says the error at once, rather than
+      # `thinking` until the turn's end arrives, and keeps saying it after.
       :llm_error ->
         w
         |> ensure_agent(path)
         |> push(path, {:system, "LLM error: #{d.message}"})
         |> push_step(path, ModelError.next_step(d))
         |> Map.put(:model_errors, Map.put(Map.get(w, :model_errors, %{}), path, d.message))
+        |> Map.put(:activity, Map.put(w.activity, path, :idle))
+        |> byte(path, ts)
 
       :todo_updated ->
         update_agent(ensure_agent(w, path), path, fn a -> %{a | todos: d.items} end)
@@ -908,6 +958,164 @@ defmodule Troupe.UI.TUI.Model do
   # The curtain line's phases start again with each turn of the window's own agent.
   defp new_curtain(%{path: path} = w, path), do: Map.put(w, :curtain, %{})
   defp new_curtain(w, _path), do: w
+
+  ## What the window's own agent is waited on
+
+  # A prompt to the window's own agent starts a wait: nothing is known of its request or
+  # its answer yet. An input comes in copies that name one command id (the one drawn as
+  # it was sent, the one queued, the one the agent took), and the first copy is when the
+  # person sent it; a copy queued while the agent works is not a turn starting.
+  defp sent(%{path: path} = w, path, d, ts) when is_integer(ts) do
+    wait = Map.get(w, :wait, @no_wait)
+    cid = d[:command_id]
+
+    cond do
+      Map.get(d, :queued, false) ->
+        w
+
+      is_binary(cid) and wait.cid == cid ->
+        w
+
+      true ->
+        %{w | wait: %{wait | sent_at: ts, cid: cid, request_at: nil, byte_at: nil, model: nil}}
+    end
+  end
+
+  defp sent(w, _path, _d, _ts), do: w
+
+  # The daemon's model request is the `thinking` the agent goes into; one that was already
+  # thinking is the same request, told twice (the log's word and the live one).
+  defp requested(%{path: path} = w, path, %{to: :thinking} = d, ts) when is_integer(ts) do
+    if Map.get(w.activity, path) == :thinking do
+      w
+    else
+      wait = Map.get(w, :wait, @no_wait)
+      %{w | wait: %{wait | request_at: ts, byte_at: nil, model: d[:model] || wait.model}}
+    end
+  end
+
+  defp requested(w, _path, _d, _ts), do: w
+
+  # The first byte back from the request: a delta, a reply that never streamed, or the
+  # error that ended it. A later byte of the same answer changes nothing.
+  defp byte(%{path: path} = w, path, ts) when is_integer(ts) do
+    wait = Map.get(w, :wait, @no_wait)
+
+    if wait.request_at != nil and (wait.byte_at == nil or wait.byte_at < wait.request_at),
+      do: %{w | wait: %{wait | byte_at: ts}},
+      else: w
+  end
+
+  defp byte(w, _path, _ts), do: w
+
+  @doc """
+  What the window's own agent has been waited on, and for how long: `{:request, ms}`
+  while the daemon has sent no model request since the prompt and the agent is doing
+  nothing else, `{:answer, ms}` while a request has drawn no byte and the agent still
+  thinks, `nil` otherwise — a turn at rest, one waiting on a person, a request answered.
+  Only the window's own agent is waited on this way; a subagent's wait is its parent's.
+  """
+  @spec waiting(window(), String.t(), integer()) :: {:request | :answer, integer()} | nil
+  def waiting(%{path: path} = w, path, now) do
+    wait = Map.get(w, :wait, @no_wait)
+    state = Map.get(w.activity, path)
+    tools = running_tools(Map.get(w.agents, path, new_agent()))
+
+    cond do
+      w.outcome != nil or w.pending != [] or not w.started ->
+        nil
+
+      wait.sent_at != nil and (wait.request_at == nil or wait.request_at < wait.sent_at) and
+        state in [nil, :idle] and tools == [] ->
+        {:request, max(now - wait.sent_at, 0)}
+
+      wait.request_at != nil and (wait.byte_at == nil or wait.byte_at < wait.request_at) and
+          state == :thinking ->
+        {:answer, max(now - wait.request_at, 0)}
+
+      true ->
+        nil
+    end
+  end
+
+  def waiting(_w, _path, _now), do: nil
+
+  @doc """
+  The box the pane draws above the composer once a prompt has drawn nothing for
+  #{div(@wait_box_ms, 1000)} s — no model request from the daemon, or no byte back from
+  the request: what was sent and when, what has happened since, the last event this
+  screen heard, and what to do. Empty while something happens, once the first byte comes
+  or the turn ends.
+  """
+  @spec wait_lines(window(), String.t(), integer()) :: [line()]
+  def wait_lines(w, path, now) do
+    case waiting(w, path, now) do
+      {on, ms} when ms >= @wait_box_ms -> wait_box(w, on, ms)
+      _ -> []
+    end
+  end
+
+  defp wait_box(w, on, ms) do
+    wait = Map.get(w, :wait, @no_wait)
+
+    since =
+      case on do
+        :request ->
+          if is_binary(wait.cid) and Map.has_key?(w.unconfirmed, wait.cid),
+            do: "the daemon has not acknowledged it",
+            else: "the daemon acknowledged it; it has not sent the model request"
+
+        :answer ->
+          "the request went to #{host_words(w)} at #{clock_of(wait.request_at)}; nothing has come back"
+      end
+
+    last =
+      case wait.last do
+        {type, ts} -> "the last event here was #{type}, at #{clock_of(ts)}"
+        nil -> "nothing has reached this screen since"
+      end
+
+    [
+      {:blank, ""},
+      {:text, [{:strong, "nothing has happened for #{clock(ms)}"}]}
+      | frame([
+          {:text, "your prompt went to the daemon at #{clock_of(wait.sent_at)}"},
+          {:text, since},
+          {:text, last},
+          {:text,
+           "Esc cancels the turn · `troupe doctor` asks the model for a token · " <>
+             "the daemon's log is #{daemon_log()}"}
+        ])
+    ]
+  end
+
+  @doc "The daemon's log file, where a stalled turn's reason is read (`Troupe.Settings`)."
+  @spec daemon_log() :: String.t()
+  defdelegate daemon_log(), to: Troupe.Settings
+
+  defp host_words(%{host: host}) when is_binary(host) and host != "", do: host
+  defp host_words(_w), do: "the model"
+
+  # A time of day, `14:02:11`, in this machine's zone: when a prompt was sent is read
+  # against the clock on the wall, as a log's lines are.
+  defp clock_of(ts) when is_integer(ts) do
+    {_date, {h, m, s}} = :calendar.system_time_to_local_time(ts, :millisecond)
+    Enum.map_join([h, m, s], ":", &String.pad_leading(Integer.to_string(&1), 2, "0"))
+  end
+
+  defp clock_of(_ts), do: "an unknown time"
+
+  defp clock(ms), do: elapsed(%{started_at: 0, ended_at: nil}, ms)
+
+  @doc "The host a session's model calls go to, as its configuration names it (`Troupe.Settings`)."
+  @spec host_of(map() | nil) :: String.t() | nil
+  defdelegate host_of(config), to: Troupe.Settings, as: :model_host
+
+  @doc "The model with the host its calls go to, on it and on every window it has."
+  @spec with_host(t(), String.t() | nil) :: t()
+  def with_host(%__MODULE__{} = m, host) do
+    %{m | host: host, windows: Map.new(m.windows, fn {path, w} -> {path, %{w | host: host}} end)}
+  end
 
   # A phase is a change of what the window's own agent does: thinking, acting, compacting.
   # The count of each kind picks the flourish (`Frames.curtain/3`), so the third time it
@@ -1449,6 +1657,7 @@ defmodule Troupe.UI.TUI.Model do
       state = Map.get(w.activity, path)
       tools = running_tools(agent)
       waiting? = Enum.any?(w.pending, &(&1.agent_path == path))
+      wait = waiting(w, path, now)
 
       children =
         Enum.reject(w.activity, fn {p, s} ->
@@ -1460,8 +1669,23 @@ defmodule Troupe.UI.TUI.Model do
           waiting? or (path == w.path and w.state == :needs_input) ->
             "waiting for you"
 
+          # A request that has drawn no byte for a while is said to be what it is, and
+          # where it went: the facts a person needs when nothing happens.
+          match?({:answer, ms} when ms >= @no_answer_ms, wait) ->
+            {:answer, ms} = wait
+            "#{spinner} no answer from #{host_words(w)} yet (#{clock(ms)})"
+
           state == :thinking ->
             "#{spinner} thinking (#{since})"
+
+          # Between the prompt and the daemon's model request: how long since the prompt,
+          # and past a few seconds, that the request has not gone out.
+          match?({:request, _ms}, wait) ->
+            {:request, ms} = wait
+
+            if ms < @no_request_ms,
+              do: "#{spinner} preparing (#{clock(ms)})",
+              else: "#{spinner} the daemon has not sent the model request yet (#{clock(ms)})"
 
           state == :compacting ->
             "#{spinner} compacting context (#{since})"
@@ -2165,7 +2389,15 @@ defmodule Troupe.UI.TUI.Model do
         _ -> []
       end
 
-    reasoning ++ streaming ++ activity ++ pending
+    # A prompt that has drawn nothing for long enough gets the box, under the curtain
+    # line and where an approval would be: the last thing in the pane, above the composer.
+    waited =
+      case wait_lines(w, agent_path, now) do
+        [] -> []
+        lines -> [lines]
+      end
+
+    reasoning ++ streaming ++ activity ++ waited ++ pending
   end
 
   defp live_reasoning(text, at, now, level) do
@@ -2254,6 +2486,13 @@ defmodule Troupe.UI.TUI.Model do
   the same place — `◐ the actors are powdering their nose — thinking (00:12)`. Waiting on
   a person, a model error and a subagent's own pane get the facts alone, and so does a
   phase past the end of its list; `nil` when nothing runs.
+
+  From the prompt the facts say what is waited on: `the house lights go down — preparing
+  (00:04)` until the daemon's model request, and once that is a while coming, `the daemon
+  has not sent the model request yet (00:14)` with no flourish; after the request,
+  `thinking (00:12)` as ever, and once nothing has come back for a while, `no answer from
+  <host> yet (00:35)`, facts alone again. A wait that has become news is no occasion for
+  theatre, and the facts stay where they always are.
   """
   @spec curtain_line(window(), String.t(), non_neg_integer(), integer()) :: String.t() | nil
   def curtain_line(w, path, tick, now) do
@@ -2266,7 +2505,7 @@ defmodule Troupe.UI.TUI.Model do
   defp curtain_segments(w, path, tick, now) do
     case activity_line(w, path, tick, now) do
       line when is_binary(line) ->
-        case {activity_segments(line), flourish(w, path)} do
+        case {activity_segments(line), flourish(w, path, now)} do
           {[{:activity_glyph, glyph}, {:activity, facts}], words} when is_binary(words) ->
             [{:activity_glyph, glyph}, {:curtain, " " <> words <> " —"}, {:activity, facts}]
 
@@ -2279,23 +2518,26 @@ defmodule Troupe.UI.TUI.Model do
     end
   end
 
-  defp flourish(%{path: path} = w, path) do
+  defp flourish(%{path: path} = w, path, now) do
     agent = Map.get(w.agents, path, new_agent())
     kind = Map.get(w.activity, path)
     count = Map.get(Map.get(w, :curtain, %{}), kind, 1)
 
-    case {kind, running_names(agent)} do
-      {nil, []} -> Enum.at(@curtain.starting, 0)
-      {nil, names} -> Enum.at(phrases(names), 0)
-      {:thinking, _names} -> Enum.at(@curtain.thinking, count - 1)
-      {:compacting, _names} -> Enum.at(@curtain.compacting, count - 1)
-      {:acting, [_ | _] = names} -> Enum.at(phrases(names), count - 1)
-      {:acting, []} -> Enum.at(@curtain.acting, count - 1)
+    case {waiting(w, path, now), kind, running_names(agent)} do
+      {{:request, ms}, _kind, _names} when ms >= @no_request_ms -> nil
+      {{:answer, ms}, _kind, _names} when ms >= @no_answer_ms -> nil
+      {{:request, _ms}, _kind, []} -> Enum.at(@curtain.starting, 0)
+      {_wait, nil, []} -> Enum.at(@curtain.starting, 0)
+      {_wait, nil, names} -> Enum.at(phrases(names), 0)
+      {_wait, :thinking, _names} -> Enum.at(@curtain.thinking, count - 1)
+      {_wait, :compacting, _names} -> Enum.at(@curtain.compacting, count - 1)
+      {_wait, :acting, [_ | _] = names} -> Enum.at(phrases(names), count - 1)
+      {_wait, :acting, []} -> Enum.at(@curtain.acting, count - 1)
       _other -> nil
     end
   end
 
-  defp flourish(_w, _path), do: nil
+  defp flourish(_w, _path, _now), do: nil
 
   defp phrases(names),
     do: if(Enum.all?(names, &(&1 in @reads)), do: @curtain.reading, else: @curtain.acting)

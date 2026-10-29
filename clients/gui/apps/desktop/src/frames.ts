@@ -443,6 +443,41 @@ export function clock(ms: number): string {
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
+/** What the session's own agent is waited on, and for how long: the daemon's model request, or its first byte. */
+export interface Waiting {
+  on: "request" | "answer";
+  ms: number;
+}
+
+/**
+ * The daemon's model request, while a prompt has drawn none and the agent does nothing
+ * else; the request's first byte, while it thinks and nothing has come back; null when
+ * nothing is waited on this way — at rest, waiting on a person, an answer under way.
+ */
+export function waitingOn(state: TranscriptState, now: number): Waiting | null {
+  if (needsYou(state)) return null;
+  const c = state.curtain;
+  if (c.sentAt !== undefined && (c.requestAt === undefined || c.requestAt < c.sentAt) && !isBusy(state)) {
+    return { on: "request", ms: Math.max(now - c.sentAt, 0) };
+  }
+  if (c.requestAt !== undefined && (c.byteAt === undefined || c.byteAt < c.requestAt) && rootState(state) === "thinking" && !state.streaming && !state.thinking) {
+    return { on: "answer", ms: Math.max(now - c.requestAt, 0) };
+  }
+  return null;
+}
+
+/**
+ * The words for a wait that has become news, in the composer's hint: the daemon's request
+ * not sent 10 s after the prompt, nothing back 20 s after the request. Null before that,
+ * and whenever nothing is waited on.
+ */
+export function waitingWords(state: TranscriptState, now: number): string | null {
+  const w = waitingOn(state, now);
+  if (w === null) return null;
+  if (w.on === "request") return w.ms >= 10_000 ? `the daemon has not sent the model request yet (${clock(w.ms)})` : null;
+  return w.ms >= 20_000 ? `waiting on the model (${clock(w.ms)}), nothing back yet` : null;
+}
+
 /**
  * What the session's own agent is doing, for the line under the transcript; null while it
  * rests. What runs, how many and for how long are always said; a few words from the set

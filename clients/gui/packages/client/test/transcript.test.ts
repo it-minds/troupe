@@ -747,17 +747,38 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
 
   it("counts the root agent's phases of a turn for the curtain line, and starts again with the next turn", () => {
     seq = 0;
-    let state = fold(emptyTranscript, durable("user_input", { text: "go", source: "user" }));
+    let state = fold(emptyTranscript, durable("user_input", { text: "go", source: "user" }), { now: 500 });
     state = fold(state, ephemeral("agent_state", { state: "thinking" }), { now: 1_000 });
     state = fold(state, ephemeral("agent_state", { state: "thinking" }), { now: 2_000 });
-    assert.deepEqual(state.curtain, { phases: { thinking: 1 }, since: 1_000 });
+    assert.deepEqual(state.curtain, { phases: { thinking: 1 }, since: 1_000, sentAt: 500, requestAt: undefined, byteAt: undefined });
     state = fold(state, ephemeral("agent_state", { state: "acting" }), { now: 3_000 });
     state = fold(state, ephemeral("agent_state", { state: "thinking" }), { now: 4_000 });
     // A subagent's state is its own and no phase of the root's.
     state = fold(state, ephemeral("agent_state", { state: "acting" }, ["root", "helper#1"]), { now: 5_000 });
-    assert.deepEqual(state.curtain, { phases: { thinking: 2, acting: 1 }, since: 4_000 });
+    assert.deepEqual(state.curtain, { phases: { thinking: 2, acting: 1 }, since: 4_000, sentAt: 500, requestAt: undefined, byteAt: undefined });
     state = fold(state, durable("user_input", { text: "again", source: "user" }));
     assert.deepEqual(state.curtain.phases, {});
+  });
+
+  it("stamps the prompt, the daemon's request and its first byte, for what a screen says it waits on", () => {
+    seq = 0;
+    let state = fold(emptyTranscript, durable("user_input", { text: "go", source: "user" }), { now: 500 });
+    assert.deepEqual([state.curtain.sentAt, state.curtain.requestAt, state.curtain.byteAt], [500, undefined, undefined]);
+    // The harness's own note to the model is no prompt.
+    state = fold(state, durable("user_input", { text: "cut", source: "harness" }), { now: 600 });
+    assert.equal(state.curtain.sentAt, 500);
+    state = fold(state, durable("llm_request", { model: "m" }), { now: 1_000 });
+    assert.deepEqual([state.curtain.sentAt, state.curtain.requestAt, state.curtain.byteAt], [500, 1_000, undefined]);
+    state = fold(state, ephemeral("llm_delta", { kind: "text", text: "a" }), { now: 2_000 });
+    state = fold(state, ephemeral("llm_delta", { kind: "text", text: "b" }), { now: 3_000 });
+    assert.equal(state.curtain.byteAt, 2_000);
+    // A reply that never streamed, and a model error, are bytes too; a turn's end clears all.
+    state = fold(state, durable("llm_request", { model: "m" }), { now: 4_000 });
+    assert.deepEqual([state.curtain.requestAt, state.curtain.byteAt], [4_000, undefined]);
+    state = fold(state, durable("llm_error", { reason: "no key" }), { now: 5_000 });
+    assert.equal(state.curtain.byteAt, 5_000);
+    state = fold(state, durable("turn_ended", { reason: "llm_error" }), { now: 6_000 });
+    assert.deepEqual([state.curtain.sentAt, state.curtain.requestAt, state.curtain.byteAt], [undefined, undefined, undefined]);
   });
 
   it("ends a turn the root failed as a failure, with what it raised, until the next turn starts (Decision 727)", () => {
