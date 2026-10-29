@@ -4376,8 +4376,18 @@ defmodule Troupe.UI.TUI.Server do
         _ -> workspace_of(sid)
       end
 
-    model = Model.rebuild(sid, workspace, events)
+    model = Model.rebuild(sid, workspace, events) |> Model.with_host(host(sid))
     %{model | watch: Client.watch_status(sid), remote: remote(sid)}
+  end
+
+  # The host the session's model calls go to, as this machine's configuration names it:
+  # what a request that draws nothing is said to be waiting on. A pod's configuration is
+  # its plane's, which this machine does not read, so there it is "the model".
+  defp host(sid) do
+    case Client.context(sid) do
+      {_workspace, config} -> Model.host_of(config)
+      _ -> nil
+    end
   end
 
   # The model learns what a remote session allows from `:remote_status` events,

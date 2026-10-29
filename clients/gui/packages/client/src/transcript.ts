@@ -321,6 +321,16 @@ export type CurtainPhase = "thinking" | "acting" | "compacting";
 export interface CurtainState {
   phases: Partial<Record<CurtainPhase, number>>;
   since: number | undefined;
+  /**
+   * What the root agent is waited on, by this client's clock: when its turn's prompt
+   * was taken (`sentAt`), when the daemon's model request went out (`requestAt`) and
+   * when the first byte came back (`byteAt`, a delta, a reply or a model error). A
+   * request older than the prompt is the last turn's, and a byte older than the request
+   * answered the last one; the phases are read by comparing the three.
+   */
+  sentAt: number | undefined;
+  requestAt: number | undefined;
+  byteAt: number | undefined;
 }
 
 /**
@@ -366,7 +376,7 @@ export const emptyTranscript: TranscriptState = {
   thinking: "",
   thinkingAt: undefined,
   agentState: {},
-  curtain: { phases: {}, since: undefined },
+  curtain: { phases: {}, since: undefined, sentAt: undefined, requestAt: undefined, byteAt: undefined },
   pending: [],
   todo: [],
   presence: [],
@@ -952,7 +962,13 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     case "user_input": {
       // Input to the root is a turn starting, and a turn that failed before it is behind it;
       // the curtain line's words start their lists again.
-      const started = isRoot(d.agent) ? { ...next, failed: undefined, curtain: { ...next.curtain, phases: {} } } : next;
+      // A line somebody sent, or a loop's, starts a wait on the daemon's request too; the
+      // harness's own notes to the model do not.
+      const source = str(d.data["source"], "user");
+      const sentAt = ["harness", "subagent"].includes(source) ? next.curtain.sentAt : now();
+      const started = isRoot(d.agent)
+        ? { ...next, failed: undefined, curtain: { ...next.curtain, phases: {}, sentAt, requestAt: undefined, byteAt: undefined } }
+        : next;
       // A loop's iteration starts the agent's turn like any input, but nobody typed it:
       // the note `loop_iteration_started` left says which iteration it is, rather than
       // the words the loop gave the model, the way the terminal client says it.
@@ -1000,11 +1016,13 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     // may be restarted: the turn is over, with what it raised, and the session stops after
     // it (Decision 727). Nothing more reaches the screen from that agent, so it is at rest
     // here, whatever it last said it was doing.
+    // The turn is over, so nothing of it is waited on any more.
     case "turn_ended": {
-      if (!isRoot(d.agent) || str(d.data["reason"]) !== "agent_failed") return { ...next, entries: [...state.entries, ...spent(base, d)] };
+      const rested = isRoot(d.agent) ? { ...next, curtain: { ...next.curtain, sentAt: undefined, requestAt: undefined, byteAt: undefined } } : next;
+      if (!isRoot(d.agent) || str(d.data["reason"]) !== "agent_failed") return { ...rested, entries: [...state.entries, ...spent(base, d)] };
       const detail = str(d.data["detail"]) || undefined;
       return {
-        ...next,
+        ...rested,
         failed: { reason: "agent_failed", detail },
         agentState: { ...next.agentState, [pathKey(d.agent)]: "idle" },
         entries: [...state.entries, { kind: "system", ...base, type: "agent_failed", text: failedText(detail) }, ...spent(base, d)],
@@ -1022,6 +1040,10 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }],
       };
     }
+
+    // The daemon's model request went out: what is waited on now is its first byte.
+    case "llm_request":
+      return isRoot(d.agent) ? { ...next, curtain: { ...next.curtain, requestAt: now(), byteAt: undefined } } : next;
 
     case "llm_response": {
       const text = textOf(d.data["message"]);
@@ -1044,6 +1066,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
         streaming: isRoot(d.agent) ? "" : next.streaming,
         thinking: isRoot(d.agent) ? "" : next.thinking,
         thinkingAt: isRoot(d.agent) ? undefined : next.thinkingAt,
+        curtain: isRoot(d.agent) ? heard(next.curtain, now) : next.curtain,
         error: undefined,
         costMicros: cost === undefined ? next.costMicros : (next.costMicros ?? 0) + cost,
         usage: addUsage(next.usage, usageOf(d.data["usage"])),
@@ -1406,6 +1429,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     case "llm_error":
       return {
         ...next,
+        curtain: isRoot(d.agent) ? heard(next.curtain, now) : next.curtain,
         error: str(d.data["reason"], "model error"),
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }],
       };
@@ -1418,6 +1442,13 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
 
 const PHASES: readonly string[] = ["thinking", "acting", "compacting"];
 
+/** The first byte back from the request on the wire; a later byte of the same answer changes nothing. */
+function heard(curtain: CurtainState, now: () => number): CurtainState {
+  if (curtain.requestAt === undefined) return curtain;
+  if (curtain.byteAt !== undefined && curtain.byteAt >= curtain.requestAt) return curtain;
+  return { ...curtain, byteAt: now() };
+}
+
 function foldEphemeral(state: TranscriptState, e: TroupeEvent, now: () => number): TranscriptState {
   switch (e.type) {
     case "llm_delta": {
@@ -1426,10 +1457,11 @@ function foldEphemeral(state: TranscriptState, e: TroupeEvent, now: () => number
       const text = str(d.text ?? d.fragment);
       // Two spellings of the model's thinking: Anthropic's, and the daemon's own
       // (`reasoning`, troupe-remote Decision 658).
+      const curtain = heard(state.curtain, now);
       if (d.kind === "thinking" || d.kind === "reasoning") {
-        return { ...state, thinking: state.thinking + text, thinkingAt: state.thinking === "" ? now() : state.thinkingAt };
+        return { ...state, curtain, thinking: state.thinking + text, thinkingAt: state.thinking === "" ? now() : state.thinkingAt };
       }
-      if (d.kind === "text") return { ...state, streaming: state.streaming + text };
+      if (d.kind === "text") return { ...state, curtain, streaming: state.streaming + text };
       return state;
     }
     case "agent_state": {
@@ -1440,7 +1472,7 @@ function foldEphemeral(state: TranscriptState, e: TroupeEvent, now: () => number
       // the curtain line, and the time it says starts again.
       if (path !== "" || state.agentState[""] === to) return { ...state, agentState };
       const phases = PHASES.includes(to) ? { ...state.curtain.phases, [to]: (state.curtain.phases[to as CurtainPhase] ?? 0) + 1 } : state.curtain.phases;
-      return { ...state, agentState, curtain: { phases, since: now() } };
+      return { ...state, agentState, curtain: { ...state.curtain, phases, since: now() } };
     }
     case "presence": {
       // A whole list, where a server sends one; otherwise one person's news, as a daemon
