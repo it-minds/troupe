@@ -1,6 +1,6 @@
 {
   "name": "@troupe/console",
-  "version": "0.32.0-beta",
+  "version": "0.33.0-beta",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
