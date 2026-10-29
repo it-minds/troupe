@@ -67,6 +67,7 @@
     "commands/onboard.decline.json",
     "commands/onboard.plan.json",
     "commands/presence.set.json",
+    "commands/profile.get.json",
     "commands/profile.switch.json",
     "commands/question.answer.json",
     "commands/remote.offer.json",

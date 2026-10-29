@@ -41,6 +41,7 @@ defmodule Troupe.Plane.Harness do
     Invites,
     Memory,
     Placement,
+    ProfileView,
     Remote,
     Sessions,
     Signing
@@ -128,6 +129,8 @@ defmodule Troupe.Plane.Harness do
     "me.connections.grant" => :control,
     "teams.list" => :observe,
     "profiles.list" => :observe,
+    # What one profile gives a session of the caller's, before they start one.
+    "profile.get" => :observe,
     "sessions.list" => :observe,
     "session.get" => :observe,
     "session.open" => :observe,
@@ -612,6 +615,21 @@ defmodule Troupe.Plane.Harness do
       end)
 
     {:ok, %{"profiles" => profiles}}
+  end
+
+  # One profile as a session of the caller's would have it, composed by
+  # `Troupe.Plane.ProfileView`; `team` narrows it to one of theirs, as `session.create`'s does.
+  defp handle("profile.get", params, %{user: user} = context) do
+    case {required_string(params, "name"), params["team"]} do
+      {{:ok, name}, team} when is_nil(team) or is_binary(team) ->
+        ProfileView.get(user, name, team: team, platform_admin?: admin?(context))
+
+      {{:ok, _name}, _team} ->
+        invalid("team is a name")
+
+      {error, _team} ->
+        error
+    end
   end
 
   # Which of the servers on the caller's profiles act as *them*, and whether they have
@@ -3189,57 +3207,12 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  # What the channel's current bundle gives a session on this profile, cut to the agents
-  # the profile says exist on it, then narrowed by the entitlement rows that apply: the
-  # profile's rule comes first, so a grant can only narrow it and never reach past it. A
-  # profile the plane has no record of follows no channel and offers the built-ins; no
-  # rows narrows nothing, which is every grant until somebody opens the editor.
-  defp offering(profile, entitlements) do
-    case Fleet.get_profile(profile) do
-      nil ->
-        Bundles.offering(nil, entitlements)
-
-      %{config_bundle_channel: channel} = row ->
-        Bundles.offering(channel, entitlements, agent_rule_of(row))
-    end
-  end
-
-  # The profile's rule on which agents exist on it, composed through what it extends: the
-  # row holds the profile in effect, so its spec's `agents` is already the chain's. One
-  # the row holds that cannot be read is no rule here, as the put would have refused it.
-  defp agent_rule_of(%{spec: %{"agents" => rule}}) do
-    case AgentRule.parse(rule) do
-      {:ok, rule} -> rule
-      {:error, _problems} -> nil
-    end
-  end
-
-  defp agent_rule_of(_profile), do: nil
-
-  # A person's own set for a profile, for *listing*: the union over the teams of theirs
-  # that may use it, because a person in two teams may use what either gives them and a
-  # listing that showed an intersection would hide something they can have. A session is
-  # narrower than a listing on purpose — it belongs to one team, and gets that team's
-  # set, which is the rule `team_for/3` already applies to budget and volume.
-  defp entitlements_of(user, profile) do
-    user
-    |> Identity.teams_for()
-    |> Enum.filter(&Identity.may_use?(user, profile, &1))
-    |> Enum.flat_map(&Identity.entitlements_for(&1, profile))
-    |> union_of_sets()
-  end
-
-  # Union across teams, with the same "deny wins" rule applied last: a name denied
-  # everywhere stays denied, and a name allowed anywhere is allowed. Rows are compared
-  # by kind and name, so two teams allowing the same skill is one row.
-  defp union_of_sets(rows) do
-    rows
-    |> Enum.group_by(&{&1.kind, &1.name})
-    |> Enum.map(fn {{kind, name}, group} ->
-      mode = if Enum.all?(group, &(&1.mode == "deny")), do: "deny", else: "allow"
-      %{kind: kind, name: name, mode: mode}
-    end)
-  end
+  # The offering, the profile's agents rule and a person's listing set are
+  # `Troupe.Plane.ProfileView`'s, so what `profile.get` shows and what a pod is handed
+  # are one composition.
+  defp offering(profile, entitlements), do: ProfileView.offering(profile, entitlements)
+  defp agent_rule_of(profile), do: ProfileView.agent_rule(profile)
+  defp entitlements_of(user, profile), do: ProfileView.listing_entitlements(user, profile)
 
   defp offering_json(profile, entitlements) do
     offering = offering(profile, entitlements)

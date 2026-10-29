@@ -26,6 +26,7 @@ import type { MemoryEntry, MemoryInEffect } from "./entries.js";
 import type { Invitee, InviteRole, SealedRead } from "./invites.js";
 import type { MemoryBrief } from "./memory.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
+import type { ProfileView } from "./profile.js";
 import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
 import type { ConfigChanged, EventEnvelope, Principal, SessionCreateResult, ToolInvoke, TroupeEvent } from "./types.js";
 import { ErrorCodes } from "./types.js";
@@ -1104,6 +1105,16 @@ export class DaemonClient {
       if (!planeReadsOnlyText(e)) throw e;
       return send({ text: renderEntries(sent) });
     }
+  }
+
+  /**
+   * What a profile the person may use gives a session, through this daemon's sign-in: the
+   * plane's `profile.get`, sent on as the person, its refusals under the plane's own code
+   * (`not_found` for a profile they may not use). Refused where the daemon is signed in to
+   * no plane, and in Local only.
+   */
+  profile(name: string): Promise<ProfileView> {
+    return this.call<ProfileView>("profile.get", { name });
   }
 
   /**

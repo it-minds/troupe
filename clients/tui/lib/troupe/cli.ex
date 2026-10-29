@@ -27,6 +27,7 @@ defmodule Troupe.CLI do
           | :config_key
           | :memory
           | :artifacts
+          | :profiles
           | :models
           | :doctor
           | :instructions_check
@@ -86,7 +87,8 @@ defmodule Troupe.CLI do
           clear: boolean(),
           status: boolean(),
           blame: boolean(),
-          artifacts: map() | nil
+          artifacts: map() | nil,
+          profiles: map() | nil
         }
 
   @switches [
@@ -244,6 +246,13 @@ defmodule Troupe.CLI do
      ]},
     {"troupe artifacts link ID", "a view link to one of your artifacts",
      [["artifacts", "link", "art-1"]]},
+    {"troupe profiles [--json]",
+     "the profiles you may use on the plane, each with a summary: its agents, MCP servers, the hosts it reaches and its sessions",
+     [["profiles"], ["profiles", "--json"]]},
+    {"troupe profiles NAME [--json]",
+     "what NAME gives a session before you start one: agents (and those not here, with why), tools and MCP servers " <>
+       "with whose access, the model, reach, limits and your teams; --json is the plane's answer as it came",
+     [["profiles", "code"], ["profiles", "code", "--json"]]},
     {"troupe models [--refresh]",
      "what each provider serves, its window and its price; asked again when stale, or now with --refresh",
      [["models", "--refresh"]]},
@@ -359,6 +368,13 @@ defmodule Troupe.CLI do
          do: {:ok, %{base | mode: :artifacts, artifacts: asked}}
   end
 
+  # `troupe profiles [NAME] [--json]`: what the profiles the person may use give a session.
+  def parse(["profiles" | rest]) do
+    with {:ok, asked} <- Troupe.CLI.Profiles.parse(rest),
+         {:ok, base} <- parse_argv([]),
+         do: {:ok, %{base | mode: :profiles, profiles: asked}}
+  end
+
   def parse(argv), do: parse_argv(argv)
 
   defp optional_values([flag, value | rest], flags, acc, values) when is_binary(value) do
@@ -426,7 +442,8 @@ defmodule Troupe.CLI do
       clear: Keyword.get(opts, :clear, false),
       status: Keyword.get(opts, :status, false),
       blame: Keyword.get(opts, :blame, false),
-      artifacts: nil
+      artifacts: nil,
+      profiles: nil
     }
 
     cond do

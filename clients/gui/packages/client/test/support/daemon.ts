@@ -39,6 +39,7 @@ import { inEffect, parse, render, type FakeLevel } from "./entries.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 import { PROVIDER_TYPES, SETUP_KINDS } from "./provider-types.js";
 import { FakeScratch } from "./scratch.js";
+import type { ProfileView } from "../../src/profile.js";
 import { PRIVATE_OFFER_SENTENCE } from "../../src/fleet.js";
 
 /** A document's entries as the plane answers them: each with the version, who saved it, when, and how many sessions used it. */
@@ -643,6 +644,13 @@ evoked where nothing is set and there was a sign-in. */
   readonly ownRollbacks: Array<Record<string, unknown>> = [];
   /** The levels above the person's own that `me.memory` answers beside it: the organisation's and their teams'. */
   ownAbove: Array<{ scope: string; name: string | null; version: number; text: string; by?: string }> = [];
+  /**
+   * The profiles the person may use as the plane answers `profile.get` for them, by name,
+   * which this daemon sends on through its sign-in; null for a daemon signed in to none.
+   */
+  profileViews: Record<string, ProfileView> | null = null;
+  /** Every `profile.get` asked, in order. */
+  readonly profileAsked: Array<Record<string, unknown>> = [];
   /** Every `memory.in_effect` asked, in order. */
   readonly inEffectAsked: Array<Record<string, unknown>> = [];
   /** What `me.memory` says of the person's roles (`roles`); null for a plane that says nothing of them. */
@@ -1708,6 +1716,21 @@ evoked where nothing is set and there was a sign-in. */
           reason: client.localOnly ? "Local only: the plane was not asked" : null,
           sessions: this.memoryReads,
         });
+      }
+
+      // A profile as the plane answers `profile.get` for the person, sent on through the
+      // daemon's sign-in, its refusal under the plane's own code.
+      case "profile.get": {
+        if (client.localOnly) {
+          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { local_only: true, reason: "this client is in Local only, so the daemon does not ask the plane; turn Local only off to read a profile" } });
+        }
+        if (!this.profileViews) {
+          return reply(ws, id, null, { code: -32010, message: "unavailable", data: { reason: "this computer's daemon is not signed in to a Troupe plane; troupe login signs it in" } });
+        }
+        this.profileAsked.push(params);
+        const view = this.profileViews[String(params["name"] ?? "")];
+        if (!view) return reply(ws, id, null, { code: -32005, message: "not_found", data: { profile: params["name"] } });
+        return reply(ws, id, view);
       }
 
       // What a new session of the person's in a team reads, as the plane answers it: the

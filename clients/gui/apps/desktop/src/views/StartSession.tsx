@@ -26,6 +26,7 @@ export function StartSession({
   linked,
   onClose,
   onCreated,
+  onProfile,
 }: {
   /** Null in local mode: there is no platform to start one on, so the question is not asked. */
   auth: AuthSession | null;
@@ -38,6 +39,8 @@ export function StartSession({
    * the brief's librarian there.
    */
   onCreated: (id: string, kind: SessionKind, workspace?: string) => void;
+  /** Open the page saying what a profile gives a session. */
+  onProfile?: ((name: string) => void) | undefined;
 }): JSX.Element {
   const [where, setWhere] = useState<"team" | "local">(auth ? "team" : "local");
 
@@ -70,7 +73,7 @@ export function StartSession({
         )}
 
         {auth && (where === "team" || !daemon) ? (
-          <TeamSession auth={auth} onClose={onClose} onCreated={onCreated} />
+          <TeamSession auth={auth} onClose={onClose} onCreated={onCreated} onProfile={onProfile} />
         ) : daemon ? (
           <LocalSession daemon={daemon} linked={linked} onClose={onClose} onCreated={onCreated} />
         ) : (
@@ -109,10 +112,12 @@ function TeamSession({
   auth,
   onClose,
   onCreated,
+  onProfile,
 }: {
   auth: AuthSession;
   onClose: () => void;
   onCreated: (id: string, kind: SessionKind) => void;
+  onProfile?: ((name: string) => void) | undefined;
 }): JSX.Element {
   const { profiles, error: profilesError } = useProfiles(auth);
   const [picked, setPicked] = useState<string | null>(null);
@@ -179,6 +184,13 @@ function TeamSession({
           })}
           {profiles.length === 0 && !profilesError && <p className="note">Loading what you can use…</p>}
         </div>
+        {/* The whole of it, before starting: its agents and what is not there, whose access
+            each server is called with, its model, its hosts and its limits. */}
+        {chosen && onProfile && (
+          <button className="link" onClick={() => onProfile(chosen.name)}>
+            What this profile can reach
+          </button>
+        )}
       </section>
 
       {chosen && (

@@ -1988,12 +1988,16 @@ defmodule Troupe.UI.TUI.Model do
   defp money(%{cost_micros: micros, unpriced: 1}), do: dollars(micros) <> ", 1 call unpriced"
   defp money(%{cost_micros: micros, unpriced: n}), do: dollars(micros) <> ", #{n} calls unpriced"
 
-  # In whole numbers, rounded half up, as `@troupe/client`'s `turnLine` works it out, so the
-  # desktop app says the same to the cent (Decision 144).
-  defp dollars(0), do: "$0.00"
-  defp dollars(micros) when micros < 10_000, do: "under a cent"
+  @doc """
+  An amount in micro-dollars as the screen says money: `$1.25`, `under a cent`. In whole
+  numbers, rounded half up, as `@troupe/client`'s `turnLine` works it out, so the desktop
+  app says the same to the cent.
+  """
+  @spec dollars(non_neg_integer()) :: String.t()
+  def dollars(0), do: "$0.00"
+  def dollars(micros) when micros < 10_000, do: "under a cent"
 
-  defp dollars(micros) do
+  def dollars(micros) do
     cents = div(micros + 5_000, 10_000)
     "$#{div(cents, 100)}." <> String.pad_leading("#{rem(cents, 100)}", 2, "0")
   end

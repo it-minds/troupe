@@ -3,7 +3,7 @@
 What [`troupe`](../../clients/tui/README.md), the terminal client, puts on the screen once a
 session is open, and the keys and pages it has: the keys, reading a transcript, colours,
 tokens and cost, the observer, the command palette, the settings page, watch mode, the
-agent picker, your artifacts and your memory. Installing it, the command lines and sessions on a plane are on
+agent picker, your artifacts, your memory and what a profile gives a session. Installing it, the command lines and sessions on a plane are on
 [its own page](../../clients/tui/README.md).
 
 ## Keys
@@ -318,3 +318,34 @@ one again), `b` who wrote each line, `s` where this machine's copy stands. A sav
 agent's entry or one from another machine is on the page when it arrives. Under Local only
 every level is read from this machine's copy and nothing is changed. `/memory facts` is the
 repository brief's facts, as before.
+
+## What a profile gives a session
+
+`/profiles` lists the profiles on the plane you may start a session on, one line each:
+how many agents it offers, its MCP servers, the hosts it reaches and the sessions on it of
+those it has room for (`code  3 agents · severa, sursen · reaches github.com · 2 of 8
+sessions`). Enter on a row, or `/profile <name>`, opens what that profile gives a session of
+yours, in a frame drawn as the settings page's is, in six groups in reading order:
+
+- **Agents**: each offered, with its mode and description (`(built in)` for one of
+  Troupe's own); then **Not here**, each with why: *the profile leaves it out*, or *your
+  team's grant leaves it out*.
+- **Tools**: the rules, one a line, what they do to a tool and whose they are
+  (`deny  shell(git push)   the profile`); then each MCP server with its host, whose access
+  it runs with — *as you, once you connect it*, *as the profile*, or *as the profile's own
+  identity* — whether a call is asked first or automatic, and its tools; one not offered to
+  you is dimmed, with why. Then the skills.
+- **Model**: the model, the small model, the provider and its host, and whose key.
+- **Reach**: the hosts a session can reach.
+- **Limits**: the sessions running of those there is room for, to a pod, at most at once,
+  and the budgets of the profile, your team and you, in dollars.
+- **Who**: the team a session would run under, which of your teams may use it, and the
+  channel and bundle.
+
+What the plane does not say is shown as *not said*, never filled in. ↑↓, PgUp/PgDn,
+Home/End and the wheel scroll it; `q` or Esc goes back to the list, or closes the frame
+`/profile` opened. A profile you may not use is said to be one. It is asked of the plane
+you are signed in to (`troupe login`), with the terminal's own sign-in; under Local only
+nothing is asked. `troupe profiles` prints the list and `troupe profiles <name>` the page as
+plain lines, `--json` the plane's answer as it came ([the command reference](cli-reference.md));
+what a profile is, and who decides each part, is on [profiles](profiles.md).
