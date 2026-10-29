@@ -8,8 +8,9 @@
 # effect it resolves for one that extends another, in the status. It cannot create or
 # delete one, so a plane that tried would be refused by the cluster and not only by its
 # own code (Decision 736). It reads the Triggers the repository holds and writes nothing
-# of them (Decision 737), and the GitHubApp the same way (#653); in direct mode its
-# triggers and its App are rows and it has no grant on them.
+# of them (Decision 737), and the GitHubApp the same way (#653). In direct mode its
+# triggers and its App are rows: it may get and list the Triggers, so an administrator
+# can copy one into a row, and has no grant on the App.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -43,6 +44,11 @@ rules:
   - apiGroups: ["troupe.dev"]
     resources: ["workerprofiles", "teamvolumes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The Triggers a repository may hold, which a direct plane lists for an administrator to
+  # copy into its rows and never acts on by itself: read, and nothing else.
+  - apiGroups: ["troupe.dev"]
+    resources: ["triggers"]
+    verbs: ["get", "list"]
   {{- end }}
   # Its own replicas, for libcluster's Kubernetes DNS strategy.
   - apiGroups: [""]

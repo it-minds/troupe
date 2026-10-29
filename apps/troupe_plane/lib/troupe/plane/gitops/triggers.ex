@@ -378,8 +378,13 @@ defmodule Troupe.Plane.Gitops.Triggers do
     :removed
   end
 
-  defp comparable(nil), do: %{}
-  defp comparable(trigger), do: Map.take(trigger, @compared)
+  @doc """
+  The fields of a row, or of a resource's attributes, that say what a trigger is: what an
+  audit diff is taken over, and what a copied row is compared with its resource by.
+  """
+  @spec comparable(Trigger.t() | map() | nil) :: map()
+  def comparable(nil), do: %{}
+  def comparable(trigger), do: Map.take(trigger, @compared)
 
   # -- bootstrapping a repository -----------------------------------------------
 

@@ -200,9 +200,15 @@ defmodule Troupe.Plane.Gitops do
 
   defp name_of(resource), do: get_in(resource, ["metadata", "name"])
 
+  @doc """
+  Every resource of a source's kind in the plane's namespace, as the API server lists
+  them, or why it could not. A pass reads them through this, and so does a direct plane
+  that only shows what the cluster holds and copies one when an administrator asks.
+  """
   # An exit is an answer, as it is for `Provision`: the client calls processes of its
   # own, and a cluster that did not answer must not take the pass down with it.
-  defp list(source) do
+  @spec list(module()) :: {:ok, [map()]} | {:error, term()}
+  def list(source) do
     with {:ok, conn} <- Provision.connection() do
       operation =
         K8s.Client.list(source.api_version(), source.kind(), namespace: Provision.namespace())

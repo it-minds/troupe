@@ -97,6 +97,8 @@ defmodule Troupe.Plane.Admin.Console do
     trigger_fix: {:area, :triggers},
     trigger_revisions: {:area, :triggers},
     trigger_key_rotate: {:area, :triggers},
+    triggers_repository: {:area, :triggers},
+    trigger_copy: {:area, :triggers},
     integrations: {:area, :integrations},
     github_get: {:area, :integrations},
     github_put: {:area, :integrations},

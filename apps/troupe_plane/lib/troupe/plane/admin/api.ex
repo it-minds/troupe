@@ -1887,6 +1887,32 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.triggers.repository",
+      function: :triggers_repository,
+      summary:
+        "On a direct plane, the team's Trigger resources in the plane's namespace, which the plane lists and never acts on by itself: each with its generation, whether it would pass the plane's checks today and why not, and where the team's row of its name stands against it (copy: copied, changed with a field-by-field diff, differs after a console edit, or not_copied). Copied rows whose resource has gone are in gone, and keep running. A platform admin also sees resources that name no team here, with team null. listed is false, with the reason, where the cluster did not answer. Refused on a gitops plane, where the rows follow the resources.",
+      risk: :read,
+      arguments: [
+        %Argument{name: "team", type: :string, required: true, description: "The team's name."}
+      ]
+    },
+    %Method{
+      name: "admin.trigger.copy",
+      function: :trigger_copy,
+      summary:
+        "On a direct plane, make a trigger from a Trigger resource in the plane's namespace, or copy it again onto the row made from it, which keeps its URL, key, runs and revisions. Refused with the reasons where the resource would not pass the plane's checks. A webhook trigger with no key gets one: the answer carries key and url once. The row records the resource and its generation; audited as trigger.copy. Refused on a gitops plane as managed_by_gitops.",
+      risk: :write,
+      arguments: [
+        %Argument{
+          name: "resource",
+          type: :string,
+          required: true,
+          description:
+            "The Trigger resource's name, <team>.<trigger>, as admin.triggers.repository lists it."
+        }
+      ]
+    },
+    %Method{
       name: "admin.runs.list",
       function: :runs_list,
       summary:
