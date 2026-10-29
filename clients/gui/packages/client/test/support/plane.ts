@@ -8,6 +8,8 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { FakeAdmin } from "./admin.js";
+import { composeProfile, exampleProfiles, specOfAdminProfile } from "./profiles.js";
+import type { FakeProfileSpec } from "./profiles.js";
 import { readBody, subjectOfIdToken, type FakeIdp } from "./idp.js";
 import { encodeToken, type FakeWorker } from "./worker.js";
 
@@ -40,6 +42,11 @@ export interface PlaneOptions {
   /** Seconds a plane token is good for. */
   planeTokenLifetime?: number;
   profiles?: string[];
+  /**
+   * What `profile.get` composes its answer from, per profile: its bundle, rules, model,
+   * egress, limits, budgets and grants. Defaults to `exampleProfiles()`.
+   */
+  profileSpecs?: FakeProfileSpec[];
   /** The teams every person signed in here is in, which `team:<name>` artifacts are for. */
   teams?: string[];
   /**
@@ -1081,6 +1088,24 @@ export class FakePlane {
             })),
           },
         };
+
+      // What a profile gives a session on it, for this person: `not_found` for one none of
+      // their teams is granted, unless they administer, who are answered for no team.
+      case "profile.get": {
+        const wanted = String(params["name"] ?? "");
+        const role = this.opts.admin?.role(subject) ?? "none";
+        const admin = role !== "none";
+        const known = this.opts.admin?.profiles.find((p) => p.name === wanted);
+        const spec =
+          (this.opts.profileSpecs ?? exampleProfiles()).find((p) => p.name === wanted) ??
+          (known ? specOfAdminProfile(known, [...this.opts.admin!.teams.values()].filter((t) => t.grants.some((g) => g.profile === wanted)).map((t) => t.name)) : undefined);
+        const view =
+          spec && (admin || profiles.includes(wanted))
+            ? composeProfile(spec, { teams: this.teamsOf(subject), admin }, { capacity: 8, active_sessions: [...this.rows.values()].filter((r) => r.profile === wanted && r.state === "active").length })
+            : null;
+        if (!view) return { error: { code: -32005, message: "not_found", data: { profile: wanted } } };
+        return { result: view };
+      }
 
       case "sessions.list": {
         const rows = [...this.rows.values()]

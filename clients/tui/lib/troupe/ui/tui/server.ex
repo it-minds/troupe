@@ -15,7 +15,18 @@ defmodule Troupe.UI.TUI.Server do
   alias Troupe.Protocol.Glob
   alias Troupe.Settings
   alias Troupe.UI.HQ
-  alias Troupe.UI.TUI.{AgentChooser, Agents, ArtifactsPage, Input, MemoryPage, Model, Theme, View}
+
+  alias Troupe.UI.TUI.{
+    AgentChooser,
+    Agents,
+    ArtifactsPage,
+    Input,
+    MemoryPage,
+    Model,
+    ProfilesPage,
+    Theme,
+    View
+  }
 
   @tick_ms 33
   @mailbox_threshold 50
@@ -43,6 +54,7 @@ defmodule Troupe.UI.TUI.Server do
             | :memory
             | :artifacts
             | :own_memory
+            | :profiles
             | :hq
             | :palette
             | :agents
@@ -89,6 +101,7 @@ defmodule Troupe.UI.TUI.Server do
           memory: memory() | nil,
           artifacts_page: ArtifactsPage.t() | nil,
           memory_page: MemoryPage.t() | nil,
+          profiles_page: ProfilesPage.t() | nil,
           hq: HQ.t() | nil,
           shell: shell() | nil,
           theme: Theme.t(),
@@ -316,6 +329,8 @@ defmodule Troupe.UI.TUI.Server do
       # `/artifacts` and `/memory`, the person's own things on the plane.
       artifacts_page: nil,
       memory_page: nil,
+      # `/profiles` and `/profile <name>`: what a profile the person may use gives a session.
+      profiles_page: nil,
       hq: nil,
       shell: nil,
       # The person's theme, from `ui.theme` (`read_appearance/1`), and the value last said
@@ -702,6 +717,9 @@ defmodule Troupe.UI.TUI.Server do
   def handle_event(%Key{} = key, %{focus: :own_memory} = state),
     do: {:noreply, own_memory_key(key, %{state | quit_armed: false})}
 
+  def handle_event(%Key{} = key, %{focus: :profiles} = state),
+    do: {:noreply, profiles_key(key, %{state | quit_armed: false})}
+
   def handle_event(%Key{} = key, %{focus: :hq} = state),
     do: {:noreply, hq_key(key, %{state | quit_armed: false})}
 
@@ -766,6 +784,9 @@ defmodule Troupe.UI.TUI.Server do
       :own_memory ->
         {:noreply, %{state | memory_page: MemoryPage.paste(state.memory_page, content)}}
 
+      :profiles ->
+        {:noreply, state, render?: false}
+
       :hq ->
         {:noreply, state, render?: false}
 
@@ -794,6 +815,7 @@ defmodule Troupe.UI.TUI.Server do
              :memory,
              :artifacts,
              :own_memory,
+             :profiles,
              :hq,
              :palette,
              :agents,
@@ -903,6 +925,9 @@ defmodule Troupe.UI.TUI.Server do
 
       :switcher ->
         {:noreply, switcher_key(%Key{code: if(step < 0, do: "up", else: "down")}, state)}
+
+      :profiles ->
+        {:noreply, profiles_wheel(state, step)}
 
       _ ->
         {:noreply, state, render?: false}
@@ -1079,7 +1104,8 @@ defmodule Troupe.UI.TUI.Server do
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
   @builtins ~w(new cancel dismiss merge discard goal loop steer invite uninvite sessions back hq observer files
-               scratch upload save publish artifacts copy memory context watch settings models mcp
+               scratch upload save publish artifacts profiles profile copy memory context watch settings
+               models mcp
                skills help
                agents worktree workflow detail unlink quit)
 
@@ -1156,6 +1182,7 @@ defmodule Troupe.UI.TUI.Server do
       :memory -> open_memory(state)
       :own_memory -> open_own_memory(state)
       :artifacts -> open_artifacts(state)
+      {:profiles, name} -> open_profiles(state, name)
       {:mcp, text} -> state |> notice(text) |> open_mcp(state.mcp_cursor)
       {:mcp_sign_in, _name, _url, _text} = signing -> signing_in(state, signing)
       {:hq, arg} -> open_hq(state, plane_arg(arg))
@@ -1432,6 +1459,10 @@ defmodule Troupe.UI.TUI.Server do
 
   # The person's artifacts on the plane, by who can see them.
   defp builtin("artifacts", _args, _state, _target), do: :artifacts
+
+  # What the profiles the person may use give a session: the list, or one profile's page.
+  defp builtin("profiles", _args, _state, _target), do: {:profiles, nil}
+  defp builtin("profile", args, _state, _target), do: {:profiles, String.trim(args)}
 
   defp builtin("context", _args, state, _target),
     do: notice_of(Client.instructions(state.session_id))
@@ -3180,6 +3211,23 @@ defmodule Troupe.UI.TUI.Server do
       {:ok, page} -> %{state | artifacts_page: page}
     end
   end
+
+  defp open_profiles(state, name),
+    do: %{put_cmd(state, "") | focus: :profiles, profiles_page: ProfilesPage.open(nil, name)}
+
+  defp profiles_key(key, state) do
+    case ProfilesPage.key(state.profiles_page, key) do
+      :close -> %{state | focus: :command, profiles_page: nil}
+      {:ok, page} -> %{state | profiles_page: page}
+    end
+  end
+
+  # The wheel scrolls an open page three rows a notch, and moves the list's cursor one.
+  defp profiles_wheel(%{profiles_page: %{name: name} = page} = state, step) when is_binary(name),
+    do: %{state | profiles_page: ProfilesPage.scroll(page, step)}
+
+  defp profiles_wheel(state, step),
+    do: profiles_key(%Key{code: if(step < 0, do: "up", else: "down")}, state)
 
   defp open_own_memory(state),
     do: %{put_cmd(state, "") | focus: :own_memory, memory_page: MemoryPage.open()}

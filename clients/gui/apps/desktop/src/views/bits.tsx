@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX, ReactNode } from "react";
-import { hasUnseen, syncWords, unseenSummary } from "@troupe/client";
+import { hasUnseen, moneyWords, syncWords, unseenSummary } from "@troupe/client";
 import type { FleetRow, SessionKind, SyncState } from "@troupe/client";
 import { Eye } from "./brand";
 
@@ -166,11 +166,10 @@ const SYNC_STATUS: Record<SyncState, Status> = {
 export function Cost({ micros }: { micros: number | null | undefined }): JSX.Element {
   // Nothing reported is not the same as nothing spent, so the two read differently.
   if (micros === null || micros === undefined) return <span className="when" title="No cost has been reported">—</span>;
-  if (micros === 0) return <span className="when">$0.00</span>;
-  const dollars = micros / 1_000_000;
+  if (micros === 0) return <span className="when">{moneyWords(0)}</span>;
   return (
     <span className="when" title={`${micros} micros`}>
-      ${dollars < 0.01 ? dollars.toFixed(4) : dollars.toFixed(2)}
+      {moneyWords(micros)}
     </span>
   );
 }

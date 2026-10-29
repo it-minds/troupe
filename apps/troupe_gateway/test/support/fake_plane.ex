@@ -655,6 +655,26 @@ defmodule Troupe.Gateway.FakePlane do
      }}
   end
 
+  # What a profile gives a session of the person's: `dev` as the plane composes it, in
+  # part; any other is not theirs to use.
+  defp dispatch(_state, "profile.get", %{"name" => "dev"} = params) do
+    {:ok,
+     %{
+       "name" => "dev",
+       "team" => params["team"] || "engineering",
+       "teams" => ["engineering"],
+       "agents" => [
+         %{"name" => "build", "mode" => "primary", "description" => nil, "from" => "builtin"}
+       ],
+       "reach" => ["api.github.com"]
+     }}
+  end
+
+  defp dispatch(_state, "profile.get", %{"name" => name}),
+    do:
+      {:rpc_error, -32_005, "not_found",
+       %{"profile" => name, "reason" => "you start no sessions on #{name}"}}
+
   # The person's own artifacts, as the plane lists them, with the gallery's address.
   defp dispatch(_state, "artifact.list", params) do
     {:ok,

@@ -3,13 +3,13 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { AdminApi, TroupeRpcError, requiredRole } from "@troupe/client";
-import type { AuthSession, Discovery, Me } from "@troupe/client";
+import type { AuthSession, Discovery, Me, ProfileView } from "@troupe/client";
 import type { Role } from "./nav";
 
 export interface Signed {
   auth: AuthSession;
   admin: AdminApi;
-  /** The person, as the plane's `me` says: the one call here that is not `admin.*`. */
+  /** The person, as the plane's `me` says. */
   me: Me;
   role: Role;
   /** The teams a team admin administers; every team, for a platform admin, is not listed here. */
@@ -92,6 +92,17 @@ export async function standing(auth: AuthSession, admin: AdminApi): Promise<Stan
     if (requiredRole(e)) return { role: "member", teams: [], me };
     throw e;
   }
+}
+
+/**
+ * What a profile gives a member's session, as the plane composes it for the person asking
+ * (`profile.get`): beside `me`, a call every signed-in person may make, so what the console
+ * shows an administrator of it is the very answer a member's app draws, not the console's
+ * own reading of the spec. Asked by an administrator it is answered for no team, so no
+ * grant narrows it.
+ */
+export function memberView(auth: AuthSession, name: string): Promise<ProfileView> {
+  return auth.rpc<ProfileView>("profile.get", { name });
 }
 
 /**

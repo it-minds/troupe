@@ -89,6 +89,7 @@ export function Session({
   onGo,
   onAgents,
   onStarted,
+  onProfile,
 }: {
   /** The plane, for a team session. Null in local mode. */
   auth: AuthSession | null;
@@ -108,6 +109,8 @@ export function Session({
   onAgents?: ((agent?: string) => void) | undefined;
   /** Open a session the agent picker started, as the start screen opens one it made. */
   onStarted?: ((id: string, kind: SessionKind, workspace?: string) => void) | undefined;
+  /** Open the page saying what a plane profile gives a session: a team session's. */
+  onProfile?: ((name: string) => void) | undefined;
 }): JSX.Element {
   // Where it runs decides which socket it is reached over and nothing else about this
   // screen: the transcript, the approvals and the composer are the same protocol either
@@ -348,6 +351,7 @@ export function Session({
                 : null
             }
             onOpenMemory={onGo ? () => onGo("memory") : undefined}
+            onProfile={onProfile}
           />
         )}
       </div>
@@ -1179,6 +1183,7 @@ function Backstage({
   onPane,
   memory,
   onOpenMemory,
+  onProfile,
 }: {
   view: SessionHandle;
   daemon: DaemonClient | null;
@@ -1201,11 +1206,15 @@ function Backstage({
   } | null;
   /** The app's Memory view, where the person's own memory is read and changed. */
   onOpenMemory?: (() => void) | undefined;
+  /** The page of what the session's plane profile gives a session. */
+  onProfile?: ((name: string) => void) | undefined;
 }): JSX.Element {
   const agents = Object.entries(view.state.agentState).filter(([path]) => path !== "");
   // A team session's memory is its pod's, and `memory.get` is this computer's daemon's; a
   // local session's settings are this computer's, which its settings screens show.
   const team = row?.kind === "team";
+  // The plane profile a team session runs on, whose page says what it gives a session.
+  const onPlane = team ? (row?.profile ?? null) : null;
   const shown: Pane = (pane === "memory" && !memory) || (pane === "settings" && !team) ? "tasks" : pane;
 
   return (
@@ -1237,6 +1246,16 @@ function Backstage({
       {shown === "settings" ? (
         <section>
           <h3>Settings</h3>
+          {onPlane && (
+            <p className="note">
+              On <span className="mono">{onPlane}</span>
+              {onProfile && (
+                <button className="link profile-link" onClick={() => onProfile(onPlane)}>
+                  What this profile can reach
+                </button>
+              )}
+            </p>
+          )}
           <PodConfig view={view.view} />
         </section>
       ) : shown === "instructions" ? (
