@@ -113,6 +113,7 @@ nav:
       - Instruction files and onboarding: user/instructions.md
       - Memory: user/memory.md
       - Artifacts: user/artifacts.md
+      - "What a profile gives a session": user/profiles.md
       - Configuration cookbook:
           - user/configuration/cookbook.md
           - Where your files are: user/configuration/files.md
