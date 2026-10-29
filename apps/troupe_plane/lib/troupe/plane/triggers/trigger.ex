@@ -76,6 +76,12 @@ defmodule Troupe.Plane.Triggers.Trigger do
     # either: the pass that reads the cluster writes it and nothing else does.
     field(:resource_generation, :integer)
 
+    # In direct mode, the `Trigger` resource an administrator copied this row from and the
+    # generation it had then, or `nil` for a row nobody copied. Written by a copy and by
+    # nothing else: a console edit leaves them, which is how the row is known to differ.
+    field(:copied_from, :string)
+    field(:copied_generation, :integer)
+
     timestamps(type: :utc_datetime_usec)
   end
 
@@ -124,6 +130,16 @@ defmodule Troupe.Plane.Triggers.Trigger do
   @spec generation_changeset(t() | Ecto.Changeset.t(), integer() | nil) :: Ecto.Changeset.t()
   def generation_changeset(trigger, generation) do
     cast(trigger, %{resource_generation: generation}, [:resource_generation])
+  end
+
+  @doc "Record the resource a row was copied from, and its generation then, in direct mode."
+  @spec copy_changeset(t() | Ecto.Changeset.t(), String.t(), integer() | nil) ::
+          Ecto.Changeset.t()
+  def copy_changeset(trigger, resource, generation) do
+    cast(trigger, %{copied_from: resource, copied_generation: generation}, [
+      :copied_from,
+      :copied_generation
+    ])
   end
 
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()

@@ -32,6 +32,8 @@ const NOT_FOUND = -32005;
 const INVALID_PARAMS = -32602;
 const METHOD_NOT_FOUND = -32601;
 const MANAGED_BY_GITOPS = -32015;
+const INVALID_REQUEST = -32600;
+const UNAVAILABLE = -32010;
 // Where the plane mirrors releases from, unless the deployment names another source.
 const RELEASE_SOURCE = "https://github.com/it-minds/troupe/releases/download";
 const CONFLICT = -32006;
@@ -399,6 +401,22 @@ export interface FakeTrigger {
   key?: string;
   key_rotated_at?: string;
   key_rotated_by?: string;
+  /** On a direct plane, the Trigger resource it was copied from and that resource's generation then. */
+  copied_from?: string;
+  copied_generation?: number;
+}
+
+/**
+ * A Trigger resource an applier put in the plane's namespace, as a direct plane lists it:
+ * its spec in the row's words (`prompt_template`, not `promptTemplate`), its generation,
+ * and why the plane's checks refuse it, where they do. The fake does not run the checks;
+ * a test says what they answer.
+ */
+export interface FakeTriggerResource {
+  name: string;
+  generation: number;
+  spec: Record<string, unknown>;
+  reasons: string[];
 }
 
 /** A trigger's run, as `admin.runs.list` answers it, with the team whose trigger it is. */
@@ -911,6 +929,10 @@ export class FakeAdmin {
   /** Every published version, by channel, oldest first. */
   readonly bundles = new Map<string, FakeBundle[]>();
   readonly triggerRows: FakeTrigger[] = [];
+  /** The Trigger resources in the plane's namespace, which a direct plane lists and copies from. */
+  readonly triggerResources: FakeTriggerResource[] = [];
+  /** Why the cluster will not list them, where it will not. */
+  clusterRefusal: string | null = null;
   readonly runRows: FakeRun[] = [];
   readonly entitlements: FakeEntitlement[] = [];
   /** The cluster policy, as far as a profile and a bundle are checked against it. */
@@ -2021,6 +2043,85 @@ export class FakeAdmin {
         return { result: this.triggerRows.filter((t) => t.team === found.team.name).sort((a, b) => a.name.localeCompare(b.name)).map((t) => this.triggerJson(t)) };
       }
 
+      // A direct plane's view of the cluster's Trigger resources: never acted on until an
+      // administrator copies one, as `Admin.triggers_repository/2` answers it.
+      case "admin.triggers.repository": {
+        const found = this.fetchTeam(subject, params["team"]);
+        if ("error" in found) return found;
+        if (this.mode === "gitops") return refuse(INVALID_REQUEST, "invalid_request", { method, reason: "this plane is in gitops mode, where its triggers follow the Trigger resources by themselves: admin.triggers.list says what each was read from" });
+        const t = found.team;
+        const answer = { team: t.name, source: this.gitopsSource };
+        if (this.clusterRefusal) return { result: { ...answer, listed: false, reason: `the cluster did not list its Trigger resources: ${this.clusterRefusal}`, resources: [], gone: [] } };
+        const rows = this.triggerRows.filter((r) => r.team === t.name);
+        const resources = this.triggerResources.flatMap((res) => {
+          const [team, name] = res.name.split(".");
+          const placed = team !== undefined && this.teams.has(team);
+          if (placed && team === t.name) return [this.resourceJson(res, rows.find((r) => r.name === name) ?? null, true)];
+          if (!placed && this.role(subject) === "platform_admin") return [this.resourceJson(res, null, false)];
+          return [];
+        });
+        const gone = rows
+          .filter((r) => r.copied_from && !this.triggerResources.some((res) => res.name === `${t.name}.${r.name}`))
+          .map((r) => ({ state: "gone", trigger_id: r.id, copied_generation: r.copied_generation ?? null, diff: null, resource: r.copied_from, team: t.name, name: r.name }));
+        return { result: { ...answer, listed: true, reason: null, resources, gone } };
+      }
+
+      // `Admin.trigger_copy/2`: the row made from a resource, or made to say what it says now.
+      case "admin.trigger.copy": {
+        const resource = params["resource"];
+        if (typeof resource !== "string") return refuse(INVALID_PARAMS, "invalid_params", { missing: "resource" });
+        const [teamName, name] = resource.split(".");
+        if (!teamName || !name || resource.split(".").length !== 2) {
+          return refuse(INVALID_PARAMS, "invalid_params", { resource, reason: `a Trigger resource is named <team>.<trigger>, the team's name and the trigger's joined by one dot, and "${resource}" is not` });
+        }
+        const role = this.role(subject);
+        if (role === "none") return refuse(FORBIDDEN, "forbidden", { required_role: "team_admin" });
+        const owner = this.teams.get(teamName);
+        if (role === "team_admin" && !(owner?.admins.includes(subject) ?? false)) return refuse(NOT_FOUND, "not_found", { team: teamName });
+        const held = this.heldByRepository(subject, "trigger.copy", `${teamName}/${name}`, "Trigger");
+        if (held) return held;
+        if (this.clusterRefusal) return refuse(UNAVAILABLE, "unavailable", { resource, reason: `the cluster did not list its Trigger resources: ${this.clusterRefusal}` });
+        const res = this.triggerResources.find((r) => r.name === resource);
+        if (!res) return refuse(NOT_FOUND, "not_found", { resource, reason: `the cluster has no Trigger ${resource} in the plane's namespace` });
+        if (res.reasons.length > 0) return refuse(INVALID_PARAMS, "invalid_params", { resource, generation: res.generation, reasons: res.reasons, reason: res.reasons.join("; ") });
+        if (!owner) return refuse(NOT_FOUND, "not_found", { team: teamName });
+        const existing = this.triggerRows.find((r) => r.team === teamName && r.name === name) ?? null;
+        const before = existing ? this.comparable_trigger(existing) : {};
+        const now = new Date().toISOString();
+        const row: FakeTrigger = existing ?? {
+          id: `trg-${teamName}-${name}`,
+          team: teamName,
+          name,
+          principal: "",
+          profile: "",
+          agent: null,
+          enabled: true,
+          source: {},
+          prompt_template: null,
+          terms: null,
+          visibility: "team",
+          review: "required",
+          notify: [],
+          notify_url: null,
+          concurrency: 1,
+          last_fired_at: null,
+          created_by: subject,
+          updated_at: now,
+          revisions: [],
+        };
+        Object.assign(row, this.resourceDocument(res), { updated_at: now, copied_from: resource, copied_generation: res.generation });
+        if (!existing) this.triggerRows.push(row);
+        // A webhook that names no repository and has no key yet gets one, answered this once.
+        const keyed = row.source["kind"] === "webhook" && !row.source["repository"];
+        const minted = keyed && !row.key && (!existing || row.has_key === false) ? mintKey() : null;
+        if (!keyed) row.has_key = false;
+        if (minted) Object.assign(row, { has_key: true, key: minted, key_rotated_at: now, key_rotated_by: subject });
+        const changes = diff(before, this.comparable_trigger(row));
+        const revision = this.revise(row, subject);
+        this.record(subject, "trigger.copy", `${teamName}/${name}`, { ...changes, __revision__: revision.revision, __revision_hash__: revision.hash, __resource__: resource, __generation__: res.generation, ...(minted ? { __key_minted__: true } : {}) });
+        return { result: { trigger: this.triggerJson(row), changes, revision: revisionJson(revision), resource, generation: res.generation, made: !existing, ...(minted ? { key: minted, url: `/trigger/${row.id}` } : {}) } };
+      }
+
       case "admin.trigger.put": {
         const attrs = ((typeof params["trigger"] === "object" && params["trigger"] !== null ? params["trigger"] : params) ?? {}) as Record<string, unknown>;
         const found = this.fetchTeam(subject, attrs["team"]);
@@ -2834,6 +2935,57 @@ export class FakeAdmin {
 
   // -- triggers ------------------------------------------------------------------------
 
+  /**
+   * Put a Trigger resource in the namespace, as an applier would: its generation moves when
+   * its spec does. `reasons` is what the plane's checks would say of it; none is a pass.
+   */
+  applyTrigger(name: string, spec: Record<string, unknown>, reasons: string[] = []): FakeTriggerResource {
+    const existing = this.triggerResources.find((r) => r.name === name);
+    if (existing) {
+      if (JSON.stringify(existing.spec) !== JSON.stringify(spec)) existing.generation += 1;
+      Object.assign(existing, { spec, reasons });
+      return existing;
+    }
+    const made = { name, generation: 1, spec, reasons };
+    this.triggerResources.push(made);
+    return made;
+  }
+
+  /** Take a Trigger resource out of the namespace, as a commit that removes its file does. */
+  removeTrigger(name: string): void {
+    const at = this.triggerResources.findIndex((r) => r.name === name);
+    if (at >= 0) this.triggerResources.splice(at, 1);
+  }
+
+  /** The whole document a resource makes: a field it leaves out is that field's default. */
+  private resourceDocument(res: FakeTriggerResource): Record<string, unknown> {
+    return Object.fromEntries(TRIGGER_KEYS.map((k) => [k, res.spec[k] ?? TRIGGER_DEFAULTS[k] ?? null]));
+  }
+
+  private resourceJson(res: FakeTriggerResource, row: FakeTrigger | null, placed: boolean): Record<string, unknown> {
+    const [team, name] = res.name.split(".");
+    const passes = res.reasons.length === 0;
+    let copy: Record<string, unknown> | null = null;
+    if (row) {
+      const changes = passes ? diff(this.comparable_trigger(row), this.resourceDocument(res)) : null;
+      const empty = changes !== null && Object.keys(changes).length === 0;
+      const state = !row.copied_from ? "not_copied" : empty ? "copied" : res.generation > (row.copied_generation ?? 0) ? "changed" : changes === null ? "copied" : "differs";
+      copy = { state, trigger_id: row.id, copied_generation: row.copied_generation ?? null, diff: changes };
+    }
+    return {
+      resource: res.name,
+      team: placed ? team : null,
+      name: placed ? name : res.name,
+      generation: res.generation,
+      principal: res.spec["principal"] ?? null,
+      profile: res.spec["profile"] ?? null,
+      source: res.spec["source"] ?? null,
+      passes,
+      reasons: res.reasons,
+      copy,
+    };
+  }
+
   private comparable_trigger(row: FakeTrigger): Record<string, unknown> {
     return Object.fromEntries(TRIGGER_KEYS.map((k) => [k, (row as unknown as Record<string, unknown>)[k] ?? null]));
   }
@@ -2928,6 +3080,8 @@ export class FakeAdmin {
       created_by: row.created_by,
       updated_at: row.updated_at,
       revision: last ? revisionJson(last) : null,
+      copied_from: row.copied_from ?? null,
+      copied_generation: row.copied_generation ?? null,
       ...(this.mode === "gitops" ? { gitops: { ...this.gitopsOf(row.gitops), resource: `${row.team}.${row.name}` } } : {}),
     };
   }

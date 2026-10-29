@@ -165,6 +165,36 @@ defmodule Troupe.Plane.Triggers do
     end
   end
 
+  @doc """
+  Make a team's trigger say what a `Trigger` resource says, in direct mode, because an
+  administrator asked: the first copy makes the row, a later one changes it in place.
+
+  Whole, as `follow/3` is, with the principal resolved to its id, and checked by the
+  caller first. The row records the resource and its generation, which a gitops pass's
+  `resource_generation` is not: a copied row is never removed by anything but an
+  administrator. In place, so the row keeps its id, URL, key, runs and revisions, and a
+  document that moved is a new revision as a put's is.
+  """
+  @spec copy(Team.t(), map(), String.t(), integer() | nil, String.t()) ::
+          {:ok, Trigger.t(), Revision.t()} | {:error, Ecto.Changeset.t()}
+  def copy(%Team{} = team, attrs, resource, generation, by) do
+    attrs = Map.drop(attrs, [:resource_generation, :team])
+
+    (get(team, attrs.name) || %Trigger{team_id: team.id, created_by: by})
+    |> Trigger.changeset(attrs)
+    |> Trigger.copy_changeset(resource, generation)
+    |> Repo.insert_or_update()
+    |> case do
+      {:ok, trigger} ->
+        trigger = drop_dead_key(trigger)
+        {:ok, revision} = revise(trigger, by)
+        {:ok, trigger, revision}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
   # -- revisions --------------------------------------------------------------
 
   @doc """
@@ -1351,7 +1381,11 @@ defmodule Troupe.Plane.Triggers do
       "key_rotated_by" => trigger.key_rotated_by,
       "last_fired_at" => trigger.last_fired_at && DateTime.to_iso8601(trigger.last_fired_at),
       "created_by" => trigger.created_by,
-      "updated_at" => trigger.updated_at && DateTime.to_iso8601(trigger.updated_at)
+      "updated_at" => trigger.updated_at && DateTime.to_iso8601(trigger.updated_at),
+      # In direct mode, the resource an administrator copied it from and its generation
+      # then; null for a row nobody copied.
+      "copied_from" => trigger.copied_from,
+      "copied_generation" => trigger.copied_generation
     }
   end
 

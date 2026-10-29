@@ -659,6 +659,67 @@ export interface Trigger {
   revision?: TriggerRevision | null;
   /** On a `gitops` plane: the resource it comes from, and what the last pass made of it. */
   gitops?: GitopsState | null;
+  /** On a `direct` plane: the Trigger resource an administrator copied it from, and its generation then; null for a row nobody copied. */
+  copied_from?: string | null;
+  copied_generation?: number | null;
+}
+
+/**
+ * Where a team's row stands against the Trigger resource of its name, on a `direct` plane:
+ * `copied` (it says what the resource says), `changed` (the resource moved past the copied
+ * generation), `differs` (edited in the console since), `gone` (the cluster has no such
+ * resource; the row goes on running) or `not_copied` (a row nobody copied, which a copy
+ * would take over). `diff` is field by field, from the row to the resource: what a copy
+ * would change. Null where the resource does not pass, and for `gone`.
+ */
+export interface TriggerCopyState {
+  state: "copied" | "changed" | "differs" | "gone" | "not_copied";
+  trigger_id: string;
+  copied_generation: number | null;
+  diff: AuditChanges | null;
+}
+
+/** A Trigger resource in the plane's namespace, as a `direct` plane sees it and never acts on. */
+export interface TriggerResource {
+  /** Its name, `<team>.<trigger>`. */
+  resource: string;
+  /** The team it names, or null where this plane has no such team (shown to a platform admin). */
+  team: string | null;
+  name: string;
+  generation: number | null;
+  principal: unknown;
+  profile: unknown;
+  source: Record<string, unknown> | null;
+  /** Whether it would pass the plane's checks today, and if not, why. */
+  passes: boolean;
+  reasons: string[];
+  /** Where the team's row of its name stands against it, or null where there is none. */
+  copy: TriggerCopyState | null;
+}
+
+/** What `admin.triggers.repository` answers: the team's Trigger resources, and its copied rows whose resource has gone. */
+export interface TriggerRepository {
+  team: string;
+  /** Where the resources come from, as the deployment says; display only. */
+  source: string | null;
+  /** False where the cluster did not list them, with the reason. */
+  listed: boolean;
+  reason: string | null;
+  resources: TriggerResource[];
+  gone: Array<TriggerCopyState & { resource: string; team: string; name: string }>;
+}
+
+/** What `admin.trigger.copy` answers: the row as it now is, what moved, its revision, and a minted key this once. */
+export interface TriggerCopied {
+  trigger: Trigger;
+  changes: AuditChanges;
+  revision: TriggerRevision;
+  resource: string;
+  generation: number | null;
+  /** Whether this copy made the row, rather than changing one in place. */
+  made: boolean;
+  key?: string;
+  url?: string;
 }
 
 /** One revision of a trigger's document: what it froze, who made it and when. */
@@ -1739,6 +1800,16 @@ export class AdminApi {
   /** Upsert by team and name; partial on update, so `{enabled: false}` is a switch-off. */
   putTrigger(trigger: Partial<Trigger> & { team: string; name: string }): Promise<TriggerPut> {
     return this.rpc<TriggerPut>("admin.trigger.put", { trigger });
+  }
+
+  /** On a `direct` plane, the team's Trigger resources in the cluster, with whether each passes and where its row stands. */
+  triggerRepository(team: string): Promise<TriggerRepository> {
+    return this.rpc<TriggerRepository>("admin.triggers.repository", { team });
+  }
+
+  /** Make a trigger from a Trigger resource, or copy it again onto the row made from it. */
+  copyTrigger(resource: string): Promise<TriggerCopied> {
+    return this.rpc<TriggerCopied>("admin.trigger.copy", { resource });
   }
 
   deleteTrigger(team: string, name: string): Promise<unknown> {

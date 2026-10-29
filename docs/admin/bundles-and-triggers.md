@@ -311,6 +311,11 @@ reported until they exist. Disabling a team deletes its triggers as it always ha
 resources are then reported as naming a team the plane does not have, until they leave the
 repository.
 
+**On a direct plane** the same resources are listed and never followed: an administrator
+copies one into a row (`admin.trigger.copy`) and copies it again when it changes, and the
+console says which rows have drifted
+([gitops.md](gitops.md#triggers-from-a-repository-on-a-direct-plane)).
+
 **From a running plane.** `admin.profiles.export` gives every trigger as
 `triggers/<team>/<trigger>.yaml`, beside the profiles and the policy, with its document and
 nothing the plane keeps; a trigger with a key says so in a note, and the key keeps working

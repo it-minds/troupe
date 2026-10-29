@@ -23,13 +23,21 @@
 // a trigger, not changes to what it is, and the key is never in a resource. So does "fix
 // this" on a trigger on a GitHub repository: one issue, by its number or its pasted link,
 // one run on it, behind a plain confirm that says what the plane checks first.
+//
+// On a `direct` plane the `Trigger` resources an applier put in the plane's namespace are
+// listed beside the team's rows, as in the repository: their source, generation and
+// whether they would pass the plane's checks, with the reasons where not. The plane never
+// acts on one by itself. Copy makes the row from one (a webhook's key shown once, as a new
+// trigger's is); a copied row says where it stands against its resource (from the
+// repository at a generation, repository changed with the diff and Re-copy, differs from
+// the repository after a console edit, or gone from the repository and still running).
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { AdminTeam, Trigger, TriggerFired, TriggerKey, TriggerPut } from "@troupe/client";
+import type { AdminTeam, Trigger, TriggerCopied, TriggerCopyState, TriggerFired, TriggerKey, TriggerPut, TriggerRepository, TriggerResource } from "@troupe/client";
 import { go, href } from "../route";
 import { recorded, show, useConsole, useLoad } from "../console";
-import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, modeOf, useChange, when } from "./bits";
+import { AuditNote, DetailList, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, linesOf, modeOf, useChange, when } from "./bits";
 import type { DiffLine, Done } from "./bits";
 
 /** The teams this person may see triggers for: every one for a platform admin, their own for a team admin. */
@@ -123,15 +131,25 @@ export function Triggers({ team }: { team: string | null }): JSX.Element {
 
 function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
   const { admin } = useConsole();
-  const [load, reload] = useLoad(() => Promise.all([admin.triggers(team.name), admin.provisioningMode().catch(() => null)]), [admin, team.name]);
+  // A direct plane also lists what the cluster holds; a plane that cannot answer that
+  // (an older one, or one with no cluster) still shows the team's rows.
+  const [load, reload] = useLoad(
+    () =>
+      Promise.all([admin.triggers(team.name), admin.provisioningMode().catch(() => null)]).then(
+        async ([listed, mode]) => [listed, mode, modeOf(mode) === "gitops" ? null : await admin.triggerRepository(team.name).catch(() => null)] as const,
+      ),
+    [admin, team.name],
+  );
   const [creating, setCreating] = useState(false);
+  const [copying, setCopying] = useState<TriggerResource | null>(null);
   const [minted, setMinted] = useState<{ name: string; key: string; url: string } | null>(null);
   const { done, apply } = useChange(reload);
 
   return (
     <Loaded load={load} what={`${team.name}'s triggers`} retry={reload}>
-      {([listed, mode]) => {
+      {([listed, mode, repository]) => {
         const locked = modeOf(mode) === "gitops";
+        const copies = copiesOf(repository);
         // A gitops listing also carries resources the plane refused and has no trigger for: a name and reasons.
         const triggers = listed.filter((t) => Boolean(t.id));
         const refused = listed.filter((t) => !t.id);
@@ -158,6 +176,7 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
                       <th>Profile</th>
                       <th>Runs as</th>
                       <th>Last fired</th>
+                      {copies.size > 0 && <th>Repository</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -173,6 +192,7 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
                         <td>{show(t.profile)}</td>
                         <td className="mono">{show(t.principal)}</td>
                         <td>{when(t.last_fired_at)}</td>
+                        {copies.size > 0 && <td>{copies.get(t.name) ? <CopyWords copy={copies.get(t.name)!} /> : "—"}</td>}
                       </tr>
                     ))}
                   </tbody>
@@ -190,6 +210,33 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
                 <GitopsProblem gitops={r.gitops} />
               </div>
             ))}
+            {repository && (
+              <InRepository
+                repository={repository}
+                busy={copying !== null || creating}
+                onCopy={(r) => setCopying(r)}
+              />
+            )}
+            {copying && (
+              <Preview
+                title={`${again(copying) ? "Re-copy" : "Copy"} ${copying.resource}`}
+                lines={copyLines(copying)}
+                effects={copyWords(team.name, copying)}
+                verb={`${again(copying) ? "Re-copy" : "Copy"} ${copying.name}`}
+                onCancel={() => setCopying(null)}
+                onConfirm={async () => {
+                  const r = copying;
+                  // A webhook trigger the copy makes comes back with its key, this once.
+                  const write = async (): Promise<TriggerCopied> => {
+                    const answer = await admin.copyTrigger(r.resource);
+                    if (answer.key) setMinted({ name: r.name, key: answer.key, url: answer.url ?? "" });
+                    return answer;
+                  };
+                  await apply("trigger.copy", `${team.name}/${r.name}`, write, `${r.name} is copied from the repository, at generation ${r.generation ?? "—"}.`, (a) => (a as { changes?: Record<string, unknown> }).changes);
+                  setCopying(null);
+                }}
+              />
+            )}
             {!locked && !creating && (
               <button type="button" onClick={() => setCreating(true)}>
                 New trigger
@@ -218,6 +265,151 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
         );
       }}
     </Loaded>
+  );
+}
+
+/** Where each of the team's rows stands against its resource, by the trigger's name: listed ones and gone ones. */
+function copiesOf(repository: TriggerRepository | null): Map<string, TriggerCopyState> {
+  const out = new Map<string, TriggerCopyState>();
+  if (!repository) return out;
+  for (const r of repository.resources) if (r.copy && r.team) out.set(r.name, r.copy);
+  for (const g of repository.gone) out.set(g.name, g);
+  return out;
+}
+
+/** A copied row's state, in words. */
+function CopyWords({ copy }: { copy: TriggerCopyState }): JSX.Element {
+  switch (copy.state) {
+    case "copied":
+      return (
+        <Status kind="running" glyph="●">
+          from the repository, generation {show(copy.copied_generation)}
+        </Status>
+      );
+    case "changed":
+      return (
+        <Status kind="waiting" glyph="◆">
+          repository changed
+        </Status>
+      );
+    case "differs":
+      return (
+        <Status kind="waiting" glyph="◇">
+          differs from the repository
+        </Status>
+      );
+    case "gone":
+      return (
+        <Status kind="denied" glyph="✕">
+          gone from the repository
+        </Status>
+      );
+    default:
+      return (
+        <Status kind="muted" glyph="○">
+          not copied
+        </Status>
+      );
+  }
+}
+
+/** Whether a copy of this resource is a re-copy: there is a row that was copied from it. */
+function again(r: TriggerResource): boolean {
+  return r.copy !== null && r.copy.state !== "not_copied";
+}
+
+/** What a copy changes, field by field: the row's diff where there is a row, and what the resource names where there is none. */
+function copyLines(r: TriggerResource): DiffLine[] {
+  if (r.copy?.diff) return linesOf(r.copy.diff);
+  return [
+    { field: "principal", from: null, to: r.principal },
+    { field: "profile", from: null, to: r.profile },
+    { field: "source", from: null, to: r.source },
+  ];
+}
+
+/** What a copy does, in words, before it is confirmed. */
+function copyWords(team: string, r: TriggerResource): string[] {
+  if (!r.copy) {
+    return [
+      `${r.name} becomes a trigger of ${team}, made from the resource ${r.resource} at generation ${show(r.generation)}: ${firedBy(r.source)}, on ${show(r.profile)}, run as ${show(r.principal)}.`,
+      "A webhook trigger is made with its key, shown once.",
+      "The plane does not follow the resource after this: when the repository changes it, the row says so and waits for a re-copy.",
+    ];
+  }
+  return [
+    `${team}'s ${r.name} is made to say what ${r.resource} says at generation ${show(r.generation)}, in place: it keeps its URL, key, runs and revisions.`,
+    r.copy.state === "differs" ? "What was changed in the console since the copy is replaced by the repository's." : "",
+    "A document that moved is a new revision, recorded in the audit as a put's is.",
+  ].filter(Boolean);
+}
+
+/**
+ * The Trigger resources in the plane's namespace that are this team's, as in the
+ * repository: what fires each, its generation, whether it passes the plane's checks today
+ * (and why not), where the team's row of its name stands, and Copy or Re-copy. A copied
+ * row whose resource has gone is said too; it goes on running until it is deleted.
+ */
+function InRepository({ repository, busy, onCopy }: { repository: TriggerRepository; busy: boolean; onCopy: (r: TriggerResource) => void }): JSX.Element {
+  return (
+    <section aria-label="In the repository">
+      <Region>In the repository</Region>
+      <p className="note">
+        The Trigger resources in the plane's namespace{repository.source ? <>, from <code>{repository.source}</code></> : null}. The plane does not act on them by itself: a copy makes a row from one, and a re-copy brings a row up to it.
+      </p>
+      {!repository.listed && <p className="note" role="status">{repository.reason}</p>}
+      {repository.listed && repository.resources.length === 0 && repository.gone.length === 0 && <p className="note">There is no Trigger resource of this team in the cluster.</p>}
+      {repository.resources.map((r) => (
+        <div key={r.resource} className="card in-repository" aria-label={r.resource}>
+          <header>
+            <span className="mono">{r.resource}</span>
+            <span>generation {show(r.generation)}</span>
+            {r.passes ? (
+              <Status kind="running" glyph="●">
+                passes
+              </Status>
+            ) : (
+              <Status kind="denied" glyph="✕">
+                would be refused
+              </Status>
+            )}
+            {r.copy && <CopyWords copy={r.copy} />}
+          </header>
+          <p>
+            {r.team === null ? "It names no team this plane has. " : null}Fired {firedBy(r.source)}, on {show(r.profile)}, run as <span className="mono">{show(r.principal)}</span>.
+          </p>
+          {r.reasons.length > 0 && (
+            <ul className="plain">
+              {r.reasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          )}
+          {r.copy?.state === "changed" && <p className="note">Copied at generation {show(r.copy.copied_generation)}; the repository is at {show(r.generation)}. What a re-copy changes:</p>}
+          {r.copy?.state === "differs" && <p className="note">Changed in the console since it was copied. What a re-copy puts back:</p>}
+          {r.copy?.state === "not_copied" && <p className="note">{r.name} is a row nobody copied. What a copy changes of it:</p>}
+          {r.copy?.diff && Object.keys(r.copy.diff).length > 0 && r.copy.state !== "copied" && <DetailList detail={r.copy.diff as Record<string, unknown>} />}
+          {r.passes && r.team !== null && !busy && r.copy?.state !== "copied" && (
+            <div className="actions">
+              <button type="button" onClick={() => onCopy(r)}>
+                {again(r) ? `Re-copy ${r.name}` : `Copy ${r.name}`}
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+      {repository.gone.map((g) => (
+        <div key={g.resource} className="card in-repository" aria-label={g.resource}>
+          <header>
+            <span className="mono">{g.resource}</span>
+            <CopyWords copy={g} />
+          </header>
+          <p>
+            {g.name} was copied from it at generation {show(g.copied_generation)}, and the cluster no longer has it. The trigger goes on running until it is deleted.
+          </p>
+        </div>
+      ))}
+    </section>
   );
 }
 

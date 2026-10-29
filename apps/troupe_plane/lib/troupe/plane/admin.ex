@@ -61,6 +61,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.GitHub.Issues, as: GitHubIssues
   alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
   alias Troupe.Plane.Gitops.GitHubApp, as: GitopsGitHubApp
+  alias Troupe.Plane.Gitops.TriggerCopies
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{KMSCheck, OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
@@ -4224,6 +4225,241 @@ defmodule Troupe.Plane.Admin do
     do: "is fired by the GitHub App's signed deliveries for #{repository}"
 
   defp fired_by(_manual), do: "is run by hand, or by a principal that signs in"
+
+  @doc """
+  The `Trigger` resources in the plane's namespace that are this team's, as a direct plane
+  sees them and never acts on: each with its generation, whether it would pass the plane's
+  checks today and the reasons where it would not, and, where the team has a row of its
+  name, where that row stands against it (`copy`): `copied`, `changed` with the diff,
+  `differs`, or `not_copied`. A copied row whose resource has gone is in `gone`, and goes
+  on running. A platform admin also sees the resources that name no team here, with
+  `team` null.
+
+  Its own method rather than a part of `admin.triggers.list`, whose answer in direct mode
+  is what it always was: this one asks the cluster, which the list has never needed, and a
+  cluster that cannot be listed is said here (`listed` false, with the reason) without
+  taking the team's triggers off the page. Refused in gitops mode, where the rows follow
+  the resources and the list already says what each was read from.
+  """
+  @spec triggers_repository(actor(), String.t()) :: result()
+  def triggers_repository(actor, team_name) do
+    with {:ok, team} <- fetch_team(actor, team_name),
+         :ok <- direct_triggers("admin.triggers.repository") do
+      answer = %{team: team.name, source: Gitops.source()}
+
+      case TriggerCopies.resources() do
+        {:ok, entries} ->
+          {:ok, Map.merge(answer, repository_listing(actor, team, entries))}
+
+        {:error, reason} ->
+          {:ok,
+           Map.merge(answer, %{
+             listed: false,
+             reason: "the cluster did not list its Trigger resources: #{inspect(reason)}",
+             resources: [],
+             gone: []
+           })}
+      end
+    end
+  end
+
+  defp repository_listing(actor, team, entries) do
+    rows = Map.new(Triggers.list(team), &{&1.name, &1})
+    teams = MapSet.new(Identity.list_teams(), & &1.name)
+
+    # This team's, by the name's first part, and for a platform admin those that name no
+    # team here, which are on no other team's page.
+    resources =
+      Enum.flat_map(entries, fn entry ->
+        cond do
+          entry.team == team.name ->
+            [TriggerCopies.json(entry, Map.get(rows, entry.trigger), true)]
+
+          actor.role == :platform_admin and not MapSet.member?(teams, entry.team) ->
+            [TriggerCopies.json(entry, nil, false)]
+
+          true ->
+            []
+        end
+      end)
+
+    listed = MapSet.new(entries, & &1.name)
+
+    gone =
+      for {name, row} <- rows,
+          row.copied_from,
+          not MapSet.member?(listed, GitopsTriggers.resource_name(team.name, name)),
+          do: TriggerCopies.gone_json(row, team.name)
+
+    %{listed: true, reason: nil, resources: resources, gone: gone}
+  end
+
+  defp direct_triggers(method) do
+    if Gitops.enabled?() do
+      {:error,
+       Error.new(:invalid_request, %{
+         method: method,
+         reason:
+           "this plane is in gitops mode, where its triggers follow the Trigger resources by " <>
+             "themselves: admin.triggers.list says what each was read from"
+       })}
+    else
+      :ok
+    end
+  end
+
+  @doc """
+  Make a team's trigger from a `Trigger` resource in the plane's namespace, in direct
+  mode, or make the row copied from it say what it says now.
+
+  `resource` is the resource's name, `<team>.<trigger>`. Refused with the check's reasons
+  when it would not pass, as `admin.triggers.repository` gives them, and with a GitHub
+  repository's reason as `admin.trigger.put` gives it. A first copy makes the row, and a
+  webhook's key is minted then and answered this once (`key`, `url`), as a put's is. A
+  later copy, the console's re-copy, changes the row in place, so it keeps its URL, key,
+  runs and revisions; a document that moved is a new revision. A row of the name nobody
+  copied is taken over the same way. The row records the resource and its generation.
+  Audited as `trigger.copy`, with the diff and the revision a put's row has. Refused in
+  gitops mode as `managed_by_gitops`: there the rows follow the resources by themselves.
+  """
+  @spec trigger_copy(actor(), String.t()) :: result()
+  def trigger_copy(actor, resource) do
+    with {:ok, team_name, name} <- copy_target(resource),
+         :ok <- may_administer(actor, team_name),
+         :ok <-
+           not_held_by_repository(
+             actor,
+             "trigger.copy",
+             "#{team_name}/#{name}",
+             GitopsTriggers.kind()
+           ),
+         {:ok, entry} <- copy_source(resource),
+         {:ok, attrs} <- copyable(entry),
+         {:ok, team} <- fetch_team(actor, team_name),
+         :ok <-
+           reachable_repository(team, name, %{
+             "source" => attrs.source,
+             "profile" => attrs.profile
+           }) do
+      copy(actor, team, attrs, entry)
+    end
+  end
+
+  defp copy(actor, team, attrs, entry) do
+    before = Triggers.get(team, attrs.name)
+
+    case Triggers.copy(team, attrs, entry.name, entry.generation, actor.subject) do
+      {:ok, trigger, revision} ->
+        {trigger, key} = minted_at_copy(trigger, actor)
+        changes = Audit.diff(comparable(before), comparable(trigger))
+
+        detail =
+          changes
+          |> Map.merge(%{
+            "__revision__" => revision.revision,
+            "__revision_hash__" => revision.hash,
+            "__resource__" => entry.name,
+            "__generation__" => entry.generation
+          })
+          |> Map.merge(key_minted(key))
+
+        subject = "#{team.name}/#{trigger.name}"
+        {:ok, _} = Audit.record(actor.subject, "trigger.copy", subject, detail)
+
+        {:ok,
+         %{
+           trigger: Triggers.trigger_json(trigger),
+           changes: changes,
+           revision: Revision.json(revision),
+           resource: entry.name,
+           generation: entry.generation,
+           made: is_nil(before)
+         }
+         |> Map.merge(key_answer(key, trigger))}
+
+      {:error, changeset} ->
+        {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+    end
+  end
+
+  # A webhook trigger that has no key is half made, whether the copy made it or a re-copy
+  # turned a schedule into a webhook; one that has a key keeps it.
+  defp minted_at_copy(%Trigger{key_hash: nil} = trigger, actor) do
+    if Triggers.keyed?(trigger) do
+      {:ok, trigger, key} = Triggers.rotate_key(trigger, actor.subject)
+      {trigger, key}
+    else
+      {trigger, nil}
+    end
+  end
+
+  defp minted_at_copy(trigger, _actor), do: {trigger, nil}
+
+  defp copy_target(resource) when is_binary(resource) do
+    case GitopsTriggers.split(resource) do
+      {:ok, team, name} ->
+        {:ok, team, name}
+
+      :error ->
+        {:error,
+         Error.new(:invalid_params, %{
+           resource: resource,
+           reason:
+             "a Trigger resource is named <team>.<trigger>, the team's name and the " <>
+               "trigger's joined by one dot, and #{inspect(resource)} is not"
+         })}
+    end
+  end
+
+  defp copy_target(_resource), do: {:error, Error.new(:invalid_params, %{missing: "resource"})}
+
+  # Asked before the cluster is, so that a team admin learns nothing of another team's
+  # resources; the team itself is fetched once the resource is known to name one.
+  defp may_administer(actor, team_name) do
+    cond do
+      not admin?(actor) ->
+        {:error, Error.new(:forbidden, %{required_role: "team_admin"})}
+
+      actor.role == :team_admin and team_name not in actor.teams ->
+        {:error, Error.new(:not_found, %{team: team_name})}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp copy_source(resource) do
+    case TriggerCopies.resource(resource) do
+      {:ok, entry} ->
+        {:ok, entry}
+
+      {:error, :not_found} ->
+        {:error,
+         Error.new(:not_found, %{
+           resource: resource,
+           reason: "the cluster has no Trigger #{resource} in the plane's namespace"
+         })}
+
+      {:error, reason} ->
+        {:error,
+         Error.new(:unavailable, %{
+           resource: resource,
+           reason: "the cluster did not list its Trigger resources: #{inspect(reason)}"
+         })}
+    end
+  end
+
+  defp copyable(%{checked: {:ok, attrs}}), do: {:ok, attrs}
+
+  defp copyable(%{checked: {:error, reasons}} = entry) do
+    {:error,
+     Error.new(:invalid_params, %{
+       resource: entry.name,
+       generation: entry.generation,
+       reasons: reasons,
+       reason: Enum.join(reasons, "; ")
+     })}
+  end
 
   @doc """
   Set or clear a person's own spend ceiling, across every team they are in, per calendar
