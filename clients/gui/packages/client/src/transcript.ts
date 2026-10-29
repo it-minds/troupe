@@ -112,8 +112,16 @@ export type Entry =
        * shows. Absent from every other approval.
        */
       delegation?: DelegationGate;
-      /** For a delegation, what its answer carried: the agent it went to, the parts edited, the word back. */
-      answered?: { agent?: string; edited?: string[]; reason?: string };
+      /**
+       * An agent's publication, for the person to say whom it is for before it is
+       * published (`publish_artifact`): what the gate shows. Absent from every other approval.
+       */
+      publication?: PublicationGate;
+      /**
+       * What its answer carried: for a delegation the agent it went to, for a publication
+       * whom it is for and whose it is; the parts edited, and the word back.
+       */
+      answered?: GateAnswered;
       /**
        * The per-tool rule of the configuration that asked (troupe #658): an "allow for the
        * session" does not stop the next such call asking. Absent where no rule asked.
@@ -430,11 +438,60 @@ export interface DelegationGate {
   agents: { name: string; description: string }[];
 }
 
-/** What a delegation's answer may carry besides its word, as `approval.respond` sends it. */
+/**
+ * What the gate shows of an agent's publication before it is published: the title, kind
+ * and file count the agent sent, whom it proposed it for (`visibility`, null where it said
+ * nobody), whose it proposed it be (`owner`, null for the default: the team's for a team,
+ * else the publisher's), the artifact it is a new version of, and its note.
+ */
+export interface PublicationGate {
+  title: string;
+  kind: string;
+  files: number;
+  visibility: string | null;
+  owner: "me" | "team" | null;
+  id: string | null;
+  note: string | null;
+}
+
+/**
+ * What an answer may carry besides its word, as `approval.respond` sends it, each a key
+ * beside `decision`: for a delegation the agent it goes to and the parts of the brief
+ * edited; for a publication whom it is for (`visibility`: `private`, `organisation`,
+ * `team:<name>` or `profile:<name>`) and, for a new artifact, whose it is (`owner`; a new
+ * version keeps whose it is, and the harness drops one sent); a word back with a denial.
+ */
 export interface GateAnswer {
   agent?: string;
   brief?: Partial<Record<(typeof BRIEF_PARTS)[number], string>>;
+  visibility?: string;
+  owner?: "me" | "team";
   reason?: string;
+}
+
+/** What `approval_decided` says the answer carried. */
+export interface GateAnswered {
+  agent?: string;
+  visibility?: string;
+  owner?: "me" | "team";
+  edited?: string[];
+  reason?: string;
+}
+
+function publicationOf(raw: unknown): PublicationGate | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const p = raw as Record<string, unknown>;
+  const text = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+  const owner = p["owner"] === "me" || p["owner"] === "team" ? p["owner"] : null;
+  return {
+    title: str(p["title"]),
+    kind: str(p["kind"], "file"),
+    files: num(p["files"]) ?? 0,
+    visibility: text(p["visibility"]),
+    owner,
+    id: text(p["id"]),
+    note: text(p["note"]),
+  };
 }
 
 function gateOf(raw: unknown): DelegationGate | undefined {
@@ -463,9 +520,11 @@ function ruleOf(raw: unknown): { rule: string; scope: string; source: string | n
   return { rule: r["rule"], scope: str(r["scope"]), source: typeof r["source"] === "string" ? r["source"] : null };
 }
 
-function answeredOf(data: Record<string, unknown>): { agent?: string; edited?: string[]; reason?: string } | undefined {
-  const out: { agent?: string; edited?: string[]; reason?: string } = {};
+function answeredOf(data: Record<string, unknown>): GateAnswered | undefined {
+  const out: GateAnswered = {};
   if (typeof data["agent"] === "string") out.agent = data["agent"];
+  if (typeof data["visibility"] === "string") out.visibility = data["visibility"];
+  if (data["owner"] === "me" || data["owner"] === "team") out.owner = data["owner"];
   if (Array.isArray(data["edited"])) out.edited = data["edited"].filter((p): p is string => typeof p === "string");
   if (typeof data["reason"] === "string") out.reason = data["reason"];
   return Object.keys(out).length > 0 ? out : undefined;
@@ -1202,6 +1261,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
 
     case "approval_requested": {
       const gate = gateOf(d.data["delegation"]);
+      const publication = publicationOf(d.data["publication"]);
       const rule = ruleOf(d.data["rule"]);
       return {
         ...next,
@@ -1217,6 +1277,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
             resolvedBy: undefined,
             closed: false,
             ...(gate ? { delegation: gate } : {}),
+            ...(publication ? { publication } : {}),
             ...(rule ? { rule } : {}),
           },
         ],
@@ -1230,7 +1291,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
         ...next,
         entries: state.entries.map((en) =>
           en.kind === "approval" && en.callId === id
-            ? { ...en, decision: str(d.data["decision"]), ...(answered && en.delegation ? { answered } : {}) }
+            ? { ...en, decision: str(d.data["decision"]), ...(answered && (en.delegation || en.publication) ? { answered } : {}) }
             : en,
         ),
       };

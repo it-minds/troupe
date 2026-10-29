@@ -234,6 +234,8 @@ defmodule Troupe.Gateway.Dispatch do
     "artifact.pin" => :control,
     # A put over a version that sends no files: the owner moving who may open it.
     "artifact.put" => :control,
+    # Whose it is: handed to a team, or taken back from one.
+    "artifact.transfer" => :control,
     # Where this machine's copy of the plane's memory stands, and what each session here
     # last read: for the person's own debugging (`troupe memory --status`).
     "me.memory.status" => :observe,
@@ -304,7 +306,7 @@ defmodule Troupe.Gateway.Dispatch do
   # and after a create, whose session there was no id for before.
   @work ~w(input.send commands.run session.goal.set session.loop.start)
   @invites ~w(session.invite session.uninvite session.invites session.read_sealed)
-  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.rollback artifact.pin artifact.put)
+  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.rollback artifact.pin artifact.put artifact.transfer)
 
   defp local_only("remote.offer", params, context) do
     cond do
@@ -1006,8 +1008,9 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  # A delegation's answer may carry more than its word (Decision 850): `agent` to send it
-  # to another subagent, `brief` with the parts the person edited, `reason` with a no. A
+  # An answer may carry more than its word: a delegation's `agent` to send it to another
+  # subagent and `brief` with the parts the person edited (Decision 850), a publication's
+  # `visibility` and `owner` for whom it is and whose it is, and `reason` with a no. A
   # wrong one is refused with the sentence that says why, and the request waits on.
   defp handle("approval.respond", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
@@ -1016,7 +1019,9 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, decision} <- parse_decision(decision),
          :ok <- activate(session_id, context) do
       answer =
-        params |> Map.take(~w(agent brief reason)) |> Map.reject(fn {_k, v} -> is_nil(v) end)
+        params
+        |> Map.take(~w(agent brief reason visibility owner))
+        |> Map.reject(fn {_k, v} -> is_nil(v) end)
 
       case Troupe.approve(session_id, call_id, decision, actor(context), answer) do
         :ok -> {:ok, %{"accepted" => true}}

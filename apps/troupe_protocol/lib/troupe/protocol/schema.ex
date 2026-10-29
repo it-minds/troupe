@@ -419,18 +419,23 @@ defmodule Troupe.Protocol.Schema do
       # `max_depth`; and `agents`, each `{name, description}` it could go to instead.
       # A call a per-tool rule of the configuration asks about (#658) carries that `rule`:
       # `action`, `rule` as written, `tool`, `pattern`, `scope` (the layer), `source`.
+      # A `publish_artifact` asks with what the person aims under `publication`: `title`,
+      # `kind`, `files` (how many), `visibility` and `owner` as the model proposed them
+      # (null where it proposed none, and then the person must choose), `id` and `note`.
       "approval_requested" => %{
         "call_id" => required(:string),
         "tool" => required(:string),
         "args" => required(:object),
         "agent_path" => required({:array, :string}),
         "delegation" => optional(:object),
+        "publication" => optional(:object),
         "rule" => optional(:object)
       },
       # A delegation's decision names the `agent` it went to when it was allowed, the
       # `brief` as the person edited it and which parts (`edited`), and the person's word
       # back with a denial (`reason`). `allow_session` lets that agent run unasked for the
-      # session.
+      # session. A publication's names the `visibility` and `owner` it ran with and which of
+      # them the person changed (`edited`).
       "approval_decided" => %{
         "call_id" => required(:string),
         "tool" => required(:string),
@@ -440,7 +445,9 @@ defmodule Troupe.Protocol.Schema do
         "agent" => optional(:string),
         "brief" => optional(:object),
         "edited" => optional({:array, :string}),
-        "reason" => optional(:string)
+        "reason" => optional(:string),
+        "visibility" => optional(:string),
+        "owner" => optional(:string)
       },
       # `ask_user` (Decision 651): the agent hands a decision to a person and waits.
       # `preview` is text the question is about, shown as it is beneath it: the prompt a
@@ -839,8 +846,9 @@ defmodule Troupe.Protocol.Schema do
       "session.loop.get" => %{"session_id" => required(:string)},
       # A delegation's answer (Decision 850) may carry `agent`, a subagent the request offered
       # to send it to instead; `brief`, the parts the person edited, held to the brief's
-      # shape; and `reason`, a word back with `deny`. A wrong one is `invalid_params`, and
-      # the request waits on.
+      # shape; and `reason`, a word back with `deny`. A publication's carries `visibility`,
+      # whom it is for, and `owner`, whose it is, and `reason` with `deny`. A wrong one is
+      # `invalid_params`, and the request waits on.
       "approval.respond" => %{
         "command_id" => required(:string),
         "session_id" => required(:string),
@@ -848,7 +856,9 @@ defmodule Troupe.Protocol.Schema do
         "decision" => required(:string),
         "agent" => optional(:string),
         "brief" => optional(:object),
-        "reason" => optional(:string)
+        "reason" => optional(:string),
+        "visibility" => optional(:string),
+        "owner" => optional(:string)
       },
       "todo.edit" => %{
         "command_id" => required(:string),
@@ -1170,6 +1180,7 @@ defmodule Troupe.Protocol.Schema do
         "title" => required(:string),
         "kind" => required(:string),
         "visibility" => optional(:string),
+        "owner" => optional(:string),
         "files" => required(:array),
         "id" => optional(:string),
         "note" => optional(:string),
@@ -1217,6 +1228,13 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "id" => required(:string),
         "version" => required({:nullable, :integer})
+      },
+      # Whose it is, moved: to a team the person is in (`team:<name>`), or back to the
+      # caller (`me`) by an administrator of the owning team.
+      "artifact.transfer" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "to" => required(:string)
       },
       # Who may open it moved by its owner, or its title: a version over `base` carrying
       # every file of it, no files sent.

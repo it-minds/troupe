@@ -161,14 +161,49 @@ export function RemoteSessions({ load, reload }: { load: Load<RemoteRow[]>; relo
  * invited this person into (troupe #765), attached as the desktop app attaches to one: an
  * endpoint and a token from `session.open`, read to follow it and activated to steer it.
  */
+/**
+ * Whom a publication may be for, from this person's own `me`: only them, the organisation,
+ * each team (the team's own, or theirs alone) and each profile; the agent's proposal first,
+ * and offered even where the plane has not named it for them.
+ */
+function audienceOptions(me: { teams: Array<{ name: string }>; profiles: string[] }, proposed: { visibility: string | null; owner: "me" | "team" | null; id: string | null }): Array<{ key: string; label: string }> {
+  // A new version keeps whose the artifact is, so only whom it is for is offered.
+  const own = proposed.id === null ? "|me" : "";
+  const options = [
+    { key: `private${own}`, label: "Only you" },
+    { key: `organisation${own}`, label: "The whole organisation" },
+    ...me.teams.flatMap((t) =>
+      proposed.id === null
+        ? [
+            { key: `team:${t.name}|team`, label: `Team ${t.name}, owned by the team` },
+            { key: `team:${t.name}|me`, label: `Team ${t.name}, owned by you` },
+          ]
+        : [{ key: `team:${t.name}`, label: `Team ${t.name}` }],
+    ),
+    ...me.profiles.map((p) => ({ key: `profile:${p}${own}`, label: `The ${p} profile's people` })),
+  ];
+  const key = proposedKey(proposed);
+  if (key && !options.some((o) => o.key === key)) options.push({ key, label: proposed.id === null ? `${proposed.visibility}, ${key.endsWith("|team") ? "owned by the team" : "owned by you"}` : String(proposed.visibility) });
+  return options;
+}
+
+/** The proposal's key: its visibility, and for a new artifact whose it is (`visibility|owner`). */
+function proposedKey(proposed: { visibility: string | null; owner: "me" | "team" | null; id: string | null }): string | null {
+  if (proposed.visibility === null) return null;
+  if (proposed.id !== null) return proposed.visibility;
+  return `${proposed.visibility}|${proposed.owner ?? (proposed.visibility.startsWith("team:") ? "team" : "me")}`;
+}
+
 export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | "activate"; whose: string } }): JSX.Element {
-  const { auth } = useConsole();
+  const { auth, me } = useConsole();
   const [state, setState] = useState<TranscriptState>(emptyTranscript);
   const [status, setStatus] = useState<AttachStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [text, setText] = useState("");
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  // Whom each publication is for, as chosen here, by its call id (`visibility|owner`).
+  const [audiences, setAudiences] = useState<Record<string, string>>({});
   const [refusal, setRefusal] = useState<string | null>(null);
   // Whom a pod session is shared with by name, named to everybody in it (troupe #765).
   const [shared, setShared] = useState<Invitee[]>([]);
@@ -274,19 +309,54 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
             )}
           </ol>
 
-          {openApprovals(state).map((a) => (
-            <section key={a.callId} className="approval" aria-label={`Approve ${a.tool}`}>
-              <p>
-                The agent asks to run <span className="mono">{a.tool}</span>.
-              </p>
-              <button type="button" onClick={() => void act((x) => x.view.respondApproval(a.callId, "allow"))}>
-                Allow once
-              </button>
-              <button type="button" onClick={() => void act((x) => x.view.respondApproval(a.callId, "deny"))}>
-                Deny
-              </button>
-            </section>
-          ))}
+          {openApprovals(state).map((a) => {
+            const pub = a.publication;
+            return pub ? (
+              // An agent's publication: whom it is for is the person's to say, the proposal chosen already.
+              <section key={a.callId} className="approval" aria-label={`Publish ${pub.title}`}>
+                <p>
+                  The agent asks to publish <b>{pub.title}</b> ({pub.kind}, {pub.files === 1 ? "1 file" : `${pub.files} files`}).
+                  {pub.visibility === null ? " It did not say whom it is for." : ""}
+                </p>
+                <label>
+                  Who may open it
+                  <select value={audiences[a.callId] ?? proposedKey(pub) ?? ""} onChange={(e) => setAudiences((m) => ({ ...m, [a.callId]: e.target.value }))}>
+                    {pub.visibility === null && <option value="">Choose whom it is for</option>}
+                    {audienceOptions(me, pub).map((o) => (
+                      <option key={o.key} value={o.key}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={(audiences[a.callId] ?? proposedKey(pub) ?? "") === ""}
+                  onClick={() => {
+                    const [visibility, owner] = (audiences[a.callId] ?? proposedKey(pub) ?? "").split("|");
+                    void act((x) => x.view.respondApproval(a.callId, "allow", { visibility: visibility ?? "private", ...(owner === undefined ? {} : { owner: owner === "team" ? "team" : "me" }) }));
+                  }}
+                >
+                  Allow once
+                </button>
+                <button type="button" onClick={() => void act((x) => x.view.respondApproval(a.callId, "deny"))}>
+                  Deny
+                </button>
+              </section>
+            ) : (
+              <section key={a.callId} className="approval" aria-label={`Approve ${a.tool}`}>
+                <p>
+                  The agent asks to run <span className="mono">{a.tool}</span>.
+                </p>
+                <button type="button" onClick={() => void act((x) => x.view.respondApproval(a.callId, "allow"))}>
+                  Allow once
+                </button>
+                <button type="button" onClick={() => void act((x) => x.view.respondApproval(a.callId, "deny"))}>
+                  Deny
+                </button>
+              </section>
+            );
+          })}
 
           {openQuestions(state).map((q) => (
             <form

@@ -14,6 +14,12 @@ defmodule Troupe.Client.Artifacts do
   `publish/3` is `/publish`'s and `troupe artifacts publish`'s: one file of this machine as a
   page (`.html`), a document (`.md`) or a file, titled by its own heading or title, else its
   name.
+
+  An artifact may be a team's rather than one person's: every member of the owning team is
+  its owner, and a person leaving changes nothing. A row says so in `owner_team`, and
+  `may_transfer` whether this person may hand it to a team they are in or take it back
+  (`transfer/2`). A publication for a team is the team's unless the person says `owner:
+  "me"`; `owner/1` is the words a row's owner is shown by.
   """
 
   alias Troupe.Client.Daemon.Link
@@ -28,13 +34,15 @@ defmodule Troupe.Client.Artifacts do
   def audiences, do: @audiences
 
   @doc """
-  What the person may see, newest first: `%{artifacts, organisation, profiles, gallery_url}`,
-  each row with `new` beside what the plane said of it.
+  What the person may see, newest first: `%{artifacts, organisation, profiles, teams,
+  gallery_url}`, each row with `new` beside what the plane said of it; `teams` and
+  `profiles` are the person's own, by name, whom a publication can be for.
   """
   @spec list(map()) :: {:ok, map()} | {:error, String.t()}
   def list(params \\ %{}) do
     with {:ok, answer} <- call("artifact.list", params) do
       profiles = List.wrap(answer["profiles"])
+      teams = List.wrap(answer["teams"])
       seen = seen()
       rows = for row <- List.wrap(answer["artifacts"]), do: Map.put(row, "new", new?(row, seen))
 
@@ -43,6 +51,7 @@ defmodule Troupe.Client.Artifacts do
          artifacts: rows,
          organisation: answer["organisation"],
          profiles: profiles,
+         teams: teams,
          gallery_url: answer["gallery_url"],
          enabled: answer["enabled"] != false
        }}
@@ -98,6 +107,31 @@ defmodule Troupe.Client.Artifacts do
   def get(id), do: call("artifact.get", %{"id" => id})
 
   @doc """
+  Whose a row is, in words: `team finance` for a team's (whoever is looking, since every
+  member owns it), `you` for the person's own, else who published it.
+  """
+  @spec owner(map()) :: String.t()
+  def owner(%{"owner_team" => team}) when is_binary(team) and team != "", do: "team " <> team
+  def owner(%{"mine" => true}), do: "you"
+  def owner(%{"owner" => %{"display_name" => name}}) when is_binary(name), do: name
+  def owner(%{"owner" => %{"subject" => subject}}) when is_binary(subject), do: subject
+  def owner(_row), do: "someone"
+
+  @doc """
+  Hand an artifact to a team the person is in (`to` is `team:<name>`), or take a team's
+  back (`me`, an admin of that team's or a platform admin's to do): the artifact as it now
+  is. Whom it may go to is the plane's to decide; `may_transfer` on a row says whether it
+  would be allowed at all.
+  """
+  @spec transfer(String.t(), String.t()) :: {:ok, map()} | {:error, String.t()}
+  def transfer(id, "team:" <> name = to) when name != "", do: transfer_call(id, to)
+  def transfer(id, "me"), do: transfer_call(id, "me")
+  def transfer(_id, to), do: {:error, "--to is team:<name> or me, not #{inspect(to)}"}
+
+  defp transfer_call(id, to),
+    do: call("artifact.transfer", %{"id" => id, "to" => to, "command_id" => RPC.command_id()})
+
+  @doc """
   The one-time address that opens it (a version of it, where one is named) on the artifacts
   host, as the console's Open asks it; good for a minute, and spent by the browser.
   """
@@ -137,7 +171,10 @@ defmodule Troupe.Client.Artifacts do
   @doc """
   Publish one file of this machine (`/publish`, `troupe artifacts publish`) for `visibility`
   (`private`, `organisation`, `team:<name>` or `profile:<name>`). `opts`: `title` instead of
-  the file's own, and `session_id`, the session it came from.
+  the file's own; `session_id`, the session it came from; and `owner`, `"me"` or `"team"`,
+  whose the artifact is: sent as given, and for a team's visibility `"team"` where nothing
+  is given, which is the plane's default too, said here so the listing agrees with what
+  was asked.
   """
   @spec publish(Path.t(), String.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
   def publish(path, visibility, opts \\ []) do
@@ -155,6 +192,9 @@ defmodule Troupe.Client.Artifacts do
           "files" => [%{"path" => name, "bytes" => Base.encode64(content)}]
         }
         |> then(&if(opts[:session_id], do: Map.put(&1, "session_id", opts[:session_id]), else: &1))
+        |> then(
+          &if(owner = owner_of(visibility, opts[:owner]), do: Map.put(&1, "owner", owner), else: &1)
+        )
         |> Map.put("command_id", RPC.command_id())
         |> then(&call("artifact.publish", &1))
 
@@ -162,6 +202,11 @@ defmodule Troupe.Client.Artifacts do
         {:error, "#{path}: #{:file.format_error(reason)}"}
     end
   end
+
+  # Whose a publication is: as asked; for a team, the team's where nothing was asked.
+  defp owner_of(_visibility, owner) when owner in ["me", "team"], do: owner
+  defp owner_of("team:" <> _, nil), do: "team"
+  defp owner_of(_visibility, _owner), do: nil
 
   @doc "A file's kind, by its name: a page, a Markdown document or a file."
   @spec kind(String.t()) :: String.t()

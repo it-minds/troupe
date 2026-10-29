@@ -626,6 +626,8 @@ defmodule Troupe.UI.TUI.Model do
           name: d.name,
           preview: d.preview,
           delegation: d[:delegation],
+          # An agent's publication (`publish_artifact`), for the person to say whom it is for.
+          publication: d[:publication],
           rule: d[:rule]
         })
         |> update_agent(path, fn a ->
@@ -2155,7 +2157,7 @@ defmodule Troupe.UI.TUI.Model do
       end
 
     streaming = if agent.streaming == "", do: [], else: [frame(streaming_lines(agent.streaming))]
-    pending = pending_blocks(w, agent_path, selection, gate, view.once_only)
+    pending = pending_blocks(w, agent_path, selection, gate, view)
 
     activity =
       case pending == [] && curtain_segments(w, agent_path, tick, now) do
@@ -2900,9 +2902,10 @@ defmodule Troupe.UI.TUI.Model do
   # A laptop's session steered from here through the plane (`once_only`) is answered once:
   # allowing a tool for the rest of the session is the laptop's person's to give, at the
   # laptop, so neither the key nor the words offer it.
-  defp pending_blocks(%{pending: []}, _path, _selection, _gate, _once_only), do: []
+  defp pending_blocks(%{pending: []}, _path, _selection, _gate, _view), do: []
 
-  defp pending_blocks(w, path, selection, gate, once_only) do
+  defp pending_blocks(w, path, selection, gate, view) do
+    once_only = view.once_only
     keys = if once_only, do: "y allow once / n deny", else: "y allow / n deny / a allow for session"
 
     [
@@ -2913,6 +2916,11 @@ defmodule Troupe.UI.TUI.Model do
           # A delegation a person asked to see first (root Decision 850, TUI Decision 157).
           %{kind: :approval, delegation: %{} = _delegation} ->
             gate_lines(item, who, gate, once_only)
+
+          # An agent's publication: whom it is for is the person's to say, from what this
+          # terminal knows of their teams and profiles (`view.audience`).
+          %{kind: :approval, publication: %{} = _publication} ->
+            publish_lines(item, who, gate, Map.get(view, :audience), once_only)
 
           %{kind: :approval, name: name, preview: preview} = item ->
             [
@@ -3129,6 +3137,177 @@ defmodule Troupe.UI.TUI.Model do
       {:system,
        "deny: type a word back for the agent that delegated, or nothing, then Enter · Esc back"}
     ]
+
+  ## The publication gate
+
+  @doc """
+  Whom an agent's publication can be for, as `{visibility, owner, words}`: only the person,
+  everyone at the organisation, each of their teams twice (the team's, and their own), and
+  each profile they are granted, from `audience` (`%{teams, profiles, organisation}`, what
+  `artifact.list` says of them; nil where nothing was learnt). What the agent proposed is
+  among them even where this terminal does not know the team, so it can be chosen. A new
+  version of an artifact (`id` set) offers no ownership, each team once with `owner` nil:
+  whose an artifact is does not change with a version, and the plane refuses a version
+  that says.
+  """
+  @spec publish_choices(map() | nil, map()) :: [{String.t(), String.t() | nil, String.t()}]
+  def publish_choices(audience, publication) do
+    audience = audience || %{}
+    org = Map.get(audience, :organisation)
+    new? = publication["id"] == nil
+    me = if new?, do: "me"
+
+    known =
+      [
+        {"private", me, "only you"},
+        {"organisation", me,
+         if(is_binary(org) and org != "", do: "everyone at #{org}", else: "the organisation")}
+      ] ++
+        Enum.flat_map(List.wrap(Map.get(audience, :teams)), &team_choices(&1, new?)) ++
+        Enum.map(List.wrap(Map.get(audience, :profiles)), &{"profile:#{&1}", me, "profile #{&1}"})
+
+    case publication["visibility"] do
+      nil ->
+        known
+
+      visibility ->
+        if Enum.any?(known, &(elem(&1, 0) == visibility)),
+          do: known,
+          else: known ++ proposed_choices(visibility, new?)
+    end
+  end
+
+  defp team_choices(team, true),
+    do: [
+      {"team:#{team}", "team", "team #{team}, owned by the team"},
+      {"team:#{team}", "me", "team #{team}, owned by you"}
+    ]
+
+  defp team_choices(team, false), do: [{"team:#{team}", nil, "team #{team}"}]
+
+  defp proposed_choices("team:" <> team, new?), do: team_choices(team, new?)
+
+  defp proposed_choices("profile:" <> profile, new?),
+    do: [{"profile:#{profile}", if(new?, do: "me"), "profile #{profile}"}]
+
+  defp proposed_choices(other, new?), do: [{other, if(new?, do: "me"), other}]
+
+  @doc """
+  The person's draft of an answer to the publication the gate shows: the choices and the
+  one picked (`choice`, an index; nil until one is, and from the start where the agent
+  named nobody), the agent's proposal picked first. A draft for another call is a fresh one.
+  """
+  @spec publish_draft(map() | nil, map(), map() | nil) :: map()
+  def publish_draft(%{call_id: id, choices: _} = draft, %{call_id: id}, _audience), do: draft
+
+  def publish_draft(_draft, item, audience) do
+    publication = item.publication
+    choices = publish_choices(audience, publication)
+
+    choice =
+      case publication["visibility"] do
+        nil ->
+          nil
+
+        visibility ->
+          owner = proposed_owner(publication)
+          Enum.find_index(choices, fn {v, o, _words} -> v == visibility and o == owner end)
+      end
+
+    %{call_id: item.call_id, choices: choices, choice: choice, step: nil}
+  end
+
+  # Whose the agent proposed it be: as it said; a team's where it said nothing of a team's;
+  # nothing for a new version, whose owner is settled.
+  defp proposed_owner(%{"id" => id}) when is_binary(id), do: nil
+
+  defp proposed_owner(publication),
+    do: publication["owner"] || default_owner(publication["visibility"])
+
+  # A team's publication is the team's unless the agent, or the person, says otherwise.
+  defp default_owner("team:" <> _), do: "team"
+  defp default_owner(_visibility), do: "me"
+
+  @doc """
+  What `approval.respond` carries for a publication besides its word, beside it as a
+  delegation's `agent` and `brief` go: the `visibility` picked and, for a new artifact,
+  its `owner`; nil while none is, which is not an answer.
+  """
+  @spec publish_answer(map()) :: map() | nil
+  def publish_answer(%{choice: n, choices: choices}) when is_integer(n) do
+    case Enum.at(choices, n) do
+      {visibility, nil, _words} -> %{"visibility" => visibility}
+      {visibility, owner, _words} -> %{"visibility" => visibility, "owner" => owner}
+      nil -> nil
+    end
+  end
+
+  def publish_answer(_draft), do: nil
+
+  @doc "One line saying what the publication is: its title, kind, files, and the artifact it is a new version of."
+  @spec publication_words(map()) :: String.t()
+  def publication_words(publication) do
+    files =
+      case publication["files"] do
+        1 -> "1 file"
+        n when is_integer(n) -> "#{n} files"
+        _ -> "files"
+      end
+
+    version =
+      if is_binary(publication["id"]), do: ", a new version of #{publication["id"]}", else: ""
+
+    "“#{one_line(publication["title"] || "untitled")}” (#{kind_words(publication["kind"])}, #{files}#{version})"
+  end
+
+  defp kind_words("html"), do: "a page"
+  defp kind_words("markdown"), do: "a document"
+  defp kind_words(_file), do: "a file"
+
+  @doc "Whom the agent proposed a publication for, in the chooser's words; or that it named nobody."
+  @spec proposal_words(map()) :: String.t()
+  def proposal_words(%{"visibility" => nil}), do: "the agent named nobody: say whom it is for"
+
+  def proposal_words(publication) do
+    visibility = publication["visibility"]
+    owner = proposed_owner(publication)
+
+    words =
+      publish_choices(nil, publication)
+      |> Enum.find_value(fn {v, o, words} -> if v == visibility and o == owner, do: words end)
+
+    "proposed for " <> (words || visibility)
+  end
+
+  # The publication before it goes anywhere: what it is, whom the agent proposed it for, its
+  # note, then the choices numbered with the one picked marked, and what the keys do now.
+  defp publish_lines(item, who, draft, audience, once_only) do
+    publication = item.publication
+    draft = publish_draft(draft, item, audience)
+    always = if once_only or publication["visibility"] == nil, do: "", else: " · a always"
+
+    choices =
+      draft.choices
+      |> Enum.with_index(1)
+      |> Enum.map(fn {{_v, _o, words}, n} ->
+        if n - 1 == draft.choice,
+          do: {:diff_add, "  ▸ #{n}. #{words}"},
+          else: {:body, "    #{n}. #{words}"}
+      end)
+
+    [
+      {:blank, ""},
+      {:pending,
+       "#{who}PUBLISH #{publication_words(publication)}: whom is it for? " <>
+         "(a digit picks · y publish · n deny#{always})"},
+      {:system, "  " <> proposal_words(publication)}
+    ] ++ note_lines(publication) ++ choices
+  end
+
+  defp note_lines(%{"note" => note}) when is_binary(note) and note != "",
+    do: [{:system, "  note: " <> one_line(note)}]
+
+  defp note_lines(_publication), do: []
 
   defp keys_label(item),
     do: Enum.map_join(item.keys, "/", &if(&1 == item.default, do: String.upcase(&1), else: &1))

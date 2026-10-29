@@ -3,7 +3,7 @@
 // ones too, since taking one down is theirs; a team admin sees the artifacts of the teams
 // they administer (`team:<name>`) and no other.
 //
-// A row is a title, a kind, who it is for, whose it is, its team and its size, never what
+// A row is a title, a kind, who it is for, whose it is (a team's, where a team owns it), its team and its size, never what
 // it holds, and nothing here opens one: that is the person's own Artifacts, where an
 // administrator who may see one opens it as anybody does. A takedown deletes every version
 // and stops every link without asking its owner, so it is typed by the artifact's id.
@@ -17,9 +17,10 @@ import { AuditNote, Empty, Loaded, Preview, bytes, useChange, when } from "./bit
 
 const KIND: Record<string, string> = { html: "HTML page", markdown: "Markdown", file: "File" };
 
+/** Whose it is: the team that owns it, with who first published it, or the person. */
 function ownerWords(a: AdminArtifact): string {
-  if (!a.owner) return "nobody now (its owner was removed)";
-  return a.owner.display_name && a.owner.display_name !== a.owner.subject ? `${a.owner.display_name} (${a.owner.subject})` : a.owner.subject;
+  const person = !a.owner ? "nobody now (its owner was removed)" : a.owner.display_name && a.owner.display_name !== a.owner.subject ? `${a.owner.display_name} (${a.owner.subject})` : a.owner.subject;
+  return a.owner_team ? `the ${a.owner_team} team, published by ${person}` : person;
 }
 
 export function PublishedArtifacts(): JSX.Element {

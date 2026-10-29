@@ -21,7 +21,9 @@ defmodule Troupe.Gateway.Artifacts do
 
   alias Troupe.Gateway.{LocalOnly, Memory, Plane}
 
-  @keys ~w(title kind visibility files id note session_id agent)
+  # `owner`, `me` or `team`, is whose a new team publication is; the plane makes it the
+  # team's unless told `me`.
+  @keys ~w(title kind visibility owner files id note session_id agent)
 
   # What one call carries inline at most, in base64: under the plane's door with room for the
   # rest of the request.
@@ -32,7 +34,8 @@ defmodule Troupe.Gateway.Artifacts do
   of them can publish now: when this daemon is signed in to a plane.
   """
   @spec install() :: :ok
-  def install, do: Troupe.Artifacts.install(&__MODULE__.publish/2, ready: &__MODULE__.signed_in?/1)
+  def install,
+    do: Troupe.Artifacts.install(&__MODULE__.publish/2, ready: &__MODULE__.signed_in?/1)
 
   @doc "Whether a session here can publish now: this daemon is signed in to a plane."
   @spec signed_in?(String.t() | nil) :: boolean()
@@ -72,7 +75,11 @@ defmodule Troupe.Gateway.Artifacts do
   def put(params) do
     with url when is_binary(url) <- Plane.url(),
          true <- Plane.linked?(),
-         {:ok, params} <- carried(Map.take(params, @keys), &Plane.call("artifact.upload.begin", %{"files" => &1})),
+         {:ok, params} <-
+           carried(
+             params |> Map.take(@keys) |> own_only_new(),
+             &Plane.call("artifact.upload.begin", %{"files" => &1})
+           ),
          {:ok, artifact} <- Plane.call("artifact.publish", params) do
       {:ok, Map.put(artifact, "plane_url", url)}
     else
@@ -81,6 +88,17 @@ defmodule Troupe.Gateway.Artifacts do
       _signed_out -> {:error, :signed_out}
     end
   end
+
+  @doc """
+  `params` with `owner` only on a new publish: whose an artifact is does not change with a
+  version, and the plane refuses an `owner` on a republish (`artifact.transfer` moves one),
+  so one said there is dropped.
+  """
+  @spec own_only_new(map()) :: map()
+  def own_only_new(%{"id" => id} = params) when is_binary(id) and id != "",
+    do: Map.delete(params, "owner")
+
+  def own_only_new(params), do: params
 
   @doc "The person's own artifacts on the linked plane, and the gallery's address."
   @spec list(map()) :: {:ok, map()} | {:error, :signed_out | term()}
@@ -111,7 +129,10 @@ defmodule Troupe.Gateway.Artifacts do
     "artifact.rollback" => ~w(id version),
     "artifact.pin" => ~w(id version),
     # Who may open it, moved by its owner (or its title): a put over a version, no files sent.
-    "artifact.put" => ~w(id base visibility title note)
+    "artifact.put" => ~w(id base visibility title note),
+    # Whose it is: handed to a team the person is in, or taken back (`to: "me"`) by an admin
+    # of that team or a platform admin; the plane decides, as for every method here.
+    "artifact.transfer" => ~w(id to)
   }
 
   @doc "The methods `forward/2` sends to the plane."
@@ -141,7 +162,8 @@ defmodule Troupe.Gateway.Artifacts do
   the object store first and the publish naming the handle. A daemon begins with the plane's
   `artifact.upload.begin`, a pod with `session.artifact.upload.begin` over its control link.
   """
-  @spec carried(map(), ([map()] -> {:ok, map()} | {:error, term()})) :: {:ok, map()} | {:error, term()}
+  @spec carried(map(), ([map()] -> {:ok, map()} | {:error, term()})) ::
+          {:ok, map()} | {:error, term()}
   def carried(%{"files" => files} = params, begin) when is_list(files) do
     inline = files |> Enum.map(&byte_size(&1["bytes"] || "")) |> Enum.sum()
 
@@ -175,14 +197,20 @@ defmodule Troupe.Gateway.Artifacts do
 
   defp announce(file) do
     %{"path" => file["path"], "size" => byte_size(file["body"])}
-    |> then(&if(file["content_type"], do: Map.put(&1, "content_type", file["content_type"]), else: &1))
+    |> then(
+      &if(file["content_type"], do: Map.put(&1, "content_type", file["content_type"]), else: &1)
+    )
   end
 
   defp send_all(files, urls) do
     by_path = Map.new(urls, &{&1["path"], &1["url"]})
 
     Enum.reduce_while(files, :ok, fn file, :ok ->
-      case Req.put(by_path[file["path"]] || "", body: file["body"], retry: false, decode_body: false) do
+      case Req.put(by_path[file["path"]] || "",
+             body: file["body"],
+             retry: false,
+             decode_body: false
+           ) do
         {:ok, %{status: status}} when status in 200..299 ->
           {:cont, :ok}
 
@@ -190,7 +218,8 @@ defmodule Troupe.Gateway.Artifacts do
           {:halt, {:error, "the object store refused #{file["path"]} (HTTP #{status})"}}
 
         {:error, reason} ->
-          {:halt, {:error, "#{file["path"]} could not be sent to the object store (#{inspect(reason)})"}}
+          {:halt,
+           {:error, "#{file["path"]} could not be sent to the object store (#{inspect(reason)})"}}
       end
     end)
   end

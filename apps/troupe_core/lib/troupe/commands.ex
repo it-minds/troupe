@@ -461,8 +461,8 @@ defmodule Troupe.Commands do
         example: "/save report.md ~/Documents"
       ),
       entry("publish", "workspace", "Publish a page, a document or a file for others to read",
-        usage: "/publish <path> [private | organisation | team:<name> | profile:<name>]",
-        args: [arg("path", true, "file"), arg("visibility", false, "text")],
+        usage: "/publish <path> [private | organisation | team:<name> [me | team] | profile:<name>]",
+        args: [arg("path", true, "file"), arg("visibility", false, "text"), arg("owner", false, "text")],
         availability: "plane",
         detail:
           "The file is read on this machine and published on your Troupe plane as an artifact, " <>
@@ -470,8 +470,9 @@ defmodule Troupe.Commands do
             "document (.md) or any other file. Yours alone unless you say otherwise, until you " <>
             "share a link to it; or the whole organisation reads it, a team you are in, or the " <>
             "people a profile is granted to, served from a host that can reach nothing of yours. " <>
-            "A team you are not in is refused, naming yours. A page with stylesheets or scripts " <>
-            "of its own is an agent's to publish, with publish_artifact.",
+            "A team you are not in is refused, naming yours. One published to a team is the " <>
+            "team's, every member its owner, unless the third word is me. A page with stylesheets " <>
+            "or scripts of its own is an agent's to publish, with publish_artifact.",
         example: "/publish report.html team:core"
       ),
       entry("artifacts", "workspace", "What is published for you, by who can see it",

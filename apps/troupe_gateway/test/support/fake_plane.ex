@@ -96,7 +96,8 @@ defmodule Troupe.Gateway.FakePlane do
   869). Never set, the plane does not answer it, and a daemon keeps the copy it had.
   """
   @spec client_defaults_with(pid(), map()) :: :ok
-  def client_defaults_with(state, answer), do: Agent.update(state, &Map.put(&1, :client_defaults, answer))
+  def client_defaults_with(state, answer),
+    do: Agent.update(state, &Map.put(&1, :client_defaults, answer))
 
   @doc """
   What `me.client_versions` answers from now on: each component's policy and where
@@ -122,7 +123,8 @@ defmodule Troupe.Gateway.FakePlane do
   under the day's heading, as the plane does. Answers what it holds with `own/1`.
   """
   @spec keep_own(pid()) :: :ok
-  def keep_own(state), do: Agent.update(state, &Map.put(&1, :own, %{"version" => 0, "text" => ""}))
+  def keep_own(state),
+    do: Agent.update(state, &Map.put(&1, :own, %{"version" => 0, "text" => ""}))
 
   @doc """
   Read a memory document as `text` alone from now on, as a plane from before entries does:
@@ -453,12 +455,32 @@ defmodule Troupe.Gateway.FakePlane do
     names = Agent.get(state, &Map.get(&1, :teams))
     teams = if is_list(names) and params["entries"] == true, do: %{"teams" => names}, else: %{}
     roles = Agent.get(state, &Map.get(&1, :roles))
-    teams = if is_map(roles) and params["entries"] == true, do: Map.put(teams, "roles", roles), else: teams
+
+    teams =
+      if is_map(roles) and params["entries"] == true,
+        do: Map.put(teams, "roles", roles),
+        else: teams
 
     case Agent.get(state, &{Map.get(&1, :memory), Map.get(&1, :own)}) do
-      {nil, nil} -> {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory"}}
-      {documents, nil} -> {:ok, signed(state, "memory", Map.merge(%{"documents" => documents}, teams))}
-      {documents, own} -> {:ok, signed(state, "memory", Map.merge(%{"documents" => List.wrap(documents) ++ own_documents(own), "user" => own_json(own)}, teams))}
+      {nil, nil} ->
+        {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory"}}
+
+      {documents, nil} ->
+        {:ok, signed(state, "memory", Map.merge(%{"documents" => documents}, teams))}
+
+      {documents, own} ->
+        {:ok,
+         signed(
+           state,
+           "memory",
+           Map.merge(
+             %{
+               "documents" => List.wrap(documents) ++ own_documents(own),
+               "user" => own_json(own)
+             },
+             teams
+           )
+         )}
     end
   end
 
@@ -466,7 +488,8 @@ defmodule Troupe.Gateway.FakePlane do
     Agent.get_and_update(state, fn held ->
       case own_put(Map.get(held, :own), params, Map.get(held, :text_only, false)) do
         {:ok, now, entry} ->
-          {{:ok, %{"changed" => true, "entry" => entry, "user" => own_json(now)}}, Map.put(held, :own, now)}
+          {{:ok, %{"changed" => true, "entry" => entry, "user" => own_json(now)}},
+           Map.put(held, :own, now)}
 
         refused ->
           {refused, held}
@@ -483,7 +506,12 @@ defmodule Troupe.Gateway.FakePlane do
         grant = "rg_fake." <> Integer.to_string(System.unique_integer([:positive]))
 
         Agent.update(state, fn s ->
-          Map.update(s, :grants, %{grant => params["device"]}, &Map.put(&1, grant, params["device"]))
+          Map.update(
+            s,
+            :grants,
+            %{grant => params["device"]},
+            &Map.put(&1, grant, params["device"])
+          )
         end)
 
         {:ok, %{"grant" => grant, "device" => params["device"]}}
@@ -586,9 +614,12 @@ defmodule Troupe.Gateway.FakePlane do
   # named, and an address on an artifacts host; a page with no title is refused, as the
   # plane refuses it, and one for a team the person is not in is forbidden.
   defp dispatch(_state, "artifact.publish", %{"visibility" => "team:research"}),
-    do: {:rpc_error, -32_004, "forbidden", %{"reason" => "you are not in team research", "teams" => ["engineering"]}}
+    do:
+      {:rpc_error, -32_004, "forbidden",
+       %{"reason" => "you are not in team research", "teams" => ["engineering"]}}
 
-  defp dispatch(_state, "artifact.publish", %{"title" => title} = params) when is_binary(title) and title != "" do
+  defp dispatch(_state, "artifact.publish", %{"title" => title} = params)
+       when is_binary(title) and title != "" do
     id = params["id"] || "art-fakefakefakefake"
 
     {:ok,
@@ -664,7 +695,9 @@ defmodule Troupe.Gateway.FakePlane do
        "visibility" => "organisation",
        "version" => 1,
        "mine" => true,
-       "versions" => [%{"n" => 1, "note" => nil, "url" => "https://artifacts.example.test/a/#{id}/v1/"}],
+       "versions" => [
+         %{"n" => 1, "note" => nil, "url" => "https://artifacts.example.test/a/#{id}/v1/"}
+       ],
        "shares" => []
      }}
   end
@@ -674,7 +707,14 @@ defmodule Troupe.Gateway.FakePlane do
 
   # One text file of a version, as the plane reads it for a client.
   defp dispatch(_state, "artifact.read", %{"id" => id} = params),
-    do: {:ok, %{"id" => id, "version" => params["version"] || 1, "path" => params["path"] || "index.md", "text" => "# Weekly"}}
+    do:
+      {:ok,
+       %{
+         "id" => id,
+         "version" => params["version"] || 1,
+         "path" => params["path"] || "index.md",
+         "text" => "# Weekly"
+       }}
 
   defp dispatch(_state, "artifact.share", %{"id" => _id, "role" => role}) do
     {:ok,
@@ -688,12 +728,43 @@ defmodule Troupe.Gateway.FakePlane do
   defp dispatch(_state, "artifact.unshare", %{"id" => id} = params),
     do: {:ok, Map.merge(%{"revoked" => true, "id" => id}, Map.take(params, ["share", "person"]))}
 
-  defp dispatch(_state, method, %{"id" => id} = params) when method in ["artifact.rollback", "artifact.pin"],
-    do: {:ok, %{"id" => id, "version" => 2, "pinned" => if(method == "artifact.pin", do: params["version"])}}
+  defp dispatch(_state, method, %{"id" => id} = params)
+       when method in ["artifact.rollback", "artifact.pin"],
+       do:
+         {:ok,
+          %{
+            "id" => id,
+            "version" => 2,
+            "pinned" => if(method == "artifact.pin", do: params["version"])
+          }}
 
   # A put over a base with no files: a version carrying them all, with what it moved.
   defp dispatch(_state, "artifact.put", %{"id" => id, "base" => base} = params),
-    do: {:ok, %{"id" => id, "version" => base + 1, "visibility" => params["visibility"] || "organisation"}}
+    do:
+      {:ok,
+       %{
+         "id" => id,
+         "version" => base + 1,
+         "visibility" => params["visibility"] || "organisation"
+       }}
+
+  # Whose it is, moved: the artifact as it now stands, a team's or the person's own.
+  defp dispatch(_state, "artifact.transfer", %{"id" => id, "to" => to}) do
+    team =
+      case to do
+        "team:" <> team -> team
+        _me -> nil
+      end
+
+    {:ok,
+     %{
+       "id" => id,
+       "version" => 1,
+       "owner_team" => team,
+       "may_transfer" => true,
+       "role" => "owner"
+     }}
+  end
 
   # The person's own memory's history and a rollback, over what `keep_own/1` set.
   defp dispatch(state, "me.memory.history", params) do
@@ -719,10 +790,13 @@ defmodule Troupe.Gateway.FakePlane do
       case Map.get(held, :own) do
         %{"version" => ^version} ->
           now = %{"version" => version + 1, "text" => "rolled back to v#{to}"}
-          {{:ok, %{"changed" => true, "entry" => nil, "user" => own_json(now)}}, Map.put(held, :own, now)}
+
+          {{:ok, %{"changed" => true, "entry" => nil, "user" => own_json(now)}},
+           Map.put(held, :own, now)}
 
         own ->
-          {{:rpc_error, -32_006, "conflict", %{"reason" => "saved since", "version" => own && own["version"]}}, held}
+          {{:rpc_error, -32_006, "conflict",
+            %{"reason" => "saved since", "version" => own && own["version"]}}, held}
       end
     end)
   end
@@ -737,37 +811,70 @@ defmodule Troupe.Gateway.FakePlane do
            "team" => "sales",
            "profile" => params["profile"],
            "organisation" => %{"name" => "Example"},
-           "levels" => [%{"scope" => "organisation", "name" => nil, "version" => 1, "entries" => 1}],
+           "levels" => [
+             %{"scope" => "organisation", "name" => nil, "version" => 1, "entries" => 1}
+           ],
            "entries" => [
              %{
                "topic" => "Tone",
                "body" => "Short answers.",
                "level" => %{"scope" => "user", "name" => nil},
-               "replaces" => [%{"level" => %{"scope" => "organisation", "name" => nil}, "topic" => "Tone", "body" => "Plain English."}]
+               "replaces" => [
+                 %{
+                   "level" => %{"scope" => "organisation", "name" => nil},
+                   "topic" => "Tone",
+                   "body" => "Plain English."
+                 }
+               ]
              }
            ]
          }}
 
       team ->
-        {:rpc_error, -32_005, "not_found", %{"team" => team, "reason" => "you are in no team called #{team}"}}
+        {:rpc_error, -32_005, "not_found",
+         %{"team" => team, "reason" => "you are in no team called #{team}"}}
     end
   end
 
   # A level of the organisation's memory: the team `sales`'s is this person's to change, the
   # organisation's is not, as the plane decides it.
-  defp dispatch(state, "admin.memory." <> _ = method, %{"scope" => "team", "name" => "sales"} = params) do
+  defp dispatch(
+         state,
+         "admin.memory." <> _ = method,
+         %{"scope" => "team", "name" => "sales"} = params
+       ) do
     text_only = Agent.get(state, &Map.get(&1, :text_only, false))
 
     case method do
-      _put_or_preview when text_only and is_map_key(params, "entries") -> text_missing()
-      "admin.memory.get" -> {:ok, %{"scope" => "team", "name" => "sales", "version" => 1, "text" => "## Prices\n\nFramework.", "entries" => [%{"topic" => "Prices", "body" => "Framework."}]}}
-      "admin.memory.preview" -> {:ok, %{"version" => 1, "bytes" => 10, "diff" => [], "entries" => params["entries"]}}
-      "admin.memory.put" -> {:ok, %{"document" => %{"version" => 2}, "changes" => %{"version" => %{"from" => 1, "to" => 2}}}}
+      _put_or_preview when text_only and is_map_key(params, "entries") ->
+        text_missing()
+
+      "admin.memory.get" ->
+        {:ok,
+         %{
+           "scope" => "team",
+           "name" => "sales",
+           "version" => 1,
+           "text" => "## Prices\n\nFramework.",
+           "entries" => [%{"topic" => "Prices", "body" => "Framework."}]
+         }}
+
+      "admin.memory.preview" ->
+        {:ok, %{"version" => 1, "bytes" => 10, "diff" => [], "entries" => params["entries"]}}
+
+      "admin.memory.put" ->
+        {:ok,
+         %{
+           "document" => %{"version" => 2},
+           "changes" => %{"version" => %{"from" => 1, "to" => 2}}
+         }}
     end
   end
 
   defp dispatch(_state, "admin.memory." <> _, params),
-    do: {:rpc_error, -32_004, "forbidden", %{"reason" => "only a platform admin changes #{params["scope"]}'s memory"}}
+    do:
+      {:rpc_error, -32_004, "forbidden",
+       %{"reason" => "only a platform admin changes #{params["scope"]}'s memory"}}
 
   defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
 
@@ -821,13 +928,19 @@ defmodule Troupe.Gateway.FakePlane do
   defp own_put(own, %{"entries" => _} = _params, true) when own != nil, do: text_missing()
   defp own_put(own, params, _text_only), do: own_put(own, params)
 
-  defp own_put(nil, _params), do: {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory.put"}}
+  defp own_put(nil, _params),
+    do: {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory.put"}}
 
   # Under the topic's heading, at the end where it is the last one, as a new section where
   # it is not: enough of the plane's rule for a test to see the topic land.
   defp own_put(own, %{"append" => entry} = params) do
     heading = "## " <> (params["topic"] || "Notes")
-    last = own["text"] |> String.split("\n") |> Enum.filter(&String.starts_with?(&1, "## ")) |> List.last()
+
+    last =
+      own["text"]
+      |> String.split("\n")
+      |> Enum.filter(&String.starts_with?(&1, "## "))
+      |> List.last()
 
     text =
       cond do
@@ -848,17 +961,32 @@ defmodule Troupe.Gateway.FakePlane do
     do: {:ok, %{"version" => version + 1, "text" => text}, nil}
 
   defp own_put(own, %{"text" => _text}) do
-    reason = "your memory was saved somewhere else since; version #{own["version"]} is in force now"
+    reason =
+      "your memory was saved somewhere else since; version #{own["version"]} is in force now"
+
     {:rpc_error, -32_602, "conflict", %{"reason" => reason, "version" => own["version"]}}
   end
 
   defp own_documents(%{"text" => ""}), do: []
 
   defp own_documents(own),
-    do: [%{"scope" => "user", "name" => nil, "version" => own["version"], "hash" => "sha256:own-#{own["version"]}", "text" => own["text"]}]
+    do: [
+      %{
+        "scope" => "user",
+        "name" => nil,
+        "version" => own["version"],
+        "hash" => "sha256:own-#{own["version"]}",
+        "text" => own["text"]
+      }
+    ]
 
   defp own_json(own),
-    do: Map.merge(own, %{"bytes" => byte_size(own["text"]), "limit" => 8192, "changed_by" => "ada@example.test"})
+    do:
+      Map.merge(own, %{
+        "bytes" => byte_size(own["text"]),
+        "limit" => 8192,
+        "changed_by" => "ada@example.test"
+      })
 
   defp put_signed(answer, nil), do: answer
   defp put_signed(answer, signed), do: Map.put(answer, "signed", signed)
@@ -883,7 +1011,8 @@ defmodule Troupe.Gateway.FakePlane do
 
   @doc "Forget a grant, as a plane whose administrators took it back."
   @spec revoke(pid(), String.t()) :: :ok
-  def revoke(state, grant), do: Agent.update(state, &Map.update(&1, :grants, %{}, fn g -> Map.delete(g, grant) end))
+  def revoke(state, grant),
+    do: Agent.update(state, &Map.update(&1, :grants, %{}, fn g -> Map.delete(g, grant) end))
 
   @doc false
   @spec redeem(pid(), String.t() | nil) :: {:ok, map()} | :error
@@ -892,7 +1021,11 @@ defmodule Troupe.Gateway.FakePlane do
       {:ok, device} ->
         token = "laptop:" <> Integer.to_string(System.unique_integer([:positive]))
         exp = System.system_time(:second) + Agent.get(state, &Map.get(&1, :laptop_lifetime, 900))
-        Agent.update(state, fn s -> %{s | calls: [{"/auth/relay", %{"grant" => grant}} | s.calls]} end)
+
+        Agent.update(state, fn s ->
+          %{s | calls: [{"/auth/relay", %{"grant" => grant}} | s.calls]}
+        end)
+
         {:ok, %{"token" => token, "expires_at" => exp, "device" => device}}
 
       :error ->
@@ -912,7 +1045,8 @@ defmodule Troupe.Gateway.FakePlane do
 
   @doc "How long, in seconds, a laptop token minted from now on lives."
   @spec laptop_lifetime(pid(), pos_integer()) :: :ok
-  def laptop_lifetime(state, seconds), do: Agent.update(state, &Map.put(&1, :laptop_lifetime, seconds))
+  def laptop_lifetime(state, seconds),
+    do: Agent.update(state, &Map.put(&1, :laptop_lifetime, seconds))
 
   # The device is recorded once every version is gone, and told again otherwise, as the
   # plane's is (Decision 804); this one deletes within the call.
@@ -924,7 +1058,10 @@ defmodule Troupe.Gateway.FakePlane do
       %{public: public, secret: secret} ->
         document = PlaneSignature.document(kind, answer)
         signature = :crypto.sign(:eddsa, :none, document, [secret, :ed25519])
-        envelope = PlaneSignature.envelope(document, signature, PlaneSignature.fingerprint(public))
+
+        envelope =
+          PlaneSignature.envelope(document, signature, PlaneSignature.fingerprint(public))
+
         Map.put(answer, "signed", envelope)
     end
   end

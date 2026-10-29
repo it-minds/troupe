@@ -43,6 +43,11 @@ export interface PlaneOptions {
   /** The teams every person signed in here is in, which `team:<name>` artifacts are for. */
   teams?: string[];
   /**
+   * The teams of particular people, by subject, where membership differs between them: a
+   * person named here is in these teams and no other, and anybody else in `teams`.
+   */
+  memberOf?: Record<string, string[]>;
+  /**
    * What `me.client_defaults` answers. Defaults to an organisation that routes through
    * its own gateway; `{ configured: false }` is one whose administrator has set nothing.
    */
@@ -121,6 +126,8 @@ export interface FakeArtifact {
   kind: "html" | "markdown" | "file";
   visibility: string;
   owner: { subject: string; display_name: string | null };
+  /** The team that owns it, every member its owner; null for a person's own. */
+  owner_team?: string | null;
   origin: { session_id: string | null; profile: string | null; agent: string | null; where: "pod" | "laptop" | "person" };
   team: string | null;
   created_at: string;
@@ -140,6 +147,7 @@ export function artifact(id: string, owner: { subject: string; display_name: str
     kind: "html",
     visibility: "organisation",
     owner,
+    owner_team: null,
     origin: { session_id: null, profile: null, agent: null, where: "person" },
     team: null,
     created_at: "2026-10-25T10:00:00Z",
@@ -590,27 +598,53 @@ export class FakePlane {
     return this.roleOf(a, subject) !== null;
   }
 
+  /** The teams this person is in: their own where named (`join` names more), else the ones everybody here is in. */
+  teamsOf(subject: string): string[] {
+    return this.opts.memberOf?.[subject] ?? this.opts.teams ?? ["core"];
+  }
+
+  /** Put a person in these teams and no other from now on, as the identity provider's groups would. */
+  join(subject: string, teams: string[]): void {
+    this.opts.memberOf = { ...(this.opts.memberOf ?? {}), [subject]: teams };
+  }
+
+  /** Every team there is here, for a platform admin to give an artifact to. */
+  private allTeams(): string[] {
+    return [...new Set([...(this.opts.teams ?? ["core"]), ...Object.values(this.opts.memberOf ?? {}).flat(), ...(this.opts.admin?.teams.keys() ?? [])])];
+  }
+
+  /** Whether this person administers a team: its admin, or a platform admin. */
+  private teamAdmin(team: string, subject: string): boolean {
+    return this.opts.admin?.role(subject) === "platform_admin" || (this.opts.admin?.teams.get(team)?.admins.includes(subject) ?? false);
+  }
+
+  /** Whether this person owns it: the person who published it, or any member or administrator of the team that owns it. */
+  private owns(a: FakeArtifact, subject: string): boolean {
+    if (a.owner_team) return this.teamsOf(subject).includes(a.owner_team) || (this.opts.admin?.teams.get(a.owner_team)?.admins.includes(subject) ?? false);
+    return a.owner.subject === subject;
+  }
+
   /** What this person is to it: its owner, an edit link's holder, or one who may view it. */
   private roleOf(a: FakeArtifact, subject: string): "owner" | "edit" | "view" | null {
-    if (a.owner.subject === subject) return "owner";
+    if (this.owns(a, subject)) return "owner";
     const linked = this.linkRole(a, subject);
     if (linked === "edit") return "edit";
-    if (linked === "view" || this.forThem(a)) return "view";
+    if (linked === "view" || this.forThem(a, subject)) return "view";
     return null;
   }
 
-  /** Whether it is for somebody every person here is: the organisation, a profile, a team. A private one is for nobody. */
-  private forThem(a: FakeArtifact): boolean {
+  /** Whether it is for somebody this person is: the organisation, a profile, a team of theirs. A private one is for nobody. */
+  private forThem(a: FakeArtifact, subject: string): boolean {
     if (a.visibility === "organisation") return true;
     if (a.visibility.startsWith("profile:")) return (this.opts.profiles ?? ["dev", "ux"]).includes(a.visibility.slice("profile:".length));
-    if (a.visibility.startsWith("team:")) return (this.opts.teams ?? ["core"]).includes(a.visibility.slice("team:".length));
+    if (a.visibility.startsWith("team:")) return this.teamsOf(subject).includes(a.visibility.slice("team:".length));
     return false;
   }
 
   /** The gallery tab it is under for this person, as the plane says it. */
   private scopeOf(a: FakeArtifact, subject: string): string {
-    if (a.owner.subject === subject) return a.visibility === "private" ? "private" : "mine";
-    if (this.forThem(a)) return a.visibility;
+    if (this.owns(a, subject)) return a.visibility === "private" ? "private" : "mine";
+    if (this.forThem(a, subject)) return a.visibility;
     return this.linkRole(a, subject) !== null ? "shared" : a.visibility;
   }
 
@@ -618,6 +652,91 @@ export class FakePlane {
   private administers(a: FakeArtifact, subject: string): boolean {
     if (!a.visibility.startsWith("team:")) return false;
     return this.opts.admin?.teams.get(a.visibility.slice("team:".length))?.admins.includes(subject) ?? false;
+  }
+
+  /**
+   * Whether this person may move it between a person and a team: the owning person or a
+   * platform admin gives one a person owns to a team; an admin of the owning team or a
+   * platform admin takes a team's back.
+   */
+  private mayTransfer(a: FakeArtifact, subject: string): boolean {
+    if (a.owner_team) return this.teamAdmin(a.owner_team, subject);
+    return a.owner.subject === subject || this.opts.admin?.role(subject) === "platform_admin";
+  }
+
+  /**
+   * `artifact.transfer`: to a team the owning person is in (a platform admin to any team), or
+   * back to the caller from the team that owns it, by its admin or a platform admin.
+   */
+  private transfer(a: FakeArtifact, subject: string, name: string, to: unknown): { result: unknown } | { error: { code: number; message: string; data?: unknown } } {
+    const forbidden = (reason: string) => ({ error: { code: -32004, message: "forbidden", data: { id: a.id, reason } } });
+    if (to === "me") {
+      if (!a.owner_team) return { error: { code: -32602, message: "invalid_params", data: { id: a.id, reason: "this artifact is not a team's, so there is nothing to take back" } } };
+      if (!this.teamAdmin(a.owner_team, subject)) return forbidden(`only an administrator of team ${a.owner_team}, or a platform administrator, takes an artifact back from the team`);
+      a.owner = { subject, display_name: name };
+      a.owner_team = null;
+      return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
+    }
+    if (typeof to !== "string" || !to.startsWith("team:") || to.length === "team:".length) {
+      return { error: { code: -32602, message: "invalid_params", data: { reason: "to must be me or team:<name>" } } };
+    }
+    const team = to.slice("team:".length);
+    const admin = this.opts.admin?.role(subject) === "platform_admin";
+    if (a.owner_team) return forbidden(`team ${a.owner_team} owns it; an admin of that team takes it back first`);
+    if (!admin && a.owner.subject !== subject) return forbidden("only its owner gives an artifact to a team");
+    if (!admin && !this.teamsOf(subject).includes(team)) return forbidden(`you are not in team ${team}, so you cannot give it to that team; you are in ${this.teamsOf(subject).map((t) => `team:${t}`).join(", ")}`);
+    if (admin && !this.allTeams().includes(team)) return { error: { code: -32005, message: "not_found", data: { team } } };
+    a.owner_team = team;
+    a.team = team;
+    return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
+  }
+
+  /**
+   * `artifact.publish`: a new artifact, private unless said, the team's when published for
+   * a team unless the publisher says `me`; with `id` the next version of one of theirs.
+   */
+  private publishNew(subject: string, name: string, params: Record<string, unknown>): { result: unknown } | { error: { code: number; message: string; data?: unknown } } {
+    const visibility = typeof params["visibility"] === "string" ? params["visibility"] : "private";
+    const files = ((params["files"] as Array<{ path: string; bytes: string; content_type?: string }> | undefined) ?? []).map((f) => ({ path: f.path, content_type: f.content_type ?? (f.path.endsWith(".md") ? "text/markdown" : "text/html"), content: Buffer.from(f.bytes, "base64").toString("utf8") }));
+    if (typeof params["id"] === "string") {
+      const a = this.artifacts.get(params["id"]);
+      if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+      if (!["owner", "edit"].includes(this.roleOf(a, subject) ?? "")) return { error: { code: -32004, message: "forbidden" } };
+      if (params["owner"] !== undefined && params["owner"] !== null) return { error: { code: -32602, message: "invalid_params", data: { reason: "whose an artifact is does not change with a version; artifact.transfer moves it" } } };
+      this.publish(a, subject, files, { note: typeof params["note"] === "string" ? params["note"] : null });
+      return { result: this.artifactJson(a, subject) };
+    }
+    const admin = this.opts.admin?.role(subject) === "platform_admin";
+    const forTeam = visibility.startsWith("team:") ? visibility.slice("team:".length) : null;
+    if (forTeam !== null && !admin && !this.teamsOf(subject).includes(forTeam)) {
+      return { error: { code: -32004, message: "forbidden", data: { reason: `you are not in team ${forTeam}, so you cannot publish to its people; you are in ${this.teamsOf(subject).map((t) => `team:${t}`).join(", ")}`, teams: this.teamsOf(subject) } } };
+    }
+    const owner = params["owner"] ?? (forTeam !== null ? "team" : "me");
+    let ownerTeam: string | null = null;
+    if (owner === "team") {
+      if (forTeam === null) return { error: { code: -32602, message: "invalid_params", data: { reason: "owner team names the team it is published for, and this is published for no team; name one as owner: team:<name>" } } };
+      ownerTeam = forTeam;
+    } else if (typeof owner === "string" && owner.startsWith("team:")) {
+      ownerTeam = owner.slice("team:".length);
+      if (!admin && !this.teamsOf(subject).includes(ownerTeam)) return { error: { code: -32004, message: "forbidden", data: { reason: `you are not in team ${ownerTeam}, so it cannot be that team's` } } };
+    } else if (owner !== "me") {
+      return { error: { code: -32602, message: "invalid_params", data: { reason: "owner must be me, team or team:<name>" } } };
+    }
+    const id = `art-${++this.counter}`;
+    const a: FakeArtifact = {
+      id,
+      title: String(params["title"] ?? id),
+      kind: params["kind"] === "markdown" || params["kind"] === "file" ? params["kind"] : "html",
+      visibility,
+      owner: { subject, display_name: name },
+      owner_team: ownerTeam,
+      origin: { session_id: typeof params["session_id"] === "string" ? params["session_id"] : null, profile: null, agent: null, where: "person" },
+      team: ownerTeam ?? forTeam ?? this.teamsOf(subject)[0] ?? null,
+      created_at: "2026-10-25T10:00:00Z",
+      versions: [{ n: 1, files, published_by: { subject, display_name: name }, published_at: "2026-10-25T10:00:00Z", note: typeof params["note"] === "string" ? params["note"] : null }],
+    };
+    this.artifacts.set(id, a);
+    return { result: this.artifactJson(a, subject) };
   }
 
   /** The administrators' table of artifacts and its takedown (`admin.artifacts.list`, `admin.artifact.takedown`). */
@@ -629,7 +748,7 @@ export class FakePlane {
       const rows = [...this.artifacts.values()].filter(mayTake).map((a) => {
         const latest = a.versions[a.versions.length - 1]!;
         const bytes = latest.files.reduce((n, f) => n + new TextEncoder().encode(f.content).length, 0);
-        return { id: a.id, title: a.title, kind: a.kind, visibility: a.visibility, owner: a.owner, team: a.team, origin: a.origin, version: latest.n, bytes, total_bytes: bytes, created_at: a.created_at, published_at: latest.published_at, may_take_down: true };
+        return { id: a.id, title: a.title, kind: a.kind, visibility: a.visibility, owner: a.owner, owner_team: a.owner_team ?? null, team: a.team, origin: a.origin, version: latest.n, bytes, total_bytes: bytes, created_at: a.created_at, published_at: latest.published_at, may_take_down: true };
       });
       return { result: rows.sort((x, y) => y.published_at.localeCompare(x.published_at)) };
     }
@@ -682,7 +801,9 @@ export class FakePlane {
     const { versions: _versions, ...shown } = a;
     return {
       ...shown,
-      mine: a.owner.subject === subject,
+      owner_team: a.owner_team ?? null,
+      mine: this.owns(a, subject),
+      may_transfer: this.mayTransfer(a, subject),
       scope: this.scopeOf(a, subject),
       role: this.roleOf(a, subject),
       version: latest.n,
@@ -694,7 +815,7 @@ export class FakePlane {
       bytes: latest.files.reduce((n, f) => n + new TextEncoder().encode(f.content).length, 0),
       url: `https://artifacts.example.test/a/${a.id}/`,
       published_at: latest.published_at,
-      may_delete: a.owner.subject === subject || this.opts.admin?.role(subject) === "platform_admin" || this.administers(a, subject),
+      may_delete: this.owns(a, subject) || this.opts.admin?.role(subject) === "platform_admin" || this.administers(a, subject),
     };
   }
 
@@ -1094,30 +1215,42 @@ export class FakePlane {
       }
 
       // Artifacts, as any signed-in person asks for them: the list, one with its versions, a
-      // one-time link to open it on the artifacts host, and its deletion by its owner or a
-      // platform admin's takedown. No answer carries what a file holds.
+      // one-time link to open it on the artifacts host, a publish, a transfer between a
+      // person and a team, and its deletion by its owner or a platform admin's takedown. An
+      // owner is the person who published it or any member of the team that owns it. No
+      // answer carries what a file holds.
       case "artifact.list": {
         const enabled = this.opts.artifactsEnabled ?? true;
         const rows = enabled
           ? [...this.artifacts.values()]
               .filter((a) => this.mayRead(a, subject))
-              .filter((a) => params["mine"] !== true || a.owner.subject === subject)
-              .filter((a) => params["shared"] !== true || (a.owner.subject !== subject && this.linkRole(a, subject) !== null))
-              .filter((a) => params["teams"] !== true || (a.visibility.startsWith("team:") && (this.forThem(a) || this.opts.admin?.role(subject) === "platform_admin")))
+              .filter((a) => params["mine"] !== true || this.owns(a, subject))
+              .filter((a) => params["shared"] !== true || (!this.owns(a, subject) && this.linkRole(a, subject) !== null))
+              .filter((a) => params["teams"] !== true || (a.visibility.startsWith("team:") && (this.forThem(a, subject) || this.opts.admin?.role(subject) === "platform_admin")))
               .filter((a) => typeof params["visibility"] !== "string" || a.visibility === params["visibility"])
               .map((a) => this.artifactJson(a, subject))
               .sort((x, y) => String(y["published_at"]).localeCompare(String(x["published_at"])))
           : [];
         return {
-          result: { enabled, profiles, teams: this.opts.teams ?? ["core"], publish_organisation: this.opts.publishOrganisation ?? "everyone", public_links: this.opts.publicLinks ?? false, gallery_url: `${this.url}/console#/artifacts`, artifacts: rows },
+          result: { enabled, profiles, teams: this.teamsOf(subject), publish_organisation: this.opts.publishOrganisation ?? "everyone", public_links: this.opts.publicLinks ?? false, gallery_url: `${this.url}/console#/artifacts`, artifacts: rows },
         };
       }
 
       case "artifact.get": {
         const a = this.artifacts.get(String(params["id"] ?? ""));
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
-        const shares = a.owner.subject === subject ? { shares: [...this.shares.values()].filter((sh) => sh.artifact === a.id).map((sh) => this.shareJson(sh)), public_links_allowed: this.opts.publicLinks ?? false } : {};
+        const shares = this.owns(a, subject) ? { shares: [...this.shares.values()].filter((sh) => sh.artifact === a.id).map((sh) => this.shareJson(sh)), public_links_allowed: this.opts.publicLinks ?? false } : {};
         return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a), ...shares } };
+      }
+
+      case "artifact.publish":
+        return this.publishNew(subject, name, params);
+
+      // Between a person and a team: given to a team of the owner's, or taken back by the team's admin.
+      case "artifact.transfer": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        return this.transfer(a, subject, name, params["to"]);
       }
 
       // A version, a rollback and a pin; one text file read for an editor and an edit's
@@ -1126,6 +1259,7 @@ export class FakePlane {
         const a = this.artifacts.get(String(params["id"] ?? ""));
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
         if (!["owner", "edit"].includes(this.roleOf(a, subject) ?? "")) return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner, or somebody the owner gave an edit link, publishes a new version of an artifact" } } };
+        if (params["owner"] !== undefined && params["owner"] !== null) return { error: { code: -32602, message: "invalid_params", data: { reason: "whose an artifact is does not change with a version; artifact.transfer moves it" } } };
         const newest = a.versions[a.versions.length - 1]!;
         const base = typeof params["base"] === "number" ? params["base"] : null;
         if (base !== null && base !== newest.n) return { error: { code: -32009, message: "conflict", data: { reason: `version ${newest.n} was published after version ${base}, which this edit was made on; open version ${newest.n} and make the edit again` } } };
@@ -1148,7 +1282,7 @@ export class FakePlane {
       case "artifact.pin": {
         const a = this.artifacts.get(String(params["id"] ?? ""));
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
-        if (a.owner.subject !== subject) return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner pins a version of an artifact" } } };
+        if (!this.owns(a, subject)) return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner pins a version of an artifact" } } };
         a.pinned = typeof params["version"] === "number" ? params["version"] : null;
         return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
       }
@@ -1175,7 +1309,7 @@ export class FakePlane {
       case "artifact.share": {
         const a = this.artifacts.get(String(params["id"] ?? ""));
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
-        if (a.owner.subject !== subject) return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner shares an artifact" } } };
+        if (!this.owns(a, subject)) return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner shares an artifact" } } };
         const pub = params["public"] === true;
         if (pub && !this.opts.publicLinks) return { error: { code: -32004, message: "forbidden", data: { reason: "public links are switched off on this plane; an administrator turns them on with artifacts_public_links under Policy and settings" } } };
         if (pub && typeof params["expires"] !== "string") return { error: { code: -32602, message: "invalid_params", data: { reason: "a public link needs an expiry (expires), at most 90 days away" } } };
@@ -1199,7 +1333,7 @@ export class FakePlane {
 
       case "artifact.unshare": {
         const a = this.artifacts.get(String(params["id"] ?? ""));
-        if (!a || a.owner.subject !== subject) return { error: { code: -32004, message: "forbidden" } };
+        if (!a || !this.owns(a, subject)) return { error: { code: -32004, message: "forbidden" } };
         if (typeof params["share"] === "string") {
           const sh = this.shares.get(params["share"]);
           if (!sh || sh.artifact !== a.id) return { error: { code: -32005, message: "not_found" } };
@@ -1221,7 +1355,7 @@ export class FakePlane {
 
       case "artifact.public": {
         const a = this.artifacts.get(String(params["id"] ?? ""));
-        if (!a || a.owner.subject !== subject) return { error: { code: -32004, message: "forbidden" } };
+        if (!a || !this.owns(a, subject)) return { error: { code: -32004, message: "forbidden" } };
         a.public_links = params["enabled"] === true;
         return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
       }
@@ -1239,7 +1373,7 @@ export class FakePlane {
       case "artifact.delete": {
         const a = this.artifacts.get(String(params["id"] ?? ""));
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
-        if (a.owner.subject !== subject && this.opts.admin?.role(subject) !== "platform_admin" && !this.administers(a, subject)) {
+        if (!this.owns(a, subject) && this.opts.admin?.role(subject) !== "platform_admin" && !this.administers(a, subject)) {
           return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner or a platform admin deletes an artifact" } } };
         }
         this.artifacts.delete(a.id);

@@ -259,9 +259,10 @@ export class SessionView {
 
   /**
    * `approval.respond`. First response wins; a later one is answered with a resolution.
-   * A delegation's answer may carry the agent it goes to instead, the parts of the brief
-   * the person edited, and a word back with a denial (troupe Decision 850); a wrong one is
-   * refused with why, and the request waits on.
+   * A delegation's answer may carry the agent it goes to instead and the parts of the
+   * brief the person edited; a publication's carries `visibility` and `owner`, whom it is
+   * for and whose it is; either may carry a word back with a denial. Each is a key beside
+   * `decision`. A wrong one is refused with why, and the request waits on.
    */
   async respondApproval(callId: string, decision: "allow" | "deny" | "allow_session", answer: GateAnswer = {}): Promise<void> {
     await this.conn.call("approval.respond", {

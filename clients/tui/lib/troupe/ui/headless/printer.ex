@@ -397,6 +397,39 @@ defmodule Troupe.UI.Headless.Printer do
     state
   end
 
+  # An agent's publication asks whom it is for, which headless mode has nobody to say: the
+  # line says what it is and whom the agent proposed it for, and it is denied like any
+  # other request. One the agent named nobody for, `--auto-approve` could not answer either.
+  defp print(
+         %{type: :approval_requested, agent_path: p, data: %{publication: %{} = publication} = d},
+         state
+       ) do
+    files = publication["files"]
+
+    files =
+      if is_integer(files),
+        do: "#{files} #{if files == 1, do: "file", else: "files"}",
+        else: "files"
+
+    proposal =
+      case publication["visibility"] do
+        nil ->
+          "the agent named nobody, so --auto-approve would not have answered it either"
+
+        visibility ->
+          "proposed for #{visibility}#{owned_by(publication)}; headless mode denies it (use --auto-approve)"
+      end
+
+    line(
+      state,
+      p,
+      "publish_artifact asks whom “#{publication["title"] || "untitled"}” (#{publication["kind"] || "file"}, #{files}) is for: #{proposal}"
+    )
+
+    Client.approve(state.session_id, d.call_id, :deny)
+    state
+  end
+
   # One a per-tool rule asks about (root #658) says so: `--auto-approve` does not answer it.
   defp print(
          %{type: :approval_requested, agent_path: p, data: %{rule: %{"rule" => rule}} = d},
@@ -504,6 +537,14 @@ defmodule Troupe.UI.Headless.Printer do
   # Every line carries the prefix, not just the first: a tool result is routinely
   # several lines long (a command's output leads with its exit code), and a bare
   # continuation line is unattributable when several branches print at once.
+  # Whose a publication would be: nothing for a new version, whose owner is settled.
+  defp owned_by(%{"id" => id}) when is_binary(id), do: ""
+
+  defp owned_by(%{"visibility" => "team:" <> _, "owner" => owner}) when owner != "me",
+    do: ", owned by the team"
+
+  defp owned_by(_publication), do: ", owned by the person"
+
   defp line(state, path, text) do
     text
     |> to_string()

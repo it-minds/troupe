@@ -6,10 +6,17 @@ defmodule Troupe.CLI.Artifacts do
       troupe artifacts list [--scope mine|organisation|team:<name>|profile:<name>|shared|private] [--json]
       troupe artifacts open ID [--version N]      the browser, through the plane's one-time address
       troupe artifacts show ID [--version N]      its text on standard output (a Markdown one's source)
-      troupe artifacts publish FILE [--to SCOPE] [--title TITLE]   as /publish; Only you when no --to
+      troupe artifacts publish FILE [--to SCOPE] [--title TITLE] [--owner me|team]
+                                                  as /publish; Only you when no --to; a team's
+                                                  when --to names a team, unless --owner me
+      troupe artifacts transfer ID --to team:NAME|me   hand one of yours to a team you are in,
+                                                  or take a team's back (its admins', or a
+                                                  platform admin's)
       troupe artifacts link ID                    a view link to one of yours
 
-  Under Local only nothing is asked, and it says so.
+  A row says whose each artifact is (`team finance`, `you`, or who published it) and
+  `transferable` where the person may hand it on. Under Local only nothing is asked, and it
+  says so.
   """
 
   alias Troupe.CLI.LocalOnly
@@ -17,7 +24,14 @@ defmodule Troupe.CLI.Artifacts do
 
   @type say :: (String.t() -> any())
 
-  @switches [scope: :string, json: :boolean, version: :integer, to: :string, title: :string]
+  @switches [
+    scope: :string,
+    json: :boolean,
+    version: :integer,
+    to: :string,
+    title: :string,
+    owner: :string
+  ]
 
   @doc "What `troupe artifacts …` asks, from the words after `artifacts`."
   @spec parse([String.t()]) :: {:ok, map()} | {:error, String.t()}
@@ -34,14 +48,18 @@ defmodule Troupe.CLI.Artifacts do
   defp verb(["list"], opts), do: only(opts, [:scope, :json], %{verb: :list})
   defp verb(["open", id], opts), do: only(opts, [:version], %{verb: :open, id: id})
   defp verb(["show", id], opts), do: only(opts, [:version], %{verb: :show, id: id})
-  defp verb(["publish", file], opts), do: only(opts, [:to, :title], %{verb: :publish, file: file})
+
+  defp verb(["publish", file], opts),
+    do: only(opts, [:to, :title, :owner], %{verb: :publish, file: file})
+
+  defp verb(["transfer", id], opts), do: only(opts, [:to], %{verb: :transfer, id: id})
   defp verb(["link", id], opts), do: only(opts, [], %{verb: :link, id: id})
   defp verb(_words, _opts), do: {:error, "usage: " <> usage()}
 
   defp only(opts, allowed, asked) do
     case Map.keys(opts) -- allowed do
       [] ->
-        {:ok, Map.merge(asked, opts)}
+        checked(Map.merge(asked, opts))
 
       extra ->
         {:error,
@@ -49,9 +67,33 @@ defmodule Troupe.CLI.Artifacts do
     end
   end
 
+  # What the words must agree on before anything is asked: whose a publication is, and
+  # where a transfer goes.
+  defp checked(%{verb: :publish, owner: owner}) when owner not in ["me", "team"],
+    do: {:error, "--owner is me or team, not #{inspect(owner)}"}
+
+  defp checked(%{verb: :publish, owner: "team"} = asked) do
+    case asked[:to] do
+      "team:" <> name when name != "" -> {:ok, asked}
+      _other -> {:error, "--owner team needs --to team:<name>: only a team publication is a team's"}
+    end
+  end
+
+  defp checked(%{verb: :transfer} = asked) do
+    case asked[:to] do
+      "team:" <> name when name != "" -> {:ok, asked}
+      "me" -> {:ok, asked}
+      nil -> {:error, "troupe artifacts transfer needs --to team:<name> or --to me"}
+      other -> {:error, "--to is team:<name> or me, not #{inspect(other)}"}
+    end
+  end
+
+  defp checked(asked), do: {:ok, asked}
+
   defp usage,
     do:
-      "troupe artifacts list [--scope SCOPE] [--json] | open ID | show ID [--version N] | publish FILE [--to SCOPE] [--title T] | link ID"
+      "troupe artifacts list [--scope SCOPE] [--json] | open ID | show ID [--version N] | " <>
+        "publish FILE [--to SCOPE] [--title T] [--owner me|team] | transfer ID --to team:NAME|me | link ID"
 
   @doc "Run it; returns the exit status."
   @spec run(map(), say()) :: non_neg_integer()
@@ -104,17 +146,31 @@ defmodule Troupe.CLI.Artifacts do
   end
 
   defp verb_run(%{verb: :publish, file: file} = asked, say) do
-    case Artifacts.publish(file, asked[:to] || "private", title: asked[:title]) do
+    case Artifacts.publish(file, asked[:to] || "private",
+           title: asked[:title],
+           owner: asked[:owner]
+         ) do
       {:ok, artifact} ->
         say.(
           "published #{file} as #{artifact["id"]} version #{artifact["version"]}" <>
-            if(artifact["url"], do: ": #{artifact["url"]}", else: "")
+            whose(artifact) <> if(artifact["url"], do: ": #{artifact["url"]}", else: "")
         )
 
         0
 
       {:error, reason} ->
         refuse(say, "#{file} not published: #{reason}")
+    end
+  end
+
+  defp verb_run(%{verb: :transfer, id: id, to: to}, say) do
+    case Artifacts.transfer(id, to) do
+      {:ok, artifact} ->
+        say.("#{artifact["id"] || id} is now #{owner_words(artifact)}")
+        0
+
+      {:error, reason} ->
+        refuse(say, "#{id} not transferred: #{reason}")
     end
   end
 
@@ -144,6 +200,13 @@ defmodule Troupe.CLI.Artifacts do
     1
   end
 
+  # A team's publication says so on the spot, since the default made it the team's.
+  defp whose(%{"owner_team" => team}) when is_binary(team), do: " (team #{team}'s)"
+  defp whose(_artifact), do: ""
+
+  defp owner_words(%{"owner_team" => team}) when is_binary(team), do: "team #{team}'s"
+  defp owner_words(_artifact), do: "yours"
+
   @doc "The list as lines: a heading per audience, then a row per artifact, newest first."
   @spec listing([map()], String.t() | nil) :: [String.t()]
   def listing([], _organisation), do: ["nothing published for you here yet"]
@@ -171,9 +234,10 @@ defmodule Troupe.CLI.Artifacts do
         row["title"],
         row["kind"],
         "v#{row["current"] || row["version"]}",
-        by(row),
+        Artifacts.owner(row),
         Artifacts.ago(row["published_at"]),
-        row["id"]
+        row["id"],
+        if(row["may_transfer"], do: "transferable")
       ]
       |> Enum.reject(&(&1 in [nil, ""]))
 
@@ -182,13 +246,10 @@ defmodule Troupe.CLI.Artifacts do
 
   defp json_row(row) do
     row
-    |> Map.take(~w(id title kind version current visibility scope published_at url mine new))
+    |> Map.take(
+      ~w(id title kind version current visibility scope published_at url mine new owner_team may_transfer)
+    )
     |> Map.put("audience", to_string(Artifacts.audience_of(row)))
-    |> Map.put("by", by(row))
+    |> Map.put("by", Artifacts.owner(row))
   end
-
-  defp by(%{"mine" => true}), do: "you"
-  defp by(%{"owner" => %{"display_name" => name}}) when is_binary(name), do: name
-  defp by(%{"owner" => %{"subject" => subject}}) when is_binary(subject), do: subject
-  defp by(_row), do: "someone"
 end

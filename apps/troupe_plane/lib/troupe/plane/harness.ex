@@ -176,6 +176,8 @@ defmodule Troupe.Plane.Harness do
     "artifact.open" => :observe,
     "artifact.publish" => :control,
     "artifact.delete" => :control,
+    # Whose it is: given to a team, or taken back from one.
+    "artifact.transfer" => :control,
     # A new version, a rollback and a pin; one text file read for the console's editor and
     # an edit previewed on the artifacts host; an upload handle for a version too large for
     # one call; links that honour sign-in, spent by the person the plane signs in through
@@ -564,9 +566,13 @@ defmodule Troupe.Plane.Harness do
   defp handle("artifact.delete", %{"id" => id}, %{user: user} = context),
     do: Artifacts.delete(id, user, platform_admin?: admin?(context))
 
+  defp handle("artifact.transfer", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.transfer(id, params["to"], user, platform_admin?: admin?(context))
+
   defp handle(method, _params, _context)
        when method in ~w(artifact.get artifact.open artifact.delete artifact.rollback artifact.pin
-                         artifact.read artifact.preview artifact.share artifact.unshare),
+                         artifact.read artifact.preview artifact.share artifact.unshare
+                         artifact.transfer),
     do: {:error, Error.new(:invalid_params, %{reason: "#{method} takes an artifact's id"})}
 
   # Which version each of the caller's own clients last ran, and how that stands against

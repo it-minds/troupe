@@ -13,7 +13,14 @@ agent picker, your artifacts and your memory. Installing it, the command lines a
   dismisses a finished one, keeping its worktree. Tab chooses the agent the window runs,
   each with its instruction beside it (`/plan` → Tab, `build` → "go" is plan-then-build;
   the title says which agent runs).
-- **Answering.** `y`/`n`/`a` answer an approval (allow / deny / allow for the session).
+- **Answering.** `y`/`n`/`a` answer an approval (allow / deny / allow for the session). An
+  agent's `publish_artifact` asks whom the artifact is for: the window shows the publication
+  (its title, kind and files, whom the agent proposed it for and whose) over the audiences
+  you have — only you, everyone at the organisation, each of your teams as the team's and as
+  yours, each profile — the proposal picked; a digit picks another, `y` publishes it for that
+  one, `n` denies. An agent that named nobody has nothing picked until you do, and `a` is not
+  offered for it. A new version of an artifact offers no ownership: whose it is does not
+  change with a version.
   Typing and Enter sends input or answers a question; when a question offers options a
   digit picks one (with `multiple`, digits tick and untick and Enter sends the ticked
   set). Alt-Enter or Ctrl-J puts a newline in the box instead of sending.
@@ -226,17 +233,21 @@ and say where they are changed. What a definition holds, and the built-ins, are 
 and its sign-in ([artifacts](artifacts.md)), in the desktop app's words: **All**, **◉
 Everyone at** your organisation, **◎ Your teams** (a team's and a profile's), **◐ Shared
 with you** (through a link) and **○ Only you**, ←/→ or `1`–`5`. A row is its title,
-kind, version, who published it and when, and `new` on a version you have not opened on
+kind, version, whose it is (`team finance` for a team's, which every member of the team
+owns; `you`; or who published it) and when, and `new` on a version you have not opened on
 this machine. `/` filters; Enter opens it in your browser through the plane's one-time
 address, never in the terminal; `v` lists its versions to open one; `m` reads a Markdown
 one here, drawn as a reply is, in a frame, which past 500 lines is cut and offers the
 browser; `p` publishes a file of the workspace as `/publish` does, for you alone where
-you name nobody; `l` copies a view link to one of yours, through the terminal (OSC 52)
+you name nobody, and a team's where you name a team unless `me` follows (`/publish
+report.html team:core me`); `l` copies a view link to one of yours, through the terminal (OSC 52)
 where it takes it, else the clipboard, and shows it either way; `r` reads the list again;
 Esc goes back. Under Local only the page says the plane is not asked, and asks it nothing.
 HQ has a line for what is shared with you, and one per invitation into a session.
-`troupe artifacts list`, `open`, `show`, `publish` and `link` are the same from the
-command line ([the command reference](cli-reference.md)).
+`troupe artifacts list`, `open`, `show`, `publish` (`--owner me` keeps a team publication
+yours), `transfer` (hand one of yours to a team you are in with `--to team:<name>`, or take a
+team's back with `--to me` as its administrator; the listing says `transferable` where you
+may) and `link` are the same from the command line ([the command reference](cli-reference.md)).
 
 ## Memory
 

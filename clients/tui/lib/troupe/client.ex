@@ -305,7 +305,8 @@ defmodule Troupe.Client do
   @doc """
   Answers an approval. `answer` is what a delegation's answer carries besides its word
   (root Decision 850): `"agent"` to send it to another subagent, `"brief"` with the parts
-  the person edited, `"reason"` with a denial.
+  the person edited, `"reason"` with a denial; and what a publication's carries, whom it
+  is for and whose (`"visibility"`, `"owner"`).
   """
   @spec approve(session_id(), String.t(), decision(), map()) :: :ok | {:error, term()}
   def approve(sid, call_id, decision, answer \\ %{}),
@@ -699,6 +700,14 @@ defmodule Troupe.Client do
   @doc "A view link to one of the person's own artifacts."
   @spec artifact_link(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def artifact_link(id), do: Artifacts.link(id)
+
+  @doc "Whose an artifact's row is, in words: `team finance`, `you`, or who published it."
+  @spec artifact_owner(map()) :: String.t()
+  def artifact_owner(row), do: Artifacts.owner(row)
+
+  @doc "Hand an artifact to a team (`team:<name>`) or take it back (`me`): `Troupe.Client.Artifacts.transfer/2`."
+  @spec transfer_artifact(String.t(), String.t()) :: {:ok, map()} | {:error, String.t()}
+  def transfer_artifact(id, to), do: Artifacts.transfer(id, to)
 
   @doc "Publish one file of this machine (`/publish`): `Troupe.Client.Artifacts.publish/3`."
   @spec publish_file(Path.t(), String.t(), keyword()) :: {:ok, map()} | {:error, String.t()}

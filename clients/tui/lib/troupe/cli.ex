@@ -227,11 +227,20 @@ defmodule Troupe.CLI do
     {"troupe artifacts open|show ID [--version N]",
      "open one in the browser, through the plane's one-time address; show prints its text (a Markdown one's source)",
      [["artifacts", "open", "art-1"], ["artifacts", "show", "art-1", "--version", "2"]]},
-    {"troupe artifacts publish FILE [--to SCOPE] [--title TITLE]",
-     "publish a file of this machine, as /publish does: for SCOPE (organisation, team:NAME, profile:NAME), only you without one",
+    {"troupe artifacts publish FILE [--to SCOPE] [--title TITLE] [--owner me|team]",
+     "publish a file of this machine, as /publish does: for SCOPE (organisation, team:NAME, profile:NAME), only you without one; " <>
+       "a team publication is the team's, every member its owner, unless --owner me",
      [
        ["artifacts", "publish", "report.md"],
-       ["artifacts", "publish", "report.md", "--to", "organisation", "--title", "Weekly"]
+       ["artifacts", "publish", "report.md", "--to", "organisation", "--title", "Weekly"],
+       ["artifacts", "publish", "report.md", "--to", "team:core", "--owner", "me"]
+     ]},
+    {"troupe artifacts transfer ID --to team:NAME|me",
+     "hand one of yours to a team you are in, or take a team's back (its admins, or a platform admin); " <>
+       "the listing says whose each is and transferable where you may",
+     [
+       ["artifacts", "transfer", "art-1", "--to", "team:core"],
+       ["artifacts", "transfer", "art-1", "--to", "me"]
      ]},
     {"troupe artifacts link ID", "a view link to one of your artifacts",
      [["artifacts", "link", "art-1"]]},

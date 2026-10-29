@@ -1184,13 +1184,45 @@ defmodule Troupe.FakeRemote do
         do: Enum.filter(state.artifacts, &(&1["scope"] == "shared")),
         else: state.artifacts
 
+    # Every row says whose it is and whether this person may hand it on, as the plane does:
+    # one the test gave no word on is the person's own, theirs to transfer.
+    rows =
+      Enum.map(rows, fn row ->
+        row
+        |> Map.put_new("owner_team", nil)
+        |> Map.put_new("may_transfer", row["mine"] == true)
+      end)
+
     {{:ok,
-      %{"enabled" => true, "profiles" => ["dev"], "organisation" => "Example", "artifacts" => rows}},
-     state}
+      %{
+        "enabled" => true,
+        "profiles" => ["dev"],
+        "teams" => Enum.map(state.teams, & &1["name"]),
+        "organisation" => "Example",
+        "artifacts" => rows
+      }}, state}
   end
 
+  # A new version says nothing of whose the artifact is: that is `artifact.transfer`'s.
+  defp dispatch(state, _kind, "artifact.publish", %{"id" => id, "owner" => owner}, _pid)
+       when is_binary(id) and not is_nil(owner) do
+    {{:error, -32_602, "invalid_params",
+      %{
+        "reason" =>
+          "whose an artifact is does not change with a version; artifact.transfer moves it"
+      }}, state}
+  end
+
+  # A publication is the person's, or a team's where it is for a team and `owner` does not
+  # say `me` (the plane's default), and then every member of the team owns it.
   defp dispatch(state, _kind, "artifact.publish", params, _pid) do
     id = "art-new#{length(state.artifacts)}"
+
+    owner_team =
+      case {params["visibility"], params["owner"]} do
+        {"team:" <> team, owner} when owner != "me" -> team
+        _ -> nil
+      end
 
     row = %{
       "id" => id,
@@ -1199,11 +1231,66 @@ defmodule Troupe.FakeRemote do
       "visibility" => params["visibility"],
       "scope" => if(params["visibility"] == "private", do: "private", else: "mine"),
       "version" => 1,
-      "mine" => true
+      "mine" => true,
+      "role" => "owner",
+      "owner_team" => owner_team,
+      "may_transfer" => true
     }
 
     {{:ok, Map.put(row, "url", "http://127.0.0.1:#{state.port}/a/#{id}/")},
      %{state | artifacts: [row | state.artifacts]}}
+  end
+
+  # Whose an artifact is, moved, answered as `artifact.get` answers it: the person's own
+  # to a team they are in; a team's back to them where they administer the team (the
+  # row's `may_transfer`, as the plane says it of a member) or administer the platform.
+  # The refusals are the plane's sentences.
+  defp dispatch(state, _kind, "artifact.transfer", %{"id" => id, "to" => to}, _pid) do
+    teams = Enum.map(state.teams, & &1["name"])
+    row = Enum.find(state.artifacts, &(&1["id"] == id))
+    refuse = fn code, name, reason -> {{:error, code, name, %{"reason" => reason}}, state} end
+
+    case {row, to} do
+      {nil, _to} ->
+        {{:error, -32_005, "not_found", %{"id" => id}}, state}
+
+      {%{"mine" => true, "owner_team" => team} = row, "me"} when is_binary(team) ->
+        if row["may_transfer"] == true do
+          moved = Map.merge(row, %{"owner_team" => nil, "may_transfer" => true})
+          {artifact(state, "artifact.get", moved, %{}), replace_artifact(state, moved)}
+        else
+          refuse.(
+            -32_004,
+            "forbidden",
+            "only an administrator of team #{team}, or a platform administrator, takes an artifact back from the team"
+          )
+        end
+
+      {%{"mine" => true}, "me"} ->
+        refuse.(
+          -32_602,
+          "invalid_params",
+          "this artifact is not a team's, so there is nothing to take back"
+        )
+
+      {%{"mine" => true} = row, "team:" <> team} ->
+        if team in teams do
+          moved = Map.merge(row, %{"owner_team" => team, "may_transfer" => true})
+          {artifact(state, "artifact.get", moved, %{}), replace_artifact(state, moved)}
+        else
+          refuse.(
+            -32_004,
+            "forbidden",
+            "you are not in team #{team}; yours are #{Enum.join(teams, ", ")}"
+          )
+        end
+
+      {_row, "team:" <> _team} ->
+        refuse.(-32_004, "forbidden", "only its owner gives an artifact to a team")
+
+      {_row, to} ->
+        refuse.(-32_602, "invalid_params", "to is me or team:<name>, not #{inspect(to)}")
+    end
   end
 
   defp dispatch(state, _kind, method, %{"id" => id} = params, _pid)
@@ -1451,6 +1538,12 @@ defmodule Troupe.FakeRemote do
   @doc "The memory documents the fake plane holds now."
   @spec memory(pid()) :: [map()]
   def memory(remote), do: GenServer.call(remote, :memory)
+
+  defp replace_artifact(state, moved),
+    do: %{
+      state
+      | artifacts: Enum.map(state.artifacts, &if(&1["id"] == moved["id"], do: moved, else: &1))
+    }
 
   @doc "Saves a level of the organisation's memory as another administrator would, so the next save over the old version conflicts."
   @spec save_level(pid(), String.t(), String.t() | nil, String.t()) :: :ok
