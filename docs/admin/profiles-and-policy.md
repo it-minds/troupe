@@ -50,6 +50,7 @@ gitops mode a manifest names its image, and a release reaches the workers with a
 | `repositoryOverridesBundle` | `true` lets a working copy's agents and skills replace the bundle's, and Troupe's built-in agents, of the same name ([a profile's options](profile-options.md#a-repositorys-agents-and-skills-on-a-pod)) |
 | `personalTools` | `allow` (the default) or `forbid`: whether a person may offer a session on these pods the tools of MCP servers they signed in to on their own machine ([a profile's options](profile-options.md#a-persons-own-tools-on-a-pod)) |
 | `permissions` | per-tool `deny`, `ask` and `allow` rules every session on these pods obeys ([a profile's options](profile-options.md#per-tool-rules-on-a-profile)) |
+| `agents` | which agents exist on these pods, built-ins included: `allow` and `deny` lists of names, a grant narrowing only what they leave ([a profile's options](profile-options.md#which-agents-a-profile-has)) |
 | `github.*` | what a session's token may do on GitHub beyond cloning (`permissions`, [github.md §5](github.md#5-let-a-profile-reach-github)) and how far the fix loop goes (`allowPublic`, `denyPaths`, `maxPushes`, `maxRuns`, `maxAttempts`, [github.md §9](github.md#9-how-far-a-run-may-go)) |
 | `mcpIdentities` | who the profile is at each MCP server its bundle calls with client credentials ([a profile's options](profile-options.md#calling-an-mcp-server-as-the-profile)). Yours to write in direct and gitops mode alike; nothing in it is secret |
 | `mcpServers` | MCP servers the profile adds to its bundle's (Decision 910). The resource's list, which its pods load, is its channel's bundle's with these added by name; one named like a bundle server replaces it only with `"override": true`. A publish to the channel composes the two again and keeps the profile's own. `admin.profile.get` answers the own ones in `spec`, and a put that sends back the resource's whole list has the bundle's dropped |
@@ -77,6 +78,8 @@ options](profile-options.md):
   `personalTools: forbid` refuses the tools a person offers from their own machine.
 - <a id="per-tool-rules-on-a-profile"></a>[Per-tool rules on a profile](profile-options.md#per-tool-rules-on-a-profile):
   `permissions`, the `deny`, `ask` and `allow` rules every session on the pods obeys.
+- <a id="which-agents-a-profile-has"></a>[Which agents a profile has](profile-options.md#which-agents-a-profile-has):
+  `agents`, the `allow` and `deny` lists of names that say which agents exist on the pods.
 
 ## 2. What the operator creates
 

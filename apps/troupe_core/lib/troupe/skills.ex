@@ -58,11 +58,14 @@ defmodule Troupe.Skills do
 
   @typedoc """
   What a session knows about its bundle: `%{version, hash, channel, dir, entitlements,
-  repository_overrides}`.
+  agent_rule, repository_overrides}`.
 
   `entitlements` is the set the plane resolved for this session's team, by name, or
   `nil` for no restriction — which is what a local session, a laptop and every grant
-  nobody has narrowed all send. `repository_overrides` is `true` where the profile lets
+  nobody has narrowed all send. `agent_rule` is the worker profile's word on which agents
+  exist on it (`allow`, `deny`), as the activation carried it, or `nil` where the profile
+  says nothing; it rides here for the reason the set does, so the one reader of the
+  bundle applies it. `repository_overrides` is `true` where the profile lets
   a repository's agents and skills replace the bundle's and the built-ins (Decision 826);
   anything else is those winning. A pod whose channel has nothing published is pinned to
   nothing: `version` and `dir` nil.
@@ -72,6 +75,7 @@ defmodule Troupe.Skills do
           optional(:hash) => String.t() | nil,
           optional(:channel) => String.t() | nil,
           optional(:entitlements) => map() | nil,
+          optional(:agent_rule) => map() | nil,
           optional(:repository_overrides) => boolean(),
           required(:dir) => Path.t() | nil
         }

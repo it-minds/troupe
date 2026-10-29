@@ -3380,7 +3380,17 @@ export class FakeAdmin {
       const allowed = rows.filter((r) => r.mode === "allow");
       return allowed.length === 0 || allowed.some((r) => r.name === agent);
     };
-    const subagents = found.filter((f) => fields(f.definition)?.mode === "subagent").map((f) => f.name);
+    // The profile's `spec.agents` rule, as the plane applies it: deny over allow, every mode.
+    const ruleOf = (spec: Record<string, unknown> | undefined): { allow?: string[]; deny: string[] } | null => {
+      const r = spec?.["agents"];
+      if (typeof r !== "object" || r === null) return null;
+      const list = (v: unknown): string[] | undefined => (Array.isArray(v) ? v.filter((n): n is string => typeof n === "string") : undefined);
+      const allow = list((r as Record<string, unknown>)["allow"]);
+      return { ...(allow ? { allow } : {}), deny: list((r as Record<string, unknown>)["deny"]) ?? [] };
+    };
+    const rule = ruleOf(p.spec);
+    const offered = (agent: string): boolean => !rule || (!rule.deny.includes(agent) && (!rule.allow || rule.allow.includes(agent)));
+    const subagents = found.filter((f) => fields(f.definition)?.mode === "subagent" && offered(f.name)).map((f) => f.name);
     return {
       profile: p.name,
       channel: chain.at(-1)?.[1] ?? null,
@@ -3399,10 +3409,13 @@ export class FakeAdmin {
           skills: read ? read.skills : null,
           permissions: read?.permissions ?? {},
           teams: teams.map((team) => ({ team, may: may(team, f.name) })),
+          offered: offered(f.name),
         };
       }),
       builtins: BUILTIN_AGENTS.map((b) => ({ name: b.name, mode: fields(b.text)?.mode === "subagent" ? "subagent" : "primary", description: fields(b.text)?.description || null, definition: b.text })),
       teams,
+      rule,
+      unmatched: rule ? [...(rule.allow ?? []), ...rule.deny].filter((n) => !found.some((f) => f.name === n) && !BUILTIN_AGENTS.some((b) => b.name === n)) : [],
     };
   }
 
@@ -3746,7 +3759,7 @@ export function exampleAdmin(): FakeAdmin {
             message: "the namespace has no troupe-plane-ca yet: the operator has read no CA from /etc/troupe/plane-control-ca/ca.crt",
           },
         ],
-        spec: { egress: { fqdns: ["mcp.example.com"] }, configBundleChannel: "stable", personalTools: "forbid" },
+        spec: { egress: { fqdns: ["mcp.example.com"] }, configBundleChannel: "stable", personalTools: "forbid", agents: { deny: ["build", "implementer"] } },
       },
       {
         name: "heavy",

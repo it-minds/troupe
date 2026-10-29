@@ -21,7 +21,7 @@ defmodule Troupe.Plane.Fleet.Profile do
 
   alias Troupe.Plane.Fleet.{Provisioner, SizeClass}
   alias Troupe.Plane.GitHub
-  alias Troupe.Protocol.{PermissionRule, ProviderTypes}
+  alias Troupe.Protocol.{AgentRule, PermissionRule, ProviderTypes}
 
   @primary_key {:name, :string, autogenerate: false}
   @derive {Phoenix.Param, key: :name}
@@ -174,10 +174,20 @@ defmodule Troupe.Plane.Fleet.Profile do
 
     overrides ++
       personal ++
-      github ++ llm_problems(Map.get(spec, "llm")) ++ rule_problems(Map.get(spec, "permissions"))
+      github ++
+      llm_problems(Map.get(spec, "llm")) ++
+      rule_problems(Map.get(spec, "permissions")) ++ agents_problems(Map.get(spec, "agents"))
   end
 
   defp spec_switches(:spec, _spec), do: []
+
+  # `agents` says which agents exist on the profile's pods, built-ins included: `allow`
+  # and `deny` lists of names, read by the plane's offering and by every pod. One the pods
+  # could not read, or that names an agent in both lists, is refused with the reader's
+  # sentence rather than saved and read one way here and another there. A name no bundle
+  # has today is kept: a bundle may gain it.
+  defp agents_problems(nil), do: []
+  defp agents_problems(rule), do: Enum.map(AgentRule.problems(rule), &{:spec, &1})
 
   # `permissions` are per-tool rules every session on the profile's pods obeys, read as a
   # person's config reads them: one the pods could not read would be a rule an

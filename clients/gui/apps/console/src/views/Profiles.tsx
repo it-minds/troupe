@@ -315,11 +315,26 @@ const READ_HERE = [
   "github.maxPushes",
   "github.maxRuns",
   "permissions",
+  "agents",
   "configBundleChannel",
   "orgMount",
   "repositoryOverridesBundle",
   "personalTools",
 ];
+
+/**
+ * The profile's rule on which agents exist on it (`spec.agents`: `allow`, `deny`), in words. Shown,
+ * not edited: the editor carries the field through a save as it was loaded, like every path it has
+ * no field for, and `admin.profile.agents` says what the rule does to each agent.
+ */
+export function agentsWords(rule: unknown): string {
+  if (!isPlain(rule)) return "every agent its bundle and Troupe give";
+  const names = (v: unknown): string[] => (Array.isArray(v) ? v.filter((n): n is string => typeof n === "string") : []);
+  const allow = names(rule["allow"]);
+  const deny = names(rule["deny"]);
+  if (Array.isArray(rule["allow"])) return `only ${allow.length ? allow.join(", ") : "none"}${deny.length ? `; not ${deny.join(", ")}` : ""}`;
+  return deny.length ? `all but ${deny.join(", ")}` : "every agent its bundle and Troupe give";
+}
 
 /** What every profile denies a push, which `github.denyPaths` adds to and cannot take from. */
 const DENIED_ALWAYS = ".env, .env.*, *.pem, *.key, *.p12, *.pfx and SSH private keys";
@@ -529,6 +544,7 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
           ["Org volume", spec["orgMount"] ? "mounted, read-only" : "not mounted"],
           ["A repository's agents and skills", spec["repositoryOverridesBundle"] ? "replace the bundle's" : "lose to the bundle's"],
           ["People's own signed-in tools", spec["personalTools"] === "forbid" ? "kept off these pods" : "allowed"],
+          ["Agents", agentsWords(spec["agents"])],
         ]}
       />
       {effective?.bundle && <BundleInEffect name={p.name} bundle={effective.bundle} />}

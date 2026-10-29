@@ -85,6 +85,26 @@ spec:
                       type: array
                       maxItems: 200
                       items: {type: string, minLength: 1, maxLength: 500}
+                agents:
+                  type: object
+                  description: >-
+                    Which agents exist on this profile's pods, built-ins and the bundle's
+                    alike, by name. allow present means only these, in every mode (primary
+                    and subagent); deny takes names away; deny over allow; absent is every
+                    agent the bundle and Troupe give. A team's grant can only narrow what
+                    this leaves. A profile that extends another has its parent's rule as
+                    well: its allow is cut to the parent's, its deny adds. A name no agent
+                    has today is kept, since a bundle may gain it. The plane reads it at
+                    every activation and sends it with the bundle pin; no pod restarts.
+                  properties:
+                    allow:
+                      type: array
+                      maxItems: 200
+                      items: {type: string, minLength: 1, maxLength: 200}
+                    deny:
+                      type: array
+                      maxItems: 200
+                      items: {type: string, minLength: 1, maxLength: 200}
                 image:
                   type: object
                   required: [repository]

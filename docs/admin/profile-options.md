@@ -296,3 +296,91 @@ extends another has its parent's rules as well as its own, each a scope of its o
 pods, so a child adds rules and cannot loosen or drop its parent's. The console's profile
 editor edits a profile's own rules, and its page lists every rule in effect with the
 profile it came from.
+
+## Which agents a profile has
+
+A profile may say which agents exist on it, built-ins and its bundle's alike, by name
+(Decision 968):
+
+```yaml
+spec:
+  agents:
+    allow: ["answer", "ask", "admin-support"]   # only these, in every mode
+    deny: ["build"]                             # taken away; deny beats allow
+```
+
+`allow` present means only the names it lists exist on the profile's pods, primaries and
+subagents both; `deny` takes names away; absent is every agent the bundle and Troupe give,
+which is what every profile had before the field. An agent the rule excludes is not
+offered to a session, is refused by `session.create` with the primaries the profile could
+have offered, and is not loaded on the pod: it is in no delegate list, so no other agent
+reaches it under that name. The rule is the profile's statement that the agent is not
+there, which is why it reaches subagents too. A name no agent has today is kept, since a
+bundle may gain it; `admin.profile.agents` marks each agent `offered` or not and lists
+such names in `unmatched`. A name in both lists, or one that is not a name, is refused.
+
+**Two profiles, as most are written.** The lean one is the usual case: a profile for one
+job, whose bundle brings the one agent it needs, takes the coding agents Troupe ships away
+and keeps the rest (`answer` and `ask` are read-only and cheap, and harmless to leave):
+
+```yaml
+apiVersion: troupe.dev/v1alpha1
+kind: WorkerProfile
+metadata: {name: company-info, namespace: troupe-system}
+spec:
+  image: {repository: ghcr.io/it-minds/troupe-worker, tag: 0.33.0-beta}
+  configBundleChannel: company-info          # brings the agent `company-info`
+  llm: {endpoint: https://llm-gw.example.com, provider: openai, model: chat-economy,
+        secretRef: {name: troupe-llm-gateway, key: api-key}}
+  agents:
+    deny: [build, implementer, orchestrate, general, quick]
+```
+
+The fuller one says everything the lean one left to the defaults, for a profile that is
+allowed to change code but only through the agents it names, with the per-tool rules
+beside it, since the two are different statements: `agents` says who exists, `permissions`
+says what any of them may do:
+
+```yaml
+apiVersion: troupe.dev/v1alpha1
+kind: WorkerProfile
+metadata:
+  name: dev-reviewed
+  namespace: troupe-system
+  annotations: {troupe.dev/max-sessions: "12"}
+spec:
+  image: {repository: ghcr.io/it-minds/troupe-worker, tag: 0.33.0-beta}
+  sessionsPerPod: 4
+  resources: {requests: {cpu: 500m, memory: 2Gi}, limits: {cpu: "2", memory: 4Gi}}
+  storage: {size: 20Gi, storageClassName: sbs-default}
+  configBundleChannel: stable                # brings `pr-reviewer` and `release-notes`
+  llm: {endpoint: https://llm-gw.example.com, provider: openai,
+        model: chat-default, smallModel: chat-economy,
+        secretRef: {name: troupe-llm-gateway, key: api-key}}
+  egress: {fqdns: [github.com, api.github.com]}
+  agents:
+    allow: [build, plan, explore, reviewer, implementer, answer, pr-reviewer, release-notes]
+    deny: [orchestrate]                      # listed to say so; deny beats allow
+  permissions:
+    deny: ["shell(git push)", "shell(curl)", "read_file(secrets/**)"]
+    ask: ["shell(mix ecto.*)", "publish_artifact"]
+    allow: ["shell(mix test)", "shell(mix format)"]
+```
+
+A profile that extends the fuller one may only narrow its list: `allow: [plan, explore,
+answer]` on the child leaves the parent's `build` behind for good.
+
+**A grant narrows what is left.** A team's `entitlements` on its grant
+([bundles and triggers](bundles-and-triggers.md#1-config-bundles)) are resolved after the
+profile's rule, so a grant can leave a team fewer of the profile's agents and never one the
+profile said is not there. `session_created` records the resolved primaries as
+`entitlements.agents` and the rule itself as `agent_rule`; `session.activate` carries both
+at every activation, so a change reaches a session the next time it wakes and restarts no
+pod, as the per-tool rules do.
+
+**extends.** A profile that extends another has its parent's rule as well as its own and
+can only narrow: its `allow` is cut to the parent's where the parent has one, its `deny`
+adds to the parent's, and `status.effective` and `admin.profile.get`'s `effective` carry the
+composed rule. The console's profile page shows it in one line ("Agents: all but build");
+its editor has no field for it and carries it through a save as loaded, so it is written
+through `admin.profile.put` or a repository's manifest.

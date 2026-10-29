@@ -117,6 +117,24 @@ defmodule Troupe.Worker.BundleWinsTest do
     assert Definitions.fetch!(definitions, "build").source == :project
   end
 
+  # The profile's rule on which agents exist rides the activation beside the entitlement
+  # set and is applied to every mode: a built-in primary and a built-in subagent it names
+  # are not loaded, and the session's first event records the rule.
+  test "an activation carrying the profile's agent rule loads neither plan nor explore",
+       context do
+    rule = %{"deny" => ["plan", "explore"]}
+    push = Map.put(push(context), "agent_rule", rule)
+    assert {:ok, %{"activated" => true}} = Commands.handle("session.activate", push)
+
+    {:ok, definitions} = Troupe.definitions(context.session_id)
+    assert {:ok, _build} = Definitions.fetch(definitions, "build")
+    assert {:error, {:unknown_agent, "plan"}} = Definitions.fetch(definitions, "plan")
+    assert {:error, {:unknown_agent, "explore"}} = Definitions.fetch(definitions, "explore")
+
+    [created] = Enum.filter(Troupe.events(context.session_id), &(&1.type == "session_created"))
+    assert created.data["agent_rule"] == rule
+  end
+
   defp push(context) do
     %{
       "session_id" => context.session_id,

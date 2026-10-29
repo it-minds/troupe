@@ -275,6 +275,9 @@ defmodule Troupe do
     # "what could this session have used" for as long as the log exists — without the
     # reader having to know what the bundle said that day, nor which grant the team had.
     |> put_present("entitlements", bundle && bundle[:entitlements])
+    # And the profile's rule on which agents exist on it, applied to every definition,
+    # subagents included, so the log says why a subagent the bundle has was never here.
+    |> put_present("agent_rule", bundle && bundle[:agent_rule])
     |> put_present("origin", Keyword.get(session_opts, :origin))
     # Who it belongs to. A worker is told; a daemon works it out from the link, and a
     # daemon nobody has linked leaves the field out rather than writing a username that

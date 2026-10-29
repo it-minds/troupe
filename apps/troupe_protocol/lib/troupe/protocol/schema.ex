@@ -47,6 +47,10 @@ defmodule Troupe.Protocol.Schema do
         # restriction, which is what a local session and an unnarrowed grant both mean.
         "owner" => optional(:string),
         "entitlements" => optional(:object),
+        # The worker profile's rule on which agents exist on it (`allow`, `deny`), which
+        # the pod applied to every definition, subagents included; absent where the
+        # profile has none, and on a laptop.
+        "agent_rule" => optional(:object),
         "origin" => optional(:object),
         # The session this one was made as a branch of, when a client said so.
         "parent" => optional(:string)

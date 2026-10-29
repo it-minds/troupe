@@ -122,7 +122,8 @@ checks without publishing.
 A new version applies to **new sessions only**; a running session keeps the version
 recorded when it was created until `admin.bundle.retire` retires that version, after which
 it moves to the channel's current version at its next activation, with a durable
-`config_upgraded` event. A channel with nothing published offers the built-in agents.
+`config_upgraded` event. A channel with nothing published offers the built-in agents, unless
+the profile's `spec.agents` rule leaves some out ([profile options](profile-options.md#which-agents-a-profile-has)).
 
 **A server that accepts only a signed-in person** is not a bundle server. Some MCP servers
 publish OAuth protected-resource metadata, answer a call without a token with `401`, and

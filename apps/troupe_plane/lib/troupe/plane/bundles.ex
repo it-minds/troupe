@@ -38,7 +38,7 @@ defmodule Troupe.Plane.Bundles do
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Fleet.{Bundle, Extends}
   alias Troupe.Plane.Identity.Entitlement
-  alias Troupe.Protocol.AgentCheck
+  alias Troupe.Protocol.{AgentCheck, AgentRule}
   alias Troupe.Protocol.Bundle, as: Document
 
   require Logger
@@ -392,34 +392,39 @@ defmodule Troupe.Plane.Bundles do
   their team may not run before a pod or a budget is touched. `[]` — the shape every
   grant has until somebody opens the editor — narrows nothing.
 
+  The third is the profile's own rule on which agents exist on it
+  (`Troupe.Protocol.AgentRule`), applied to the bundle's primaries and the built-ins
+  before any grant: a grant can only narrow what the profile offers, never reach an
+  agent the profile said is not there. `nil` is a profile that says nothing.
+
   The bundle is untouched. There are no derived bundles and no per-team hashes; the hash
   a session pins is the same hash for every team.
   """
-  @spec offering(String.t() | nil, [map()]) :: map()
-  def offering(channel, entitlements \\ [])
+  @spec offering(String.t() | nil, [map()], AgentRule.t() | nil) :: map()
+  def offering(channel, entitlements \\ [], rule \\ nil)
 
-  def offering(nil, entitlements), do: offering_of(nil, nil, entitlements)
+  def offering(nil, entitlements, rule), do: offering_of(nil, nil, entitlements, rule)
 
-  def offering(channel, entitlements) do
+  def offering(channel, entitlements, rule) do
     case current(channel) do
-      nil -> offering_of(channel, nil, entitlements)
-      bundle -> offering_of(channel, bundle, entitlements)
+      nil -> offering_of(channel, nil, entitlements, rule)
+      bundle -> offering_of(channel, bundle, entitlements, rule)
     end
   end
 
-  defp offering_of(channel, nil, entitlements) do
+  defp offering_of(channel, nil, entitlements, rule) do
     %{
       channel: channel,
       bundle_version: nil,
       bundle_hash: nil,
-      agents: narrow(@builtin_primaries, entitlements, "agent"),
+      agents: @builtin_primaries |> AgentRule.keep(rule) |> narrow(entitlements, "agent"),
       skills: [],
       mcp_servers: [],
       acp_agents: []
     }
   end
 
-  defp offering_of(channel, bundle, entitlements) do
+  defp offering_of(channel, bundle, entitlements, rule) do
     parsed = contents(bundle)
     skills = for skill <- skills_of(parsed), do: %{name: skill.name, description: skill.description}
 
@@ -427,7 +432,7 @@ defmodule Troupe.Plane.Bundles do
       channel: channel,
       bundle_version: bundle.version,
       bundle_hash: bundle.hash,
-      agents: narrow(primaries(parsed), entitlements, "agent"),
+      agents: parsed |> primaries() |> AgentRule.keep(rule) |> narrow(entitlements, "agent"),
       skills: narrow_by(skills, & &1.name, entitlements, "skill"),
       mcp_servers: narrow(for(server <- servers_of(parsed), do: server.name), entitlements, "mcp_server"),
       acp_agents: narrow(for(agent <- acp_agents_of(parsed), do: agent.name), entitlements, "acp_agent")

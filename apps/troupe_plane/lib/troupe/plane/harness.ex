@@ -55,6 +55,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.{Tokens, Triggers}
   alias Troupe.Plane.Triggers.Run
+  alias Troupe.Protocol.AgentRule
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.{Canonical, ClientUpdate, Error, Origin, Principal, Relay, SessionId, Token}
   alias Troupe.Protocol.Memory.Entries
@@ -3188,16 +3189,32 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  # What the channel's current bundle gives a session on this profile, narrowed by the
-  # entitlement rows that apply. A profile the plane has no record of follows no channel
-  # and offers the built-ins; no rows narrows nothing, which is every grant until
-  # somebody opens the editor.
+  # What the channel's current bundle gives a session on this profile, cut to the agents
+  # the profile says exist on it, then narrowed by the entitlement rows that apply: the
+  # profile's rule comes first, so a grant can only narrow it and never reach past it. A
+  # profile the plane has no record of follows no channel and offers the built-ins; no
+  # rows narrows nothing, which is every grant until somebody opens the editor.
   defp offering(profile, entitlements) do
     case Fleet.get_profile(profile) do
-      nil -> Bundles.offering(nil, entitlements)
-      %{config_bundle_channel: channel} -> Bundles.offering(channel, entitlements)
+      nil ->
+        Bundles.offering(nil, entitlements)
+
+      %{config_bundle_channel: channel} = row ->
+        Bundles.offering(channel, entitlements, agent_rule_of(row))
     end
   end
+
+  # The profile's rule on which agents exist on it, composed through what it extends: the
+  # row holds the profile in effect, so its spec's `agents` is already the chain's. One
+  # the row holds that cannot be read is no rule here, as the put would have refused it.
+  defp agent_rule_of(%{spec: %{"agents" => rule}}) do
+    case AgentRule.parse(rule) do
+      {:ok, rule} -> rule
+      {:error, _problems} -> nil
+    end
+  end
+
+  defp agent_rule_of(_profile), do: nil
 
   # A person's own set for a profile, for *listing*: the union over the teams of theirs
   # that may use it, because a person in two teams may use what either gives them and a
@@ -3322,10 +3339,20 @@ defmodule Troupe.Plane.Harness do
       # activation like the two above, so a rule reaches a session at its next wake and
       # restarts no pod; an empty list takes away what was there.
       |> Map.put("permission_rules", Extends.rules(profile))
+      # Which agents exist on the profile's pods, the chain's rule composed, for the pod
+      # to apply to its subagents too: the entitlement set already carries the primaries
+      # it leaves. Read again at every activation like the rules; left out where the
+      # profile says nothing, which the pod reads as no rule.
+      |> put_agent_rule(agent_rule_of(profile))
     else
       _ -> %{"bundle_version" => session.bundle_version}
     end
   end
+
+  defp put_agent_rule(params, nil), do: params
+
+  defp put_agent_rule(params, rule),
+    do: Map.put(params, "agent_rule", AgentRule.json(rule))
 
   # The memory documents the session reads (`Memory.for_session/2`): the organisation's, its
   # team's and its worker profile's. Read again at every activation, as the profile's

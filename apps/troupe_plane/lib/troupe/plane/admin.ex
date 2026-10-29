@@ -67,7 +67,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision, Trigger}
-  alias Troupe.Protocol.AgentDefinition
+  alias Troupe.Protocol.{AgentDefinition, AgentRule}
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Memory.Entries
@@ -845,7 +845,7 @@ defmodule Troupe.Plane.Admin do
   @spec profile_agents(actor(), String.t()) :: result()
   def profile_agents(actor, name) do
     with :ok <- require_platform_admin(actor),
-         {:ok, _profile} <- fetch_profile(name) do
+         {:ok, profile} <- fetch_profile(name) do
       layers =
         case Extends.resolve(name) do
           {:ok, resolved} -> resolved.bundle.layers
@@ -854,7 +854,11 @@ defmodule Troupe.Plane.Admin do
 
       agents = effective_agents(layers)
       grants = Identity.grants_for_profile(name)
-      subagents = for %{mode: "subagent", name: sub} <- agents, do: sub
+      rule = agent_rule_of(profile)
+      # What a primary may hand work to is what exists: a subagent the rule excludes is
+      # not on the pods, so it is not in anybody's list.
+      subagents =
+        for %{mode: "subagent", name: sub} <- agents, AgentRule.allows?(rule, sub), do: sub
 
       offered =
         for builtin <- Bundles.builtin_primaries(),
@@ -870,6 +874,7 @@ defmodule Troupe.Plane.Admin do
           agent
           |> Map.put(:delegate, delegates(agent, subagents))
           |> Map.put(:teams, agent_teams(agent.name, name, grants))
+          |> Map.put(:offered, AgentRule.allows?(rule, agent.name))
           |> Map.delete(:tools)
         end
 
@@ -885,10 +890,26 @@ defmodule Troupe.Plane.Admin do
          channel: layers |> Bundles.Effective.channels() |> List.last(),
          agents: rows,
          builtins: builtins,
-         teams: grants |> Enum.map(& &1.team.name) |> Enum.sort()
+         teams: grants |> Enum.map(& &1.team.name) |> Enum.sort(),
+         # The profile's rule as it is in effect, and the names in it that match no agent
+         # the profile has today: said rather than refused, since a bundle may gain one.
+         rule: AgentRule.json(rule),
+         unmatched:
+           AgentRule.unmatched(rule, Enum.map(rows, & &1.name) ++ Bundles.builtin_agents())
        }}
     end
   end
+
+  # The rule as the row holds it in effect, the chain's composed; `nil` where the profile
+  # says nothing or holds one the put would have refused.
+  defp agent_rule_of(%{spec: %{"agents" => rule}}) do
+    case AgentRule.parse(rule) do
+      {:ok, rule} -> rule
+      {:error, _problems} -> nil
+    end
+  end
+
+  defp agent_rule_of(_profile), do: nil
 
   # The agents of a chain's bundle in effect, each read as the harness reads its file, with
   # the profile and channel it came from. One that does not parse is left out: the bundle's
