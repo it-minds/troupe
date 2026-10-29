@@ -484,9 +484,10 @@ defmodule Troupe do
 
   An agent that stops between the lookup and the call, as one does when its session goes
   to sleep, is `{:error, :no_agent}` like one that was never there, so the sweeper and
-  the worker that ask can't be taken down by the timing.
+  the worker that ask can't be taken down by the timing. One that is alive but does not
+  answer within the call's limit is `{:error, :busy}`, for the same reason.
   """
-  @spec snapshot(String.t(), [String.t()]) :: map() | {:error, :no_agent}
+  @spec snapshot(String.t(), [String.t()]) :: map() | {:error, :no_agent | :busy}
   def snapshot(session_id, agent_path \\ ["root"]) do
     case Registry.agent_pid(session_id, agent_path) do
       nil -> {:error, :no_agent}
@@ -494,11 +495,18 @@ defmodule Troupe do
     end
   end
 
+  # An agent that is alive but does not answer within the call's limit is busy, not gone:
+  # its first turn may hold its process for longer than that (a workspace scan, the
+  # plane asked whether the memory is current). A caller that read the exit as a crash
+  # took its own process down with it, and a pod's session manager seeding the lifecycle
+  # right after activation did exactly that, so the whole activation failed over a
+  # snapshot it could do without.
   defp snapshot_of(pid) do
     Agent.snapshot(pid)
   catch
     :exit, {reason, _call} when reason in [:noproc, :normal, :shutdown] -> {:error, :no_agent}
     :exit, {{:shutdown, _}, _call} -> {:error, :no_agent}
+    :exit, {:timeout, _call} -> {:error, :busy}
   end
 
   @doc """
