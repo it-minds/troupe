@@ -291,6 +291,93 @@ defmodule Troupe.DoctorTest do
     end
   end
 
+  # The `key` line asks the host for its model list; this one asks it for an answer, as a
+  # turn does, with the sentence a turn would have ended with when nothing comes.
+  describe "the answer line, against the stand-in gateway" do
+    setup ctx do
+      gateway = FakeGateway.start()
+      on_exit(fn -> FakeGateway.stop(gateway) end)
+
+      write = fn key ->
+        File.write!(ctx.config_file, """
+        provider: openai
+        base_url: #{gateway.base_url}
+        api_key: #{key}
+        models:
+          default: qwen3-235b
+        """)
+      end
+
+      %{gateway: gateway, write: write}
+    end
+
+    test "ok with the round trip when the host answers one token", ctx do
+      ctx.write.(FakeGateway.key())
+
+      checks = Doctor.run(workspace: ctx.base, command: "troupe")
+      assert %{state: :ok, detail: detail} = Enum.find(checks, &(&1.name == "answer"))
+      assert detail =~ ~r/^qwen3-235b at 127\.0\.0\.1 answered in \d+ ms$/
+
+      assert Enum.any?(FakeGateway.requests(ctx.gateway), &(&1.path == "/v1/chat/completions"))
+      assert Doctor.format(checks) =~ ~r/^ok    answer                qwen3-235b at 127\.0\.0\.1 answered in/m
+    end
+
+    test "fails with the provider's refusal when the key is refused", ctx do
+      ctx.write.("sk-not-the-stand-ins-key")
+
+      checks = Doctor.run(workspace: ctx.base, command: "troupe")
+      assert %{state: :fail, detail: detail} = Enum.find(checks, &(&1.name == "answer"))
+      assert detail =~ "qwen3-235b at 127.0.0.1: the provider rejected the credentials"
+      assert detail =~ "invalid key"
+    end
+
+    test "fails with the first-byte sentence when the host holds the request", ctx do
+      ctx.write.(FakeGateway.key())
+      FakeGateway.stall(ctx.gateway, 3_000)
+
+      checks = Doctor.run(workspace: ctx.base, command: "troupe", answer_timeout_ms: 300)
+      assert %{state: :fail, detail: detail} = Enum.find(checks, &(&1.name == "answer"))
+
+      assert detail ==
+               "the model at 127.0.0.1 sent nothing for 300 ms: the address, the key or a proxy " <>
+                 "between here and there is the usual reason; `troupe doctor` tries a small request"
+
+      assert Doctor.exit_status(checks) == 1
+    end
+
+    test "fails when nothing listens at the address", ctx do
+      File.write!(ctx.config_file, """
+      provider: openai
+      base_url: http://127.0.0.1:1/v1
+      api_key: k
+      models:
+        default: m
+      """)
+
+      checks = Doctor.run(workspace: ctx.base, command: "troupe", answer_timeout_ms: 2_000)
+      assert %{state: :fail, detail: detail} = Enum.find(checks, &(&1.name == "answer"))
+      assert detail == "m at 127.0.0.1: the connection to the provider failed (econnrefused)"
+    end
+  end
+
+  test "the answer line asks nothing of the fake provider, with no key, or when asked not to",
+       ctx do
+    File.write!(ctx.config_file, "provider: fake\n")
+
+    assert %{state: :ok, detail: "not asked: the fake provider asks nobody"} =
+             ctx.base |> run_live_free() |> Enum.find(&(&1.name == "answer"))
+
+    File.write!(ctx.config_file, "provider: anthropic\n")
+
+    assert %{state: :ok, detail: "not asked: no key"} =
+             ctx.base |> run_live_free() |> Enum.find(&(&1.name == "answer"))
+
+    System.put_env("ANTHROPIC_API_KEY", "sk-ant-secret-1234567890")
+
+    assert %{state: :ok, detail: "not tried"} =
+             ctx.base |> run_live_free() |> Enum.find(&(&1.name == "answer"))
+  end
+
   test "a name longer than its column still has a space before what it says" do
     text =
       Doctor.format([

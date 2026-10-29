@@ -152,11 +152,16 @@ defmodule Troupe.LLM.Providers.OpenAI do
   # Req hands `into` the body of every response, whatever its status. Only a 200's is the
   # event stream; any other's is the provider's error, kept for `post/5` to read rather
   # than fed to the parser, where it was lost (Decision 791).
-  defp handle_chunk(%Req.Response{status: status} = resp, chunk, _sink)
+  # The first chunk of any response, the stream's or an error's, says to the agent that the
+  # host answered, before anything is read from it; the rest is read by status.
+  defp handle_chunk(resp, chunk, sink),
+    do: resp |> Provider.first_byte(sink.reply_to, sink.ref) |> read_chunk(chunk, sink)
+
+  defp read_chunk(%Req.Response{status: status} = resp, chunk, _sink)
        when status != 200,
        do: Provider.collect_error(resp, chunk)
 
-  defp handle_chunk(resp, chunk, sink) do
+  defp read_chunk(resp, chunk, sink) do
     state = resp.private[:troupe] || %{acc: Collector.new(sink.type), sse: SSE.new()}
     {events, sse} = SSE.feed(state.sse, chunk)
 

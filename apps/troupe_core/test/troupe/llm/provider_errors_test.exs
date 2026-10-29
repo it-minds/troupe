@@ -38,7 +38,18 @@ defmodule Troupe.LLM.ProviderErrorsTest do
              "gave up after retrying: the provider answered 502"
 
     assert Provider.describe_error({:retries_exhausted, {:transport, :econnrefused}}) ==
-             "gave up after retrying: {:transport, :econnrefused}"
+             "gave up after retrying: the connection to the provider failed (econnrefused)"
+  end
+
+  # Nothing came, not a byte: the sentence names the host and the wait, blames what is
+  # between here and there rather than the model, and says what to run next.
+  test "a call nothing came from names the host, the wait and the next step" do
+    assert Provider.describe_error({:first_byte, "api.anthropic.com", 60_000}) ==
+             "the model at api.anthropic.com sent nothing for 60 seconds: the address, the key or a proxy " <>
+               "between here and there is the usual reason; `troupe doctor` tries a small request"
+
+    assert Provider.describe_error({:first_byte, "llm-gw.example", 1_000}) =~ "sent nothing for 1 second:"
+    assert Provider.describe_error({:first_byte, "localhost", 1_500}) =~ "sent nothing for 1500 ms:"
   end
 
   test "describe_error says what happened in words a person can act on" do

@@ -46,8 +46,9 @@ defmodule Troupe.LLM.Fake do
   Start a scripted model.
 
   Options:
-    * `:steps` — the script, consumed one step per request; `{:delay, ms, step}` answers
-      `step` after `ms`, which is how a test makes one call outlast `llm_timeout_ms`;
+    * `:steps` — the script, consumed one step per request; `{:delay, ms, step}` sends
+      nothing, not a byte, for `ms` and then answers `step`, which is how a test makes one
+      call outlast `llm_first_byte_ms` or, with a longer wait, `llm_timeout_ms`;
       `{:endless, ms}` never answers but streams a delta every `ms` for as long as it is
       let, after reporting the prompt's usage as Anthropic's `message_start` does, and
       `{:endless, ms, :no_usage}` reports none, as an OpenAI-compatible stream says its
@@ -91,6 +92,14 @@ defmodule Troupe.LLM.Fake do
   `cost_micros`, what the imaginary gateway charges per call, `null` for one that says
   nothing, as a gateway streaming a response does. Returned as the options
   `start_link/1` takes.
+
+  A step is an object: `{"text": "..."}`, `{"tools": [{"name": "...", "input": {}}]}`
+  (with a `text` beside them or not), `{"reasoning": "..."}` wrapping either or alone,
+  `{"error": "..."}`, and `"stop"` (`max_tokens`, `refusal`) on any of them. `"delay_ms"`
+  on a step is a model that stalls: nothing, not a byte, is sent for that long, and then
+  the step is answered. `{"delay_ms": 90000, "text": "late"}` outlasts the harness's
+  `llm_first_byte_ms`, which is how the sentence it ends a turn with, and what a client
+  shows while it waits, are tried without a network.
   """
   @spec load_script!(Path.t()) :: keyword()
   def load_script!(path) do
@@ -119,6 +128,12 @@ defmodule Troupe.LLM.Fake do
     do: [cost_micros: cost]
 
   defp script_cost(_script), do: []
+
+  # `delay_ms` wraps the whole step: a model that sends nothing for that long, then
+  # answers. The outermost wrapper, so the delay is the stall before the first byte.
+  defp normalize_step(%{"delay_ms" => ms} = step) when is_integer(ms) and ms >= 0 do
+    {:delay, ms, normalize_step(Map.delete(step, "delay_ms"))}
+  end
 
   # `stop` overrides how the step's answer ended: `max_tokens` for a reply the output cap
   # cut, `refusal` for one the model declined to give.

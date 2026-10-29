@@ -6,8 +6,11 @@
 #
 # It answers `GET /model_group/info` the way LiteLLM does, with windows and prices, and
 # `GET /v1/models` with the ids alone, the way any OpenAI-compatible server does; with
-# `litellm: false` the first is a 404, which is a vanilla server. A key it was not given is
-# a 401 on both. Every request is recorded, so a test can say what was asked and how often.
+# `litellm: false` the first is a 404, which is a vanilla server. `POST /v1/chat/completions`
+# streams one word and a usage, as a server does for `troupe doctor`'s smallest request,
+# after `stall_ms` of nothing, for a doctor that has to give up on it. A key it was not
+# given is a 401 on all of them. Every request is recorded, so a test can say what was
+# asked and how often.
 unless Code.ensure_loaded?(Troupe.Test.FakeGateway) do
   defmodule Troupe.Test.FakeGateway do
     @key "sk-standin-0123456789"
@@ -32,7 +35,8 @@ unless Code.ensure_loaded?(Troupe.Test.FakeGateway) do
 
     @doc """
     Start one. Options: `keys` (the one key above), `models` (the four above), `litellm`
-    (`true`: `/model_group/info` answers) and `port` (0, any free one).
+    (`true`: `/model_group/info` answers), `stall_ms` (0: how long a completion sends
+    nothing) and `port` (0, any free one).
     """
     def start(opts \\ []) do
       {:ok, listener} =
@@ -52,6 +56,7 @@ unless Code.ensure_loaded?(Troupe.Test.FakeGateway) do
             keys: Keyword.get(opts, :keys, [@key]),
             models: Keyword.get(opts, :models, @models),
             litellm: Keyword.get(opts, :litellm, true),
+            stall_ms: Keyword.get(opts, :stall_ms, 0),
             requests: []
           }
         end)
@@ -71,6 +76,9 @@ unless Code.ensure_loaded?(Troupe.Test.FakeGateway) do
 
     @doc "Change what it serves, as a gateway's operator would."
     def serve_models(fake, models), do: Agent.update(fake.agent, &%{&1 | models: models})
+
+    @doc "How long a completion sends nothing before it answers: a proxy that holds the request."
+    def stall(fake, ms), do: Agent.update(fake.agent, &%{&1 | stall_ms: ms})
 
     @doc "Every request so far, oldest first: `%{path, authorization, status}`."
     def requests(fake), do: fake.agent |> Agent.get(& &1.requests) |> Enum.reverse()
@@ -97,20 +105,24 @@ unless Code.ensure_loaded?(Troupe.Test.FakeGateway) do
     end
 
     defp handle(socket, agent) do
-      with {:ok, head} <- read_head(socket),
+      with {:ok, head, rest} <- read_head(socket),
+           :ok <- read_body(socket, rest, header(head, "content-length")),
            true <- Process.alive?(agent) do
         [request_line | _] = String.split(head, "\r\n", parts: 2)
         path = request_line |> String.split(" ") |> Enum.at(1, "/") |> String.split("?") |> hd()
         authorization = header(head, "authorization")
         state = Agent.get(agent, & &1)
 
-        {status, body} = answer(path, authorization, state)
+        {status, body, type} = answer(path, authorization, state)
         entry = %{path: path, authorization: authorization, status: status}
         Agent.update(agent, &%{&1 | requests: [entry | &1.requests]})
 
+        # The stall is before the status line: a held request shows nothing, not a byte.
+        if path == "/v1/chat/completions" and status == 200, do: Process.sleep(state.stall_ms)
+
         :gen_tcp.send(
           socket,
-          "HTTP/1.1 #{status} X\r\ncontent-type: application/json\r\ncontent-length: #{byte_size(body)}\r\nconnection: close\r\n\r\n" <>
+          "HTTP/1.1 #{status} X\r\ncontent-type: #{type}\r\ncontent-length: #{byte_size(body)}\r\nconnection: close\r\n\r\n" <>
             body
         )
       end
@@ -119,9 +131,32 @@ unless Code.ensure_loaded?(Troupe.Test.FakeGateway) do
     end
 
     defp answer(path, authorization, state) do
+      case answer_json(path, authorization, state) do
+        {status, body} -> {status, body, "application/json"}
+        {status, body, type} -> {status, body, type}
+      end
+    end
+
+    # The stream an OpenAI-compatible server sends for one token: a word, then the usage
+    # with the finish, then the sentinel.
+    defp completion do
+      first = %{"choices" => [%{"index" => 0, "delta" => %{"role" => "assistant", "content" => "Hi"}}]}
+
+      last = %{
+        "choices" => [%{"index" => 0, "delta" => %{}, "finish_reason" => "length"}],
+        "usage" => %{"prompt_tokens" => 5, "completion_tokens" => 1, "total_tokens" => 6}
+      }
+
+      "data: #{JSON.encode!(first)}\n\ndata: #{JSON.encode!(last)}\n\ndata: [DONE]\n\n"
+    end
+
+    defp answer_json(path, authorization, state) do
       cond do
         authorization not in Enum.map(state.keys, &("Bearer " <> &1)) ->
           {401, JSON.encode!(%{"error" => %{"message" => "Authentication Error, invalid key"}})}
+
+        path == "/v1/chat/completions" ->
+          {200, completion(), "text/event-stream"}
 
         path == "/model_group/info" and state.litellm ->
           {200, JSON.encode!(%{"data" => Enum.map(state.models, &group/1)})}
@@ -152,14 +187,31 @@ unless Code.ensure_loaded?(Troupe.Test.FakeGateway) do
 
     defp read_head(socket, buffer \\ "") do
       case String.split(buffer, "\r\n\r\n", parts: 2) do
-        [head, _rest] ->
-          {:ok, head}
+        [head, rest] ->
+          {:ok, head, rest}
 
         [_incomplete] ->
           case :gen_tcp.recv(socket, 0, 10_000) do
             {:ok, data} -> read_head(socket, buffer <> data)
             error -> error
           end
+      end
+    end
+
+    # A request's body is read whole before the answer goes, so the client never has its
+    # write refused by a socket closed with bytes unread.
+    defp read_body(_socket, _read, nil), do: :ok
+
+    defp read_body(socket, read, length) do
+      case Integer.parse(length) do
+        {wanted, ""} when byte_size(read) < wanted ->
+          case :gen_tcp.recv(socket, 0, 10_000) do
+            {:ok, data} -> read_body(socket, read <> data, length)
+            error -> error
+          end
+
+        _read_or_malformed ->
+          :ok
       end
     end
 

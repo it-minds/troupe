@@ -32,6 +32,25 @@ defmodule Troupe.LLM.FakeScriptTest do
              ]
   end
 
+  # A model that stalls: nothing for `delay_ms`, then the step, which is how a client's
+  # waiting state and the harness's first-byte limit are tried with no network.
+  test "a step with delay_ms sends nothing, not a byte, for that long, and then answers" do
+    assert Fake.normalize_script([%{"delay_ms" => 50, "text" => "late"}]) ==
+             [steps: [{:delay, 50, {:text, "late"}}], routes: %{}]
+
+    assert Fake.normalize_script([%{"delay_ms" => 10, "stop" => "max_tokens", "text" => "cut"}]) ==
+             [steps: [{:delay, 10, {:stop, :max_tokens, {:text, "cut"}}}], routes: %{}]
+
+    fake = start_supervised!({Fake, steps: [{:delay, 150, {:text, "late"}}]})
+    request = %Request{model: "fake-model", messages: [Message.user("hi")], extra: %{fake: fake}}
+    {ref, test} = {make_ref(), self()}
+    Task.start_link(fn -> Troupe.LLM.Providers.Fake.stream(request, test, ref) end)
+
+    refute_receive {:llm_delta, ^ref, _delta}, 100
+    assert_receive {:llm_delta, ^ref, _delta}, 1_000
+    assert_receive {:llm_done, ^ref, _response}, 1_000
+  end
+
   # A gateway streaming a response says nothing about its cost, which is what a smoke of
   # `models.prices` against a packaged daemon has to reproduce (#160).
   test "a script may say what the imaginary gateway charges, nothing included" do

@@ -338,6 +338,15 @@
       ],
       "minimum": 1
     },
+    "llm_first_byte_ms": {
+      "description": "How long the model may take to send its first byte before the call is given up on. A call that has begun may pause for as long as `llm_timeout_ms` allows; one that has not begun is given up on here, with a sentence naming the host.",
+      "default": 60000,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
     "identify": {
       "description": "Every model call names Troupe: a User-Agent with the version and the client, LiteLLM's tags and the session's id to a gateway, OpenRouter's app headers to OpenRouter; never a person, a path or a repository. `false` sends none of it. `troupe doctor` prints what goes out. Read from a project's file only in a trusted workspace.",
       "default": true,

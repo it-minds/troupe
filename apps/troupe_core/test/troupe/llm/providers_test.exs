@@ -612,6 +612,48 @@ defmodule Troupe.LLM.ProvidersTest do
     end
   end
 
+  # The agent's first-byte limit is met by any response, the stream's or an error's: the
+  # adapter says so before it reads the chunk, so the message precedes every delta.
+  describe "the first byte" do
+    test "is announced before anything is read from a stream, by both adapters" do
+      assert {:ok, %Response{}} = run(Anthropic, request(chunks: anthropic_stream()))
+      assert first_message() == :llm_first_byte
+
+      assert {:ok, %Response{}} =
+               run(OpenAI, %{request(chunks: ["data: [DONE]\n\n"]) | model: "gpt-5"})
+
+      assert first_message() == :llm_first_byte
+    end
+
+    test "is announced for an error's body too, once per response" do
+      request = request(chunks: anthropic_stream(), fail_first: 1, fail_status: 500, max_retries: 1)
+      assert {:ok, %Response{}} = run(Anthropic, request)
+
+      {:messages, messages} = Process.info(self(), :messages)
+      assert Enum.count(messages, &match?({:llm_first_byte, _ref}, &1)) == 2
+    end
+  end
+
+  defp first_message do
+    {:messages, messages} = Process.info(self(), :messages)
+
+    messages
+    |> Enum.find_value(fn
+      {kind, _ref} when kind in [:llm_first_byte] -> kind
+      {kind, _ref, _payload} when kind in [:llm_delta, :llm_usage] -> kind
+      _other -> nil
+    end)
+    |> tap(fn _ -> flush() end)
+  end
+
+  defp flush do
+    receive do
+      _message -> flush()
+    after
+      0 -> :ok
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   defp run(adapter, request) do

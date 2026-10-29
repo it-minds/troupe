@@ -8,7 +8,9 @@ defmodule Troupe.LLM.Provider do
   happen inside the task; the agent only ever sees a final outcome. Along the way it
   sends `{:llm_usage, ref, usage}` whenever the provider has reported usage, the running
   total so far, which is what a call the agent stops before it answers is counted as
-  (Decision 788).
+  (Decision 788). An HTTP adapter also sends `{:llm_first_byte, ref}` as the first byte of
+  a response arrives, whatever its status (`first_byte/3`): the agent's first-byte limit
+  is about a host that says nothing, and a 429 being retried is a host that answered.
 
   Because the task is supervised by the agent, an agent that dies takes its in-flight
   request with it — cancellation needs no cooperation from the adapter. An agent that
@@ -161,6 +163,23 @@ defmodule Troupe.LLM.Provider do
     end)
   end
 
+  @doc """
+  Tell the agent the first byte of a response has arrived, once per response. Called by an
+  HTTP adapter's `into` function before it reads the chunk, so the message precedes any
+  delta or usage report made from it. The mark is kept in the response's private map, as
+  the adapters keep their stream state, so a retried request says so again and the agent,
+  whose timer is already cancelled, ignores the repeat.
+  """
+  @spec first_byte(Req.Response.t(), pid(), reference()) :: Req.Response.t()
+  def first_byte(%Req.Response{} = response, reply_to, ref) do
+    if response.private[:troupe_first_byte] do
+      response
+    else
+      send(reply_to, {:llm_first_byte, ref})
+      Req.Response.put_private(response, :troupe_first_byte, true)
+    end
+  end
+
   # More than any provider's error, and a bound on a proxy's page.
   @error_body_limit 65_536
 
@@ -262,7 +281,23 @@ defmodule Troupe.LLM.Provider do
   defp sentence(:missing_api_key), do: "no API key is configured for the provider"
   defp sentence({:refused, why}) when is_binary(why), do: why
   defp sentence({:timeout, _ms}), do: "the model did not answer in time"
+
+  # Nothing came, not a byte: the host, not the model, is the usual reason, and `troupe
+  # doctor` tries the same host with the smallest request it takes.
+  defp sentence({:first_byte, host, ms}) do
+    "the model at #{host} sent nothing for #{wait(ms)}: the address, the key or a proxy " <>
+      "between here and there is the usual reason; `troupe doctor` tries a small request"
+  end
+
+  defp sentence({:transport, reason}), do: "the connection to the provider failed" <> detail(transport(reason))
   defp sentence(other), do: inspect(other)
+
+  defp transport(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp transport(reason), do: inspect(reason)
+
+  defp wait(1_000), do: "1 second"
+  defp wait(ms) when rem(ms, 1_000) == 0, do: "#{div(ms, 1_000)} seconds"
+  defp wait(ms), do: "#{ms} ms"
 
   defp text(detail) when is_binary(detail), do: detail
   defp text(detail), do: inspect(detail)
