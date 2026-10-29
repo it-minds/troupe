@@ -1,6 +1,6 @@
 ---
 description: Surveys the repository and writes what later agents need to know as anchored facts in its memory, re-verifying the ones that may no longer be true. Cheap model, few turns.
-mode: primary
+mode: function
 model: cheap
 tools:
   - read_file

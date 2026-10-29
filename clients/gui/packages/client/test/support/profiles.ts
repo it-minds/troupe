@@ -25,7 +25,7 @@ export interface FakeProfileSpec {
   bundle_version: string;
   bundle_hash: string;
   bundle: {
-    agents: Array<{ name: string; mode: "primary" | "subagent"; description: string }>;
+    agents: Array<{ name: string; mode: "primary" | "subagent" | "function"; description: string }>;
     skills: string[];
     mcp_servers: FakeBundleServer[];
   };
@@ -43,11 +43,16 @@ export interface FakeProfileSpec {
   grants: Record<string, { agents_out?: string[]; servers_out?: string[] }>;
 }
 
-/** The built-ins every profile has unless its rule or a grant takes them away. */
-export const BUILTINS: Array<{ name: string; mode: "primary" | "subagent"; description: string }> = [
+/**
+ * The built-ins every profile has unless its rule or a grant takes them away; a function
+ * agent (the harness's to run for its own job) only its rule takes away.
+ */
+export const BUILTINS: Array<{ name: string; mode: "primary" | "subagent" | "function"; description: string }> = [
   { name: "build", mode: "primary", description: "Does the work: reads, edits and runs" },
   { name: "plan", mode: "primary", description: "Reads and plans; changes nothing" },
   { name: "explore", mode: "subagent", description: "Searches a codebase and reports back" },
+  { name: "answer", mode: "function", description: "Answers an AI? question about the code" },
+  { name: "librarian", mode: "function", description: "Surveys the repository for its brief" },
 ];
 
 /** The organisation's tool rules, which every profile runs under beside its own. */
@@ -59,7 +64,8 @@ export const PERSON_BUDGET: number | null = 150_000_000;
 
 /**
  * Two profiles: `dev`, the full one, whose `core` grant leaves out the wiki server; and
- * `ux`, a lean one whose rule leaves out `build` and whose `core` grant leaves out `plan`.
+ * `ux`, a lean one whose rule leaves out `build` and the librarian and whose `core` grant
+ * leaves out `plan`.
  */
 export function exampleProfiles(): FakeProfileSpec[] {
   return [
@@ -95,7 +101,7 @@ export function exampleProfiles(): FakeProfileSpec[] {
         skills: [],
         mcp_servers: [{ name: "figma", url: "https://figma.example.com/mcp", credential_mode: "person", permission: "auto", tools: "all" }],
       },
-      agentRule: { deny: ["build"] },
+      agentRule: { deny: ["build", "librarian"] },
       egress: ["figma.example.com"],
       sessions_per_pod: 4,
       max_sessions: null,
@@ -161,9 +167,14 @@ export function composeProfile(
       // gives a person's own key, so the plane never answers "yours".
       key: spec.llm?.endpoint && spec.llm.secretRef ? "profile" : null,
     },
-    agents: every.filter((a) => byRule(a.name) && byGrant(a.name)).map((a) => ({ name: a.name, mode: a.mode, description: a.description, from: a.from })),
+    agents: every.filter((a) => a.mode !== "function" && byRule(a.name) && byGrant(a.name)).map((a) => ({ name: a.name, mode: a.mode, description: a.description, from: a.from })),
+    // The harness's own jobs: no grant names one, so only the profile's rule takes one away.
+    functions: every
+      .filter((a) => a.mode === "function" && byRule(a.name))
+      .map((a) => ({ name: a.name, description: a.description, from: a.from }))
+      .sort((x, y) => x.name.localeCompare(y.name)),
     agents_not_here: every
-      .filter((a) => !byRule(a.name) || !byGrant(a.name))
+      .filter((a) => !byRule(a.name) || (a.mode !== "function" && !byGrant(a.name)))
       .map((a) => ({ name: a.name, mode: a.mode, from: a.from, why: byRule(a.name) ? "grant" : "profile" })),
     skills: spec.bundle.skills,
     tools: {

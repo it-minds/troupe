@@ -303,6 +303,25 @@ defmodule Troupe.Session do
   end
 
   @doc """
+  Whether the agent `build_opts/1` named is one of the session's definitions: `:ok`, or
+  `{:error, {:not_on_profile, name}}` where the profile's agents rule took it away (a
+  function agent's job with it: the librarian a profile denies is not run there), or
+  `{:error, {:unknown_agent, name}}`. Asked before the tree starts, whose root would
+  otherwise fail to start with nothing said.
+  """
+  @spec defined(keyword()) :: :ok | {:error, {:not_on_profile | :unknown_agent, String.t()}}
+  def defined(session_opts) do
+    profile = Keyword.fetch!(session_opts, :profile)
+    definitions = Keyword.fetch!(session_opts, :definitions)
+
+    cond do
+      match?({:ok, _}, Definitions.fetch(definitions, profile)) -> :ok
+      Definitions.ruled_out?(definitions, profile) -> {:error, {:not_on_profile, profile}}
+      true -> {:error, {:unknown_agent, profile}}
+    end
+  end
+
+  @doc """
   A running session's configuration resolved again, as `build_opts/1` resolved it when the
   session started, from the same workspace and the same overrides, over the files and the
   organisation's document as they are now: what `Troupe.Session.Organisation` gives a

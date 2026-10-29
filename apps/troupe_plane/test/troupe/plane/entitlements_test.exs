@@ -77,7 +77,7 @@ defmodule Troupe.Plane.EntitlementsTest do
       assert {:ok, %{"profiles" => [profile]}} =
                Harness.call("profiles.list", %{}, as(context.ada))
 
-      assert profile["agents"] == ["pr-reviewer", "build", "plan"]
+      assert profile["agents"] == ["pr-reviewer", "build", "orchestrate", "plan"]
 
       assert profile["skills"] == [
                %{"name" => "review", "description" => "How we review"},
@@ -214,7 +214,7 @@ defmodule Troupe.Plane.EntitlementsTest do
       # `acp_agents` is unnarrowed here and so is every one the bundle has, which is the
       # rule: absence means everything, for the fourth kind as for the other three.
       assert pushed["entitlements"] == %{
-               "agents" => ["pr-reviewer", "build", "plan"],
+               "agents" => ["pr-reviewer", "build", "orchestrate", "plan"],
                "skills" => ["review"],
                "mcp_servers" => ["jira"],
                "acp_agents" => ["gemini", "codex"]

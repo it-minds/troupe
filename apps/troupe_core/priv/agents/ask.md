@@ -1,6 +1,6 @@
 ---
 description: Answers a question across this session's branches from what they finished with. Cheap model.
-mode: primary
+mode: function
 model: cheap
 tools:
   - read_file

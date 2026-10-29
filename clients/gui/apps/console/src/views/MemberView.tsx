@@ -5,7 +5,7 @@
 // say beside the profile's own.
 
 import type { JSX } from "react";
-import { accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, ruleAccessWords, whoseWords } from "@troupe/client";
+import { FUNCTIONS_HEADING, accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, ruleAccessWords, whoseWords } from "@troupe/client";
 import { memberView, useConsole, useLoad } from "../console";
 import { Loaded, Region } from "./bits";
 
@@ -53,6 +53,30 @@ export function MemberView({ name }: { name: string }): JSX.Element {
                 </tbody>
               </table>
             </div>
+            {(view.functions ?? []).length > 0 && (
+              <div className="scroll">
+                <table>
+                  <caption>{FUNCTIONS_HEADING}</caption>
+                  <thead>
+                    <tr>
+                      <th>Agent</th>
+                      <th>From</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(view.functions ?? []).map((a) => (
+                      <tr key={a.name}>
+                        <td>
+                          <span className="mono">{a.name}</span>
+                          {a.description && <span className="hint"> {a.description}</span>}
+                        </td>
+                        <td>{whoseWords(a.from)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             <div className="scroll">
               <table>
                 <caption>Tool rules</caption>

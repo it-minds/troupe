@@ -119,11 +119,20 @@ defmodule Troupe.Gateway.CommandsListTest do
     sections = commands |> Enum.map(& &1["section"]) |> Enum.dedup()
     assert sections == Troupe.Commands.sections() -- ["custom"]
 
-    # The same agents `agents.list` offers, so a palette and a session picker agree.
+    # The same agents `agents.list` offers, so a palette and a session picker agree, and
+    # the function agents a command starts in a branch for their job (`/ask`), which no
+    # picker offers.
     {:ok, %{"agents" => agents}} =
-      Client.call(context.client, "agents.list", %{"workspace" => context.workspace})
+      Client.call(context.client, "agents.list", %{
+        "workspace" => context.workspace,
+        "subagents" => true
+      })
 
-    from_agents = agents |> Enum.map(& &1["name"]) |> Enum.sort()
+    from_agents =
+      for(%{"mode" => mode, "name" => name} <- agents, mode in ["primary", "function"], do: name)
+      |> Enum.sort()
+
+    assert by_name["ask"]["source"] == "agent"
 
     from_commands =
       commands |> Enum.filter(&(&1["source"] == "agent")) |> Enum.map(& &1["name"]) |> Enum.sort()

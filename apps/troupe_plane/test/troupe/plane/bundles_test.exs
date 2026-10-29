@@ -432,7 +432,7 @@ defmodule Troupe.Plane.BundlesTest do
                )
 
       assert error.message == "invalid_params"
-      assert error.data.agents == ["pr-reviewer", "build", "plan"]
+      assert error.data.agents == ["pr-reviewer", "build", "orchestrate", "plan"]
       refute_receive {:pushed, ^pod, "session.activate", %{"agent" => "helper"}}, 200
     end
 

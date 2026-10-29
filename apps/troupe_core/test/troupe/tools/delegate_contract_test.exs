@@ -7,7 +7,7 @@ defmodule Troupe.Tools.DelegateContractTest do
 
   use Troupe.SessionCase, async: true
 
-  alias Troupe.Agent.Writes
+  alias Troupe.Agent.{Definitions, Writes}
   alias Troupe.LLM.Message
   alias Troupe.Tool.Ctx
   alias Troupe.Tools.{Delegate, Finish, ReadBranch}
@@ -48,6 +48,25 @@ defmodule Troupe.Tools.DelegateContractTest do
       assert refused.data["content"] =~ "goal"
       # The old single field is named as gone, so a model retries in parts.
       assert refused.data["content"] =~ "`task` field is gone"
+    end
+
+    test "a function agent is no delegate target, and the refusal says what it is" do
+      definitions = Definitions.load(nil)
+
+      ctx = %Ctx{
+        session_id: "s-fn",
+        agent_path: ["root"],
+        workspace: nil,
+        call_id: "c1",
+        agent_pid: self(),
+        definitions: definitions,
+        max_depth: 3
+      }
+
+      refute "librarian" in Enum.map(Definitions.subagents(definitions), & &1.name)
+      assert {:error, sentence} = Delegate.run(Map.put(@brief, "agent", "librarian"), ctx)
+      assert sentence =~ "librarian is a function agent"
+      assert sentence =~ "Delegate to a subagent instead."
     end
 
     test "the refusal names every missing part and nothing else" do
@@ -393,6 +412,7 @@ defmodule Troupe.Tools.DelegateContractTest do
           ]
 
       assert {[], 1} = Writes.of(refused ++ allowed, agent)
+
       assert Writes.describe(Writes.changed(refused ++ allowed, agent, "s")) =~
                "what its 1 command changed"
     end

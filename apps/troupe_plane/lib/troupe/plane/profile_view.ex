@@ -13,6 +13,12 @@ defmodule Troupe.Plane.ProfileView do
   the plane enforces, and the two differ exactly where it matters: a grant that narrows, a
   rule that takes an agent away, a server whose host the policy refused.
 
+  The agents come in three lists: `agents`, those a session may start as and the subagents
+  they delegate to; `functions`, those the harness may run there for a job of their own
+  (`answer` for an `AI?` comment, the librarian), which no session runs as its agent; and
+  `agents_not_here`. A function agent is in that last list only when the profile's rule
+  took it away, since no grant names one.
+
   It says what a session will not get as well as what it will (`agents_not_here`, an MCP
   server `offered: false`), each with why, because a person who does not find the agent
   they expected should be told whose word took it away rather than left to guess whether
@@ -156,7 +162,7 @@ defmodule Troupe.Plane.ProfileView do
     whole = offering(name, [])
     parsed = bundle_of(row)
     rule = agent_rule(row)
-    {here, not_here} = agents(parsed, rule, offered, whole)
+    {here, functions, not_here} = agents(parsed, rule, offered, whole)
 
     %{
       "name" => name,
@@ -167,6 +173,7 @@ defmodule Troupe.Plane.ProfileView do
       "teams" => Enum.map(teams, & &1.name),
       "model" => model(row),
       "agents" => here,
+      "functions" => functions,
       "agents_not_here" => not_here,
       "skills" => Enum.map(offered.skills, & &1.name),
       "tools" => %{"rules" => rules(row), "mcp" => servers(parsed, offered)},
@@ -192,34 +199,34 @@ defmodule Troupe.Plane.ProfileView do
 
   # -- agents ----------------------------------------------------------------------
 
-  # Every agent the bundle or Troupe has on these pods, sorted into the two lists. The
+  # Every agent the bundle or Troupe has on these pods, sorted into the three lists. The
   # bundle's win over a built-in of the same name, as they do on the pod. On the pod the
   # profile's rule applies to every mode, and the team's set to primaries alone (a subagent
-  # is the bundle's own delegation), so that is how each is judged here: a primary is here
-  # when the offering for this grant names it, not here for the grant when the offering
-  # without one does, and not here for the profile when the rule takes it away.
-  #
-  # A built-in primary that is not one a session may start as on a pod (Troupe's own
-  # `answer`, `quick` and the like, which the plane never puts in a session's set) is in
-  # neither list: no rule and no grant took it away, and a pod session never has it.
+  # is the bundle's own delegation, a function agent the harness's own job), so that is how
+  # each is judged here: a primary is here when the offering for this grant names it, not
+  # here for the grant when the offering without one does, and not here for the profile
+  # when the rule takes it away; a function agent is the harness's to run unless the rule
+  # takes it away.
   defp agents(parsed, rule, offered, whole) do
-    {here, not_here} =
+    {here, functions, not_here} =
       parsed
       |> all_agents()
-      |> Enum.reduce({[], []}, fn agent, {here, not_here} ->
+      |> Enum.reduce({[], [], []}, fn agent, {here, functions, not_here} ->
         case judge(agent, rule, offered.agents, whole.agents) do
-          :here -> {[agent | here], not_here}
-          {:not_here, why} -> {here, [Map.put(agent, "why", why) | not_here]}
-          :never -> {here, not_here}
+          :here -> {[agent | here], functions, not_here}
+          :function -> {here, [Map.delete(agent, "mode") | functions], not_here}
+          {:not_here, why} -> {here, functions, [Map.put(agent, "why", why) | not_here]}
+          :never -> {here, functions, not_here}
         end
       end)
 
-    {sort_agents(here), sort_agents(not_here)}
+    {sort_agents(here), Enum.sort_by(functions, & &1["name"]), sort_agents(not_here)}
   end
 
   defp judge(%{"name" => name, "mode" => mode}, rule, offered, whole) do
     cond do
       not AgentRule.allows?(rule, name) -> {:not_here, "profile"}
+      mode == "function" -> :function
       mode != "primary" -> :here
       name in offered -> :here
       name in whole -> {:not_here, "grant"}

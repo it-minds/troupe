@@ -354,7 +354,8 @@ defmodule Troupe.Agent.Definitions do
   # what `Bundles.primaries/1` offers and what `session.create` refuses by name. A
   # subagent is reached only by an agent the team *is* entitled to, and narrowing it
   # here would break a bundle's own internal delegation for a team that had simply not
-  # listed a name it never names.
+  # listed a name it never names. A function agent is not narrowed by it either: the set
+  # never names one, and only the profile's rule below takes one away.
   defp entitled(by_name, nil), do: by_name
 
   defp entitled(by_name, names) when is_list(names) do
@@ -397,6 +398,16 @@ defmodule Troupe.Agent.Definitions do
     }
   end
 
+  @doc """
+  Whether the profile's rule this snapshot was loaded with (`agent_rule:`) is what took
+  `name` away: an agent of that name could have been here and the profile says it is not.
+  """
+  @spec ruled_out?(t(), String.t()) :: boolean()
+  def ruled_out?(%__MODULE__{loaded: {_workspace, opts}}, name),
+    do: not AgentRule.allows?(Keyword.get(opts, :agent_rule), name)
+
+  def ruled_out?(%__MODULE__{}, _name), do: false
+
   @spec fetch(t(), String.t()) :: {:ok, Definition.t()} | {:error, {:unknown_agent, String.t()}}
   def fetch(%__MODULE__{by_name: by_name}, name) do
     case Map.fetch(by_name, name) do
@@ -420,9 +431,20 @@ defmodule Troupe.Agent.Definitions do
   @spec subagents(t()) :: [Definition.t()]
   def subagents(%__MODULE__{} = defs), do: Enum.filter(all(defs), &(&1.mode == :subagent))
 
-  @doc "Definitions the user may switch the root agent between."
+  @doc """
+  Definitions the user may switch the root agent between: the primaries alone. A function
+  agent is the harness's to start for its job, so no picker offers it.
+  """
   @spec primaries(t()) :: [Definition.t()]
   def primaries(%__MODULE__{} = defs), do: Enum.filter(all(defs), &(&1.mode == :primary))
+
+  @doc """
+  Definitions the harness starts by name for one job each (`mode: function`): what a
+  command such as `/ask` runs in a branch. Not in `primaries/1` nor `subagents/1`; reached
+  through `fetch/2`, which filters by no mode.
+  """
+  @spec functions(t()) :: [Definition.t()]
+  def functions(%__MODULE__{} = defs), do: Enum.filter(all(defs), &(&1.mode == :function))
 
   @doc false
   @spec builtin_dir() :: Path.t()

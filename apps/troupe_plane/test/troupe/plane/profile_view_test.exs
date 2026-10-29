@@ -61,7 +61,8 @@ defmodule Troupe.Plane.ProfileViewTest do
     test "sees the agents a session gets, and those it does not with whose word it was", ctx do
       view = view!(ctx.ada)
 
-      assert names(view["agents"]) == ~w(build pr-reviewer general helper implementer reviewer)
+      assert names(view["agents"]) ==
+               ~w(build orchestrate pr-reviewer general helper implementer reviewer)
 
       assert %{"mode" => "primary", "from" => "bundle", "description" => "Reviews code"} =
                find(view["agents"], "pr-reviewer")
@@ -82,8 +83,41 @@ defmodule Troupe.Plane.ProfileViewTest do
                  "from" => "builtin",
                  "why" => "profile",
                  "description" => find_builtin_description("explore")
+               },
+               %{
+                 "name" => "librarian",
+                 "mode" => "function",
+                 "from" => "builtin",
+                 "why" => "profile",
+                 "description" => find_builtin_description("librarian")
                }
              ]
+    end
+
+    test "sees the function agents the harness may run there, less those the rule denies", ctx do
+      view = view!(ctx.ada)
+
+      # The harness's own jobs are in neither list a session picks from, and the
+      # librarian the profile's rule denies is not among them.
+      assert view["functions"] == [
+               %{
+                 "name" => "answer",
+                 "from" => "builtin",
+                 "description" => find_builtin_description("answer")
+               },
+               %{
+                 "name" => "ask",
+                 "from" => "builtin",
+                 "description" => find_builtin_description("ask")
+               },
+               %{
+                 "name" => "quick",
+                 "from" => "builtin",
+                 "description" => find_builtin_description("quick")
+               }
+             ]
+
+      for name <- ~w(answer ask quick librarian), do: refute(find(view["agents"], name))
     end
 
     test "is shown the primaries profiles.list offers them, which are the ones a create allows",
@@ -239,7 +273,7 @@ defmodule Troupe.Plane.ProfileViewTest do
       # No grant narrows it, so what the grant took from a member is there.
       assert "plan" in names(view["agents"])
       assert Enum.all?(view["tools"]["mcp"], & &1["offered"])
-      assert view["agents_not_here"] |> names() == ["explore"]
+      assert view["agents_not_here"] |> names() == ["explore", "librarian"]
       assert view["limits"]["budgets"]["team"] == nil
 
       assert {:error, %{message: "not_found"}} =
@@ -273,7 +307,7 @@ defmodule Troupe.Plane.ProfileViewTest do
 
   defp spec do
     %{
-      "agents" => %{"deny" => ["explore"]},
+      "agents" => %{"deny" => ["explore", "librarian"]},
       "permissions" => %{
         "deny" => ["shell(git push)"],
         "ask" => ["mcp(tracker)", "web_fetch"],

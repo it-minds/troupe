@@ -84,9 +84,22 @@ defmodule Troupe.FakeRemote do
             "from" => "builtin"
           }
         ],
+        "functions" => [
+          %{
+            "name" => "answer",
+            "description" => "Answers an AI? question about the code",
+            "from" => "builtin"
+          },
+          %{
+            "name" => "ask",
+            "description" => "Answers a question across the session's branches",
+            "from" => "builtin"
+          }
+        ],
         "excluded_agents" => [
           %{"name" => "deploy", "mode" => "primary", "from" => "bundle", "why" => "profile"},
-          %{"name" => "review", "mode" => "subagent", "from" => "bundle", "why" => "grant"}
+          %{"name" => "review", "mode" => "subagent", "from" => "bundle", "why" => "grant"},
+          %{"name" => "librarian", "mode" => "function", "from" => "builtin", "why" => "profile"}
         ],
         "skills" => ["changelog"],
         "rules" => [
@@ -1897,6 +1910,7 @@ defmodule Troupe.FakeRemote do
         model ||
           %{"model" => nil, "small_model" => nil, "provider" => nil, "host" => nil, "key" => nil},
       "agents" => profile["agents"] || [],
+      "functions" => profile["functions"] || [],
       "agents_not_here" => profile["excluded_agents"] || [],
       "skills" => profile["skills"] || [],
       "tools" => %{

@@ -33,11 +33,12 @@ export interface AgentRow {
   source: string;
   notes?: Array<{ key: string; reason: string }>;
   /**
-   * `primary`, run by a session or a branch, or `subagent`, delegated to: `agents.list`
-   * lists the subagents only when asked (troupe Decision 852). Absent from a daemon before
-   * it, whose rows are all primaries.
+   * `primary`, run by a session or a branch, `subagent`, delegated to, or `function`, run
+   * by the harness for a job of its own (`answer` for an `AI?` comment): `agents.list`
+   * lists the subagents and the function agents only when asked (troupe Decision 852).
+   * Absent from a daemon before it, whose rows are all primaries.
    */
-  mode?: "primary" | "subagent";
+  mode?: "primary" | "subagent" | "function";
   layer?: AgentLayer;
   /** As the definition names it; null runs on the session's own model. */
   model?: string | null;
@@ -94,7 +95,7 @@ export interface AgentSkippedFile {
 
 /** One definition whole, as `agents.get` answers it. */
 export interface AgentDefinition extends AgentRow {
-  mode: "primary" | "subagent";
+  mode: "primary" | "subagent" | "function";
   tools: "all" | string[];
   permissions: Record<string, AgentPermission>;
   budget_share: number | null;

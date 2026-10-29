@@ -1,6 +1,6 @@
 ---
 description: Makes the small, local change an `AI!` comment asks for. Cheap model, few turns.
-mode: primary
+mode: function
 model: cheap
 tools:
   - read_file

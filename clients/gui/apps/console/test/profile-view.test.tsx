@@ -41,6 +41,8 @@ describe("what a member sees", () => {
       await sees("the profile", member);
       await sees("glm-5.2", member);
       await sees("profile $200.00", member);
+      await sees("What the harness may run here", member);
+      await sees("Answers an AI? question about the code", member);
       expect(member()!.querySelectorAll("input, select, textarea, button")).toHaveLength(0);
       expect(calls.filter((c) => c.method === "profile.get")).toHaveLength(1);
     } finally {
@@ -51,6 +53,9 @@ describe("what a member sees", () => {
   it("is answered for no team, so only the profile's own rule leaves an agent out", async () => {
     await open("#/profiles/ux");
     await sees("not here: the profile does not have it", member);
+    // The librarian the profile's rule denies is a row not here, not among the harness's jobs.
+    const caption = [...member()!.querySelectorAll("caption")].find((c) => c.textContent === "What the harness may run here");
+    expect(caption?.closest("table")?.textContent).not.toContain("librarian");
     // The core team's grant leaves out plan; asked as the administrator, no grant narrows it.
     expect(says("your team's grant leaves it out")).toBe(false);
   });

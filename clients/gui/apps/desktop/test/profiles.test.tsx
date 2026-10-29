@@ -65,6 +65,9 @@ describe("profiles", () => {
     const agents = await section("Agents");
     expect(agents.textContent).toContain("Reads a diff and comments on it");
     expect(agents.textContent).toContain("built in");
+    // The harness's own jobs, under a heading of their own with each one's line.
+    expect(agents.textContent).toContain("What the harness may run here");
+    expect(agents.textContent).toContain("Surveys the repository for its brief");
     const tools = await section("Tools");
     expect(tools.textContent).toContain("git push *");
     expect(tools.textContent).toContain("refused");

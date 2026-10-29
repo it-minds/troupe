@@ -361,9 +361,10 @@ function Form({
         <label>
           Mode
           <select value={fields.mode} onChange={(e) => onChange({ mode: e.target.value })} aria-label="Mode">
-            {fields.mode !== "primary" && fields.mode !== "subagent" && <option value={fields.mode}>{fields.mode || "(not set)"}</option>}
+            {fields.mode !== "primary" && fields.mode !== "subagent" && fields.mode !== "function" && <option value={fields.mode}>{fields.mode || "(not set)"}</option>}
             <option value="primary">primary: a session or a branch runs it</option>
             <option value="subagent">subagent: an agent delegates to it</option>
+            <option value="function">function: the harness runs it for one job</option>
           </select>
           {notes("mode")}
         </label>

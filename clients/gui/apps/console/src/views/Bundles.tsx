@@ -1045,11 +1045,12 @@ function AgentBuilder({
       </Field>
       {formed ? (
         <>
-          <Field label="Mode" hint="A primary agent is what a session runs; a subagent is one an agent delegates to." error={at("mode")}>
+          <Field label="Mode" hint="A primary agent is what a session runs; a subagent is one an agent delegates to; a function agent is one the harness runs for a job of its own." error={at("mode")}>
             {(p) => (
               <select {...p} value={mode} onChange={(e) => setMode(e.target.value)}>
                 <option value="primary">primary</option>
                 <option value="subagent">subagent</option>
+                <option value="function">function</option>
               </select>
             )}
           </Field>

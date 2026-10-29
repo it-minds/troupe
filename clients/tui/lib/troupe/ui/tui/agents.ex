@@ -1057,6 +1057,7 @@ defmodule Troupe.UI.TUI.Agents do
   defp path_words(_whole), do: ""
 
   defp mode_words("subagent"), do: "subagent: an agent delegates to it"
+  defp mode_words("function"), do: "function: the harness runs it for one job"
   defp mode_words(_primary), do: "primary: a session or a branch runs it"
 
   defp tools_words(%{"tools" => "all", "tool_count" => n}), do: "all (#{n})"

@@ -9,11 +9,19 @@ one wins where two share a name is [the ladder](configuration-layers.md#which-on
 
 An agent is a Markdown file whose front matter says what it is and what it may do, and
 whose body is its instruction; the [recipe](configuration/mcp-agents-skills.md#a-custom-agent)
-is a complete one. The file name is the agent's name, and every `mode: primary` agent is a
-command in the clients. One in `<workspace>/.troupe/agents/` or `<config>/agents/`
-replaces an agent of that name lower on the ladder: a profile's bundle's, or a built-in:
-`build`, `plan`, `orchestrate`, `ask`, `librarian`, watch mode's `quick` and `answer`, and
-the subagents `general`, `explore`, `implementer` and `reviewer`.
+is a complete one. The file name is the agent's name. One in `<workspace>/.troupe/agents/`
+or `<config>/agents/` replaces an agent of that name lower on the ladder: a profile's
+bundle's, or a built-in.
+
+- **`mode:`** says who starts it. `primary` is one you pick for a session or a branch, in
+  the agent picker or as `/<name>`: the built-ins `build`, `plan` and `orchestrate`.
+  `subagent` is one an agent delegates to: `general`, `explore`, `implementer` and
+  `reviewer`. `function` is one Troupe starts by itself for one job: `answer` for an `AI?`
+  comment, `quick` for an `AI!` and `/quick`, `ask` for `/ask` across a session's
+  branches, and `librarian` for the project brief. A function agent runs in a branch of
+  the session it serves, and `/<name>` starts one there; no picker offers it, no agent
+  delegates to it, and a session started or switched to one is refused with what it is for. Replacing one
+  changes the job: a `quick` of your own is what every `AI!` starts.
 
 - **`model:`** is `default`, `cheap`, `expensive` or a model named outright. `expensive`
   is `models.expensive`, else the default model, so an agent that asks for it still runs

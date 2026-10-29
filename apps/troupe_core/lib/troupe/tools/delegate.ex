@@ -271,6 +271,12 @@ defmodule Troupe.Tools.Delegate do
 
   defp check_mode(%Definition{mode: :subagent}), do: :ok
 
+  defp check_mode(%Definition{mode: :function, name: name}) do
+    {:error,
+     "#{name} is a function agent, which the harness runs for one job, not a subagent. " <>
+       "Delegate to a subagent instead."}
+  end
+
   defp check_mode(%Definition{name: name}) do
     {:error, "#{name} is a primary profile, not a subagent. Delegate to a subagent instead."}
   end

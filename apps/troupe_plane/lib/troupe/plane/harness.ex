@@ -56,7 +56,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.{Tokens, Triggers}
   alias Troupe.Plane.Triggers.Run
-  alias Troupe.Protocol.AgentRule
+  alias Troupe.Protocol.{AgentDefinition, AgentRule}
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.{Canonical, ClientUpdate, Error, Origin, Principal, Relay, SessionId, Token}
   alias Troupe.Protocol.Memory.Entries
@@ -1443,14 +1443,26 @@ defmodule Troupe.Plane.Harness do
   # and then failed on the pod.
   defp agent_for(_profile, _team, nil), do: {:ok, nil}
 
+  # A function agent is no session's agent: the harness starts it for its one job, so a
+  # create naming one is told what it is for rather than that it does not exist.
   defp agent_for(profile, team, agent) when is_binary(agent) do
-    %{agents: agents} = offering(profile, Identity.entitlements_for(team, profile))
+    offering = offering(profile, Identity.entitlements_for(team, profile))
+    %{agents: agents} = offering
 
-    if agent in agents do
-      {:ok, agent}
-    else
-      {:error,
-       Error.new(:invalid_params, %{reason: "no primary agent named #{agent}", agents: agents})}
+    cond do
+      agent in agents ->
+        {:ok, agent}
+
+      agent in Map.get(offering, :functions, []) ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason: AgentDefinition.function_refusal(agent),
+           agents: agents
+         })}
+
+      true ->
+        {:error,
+         Error.new(:invalid_params, %{reason: "no primary agent named #{agent}", agents: agents})}
     end
   end
 
@@ -3022,16 +3034,26 @@ defmodule Troupe.Plane.Harness do
   defp agent_within(_parent, nil), do: {:ok, nil}
 
   defp agent_within(%Session{} = parent, agent) when is_binary(agent) do
-    %{agents: agents} = offering(parent.profile, Identity.entitlements_for(team_of(parent), parent.profile))
+    offering = offering(parent.profile, Identity.entitlements_for(team_of(parent), parent.profile))
+    %{agents: agents} = offering
 
-    if agent in agents do
-      {:ok, agent}
-    else
-      {:error,
-       Error.new(:forbidden, %{
-         reason: "the parent session cannot run an agent named #{agent}",
-         agents: agents
-       })}
+    cond do
+      agent in agents ->
+        {:ok, agent}
+
+      agent in Map.get(offering, :functions, []) ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason: AgentDefinition.function_refusal(agent),
+           agents: agents
+         })}
+
+      true ->
+        {:error,
+         Error.new(:forbidden, %{
+           reason: "the parent session cannot run an agent named #{agent}",
+           agents: agents
+         })}
     end
   end
 

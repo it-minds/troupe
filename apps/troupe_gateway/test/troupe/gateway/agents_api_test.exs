@@ -435,6 +435,46 @@ defmodule Troupe.Gateway.AgentsApiTest do
                })
 
       assert reason =~ "subagent"
+
+      # A function agent is the harness's to run for its job, so no session switches to it.
+      assert {:error, %Error{message: "invalid_params", data: %{"reason" => reason}}} =
+               Client.call(context.client, "profile.switch", %{
+                 "command_id" => "c-fn",
+                 "session_id" => branch.id,
+                 "profile" => "librarian"
+               })
+
+      assert reason ==
+               "librarian is a function agent the harness runs for the project brief's survey; " <>
+                 "it does not carry a session"
+    end
+
+    test "session.create refuses a function agent as a session's own and starts it as a branch",
+         context do
+      assert {:error, %Error{message: "invalid_params", data: data}} =
+               Client.call(context.client, "session.create", %{
+                 "command_id" => "c-ask",
+                 "workspace" => context.workspace,
+                 "profile" => "ask"
+               })
+
+      assert data["field"] == "profile"
+      assert data["reason"] =~ "ask is a function agent the harness runs for `/ask`"
+      assert data["reason"] =~ "it does not carry a session"
+
+      # Neither listing a person picks from has it; the one with every mode says what it is.
+      {:ok, %{"agents" => primaries}} =
+        Client.call(context.client, "agents.list", %{"workspace" => context.workspace})
+
+      refute "ask" in Enum.map(primaries, & &1["name"])
+
+      {:ok, %{"agents" => every}} =
+        Client.call(context.client, "agents.list", %{
+          "workspace" => context.workspace,
+          "subagents" => true
+        })
+
+      assert %{"mode" => "function"} = Enum.find(every, &(&1["name"] == "ask"))
     end
   end
 

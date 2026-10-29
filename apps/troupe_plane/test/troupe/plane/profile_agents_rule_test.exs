@@ -67,7 +67,7 @@ defmodule Troupe.Plane.ProfileAgentsRuleTest do
 
     test "deny takes a built-in away, and deny beats allow", context do
       profile(%{"deny" => ["build"]})
-      assert offered(context.ada) == ["pr-reviewer", "plan"]
+      assert offered(context.ada) == ["pr-reviewer", "orchestrate", "plan"]
 
       # A spec cannot name an agent in both lists (the put refuses it), so deny over
       # allow is asked of the offering directly, as a composed rule can come to it.
@@ -77,7 +77,7 @@ defmodule Troupe.Plane.ProfileAgentsRuleTest do
 
     test "a profile that says nothing offers what it always did", context do
       profile(nil)
-      assert offered(context.ada) == ["pr-reviewer", "build", "plan"]
+      assert offered(context.ada) == ["pr-reviewer", "build", "orchestrate", "plan"]
     end
 
     test "a grant narrows further and never widens", context do
@@ -91,7 +91,21 @@ defmodule Troupe.Plane.ProfileAgentsRuleTest do
       assert offered(context.ada) == ["pr-reviewer"]
 
       entitle(context.team, [%{"kind" => "agent", "name" => "plan", "mode" => "deny"}])
-      assert offered(context.ada) == ["pr-reviewer"]
+      assert offered(context.ada) == ["pr-reviewer", "orchestrate"]
+    end
+
+    test "the built-in primaries are the files' own, and a function agent is never one" do
+      # Read from the definitions Troupe ships, not a list kept here: their modes say it.
+      assert Bundles.builtin_primaries() == ["build", "orchestrate", "plan"]
+      assert Bundles.builtin_functions() == ["answer", "ask", "librarian", "quick"]
+
+      offering = Bundles.offering(nil, [])
+      assert offering.agents == ["build", "orchestrate", "plan"]
+      assert offering.functions == ["answer", "ask", "librarian", "quick"]
+
+      # A grant never names a function agent; the profile's rule takes one away.
+      ruled = Bundles.offering(nil, [], %{allow: nil, deny: ["librarian"]})
+      assert ruled.functions == ["answer", "ask", "quick"]
     end
   end
 
@@ -105,7 +119,22 @@ defmodule Troupe.Plane.ProfileAgentsRuleTest do
       assert {:error, error} = Harness.call("session.create", params, as(context.ada))
       assert error.message == "invalid_params"
       assert error.data.reason == "no primary agent named build"
-      assert error.data.agents == ["pr-reviewer", "plan"]
+      assert error.data.agents == ["pr-reviewer", "orchestrate", "plan"]
+      refute_received {:pushed, "session.activate", _}
+    end
+
+    test "is refused a function agent with what the harness runs it for", context do
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+      profile(nil)
+
+      params = %{"profile" => "dev", "agent" => "librarian", "team" => "engineering"}
+      assert {:error, error} = Harness.call("session.create", params, as(context.ada))
+      assert error.message == "invalid_params"
+
+      assert error.data.reason ==
+               "librarian is a function agent the harness runs for the project brief's survey; " <>
+                 "it does not carry a session"
+
       refute_received {:pushed, "session.activate", _}
     end
 

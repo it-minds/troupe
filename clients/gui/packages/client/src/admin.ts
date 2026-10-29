@@ -1248,7 +1248,8 @@ export interface ProfileChoices {
 /** One agent of a profile's bundle in effect, as `admin.profile.agents` answers it. */
 export interface ProfileAgent {
   name: string;
-  mode: "primary" | "subagent";
+  /** `function`: one the harness runs for a job of its own, which no session runs as its agent. */
+  mode: "primary" | "subagent" | "function";
   description: string | null;
   model: string | null;
   /** The subagents it may delegate to; null where it cannot delegate. */

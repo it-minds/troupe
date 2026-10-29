@@ -13,9 +13,16 @@ defmodule Troupe.Protocol.AgentDefinition do
 
   `delegation: ask` says a `delegate` to this agent asks the person first (#554, Decision
   850); `auto`, the default, runs it at once.
+
+  `mode` is one of three: `primary`, an agent a person picks for a session or a branch;
+  `subagent`, one an agent delegates to; and `function`, one the harness itself starts
+  for one job (an `AI?` comment's question, the project brief's survey) and that never
+  carries a session of a person's choosing. Every list of agents a person picks from
+  leaves a function agent out, and no agent can delegate to one; the harness fetches it
+  by name.
   """
 
-  @type mode :: :primary | :subagent
+  @type mode :: :primary | :subagent | :function
   @type permission :: :auto | :ask | :deny
   @type delegation :: :auto | :ask
 
@@ -35,6 +42,33 @@ defmodule Troupe.Protocol.AgentDefinition do
         }
 
   @name ~r/\A[a-z0-9][a-z0-9-]{0,63}\z/
+
+  # What the harness runs each of Troupe's own function agents for, in the words a refusal
+  # uses; any other function agent's job is its description's.
+  @jobs %{
+    "answer" => "an `AI?` comment's question",
+    "quick" => "an `AI!` comment's change and `/quick`",
+    "ask" => "`/ask`, a question across a session's branches",
+    "librarian" => "the project brief's survey"
+  }
+
+  @doc """
+  The sentence a request is refused with when it names a function agent as a session's
+  agent: what the harness runs it for, and that it carries no session. `description` is
+  the agent's own, said where Troupe's own words for its job are not.
+  """
+  @spec function_refusal(String.t(), String.t() | nil) :: String.t()
+  def function_refusal(name, description \\ nil) do
+    job =
+      Map.get_lazy(@jobs, name, fn ->
+        case description && String.trim(description) do
+          blank when blank in [nil, ""] -> "a job of its own"
+          text -> "its own job (#{text |> String.split("\n", parts: 2) |> hd()})"
+        end
+      end)
+
+    "#{name} is a function agent the harness runs for #{job}; it does not carry a session"
+  end
 
   @doc "Whether a name is one an agent or a skill may have."
   @spec valid_name?(term()) :: boolean()
@@ -110,6 +144,7 @@ defmodule Troupe.Protocol.AgentDefinition do
 
   defp parse_mode("primary"), do: {:ok, :primary}
   defp parse_mode("subagent"), do: {:ok, :subagent}
+  defp parse_mode("function"), do: {:ok, :function}
   defp parse_mode(other), do: {:error, {:bad_mode, other}}
 
   # `tools` absent means every tool; `skills` absent means none. Both accept the word
