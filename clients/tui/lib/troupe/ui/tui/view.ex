@@ -18,7 +18,17 @@ defmodule Troupe.UI.TUI.View do
   alias ExRatatui.Widgets.Block.Title
   alias Troupe.Client
   alias Troupe.Settings
-  alias Troupe.UI.TUI.{AgentChooser, Agents, ArtifactsPage, Input, MemoryPage, Model, Theme}
+
+  alias Troupe.UI.TUI.{
+    AgentChooser,
+    Agents,
+    ArtifactsPage,
+    Input,
+    MemoryPage,
+    Model,
+    ProfilesPage,
+    Theme
+  }
 
   # Command-box geometry. The focused box — the command line and an active
   # window's input — is a fixed `@input_rows` console rows: `@input_content`
@@ -119,14 +129,16 @@ defmodule Troupe.UI.TUI.View do
       AgentChooser.render(chooser, area, cmd_rect.y, Agents.running(state))
   end
 
-  defp draw(%{focus: focus} = state, frame) when focus in [:artifacts, :own_memory] do
+  defp draw(%{focus: focus} = state, frame) when focus in [:artifacts, :own_memory, :profiles] do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
 
     page =
-      if focus == :artifacts,
-        do: ArtifactsPage.render(state.artifacts_page, page_rect, state),
-        else: MemoryPage.render(state.memory_page, page_rect, state)
+      case focus do
+        :artifacts -> ArtifactsPage.render(state.artifacts_page, page_rect, state)
+        :own_memory -> MemoryPage.render(state.memory_page, page_rect, state)
+        :profiles -> ProfilesPage.render(state.profiles_page, page_rect, state)
+      end
 
     page ++ [status(state, status_rect), command_line(state, cmd_rect)]
   end
@@ -3029,6 +3041,9 @@ defmodule Troupe.UI.TUI.View do
 
         :own_memory ->
           {"", MemoryPage.footer(state.memory_page)}
+
+        :profiles ->
+          {"", ProfilesPage.footer(state.profiles_page)}
 
         :hq ->
           {hq_text(state), Troupe.UI.HQ.footer(state.hq)}

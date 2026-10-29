@@ -48,6 +48,104 @@ defmodule Troupe.FakeRemote do
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts)
 
+  @doc """
+  Profiles with everything `profile.get` says, for `profiles: …`: `code`, offering two
+  agents, one left out by the profile and one by the team's grant, a server as the person,
+  one as the profile's own identity and one the grant does not offer; `docs`, with little
+  said; and `ops`, not granted to the caller, which `profile.get` answers `not_found`.
+  """
+  @spec profile_fixtures() :: [map()]
+  def profile_fixtures do
+    [
+      %{
+        "name" => "code",
+        "description" => "writes code",
+        "health" => "ok",
+        "capacity" => %{"free" => 6, "total" => 8},
+        "bundle_hash" => "sha256:0123456789abcdef",
+        "bundle_version" => "1.4",
+        "agents" => [
+          %{
+            "name" => "build",
+            "mode" => "primary",
+            "description" => "Edits in the checkout",
+            "from" => "bundle"
+          },
+          %{
+            "name" => "plan",
+            "mode" => "primary",
+            "description" => "Reads and plans",
+            "from" => "builtin"
+          },
+          %{
+            "name" => "explore",
+            "mode" => "subagent",
+            "description" => "Searches the code",
+            "from" => "builtin"
+          }
+        ],
+        "excluded_agents" => [
+          %{"name" => "deploy", "mode" => "primary", "from" => "bundle", "why" => "profile"},
+          %{"name" => "review", "mode" => "subagent", "from" => "bundle", "why" => "grant"}
+        ],
+        "skills" => ["changelog"],
+        "rules" => [
+          %{"tool" => "shell", "pattern" => "git push", "access" => "deny", "from" => "profile"},
+          %{"tool" => "web_fetch", "pattern" => nil, "access" => "ask", "from" => "profile"}
+        ],
+        "mcp_servers" => [
+          %{
+            "name" => "severa",
+            "host" => "severa.example.com",
+            "credential_mode" => "yours",
+            "permission" => "ask",
+            "tools" => ["list_projects", "log_hours", "find_customer"]
+          },
+          %{
+            "name" => "sursen",
+            "host" => "sursen.internal",
+            "credential_mode" => "system",
+            "tools" => "all"
+          },
+          %{
+            "name" => "jira",
+            "host" => "jira.example.com",
+            "credential_mode" => "profile",
+            "offered" => false,
+            "why" => "grant"
+          }
+        ],
+        "egress" => ["github.com"],
+        "model" => %{
+          "model" => "claude-sonnet-4-5",
+          "small_model" => "claude-haiku-4-5",
+          "provider" => "anthropic",
+          "host" => "api.anthropic.com",
+          "key" => "profile"
+        },
+        "limits" => %{"sessions_per_pod" => 4, "max_sessions" => 3},
+        "budgets" => %{"profile" => 50_000_000, "team" => 200_000_000},
+        "teams" => ["core", "design"]
+      },
+      %{
+        "name" => "docs",
+        "description" => "writes docs",
+        "health" => "ok",
+        "capacity" => %{"free" => 2, "total" => 2},
+        "agents" => [
+          %{"name" => "write", "mode" => "primary", "description" => "Writes", "from" => "bundle"}
+        ]
+      },
+      %{
+        "name" => "ops",
+        "description" => "runs things",
+        "health" => "ok",
+        "capacity" => %{"free" => 1, "total" => 1},
+        "granted" => false
+      }
+    ]
+  end
+
   @doc "The plane's base URL — what `troupe login` is given."
   @spec url(pid()) :: String.t()
   def url(remote), do: GenServer.call(remote, :url)
@@ -744,7 +842,7 @@ defmodule Troupe.FakeRemote do
       "email" => nil,
       "kind" => "person",
       "teams" => state.teams,
-      "profiles" => Enum.map(state.profiles, & &1["name"]),
+      "profiles" => Enum.map(granted(state), & &1["name"]),
       "platform_admin" => false
     }
 
@@ -756,9 +854,18 @@ defmodule Troupe.FakeRemote do
   end
 
   defp dispatch(%{transport: :http} = state, _kind, "profiles.list", _params, _pid),
-    do: {{:ok, %{"profiles" => Enum.map(state.profiles, &live_profile/1)}}, state}
+    do: {{:ok, %{"profiles" => Enum.map(granted(state), &live_profile/1)}}, state}
 
-  defp dispatch(state, _kind, "profiles.list", _params, _pid), do: {{:ok, state.profiles}, state}
+  defp dispatch(state, _kind, "profiles.list", _params, _pid), do: {{:ok, granted(state)}, state}
+
+  # What a profile gives a session of the caller's, composed as the plane composes it from
+  # what it enforces; a profile not granted to them, or none of that name, is `not_found`.
+  defp dispatch(state, _kind, "profile.get", %{"name" => name} = params, _pid) do
+    case Enum.find(granted(state), &(&1["name"] == name)) do
+      nil -> {{:error, -32_005, "not_found", %{"profile" => name}}, state}
+      profile -> {{:ok, profile_view(profile, state, params["team"])}, state}
+    end
+  end
 
   defp dispatch(state, _kind, "sessions.list", params, _pid) do
     sessions =
@@ -1746,6 +1853,80 @@ defmodule Troupe.FakeRemote do
 
   # The live plane's rows: pods and micros rather than a verdict and a price,
   # and no team on a session.
+  defp granted(state), do: Enum.reject(state.profiles, &(&1["granted"] == false))
+
+  # `profile.get`'s answer from a profile's fields, as the plane composes it: its agents
+  # and those it or the team's grant leaves out, its rules (always the profile's: a pod
+  # reads no organisation layer), each MCP server with the identity it runs as
+  # (`credential_mode`), whether it asks (`permission`) and its tools, its limits and
+  # budgets. `reach` is the egress hosts, the model's host and each offered server's,
+  # sorted and once each. The team is the one named, else the caller's one team, else
+  # null with several; `terms` is null. A field the profile does not have is null, as the
+  # plane leaves what it cannot say.
+  defp profile_view(profile, state, team) do
+    teams = profile["teams"] || Enum.map(state.teams, & &1["id"])
+    servers = profile["mcp_servers"] || []
+    model = profile["model"]
+
+    reach =
+      if profile["egress"] do
+        hosts = for server <- servers, server["offered"] != false, do: server["host"]
+
+        (profile["egress"] ++ [model && model["host"] | hosts])
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq()
+        |> Enum.sort()
+      end
+
+    %{"free" => free, "total" => total} = profile["capacity"] || %{"free" => nil, "total" => nil}
+    limits = profile["limits"] || %{}
+
+    %{
+      "name" => profile["name"],
+      "channel" => profile["channel"] || "stable",
+      "bundle_version" => profile["bundle_version"] || "1",
+      "bundle_hash" => profile["bundle_hash"],
+      "team" =>
+        cond do
+          team -> team
+          length(teams) == 1 -> hd(teams)
+          true -> nil
+        end,
+      "teams" => teams,
+      "model" =>
+        model ||
+          %{"model" => nil, "small_model" => nil, "provider" => nil, "host" => nil, "key" => nil},
+      "agents" => profile["agents"] || [],
+      "agents_not_here" => profile["excluded_agents"] || [],
+      "skills" => profile["skills"] || [],
+      "tools" => %{
+        "rules" => profile["rules"] || [],
+        "mcp" =>
+          for server <- servers do
+            %{
+              "name" => server["name"],
+              "host" => server["host"],
+              "access" => server["credential_mode"],
+              "permission" => server["permission"] || "auto",
+              "tools" => server["tools"] || "all",
+              "offered" => server["offered"] != false,
+              "why" => if(server["offered"] == false, do: server["why"] || "grant")
+            }
+          end
+      },
+      "reach" => reach,
+      "limits" => %{
+        "sessions_per_pod" => limits["sessions_per_pod"],
+        "max_sessions" => limits["max_sessions"],
+        "capacity" => total,
+        "active_sessions" => if(is_integer(total) and is_integer(free), do: total - free),
+        "budgets" =>
+          Map.merge(%{"profile" => nil, "team" => nil, "you" => nil}, profile["budgets"] || %{})
+      },
+      "terms" => nil
+    }
+  end
+
   defp live_profile(profile) do
     %{"free" => free, "total" => total} = profile["capacity"]
 
@@ -1764,7 +1945,7 @@ defmodule Troupe.FakeRemote do
       "healthy_pods" => healthy,
       "channel" => "stable",
       "bundle_version" => "1",
-      "agents" => ["code"]
+      "agents" => Enum.map(profile["agents"] || [%{"name" => "code"}], & &1["name"])
     }
   end
 

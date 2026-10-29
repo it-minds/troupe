@@ -54,7 +54,7 @@ defmodule Troupe.UI.Headless.Printer do
 
   alias Troupe.Client
   alias Troupe.Client.Message
-  alias Troupe.UI.ModelError
+  alias Troupe.UI.{ModelError, ProfileView}
   alias Troupe.UI.TUI.Model
 
   @reconnect_ms 60_000
@@ -62,6 +62,24 @@ defmodule Troupe.UI.Headless.Printer do
   @stall_ms 45_000
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
+
+  @doc """
+  The profiles the person may use as plain lines, `troupe profiles`'s: each name and its
+  summary, the words the terminal's `/profiles` uses (`Troupe.UI.ProfileView`).
+  """
+  @spec profiles_lines([map()]) :: [String.t()]
+  def profiles_lines(pages), do: pages |> ProfileView.list_lines() |> ProfileView.plain()
+
+  @doc """
+  One profile's page as plain lines, `troupe profiles <name>`'s: its name, then the six
+  groups the terminal's frame shows, in the same words.
+  """
+  @spec profile_lines(map(), pos_integer()) :: [String.t()]
+  def profile_lines(page, width \\ 80),
+    do: [
+      "profile " <> ProfileView.name(page),
+      "" | ProfileView.plain(ProfileView.lines(page, width))
+    ]
 
   @impl true
   def init(opts) do

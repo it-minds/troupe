@@ -857,6 +857,21 @@ defmodule Troupe.Client do
   @spec planes() :: [map()]
   def planes, do: Remote.planes()
 
+  @doc """
+  The profiles the person may use on the plane, each as `profile.get` answers it for them
+  (`Troupe.Client.Profiles.list/1`); `origin` is a plane, or nil for the one signed in to.
+  """
+  @spec offered_profiles(origin() | nil) :: {:ok, [map()]} | {:error, term()}
+  def offered_profiles(origin \\ nil), do: Troupe.Client.Profiles.list(origin)
+
+  @doc "What one profile gives a session of the person's: `profile.get`, for them."
+  @spec profile_page(origin() | nil, String.t()) :: {:ok, map()} | {:error, term()}
+  def profile_page(origin \\ nil, name), do: Troupe.Client.Profiles.get(origin, name)
+
+  @doc "Why a profile, or the list of them, could not be shown, in a sentence."
+  @spec profile_refusal(term(), String.t() | nil) :: String.t()
+  def profile_refusal(reason, name \\ nil), do: Troupe.Client.Profiles.refusal(reason, name)
+
   @doc "The origin of the plane `troupe --remote` opens without an argument."
   @spec default_plane() :: origin() | nil
   def default_plane, do: Remote.default_plane()
