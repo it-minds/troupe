@@ -60,6 +60,13 @@ Dex's device flow is driven headlessly — a code post, a login post, and a redi
 the last test pins that as a stated refusal rather than a hang. A session placed *through*
 a plane onto a real pod still wants a cluster.
 
+A session placed through a plane onto a real worker, without a cluster, is the
+plane-light's: `scripts/plane-light-check` at the repository root brings up
+`deploy/plane-light/compose.yml` and runs `test/e2e.plane-light.test.ts` against it, which
+signs in through its Dex the same way (`test/support/dex.ts` is the shared driving), runs
+a session on the box's own worker and reads an artifact back
+([docs/admin/plane-light.md](../../../docs/admin/plane-light.md)).
+
 ## A real worker
 
 A worker verifies session tokens offline against a JWKS on disk, so a JWKS whose private
