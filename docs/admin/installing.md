@@ -7,6 +7,9 @@ same steps automated for one target, kept working by `mix troupe.e2e`. On a mana
 cluster with a cloud's services beside it, [section 6](#6-a-worked-example-on-managed-services)
 is a worked example.
 
+No cluster at all, one box in a corner for a small team: [plane-light.md](plane-light.md) runs the
+plane and its own worker from one compose file, and names what that gives up.
+
 ## 0. Before the first command
 
 | | why | without it |

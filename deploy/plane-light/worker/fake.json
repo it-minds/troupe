@@ -1,0 +1,10 @@
+{
+  "steps": [
+    {
+      "text": "Let me run a command first, to show the sandbox works.",
+      "tools": [{"name": "shell", "input": {"command": "echo plane-light-sandbox-ok && uname -m"}}]
+    },
+    {"text": "Hello from the fake model. The command above ran in the worker's sandbox, and nothing was sent anywhere: this plane-light has no model key yet. Put a real provider in .env when you want one."},
+    {"text": "Still the fake model, still answering from worker/fake.json."}
+  ]
+}
