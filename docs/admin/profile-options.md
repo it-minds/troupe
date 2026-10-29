@@ -319,6 +319,57 @@ there, which is why it reaches subagents too. A name no agent has today is kept,
 bundle may gain it; `admin.profile.agents` marks each agent `offered` or not and lists
 such names in `unmatched`. A name in both lists, or one that is not a name, is refused.
 
+**Two profiles, as most are written.** The lean one is the usual case: a profile for one
+job, whose bundle brings the one agent it needs, takes the coding agents Troupe ships away
+and keeps the rest (`answer` and `ask` are read-only and cheap, and harmless to leave):
+
+```yaml
+apiVersion: troupe.dev/v1alpha1
+kind: WorkerProfile
+metadata: {name: company-info, namespace: troupe-system}
+spec:
+  image: {repository: ghcr.io/it-minds/troupe-worker, tag: 0.33.0-beta}
+  configBundleChannel: company-info          # brings the agent `company-info`
+  llm: {endpoint: https://llm-gw.example.com, provider: openai, model: chat-economy,
+        secretRef: {name: troupe-llm-gateway, key: api-key}}
+  agents:
+    deny: [build, implementer, orchestrate, general, quick]
+```
+
+The fuller one says everything the lean one left to the defaults, for a profile that is
+allowed to change code but only through the agents it names, with the per-tool rules
+beside it, since the two are different statements: `agents` says who exists, `permissions`
+says what any of them may do:
+
+```yaml
+apiVersion: troupe.dev/v1alpha1
+kind: WorkerProfile
+metadata:
+  name: dev-reviewed
+  namespace: troupe-system
+  annotations: {troupe.dev/max-sessions: "12"}
+spec:
+  image: {repository: ghcr.io/it-minds/troupe-worker, tag: 0.33.0-beta}
+  sessionsPerPod: 4
+  resources: {requests: {cpu: 500m, memory: 2Gi}, limits: {cpu: "2", memory: 4Gi}}
+  storage: {size: 20Gi, storageClassName: sbs-default}
+  configBundleChannel: stable                # brings `pr-reviewer` and `release-notes`
+  llm: {endpoint: https://llm-gw.example.com, provider: openai,
+        model: chat-default, smallModel: chat-economy,
+        secretRef: {name: troupe-llm-gateway, key: api-key}}
+  egress: {fqdns: [github.com, api.github.com]}
+  agents:
+    allow: [build, plan, explore, reviewer, implementer, answer, pr-reviewer, release-notes]
+    deny: [orchestrate]                      # listed to say so; deny beats allow
+  permissions:
+    deny: ["shell(git push)", "shell(curl)", "read_file(secrets/**)"]
+    ask: ["shell(mix ecto.*)", "publish_artifact"]
+    allow: ["shell(mix test)", "shell(mix format)"]
+```
+
+A profile that extends the fuller one may only narrow its list: `allow: [plan, explore,
+answer]` on the child leaves the parent's `build` behind for good.
+
 **A grant narrows what is left.** A team's `entitlements` on its grant
 ([bundles and triggers](bundles-and-triggers.md#1-config-bundles)) are resolved after the
 profile's rule, so a grant can leave a team fewer of the profile's agents and never one the
