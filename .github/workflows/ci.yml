@@ -267,9 +267,11 @@ jobs:
           gui=$(flag eval 'on shared || on gui')
           # The client against a plane built from this commit.
           gui_e2e=$(flag eval 'on shared || on gui_e2e || on chart || has troupe_plane || has troupe_gateway')
-          # The plane-light: the stack, the images it builds (`chart` covers docker/), and
-          # the plane and the worker those images run.
-          plane_light=$(flag eval 'on shared || on plane_light || on chart || has troupe_plane || has troupe_worker')
+          # The plane-light: on a pull request only when the stack itself changes, since
+          # three images from scratch is most of half an hour; a full run (the nightly)
+          # brings it up whatever changed, and that is where a plane or worker change
+          # that breaks it is found.
+          plane_light=$(flag eval 'on plane_light')
           desktop=$(flag eval 'on shared || on desktop')
           vscode=$(flag eval 'on shared || on vscode')
           # Native builds on a pull request that touches them; a full run leaves them to
