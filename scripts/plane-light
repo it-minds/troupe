@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# A plane-light on this machine: `deploy/plane-light/compose.yml`, which works with
+# `docker compose` alone; this is the shorter spelling of the commands a person runs.
+#
+#   scripts/plane-light up [--build]     bring it up (--build: the images from this checkout)
+#   scripts/plane-light down             stop it; every volume stays
+#   scripts/plane-light status           what is running, and where it is
+#   scripts/plane-light logs [service]   follow the logs
+#   scripts/plane-light reset            stop it and delete every volume: sessions, keys, users
+#   scripts/plane-light hash             a bcrypt hash for a static user in dex/config.yaml
+#
+# Needs an `.env` beside the compose file (`cp .env.example .env` and edit it); the
+# compose file refuses to start without the values nobody can leave at a default.
+set -euo pipefail
+
+cd "$(dirname "$0")/../deploy/plane-light"
+
+compose() { docker compose --file compose.yml "$@"; }
+
+need_env() {
+  if [ ! -f .env ]; then
+    echo "plane-light: no .env in $(pwd). Copy .env.example to .env and change what is yours." >&2
+    exit 1
+  fi
+}
+
+where() {
+  # What `.env` says, for the lines printed at the end.
+  local host port artifacts aport
+  host="$(sed -n 's/^TROUPE_LIGHT_HOST=//p' .env | tail -1)"
+  port="$(sed -n 's/^TROUPE_LIGHT_PORT=//p' .env | tail -1)"
+  artifacts="$(sed -n 's/^TROUPE_LIGHT_ARTIFACTS_HOST=//p' .env | tail -1)"
+  aport="$(sed -n 's/^TROUPE_LIGHT_ARTIFACTS_PORT=//p' .env | tail -1)"
+  echo
+  echo "  app        http://${host:-?}:${port:-8080}/app"
+  echo "  console    http://${host:-?}:${port:-8080}/console"
+  echo "  plane      http://${host:-?}:${port:-8080}        (troupe login http://${host:-?}:${port:-8080})"
+  echo "  artifacts  http://${artifacts:-?}:${aport:-8081}"
+  echo
+  echo "The first sign-in by somebody in the team group is what makes the team and grants it"
+  echo "the box: 'scripts/plane-light logs bootstrap' says when that is done."
+}
+
+case "${1:-}" in
+  up)
+    need_env
+    shift
+    build=()
+    if [ "${1:-}" = "--build" ]; then build=(--build); shift; fi
+    # Only the services that stay up are waited on: a one-shot that exited 0 on purpose
+    # would fail `--wait`, and the bootstrap waits for a sign-in. Their exit codes are
+    # read afterwards.
+    compose up --detach "${build[@]}" --wait --wait-timeout 600 \
+      postgres minio openbao dex plane gui proxy worker "$@"
+    for oneshot in minio-setup plane-migrate control-tls dex-config; do
+      if [ "$(compose ps --all --format '{{.ExitCode}}' "$oneshot")" != "0" ]; then
+        echo "plane-light: $oneshot failed; its log:" >&2
+        compose logs --no-color "$oneshot" | tail -30 >&2
+        exit 1
+      fi
+    done
+    where
+    ;;
+  down)
+    need_env
+    compose down
+    ;;
+  status)
+    need_env
+    compose ps --all
+    where
+    ;;
+  logs)
+    need_env
+    shift
+    compose logs --follow --tail=100 "$@"
+    ;;
+  reset)
+    need_env
+    echo "plane-light: this deletes every volume: the database, every session, the keys that read them, and Dex's state."
+    read -r -p "Type reset to go on: " answer
+    if [ "$answer" != "reset" ]; then echo "left alone"; exit 1; fi
+    compose down --volumes
+    ;;
+  hash)
+    shift
+    if [ -z "${1:-}" ]; then
+      read -r -s -p "Password: " password; echo
+    else
+      password="$1"
+    fi
+    docker run --rm caddy:2.10.2-alpine caddy hash-password --plaintext "$password"
+    ;;
+  *)
+    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    exit 1
+    ;;
+esac

@@ -141,6 +141,7 @@ nav:
       - Runs on GitHub: admin/github-runs.md
       - Authentik: admin/authentik.md
       - A worker on your own machine: admin/single-machine.md
+      - A plane-light on one machine: admin/plane-light.md
       - Upgrading: admin/upgrading.md
       - Backup and restore: admin/backup-restore.md
       - Monitoring: admin/monitoring.md
