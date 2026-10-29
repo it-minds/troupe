@@ -1450,3 +1450,27 @@ pre.manifest {
 .artifact-links header button {
   margin-left: auto;
 }
+
+/* -- what a member sees of a profile ---------------------------------------- */
+
+/* The plane's answer for a member's app, as tables one after another, each named by its
+   caption; a row a rule or a grant leaves out is greyed, with why in words beside it. */
+.member-view .scroll + .scroll {
+  margin-top: var(--space-4);
+}
+.member-view caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0 0 var(--space-2);
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.member-view tr.muted td {
+  color: var(--text-muted);
+}
+.member-view tbody th {
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+  white-space: nowrap;
+}

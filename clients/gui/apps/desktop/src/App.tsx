@@ -36,6 +36,7 @@ import { Review } from "./views/Review";
 import { Sessions } from "./views/Sessions";
 import { Session } from "./views/Session";
 import { Opened } from "./views/Invites";
+import { ProfilePage, Profiles } from "./views/Profiles";
 import { newSession, SignIn } from "./views/SignIn";
 import { StartSession } from "./views/StartSession";
 import { Eye, Wordmark } from "./views/brand";
@@ -48,6 +49,7 @@ type Where =
   | { screen: "artifacts" }
   | { screen: "memory" }
   | { screen: "review" }
+  | { screen: "profiles"; profile?: string }
   | { screen: "local" }
   | { screen: "agents"; workspace?: string; agent?: string }
   | { screen: "appearance" }
@@ -109,6 +111,8 @@ function placeOf(where: Where): string {
       return `session ${where.id}`;
     case "agents":
       return `agents ${where.workspace ?? ""} ${where.agent ?? ""}`;
+    case "profiles":
+      return `profiles ${where.profile ?? ""}`;
     default:
       return where.screen;
   }
@@ -384,6 +388,13 @@ export function App(): JSX.Element {
               Review
             </button>
           )}
+          {/* What each profile the person may use gives a session, before they start one: the
+              plane's to say, so offered only while signed in to one, as Review is. */}
+          {planeAuth && (
+            <button aria-current={where.screen === "profiles" ? "page" : undefined} onClick={() => setWhere({ screen: "profiles" })}>
+              Profiles
+            </button>
+          )}
           <button aria-current={where.screen === "local" ? "page" : undefined} onClick={() => setWhere({ screen: "local" })}>
             This computer
             {daemon.status === "connected" && <span className="count muted">{local}</span>}
@@ -481,6 +492,7 @@ export function App(): JSX.Element {
               daemon={daemon.client}
               linked={Boolean(daemon.identity?.linked)}
               onClose={() => setWhere({ screen: "sessions" })}
+              onProfile={(profile) => setWhere({ screen: "profiles", profile })}
               onCreated={(id, kind, workspace) => {
                 refresh();
                 setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
@@ -519,6 +531,14 @@ export function App(): JSX.Element {
             <Review auth={planeAuth} admin={adminApi} daemon={daemon.client} teams={planeAuth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
           )}
 
+          {where.screen === "profiles" &&
+            planeAuth &&
+            (where.profile ? (
+              <ProfilePage key={where.profile} auth={planeAuth} name={where.profile} onBack={() => setWhere({ screen: "profiles" })} />
+            ) : (
+              <Profiles auth={planeAuth} onOpen={(profile) => setWhere({ screen: "profiles", profile })} />
+            ))}
+
           {where.screen === "artifacts" && (
             <Artifacts
               daemon={daemon.client}
@@ -556,6 +576,7 @@ export function App(): JSX.Element {
                 onBack={() => setWhere({ screen: "sessions" })}
                 onGo={(screen) => setWhere({ screen })}
                 onAgents={(agent) => setWhere({ screen: "agents", ...workspaceOf(row), ...(agent ? { agent } : {}) })}
+                onProfile={planeAuth ? (profile) => setWhere({ screen: "profiles", profile }) : undefined}
                 onStarted={(id, kind, workspace) => {
                   refresh();
                   setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });

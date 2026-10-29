@@ -4440,3 +4440,27 @@ pre.instruction {
   border: 0;
   color: var(--text-muted);
 }
+
+/* -- what a profile gives a session ----------------------------------------- */
+
+/* A profile's page: plain sections, one table after another inside each. A server's tools
+   and an agent's description wrap in their cell; the table still scrolls inside itself. */
+.profile-view .group > .table-scroll + .table-scroll,
+.profile-view .group > .table-scroll + p.note {
+  margin-top: var(--space-3);
+}
+.profile-view .table td.wrap {
+  white-space: normal;
+  min-width: 12rem;
+}
+.profile-view .table tr.muted td {
+  color: var(--text-muted);
+}
+.profile-view ul.chips {
+  list-style: none;
+  padding: 0;
+  margin-top: 0;
+}
+.profile-link {
+  margin-left: var(--space-2);
+}
