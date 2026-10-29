@@ -347,7 +347,10 @@ defmodule Troupe.Commands do
             "shows loop 2/10 and /loop stop stops it. Needs a goal.",
         example: "/loop 10"
       ),
-      entry("steer", "session", "Offer this session to the plane, to steer it from another device",
+      entry(
+        "steer",
+        "session",
+        "Offer this session to the plane, to steer it from another device",
         usage: "/steer [on [yes | PERSON[:observe] ...] | off]",
         args: [arg("verb", false, "text"), arg("people", false, "text")],
         availability: "local",
@@ -461,8 +464,13 @@ defmodule Troupe.Commands do
         example: "/save report.md ~/Documents"
       ),
       entry("publish", "workspace", "Publish a page, a document or a file for others to read",
-        usage: "/publish <path> [private | organisation | team:<name> [me | team] | profile:<name>]",
-        args: [arg("path", true, "file"), arg("visibility", false, "text"), arg("owner", false, "text")],
+        usage:
+          "/publish <path> [private | organisation | team:<name> [me | team] | profile:<name>]",
+        args: [
+          arg("path", true, "file"),
+          arg("visibility", false, "text"),
+          arg("owner", false, "text")
+        ],
         availability: "plane",
         detail:
           "The file is read on this machine and published on your Troupe plane as an artifact, " <>
@@ -485,6 +493,28 @@ defmodule Troupe.Commands do
             "Markdown one here; p publishes a file of the workspace and l copies a view link to " <>
             "one of yours.",
         example: "/artifacts"
+      ),
+      entry("profiles", "workspace", "The profiles you may use, and what each gives a session",
+        usage: "/profiles",
+        availability: "plane",
+        detail:
+          "Every profile on your Troupe plane you may start a session on, one line each: how " <>
+            "many agents it offers, its MCP servers, the hosts it reaches and how many sessions " <>
+            "run on it of those it has room for. Enter opens what one gives a session, as " <>
+            "/profile does.",
+        example: "/profiles"
+      ),
+      entry("profile", "workspace", "What a profile gives a session, before you start one",
+        usage: "/profile <name>",
+        args: [arg("name", true, "text")],
+        availability: "plane",
+        detail:
+          "What the plane gives a session of yours on the profile: the agents it offers and " <>
+            "those not there, with why; the tool rules and each MCP server, with whose access it " <>
+            "runs (as you, once you connect it; as the profile; as the profile's own identity); " <>
+            "the model; the hosts it reaches; its limits and budgets; and which of your teams it " <>
+            "runs under. What the plane does not say is shown as not said. q or Esc closes it.",
+        example: "/profile code"
       ),
       entry("copy", "workspace", "Copy a transcript to the clipboard",
         usage: "/copy [window]",

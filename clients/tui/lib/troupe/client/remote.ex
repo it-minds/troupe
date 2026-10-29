@@ -423,6 +423,42 @@ defmodule Troupe.Client.Remote do
 
   def profiles(_origin, _team), do: {:error, :unsupported}
 
+  @doc """
+  The profiles the person may use, as `profiles.list` answers them, row by row and
+  unshaped: `/profiles` and `troupe profiles` say more of each than HQ's picker does.
+  """
+  @spec profile_rows(Troupe.Client.origin()) :: {:ok, [map()]} | {:error, term()}
+  def profile_rows({:remote, plane}) do
+    case call(plane, "profiles.list") do
+      {:ok, list} -> {:ok, list |> unwrap("profiles") |> Enum.filter(&is_map/1)}
+      {:error, reason} -> {:error, plane_refusal(reason)}
+    end
+  end
+
+  def profile_rows(_origin), do: {:error, :unsupported}
+
+  @doc """
+  What one profile gives a session of the person's, as `profile.get` answers it for
+  them: `{:error, :not_found}` for one they may not use, `{:error, :unsupported}` from a
+  plane from before the method.
+  """
+  @spec profile_page(Troupe.Client.origin(), String.t()) :: {:ok, map()} | {:error, term()}
+  def profile_page({:remote, plane}, name) do
+    case call(plane, "profile.get", %{name: name}) do
+      {:ok, %{} = page} -> {:ok, page}
+      {:ok, other} -> {:error, "unexpected profile.get answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, plane_refusal(reason)}
+    end
+  end
+
+  def profile_page(_origin, _name), do: {:error, :unsupported}
+
+  defp plane_refusal(%{code: -32_005}), do: :not_found
+  defp plane_refusal(%{code: -32_601}), do: :unsupported
+  defp plane_refusal(%{code: _code} = error), do: RPC.describe(error)
+  defp plane_refusal(reason) when is_atom(reason), do: reason
+  defp plane_refusal(reason), do: message(reason)
+
   # With the plane down there is still something true to say: the sessions this
   # client is attached to are on screen and streaming, so they are listed from
   # what the worker connections know rather than the list coming back empty

@@ -142,6 +142,10 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :artifacts} = args} ->
         Troupe.CLI.Artifacts.run(args.artifacts)
 
+      # What a profile the person may use gives a session, from the plane signed in to.
+      {:ok, %{mode: :profiles} = args} ->
+        Troupe.CLI.Profiles.run(args.profiles)
+
       {:ok, %{mode: :models} = args} ->
         case models_report(args) do
           {:ok, report} ->
@@ -248,7 +252,7 @@ defmodule Troupe.CLI.Runner do
 
   def local_only(parsed), do: parsed
 
-  defp plane_call?(%{mode: mode}) when mode in [:login, :whoami, :config_pull], do: true
+  defp plane_call?(%{mode: mode}) when mode in [:login, :whoami, :config_pull, :profiles], do: true
   defp plane_call?(%{mode: :tui, remote: true}), do: true
   # A private session is sealed to the plane.
   defp plane_call?(%{mode: mode, private: true}) when mode in [:tui, :run, :resume], do: true
@@ -256,6 +260,7 @@ defmodule Troupe.CLI.Runner do
 
   defp plane_command(%{mode: :login}), do: "troupe login"
   defp plane_command(%{mode: :whoami}), do: "troupe whoami"
+  defp plane_command(%{mode: :profiles}), do: "troupe profiles"
   defp plane_command(%{mode: :config_pull}), do: "troupe config pull"
   defp plane_command(%{remote: true}), do: "troupe --remote"
   defp plane_command(%{private: true}), do: "troupe --private"
@@ -303,6 +308,7 @@ defmodule Troupe.CLI.Runner do
         :config_pull,
         :memory,
         :artifacts,
+        :profiles,
         :update
       ]
 
