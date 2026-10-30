@@ -49,6 +49,21 @@ defmodule Troupe.DoctorCLITest do
     refute out =~ "bench"
   end
 
+  test "a newer release that supports the plane is a line, never a failure", %{user: user} do
+    File.write!(user, "version: 1\nprovider: fake\n")
+
+    line = %{
+      name: "update",
+      state: :ok,
+      detail: "0.36.0-beta supports this plane; `troupe update --latest` installs it"
+    }
+
+    out = capture_io(fn -> assert Doctor.run(args(~w(doctor)), update: fn -> line end) == 0 end)
+
+    assert out =~
+             ~r/^ok    update +0\.36\.0-beta supports this plane; `troupe update --latest` installs it$/m
+  end
+
   test "troupe doctor takes --bench, and --json with it or without" do
     assert {:ok, %{mode: :doctor, bench: true, json: false}} = CLI.parse(~w(doctor --bench))
     assert {:ok, %{mode: :doctor, bench: false, json: false}} = CLI.parse(~w(doctor))

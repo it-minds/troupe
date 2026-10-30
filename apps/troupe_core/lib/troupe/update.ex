@@ -1,12 +1,27 @@
 defmodule Troupe.Update do
   @moduledoc """
   `troupe update`: a release, checked, then swapped in for the troupe and the
-  troupe-daemon the installers put on this machine (#66, Decision 865), and for the
-  desktop app and the VS Code extension where the installers put those too.
+  troupe-daemon the installers put on this machine (#66), and for the desktop app and the
+  VS Code extension where the installers put those too. Nothing is installed but what the
+  release key signed.
 
-      troupe update --check            what is installed, the latest release, and what an update would do
-      troupe update [--version X]      install the latest release, or X
+      troupe update --check            what is installed, the release, and what an update would do
+      troupe update [--recommended]    install the version the plane recommends, or the latest release
+      troupe update --latest           install the newest release that supports the plane
+      troupe update --version X        install X
       troupe update --rollback         put the previous troupe and troupe-daemon back
+
+  **Which release.** `--recommended`, the default, is the plane's word: the version its
+  administrators recommend, so a person who never thinks about versions lands on the one
+  their IT supports. `--latest` is for the person who wants to go past it: the newest
+  release whose signed manifest says it supports the plane's version (`supports.plane`,
+  read from the plane's discovery document), and still none the plane blocks or holds
+  below its minimum, since the plane refuses those at `initialize` and finding that out
+  after the install is too late. A release from before manifests said what they support
+  is not known to support anything and is passed over, but for the recommended one, which
+  the plane's word covers. Releases are looked at newest first, from GitHub's list (or the
+  one release `TROUPE_RELEASE_URL` names), at most 20 of them; not signed in to a plane,
+  `--latest` is the newest release there is.
 
   **Where from.** `TROUPE_RELEASE_URL`, when it is set, is one release's assets, as the
   installers read it: a mirror, or a `file://` directory. Otherwise, signed in to a plane
@@ -37,9 +52,10 @@ defmodule Troupe.Update do
   the old kept as `troupe-daemon.previous`. `--rollback` swaps each back, and run again
   swaps forward.
 
-  **A plane's word, when signed in to one** (Decision 868). The caller hands over what
-  the plane says of each component (`:plane`, from its `me.client_versions`). Then the
-  version installed is the plane's `recommended` one rather than the latest; a version
+  **A plane's word, when signed in to one.** The caller hands over what the plane says of
+  each component (`:plane`, from its `me.client_versions`, with the plane's own version
+  from its discovery document). Then the version installed is the plane's `recommended`
+  one rather than the latest; a version
   the plane blocks, or one older than its minimum, is never installed, whether it is the
   latest or named with `--version`. Nothing moves backwards unless the person names the
   version: a component on a blocked version whose recommended one is older is told the
@@ -70,16 +86,20 @@ defmodule Troupe.Update do
   @uninstall_key "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Troupe"
   # A manifest and its signature are a few kilobytes; anything much bigger is not one.
   @small 1_048_576
+  # How many releases `--latest` looks at, newest first, before it stops looking.
+  @look 20
 
   @type action :: :check | :update | :rollback
 
   @doc """
   Run one action and return the exit status.
 
-  `opts`: `:version` (the release asked for), `:installed` (this troupe's version),
-  `:plane` (`%{url: plane, versions: %{"tui" => policy, "daemon" => policy}, release_url:
-  url}`, what a plane signed in to says, or `nil`), and, standing in for the machine in tests,
-  `:release_url`, `:repo`, `:keys`, `:target`, `:tui`, `:lib`, `:desktop` (where the
+  `opts`: `:version` (the release asked for), `:pick` (`:recommended`, the default, or
+  `:latest`), `:installed` (this troupe's version), `:plane` (`%{url: plane, version:
+  plane's version, versions: %{"tui" => policy, "daemon" => policy}, release_url: url}`,
+  what a plane signed in to says, or `nil`), and, standing in for the machine in tests,
+  `:releases` (the releases `--latest` looks at, newest first: `{:ok, [{version | nil,
+  base}]}`), `:release_url`, `:repo`, `:keys`, `:target`, `:tui`, `:lib`, `:desktop` (where the
   desktop app is: `%{kind: :appimage | :mac_app | :windows_setup, path: ...}`), `:vscode`
   (VS Code's command line, or nil), `:windows?`, `:out` (a line printed), `:fetch`,
   `:run` (a program run to completion: `{:ok, output, status}`), `:daemon` (what quiets
@@ -93,8 +113,8 @@ defmodule Troupe.Update do
 
     result =
       case action do
-        :check -> s |> planned() |> check()
-        :update -> s |> planned() |> update()
+        :check -> with {:ok, s} <- planned(s), do: check(s)
+        :update -> with {:ok, s} <- planned(s), do: update(s)
         :rollback -> rollback(s)
       end
 
@@ -118,6 +138,12 @@ defmodule Troupe.Update do
       # Whether the version was named by the person, who may move either way, rather than
       # chosen for them by a plane, which moves only forward but for a blocked version.
       named?: opts[:version] != nil,
+      pick: Keyword.get(opts, :pick, :recommended),
+      # The version the plane recommends, and how the version installed was chosen.
+      recommended: nil,
+      chosen: nil,
+      # Where the chosen release is, when `--latest` found it somewhere of its own.
+      base: nil,
       plane: opts[:plane],
       installed: opts[:installed],
       release_url: Keyword.get_lazy(opts, :release_url, fn -> env("TROUPE_RELEASE_URL") end),
@@ -131,6 +157,7 @@ defmodule Troupe.Update do
       windows?: windows?,
       out: Keyword.get(opts, :out, &IO.puts/1),
       fetch: Keyword.get(opts, :fetch, &fetch/2),
+      releases: Keyword.get(opts, :releases, &releases/1),
       run: Keyword.get(opts, :run, &run_program/1),
       daemon: Keyword.get(opts, :daemon, &quiet_daemon/1),
       sleep: Keyword.get(opts, :sleep, &Process.sleep/1)
@@ -359,6 +386,7 @@ defmodule Troupe.Update do
     with {:ok, rel} <- release(s) do
       s.out.("  release        #{rel.version}  #{rel.base}")
       s.out.("                 manifest signed by release key #{Enum.join(rel.key_ids, " and ")}")
+      if line = chosen_line(rel, s), do: s.out.("                 " <> line)
 
       case plan(rel, s) do
         {:ok, %{steps: []}} ->
@@ -392,15 +420,25 @@ defmodule Troupe.Update do
   @spec release(map()) :: {:ok, map()} | {:error, String.t()}
   def release(s) do
     with {:ok, base, tag} <- source(s),
-         {:ok, bytes} <- get_small(s, base, "manifest.json"),
+         {:ok, rel} <- release_at(s, base, s.version, tag),
+         :ok <- served(rel.version, s) do
+      {:ok, rel}
+    end
+  end
+
+  # A release's manifest at `base`, once its signature holds and it names what was asked.
+  defp release_at(s, base, asked, tag) do
+    with {:ok, bytes} <- get_small(s, base, "manifest.json"),
          {:ok, signature} <- get_small(s, base, "manifest.json.minisig"),
          {:ok, signed} <- signed(bytes, signature, s.keys, base),
          {:ok, manifest} <- decoded(bytes, base),
-         :ok <- asked_for(manifest, s.version, tag, base),
-         :ok <- served(manifest.version, s) do
+         :ok <- asked_for(manifest, asked, tag, base) do
       {:ok, %{version: manifest.version, base: base, manifest: manifest, key_ids: signed.key_ids}}
     end
   end
+
+  # Where `--latest` found the release it chose.
+  defp source(%{base: base, version: version}) when is_binary(base), do: {:ok, base, version}
 
   defp source(%{release_url: url}) when is_binary(url),
     do: {:ok, String.trim_trailing(url, "/"), nil}
@@ -440,6 +478,57 @@ defmodule Troupe.Update do
         {:error, "could not reach #{url}: #{Exception.message(exception)}"}
     end
   end
+
+  # The releases `--latest` looks at, newest first, each `{version, base}`: the one
+  # `TROUPE_RELEASE_URL` names, whose version its manifest says; GitHub's list otherwise,
+  # drafts left out and pre-releases in, since a beta is published as one. A plane's own
+  # mirror is found by version and lists none.
+  defp releases(%{release_url: url}) when is_binary(url),
+    do: {:ok, [{nil, String.trim_trailing(url, "/")}]}
+
+  defp releases(%{plane: %{release_url: url} = plane}) when is_binary(url),
+    do:
+      {:error,
+       "the plane at #{plane.url} has releases at #{url}, which lists none to choose the newest " <>
+         "from: name one with troupe update --version X"}
+
+  defp releases(%{repo: repo}) do
+    url = "https://api.github.com/repos/#{repo}/releases?per_page=#{@look + 10}"
+
+    case Req.get(url,
+           retry: false,
+           receive_timeout: 30_000,
+           headers: [accept: "application/json"]
+         ) do
+      {:ok, %Req.Response{status: 200, body: list}} when is_list(list) ->
+        {:ok,
+         list
+         |> Enum.reject(&(&1["draft"] == true))
+         |> Enum.flat_map(&listed_version/1)
+         |> Enum.sort_by(&elem(&1, 1), &newest_first/2)
+         |> Enum.map(fn {version, _parsed} ->
+           {version, "https://github.com/#{repo}/releases/download/v#{version}"}
+         end)}
+
+      {:ok, %Req.Response{status: status}} ->
+        {:error,
+         "#{url} answered #{status}, not the list of releases (set TROUPE_RELEASE_URL to a mirror)"}
+
+      {:error, exception} ->
+        {:error, "could not reach #{url}: #{Exception.message(exception)}"}
+    end
+  end
+
+  defp listed_version(%{"tag_name" => "v" <> version}) do
+    case Version.parse(version) do
+      {:ok, parsed} -> [{version, parsed}]
+      :error -> []
+    end
+  end
+
+  defp listed_version(_release), do: []
+
+  defp newest_first(a, b), do: Version.compare(a, b) != :lt
 
   @doc false
   @spec latest_tag(String.t()) :: String.t() | nil
@@ -511,23 +600,201 @@ defmodule Troupe.Update do
 
   # With a plane and no version named, the one asked for is the plane's recommended
   # version: the terminal's, where troupe is installed and the plane names one, and
-  # otherwise the daemon's. With none, the latest, as without a plane.
-  defp planned(%{plane: %{} = plane, version: nil} = s) do
-    components =
-      if installed(s).tui, do: ["tui", "daemon", "desktop"], else: ["daemon", "tui", "desktop"]
+  # otherwise the daemon's. With none, the latest, as without a plane. `--latest` looks
+  # past it for a newer release that supports the plane; a version named is the person's.
+  defp planned(s) do
+    s = %{s | recommended: recommended(s)}
 
-    case Enum.find_value(components, &policy(plane, &1)["recommended"]) do
-      nil -> s
-      version -> %{s | version: version}
+    cond do
+      s.named? -> {:ok, s}
+      s.pick == :latest -> latest(s)
+      true -> {:ok, %{s | version: s.recommended || s.version, chosen: :recommended}}
     end
   end
 
-  defp planned(s), do: s
+  defp recommended(%{plane: %{} = plane} = s) do
+    components =
+      if installed(s).tui, do: ["tui", "daemon", "desktop"], else: ["daemon", "tui", "desktop"]
 
-  defp plane_says(%{named?: false, version: version}) when is_binary(version),
+    Enum.find_value(components, &policy(plane, &1)["recommended"])
+  end
+
+  defp recommended(_s), do: nil
+
+  defp plane_says(%{recommended: version}) when is_binary(version),
     do: "recommends #{version}"
 
   defp plane_says(_s), do: "recommends no version"
+
+  # How the version installed was chosen, as `troupe update` says it.
+  defp chosen_line(rel, %{chosen: :recommended, plane: %{url: url}, recommended: version})
+       when is_binary(version),
+       do: "#{rel.version}, the version #{url} recommends"
+
+  defp chosen_line(rel, %{chosen: :latest, plane: %{url: url}} = s),
+    do:
+      "#{rel.version}, the newest release that supports #{url} " <>
+        "(it #{plane_says(s)})"
+
+  defp chosen_line(rel, %{chosen: :latest}), do: "#{rel.version}, the newest release"
+
+  defp chosen_line(rel, %{chosen: {:fallback, why}, plane: %{url: url}}) do
+    unknown =
+      if rel.manifest.supports == nil,
+        do: "; it says nothing of which planes it supports, and the plane's word covers it",
+        else: ""
+
+    "#{rel.version}, the version #{url} recommends: #{why}" <> unknown
+  end
+
+  defp chosen_line(_rel, _s), do: nil
+
+  # -- --latest ---------------------------------------------------------------------
+
+  # The newest release that supports the plane and that the plane serves, looked for
+  # newest first and never past the recommended version: from there on the plane's word
+  # is the better one. A release that says nothing of planes is passed over, said; one
+  # below the plane's minimum ends the look, since every older one is too.
+  defp latest(s) do
+    if s.plane && not is_binary(s.plane[:version]),
+      do:
+        fall_back(
+          s,
+          "the plane at #{s.plane.url} does not say which version it is, so no release can be " <>
+            "said to support it"
+        ),
+      else: look_for_latest(s)
+  end
+
+  defp look_for_latest(s) do
+    with {:ok, listed} <- s.releases.(s) do
+      case look(Enum.take(listed, @look), s) do
+        {:found, rel} ->
+          {:ok, %{s | version: rel.version, base: rel.base, chosen: :latest}}
+
+        :reached ->
+          fall_back(s, "no newer release says it supports this plane")
+
+        {:stopped, why} ->
+          fall_back(s, why)
+
+        :none when length(listed) > @look ->
+          fall_back(
+            s,
+            "none of the #{@look} newest releases says it supports this plane, and troupe " <>
+              "update looked no further"
+          )
+
+        :none ->
+          fall_back(
+            s,
+            "none of the #{length(listed)} releases listed says it supports this plane"
+          )
+      end
+    end
+  end
+
+  defp fall_back(%{recommended: version} = s, why) when is_binary(version),
+    do: {:ok, %{s | version: version, chosen: {:fallback, why}}}
+
+  defp fall_back(%{plane: %{url: url}}, why),
+    do:
+      {:error,
+       "troupe update --latest found nothing to install for the plane at #{url}, which " <>
+         "recommends no version: #{why}; name one with troupe update --version X"}
+
+  defp fall_back(_s, why), do: {:error, "troupe update --latest found nothing to install: #{why}"}
+
+  defp look(listed, s), do: Enum.reduce_while(listed, :none, &look_at(&1, &2, s))
+
+  defp look_at({tag, base}, :none, s) do
+    with true <- tag == nil or past_recommended?(tag, s),
+         {:ok, rel} <- release_at(s, base, nil, tag) do
+      fits(rel, s)
+    else
+      false ->
+        {:halt, :reached}
+
+      {:error, why} ->
+        passed_over(s, tag || base, why)
+        {:cont, :none}
+    end
+  end
+
+  defp fits(rel, s) do
+    cond do
+      not past_recommended?(rel.version, s) ->
+        {:halt, :reached}
+
+      s.plane == nil ->
+        {:halt, {:found, rel}}
+
+      true ->
+        case {Manifest.supports?(rel.manifest, s.plane[:version]), judged(rel.version, s)} do
+          {_supports, {:below_minimum, why}} ->
+            {:halt, {:stopped, why}}
+
+          {_supports, {:blocked, why}} ->
+            passed_over(s, rel.version, why)
+            {:cont, :none}
+
+          {true, :ok} ->
+            {:halt, {:found, rel}}
+
+          {false, :ok} ->
+            passed_over(
+              s,
+              rel.version,
+              "it supports planes #{rel.manifest.supports.plane}, and the plane at " <>
+                "#{s.plane.url} is #{s.plane[:version]}"
+            )
+
+            {:cont, :none}
+
+          {:unknown, :ok} ->
+            passed_over(
+              s,
+              rel.version,
+              "its manifest says nothing of which planes it supports, from before releases said so"
+            )
+
+            {:cont, :none}
+        end
+    end
+  end
+
+  defp past_recommended?(version, %{recommended: recommended}) when is_binary(recommended),
+    do: version != recommended and not ClientUpdate.older?(version, recommended)
+
+  defp past_recommended?(_version, _s), do: true
+
+  defp passed_over(s, what, why), do: s.out.("  passed over #{what}: #{why}")
+
+  @doc """
+  What `troupe doctor` says of updates, signed in to a plane that recommends a version
+  while a newer release than it, and than this troupe, supports the plane and is served:
+  one line, never a failure. `nil` otherwise, or where the releases cannot be asked.
+  Takes `run/2`'s options.
+  """
+  @spec doctor_check(keyword()) :: %{name: String.t(), state: :ok, detail: String.t()} | nil
+  def doctor_check(opts) do
+    s = settings(Keyword.merge(opts, pick: :latest, version: nil, out: fn _line -> :ok end))
+    s = Map.put(s, :installed_now, installed(s))
+
+    with %{} <- s.plane,
+         {:ok, %{chosen: :latest, version: version, recommended: recommended}}
+         when is_binary(recommended) <- planned(s),
+         true <-
+           s.installed in [nil, "unknown version"] or ClientUpdate.older?(s.installed, version) do
+      %{
+        name: "update",
+        state: :ok,
+        detail: "#{version} supports this plane; `troupe update --latest` installs it"
+      }
+    else
+      _nothing_newer -> nil
+    end
+  end
 
   defp policy(%{versions: versions}, component) when is_map(versions) do
     case versions[component] do
@@ -540,9 +807,16 @@ defmodule Troupe.Update do
 
   # A version the plane serves to each component this would replace: none blocked, none
   # older than its minimum. Without a plane, every signed version is.
-  defp served(_version, %{plane: nil}), do: :ok
+  defp served(version, s) do
+    case judged(version, s) do
+      :ok -> :ok
+      {_why, sentence} -> {:error, sentence <> "; nothing is installed"}
+    end
+  end
 
-  defp served(version, %{plane: plane} = s) do
+  defp judged(_version, %{plane: nil}), do: :ok
+
+  defp judged(version, %{plane: plane} = s) do
     inst = installed(s)
 
     [{"tui", inst.tui}, {"daemon", inst.daemon}, {"desktop", inst.desktop}]
@@ -553,14 +827,13 @@ defmodule Troupe.Update do
 
       case ClientUpdate.judge(policy, version) do
         {:refuse, :blocked} ->
-          {:halt,
-           {:error, "the plane at #{plane.url} blocks #{name} #{version}; nothing is installed"}}
+          {:halt, {:blocked, "the plane at #{plane.url} blocks #{name} #{version}"}}
 
         {:refuse, :below_minimum} ->
           {:halt,
-           {:error,
+           {:below_minimum,
             "#{version} is older than the oldest #{name} the plane at #{plane.url} serves " <>
-              "(#{policy["minimum"]}); nothing is installed"}}
+              "(#{policy["minimum"]})"}}
 
         {:ok, _action} ->
           {:cont, :ok}
@@ -686,7 +959,7 @@ defmodule Troupe.Update do
         "release #{rel.version} (#{rel.base}), manifest signed by release key #{Enum.join(rel.key_ids, " and ")}"
       )
 
-      if s.plane, do: s.out.("the plane at #{s.plane.url} #{plane_says(s)}")
+      announce(rel, s)
 
       if plan.steps == [] do
         s.out.("Nothing to update: what is installed is #{rel.version} or newer.")
@@ -694,6 +967,14 @@ defmodule Troupe.Update do
       else
         install(plan, rel, s)
       end
+    end
+  end
+
+  # How the release was chosen, or what the plane says where that is all there is to say.
+  defp announce(rel, s) do
+    case chosen_line(rel, s) do
+      nil -> if s.plane, do: s.out.("the plane at #{s.plane.url} #{plane_says(s)}")
+      line -> s.out.(line)
     end
   end
 

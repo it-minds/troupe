@@ -1,7 +1,7 @@
 defmodule Troupe.Release.ManifestTest do
   @moduledoc """
-  A release's `manifest.json` (Decision 865): what each file is, the bytes it is signed
-  as, and a downloaded file checked against it.
+  A release's `manifest.json`: what each file is, what the release supports, the bytes it
+  is signed as, and a downloaded file checked against it.
   """
 
   use ExUnit.Case, async: true
@@ -64,6 +64,72 @@ defmodule Troupe.Release.ManifestTest do
     assert tui =~ ~s("sha256": "#{Manifest.sha256(Path.join(dir, "troupe-1.0.0-linux_x86_64"))}")
     assert tui =~ ~s("size": 3)
     assert Enum.at(lines, 2) == ~s(  "version": "1.0.0",)
+  end
+
+  @tag :tmp_dir
+  test "supports is signed on its own line, and a manifest without it reads as before", %{
+    tmp_dir: dir
+  } do
+    File.write!(Path.join(dir, "troupe-1.0.0-linux_x86_64"), "tui")
+    supports = %{plane: ">= 0.30.0-beta", protocol: "1"}
+    manifest = Manifest.build("1.0.0", dir, supports)
+    bytes = Manifest.encode(manifest)
+
+    assert Enum.at(String.split(bytes, "\n"), 3) ==
+             ~s(  "supports": {"plane": ">= 0.30.0-beta", "protocol": "1"},)
+
+    assert {:ok, ^manifest} = Manifest.decode(bytes)
+
+    without = Manifest.build("1.0.0", dir)
+    refute Manifest.encode(without) =~ "supports"
+    assert {:ok, %{supports: nil}} = Manifest.decode(Manifest.encode(without))
+
+    bad = String.replace(bytes, ">= 0.30.0-beta", "~> 0.30")
+    assert {:error, "says it supports planes" <> _} = Manifest.decode(bad)
+  end
+
+  test "whether a release supports a plane is SemVer's order, and unknown without supports" do
+    with_req = fn req ->
+      %Manifest{version: "1", artifacts: [], supports: %{plane: req, protocol: "1"}}
+    end
+
+    assert Manifest.supports?(with_req.(">= 0.30.0-beta"), "0.34.0-beta")
+    assert Manifest.supports?(with_req.(">= 0.30.0-beta"), "0.30.0-beta")
+    assert Manifest.supports?(with_req.(">= 0.30.0-beta"), "0.30.0")
+    refute Manifest.supports?(with_req.(">= 0.30.0"), "0.30.0-beta")
+    refute Manifest.supports?(with_req.(">= 0.30.0-beta and < 0.40.0-beta"), "0.40.0-beta")
+    assert Manifest.supports?(with_req.(">= 0.30.0-beta"), "nightly") == :unknown
+    assert Manifest.supports?(%Manifest{version: "1", artifacts: []}, "0.34.0-beta") == :unknown
+    assert Manifest.supports?(with_req.(">= 0.30.0-beta"), nil) == :unknown
+  end
+
+  test "COMPATIBILITY parses, and a file that says too little or too much is refused" do
+    root = Path.expand("../../../../..", __DIR__)
+
+    assert {:ok, %{plane: plane, protocol: "1"}} =
+             Manifest.compatibility(File.read!(Path.join(root, "COMPATIBILITY")))
+
+    assert Manifest.requirement?(plane)
+
+    assert {:ok, %{plane: ">= 0.30.0-beta and < 1.0.0", protocol: "1"}} =
+             Manifest.compatibility(
+               "# a comment\n\nplane >= 0.30.0-beta and < 1.0.0\nprotocol 1\n"
+             )
+
+    assert {:error, "names no protocol"} = Manifest.compatibility("plane >= 1.0.0\n")
+    assert {:error, "names no plane"} = Manifest.compatibility("protocol 1\n")
+
+    assert {:error, "line 1: \"planes\" is not plane or protocol"} =
+             Manifest.compatibility("planes 1")
+
+    assert {:error, "line 2: plane is said twice"} =
+             Manifest.compatibility("plane >= 1.0.0\nplane >= 2.0.0\nprotocol 1")
+
+    assert {:error, "line 1: \"~> 1.0\" is not a requirement" <> _} =
+             Manifest.compatibility("plane ~> 1.0\nprotocol 1")
+
+    assert {:error, "line 2: \"one\" is not a protocol version"} =
+             Manifest.compatibility("plane >= 1.0.0\nprotocol one")
   end
 
   test "a manifest a client cannot rely on is refused" do

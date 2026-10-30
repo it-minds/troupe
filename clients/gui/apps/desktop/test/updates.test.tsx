@@ -9,12 +9,14 @@
 //     recommended version when signed in and the latest otherwise;
 //   - it asks before it restarts, waits for a turn on this computer to end, and asks the
 //     daemon to stop between turns when its release is replaced too;
-//   - a release the shell cannot check is refused with its sentence, and nothing changes.
+//   - a release the shell cannot check is refused with its sentence, and nothing changes;
+//   - a newer release than the recommended one that supports the plane is a second,
+//     quieter action, which asks the shell for that target before it downloads.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
-import type { ShellUpdater, UpdateCheck, UpdateOffer, UpdatePlane } from "../src/shell";
+import type { ShellUpdater, UpdateCheck, UpdateOffer, UpdatePlane, UpdateTarget } from "../src/shell";
 import { updateTiming } from "../src/updates";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
@@ -32,13 +34,13 @@ let unmount: (() => void) | null = null;
 
 /** A stand-in for the shell's updater, which records what the page asked of it. */
 class Updater implements ShellUpdater {
-  checks: Array<{ version: string | null; plane: UpdatePlane | null }> = [];
+  checks: Array<{ version: string | null; plane: UpdatePlane | null; target?: UpdateTarget }> = [];
   downloads = 0;
   installs: boolean[] = [];
   answer: () => Promise<UpdateCheck> = async () => ({ state: "current", version: VERSION, current: VERSION });
   failDownload: string | null = null;
 
-  async check(params: { version: string | null; plane: UpdatePlane | null }): Promise<UpdateCheck> {
+  async check(params: { version: string | null; plane: UpdatePlane | null; target?: UpdateTarget }): Promise<UpdateCheck> {
     this.checks.push(params);
     return this.answer();
   }
@@ -158,6 +160,40 @@ describe("the plane's word on this version", () => {
     // Nothing is downloaded until the person asks.
     await sleep(100);
     expect(updater.downloads).toBe(0);
+  });
+
+  it("a newer release that supports the plane is a second, quieter action", async () => {
+    harness = await startHarness({ plane: { clientVersions: { desktop: { recommended: "99.0.0" } } } });
+    const updater = new Updater();
+    updater.answer = async () => {
+      const latest = updater.checks.at(-1)?.target === "latest";
+      return offer(latest ? "99.1.0" : "99.0.0", { newest: latest ? null : "99.1.0" })();
+    };
+    window.troupe = { name: "Test shell", version: "0", signInFlow: "device", updater };
+    await signIn(harness);
+
+    const newest = await waitFor(() => button("Newest supported (99.1.0)", banner()!), "the second action");
+    expect(newest.classList.contains("secondary")).toBe(true);
+    // The recommended one is still the offer, and the first action.
+    await waitFor(() => button("Update", banner()!), "the recommended offer, still the first action");
+    expect(updater.checks.every((c) => c.target === undefined)).toBe(true);
+
+    newest.click();
+    await waitFor(() => button("Restart now", banner()!), "the newest one downloaded");
+    expect(updater.checks.at(-1)?.target).toBe("latest");
+    expect(updater.downloads).toBe(1);
+    await sees("Troupe 99.1.0 is downloaded");
+  });
+
+  it("with nothing newer than the recommended one, there is no second action", async () => {
+    harness = await startHarness({ plane: { clientVersions: { desktop: { recommended: "99.0.0" } } } });
+    const updater = new Updater();
+    updater.answer = offer("99.0.0", { newest: null });
+    window.troupe = { name: "Test shell", version: "0", signInFlow: "device", updater };
+    await signIn(harness);
+
+    await waitFor(() => button("Update", banner()!), "the offer");
+    expect(banner()?.textContent).not.toContain("Newest supported");
   });
 
   it("a plane from before the policy says nothing, and the latest release is checked", async () => {

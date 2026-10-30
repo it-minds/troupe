@@ -1,10 +1,10 @@
 defmodule Troupe.Release.ReleaseWorkflowTest do
   @moduledoc """
-  The release signs what it publishes (#66, Decision 865): `release.yml`'s publish job
+  The release signs what it publishes (#66): `release.yml`'s publish job
   writes `manifest.json` and its `.minisig` with the `release` environment's key before
   anything is published, and `scripts/release-manifest.exs`, which it runs, signs a
-  release and refuses one it cannot sign. The script is run here as CI runs it, with a
-  throwaway key made in the test.
+  release, with what the root `COMPATIBILITY` says it supports, and refuses one it cannot
+  sign. The script is run here as CI runs it, with a throwaway key made in the test.
   """
 
   use ExUnit.Case, async: true
@@ -82,15 +82,46 @@ defmodule Troupe.Release.ReleaseWorkflowTest do
     {:ok, decoded} = Manifest.decode(manifest)
     assert decoded.version == "9.9.9"
 
+    assert {:ok, decoded.supports} ==
+             Manifest.compatibility(File.read!(Path.join(@root, "COMPATIBILITY")))
+
+    assert out =~ "supporting plane #{decoded.supports.plane}"
+
     assert Enum.map(decoded.artifacts, & &1.file) ==
              ~w(install.sh troupe-9.9.9-linux_x86_64 troupe-daemon-9.9.9-windows_x86_64.tar.gz)
 
     assert %{component: "tui", target: "linux_x86_64", size: 6} =
              Manifest.find(decoded, "tui", "linux_x86_64")
 
+    # Another COMPATIBILITY is signed as it says; one that does not parse stops the release.
+    compatibility = Path.join(tmp, "COMPATIBILITY")
+    File.write!(compatibility, "# a test's\nplane >= 2.0.0 and < 3.0.0\nprotocol 1\n")
+    key = [{"RELEASE_MINISIGN_KEY", Minisign.encode_secret_key(secret)}]
+    with_file = &System.cmd(elixir, &1, env: key, stderr_to_stdout: true)
+
+    {out, 0} =
+      with_file.([@script, "9.9.9", dist, "--keys", keys, "--compatibility", compatibility])
+
+    assert out =~ "supporting plane >= 2.0.0 and < 3.0.0"
+    {:ok, decoded} = Manifest.decode(File.read!(Path.join(dist, "manifest.json")))
+    assert decoded.supports == %{plane: ">= 2.0.0 and < 3.0.0", protocol: "1"}
+
+    File.write!(compatibility, "plane 2.0.0\nprotocol 1\n")
+    File.rm!(Path.join(dist, "manifest.json.minisig"))
+
+    {out, status} =
+      with_file.([@script, "9.9.9", dist, "--keys", keys, "--compatibility", compatibility])
+
+    assert status != 0
+    assert out =~ "line 1: \"2.0.0\" is not a requirement"
+    refute File.exists?(Path.join(dist, "manifest.json.minisig"))
+
+    assert {"COMPATIBILITY: plane " <> _, 0} =
+             System.cmd(elixir, [@script, "--check"], stderr_to_stdout: true)
+
     # A key the release's list does not hold is refused, before anything is written.
     {_other_public, other_secret} = Minisign.generate_keypair()
-    File.rm!(Path.join(dist, "manifest.json.minisig"))
+    _ = File.rm(Path.join(dist, "manifest.json.minisig"))
 
     {out, status} =
       run.([

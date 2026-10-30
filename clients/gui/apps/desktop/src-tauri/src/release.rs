@@ -185,6 +185,17 @@ pub struct Artifact {
 pub struct Manifest {
     pub version: String,
     pub artifacts: Vec<Artifact>,
+    /// What the release says it works with, signed with the rest; `None` in a manifest
+    /// from before releases said, which is not known to support any plane.
+    pub supports: Option<Supports>,
+}
+
+/// The plane versions a release's clients work with, as a requirement, and the protocol
+/// version they speak.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct Supports {
+    pub plane: String,
+    pub protocol: String,
 }
 
 #[derive(Deserialize)]
@@ -192,6 +203,8 @@ struct ManifestJson {
     format: serde_json::Value,
     version: String,
     artifacts: Vec<serde_json::Value>,
+    #[serde(default)]
+    supports: Option<serde_json::Value>,
 }
 
 /// A manifest from its bytes, checked for the shape a client relies on. A refusal is a
@@ -216,7 +229,44 @@ pub fn decode_manifest(bytes: &[u8]) -> Result<Manifest, String> {
             Ok(artifact)
         })
         .collect::<Result<Vec<_>, String>>()?;
-    Ok(Manifest { version: json.version, artifacts })
+    let supports = match json.supports {
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => {
+            let supports: Supports =
+                serde_json::from_value(value).map_err(|_| "has a supports without its plane and protocol".to_string())?;
+            if requirement_holds(&supports.plane, "0.0.0").is_none() {
+                return Err(format!("says it supports planes {:?}, which is not a requirement", supports.plane));
+            }
+            Some(supports)
+        }
+    };
+    Ok(Manifest { version: json.version, artifacts, supports })
+}
+
+/// Whether `version` meets a requirement a manifest carries: comparisons joined by `and`,
+/// each `>=`, `>`, `<=`, `<` or `==` and a version, ordered as SemVer orders them (a
+/// pre-release before its release), as `Troupe.Release.Manifest.supports?/2` reads it.
+/// `None` where the requirement or the version is not one that can be read.
+pub fn requirement_holds(requirement: &str, version: &str) -> Option<bool> {
+    let version = Version::parse(version).ok()?;
+    let mut holds = true;
+    for part in requirement.split(" and ") {
+        let part = part.trim();
+        let (op, rest) = [">=", "<=", "==", ">", "<"].iter().find_map(|op| part.strip_prefix(op).map(|rest| (*op, rest)))?;
+        let rest = rest.trim();
+        if rest.is_empty() || rest.contains(char::is_whitespace) {
+            return None;
+        }
+        let bound = Version::parse(rest).ok()?;
+        holds &= match op {
+            ">=" => version >= bound,
+            "<=" => version <= bound,
+            "==" => version == bound,
+            ">" => version > bound,
+            _ => version < bound,
+        };
+    }
+    Some(holds)
 }
 
 // A file name is where a client puts what it downloads: never a path.
@@ -229,6 +279,12 @@ fn sha256_hex(hex: &str) -> bool {
 }
 
 impl Manifest {
+    /// Whether the release supports a plane at `plane_version`: `None` where the manifest
+    /// says nothing of planes or the plane's version cannot be read.
+    pub fn supports_plane(&self, plane_version: Option<&str>) -> Option<bool> {
+        requirement_holds(&self.supports.as_ref()?.plane, plane_version?)
+    }
+
     /// The entry for a file, by name.
     pub fn file(&self, name: &str) -> Option<&Artifact> {
         self.artifacts.iter().find(|a| a.file == name)
@@ -473,8 +529,40 @@ mod tests {
     }
 
     #[test]
+    fn a_requirement_is_read_as_the_terminal_reads_it() {
+        assert_eq!(requirement_holds(">= 0.30.0-beta", "0.34.0-beta"), Some(true));
+        assert_eq!(requirement_holds(">= 0.30.0-beta", "0.30.0"), Some(true));
+        assert_eq!(requirement_holds(">= 0.30.0", "0.30.0-beta"), Some(false));
+        assert_eq!(requirement_holds(">= 0.30.0-beta and < 0.40.0-beta", "0.40.0-beta"), Some(false));
+        assert_eq!(requirement_holds(">=0.30.0-beta", "0.31.0-beta"), Some(true));
+        assert_eq!(requirement_holds("~> 0.30", "0.31.0"), None);
+        assert_eq!(requirement_holds(">= 0.30.0", "nightly"), None);
+    }
+
+    #[test]
+    fn supports_is_read_where_it_is_and_unknown_where_it_is_not() {
+        let sha = "a".repeat(64);
+        let with = format!(
+            r#"{{"format": 1, "version": "1.0.0", "supports": {{"plane": ">= 0.30.0-beta", "protocol": "1"}}, "artifacts": [{{"component": "tui", "target": null, "file": "x", "size": 1, "sha256": "{sha}"}}]}}"#
+        );
+        let manifest = decode_manifest(with.as_bytes()).unwrap();
+        assert_eq!(manifest.supports, Some(Supports { plane: ">= 0.30.0-beta".into(), protocol: "1".into() }));
+        assert_eq!(manifest.supports_plane(Some("0.34.0-beta")), Some(true));
+        assert_eq!(manifest.supports_plane(Some("0.29.0")), Some(false));
+        assert_eq!(manifest.supports_plane(None), None);
+
+        let without = decode_manifest(br#"{"format": 1, "version": "1.0.0", "artifacts": []}"#).unwrap();
+        assert_eq!(without.supports, None);
+        assert_eq!(without.supports_plane(Some("0.34.0-beta")), None);
+
+        let bad = decode_manifest(br#"{"format": 1, "version": "1.0.0", "supports": {"plane": "~> 1.0", "protocol": "1"}, "artifacts": []}"#);
+        assert!(bad.unwrap_err().starts_with("says it supports planes"));
+    }
+
+    #[test]
     fn the_update_for_each_computer() {
         let manifest = Manifest {
+            supports: None,
             version: "0.15.0-beta".into(),
             artifacts: vec![
                 artifact("desktop", Some("windows_x86_64"), "Troupe_0.15.0_x64_en-US.msi"),

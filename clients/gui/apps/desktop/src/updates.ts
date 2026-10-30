@@ -4,7 +4,9 @@
 // makes of this version — its `initialize`, with this app's name and version — and which
 // version each kind of client should run (`askPlane`). Then the shell is asked for a
 // release to move to: the version the plane recommends, or with no plane the latest, held
-// to the plane's minimum and blocked list where there is one. The shell checks it against
+// to the plane's minimum and blocked list where there is one. Where a newer release than
+// the recommended one says it supports the plane, the shell says which, and the person may
+// take that one instead, by asking for it: the recommended one stays what is offered. The shell checks it against
 // the release keys it was built with; this file decides nothing about what may be
 // installed, only when to ask and what to say.
 //
@@ -29,7 +31,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { askPlane, onThisComputer, suggestion, TroupeRpcError } from "@troupe/client";
 import type { AuthSession, DaemonClient, FleetRow, PinnedPlaneKey, PlaneVersionWord } from "@troupe/client";
 import { shell } from "./shell";
-import type { UpdateOffer, UpdatePlane } from "./shell";
+import type { UpdateOffer, UpdatePlane, UpdateTarget } from "./shell";
 
 /** How often the questions are asked again, and how often a wait looks again. */
 export const updateTiming = { everyMs: 24 * 60 * 60 * 1000, waitMs: 1_000 };
@@ -61,11 +63,15 @@ export interface Updates {
   signatureLine: string | null;
   /** A newer version the plane recommends, as a quiet offer. */
   suggest: string | null;
+  /** A newer release than the recommended one that supports the plane, offered more quietly. */
+  newest: string | null;
   phase: UpdatePhase;
   /** Whether this host can update the app at all: a browser build cannot. */
   canUpdate: boolean;
   /** Download what was found, finding it first where nothing was. */
   update: () => void;
+  /** Find the newest release that supports the plane, and download it. */
+  updateNewest: () => void;
   /** The person said restart: wait for the turns here, stop the daemon, install. */
   restart: () => void;
   /** Put the question away until the next check. */
@@ -116,6 +122,7 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
   const [heardFor, setHeardFor] = useState<AuthSession | null>(null);
   const heard = !auth || heardFor === auth;
   const [phase, setPhase] = useState<UpdatePhase>({ kind: "idle" });
+  const [newest, setNewest] = useState<string | null>(null);
   const [round, setRound] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const phaseRef = useRef(phase);
@@ -179,10 +186,12 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
   }, [auth, word]);
 
   /** Ask the shell for a release; the offer, or null where there is nothing to move to. */
-  const check = useCallback(async (): Promise<UpdateOffer | null> => {
+  const check = useCallback(async (target: UpdateTarget = "recommended"): Promise<UpdateOffer | null> => {
     if (!updater) return null;
     try {
-      const found = await updater.check(params());
+      // Only a target other than the default is named, so a shell from before it reads the same.
+      const found = await updater.check(target === "latest" ? { ...params(), target } : params());
+      if (target === "recommended") setNewest(found.newest ?? null);
       if (found.state === "offer") {
         const { state: _state, ...offer } = found;
         return offer;
@@ -212,12 +221,14 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
     };
   }, [updater, heard, check, round]);
 
-  const update = useCallback(() => {
+  // The recommended release, as offered, or found first; or the newest supported one, which
+  // is always found again, so that what the shell holds to install is that one.
+  const download = useCallback((target: UpdateTarget) => {
     void (async () => {
       const now = phaseRef.current;
       if (!updater || !["idle", "offer", "refused"].includes(now.kind)) return;
       setDismissed(false);
-      const offer = now.kind === "offer" ? now.offer : await check().catch(() => null);
+      const offer = now.kind === "offer" && target === "recommended" ? now.offer : await check(target).catch(() => null);
       if (!offer) {
         if (phaseRef.current.kind !== "refused") setPhase({ kind: "idle" });
         return;
@@ -231,6 +242,8 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
       }
     })();
   }, [updater, check]);
+  const update = useCallback(() => download("recommended"), [download]);
+  const updateNewest = useCallback(() => download("latest"), [download]);
 
   const restart = useCallback(() => {
     void (async () => {
@@ -289,9 +302,11 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
     planeKey,
     signatureLine,
     suggest,
+    newest,
     phase,
     canUpdate: Boolean(updater),
     update,
+    updateNewest,
     restart,
     later: useCallback(() => setDismissed(true), []),
     dismissed,

@@ -1,7 +1,14 @@
-# A release's signed manifest (#66, Decision 865): `manifest.json` over every file in DIR,
-# and `manifest.json.minisig`, signed with the release key the `release` environment holds.
+# A release's signed manifest (#66): `manifest.json` over every file in DIR, and
+# `manifest.json.minisig`, signed with the release key the `release` environment holds.
 #
-#   RELEASE_MINISIGN_KEY=... elixir scripts/release-manifest.exs VERSION DIR [--keys FILE]
+#   RELEASE_MINISIGN_KEY=... elixir scripts/release-manifest.exs VERSION DIR [--keys FILE] [--compatibility FILE]
+#   elixir scripts/release-manifest.exs --check [--compatibility FILE]
+#
+# The manifest's `supports` is what the root `COMPATIBILITY` file says (the plane versions
+# the release's clients work with, and the protocol they speak), signed with the rest, so a
+# client takes it as the release key's word. A COMPATIBILITY that does not parse stops the
+# release here; `--check` only parses it and says what it says, which `scripts/release`
+# runs before it opens the release's pull request.
 #
 # RELEASE_MINISIGN_KEY is the release key as `minisign -G -W` writes it (unencrypted; the
 # secret's own protection is the environment's), and its public half must be the first key
@@ -41,7 +48,32 @@ defmodule ReleaseManifest do
   end
 end
 
-{opts, args, invalid} = OptionParser.parse(System.argv(), strict: [keys: :string])
+{opts, args, invalid} =
+  OptionParser.parse(System.argv(),
+    strict: [keys: :string, compatibility: :string, check: :boolean]
+  )
+
+compatibility_path = opts[:compatibility] || Path.join(root, "COMPATIBILITY")
+
+supports =
+  with {:ok, text} <- File.read(compatibility_path),
+       {:ok, supports} <- Manifest.compatibility(text) do
+    supports
+  else
+    {:error, why} when is_atom(why) ->
+      ReleaseManifest.fail("#{compatibility_path}: #{:file.format_error(why)}")
+
+    {:error, why} ->
+      ReleaseManifest.fail("#{compatibility_path} #{why}")
+  end
+
+if opts[:check] do
+  IO.puts(
+    "#{Path.basename(compatibility_path)}: plane #{supports.plane}, protocol #{supports.protocol}"
+  )
+
+  System.halt(0)
+end
 
 {version, dir} =
   case {args, invalid} do
@@ -49,7 +81,9 @@ end
       {version, dir}
 
     _ ->
-      ReleaseManifest.fail("usage: elixir scripts/release-manifest.exs VERSION DIR [--keys FILE]")
+      ReleaseManifest.fail(
+        "usage: elixir scripts/release-manifest.exs VERSION DIR [--keys FILE] [--compatibility FILE]"
+      )
   end
 
 unless Regex.match?(~r/\A[0-9A-Za-z.+-]+\z/, version),
@@ -121,7 +155,7 @@ previous =
       end
   end
 
-manifest = Manifest.build(version, dir)
+manifest = Manifest.build(version, dir, supports)
 if manifest.artifacts == [], do: ReleaseManifest.fail("#{dir} holds no file to sign")
 
 bytes = Manifest.encode(manifest)
@@ -137,7 +171,8 @@ case Minisign.verify(bytes, signature, keys) do
     File.write!(Path.join(dir, "manifest.json.minisig"), signature)
 
     IO.puts(
-      "manifest.json: #{length(manifest.artifacts)} files of #{version}, signed by key #{Enum.join(ids, " and ")}"
+      "manifest.json: #{length(manifest.artifacts)} files of #{version}, supporting plane " <>
+        "#{supports.plane} and protocol #{supports.protocol}, signed by key #{Enum.join(ids, " and ")}"
     )
 
   {:error, why} ->

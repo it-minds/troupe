@@ -1,0 +1,18 @@
+# What a release of this repository works with. scripts/release-manifest.exs signs it
+# into the release's manifest.json as "supports", so that `troupe update --latest` and the
+# desktop app's "Newest supported" install a release only where it says it works with
+# the plane the person is signed in to. A release publishes with this file as it is at
+# its tag; scripts/release checks that it parses before it tags.
+#
+# One fact to a line, its name and then its value:
+#
+#   plane     the plane versions this release's clients work with: comparisons joined
+#             by "and", each one of >=, >, <=, < or == and a version, as SemVer orders
+#             them (a pre-release before its release), e.g. ">= 0.30.0-beta"
+#   protocol  the protocol version its clients speak (PROTOCOL.md)
+#
+# Raise the plane's minimum when a client starts needing a method or a field an older
+# plane does not have (docs/developer/ci.md, "What a release supports"). Lines starting with # are not read.
+
+plane >= 0.30.0-beta
+protocol 1

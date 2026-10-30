@@ -1,13 +1,18 @@
-// The desktop app's own update, and beside it the daemon's (#66, Decision 874), the
-// terminal client's and the VS Code extension's, wherever the installers put those:
-// an install picks its components once, and one update moves them all.
+// The desktop app's own update, and beside it the daemon's (#66), the terminal client's
+// and the VS Code extension's, wherever the installers put those: an install picks its
+// components once, and one update moves them all.
 //
 // Three commands, one step each, so that the page can ask the person between them:
 //
-//   update_check     finds the release to move to: the version a plane recommends, or the
-//                    latest; checks its manifest against the release keys this build was
-//                    compiled with (`release.rs`); and says what an update would replace.
-//                    Nothing is downloaded but the manifest and the update's signature.
+//   update_check     finds the release to move to: the version a plane recommends (the
+//                    default target), or the latest; or, with the target "latest", the
+//                    newest release whose signed manifest says it supports the plane's
+//                    version and that the plane neither blocks nor holds below its
+//                    minimum. It checks the manifest against the release keys this build
+//                    was compiled with (`release.rs`) and says what an update would
+//                    replace, and, where a newer release than the recommended one
+//                    supports the plane, which (`newest`), for the page's quieter offer.
+//                    Nothing is downloaded but manifests and the update's signature.
 //   update_download  downloads the app's update, which Tauri's updater checks against the
 //                    release key, and checks it again against the signed manifest's size
 //                    and sha256; the daemon's release, checked and unpacked beside the one
@@ -15,7 +20,7 @@
 //                    replaces; and the extension's `.vsix`, checked. Nothing in place is
 //                    touched.
 //   update_install   installs the extension with `code`, swaps the daemon's release and
-//                    the terminal client in, as `troupe update` does (Decision 865), and
+//                    the terminal client in, as `troupe update` does, and
 //                    hands the app's update to Tauri's updater, which restarts the app.
 //
 // A release that cannot be checked is refused with a sentence, and nothing changes. The
@@ -39,6 +44,9 @@ use crate::release::{self, Artifact, Judgement, Manifest, Platform, Policy, Trus
 
 /// Where releases are published, unless `TROUPE_REPO` or `TROUPE_RELEASE_URL` says otherwise.
 const REPO: &str = "it-minds/troupe";
+
+/// How many releases, newest first, the newest supported one is looked for among.
+const LOOK: usize = 20;
 
 /// What the page hears while an update downloads: bytes received, and of how many.
 pub const PROGRESS: &str = "troupe://update-progress";
@@ -93,12 +101,17 @@ const EXTENSION: &str = "objective-mj.troupe";
 /// version and where releases are from that alone, once the key this computer pinned for
 /// the plane, which it asks the daemon for itself, holds for it: the page's `version` and
 /// `versions` are then not read, and no field of the page's is a URL.
+///
+/// `target` is `"recommended"`, the default, or `"latest"`: the newest release that says
+/// it supports the plane, still never one the plane blocks or holds below its minimum.
 #[derive(Default, Deserialize)]
 pub struct CheckParams {
     #[serde(default)]
     version: Option<String>,
     #[serde(default)]
     plane: Option<PlaneWord>,
+    #[serde(default)]
+    target: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -123,8 +136,9 @@ impl PlaneWord {
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum Checked {
-    /// Nothing newer: `version` is the release found, `current` this build.
-    Current { version: String, current: String },
+    /// Nothing newer: `version` is the release found, `current` this build, and `newest` a
+    /// newer release than the recommended one that supports the plane, where there is one.
+    Current { version: String, current: String, newest: Option<String> },
     Offer(Box<Offer>),
 }
 
@@ -144,6 +158,9 @@ pub struct Offer {
     /// The VS Code extension `code` lists, installed again from the release.
     pub extension: Option<ComponentOffer>,
     pub extension_note: Option<String>,
+    /// A newer release than this one that supports the plane, which a check with the
+    /// target "latest" moves to; `None` where there is none or that was the target.
+    pub newest: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -294,7 +311,7 @@ fn asked_for(manifest: &Manifest, source: &Source) -> Result<(), String> {
 }
 
 /// A plane's word on a version for one component: never a blocked one, never below its
-/// minimum (Decision 868).
+/// minimum.
 fn served(plane: &PlaneWord, component: &str, version: &str) -> Result<(), String> {
     let name = match component {
         "desktop" => "the desktop app",
@@ -310,6 +327,110 @@ fn served(plane: &PlaneWord, component: &str, version: &str) -> Result<(), Strin
         )),
         Judgement::Served => Ok(()),
     }
+}
+
+/// The plane's own version, from its discovery document, which a release's signed
+/// `supports` is held to; `None` from a plane that does not say, or cannot be asked.
+async fn plane_version(client: &reqwest::Client, url: &str) -> Option<String> {
+    let url = format!("{}/.well-known/troupe", url.trim_end_matches('/'));
+    let bytes = get(client, &url, Some(release::SMALL)).await.ok()??;
+    let json: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    json.pointer("/plane/build/version")?.as_str().filter(|v| !v.is_empty()).map(Into::into)
+}
+
+/// The releases the newest supported one is looked for among, newest first, each its tag
+/// and where it is: the one `TROUPE_RELEASE_URL` names; GitHub's list otherwise. A plane's
+/// own mirror is found by version and lists none.
+async fn listed(client: &reqwest::Client, plane_release: Option<&str>) -> Result<Vec<(Option<String>, String)>, String> {
+    if let Some(url) = env("TROUPE_RELEASE_URL") {
+        return Ok(vec![(None, url.trim_end_matches('/').to_string())]);
+    }
+    if let Some(url) = plane_release {
+        return Err(format!("the plane says releases are at {url}, which lists none to choose the newest from"));
+    }
+    let repo = env("TROUPE_REPO").unwrap_or_else(|| REPO.to_string());
+    let url = format!("https://api.github.com/repos/{repo}/releases?per_page={}", LOOK + 10);
+    let bytes = get(client, &url, Some(16 * release::SMALL)).await?.ok_or_else(|| format!("{url} lists no releases"))?;
+    listing(&bytes, &repo)
+}
+
+/// GitHub's list of releases, newest first by version: drafts left out, pre-releases kept,
+/// since a beta is published as one.
+fn listing(bytes: &[u8], repo: &str) -> Result<Vec<(Option<String>, String)>, String> {
+    #[derive(Deserialize)]
+    struct Listed {
+        tag_name: String,
+        #[serde(default)]
+        draft: bool,
+    }
+    let listed: Vec<Listed> = serde_json::from_slice(bytes).map_err(|_| "GitHub's list of releases is not one".to_string())?;
+    let mut versions: Vec<semver::Version> = listed
+        .into_iter()
+        .filter(|r| !r.draft)
+        .filter_map(|r| r.tag_name.strip_prefix('v').and_then(|v| semver::Version::parse(v).ok()))
+        .collect();
+    versions.sort_by(|a, b| b.cmp(a));
+    Ok(versions
+        .into_iter()
+        .map(|v| (Some(v.to_string()), format!("https://github.com/{repo}/releases/download/v{v}")))
+        .collect())
+}
+
+/// What one release says while the newest supported one is looked for.
+#[derive(Debug, PartialEq)]
+enum Look {
+    /// The one: it supports the plane, which serves it.
+    Take,
+    /// Passed over: blocked, said to support other planes, or saying nothing of planes.
+    Pass,
+    /// No further: at or before the recommended version, whose word is the plane's, or
+    /// below the plane's minimum, where every older one is too.
+    Stop,
+}
+
+fn past(version: &str, recommended: Option<&str>) -> bool {
+    recommended.map_or(true, |r| version != r && !release::older(version, r))
+}
+
+fn look_at(manifest: &Manifest, plane: Option<&PlaneWord>, plane_version: Option<&str>, recommended: Option<&str>) -> Look {
+    if !past(&manifest.version, recommended) {
+        return Look::Stop;
+    }
+    let Some(plane) = plane else { return Look::Take };
+    match release::judge(&plane.policy("desktop"), &manifest.version) {
+        Judgement::BelowMinimum => Look::Stop,
+        Judgement::Blocked => Look::Pass,
+        Judgement::Served if manifest.supports_plane(plane_version) == Some(true) => Look::Take,
+        Judgement::Served => Look::Pass,
+    }
+}
+
+/// The newest release past the recommended one that supports the plane and that it
+/// serves, with where it is, its manifest checked as any other; `None` where none of the
+/// newest is.
+async fn newest_supported(
+    client: &reqwest::Client,
+    keys: &[TrustedKey],
+    plane: Option<&PlaneWord>,
+    plane_version: Option<&str>,
+    recommended: Option<&str>,
+) -> Result<Option<(Source, Manifest)>, String> {
+    if plane.is_some() && plane_version.is_none() {
+        return Ok(None);
+    }
+    for (tag, base) in listed(client, plane.and_then(|p| p.release.as_deref())).await?.into_iter().take(LOOK) {
+        if tag.as_deref().is_some_and(|t| !past(t, recommended)) {
+            break;
+        }
+        let source = Source { base, asked: None, tag };
+        let Ok(manifest) = signed_manifest(client, &source, keys).await else { continue };
+        match look_at(&manifest, plane, plane_version, recommended) {
+            Look::Take => return Ok(Some((source, manifest))),
+            Look::Pass => continue,
+            Look::Stop => break,
+        }
+    }
+    Ok(None)
 }
 
 /// The app's update's signature: the `.sig` beside it, held to the signed manifest, and the
@@ -763,8 +884,28 @@ pub async fn update_check(app: AppHandle, updates: State<'_, Updates>, params: O
         Some(word) if word.signed.is_some() => word.policy("desktop").recommended,
         _ => params.version.clone(),
     };
-    let source = source(asked.as_deref(), plane.as_ref().and_then(|p| p.release.as_deref())).await?;
-    let manifest = signed_manifest(&client, &source, &keys).await?;
+    let latest = params.target.as_deref() == Some("latest");
+    let plane_version = match &plane {
+        Some(word) => plane_version(&client, &word.url).await,
+        None => None,
+    };
+    // The newest release past the recommended one that supports the plane: the target
+    // with "latest", and otherwise only said, for the page to offer as well.
+    let newest = if latest || (plane.is_some() && asked.is_some()) {
+        let found = newest_supported(&client, &keys, plane.as_ref(), plane_version.as_deref(), asked.as_deref()).await;
+        if latest { found? } else { found.unwrap_or(None) }
+    } else {
+        None
+    };
+    let (source, manifest, newest) = match newest {
+        Some((source, manifest)) if latest => (source, manifest, None),
+        found => {
+            let source = source(asked.as_deref(), plane.as_ref().and_then(|p| p.release.as_deref())).await?;
+            let manifest = signed_manifest(&client, &source, &keys).await?;
+            let newest = found.map(|(_, m)| m.version).filter(|v| release::wanted(&current, v));
+            (source, manifest, newest)
+        }
+    };
     let version = manifest.version.clone();
     if let Some(plane) = &plane {
         served(plane, "desktop", &version)?;
@@ -781,7 +922,7 @@ pub async fn update_check(app: AppHandle, updates: State<'_, Updates>, params: O
             }
         }
         *updates.0.lock().unwrap() = None;
-        return Ok(Checked::Current { version, current });
+        return Ok(Checked::Current { version, current, newest });
     }
 
     let artifact = manifest.desktop_update(&platform).cloned().ok_or_else(|| {
@@ -803,6 +944,7 @@ pub async fn update_check(app: AppHandle, updates: State<'_, Updates>, params: O
     let (tui, tui_offer, tui_note) = tui_step(&manifest, &platform, plane.as_ref(), tui_at, tui_from);
     let (extension, extension_offer, extension_note) = extension_step(&manifest, code_at, code_from);
 
+    let newest = newest.filter(|n| *n != version);
     let offer = Offer {
         version,
         current,
@@ -813,6 +955,7 @@ pub async fn update_check(app: AppHandle, updates: State<'_, Updates>, params: O
         tui_note,
         extension: extension_offer,
         extension_note,
+        newest,
     };
     *updates.0.lock().unwrap() = Some(Pending { base: source.base, update, app: artifact, daemon, tui, extension, bytes: None });
     Ok(Checked::Offer(Box::new(offer)))
@@ -944,7 +1087,7 @@ mod tests {
     use super::*;
 
     fn manifest(version: &str, artifacts: Vec<Artifact>) -> Manifest {
-        Manifest { version: version.into(), artifacts }
+        Manifest { version: version.into(), artifacts, supports: None }
     }
 
     fn artifact(component: &str, target: &str, file: &str, bytes: &[u8]) -> Artifact {
@@ -994,6 +1137,51 @@ mod tests {
             signed: None,
             release: None,
         }
+    }
+
+    // -- the newest supported release ------------------------------------------------
+
+    fn supporting(version: &str, plane: Option<&str>) -> Manifest {
+        let supports = plane.map(|p| release::Supports { plane: p.into(), protocol: "1".into() });
+        Manifest { version: version.into(), artifacts: vec![], supports }
+    }
+
+    fn desktop_plane(desktop: Policy) -> PlaneWord {
+        PlaneWord { url: "https://plane.example.test".into(), versions: HashMap::from([("desktop".to_string(), desktop)]), signed: None, release: None }
+    }
+
+    #[test]
+    fn the_newest_supported_is_one_the_plane_serves_and_that_says_it_supports_it() {
+        let word = desktop_plane(Policy { minimum: Some("0.30.0-beta".into()), blocked: vec!["0.37.0-beta".into()], ..Policy::default() });
+        let at = |m: &Manifest| look_at(m, Some(&word), Some("0.34.0-beta"), Some("0.34.0-beta"));
+
+        assert_eq!(at(&supporting("0.36.0-beta", Some(">= 0.30.0-beta"))), Look::Take);
+        assert_eq!(at(&supporting("0.38.0-beta", Some(">= 0.35.0-beta"))), Look::Pass);
+        assert_eq!(at(&supporting("0.37.0-beta", Some(">= 0.30.0-beta"))), Look::Pass);
+        // A manifest from before releases said what they support is not known to.
+        assert_eq!(at(&supporting("0.36.0-beta", None)), Look::Pass);
+        // At the recommended version the plane's word is the better one.
+        assert_eq!(at(&supporting("0.34.0-beta", Some(">= 0.30.0-beta"))), Look::Stop);
+        // Below the minimum, and so is every older one.
+        let no_recommended = |m: &Manifest| look_at(m, Some(&word), Some("0.34.0-beta"), None);
+        assert_eq!(no_recommended(&supporting("0.29.0-beta", Some(">= 0.20.0"))), Look::Stop);
+        // Signed in to no plane, the newest release is the one.
+        assert_eq!(look_at(&supporting("0.36.0-beta", None), None, None, None), Look::Take);
+    }
+
+    #[test]
+    fn github_s_list_is_read_newest_first_without_drafts() {
+        let list = br#"[
+            {"tag_name": "v0.35.0-beta", "draft": false, "prerelease": true},
+            {"tag_name": "v0.36.0-beta", "draft": true},
+            {"tag_name": "v0.36.0-beta-pre.2", "draft": false},
+            {"tag_name": "nightly", "draft": false},
+            {"tag_name": "v0.34.0-beta", "draft": false}
+        ]"#;
+        let listed = listing(list, "it-minds/troupe").unwrap();
+        let tags: Vec<_> = listed.iter().map(|(t, _)| t.clone().unwrap()).collect();
+        assert_eq!(tags, vec!["0.36.0-beta-pre.2", "0.35.0-beta", "0.34.0-beta"]);
+        assert_eq!(listed[1].1, "https://github.com/it-minds/troupe/releases/download/v0.35.0-beta");
     }
 
     // -- the terminal client and the extension --------------------------------------
