@@ -231,6 +231,30 @@ flowchart LR
 - A version with a hyphen — a beta such as `0.15.0-beta`, or a release candidate such as `1.0.0-rc.1` — runs all of it and is published as a GitHub pre-release, so `/releases/latest` and the installers' default find it only once it is marked Latest by hand.
 - A release whose run failed after VERSION merged can be retried with `Actions → release → Run workflow`: by hand it cuts VERSION's version if that has no tag yet.
 
+### What a release supports
+
+The root `COMPATIBILITY` file says which plane versions a release's clients work with and
+which protocol version they speak, one fact to a line (the file explains its own format):
+
+```text
+plane >= 0.30.0-beta
+protocol 1
+```
+
+`scripts/release-manifest.exs` signs it into the manifest as `supports`, so it is the
+release key's word like the rest ([PROTOCOL.md](../../PROTOCOL.md#client-versions)).
+`troupe update --latest` and the desktop app's "Newest supported" hold each release to it
+against the version the person's plane runs. `scripts/release` runs
+`elixir scripts/release-manifest.exs --check` before it opens the pull request, and the
+manifest test parses the file on every change, so a `COMPATIBILITY` that does not parse
+never reaches a release.
+
+**Raise the plane's minimum** when a client starts needing a method or a field an older
+plane does not have: the change that makes the terminal, the daemon or the desktop app
+call it raises `plane >=` to the first plane version that answers it, in the same pull
+request. Lower it never; a requirement such as `>= 0.30.0-beta and < 1.0.0-beta` caps it
+where a plane's protocol moves on. `protocol` changes only with the protocol's version.
+
 ### The release key
 
 One minisign key (Ed25519) signs every release's manifest; `troupe update` and the

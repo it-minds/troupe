@@ -3387,7 +3387,26 @@ whose `admin.clients.get` answers them beside the policy as `fleet`, and whose
 `troupe update`, signed in, asks `me.client_versions` and installs the `recommended`
 version, never a blocked one and never one below `minimum`, moves backwards only when the
 person names the version, and is still held to the release key: the plane can hold a
-version back or name one, and cannot make a client install anything the key did not sign. The daemon makes the same `initialize` when a client
+version back or name one, and cannot make a client install anything the key did not sign.
+
+**What a release supports** is the release's word, in its signed `manifest.json`
+(Decisions 865 and 972), beside its version:
+
+```json
+"supports": {"plane": ">= 0.30.0-beta", "protocol": "1"}
+```
+
+`plane` is the plane versions the release's clients work with: comparisons joined by
+`and`, each `>=`, `>`, `<=`, `<` or `==` and a version, ordered as SemVer orders them. A
+plane's version is `plane.build.version` in its discovery document. `protocol` is the
+protocol version they speak. CI writes it from the repository's `COMPATIBILITY` file and
+signs it with the rest; a manifest from before it has no `supports`, which a client reads
+as not knowing, never as supporting every plane. `troupe update --latest`, and the desktop
+app's "Newest supported", install the newest release whose `supports.plane` covers the
+plane signed in to, still never one the plane blocks or holds below `minimum`, since the
+plane would refuse it at `initialize`; the recommended version stays the default, and a
+release that says nothing of planes is passed over unless it is the recommended one,
+which the plane's word covers. The daemon makes the same `initialize` when a client
 links it with a token (`identity.link`); refused, it asks the plane nothing more until the
 next handshake, and `identity.get` carries the sentence as `update_required`.
 

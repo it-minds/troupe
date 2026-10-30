@@ -1,18 +1,28 @@
 defmodule Troupe.Release.Manifest do
   @moduledoc """
-  A release's `manifest.json` (#66, Decision 865): the version, then every file the
-  release publishes with its component, its target, its size and its sha256. CI writes
-  it and signs it (`scripts/release-manifest.exs`); a client checks the signature
-  (`Troupe.Release.Minisign`), then each file it downloads against it.
+  A release's `manifest.json` (#66): the version, what the release works with, then
+  every file the release publishes with its component, its target, its size and its
+  sha256. CI writes it and signs it (`scripts/release-manifest.exs`); a client checks the
+  signature (`Troupe.Release.Minisign`), then each file it downloads against it. Nothing
+  in it is taken before the signature holds, so what it says it supports is the release
+  key's word, as its files are.
 
       {
         "format": 1,
-        "version": "0.13.0-beta",
+        "version": "0.34.0-beta",
+        "supports": {"plane": ">= 0.30.0-beta", "protocol": "1"},
         "artifacts": [
           {"component": "tui", "target": "linux_x86_64", "file": "troupe-0.13.0-beta-linux_x86_64", "size": 41234567, "sha256": "..."},
           ...
         ]
       }
+
+  `supports` is read from the repository's `COMPATIBILITY` file (`compatibility/1`): the
+  plane versions this release's clients work with, as a requirement, and the protocol
+  version they speak. It was added within format 1, so a manifest from before it has
+  none, and that is read as not knowing (`supports: nil`), never as supporting every
+  plane. A requirement is comparisons joined by `and`, each `>=`, `>`, `<=`, `<` or `==`
+  and a version, which every client can evaluate the same way SemVer orders versions.
 
   One artifact to a line, written the same way every time, so that a shell installer
   finds a file's line with `grep` and the bytes signed are the bytes a reader gets.
@@ -31,7 +41,7 @@ defmodule Troupe.Release.Manifest do
   @not_artifacts ~w(manifest.json manifest.json.minisig SHA256SUMS)
 
   @enforce_keys [:version, :artifacts]
-  defstruct [:version, :artifacts]
+  defstruct [:version, :artifacts, supports: nil]
 
   @type artifact :: %{
           component: String.t(),
@@ -40,7 +50,12 @@ defmodule Troupe.Release.Manifest do
           size: non_neg_integer(),
           sha256: String.t()
         }
-  @type t :: %__MODULE__{version: String.t(), artifacts: [artifact()]}
+  @type supports :: %{plane: String.t(), protocol: String.t()}
+  @type t :: %__MODULE__{
+          version: String.t(),
+          artifacts: [artifact()],
+          supports: supports() | nil
+        }
 
   @doc "The five targets a release builds the daemon and the TUI for."
   @spec targets() :: [String.t()]
@@ -48,10 +63,10 @@ defmodule Troupe.Release.Manifest do
 
   @doc """
   The manifest of the release in `dir`: every regular file in it, by name, bar the
-  manifest's own files.
+  manifest's own files, and `supports` where it is given.
   """
-  @spec build(String.t(), Path.t()) :: t()
-  def build(version, dir) do
+  @spec build(String.t(), Path.t(), supports() | nil) :: t()
+  def build(version, dir, supports \\ nil) do
     artifacts =
       dir
       |> File.ls!()
@@ -71,8 +86,102 @@ defmodule Troupe.Release.Manifest do
         }
       end)
 
-    %__MODULE__{version: version, artifacts: artifacts}
+    %__MODULE__{version: version, artifacts: artifacts, supports: supports}
   end
+
+  @doc """
+  What a `COMPATIBILITY` file says, as the manifest's `supports`, or a sentence saying
+  which line is wrong.
+
+  One fact to a line, its name and then its value: `plane` and a requirement
+  (`plane >= 0.30.0-beta`), `protocol` and a version (`protocol 1`). A line that starts
+  with `#`, and an empty one, is not read. Both facts are needed, once each.
+  """
+  @spec compatibility(String.t()) :: {:ok, supports()} | {:error, String.t()}
+  def compatibility(text) when is_binary(text) do
+    text
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.map(fn {line, n} -> {String.trim(line), n} end)
+    |> Enum.reject(fn {line, _n} -> line == "" or String.starts_with?(line, "#") end)
+    |> Enum.reduce_while({:ok, %{}}, &fact/2)
+    |> case do
+      {:ok, %{plane: _, protocol: _} = supports} -> {:ok, supports}
+      {:ok, partial} -> {:error, "names no #{if partial[:plane], do: "protocol", else: "plane"}"}
+      error -> error
+    end
+  end
+
+  defp fact({line, n}, {:ok, acc}) do
+    {name, value} =
+      case String.split(line, ~r/\s+/, parts: 2) do
+        [name, value] -> {name, String.trim(value)}
+        [name] -> {name, ""}
+      end
+
+    key = %{"plane" => :plane, "protocol" => :protocol}[name]
+
+    case wrong(key, name, value, acc) do
+      nil -> {:cont, {:ok, Map.put(acc, key, value)}}
+      why -> {:halt, {:error, "line #{n}: " <> why}}
+    end
+  end
+
+  defp wrong(nil, name, _value, _acc), do: "#{inspect(name)} is not plane or protocol"
+
+  defp wrong(key, name, value, acc) do
+    cond do
+      Map.has_key?(acc, key) ->
+        "#{name} is said twice"
+
+      key == :plane and not requirement?(value) ->
+        "#{inspect(value)} is not a requirement (comparisons joined by and, " <>
+          "each >=, >, <=, < or == and a version)"
+
+      key == :protocol and not Regex.match?(~r/\A[1-9][0-9]*\z/, value) ->
+        "#{inspect(value)} is not a protocol version"
+
+      true ->
+        nil
+    end
+  end
+
+  @doc """
+  Whether `requirement` is one a manifest may carry: comparisons joined by `and`, each one
+  of `>=`, `>`, `<=`, `<` or `==` and a SemVer version.
+  """
+  @spec requirement?(term()) :: boolean()
+  def requirement?(requirement) when is_binary(requirement) do
+    requirement
+    |> String.split(" and ")
+    |> Enum.all?(fn part ->
+      case Regex.run(~r/\A\s*(>=|<=|==|>|<)\s*(\S+)\s*\z/, part) do
+        [_, _op, version] -> match?({:ok, _}, Version.parse(version))
+        nil -> false
+      end
+    end)
+  end
+
+  def requirement?(_requirement), do: false
+
+  @doc """
+  Whether a release's `supports` covers a plane at `plane_version`: `true` or `false`, or
+  `:unknown` where the manifest says nothing of planes (one from before it did) or the
+  plane's version is not one SemVer reads. Versions are ordered as SemVer orders them, a
+  pre-release before its release, as the rest of `troupe update` orders them.
+  """
+  @spec supports?(t(), String.t() | nil) :: boolean() | :unknown
+  def supports?(%__MODULE__{supports: %{plane: requirement}}, plane_version)
+      when is_binary(plane_version) do
+    with {:ok, version} <- Version.parse(plane_version),
+         {:ok, requirement} <- Version.parse_requirement(requirement) do
+      Version.match?(version, requirement, allow_pre: true)
+    else
+      _unreadable -> :unknown
+    end
+  end
+
+  def supports?(_manifest, _plane_version), do: :unknown
 
   @doc """
   What a release's file is, from its name: `{component, target}`. The names are the ones
@@ -143,9 +252,12 @@ defmodule Troupe.Release.Manifest do
     end
   end
 
-  @doc "The manifest as it is signed: the same bytes for the same release, one artifact to a line."
+  @doc """
+  The manifest as it is signed: the same bytes for the same release, one artifact to a
+  line. Without `supports`, the bytes are the ones a manifest had before it was added.
+  """
   @spec encode(t()) :: String.t()
-  def encode(%__MODULE__{version: version, artifacts: artifacts}) do
+  def encode(%__MODULE__{version: version, artifacts: artifacts} = manifest) do
     lines =
       Enum.map_join(artifacts, ",\n", fn a ->
         "    {" <>
@@ -166,20 +278,27 @@ defmodule Troupe.Release.Manifest do
     {
       "format": #{@format},
       "version": #{JSON.encode!(version)},
-      "artifacts": [
+    #{supports_line(manifest.supports)}  "artifacts": [
     #{lines}
       ]
     }
     """
   end
 
+  defp supports_line(nil), do: ""
+
+  defp supports_line(%{plane: plane, protocol: protocol}),
+    do:
+      ~s(  "supports": {"plane": #{JSON.encode!(plane)}, "protocol": #{JSON.encode!(protocol)}},\n)
+
   @doc "A manifest from its bytes, checked for the shape a client relies on."
   @spec decode(binary()) :: {:ok, t()} | {:error, String.t()}
   def decode(bytes) when is_binary(bytes) do
-    with {:ok, %{"format" => @format, "version" => version, "artifacts" => artifacts}}
+    with {:ok, %{"format" => @format, "version" => version, "artifacts" => artifacts} = json}
          when is_binary(version) and is_list(artifacts) <- JSON.decode(bytes),
-         {:ok, artifacts} <- artifacts(artifacts, []) do
-      {:ok, %__MODULE__{version: version, artifacts: artifacts}}
+         {:ok, artifacts} <- artifacts(artifacts, []),
+         {:ok, supports} <- supports(json["supports"]) do
+      {:ok, %__MODULE__{version: version, artifacts: artifacts, supports: supports}}
     else
       {:ok, %{"format" => format}} when format != @format ->
         {:error,
@@ -192,6 +311,17 @@ defmodule Troupe.Release.Manifest do
         {:error, "is not a release manifest"}
     end
   end
+
+  defp supports(nil), do: {:ok, nil}
+
+  defp supports(%{"plane" => plane, "protocol" => protocol})
+       when is_binary(plane) and is_binary(protocol) do
+    if requirement?(plane),
+      do: {:ok, %{plane: plane, protocol: protocol}},
+      else: {:error, "says it supports planes #{inspect(plane)}, which is not a requirement"}
+  end
+
+  defp supports(_other), do: {:error, "has a supports without its plane and protocol"}
 
   defp artifacts([], acc), do: {:ok, Enum.reverse(acc)}
 

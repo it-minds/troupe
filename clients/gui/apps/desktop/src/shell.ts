@@ -141,17 +141,29 @@ export interface UpdateOffer {
   /** The VS Code extension `code` lists, installed again from the release. */
   extension: { from: string; to: string; at: string } | null;
   extension_note: string | null;
+  /**
+   * A newer release than this one that says it supports the plane, which the plane serves:
+   * what a check with the target `latest` moves to. Null where there is none.
+   */
+  newest?: string | null;
 }
 
-export type UpdateCheck = { state: "current"; version: string; current: string } | ({ state: "offer" } & UpdateOffer);
+export type UpdateCheck = { state: "current"; version: string; current: string; newest?: string | null } | ({ state: "offer" } & UpdateOffer);
+
+/**
+ * Which release a check looks for: the version the plane recommends (the default), or the
+ * newest release that supports the plane, still never one it blocks or holds below its minimum.
+ */
+export type UpdateTarget = "recommended" | "latest";
 
 export interface ShellUpdater {
   /**
-   * Find the release to move to — `version`, which a plane recommends, or the latest — and
-   * say what an update would replace. Rejects with a sentence where the release cannot be
+   * Find the release to move to — `version`, which a plane recommends, or the latest; with
+   * `target: "latest"`, the newest release that supports the plane — and say what an update
+   * would replace, and the newest supported release where it is newer still. Rejects with a sentence where the release cannot be
    * checked, or a plane does not serve it; nothing changes either way.
    */
-  check(params: { version: string | null; plane: UpdatePlane | null }): Promise<UpdateCheck>;
+  check(params: { version: string | null; plane: UpdatePlane | null; target?: UpdateTarget }): Promise<UpdateCheck>;
   /** Download what the check offered and check it against the release key and the manifest. */
   download(onProgress?: (received: number, total: number | null) => void): Promise<void>;
   /**

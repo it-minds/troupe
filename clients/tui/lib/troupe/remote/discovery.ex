@@ -31,7 +31,8 @@ defmodule Troupe.Remote.Discovery do
           scopes: [String.t()],
           device_endpoint: String.t() | nil,
           token_endpoint: String.t() | nil,
-          name: String.t() | nil
+          name: String.t() | nil,
+          plane_version: String.t() | nil
         }
 
   @default_scopes ~w(openid profile groups offline_access)
@@ -68,10 +69,19 @@ defmodule Troupe.Remote.Discovery do
          scopes: scopes(body),
          device_endpoint: Map.get(body, "device_authorization_endpoint"),
          token_endpoint: Map.get(body, "token_endpoint"),
-         name: Map.get(plane, "name") || Map.get(body, "name")
+         name: Map.get(plane, "name") || Map.get(body, "name"),
+         # The plane's own version, which a release's signed manifest says it supports or
+         # not (`troupe update --latest`); nil from a plane that does not say.
+         plane_version: plane_version(plane)
        }}
     end
   end
+
+  defp plane_version(%{"build" => %{"version" => version}})
+       when is_binary(version) and version != "",
+       do: version
+
+  defp plane_version(_plane), do: nil
 
   @doc "The plane URL with any trailing slash and `/.well-known/troupe` suffix removed."
   @spec base(String.t()) :: String.t()

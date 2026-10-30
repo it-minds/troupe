@@ -90,9 +90,9 @@ defmodule Troupe.CLI.Remote do
 
   @doc """
   What the plane this machine is signed in to says of each component's version, for
-  `troupe update` (Decision 868): `%{url: plane, versions: %{"tui" => ..., "daemon" =>
-  ...}, release_url: url}`, or `nil` where it is signed in to none or the plane has no
-  version policy.
+  `troupe update`, which holds each component to it: `%{url: plane, version: the plane's
+  own version or nil, versions: %{"tui" => ..., "daemon" => ...}, release_url: url}`, or
+  `nil` where it is signed in to none or the plane has no version policy.
 
   Taken only as the plane signed it (#657), checked against the key this machine pinned
   for the plane: one signed by another key, changed after it was signed or expired is said
@@ -136,7 +136,13 @@ defmodule Troupe.CLI.Remote do
   defp checked(url, answer, say) do
     case PlaneKeys.check(url, answer, "client_versions") do
       {:ok, %{"versions" => %{} = versions} = body, :signed} ->
-        {:ok, %{url: url, versions: versions, release_url: release_url(body)}}
+        {:ok,
+         %{
+           url: url,
+           version: plane_version(url),
+           versions: versions,
+           release_url: release_url(body)
+         }}
 
       {:ok, _body, :signed} ->
         {:refused, "the version policy #{url} signed has no versions in it"}
@@ -145,10 +151,24 @@ defmodule Troupe.CLI.Remote do
         say.(PlaneKeys.unsigned_line(url, "client_versions"))
 
         {:ok,
-         %{url: url, versions: Map.delete(answer, "release"), release_url: release_url(answer)}}
+         %{
+           url: url,
+           version: plane_version(url),
+           versions: Map.delete(answer, "release"),
+           release_url: release_url(answer)
+         }}
 
       {:error, sentence} ->
         {:refused, sentence}
+    end
+  end
+
+  # The plane's own version, from its discovery document, which `troupe update --latest`
+  # holds each release's signed `supports` to.
+  defp plane_version(url) do
+    case Tokens.discovery(url) do
+      {:ok, discovery} -> Map.get(discovery, :plane_version)
+      :error -> nil
     end
   end
 

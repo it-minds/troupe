@@ -455,6 +455,10 @@ label code {
   color: var(--error-fg);
   background: var(--error-bg);
 }
+/* The newest supported release beside the recommended one: the same link, quieter. */
+.banner.update button.link.secondary {
+  font-weight: 400;
+}
 
 .empty {
   padding: var(--space-9) var(--space-6);

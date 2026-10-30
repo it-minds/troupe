@@ -176,7 +176,7 @@ defmodule Troupe.UpdateTest do
       assert "troupe update would install 1.1.0 over troupe-daemon 1.0.0 and troupe 1.0.0." in out
 
       assert Update.run(:update, opts(ctx, url, plane: plane)) == 0
-      assert "the plane at https://plane.example.test recommends 1.1.0" in lines()
+      assert "1.1.0, the version https://plane.example.test recommends" in lines()
       assert File.read!(ctx.tui) == "troupe 1.1.0\n"
       assert Update.daemon_version(ctx.lib, false) == "1.1.0"
     end
@@ -300,6 +300,158 @@ defmodule Troupe.UpdateTest do
 
       assert Update.run(:update, opts(ctx, nil, plane: plane)) == 1
       assert Enum.any?(lines(), &(&1 =~ "is 1.0.5, not 1.1.0; nothing is installed"))
+      assert_unchanged(ctx)
+    end
+  end
+
+  describe "--latest" do
+    test "picks the newest release whose manifest supports the plane's version", ctx do
+      listed = [
+        {"1.3.0", release!(ctx, "1.3.0", supports: ">= 2.0.0")},
+        {"1.2.0", release!(ctx, "1.2.0", supports: ">= 1.0.0 and < 2.0.0")},
+        {"1.1.0", release!(ctx, "1.1.0", supports: ">= 1.0.0")}
+      ]
+
+      plane = plane(%{"recommended" => "1.1.0"})
+
+      assert Update.run(:update, latest(ctx, listed, plane: plane)) == 0
+      out = lines()
+
+      assert ("  passed over 1.3.0: it supports planes >= 2.0.0, and the plane at " <>
+                "https://plane.example.test is 1.5.0") in out
+
+      assert ("1.2.0, the newest release that supports https://plane.example.test " <>
+                "(it recommends 1.1.0)") in out
+
+      assert File.read!(ctx.tui) == "troupe 1.2.0\n"
+      assert Update.daemon_version(ctx.lib, false) == "1.2.0"
+    end
+
+    test "passes over a release the plane blocks", ctx do
+      listed = [
+        {"1.2.0", release!(ctx, "1.2.0", supports: ">= 1.0.0")},
+        {"1.1.5", release!(ctx, "1.1.5", supports: ">= 1.0.0")}
+      ]
+
+      plane = plane(%{"recommended" => "1.1.0", "blocked" => ["1.2.0"]})
+
+      assert Update.run(:update, latest(ctx, listed, plane: plane)) == 0
+      out = lines()
+
+      assert "  passed over 1.2.0: the plane at https://plane.example.test blocks troupe 1.2.0" in out
+
+      assert File.read!(ctx.tui) == "troupe 1.1.5\n"
+    end
+
+    test "stops at a release below the plane's minimum", ctx do
+      test = self()
+
+      fetch = fn url, dest ->
+        send(test, {:fetched, url})
+        Update.fetch(url, dest)
+      end
+
+      oldest = release!(ctx, "1.0.7", supports: ">= 1.0.0")
+
+      listed = [
+        {"1.2.0", release!(ctx, "1.2.0", supports: ">= 2.0.0")},
+        {"1.0.8", release!(ctx, "1.0.8", supports: ">= 1.0.0")},
+        {"1.0.7", oldest}
+      ]
+
+      plane = plane(%{"minimum" => "1.1.0"})
+
+      assert Update.run(:update, latest(ctx, listed, plane: plane, fetch: fetch)) == 1
+
+      assert Enum.any?(
+               lines(),
+               &(&1 =~
+                   "troupe update --latest found nothing to install for the plane at " <>
+                     "https://plane.example.test, which recommends no version: 1.0.8 is older " <>
+                     "than the oldest troupe the plane at https://plane.example.test serves (1.1.0)")
+             )
+
+      refute_received {:fetched, ^oldest <> _}
+      assert_unchanged(ctx)
+    end
+
+    test "reads a manifest without supports as unknown, bar the recommended one", ctx do
+      listed = [
+        {"1.2.0", release!(ctx, "1.2.0")},
+        {"1.1.0", release!(ctx, "1.1.0")}
+      ]
+
+      plane = plane(%{"recommended" => "1.1.0"})
+
+      # The recommended one is fetched by its version, from where releases are.
+      {"1.1.0", url} = List.last(listed)
+      assert Update.run(:update, latest(ctx, listed, plane: plane, release_url: url)) == 0
+      out = lines()
+
+      assert ("  passed over 1.2.0: its manifest says nothing of which planes it supports, " <>
+                "from before releases said so") in out
+
+      assert ("1.1.0, the version https://plane.example.test recommends: no newer release says " <>
+                "it supports this plane; it says nothing of which planes it supports, and the " <>
+                "plane's word covers it") in out
+
+      assert File.read!(ctx.tui) == "troupe 1.1.0\n"
+    end
+
+    test "not signed in, picks the newest release", ctx do
+      listed = [
+        {"1.2.0", release!(ctx, "1.2.0")},
+        {"1.1.0", release!(ctx, "1.1.0", supports: ">= 9.0.0")}
+      ]
+
+      assert Update.run(:update, latest(ctx, listed)) == 0
+      assert "1.2.0, the newest release" in lines()
+      assert File.read!(ctx.tui) == "troupe 1.2.0\n"
+    end
+
+    test "looks at the 20 newest releases and no more", ctx do
+      listed = for n <- 30..1//-1, do: {"1.9.#{n}", "file://" <> Path.join(ctx.root, "gone-#{n}")}
+
+      assert Update.run(:update, latest(ctx, listed)) == 1
+      out = lines()
+      assert Enum.count(out, &String.starts_with?(&1, "  passed over ")) == 20
+
+      assert Enum.any?(
+               out,
+               &(&1 =~
+                   "none of the 20 newest releases says it supports this plane, and troupe " <>
+                     "update looked no further")
+             )
+
+      assert_unchanged(ctx)
+    end
+
+    test "--recommended, the default, lists no releases", ctx do
+      url = release!(ctx, "1.1.0", supports: ">= 1.0.0")
+      releases = fn _s -> flunk("--recommended listed the releases") end
+      plane = plane(%{"recommended" => "1.1.0"})
+
+      assert Update.run(:update, opts(ctx, url, plane: plane, releases: releases)) == 0
+      assert "1.1.0, the version https://plane.example.test recommends" in lines()
+    end
+
+    test "troupe doctor's line names a newer supported release", ctx do
+      listed = [
+        {"1.2.0", release!(ctx, "1.2.0", supports: ">= 1.0.0")},
+        {"1.1.0", release!(ctx, "1.1.0", supports: ">= 1.0.0")}
+      ]
+
+      plane = plane(%{"recommended" => "1.1.0"})
+
+      assert %{
+               name: "update",
+               state: :ok,
+               detail: "1.2.0 supports this plane; `troupe update --latest` installs it"
+             } = Update.doctor_check(latest(ctx, listed, plane: plane))
+
+      assert Update.doctor_check(latest(ctx, tl(listed), plane: plane)) == nil
+      assert Update.doctor_check(latest(ctx, listed, plane: plane, installed: "1.2.0")) == nil
+      assert Update.doctor_check(latest(ctx, listed)) == nil
       assert_unchanged(ctx)
     end
   end
@@ -598,7 +750,16 @@ defmodule Troupe.UpdateTest do
 
   # What a plane's `me.client_versions` said, as the CLI hands it over.
   defp plane(tui, daemon \\ %{}) do
-    %{url: "https://plane.example.test", versions: %{"tui" => tui, "daemon" => daemon}}
+    %{
+      url: "https://plane.example.test",
+      version: "1.5.0",
+      versions: %{"tui" => tui, "daemon" => daemon}
+    }
+  end
+
+  # `--latest` over releases each in its own directory, newest first.
+  defp latest(ctx, listed, extra \\ []) do
+    opts(ctx, nil, [pick: :latest, releases: fn _s -> {:ok, listed} end] ++ extra)
   end
 
   defp opts(ctx, url, extra \\ []) do
@@ -645,7 +806,8 @@ defmodule Troupe.UpdateTest do
 
   # A release of a troupe and a troupe-daemon for linux_x86_64, signed; with `desktop:`
   # the desktop app's files the installers use (`:appimage`, `:dmg`, `:setup`, or a list),
-  # and with `vsix: true` the VS Code extension.
+  # with `vsix: true` the VS Code extension, and with `supports:` the plane requirement its
+  # manifest signs.
   defp release!(ctx, version, extra \\ []) do
     dir = Path.join(ctx.root, "release-#{version}-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
@@ -676,7 +838,10 @@ defmodule Troupe.UpdateTest do
     archive = Path.join(dir, "troupe-daemon-#{version}-linux_x86_64.tar.gz")
     :ok = :erl_tar.create(String.to_charlist(archive), files, [:compressed])
 
-    manifest = Manifest.encode(Manifest.build(version, dir))
+    supports =
+      if plane = extra[:supports], do: %{plane: plane, protocol: "1"}
+
+    manifest = Manifest.encode(Manifest.build(version, dir, supports))
     File.write!(Path.join(dir, "manifest.json"), manifest)
 
     File.write!(

@@ -29,6 +29,10 @@ if git rev-parse --quiet --verify "refs/tags/v${version}" >/dev/null; then
   exit 1
 fi
 
+# What the release will say it supports, signed into its manifest: a COMPATIBILITY that
+# does not parse would stop the publish job after the full suite, so it stops here first.
+elixir scripts/release-manifest.exs --check
+
 current="$(tr -d '[:space:]' < VERSION)"
 branch="release/v${version}"
 git switch --quiet -c "$branch" origin/main

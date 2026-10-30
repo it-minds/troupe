@@ -1,4 +1,4 @@
-// The app's own update, in one line at the top (#66, Decision 874).
+// The app's own update, in one line at the top (#66).
 //
 // Quiet while it is an offer — a newer release, or the version the plane recommends — and
 // in the refusal's colour when the plane does not serve this version, which is the one
@@ -6,6 +6,9 @@
 // downloading checks the release against its signature; restarting is asked for, and
 // waits for a turn on this computer to end. Above all of it, a plane whose signing key has
 // changed since this computer pinned it, which asks its person to accept the new one.
+// Beside the recommended release, quieter still, the newest release that says it supports
+// the plane, where that is newer: the plane's word stays the first offer, and going past it
+// is the person's to ask for.
 
 import type { JSX } from "react";
 import type { UpdateOffer } from "../shell";
@@ -54,13 +57,15 @@ export function UpdateBanner({ updates }: { updates: Updates }): JSX.Element | n
   if (updates.planeKey) return <PlaneKeyBanner change={updates.planeKey} />;
   const { phase, required, suggest } = updates;
   if (updates.dismissed && !required) return null;
+  const newest = updates.canUpdate ? updates.newest : null;
 
   const tone = required ? "required" : phase.kind === "refused" ? "refused" : "quiet";
   const offered = phase.kind === "offer" ? phase.offer : null;
-  if (!required && !suggest && !updates.signatureLine && phase.kind === "idle") return null;
+  if (!required && !suggest && !updates.signatureLine && !newest && phase.kind === "idle") return null;
   // A suggestion with nothing the shell can install is still said, once, as a line; so is a
   // policy the plane's key did not sign, which the update then does without.
-  const lead = required ?? suggest ?? (offered ? `Troupe ${offered.version} is available; this is ${offered.current}.` : updates.signatureLine);
+  const newestLine = newest ? `Troupe ${newest} supports this plane too, past the version it recommends.` : null;
+  const lead = required ?? suggest ?? (offered ? `Troupe ${offered.version} is available; this is ${offered.current}.` : (updates.signatureLine ?? newestLine));
 
   let body: JSX.Element | null = null;
   switch (phase.kind) {
@@ -79,6 +84,11 @@ export function UpdateBanner({ updates }: { updates: Updates }): JSX.Element | n
           {updates.canUpdate && (required || offered) && (
             <button className="link" onClick={updates.update}>
               {required ? "Update now" : "Update"}
+            </button>
+          )}
+          {newest && (
+            <button className="link secondary" onClick={updates.updateNewest}>
+              Newest supported ({newest})
             </button>
           )}
           {!required && (

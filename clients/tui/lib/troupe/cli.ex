@@ -83,6 +83,7 @@ defmodule Troupe.CLI do
           check: boolean(),
           rollback: boolean(),
           update_version: String.t() | nil,
+          update_pick: :recommended | :latest,
           edit: boolean(),
           clear: boolean(),
           status: boolean(),
@@ -296,12 +297,21 @@ defmodule Troupe.CLI do
      "the local daemon: `run` (default), `status`, `open` (the web app, connected to it), " <>
        "`config`, `models`, `login on|off`, `version`",
      [["daemon"], ["daemon", "status"], ["daemon", "open"]]},
-    {"troupe update [--check] [--version X]",
-     "install the latest release, or X, over this troupe and troupe-daemon, and over the desktop app " <>
-       "and the VS Code extension where the installers put those: its signature checked " <>
-       "against the release key this build carries, each file against the signed manifest, the daemon " <>
-       "replaced between turns; --check says what is installed, the latest release and what an update would do",
-     [["update"], ["update", "--check"], ["update", "--version", "0.13.0"]]},
+    {"troupe update [--check] [--recommended | --latest | --version X]",
+     "install a release over this troupe and troupe-daemon, and over the desktop app " <>
+       "and the VS Code extension where the installers put those: --recommended (the default) the version " <>
+       "the plane you are signed in to recommends, or the latest release without one; --latest the newest " <>
+       "release that says it supports that plane, never one the plane blocks or holds below its minimum; " <>
+       "--version X that release. Its signature is checked against the release key this build carries, " <>
+       "each file against the signed manifest, the daemon replaced between turns; --check says what is " <>
+       "installed, the release and what an update would do",
+     [
+       ["update"],
+       ["update", "--check"],
+       ["update", "--latest"],
+       ["update", "--check", "--latest"],
+       ["update", "--version", "0.13.0"]
+     ]},
     {"troupe update --rollback",
      "put the troupe, troupe-daemon and desktop app (its AppImage or app bundle) from before the last update back",
      [["update", "--rollback"]]},
@@ -327,28 +337,53 @@ defmodule Troupe.CLI do
     end
   end
 
-  # `--version` names the release to install here; anywhere else it is the program's own
-  # (Decision 865). A tag's `v` is taken off: the release's number is without it.
+  # `--version` names the release to install here; anywhere else it is the program's own.
+  # A tag's `v` is taken off: the release's number is without it. `--recommended`, the
+  # default, and `--latest` say how the release is chosen, so either beside a version
+  # named, or both together, cannot mean anything.
   def parse(["update" | rest]) do
-    case OptionParser.parse(rest, strict: [check: :boolean, rollback: :boolean, version: :string]) do
+    case OptionParser.parse(rest,
+           strict: [
+             check: :boolean,
+             rollback: :boolean,
+             version: :string,
+             latest: :boolean,
+             recommended: :boolean
+           ]
+         ) do
       {opts, [], []} ->
         rollback = Keyword.get(opts, :rollback, false)
         version = if v = opts[:version], do: String.replace_prefix(v, "v", "")
+        latest = Keyword.get(opts, :latest, false)
+        recommended = Keyword.get(opts, :recommended, false)
 
-        if rollback and (version != nil or opts[:check]) do
-          {:error,
-           "troupe update --rollback takes nothing else: it puts back what the last update replaced"}
-        else
-          with {:ok, base} <- parse_argv([]) do
-            {:ok,
-             %{
-               base
-               | mode: :update,
-                 check: Keyword.get(opts, :check, false),
-                 rollback: rollback,
-                 update_version: version
-             }}
-          end
+        cond do
+          rollback and (version != nil or Keyword.get(opts, :check, false) or latest or recommended) ->
+            {:error,
+             "troupe update --rollback takes nothing else: it puts back what the last update replaced"}
+
+          latest and recommended ->
+            {:error,
+             "troupe update takes --recommended or --latest, not both: the version the plane " <>
+               "recommends, or the newest release that supports it"}
+
+          version != nil and (latest or recommended) ->
+            {:error,
+             "troupe update --version #{version} names the release; --latest and --recommended " <>
+               "choose one, so neither goes with it"}
+
+          true ->
+            with {:ok, base} <- parse_argv([]) do
+              {:ok,
+               %{
+                 base
+                 | mode: :update,
+                   check: Keyword.get(opts, :check, false),
+                   rollback: rollback,
+                   update_version: version,
+                   update_pick: if(latest, do: :latest, else: :recommended)
+               }}
+            end
         end
 
       {_opts, words, []} ->
@@ -356,7 +391,7 @@ defmodule Troupe.CLI do
 
       {_opts, _words, invalid} ->
         {:error,
-         "unknown option: #{Enum.map_join(invalid, ", ", &elem(&1, 0))} (troupe update takes --check, --version X and --rollback)"}
+         "unknown option: #{Enum.map_join(invalid, ", ", &elem(&1, 0))} (troupe update takes --check, --recommended, --latest, --version X and --rollback)"}
     end
   end
 
@@ -438,6 +473,7 @@ defmodule Troupe.CLI do
       check: false,
       rollback: false,
       update_version: nil,
+      update_pick: :recommended,
       edit: Keyword.get(opts, :edit, false),
       clear: Keyword.get(opts, :clear, false),
       status: Keyword.get(opts, :status, false),

@@ -8,11 +8,16 @@ way round, replacing `troupe-daemon`, `troupe` and the extension beside it. An i
 picks its components once; from then on one update, from either side, moves all of them.
 
 ```sh
-troupe update --check            # what is installed, the latest release, and what an update would do
-troupe update                    # install the latest release
+troupe update --check            # what is installed, the release, and what an update would do
+troupe update                    # install the version your plane recommends, or the latest release
+troupe update --latest           # install the newest release that supports your plane
 troupe update --version 0.13.0   # install that release, older or newer
 troupe update --rollback         # put back what the last update replaced
 ```
+
+`troupe update` on its own is `troupe update --recommended`: signed in to a plane, the
+version its administrators recommend. That is the one to run unless you know you want
+something newer ([below](#recommended-or-latest)).
 
 ## What it does
 
@@ -167,6 +172,44 @@ policy or your organisation's settings changed. A changed setting is applied to 
 sessions as their next turn begins, with a line saying which (`Your organisation's settings
 changed: max_turns holds from this turn.`); a changed version policy is passed to the
 desktop app, which looks for its update again.
+
+### Recommended or latest
+
+The recommended version is the one your organisation's IT has chosen and supports: the
+right one for nearly everybody, and what `troupe update` and the desktop app's **Update**
+install. A newer release may already work with your plane; `--latest` is for the person
+who wants it before IT recommends it.
+
+```text
+$ troupe update
+0.34.0-beta, the version https://plane.example.com recommends
+$ troupe update --latest
+0.36.0-beta, the newest release that supports https://plane.example.com (it recommends 0.34.0-beta)
+```
+
+- **What "supports" means.** Each release says, in its signed manifest, which plane
+  versions it works with. `--latest` looks at the newest releases first, at most twenty,
+  and takes the first that says it supports the version your plane runs. One that says
+  nothing (older releases do not) is passed over, and said; so is one that
+  supports other planes. Without a newer one it installs the recommended version and says
+  why.
+- **The plane's minimum and blocked list still hold.** `--latest` never installs a version
+  the plane blocks or one below its minimum, any more than `--version` does: the plane
+  would refuse it when it connects. A blocked release is passed over for the next; one
+  below the minimum ends the look.
+- **Not signed in**, `--latest` is simply the newest release.
+- **`troupe doctor`** says, in a line that is never a failure, when a release newer than
+  the recommended one supports your plane:
+
+  ```text
+  ok    update  0.36.0-beta supports this plane; `troupe update --latest` installs it
+  ```
+
+- **The desktop app** offers the recommended version as before, and beside it, more
+  quietly, **Newest supported (0.36.0-beta)** where there is one.
+
+`--latest` reads GitHub's list of releases, or the one release `TROUPE_RELEASE_URL` names.
+A plane that serves its own releases lists none, so there, name the version.
 
 ### The plane's word is signed
 
