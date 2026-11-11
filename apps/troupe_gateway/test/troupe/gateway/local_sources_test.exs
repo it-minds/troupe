@@ -10,6 +10,7 @@ defmodule Troupe.Gateway.LocalSourcesTest do
   use ExUnit.Case, async: false
 
   alias Troupe.Gateway.{Daemon, Dispatch}
+  alias Troupe.MCP.{Local, Secrets}
   alias Troupe.Protocol.{Client, Endpoint, Error}
 
   @vars ~w(TROUPE_CONFIG_HOME TROUPE_STATE_HOME TROUPE_OPENCODE_CONFIG TROUPE_OPENCODE_AUTH TROUPE_API_KEY
@@ -258,7 +259,7 @@ defmodule Troupe.Gateway.LocalSourcesTest do
       assert File.read!(context.user_file) =~ "{secret:stub/STUB_TOKEN}"
 
       # What the server is started with: the value, read from the store.
-      {[resolved], _warnings} = Troupe.MCP.Local.resolve(nil)
+      {[resolved], _warnings} = Local.resolve(nil)
       assert resolved.config.env == %{"STUB_TOKEN" => "s3cr3t-value"}
 
       assert {:ok, %{"server" => %{"state" => "ready"}}} =
@@ -273,7 +274,7 @@ defmodule Troupe.Gateway.LocalSourcesTest do
                  "value" => nil
                })
 
-      assert Troupe.MCP.Secrets.get("stub/STUB_TOKEN") == :none
+      assert Secrets.get("stub/STUB_TOKEN") == :none
       refute File.read!(context.user_file) =~ "STUB_TOKEN"
 
       # Kept again, then the server removed: its secret goes with it.
@@ -291,7 +292,7 @@ defmodule Troupe.Gateway.LocalSourcesTest do
                  "name" => "stub"
                })
 
-      assert Troupe.MCP.Secrets.get("stub/STUB_TOKEN") == :none
+      assert Secrets.get("stub/STUB_TOKEN") == :none
     end
 
     # A cloned repository's file must not send a key the person keeps for their own server
@@ -299,7 +300,7 @@ defmodule Troupe.Gateway.LocalSourcesTest do
     # server reads only what was set for that workspace.
     test "a workspace's server reads only the secrets set for that workspace until it is trusted",
          context do
-      :ok = Troupe.MCP.Secrets.put("github/TOKEN", "the-persons-own")
+      :ok = Secrets.put("github/TOKEN", "the-persons-own")
 
       File.mkdir_p!(Path.join(context.workspace, ".troupe"))
 
@@ -338,7 +339,7 @@ defmodule Troupe.Gateway.LocalSourcesTest do
       assert own["refused"] == nil
       assert own["secrets"] == ["Authorization"]
     after
-      Troupe.MCP.Secrets.delete("github/TOKEN")
+      Secrets.delete("github/TOKEN")
     end
 
     test "a server's tools come with what the server says of them for a person", context do

@@ -2236,8 +2236,7 @@ defmodule Troupe.UI.TUI.View do
           Enum.map(trees, fn t ->
             {:text,
              [
-               {:text,
-                String.pad_trailing(clip(t.branch || "(detached)", branch_w), branch_w + 2)},
+               {:text, String.pad_trailing(clip(t.branch || "(detached)", branch_w), branch_w + 2)},
                {Theme.style(:muted), String.pad_trailing(ahead_behind(t), 10)},
                {:text, String.pad_trailing(changed(t), 12)},
                {if(t.dirty, do: Theme.style(:working), else: Theme.style(:muted)),
@@ -2298,8 +2297,7 @@ defmodule Troupe.UI.TUI.View do
 
   # The command box under the picker: what it is open for, and the task a start is for.
   defp picker_line(%{step: :where} = picker),
-    do:
-      " where it works — w a worktree of its own · c the checkout · Esc back#{task_note(picker)} "
+    do: " where it works — w a worktree of its own · c the checkout · Esc back#{task_note(picker)} "
 
   defp picker_line(%{for: {:window, path}}),
     do: " the agent #{path} runs — ↑↓ choose · Enter switches · Esc keeps it "
