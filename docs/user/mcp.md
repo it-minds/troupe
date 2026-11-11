@@ -86,15 +86,92 @@ The layers stack as the config files do: the workspace's file over yours over
 `config.yaml`'s `mcp:`, an entry of one name merged key by key, so a workspace can say
 `{"fs": {"disabled": true}}` and no more.
 
-The TUI's `/mcp` page and the desktop app's **Servers and skills** panel show every server
-and skill with the layer and file it came from, and each server's state (✓ ready,
-… connecting, ✗ error) and tools. A server that fails to start is marked, and the rest
-still work. Both import a file (`/mcp import <path>` copies one into your `mcp.json`,
-`/skills import <dir>` a directory of skills; `link` in place of `import` reads it where
-it is; `--workspace` writes the workspace's `.troupe/mcp.json` or `.troupe/skills/`
-instead), remove one, and try a server before it is kept. On the TUI's page the layers
-read `[user]`, `[workspace]` and `[config]`; `c` checks a server (and starts one written
-after the session began), `d` disables or enables it and `x` removes it.
+The TUI's `/mcp` page and the desktop app's **Tools and skills** (in the rail; `/mcp` in
+its command palette opens it) show every server and skill with the layer and file it came
+from, and how each server stands. A server that fails to start is marked, and the rest
+still work. Both bring in another app's file (`/mcp import <path>` copies one into your
+`mcp.json`, `/skills import <dir>` a directory of skills; `link` in place of `import`
+reads it where it is; `--workspace` writes the workspace's `.troupe/mcp.json` or
+`.troupe/skills/` instead), remove one, and try a server before it is kept. On the TUI's
+page the layers read `[user]`, `[workspace]` and `[config]`; `c` checks a server (and
+starts one written after the session began), `p` sets a secret it is missing, `d`
+disables or enables it and `x` removes it.
+
+### Tools and skills, in the desktop app
+
+Each server is a row saying in words how it stands: **Ready** with how many tools,
+**Needs a secret** naming the one it lacks, **Needs you to sign in**, **Can't connect**
+with why, or **Not checked yet**. Beside it is the one thing that fixes it: **Add
+API_KEY** opens a field in the row to paste the value into, **Sign in** opens your
+browser, **Try again** or **Check it** starts it. **Details** says what it can do, each
+tool by the title and description its server gives it and marked **READS ONLY** or
+**CHANGES THINGS** by the server's own word (its `readOnlyHint`), and, under
+**Technical**, how it starts, which of its secrets and settings are set, and its tools'
+names. **Pause for now** turns it off without removing it.
+
+Its chips say where agents can use it, every project or one, and where it comes from: in
+your settings, or **↻ FOLLOWS** another app's file, read from there each time.
+
+**Bring in from another app** reads Claude Code's, Claude Desktop's, Cursor's, VS Code's
+or Codex's file, or one you name, for every project or one project, either following it
+(linked, the suggested way, so the other app stays the one place you change it) or as a
+copy of your own. A key in a copied file is not copied: the server asks for it as a
+secret. **Set one up by hand** takes a name and either the whole command line, pasted as
+you would type it in a terminal, or a URL, and **It signs me in** for a server that acts
+as you. **Secrets and settings** are `NAME=value` lines (headers, for a URL): each value
+goes to this computer's keychain, the file getting a reference to it, and one written
+`{env:NAME}` is read from the environment instead. **Try it first** runs it once and keeps
+nothing; **Add server** writes it and checks it. **More options** has the permission,
+[where your organisation keeps files](#where-your-organisation-keeps-files), the working
+directory, the start timeout and the sign-in's settings, which most providers need none
+of. **Edit** opens the same drawer on a server: a secret's name alone on its line keeps
+the value it has, a line taken out forgets it, and what is saved is only what changed,
+merged onto the entry as the layers merge. A server from `config.yaml` or a linked file is
+changed by writing the change over it in your own `mcp.json`.
+
+The **Skills** tab lists your skills, and the folders of skills other apps keep on this
+computer (Claude Code's `~/.claude/skills`, Codex's, opencode's, and a project's
+`.claude/skills`) that you have not brought in: **Use this folder** reads it where it is,
+so edits you make there show up here; **Copy them in** takes a snapshot to change without
+touching the originals.
+
+### In the TUI
+
+The same entry is one command, flags first and then a URL, or a command and everything
+after it as its arguments:
+
+```
+/mcp add github npx -y @modelcontextprotocol/server-github
+/mcp secret github GITHUB_TOKEN
+/mcp add wiki --oauth https://mcp.example.com/mcp
+/mcp add tracker --header "Authorization=Bearer {env:TRACKER_TOKEN}" https://mcp.example.com/mcp
+/mcp try github …      the same, run once and not kept
+```
+
+`--env` and `--header` take `K=V` (repeat them), `--oauth`, `--client-id` and `--scope`
+the sign-in, `--auto` and `--ask` the permission, `--cd` the working directory and
+`--stores-files` [where your organisation keeps files](#where-your-organisation-keeps-files).
+`/mcp add` on a name that is there with flags alone edits it, and `K=` with nothing
+after it takes `K` out. A server added is started in the session at once. A value given
+with `--env` or `--header` is written into the file as it is, so give a key with `/mcp
+secret <server> <KEY> [--header]`, or `p` on the server's line: the page asks for it,
+shows what you type or paste as dots, and keeps it in the keychain. A server's line says
+which secret it lacks (`needs GITHUB_TOKEN — p sets it`), and its details list each tool
+as its server describes it, marked `reads only` or `changes things`. A folder of skills
+another app keeps that you have not brought in is listed with `+`: `l` links it, `i`
+copies it in.
+
+Neither client shows a value the file or the keychain has: a variable or a header is
+listed by name, as set, kept in the keychain, or missing.
+
+### In a session
+
+A session on this computer has a **Servers** line under its head in the desktop app: a
+glyph for each of your servers as it stands in that session. Opened, it says why one is
+not ready, **Start** starts one written after the session began, **Restart** reads a
+server's file again and starts it, and **Sign in** signs in to one that wants you, whose
+tools the session takes once the sign-in lands. The TUI's `/mcp` page does the same with
+`c` and `s`.
 
 `skills.list`, which both ask, also lists each skill that is not offered and why:
 `skipped`, naming the one of that name that is used, or `outside`. A skill from an
@@ -164,11 +241,17 @@ entry's `headers`, sent with every request to it, the first one too:
 }
 ```
 
-A value is written as it is, or as `{env:VAR}`, read from the environment each time the
-server starts and never written back. An unset variable keeps the server from starting,
-its line on the `/mcp` page says which, and nothing is sent in its place. Keep a key out
-of the file: `mcp.json` is a file people link, copy and commit. Troupe keeps no keychain
-for these; a server that signs you in keeps its tokens as the next section says.
+A value is written as it is, as `{env:VAR}`, read from the environment each time the
+server starts and never written back, or as `{secret:<server>/<KEY>}`, read from this
+computer's keychain (Windows' Credential Manager, the macOS keychain, or the Secret
+Service through `secret-tool` on Linux). An unset variable or a missing secret keeps the
+server from starting, its line says which, and nothing is sent in its place. Keep a key
+out of the file: `mcp.json` is a file people link, copy and commit. Both clients write a
+key you paste into the keychain and the reference into the file, never the value, and
+removing a server forgets its secrets. A computer with no keychain says so, and the key
+is then an `{env:VAR}`. A workspace's server reads only the secrets set for that workspace
+until it is trusted, so a repository's file cannot send one of yours elsewhere. A server
+that signs you in keeps its tokens as the next section says.
 
 What the daemon says about a server names its headers and never shows a value, and
 `troupe config --explain` masks one in `config.yaml`'s `mcp:` as it masks a key. A header
@@ -240,7 +323,7 @@ the authorization server's) and which scopes it wants.
   of its own.
 
 Then sign in: `/mcp sign-in wiki` in the TUI, `s` on the server's line of the `/mcp` page,
-or **Sign in** on the desktop app's **Servers and skills** panel. Your browser opens on
+or **Sign in** on the desktop app's **Tools and skills**. Your browser opens on
 the provider's page and comes back to the daemon, which listens for it on this machine,
 so open the URL on the machine the daemon runs on. The page says "Signed in to … as …",
 and a session waiting for the server gets its tools at once. The sign-in is kept in

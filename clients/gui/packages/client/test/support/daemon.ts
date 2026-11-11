@@ -193,9 +193,15 @@ export interface FakeServer {
   args?: string[];
   url?: string;
   env?: Record<string, string>;
+  headers?: Record<string, string>;
+  cd?: string;
+  permission?: "ask" | "auto";
+  stores?: "files";
+  files?: string[];
+  timeout_ms?: number;
   disabled?: boolean;
   /** A server that wants the person signed in (troupe-remote Decision 741). */
-  oauth?: { client_id: string; scopes?: string[] };
+  oauth?: { client_id?: string; scopes?: string[]; issuer?: string; redirect_uri?: string; resource?: false };
   /** What `mcp.tools` lists for it; one `search` tool when absent. */
   tools?: Array<{ name: string; description: string; schema: Record<string, unknown>; files?: boolean }>;
 }
@@ -584,6 +590,12 @@ evoked where nothing is set and there was a sign-in. */
   skills: FakeSkill[] = [];
   /** The skills a nearer layer's name hid, or that are outside their edge. */
   skippedSkills: FakeSkippedSkill[] = [];
+  /** The directories of skills other tools keep, as `skills.discover` finds them. */
+  foundSkills: Array<{ app: string; dir: string; from: string; scope: "user" | "workspace"; state: "available" | "linked" | "copied"; skills: Array<{ name: string; description: string }> }> = [];
+  /** The keychain, by reference (`<server>/<key>`): what `mcp.secret` kept. */
+  keychain: Record<string, string> = {};
+  /** Every server `mcp.add` wrote by name, with what it was sent: the form's patches. */
+  written: Array<{ name: string; scope: string; server: Record<string, unknown> }> = [];
   /** What lies at a path a test names, for `mcp.add` and `skills.add` with `from`. */
   importable: Record<string, Importable> = {};
   /** The record of a finished first run, as `setup.get` reports it; null until `finish`. */
@@ -2021,6 +2033,8 @@ evoked where nothing is set and there was a sign-in. */
       case "skills.list":
       case "skills.add":
       case "skills.remove":
+      case "skills.discover":
+      case "mcp.secret":
         return this.sources(ws, id, method, params);
 
       case "onboard.plan":
@@ -2408,23 +2422,53 @@ evoked where nothing is set and there was a sign-in. */
 
     const visible = <T extends { layer: string }>(rows: T[]): T[] => rows.filter((r) => r.layer === "user" || r.layer === "user_agents" || Boolean(workspace));
     const authOf = (s: FakeServer): FakeAuth | null => (s.oauth ? (this.signIns[s.name] ?? { state: "signed_out", account: null, error: null, step_up: null }) : null);
+    // A `{secret:…}` the keychain does not have, by the key that reads it.
+    const missingOf = (s: FakeServer): string[] =>
+      Object.entries({ ...(s.env ?? {}), ...(s.headers ?? {}) })
+        .filter(([, v]) => {
+          const ref = /\{secret:([^}]+)\}/.exec(v)?.[1];
+          return ref !== undefined && !(ref in this.keychain);
+        })
+        .map(([k]) => k)
+        .sort();
+    const secretsOf = (s: FakeServer): string[] =>
+      Object.entries({ ...(s.env ?? {}), ...(s.headers ?? {}) })
+        .filter(([, v]) => v.includes("{secret:"))
+        .map(([k]) => k)
+        .sort();
+    const aboutOf = (s: FakeServer) =>
+      (s.tools ?? [{ name: "greet", description: "Says hello.", schema: {} }]).map((t) => ({
+        name: t.name,
+        title: (t as { title?: string }).title ?? null,
+        summary: t.description,
+        read_only: (t as { read_only?: boolean }).read_only ?? false,
+      }));
     const liveOf = (s: FakeServer) =>
-      s.disabled
+      missingOf(s).length
+        ? { state: "error", tools: [], about: [], error: `${missingOf(s)[0]} is not set in your keychain; the MCP server ${s.name} is not started until it is` }
+        : s.disabled
         ? { state: "disabled", tools: [], error: null }
         : s.oauth && authOf(s)?.state !== "signed_in"
-          ? { state: "sign_in", tools: [], error: `sign in to ${s.name}: /mcp sign-in ${s.name}, or Sign in on the desktop app's Servers and skills` }
-          : { state: "ready", tools: ["greet"], error: null };
+          ? { state: "sign_in", tools: [], error: `sign in to ${s.name}: /mcp sign-in ${s.name}, or Sign in on the desktop app's Tools and skills` }
+          : { state: "ready", tools: aboutOf(s).map((t) => t.name), about: aboutOf(s), error: null };
     const serverJson = (s: FakeServer, live: boolean) => ({
       name: s.name,
       layer: s.layer,
       source: s.source,
+      linked: s.layer === "user" ? s.source !== `${dir}/mcp.json` : !s.source.endsWith("/.troupe/mcp.json"),
       transport: s.url ? "http" : "stdio",
       command: s.command ?? null,
       args: s.args ?? [],
       url: s.url ?? null,
-      cd: null,
+      cd: s.cd ?? null,
       env: Object.keys(s.env ?? {}).sort(),
-      permission: "ask",
+      headers: Object.keys(s.headers ?? {}).sort(),
+      secrets: secretsOf(s),
+      missing: missingOf(s),
+      permission: s.permission ?? "ask",
+      timeout_ms: s.timeout_ms ?? 30_000,
+      stores: s.stores ?? null,
+      files: s.files ?? null,
       disabled: Boolean(s.disabled),
       refused: null,
       trust: s.layer === "workspace" ? "trusted" : null,
@@ -2462,10 +2506,26 @@ evoked where nothing is set and there was a sign-in. */
         if (typeof name !== "string" || typeof raw !== "object" || raw === null) return invalid("mcp.add takes a file to import (from) or a server to write (name and server)");
         if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) return invalid(`${JSON.stringify(name)} is not a server name: lower-case letters, digits, - and _, and no dot`);
         const existing = this.servers.find((s) => s.name === name && s.layer === scope);
-        const merged: FakeServer = { ...(existing ?? { name, layer: scope, source: layerPath("mcp.json") }), ...(raw as Partial<FakeServer>), name, layer: scope };
+        // As the daemon merges (RFC 7396): maps by key, `null` takes a key out, a list replaces.
+        const merge = (below: Record<string, unknown>, over: Record<string, unknown>): Record<string, unknown> => {
+          const out = { ...below };
+          for (const [k, v] of Object.entries(over)) {
+            if (v === null) delete out[k];
+            else if (typeof v === "object" && !Array.isArray(v)) out[k] = merge((out[k] as Record<string, unknown> | undefined) ?? {}, v as Record<string, unknown>);
+            else out[k] = v;
+          }
+          return out;
+        };
+        const merged = { ...merge((existing ?? { name, layer: scope, source: layerPath("mcp.json") }) as unknown as Record<string, unknown>, raw as Record<string, unknown>), name, layer: scope } as unknown as FakeServer;
         this.servers = [...this.servers.filter((s) => s !== existing), merged];
-        const { name: _n, layer: _l, source: _s, env, ...entry } = merged;
-        return reply(ws, id, { name, path: merged.source, entry: { ...entry, ...(env ? { env: Object.keys(env).sort() } : {}) }, warnings: [] });
+        this.written.push({ name, scope, server: raw as Record<string, unknown> });
+        const { name: _n, layer: _l, source: _s, env, headers, ...entry } = merged;
+        return reply(ws, id, {
+          name,
+          path: merged.source,
+          entry: { ...entry, ...(env ? { env: Object.keys(env).sort() } : {}), ...(headers ? { headers: Object.keys(headers).sort() } : {}) },
+          warnings: [],
+        });
       }
 
       case "mcp.remove": {
@@ -2514,7 +2574,7 @@ evoked where nothing is set and there was a sign-in. */
           return reply(ws, id, { server: name, auth: authOf(known), revocation });
         }
         this.signIns[name] = { state: "signing_in", account: this.signIns[name]?.account ?? null, error: null, step_up: this.signIns[name]?.step_up ?? null };
-        const query = new URLSearchParams({ client_id: known.oauth.client_id, response_type: "code", redirect_uri: "http://127.0.0.1:53682/callback" });
+        const query = new URLSearchParams({ client_id: known.oauth.client_id ?? "troupe-test-client", response_type: "code", redirect_uri: "http://127.0.0.1:53682/callback" });
         return reply(ws, id, {
           server: name,
           url: `https://login.example.test/tenant/authorize?${query.toString()}`,
@@ -2546,7 +2606,7 @@ evoked where nothing is set and there was a sign-in. */
           this.serverCalls.push({ server: name, tool, arguments: args, authorization: token ? `Bearer ${token}` : null });
           content = `${tool} on ${name} for ${this.signIns[name]?.account ?? "nobody"}: ${JSON.stringify(args)}`;
         } else {
-          content = JSON.stringify({ error: "sign_in_required", server: name, hint: `sign in to ${name} on the desktop app's Servers and skills panel, then ask again` });
+          content = JSON.stringify({ error: "sign_in_required", server: name, hint: `sign in to ${name} on the desktop app's Tools and skills, then ask again` });
         }
         const answer = { server: name, tool, content };
         this.answered.set(commandId, answer);
@@ -2555,6 +2615,33 @@ evoked where nothing is set and there was a sign-in. */
 
       case "skills.list":
         return reply(ws, id, { skills: visible(this.skills), skipped: visible(this.skippedSkills) });
+
+      case "skills.discover":
+        return reply(ws, id, { found: this.foundSkills });
+
+      // As the daemon keeps one: the value in the keychain, the reference in the entry.
+      case "mcp.secret": {
+        if (!params["command_id"]) return invalid("command_id is required");
+        const name = String(params["name"] ?? "");
+        const key = String(params["key"] ?? "");
+        const field = params["field"] === "headers" ? "headers" : "env";
+        const ref = `${name}/${key}`;
+        let server = this.servers.find((s) => s.name === name && s.layer === scope);
+        if (!server) {
+          server = { name, layer: scope, source: layerPath("mcp.json") };
+          this.servers.push(server);
+        }
+        const map = { ...(server[field] ?? {}) };
+        if (params["value"] === null) {
+          delete map[key];
+          delete this.keychain[ref];
+        } else {
+          map[key] = `{secret:${ref}}`;
+          this.keychain[ref] = String(params["value"]);
+        }
+        server[field] = map;
+        return reply(ws, id, { name, key, field, state: params["value"] === null ? "removed" : "set", path: server.source });
+      }
 
       case "skills.add": {
         if (!params["command_id"]) return invalid("command_id is required");

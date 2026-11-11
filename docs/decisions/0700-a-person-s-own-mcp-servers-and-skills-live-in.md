@@ -23,8 +23,8 @@ paths:
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
   - apps/troupe_gateway/test/troupe/gateway/local_sources_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/gui/apps/desktop/src/views/Servers.tsx
-  - clients/gui/apps/desktop/test/servers-panel.test.tsx
+  - clients/gui/apps/desktop/src/views/ConnectScreen.tsx
+  - clients/gui/apps/desktop/test/tools-and-skills.test.tsx
   - clients/gui/packages/client/src/daemon.ts
   - clients/gui/packages/client/test/local-sources.test.ts
   - clients/gui/packages/client/test/support/daemon.ts

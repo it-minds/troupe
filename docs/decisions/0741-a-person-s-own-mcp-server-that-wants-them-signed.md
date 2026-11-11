@@ -25,8 +25,8 @@ paths:
   - apps/troupe_protocol/lib/troupe/mcp/client.ex
   - apps/troupe_protocol/lib/troupe/mcp/server.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/gui/apps/desktop/src/views/Servers.tsx
-  - clients/gui/apps/desktop/test/servers-panel.test.tsx
+  - clients/gui/apps/desktop/src/views/ConnectScreen.tsx
+  - clients/gui/apps/desktop/test/tools-and-skills.test.tsx
   - clients/gui/packages/client/src/daemon.ts
   - clients/gui/packages/client/test/local-sources.test.ts
   - clients/gui/packages/client/test/support/daemon.ts

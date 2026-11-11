@@ -16,15 +16,24 @@ defmodule McpStub do
   defp handle(line) do
     case decode(line) do
       {:ok, %{"id" => id, "method" => "initialize"}} ->
-        reply(id, %{"protocolVersion" => "2025-06-18", "capabilities" => %{"tools" => %{}}, "serverInfo" => %{"name" => "stub", "version" => "1"}})
+        reply(id, %{
+          "protocolVersion" => "2025-06-18",
+          "capabilities" => %{"tools" => %{}},
+          "serverInfo" => %{"name" => "stub", "version" => "1"}
+        })
 
       {:ok, %{"id" => id, "method" => "tools/list"}} ->
         reply(id, %{
           "tools" => [
             %{
               "name" => "greet",
+              "title" => "Greet someone",
               "description" => "Says hello",
-              "inputSchema" => %{"type" => "object", "properties" => %{"name" => %{"type" => "string"}}}
+              "annotations" => %{"readOnlyHint" => true},
+              "inputSchema" => %{
+                "type" => "object",
+                "properties" => %{"name" => %{"type" => "string"}}
+              }
             }
           ]
         })
@@ -33,20 +42,30 @@ defmodule McpStub do
         name = get_in(params, ["arguments", "name"]) || "world"
 
         if name == "nobody" do
-          reply(id, %{"isError" => true, "content" => [%{"type" => "text", "text" => "nobody to greet"}]})
+          reply(id, %{
+            "isError" => true,
+            "content" => [%{"type" => "text", "text" => "nobody to greet"}]
+          })
         else
           reply(id, %{"content" => [%{"type" => "text", "text" => "Hello, #{name}!"}]})
         end
 
       {:ok, %{"id" => id, "method" => method}} ->
-        IO.puts(encode(%{"jsonrpc" => "2.0", "id" => id, "error" => %{"code" => -32_601, "message" => "no such method #{method}"}}))
+        IO.puts(
+          encode(%{
+            "jsonrpc" => "2.0",
+            "id" => id,
+            "error" => %{"code" => -32_601, "message" => "no such method #{method}"}
+          })
+        )
 
       _ ->
         :ok
     end
   end
 
-  defp reply(id, result), do: IO.puts(encode(%{"jsonrpc" => "2.0", "id" => id, "result" => result}))
+  defp reply(id, result),
+    do: IO.puts(encode(%{"jsonrpc" => "2.0", "id" => id, "result" => result}))
 
   defp encode(term), do: term |> :json.encode() |> IO.iodata_to_binary()
 

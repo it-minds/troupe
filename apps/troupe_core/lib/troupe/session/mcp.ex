@@ -555,7 +555,10 @@ defmodule Troupe.Session.MCP do
   # now, at the server too, as a pod's are when its bundle drops one, rather than when the
   # session stops; every other server's are kept and go on.
   defp retain_sessions(state) do
-    servers = for {_name, %{kind: :http, http: %{server: %Server{} = server}}} <- state.servers, do: server
+    servers =
+      for {_name, %{kind: :http, http: %{server: %Server{} = server}}} <- state.servers,
+          do: server
+
     :ok = Sessions.retain(state.sessions, servers)
     state
   end
@@ -630,7 +633,13 @@ defmodule Troupe.Session.MCP do
         true -> {:ready, nil}
       end
 
-    %{name: server.name, state: state, tools: Enum.map(tools, & &1.remote_name), error: error}
+    %{
+      name: server.name,
+      state: state,
+      tools: Enum.map(tools, & &1.remote_name),
+      about: Enum.map(tools, &Tool.about/1),
+      error: error
+    }
   end
 
   defp run_out?(%Server{oauth: %{} = binding}),
@@ -657,7 +666,7 @@ defmodule Troupe.Session.MCP do
           tools: [],
           sign_in: true,
           error:
-            "sign in to #{name}: /mcp sign-in #{name}, or Sign in on the desktop app's Servers and skills"
+            "sign in to #{name}: /mcp sign-in #{name}, or Sign in on the desktop app's Tools and skills"
         }
 
       # Listing its tools wants a scope the sign-in did not grant (Decision 872).
@@ -668,7 +677,7 @@ defmodule Troupe.Session.MCP do
           sign_in: true,
           error:
             "#{name} wants the scope #{scope} on top of your sign-in: sign in again with " <>
-              "/mcp sign-in #{name}, or Sign in on the desktop app's Servers and skills"
+              "/mcp sign-in #{name}, or Sign in on the desktop app's Tools and skills"
         }
 
       {:error, {:unauthorized, _challenge}} ->

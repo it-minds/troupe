@@ -38,7 +38,7 @@ defmodule Troupe.MCP.Local do
 
   alias Troupe.Config.{Layers, Migrate, Trust}
   alias Troupe.Instructions
-  alias Troupe.MCP.{Import, OAuth, Server}
+  alias Troupe.MCP.{Import, OAuth, Secrets, Server}
   alias Troupe.Workspace
 
   @type layer :: :config | :user | :workspace
@@ -205,7 +205,7 @@ defmodule Troupe.MCP.Local do
     resolved =
       entries
       |> Enum.map(fn {name, %{entry: entry, layer: layer, source: source}} ->
-        to_server(name, entry, layer, source, workspace)
+        to_server(name, entry, layer, source, workspace, fence(layer, workspace, opts))
       end)
 
     named = MapSet.new(resolved, & &1.name)
@@ -331,8 +331,17 @@ defmodule Troupe.MCP.Local do
     }
   end
 
-  defp to_server(name, entry, layer, source, workspace) do
-    config = to_config(name, entry, workspace)
+  # A workspace's server reads only the secrets kept for that workspace until the
+  # workspace is trusted: a cloned repository's file must not send a key the person keeps
+  # for their own server of the same name to an address the repository chose.
+  defp fence(:workspace, workspace, opts) when is_binary(workspace) do
+    if Keyword.get(opts, :trusted) == true, do: nil, else: Secrets.workspace_prefix(workspace)
+  end
+
+  defp fence(_layer, _workspace, _opts), do: nil
+
+  defp to_server(name, entry, layer, source, workspace, fence) do
+    config = to_config(name, entry, workspace, fence: fence)
 
     %{
       name: name,
@@ -349,22 +358,22 @@ defmodule Troupe.MCP.Local do
   read from the environment and `refused` set when one is missing; a relative `cd`
   is from the workspace.
   """
-  @spec to_config(String.t(), Import.entry(), Path.t() | nil) :: map()
-  def to_config(name, entry, workspace) do
+  @spec to_config(String.t(), Import.entry(), Path.t() | nil, keyword()) :: map()
+  def to_config(name, entry, workspace, opts \\ []) do
     env = entry["env"] || %{}
     headers = entry["headers"] || %{}
     args = List.wrap(entry["args"])
     oauth = entry["oauth"]
 
-    unset =
-      unset_variable(
-        [entry["command"], entry["url"], entry["cd"] | args ++ Map.values(env)] ++
-          Map.values(headers) ++ oauth_strings(oauth)
-      )
+    strings =
+      [entry["command"], entry["url"], entry["cd"] | args ++ Map.values(env)] ++
+        Map.values(headers) ++ oauth_strings(oauth)
 
-    # With a variable unset the strings are kept as written: nothing is sent in its
-    # place, and the refusal below names it.
-    read = if unset, do: & &1, else: &Layers.interpolate/1
+    unset = unset_variable(strings)
+    # A value kept in the operating system's store, `{secret:<server>/<key>}`, read once.
+    found = Secrets.lookup(strings)
+    lack = lacking(strings, unset, found, opts[:fence])
+    read = reader(unset, lack, found)
 
     config = %{
       command: entry["command"] |> present() |> maybe(read),
@@ -377,9 +386,13 @@ defmodule Troupe.MCP.Local do
     }
 
     {config, oauth_refusal} =
-      config |> with_stores(entry) |> with_headers(headers, read) |> with_oauth(oauth, read)
+      config
+      |> with_stores(entry)
+      |> with_headers(headers, read)
+      |> with_oauth(oauth, read)
+      |> with_keys(env, headers, found)
 
-    case refusal(name, unset, config) || oauth_refusal(name, oauth_refusal, config) do
+    case refused(name, unset, lack, oauth_refusal, config) do
       nil -> config
       why -> Map.put(config, :refused, why)
     end
@@ -390,8 +403,11 @@ defmodule Troupe.MCP.Local do
   # says so, so every other server's config, and its fingerprint, is what it always was.
   defp with_stores(config, %{"stores" => "files"} = entry) do
     case entry["files"] do
-      names when is_list(names) -> Map.merge(config, %{stores: :files, files: Enum.filter(names, &is_binary/1)})
-      _all -> Map.put(config, :stores, :files)
+      names when is_list(names) ->
+        Map.merge(config, %{stores: :files, files: Enum.filter(names, &is_binary/1)})
+
+      _all ->
+        Map.put(config, :stores, :files)
     end
   end
 
@@ -458,6 +474,80 @@ defmodule Troupe.MCP.Local do
         nil
     end)
   end
+
+  # Which of a server's variables and headers are kept in the store (`:secrets`), and
+  # which read a variable that is unset or a secret the store does not have (`:missing`),
+  # by name, for a client to say which one wants a value. Under those keys only where
+  # there are some, so every other server's config is what it always was.
+  defp with_keys({config, refusal}, env, headers, found) do
+    pairs = Map.to_list(env) ++ Map.to_list(headers)
+
+    secrets =
+      for {key, value} <- pairs, Secrets.reference?(value), do: to_string(key)
+
+    missing =
+      for {key, value} <- pairs,
+          unset_variable([value]) != nil or Secrets.lacking([value], found) != nil,
+          do: to_string(key)
+
+    config =
+      config
+      |> put_some(:secrets, Enum.sort(Enum.uniq(secrets)))
+      |> put_some(:missing, Enum.sort(Enum.uniq(missing)))
+
+    {config, refusal}
+  end
+
+  defp put_some(config, _key, []), do: config
+  defp put_some(config, key, list), do: Map.put(config, key, list)
+
+  # The secret a server cannot have: outside its fence, or not in the store. Nothing is
+  # asked of the store's answers where a variable is unset already.
+  defp lacking(_strings, unset, _found, _fence) when is_binary(unset), do: nil
+
+  defp lacking(strings, nil, found, fence),
+    do: fenced(strings, fence) || Secrets.lacking(strings, found)
+
+  # With a variable unset or a secret missing the strings are kept as written: nothing is
+  # sent in its place, and the refusal names it.
+  defp reader(nil, nil, found), do: &(&1 |> Layers.interpolate() |> Secrets.fill(found))
+  defp reader(_unset, _lack, _found), do: & &1
+
+  defp refused(name, unset, lack, oauth_why, config),
+    do:
+      refusal(name, unset, config) || secret_refusal(name, lack) ||
+        oauth_refusal(name, oauth_why, config)
+
+  # A reference outside the fence, which is a workspace's prefix until it is trusted.
+  defp fenced(_strings, nil), do: nil
+
+  defp fenced(strings, prefix) do
+    strings
+    |> Enum.flat_map(&Secrets.refs/1)
+    |> Enum.find_value(fn ref ->
+      if String.starts_with?(ref, prefix), do: nil, else: {:fenced, ref}
+    end)
+  end
+
+  defp secret_refusal(_name, nil), do: nil
+
+  defp secret_refusal(name, {:fenced, ref}),
+    do:
+      "#{name} reads #{ref_key(ref)} from a keychain entry this workspace did not set; a " <>
+        "workspace's server reads only its own until the workspace is trusted"
+
+  defp secret_refusal(name, {:missing, ref}),
+    do:
+      "#{ref_key(ref)} is not set in your keychain; the MCP server #{name} is not started " <>
+        "until it is"
+
+  defp secret_refusal(name, {:unavailable, ref, why}),
+    do:
+      "#{ref_key(ref)} is kept in your keychain, which this computer cannot open " <>
+        "(#{inspect(why)}); the MCP server #{name} is not started"
+
+  # The key a reference keeps, `<server>/<key>` without the server, to name to a person.
+  defp ref_key(ref), do: ref |> String.split("/") |> List.last()
 
   defp refusal(name, unset, _config) when is_binary(unset),
     do: "{env:#{unset}} is not set; the MCP server #{name} is not started until it is"

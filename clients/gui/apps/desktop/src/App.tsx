@@ -29,6 +29,7 @@ import { Artifacts } from "./views/Artifacts";
 import { MemoryScreen } from "./views/OwnMemory";
 import { Launcher, opensOnLauncher } from "./views/Launcher";
 import { Local } from "./views/Local";
+import { ConnectScreen } from "./views/ConnectScreen";
 import { AppearanceSettings, Onboarding } from "./views/Appearance";
 import { FirstRun, SetupScreen, useSetupNeeded } from "./views/Onboarding";
 import type { SetupOutcome } from "./views/Onboarding";
@@ -51,6 +52,7 @@ type Where =
   | { screen: "review" }
   | { screen: "profiles"; profile?: string }
   | { screen: "local" }
+  | { screen: "connect"; workspace?: string }
   | { screen: "agents"; workspace?: string; agent?: string }
   | { screen: "appearance" }
   | { screen: "setup" }
@@ -402,6 +404,10 @@ export function App(): JSX.Element {
           <button aria-current={where.screen === "agents" ? "page" : undefined} onClick={() => setWhere({ screen: "agents" })}>
             Agents
           </button>
+          {/* Your own MCP servers and skills, which every session on this computer starts. */}
+          <button aria-current={where.screen === "connect" ? "page" : undefined} onClick={() => setWhere({ screen: "connect" })}>
+            Tools and skills
+          </button>
           <button aria-current={where.screen === "appearance" ? "page" : undefined} onClick={() => setWhere({ screen: "appearance" })}>
             Appearance
           </button>
@@ -508,8 +514,11 @@ export function App(): JSX.Element {
               planeUrl={planeAuth?.planeUrl ?? ""}
               localOnly={localOnly}
               onLocalOnly={setLocalOnly}
+              onConnect={() => setWhere({ screen: "connect" })}
             />
           )}
+
+          {where.screen === "connect" && <ConnectScreen key={where.workspace ?? ""} client={daemon.client} workspace={where.workspace} />}
 
           {where.screen === "agents" && (
             <Agents

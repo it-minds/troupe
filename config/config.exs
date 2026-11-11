@@ -22,6 +22,10 @@ if Mix.env() == :test do
   # Nothing a test does reaches the person's own credential store (#58): the daemon's sign-in
   # for steering is kept in the VM. `Troupe.KeyringTest` asks the real one, by a test name.
   config :troupe_protocol, keyring: Troupe.Keyring.Memory
+
+  # Nor read the directories of skills other tools keep in the developer's home
+  # (`skills.discover`): a test names the home it means.
+  config :troupe_core, skills_home: Path.join(System.tmp_dir!(), "troupe-test-no-home")
 end
 
 # Bonny reads a handful of things from application configuration rather than from the

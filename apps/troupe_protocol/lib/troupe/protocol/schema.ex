@@ -1285,6 +1285,18 @@ defmodule Troupe.Protocol.Schema do
         "name" => optional(:string),
         "include" => optional(:string)
       },
+      # A value one of the person's servers needs, kept in the operating system's store
+      # and written into the entry as `{secret:…}`: `value` keeps it, `null` forgets it.
+      # `field` is `env` (the default) or `headers`.
+      "mcp.secret" => %{
+        "command_id" => required(:string),
+        "scope" => optional(:string),
+        "workspace" => optional(:string),
+        "name" => required(:string),
+        "key" => required(:string),
+        "field" => optional(:string),
+        "value" => optional(:any)
+      },
       "mcp.check" => %{
         "workspace" => optional(:string),
         "session_id" => optional(:string),
@@ -1326,6 +1338,9 @@ defmodule Troupe.Protocol.Schema do
         "session_id" => optional(:string)
       },
       "skills.list" => %{"workspace" => optional(:string)},
+      # The directories of skills other tools keep on this machine (`~/.claude/skills`,
+      # and so on), each with its skills and whether a layer already has it. Read only.
+      "skills.discover" => %{"workspace" => optional(:string)},
       "skills.add" => %{
         "command_id" => required(:string),
         "scope" => optional(:string),

@@ -2224,7 +2224,7 @@ A bad answer is `invalid_params` with `data.reason` in one sentence, and the flo
 where it was. After `finish` the next `setup.get` is a fresh flow with `needed` false,
 which is what a client's "Setup" entry re-runs.
 
-#### `mcp.list`, `mcp.add`, `mcp.remove`, `mcp.check`, `skills.list`, `skills.add`, `skills.remove`
+#### `mcp.list`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.secret`, `skills.list`, `skills.add`, `skills.remove`, `skills.discover`
 
 The person's own MCP servers and skills, in two layers the daemon reads for every local
 session: the user's (`mcp.json` and `skills/` beside `config.yaml`) and the workspace's
@@ -2239,13 +2239,18 @@ for a panel to print.
 {"workspace": "/home/me/project", "session_id": "s-9f"}
 ```
 `mcp.list` (`observe`; both optional) → `{"servers": [{"name", "layer", "source",
-"transport", "command", "args", "url", "cd", "env", "headers", "permission", "disabled",
-"refused", "trust", "notes", "oauth", "auth", "state", "tools", "error"}], "warnings": [...]}`
+"linked", "transport", "command", "args", "url", "cd", "env", "headers", "secrets", "missing",
+"permission", "timeout_ms", "stores", "files", "disabled", "refused", "trust", "notes",
+"oauth", "auth", "state", "tools", "about", "error"}], "warnings": [...]}`
 (`auth` is `{"state", "account", "error", "step_up"}`, below) —
 every server the layers give the workspace, merged by name, the workspace's file over
 the user's over `config.yaml`. `layer` is `config`, `user` or `workspace` and `source`
-the file; `env` is the names of its variables and `headers` the names of the headers it
-is sent (Decision 820), never their values; `refused` says why one will not start (an
+the file, `linked` true where that is a file the layer links rather than its own; `env` is the names of its variables and `headers` the names of the headers it
+is sent (Decision 820), never their values; `secrets` is which of those the
+operating system's keychain keeps (a value written `{secret:<ref>}`, below), and `missing`
+which read an unset `{env:VAR}` or a keychain entry that is not there, for a client to ask
+for that one; `stores` is `files` and `files` the tools that save one, as the entry says,
+or null; `refused` says why one will not start (an
 unset `{env:VAR}`, an `oauth` whose `redirect_uri` is not loopback, a header Troupe sends itself); `trust` is
 `trusted` or `pending` for a workspace-level server and null otherwise. `notes` is
 `[{"key", "reason"}]`, as `agents.list`'s: a workspace-level server set to `permission:
@@ -2255,14 +2260,26 @@ ask until the workspace is trusted, whatever its start's answer (Decision 830);
 the repository until the workspace is trusted: an `include` from elsewhere (the person's
 own `~/.claude.json`, say), or a `.troupe/mcp.json` that is a link out, gives no servers,
 and `warnings` names it with the command that trusts the workspace (Decision 830). For a server
-that wants the person signed in, `oauth` is `{"client_id"?, "scopes"?, "issuer"?}` as its
+that wants the person signed in, `oauth` is `{"client_id"?, "scopes"?, "issuer"?,
+"redirect_uri"?, "resource"?}` as its
 entry says (no `client_id` when Troupe introduces itself to the provider), and `auth` is how their sign-in stands — `{"state", "account", "error"}`,
 `state` one of `signed_out`, `signing_in` (a browser is out), `signed_in` and `expired`
 (it ran out or was refused: sign in again), `account` whose it is when the provider said,
 `error` why the last attempt failed — and never a token; both are null for any other
 server. With `session_id`, each server also carries the `state`, `tools` and `error`
 that `mcp.status` reports for the session, and a server the session runs that no file
-names any more is listed too.
+names any more is listed too. `about` is `[{"name", "title", "summary", "read_only"}]`,
+each tool as its server describes it for a person: its `title` (or its annotations'),
+its own description, and its `readOnlyHint`, the server's word and not a guarantee; it
+is empty where nothing has run the server.
+
+A variable's or a header's value written `{secret:<ref>}` is read from the operating
+system's keychain (Windows' Credential Manager, the macOS keychain, the Secret Service)
+when the server starts, as `{env:VAR}` is read from the environment, and the file holds
+the reference alone. One the keychain does not have refuses the server, naming the key.
+Until a workspace is trusted, its servers read only references under that workspace's
+own prefix, the ones `mcp.secret` writes for it: a cloned repository's file cannot send
+a key the person keeps for a server of their own to an address the repository chose.
 
 ```json
 {"command_id": "c-14", "scope": "user", "from": "/home/me/.claude/.mcp.json", "link": false}
@@ -2294,13 +2311,25 @@ command — and answers `{"name", "path", "entry", "warnings"}`, the entry's `en
 ```
 `mcp.remove` (`admin`) → `{"path", "removed": ["fs"]}`. `include` in place of `name`
 unlinks a linked file, and `removed` names every server it gave. A server that comes
-only from a linked file is refused with `invalid_params` naming the file.
+only from a linked file is refused with `invalid_params` naming the file. A server
+removed by name takes the keychain entries `mcp.secret` kept for it along.
+
+```json
+{"command_id": "c-19", "scope": "user", "name": "tracker", "key": "API_KEY", "field": "env", "value": "…"}
+```
+`mcp.secret` (`admin`) → `{"name", "key", "field", "state", "path", "entry", "warnings"}`:
+the value kept in the keychain under `<name>/<key>` (a workspace's under its own prefix),
+and the entry's `env` (or, with `field: "headers"`, its `headers`) given
+`{"<key>": "{secret:<ref>}"}`, merged as `mcp.add` merges; `state` is `set`. `value:
+null` forgets it and takes the key out, `state` `removed`. The value never comes back.
+A computer with no keychain Troupe can use is `unavailable`, saying to write `{env:NAME}`
+instead, and nothing is written.
 
 ```json
 {"session_id": "s-9f", "name": "fs"}
 ```
 `mcp.check` (`admin`) → `{"server": {"name", "layer", "source", "state", "tools",
-"error"}}`. With a `session_id`, the session reads its files again for that server and
+"about", "error"}}`, `about` as for `mcp.list`. With a `session_id`, the session reads its files again for that server and
 starts what they say now — which is how one that died is brought back, one just written
 is started, and one now `disabled` is stopped — and answers once it is ready or has
 failed, or after twenty seconds with what it is then, which may still be `connecting`; a
@@ -2339,6 +2368,19 @@ layer's `skills.json`. A directory whose name is not one a skill may have is ski
 ```
 `skills.remove` (`admin`) → `{"path", "removed"}`; `include` unlinks a linked directory,
 as for servers.
+
+```json
+{"workspace": "/home/me/project"}
+```
+`skills.discover` (`observe`; `workspace` optional) → `{"found": [{"app", "dir", "from",
+"scope", "state", "skills": [{"name", "description"}]}]}`: the directories of skills
+other tools keep on this machine — Claude Code's `~/.claude/skills`, Codex's
+`~/.codex/skills`, opencode's `~/.config/opencode/skills`, and the workspace's
+`.claude/skills` — each that is there and holds a skill. `from` is the path to give
+`skills.add`, `scope` the layer it would come into, and `state` `linked` where that
+layer's `skills.json` reads it, `copied` where the layer has every skill in it, else
+`available`. Nothing is written; `~/.agents/skills`, read in place already, is not among
+them.
 
 **Trust.** A workspace-level server is a command a cloned repository would run, so a
 local session starts the workspace's servers only once somebody attached has answered
@@ -2423,7 +2465,8 @@ the layers do not give is `not_found` with `kind: "mcp_server"`.
 {"name": "wiki"}
 ```
 `mcp.tools` (`workspace` or `session_id` optional, as for `mcp.list`) → `{"server",
-"state", "error", "tools": [{"name", "description", "schema", "files"}]}`: the server asked for
+"state", "error", "tools": [{"name", "description", "schema", "files", "title", "summary",
+"read_only"}]}` (the last three as `about`, above): the server asked for
 its tools as a local session asks, with the person's sign-in, `state` and `error` as
 `mcp.check` reports them, so one that waits for a sign-in is `sign_in` with no tools.
 `files: true` on a tool of a server whose entry is marked `stores: files`, which the client
@@ -2659,9 +2702,9 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `client.mode`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.invites`, `session.read_sealed`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get`, `me.memory.status`, `artifact.list`, `artifact.get`, `artifact.open`, `artifact.read`, `profile.get` |
+| `observe` | `initialize`, `client.mode`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.invites`, `session.read_sealed`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `skills.discover`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get`, `me.memory.status`, `artifact.list`, `artifact.get`, `artifact.open`, `artifact.read`, `profile.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`, `me.memory`, `me.memory.put`, `me.memory.history`, `me.memory.rollback`, `memory.in_effect`, `admin.memory.get`, `admin.memory.preview`, `admin.memory.put`, `artifact.publish`, `artifact.share`, `artifact.unshare`, `artifact.rollback`, `artifact.pin`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `session.invite`, `session.uninvite`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `config.memory`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop`, `remote.offer`, `remote.withdraw` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `session.invite`, `session.uninvite`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `config.memory`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.secret`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop`, `remote.offer`, `remote.withdraw` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three, and so does the loopback TCP token; a daemon mints no narrower token.

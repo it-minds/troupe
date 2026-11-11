@@ -606,6 +606,7 @@ defmodule Troupe.Client.Daemon do
          servers: Enum.map(servers, &server_entry/1),
          skills: Enum.map(skills, &skill_entry/1),
          skipped: offered["skipped"] |> List.wrap() |> Enum.map(&skipped_entry/1),
+         found: found_skills(workspace),
          warnings: List.wrap(listed["warnings"])
        }}
     else
@@ -614,12 +615,32 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
-  # `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `skills.add`
-  # and `skills.remove` on this session's workspace; a command gets its id here, as
-  # every other does.
+  # The directories of skills other tools keep here that no layer has yet, for the page to
+  # offer bringing in. A daemon from before `skills.discover` has none to say.
+  defp found_skills(workspace) do
+    case Link.call("skills.discover", %{workspace: workspace}) do
+      {:ok, %{"found" => found}} when is_list(found) ->
+        for d <- found, d["state"] == "available" do
+          %{
+            app: d["app"],
+            dir: d["dir"],
+            from: d["from"],
+            scope: d["scope"],
+            skills: Enum.map(List.wrap(d["skills"]), & &1["name"])
+          }
+        end
+
+      _none ->
+        []
+    end
+  end
+
+  # `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.secret`,
+  # `skills.add` and `skills.remove` on this session's workspace; a command gets its id
+  # here, as every other does.
   @impl true
   def manage_sources(sid, method, params)
-      when method in ~w(mcp.add mcp.remove mcp.sign_in mcp.sign_out skills.add skills.remove) do
+      when method in ~w(mcp.add mcp.remove mcp.sign_in mcp.sign_out mcp.secret skills.add skills.remove) do
     params =
       Map.merge(%{workspace: workspace(sid), command_id: Troupe.Remote.RPC.command_id()}, params)
 
@@ -674,6 +695,7 @@ defmodule Troupe.Client.Daemon do
       name: server["name"],
       layer: layer(server["layer"]),
       source: server["source"],
+      linked?: server["linked"] == true,
       transport: server["transport"],
       command: server["command"],
       args: List.wrap(server["args"]),
@@ -681,6 +703,15 @@ defmodule Troupe.Client.Daemon do
       state: if(server["state"], do: mcp_state(server["state"])),
       tools: List.wrap(server["tools"]),
       error: server["error"] || server["refused"],
+      env: List.wrap(server["env"]),
+      headers: List.wrap(server["headers"]),
+      secrets: List.wrap(server["secrets"]),
+      missing: List.wrap(server["missing"]),
+      about: server["about"] |> List.wrap() |> Enum.map(&about_entry/1),
+      permission: server["permission"],
+      stores: server["stores"],
+      files: server["files"],
+      oauth: server["oauth"],
       disabled?: server["disabled"] == true,
       trust: server["trust"],
       auth: auth_entry(server["auth"])
@@ -720,6 +751,16 @@ defmodule Troupe.Client.Daemon do
 
   # A skill a nearer layer's name hid, or one outside its edge and never read; an
   # `.agents/skills` linked out whole has no name.
+  # A tool as its server describes it for a person: title, summary, and whether it only reads.
+  defp about_entry(about) do
+    %{
+      name: about["name"],
+      title: about["title"],
+      summary: about["summary"],
+      read_only?: about["read_only"] == true
+    }
+  end
+
   defp skipped_entry(skill) do
     %{
       name: skill["name"],

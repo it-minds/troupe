@@ -151,25 +151,39 @@ export interface LocalServer {
   name: string;
   layer: SourceLayer;
   source: string | null;
+  /** From a file the layer links rather than its own: read from there each time. */
+  linked?: boolean;
   transport?: "stdio" | "http";
   command?: string | null;
   args?: string[];
   url?: string | null;
   cd?: string | null;
+  /** Its environment's variables and its headers, by name: the daemon never sends a value. */
   env?: string[];
+  headers?: string[];
+  /** Which of those the keychain keeps, and which want a value they do not have yet. */
+  secrets?: string[];
+  missing?: string[];
   permission?: "ask" | "auto";
+  /** How long its tools are waited for at the start. */
+  timeout_ms?: number | null;
+  /** `files` for where your organisation keeps files, and which of its tools save one (all of them when absent). */
+  stores?: "files" | null;
+  files?: string[] | null;
   disabled?: boolean;
   /** Why the daemon will not start it: an unset `{env:VAR}`, or no transport. */
   refused?: string | null;
   /** For a workspace-level server: whether somebody has approved it there. */
   trust?: "trusted" | "pending" | null;
   /** A server that wants you signed in (troupe-remote Decision 741): what its entry says about the sign-in. */
-  oauth?: { client_id: string; scopes?: string[] | null; issuer?: string } | null;
+  oauth?: { client_id?: string; scopes?: string[] | null; issuer?: string; redirect_uri?: string; resource?: false } | null;
   /** How your sign-in to it stands, never a token; null for a server that takes none. */
   auth?: ServerAuth | null;
   /** From the session named in the call, or from a check; null when nothing has run it. `sign_in` waits for yours. */
   state: string | null;
   tools: string[];
+  /** Each tool as its server describes it, from a check or the session. */
+  about?: ToolAbout[];
   error: string | null;
 }
 
@@ -234,6 +248,33 @@ export interface ServerTool {
   schema: Record<string, unknown>;
   /** Where your organisation keeps files, as the server's entry says (`stores: files`). */
   files?: boolean;
+  /** What the server says of the tool for a person: its title, its own description, and whether it only reads. */
+  title?: string | null;
+  summary?: string | null;
+  read_only?: boolean;
+}
+
+/** A tool as a check or a session describes it for a person, from what its server says. */
+export interface ToolAbout {
+  name: string;
+  title: string | null;
+  summary: string | null;
+  /** The server's `readOnlyHint`: its word, not a guarantee. */
+  read_only: boolean;
+}
+
+/** A directory of skills another tool keeps on this computer, as `skills.discover` finds it. */
+export interface FoundSkills {
+  app: string;
+  /** Shown as a person writes it on this platform. */
+  dir: string;
+  /** The path to give `skills.add`. */
+  from: string;
+  /** The layer it would come into: yours, or the workspace's for one in the repository. */
+  scope: SourceScope;
+  /** `linked` where a layer reads it already, `copied` where it has every skill in it. */
+  state: "available" | "linked" | "copied";
+  skills: Array<{ name: string; description: string }>;
 }
 
 /**
@@ -932,6 +973,20 @@ export class DaemonClient {
   /** Every skill the layers offer, and beside them the ones they hold and do not offer, with why (`skipped`; a daemon before 0.9.3 says none). */
   listSkills(workspace?: string): Promise<{ skills: LocalSkill[]; skipped?: SkippedSkill[] }> {
     return this.call("skills.list", workspace ? { workspace } : {});
+  }
+
+  /** The directories of skills other tools keep on this computer, and whether each is in already. */
+  discoverSkills(workspace?: string): Promise<{ found: FoundSkills[] }> {
+    return this.call("skills.discover", workspace ? { workspace } : {});
+  }
+
+  /**
+   * Keep a value one of your servers needs in this computer's keychain, and write a
+   * `{secret:…}` reference to it into the entry: never the value. `null` forgets it and
+   * takes the key out. `field` is `env` (a variable) or `headers`.
+   */
+  setServerSecret(params: ScopedParams & { name: string; key: string; field?: "env" | "headers"; value: string | null }): Promise<{ name: string; key: string; field: string; state: "set" | "removed"; path: string }> {
+    return this.command("mcp.secret", { ...params });
   }
 
   /** Bring a directory of skills in, such as `~/.claude/skills`: copied, or read in place with `link`. */

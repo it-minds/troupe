@@ -98,6 +98,7 @@ defmodule Troupe.UI.TUI.Server do
           files: files() | nil,
           scratch: scratch() | nil,
           mcp_cursor: non_neg_integer(),
+          mcp_secret: map() | nil,
           memory: memory() | nil,
           artifacts_page: ArtifactsPage.t() | nil,
           memory_page: MemoryPage.t() | nil,
@@ -325,6 +326,9 @@ defmodule Troupe.UI.TUI.Server do
       # The sign-in URL the daemon last answered, `%{name, url}`, shown on the page in
       # full for a person whose browser did not open (troupe-remote Decision 741).
       mcp_sign_in: nil,
+      # A value a server needs, while it is typed: `%{name, key, field, scope, text}`. Its
+      # text is drawn as dots and goes nowhere but `mcp.secret`.
+      mcp_secret: nil,
       memory: nil,
       # `/artifacts` and `/memory`, the person's own things on the plane.
       artifacts_page: nil,
@@ -705,6 +709,9 @@ defmodule Troupe.UI.TUI.Server do
   def handle_event(%Key{} = key, %{focus: :scratch} = state),
     do: {:noreply, scratch_key(key, %{state | quit_armed: false})}
 
+  def handle_event(%Key{} = key, %{focus: :mcp, mcp_secret: %{}} = state),
+    do: {:noreply, secret_key(key, %{state | quit_armed: false})}
+
   def handle_event(%Key{} = key, %{focus: :mcp} = state),
     do: {:noreply, mcp_key(key, %{state | quit_armed: false})}
 
@@ -773,7 +780,13 @@ defmodule Troupe.UI.TUI.Server do
         {:noreply, state, render?: false}
 
       :mcp ->
-        {:noreply, state, render?: false}
+        case state.mcp_secret do
+          %{text: text} = asking ->
+            {:noreply, %{state | mcp_secret: %{asking | text: text <> String.trim(content)}}}
+
+          nil ->
+            {:noreply, state, render?: false}
+        end
 
       :memory ->
         {:noreply, state, render?: false}
@@ -1184,6 +1197,7 @@ defmodule Troupe.UI.TUI.Server do
       :artifacts -> open_artifacts(state)
       {:profiles, name} -> open_profiles(state, name)
       {:mcp, text} -> state |> notice(text) |> open_mcp(state.mcp_cursor)
+      {:mcp_secret, asking} -> %{open_mcp(state, state.mcp_cursor) | mcp_secret: asking}
       {:mcp_sign_in, _name, _url, _text} = signing -> signing_in(state, signing)
       {:hq, arg} -> open_hq(state, plane_arg(arg))
       :settings -> open_settings(state)
@@ -2465,12 +2479,20 @@ defmodule Troupe.UI.TUI.Server do
   # `check <name>`, `sign-in <name>` and `sign-out <name>` manage the servers,
   # `--workspace` on any of them writing the workspace's `.troupe/` file instead of the
   # user's; `/skills` has the same verbs for skills, and either word alone opens the page.
+  # `/mcp add <name> …` writes one server from the command line, as the desktop app's form
+  # does, and `/mcp try <name> …` runs the same entry once without keeping it.
   defp sources_command(_state, _kind, ""), do: :mcp
 
   defp sources_command(state, kind, args) do
     {scope, rest} = scope_flag(args)
 
     case String.split(rest, " ", parts: 2) do
+      [verb, target] when verb in ["add", "try"] and kind == "mcp" and target != "" ->
+        write_server(state, verb, String.trim(target), scope)
+
+      ["secret", target] when kind == "mcp" ->
+        secret_command(state, String.trim(target), scope)
+
       [verb, target]
       when verb in ["import", "link", "unlink", "remove", "check", "sign-in", "sign-out"] and
              target != "" ->
@@ -2483,8 +2505,144 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  defp check_usage("mcp"), do: " | check|sign-in|sign-out <name>"
+  defp check_usage("mcp"),
+    do: " | check|sign-in|sign-out <name> | add|try <name> … | secret <name> <KEY> [--header]"
+
   defp check_usage(_kind), do: ""
+
+  @add_usage "usage: /mcp add|try <name> [--env K=V] [--header K=V] [--oauth] " <>
+               "[--client-id ID] [--scope S] [--auto|--ask] [--cd DIR] [--stores-files] " <>
+               "[<url> | <command> [args…]] [--workspace]"
+
+  # `/mcp secret <name> <KEY> [--header]` opens the page with the value asked for there,
+  # typed as dots: a command line is drawn as typed and kept in the line's history.
+  defp secret_command(_state, target, scope) do
+    {field, rest} =
+      if String.contains?(target, "--header"),
+        do: {"headers", target |> String.replace("--header", "") |> String.trim()},
+        else: {"env", target}
+
+    case String.split(rest, ~r/\s+/, trim: true) do
+      [name, key] -> {:mcp_secret, %{name: name, key: key, field: field, scope: scope, text: ""}}
+      _ -> {:error, "usage: /mcp secret <name> <KEY> [--header] [--workspace]"}
+    end
+  end
+
+  # One server written, merged onto what the layer has under that name: a command or a
+  # URL sets the transport and clears the other's keys; with neither, the flags edit the
+  # entry there is. Once written it is checked in this session, so it joins it now.
+  defp write_server(state, verb, target, scope) do
+    with {:ok, name, server} <- parse_server(target) do
+      case verb do
+        "add" -> add_server(state, name, server, scope)
+        "try" -> try_server(state, name, server)
+      end
+    end
+  end
+
+  defp add_server(state, name, server, scope) do
+    params = %{scope: scope, name: name, server: server}
+
+    with {:ok, answer} <- Client.manage_sources(state.session_id, "mcp.add", params) |> or_message(),
+         {:mcp, checked} <- check_server(state, name) do
+      warned = answer["warnings"] |> List.wrap() |> Enum.map_join(&(" · " <> &1))
+      {:mcp, "wrote #{name} into #{answer["path"]} · #{checked}#{warned}"}
+    end
+  end
+
+  # Run once and stopped, never written: what the server offers, or why it did not start.
+  defp try_server(state, name, server) do
+    case Client.manage_sources(state.session_id, "mcp.check", %{name: name, server: compact(server)}) do
+      {:ok, %{"server" => checked}} ->
+        {:mcp, "#{name}: #{checked["state"]}#{server_note(checked)} (tried, not kept)"}
+
+      {:error, reason} ->
+        {:error, to_message(reason)}
+    end
+  end
+
+  defp or_message({:ok, answer}), do: {:ok, answer}
+  defp or_message({:error, reason}), do: {:error, to_message(reason)}
+
+  # A try is a whole entry, so the `null`s that clear a key in a write mean nothing there.
+  defp compact(server), do: Map.reject(server, fn {_key, value} -> is_nil(value) end)
+
+  @doc false
+  # The flags come first; the first word that is not one is the URL or the command, and
+  # every word after the command is its arguments, flags and all. `K=` with nothing after
+  # it takes `K` out of the entry's env or headers.
+  def parse_server(target) do
+    case OptionParser.split(target) do
+      [name | words] -> parse_words(words, name, %{})
+      [] -> {:error, @add_usage}
+    end
+  end
+
+  defp parse_words([], name, server), do: {:ok, name, server}
+
+  defp parse_words(["--env", pair | rest], name, server),
+    do: with({:ok, server} <- put_pair(server, "env", pair), do: parse_words(rest, name, server))
+
+  defp parse_words(["--header", pair | rest], name, server),
+    do:
+      with({:ok, server} <- put_pair(server, "headers", pair), do: parse_words(rest, name, server))
+
+  defp parse_words(["--oauth" | rest], name, server),
+    do: parse_words(rest, name, Map.update(server, "oauth", %{}, & &1))
+
+  defp parse_words(["--client-id", id | rest], name, server),
+    do: parse_words(rest, name, put_oauth(server, "client_id", id))
+
+  defp parse_words(["--scope", scope | rest], name, server) do
+    scopes = (get_in(server, ["oauth", "scopes"]) || []) ++ [scope]
+    parse_words(rest, name, put_oauth(server, "scopes", scopes))
+  end
+
+  defp parse_words(["--auto" | rest], name, server),
+    do: parse_words(rest, name, Map.put(server, "permission", "auto"))
+
+  defp parse_words(["--ask" | rest], name, server),
+    do: parse_words(rest, name, Map.put(server, "permission", "ask"))
+
+  defp parse_words(["--cd", dir | rest], name, server),
+    do: parse_words(rest, name, Map.put(server, "cd", dir))
+
+  defp parse_words(["--stores-files" | rest], name, server),
+    do: parse_words(rest, name, Map.put(server, "stores", "files"))
+
+  defp parse_words(["--" <> _flag | _rest], _name, _server), do: {:error, @add_usage}
+
+  defp parse_words([word | rest], name, server) do
+    if String.starts_with?(word, ["http://", "https://"]) and rest == [] do
+      {:ok, name,
+       Map.merge(server, %{"url" => word, "command" => nil, "args" => nil, "env" => nil})}
+    else
+      {:ok, name,
+       Map.merge(server, %{
+         "command" => word,
+         "args" => rest,
+         "url" => nil,
+         "headers" => nil,
+         "oauth" => nil
+       })}
+    end
+  end
+
+  defp put_pair(server, key, pair) do
+    case String.split(pair, "=", parts: 2) do
+      [k, v] when k != "" ->
+        {:ok, Map.update(server, key, %{k => blank(v)}, &Map.put(&1, k, blank(v)))}
+
+      _ ->
+        {:error, "#{key} takes K=V, not #{pair}"}
+    end
+  end
+
+  defp blank(""), do: nil
+  defp blank(value), do: value
+
+  defp put_oauth(server, key, value),
+    do: Map.update(server, "oauth", %{key => value}, &Map.put(&1 || %{}, key, value))
 
   defp scope_flag(args) do
     if String.contains?(args, "--workspace"),
@@ -2932,8 +3090,94 @@ defmodule Troupe.UI.TUI.Server do
   defp mcp_key(%Key{code: "x"}, state), do: mcp_act(state, mcp_remove_selected(state))
   defp mcp_key(%Key{code: "s"}, state), do: mcp_act(state, mcp_sign_in_selected(state))
   defp mcp_key(%Key{code: "o"}, state), do: mcp_act(state, mcp_sign_out_selected(state))
+  defp mcp_key(%Key{code: "p"}, state), do: mcp_secret_selected(state)
+  defp mcp_key(%Key{code: "l"}, state), do: mcp_act(state, bring_skills_selected(state, true))
+  defp mcp_key(%Key{code: "i"}, state), do: mcp_act(state, bring_skills_selected(state, false))
 
   defp mcp_key(_key, state), do: state
+
+  # The value being typed: kept on Enter, dropped on Esc, and never drawn but as dots.
+  defp secret_key(%Key{code: "esc"}, state),
+    do: notice(%{state | mcp_secret: nil}, "left as it was")
+
+  defp secret_key(%Key{code: "enter"}, %{mcp_secret: %{text: ""}} = state),
+    do: notice(state, "type or paste the value first, or Esc")
+
+  defp secret_key(%Key{code: "enter"}, %{mcp_secret: asking} = state) do
+    state = %{state | mcp_secret: nil}
+    mcp_act(state, keep_secret(state, asking))
+  end
+
+  defp secret_key(%Key{code: "backspace"}, %{mcp_secret: %{text: text} = asking} = state),
+    do: %{state | mcp_secret: %{asking | text: String.slice(text, 0..-2//1)}}
+
+  defp secret_key(%Key{code: code, modifiers: mods}, %{mcp_secret: %{text: text} = asking} = state)
+       when is_binary(code) and mods in [[], ["shift"]] do
+    if String.length(code) == 1,
+      do: %{state | mcp_secret: %{asking | text: text <> code}},
+      else: state
+  end
+
+  defp secret_key(_key, state), do: state
+
+  # `p` on a server: the first value it wants, or, where it wants none, why not here.
+  defp mcp_secret_selected(state) do
+    case mcp_selected(state) do
+      {:server, %{missing: [key | _]} = server} ->
+        ask_secret(state, server.name, key, field_of(server, key), layer_scope(server.layer))
+
+      {:server, server} ->
+        notice(
+          state,
+          "#{server.name} wants no value now; /mcp secret #{server.name} <KEY> [--header] keeps one in your keychain"
+        )
+
+      _other ->
+        state
+    end
+  end
+
+  defp ask_secret(state, name, key, field, scope),
+    do: %{state | mcp_secret: %{name: name, key: key, field: field, scope: scope, text: ""}}
+
+  # A key the server's headers name is a header's; anything else a variable.
+  defp field_of(server, key),
+    do: if(key in Map.get(server, :headers, []), do: "headers", else: "env")
+
+  defp layer_scope(:workspace), do: "workspace"
+  defp layer_scope(_layer), do: "user"
+
+  # Into the keychain, the reference into the entry, and the server started again here.
+  defp keep_secret(state, %{name: name, key: key, field: field, scope: scope, text: text}) do
+    params = %{scope: scope, name: name, key: key, field: field, value: text}
+
+    case Client.manage_sources(state.session_id, "mcp.secret", params) do
+      {:ok, _answer} ->
+        case check_server(state, name) do
+          {:mcp, checked} -> {:mcp, "kept #{key} in your keychain · #{checked}"}
+          other -> other
+        end
+
+      {:error, reason} ->
+        {:error, to_message(reason)}
+    end
+  end
+
+  # Another tool's directory of skills: read where it is (`l`) or copied in (`i`).
+  defp bring_skills_selected(state, link?) do
+    case mcp_selected(state) do
+      {:found, found} ->
+        params = %{scope: found.scope, from: found.from, link: link?}
+
+        case Client.manage_sources(state.session_id, "skills.add", params) do
+          {:ok, answer} -> {:mcp, added_notice("skills", answer)}
+          {:error, reason} -> {:error, to_message(reason)}
+        end
+
+      _other ->
+        nil
+    end
+  end
 
   ## Agents (TUI Decision 156)
 

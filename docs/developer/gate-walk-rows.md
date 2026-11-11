@@ -151,7 +151,7 @@ desktop app and a browser. Keep the browser's address bar out of frame while sig
 **What to show, in this order, about six minutes:**
 
 1. (0:00) The desktop app's version, and the plane it is signed in to.
-2. (0:30) **This computer → Servers and skills**: the server, **Sign in**, the provider's
+2. (0:30) **Tools and skills**: the server, **Sign in**, the provider's
    page, back to "Signed in as …".
 3. (1:30) A new session on the team's profile: the head shows it runs on the plane.
 4. (2:00) "Offer your servers to this session?" read out, then **Offer them**; the banner

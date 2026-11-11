@@ -11,3 +11,7 @@ config :troupe_core, catalog_refresh: false
 # Nor reach the person's own credential store (root #58): a daemon a test embeds keeps its
 # sign-in for steering in the VM.
 config :troupe_protocol, keyring: Troupe.Keyring.Memory
+
+# Nor read the directories of skills other tools keep in the developer's home
+# (`skills.discover`): a test names the home it means.
+config :troupe_core, skills_home: Path.join(System.tmp_dir!(), "troupe-test-no-home")

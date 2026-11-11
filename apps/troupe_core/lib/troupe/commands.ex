@@ -589,12 +589,15 @@ defmodule Troupe.Commands do
         example: "/unlink yes"
       ),
       entry("mcp", "setup", "Your MCP servers: each one's layer, state, tools and errors",
-        usage: "/mcp [import|link|remove|check <target>] [--workspace]",
+        usage: "/mcp [import|link|remove|check|add|try|secret <target>] [--workspace]",
         args: [arg("verb", false, "text"), arg("target", false, "path")],
         detail:
           "Servers from your mcp.json, the workspace's .troupe/mcp.json and the bundle. " <>
             "import copies a .mcp.json, link reads it in place, remove and check take a " <>
-            "server name; --workspace writes the workspace's file.",
+            "server name; add <name> writes one (flags such as --env K=V, --header K=V and " <>
+            "--oauth, then a URL or a command and its arguments) and try runs it once " <>
+            "without keeping it; secret <name> <KEY> asks for a value and keeps it in the " <>
+            "keychain; --workspace writes the workspace's file.",
         example: "/mcp import .mcp.json"
       ),
       entry("skills", "setup", "Your skills: each one's layer, description and source",

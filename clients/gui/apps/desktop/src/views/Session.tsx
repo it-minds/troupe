@@ -60,6 +60,7 @@ import { Instructions } from "./Instructions";
 import { MemoryPane } from "./Memory";
 import type { MemoryAsk } from "./Memory";
 import { OfferLine, OfferPanel } from "./Offer";
+import { SessionServers } from "./SessionServers";
 import { StartLine, StartPanel } from "./Onboard";
 import { inviteLine, RemoteLine, RemoteOfferControl } from "./Remote";
 import { InviteControl } from "./Invites";
@@ -268,6 +269,10 @@ export function Session({
 
       <Banners status={view.status} detail={view.detail} dormant={dormant} readOnly={readOnly} error={view.error} />
       <OfferLine offer={view.offer} />
+      {/* Your own servers as this session on this computer has them. */}
+      {here && daemon && (
+        <SessionServers daemon={daemon} sessionId={sessionId} workspace={workspaceOf(row) ?? workspace ?? null} onManage={onGo ? () => onGo("connect") : undefined} />
+      )}
       <StartLine state={start.state} />
       {away && <Away summary={away} onSeen={seenAway} />}
 
