@@ -162,6 +162,7 @@ defmodule Troupe.MCP.Stdio do
        name: state.name,
        state: state.state,
        tools: Enum.map(state.tools, & &1.remote_name),
+       about: Enum.map(state.tools, &Tool.about/1),
        error: state.error
      }, state}
   end
@@ -208,7 +209,8 @@ defmodule Troupe.MCP.Stdio do
 
   @doc false
   @spec redacted(%__MODULE__{}) :: %__MODULE__{}
-  def redacted(%__MODULE__{config: config} = state), do: %{state | config: Config.redacted_server(config)}
+  def redacted(%__MODULE__{config: config} = state),
+    do: %{state | config: Config.redacted_server(config)}
 
   # Only callers are answered; the lifecycle requests (`:initialize`, `:tools_list`) have
   # nobody waiting.
@@ -298,6 +300,7 @@ defmodule Troupe.MCP.Stdio do
       files: stores_files?(state.config, remote),
       run: fn args, _ctx -> call_tool(session_id, name, remote, args) end
     }
+    |> Map.merge(Tool.said(listed))
   end
 
   # Where the organisation keeps files, as the server's entry declares it (`stores: files`,

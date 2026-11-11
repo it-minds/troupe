@@ -28,7 +28,7 @@ import type { SessionHandle } from "../hooks";
 import { loopError } from "./Goal";
 
 /** The screens a command can leave the session for; `setup` is also where a refused key sends people. */
-export type PaletteScreen = "sessions" | "local" | "appearance" | "setup" | "memory";
+export type PaletteScreen = "sessions" | "local" | "connect" | "appearance" | "setup" | "memory";
 
 export interface PaletteActions {
   go: (screen: PaletteScreen) => void;
@@ -113,6 +113,9 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
   },
   detail: ({ detail }, args) => detail(args),
   settings: ({ go }) => void go("local"),
+  // Your own servers and skills, as the terminal client's /mcp and /skills pages.
+  mcp: ({ go }) => void go("connect"),
+  skills: ({ go }) => void go("connect"),
   models: ({ go }) => void go("local"),
   // "Stop using my account here" is on This computer, under who it records.
   unlink: ({ go }) => void go("local"),
@@ -141,7 +144,6 @@ const NOT_HERE: Record<string, string> = {
   observer: "not in the desktop app yet",
   upload: "not in the desktop app yet",
   watch: "on This computer, under this session's controls",
-  mcp: "not in the desktop app yet",
   worktree: "start a branch from the terminal client, or a new session from the list",
 };
 

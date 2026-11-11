@@ -82,6 +82,125 @@ defmodule Troupe.MCPPageTest do
     refute screen_text(pid, session) =~ "stub  [user]"
   end
 
+  # The command line's form for one server, as the desktop app's Add server writes it:
+  # `/mcp try` runs it once and keeps nothing, `/mcp add` writes it and starts it in this
+  # session, and a second `add` with flags alone edits what is there.
+  test "a server written with /mcp add joins the session, and /mcp try keeps nothing", context do
+    elixir = System.find_executable("elixir") || "elixir"
+    file = Path.join(context.config_home, "mcp.json")
+
+    {sid, _, _ws} = start_session!(script: [])
+    {pid, session} = start_tui(sid)
+
+    type(pid, "/mcp try stub #{elixir} #{@stub}")
+    press(pid, "enter")
+
+    eventually(
+      fn -> screen_text(pid, session) =~ "stub: ready, 1 tools (tried, not kept)" end,
+      20_000,
+      250
+    )
+
+    refute File.exists?(file)
+
+    press(pid, "esc")
+    type(pid, "/mcp add stub --env STUB_TOKEN={env:STUB_TOKEN_FROM} #{elixir} #{@stub} --quiet")
+    press(pid, "enter")
+    eventually(fn -> screen_text(pid, session) =~ "wrote stub into" end, 20_000, 250)
+
+    assert %{"mcpServers" => %{"stub" => entry}} = file |> File.read!() |> Jason.decode!()
+    assert entry["command"] == elixir
+    assert entry["args"] == [@stub, "--quiet"]
+    assert entry["env"] == %{"STUB_TOKEN" => "{env:STUB_TOKEN_FROM}"}
+
+    # Flags alone edit the entry: `K=` takes a variable out, the command stays.
+    press(pid, "esc")
+    type(pid, "/mcp add stub --env STUB_TOKEN= --auto")
+    press(pid, "enter")
+    eventually(fn -> screen_text(pid, session) =~ "wrote stub into" end, 20_000, 250)
+    assert %{"mcpServers" => %{"stub" => edited}} = file |> File.read!() |> Jason.decode!()
+    assert edited["command"] == elixir
+    assert edited["permission"] == "auto"
+    refute Map.has_key?(edited, "env")
+
+    eventually(
+      fn -> match?([%{name: "stub", state: :ready}], Client.mcp_status(sid)) end,
+      20_000,
+      250
+    )
+  end
+
+  # A value a server needs, kept in the keychain (the suite's is in this VM): the line says
+  # which key it wants, `p` asks for it as dots, and the entry gets the reference alone.
+  test "p keeps a missing secret in the keychain, typed as dots, and the server starts", context do
+    elixir = System.find_executable("elixir") || "elixir"
+    stub = Path.expand("../../../../apps/troupe_core/test/support/mcp_stub.exs", __DIR__)
+    file = Path.join(context.config_home, "mcp.json")
+
+    File.write!(
+      file,
+      Jason.encode!(%{
+        "mcpServers" => %{
+          "stub" => %{
+            "command" => elixir,
+            "args" => [stub],
+            "env" => %{"STUB_TOKEN" => "{secret:stub/STUB_TOKEN}"}
+          }
+        }
+      })
+    )
+
+    on_exit(fn -> Troupe.MCP.Secrets.delete("stub/STUB_TOKEN") end)
+
+    {sid, _, _ws} = start_session!(script: [])
+    {pid, session} = start_tui(sid)
+
+    type(pid, "/mcp")
+    press(pid, "enter")
+    eventually(fn -> screen_text(pid, session) =~ "stub  [user]  needs STUB_TOKEN — p sets it" end)
+
+    press(pid, "p")
+    eventually(fn -> screen_text(pid, session) =~ "Enter keeps it in your keychain" end)
+    type(pid, "hunter2")
+    eventually(fn -> screen_text(pid, session) =~ "•••••••" end)
+    refute screen_text(pid, session) =~ "hunter2"
+
+    press(pid, "enter")
+
+    eventually(
+      fn -> screen_text(pid, session) =~ "kept STUB_TOKEN in your keychain" end,
+      20_000,
+      250
+    )
+
+    assert Troupe.MCP.Secrets.get("stub/STUB_TOKEN") == {:ok, "hunter2"}
+    refute File.read!(file) =~ "hunter2"
+
+    # Started in the session, and its tool shown as the server describes it.
+    eventually(fn -> screen_text(pid, session) =~ "✓ stub  [user]  1 tools" end, 20_000, 250)
+    eventually(fn -> screen_text(pid, session) =~ "Greet someone (greet) · reads only" end)
+  end
+
+  test "the words of /mcp add: flags first, then a URL or a command and its arguments" do
+    alias Troupe.UI.TUI.Server
+
+    assert {:ok, "wiki",
+            %{"url" => "https://mcp.example.test/mcp", "oauth" => %{"scopes" => ["a", "b"]}}} =
+             Server.parse_server("wiki --oauth --scope a --scope b https://mcp.example.test/mcp")
+
+    assert {:ok, "t", %{"headers" => %{"Authorization" => "Bearer {env:T}"}, "command" => nil}} =
+             Server.parse_server(
+               ~s(t --header "Authorization=Bearer {env:T}" https://t.example.test)
+             )
+
+    assert {:ok, "fs",
+            %{"command" => "npx", "args" => ["-y", "fs", "--root", "/tmp"], "url" => nil}} =
+             Server.parse_server("fs npx -y fs --root /tmp")
+
+    assert {:error, "usage: /mcp add" <> _} = Server.parse_server("fs --nope npx")
+    assert {:error, "env takes K=V" <> _} = Server.parse_server("fs --env NOPE npx")
+  end
+
   # troupe-remote Decision 741: a server that wants the person signed in, against the
   # core suite's fake authorization server and protected MCP server.
   test "a server that wants a sign-in: s opens the browser, and the page says whose it is",

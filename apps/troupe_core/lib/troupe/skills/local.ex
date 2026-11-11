@@ -419,6 +419,91 @@ defmodule Troupe.Skills.Local do
     end
   end
 
+  # -- other tools' skills ------------------------------------------------------------
+
+  @typedoc """
+  A directory of skills another tool keeps, as `discover/2` finds it: which tool, where,
+  the layer it would come into, its skills, and whether that layer already has it
+  (`linked`, `copied`, or `available`).
+  """
+  @type discovered :: %{
+          app: String.t(),
+          dir: Path.t(),
+          scope: layer(),
+          skills: [%{name: String.t(), description: String.t()}],
+          state: :linked | :copied | :available
+        }
+
+  @doc """
+  The directories of skills other tools keep on this machine, which a person brings in
+  with `add/5`: Claude Code's `~/.claude/skills`, Codex's `~/.codex/skills` and
+  opencode's `~/.config/opencode/skills` for their own layer, and a workspace's
+  `.claude/skills` for the workspace's. Only one that is there and holds a skill is
+  listed. Nothing is read but each `SKILL.md`'s name and description, and nothing is
+  written; `~/.agents/skills`, which Troupe reads in place already, is not among them.
+  """
+  @spec discover(Path.t() | nil, keyword()) :: [discovered()]
+  def discover(workspace, opts \\ []) do
+    # A test names another home with `home:`, or for a whole suite `:troupe_core, :skills_home`.
+    home =
+      Keyword.get(opts, :home) || Application.get_env(:troupe_core, :skills_home) ||
+        System.user_home() || "/"
+
+    own = [
+      {"Claude Code", Path.join([home, ".claude", "skills"])},
+      {"Codex", Path.join([home, ".codex", "skills"])},
+      {"opencode", Path.join([home, ".config", "opencode", "skills"])}
+    ]
+
+    repository =
+      if workspace,
+        do: [{"Claude Code (this repository)", Path.join([workspace, ".claude", "skills"])}],
+        else: []
+
+    held = list(workspace, opts)
+
+    (Enum.map(own, fn {app, dir} -> {app, dir, :user} end) ++
+       Enum.map(repository, fn {app, dir} -> {app, dir, :workspace} end))
+    |> Enum.filter(fn {_app, dir, _scope} -> File.dir?(dir) end)
+    |> Enum.flat_map(fn {app, dir, scope} ->
+      case Bundle.list_skills_in(dir) do
+        [] ->
+          []
+
+        skills ->
+          [
+            %{
+              app: app,
+              dir: dir,
+              scope: scope,
+              skills: Enum.map(skills, &%{name: &1.name, description: &1.description}),
+              state: standing(scope, workspace, dir, skills, held, opts)
+            }
+          ]
+      end
+    end)
+  end
+
+  # Linked when the layer's `skills.json` reads the directory; copied when every skill
+  # in it is one the layer has; otherwise there to bring in.
+  defp standing(scope, workspace, dir, skills, held, opts) do
+    {:ok, paths} = layer_paths(scope, workspace, opts)
+    there = key(dir)
+
+    cond do
+      Enum.any?(links(paths.links), &(key(&1) == there)) ->
+        :linked
+
+      Enum.all?(skills, fn skill ->
+        Enum.any?(held, &(&1.name == skill.name and &1.layer == scope))
+      end) ->
+        :copied
+
+      true ->
+        :available
+    end
+  end
+
   # -- writing -----------------------------------------------------------------------
 
   @doc """

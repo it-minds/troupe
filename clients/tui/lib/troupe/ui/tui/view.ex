@@ -191,7 +191,12 @@ defmodule Troupe.UI.TUI.View do
 
     constraints =
       if activated?,
-        do: [{:length, tray_height(height, windows)}, {:fill, 1}, {:length, 1}, {:length, cmd_rows}],
+        do: [
+          {:length, tray_height(height, windows)},
+          {:fill, 1},
+          {:length, 1},
+          {:length, cmd_rows}
+        ],
         else: [{:fill, 1}, {:length, 1}, {:length, cmd_rows}]
 
     rects = Layout.split(area, :vertical, constraints)
@@ -484,7 +489,10 @@ defmodule Troupe.UI.TUI.View do
 
   defp tree_line(row, state) do
     indent = String.duplicate("  ", row.depth)
-    label = if row.root?, do: row.path, else: "↳ " <> (row.path |> String.split("/") |> List.last())
+
+    label =
+      if row.root?, do: row.path, else: "↳ " <> (row.path |> String.split("/") |> List.last())
+
     name = row.agent.name || row.window.profile
     st = Model.agent_state(row)
 
@@ -711,7 +719,8 @@ defmodule Troupe.UI.TUI.View do
 
   @doc "A private session's sync state in words: the label, and the sentence behind it."
   @spec sync_words(String.t(), String.t() | nil) :: {String.t(), String.t()}
-  def sync_words("current", _device), do: {"synced", "sealed under your key through its last event"}
+  def sync_words("current", _device),
+    do: {"synced", "sealed under your key through its last event"}
 
   def sync_words("behind", _device),
     do: {"syncing", "being sealed; its latest events are not sealed yet"}
@@ -879,7 +888,10 @@ defmodule Troupe.UI.TUI.View do
     if claimable?(entry),
       do:
         said ++
-          ["", "c claims it for this computer: it is sealed from here, and the other device stops."],
+          [
+            "",
+            "c claims it for this computer: it is sealed from here, and the other device stops."
+          ],
       else: said
   end
 
@@ -1086,7 +1098,9 @@ defmodule Troupe.UI.TUI.View do
   def mcp_entries(%{mcp_page: %{servers: servers, skills: skills} = page}),
     do:
       Enum.map(servers, &{:server, &1}) ++
-        Enum.map(skills, &{:skill, &1}) ++ Enum.map(Map.get(page, :skipped, []), &{:skipped, &1})
+        Enum.map(skills, &{:skill, &1}) ++
+        Enum.map(Map.get(page, :skipped, []), &{:skipped, &1}) ++
+        Enum.map(Map.get(page, :found, []), &{:found, &1})
 
   def mcp_entries(_state), do: []
 
@@ -1102,6 +1116,8 @@ defmodule Troupe.UI.TUI.View do
             "",
             "/mcp import <path>    copy a .mcp.json (Claude Code, Cursor, VS Code, Claude Desktop)",
             "/mcp link <path>      read one in place",
+            "/mcp add <name> <command> [args…] | <url>   write one; --env K=V --header K=V --oauth",
+            "/mcp try <name> …     the same, run once and not kept",
             "/skills import <dir>  copy a directory of skills, such as ~/.claude/skills",
             "/skills link <dir>    read one in place",
             "",
@@ -1126,7 +1142,11 @@ defmodule Troupe.UI.TUI.View do
     }
 
     detail = %Paragraph{
-      text: mcp_detail(Enum.at(entries, state.mcp_cursor), Map.get(state, :mcp_sign_in)),
+      text:
+        case Map.get(state, :mcp_secret) do
+          %{} = asking -> secret_prompt(asking)
+          nil -> mcp_detail(Enum.at(entries, state.mcp_cursor), Map.get(state, :mcp_sign_in))
+        end,
       wrap: true,
       block: %Block{title: mcp_detail_title(), borders: [:all]}
     }
@@ -1167,6 +1187,22 @@ defmodule Troupe.UI.TUI.View do
   defp mcp_line({:skipped, %{layer: layer, reason: reason} = skill}),
     do: "◇ #{skill.name || skill.dir}  [#{layer}]  #{reason}"
 
+  defp mcp_line({:found, %{app: app, dir: dir, skills: skills}}),
+    do: "+ #{app}  #{dir}  #{length(skills)} skills — l links, i copies"
+
+  # The value a server needs, typed or pasted and never shown: a dot a character.
+  defp secret_prompt(%{name: name, key: key, text: text}) do
+    [
+      field("server", name),
+      field("secret", key),
+      field("value", String.duplicate("•", String.length(text))),
+      "",
+      "Paste or type it. Enter keeps it in your keychain and writes {secret:…} into the",
+      "entry, never the value; Esc leaves it as it was."
+    ]
+    |> Enum.join("\n")
+  end
+
   defp mcp_glyph(%{disabled?: true}), do: "–"
   defp mcp_glyph(%{state: :ready}), do: "✓"
   defp mcp_glyph(%{state: :connecting}), do: "…"
@@ -1180,7 +1216,11 @@ defmodule Troupe.UI.TUI.View do
   # A server that wants the person signed in (troupe-remote Decision 741) says so on
   # its line, and what `s` does about it.
   defp mcp_summary(%{disabled?: true}), do: "disabled"
-  defp mcp_summary(%{auth: %{state: :signing_in}}), do: "signing in — finish in the browser, then r"
+  defp mcp_summary(%{missing: [key | _]}), do: "needs #{key} — p sets it"
+
+  defp mcp_summary(%{auth: %{state: :signing_in}}),
+    do: "signing in — finish in the browser, then r"
+
   defp mcp_summary(%{state: :sign_in, auth: %{state: :expired}}), do: "sign in again — s"
   defp mcp_summary(%{state: :sign_in}), do: "sign in — s"
   defp mcp_summary(%{state: nil}), do: "not in this session yet — c starts it"
@@ -1196,9 +1236,54 @@ defmodule Troupe.UI.TUI.View do
   defp mcp_summary(%{state: :ready, tools: tools}), do: "#{length(tools)} tools"
   defp mcp_summary(%{state: state}), do: to_string(state)
 
+  defp names_list(_label, names) when names in [nil, []], do: nil
+  defp names_list(label, names), do: field(label, Enum.join(names, ", "))
+
+  # Each tool as its server describes it, and which change things: what a person reads
+  # before letting an agent use them. A server that says nothing of a tool is named.
+  defp tools_field(%{about: [_ | _] = about}) do
+    lines =
+      Enum.map(about, fn tool ->
+        mark = if tool.read_only?, do: "reads only", else: "changes things"
+        title = tool.title || tool.name
+        summary = if tool.summary, do: " — " <> clip(tool.summary, 60), else: ""
+        "  #{title} (#{tool.name}) · #{mark}#{summary}"
+      end)
+
+    Enum.join([field("tools", "") | lines], "\n")
+  end
+
+  defp tools_field(server), do: field("tools", Enum.join(server.tools, ", "))
+
+  # A server's env and headers by name: the daemon never sends a value.
+  defp names_field(_label, names) when names in [nil, []], do: nil
+  defp names_field(label, names), do: field(label, Enum.join(names, ", ") <> " (values kept)")
+
+  defp stores_field(%{stores: "files", files: [_ | _] = tools}),
+    do: field("stores files", "with " <> Enum.join(tools, ", "))
+
+  defp stores_field(%{stores: "files"}), do: field("stores files", "with every tool")
+  defp stores_field(_server), do: nil
+
+  defp oauth_field(nil), do: nil
+
+  defp oauth_field(oauth) do
+    parts =
+      [
+        oauth["client_id"] && "client #{oauth["client_id"]}",
+        oauth["scopes"] && "scopes #{Enum.join(oauth["scopes"], " ")}",
+        oauth["issuer"] && "issuer #{oauth["issuer"]}",
+        oauth["redirect_uri"] && "redirect #{oauth["redirect_uri"]}",
+        oauth["resource"] == false && "no resource indicator"
+      ]
+      |> Enum.filter(&is_binary/1)
+
+    field("oauth", if(parts == [], do: "Troupe introduces itself", else: Enum.join(parts, " · ")))
+  end
+
   defp mcp_detail_title,
     do:
-      " ↑↓ move · r reload · c check · s sign in · o sign out · d enable/disable · x remove · Esc back "
+      " ↑↓ move · r reload · c check · p secret · s sign in · o sign out · d enable/disable · x remove · l/i skills · Esc back "
 
   defp mcp_detail(nil, _sign_in), do: "Select a server or a skill to see where it comes from."
 
@@ -1209,7 +1294,17 @@ defmodule Troupe.UI.TUI.View do
       field("name", server.name),
       field("layer", server.layer),
       field("source", server.source || "(this session)"),
+      if(Map.get(server, :linked?), do: field("follows", "read from that file each time")),
       transport_field(server),
+      names_field("env", Map.get(server, :env)),
+      names_field("headers", Map.get(server, :headers)),
+      names_list("keychain", Map.get(server, :secrets)),
+      if(Map.get(server, :missing, []) != [],
+        do: field("missing", Enum.join(server.missing, ", ") <> " — p sets it")
+      ),
+      if(Map.get(server, :permission) == "auto", do: field("permission", "auto")),
+      stores_field(server),
+      oauth_field(Map.get(server, :oauth)),
       field("state", server.state || "not started in this session"),
       if(auth, do: field("sign-in", sign_in_text(auth))),
       if(auth && Map.get(auth, :step_up),
@@ -1217,12 +1312,24 @@ defmodule Troupe.UI.TUI.View do
       ),
       if(auth && auth.error, do: field("last sign-in", auth.error)),
       sign_in_url(server, auth, sign_in),
-      field("tools", Enum.join(server.tools, ", ")),
+      tools_field(server),
       if(server.error, do: field("error", server.error)),
       if(server.trust, do: field("trust", server.trust)),
       if(server.disabled?, do: field("disabled", "yes"))
     ]
     |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp mcp_detail({:found, found}, _sign_in) do
+    [
+      field("from", found.app),
+      field("directory", found.dir),
+      field("skills", Enum.join(found.skills, ", ")),
+      "",
+      "l reads it where it is, so edits there show up here; i copies the skills into your",
+      "own, to change without touching the originals."
+    ]
     |> Enum.join("\n")
   end
 
@@ -1957,7 +2064,10 @@ defmodule Troupe.UI.TUI.View do
   @spec branch_at(map(), non_neg_integer(), non_neg_integer()) :: String.t() | nil
   def branch_at(%{size: {width, height}} = state, x, y) do
     windows = Model.windows(state.model)
-    {rect, _pane, _status, _cmd} = layout(width, height, false, length(windows), box_height(height))
+
+    {rect, _pane, _status, _cmd} =
+      layout(width, height, false, length(windows), box_height(height))
+
     inner_w = max(rect.width - 2, 1)
     inner_h = max(rect.height - 2, 1)
 
@@ -2084,7 +2194,9 @@ defmodule Troupe.UI.TUI.View do
             String.pad_trailing(clip(w.profile || "", agent_w), agent_w + 2) <>
             String.pad_trailing(word, 11) <> String.pad_trailing(Model.elapsed(w, state.now), 7)
 
-        room = width - Model.cell_width(glyph) - Model.cell_width(left) - Model.cell_width(used) - 2
+        room =
+          width - Model.cell_width(glyph) - Model.cell_width(left) - Model.cell_width(used) - 2
+
         said = if room > 1, do: clip(Model.last_line(w, state.tick, state.now), room), else: ""
         said = String.pad_trailing(said, max(room, 0))
         word_style = if w.state == :needs_input, do: Theme.style(:needs_you, [:bold]), else: nil
@@ -2124,7 +2236,8 @@ defmodule Troupe.UI.TUI.View do
           Enum.map(trees, fn t ->
             {:text,
              [
-               {:text, String.pad_trailing(clip(t.branch || "(detached)", branch_w), branch_w + 2)},
+               {:text,
+                String.pad_trailing(clip(t.branch || "(detached)", branch_w), branch_w + 2)},
                {Theme.style(:muted), String.pad_trailing(ahead_behind(t), 10)},
                {:text, String.pad_trailing(changed(t), 12)},
                {if(t.dirty, do: Theme.style(:working), else: Theme.style(:muted)),
@@ -2137,7 +2250,9 @@ defmodule Troupe.UI.TUI.View do
     end
   end
 
-  defp ahead_behind(%{ahead: a, behind: b}) when is_integer(a) and is_integer(b), do: "↑#{a} ↓#{b}"
+  defp ahead_behind(%{ahead: a, behind: b}) when is_integer(a) and is_integer(b),
+    do: "↑#{a} ↓#{b}"
+
   defp ahead_behind(_tree), do: ""
 
   defp changed(%{added: a, removed: r}) when is_integer(a) and is_integer(r), do: "+#{a} −#{r}"
@@ -2183,7 +2298,8 @@ defmodule Troupe.UI.TUI.View do
 
   # The command box under the picker: what it is open for, and the task a start is for.
   defp picker_line(%{step: :where} = picker),
-    do: " where it works — w a worktree of its own · c the checkout · Esc back#{task_note(picker)} "
+    do:
+      " where it works — w a worktree of its own · c the checkout · Esc back#{task_note(picker)} "
 
   defp picker_line(%{for: {:window, path}}),
     do: " the agent #{path} runs — ↑↓ choose · Enter switches · Esc keeps it "

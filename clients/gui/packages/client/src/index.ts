@@ -28,6 +28,8 @@ export type { BeginRedirectOptions, IdpMetadata, PkcePair, PendingRedirect, Redi
 export { SessionAttachment, waitOn } from "./attach.js";
 export type { AttachOptions, AttachStatus } from "./attach.js";
 export { ServerOffer, offeredName } from "./offer.js";
+export { draftOf, draftProblems, joinCommand, pairsFromText, pairsToText, readsEnvironment, serverChanges, serverPatch, serverTrial, splitCommand } from "./servers.js";
+export type { DraftOAuth, DraftPair, SecretChange, ServerDraft } from "./servers.js";
 export type { OfferAnswer, OfferAsk, OfferOptions, OfferState } from "./offer.js";
 export {
   LIBRARIAN_PROMPT,
@@ -308,6 +310,8 @@ export type {
   DaemonStop,
   ImportResult,
   LocalServer,
+  FoundSkills,
+  ToolAbout,
   LocalSkill,
   RecentWorkspace,
   RemoveResult,

@@ -1,11 +1,13 @@
 defmodule Troupe.Gateway.LocalSources do
   @moduledoc """
   `mcp.list`, `mcp.add`, `mcp.remove`, `mcp.check` and `skills.list`, `skills.add`,
-  `skills.remove`: the person's own MCP servers and skills, over the wire
+  `skills.remove`, `skills.discover`: the person's own MCP servers and skills, over the wire
   (Decision 700). `mcp.sign_in` and `mcp.sign_out`: their sign-in to a server that wants
   them rather than a machine (Decision 741). `mcp.tools` and `mcp.call`: one of their
   servers listed and called outside any session, with their sign-in, for a client that
-  offers its tools to a session on a pod (Decision 748).
+  offers its tools to a session on a pod (Decision 748). `mcp.secret`: a value one of
+  their servers needs, kept in the operating system's credential store and written into
+  the entry as a `{secret:…}` reference (`Troupe.MCP.Secrets`).
 
   The daemon's alone, as the model settings are. The files are the daemon's config
   directory and a workspace on this machine, a pod's servers are its bundle's, and so
@@ -20,7 +22,7 @@ defmodule Troupe.Gateway.LocalSources do
   prints it; the files themselves are read and written by the paths they had.
   """
 
-  alias Troupe.MCP.{Import, Local, OAuth, Tool, Trust}
+  alias Troupe.MCP.{Import, Local, OAuth, Secrets, Tool, Trust}
   alias Troupe.Paths
   alias Troupe.Protocol.Error
   alias Troupe.Session.MCP, as: LocalMCP
@@ -28,17 +30,19 @@ defmodule Troupe.Gateway.LocalSources do
 
   @type outcome :: {:ok, map()} | {:error, Error.t()}
 
-  @doc "Dispatch one of the eleven, with the daemon already known to be the server."
+  @doc "Dispatch one of these methods, with the daemon already known to be the server."
   @spec call(String.t(), map()) :: outcome()
   def call("mcp.list", params), do: list_servers(params)
   def call("mcp.add", params), do: add_server(params)
   def call("mcp.remove", params), do: remove_server(params)
+  def call("mcp.secret", params), do: put_secret(params)
   def call("mcp.check", params), do: check_server(params)
   def call("mcp.sign_in", params), do: sign_in(params)
   def call("mcp.sign_out", params), do: sign_out(params)
   def call("mcp.tools", params), do: server_tools(params)
   def call("mcp.call", params), do: call_tool(params)
   def call("skills.list", params), do: list_skills(params)
+  def call("skills.discover", params), do: discover_skills(params)
   def call("skills.add", params), do: add_skill(params)
   def call("skills.remove", params), do: remove_skill(params)
   def call(method, _params), do: {:error, Error.new(:method_not_found, %{method: method})}
@@ -100,12 +104,17 @@ defmodule Troupe.Gateway.LocalSources do
 
   defp written({:error, reason}), do: invalid(reason)
 
+  # A server taken out of its file takes the secrets the store kept for it along: they are
+  # its, under its name, and nothing else reads them.
   defp remove_server(params) do
     with {:ok, scope} <- scope_of(params),
          {:ok, workspace} <- workspace_of(params),
          {:ok, what} <- what_to_remove(params) do
+      kept = kept_secrets(scope, workspace, what)
+
       case Local.remove(scope, workspace, what) do
         {:ok, result} ->
+          Enum.each(kept, &Secrets.delete/1)
           {:ok, %{"path" => Paths.display(result.path), "removed" => result.removed}}
 
         {:error, reason} ->
@@ -113,6 +122,91 @@ defmodule Troupe.Gateway.LocalSources do
       end
     end
   end
+
+  defp kept_secrets(scope, workspace, %{name: name}) do
+    {servers, _warnings} = resolve(workspace)
+
+    case Enum.find(servers, &(&1.name == name and &1.layer == scope)) do
+      %{config: %{secrets: keys}} ->
+        Enum.map(keys, &Secrets.ref(name, &1, secret_home(scope, workspace)))
+
+      _none ->
+        []
+    end
+  end
+
+  defp kept_secrets(_scope, _workspace, _what), do: []
+
+  defp secret_home(:workspace, workspace), do: workspace
+  defp secret_home(:user, _workspace), do: nil
+
+  # One value a server needs, kept in the store and named in the entry: `value` keeps it
+  # (replacing one there), `null` forgets it and takes the key out. `field` is `env`, a
+  # variable, or `headers`. The entry is written as `mcp.add` writes one, merged onto the
+  # layer's, so a server from a lower layer gets the key over it in this one. A store this
+  # machine does not have is said, and nothing is written.
+  defp put_secret(params) do
+    with {:ok, scope} <- scope_of(params),
+         {:ok, workspace} <- workspace_of(params),
+         {:ok, name} <- fetch(params, "name"),
+         {:ok, key} <- fetch(params, "key"),
+         {:ok, field} <- secret_field(params),
+         :ok <- workspace_for(scope, workspace) do
+      ref = Secrets.ref(name, key, secret_home(scope, workspace))
+
+      case Map.get(params, "value") do
+        value when is_binary(value) and value != "" ->
+          keep_secret(scope, workspace, name, field, key, ref, value)
+
+        nil ->
+          forget_secret(scope, workspace, name, field, key, ref)
+
+        _other ->
+          invalid("value is the secret to keep, or null to forget it")
+      end
+    end
+  end
+
+  defp keep_secret(scope, workspace, name, field, key, ref, value) do
+    with :ok <- stored(Secrets.put(ref, value)),
+         {:ok, result} <-
+           written(
+             Local.add(scope, workspace, name, %{field => %{key => Secrets.reference(ref)}})
+           ) do
+      {:ok, Map.merge(result, %{"key" => key, "field" => field, "state" => "set"})}
+    end
+  end
+
+  defp forget_secret(scope, workspace, name, field, key, ref) do
+    with {:ok, result} <- written(Local.add(scope, workspace, name, %{field => %{key => nil}})) do
+      _ = Secrets.delete(ref)
+      {:ok, Map.merge(result, %{"key" => key, "field" => field, "state" => "removed"})}
+    end
+  end
+
+  defp stored(:ok), do: :ok
+
+  defp stored({:error, :unavailable}),
+    do:
+      {:error,
+       Error.new(:unavailable, %{
+         reason:
+           "this computer has no keychain Troupe can use (on Linux, the Secret Service and " <>
+             "secret-tool); write {env:NAME} in the entry instead"
+       })}
+
+  defp stored({:error, why}),
+    do: {:error, Error.new(:unavailable, %{reason: "the keychain refused it: #{inspect(why)}"})}
+
+  defp secret_field(params) do
+    case Map.get(params, "field", "env") do
+      field when field in ["env", "headers"] -> {:ok, field}
+      other -> invalid("field is env or headers, not #{inspect(other)}")
+    end
+  end
+
+  defp workspace_for(:workspace, nil), do: invalid("the workspace scope needs a workspace")
+  defp workspace_for(_scope, _workspace), do: :ok
 
   # Three ways to check: a session's server is read again from its files and started
   # (which is also how one that died is brought back); a workspace's named server, or
@@ -280,9 +374,19 @@ defmodule Troupe.Gateway.LocalSources do
   end
 
   # `files` where the server's entry says the tool is where the organisation keeps files,
-  # for the client to say so again when it offers the tool.
+  # for the client to say so again when it offers the tool. `title`, `summary` (the
+  # server's own description, without the line Troupe adds for the model) and
+  # `read_only` are what the server says of the tool, for a person to read.
   defp tool_json(tool) do
-    json = %{"name" => tool.remote_name, "description" => tool.description, "schema" => tool.schema}
+    json = %{
+      "name" => tool.remote_name,
+      "description" => tool.description,
+      "schema" => tool.schema,
+      "title" => tool.title,
+      "summary" => tool.summary,
+      "read_only" => tool.read_only
+    }
+
     if tool.files, do: Map.put(json, "files", true), else: json
   end
 
@@ -355,8 +459,16 @@ defmodule Troupe.Gateway.LocalSources do
 
   defp auth_json(_server), do: nil
 
+  # Everything the entry says about the sign-in, so a form that edits the entry starts
+  # from what it has; `resource` only when it is off, as the file says it.
   defp oauth_json(%{oauth: %{} = oauth}) do
-    %{"client_id" => oauth.client_id, "scopes" => oauth.scopes, "issuer" => oauth.issuer}
+    %{
+      "client_id" => oauth.client_id,
+      "scopes" => oauth.scopes,
+      "issuer" => oauth.issuer,
+      "redirect_uri" => Map.get(oauth, :redirect_uri),
+      "resource" => if(Map.get(oauth, :resource) == false, do: false)
+    }
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end
 
@@ -408,6 +520,8 @@ defmodule Troupe.Gateway.LocalSources do
       "name" => server.name,
       "layer" => to_string(server.layer),
       "source" => Paths.display(server.source),
+      # From a file the layer links rather than the layer's own: read there each time.
+      "linked" => linked?(server, workspace),
       "transport" => if(is_binary(config[:url]), do: "http", else: "stdio"),
       "command" => config[:command],
       "args" => config[:args] || [],
@@ -415,7 +529,13 @@ defmodule Troupe.Gateway.LocalSources do
       "cd" => config[:cd],
       "env" => config |> Map.get(:env, %{}) |> Map.keys() |> Enum.sort(),
       "headers" => config |> Map.get(:headers, %{}) |> Map.keys() |> Enum.sort(),
+      # Which of those the store keeps, and which want a value they do not have.
+      "secrets" => config[:secrets] || [],
+      "missing" => config[:missing] || [],
       "permission" => to_string(config[:permission] || :ask),
+      "timeout_ms" => config[:timeout_ms],
+      "stores" => if(config[:stores] == :files, do: "files"),
+      "files" => config[:files],
       "disabled" => server.disabled?,
       "refused" => config[:refused],
       "trust" => trust_of(server, workspace),
@@ -425,6 +545,15 @@ defmodule Troupe.Gateway.LocalSources do
     }
     |> Map.merge(status_json(live))
   end
+
+  defp linked?(%{layer: :user, source: source}, _workspace) when is_binary(source),
+    do: Path.expand(source) != Path.expand(Local.user_path())
+
+  defp linked?(%{layer: :workspace, source: source}, workspace)
+       when is_binary(source) and is_binary(workspace),
+       do: Path.expand(source) != Path.expand(Local.workspace_path(workspace))
+
+  defp linked?(_server, _workspace), do: false
 
   # A server the session runs that no file names any more: its live state, and the
   # layer it started from.
@@ -437,10 +566,25 @@ defmodule Troupe.Gateway.LocalSources do
     |> Map.merge(status_json(status))
   end
 
-  defp status_json(nil), do: %{"state" => nil, "tools" => [], "error" => nil}
+  defp status_json(nil), do: %{"state" => nil, "tools" => [], "about" => [], "error" => nil}
 
-  defp status_json(status),
-    do: %{"state" => to_string(status.state), "tools" => status.tools, "error" => status.error}
+  # `about`: each tool as its server describes it for a person (`Troupe.MCP.Tool.said/1`).
+  defp status_json(status) do
+    %{
+      "state" => to_string(status.state),
+      "tools" => status.tools,
+      "about" => Enum.map(Map.get(status, :about, []), &about_json/1),
+      "error" => status.error
+    }
+  end
+
+  defp about_json(about),
+    do: %{
+      "name" => about.name,
+      "title" => about.title,
+      "summary" => about.summary,
+      "read_only" => about.read_only
+    }
 
   defp trust_of(%{layer: :workspace} = server, workspace) when is_binary(workspace) do
     trusted? = Troupe.Config.trusted?(workspace) or Trust.approved?(nil, workspace, server)
@@ -489,6 +633,30 @@ defmodule Troupe.Gateway.LocalSources do
              skipped,
              &Map.merge(skill_json(&1), %{"status" => to_string(&1.status), "reason" => &1.reason})
            )
+       }}
+    end
+  end
+
+  # The directories of skills other tools keep here, for a client to offer bringing in
+  # with `skills.add`: read, never written.
+  defp discover_skills(params) do
+    with {:ok, workspace} <- workspace_of(params) do
+      found = Skills.Local.discover(workspace)
+
+      {:ok,
+       %{
+         "found" =>
+           Enum.map(found, fn d ->
+             %{
+               "app" => d.app,
+               "dir" => Paths.display(d.dir),
+               "from" => d.dir,
+               "scope" => to_string(d.scope),
+               "state" => to_string(d.state),
+               "skills" =>
+                 Enum.map(d.skills, &%{"name" => &1.name, "description" => &1.description})
+             }
+           end)
        }}
     end
   end

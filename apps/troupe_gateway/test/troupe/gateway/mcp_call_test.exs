@@ -103,7 +103,7 @@ defmodule Troupe.Gateway.MCPCallTest do
     assert %{"error" => "sign_in_required", "server" => "notes", "hint" => hint} =
              Jason.decode!(content)
 
-    assert hint =~ "Servers and skills"
+    assert hint =~ "Tools and skills"
   end
 
   test "a token the server stops taking is refreshed and the call made again, and a refused refresh asks for a sign-in",

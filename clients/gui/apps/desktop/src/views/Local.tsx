@@ -20,7 +20,6 @@ import type { MachineUser } from "../hooks";
 import { Confirm, Failed, Loading, Pill, Table, When } from "./bits";
 import { Models } from "./Models";
 import { Rules } from "./Rules";
-import { Servers } from "./Servers";
 
 export interface DaemonState {
   client: DaemonClient | null;
@@ -44,6 +43,7 @@ export function Local({
   planeUrl,
   localOnly,
   onLocalOnly,
+  onConnect,
 }: {
   daemon: DaemonState;
   /** For the organisation's model defaults. Null when nobody is signed in to a plane. */
@@ -53,6 +53,8 @@ export function Local({
   planeUrl: string;
   localOnly: boolean;
   onLocalOnly: (on: boolean) => void;
+  /** Open Tools and skills, where your servers and skills are. */
+  onConnect?: (() => void) | undefined;
 }): JSX.Element {
   return (
     <>
@@ -68,7 +70,15 @@ export function Local({
         {daemon.client && <WhoAmI daemon={daemon} me={me} planeUrl={planeUrl} />}
         {daemon.client && <Models client={daemon.client} auth={auth} />}
         {daemon.client && <Rules client={daemon.client} />}
-        {daemon.client && <Servers client={daemon.client} />}
+        {daemon.client && onConnect && (
+          <section className="group">
+            <h3>Servers and skills</h3>
+            <p className="copy">Your MCP servers and skills are on Tools and skills, where you add, sign in to and check them.</p>
+            <div className="actions start-actions">
+              <button onClick={onConnect}>Open Tools and skills</button>
+            </div>
+          </section>
+        )}
         {daemon.client && <Workspaces client={daemon.client} />}
         {daemon.client && <Worktrees client={daemon.client} />}
       </div>

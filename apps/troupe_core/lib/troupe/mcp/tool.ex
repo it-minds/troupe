@@ -19,6 +19,9 @@ defmodule Troupe.MCP.Tool do
   @enforce_keys [:name, :description, :schema, :run]
   # `files`: the server's config says this tool is where the organisation keeps files
   # (`stores: files`), which the harness names to the agent; nothing else reads it.
+  # `title`, `summary` and `read_only` are what the server says of the tool for a person:
+  # its display title, its own description, and its `readOnlyHint`. A client shows them;
+  # nothing decides on them, since a hint is the server's word and not a guarantee.
   defstruct [
     :name,
     :description,
@@ -26,8 +29,11 @@ defmodule Troupe.MCP.Tool do
     :run,
     :server,
     :remote_name,
+    :title,
+    :summary,
     default_permission: :ask,
-    files: false
+    files: false,
+    read_only: false
   ]
 
   @type t :: %__MODULE__{
@@ -38,7 +44,10 @@ defmodule Troupe.MCP.Tool do
           server: String.t(),
           remote_name: String.t(),
           default_permission: :auto | :ask | :deny,
-          files: boolean()
+          files: boolean(),
+          title: String.t() | nil,
+          summary: String.t() | nil,
+          read_only: boolean()
         }
 
   @doc "Build a Troupe tool from one entry of a server's `tools/list`."
@@ -56,7 +65,44 @@ defmodule Troupe.MCP.Tool do
       files: Server.stores_files?(server, remote_name),
       run: fn args, ctx -> call(server, remote_name, args, ctx) end
     }
+    |> Map.merge(said(listed))
   end
+
+  @doc """
+  What a server says of one tool for a person, from its `tools/list` entry: its
+  `title`, its own description as `summary`, and its `readOnlyHint` as `read_only`.
+  """
+  @spec said(map()) :: %{title: String.t() | nil, summary: String.t() | nil, read_only: boolean()}
+  def said(listed) do
+    %{
+      title: title_of(listed),
+      summary: text_of(listed["description"]),
+      read_only: get_in(listed, ["annotations", "readOnlyHint"]) == true
+    }
+  end
+
+  @doc "A tool as a status lists it for a person: its server's name for it, and `said/1`."
+  @spec about(t()) :: map()
+  def about(%__MODULE__{} = tool),
+    do: %{
+      name: tool.remote_name,
+      title: tool.title,
+      summary: tool.summary,
+      read_only: tool.read_only
+    }
+
+  # The tool's `title`, or its annotations' (the older place for it), when either is text.
+  defp title_of(listed),
+    do: text_of(listed["title"]) || text_of(get_in(listed, ["annotations", "title"]))
+
+  defp text_of(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      text -> text
+    end
+  end
+
+  defp text_of(_value), do: nil
 
   defp description_of(server, listed) do
     text = listed["description"] || "A tool provided by the #{server.name} MCP server."
@@ -139,7 +185,7 @@ defmodule Troupe.MCP.Tool do
       "hint" =>
         "#{server.name} acts as the person who runs this session, and their sign-in to it " <>
           "has run out or was never made: they sign in with /mcp sign-in #{server.name} in " <>
-          "the terminal, or Sign in on the desktop app's Servers and skills panel, then ask again"
+          "the terminal, or Sign in on the desktop app's Tools and skills, then ask again"
     })
   end
 
@@ -154,7 +200,7 @@ defmodule Troupe.MCP.Tool do
         "#{server.name} acts as the person who runs this session, and this tool wants more " <>
           "than their sign-in grants: the scope #{scope}. If they choose to grant it, they " <>
           "sign in again with /mcp sign-in #{server.name} in the terminal, or Sign in on the " <>
-          "desktop app's Servers and skills panel, which asks for it, then ask again"
+          "desktop app's Tools and skills, which asks for it, then ask again"
     })
   end
 
