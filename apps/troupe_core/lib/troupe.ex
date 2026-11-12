@@ -21,7 +21,7 @@ defmodule Troupe do
   alias Troupe.Onboard.Notice
   alias Troupe.Protocol.Origin
   alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
-  alias Troupe.Sessions.{Fork, Index, Pin, Unseen}
+  alias Troupe.Sessions.{Fork, Index, Pin, Title, Unseen}
 
   require Logger
 
@@ -930,14 +930,14 @@ defmodule Troupe do
           {:ok, String.t() | nil} | {:error, :not_found | {:title, String.t()} | String.t()}
   def title_session(session_id, title) do
     with {:ok, title} <- titled(title),
-         :ok <- Troupe.Sessions.Title.put(session_id, title, state_dirs()),
+         :ok <- Title.put(session_id, title, state_dirs()),
          :ok <- Index.update(session_id, %{title: title}) do
       {:ok, title}
     end
   end
 
   defp titled(title) do
-    case Troupe.Sessions.Title.normalise(title) do
+    case Title.normalise(title) do
       {:ok, title} -> {:ok, title}
       {:error, sentence} -> {:error, {:title, sentence}}
     end

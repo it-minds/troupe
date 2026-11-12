@@ -49,7 +49,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
   alias Troupe.Session.MCP, as: LocalMCP
-  alias Troupe.Sessions.{Index, Unseen}
+  alias Troupe.Sessions.{Index, Title, Unseen}
   alias Troupe.Todo.Edit
   alias Troupe.Tool.Result
   alias Troupe.Workflow
@@ -1205,9 +1205,7 @@ defmodule Troupe.Gateway.Dispatch do
 
       case session_agent(profile, parent, resolved.path) || Troupe.start_session(opts) do
         {:ok, session} ->
-          # Named beside its log before the answer, so the listing a client asks for next
-          # already has it.
-          if title, do: Troupe.title_session(session.id, title)
+          named(session.id, title)
 
           {:ok,
            %{
@@ -2397,9 +2395,14 @@ defmodule Troupe.Gateway.Dispatch do
   defp start_error(other), do: inspect(other)
 
   # Running or dormant: the mark is kept beside the session's log.
+  # Named beside its log before the answer, so the listing a client asks for next already
+  # has it.
+  defp named(_session_id, nil), do: :ok
+  defp named(session_id, title), do: Troupe.title_session(session_id, title)
+
   # Checked before the session exists, so a title too long costs nothing.
   defp title_of(params) do
-    case Troupe.Sessions.Title.normalise(Map.get(params, "title")) do
+    case Title.normalise(Map.get(params, "title")) do
       {:ok, title} ->
         {:ok, title}
 
