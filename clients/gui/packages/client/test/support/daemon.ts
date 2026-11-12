@@ -81,6 +81,8 @@ interface Session {
   device?: string | null;
   /** The session this one is a branch of. */
   parent?: string | null;
+  /** What the person called it (`session.create`'s `title`, `session.title.set`). */
+  title?: string | null;
   /**
    * Offered to the plane for steering from another device (troupe #58), as
    * `remote.offer` left it and `session.list` says it.
@@ -1332,9 +1334,14 @@ evoked where nothing is set and there was a sign-in. */
           return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "parent", reason: "no such session" } });
         }
         const profile = typeof params["profile"] === "string" && params["profile"] ? params["profile"] : undefined;
+        const title = typeof params["title"] === "string" && params["title"].trim() ? params["title"].trim() : null;
+        if (title && new TextEncoder().encode(title).length > 200) {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "title", reason: "a title is at most 200 bytes" } });
+        }
         const created = this.seed(workspace, {
           watch: Boolean(config.watch),
           parent,
+          title,
           ...(profile ? { profile } : {}),
           ...(asked ? { kind: "private" as const, sync: this.planeToken !== null ? ("current" as const) : ("paused" as const) } : {}),
         });
@@ -1353,11 +1360,23 @@ evoked where nothing is set and there was a sign-in. */
         }
         return reply(ws, id, {
           session_id: created.id,
+          title,
           workspace,
           worktree: null,
           branch: null,
           syncing: asked && this.planeToken !== null,
         });
+      }
+
+      case "session.title.set": {
+        const session = this.sessions.get(String(params["session_id"] ?? ""));
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const title = String(params["title"] ?? "").trim();
+        if (new TextEncoder().encode(title).length > 200) {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "title", reason: "a title is at most 200 bytes" } });
+        }
+        session.title = title || null;
+        return reply(ws, id, { session_id: session.id, title: session.title });
       }
 
       // A session offered to the plane for steering from another device, and taken back
@@ -2927,6 +2946,7 @@ evoked where nothing is set and there was a sign-in. */
       created_at: s.createdAt,
       last_active_at: s.lastActiveAt,
       pinned: false,
+      title: s.title ?? null,
       kind: s.kind ?? "local",
       sync: s.kind === "private" ? (s.sync ?? "paused") : null,
       device: s.kind === "private" && s.sync === "elsewhere" ? (s.device ?? null) : null,

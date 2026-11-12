@@ -14,7 +14,7 @@ import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, externalResources, nav, recordNetwork, render, says, sees, sleep, startOnTheList, type, waitFor } from "./support";
+import { button, externalResources, hereIn, nav, recordNetwork, render, says, sees, sleep, startButton, startOnTheList, type, waitFor } from "./support";
 import type { Recorder } from "./support";
 
 // jsdom lays nothing out, so it has nothing to scroll; the transcript asks anyway.
@@ -308,10 +308,8 @@ describe("a session started on this computer while signed in to a plane", () => 
 
     button("Start a session")!.click();
     const start = await waitFor(() => document.querySelector<HTMLElement>(".start"), "the start screen");
-    button("Local", start)!.click();
-    const directory = await waitFor(() => start.querySelector<HTMLInputElement>('input[aria-label="Which directory"]'), "the local half");
-    type(directory, "/home/ada/project");
-    button("Start", start)!.click();
+    await hereIn(start, "/home/ada/project");
+    (await startButton(start)).click();
     await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
     const created = [...daemon.sessions.values()].find((s) => s.workspace === "/home/ada/project")!;
     await waitFor(() => daemon.calls.some((c) => c.method === "presence.set" && c.params["session_id"] === created.id), "the daemon's view of it");

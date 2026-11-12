@@ -111,6 +111,10 @@ export interface SessionRow {
   device?: string | null;
   epoch: number;
   title: string | null;
+  /** The agent it was created as or last switched to; null for the profile's default. Absent from an older plane. */
+  agent?: string | null;
+  /** When it was made. Absent from an older plane. */
+  created_at?: string | null;
   last_active_at: string | null;
   last_seq: number;
   head_hash: string | null;
@@ -169,6 +173,14 @@ export interface ProfileOffering {
   agents: string[];
   skills: Array<{ name: string; description?: string }>;
   mcp_servers: string[];
+  /**
+   * The administrator's ceiling on the profile's sessions at once, running and waiting;
+   * null for none. Below it a full profile makes a create wait (`pending`); at it, a
+   * create is refused with `capacity`. Absent from a plane before it said so.
+   */
+  max_sessions?: number | null;
+  /** The caller's teams that may use it, by name: whom a session there is open to. */
+  teams?: string[];
   [k: string]: unknown;
 }
 

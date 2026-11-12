@@ -195,6 +195,31 @@ export function nav(label: string): HTMLButtonElement | null {
 }
 
 /** Type into a field the way React hears it: through the native setter, then an input event. */
+/**
+ * On the new-session screen, put the session on this computer, in `workspace`, as a person
+ * does: the sentence's where chip, "On this computer" once it is on, the folder typed.
+ */
+export async function hereIn(start: HTMLElement, workspace: string): Promise<void> {
+  const chip = await waitFor(() => start.querySelector<HTMLButtonElement>('button.ns-chip[aria-label^="Where it runs"]'), "the where chip");
+  if (!chip.textContent?.includes("on this computer")) {
+    chip.click();
+    const here = await waitFor(() => {
+      const b = button("On this computer", start);
+      return b && !b.disabled && b;
+    }, "On this computer, on");
+    here.click();
+  }
+  type(await waitFor(() => start.querySelector<HTMLInputElement>('input[aria-label="Which directory"]'), "the folder"), workspace);
+}
+
+/** The new-session screen's start button, once it may be pressed. */
+export function startButton(start: HTMLElement): Promise<HTMLButtonElement> {
+  return waitFor(() => {
+    const b = start.querySelector<HTMLButtonElement>("button.ns-start");
+    return b && !b.disabled && b;
+  }, "the start button, on");
+}
+
 export function type(field: HTMLInputElement | HTMLTextAreaElement, value: string): void {
   const proto = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(field, value);

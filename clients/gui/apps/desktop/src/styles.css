@@ -3011,6 +3011,396 @@ details.advanced > summary {
   margin-top: var(--space-1);
 }
 
+/* -- the prompt-first new session ------------------------------------------- */
+
+/* The message first, the settings as one sentence of chips under it, each chip's picker
+   below the sentence. Colours by role: the platform is running's, this computer local's,
+   a full profile queued's (the reserved waiting colour stays the mask's and the
+   approvals'). */
+.new-session .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.new-session .ns-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+  color: var(--text-primary);
+}
+.new-session .ns-word {
+  font: var(--t-wordmark);
+  letter-spacing: var(--tracking-wordmark);
+}
+.new-session .body {
+  max-width: 860px;
+  gap: var(--space-5);
+}
+.new-session .ns-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+}
+.new-session .ns-hero-mask {
+  flex: 0 0 auto;
+  color: var(--text-primary);
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 45%, transparent));
+}
+.new-session h1 {
+  margin: var(--space-1) 0 0;
+  font: var(--t-title);
+  letter-spacing: var(--tracking-title);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.new-session .ns-quip {
+  margin: var(--space-1) 0 0;
+  font: var(--t-note);
+  font-style: italic;
+  color: var(--text-secondary);
+}
+.ns-composer {
+  border: var(--bw-hairline) solid var(--border-strong);
+  background: var(--bg-panel);
+  box-shadow: 6px 6px 0 var(--bg-shadow);
+  min-width: 0;
+}
+.ns-composer:focus-within {
+  border-color: var(--text-body);
+}
+.ns-stripe {
+  height: 4px;
+  background: linear-gradient(90deg, var(--accent), var(--p-agent) 50%, var(--running-fg));
+}
+.ns-ask {
+  display: block;
+  width: 100%;
+  min-height: 150px;
+  padding: var(--space-4) var(--space-5);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  resize: vertical;
+  color: var(--text-primary);
+  font: var(--t-body);
+  font-size: 17px;
+}
+.ns-sentence {
+  border-top: var(--bw-hairline) solid var(--divider);
+  padding: var(--space-3) var(--space-5);
+  font: var(--t-ui);
+  line-height: 2.4;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.ns-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  max-width: 100%;
+  padding: 0 10px;
+  border: var(--bw-hairline) solid var(--border-strong);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font: var(--t-name);
+  font-size: 15px;
+  vertical-align: baseline;
+  line-height: 1;
+}
+.ns-chip.mono {
+  font: var(--t-code);
+}
+.ns-chip[aria-expanded="true"] {
+  border-color: var(--focus);
+  background: var(--bg-raised);
+}
+.ns-chip.tone-running .ns-dot {
+  color: var(--running-fg);
+}
+.ns-chip.tone-local .ns-dot {
+  color: var(--local-fg);
+}
+.ns-chip.tone-queued {
+  border-color: var(--queued-bd);
+  color: var(--queued-fg);
+}
+.ns-caret {
+  color: var(--text-muted);
+}
+.ns-why {
+  margin: 0;
+  padding: 0 var(--space-5) var(--space-3);
+  font: var(--t-note);
+  color: var(--text-secondary);
+}
+.ns-why.warn {
+  color: var(--queued-fg);
+}
+.casting .ns-why {
+  padding: 0;
+}
+.ns-picker {
+  border-top: var(--bw-hairline) solid var(--divider);
+  padding: var(--space-4) var(--space-5);
+  background: var(--bg-sunken);
+}
+.ns-picker-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.ns-picker-head .screen {
+  flex: 1 1 auto;
+}
+.ns-picker-hint,
+.ns-chord,
+.ns-aside,
+.ns-called > span,
+.ns-recent-facts,
+.ns-opt-tag,
+.ns-step-word {
+  font: var(--t-micro);
+  color: var(--text-muted);
+}
+.ns-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: var(--space-2);
+}
+.ns-opt {
+  text-align: left;
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--divider);
+  background: var(--bg-canvas);
+}
+.ns-opt[aria-pressed="true"] {
+  border-color: var(--focus);
+  background: var(--bg-raised);
+}
+.ns-opt:disabled {
+  opacity: 0.6;
+}
+.ns-opt-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--text-muted);
+}
+.ns-opt.tone-running .ns-opt-dot {
+  background: var(--running-fg);
+}
+.ns-opt.tone-local .ns-opt-dot,
+.ns-opt.tone-local .ns-opt-tag {
+  background: var(--local-fg);
+}
+.ns-opt.tone-local .ns-opt-tag {
+  background: none;
+  color: var(--local-fg);
+}
+.ns-opt.tone-queued .ns-opt-dot {
+  background: var(--queued-fg);
+}
+.ns-opt.tone-queued .ns-opt-tag {
+  color: var(--queued-fg);
+}
+.ns-opt.tone-offline .ns-opt-tag {
+  color: var(--offline-fg);
+}
+.ns-opt-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ns-opt-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.ns-opt-label {
+  font: var(--t-name);
+  font-size: 15px;
+  color: var(--text-primary);
+}
+.ns-opt-label.mono {
+  font: var(--t-code);
+}
+.ns-opt-detail {
+  display: block;
+  margin-top: 3px;
+  font: var(--t-ui-small);
+  color: var(--text-secondary);
+}
+.ns-picker .agent-picker,
+.ns-local {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.ns-local {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.ns-folder {
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.ns-folder input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ns-small {
+  font: var(--t-ui-small);
+}
+.ns-foot {
+  border-top: var(--bw-hairline) solid var(--divider);
+  padding: var(--space-3) var(--space-5);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.ns-called {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ns-called input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 36px;
+  background: transparent;
+  border: 0;
+  border-bottom: var(--bw-hairline) dashed var(--border-strong);
+  color: var(--text-body);
+}
+.ns-start {
+  min-height: var(--touch-target);
+  padding: 0 var(--space-5);
+  background: var(--running-fg);
+  color: var(--text-inverse);
+  font: var(--t-subheading);
+  box-shadow: 4px 4px 0 var(--bg-shadow);
+}
+.ns-start.queue {
+  background: var(--queued-fg);
+}
+.ns-start:disabled {
+  opacity: 0.45;
+}
+.ns-hint {
+  margin: 0;
+  font: var(--t-ui-small);
+  color: var(--text-secondary);
+}
+.ns-recents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: var(--space-3);
+}
+.ns-recent {
+  width: 100%;
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--divider);
+  background: var(--bg-panel);
+}
+.ns-recent-title {
+  display: block;
+  font: var(--t-name);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ns-recent-facts {
+  display: block;
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+}
+.ns-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.ns-steps li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  font: var(--t-ui);
+  color: var(--text-muted);
+}
+.ns-steps li.done,
+.ns-steps li.now {
+  color: var(--text-body);
+}
+.ns-step-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bg-raised);
+}
+.ns-steps li.done .ns-step-dot {
+  background: var(--running-fg);
+}
+.ns-steps li.now .ns-step-dot {
+  background: var(--text-body);
+  animation: ns-pulse 1s ease-in-out infinite;
+}
+@keyframes ns-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ns-steps li.now .ns-step-dot {
+    animation: none;
+  }
+}
+@media (max-width: 719px) {
+  .new-session .ns-hero-mask {
+    display: none;
+  }
+  .new-session .ns-brand {
+    padding: var(--space-3) var(--space-4);
+  }
+  .ns-sentence,
+  .ns-why,
+  .ns-picker,
+  .ns-foot,
+  .ns-ask {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+}
+
 /* -- motion ----------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {

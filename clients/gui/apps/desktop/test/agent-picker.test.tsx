@@ -78,7 +78,9 @@ describe("the agent picker", () => {
     await sees("/home/ada/notes");
     button("Start a session")!.click();
     const start = await waitFor(() => document.querySelector<HTMLElement>(".start"), "the start screen");
-    type(start.querySelector<HTMLInputElement>("input")!, REPO);
+    type(start.querySelector<HTMLInputElement>('input[aria-label="Which directory"]')!, REPO);
+
+    (await waitFor(() => start.querySelector<HTMLButtonElement>('button.ns-chip[aria-label^="Which agent"]'), "the agent chip")).click();
 
     const picker = await waitFor(() => start.querySelector<HTMLElement>('[role="group"][aria-label="The agent it starts as"]'), "the picker");
     await waitFor(() => option(picker, "careful"), "the repository's agent");

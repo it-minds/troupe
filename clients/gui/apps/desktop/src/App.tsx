@@ -477,7 +477,8 @@ export function App(): JSX.Element {
           </div>
         )}
 
-        {readySince && <DaemonReady onRefresh={refreshScreen} />}
+        {/* Not on the new-session screen, whose "On this computer" turns on by itself. */}
+        {readySince && where.screen !== "new" && <DaemonReady onRefresh={refreshScreen} />}
 
         {/* Keyed so a refresh is a remount of the screen alone, never of the window. */}
         <Fragment key={entered.remount}>
@@ -496,7 +497,9 @@ export function App(): JSX.Element {
             <StartSession
               auth={planeAuth}
               daemon={daemon.client}
+              daemonStatus={daemon.status}
               linked={Boolean(daemon.identity?.linked)}
+              rows={snapshot.rows}
               onClose={() => setWhere({ screen: "sessions" })}
               onProfile={(profile) => setWhere({ screen: "profiles", profile })}
               onCreated={(id, kind, workspace) => {

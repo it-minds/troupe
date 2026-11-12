@@ -358,6 +358,8 @@ export interface CreateLocalParams {
   private?: boolean;
   /** The session this one is a branch of, as the librarian is of the session that started it. */
   parent?: string;
+  /** What the person calls it: trimmed, at most 200 bytes. Absent, it lists by its workspace. */
+  title?: string;
 }
 
 export interface DaemonHooks {
@@ -789,6 +791,11 @@ export class DaemonClient {
   /** Take an offer back: every view of the session from another device ends at once. */
   withdrawRemote(sessionId: string): Promise<{ session_id: string; remote: null }> {
     return this.command("remote.withdraw", { session_id: sessionId });
+  }
+
+  /** Name a session on this computer, or take its name off with an empty title (`session.title.set`). */
+  setSessionTitle(sessionId: string, title: string): Promise<{ session_id: string; title: string | null }> {
+    return this.command("session.title.set", { session_id: sessionId, title });
   }
 
   recentWorkspaces(): Promise<{ workspaces: RecentWorkspace[] }> {
