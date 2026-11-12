@@ -26,22 +26,6 @@ defmodule Troupe.UI.HQ do
 
   @type column :: :inbox | :teams | :profiles | :sessions
 
-  @typedoc """
-  The new-session wizard: which field is being filled, and what has been chosen
-  so far. It is deliberately a plain map — the page is a fold over keypresses,
-  and a half-finished session is not worth a process.
-  """
-  @type create :: %{
-          step: :profile | :source | :url | :ref | :visibility | :prompt,
-          profile: String.t() | nil,
-          source: String.t(),
-          url: String.t(),
-          ref: String.t(),
-          visibility: String.t(),
-          prompt: String.t(),
-          cursor: non_neg_integer()
-        }
-
   @type t :: %{
           origin: Client.origin() | nil,
           workspace: String.t(),
@@ -52,7 +36,6 @@ defmodule Troupe.UI.HQ do
           cursors: %{column() => non_neg_integer()},
           status: map(),
           error: String.t() | nil,
-          create: create() | nil,
           invitations: [map()],
           shared: non_neg_integer()
         }
@@ -70,7 +53,6 @@ defmodule Troupe.UI.HQ do
       cursors: %{teams: 0, profiles: 0, sessions: 0},
       status: status(origin),
       error: nil,
-      create: nil,
       invitations: [],
       shared: 0
     }
@@ -115,11 +97,15 @@ defmodule Troupe.UI.HQ do
   @doc """
   Handles a key. Returns `{:ok, hq}`, `{:open, hq, session_id}` when a session
   was attached and should take the screen, `{:artifacts, hq}` for the artifacts shared with
-  the person, or `:close`.
+  the person, `{:new_session, hq, profile}` for `n`, which is `/new`'s screen on the
+  platform on the profile selected here, or `:close`.
   """
-  @spec key(t(), map()) :: {:ok, t()} | {:open, t(), String.t()} | {:artifacts, t()} | :close
-  def key(%{create: %{}} = hq, key), do: create_key(hq, key)
-
+  @spec key(t(), map()) ::
+          {:ok, t()}
+          | {:open, t(), String.t()}
+          | {:artifacts, t()}
+          | {:new_session, t(), String.t() | nil}
+          | :close
   def key(_hq, %{code: "esc"}), do: :close
 
   def key(hq, %{code: code}) when code in ["tab", "right", "l"],
@@ -131,7 +117,7 @@ defmodule Troupe.UI.HQ do
   def key(hq, %{code: code}) when code in ["up", "k"], do: {:ok, move(hq, -1)}
   def key(hq, %{code: code}) when code in ["down", "j"], do: {:ok, move(hq, 1)}
   def key(hq, %{code: "r"}), do: {:ok, reload(hq)}
-  def key(hq, %{code: "n"}), do: {:ok, start_create(hq)}
+  def key(hq, %{code: "n"}), do: {:new_session, hq, selected_profile(hq)}
 
   def key(hq, %{code: "enter"}) do
     case hq.column do
@@ -165,10 +151,7 @@ defmodule Troupe.UI.HQ do
     {header, rect} = header(hq, rect, state)
     {banner, rect} = banner(hq, rect)
 
-    case hq.create do
-      nil -> header ++ banner ++ inbox_box(hq, rect, state)
-      create -> header ++ banner ++ create_page(hq, create, rect)
-    end
+    header ++ banner ++ inbox_box(hq, rect, state)
   end
 
   defp inbox_box(hq, rect, state) do
@@ -186,8 +169,6 @@ defmodule Troupe.UI.HQ do
 
   @doc "The line under the page that says what the keys do."
   @spec footer(t()) :: String.t()
-  def footer(%{create: %{step: step}}), do: " new session — #{step_hint(step)} · Esc cancels "
-
   def footer(_hq),
     do: " HQ — ↑↓ move · ←/→/Tab column · Enter opens · n new session · r refresh · Esc back "
 
@@ -398,156 +379,15 @@ defmodule Troupe.UI.HQ do
     if hq.column == column, do: Theme.style(:accent), else: Theme.style(:rail)
   end
 
-  ## The new-session wizard
-
-  defp start_create(hq) do
-    %{
-      hq
-      | create: %{
-          step: :profile,
-          profile: nil,
-          source: "empty",
-          url: "",
-          ref: "",
-          visibility: "private",
-          prompt: "",
-          cursor: 0
-        }
-    }
-  end
-
-  defp create_key(hq, %{code: "esc"}), do: {:ok, %{hq | create: nil}}
-
-  defp create_key(%{create: %{step: :profile} = create} = hq, %{code: code})
-       when code in ["up", "k"],
-       do: {:ok, put_create(hq, cursor: max(create.cursor - 1, 0))}
-
-  defp create_key(%{create: %{step: :profile} = create} = hq, %{code: code})
-       when code in ["down", "j"],
-       do: {:ok, put_create(hq, cursor: min(create.cursor + 1, max(length(hq.profiles) - 1, 0)))}
-
-  defp create_key(%{create: %{step: :profile} = create} = hq, %{code: "enter"}) do
-    case Enum.at(hq.profiles, create.cursor) do
-      nil -> {:ok, hq}
-      profile -> {:ok, put_create(hq, profile: profile.name, step: :source, cursor: 0)}
+  # The profile under HQ's cursor, which `n` starts the new-session screen on.
+  defp selected_profile(%{column: :profiles} = hq) do
+    case selected(hq, :profiles) do
+      %{name: name} -> name
+      _none -> nil
     end
   end
 
-  defp create_key(%{create: %{step: :source}} = hq, %{code: code})
-       when code in ["up", "k", "down", "j"] do
-    next = if hq.create.source == "empty", do: "git", else: "empty"
-    {:ok, put_create(hq, source: next)}
-  end
-
-  defp create_key(%{create: %{step: :source, source: "git"}} = hq, %{code: "enter"}),
-    do: {:ok, put_create(hq, step: :url)}
-
-  defp create_key(%{create: %{step: :source}} = hq, %{code: "enter"}),
-    do: {:ok, put_create(hq, step: :visibility)}
-
-  defp create_key(%{create: %{step: :url}} = hq, %{code: "enter"}),
-    do: {:ok, put_create(hq, step: :ref)}
-
-  defp create_key(%{create: %{step: :ref}} = hq, %{code: "enter"}),
-    do: {:ok, put_create(hq, step: :visibility)}
-
-  defp create_key(%{create: %{step: :visibility}} = hq, %{code: code})
-       when code in ["up", "k", "down", "j"] do
-    next = if hq.create.visibility == "private", do: "team", else: "private"
-    {:ok, put_create(hq, visibility: next)}
-  end
-
-  defp create_key(%{create: %{step: :visibility}} = hq, %{code: "enter"}),
-    do: {:ok, put_create(hq, step: :prompt)}
-
-  defp create_key(%{create: %{step: :prompt}} = hq, %{code: "enter"}), do: create_session(hq)
-
-  defp create_key(%{create: %{step: step}} = hq, %{code: "backspace"})
-       when step in [:url, :ref, :prompt],
-       do: {:ok, put_create(hq, [{step, String.slice(Map.fetch!(hq.create, step), 0..-2//1)}])}
-
-  defp create_key(%{create: %{step: step}} = hq, %{code: code, modifiers: mods})
-       when step in [:url, :ref, :prompt] and mods in [[], ["shift"]] do
-    if String.length(code) == 1,
-      do: {:ok, put_create(hq, [{step, Map.fetch!(hq.create, step) <> code}])},
-      else: {:ok, hq}
-  end
-
-  defp create_key(hq, _key), do: {:ok, hq}
-
-  defp put_create(hq, changes), do: %{hq | create: Enum.into(changes, hq.create)}
-
-  defp create_session(%{origin: nil} = hq),
-    do: {:ok, %{hq | create: nil, error: "no plane; run troupe login <plane-url> first"}}
-
-  defp create_session(hq) do
-    create = hq.create
-
-    params = %{
-      team: selected_team(hq),
-      profile: create.profile,
-      source: source(create),
-      visibility: create.visibility,
-      prompt: create.prompt
-    }
-
-    case Client.create_session(hq.origin, params) do
-      {:ok, session_id} ->
-        {:open, %{hq | create: nil, error: nil}, session_id}
-
-      {:error, reason} ->
-        {:ok, %{hq | create: nil, error: message(reason)}}
-    end
-  end
-
-  defp source(%{source: "git", url: url, ref: ref}),
-    do: %{type: "git", url: url, ref: if(ref == "", do: "main", else: ref)}
-
-  defp source(_create), do: %{type: "empty"}
-
-  defp create_page(hq, create, rect) do
-    lines = [
-      "profile     #{create.profile || "(pick one)"}",
-      "team        #{selected_team(hq) || "(none)"}",
-      "source      #{create.source}#{git_summary(create)}",
-      "visibility  #{create.visibility}",
-      "prompt      #{create.prompt}▏",
-      "",
-      step_hint(create.step)
-    ]
-
-    body =
-      case create.step do
-        :profile -> profile_choices(hq, create) ++ ["", step_hint(create.step)]
-        _ -> lines
-      end
-
-    [
-      {%Paragraph{
-         text: Enum.join(body, "\n"),
-         wrap: true,
-         block: %Block{title: " new session ", borders: [:all], border_type: :double}
-       }, rect}
-    ]
-  end
-
-  defp profile_choices(hq, create) do
-    ["pick a profile:", ""] ++
-      Enum.with_index(hq.profiles, fn profile, index ->
-        marker = if index == create.cursor, do: "▸ ", else: "  "
-        marker <> String.pad_trailing(profile.name, 14) <> capacity(profile.capacity)
-      end)
-  end
-
-  defp git_summary(%{source: "git", url: url, ref: ref}), do: " #{url}##{ref}"
-  defp git_summary(_create), do: ""
-
-  defp step_hint(:profile), do: "↑↓ pick a profile, Enter continues"
-  defp step_hint(:source), do: "↑↓ empty or git, Enter continues"
-  defp step_hint(:url), do: "type the repository URL, Enter continues"
-  defp step_hint(:ref), do: "type the ref (blank means main), Enter continues"
-  defp step_hint(:visibility), do: "↑↓ private or team, Enter continues"
-  defp step_hint(:prompt), do: "type the first prompt, Enter creates the session and attaches"
+  defp selected_profile(_hq), do: nil
 
   ## Opening
 

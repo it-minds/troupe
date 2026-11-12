@@ -282,6 +282,13 @@ defmodule Troupe.FakeRemote do
   @spec state(pid(), String.t(), String.t()) :: :ok
   def state(remote, session_id, state), do: GenServer.call(remote, {:state, session_id, state})
 
+  @doc "Give a session that waits for a place its place, as the plane's scaler does."
+  def place(remote, session_id), do: GenServer.call(remote, {:place, session_id})
+
+  @doc "Say how full a profile is from now on: `capacity` as `%{free, total}`, `max_sessions`."
+  def room(remote, name, capacity, max_sessions \\ nil),
+    do: GenServer.call(remote, {:room, name, capacity, max_sessions})
+
   @doc "How many worker connections are open right now."
   @spec worker_connections(pid()) :: non_neg_integer()
   def worker_connections(remote), do: GenServer.call(remote, :worker_connections)
@@ -515,6 +522,22 @@ defmodule Troupe.FakeRemote do
     do: {:reply, :ok, state |> Map.put(:offered, rows) |> Map.put(:opener, open)}
 
   def handle_call(:registered, _from, state), do: {:reply, state.private, state}
+
+  def handle_call({:place, session_id}, _from, state),
+    do: {:reply, :ok, put_in(state.sessions[session_id][:state], "active")}
+
+  def handle_call({:room, name, capacity, max_sessions}, _from, state) do
+    profiles =
+      Enum.map(state.profiles, fn
+        %{"name" => ^name} = p ->
+          Map.merge(p, %{"capacity" => capacity, "max_sessions" => max_sessions})
+
+        p ->
+          p
+      end)
+
+    {:reply, :ok, %{state | profiles: profiles}}
+  end
 
   def handle_call({:hold, session_id, attrs}, _from, state) do
     row = Map.merge(Map.fetch!(state.private, session_id), attrs)
@@ -894,26 +917,40 @@ defmodule Troupe.FakeRemote do
 
   defp dispatch(state, _kind, "session.create", params, _pid) do
     id = "s-" <> Base.encode16(:crypto.strong_rand_bytes(3), case: :lower)
+    profile = Enum.find(state.profiles, &(&1["name"] == (params["profile"] || "code")))
+    {free, max, running} = room_of(profile, state)
 
-    session =
-      normalise(
+    if max && running >= max do
+      reason = "#{profile["name"]} allows #{max} session(s) at once, and they are running"
+
+      {{:error, -32_008, "capacity",
+        %{"profile" => profile["name"], "max_sessions" => max, "reason" => reason}}, state}
+    else
+      waits? = free == 0
+
+      session =
         session(
           id: id,
-          title: params["prompt"] || "new session",
+          title: params["title"] || params["prompt"] || "new session",
           team: params["team"] || "core",
           profile: params["profile"] || "code",
-          state: "active"
+          state: if(waits?, do: "pending", else: "active")
         )
-      )
+        |> normalise()
+        |> Map.put(:agent, params["agent"])
 
-    state = put_in(state.sessions[id], session)
+      state = put_in(state.sessions[id], session)
 
-    {{:ok,
-      %{
-        "session_id" => id,
-        "endpoint" => endpoint(state, session.worker),
-        "token" => token(id)
-      }}, state}
+      if waits?,
+        do: {{:ok, waiting_for(id, session.profile)}, state},
+        else:
+          {{:ok,
+            %{
+              "session_id" => id,
+              "endpoint" => endpoint(state, session.worker),
+              "token" => token(id)
+            }}, state}
+    end
   end
 
   # The plane's fork (root Decision 812): a session of the parent's team and profile, whose
@@ -965,8 +1002,21 @@ defmodule Troupe.FakeRemote do
     end
   end
 
-  defp dispatch(state, _kind, "token.mint", params, _pid),
-    do: {{:ok, %{"token" => token(params["session_id"])}}, state}
+  defp dispatch(state, _kind, "token.mint", params, _pid) do
+    id = params["session_id"]
+
+    case state.sessions[id] do
+      %{state: "pending", profile: profile} ->
+        {{:ok, waiting_for(id, profile)}, state}
+
+      %{worker: worker} ->
+        {{:ok, %{"session_id" => id, "endpoint" => endpoint(state, worker), "token" => token(id)}},
+         state}
+
+      nil ->
+        {{:ok, %{"token" => token(id)}}, state}
+    end
+  end
 
   defp dispatch(state, _kind, "subscribe", %{"topic" => "fleet"}, pid) do
     {{:ok, %{}}, put_in(state.subscriptions[pid], :fleet)}
@@ -1866,6 +1916,31 @@ defmodule Troupe.FakeRemote do
 
   # The live plane's rows: pods and micros rather than a verdict and a price,
   # and no team on a session.
+  # How full a profile is: the free places it says, its ceiling, and how many run on it.
+  defp room_of(nil, _state), do: {1, nil, 0}
+
+  defp room_of(profile, state) do
+    free = get_in(profile, ["capacity", "free"]) || 1
+
+    running =
+      Enum.count(
+        Map.values(state.sessions),
+        &(&1.profile == profile["name"] and &1.state == "active")
+      )
+
+    {free, profile["max_sessions"], running}
+  end
+
+  defp waiting_for(id, profile),
+    do: %{
+      "session_id" => id,
+      "epoch" => 1,
+      "state" => "pending",
+      "mode" => "waiting",
+      "reason" => "waiting for a free place on #{profile}",
+      "retry_after_ms" => 50
+    }
+
   defp granted(state), do: Enum.reject(state.profiles, &(&1["granted"] == false))
 
   # `profile.get`'s answer from a profile's fields, as the plane composes it: its agents
@@ -1957,6 +2032,8 @@ defmodule Troupe.FakeRemote do
       "capacity" => total,
       "active_sessions" => total - free,
       "healthy_pods" => healthy,
+      "max_sessions" => profile["max_sessions"],
+      "teams" => profile["teams"],
       "channel" => "stable",
       "bundle_version" => "1",
       "agents" => Enum.map(profile["agents"] || [%{"name" => "code"}], & &1["name"])
@@ -1971,6 +2048,7 @@ defmodule Troupe.FakeRemote do
       "state" => session.state,
       "status" => session.status,
       "title" => session.title,
+      "agent" => Map.get(session, :agent),
       "last_active_at" => session.updated_at,
       "cost_micros" => session.cost && round(session.cost * 1_000_000),
       "pending_approvals" => 0,

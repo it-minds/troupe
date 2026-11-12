@@ -12,6 +12,7 @@ defmodule Troupe.RemoteHQTest do
 
   alias Troupe.Client
   alias Troupe.FakeRemote
+  alias Troupe.UI.TUI.NewSessionPage
 
   @moduletag :remote
 
@@ -140,25 +141,18 @@ defmodule Troupe.RemoteHQTest do
       GenServer.stop(pid, :normal)
     end
 
-    test "the wizard creates a session with the chosen profile, source and prompt, then attaches" do
+    test "n opens the new-session screen on the platform, which creates and attaches" do
       {remote, url} = start_remote!(sessions: sessions(), profiles: profiles())
       login!(remote, url)
       {sid, _ws} = local_session!()
 
       {pid, _screen} = start_tui(sid, page: :hq, plane: url)
 
+      # `n` is `/new`'s screen on the platform: the message first, the
+      # profile picked as the screen picks it, the session open to the team it says.
       press(pid, "n")
-      assert user_state(pid).hq.create.step == :profile
-      press(pid, "enter")
-
-      assert user_state(pid).hq.create.profile == "code"
-      assert user_state(pid).hq.create.step == :source
-      press(pid, "enter")
-
-      assert user_state(pid).hq.create.step == :visibility
-      press(pid, "down")
-      assert user_state(pid).hq.create.visibility == "team"
-      press(pid, "enter")
+      assert user_state(pid).focus == :new_session
+      assert NewSessionPage.plain(user_state(pid).new_page) =~ "Runs [on the platform] with [code]"
 
       type(pid, "ship it")
       press(pid, "enter")
@@ -171,6 +165,7 @@ defmodule Troupe.RemoteHQTest do
       assert params["team"] == "Core"
       assert params["visibility"] == "team"
       assert params["prompt"] == "ship it"
+      assert params["title"] == "ship it"
       assert params["source"] == %{"type" => "empty"}
       assert params["command_id"] != nil
 

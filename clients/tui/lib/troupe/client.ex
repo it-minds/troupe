@@ -864,6 +864,18 @@ defmodule Troupe.Client do
   @spec offered_profiles(origin() | nil) :: {:ok, [map()]} | {:error, term()}
   def offered_profiles(origin \\ nil), do: Troupe.Client.Profiles.list(origin)
 
+  @doc "The plane's `profiles.list` rows as it answers them: room, ceiling and teams for `/new`'s screen."
+  @spec profile_rows(origin()) :: {:ok, [map()]} | {:error, term()}
+  def profile_rows(origin), do: Remote.profile_rows(origin)
+
+  @doc "The plane's `sessions.list` rows as it answers them: each one's agent, for `/new`'s screen."
+  @spec plane_session_rows(origin()) :: {:ok, [map()]} | {:error, term()}
+  def plane_session_rows(origin), do: Remote.session_rows(origin)
+
+  @doc "The plane this machine is signed in to, connected; or why there is none (Local only, signed out)."
+  @spec signed_in_plane() :: {:ok, origin()} | {:error, term()}
+  def signed_in_plane, do: Troupe.Client.Profiles.plane(nil)
+
   @doc "What one profile gives a session of the person's: `profile.get`, for them."
   @spec profile_page(origin() | nil, String.t()) :: {:ok, map()} | {:error, term()}
   def profile_page(origin \\ nil, name), do: Troupe.Client.Profiles.get(origin, name)

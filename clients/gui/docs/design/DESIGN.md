@@ -218,6 +218,15 @@ What it deliberately does *not* do: no modal, no dimming, no sound, no red, no c
 
 ## 6a. Starting a session: ownership, tools, output
 
+The new-session screen is prompt-first (Decision 975): the message box with the
+pink-violet-cyan stripe, then one sentence of chips, "Runs [on the platform] with [dev] as
+[build] · everyone on core can open it", each opening its picker beneath; a line under it
+says why the profile was picked or what is blocked (a full profile in the queued amber,
+"On this computer" off until the daemon answers); CALLED, the title from the first line;
+*Start*, *Start empty* or *Queue it*; *Start like last time*; then the casting steps. One
+quip per load is decoration beside the plain lines. What follows is the longer design of
+ownership, tools and output, not all of which the screen asks yet.
+
 Three decisions are made before a session exists, and each one is phrased as a consequence rather than a setting.
 
 **Who it belongs to.** One list: **Private — only you**, then the user's teams. Private is first because it is the safest answer and the one people reach for when they are unsure. Underneath, one sentence states the consequence in plain words — "Everyone on Sales can open this session and answer its approvals", or "Only you can open this session. Nobody can be added later." Privacy in Troupe is not a padlock icon; it is a sentence saying who will be able to read this. A private session is not a lesser session: it streams, sleeps, and takes approvals exactly like a team one. It simply has no second person, so the presence row and the "anyone can answer" line are absent.

@@ -258,6 +258,7 @@ defmodule Troupe.CLI.Runner do
   defp plane_call?(%{mode: :tui, remote: true}), do: true
   # A private session is sealed to the plane.
   defp plane_call?(%{mode: mode, private: true}) when mode in [:tui, :run, :resume], do: true
+  defp plane_call?(%{mode: :run, profile: profile}) when is_binary(profile), do: true
   defp plane_call?(_args), do: false
 
   defp plane_command(%{mode: :login}), do: "troupe login"
@@ -266,6 +267,7 @@ defmodule Troupe.CLI.Runner do
   defp plane_command(%{mode: :config_pull}), do: "troupe config pull"
   defp plane_command(%{remote: true}), do: "troupe --remote"
   defp plane_command(%{private: true}), do: "troupe --private"
+  defp plane_command(%{profile: profile}) when is_binary(profile), do: "troupe run --profile"
 
   @doc """
   A command line that would draw the terminal UI, when standard output is not a
@@ -341,7 +343,14 @@ defmodule Troupe.CLI.Runner do
     # provider by what the connection called itself (root Decision 787).
     Application.put_env(:troupe, :client_name, client_name(args))
 
-    case Client.create_session({:local, args.workspace}, run_params(args)) do
+    case Troupe.CLI.RunTarget.resolve(args) do
+      {:error, sentence} -> fail("troupe: " <> sentence)
+      {origin, params} -> run_on(args, origin, params)
+    end
+  end
+
+  defp run_on(args, origin, params) do
+    case Client.create_session(origin, params) do
       {:ok, sid} when args.headless ->
         me = self()
 

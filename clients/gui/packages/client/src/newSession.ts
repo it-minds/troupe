@@ -75,7 +75,7 @@ export function stripTokens(text: string, picked: { profile?: unknown; agent?: u
   if ("profile" in picked) t = strip(t, PROFILE, names.profiles);
   if ("agent" in picked) t = strip(t, AGENT, names.agents);
   if ("where" in picked) t = strip(t, WHERE, null);
-  return t.replace(/[ \t]{2,}/g, " ").replace(/[ \t]+$/gm, "");
+  return t.replace(/[ \t]{2,}/g, " ").replace(/[ \t]+$/gm, "").replace(/^[ \t]+/, "");
 }
 
 /** The title the cleaned message gives: its first sentence or line, at most 60 characters. */

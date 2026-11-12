@@ -282,14 +282,17 @@ defmodule Troupe.Commands do
         usage: "/new [--private | --remote PROFILE | --branch]",
         args: [arg("flags", false, "text")],
         detail:
-          "Opens a new session in this workspace and takes the screen; the one you left " <>
-            "keeps running, stays in /sessions, and /back returns to it. The agent picker " <>
-            "opens first, and Enter starts the session on the agent chosen (n there makes " <>
-            "a new agent from one, which you save and then start on). --private makes " <>
-            "it a private session, --remote PROFILE starts it on that profile of the plane " <>
-            "you are signed in to, and --branch forks the one on screen: a session of its " <>
-            "own that starts from this conversation as it stands. Type its first line on " <>
-            "the command line it opens with.",
+          "Opens the new-session screen and the session takes the screen; the one you " <>
+            "left keeps running, stays in /sessions, and /back returns to it. The message " <>
+            "comes first; under it one sentence says where it runs, the folder or the " <>
+            "profile, and the agent, each a chip Tab and the arrows reach and Enter opens. " <>
+            "The profile is the last used with room, else the first with room, and a line " <>
+            "says why. @profile, #agent, /local and /platform in the message set those and " <>
+            "are taken out of it. Enter starts (a full profile queues, and the wait is " <>
+            "shown); Shift or Alt with Enter is a new line; a digit on an empty box starts " <>
+            "like a recent session. --private and --remote PROFILE set the chips, and " <>
+            "--branch forks the one on screen at once: a session of its own that starts " <>
+            "from this conversation as it stands.",
         example: "/new --branch"
       ),
       entry("cancel", "session", "Stop a branch mid-turn and remove its window",

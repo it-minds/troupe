@@ -276,6 +276,28 @@ back to the picker on what was saved, so Enter, or `b`, starts on it at once. A 
 and say where they are changed. What a definition holds, and the built-ins, are on
 [agents, commands and workflows](agents.md).
 
+## A new session
+
+`/new` opens the new-session screen with the message box first. Under it one sentence
+says how the session will run, `Runs [on the platform] with [code] as [build] · everyone
+on core can open it` (or `Runs [on this computer] in [folder] as [build] · only you can
+open it`). Tab moves to the chips and on to CALLED, ←→ between the chips, Enter opens the
+picker under the sentence: where it runs (*On this computer* is greyed, with why, until
+the daemon link is up), the recent folders, the profiles with their room (`FULL` in
+amber), the agent (on this computer the agent picker above). A line under the sentence
+says why the profile was picked: the last you used while it has room, else the first with
+room. `@profile`, `#agent`, `/local` and `/platform` typed in the box set the chips and are
+taken out before the agent reads it; in this box `@name` naming a profile is not a file
+path, and `/local` is not a command. CALLED is the first line until you edit it.
+
+Enter starts it; Shift or Alt with Enter is a new line, as on the command line (most
+terminals send Ctrl+Enter as Enter). On an empty box `1`-`3` start like a recent session:
+its where, folder, profile and agent. On a full profile Enter queues it: the curtain line
+says *waiting for a free place in code*, the plane is asked again as it says, and the
+session screen opens once it is placed; Esc goes back, and the session waits on by
+itself. `/new --remote PROFILE` and `/new --private` set the chips first; `/new --branch`
+forks at once. HQ's `n` opens the same screen on the platform.
+
 ## Artifacts
 
 `/artifacts` lists what is published for you on the plane, through this computer's daemon

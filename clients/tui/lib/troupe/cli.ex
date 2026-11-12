@@ -44,6 +44,9 @@ defmodule Troupe.CLI do
   @type args :: %{
           mode: mode(),
           agent: String.t(),
+          agent_given: boolean(),
+          profile: String.t() | nil,
+          title: String.t() | nil,
           task: String.t() | nil,
           headless: boolean(),
           worktree: boolean(),
@@ -126,7 +129,9 @@ defmodule Troupe.CLI do
     edit: :boolean,
     clear: :boolean,
     status: :boolean,
-    blame: :boolean
+    blame: :boolean,
+    profile: :string,
+    title: :string
   ]
 
   # Every command line `troupe` takes: how it is typed, what it does, and command lines
@@ -150,6 +155,11 @@ defmodule Troupe.CLI do
     {~s(troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--full-send] [--private] [--workspace DIR]),
      "one task: in the TUI, or with --headless printed line by line until the agent rests",
      [["run", "task"], ["run", "plan", "task", "--headless", "--workspace", "."]]},
+    {~s(troupe run [AGENT] "task" --profile NAME [--title "TITLE"] [--headless]),
+     "the task on the platform, on that plane profile, as the TUI's /new would start it; " <>
+       "a full profile is waited on, a line a wait; @profile #agent /local /platform in " <>
+       "the task set those and are taken out of it",
+     [["run", "task", "--profile", "dev", "--headless"], ["run", "task", "--title", "Called"]]},
     {"troupe resume [SESSION_ID | latest] [--private]",
      "no id: the newest session here, picker open; latest, or --private for the newest private one: " <>
        "straight in (troupe --resume is the same)",
@@ -429,6 +439,10 @@ defmodule Troupe.CLI do
     base = %{
       mode: :tui,
       agent: "build",
+      agent_given: false,
+      # `troupe run --profile`: a plane profile, which puts the run on the platform.
+      profile: Keyword.get(opts, :profile),
+      title: Keyword.get(opts, :title),
       task: nil,
       headless: Keyword.get(opts, :headless, false),
       worktree: Keyword.get(opts, :worktree, false),
@@ -529,7 +543,7 @@ defmodule Troupe.CLI do
   defp parse_rest(["run", task], base), do: {:ok, %{base | mode: :run, task: task}}
 
   defp parse_rest(["run", agent, task], base),
-    do: {:ok, %{base | mode: :run, agent: agent, task: task}}
+    do: {:ok, %{base | mode: :run, agent: agent, agent_given: true, task: task}}
 
   defp parse_rest(["run"], _base), do: {:error, "usage: troupe run [AGENT] \"task\""}
   # `--explain` names at most one key; `--json` alone is the whole explanation as JSON.

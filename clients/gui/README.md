@@ -78,6 +78,11 @@ from the daemon's scripted `fake` provider reading `script.json` beside it in
 `TROUPE_DEV_HOME`: one step per model call, per agent under `routes` (`Troupe.LLM.Fake`),
 from the top for each new session.
 
+The start screen (`StartSession.tsx`) is prompt-first: the message, then one sentence of
+chips (where, folder, profile, agent) with a line saying why the profile was picked, the
+tokens `@profile #agent /local /platform` read from the message (`newSession.ts`), *Queue
+it* on a full profile with the wait shown, and *Start like last time* (Decision 975).
+
 It needs `troupe-daemon` installed (`install.ps1`/`install.sh` at the repository root, or
 `scripts/install-local.ps1` from a checkout); `TROUPE_DAEMON_BIN` names another. The daemon
 it starts is a second instance of that install, with its own state, config and

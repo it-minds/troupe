@@ -23,6 +23,7 @@ defmodule Troupe.UI.TUI.Server do
     Input,
     MemoryPage,
     Model,
+    NewSessionPage,
     ProfilesPage,
     Theme,
     View
@@ -103,6 +104,8 @@ defmodule Troupe.UI.TUI.Server do
           artifacts_page: ArtifactsPage.t() | nil,
           memory_page: MemoryPage.t() | nil,
           profiles_page: ProfilesPage.t() | nil,
+          new_page: NewSessionPage.t() | nil,
+          new_task: reference() | nil,
           hq: HQ.t() | nil,
           shell: shell() | nil,
           theme: Theme.t(),
@@ -335,6 +338,9 @@ defmodule Troupe.UI.TUI.Server do
       memory_page: nil,
       # `/profiles` and `/profile <name>`: what a profile the person may use gives a session.
       profiles_page: nil,
+      # `/new`'s screen, and the start it is waiting on.
+      new_page: nil,
+      new_task: nil,
       hq: nil,
       shell: nil,
       # The person's theme, from `ui.theme` (`read_appearance/1`), and the value last said
@@ -633,6 +639,42 @@ defmodule Troupe.UI.TUI.Server do
     {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
   end
 
+  # The start `/new`'s screen is waiting on: the plane's wait for a place, then the session,
+  # or why not. An answer for a start since left is not this screen's.
+  def handle_info({:new_session_wait, ref}, %{new_task: ref, new_page: %{} = page} = state),
+    do:
+      {:noreply, %{state | new_page: NewSessionPage.waiting(page)} |> notice(waiting_line(page)),
+       render?: true}
+
+  # A session here on an agent the screen named: a line typed on its command line starts
+  # that agent, as a session the agent picker started always did.
+  def handle_info({:new_session_done, ref, {:ok, sid}}, %{new_task: ref} = state) do
+    casting = state.new_page && state.new_page.casting
+    agent = casting && casting.where == :local && casting.named_agent
+    state = %{state | new_task: nil, new_page: nil, focus: :command, switcher: nil}
+
+    said =
+      if agent,
+        do: "new session #{sid} on #{agent}: a line typed here starts #{agent}; ",
+        else: "new session #{sid}; "
+
+    state = adopt(state, sid, said <> "/back returns to #{state.session_id}")
+    state = if agent, do: %{state | choice: %{agent: agent, where: :checkout}}, else: state
+    {:noreply, state, render?: true}
+  end
+
+  def handle_info(
+        {:new_session_done, ref, {:error, reason}},
+        %{new_task: ref, new_page: %{} = page} = state
+      ),
+      do:
+        {:noreply,
+         %{state | new_task: nil, new_page: NewSessionPage.failed(page, to_message(reason))},
+         render?: true}
+
+  def handle_info({:new_session_wait, _ref}, state), do: {:noreply, state, render?: false}
+  def handle_info({:new_session_done, _ref, _result}, state), do: {:noreply, state, render?: false}
+
   def handle_info(_msg, state), do: {:noreply, state, render?: false}
 
   # A scrolled-up pane that ends up at the bottom (because the transcript shrank) follows
@@ -730,6 +772,9 @@ defmodule Troupe.UI.TUI.Server do
   def handle_event(%Key{} = key, %{focus: :hq} = state),
     do: {:noreply, hq_key(key, %{state | quit_armed: false})}
 
+  def handle_event(%Key{} = key, %{focus: :new_session} = state),
+    do: {:noreply, new_page_key(key, %{state | quit_armed: false})}
+
   def handle_event(%Key{} = key, %{focus: :agents} = state),
     do: {:noreply, agents_key(key, %{state | quit_armed: false})}
 
@@ -802,6 +847,9 @@ defmodule Troupe.UI.TUI.Server do
 
       :hq ->
         {:noreply, state, render?: false}
+
+      :new_session ->
+        {:noreply, %{state | new_page: NewSessionPage.paste(state.new_page, content)}}
 
       :palette ->
         {:noreply, state, render?: false}
@@ -2224,31 +2272,85 @@ defmodule Troupe.UI.TUI.Server do
   # and choosing who runs it are one action. Not with a pod's session on screen, whose
   # listing is the pod's, not what a session here could run; nor for a fork, which keeps
   # the agent of what it forks, or a plane's profile, which names its own.
+  #
+  # The screen is prompt-first: the message box, then the settings as
+  # one sentence of chips. `--private` and `--remote PROFILE` pre-set the chips; `--branch`
+  # forks what is on screen at once, as it always did.
   defp new_session(state, args) do
     case new_kind(String.split(args)) do
-      {:ok, kind} when kind in [:local, :private] ->
-        if Client.remote?(state.session_id),
-          do: open_kind(state, kind, nil),
-          else: pick_new(state, kind)
-
-      {:ok, kind} ->
-        open_kind(state, kind, nil)
-
-      :usage ->
-        notice(state, "usage: /new [--private | --remote PROFILE | --branch]")
+      {:ok, :branch} -> open_kind(state, :branch, nil)
+      {:ok, :local} -> open_new_page(state, [])
+      {:ok, :private} -> open_new_page(state, private: true)
+      {:ok, {:remote, profile}} -> open_new_page(state, where: :platform, profile: profile)
+      :usage -> notice(state, "usage: /new [--private | --remote PROFILE | --branch]")
     end
   end
 
-  defp pick_new(state, kind) do
-    case AgentChooser.open(state.session_id, state.default_agent,
-           title:
-             if(kind == :private, do: " a new private session on ", else: " a new session on "),
-           for: {:new, kind}
-         ) do
-      {:ok, picker} -> %{put_cmd(state, "") | focus: :switcher, switcher: picker}
-      {:error, _reason} -> open_kind(state, kind, nil)
+  defp open_new_page(state, opts, origin \\ :default) do
+    origin = if origin == :default, do: new_page_plane(), else: origin
+    agent = if Client.remote?(state.session_id), do: nil, else: state.default_agent
+    opts = Keyword.merge([origin: origin, workspace: here(state), agent: agent], opts)
+    %{put_cmd(state, "") | focus: :new_session, new_page: NewSessionPage.open(opts)}
+  end
+
+  # The plane this machine is signed in to, unless Local only: the screen offers it.
+  defp new_page_plane do
+    case Client.signed_in_plane() do
+      {:ok, origin} -> origin
+      {:error, _none} -> nil
     end
   end
+
+  defp new_page_key(key, %{new_page: page} = state) do
+    case NewSessionPage.key(page, key) do
+      # Back to the form from the casting steps: the start is no longer this screen's.
+      {:ok, page} ->
+        %{state | new_page: page, new_task: if(page.casting, do: state.new_task)}
+
+      :close ->
+        %{state | focus: :command, new_page: nil, new_task: nil}
+
+      {:choose_agent, page} ->
+        case AgentChooser.open(state.session_id, page.agent || state.default_agent,
+               title: " a new session on ",
+               for: {:new, :screen}
+             ) do
+          {:ok, picker} -> %{state | new_page: page, focus: :switcher, switcher: picker}
+          {:error, reason} -> notice(%{state | new_page: page}, to_message(reason))
+        end
+
+      {:start, page, origin, params} ->
+        start_new(%{state | new_page: page}, origin, params)
+    end
+  end
+
+  # Made in a task, so the screen draws the wait while the plane holds the session for a
+  # place, and asks again as `retry_after_ms` says; going back to the form stops the wait.
+  defp start_new(state, origin, params) do
+    server = self()
+    ref = make_ref()
+
+    on_wait = fn _answer ->
+      send(server, {:new_session_wait, ref})
+      if Process.alive?(server), do: :go_on, else: :stop
+    end
+
+    params =
+      if match?({:remote, _}, origin),
+        do: Map.merge(params, %{on_wait: on_wait, visibility: "team"}),
+        else: params
+
+    {:ok, _task} =
+      Task.start(fn ->
+        send(server, {:new_session_done, ref, Client.create_session(origin, params)})
+      end)
+
+    {_word, first} = state.new_page.casting |> NewSessionPage.steps() |> hd()
+    notice(%{state | new_task: ref}, "casting: " <> first)
+  end
+
+  defp waiting_line(%{casting: %{profile: profile}}), do: "waiting for a free place in #{profile}"
+  defp waiting_line(_page), do: "waiting for a free place"
 
   # The session made and on screen; on an agent chosen, the first line typed starts it.
   defp open_kind(state, kind, agent) do
@@ -2424,6 +2526,14 @@ defmodule Troupe.UI.TUI.Server do
 
       {:open, _hq, session_id} ->
         %{state | hq: nil} |> adopt(session_id)
+
+      # HQ's `n` is `/new`'s screen, on the platform, on the profile HQ has selected.
+      {:new_session, hq, profile} ->
+        opts =
+          [where: :platform, team: HQ.selected_team(hq)] ++
+            if(profile, do: [profile: profile], else: [])
+
+        open_new_page(%{state | hq: nil}, opts, hq.origin)
 
       # HQ's line for what is shared with the person opens the artifacts there.
       {:artifacts, _hq} ->
@@ -3340,6 +3450,9 @@ defmodule Troupe.UI.TUI.Server do
       else: %{state | focus: :command, switcher: nil}
   end
 
+  defp picker_back(%{switcher: %{for: {:new, :screen}}, new_page: %{}} = state),
+    do: %{state | focus: :new_session, switcher: nil}
+
   defp picker_back(state), do: %{state | focus: :command, switcher: nil}
 
   # The picker's three actions. A switch keeps the window's conversation; the agent picked
@@ -3375,6 +3488,14 @@ defmodule Troupe.UI.TUI.Server do
           end
 
         chosen(state, name, where, prompt)
+
+      {:new, name} when chooser.for == {:new, :screen} and state.new_page != nil ->
+        %{
+          state
+          | focus: :new_session,
+            switcher: nil,
+            new_page: NewSessionPage.chose_agent(state.new_page, name)
+        }
 
       {:new, name} ->
         {:new, kind} = chooser.for

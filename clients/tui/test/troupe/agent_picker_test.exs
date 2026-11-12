@@ -198,8 +198,10 @@ defmodule Troupe.AgentPickerTest do
     {sid, _, _} = start_session!(workspace: ws, script: [])
     {pid, session} = ready(sid)
 
+    # The screen's agent chip (Tab to the chips, the third) opens the one picker.
     type(pid, "/new")
     press(pid, "enter")
+    for key <- ["tab", "right", "right", "enter"], do: press(pid, key)
     assert user_state(pid).focus == :switcher
     assert screen_text(pid, session) =~ "a new session on"
 
@@ -207,6 +209,10 @@ defmodule Troupe.AgentPickerTest do
     refute Enum.any?(picker(pid).rows, &(&1["mode"] == "subagent"))
 
     to_row(pid, "careful")
+    press(pid, "enter")
+    assert user_state(pid).focus == :new_session
+    press(pid, "tab")
+    press(pid, "tab")
     press(pid, "enter")
     eventually(fn -> user_state(pid).session_id != sid end)
     fresh = user_state(pid).session_id
@@ -230,6 +236,7 @@ defmodule Troupe.AgentPickerTest do
 
     type(pid, "/new")
     press(pid, "enter")
+    for key <- ["tab", "right", "right", "enter"], do: press(pid, key)
     to_row(pid, "plan")
 
     editor(
@@ -252,6 +259,10 @@ defmodule Troupe.AgentPickerTest do
     assert Enum.at(picker(pid).rows, picker(pid).cursor)["name"] == "planner"
     assert File.read!(Path.join(ws, ".troupe/agents/planner.md")) =~ "description: Plans our way."
 
+    press(pid, "enter")
+    assert user_state(pid).focus == :new_session
+    press(pid, "tab")
+    press(pid, "tab")
     press(pid, "enter")
     eventually(fn -> user_state(pid).session_id != sid end)
     fresh = user_state(pid).session_id

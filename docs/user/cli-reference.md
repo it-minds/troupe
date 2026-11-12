@@ -21,6 +21,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe --full-send` | start with every budget/token limit lifted for the session |
 | `troupe --private` | a private session, sealed to the plane you are signed in to |
 | `troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--full-send] [--private] [--workspace DIR]` | one task: in the TUI, or with --headless printed line by line until the agent rests |
+| `troupe run [AGENT] "task" --profile NAME [--title "TITLE"] [--headless]` | the task on the platform, on that plane profile, as the TUI's /new would start it; a full profile is waited on, a line a wait; @profile #agent /local /platform in the task set those and are taken out of it |
 | `troupe resume [SESSION_ID \| latest] [--private]` | no id: the newest session here, picker open; latest, or --private for the newest private one: straight in (troupe --resume is the same) |
 | `troupe resume SESSION_ID\|latest\|--private --headless "message"` | one turn on that session, printed as run --headless prints it, then exit |
 | `troupe --remote [PLANE_URL]` | open HQ: teams, profiles and sessions on a plane |
@@ -67,6 +68,13 @@ they are not what the tables say, so edit the tables rather than this page.
 `troupe daemon ...` hands it everything after `daemon`. What a headless run's exit status
 means is in [the terminal client](../../clients/tui/README.md#use).
 
+`troupe run --profile dev "task"` starts the task on the platform as `/new`'s screen would,
+titled `--title` or the task's first line; on a full profile it prints `troupe: waiting for
+a free place in dev; asking again in 2 s` at each wait until the plane places it, and at the
+administrator's limit it fails with the plane's sentence. The task's `@profile`, `#agent`,
+`/local` and `/platform` win over the flags and are taken out before the agent reads it:
+`troupe run "@docs #plan write it up" --headless` runs plan on docs with "write it up".
+
 ## Inside a session
 
 Every command starts with `/`. In the terminal client `/` on an empty line, Ctrl-K or
@@ -105,7 +113,7 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 
 | command | what it does | needs |
 | --- | --- | --- |
-| `/new [--private \| --remote PROFILE \| --branch]` | Start a fresh session here, without leaving the client. Opens a new session in this workspace and takes the screen; the one you left keeps running, stays in /sessions, and /back returns to it. The agent picker opens first, and Enter starts the session on the agent chosen (n there makes a new agent from one, which you save and then start on). --private makes it a private session, --remote PROFILE starts it on that profile of the plane you are signed in to, and --branch forks the one on screen: a session of its own that starts from this conversation as it stands. Type its first line on the command line it opens with. For example `/new --branch`. |  |
+| `/new [--private \| --remote PROFILE \| --branch]` | Start a fresh session here, without leaving the client. Opens the new-session screen and the session takes the screen; the one you left keeps running, stays in /sessions, and /back returns to it. The message comes first; under it one sentence says where it runs, the folder or the profile, and the agent, each a chip Tab and the arrows reach and Enter opens. The profile is the last used with room, else the first with room, and a line says why. @profile, #agent, /local and /platform in the message set those and are taken out of it. Enter starts (a full profile queues, and the wait is shown); Shift or Alt with Enter is a new line; a digit on an empty box starts like a recent session. --private and --remote PROFILE set the chips, and --branch forks the one on screen at once: a session of its own that starts from this conversation as it stands. For example `/new --branch`. |  |
 | `/cancel [window]` | Stop a branch mid-turn and remove its window. Stops the agent in the activated window, or in the one named by its tile number or path, and removes the window; a worktree Troupe made for it goes too. For example `/cancel 2`. | a window: the activated one, or one named |
 | `/dismiss [window]` | Let go of a window. Closes the activated window, or the one named: a branch's window closes for good and its session stays in the daemon, where /sessions still lists it. This session's own window stays; /back, /sessions or /new leave the session. For example `/dismiss 3`. | a window: the activated one, or one named |
 | `/merge [window]` | Land a worktree branch on the checkout. Commits whatever the branch left uncommitted, merges its branch into the checkout with a merge commit, and removes the worktree and the window. A merge git cannot complete is left for you to resolve. Tab completes the branches that have finished. For example `/merge 2`. | a session on this machine |

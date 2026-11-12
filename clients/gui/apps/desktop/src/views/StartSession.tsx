@@ -131,7 +131,8 @@ export function StartSession({
   const names = { profiles: profileNames, agents: agentNames };
 
   const tokens = messageTokens(text, names);
-  const where: NewSessionWhere = auth ? (tokens.where ?? chosenWhere) : "local";
+  // A token wins over the chip, and `@profile` without `/local` means the platform.
+  const where: NewSessionWhere = auth ? (tokens.where ?? (tokens.profile ? "platform" : chosenWhere)) : "local";
   const local = where === "local";
   const profileName = tokens.profile ?? profileChip ?? auto.name;
   const prof = profiles.find((p) => p.name === profileName);
@@ -770,6 +771,8 @@ async function castOnPlatform(
   try {
     answer = await auth.rpc<PlaneCreate>("session.create", {
       profile: prof.name,
+      // The sentence says everyone on the profile's team can open it, so it is a team's.
+      visibility: "team",
       ...(ask.agent ? { agent: ask.agent } : {}),
       ...(ask.title ? { title: ask.title } : {}),
       ...(ask.prompt ? { prompt: ask.prompt } : {}),
