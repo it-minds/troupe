@@ -21,7 +21,7 @@ defmodule Troupe do
   alias Troupe.Onboard.Notice
   alias Troupe.Protocol.Origin
   alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
-  alias Troupe.Sessions.{Fork, Index, Pin, Unseen}
+  alias Troupe.Sessions.{Fork, Index, Pin, Title, Unseen}
 
   require Logger
 
@@ -81,7 +81,8 @@ defmodule Troupe do
   end
 
   defp not_started(:not_on_profile, name),
-    do: "#{name} was not started: this profile's agents rule takes it away, so its job is not done here"
+    do:
+      "#{name} was not started: this profile's agents rule takes it away, so its job is not done here"
 
   defp not_started(:unknown_agent, name),
     do: "#{name} was not started: no agent of that name is defined here"
@@ -826,7 +827,11 @@ defmodule Troupe do
       |> Enum.find(&(&1.type == "turn_ended" and &1.agent == ["root"]))
 
     case ended do
-      %{type: "turn_ended", agent: ["root"], data: %{"reason" => "agent_failed", "detail" => detail}}
+      %{
+        type: "turn_ended",
+        agent: ["root"],
+        data: %{"reason" => "agent_failed", "detail" => detail}
+      }
       when is_binary(detail) ->
         detail
 
@@ -913,6 +918,28 @@ defmodule Troupe do
   def pin_session(session_id, pinned?) do
     with :ok <- Pin.put(session_id, pinned?, state_dirs()) do
       Index.update(session_id, %{pinned: pinned?})
+    end
+  end
+
+  @doc """
+  Name a session, or take its name off with `nil`, running or dormant: kept beside its log
+  (`Troupe.Sessions.Title`) and answered as `title` in every listing. The title is trimmed
+  first; one past `Troupe.Sessions.Title.max_bytes/0` is `{:error, {:title, sentence}}`.
+  """
+  @spec title_session(String.t(), String.t() | nil) ::
+          {:ok, String.t() | nil} | {:error, :not_found | {:title, String.t()} | String.t()}
+  def title_session(session_id, title) do
+    with {:ok, title} <- titled(title),
+         :ok <- Title.put(session_id, title, state_dirs()),
+         :ok <- Index.update(session_id, %{title: title}) do
+      {:ok, title}
+    end
+  end
+
+  defp titled(title) do
+    case Title.normalise(title) do
+      {:ok, title} -> {:ok, title}
+      {:error, sentence} -> {:error, {:title, sentence}}
     end
   end
 

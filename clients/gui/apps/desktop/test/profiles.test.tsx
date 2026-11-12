@@ -107,7 +107,12 @@ describe("profiles", () => {
     harness.plane.seed("alice@example.com", { id: "team-1", title: "Plan the release", profile: "ux" });
     unmount = render(<App />).unmount;
     (await seesButton("Start a session")).click();
-    (await seesButton("What this profile can reach")).click();
+    // The profile chip's picker, where the last-used profile (ux) is picked: dev, then its page.
+    const chip = (): HTMLButtonElement | null => document.querySelector<HTMLButtonElement>('button.ns-chip[aria-label^="Which profile"]');
+    (await waitFor(() => chip()?.textContent?.startsWith("ux") && chip(), "the profile chip on ux")).click();
+    (await seesButton("dev")).click();
+    (await waitFor(() => chip()?.textContent?.startsWith("dev") && chip()?.getAttribute("aria-expanded") === "false" && chip(), "the profile chip on dev")).click();
+    (await seesButton("What dev can reach")).click();
     await waitFor(() => document.querySelector(".screen-head h1")?.textContent === "dev", "dev's page");
     await sees("as the profile's own identity");
 

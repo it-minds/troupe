@@ -147,6 +147,12 @@ and the one a session runs under). *What this profile can reach* leads there fro
 screen's profile picker and from a running team session's *Settings*. The plane works it
 all out from what it enforces (`profile.get`), so the page is what your session gets.
 
+**Starting a session** begins with the message (*New session*, `/new`). One sentence under
+it says how it runs, "Runs on the platform with dev as build · everyone on core can open
+it", each word a picker; the profile is the last used with room, else the first with room,
+and a line says which. `@dev`, `#plan`, `/local` in the message set those and are removed
+before the agent reads it; a full profile says *Queue it* and starts when a place frees.
+
 ## Words you will meet
 
 The [glossary](../glossary.md) defines each of Troupe's words: a **plane**, a **team**, a

@@ -78,6 +78,7 @@ defmodule Troupe.Worker.AuthTest do
     "session.archive",
     "session.pin",
     "session.unpin",
+    "session.title.set",
     "session.erase",
     "session.fork"
   ]

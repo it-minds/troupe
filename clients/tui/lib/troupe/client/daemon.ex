@@ -1196,6 +1196,7 @@ defmodule Troupe.Client.Daemon do
         workspace: workspace,
         profile: params[:profile],
         prompt: blank_to_nil(params[:prompt]),
+        title: blank_to_nil(params[:title]),
         worktree: params[:worktree] || "never",
         config: params[:config] || %{},
         private: if(params[:private] == true, do: true),
@@ -1210,7 +1211,7 @@ defmodule Troupe.Client.Daemon do
                attach(origin, sid, %{
                  workspace: result["workspace"] || workspace,
                  profile: params[:profile],
-                 title: params[:prompt],
+                 title: blank_to_nil(params[:title]) || params[:prompt],
                  isolation: if(result["worktree"], do: :worktree, else: :shared)
                }) do
           # Onboarding, then the brief (root Decision 835, TUI Decision 154).

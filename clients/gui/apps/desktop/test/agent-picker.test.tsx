@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, render, sees, startOnTheList, type, waitFor } from "./support";
+import { button, render, sees, startButton, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -70,41 +70,32 @@ async function alertIn(picker: ParentNode, text: string): Promise<void> {
 }
 
 describe("the agent picker", () => {
-  it("on the start screen lists the workspace's agents by where they come from, and starts one", async () => {
+  it("on the start screen is a plain pick: each agent with what it does, the default marked, nothing to switch or edit", async () => {
     daemon.seed("/home/ada/notes");
     daemon.agents.files.push({ name: "careful", layer: "project", workspace: REPO, text: CAREFUL });
-    daemon.agents.files.push({ name: "mine", layer: "user", text: "---\ndescription: Mine.\nmode: primary\n---\nYou are mine.\n" });
     unmount = render(<App />).unmount;
     await sees("/home/ada/notes");
     button("Start a session")!.click();
     const start = await waitFor(() => document.querySelector<HTMLElement>(".start"), "the start screen");
-    type(start.querySelector<HTMLInputElement>("input")!, REPO);
+    type(start.querySelector<HTMLInputElement>('input[aria-label="Which directory"]')!, REPO);
 
-    const picker = await waitFor(() => start.querySelector<HTMLElement>('[role="group"][aria-label="The agent it starts as"]'), "the picker");
-    await waitFor(() => option(picker, "careful"), "the repository's agent");
-    expect(groupOf(picker, "careful")).toBe("This repository's");
-    expect(groupOf(picker, "mine")).toBe("Yours");
-    expect(groupOf(picker, "build")).toBe("Shipped");
-    expect(option(picker, "careful")!.textContent).toContain("read only");
+    const chip = (): HTMLButtonElement | null => start.querySelector<HTMLButtonElement>('button.ns-chip[aria-label^="Which agent"]');
+    (await waitFor(chip, "the agent chip")).click();
+    const pick = (name: string): HTMLButtonElement | undefined =>
+      [...start.querySelectorAll<HTMLButtonElement>(".ns-picker button.ns-opt")].find((o) => o.querySelector(".ns-opt-label")?.textContent === name);
+    const careful = await waitFor(() => pick("careful"), "the repository's agent");
+    expect(careful.textContent).toContain("Reads and reports, never writes.");
+    expect(pick("build")!.textContent).toContain("DEFAULT");
+    expect(pick("build")!.getAttribute("aria-pressed")).toBe("true");
+    // Before a session exists there is nothing to start on, switch or edit from here.
+    const picker = start.querySelector<HTMLElement>(".ns-picker")!;
+    for (const word of ["Start a session on", "Switch to", "Edit "]) expect(button(word, picker)).toBeNull();
+    expect(picker.textContent).not.toContain("change it in the console");
 
-    // A built-in's file is Troupe's: refused, with how it is changed instead.
-    option(picker, "plan")!.click();
-    (await enabled(picker, "Edit plan's file")).click();
-    await alertIn(picker, "plan is built in: a copy of it in your agents or the repository's");
-    expect(opened).toEqual([]);
-
-    // There is no session yet to switch.
-    (await enabled(picker, "Switch to plan")).click();
-    await alertIn(picker, "There is no session to switch yet");
-
-    // The repository's opens in the editor, by its file.
-    option(picker, "careful")!.click();
-    (await enabled(picker, "Edit careful's file")).click();
-    await waitFor(() => opened.length === 1, "the file opened");
-    expect(opened).toEqual([`${REPO}/.troupe/agents/careful.md`]);
-
-    // Start, from the picker: a session on careful in that workspace.
-    (await enabled(picker, "Start a session on careful")).click();
+    // A click picks it and closes the picker; Start starts on it.
+    careful.click();
+    await waitFor(() => chip()?.textContent?.startsWith("careful") && start.querySelector(".ns-picker") === null, "careful chosen, the picker closed");
+    (await startButton(start)).click();
     await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
     const created = daemon.calls.find((c) => c.method === "session.create" && c.params["workspace"] === REPO);
     expect(created?.params).toMatchObject({ workspace: REPO, profile: "careful" });

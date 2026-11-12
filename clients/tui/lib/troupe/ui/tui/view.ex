@@ -84,6 +84,15 @@ defmodule Troupe.UI.TUI.View do
       [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
+  # `/new`'s screen.
+  defp draw(%{focus: :new_session} = state, frame) do
+    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
+    [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
+
+    Troupe.UI.TUI.NewSessionPage.render(state.new_page, page_rect, state) ++
+      [status(state, status_rect), command_line(state, cmd_rect)]
+  end
+
   defp draw(%{focus: :files} = state, frame) do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
@@ -117,6 +126,7 @@ defmodule Troupe.UI.TUI.View do
     under =
       case chooser.for do
         {:window, path} when is_map_key(state.model.windows, path) -> {:window, path}
+        {:new, :screen} when state.new_page != nil -> :new_session
         _start -> :command
       end
 
@@ -2299,6 +2309,9 @@ defmodule Troupe.UI.TUI.View do
   defp picker_line(%{step: :where} = picker),
     do: " where it works — w a worktree of its own · c the checkout · Esc back#{task_note(picker)} "
 
+  defp picker_line(%{for: {:new, :screen}}),
+    do: " the agent it starts as — ↑↓ choose · Enter picks it · Esc back "
+
   defp picker_line(%{for: {:window, path}}),
     do: " the agent #{path} runs — ↑↓ choose · Enter switches · Esc keeps it "
 
@@ -3161,6 +3174,9 @@ defmodule Troupe.UI.TUI.View do
 
         :hq ->
           {hq_text(state), Troupe.UI.HQ.footer(state.hq)}
+
+        :new_session ->
+          {"", Troupe.UI.TUI.NewSessionPage.footer(state.new_page)}
       end
 
     focused_cmd? = state.focus in [:command, :palette]

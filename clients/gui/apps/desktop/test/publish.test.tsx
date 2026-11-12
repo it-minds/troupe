@@ -12,7 +12,7 @@ import { kindOf } from "../src/views/Publish";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, render, says, sees, startOnTheList, type, waitFor } from "./support";
+import { button, hereIn, render, says, sees, startButton, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -77,8 +77,8 @@ async function publishRow(signIn = true, linked = true): Promise<HTMLInputElemen
   await waitFor(() => says("/home/ada/notes"), "the daemon's session in the list");
   button("Start a session")!.click();
   const start = await waitFor(() => document.querySelector<HTMLElement>(".start"), "the start screen");
-  type(start.querySelector<HTMLInputElement>("input")!, "/home/ada/project");
-  button("Start", start)!.click();
+  await hereIn(start, "/home/ada/project");
+  (await startButton(start)).click();
   await waitFor(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]'), "the session");
   key(window, "k", { ctrlKey: true });
   const palette = await waitFor(() => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Commands"]'), "the palette");

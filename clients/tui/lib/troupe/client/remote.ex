@@ -543,23 +543,25 @@ defmodule Troupe.Client.Remote do
       params(%{
         team: team_name(plane, params[:team]),
         profile: params[:profile],
+        agent: params[:agent],
+        title: params[:title],
         source: source(params[:source]),
         visibility: params[:visibility] || "private",
         prompt: params[:prompt] || "",
         command_id: RPC.command_id()
       })
 
-    case call(plane, "session.create", body) do
-      {:ok, %{"session_id" => sid} = result} ->
-        attach(origin, sid, %{
-          endpoint: result["endpoint"],
-          token: result["token"],
-          state: :active,
-          profile: params[:profile],
-          team: params[:team],
-          title: params[:prompt]
-        })
-
+    with {:ok, %{"session_id" => sid} = result} <- call(plane, "session.create", body),
+         {:ok, result} <- placed(plane, sid, result, params[:on_wait]) do
+      attach(origin, sid, %{
+        endpoint: result["endpoint"],
+        token: result["token"],
+        state: :active,
+        profile: params[:profile],
+        team: params[:team],
+        title: params[:title] || params[:prompt]
+      })
+    else
       {:ok, other} ->
         {:error, "unexpected session.create answer: #{inspect(other)}"}
 
@@ -569,6 +571,44 @@ defmodule Troupe.Client.Remote do
   end
 
   def create_session(_origin, _params), do: {:error, :unsupported}
+
+  # A profile with no room below its ceiling makes the session wait for a place: the plane
+  # answers `pending` with `retry_after_ms` and holds the prompt. Given `on_wait`, the wait
+  # is the caller's to show, once per answer, and `token.mint` is asked again as the plane
+  # says until the session is placed; `on_wait` answering `:stop` ends the wait, and the
+  # session waits on at the plane by itself. Without it, the session is attached as it
+  # stands and its worker connection asks for a token as it reconnects.
+  defp placed(plane, sid, %{"state" => "pending"} = answer, on_wait) when is_function(on_wait, 1) do
+    case on_wait.(answer) do
+      :stop ->
+        {:error, "stopped waiting for a place; #{sid} starts by itself when one frees"}
+
+      _go_on ->
+        Process.sleep(max(answer["retry_after_ms"] || 2_000, 250))
+
+        case call(plane, "token.mint", %{session_id: sid}) do
+          {:ok, %{} = next} -> placed(plane, sid, next, on_wait)
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp placed(_plane, _sid, answer, _on_wait), do: {:ok, answer}
+
+  @doc """
+  The plane's own rows of the person's sessions, as `sessions.list` answers them: the
+  agent each runs as and when it was last active, which the new-session screen starts
+  from ("start like last time", the last profile used).
+  """
+  @spec session_rows(Troupe.Client.origin()) :: {:ok, [map()]} | {:error, term()}
+  def session_rows({:remote, plane}) do
+    case call(plane, "sessions.list", %{}) do
+      {:ok, list} -> {:ok, list |> unwrap("sessions") |> Enum.filter(&is_map/1)}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  def session_rows(_origin), do: {:error, :unsupported}
 
   # Browsing uses mode `read`, which never wakes a dormant session; the first
   # activating action is what opens it with mode `activate`, from the worker.

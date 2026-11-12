@@ -46,6 +46,7 @@ defmodule Troupe.Plane.Harness do
     Sessions,
     Signing
   }
+
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Fleet.{Extends, Scaler}
   alias Troupe.Plane.Identity.User
@@ -58,7 +59,18 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Protocol.{AgentDefinition, AgentRule}
   alias Troupe.Protocol.Bundle, as: Document
-  alias Troupe.Protocol.{Canonical, ClientUpdate, Error, Origin, Principal, Relay, SessionId, Token}
+
+  alias Troupe.Protocol.{
+    Canonical,
+    ClientUpdate,
+    Error,
+    Origin,
+    Principal,
+    Relay,
+    SessionId,
+    Token
+  }
+
   alias Troupe.Protocol.Memory.Entries
   alias Troupe.Sessions.Fork
 
@@ -144,6 +156,9 @@ defmodule Troupe.Plane.Harness do
     "session.erased" => :control,
     "session.pin" => :control,
     "session.unpin" => :control,
+    # A session's name, as its owner calls it; the daemon's of the same name for one of
+    # its own.
+    "session.title.set" => :control,
     "session.erase" => :control,
     "session.archive" => :control,
     "session.grant" => :control,
@@ -226,7 +241,7 @@ defmodule Troupe.Plane.Harness do
     with {:ok, team} <- still_granted(session),
          {:ok, %{worker: worker}} <- Placement.reserve(session.profile, session.id),
          {:ok, _pushed} <-
-           start_on_pod(worker, session, team, nil, session.pending_prompt,
+           start_on_pod(worker, session, team, session.agent, session.pending_prompt,
              on_failure: :requeue
            ),
          {:ok, _session} <- admitted(session, worker) do
@@ -405,7 +420,12 @@ defmodule Troupe.Plane.Harness do
   defp handle("me.memory", params, %{user: user} = context) do
     :ok = Memory.machine(user, params["sessions"])
     own = Memory.own(user)
-    own = if params["blame"] == true and is_binary(user.id), do: Map.put(own, "lines", Memory.blame(user)), else: own
+
+    own =
+      if params["blame"] == true and is_binary(user.id),
+        do: Map.put(own, "lines", Memory.blame(user)),
+        else: own
+
     documents = Memory.for_person(user)
 
     answer = %{"documents" => documents, "user" => own, "organisation" => organisation()}
@@ -414,13 +434,15 @@ defmodule Troupe.Plane.Harness do
     # them, so a client lists each as a level of its own.
     answer =
       if params["entries"] == true,
-        do: %{
-          answer
-          | "documents" => Enum.map(documents, &with_entries(&1, user)),
-            "user" => Map.put(own, "entries", with_entries(%{"scope" => "user"}, user)["entries"])
-        }
-        |> Map.put("teams", user |> Identity.teams_for() |> Enum.map(& &1.name) |> Enum.sort())
-        |> Map.put("roles", memory_roles(user, context)),
+        do:
+          %{
+            answer
+            | "documents" => Enum.map(documents, &with_entries(&1, user)),
+              "user" =>
+                Map.put(own, "entries", with_entries(%{"scope" => "user"}, user)["entries"])
+          }
+          |> Map.put("teams", user |> Identity.teams_for() |> Enum.map(& &1.name) |> Enum.sort())
+          |> Map.put("roles", memory_roles(user, context)),
         else: answer
 
     {:ok, Signing.signed("memory", answer)}
@@ -577,7 +599,7 @@ defmodule Troupe.Plane.Harness do
        when method in ~w(artifact.get artifact.open artifact.delete artifact.rollback artifact.pin
                          artifact.read artifact.preview artifact.share artifact.unshare
                          artifact.transfer),
-    do: {:error, Error.new(:invalid_params, %{reason: "#{method} takes an artifact's id"})}
+       do: {:error, Error.new(:invalid_params, %{reason: "#{method} takes an artifact's id"})}
 
   # Which version each of the caller's own clients last ran, and how that stands against
   # the plane's policy now: the line a person's own console shows, as an administrator's
@@ -593,7 +615,9 @@ defmodule Troupe.Plane.Harness do
   # Only granted profiles, and for each one what a person actually needs in order to
   # choose: whether there is anywhere to put a session right now, and what a session
   # created there will have — which agents it may start as, which skills and MCP servers
-  # the channel's current bundle gives it.
+  # the channel's current bundle gives it. `max_sessions` beside the room is what tells
+  # "full, a create waits for the next place" from "at the ceiling, a create is refused",
+  # and `teams` is who a session there would be open to.
   defp handle("profiles.list", _params, %{user: user}) do
     profiles =
       user
@@ -603,13 +627,16 @@ defmodule Troupe.Plane.Harness do
         # A draining pod is listed, so a person can see it, and counts for nothing: it
         # takes no session and is out of its Service, so it is neither room nor health.
         placeable = Enum.reject(workers, & &1.draining)
+        row = Fleet.get_profile(profile)
 
         %{
           "name" => profile,
           "pods" => Enum.map(workers, &worker_json/1),
           "capacity" => Enum.sum(Enum.map(placeable, & &1.capacity)),
           "active_sessions" => Enum.sum(Enum.map(workers, & &1.active_sessions)),
-          "healthy_pods" => Enum.count(placeable, & &1.healthy)
+          "healthy_pods" => Enum.count(placeable, & &1.healthy),
+          "max_sessions" => ceiling_of(row),
+          "teams" => ProfileView.team_names(user, profile)
         }
         |> Map.merge(offering_json(profile, entitlements_of(user, profile)))
       end)
@@ -744,7 +771,8 @@ defmodule Troupe.Plane.Harness do
            }}
 
         {:error, reason} ->
-          {:error, Error.new(:unavailable, %{reason: "no token could be minted: #{inspect(reason)}"})}
+          {:error,
+           Error.new(:unavailable, %{reason: "no token could be minted: #{inspect(reason)}"})}
       end
     end
   end
@@ -777,6 +805,7 @@ defmodule Troupe.Plane.Harness do
          {:ok, repository} <- repository_for(params["repository"], profile, team),
          {:ok, session_id} <- session_id_for(params["session_id"]),
          params = Map.put(params, "repository", repository),
+         params = Map.put(params, "agent", agent),
          {:ok, session} <- create_row(session_id, user, team, profile, params, terms, origin),
          {:ok, _budget} <- reserve_budget(team, session),
          {:ok, placement} <- place_or_wait(session, prompt) do
@@ -1382,6 +1411,18 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # Renaming is its owner's, as pinning is: a title is what the team's listing shows.
+  defp handle("session.title.set", params, %{user: user}) do
+    with {:ok, session} <- visible(params["session_id"], user),
+         :ok <- must_administer(user, session),
+         {:ok, title} <- title_for(params["title"]) do
+      case Sessions.retitle(session.id, title) do
+        {:ok, updated} -> {:ok, session_json(updated, user)}
+        {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+      end
+    end
+  end
+
   defp pin(params, %{user: user}, pinned?) do
     with {:ok, session} <- visible(params["session_id"], user),
          :ok <- must_administer(user, session) do
@@ -1513,9 +1554,14 @@ defmodule Troupe.Plane.Harness do
   # have been spared, and one that said the wrong thing about why.
   defp cap_budget(%{"budget_micros" => asked} = terms, team, subject, profile) do
     case tightest_remaining(team, subject, profile) do
-      :unlimited -> {:ok, terms}
-      {_scope, remaining} when remaining > 0 -> {:ok, Map.put(terms, "budget_micros", min(asked, remaining))}
-      {scope, _none} -> {:error, nothing_left(team, scope, profile)}
+      :unlimited ->
+        {:ok, terms}
+
+      {_scope, remaining} when remaining > 0 ->
+        {:ok, Map.put(terms, "budget_micros", min(asked, remaining))}
+
+      {scope, _none} ->
+        {:error, nothing_left(team, scope, profile)}
     end
   end
 
@@ -1613,7 +1659,8 @@ defmodule Troupe.Plane.Harness do
   end
 
   # The organisation's name as its plane is called, for a client to say "Everyone at <name>".
-  defp organisation, do: %{"name" => Application.get_env(:troupe_plane, :oidc, [])[:plane_name] || "troupe"}
+  defp organisation,
+    do: %{"name" => Application.get_env(:troupe_plane, :oidc, [])[:plane_name] || "troupe"}
 
   # A document of `me.memory`'s with its entries: the organisation's, a team of the caller's
   # by name, or their own.
@@ -1632,8 +1679,12 @@ defmodule Troupe.Plane.Harness do
 
   defp effect_team(user, name) when is_nil(name) or is_binary(name) do
     case InEffect.team_of(user, name) do
-      {:ok, team} -> {:ok, team}
-      {:error, :not_found} -> {:error, Error.new(:not_found, %{team: name, reason: "you are in no team called #{name}"})}
+      {:ok, team} ->
+        {:ok, team}
+
+      {:error, :not_found} ->
+        {:error,
+         Error.new(:not_found, %{team: name, reason: "you are in no team called #{name}"})}
     end
   end
 
@@ -1646,10 +1697,15 @@ defmodule Troupe.Plane.Harness do
       do: {:ok, profile},
       else:
         {:error,
-         Error.new(:not_found, %{profile: profile, reason: "you start no sessions on #{profile} through #{(team && team.name) || "a team"}"})}
+         Error.new(:not_found, %{
+           profile: profile,
+           reason:
+             "you start no sessions on #{profile} through #{(team && team.name) || "a team"}"
+         })}
   end
 
-  defp effect_profile(_user, _team, _profile), do: invalid("profile is a worker profile's name", field: "profile")
+  defp effect_profile(_user, _team, _profile),
+    do: invalid("profile is a worker profile's name", field: "profile")
 
   # A person's own memory is a person's: a service principal has no row to keep it under.
   defp own_memory(%User{id: id}) when is_binary(id), do: :ok
@@ -1658,12 +1714,14 @@ defmodule Troupe.Plane.Harness do
     do: {:error, Error.new(:forbidden, %{reason: "a service principal has no memory of its own"})}
 
   defp memory_text(params) do
-    with {:ok, text} <- memory_text_or_entries(params), do: {:ok, Troupe.Protocol.Memory.normalise(text)}
+    with {:ok, text} <- memory_text_or_entries(params),
+         do: {:ok, Troupe.Protocol.Memory.normalise(text)}
   end
 
   # A save's document: `text` as written, or `entries`, written as sections in their order
   # (`Troupe.Protocol.Memory.Entries.render/1`), each heading's text as given.
-  defp memory_text_or_entries(%{"entries" => entries} = params) when not is_map_key(params, "text") do
+  defp memory_text_or_entries(%{"entries" => entries} = params)
+       when not is_map_key(params, "text") do
     case Entries.cast(entries) do
       {:ok, entries} -> memory_string(%{"text" => Entries.render(entries)}, "text")
       {:error, reason} -> invalid(reason, field: "entries")
@@ -1750,10 +1808,15 @@ defmodule Troupe.Plane.Harness do
   defp own_against(user, _shown, number), do: own_version(user, number)
 
   defp rollback_to(to) when is_integer(to) and to > 0, do: {:ok, to}
-  defp rollback_to(_to), do: invalid("to is the number of the version to roll back to", field: "to")
+
+  defp rollback_to(_to),
+    do: invalid("to is the number of the version to roll back to", field: "to")
 
   defp own_rollback(user, text, to, base) when is_integer(base) and base >= 0,
-    do: own_result(Memory.save_own(user, text, base, rolled_back_to: to, note: "rolled back to v#{to}"))
+    do:
+      own_result(
+        Memory.save_own(user, text, base, rolled_back_to: to, note: "rolled back to v#{to}")
+      )
 
   defp own_rollback(_user, _text, _to, _base),
     do: invalid("version is the version in force, which the rollback replaces", field: "version")
@@ -2030,6 +2093,7 @@ defmodule Troupe.Plane.Harness do
   # session's own; one that does not start with it is ignored rather than refused,
   # because the only thing it could be asking for is somebody else's.
   defp suffix_of(nil, prefix), do: prefix
+
   defp suffix_of(given, prefix) when is_binary(given) do
     if String.starts_with?(given, prefix) and not String.contains?(given, ".."),
       do: given,
@@ -2055,12 +2119,23 @@ defmodule Troupe.Plane.Harness do
     prefix = "sessions/#{session.id}/"
 
     cond do
-      keys == [] -> invalid("keys is a non-empty list of object keys")
-      length(keys) > @presign_keys -> invalid("at most #{@presign_keys} keys in one request")
-      not Enum.all?(keys, &is_binary/1) -> invalid("keys is a non-empty list of object keys")
-      not Enum.all?(keys, &String.starts_with?(&1, prefix)) -> invalid("every key is under #{prefix}")
-      Enum.any?(keys, &String.contains?(&1, "..")) -> invalid("every key is under #{prefix}")
-      true -> {:ok, keys}
+      keys == [] ->
+        invalid("keys is a non-empty list of object keys")
+
+      length(keys) > @presign_keys ->
+        invalid("at most #{@presign_keys} keys in one request")
+
+      not Enum.all?(keys, &is_binary/1) ->
+        invalid("keys is a non-empty list of object keys")
+
+      not Enum.all?(keys, &String.starts_with?(&1, prefix)) ->
+        invalid("every key is under #{prefix}")
+
+      Enum.any?(keys, &String.contains?(&1, "..")) ->
+        invalid("every key is under #{prefix}")
+
+      true ->
+        {:ok, keys}
     end
   end
 
@@ -2199,7 +2274,8 @@ defmodule Troupe.Plane.Harness do
     Error.new(:capacity, %{
       profile: profile.name,
       max_sessions: profile.max_sessions,
-      reason: "#{profile.name} allows #{profile.max_sessions} session(s) at once, and they are running"
+      reason:
+        "#{profile.name} allows #{profile.max_sessions} session(s) at once, and they are running"
     })
   end
 
@@ -2339,6 +2415,7 @@ defmodule Troupe.Plane.Harness do
       state: "active",
       epoch: 1,
       title: params["title"],
+      agent: params["agent"],
       workspace_source: params["source"],
       repository: params["repository"],
       terms: terms,
@@ -3034,7 +3111,9 @@ defmodule Troupe.Plane.Harness do
   defp agent_within(_parent, nil), do: {:ok, nil}
 
   defp agent_within(%Session{} = parent, agent) when is_binary(agent) do
-    offering = offering(parent.profile, Identity.entitlements_for(team_of(parent), parent.profile))
+    offering =
+      offering(parent.profile, Identity.entitlements_for(team_of(parent), parent.profile))
+
     %{agents: agents} = offering
 
     cond do
@@ -3216,7 +3295,9 @@ defmodule Troupe.Plane.Harness do
   # The person-mode servers a profile's current bundle carries. A profile with none is
   # every profile that existed before there was a mode.
   defp person_servers_for(user) do
-    for profile <- granted_profiles(user), server <- person_servers(profile), do: {profile, server}
+    for profile <- granted_profiles(user),
+        server <- person_servers(profile),
+        do: {profile, server}
   end
 
   defp person_servers(profile) do
@@ -3354,7 +3435,10 @@ defmodule Troupe.Plane.Harness do
   # switches are, so a save reaches a session the next time it wakes and restarts no pod; an
   # empty list takes away what was there.
   defp memory_params(session, team),
-    do: %{"memory" => Memory.for_session(team, session.profile, Identity.get_user(session.owner_subject))}
+    do: %{
+      "memory" =>
+        Memory.for_session(team, session.profile, Identity.get_user(session.owner_subject))
+    }
 
   # A session the pod took holds the memory its activation carried, until its first turn
   # says what it read: kept so, it is among the readers of each document before that turn.
@@ -3391,6 +3475,26 @@ defmodule Troupe.Plane.Harness do
 
   # A grant names a profile *and* a team, and a user in two teams that both grant `dev`
   # has one profile, not two.
+  # Trimmed, at most 200 bytes, as the daemon keeps one; empty is no title.
+  defp title_for(nil), do: {:ok, nil}
+
+  defp title_for(title) when is_binary(title) do
+    trimmed = String.trim(title)
+
+    cond do
+      byte_size(trimmed) > 200 -> invalid("a title is at most 200 bytes", field: "title")
+      trimmed == "" -> {:ok, nil}
+      true -> {:ok, trimmed}
+    end
+  end
+
+  defp title_for(_other), do: invalid("a title is text", field: "title")
+
+  # The administrator's ceiling on a profile's sessions at once, as the scaler holds a
+  # create to it: none without a row, since a create is not refused there either.
+  defp ceiling_of(nil), do: nil
+  defp ceiling_of(row), do: Scaler.ceiling(row)
+
   defp granted_profiles(user) do
     user |> Identity.profiles_for() |> Enum.map(& &1.profile) |> Enum.uniq() |> Enum.sort()
   end
@@ -3550,6 +3654,10 @@ defmodule Troupe.Plane.Harness do
       "state" => session.state,
       "epoch" => session.epoch,
       "title" => session.title,
+      # The agent it was created as or last switched to; nil where the profile's default
+      # ran. With when it was made, it is what "start like last time" copies.
+      "agent" => session.agent,
+      "created_at" => session.inserted_at && DateTime.to_iso8601(session.inserted_at),
       "last_active_at" => session.last_active_at && DateTime.to_iso8601(session.last_active_at),
       "last_seq" => session.last_seq,
       "head_hash" => session.head_hash,

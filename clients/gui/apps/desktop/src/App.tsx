@@ -483,9 +483,12 @@ export function App(): JSX.Element {
           </div>
         )}
 
-        {/* Memory and Artifacts read the plane when signed in: a daemon getting ready changes
-            nothing they show, so they are not offered a refresh for it. */}
-        {readySince && !(ownPlane && !localOnly && (where.screen === "memory" || where.screen === "artifacts")) && <DaemonReady onRefresh={refreshScreen} />}
+        {/* Not on the new-session screen, whose "On this computer" turns on by itself; and
+            Memory and Artifacts read the plane when signed in, so a daemon getting ready
+            changes nothing they show and they are not offered a refresh for it. */}
+        {readySince &&
+          where.screen !== "new" &&
+          !(ownPlane && !localOnly && (where.screen === "memory" || where.screen === "artifacts")) && <DaemonReady onRefresh={refreshScreen} />}
 
         {/* Keyed so a refresh is a remount of the screen alone, never of the window. */}
         <Fragment key={entered.remount}>
@@ -504,7 +507,9 @@ export function App(): JSX.Element {
             <StartSession
               auth={planeAuth}
               daemon={daemon.client}
+              daemonStatus={daemon.status}
               linked={Boolean(daemon.identity?.linked)}
+              rows={snapshot.rows}
               onClose={() => setWhere({ screen: "sessions" })}
               onProfile={(profile) => setWhere({ screen: "profiles", profile })}
               onCreated={(id, kind, workspace) => {

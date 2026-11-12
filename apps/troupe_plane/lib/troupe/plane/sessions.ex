@@ -268,7 +268,8 @@ defmodule Troupe.Plane.Sessions do
   an older epoch cannot park a session a newer one is serving. Saying it about a session
   already parked, or erased, or unknown, changes nothing and is not an error.
   """
-  @spec unrestorable(String.t(), integer() | nil) :: {:ok, non_neg_integer()} | {:error, :stale_epoch}
+  @spec unrestorable(String.t(), integer() | nil) ::
+          {:ok, non_neg_integer()} | {:error, :stale_epoch}
   def unrestorable(session_id, epoch) do
     now = DateTime.utc_now()
 
@@ -282,8 +283,11 @@ defmodule Troupe.Plane.Sessions do
     case Repo.update_all(query, set: [state: "read_only", worker_id: nil, updated_at: now]) do
       {0, _} ->
         case Repo.get(Session, session_id) do
-          %Session{state: state} when state in ["pending", "active", "dormant"] -> {:error, :stale_epoch}
-          _parked_erased_or_unknown -> {:ok, 0}
+          %Session{state: state} when state in ["pending", "active", "dormant"] ->
+            {:error, :stale_epoch}
+
+          _parked_erased_or_unknown ->
+            {:ok, 0}
         end
 
       {count, _} ->
@@ -417,6 +421,15 @@ defmodule Troupe.Plane.Sessions do
   @doc "Set a session's lifecycle state directly. Erasure is the only caller."
   @spec put_state(String.t(), String.t()) :: {:ok, Session.t()} | {:error, term()}
   def put_state(session_id, state), do: put_fields(session_id, %{state: state})
+
+  @doc "Name a session, or take its name off with `nil`."
+  @spec retitle(String.t(), String.t() | nil) :: {:ok, Session.t()} | {:error, term()}
+  def retitle(session_id, title) do
+    case Repo.get(Session, session_id) do
+      nil -> {:error, :not_found}
+      session -> session |> Session.changeset(%{title: title}) |> Repo.update()
+    end
+  end
 
   @doc """
   Pin a session, exempting it from retention, or unpin it.
@@ -626,6 +639,7 @@ defmodule Troupe.Plane.Sessions do
       |> put_status_field(:pending_approvals, report["pending_approvals"])
       |> put_status_field(:pending_questions, report["pending_questions"])
       |> put_status_field(:cost_micros, report["cost_micros"])
+      |> put_status_field(:agent, report["agent"])
       |> put_reason(:done_reason, report)
       |> put_reason(:failed_reason, report)
 
@@ -651,6 +665,11 @@ defmodule Troupe.Plane.Sessions do
        when key in [:pending_approvals, :pending_questions, :cost_micros] do
     if is_integer(value) and value >= 0, do: Keyword.put(set, key, value), else: set
   end
+
+  # The agent the root was switched to, once it has been; a pod reports none before, and
+  # the row keeps the one the session was created as.
+  defp put_status_field(set, :agent, agent) when is_binary(agent) and agent != "",
+    do: Keyword.put(set, :agent, agent)
 
   defp put_status_field(set, _key, _value), do: set
 

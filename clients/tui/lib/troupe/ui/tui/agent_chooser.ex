@@ -196,6 +196,12 @@ defmodule Troupe.UI.TUI.AgentChooser do
   def key(chooser, %Key{code: "home"}, sid), do: {:ok, move(chooser, -1_000, sid)}
   def key(chooser, %Key{code: "end"}, sid), do: {:ok, move(chooser, 1_000, sid)}
 
+  # On `/new`'s screen, before a session exists, the picker only picks: there is nothing
+  # to switch, and starting, editing and making an agent are the screen's or `/agents`'.
+  def key(%{for: {:new, :screen}} = chooser, %Key{code: code}, _sid)
+      when code in ["s", "b", "e", "n"],
+      do: {:ok, chooser}
+
   def key(%{for: {:window, _path}} = chooser, %Key{code: "enter"}, _sid), do: switch(chooser)
   def key(%{for: {:new, _kind}} = chooser, %Key{code: "enter"}, _sid), do: new_session(chooser)
   def key(%{for: :manage} = chooser, %Key{code: "enter"}, _sid), do: manage(chooser, "v")
@@ -453,6 +459,8 @@ defmodule Troupe.UI.TUI.AgentChooser do
 
   defp footer(%{for: {:window, _path}}),
     do: " Enter/s switches · b starts a branch · e edits · n new from it · Esc keeps it "
+
+  defp footer(%{for: {:new, :screen}}), do: " ↑↓ choose · Enter picks it · Esc back "
 
   defp footer(%{for: {:new, _kind}}),
     do: " Enter starts a session on it · e edits · n new from it · Esc "

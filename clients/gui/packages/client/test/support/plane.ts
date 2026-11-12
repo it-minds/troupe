@@ -19,6 +19,8 @@ interface Row {
   owner: string;
   profile: string;
   title: string | null;
+  /** The agent it was created as; null for the profile's default. */
+  agent: string | null;
   state: string;
   status: string | null;
   /** A turn the harness stopped, `tool_failures` or `agent_failed`, until the next input (Decision 750). */
@@ -48,6 +50,14 @@ export interface PlaneOptions {
    * egress, limits, budgets and grants. Defaults to `exampleProfiles()`.
    */
   profileSpecs?: FakeProfileSpec[];
+  /**
+   * How full each profile is, by name, where it is not the default (room for eight, none
+   * running but this fake's own): `capacity`, `active` running now and `max_sessions`,
+   * the administrator's ceiling (none by default). A create on a profile with no room
+   * below its ceiling answers `pending` until `placeWaiting` gives it a place; one at the
+   * ceiling is refused with `capacity`, as the plane refuses it.
+   */
+  room?: Record<string, { capacity: number; active: number; max_sessions?: number | null }>;
   /** The teams every person signed in here is in, which `team:<name>` artifacts are for. */
   teams?: string[];
   /**
@@ -539,25 +549,54 @@ export class FakePlane {
   }
 
   /** Put a session on the worker and in the index, as `session.create` would. */
-  seed(owner: string, params: { id?: string; profile?: string; title?: string; origin?: Row["origin"] } = {}): Row {
+  seed(owner: string, params: { id?: string; profile?: string; title?: string; agent?: string | null; origin?: Row["origin"] } = {}): Row {
     const id = params.id ?? `s-${++this.counter}`;
-    const row: Row = {
+    const row: Row = { ...this.blankRow(id, owner, params.profile ?? "dev", params.title ?? null), agent: params.agent ?? null };
+    if (params.origin) row.origin = params.origin;
+    this.rows.set(id, row);
+    this.opts.worker.createSession(id, { profile: row.profile });
+    return row;
+  }
+
+  /** How long a waiting create says to wait before asking again, in milliseconds. */
+  retryAfterMs = 50;
+
+  /** Every `token.mint` asked, by session: what a client waiting for a place re-asks. */
+  readonly mints: string[] = [];
+
+  /** Say how full a profile is from now on, as `room` does at the start. */
+  setRoom(profile: string, room: { capacity: number; active: number; max_sessions?: number | null }): void {
+    this.opts.room = { ...(this.opts.room ?? {}), [profile]: room };
+  }
+
+  /** Give a session that waits for a place its place, as the scaler does when room comes. */
+  placeWaiting(id: string): void {
+    const row = this.rows.get(id);
+    if (!row || row.state !== "pending") return;
+    row.state = "active";
+    this.opts.worker.createSession(id, { profile: row.profile });
+  }
+
+  private roomOf(profile: string): { capacity: number; active: number; max_sessions?: number | null } {
+    return this.opts.room?.[profile] ?? { capacity: 8, active: this.opts.worker.sessions.size };
+  }
+
+  private blankRow(id: string, owner: string, profile: string, title: string | null): Row {
+    return {
       id,
       owner,
-      profile: params.profile ?? "dev",
-      title: params.title ?? null,
+      profile,
+      title,
+      agent: null,
       state: "active",
       status: "idle",
       failed_reason: null,
       epoch: 1,
       pinned: false,
       reviewed_by: null,
-      origin: params.origin ?? { kind: "user" },
+      origin: { kind: "user" },
       created_at: Date.now() + this.counter,
     };
-    this.rows.set(id, row);
-    this.opts.worker.createSession(id, { profile: row.profile });
-    return row;
   }
 
   /** A laptop's session, offered by `owner` and shared as `shares` says, its laptop online. */
@@ -1090,10 +1129,12 @@ export class FakePlane {
           result: {
             profiles: profiles.map((p) => ({
               name: p,
-              pods: [{ pod: `${p}-0`, ordinal: 0, endpoint: worker.endpoint, healthy: true, draining: false, capacity: 8, active_sessions: worker.sessions.size }],
-              capacity: 8,
-              active_sessions: worker.sessions.size,
+              pods: [{ pod: `${p}-0`, ordinal: 0, endpoint: worker.endpoint, healthy: true, draining: false, capacity: this.roomOf(p).capacity, active_sessions: this.roomOf(p).active }],
+              capacity: this.roomOf(p).capacity,
+              active_sessions: this.roomOf(p).active,
               healthy_pods: 1,
+              max_sessions: this.roomOf(p).max_sessions ?? null,
+              teams: this.teamsOf(subject),
               channel: "stable",
               bundle_version: "3",
               bundle_hash: "sha256:abc",
@@ -1147,7 +1188,20 @@ export class FakePlane {
           return { error: { code: -32602, message: "invalid_params", data: { agents: ["build", "plan", "explore"] } } };
         }
         const title = params["title"] === undefined ? undefined : String(params["title"]);
-        const row = this.seed(subject, title === undefined ? { profile } : { profile, title });
+        const room = this.opts.room?.[profile];
+        if (room && typeof room.max_sessions === "number" && room.active >= room.max_sessions) {
+          const reason = `${profile} allows ${room.max_sessions} session(s) at once, and they are running`;
+          return { error: { code: -32008, message: "capacity", data: { profile, max_sessions: room.max_sessions, reason } } };
+        }
+        if (room && room.active >= room.capacity) {
+          // No room, and more coming: the session exists, waits, and holds its prompt.
+          const id = `s-${++this.counter}`;
+          const row: Row = { ...this.blankRow(id, subject, profile, title ?? null), agent: agent ?? null, state: "pending" };
+          this.rows.set(id, row);
+          return { result: { session_id: id, epoch: 1, state: "pending", mode: "waiting", reason: `waiting for a free place on ${profile}`, retry_after_ms: this.retryAfterMs } };
+        }
+        const row = this.seed(subject, { profile, ...(title === undefined ? {} : { title }), agent: agent ?? null });
+        if (room) room.active += 1;
         return { result: this.attachment(row, subject, name, "owner", "activate") };
       }
 
@@ -1162,6 +1216,10 @@ export class FakePlane {
       case "token.mint": {
         const row = this.rows.get(String(params["session_id"] ?? ""));
         if (!row) return { error: { code: -32005, message: "not_found" } };
+        this.mints.push(row.id);
+        if (row.state === "pending") {
+          return { result: { session_id: row.id, epoch: 1, state: "pending", mode: "waiting", reason: `waiting for a free place on ${row.profile}`, retry_after_ms: this.retryAfterMs } };
+        }
         const role = row.owner === subject ? "owner" : "collaborator";
         return { result: this.attachment(row, subject, name, role, "activate") };
       }
@@ -1522,6 +1580,8 @@ export class FakePlane {
       state: row.state,
       epoch: row.epoch,
       title: row.title,
+      agent: row.agent,
+      created_at: new Date(row.created_at).toISOString(),
       last_active_at: new Date(row.created_at).toISOString(),
       last_seq: session?.log.headSeq ?? 0,
       head_hash: session?.log.headHash ?? null,

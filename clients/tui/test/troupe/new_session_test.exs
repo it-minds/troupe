@@ -14,6 +14,7 @@ defmodule Troupe.NewSessionTest do
   alias Troupe.{Client, FakeRemote}
   alias Troupe.Client.Daemon.Link
   alias Troupe.Remote.RPC
+  alias Troupe.UI.TUI.NewSessionPage
 
   test "/new opens a fresh session here; the one it left stays in the picker, and /back returns" do
     {first, _, ws} = start_session!(script: [{:text_and_tools, "hello back", []}])
@@ -25,8 +26,8 @@ defmodule Troupe.NewSessionTest do
 
     type(pid, "/new")
     press(pid, "enter")
-    # The agent picker first: Enter starts the session on the one marked.
-    assert user_state(pid).focus == :switcher
+    # The prompt-first screen: Enter starts it, here, with an empty box.
+    assert user_state(pid).focus == :new_session
     press(pid, "enter")
     eventually(fn -> user_state(pid).session_id != first end)
     fresh = user_state(pid).session_id
@@ -115,8 +116,8 @@ defmodule Troupe.NewSessionTest do
 
     type(pid, "/new --private")
     press(pid, "enter")
-    # The agent picker first: Enter starts the session on the one marked.
-    assert user_state(pid).focus == :switcher
+    # The prompt-first screen: Enter starts it, here, with an empty box.
+    assert user_state(pid).focus == :new_session
     press(pid, "enter")
     eventually(fn -> user_state(pid).session_id != first end)
     private = user_state(pid).session_id
@@ -137,6 +138,10 @@ defmodule Troupe.NewSessionTest do
     rested(first)
 
     type(pid, "/new --remote code")
+    press(pid, "enter")
+    # The shortcut sets the chips on the screen; Enter starts it.
+    assert user_state(pid).focus == :new_session
+    assert NewSessionPage.plain(user_state(pid).new_page) =~ "Runs [on the platform] with [code] as"
     press(pid, "enter")
     eventually(fn -> user_state(pid).session_id != first end)
     pod = user_state(pid).session_id
@@ -184,8 +189,8 @@ defmodule Troupe.NewSessionTest do
 
     type(pid, "/new")
     press(pid, "enter")
-    # The agent picker first: Enter starts the session on the one marked.
-    assert user_state(pid).focus == :switcher
+    # The prompt-first screen: Enter starts it, here, with an empty box.
+    assert user_state(pid).focus == :new_session
     press(pid, "enter")
     eventually(fn -> user_state(pid).session_id != first end)
     fresh = user_state(pid).session_id

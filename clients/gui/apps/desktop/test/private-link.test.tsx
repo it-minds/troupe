@@ -12,7 +12,7 @@ import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, nav, render, says, sees, seesButton, sleep, startOnTheList, type, waitFor } from "./support";
+import { button, hereIn, nav, render, says, sees, seesButton, sleep, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -178,8 +178,7 @@ describe("this computer linked by the sign-in, and a private session started", (
     nav("Sessions")!.click();
     (await waitFor(() => button("Start a session"), "the list's start button")).click();
     const start = await waitFor(() => document.querySelector<HTMLElement>(".start"), "the start screen");
-    button("Local", start)!.click();
-    type(await waitFor(() => start.querySelector<HTMLInputElement>('input[aria-label="Which directory"]'), "the local half"), "/home/ada/project");
+    await hereIn(start, "/home/ada/project");
     // Offered on the same connection: the daemon said no private sessions when the app
     // connected, before anybody had linked it.
     const keep = await waitFor(

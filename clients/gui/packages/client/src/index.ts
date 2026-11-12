@@ -19,6 +19,21 @@ export type {
 } from "./plane.js";
 export { FUNCTIONS_HEADING, accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, moneyWords, profileSummary, ruleAccessWords, whoseWords } from "./profile.js";
 export type { ProfileView, ProfileViewAgent, ProfileViewFunction, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, RuleAccess, ServerAccess } from "./profile.js";
+export {
+  LOCAL_DOWN_SENTENCE,
+  andList,
+  autoPickProfile,
+  ceilingSentence,
+  cleanMessage,
+  fullHouseSentence,
+  messageTokens,
+  profileRoom,
+  stripTokens,
+  titleFromMessage,
+  tokensSentence,
+  whoCanOpen,
+} from "./newSession.js";
+export type { AutoPick, MessageTokens, NewSessionWhere, ProfileRoom, ProfileRoomRow, TokenNames } from "./newSession.js";
 export { SessionView, createLocalSession, turnCompleted } from "./session.js";
 export type { SessionViewHooks, TurnResult } from "./session.js";
 export { AuthSession, PlaneUnreachableError, memoryTokenStore, webTokenStore, currentOrigin } from "./auth.js";

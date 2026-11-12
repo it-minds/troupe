@@ -64,8 +64,8 @@ not before: an `auto` in your own agents applies in every workspace, with no tru
 A profile bundle's agent is changed in the console. A session's head shows the agent it
 runs and switches it from the next turn, the conversation kept, and the transcript records
 the switch. The TUI's `/agents` does the same, as the agent picker Ctrl-N and Tab open, at
-the manager's density, and `/new` starts a session on the agent picked there
-([the terminal client](terminal-screen.md#agents)).
+the manager's density; on `/new`'s screen the agent chip opens that picker, and `#name` in
+the message picks the agent too ([the terminal client](terminal-screen.md#agents)).
 
 ### Seeing a delegation before it runs
 

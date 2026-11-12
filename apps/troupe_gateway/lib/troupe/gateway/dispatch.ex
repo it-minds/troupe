@@ -49,7 +49,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
   alias Troupe.Session.MCP, as: LocalMCP
-  alias Troupe.Sessions.{Index, Unseen}
+  alias Troupe.Sessions.{Index, Title, Unseen}
   alias Troupe.Todo.Edit
   alias Troupe.Tool.Result
   alias Troupe.Workflow
@@ -159,6 +159,7 @@ defmodule Troupe.Gateway.Dispatch do
     "session.create" => :admin,
     "session.archive" => :admin,
     "session.pin" => :admin,
+    "session.title.set" => :admin,
     "session.unpin" => :admin,
     "session.erase" => :admin,
     # Taking a private session over from another device, which then stops sealing it, is
@@ -1176,6 +1177,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp handle("session.create", params, context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
+         {:ok, title} <- title_of(params),
          {:ok, parent} <- parent_of(params),
          {:ok, resolved} <- where(workspace, params) do
       private? = Map.get(params, "private", false) == true
@@ -1203,9 +1205,12 @@ defmodule Troupe.Gateway.Dispatch do
 
       case session_agent(profile, parent, resolved.path) || Troupe.start_session(opts) do
         {:ok, session} ->
+          named(session.id, title)
+
           {:ok,
            %{
              "session_id" => session.id,
+             "title" => title,
              "workspace" => resolved.path,
              "worktree" => resolved.worktree,
              "branch" => resolved.branch,
@@ -1241,6 +1246,27 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   defp handle("session.pin", params, _context), do: pin(params, true)
+
+  # A person's name for a local session, kept beside its log; an empty one takes it off.
+  # A pod session's is the plane's, which a pod refuses for that reason.
+  defp handle("session.title.set", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id") do
+      case Troupe.title_session(session_id, params["title"]) do
+        {:ok, title} ->
+          {:ok, %{"session_id" => session_id, "title" => title}}
+
+        {:error, :not_found} ->
+          {:error, Error.new(:not_found, %{session_id: session_id})}
+
+        {:error, {:title, sentence}} ->
+          {:error, Error.new(:invalid_params, %{field: "title", reason: sentence})}
+
+        {:error, reason} ->
+          {:error, Error.new(:internal_error, %{reason: reason})}
+      end
+    end
+  end
+
   defp handle("session.unpin", params, _context), do: pin(params, false)
 
   # A private session is sealed at the plane as well, and erased there first, as one erased
@@ -2369,6 +2395,22 @@ defmodule Troupe.Gateway.Dispatch do
   defp start_error(other), do: inspect(other)
 
   # Running or dormant: the mark is kept beside the session's log.
+  # Named beside its log before the answer, so the listing a client asks for next already
+  # has it.
+  defp named(_session_id, nil), do: :ok
+  defp named(session_id, title), do: Troupe.title_session(session_id, title)
+
+  # Checked before the session exists, so a title too long costs nothing.
+  defp title_of(params) do
+    case Title.normalise(Map.get(params, "title")) do
+      {:ok, title} ->
+        {:ok, title}
+
+      {:error, sentence} ->
+        {:error, Error.new(:invalid_params, %{field: "title", reason: sentence})}
+    end
+  end
+
   defp pin(params, pinned?) do
     with {:ok, session_id} <- fetch(params, "session_id") do
       case Troupe.pin_session(session_id, pinned?) do
@@ -2833,6 +2875,8 @@ defmodule Troupe.Gateway.Dispatch do
       "created_at" => Map.get(session, :created_at),
       "last_active_at" => Map.get(session, :last_active_at),
       "pinned" => Map.get(session, :pinned, false),
+      # What the person called it, or nil, and the client shows the workspace.
+      "title" => Map.get(session, :title),
       # Offered to the plane for steering from another device: to whom, whether the plane
       # has it now, and who is steering it from where (`Troupe.Gateway.Remote`).
       "remote" => Remote.describe(session.id)
