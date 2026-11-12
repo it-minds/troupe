@@ -8,13 +8,16 @@
 // in one of their teams starts knowing: the winner on each topic, with what it replaces
 // struck through. Each level is listed on its own, each entry with who last changed it and
 // in how many sessions it was used; the person changes their own here (adding, editing and
-// forgetting entries, saved as entries over the version they read, through this computer's
-// daemon, which hands the new version to the sessions running here for their next turn).
-// A level above is changed here too by whoever the plane lets change it, as `me.memory`'s
-// `roles` say: a platform admin the organisation's, a team's admins that team's, through the
-// daemon's forwarded `admin.memory.preview` and `admin.memory.put` as them. Everybody else
-// reads it, with who can change it; the console's document editor is the administrators'
-// other way.
+// forgetting entries, saved as entries over the version they read). A level above is
+// changed here too by whoever the plane lets change it, as `me.memory`'s `roles` say: a
+// platform admin the organisation's, a team's admins that team's, by `admin.memory.preview`
+// and `admin.memory.put` as them. Everybody else reads it, with who can change it; the
+// console's document editor is the administrators' other way.
+//
+// Signed in to a plane, the app asks the plane itself, as the console does; this computer's
+// daemon is asked only where its copy stands, which it asks the plane again to answer, so a
+// save reaches the sessions running here for their next turn. Not signed in, everything goes
+// through the daemon and its own sign-in, as the person.
 //
 // The person's own level has a Versions drawer: every version, any two side by side, a
 // rollback to one, who wrote each line, where this computer's copy stands and what each
@@ -25,8 +28,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import { besideRows, replacedBy, topicKey, writtenBy } from "@troupe/client";
-import type { DaemonClient, EntryLevel, MemoryEntry, MemoryInEffect, MemoryStatus, OwnMemory, OwnMemoryHistory } from "@troupe/client";
-import { Loading, relative } from "./bits";
+import type { DaemonClient, EntryLevel, MemoryEntry, MemoryInEffect, MemoryStatus, OwnMemory, OwnMemoryHistory, OwnPlane } from "@troupe/client";
+import { Loading, relative, unreachedWords } from "./bits";
 
 type View = "effect" | string;
 
@@ -120,7 +123,25 @@ function Toast({ text, onDone }: { text: string; onDone: () => void }): JSX.Elem
   );
 }
 
-export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClient | null; localOnly: boolean; teams: string[] }): JSX.Element {
+/**
+ * The Memory view. `via` is what the person's memory is read and changed through: the plane
+ * itself where the app is signed in to one, this computer's daemon otherwise, and nothing
+ * under Local only or with neither. `daemon` is asked only what this computer holds: where
+ * its copy stands, and a `config.changed` for memory.
+ */
+export function MemoryScreen({
+  via,
+  daemon,
+  daemonState,
+  localOnly,
+  teams,
+}: {
+  via: OwnPlane | null;
+  daemon: DaemonClient | null;
+  daemonState: { status: "unsupported" | "searching" | "absent" | "connected" | "error"; error: string | null };
+  localOnly: boolean;
+  teams: string[];
+}): JSX.Element {
   const [own, setOwn] = useState<OwnMemory | null>(null);
   const [why, setWhy] = useState<string | null>(null);
   const [status, setStatus] = useState<MemoryStatus | null>(null);
@@ -131,6 +152,8 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
 
   const read = useCallback(() => setAsked((n) => n + 1), []);
 
+  // Where this computer's copy stands, asked again at each read: the daemon asks the plane
+  // as it answers, so a save made straight to the plane reaches the sessions here too.
   useEffect(() => {
     if (!daemon) return;
     let live = true;
@@ -138,8 +161,16 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
       (s) => live && setStatus(s),
       () => undefined,
     );
+    return () => {
+      live = false;
+    };
+  }, [daemon, asked]);
+
+  useEffect(() => {
+    if (!via) return;
+    let live = true;
     if (!localOnly) {
-      daemon.ownMemory({ blame: true }).then(
+      via.ownMemory({ blame: true }).then(
         (o) => {
           if (!live) return;
           setWhy(null);
@@ -151,7 +182,7 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
     return () => {
       live = false;
     };
-  }, [daemon, localOnly, asked]);
+  }, [via, localOnly, asked]);
 
   // A save from elsewhere, or an agent's entry, reaches this computer's copy: read it again.
   useEffect(() => {
@@ -172,9 +203,9 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
   const [inEffect, setInEffect] = useState<MemoryInEffect | null>(null);
   const [effectWhy, setEffectWhy] = useState<string | null>(null);
   useEffect(() => {
-    if (!daemon || localOnly || !own) return;
+    if (!via || localOnly || !own) return;
     let live = true;
-    daemon.memoryInEffect(effectTeam === null ? {} : { team: effectTeam }).then(
+    via.memoryInEffect(effectTeam === null ? {} : { team: effectTeam }).then(
       (e) => {
         if (!live) return;
         setEffectWhy(null);
@@ -185,7 +216,7 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
     return () => {
       live = false;
     };
-  }, [daemon, localOnly, own, effectTeam]);
+  }, [via, localOnly, own, effectTeam]);
   const head = (
     <header className="memory-head">
       <div className="lede">
@@ -201,16 +232,16 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
     </header>
   );
 
-  if (localOnly || !daemon) {
+  if (!localOnly && !via) {
+    const unreached = unreachedWords(daemonState, "your memory");
+    return <div className="memory-screen">{head}{unreached ? <p className="note">{unreached}</p> : <Loading what="Looking for this computer's daemon…" />}</div>;
+  }
+  if (localOnly || !via) {
     const mine = status?.documents.find((d) => d.scope === "user");
     return (
       <div className="memory-screen">
         {head}
-        <p className="note">
-          {daemon
-            ? "Local only: the plane is not asked. Your memory is kept on your organisation's plane, so it is read only here, and changed when Local only is off."
-            : "This computer's daemon is not connected, and your memory is read through it."}
-        </p>
+        <p className="note">Local only: the plane is not asked. Your memory is kept on your organisation's plane, so it is read only here, and changed when Local only is off.</p>
         {status && (
           <p className="muted">
             {mine ? `This computer holds version ${mine.version} of your memory` : "This computer holds no copy of your memory"}
@@ -316,7 +347,7 @@ export function MemoryScreen({ daemon, localOnly, teams }: { daemon: DaemonClien
       {current && (
         <LevelView
           key={current.key}
-          daemon={daemon}
+          via={via}
           own={own}
           level={current}
           levels={levels}
@@ -389,7 +420,7 @@ type Conflict = { version: number; text: string; mine: string };
  * forgotten: their own through `me.memory.put`, a level above through `admin.memory.put`.
  */
 function LevelView({
-  daemon,
+  via,
   own,
   level,
   levels,
@@ -398,7 +429,7 @@ function LevelView({
   onLevelSaved,
   onReload,
 }: {
-  daemon: DaemonClient;
+  via: OwnPlane;
   own: OwnMemory;
   level: Level;
   levels: Level[];
@@ -427,7 +458,7 @@ function LevelView({
   useEffect(() => {
     if (!open || !above) return;
     let live = true;
-    daemon.previewLevelMemory(above, level.level.name, { entries: JSON.parse(asRead) as ReturnType<typeof wire> }).then(
+    via.previewLevelMemory(above, level.level.name, { entries: JSON.parse(asRead) as ReturnType<typeof wire> }).then(
       (p) => live && setReach(p.readers?.sessions.length ?? null),
       (e: unknown) => {
         if (!live) return;
@@ -438,7 +469,7 @@ function LevelView({
     return () => {
       live = false;
     };
-  }, [daemon, open, above, level.level.name, asRead]);
+  }, [via, open, above, level.level.name, asRead]);
 
   // The whole document as entries over the version read: the plane writes them as sections.
   const save = (entries: MemoryEntry[], said: string, draft: string): void => {
@@ -450,17 +481,17 @@ function LevelView({
     };
     const refused = async (e: unknown): Promise<void> => {
       if (isConflict(e)) {
-        const theirs = above ? await daemon.levelMemory(above, level.level.name).catch(() => null) : await daemon.ownMemory().catch(() => null);
+        const theirs = above ? await via.levelMemory(above, level.level.name).catch(() => null) : await via.ownMemory().catch(() => null);
         if (theirs) setConflict({ version: theirs.version ?? 0, text: theirs.text, mine: draft });
       }
       setError(message(e));
     };
     const sent = above
-      ? daemon.putLevelMemory(above, level.level.name, { entries: wire(entries) }, level.version).then((saved) => {
+      ? via.putLevelMemory(above, level.level.name, { entries: wire(entries) }, level.version).then((saved) => {
           done();
           onLevelSaved(Object.keys(saved.changes ?? {}).length > 0 ? said : "Nothing changed; nothing was saved.");
         })
-      : daemon.putOwnMemoryEntries(wire(entries), own.version).then((saved) => {
+      : via.putOwnMemoryEntries(wire(entries), own.version).then((saved) => {
           done();
           onSaved(saved.user, saved.changed ? said : "Nothing changed; nothing was saved.");
         });
@@ -573,7 +604,7 @@ function LevelView({
           </button>
         </div>
       )}
-      {versions && mine && <Versions daemon={daemon} own={own} status={status} onRolledBack={(saved, said) => onSaved(saved, said)} />}
+      {versions && mine && <Versions via={via} own={own} status={status} onRolledBack={(saved, said) => onSaved(saved, said)} />}
       {editing && editing.index === null && form("New memory")}
       {level.entries.length === 0 && !editing ? (
         <div className="empty">
@@ -670,12 +701,12 @@ function LevelView({
  * computer stands: its copy against the plane's, and what each session running here read.
  */
 function Versions({
-  daemon,
+  via,
   own,
   status,
   onRolledBack,
 }: {
-  daemon: DaemonClient;
+  via: OwnPlane;
   own: OwnMemory;
   status: MemoryStatus | null;
   onRolledBack: (saved: OwnMemory, said: string) => void;
@@ -691,7 +722,7 @@ function Versions({
   useEffect(() => {
     let live = true;
     const params = right === null ? {} : left === null ? { version: right } : { version: right, against: left };
-    daemon.ownMemoryHistory(params).then(
+    via.ownMemoryHistory(params).then(
       (h) => {
         if (!live) return;
         setHistory(h);
@@ -706,12 +737,12 @@ function Versions({
     return () => {
       live = false;
     };
-  }, [daemon, right, left, own.version]);
+  }, [via, right, left, own.version]);
 
   const rollback = (to: number): void => {
     setBusy(true);
     setError(null);
-    daemon
+    via
       .rollbackOwnMemory(to, own.version)
       .then((saved) => onRolledBack(saved.user, `Rolled back: version ${to}'s text is version ${saved.user.version} now.`))
       .catch((e: unknown) => setError(message(e)))

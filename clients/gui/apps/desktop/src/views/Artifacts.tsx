@@ -1,6 +1,6 @@
 // The person's artifacts in their own app (troupe #62): what they and their troupe published
-// that they may open, through this computer's daemon and its sign-in, as the gallery in the
-// console has them. A grid of cards grouped by when, filtered by who each is for (everyone,
+// that they may open, as the gallery in the console has them: from the plane itself where
+// the app is signed in to one, through this computer's daemon and its sign-in otherwise. A grid of cards grouped by when, filtered by who each is for (everyone,
 // your teams and profiles, a link's, only you) and by a search; the one chosen in an aside
 // with its versions, where it came from, who can see it, whose it is, and for its owner the
 // controls. An artifact a team owns is every member's: each has the owner's controls, and
@@ -17,10 +17,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
 import { audienceName, audienceOf, teamOwned, visibilityWords } from "@troupe/client";
-import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, DaemonClient } from "@troupe/client";
+import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, DaemonClient, OwnPlane } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { shell } from "../shell";
-import { Loading, relative } from "./bits";
+import { Loading, relative, unreachedWords } from "./bits";
 import { Publish, VisibilityOptions } from "./Publish";
 
 type Filter = "all" | ArtifactAudience;
@@ -108,8 +108,8 @@ function audienceWords(a: Artifact, audience: ArtifactAudience): { long: string;
 }
 
 /** Open an artifact, or one version, from its host: a window of the shell's, or a tab of its own. */
-async function show(daemon: DaemonClient, a: { id: string; title: string }, version?: number): Promise<void> {
-  const ticket = await daemon.openArtifact(a.id, version);
+async function show(via: OwnPlane, a: { id: string; title: string }, version?: number): Promise<void> {
+  const ticket = await via.openArtifact(a.id, version);
   const title = version === undefined ? a.title : `${a.title} (version ${version})`;
   const open = shell()?.openArtifactWindow;
   if (open) await open(ticket.url, title, a.id);
@@ -122,12 +122,22 @@ async function openExternal(url: string): Promise<void> {
   else globalThis.open?.(url, "_blank", "noopener,noreferrer");
 }
 
+/**
+ * The gallery. `via` is what the person's artifacts are read and changed through: the plane
+ * itself where the app is signed in to one, this computer's daemon otherwise, and nothing
+ * under Local only or with neither. `daemon` publishes a new version, which sends files from
+ * this computer.
+ */
 export function Artifacts({
+  via,
   daemon,
+  daemonState,
   localOnly,
   onOpenSession,
 }: {
+  via: OwnPlane | null;
   daemon: DaemonClient | null;
+  daemonState: { status: "unsupported" | "searching" | "absent" | "connected" | "error"; error: string | null };
   localOnly: boolean;
   /** A session the artifact came from, opened in the app where it is one of the list's. */
   onOpenSession?: ((id: string) => void) | undefined;
@@ -141,10 +151,10 @@ export function Artifacts({
   const [asked, setAsked] = useState(0);
 
   useEffect(() => {
-    if (localOnly || !daemon) return;
+    if (localOnly || !via) return;
     let live = true;
     setError(null);
-    daemon.artifacts({}).then(
+    via.artifacts({}).then(
       (l) => {
         if (live) setList(l);
       },
@@ -153,7 +163,7 @@ export function Artifacts({
     return () => {
       live = false;
     };
-  }, [daemon, localOnly, asked]);
+  }, [via, localOnly, asked]);
 
   const reload = useCallback(() => setAsked((n) => n + 1), []);
 
@@ -181,7 +191,10 @@ export function Artifacts({
       </div>
     );
   }
-  if (!daemon) return <div className="repertoire">{head}<p className="note">This computer's daemon is not connected, and the gallery is read through it.</p></div>;
+  if (!via) {
+    const unreached = unreachedWords(daemonState, "your artifacts");
+    return <div className="repertoire">{head}{unreached ? <p className="note">{unreached}</p> : <Loading what="Looking for this computer's daemon…" />}</div>;
+  }
   if (error) return <div className="repertoire">{head}<p className="note error">{error}</p></div>;
   if (!list) return <div className="repertoire">{head}<Loading what="Asking the plane for your artifacts…" /></div>;
 
@@ -271,6 +284,7 @@ export function Artifacts({
         {current && (
           <Aside
             key={current.id}
+            via={via}
             daemon={daemon}
             artifact={current}
             audience={audienceOf(current)}
@@ -291,6 +305,7 @@ export function Artifacts({
 
 /** The artifact chosen: what it is, Open and Copy link, who can see it, where it came from, its versions, and its owner's controls. */
 function Aside({
+  via,
   daemon,
   artifact,
   audience,
@@ -300,7 +315,8 @@ function Aside({
   onChanged,
   onOpenSession,
 }: {
-  daemon: DaemonClient;
+  via: OwnPlane;
+  daemon: DaemonClient | null;
   artifact: Artifact;
   audience: ArtifactAudience;
   teams: string[] | undefined;
@@ -327,14 +343,14 @@ function Aside({
 
   useEffect(() => {
     let live = true;
-    daemon.artifact(artifact.id).then(
+    via.artifact(artifact.id).then(
       (d) => live && setDetail(d),
       (e: unknown) => live && setError(sentence(e)),
     );
     return () => {
       live = false;
     };
-  }, [daemon, artifact.id, asked]);
+  }, [via, artifact.id, asked]);
 
   const act = async (what: () => Promise<unknown>, done: string): Promise<void> => {
     setBusy(true);
@@ -354,7 +370,7 @@ function Aside({
 
   const open = (version?: number): void => {
     setError(null);
-    show(daemon, artifact, version).then(
+    show(via, artifact, version).then(
       () => onOpened(version ?? detail?.current ?? artifact.current ?? artifact.version),
       (e: unknown) => setError(sentence(e)),
     );
@@ -364,7 +380,7 @@ function Aside({
   const copy = async (): Promise<void> => {
     setError(null);
     try {
-      const url = owner ? (await daemon.shareArtifact(artifact.id, "view")).url : artifact.url;
+      const url = owner ? (await via.shareArtifact(artifact.id, "view")).url : artifact.url;
       await copyText(url);
       setCopied(true);
       if (owner) setAsked((n) => n + 1);
@@ -427,7 +443,7 @@ function Aside({
               disabled={busy || moveTo === artifact.visibility}
               onClick={() =>
                 void act(
-                  () => daemon.moveArtifact(artifact.id, artifact.version, moveTo),
+                  () => via.moveArtifact(artifact.id, artifact.version, moveTo),
                   `Moved: ${artifact.title} is for ${visibilityWords(moveTo)} now, as version ${artifact.version + 1} with the same files.`,
                 )
               }
@@ -463,7 +479,7 @@ function Aside({
             <button
               type="button"
               disabled={busy || giveTo === ""}
-              onClick={() => void act(() => daemon.transferArtifact(artifact.id, `team:${giveTo}`), `Given: ${artifact.title} is the ${giveTo} team's now, and every member of it is its owner.`)}
+              onClick={() => void act(() => via.transferArtifact(artifact.id, `team:${giveTo}`), `Given: ${artifact.title} is the ${giveTo} team's now, and every member of it is its owner.`)}
             >
               Give it to the team
             </button>
@@ -471,7 +487,7 @@ function Aside({
         )}
         {mayTakeBack && (
           <div className="move-visibility">
-            <button type="button" disabled={busy} onClick={() => void act(() => daemon.transferArtifact(artifact.id, "me"), `Taken back: ${artifact.title} is yours now, not the ${artifact.owner_team} team's.`)}>
+            <button type="button" disabled={busy} onClick={() => void act(() => via.transferArtifact(artifact.id, "me"), `Taken back: ${artifact.title} is yours now, not the ${artifact.owner_team} team's.`)}>
               Take back
             </button>
           </div>
@@ -523,7 +539,7 @@ function Aside({
                   Open
                 </button>
                 {(owner || artifact.may_edit) && i > 0 && (
-                  <button type="button" className="link" disabled={busy} onClick={() => void act(() => daemon.rollbackArtifact(artifact.id, v.n), `Rolled back: version ${v.n}'s files are the newest version now.`)}>
+                  <button type="button" className="link" disabled={busy} onClick={() => void act(() => via.rollbackArtifact(artifact.id, v.n), `Rolled back: version ${v.n}'s files are the newest version now.`)}>
                     Roll back to it
                   </button>
                 )}
@@ -534,7 +550,7 @@ function Aside({
                     disabled={busy}
                     onClick={() =>
                       void act(
-                        () => daemon.pinArtifact(artifact.id, pinned === v.n ? null : v.n),
+                        () => via.pinArtifact(artifact.id, pinned === v.n ? null : v.n),
                         pinned === v.n ? "Unpinned: its address serves the newest version." : `Pinned: its address serves version ${v.n}.`,
                       )
                     }
@@ -546,7 +562,8 @@ function Aside({
             </li>
           ))}
         </ol>
-        {owner && (
+        {/* A new version's files are this computer's, sent by its daemon. */}
+        {owner && daemon && (
           <button type="button" onClick={() => setPublishing(true)}>
             Publish a new version
           </button>
@@ -566,7 +583,7 @@ function Aside({
                     {s.role === "edit" ? "Can edit" : "Can view"}
                     {s.used_by.length > 0 && ` · opened by ${s.used_by.map((u) => u.person.display_name || u.person.subject).join(", ")}`}
                   </span>
-                  <button type="button" className="link" disabled={busy} onClick={() => void act(() => daemon.unshareArtifact(artifact.id, { share: s.id }), "Revoked: that link opens nothing now.")}>
+                  <button type="button" className="link" disabled={busy} onClick={() => void act(() => via.unshareArtifact(artifact.id, { share: s.id }), "Revoked: that link opens nothing now.")}>
                     Revoke
                   </button>
                 </li>
@@ -576,7 +593,7 @@ function Aside({
         </section>
       )}
 
-      {publishing && (
+      {publishing && daemon && (
         <Publish
           daemon={daemon}
           target={artifact.id}

@@ -1,10 +1,10 @@
 // The person's artifacts in the app (troupe #62): a gallery beside Sessions,
-// read through this computer's daemon, its cards grouped by when and filtered by who each
+// read from the plane the app is signed in to, its cards grouped by when and filtered by who each
 // is for and by a search; the chosen one in an aside with its versions, where it came from,
 // who can see it and its owner's controls. An artifact is shown from its own host in a
 // window of the shell's, at the one-time address `artifact.open` answers, and nothing of it
-// is fetched into the app. Under Local only the gallery asks nothing. Against the fake
-// daemon and a fake plane for the app's own sign-in.
+// is fetched into the app. Under Local only the gallery asks nothing. Against a fake plane
+// whose artifacts the fake daemon keeps (`keptBy`).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
@@ -13,6 +13,7 @@ import { App } from "../src/App";
 import { dayOf } from "../src/views/Artifacts";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
+import { keptBy } from "../../../packages/client/test/support/kept.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
 import { button, externalResources, nav, recordNetwork, render, sees, seesButton, startOnTheList, type, waitFor } from "./support";
 import type { Recorder } from "./support";
@@ -85,7 +86,7 @@ afterEach(async () => {
 });
 
 async function signedIn(): Promise<void> {
-  harness = await startHarness();
+  harness = await startHarness({ plane: { keeper: keptBy(daemon) } });
   await harness.signIn({ store: webTokenStore() });
   localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
   localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");

@@ -12,6 +12,7 @@ import { composeProfile, exampleProfiles, specOfAdminProfile } from "./profiles.
 import type { FakeProfileSpec } from "./profiles.js";
 import { readBody, subjectOfIdToken, type FakeIdp } from "./idp.js";
 import { encodeToken, type FakeWorker } from "./worker.js";
+import { inEffect, parse, type FakeLevel } from "./entries.js";
 
 interface Row {
   id: string;
@@ -78,6 +79,12 @@ export interface PlaneOptions {
   own?: Record<string, string>;
   /** What `artifact.*` serves, in any order: the list sorts them, newest published first. */
   artifacts?: FakeArtifact[];
+  /**
+   * Where the person's own memory and artifacts are kept, for a test that keeps them
+   * somewhere else (`keptBy`, the fake daemon's): asked first for each method `KEPT` names,
+   * its answer the plane's.
+   */
+  keeper?: Keeper;
   /** `false` is a plane whose administrator switched artifacts off. */
   artifactsEnabled?: boolean;
   /** Who may publish to the whole organisation. */
@@ -258,6 +265,12 @@ interface Invited {
   /** A private session's: whether its owner offers it for steering now. */
   offered?: boolean | null;
 }
+
+/** What a keeper answers for one of the plane's methods, as the plane would. */
+export type Keeper = (method: string, params: Record<string, unknown>) => Promise<{ result: unknown } | { error: { code: number; message: string; data?: unknown } }>;
+
+/** The person's own memory and artifacts: the methods a keeper answers. */
+export const KEPT = (method: string): boolean => method.startsWith("me.memory") || method === "memory.in_effect" || method.startsWith("admin.memory.") || method.startsWith("artifact.");
 
 export class FakePlane {
   readonly server: Server;
@@ -976,6 +989,8 @@ export class FakePlane {
       let answer =
         method === "me" && held.breakglass
           ? { result: { subject: held.subject, display_name: held.name, kind: "breakglass", teams: [], profiles: [], platform_admin: true, breakglass: true } }
+          : this.opts.keeper && KEPT(method)
+          ? await this.opts.keeper(method, request.params ?? {})
           : method === "admin.artifacts.list" || method === "admin.artifact.takedown"
           ? this.adminArtifacts(held.subject, method, request.params ?? {})
           : this.opts.admin && method.startsWith("admin.")
@@ -1202,10 +1217,41 @@ export class FakePlane {
         return { result: { clients: this.opts.clientsSeen ?? [] } };
 
       // The memory a person's machine reads into every session: signed, as the plane signs it.
+      // With `entries`, as a client showing memory asks it: each document's and their own's
+      // `## Topic` sections, their teams by name, the organisation's name and their roles.
       case "me.memory": {
         const own = this.ownOf(subject);
         const mine = own.text === "" ? [] : [{ scope: "user", name: null, version: own.version, hash: `sha256:own-${own.version}`, updated_at: own.changed_at, text: own.text }];
-        return { result: { documents: [...(this.opts.memory ?? []), ...mine], user: this.ownJson(own) } };
+        const documents = [...(this.opts.memory ?? []), ...mine];
+        if (params["entries"] !== true) return { result: { documents, user: this.ownJson(own) } };
+        const entriesOf = (d: Record<string, unknown>): Array<Record<string, unknown>> => parse(String(d["text"] ?? "")).map((e) => ({ ...e, version: d["version"], by: d["changed_by"] ?? "root@example.com", at: "2026-10-26T08:00:00Z", used: 3 }));
+        const admin = this.opts.admin?.role(subject) === "platform_admin";
+        const administers = [...(this.opts.admin?.teams.entries() ?? [])].filter(([, t]) => t.admins.includes(subject)).map(([name]) => name);
+        return {
+          result: {
+            documents: documents.map((d) => ({ ...d, entries: entriesOf(d) })),
+            user: { ...this.ownJson(own), entries: entriesOf({ text: own.text, version: own.version, changed_by: subject }) },
+            teams: [...this.teamsOf(subject)].sort(),
+            organisation: { name: "Example" },
+            roles: { platform_admin: admin, team_admin: administers },
+          },
+        };
+      }
+
+      // What a new session of the person's in one of their teams reads: the organisation's,
+      // the team's (their first by name for none) and their own, per topic the closest.
+      case "memory.in_effect": {
+        const teams = [...this.teamsOf(subject)].sort();
+        const team = typeof params["team"] === "string" ? params["team"] : (teams[0] ?? null);
+        if (team !== null && !teams.includes(team)) return { error: { code: -32005, message: "not_found", data: { team, reason: `you are in no team called ${team}` } } };
+        const docs = this.opts.memory ?? [];
+        const textOf = (scope: string, name: string | null): string => String(docs.find((d) => d["scope"] === scope && (d["name"] ?? null) === name)?.["text"] ?? "");
+        const levels: FakeLevel[] = [
+          { level: { scope: "organisation", name: null }, rank: 0, entries: parse(textOf("organisation", null)) },
+          ...(team ? [{ level: { scope: "team", name: team }, rank: 1, entries: parse(textOf("team", team)) }] : []),
+          { level: { scope: "user", name: null }, rank: 9, entries: parse(this.ownOf(subject).text) },
+        ];
+        return { result: { team, profile: null, organisation: { name: "Example" }, levels: levels.map((l) => ({ ...l.level, version: 1, entries: l.entries.length })), entries: inEffect(levels) } };
       }
 
       // A person's own memory: what a save would change, written nowhere; and the save, over

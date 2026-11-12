@@ -4,7 +4,8 @@
 // entered before its socket opened again holds what the earlier daemon had. The app does
 // not remount a screen uninvited; it says the daemon is ready now and offers a refresh,
 // which remounts that one screen, and the banner goes at the refresh and at the next
-// screen. A screen entered after the daemon was ready says nothing.
+// screen. A screen entered after the daemon was ready says nothing. The screen is the
+// gallery, against a fake plane whose artifacts the fake daemon keeps (`keptBy`).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
@@ -12,6 +13,7 @@ import { webTokenStore } from "@troupe/client";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
+import { keptBy } from "../../../packages/client/test/support/kept.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
 import { nav, render, says, sees, seesButton, startOnTheList, waitFor } from "./support";
 
@@ -63,7 +65,7 @@ afterEach(async () => {
 
 /** Signed in to the plane, on the list; the daemon is linked once the hand-over lands. */
 async function open(): Promise<void> {
-  harness = await startHarness();
+  harness = await startHarness({ plane: { keeper: keptBy(daemon) } });
   await harness.signIn({ store: webTokenStore() });
   localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
   localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");
