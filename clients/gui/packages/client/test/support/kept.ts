@@ -27,7 +27,9 @@ export function keptBy(daemon: FakeDaemon): Keeper {
     } catch (e) {
       // The error's own word (`conflict`, `forbidden`), out of the sentence the client made of it.
       if (e instanceof TroupeRpcError) return { error: { code: e.code, message: /^\S+: (\S+) \(/.exec(e.message)?.[1] ?? e.message, ...(e.data ? { data: e.data } : {}) } };
-      throw e;
+      // The daemon gone mid-call, as a test that stops it while a read is still on its way
+      // does: the plane says it is unavailable rather than leave the request unanswered.
+      return { error: { code: -32010, message: "unavailable", data: { reason: e instanceof Error ? e.message : String(e) } } };
     } finally {
       client.disconnect();
     }
