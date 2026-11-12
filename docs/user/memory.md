@@ -70,8 +70,9 @@ made elsewhere meanwhile is said rather than overwritten:
   then `EDITOR`) and saves what you leave there; `troupe memory --clear` empties it. Inside
   the terminal client, `/memory` is the same page as the desktop app's *Memory*, entry by
   entry ([the terminal client's screen](terminal-screen.md#memory)).
-- **The desktop app**: *Memory* in the rail, through this computer's daemon (below). A
-  session's *Instructions* pane lists it as *Your memory* and opens *Memory* for it.
+- **The desktop app**: *Memory* in the rail (below), read from the plane the app is signed
+  in to, or through this computer's daemon and its sign-in when the app is not. A session's
+  *Instructions* pane lists it as *Your memory* and opens *Memory* for it.
 - **The console**, under *Mine*: a change is previewed line by line before it is saved.
 
 A save reaches the sessions running on the machine that saved it, and on the plane's pods,
@@ -102,8 +103,14 @@ organisation's its platform admins, a team's its team admins. The plane decides 
 save, so a role taken away since is refused in its own words. *Only you* also has a
 *Versions* drawer: it lists every version, sets any two side by side, rolls back to one,
 shows who wrote each line, and says whether this computer's copy is current and what each
-session running here read. An entry an agent adds while it is open appears in it. Under
-*Local only* it asks the plane nothing and says what this computer holds.
+session running here read. An entry an agent adds while it is open appears in it.
+
+Signed in, the app reads and saves your memory on the plane itself, as the console does,
+whether or not this computer's daemon is running; where one is, the app asks it where its
+copy stands after each read, which has it fetch the new version for the sessions running
+here. Not signed in (the plane not answering, say), it all goes through the daemon, as the
+person it is signed in as; with no daemon either, the view says which of the two is
+missing. Under *Local only* it asks the plane nothing and says what this computer holds.
 
 **In the terminal**, `/memory` is the same by role: on the ◉ organisation's and each ◎
 team's tab, `a`, `e` and `f` add, edit and forget where you may change that level, and the

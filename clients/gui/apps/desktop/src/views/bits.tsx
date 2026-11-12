@@ -227,6 +227,25 @@ export function Loading({ what }: { what: string }): JSX.Element {
   );
 }
 
+/**
+ * Why a screen of the person's own things on the plane has nothing to read them through:
+ * the app is not signed in to a plane, and this computer's daemon is as its status says.
+ * `null` while the daemon is still being looked for, or is between two dials, which is a
+ * wait rather than an absence.
+ */
+export function unreachedWords(daemon: { status: "unsupported" | "searching" | "absent" | "connected" | "error"; error: string | null }, what: string): string | null {
+  switch (daemon.status) {
+    case "absent":
+      return `You are not signed in here, and this computer's daemon is not running, so ${what} cannot be read. Sign in, or start the daemon on This computer.`;
+    case "error":
+      return `You are not signed in here, and this computer's daemon did not answer${daemon.error ? ` (${daemon.error})` : ""}, so ${what} cannot be read. Sign in, or find the daemon again on This computer.`;
+    case "unsupported":
+      return `You are not signed in here, and a browser cannot find this computer's daemon by itself, so ${what} cannot be read. Sign in, or connect the daemon on This computer.`;
+    default:
+      return null;
+  }
+}
+
 /** A plain data table. Scrolls on its own so the page never does, sideways. */
 export function Table({ head, children }: { head: string[]; children: ReactNode }): JSX.Element {
   return (

@@ -1,8 +1,8 @@
 // The artifact panel's Copy link and Open in browser in the shell. The link is put on the
 // clipboard by the shell, never by the page: a webview writes its own clipboard only inside
-// the click that asked, and the owner's link is minted by the daemon first. Open in browser
+// the click that asked, and the owner's link is minted by the plane first. Open in browser
 // hands the artifact's address to the shell, and a shell that refuses says why on the
-// panel's error line rather than nothing. Against the fake daemon and a fake plane.
+// panel's error line rather than nothing. Against a fake plane whose artifacts the fake daemon keeps.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
@@ -10,6 +10,7 @@ import { webTokenStore } from "@troupe/client";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
+import { keptBy } from "../../../packages/client/test/support/kept.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
 import { nav, render, sees, seesButton, startOnTheList, waitFor } from "./support";
 
@@ -68,7 +69,7 @@ beforeEach(async () => {
     row({ id: "art-mine", title: "My notes", scope: "mine", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, may_delete: true }),
   ];
   location.hash = `#daemon=${daemon.port}:${daemon.token}`;
-  harness = await startHarness();
+  harness = await startHarness({ plane: { keeper: keptBy(daemon) } });
   await harness.signIn({ store: webTokenStore() });
   localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
   localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");

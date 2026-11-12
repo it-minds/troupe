@@ -25,6 +25,7 @@ import { renderEntries } from "./entries.js";
 import type { MemoryEntry, MemoryInEffect } from "./entries.js";
 import type { Invitee, InviteRole, SealedRead } from "./invites.js";
 import type { MemoryBrief } from "./memory.js";
+import type { OwnPlane } from "./own.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
 import type { ProfileView } from "./profile.js";
 import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
@@ -402,7 +403,7 @@ export function daemonUrl(endpoint: Pick<DaemonEndpoint, "port">): string {
  * to each until one claims it. That is the same routing `SessionView.handle` does on a
  * worker socket; there is simply more than one candidate here.
  */
-export class DaemonClient {
+export class DaemonClient implements OwnPlane {
   private at: DaemonEndpoint;
   // Whether the next dial follows a socket that dropped or a dial that failed, and so
   // reads where the daemon is before it goes.
