@@ -721,6 +721,29 @@ defmodule Troupe.Gateway.LocalSourcesTest do
       assert data["reason"] =~ "not a directory"
     end
 
+    test "a skill missing a program its requires names is listed, unavailable, with what it lacks",
+         context do
+      skill = fn name, requires ->
+        dir = Path.join([context.workspace, ".troupe", "skills", name])
+        File.mkdir_p!(dir)
+
+        File.write!(
+          Path.join(dir, "SKILL.md"),
+          "---\ndescription: #{name}\nrequires: #{requires}\n---\nRun the script."
+        )
+      end
+
+      skill.("deck", "[troupe-absent-873, sh]")
+      skill.("plain", "[sh]")
+
+      assert {:ok, %{"skills" => skills}} =
+               Client.call(context.client, "skills.list", %{"workspace" => context.workspace})
+
+      by_name = Map.new(skills, &{&1["name"], &1})
+      assert %{"available" => false, "missing" => ["troupe-absent-873"]} = by_name["deck"]
+      assert %{"available" => true, "missing" => []} = by_name["plain"]
+    end
+
     # Decision 822: the repository's `.agents/skills` is a layer below Troupe's own, read in
     # place; a name `.troupe/skills` has too is listed as skipped, saying which is used.
     test "an .agents/skills skill is listed with its layer, and one .troupe/skills beats is " <>

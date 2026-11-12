@@ -93,3 +93,46 @@ description: Write release notes from the merged pull requests since the last ta
 
 `~/.agents/skills/` is read too, the directory other tools share for skills; Troupe never
 writes there.
+
+### A skill with a script
+
+A skill may carry a script beside its `SKILL.md`, which the agent runs with `shell` (a
+profile that denies `shell` runs none). On your machine a script has whatever your machine
+has. On a worker pod it has what the worker image has, and nothing more can be installed
+from inside a session, because a pod reaches only the hosts its profile names. What a
+skill's script may rely on there:
+
+| Program | For |
+|---|---|
+| `bash`, `sh` | the script itself |
+| `python3`, the standard library only (no `pip`, no packages) | `zipfile`, `json`, `csv`, `xml.etree`, and so the zip-based office files (`.docx`, `.xlsx`, `.pptx`, `.odt`) |
+| `zip`, `unzip`, `tar`, `gzip` | archives |
+| `perl`, `git` | text, and the repository |
+
+A skill that needs anything else says so in its frontmatter, as a list of program names:
+
+```markdown title="skills/deck/SKILL.md"
+---
+name: deck
+description: Build a slide deck (.pptx) from an outline, with the template beside this file.
+requires: [python3, zip]
+---
+Run `python3 build.py outline.md` and attach the `.pptx` it writes.
+```
+
+Each name is looked for on the `PATH` of the machine the skill is loaded on, when a turn
+begins. A skill missing one is kept, and marked: the agent's prompt lists it as "cannot
+run here: needs node" rather than offering it, so the agent says so instead of finding
+out halfway through, and the `skill` tool answers the same if asked for it. The daemon's
+`skills.list` gives each of your own skills `available` and `missing`. On a pod, the
+profile's page (`profile.get`) lists the skills its grant leaves without this check, since
+the plane cannot see what a pod's image holds: the pod's session is where it is known, in
+the agent's prompt and in the turn's `llm_request` (`turn_hold`, each skill that lacks a
+program with its `missing`). An admin
+closes the gap with an image of the profile's own
+([profiles-and-policy.md](../../admin/profiles-and-policy.md#a-worker-image-of-the-profiles-own)).
+
+A name is lower-case letters, digits, `+`, `.`, `_` and `-`, as a program's is (`python3`,
+`node`, `g++`). A `requires:` that is not a list of such names is refused when a bundle is
+published, and on your own machine is a warning in the daemon's log, the skill loaded with
+the names that are.

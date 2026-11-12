@@ -109,6 +109,38 @@ defmodule Troupe.Protocol.BundleTest do
       assert m3 =~ "says its name"
     end
 
+    test "a skill's requires is a list of program names, or the publish is refused" do
+      needs = fn requires ->
+        %{"name" => "x", "files" => %{"SKILL.md" => "---\nrequires: #{requires}\n---\nhi"}}
+      end
+
+      assert {:ok, _bundle} =
+               Bundle.validate(
+                 document(%{"agents" => [], "skills" => [needs.("[python3, zip]")]})
+               )
+
+      for bad <- ["python3", "[\"python 3\"]", "[/usr/bin/zip]", "[Python3]", "[3, zip]"] do
+        assert {:error, [message]} =
+                 Bundle.validate(document(%{"agents" => [], "skills" => [needs.(bad)]})),
+               bad
+
+        assert message =~ "skill x: requires is a list of program names"
+      end
+    end
+
+    test "a skill's requires reads the programs, and apart what is not one" do
+      assert Bundle.skill_requires("---\nrequires: [python3, zip, python3, g++, x.y_z]\n---\n") ==
+               {["python3", "zip", "g++", "x.y_z"], []}
+
+      assert Bundle.skill_requires("---\nrequires: [python3, \"a b\"]\n---\n") ==
+               {["python3"], ["a b"]}
+
+      assert Bundle.skill_requires("---\nrequires: zip\n---\n") == {[], ["zip"]}
+      assert Bundle.skill_requires("---\nrequires:\n---\n") == {[], []}
+      assert Bundle.skill_requires("---\nname: x\n---\n") == {[], []}
+      assert Bundle.skill_requires("no frontmatter") == {[], []}
+    end
+
     test "an MCP server must be https, inside egress, and reference a credential by name" do
       plain = %{"name" => "a", "url" => "http://mcp.example/mcp"}
       assert {:error, [m1]} = Bundle.validate(document(%{"mcp_servers" => [plain]}))
@@ -367,18 +399,27 @@ defmodule Troupe.Protocol.BundleTest do
   # its tools save one; the worker's servers carry it, and the harness names those tools.
   describe "a server where the organisation keeps files" do
     defp docs(fields),
-      do: %{"schema" => 1, "mcp_servers" => [Map.merge(%{"name" => "docs", "url" => "https://mcp.docs.example/mcp"}, fields)]}
+      do: %{
+        "schema" => 1,
+        "mcp_servers" => [
+          Map.merge(%{"name" => "docs", "url" => "https://mcp.docs.example/mcp"}, fields)
+        ]
+      }
 
     test "is marked stores: files, with the tools that save one, and reaches the worker so" do
       assert {:ok, parsed} = Bundle.validate(docs(%{"stores" => "files", "files" => ["upload"]}))
       assert [%{stores: :files, files: ["upload"]}] = parsed.mcp_servers
-      assert [%{"stores" => "files", "files" => ["upload"]} = config] = Bundle.mcp_server_configs(parsed)
+
+      assert [%{"stores" => "files", "files" => ["upload"]} = config] =
+               Bundle.mcp_server_configs(parsed)
 
       server = Server.from_config(config)
       assert Server.stores_files?(server, "upload")
       refute Server.stores_files?(server, "search")
 
-      assert {:ok, %{mcp_servers: [%{stores: :files, files: :all}]}} = Bundle.validate(docs(%{"stores" => "files"}))
+      assert {:ok, %{mcp_servers: [%{stores: :files, files: :all}]}} =
+               Bundle.validate(docs(%{"stores" => "files"}))
+
       assert {:ok, %{mcp_servers: [%{stores: nil}]} = plain} = Bundle.validate(docs(%{}))
       refute Map.has_key?(hd(Bundle.mcp_server_configs(plain)), "stores")
     end
@@ -390,7 +431,9 @@ defmodule Troupe.Protocol.BundleTest do
       assert {:error, [reason]} = Bundle.validate(docs(%{"files" => ["upload"]}))
       assert reason =~ "needs stores: files"
 
-      assert {:error, [reason]} = Bundle.validate(docs(%{"stores" => "files", "files" => "upload"}))
+      assert {:error, [reason]} =
+               Bundle.validate(docs(%{"stores" => "files", "files" => "upload"}))
+
       assert reason =~ "files is a list"
     end
   end

@@ -219,6 +219,12 @@ defmodule Troupe.Tool.Result do
       "The skill #{name} went during this turn: its SKILL.md is no longer there to read. " <>
         "Do the work without it, or say what is left undone."
 
+  # A skill whose `requires:` names a program this machine does not have.
+  def describe({:skill_cannot_run, name, missing}),
+    do:
+      "The skill #{name} cannot run here: it needs #{Enum.join(missing, ", ")}, which this " <>
+        "machine does not have. Tell the person, and do what you can without it."
+
   def describe({:no_loop, name}),
     do:
       "#{name} ends a /loop, and no loop is running on this turn, so there is nothing for it " <>
