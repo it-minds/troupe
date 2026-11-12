@@ -349,7 +349,11 @@ defmodule Troupe.Plane.ScalingTest do
 
       # The wait is visible: the session exists and says what it is doing.
       assert {:ok, listed} =
-               Harness.call("session.get", %{"session_id" => second["session_id"]}, context.caller)
+               Harness.call(
+                 "session.get",
+                 %{"session_id" => second["session_id"]},
+                 context.caller
+               )
 
       assert listed["state"] == "pending"
 
@@ -395,6 +399,49 @@ defmodule Troupe.Plane.ScalingTest do
                Harness.call("token.mint", %{"session_id" => placed.id}, context.caller)
 
       assert is_binary(endpoint["token"])
+    end
+
+    test "starts as the agent it was asked for, which its row says", context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard"})
+      _pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0", capacity: 1)
+
+      {:ok, _first} = create(context)
+      assert_receive {:pushed, "session.activate", _}, 5_000
+
+      {:ok, waiting} = create(context, agent: "plan")
+      assert waiting["state"] == "pending"
+
+      # A listing says what it will run as before it runs, and when it was asked for.
+      {:ok, row} =
+        Harness.call("session.get", %{"session_id" => waiting["session_id"]}, context.caller)
+
+      assert row["agent"] == "plan"
+      assert {:ok, _at, _offset} = DateTime.from_iso8601(row["created_at"])
+
+      _second_pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-1", capacity: 1)
+      Scaler.tick()
+
+      # A session that waited used to start as the profile's default, whatever was asked.
+      assert_receive {:pushed, "session.activate", pushed}, 5_000
+      assert pushed["session_id"] == waiting["session_id"]
+      assert pushed["agent"] == "plan"
+
+      # The pod reports a switch, and the row follows it; a report without one keeps it.
+      {:ok, _} = Sessions.put_status(waiting["session_id"], %{"agent" => "build"})
+      {:ok, _} = Sessions.put_status(waiting["session_id"], %{"status" => "idle", "agent" => nil})
+      assert Sessions.get(waiting["session_id"]).agent == "build"
+    end
+
+    test "is told by the listing whether a create would wait or be refused", context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard"})
+
+      assert {:ok, %{"profiles" => [open]}} = Harness.call("profiles.list", %{}, context.caller)
+      assert open["max_sessions"] == nil
+      assert open["teams"] == ["engineering"]
+
+      {:ok, _} = Fleet.put_profile(%{name: "dev", max_sessions: 3})
+      assert {:ok, %{"profiles" => [capped]}} = Harness.call("profiles.list", %{}, context.caller)
+      assert capped["max_sessions"] == 3
     end
 
     test "is refused at the ceiling even when the worker has room", context do
@@ -578,7 +625,10 @@ defmodule Troupe.Plane.ScalingTest do
         "profile" => "dev",
         "team" => "engineering",
         "prompt" => Keyword.get(opts, :prompt, "hello")
-      },
+      }
+      |> then(fn params ->
+        if agent = opts[:agent], do: Map.put(params, "agent", agent), else: params
+      end),
       context.caller
     )
   end

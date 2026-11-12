@@ -62,6 +62,10 @@ defmodule Troupe.Plane.Sessions.Session do
     field(:rekey_due, :boolean, default: false)
 
     field(:title, :string)
+    # The agent the session was created as, or last switched to: what its row says it runs
+    # as, and what a session that waited for a place starts as. Nil where none was named
+    # and the profile's default ran.
+    field(:agent, :string)
     field(:workspace_source, :map)
     # The GitHub repository the session clones on its first activation, `{owner, name,
     # ref}`, checked against the plane's App when the session was created. What a pod may
@@ -156,6 +160,7 @@ defmodule Troupe.Plane.Sessions.Session do
     :key_version,
     :rekey_due,
     :title,
+    :agent,
     :workspace_source,
     :repository,
     :github,
@@ -219,8 +224,11 @@ defmodule Troupe.Plane.Sessions.Session do
   # caller gets a field and a sentence rather than a constraint error.
   defp validate_shape(changeset) do
     case get_field(changeset, :kind) do
-      "private" -> refute_present(changeset, [:profile, :team_id, :worker_id], "a private session has no")
-      _team -> validate_required(changeset, [:profile])
+      "private" ->
+        refute_present(changeset, [:profile, :team_id, :worker_id], "a private session has no")
+
+      _team ->
+        validate_required(changeset, [:profile])
     end
   end
 

@@ -91,7 +91,8 @@ defmodule Troupe.Worker.Session.Manager do
       failed_reason: nil,
       interrupted: false,
       approvals: %{},
-      questions: %{}
+      questions: %{},
+      agent: nil
     }
   ]
 
@@ -604,7 +605,8 @@ defmodule Troupe.Worker.Session.Manager do
           | approvals: approvals,
             questions: questions,
             interrupted: interrupted_on_restore?(root),
-            failed_reason: failed_on_restore(root)
+            failed_reason: failed_on_restore(root),
+            agent: switched_on_restore(root)
         }
     }
   end
@@ -649,6 +651,18 @@ defmodule Troupe.Worker.Session.Manager do
     end
   end
 
+  # The agent the root was last switched to, which a session woken on another pod still
+  # runs as and its row still says.
+  defp switched_on_restore(events) do
+    events
+    |> Enum.filter(&(&1.type == "profile_switched"))
+    |> List.last()
+    |> case do
+      %Event{data: %{"to" => to}} when is_binary(to) -> to
+      _ -> nil
+    end
+  end
+
   # The fold that turns the session's events into the five lifecycle facts. Only the
   # root agent's transitions count: a subagent thinking under an idle root is a root
   # that is acting, and the root's own state says so.
@@ -661,6 +675,12 @@ defmodule Troupe.Worker.Session.Manager do
     }
 
     status_changed(%{state | lifecycle: lifecycle})
+  end
+
+  # A switch of the root's agent is the row's to say, so a listing names what it runs as.
+  defp observe(state, %Event{type: "profile_switched", agent: ["root"], data: %{"to" => to}})
+       when is_binary(to) do
+    status_changed(put_in(state.lifecycle.agent, to))
   end
 
   defp observe(state, %Event{type: "agent_restarted", agent: ["root"], data: data}) do
@@ -769,7 +789,8 @@ defmodule Troupe.Worker.Session.Manager do
       "failed_reason" => state.lifecycle.failed_reason,
       "pending_approvals" => map_size(state.lifecycle.approvals),
       "pending_questions" => map_size(state.lifecycle.questions),
-      "cost_micros" => cost_micros(state.session_id)
+      "cost_micros" => cost_micros(state.session_id),
+      "agent" => state.lifecycle.agent
     }
   end
 

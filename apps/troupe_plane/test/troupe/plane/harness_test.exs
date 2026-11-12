@@ -233,7 +233,12 @@ defmodule Troupe.Plane.HarnessTest do
       {:ok, bundle} =
         Bundles.publish(
           "stable",
-          %{"schema" => 1, "agents" => [%{"name" => "pr-reviewer", "definition" => "---\nmode: primary\n---\nReview."}]},
+          %{
+            "schema" => 1,
+            "agents" => [
+              %{"name" => "pr-reviewer", "definition" => "---\nmode: primary\n---\nReview."}
+            ]
+          },
           announce: false
         )
 
@@ -292,7 +297,9 @@ defmodule Troupe.Plane.HarnessTest do
       # One of the right shape becomes the session's id, and none at all gets one made.
       brought = SessionId.generate()
       params = %{"profile" => "dev", "session_id" => brought}
-      assert {:ok, %{"session_id" => ^brought}} = Harness.call("session.create", params, context(user))
+
+      assert {:ok, %{"session_id" => ^brought}} =
+               Harness.call("session.create", params, context(user))
 
       assert {:ok, %{"session_id" => generated}} =
                Harness.call("session.create", %{"profile" => "dev"}, context(user))
@@ -416,7 +423,11 @@ defmodule Troupe.Plane.HarnessTest do
       session = session!("s-erased", user, team, state: "dormant")
 
       assert {:error, error} =
-               Harness.call("session.open", %{"session_id" => session.id, "mode" => "activate"}, context(user))
+               Harness.call(
+                 "session.open",
+                 %{"session_id" => session.id, "mode" => "activate"},
+                 context(user)
+               )
 
       assert error.message == "forbidden"
       assert error.data.reason =~ "workspace is gone"
@@ -433,7 +444,11 @@ defmodule Troupe.Plane.HarnessTest do
 
       # The next open is refused before any pod is asked.
       assert {:error, %{message: "forbidden"}} =
-               Harness.call("session.open", %{"session_id" => session.id, "mode" => "activate"}, context(user))
+               Harness.call(
+                 "session.open",
+                 %{"session_id" => session.id, "mode" => "activate"},
+                 context(user)
+               )
 
       refute_receive {:pushed, "session.activate", _}, 200
     end
@@ -515,6 +530,32 @@ defmodule Troupe.Plane.HarnessTest do
                Harness.call("session.unpin", %{"session_id" => session.id}, context(owner))
 
       refute unpinned["pinned"]
+    end
+  end
+
+  describe "titles" do
+    test "an owner renames a session, trimmed and at most 200 bytes; a viewer may not" do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      owner = person("ada@example.test", ["engineering"])
+      watcher = person("grace@example.test", ["engineering"])
+      session = session!("s-titled", owner, team, visibility: "team")
+
+      rename =
+        &Harness.call("session.title.set", %{"session_id" => session.id, "title" => &1}, &2)
+
+      assert {:ok, %{"title" => "Rewrite the loop"}} =
+               rename.("  Rewrite the loop ", context(owner))
+
+      assert Sessions.get(session.id).title == "Rewrite the loop"
+
+      assert {:error, too_long} = rename.(String.duplicate("a", 201), context(owner))
+      assert too_long.message == "invalid_params"
+      assert too_long.data.field == "title"
+
+      assert {:error, forbidden} = rename.("Mine now", context(watcher))
+      assert forbidden.message == "forbidden"
+
+      assert {:ok, %{"title" => nil}} = rename.("", context(owner))
     end
   end
 

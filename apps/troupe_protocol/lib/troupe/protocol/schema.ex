@@ -748,7 +748,8 @@ defmodule Troupe.Protocol.Schema do
         "config" => optional(:object),
         "parent" => optional(:string),
         "workflow" => optional(:string),
-        "private" => optional(:boolean)
+        "private" => optional(:boolean),
+        "title" => optional(:string)
       },
       "session.archive" => %{
         "command_id" => required(:string),
@@ -761,6 +762,11 @@ defmodule Troupe.Protocol.Schema do
         "text" => required(:string)
       },
       "session.pin" => %{"command_id" => required(:string), "session_id" => required(:string)},
+      "session.title.set" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "title" => required(:string)
+      },
       "session.unpin" => %{"command_id" => required(:string), "session_id" => required(:string)},
       "session.erase" => %{"command_id" => required(:string), "session_id" => required(:string)},
       # A private session another device sealed last, taken over on this one (Decision 785):

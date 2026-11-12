@@ -40,7 +40,7 @@ defmodule Troupe.Sessions.Index do
   alias Troupe.{Config, Events, Paths, Registry, Session}
   alias Troupe.Protocol.Event
   alias Troupe.Session.{Approvals, Log, Questions, Summary, Watcher}
-  alias Troupe.Sessions.{Pin, Unseen}
+  alias Troupe.Sessions.{Pin, Title, Unseen}
 
   @type meta :: %{
           id: String.t(),
@@ -61,6 +61,7 @@ defmodule Troupe.Sessions.Index do
           created_at: String.t() | nil,
           last_active_at: String.t() | nil,
           pinned: boolean(),
+          title: String.t() | nil,
           state_dir: Path.t() | nil
         }
 
@@ -197,6 +198,7 @@ defmodule Troupe.Sessions.Index do
       Keyword.get_lazy(opts, :sweep_ms, fn ->
         Application.get_env(:troupe_core, :session_sweep_ms, @sweep_ms)
       end)
+
     if detached_ms != :infinity, do: Process.send_after(self(), :sweep, sweep_ms)
 
     # Where the sweep, the stops and the reads run, so that this process never waits on one.
@@ -243,6 +245,7 @@ defmodule Troupe.Sessions.Index do
       |> Map.put_new(:tokens, 0)
       |> Map.put_new(:cost, 0.0)
       |> Map.put_new(:pinned, false)
+      |> Map.put_new(:title, nil)
       |> Map.put_new(:created_at, timestamp())
       |> Map.put(:last_active_at, timestamp())
       # Idle from the moment it exists: a session created and never spoken to is the
@@ -522,7 +525,8 @@ defmodule Troupe.Sessions.Index do
     :exit, _ -> :busy
   end
 
-  defp done_agent?(session_id, path), do: match?(%{state: :done}, Troupe.snapshot(session_id, path))
+  defp done_agent?(session_id, path),
+    do: match?(%{state: :done}, Troupe.snapshot(session_id, path))
 
   # A root at rest while a subagent it started in the background still works (Decision 853)
   # is not idle: the subagent's end is its next turn, and a sleep would stop it.
@@ -628,6 +632,7 @@ defmodule Troupe.Sessions.Index do
           :pinned,
           if(listed, do: Map.get(listed, :pinned, false), else: pinned(session_id))
         )
+        |> Map.put(:title, if(listed, do: Map.get(listed, :title), else: titled(session_id)))
 
       :error ->
         nil
@@ -646,6 +651,13 @@ defmodule Troupe.Sessions.Index do
     session_id |> Log.path() |> Path.dirname() |> Pin.pinned?()
   catch
     :exit, _ -> false
+  end
+
+  # The title beside the log, which a session named while it was dormant woke with.
+  defp titled(session_id) do
+    session_id |> Log.path() |> Path.dirname() |> Title.read()
+  catch
+    :exit, _ -> nil
   end
 
   defp put_asked(meta, summary) do
@@ -672,7 +684,7 @@ defmodule Troupe.Sessions.Index do
 
     disk
     |> Map.merge(view.live, fn _id, from_disk, live ->
-      Map.merge(live, Map.take(from_disk, [:unseen, :failed, :pinned]))
+      Map.merge(live, Map.take(from_disk, [:unseen, :failed, :pinned, :title]))
     end)
     |> Map.values()
     |> Enum.sort_by(& &1.last_active_at, :desc)
@@ -755,9 +767,15 @@ defmodule Troupe.Sessions.Index do
           rows
       end
 
-    # The pin is read each time, a file's presence: it changes without the log changing.
+    # The pin and the title are read each time, a file's presence and a few bytes: they
+    # change without the log changing.
     pinned = Pin.pinned?(dir)
-    Enum.map(rows, &%{&1 | unseen: Unseen.unseen_now(&1.id, &1.unseen), pinned: pinned})
+    title = Title.read(dir)
+
+    Enum.map(
+      rows,
+      &%{&1 | unseen: Unseen.unseen_now(&1.id, &1.unseen), pinned: pinned, title: title}
+    )
   end
 
   defp file_stamp(path) do
@@ -809,6 +827,7 @@ defmodule Troupe.Sessions.Index do
           created_at: first.ts,
           last_active_at: last.ts,
           pinned: false,
+          title: nil,
           state_dir: root
         }
 
@@ -886,10 +905,17 @@ defmodule Troupe.Sessions.Index do
   defp open_calls(events) do
     events
     |> Enum.reduce(MapSet.new(), fn
-      %Event{type: "tool_call_started", data: %{"call_id" => id}}, open -> MapSet.put(open, id)
-      %Event{type: "tool_call_completed", data: %{"call_id" => id}}, open -> MapSet.delete(open, id)
-      %Event{type: "cancelled"}, _open -> MapSet.new()
-      _event, open -> open
+      %Event{type: "tool_call_started", data: %{"call_id" => id}}, open ->
+        MapSet.put(open, id)
+
+      %Event{type: "tool_call_completed", data: %{"call_id" => id}}, open ->
+        MapSet.delete(open, id)
+
+      %Event{type: "cancelled"}, _open ->
+        MapSet.new()
+
+      _event, open ->
+        open
     end)
     |> MapSet.to_list()
   end

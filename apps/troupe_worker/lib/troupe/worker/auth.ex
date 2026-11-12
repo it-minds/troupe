@@ -66,7 +66,8 @@ defmodule Troupe.Worker.Auth do
   # objects and the row. A client asks the plane, whose erasure reaches this pod over the
   # control channel (`Troupe.Worker.Plane.Commands`), which this guard is not on. A fork
   # is a new row, key and placement too, so it is the plane's `session.fork` (Decision 812).
-  @plane_methods ~w(session.archive session.pin session.unpin session.erase session.fork)
+  @plane_methods ~w(session.archive session.pin session.unpin session.erase session.fork
+                    session.title.set)
 
   @enforce_keys [:worker_id]
   defstruct [:worker_id, :issuer, jwks: %{"keys" => []}, acl: %{}, revoked: MapSet.new()]
@@ -123,12 +124,17 @@ defmodule Troupe.Worker.Auth do
   Closes over the server rather than the worker id, so a pod that enrols after its
   listener is up does not have to restart it.
   """
-  @spec authenticator(GenServer.server()) :: (map() -> {:ok, map(), [atom()], map()} | {:error, Error.t()})
+  @spec authenticator(GenServer.server()) :: (map() ->
+                                                {:ok, map(), [atom()], map()}
+                                                | {:error, Error.t()})
   def authenticator(server \\ __MODULE__) do
     fn params ->
       case verify(server, get_in(params, ["auth", "token"]) || "") do
-        {:ok, claims} -> {:ok, principal(claims), scopes(claims), %{claims: claims, expires_at: claims["exp"]}}
-        {:error, reason} -> {:error, Error.new(:unauthenticated, %{reason: to_string(reason)})}
+        {:ok, claims} ->
+          {:ok, principal(claims), scopes(claims), %{claims: claims, expires_at: claims["exp"]}}
+
+        {:error, reason} ->
+          {:error, Error.new(:unauthenticated, %{reason: to_string(reason)})}
       end
     end
   end

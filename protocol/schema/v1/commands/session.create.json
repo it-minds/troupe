@@ -21,6 +21,9 @@
     "prompt": {
       "type": "string"
     },
+    "title": {
+      "type": "string"
+    },
     "workflow": {
       "type": "string"
     },

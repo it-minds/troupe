@@ -101,6 +101,14 @@ defmodule Troupe.Plane.ProfileView do
     end)
   end
 
+  @doc """
+  The caller's teams that may use `profile`, by name and sorted: who a session there would
+  be open to, which `profiles.list` answers per profile so a client can say so without a
+  `profile.get` for each.
+  """
+  @spec team_names(User.t(), String.t()) :: [String.t()]
+  def team_names(user, profile), do: user |> teams_using(profile) |> Enum.map(& &1.name)
+
   defp teams_using(user, profile) do
     user
     |> Identity.teams_for()
