@@ -493,7 +493,9 @@ function LevelView({
         })
       : via.putOwnMemoryEntries(wire(entries), own.version).then((saved) => {
           done();
-          onSaved(saved.user, saved.changed ? said : "Nothing changed; nothing was saved.");
+          // A save's answer carries the document without its entries; the ones just saved are
+          // shown until the read that follows brings the plane's, rather than none.
+          onSaved({ entries, ...saved.user }, saved.changed ? said : "Nothing changed; nothing was saved.");
         });
     sent.catch(refused).finally(() => setBusy(false));
   };
