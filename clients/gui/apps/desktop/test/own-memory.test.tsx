@@ -12,6 +12,7 @@ import { webTokenStore } from "@troupe/client";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
+import { keptBy } from "../../../packages/client/test/support/kept.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
 import { button, nav, render, sees, seesButton, startOnTheList, type, waitFor } from "./support";
 
@@ -50,7 +51,7 @@ afterEach(async () => {
 });
 
 async function openMemory(): Promise<HTMLElement> {
-  harness = await startHarness();
+  harness = await startHarness({ plane: { keeper: keptBy(daemon) } });
   await harness.signIn({ store: webTokenStore() });
   localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
   localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");

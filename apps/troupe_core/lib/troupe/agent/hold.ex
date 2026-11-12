@@ -125,14 +125,21 @@ defmodule Troupe.Agent.Hold do
       "layer" => Atom.to_string(skill.layer),
       "dir" => skill.dir
     }
+    |> put_missing(skill)
   end
+
+  # The programs a skill needs and this machine lacks, written only where there are some,
+  # so a hold of skills that can all run reads and hashes as it always did.
+  defp put_missing(json, %{missing: [_ | _] = missing}), do: Map.put(json, "missing", missing)
+  defp put_missing(json, _skill), do: json
 
   defp skill(json) do
     %{
       name: json["name"],
       description: json["description"],
       layer: Map.get(@layers, json["layer"], :user),
-      dir: json["dir"]
+      dir: json["dir"],
+      missing: List.wrap(json["missing"])
     }
   end
 end

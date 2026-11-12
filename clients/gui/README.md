@@ -363,6 +363,7 @@ packages/client/src
   admin.ts        the plane's administrative surface, one call per method
   agents.ts       agents as the daemon reads, checks, writes and switches them
   memory.ts       a repository's memory, as a client shows it and a start keeps it up
+  own.ts          a person's own memory and artifacts, from the plane or through the daemon
   offer.ts        your own servers, offered to a session on a pod
   pkce.ts         the authorization code flow with PKCE, the sign-in a browser can do
   scratch.ts      the session's scratchpad

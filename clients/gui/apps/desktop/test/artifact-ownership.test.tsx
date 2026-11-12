@@ -1,8 +1,8 @@
 // An artifact a team owns, in the app's gallery: its card and its aside say the team is
 // whose it is, a member has the owner's controls, an admin of the team takes it back and
-// the owning person gives one of theirs to a team, each forwarded through the daemon as
+// the owning person gives one of theirs to a team, each asked of the plane as
 // `artifact.transfer`; a refusal is said in the aside. The Publish dialog publishes one
-// for a team as the team's unless the person unticks it. Against the fake daemon.
+// for a team as the team's unless the person unticks it. Against a fake plane whose artifacts the fake daemon keeps; the dialog publishes through the daemon.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
@@ -11,6 +11,7 @@ import { App } from "../src/App";
 import { Publish } from "../src/views/Publish";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
+import { keptBy } from "../../../packages/client/test/support/kept.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
 import { button, nav, recordNetwork, render, says, sees, seesButton, startOnTheList, type, waitFor } from "./support";
 import type { Recorder } from "./support";
@@ -86,7 +87,7 @@ const card = (title: string): HTMLButtonElement | undefined => [...document.quer
 const transfers = () => daemon.artifactCalls.filter((c) => c.method === "artifact.transfer").map((c) => ({ id: c.params["id"], to: c.params["to"] }));
 
 async function openGallery(): Promise<void> {
-  harness = await startHarness();
+  harness = await startHarness({ plane: { keeper: keptBy(daemon) } });
   await harness.signIn({ store: webTokenStore() });
   localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
   localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");

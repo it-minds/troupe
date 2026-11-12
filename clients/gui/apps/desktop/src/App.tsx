@@ -10,10 +10,10 @@
 // be signed in: in local mode there is no `auth`, the screens that only a plane can fill
 // are not offered, and nothing here calls a plane.
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import { awaitingYou, onThisComputer } from "@troupe/client";
-import type { AuthSession, FleetRow, SessionKind } from "@troupe/client";
+import { PlaneOwn, awaitingYou, onThisComputer } from "@troupe/client";
+import type { AuthSession, FleetRow, OwnPlane, SessionKind } from "@troupe/client";
 import { useAdmin, useDaemon, useFleet } from "./hooks";
 import { useUpdates } from "./updates";
 import { UpdateBanner } from "./views/Update";
@@ -180,6 +180,12 @@ export function App(): JSX.Element {
   // Only the Review screen still needs it: `admin.runs.list` is how a reviewer finds
   // the runs nobody has looked at. Administration itself is the console's, at /admin.
   const adminApi = useAdmin(planeAuth);
+  // What the person's own memory and artifacts are read and changed through: the plane the
+  // app is signed in to, by the sign-in's own gated `rpc`, as the console reads them; this
+  // computer's daemon, as the person it is signed in as, only where the app is not signed
+  // in; and nothing under Local only.
+  const ownPlane = useMemo(() => (planeAuth ? new PlaneOwn((method, params) => planeAuth.rpc(method, params), planeAuth.planeUrl) : null), [planeAuth]);
+  const own: OwnPlane | null = localOnly ? null : (ownPlane ?? daemon.client);
   const appearance = useAppearance();
   // Opening a session reads it, which clears its row's `unseen` at the daemon: the row
   // says so now rather than at the next poll. What rows count while nobody reads their
@@ -366,8 +372,8 @@ export function App(): JSX.Element {
           </button>
           {/* A person's own things, read and changed here rather than in the console: what
               they and their troupe published for them, and what every session of theirs
-              remembers. Both through this computer's daemon; neither asks a plane under
-              Local only. */}
+              remembers. Both from the plane the app is signed in to, through this
+              computer's daemon where it is not; neither asks a plane under Local only. */}
           <button aria-current={where.screen === "artifacts" ? "page" : undefined} onClick={() => setWhere({ screen: "artifacts" })}>
             Artifacts
           </button>
@@ -477,8 +483,12 @@ export function App(): JSX.Element {
           </div>
         )}
 
-        {/* Not on the new-session screen, whose "On this computer" turns on by itself. */}
-        {readySince && where.screen !== "new" && <DaemonReady onRefresh={refreshScreen} />}
+        {/* Not on the new-session screen, whose "On this computer" turns on by itself; and
+            Memory and Artifacts read the plane when signed in, so a daemon getting ready
+            changes nothing they show and they are not offered a refresh for it. */}
+        {readySince &&
+          where.screen !== "new" &&
+          !(ownPlane && !localOnly && (where.screen === "memory" || where.screen === "artifacts")) && <DaemonReady onRefresh={refreshScreen} />}
 
         {/* Keyed so a refresh is a remount of the screen alone, never of the window. */}
         <Fragment key={entered.remount}>
@@ -553,13 +563,15 @@ export function App(): JSX.Element {
 
           {where.screen === "artifacts" && (
             <Artifacts
+              via={own}
               daemon={daemon.client}
+              daemonState={daemon}
               localOnly={localOnly}
               onOpenSession={(id) => (snapshot.rows.some((r) => r.id === id) ? setWhere({ screen: "session", id }) : undefined)}
             />
           )}
 
-          {where.screen === "memory" && <MemoryScreen daemon={daemon.client} localOnly={localOnly} teams={planeAuth?.me?.teams ?? []} />}
+          {where.screen === "memory" && <MemoryScreen via={own} daemon={daemon.client} daemonState={daemon} localOnly={localOnly} teams={planeAuth?.me?.teams ?? []} />}
 
           {where.screen === "appearance" && <AppearanceSettings {...appearance} />}
 

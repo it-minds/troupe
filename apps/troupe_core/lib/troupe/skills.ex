@@ -33,11 +33,22 @@ defmodule Troupe.Skills do
 
   `trusted: true` in the options says the session's workspace is trusted, as the session
   stamps it when it starts (`Troupe.Workspace`'s `trusted?`): only then is what the
-  workspace's `skills.json` links from outside the repository read (Decision 829).
+  workspace's `skills.json` links from outside the repository read.
+
+  A skill may say which programs its scripts need (`requires: [python3, zip]` in its
+  frontmatter), and each is looked for on this machine's `PATH` as the skills are found
+  (`check/2`). A skill missing one is still found, with `missing` naming what it lacks,
+  rather than left out: the prompt lists it as one that cannot run here and the tool
+  answers so. A skill hidden on a pod whose image lacks `python3` is one the agent and the
+  person learn of only halfway through a task; one listed as missing is a gap anybody can
+  see and an admin can close. A `requires:` that is not a list of program names is a
+  warning in the log, and the skill is loaded with the names that are.
   """
 
+  require Logger
+
   alias Troupe.Agent.{Definition, Definitions}
-  alias Troupe.{Paths, Workspace, Worktree}
+  alias Troupe.{Executable, Paths, Workspace, Worktree}
   alias Troupe.Protocol.Bundle
   alias Troupe.Skills.Local
 
@@ -112,10 +123,11 @@ defmodule Troupe.Skills do
   (`Troupe.Agent.Definitions.bundle_wins?/1`); `nil` reads no local layer.
   """
   @type listed :: %{
-          name: String.t(),
-          description: String.t(),
-          layer: :bundle | Local.layer(),
-          dir: Path.t()
+          required(:name) => String.t(),
+          required(:description) => String.t(),
+          required(:layer) => :bundle | Local.layer(),
+          required(:dir) => Path.t(),
+          optional(:missing) => [String.t()]
         }
 
   @spec available(bundle() | nil, Definition.t(), Path.t() | nil, keyword()) :: [listed()]
@@ -151,8 +163,44 @@ defmodule Troupe.Skills do
       end
 
     {local, _skipped} = local(bundle, workspace, opts)
-    %{bundle: from_bundle, local: local}
+    %{bundle: check(from_bundle, opts), local: check(local, opts)}
   end
+
+  @doc """
+  Each skill with `missing`: the programs its `SKILL.md`'s `requires:` names that are not
+  on this machine's `PATH` (`Troupe.Executable.find/2`), empty for one that needs nothing
+  or has all it needs. `:path` in the options stands in for `PATH`. What is not a program's
+  name is logged and passed over (`Troupe.Protocol.Bundle.skill_requires/1`); a `SKILL.md`
+  that can't be read needs nothing here, and the `skill` tool says it went when asked.
+  """
+  @spec check([map()], keyword()) :: [map()]
+  def check(skills, opts \\ []) do
+    lookup = Keyword.take(opts, [:path])
+    Enum.map(skills, &Map.put(&1, :missing, missing(&1, lookup)))
+  end
+
+  defp missing(%{name: name, dir: dir}, lookup) do
+    case File.read(Path.join(dir, "SKILL.md")) do
+      {:ok, text} ->
+        {programs, faults} = Bundle.skill_requires(text)
+
+        if faults != [] do
+          Logger.warning(
+            "troupe: skill #{name}: requires names something that is not a program, " <>
+              "passed over: #{Enum.map_join(faults, ", ", &inspect/1)}"
+          )
+        end
+
+        Enum.reject(programs, &Executable.find(&1, lookup))
+
+      {:error, _reason} ->
+        []
+    end
+  end
+
+  @doc "Whether a skill has every program it names: none is `missing`."
+  @spec runnable?(map()) :: boolean()
+  def runnable?(skill), do: Map.get(skill, :missing, []) == []
 
   @doc "The skills a profile may consult of those `found/3` found, by name."
   @spec offered(found(), Definition.t()) :: [listed()]
@@ -317,10 +365,17 @@ defmodule Troupe.Skills do
   def tools(bundle, %Definition{} = definition, workspace \\ nil, opts \\ []),
     do: bundle |> available(definition, workspace, opts) |> tools_for()
 
-  @doc "The `skill` tool for these skills, or none when there are none."
+  @doc """
+  The `skill` tool for these skills, or none when none of them can run here. A skill
+  missing a program is not among those it offers, and asked for by name it answers why.
+  """
   @spec tools_for([listed()]) :: [Tool.t()]
-  def tools_for([]), do: []
-  def tools_for(skills), do: [tool(skills)]
+  def tools_for(skills) do
+    case Enum.filter(skills, &runnable?/1) do
+      [] -> []
+      offered -> [tool(offered, skills)]
+    end
+  end
 
   @doc """
   The lines a system prompt carries: one per skill the profile lists, or nothing.
@@ -333,18 +388,42 @@ defmodule Troupe.Skills do
   def prompt_section(bundle, %Definition{} = definition, workspace \\ nil, opts \\ []),
     do: bundle |> available(definition, workspace, opts) |> prompt_section_for()
 
-  @doc "The system prompt's lines for these skills, or nothing when there are none."
+  @doc """
+  The system prompt's lines for these skills, or nothing when there are none: those that
+  can run, then, apart, those missing a program, each with what it needs, so the agent
+  says a skill cannot run here instead of finding out halfway through it.
+  """
   @spec prompt_section_for([listed()]) :: String.t()
-  def prompt_section_for([]), do: ""
-
   def prompt_section_for(skills) do
+    {offered, blocked} = Enum.split_with(skills, &runnable?/1)
+
+    [offered_lines(offered), blocked_lines(blocked)]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
+  end
+
+  defp offered_lines([]), do: ""
+
+  defp offered_lines(skills) do
     lines = Enum.map_join(skills, "\n", &("- " <> &1.name <> ": " <> &1.description))
     "Skills available — call the skill tool with a name to read one:\n" <> lines
   end
 
-  defp tool(skills) do
+  defp blocked_lines([]), do: ""
+
+  defp blocked_lines(skills) do
+    lines =
+      Enum.map_join(skills, "\n", fn skill ->
+        "- " <> skill.name <> ": cannot run here: needs " <> Enum.join(skill.missing, ", ")
+      end)
+
+    "Skills that cannot run here, for want of a program this machine does not have; " <>
+      "say so when a task needs one:\n" <> lines
+  end
+
+  defp tool(skills, all) do
     names = Enum.map(skills, & &1.name)
-    by_name = Map.new(skills, &{&1.name, &1})
+    by_name = Map.new(all, &{&1.name, &1})
 
     %Tool{
       name: "skill",
@@ -384,6 +463,7 @@ defmodule Troupe.Skills do
   defp read(by_name, args) do
     with {:ok, name} <- Troupe.Tool.fetch_string(args, "name"),
          {:ok, listed} <- Map.fetch(by_name, name) |> or_unknown(name),
+         :ok <- can_run(listed),
          {:ok, skill} <- read_skill(listed) do
       {:ok, render(listed, skill)}
     end
@@ -391,6 +471,12 @@ defmodule Troupe.Skills do
 
   defp or_unknown({:ok, listed}, _name), do: {:ok, listed}
   defp or_unknown(:error, name), do: {:error, {:unknown_skill, name}}
+
+  defp can_run(listed) do
+    if runnable?(listed),
+      do: :ok,
+      else: {:error, {:skill_cannot_run, listed.name, listed.missing}}
+  end
 
   defp read_skill(%{name: name, dir: dir}) do
     case Bundle.read_skill_dir(dir, name) do

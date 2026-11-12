@@ -92,6 +92,17 @@ ARG RELEASE=troupe_operator
 # gone. Like `git` it is GPL-2.0 and, like both, a separate program the VM starts, not
 # code linked into the release; Debian keeps its licence at /usr/share/doc/inotify-tools.
 #
+# `python3-minimal` with `libpython3-stdlib` (Python's standard library, no pip), `zip` and
+# `unzip` are for a skill's own scripts, in the worker image alone. A skill in a bundle may
+# carry a script beside its `SKILL.md`, and a pod reaches only the hosts its profile names,
+# so nothing a script needs can be installed from inside a session: what is here is all a
+# script has. With `bash`, `perl`, `tar` and `gzip`, which the base image has, this is the
+# set the user docs say a script may rely on, and the zip-based office formats and JSON or
+# CSV beyond a `perl` one-liner are within it. A skill that needs more says so in its
+# `requires:`, and a pod without it lists the skill as one that cannot run here. Like `git`
+# these are separate programs, not code linked into the release; Python is PSF-licensed,
+# `zip` and `unzip` Info-ZIP, each licence under /usr/share/doc.
+#
 # `apparmor` is `apparmor_parser`, in the operator's image alone: the chart's
 # `troupe-worker-profiles` DaemonSet runs this image to load the workers' AppArmor profile
 # into each node's kernel. Nothing of the operator calls it, and it loads nothing without
@@ -99,7 +110,7 @@ ARG RELEASE=troupe_operator
 RUN apt-get update -y \
  && apt-get install -y --no-install-recommends \
       libstdc++6 openssl libncurses6 locales ca-certificates \
-      $(if [ "${RELEASE}" = "troupe_worker" ]; then echo git bubblewrap inotify-tools; fi) \
+      $(if [ "${RELEASE}" = "troupe_worker" ]; then echo git bubblewrap inotify-tools python3-minimal libpython3-stdlib zip unzip; fi) \
       $(if [ "${RELEASE}" = "troupe_operator" ]; then echo apparmor; fi) \
  && rm -rf /var/lib/apt/lists/* \
  && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen

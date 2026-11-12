@@ -81,6 +81,58 @@ options](profile-options.md):
 - <a id="which-agents-a-profile-has"></a>[Which agents a profile has](profile-options.md#which-agents-a-profile-has):
   `agents`, the `allow` and `deny` lists of names that say which agents exist on the pods.
 
+### A worker image of the profile's own
+
+The release's worker image holds what a skill's script may rely on: `bash`, `git`, `perl`,
+Python 3 with its standard library and no `pip`, `zip`, `unzip`, `tar` and `gzip`
+([a skill with a script](../user/configuration/mcp-agents-skills.md#a-skill-with-a-script)).
+A pod reaches only the hosts its profile names, so a session cannot install more. A profile
+whose skills need more, `node` or a Python package, gets it from an image built on the
+release's:
+
+```dockerfile
+ARG VERSION=0.35.0-beta
+FROM ghcr.io/it-minds/troupe-worker:${VERSION}
+USER root
+RUN apt-get update -y \
+ && apt-get install -y --no-install-recommends nodejs python3-openpyxl \
+ && rm -rf /var/lib/apt/lists/*
+USER troupe:troupe
+```
+
+What must stay as the release's image has it:
+
+- **The entrypoint.** The pod spec gives no command, so the pod runs the image's
+  `ENTRYPOINT`, which starts `/app/bin/${RELEASE_NAME} start`. Set no `ENTRYPOINT`, `CMD`
+  or `RELEASE_NAME`.
+- **The user.** The operator runs the container as uid 1000 with `runAsNonRoot`, and the
+  release in `/app` belongs to `troupe` (1000:1000). End on `USER troupe:troupe`, and leave
+  `/app`'s owner as it is.
+- **The release and its reaper.** `/app` is the release, and the reaper under
+  `/app/lib/troupe_core-*/priv/reaper/` is what every process `shell` starts runs under;
+  without it every command fails with `reaper_missing`. Add nothing to `/app` and remove
+  nothing from it, nor `bubblewrap`, `git` or `inotify-tools`.
+- **Where a tool goes.** A command runs in a sandbox that sees `/usr`, `/bin`, `/sbin`,
+  `/lib`, `/lib64` and a few files of `/etc` (`passwd`, `group`, `hosts`, `resolv.conf`,
+  `nsswitch.conf`, `ssl`, `ca-certificates`, `alternatives`), read-only. Install under
+  `/usr` (`apt-get` does, and `/usr/local`), never `/opt`, and nothing that needs its own
+  file in `/etc` at run time.
+
+`policy.allowedImageRepositories` must allow the new repository: it is compared without
+tag or digest, exactly or as a prefix `<repo>/` ([§4](#4-troupepolicy)), and the chart's
+default allows `ghcr.io/it-minds/troupe-worker` alone. A private registry needs its pull
+secret in the chart's `imagePullSecrets`. Give the profile the image by its digest or tag.
+
+**A profile on its own image no longer follows the release.** The plane rewrites only the
+profiles whose image is `release` when it is upgraded ([upgrading.md §4](upgrading.md#4-what-to-watch));
+one that names an image keeps it until `admin.profile.put` (in gitops mode, a commit), so
+its pods go on running the worker the image was built from. Build it again `FROM` each new
+release's tag and put it as part of the upgrade.
+
+A skill names what it needs in `requires:`, and a pod lists one whose program its image
+lacks as one that cannot run there, in the agent's prompt and the session's log.
+`profile.get` cannot say so, since the plane does not see inside an image.
+
 ## 2. What the operator creates
 
 `Troupe.Operator.Resources.for_profile/3` is a pure function from profile, policy and

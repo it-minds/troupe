@@ -616,10 +616,12 @@ defmodule Troupe.Gateway.LocalSources do
 
   # -- skills --------------------------------------------------------------------
 
-  # What is offered, and beside it every skill the layers hold and do not offer, with why
-  # (Decision 822): one a nearer layer's name hid, or one outside its edge, never read. A
-  # session here trusts the workspace as the user's file says, so what its `skills.json`
-  # links from outside the repository is listed as a session would read it (Decision 829).
+  # What is offered, and beside it every skill the layers hold and do not offer, with why:
+  # one a nearer layer's name hid, or one outside its edge, never read. A session here
+  # trusts the workspace as the user's file says, so what its `skills.json` links from
+  # outside the repository is listed as a session would read it. An offered skill missing a
+  # program its `requires:` names is listed with `available: false` and what it lacks, as a
+  # session here would offer it: kept, and marked as one that cannot run on this machine.
   defp list_skills(params) do
     with {:ok, workspace} <- workspace_of(params) do
       trusted? = workspace != nil and Troupe.Config.trusted?(workspace)
@@ -627,7 +629,7 @@ defmodule Troupe.Gateway.LocalSources do
 
       {:ok,
        %{
-         "skills" => Enum.map(skills, &Map.put(skill_json(&1), "description", &1.description)),
+         "skills" => skills |> Skills.check() |> Enum.map(&offered_skill_json/1),
          "skipped" =>
            Enum.map(
              skipped,
@@ -659,6 +661,14 @@ defmodule Troupe.Gateway.LocalSources do
            end)
        }}
     end
+  end
+
+  defp offered_skill_json(skill) do
+    Map.merge(skill_json(skill), %{
+      "description" => skill.description,
+      "available" => skill.missing == [],
+      "missing" => skill.missing
+    })
   end
 
   defp skill_json(skill) do

@@ -9,6 +9,7 @@
 
 import { FakeDaemon, exampleFacts, exampleOnboarding } from "../packages/client/test/support/daemon.js";
 import { FakeIdp } from "../packages/client/test/support/idp.js";
+import { keptBy } from "../packages/client/test/support/kept.js";
 import { FakePlane, GATEWAY_DEFAULTS } from "../packages/client/test/support/plane.js";
 import { FakeWorker } from "../packages/client/test/support/worker.js";
 
@@ -28,6 +29,9 @@ const plane = await FakePlane.start({
   corsOrigins: origins,
   podTokenLifetime: 900,
   clientDefaults: process.env["NO_CLIENT_DEFAULTS"] ? { configured: false } : GATEWAY_DEFAULTS,
+  // The person's memory and artifacts are the ones the daemon below keeps, so the app shows
+  // the same signed in, when it asks the plane, and offline, when it asks the daemon.
+  keeper: (method, params) => keptBy(daemon)(method, params),
 });
 
 // Something to look at on the first screen. The oldest is a run whose turn the harness

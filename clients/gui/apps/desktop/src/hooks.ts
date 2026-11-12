@@ -151,6 +151,12 @@ async function handOver(client: DaemonClient, auth: AuthSession | null, who: Dae
 }
 
 /**
+ * How often the app tries again for a daemon it has not reached: every `firstMs` for the
+ * first `firstForMs`, then every `thenMs`. Exported so a test can shorten it.
+ */
+export const redialTiming = { firstMs: 5_000, firstForMs: 60_000, thenMs: 30_000 };
+
+/**
  * Why a browser build could not reach the daemon it was told about, in words a person can
  * act on. A browser shows a page no 403, so a daemon that is not running, one that started
  * again somewhere else, and one that refuses this page's origin all look the same: a socket
@@ -214,6 +220,12 @@ export function useDaemon(auth: AuthSession | null = null): {
   );
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState(0);
+  // Bumped to dial the same endpoint again, after a first dial that failed.
+  const [dial, setDial] = useState(0);
+  // A dial on its way, which a try again leaves to finish.
+  const dialling = useRef(false);
+  // The person forgot the daemon: nothing dials it again until they connect or find one.
+  const [forgotten, setForgotten] = useState(false);
   // How many times the socket has opened again since the first answer: a screen holding
   // something the daemon keeps asks again at each.
   const [opened, setOpened] = useState(0);
@@ -301,8 +313,12 @@ export function useDaemon(auth: AuthSession | null = null): {
       localOnly: storedLocalOnly,
     });
     setReached(null);
+    dialling.current = true;
     next
       .identity()
+      .finally(() => {
+        if (live) dialling.current = false;
+      })
       .then((who) => {
         if (!live) return;
         answered = true;
@@ -324,7 +340,42 @@ export function useDaemon(auth: AuthSession | null = null): {
       next.disconnect();
       setClient(null);
     };
-  }, [endpoint]);
+  }, [endpoint, dial]);
+
+  // A daemon not reached yet is tried again, by itself, rather than only when somebody
+  // presses Find: a first dial that failed (one just starting, a restart under way) never
+  // dials again on its own, and the app would carry on as though there were no daemon while
+  // one runs. Where the shell reads `daemon.json`, it is read first, and a daemon now
+  // somewhere else is dialled there; otherwise the endpoint it was told is dialled again.
+  // Every `firstMs` for a minute, then every `thenMs`; never while a client is there, whose
+  // own dial follows a daemon that restarts, and never with nothing to dial.
+  const unreached = client === null && !forgotten && (status === "error" || status === "absent");
+  const read = shell()?.readDaemon;
+  const canRedial = unreached && (endpoint !== null || Boolean(read));
+  useEffect(() => {
+    if (!canRedial) return;
+    let live = true;
+    const since = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const again = (): void => {
+      const wait = Date.now() - since < redialTiming.firstForMs ? redialTiming.firstMs : redialTiming.thenMs;
+      timer = setTimeout(() => {
+        void (async () => {
+          const found = read ? await read().catch(() => null) : null;
+          if (!live) return;
+          if (found && (found.port !== endpoint?.port || found.token !== endpoint?.token)) setEndpoint(found);
+          else if (endpoint && !dialling.current) setDial((n) => n + 1);
+          // Asked again while nothing has changed: the next try is scheduled by this one.
+          if (live) again();
+        })();
+      }, wait);
+    };
+    again();
+    return () => {
+      live = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [canRedial, endpoint, read]);
 
   // The daemon reached with somebody signed in, or somebody signing in with the daemon
   // reached, and every token the sign-in renews after that.
@@ -357,18 +408,23 @@ export function useDaemon(auth: AuthSession | null = null): {
     canFind,
     connectTo: useCallback((e: DaemonEndpoint) => {
       setError(null);
+      setForgotten(false);
       if (!shell()?.findDaemon) rememberDaemon(e);
       setEndpoint(e);
     }, []),
     forget: useCallback(() => {
       forgetDaemon();
+      setForgotten(true);
       setEndpoint(null);
       setReached(null);
       setIdentity(null);
       setPrincipal(null);
       setStatus(shell()?.findDaemon ? "absent" : "unsupported");
     }, []),
-    find: useCallback(() => setRound((n) => n + 1), []),
+    find: useCallback(() => {
+      setForgotten(false);
+      setRound((n) => n + 1);
+    }, []),
     // With the token, when the link names the plane this app is signed in to: linking is
     // what a private session needs, and the label alone seals nothing.
     link: useCallback(

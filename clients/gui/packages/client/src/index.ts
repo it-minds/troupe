@@ -314,6 +314,8 @@ export type { PlaneKey, SignatureRefusal, SignedAnswer, SignedKind, Verified } f
 export type { ClientUpdate, PlaneVersionWord, SignatureWord, UpdateRequired, VersionPolicy } from "./update.js";
 export { DaemonClient, DaemonSource, claimRefusal, daemonUrl, revocationText, rowFromDaemon } from "./daemon.js";
 export type { EntriesOrText } from "./daemon.js";
+export { PlaneOwn } from "./own.js";
+export type { OwnPlane } from "./own.js";
 export type {
   ClaimResult,
   CreateLocalParams,

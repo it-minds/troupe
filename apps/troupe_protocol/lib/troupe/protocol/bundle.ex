@@ -27,7 +27,8 @@ defmodule Troupe.Protocol.Bundle do
   ## What is checked
 
   Names are `[a-z0-9-]`, unique per kind. An agent's definition must parse. A skill
-  must have a `SKILL.md` whose frontmatter `name`, if present, is its own. An agent may
+  must have a `SKILL.md` whose frontmatter `name`, if present, is its own, and whose
+  `requires`, if present, is a list of program names (`skill_requires/1`). An agent may
   only list skills the bundle has. An MCP URL must be `https://`, or `http://` to a
   cluster-internal `.svc` host, and a credential reference must look like the name of
   an environment variable rather than like a secret — a value in the plane's database
@@ -267,6 +268,7 @@ defmodule Troupe.Protocol.Bundle do
   # Where the organisation keeps files, only on a server the bundle marks so.
   defp put_stores(config, %{stores: :files} = server) do
     files = Map.get(server, :files, :all)
+
     Map.merge(config, %{"stores" => "files", "files" => if(files == :all, do: "all", else: files)})
   end
 
@@ -393,6 +395,38 @@ defmodule Troupe.Protocol.Bundle do
     |> Enum.sort_by(& &1.name)
   end
 
+  @program_name ~r/\A[a-z0-9][a-z0-9+._-]{0,63}\z/
+
+  @doc """
+  The programs a skill's `SKILL.md` says its scripts need, from the frontmatter's
+  `requires:` (`requires: [python3, zip]`), and beside them whatever in it is not a
+  program's name: lower-case letters, digits, `+`, `.`, `_` and `-`, starting with a letter
+  or a digit, as Debian names a package's programs. A name is looked for on `PATH` where a
+  skill is loaded, so a path, a version or a shell word is not one. No `requires:`, or an
+  empty one, needs nothing; one that is not a list is the one fault.
+  """
+  @spec skill_requires(String.t()) :: {[String.t()], [term()]}
+  def skill_requires(text) when is_binary(text) do
+    {frontmatter, _body} = AgentDefinition.split_frontmatter(text)
+
+    case YamlElixir.read_from_string(frontmatter) do
+      {:ok, %{"requires" => names}} when is_list(names) ->
+        {programs, faults} = Enum.split_with(names, &program_name?/1)
+        {Enum.uniq(programs), faults}
+
+      {:ok, %{"requires" => nil}} ->
+        {[], []}
+
+      {:ok, %{"requires" => other}} ->
+        {[], [other]}
+
+      _no_requires ->
+        {[], []}
+    end
+  end
+
+  defp program_name?(name), do: is_binary(name) and Regex.match?(@program_name, name)
+
   # -- schema 0 ---------------------------------------------------------------
 
   defp validate_legacy(content) do
@@ -492,7 +526,8 @@ defmodule Troupe.Protocol.Bundle do
   defp acp_hash(_name, "sha256:" <> digest) when byte_size(digest) == 64, do: :ok
 
   defp acp_hash(name, other) do
-    {:error, ["acp_agent #{name}: hash is `sha256:` and 64 hex characters, not #{inspect(other)}"]}
+    {:error,
+     ["acp_agent #{name}: hash is `sha256:` and 64 hex characters, not #{inspect(other)}"]}
   end
 
   defp present(kind, name, field, value) do
@@ -517,7 +552,9 @@ defmodule Troupe.Protocol.Bundle do
       :ok
     else
       {:error,
-       ["these names are both an agent and an acp_agent: #{Enum.join(MapSet.to_list(clash), ", ")}"]}
+       [
+         "these names are both an agent and an acp_agent: #{Enum.join(MapSet.to_list(clash), ", ")}"
+       ]}
     end
   end
 
@@ -617,6 +654,7 @@ defmodule Troupe.Protocol.Bundle do
          :ok <- files_ok(name, files),
          {:ok, manifest} <- Map.fetch(files, "SKILL.md") |> manifest_present(name),
          :ok <- manifest_name(name, manifest),
+         :ok <- requires_ok(name, manifest),
          :ok <- skill_size(name, files) do
       {:ok, %{name: name, description: to_string(raw["description"] || ""), files: files}}
     end
@@ -640,6 +678,20 @@ defmodule Troupe.Protocol.Bundle do
 
       _ ->
         :ok
+    end
+  end
+
+  # Refused at publish, where an admin can mend it; a skill on a disk with the same fault is
+  # loaded with a warning instead, since nobody is there to be told.
+  defp requires_ok(name, text) do
+    case skill_requires(text) do
+      {_programs, []} ->
+        :ok
+
+      {_programs, faults} ->
+        {:error,
+         "skill #{name}: requires is a list of program names, such as [python3, zip]; " <>
+           "not a program's name: #{Enum.map_join(faults, ", ", &inspect/1)}"}
     end
   end
 
@@ -718,7 +770,9 @@ defmodule Troupe.Protocol.Bundle do
   defp file_tools(_name, _stores, nil), do: {:ok, :all}
 
   defp file_tools(name, nil, _files),
-    do: {:error, "mcp server #{name}: files names the tools that store files, and needs stores: files"}
+    do:
+      {:error,
+       "mcp server #{name}: files names the tools that store files, and needs stores: files"}
 
   defp file_tools(name, :files, files) do
     if is_list(files) and files != [] and Enum.all?(files, &is_binary/1),
