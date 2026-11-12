@@ -483,7 +483,9 @@ export function App(): JSX.Element {
           </div>
         )}
 
-        {readySince && <DaemonReady onRefresh={refreshScreen} />}
+        {/* Memory and Artifacts read the plane when signed in: a daemon getting ready changes
+            nothing they show, so they are not offered a refresh for it. */}
+        {readySince && !(ownPlane && !localOnly && (where.screen === "memory" || where.screen === "artifacts")) && <DaemonReady onRefresh={refreshScreen} />}
 
         {/* Keyed so a refresh is a remount of the screen alone, never of the window. */}
         <Fragment key={entered.remount}>

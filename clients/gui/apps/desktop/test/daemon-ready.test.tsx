@@ -4,8 +4,9 @@
 // entered before its socket opened again holds what the earlier daemon had. The app does
 // not remount a screen uninvited; it says the daemon is ready now and offers a refresh,
 // which remounts that one screen, and the banner goes at the refresh and at the next
-// screen. A screen entered after the daemon was ready says nothing. The screen is the
-// gallery, against a fake plane whose artifacts the fake daemon keeps (`keptBy`).
+// screen. A screen entered after the daemon was ready says nothing, and Memory and
+// Artifacts, which read the plane when signed in, never do. Against a fake plane whose
+// artifacts the fake daemon keeps (`keptBy`).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
@@ -15,7 +16,7 @@ import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import { keptBy } from "../../../packages/client/test/support/kept.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { nav, render, says, sees, seesButton, startOnTheList, waitFor } from "./support";
+import { nav, render, says, sees, seesButton, sleep, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -77,15 +78,29 @@ describe("a screen entered before this computer's daemon was ready", () => {
     // The daemon is reached long before it is linked.
     daemon.delayMs["identity.link"] = 3000;
     await open();
-    (await waitFor(() => nav("Artifacts"), "the rail")).click();
-    await sees("not signed in to a Troupe plane");
+    (await waitFor(() => nav("Tools and skills"), "the rail")).click();
+    const asked = (): number => daemon.calls.filter((c) => c.method === "mcp.list").length;
+    await waitFor(() => asked() > 0, "the servers asked of the daemon");
     expect(says(READY)).toBe(false);
 
-    daemon.artifacts = [weekly];
     await sees(READY);
+    const before = asked();
     (await seesButton("Refresh")).click();
-    await sees("Weekly figures");
+    await waitFor(() => asked() > before, "the servers asked again at the refresh");
     await waitFor(() => !says(READY), "the banner gone at the refresh");
+  });
+
+  // Signed in, Memory and Artifacts read the plane, so the daemon becoming ready changes
+  // nothing they show: no banner there.
+  it("says nothing on Memory and Artifacts, which read the plane", async () => {
+    daemon.artifacts = [weekly];
+    daemon.delayMs["identity.link"] = 1500;
+    await open();
+    (await waitFor(() => nav("Artifacts"), "the rail")).click();
+    await sees("Weekly figures");
+    await waitFor(() => daemon.linked !== null && daemon.linked !== undefined, "the daemon linked", 10_000);
+    await sleep(300);
+    expect(says(READY)).toBe(false);
   });
 
   it("goes at the next screen, which says nothing when it was entered after", async () => {
@@ -103,8 +118,9 @@ describe("a screen entered before this computer's daemon was ready", () => {
     daemon.artifacts = [weekly];
     await open();
     await sees(READY);
-    (await waitFor(() => nav("Artifacts"), "the rail")).click();
-    await sees("Weekly figures");
+    (await waitFor(() => nav("Tools and skills"), "the rail")).click();
+    await waitFor(() => daemon.calls.some((c) => c.method === "mcp.list"), "the servers asked of the daemon");
+    expect(says(READY)).toBe(false);
 
     const port = daemon.port;
     await daemon.stop();

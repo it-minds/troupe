@@ -348,6 +348,7 @@ export function MemoryScreen({
         <LevelView
           key={current.key}
           via={via}
+          here={daemon !== null}
           own={own}
           level={current}
           levels={levels}
@@ -421,6 +422,7 @@ type Conflict = { version: number; text: string; mine: string };
  */
 function LevelView({
   via,
+  here,
   own,
   level,
   levels,
@@ -430,6 +432,8 @@ function LevelView({
   onReload,
 }: {
   via: OwnPlane;
+  /** Whether this computer's daemon is connected, so that there are sessions running here to say a save reaches. */
+  here: boolean;
   own: OwnMemory;
   level: Level;
   levels: Level[];
@@ -521,7 +525,7 @@ function LevelView({
     const entries = editing.index === null ? [...level.entries, entry] : level.entries.map((e, i) => (i === editing.index ? entry : e));
     const said = mine
       ? editing.index === null
-        ? "Saved. New sessions start with it; the sessions running here read it at their next turn."
+        ? `Saved. New sessions start with it${here ? "; the sessions running here read it at their next turn" : ""}.`
         : "Saved. New sessions start with the new version."
       : `Saved to ${title}. New sessions start with it; the sessions running read it at their next turn.`;
     save(entries, said, entry.heading === false ? entry.body : `## ${entry.topic}\n\n${entry.body}`);

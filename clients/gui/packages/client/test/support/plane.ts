@@ -12,7 +12,7 @@ import { composeProfile, exampleProfiles, specOfAdminProfile } from "./profiles.
 import type { FakeProfileSpec } from "./profiles.js";
 import { readBody, subjectOfIdToken, type FakeIdp } from "./idp.js";
 import { encodeToken, type FakeWorker } from "./worker.js";
-import { inEffect, parse, type FakeLevel } from "./entries.js";
+import { inEffect, parse, render, type FakeLevel } from "./entries.js";
 
 interface Row {
   id: string;
@@ -1275,7 +1275,8 @@ export class FakePlane {
 
       case "me.memory.put": {
         const own = this.ownOf(subject);
-        const text = String(params["text"] ?? "").replace(/\r\n/g, "\n").trimEnd();
+        // As text, or as entries the plane writes as `## Topic` sections in order.
+        const text = (Array.isArray(params["entries"]) ? render(params["entries"] as Array<{ topic?: string; body?: string }>) : String(params["text"] ?? "")).replace(/\r\n/g, "\n").trimEnd();
         if (params["version"] !== own.version) {
           return { error: { code: -32006, message: "conflict", data: { reason: `your memory was saved somewhere else since; version ${own.version} is in force now`, version: own.version } } };
         }

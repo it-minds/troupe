@@ -10,6 +10,8 @@ paths:
   - clients/gui/apps/desktop/src/views/OwnMemory.tsx
   - clients/gui/apps/desktop/src/views/Artifacts.tsx
   - clients/gui/apps/desktop/src/views/bits.tsx
+  - clients/gui/apps/desktop/src/hooks.ts
+  - clients/gui/apps/desktop/test/daemon-redial.test.tsx
   - clients/gui/apps/desktop/test/own-things-from-the-plane.test.tsx
   - docs/user/memory.md
   - docs/user/artifacts.md
@@ -17,7 +19,8 @@ symbols:
   - PlaneOwn
   - OwnPlane
   - unreachedWords
-gist: "Signed in, Memory/Artifacts use PlaneOwn (auth.rpc, gated); daemon only for its copy's status, config.changed, publish; daemon route only unsigned; no-route sentence from daemon.status"
+  - redialTiming
+gist: "Signed in, Memory/Artifacts use PlaneOwn (gated auth.rpc); daemon for its copy, publish, or unsigned; useDaemon redials an unreached daemon"
 ---
 
 # Memory and Artifacts read from the plane when the app is signed in
@@ -72,6 +75,19 @@ it is signed in as. Two things followed from that:
   (`unreachedWords`): not running, did not answer (with its error), or a browser that
   cannot find it; while it is still being looked for, or between two dials, the screen
   waits rather than calling it absent.
+
+- **A daemon not reached is dialled again by itself.** `useDaemon` used to leave a first
+  dial that failed for good, so the app carried on daemon-less while one ran. Now, while
+  it has no client and its status is "error" or "absent", it tries again: every five
+  seconds for a minute, then every thirty (`redialTiming`). Where the shell can read
+  `daemon.json` it reads that first and dials a daemon that moved; otherwise it dials the
+  endpoint it was told again. It skips a try while a dial is still on its way and stops
+  once connected. It never redials a daemon the person disconnected, until they connect
+  or Find again. A connected client that loses its socket follows the daemon by itself and
+  is left alone.
+- **Signed in, Memory and Artifacts get no "daemon is ready now" banner.** A daemon
+  becoming ready changes nothing they show. A save of the person's own says the
+  sessions running here read it at their next turn only when a daemon is connected.
 
 This narrows Decision 954's "read through this computer's daemon" to the app when it is
 not signed in, and Decision 955's "visibility moves in the app via the daemon" the same

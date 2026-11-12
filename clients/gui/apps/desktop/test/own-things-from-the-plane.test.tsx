@@ -13,7 +13,7 @@ import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
 import { artifact } from "../../../packages/client/test/support/plane.js";
-import { button, nav, recordNetwork, render, sees, startOnTheList, waitFor } from "./support";
+import { button, nav, recordNetwork, render, sees, startOnTheList, type, waitFor } from "./support";
 import type { Recorder } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -81,6 +81,18 @@ async function seesTheMemory(): Promise<void> {
   expect(screen.textContent).not.toMatch(/daemon/i);
 }
 
+/** Add a memory of the person's own, and the toast the save leaves. */
+async function addsOne(): Promise<string> {
+  const screen = await memoryScreen();
+  [...screen.querySelectorAll<HTMLButtonElement>(".levels .level")].find((b) => b.textContent?.includes("Only you"))!.click();
+  (await waitFor(() => button("Add a memory", screen), "Add a memory")).click();
+  const form = await waitFor(() => screen.querySelector<HTMLElement>('[aria-label="New memory"]'), "the form");
+  type(form.querySelector<HTMLInputElement>("input")!, "Language");
+  type(form.querySelector<HTMLTextAreaElement>("textarea")!, "British English.");
+  (await waitFor(() => (button("Save", form)?.disabled === false ? button("Save", form) : null), "Save")).click();
+  return (await waitFor(() => document.querySelector(".toast .text")?.textContent, "the toast")) ?? "";
+}
+
 async function seesTheGallery(): Promise<void> {
   (await waitFor(() => nav("Artifacts"), "the Artifacts entry in the rail")).click();
   const screen = await gallery();
@@ -94,6 +106,9 @@ describe("signed in to a plane", () => {
     await seesTheMemory();
     expect(harness!.plane.asked).toContain("me.memory");
     expect(harness!.plane.asked).toContain("memory.in_effect");
+    // Saved on the plane; with no daemon here, no word of sessions running here.
+    expect(await addsOne()).toBe("Saved. New sessions start with it.");
+    expect(harness!.plane.own.get("alice@example.com")?.text).toBe(`${MINE}\n\n## Language\n\nBritish English.`);
     await seesTheGallery();
     expect(harness!.plane.asked).toContain("artifact.list");
   });
@@ -106,6 +121,8 @@ describe("signed in to a plane", () => {
     // The daemon is asked where this computer's copy stands, and nothing of the person's own.
     await waitFor(() => daemon!.calls.some((c) => c.method === "me.memory.status"), "this computer's copy asked");
     expect(daemon.calls.filter((c) => c.method === "me.memory" || c.method === "memory.in_effect")).toEqual([]);
+    expect(await addsOne()).toBe("Saved. New sessions start with it; the sessions running here read it at their next turn.");
+    expect(daemon.calls.filter((c) => c.method === "me.memory.put")).toEqual([]);
     await seesTheGallery();
     expect(daemon.calls.filter((c) => c.method.startsWith("artifact."))).toEqual([]);
   });
