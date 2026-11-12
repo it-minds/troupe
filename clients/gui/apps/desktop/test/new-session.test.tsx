@@ -114,7 +114,7 @@ describe("the new-session screen", () => {
 
     // A chip picked: its token leaves the message, and the chip holds.
     chip(s, "Which agent")!.click();
-    (await waitFor(() => [...s.querySelectorAll<HTMLButtonElement>('.ns-picker [role="option"]')].find((o) => o.querySelector(".name")?.textContent?.startsWith("build")), "build in the picker")).click();
+    (await waitFor(() => [...s.querySelectorAll<HTMLButtonElement>(".ns-picker button.ns-opt")].find((o) => o.querySelector(".ns-opt-label")?.textContent === "build"), "build in the picker")).click();
     await waitFor(() => ask(s).value === "@research survey the field", "the agent's token gone");
     expect(sentence(s)).toContain("as build");
 

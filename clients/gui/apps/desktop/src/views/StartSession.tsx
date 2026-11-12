@@ -40,7 +40,6 @@ import {
 import type { AgentRow, AuthSession, DaemonClient, FleetRow, NewSessionWhere, ProfileOffering, SessionKind } from "@troupe/client";
 import { useProfiles } from "../hooks";
 import { prefs, shell } from "../shell";
-import { AgentPicker } from "./AgentPicker";
 import { relative } from "./bits";
 import { Mask } from "./brand";
 
@@ -426,20 +425,19 @@ export function StartSession({
 
           {shownPicker === "agent" && (
             <PickerPanel title="HOW IT STARTS" hint="#agent">
-              <AgentPicker
-                label="The agent it starts as"
-                rows={local ? localAgents.rows : prof ? offered(prof) : []}
-                error={local ? localAgents.error : null}
-                current={null}
-                chosen={agent}
-                onChoose={(name) => {
-                  // Chosen, and the picker stays: its own buttons start on it or open its file.
-                  setText((t) => stripTokens(t, { agent: name }, names));
-                  setAgentChip(name);
-                }}
-                start={async (name) => start(name)}
-                switchTo="There is no session to switch yet: start one on it."
-              />
+              {agentOptions(local ? localAgents.rows : (prof?.agents ?? []).map((name) => ({ name, description: "" }))).map((a) => (
+                <Option
+                  key={a.name}
+                  label={a.name}
+                  {...(a.name === defaultAgent ? { tag: local ? "DEFAULT" : "PROFILE DEFAULT" } : {})}
+                  tone="agent"
+                  pressed={a.name === agent}
+                  {...(a.description ? { detail: a.description } : {})}
+                  onClick={() => pick({ agent: a.name })}
+                />
+              ))}
+              {local && localAgents.error && <p className="note">Could not read the agents here: {localAgents.error}</p>}
+              {local && !localAgents.rows && !localAgents.error && <p className="note">Reading the agents here…</p>}
             </PickerPanel>
           )}
 
@@ -573,7 +571,7 @@ function Option({
 }: {
   label: string;
   tag?: string;
-  tone?: "running" | "local" | "queued" | "offline";
+  tone?: "running" | "local" | "queued" | "offline" | "agent";
   detail?: string;
   pressed: boolean;
   disabled?: boolean;
@@ -670,19 +668,10 @@ function LocalControls({
   );
 }
 
-// A profile's agents before any session has them: the offering names them, and each is
-// the organisation's, from that profile's bundle, changed in the console.
-function offered(profile: ProfileOffering): AgentRow[] {
-  return profile.agents.map((name) => ({
-    name,
-    description: "",
-    source: "bundle",
-    layer: "bundle",
-    origin: "Your organisation's",
-    profile: profile.name,
-    editable: false,
-    editable_reason: `${name} comes from the profile's bundle; change it in the console`,
-  }));
+// The agents a session could start as, before there is one: the primaries, by name and what
+// each does. Nothing to switch or edit yet; that is a running session's picker.
+function agentOptions(rows: Array<Pick<AgentRow, "name" | "description" | "mode">> | null): Array<{ name: string; description: string }> {
+  return (rows ?? []).filter((r) => (r.mode ?? "primary") === "primary").map((r) => ({ name: r.name, description: r.description }));
 }
 
 interface Recent {

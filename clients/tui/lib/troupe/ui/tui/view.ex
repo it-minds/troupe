@@ -2309,6 +2309,9 @@ defmodule Troupe.UI.TUI.View do
   defp picker_line(%{step: :where} = picker),
     do: " where it works — w a worktree of its own · c the checkout · Esc back#{task_note(picker)} "
 
+  defp picker_line(%{for: {:new, :screen}}),
+    do: " the agent it starts as — ↑↓ choose · Enter picks it · Esc back "
+
   defp picker_line(%{for: {:window, path}}),
     do: " the agent #{path} runs — ↑↓ choose · Enter switches · Esc keeps it "
 

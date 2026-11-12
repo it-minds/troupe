@@ -2312,7 +2312,7 @@ defmodule Troupe.UI.TUI.Server do
 
       {:choose_agent, page} ->
         case AgentChooser.open(state.session_id, page.agent || state.default_agent,
-               title: " a new session on ",
+               title: " the agent it starts as ",
                for: {:new, :screen}
              ) do
           {:ok, picker} -> %{state | new_page: page, focus: :switcher, switcher: picker}

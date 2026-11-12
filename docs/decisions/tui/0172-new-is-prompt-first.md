@@ -9,6 +9,8 @@ paths:
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/lib/troupe/ui/hq.ex
+  - clients/tui/lib/troupe/ui/tui/agent_chooser.ex
+  - clients/tui/test/troupe/agent_picker_test.exs
   - clients/tui/lib/troupe/client/remote.ex
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/cli/run_target.ex
@@ -39,7 +41,8 @@ from the box to the chips and on to CALLED, ←→ move between the chips, Enter
 picker under the sentence: where it runs, the recent folders, the profiles with their room
 (`FULL` in the stale amber the screen already uses for what may no longer hold), the agent.
 The agent on this computer is chosen in the one agent picker (Decisions 164, 166), which
-comes back to the screen; this narrows those two: `/new` no longer opens that picker
+comes back to the screen and there only picks (`s`, `b`, `e` and `n` do nothing before a
+session exists; making and editing an agent are `/agents`'); this narrows those two: `/new` no longer opens that picker
 first, its agent chip does. A plane profile's agents are listed from the listing.
 
 The box reads the same tokens as the desktop app, through `Troupe.UI.NewSession`. In this

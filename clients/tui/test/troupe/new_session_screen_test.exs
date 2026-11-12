@@ -19,7 +19,7 @@ defmodule Troupe.NewSessionScreenTest do
   alias Troupe.UI.NewSession
   alias Troupe.UI.TUI.NewSessionPage
 
-  defp page(origin, opts \\ []) do
+  defp page(origin, opts) do
     NewSessionPage.open(
       Keyword.merge([origin: origin, workspace: tmp_workspace(), daemon_up: true], opts)
     )

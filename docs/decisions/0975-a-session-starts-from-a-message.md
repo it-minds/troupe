@@ -50,7 +50,11 @@ word is a chip that opens its picker underneath: where it runs, the folder when 
 here, the profile with its room, the agent. On this computer the sentence reads "Runs [on
 this computer] in [folder] as [build] · only you can open it", and the folder's picker
 holds what the local half had: recent folders, Choose…, a typed path, the worktree
-choice, watch mode and private where the daemon can seal one.
+choice, watch mode and private where the daemon can seal one. The agent's picker is a plain
+pick, one option per agent with what it does and the default marked: before a session
+exists there is nothing to switch and no file to open from here, so the in-session
+`AgentPicker`'s start, switch and edit are not on this screen (this narrows Decision 920
+for the new-session screen; it still reads `agents.list` on this computer).
 
 **The profile is picked by a rule, and the rule is said.** Nobody having picked one, it is
 the last one used (the newest of the person's own sessions on the plane by

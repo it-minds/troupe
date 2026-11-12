@@ -3211,6 +3211,9 @@ details.advanced > summary {
   background: none;
   color: var(--local-fg);
 }
+.ns-opt.tone-agent .ns-opt-dot {
+  background: var(--p-agent);
+}
 .ns-opt.tone-queued .ns-opt-dot {
   background: var(--queued-fg);
 }
