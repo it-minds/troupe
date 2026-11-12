@@ -1025,6 +1025,24 @@ defmodule Troupe.Plane.AdminTest do
       assert Fleet.get_profile("tools-dev").spec["personalTools"] == "allow"
     end
 
+    # An identity's subject is optional, so every resource written before it stays valid,
+    # and one that is empty or longer than a name is refused by the API server, as
+    # `MCPIdentity.problems/1` reports it.
+    test "the WorkerProfile resource declares an identity's subject as an optional name" do
+      crd =
+        "../../../../../charts/troupe/crds/workerprofile.yaml"
+        |> Path.expand(__DIR__)
+        |> YamlElixir.read_from_file!()
+
+      [%{"schema" => %{"openAPIV3Schema" => schema}}] = crd["spec"]["versions"]
+      items = schema["properties"]["spec"]["properties"]["mcpIdentities"]["items"]
+
+      refute "subject" in items["required"]
+
+      assert %{"type" => "string", "minLength" => 1, "maxLength" => 255} =
+               items["properties"]["subject"]
+    end
+
     # The custom resource declares the field the plane validates, with the same two words,
     # so a profile written in a repository is refused by the API server where the console
     # would refuse it. Absent is the default, and the resource gives none of its own: no

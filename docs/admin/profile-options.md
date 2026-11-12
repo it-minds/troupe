@@ -96,75 +96,54 @@ spec:
       keyVersion: 1                        # optional; absent is the key's latest
       certificateThumbprint: qIAESDPaFvTg7nQnau6q6AzzzpMg6PElJvINleJ0N2s
       algorithm: RS256                     # or PS256
+      # subject: absent, so iss and sub are the clientId
 ```
 
 A worker asks the token endpoint for a token with `grant_type=client_credentials`, the
-client id, the scope and an assertion: `iss` and `sub` the client, `aud` the token
-endpoint, five minutes' life, a unique `jti`, and the certificate named in the header's
-`x5t#S256`. **OpenBao transit** signs it: the worker sends the signing input and gets the
-signature back, so the private key never leaves OpenBao, not even into the worker's memory.
-The worker keeps one token per server, renews it a minute before it runs out (or at three
-quarters of its life, if that is sooner), asks again once after a `401`, and sends it as
-`Authorization: Bearer`; it is never in a log, an error or the event log. Without
-`tokenUrl` the token endpoint is the one the server's authorization server publishes (named
-in its protected-resource metadata). `tokenUrl`'s host is egress the policy must allow, and
-one found in metadata must be in `egress.fqdns`.
+client id, the scope and an assertion: `iss` and `sub` the identity's `subject` (the client
+id when it has none), `aud` the token endpoint, five minutes' life, a fresh random UUID as
+`jti`, and the certificate's thumbprint in the header twice, as `x5t#S256` and as `kid`
+(Entra reads the first, Authentik only the second; each ignores the other). An identity
+provider refuses an assertion whose `exp` is more than ten minutes ahead or whose `aud` is
+not exactly its token URL, so name `tokenUrl` as the provider spells it, trailing slash and
+all. **OpenBao transit** signs it: the worker sends the signing input and gets the signature
+back, so the private key never leaves OpenBao, not even into the worker's memory. The token
+that comes back names the server's client id as its `aud` (or `azp`). The worker keeps one
+token per server, renews it five minutes before it runs out (or at three quarters of its
+life, if that is sooner), asks again once after a `401`, and sends it as `Authorization:
+Bearer`; it is never in a log, an error or the event log. Without `tokenUrl` the token
+endpoint is the one the server's authorization server publishes (named in its
+protected-resource metadata). `tokenUrl`'s host is egress the policy must allow, and one
+found in metadata must be in `egress.fqdns`.
 
-**Setting one up.**
+**`subject`** is needed with an identity provider that knows the system by one subject
+while each server is its own client there, as Authentik does: the `clientId` differs per
+server, and `iss` and `sub` are the one system identity, a name of at most 255 bytes.
+Leave it out for a provider, such as Entra, whose client is the system. In Authentik:
 
-1. Make a key and a certificate for the profile's client (or have your PKI issue one), and
-   work out the thumbprint: base64url, without padding, of the SHA-256 of the certificate
-   in DER. The 64 hex digits `openssl x509 -fingerprint -sha256` prints are taken too.
-
-   ```sh
-   openssl req -x509 -newkey rsa:2048 -nodes -keyout jira.key -out jira.crt \
-     -days 365 -subj "/CN=troupe-w-dev jira"
-   openssl x509 -in jira.crt -outform DER | openssl dgst -sha256 -binary \
-     | basenc --base64url | tr -d '='
-   ```
-
-2. Import the key into transit under a name that starts with the profile's worker
-   namespace and a dot, then delete every copy of `jira.key`. `bao transit import` wraps the
-   key for you; it is not exportable from then on.
-
-   ```sh
-   openssl pkcs8 -topk8 -nocrypt -in jira.key -outform DER | base64 -w0 > jira.key.b64
-   bao transit import transit/keys/troupe-w-dev.jira @jira.key.b64 type=rsa-2048
-   shred -u jira.key jira.key.b64
-   ```
-
-3. Register `jira.crt` with the identity provider as the client's credential, and grant the
-   client the server's roles or scopes.
-
-4. Write the identity on the profile, with `keyVersion: 1` and the thumbprint. The pods
-   read it from a file ([§2](profiles-and-policy.md#2-what-the-operator-creates)) and use it from their next
-   token, with no restart.
-
-The pods need leave to sign with the key: attach the policy `Troupe.KMS.Policy.mcp_identity/2`
-renders, which lets a pod sign with the keys named after its own namespace and nothing
-else, to the Kubernetes-auth role they log in with
-([roles and permissions §8](roles-and-permissions.md#8-openbao-policies)).
-
-**Rotating.** Make the new key and certificate as in step 1, register the new certificate
-beside the old one, and import the key as the next version of the same transit key:
-
-```sh
-bao transit import-version transit/keys/troupe-w-dev.jira @jira-2.key.b64
+```yaml
+    - server: jira
+      clientId: <the jira application's client id>
+      subject: sys-dev                     # sys-<profile>
+      scope: openid entitlements
+      tokenUrl: https://auth.example.com/application/o/token/
+      transitKey: troupe-w-dev.jira
+      certificateThumbprint: qIAESDPaFvTg7nQnau6q6AzzzpMg6PElJvINleJ0N2s
 ```
 
-Then change `keyVersion` and `certificateThumbprint` on the profile in one change. A worker
-signs with the pinned version until it reads the new pair, then gets its next token with
-the new key; there is no gap, because the identity provider holds both certificates.
-Remove the old certificate once the old tokens have run out, an hour later. With no
-`keyVersion` a worker signs with the latest version, so an import before the profile names
-the new thumbprint fails token requests in between.
+**Setting one up and rotating** are on [an MCP identity's key](mcp-identity-keys.md): make
+the key and certificate, import the key into OpenBao transit under
+`<worker namespace>.<anything>`, register the certificate with the identity provider, write
+the identity; to rotate, register the new certificate beside the old, import the next key
+version, and change `keyVersion` and `certificateThumbprint` in one change.
 
 **What is reported.** A `client_credentials` server with no identity on the profile, or an
 identity without `clientId` or `transitKey`, with a thumbprint that is not one, another
-algorithm, a `keyVersion` that is not a positive number, or a `tokenUrl` that is not
-`https` (or `http` to loopback), is reported rather than refused, as a missing Secret is: by
-the operator's `MCPIdentityMissing` condition and in `admin.profile.get`'s and
-`admin.profile.put`'s `identity_problems`. The pods start regardless and offer that server's
+algorithm, a `keyVersion` that is not a positive number, a `subject` that is empty or
+longer than 255 bytes, or a `tokenUrl` that is not `https` (or `http` to loopback), is
+reported rather than refused, as a missing Secret is: by the operator's
+`MCPIdentityMissing` condition and in `admin.profile.get`'s and `admin.profile.put`'s
+`identity_problems` (the resource's schema refuses an empty or over-long `subject` outright). The pods start regardless and offer that server's
 tools once both halves are there. A worker that cannot get a token says which server and
 why: the token endpoint refused the client (with the provider's error), the transit key is
 not in OpenBao, the pod may not sign with it, or the server refused a tool the identity

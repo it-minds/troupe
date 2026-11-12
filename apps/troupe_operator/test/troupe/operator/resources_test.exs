@@ -1615,6 +1615,20 @@ defmodule Troupe.Operator.ResourcesTest do
       assert path in worker["env"]
     end
 
+    test "a subject of the identity's own reaches the pod's file with it", context do
+      with_subject = Map.put(context.identity, "subject", "sys-dev")
+
+      config_map =
+        [mcpIdentities: [with_subject]]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(context.policy, context.settings)
+        |> find("ConfigMap", Names.mcp_identities())
+
+      assert [entry] = Jason.decode!(config_map["data"]["identities.json"])
+      assert entry == Map.put(with_subject, "algorithm", "RS256")
+    end
+
     test "the server is marked, and has no Secret and no variable", context do
       env = container(context.resources)["env"]
 

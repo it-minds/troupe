@@ -107,6 +107,15 @@ defmodule Troupe.Worker.ClientCredentialsTest do
       assert issued.client_id == "client-dev"
       assert issued.alg == "RS256"
       assert issued.thumbprint == thumbprint(context.key.v1)
+      # The same thumbprint as the key's id, which is where Authentik looks for it.
+      assert issued.kid == issued.thumbprint
+      # With no subject of its own, the identity vouches for itself as its client.
+      assert issued.iss == "client-dev"
+      assert issued.sub == "client-dev"
+      # A fresh random UUID names the assertion, so a replay of it is recognisable.
+      assert issued.jti =~
+               ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/
+
       assert issued.aud == context.fake.token_url
       assert issued.scope == "api://jira/.default"
       assert_received {:fake_mcp, "tools/list", bearer}
@@ -233,6 +242,40 @@ defmodule Troupe.Worker.ClientCredentialsTest do
       assert_received {:fake_idp, :issued, %{alg: "PS256", client_id: "client-dev"}}
     end
 
+    # Authentik picks the certificate by the header's `kid` and does not read `x5t#S256`,
+    # and each server is its own client there while `iss` and `sub` name the one system
+    # the profile is. On the tip the header had no `kid` and `iss` was the client id, and
+    # such an identity provider refused the assertion.
+    test "gets a token from an identity provider that keys by kid and a subject of its own",
+         context do
+      context = requires_tier(context)
+
+      FakeIdentityProvider.register(
+        context.fake,
+        "client-authentik",
+        %{thumbprint(context.key.v1) => context.key.v1},
+        scope: "openid entitlements",
+        subject: "sys-dev",
+        key_header: "kid"
+      )
+
+      write_identities!(context.path, [
+        context.identity
+        |> Map.put("clientId", "client-authentik")
+        |> Map.put("scope", "openid entitlements")
+        |> Map.put("subject", "sys-dev")
+      ])
+
+      assert {:ok, [_ | _]} = MCP.put_servers(context.configs)
+      assert_received {:fake_idp, :issued, issued}
+      assert issued.client_id == "client-authentik"
+      assert issued.kid == thumbprint(context.key.v1)
+      assert issued.iss == "sys-dev"
+      assert issued.sub == "sys-dev"
+      assert issued.scope == "openid entitlements"
+      refute_received {:fake_idp, :refused, _error, _description}
+    end
+
     test "finds the token endpoint in the authorization server's metadata when none is named",
          context do
       context = requires_tier(context)
@@ -268,6 +311,7 @@ defmodule Troupe.Worker.ClientCredentialsTest do
       assert {:ok, "search as client-dev"} = invoke("mcp.jira.search", %{})
       assert_received {:fake_idp, :issued, second}
       assert second.thumbprint == thumbprint(v2)
+      assert second.kid == thumbprint(v2)
       assert Process.alive?(context.tokens)
     end
 

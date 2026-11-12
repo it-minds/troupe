@@ -58,6 +58,38 @@ defmodule Troupe.WorkerProfileIdentityTest do
              Map.put(identity(), "algorithm", "RS256")
   end
 
+  # An identity provider that keys the system by one subject while each server is its own
+  # client there (Authentik) is given the subject; one without it vouches as its client.
+  test "a subject is the assertion's iss and sub, and the client is when there is none" do
+    with_subject = identity(%{"clientId" => "client-for-jira", "subject" => "sys-dev"})
+    profile = WorkerProfile.from_resource(resource(%{"mcpIdentities" => [with_subject]}))
+
+    assert [%MCPIdentity{subject: "sys-dev", client_id: "client-for-jira"} = parsed] =
+             profile.mcp_identities
+
+    assert MCPIdentity.subject(parsed) == "sys-dev"
+    assert MCPIdentity.problems(parsed) == []
+    assert MCPIdentity.to_spec(parsed) == Map.put(with_subject, "algorithm", "RS256")
+    assert parsed |> MCPIdentity.to_spec() |> MCPIdentity.from_spec() == parsed
+
+    without = MCPIdentity.from_spec(identity())
+    assert without.subject == nil
+    assert MCPIdentity.subject(without) == "00000000-0000-0000-0000-000000000001"
+    refute Map.has_key?(MCPIdentity.to_spec(without), "subject")
+  end
+
+  test "a subject that is empty, not a string or longer than 255 bytes is a problem" do
+    for subject <- ["", 7, String.duplicate("s", 256), String.duplicate("å", 128)] do
+      problems = MCPIdentity.problems(MCPIdentity.from_spec(identity(%{"subject" => subject})))
+      assert problems == ["mcp server jira: subject is not a name of 1 to 255 bytes"]
+    end
+
+    assert [] =
+             MCPIdentity.problems(
+               MCPIdentity.from_spec(identity(%{"subject" => String.duplicate("s", 255)}))
+             )
+  end
+
   test "takes a thumbprint as openssl prints it and keeps it as x5t#S256 carries it" do
     hex =
       @thumbprint

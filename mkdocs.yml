@@ -134,6 +134,7 @@ nav:
       - The console: admin/console.md
       - Profiles and policy: admin/profiles-and-policy.md
       - "A profile's options": admin/profile-options.md
+      - "An MCP identity's key": admin/mcp-identity-keys.md
       - Profiles from a repository: admin/gitops.md
       - Bundles, triggers, budgets: admin/bundles-and-triggers.md
       - Integrations: admin/integrations.md

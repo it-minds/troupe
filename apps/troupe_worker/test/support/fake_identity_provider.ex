@@ -5,11 +5,17 @@ defmodule Troupe.Worker.FakeIdentityProvider do
 
   The token endpoint does what one that takes a private key JWT (RFC 7523) does, and
   refuses with `invalid_client` what one would refuse: an unknown client, an assertion
-  whose `iss` or `sub` is not the client, whose `aud` is not this endpoint, which has run
-  out or lives too long, whose `jti` was seen before, whose `x5t#S256` names no
+  whose `iss` or `sub` is not the client's subject, whose `aud` is not this endpoint, which
+  has run out or lives too long, whose `jti` was seen before, whose key header names no
   certificate registered for the client, or whose signature does not verify against that
   certificate's key with the algorithm the header names (RS256, or PS256 with a salt as
   long as the hash). Each client has its own certificates, scope and tools.
+
+  A client is checked as Entra checks one: the certificate is the one the header's
+  `x5t#S256` names, and `iss` and `sub` are the client id. Registered with
+  `key_header: "kid"` and a `subject`, it is checked as Authentik checks one: the
+  certificate is the one `kid` names, `x5t#S256` is not looked at, and `iss` and `sub` are
+  the system's own subject, which is not the client id the form carries.
 
   The MCP server answers only a bearer the token endpoint issued and that has not run out
   or been revoked, lists the tools of the client that token was issued to, and answers
@@ -69,7 +75,9 @@ defmodule Troupe.Worker.FakeIdentityProvider do
 
   @doc """
   Register a client: its certificates as `%{thumbprint => public key PEM}`, the scope it
-  must ask for, and the tools it may see.
+  must ask for, and the tools it may see; `:subject`, what `iss` and `sub` must be (the
+  client id when absent), and `:key_header`, the header that names the certificate
+  (`"x5t#S256"` when absent, or `"kid"`).
   """
   def register(fake, client_id, certificates, opts \\ []) do
     keys = Map.new(certificates, fn {thumbprint, pem} -> {thumbprint, public_key(pem)} end)
@@ -77,7 +85,9 @@ defmodule Troupe.Worker.FakeIdentityProvider do
     client = %{
       certificates: keys,
       scope: Keyword.get(opts, :scope),
-      tools: Keyword.get(opts, :tools, ["search"])
+      tools: Keyword.get(opts, :tools, ["search"]),
+      subject: Keyword.get(opts, :subject, client_id),
+      key_header: Keyword.get(opts, :key_header, "x5t#S256")
     }
 
     Agent.update(fake.agent, &put_in(&1, [:clients, client_id], client))
@@ -162,6 +172,10 @@ defmodule Troupe.Worker.FakeIdentityProvider do
           client_id: client_id,
           alg: header["alg"],
           thumbprint: header["x5t#S256"],
+          kid: header["kid"],
+          iss: claims["iss"],
+          sub: claims["sub"],
+          jti: claims["jti"],
           scope: form["scope"],
           aud: claims["aud"],
           issued_at: now,
@@ -211,9 +225,9 @@ defmodule Troupe.Worker.FakeIdentityProvider do
          {:ok, client} <- client(state, form["client_id"]),
          {:ok, header, claims, input, signature} <- parse(form["client_assertion"]),
          :ok <-
-           expect(claims["iss"] == form["client_id"], "invalid_client", "iss is not the client"),
+           expect(claims["iss"] == client.subject, "invalid_client", "iss is not the client"),
          :ok <-
-           expect(claims["sub"] == form["client_id"], "invalid_client", "sub is not the client"),
+           expect(claims["sub"] == client.subject, "invalid_client", "sub is not the client"),
          :ok <-
            expect(
              claims["aud"] == state.base <> "/token",
@@ -235,7 +249,7 @@ defmodule Troupe.Worker.FakeIdentityProvider do
              "invalid_client",
              "a jti seen before"
            ),
-         {:ok, key} <- certificate(client, header["x5t#S256"]),
+         {:ok, key} <- certificate(client, header[client.key_header]),
          :ok <-
            expect(
              verified?(header["alg"], input, signature, key),

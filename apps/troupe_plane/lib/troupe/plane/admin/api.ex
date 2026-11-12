@@ -100,7 +100,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "spec",
       type: :object,
       description:
-        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount, repositoryOverridesBundle, personalTools, github, permissions, agents, storage.storageClassName. agents says which agents exist on the profile's pods, built-ins and the bundle's alike: {\"allow\": [names], \"deny\": [names]}; allow present means only those, in every mode (primary and subagent), deny takes names away, deny over allow, absent is every agent the bundle and Troupe give. A team's grant can only narrow what it leaves. A name no agent has today is kept, since a bundle may gain it (admin.profile.agents lists it as unmatched); a name in both lists, or one that is not a name, is refused; an empty allow offers none. A profile that extends another has its parent's rule as well: its allow is cut to the parent's, its deny adds. permissions is per-tool rules every session on the profile's pods obeys, as config's: {\"deny\": [\"shell(curl)\"], \"ask\": [\"mcp(issues.delete)\"], \"allow\": [...]}; an enforced layer, the strictest rule that matches a call holding, so a session's own configuration cannot loosen them, and a shell deny refuses a command a person types with ! there too; a rule the pods could not read is refused. mcpServers are the profile's own servers, which its pods load beside its bundle's: the resource's list is the bundle's with these added by name, one with a bundle server's name replacing it only with override: true, and a publish to the channel composes the two again rather than overwriting these; servers sent back that are the bundle's are dropped as the bundle's. configBundleChannel is the bundle channel the profile follows, stable where absent. repositoryOverridesBundle true lets a session's working copy replace the bundle's agents and skills, and the built-in agents, of the same name with its own; absent or false, those win and the working copy's are skipped and listed. personalTools is allow (the default, also when absent) or forbid: forbid has the profile's pods refuse a person's offer of their own signed-in tools (tools.register), saying why. github.permissions is what a session's token may do on GitHub beyond cloning, in GitHub's names: contents (read or write: write pushes its troupe/* branch), pull_requests (read or write: write opens its draft pull request and comments), checks and statuses (read: its CI); absent, sessions clone and do no more. Every llm field but endpoint needs llm.endpoint, without which the pods are given none of them, and is refused without it. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. storage.storageClassName is the storage class a worker's disk comes from, one the cluster policy allows; absent is the cluster's default. mcpIdentities says who the profile is at each server its bundle calls with client credentials: {server, clientId, scope, tokenUrl, transitKey, keyVersion, certificateThumbprint, algorithm}, none of it secret; the answer's identity_problems lists a server the bundle marks client_credentials that has none, or an identity that is incomplete. Replicas, sessionsPerPod, resources and storage.size are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
+        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount, repositoryOverridesBundle, personalTools, github, permissions, agents, storage.storageClassName. agents says which agents exist on the profile's pods, built-ins and the bundle's alike: {\"allow\": [names], \"deny\": [names]}; allow present means only those, in every mode (primary and subagent), deny takes names away, deny over allow, absent is every agent the bundle and Troupe give. A team's grant can only narrow what it leaves. A name no agent has today is kept, since a bundle may gain it (admin.profile.agents lists it as unmatched); a name in both lists, or one that is not a name, is refused; an empty allow offers none. A profile that extends another has its parent's rule as well: its allow is cut to the parent's, its deny adds. permissions is per-tool rules every session on the profile's pods obeys, as config's: {\"deny\": [\"shell(curl)\"], \"ask\": [\"mcp(issues.delete)\"], \"allow\": [...]}; an enforced layer, the strictest rule that matches a call holding, so a session's own configuration cannot loosen them, and a shell deny refuses a command a person types with ! there too; a rule the pods could not read is refused. mcpServers are the profile's own servers, which its pods load beside its bundle's: the resource's list is the bundle's with these added by name, one with a bundle server's name replacing it only with override: true, and a publish to the channel composes the two again rather than overwriting these; servers sent back that are the bundle's are dropped as the bundle's. configBundleChannel is the bundle channel the profile follows, stable where absent. repositoryOverridesBundle true lets a session's working copy replace the bundle's agents and skills, and the built-in agents, of the same name with its own; absent or false, those win and the working copy's are skipped and listed. personalTools is allow (the default, also when absent) or forbid: forbid has the profile's pods refuse a person's offer of their own signed-in tools (tools.register), saying why. github.permissions is what a session's token may do on GitHub beyond cloning, in GitHub's names: contents (read or write: write pushes its troupe/* branch), pull_requests (read or write: write opens its draft pull request and comments), checks and statuses (read: its CI); absent, sessions clone and do no more. Every llm field but endpoint needs llm.endpoint, without which the pods are given none of them, and is refused without it. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. storage.storageClassName is the storage class a worker's disk comes from, one the cluster policy allows; absent is the cluster's default. mcpIdentities says who the profile is at each server its bundle calls with client credentials: {server, clientId, scope, tokenUrl, transitKey, keyVersion, certificateThumbprint, subject, algorithm}, none of it secret, subject being the assertion's iss and sub where the identity provider names the system apart from each server's client (absent: clientId); the answer's identity_problems lists a server the bundle marks client_credentials that has none, or an identity that is incomplete. Replicas, sessionsPerPod, resources and storage.size are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
     }
   ]
 
@@ -1254,7 +1254,8 @@ defmodule Troupe.Plane.Admin.API do
           name: "definition",
           type: :string,
           required: true,
-          description: "The definition: Markdown with YAML frontmatter, as a bundle's agent carries it."
+          description:
+            "The definition: Markdown with YAML frontmatter, as a bundle's agent carries it."
         }
       ]
     },
@@ -1501,19 +1502,21 @@ defmodule Troupe.Plane.Admin.API do
       summary:
         "One memory document: a version's text (the one in force where no version is named), every version with who saved it and when, and what the version shown changed against the one before it, or against the version named as against, line by line (op same, del or add). A profile's has inherited: the documents of the profiles it extends, which its sessions read before its own, each with the profile it is from. readers lists the running sessions it reaches that have had a turn: each session_id, where it runs (pod or machine), its owner, profile and team, the version of this document its last turn ran under (0 for none), when that turn began, and whether it is behind the version in force; behind counts them. lines is the version shown line by line, each with by (who saved the version it came in), version, at and, for an agent's entry, session and agent: who wrote each line, not the history. entries is the version shown as its ## Topic sections, each with topic, body, heading (false for the text before the first heading, called General), version, by and at (those of its newest line) and used, how many sessions read a version holding it since, approximately.",
       risk: :read,
-      arguments: @memory_document ++
-        [
-          %Argument{
-            name: "version",
-            type: :integer,
-            description: "The version to show. Absent is the one in force."
-          },
-          %Argument{
-            name: "against",
-            type: :integer,
-            description: "Another version to compare the one shown with. Absent is the version before it."
-          }
-        ]
+      arguments:
+        @memory_document ++
+          [
+            %Argument{
+              name: "version",
+              type: :integer,
+              description: "The version to show. Absent is the one in force."
+            },
+            %Argument{
+              name: "against",
+              type: :integer,
+              description:
+                "Another version to compare the one shown with. Absent is the version before it."
+            }
+          ]
     },
     %Method{
       name: "admin.memory.preview",
@@ -1560,7 +1563,8 @@ defmodule Troupe.Plane.Admin.API do
             %Argument{
               name: "version",
               type: :integer,
-              description: "The version in force as admin.memory.get answered it, which the rollback replaces."
+              description:
+                "The version in force as admin.memory.get answered it, which the rollback replaces."
             }
           ]
     },

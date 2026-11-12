@@ -103,9 +103,11 @@ defmodule Troupe.WorkerProfile do
     client registered for it at the identity provider, the scope to ask for, where tokens
     come from (`token_url`, or the authorization server's metadata when absent), and the
     OpenBao transit key that signs the assertion together with the SHA-256 thumbprint of
-    the certificate registered for that key, which goes in the assertion's `x5t#S256`
-    header. `key_version` pins the transit key's version, so a rotation changes the key and
-    the thumbprint in one write; absent is the key's latest.
+    the certificate registered for that key, which goes in the assertion's `x5t#S256` and
+    `kid` headers. `key_version` pins the transit key's version, so a rotation changes the
+    key and the thumbprint in one write; absent is the key's latest. `subject` is the
+    assertion's `iss` and `sub` when the identity provider knows the system by a name of its
+    own while each server is its own client there; absent, they are the client.
 
     Nothing here is secret, so all of it may sit in git. The private key never leaves
     OpenBao: the pod sends the assertion's signing input to transit and gets the signature
@@ -115,6 +117,8 @@ defmodule Troupe.WorkerProfile do
     @algorithms ~w(RS256 PS256)
     @base64url ~r/\A[A-Za-z0-9_-]{43}\z/
     @hex ~r/\A(?:[0-9A-Fa-f]{2}:?){31}[0-9A-Fa-f]{2}\z/
+    # A name, not a page: room for any system id an identity provider gives.
+    @subject_bytes 255
 
     defstruct [
       :server,
@@ -124,6 +128,7 @@ defmodule Troupe.WorkerProfile do
       :transit_key,
       :key_version,
       :thumbprint,
+      :subject,
       algorithm: "RS256"
     ]
 
@@ -135,6 +140,7 @@ defmodule Troupe.WorkerProfile do
             transit_key: String.t() | nil,
             key_version: pos_integer() | nil,
             thumbprint: String.t() | nil,
+            subject: String.t() | nil,
             algorithm: String.t()
           }
 
@@ -144,7 +150,8 @@ defmodule Troupe.WorkerProfile do
     Lenient, because the operator and the plane report a broken entry (`problems/1`) rather
     than fail on it. The thumbprint is kept as `x5t#S256` wants it, base64url without
     padding, and may be written as the 64 hex digits `openssl x509 -fingerprint -sha256`
-    prints, colons and all.
+    prints, colons and all. A `subject` is kept as given, so that one which is not a name
+    is reported rather than quietly taken for the client.
     """
     @spec from_spec(map()) :: t()
     def from_spec(entry) when is_map(entry) do
@@ -156,6 +163,7 @@ defmodule Troupe.WorkerProfile do
         transit_key: string(entry["transitKey"]),
         key_version: entry["keyVersion"],
         thumbprint: thumbprint(entry["certificateThumbprint"]),
+        subject: entry["subject"],
         algorithm: string(entry["algorithm"]) || "RS256"
       }
     end
@@ -173,6 +181,7 @@ defmodule Troupe.WorkerProfile do
         "transitKey" => identity.transit_key,
         "keyVersion" => identity.key_version,
         "certificateThumbprint" => identity.thumbprint,
+        "subject" => identity.subject,
         "algorithm" => identity.algorithm
       }
       |> Map.reject(fn {_key, value} -> is_nil(value) end)
@@ -198,6 +207,14 @@ defmodule Troupe.WorkerProfile do
 
     def thumbprint(_value), do: nil
 
+    @doc """
+    Who the assertion says vouches for itself, its `iss` and `sub`: the identity's subject,
+    or its client when it names none.
+    """
+    @spec subject(t()) :: String.t() | nil
+    def subject(%__MODULE__{subject: nil, client_id: client_id}), do: client_id
+    def subject(%__MODULE__{subject: subject}), do: subject
+
     @doc "What is wrong with an entry, one sentence each; none for one a pod can use."
     @spec problems(t()) :: [String.t()]
     def problems(%__MODULE__{} = identity) do
@@ -214,6 +231,8 @@ defmodule Troupe.WorkerProfile do
          "mcp server #{name}: algorithm #{inspect(identity.algorithm)} is not RS256 or PS256"},
         {not version?(identity.key_version),
          "mcp server #{name}: keyVersion is not a version number"},
+        {not subject?(identity.subject),
+         "mcp server #{name}: subject is not a name of 1 to #{@subject_bytes} bytes"},
         {not secure?(identity.token_url), "mcp server #{name}: tokenUrl is not an https URL"}
       ]
       |> Enum.flat_map(fn {wrong?, sentence} -> if wrong?, do: [sentence], else: [] end)
@@ -240,6 +259,11 @@ defmodule Troupe.WorkerProfile do
 
     defp version?(nil), do: true
     defp version?(version), do: is_integer(version) and version > 0
+
+    defp subject?(nil), do: true
+
+    defp subject?(subject),
+      do: is_binary(subject) and subject != "" and byte_size(subject) <= @subject_bytes
 
     defp string(value) when is_binary(value) and value != "", do: value
     defp string(_value), do: nil
@@ -536,9 +560,12 @@ defmodule Troupe.WorkerProfile do
   `status.podsBehind`: each one's name, uid and revision. A pod already being replaced is
   not among them.
   """
-  @spec pods_behind(map()) :: [%{pod: String.t(), uid: String.t() | nil, revision: String.t() | nil}]
+  @spec pods_behind(map()) :: [
+          %{pod: String.t(), uid: String.t() | nil, revision: String.t() | nil}
+        ]
   def pods_behind(resource) do
-    for %{"pod" => pod} = entry <- get_in(resource, ["status", "podsBehind"]) || [], is_binary(pod) do
+    for %{"pod" => pod} = entry <- get_in(resource, ["status", "podsBehind"]) || [],
+        is_binary(pod) do
       %{pod: pod, uid: entry["uid"], revision: entry["revision"]}
     end
   end
