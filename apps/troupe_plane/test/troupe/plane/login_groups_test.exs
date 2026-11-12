@@ -28,6 +28,22 @@ defmodule Troupe.Plane.LoginGroupsTest do
     assert Identity.group_ids_for(ada) == []
   end
 
+  test "a sign-in names a group it creates by its id, and leaves a known group's name alone" do
+    # The claim carries ids and no names, so a group first seen at a sign-in is its id.
+    assert Repo.get_by!(Identity.Group, external_id: "eng").display_name == "eng"
+
+    # A provider's SCIM push names it, and names one no sign-in has carried yet.
+    {:ok, _} = Identity.upsert_group(%{external_id: "eng", display_name: "Engineering"})
+    {:ok, _} = Identity.upsert_group(%{external_id: "ops", display_name: "Operations"})
+
+    {:ok, ada, _} = Login.from_claims(%{"sub" => "idp|ada", "groups" => ["eng", "ops", "new"]})
+
+    assert Identity.group_ids_for(ada) == ["eng", "new", "ops"]
+    assert Repo.get_by!(Identity.Group, external_id: "eng").display_name == "Engineering"
+    assert Repo.get_by!(Identity.Group, external_id: "ops").display_name == "Operations"
+    assert Repo.get_by!(Identity.Group, external_id: "new").display_name == "new"
+  end
+
   test "a token with no groups claim at all leaves memberships as they were" do
     for claims <- [%{"sub" => "idp|ada"}, %{"sub" => "idp|ada", "groups" => nil}] do
       {:ok, ada, _} = Login.from_claims(claims)

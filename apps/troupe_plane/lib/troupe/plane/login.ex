@@ -203,7 +203,9 @@ defmodule Troupe.Plane.Login do
 
   # Groups named in a token but not yet known are created. A group is not access — a
   # team is, and only an admin makes one — so learning that one exists is safe, and it
-  # is what lets an admin enable it without asking the provider for a list first.
+  # is what lets an admin enable it without asking the provider for a list first. The claim
+  # carries ids and no names, so a new group is named by its id and a known one keeps the
+  # name it has: the one a SCIM push gave it would otherwise be lost at every sign-in.
   #
   # A token with no groups claim at all says nothing about groups, and is left to say
   # nothing: an MCP client's access token is minted for the scopes the client asked for,
@@ -215,7 +217,7 @@ defmodule Troupe.Plane.Login do
 
   defp sync_groups(user, group_ids) do
     for id <- group_ids do
-      {:ok, _} = Identity.upsert_group(%{external_id: id, display_name: id})
+      {:ok, _} = Identity.learn_group(id)
     end
 
     :ok = Identity.groups_seen(group_ids)
