@@ -102,7 +102,7 @@ tools included.
 
 ## The GUI and the VS Code extension (pnpm)
 
-228 packages, from `clients/gui/pnpm-lock.yaml` and `clients/vscode/pnpm-lock.yaml`,
+229 packages, from `clients/gui/pnpm-lock.yaml` and `clients/vscode/pnpm-lock.yaml`,
 build and test tools included; the VS Code extension's are all build and test tools. A
 package's builds for one operating system and processor, such as esbuild's, are checked
 and not listed: each is under its parent's licence, and which of them are installed
@@ -135,6 +135,7 @@ depends on the machine.
 | `@fontsource/dm-mono` | OFL-1.1 |
 | `@fontsource/figtree` | OFL-1.1 |
 | `@fontsource/vt323` | OFL-1.1 |
+| `@isaacs/nonrecursive-glob-match` | BlueOak-1.0.0 |
 | `@jridgewell/resolve-uri` | MIT |
 | `@jridgewell/sourcemap-codec` | MIT |
 | `@jridgewell/trace-mapping` | MIT |
@@ -342,7 +343,7 @@ depends on the machine.
 
 ## The desktop app (Cargo)
 
-530 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
+529 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
 platform, build dependencies included.
 
 | package | licence |
@@ -353,7 +354,6 @@ platform, build dependencies included.
 | `alloc-stdlib` | BSD-3-Clause |
 | `android_system_properties` | MIT OR Apache-2.0 |
 | `anyhow` | MIT OR Apache-2.0 |
-| `arbitrary` | MIT OR Apache-2.0 |
 | `arboard` | MIT OR Apache-2.0 |
 | `async-broadcast` | MIT OR Apache-2.0 |
 | `async-channel` | Apache-2.0 OR MIT |
@@ -402,6 +402,7 @@ platform, build dependencies included.
 | `clipboard-win` | BSL-1.0 |
 | `combine` | MIT |
 | `concurrent-queue` | Apache-2.0 OR MIT |
+| `constant_time_eq` | CC0-1.0 OR MIT-0 OR Apache-2.0 |
 | `cookie` | MIT OR Apache-2.0 |
 | `cookie_store` | MIT OR Apache-2.0 |
 | `core-foundation` | MIT OR Apache-2.0 |
@@ -428,7 +429,6 @@ platform, build dependencies included.
 | `defmt-macros` | MIT OR Apache-2.0 |
 | `defmt-parser` | MIT OR Apache-2.0 |
 | `deranged` | MIT OR Apache-2.0 |
-| `derive_arbitrary` | MIT OR Apache-2.0 |
 | `derive_more` | MIT |
 | `derive_more-impl` | MIT |
 | `digest` | MIT OR Apache-2.0 |
@@ -581,6 +581,7 @@ platform, build dependencies included.
 | `ndk-context` | MIT OR Apache-2.0 |
 | `ndk-sys` | MIT OR Apache-2.0 |
 | `new_debug_unreachable` | MIT |
+| `nix` | MIT |
 | `nom` | MIT |
 | `notify-rust` | MIT OR Apache-2.0 |
 | `num-conv` | MIT OR Apache-2.0 |
@@ -634,7 +635,6 @@ platform, build dependencies included.
 | `portable-atomic-util` | Apache-2.0 OR MIT |
 | `potential_utf` | Unicode-3.0 |
 | `powerfmt` | MIT OR Apache-2.0 |
-| `ppv-lite86` | MIT OR Apache-2.0 |
 | `precomputed-hash` | MIT |
 | `proc-macro-crate` | MIT OR Apache-2.0 |
 | `proc-macro-error` | MIT OR Apache-2.0 |
@@ -651,7 +651,6 @@ platform, build dependencies included.
 | `quote` | MIT OR Apache-2.0 |
 | `r-efi` | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
 | `rand` | MIT OR Apache-2.0 |
-| `rand_chacha` | MIT OR Apache-2.0 |
 | `rand_core` | MIT OR Apache-2.0 |
 | `rand_pcg` | MIT OR Apache-2.0 |
 | `raw-window-handle` | MIT OR Apache-2.0 OR Zlib |
@@ -776,6 +775,7 @@ platform, build dependencies included.
 | `tray-icon` | MIT OR Apache-2.0 |
 | `tree_magic_mini` | MIT |
 | `try-lock` | MIT |
+| `typed-path` | MIT OR Apache-2.0 |
 | `typeid` | MIT OR Apache-2.0 |
 | `typenum` | MIT OR Apache-2.0 |
 | `uds_windows` | MIT |
