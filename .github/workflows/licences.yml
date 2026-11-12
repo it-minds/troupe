@@ -7,7 +7,8 @@
 # reviewed exception, and fails when `docs/third-party-licences.md`, the licence texts in
 # `THIRD-PARTY-NOTICES.txt` (which every release artifact carries) or the chart's copies
 # of LICENSE and NOTICE are no longer what the locks and the root say. The policy and how
-# to record an exception are at the top of the script.
+# to record an exception are at the top of the script. Beside it, `mix hex.audit` fails
+# the pull request when either Mix lock holds a package with a security advisory.
 #
 # Every pull request, into `main`, a `development-*` chunk or anything else, and no path
 # filter: a workflow skipped by `paths:` leaves its check pending, and the answer is one
@@ -67,3 +68,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: clients/vscode
       - run: elixir scripts/licences.exs --check
+      # The security advisories against what the two Mix locks hold. Dependabot does not
+      # read Hex, so nothing else raises them. `hex.audit` asks hex.pm each time; the deps
+      # are fetched fresh above, never from a cache.
+      - name: No Hex package with a security advisory
+        run: |
+          mix hex.audit
+          (cd clients/tui && mix hex.audit)

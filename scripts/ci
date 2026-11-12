@@ -70,6 +70,9 @@ step "decisions hold"               box bash -c 'MIX_ENV=test mix troupe.decisio
 # `troupe bench`'s offline suite (Decision 772): a scenario past a budget in
 # apps/troupe_core/priv/bench/budgets.json, or a check that does not hold, fails it.
 step "bench within its budgets"     box bash -c 'MIX_ENV=test mix troupe.bench'
+# A package either Mix lock holds with a security advisory (`licences.yml` runs it too);
+# hex.pm is asked each time.
+step "no Hex security advisories"   box bash -c 'mix hex.audit && cd clients/tui && mix hex.audit'
 step "protocol schema is current"   box bash -c 'mix troupe.schema.diff | grep -q "schema unchanged"'
 step "migrate the test database"    box bash -c 'MIX_ENV=test mix ecto.create --quiet && MIX_ENV=test mix ecto.migrate --quiet'
 
