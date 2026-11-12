@@ -108,19 +108,19 @@ jobs:
             [{"os": "ubuntu-24.04", "target": "linux_x86_64", "timeout": 10},
              {"os": "ubuntu-24.04-arm", "target": "linux_aarch64", "timeout": 10},
              {"os": "macos-15-intel", "target": "macos_x86_64", "timeout": 25},
-             {"os": "macos-14", "target": "macos_aarch64", "timeout": 10},
+             {"os": "macos-15", "target": "macos_aarch64", "timeout": 10},
              {"os": "windows-2022", "target": "windows_x86_64", "timeout": 15}]
           TUI: >-
             [{"os": "ubuntu-24.04", "target": "linux_x86_64", "target_abi": "musl", "timeout": 20},
              {"os": "ubuntu-24.04-arm", "target": "linux_aarch64", "target_abi": "musl", "timeout": 15},
              {"os": "macos-15-intel", "target": "macos_x86_64", "timeout": 40},
-             {"os": "macos-14", "target": "macos_aarch64", "timeout": 20},
+             {"os": "macos-15", "target": "macos_aarch64", "timeout": 20},
              {"os": "windows-2022", "target": "windows_x86_64", "timeout": 25}]
           # Linux on 22.04 is the glibc floor: the oldest Ubuntu that carries
           # libwebkit2gtk-4.1-dev. Building on 24.04 raises the required glibc and
           # silently breaks every 22.04 user. Do not "modernise" it.
           DESKTOP: >-
-            [{"name": "macOS (universal)", "os": "macos-14", "target": "universal-apple-darwin",
+            [{"name": "macOS (universal)", "os": "macos-15", "target": "universal-apple-darwin",
               "rust-targets": "aarch64-apple-darwin,x86_64-apple-darwin", "timeout": 30},
              {"name": "Windows (x64)", "os": "windows-latest", "target": "x86_64-pc-windows-msvc",
               "rust-targets": "x86_64-pc-windows-msvc", "timeout": 20},
@@ -130,7 +130,7 @@ jobs:
         # signing test signs what has a signature to add, on one Mac and on Windows.
         run: |
           if [ "$SIGN" = self-signed ]; then
-            pick() { jq -c 'map(select(.os == "macos-14" or (.os | startswith("windows"))))'; }
+            pick() { jq -c 'map(select(.os == "macos-15" or (.os | startswith("windows"))))'; }
           elif [ "$MACOS" = false ]; then
             pick() { jq -c 'map(select(.os | startswith("macos") | not))'; }
           else
