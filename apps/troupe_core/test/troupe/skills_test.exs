@@ -6,12 +6,14 @@ defmodule Troupe.SkillsTest do
   would lay it out, and a session is pinned to it. What is checked is what a transcript
   would show: the definition came from the bundle, the prompt listed the skills and
   nothing more, the `skill` tool returned the instructions, a skill the profile did not
-  list does not exist, and the files beside a skill can be read but never written.
+  list does not exist, and the files beside a skill can be read but never written. A skill
+  whose `requires:` names a program missing from a `PATH` the test lays out is listed with
+  what it lacks, and the prompt and the tool say it cannot run here rather than offer it.
   """
 
   use Troupe.SessionCase, async: true
 
-  alias Troupe.Agent.{Definition, Definitions}
+  alias Troupe.Agent.{Definition, Definitions, Hold}
   alias Troupe.{Mounts, Skills, Tool, Tools}
   alias Troupe.Tool.Ctx
   alias Troupe.Tools.{ReadFile, WriteFile}
@@ -196,6 +198,104 @@ defmodule Troupe.SkillsTest do
       # it here would break a bundle's own delegation for a team that had simply not
       # listed a name it never names.
       assert Definitions.fetch!(narrowed, "helper").mode == :subagent
+    end
+  end
+
+  describe "a skill's requirements" do
+    # A directory standing in for `PATH`, holding one program, so what a skill needs is
+    # checked against a machine the test lays out rather than the one it runs on.
+    setup context do
+      bin = Path.join(context.base, "bin")
+      File.mkdir_p!(bin)
+      program = Path.join(bin, "zip")
+      File.write!(program, "#!/bin/sh\n")
+      File.chmod!(program, 0o755)
+
+      skill(context.dir, "pptx", %{
+        "SKILL.md" =>
+          "---\nname: pptx\ndescription: Build a deck\nrequires: [troupe-absent-873, zip]\n---\n" <>
+            "Run build.py.",
+        "build.py" => "print('deck')\n"
+      })
+
+      skill(context.dir, "zipper", %{
+        "SKILL.md" => "---\nname: zipper\ndescription: Zip a folder\nrequires: [zip]\n---\nZip."
+      })
+
+      definition = %Definition{name: "auditor", mode: :primary, prompt: "", skills: :all}
+      Map.merge(context, %{definition: definition, opts: [path: bin]})
+    end
+
+    test "a skill whose program is missing is kept and marked, not offered", context do
+      listed = Skills.available(context.bundle, context.definition, nil, context.opts)
+      by_name = Map.new(listed, &{&1.name, &1})
+
+      assert by_name["pptx"].missing == ["troupe-absent-873"]
+      assert by_name["zipper"].missing == []
+      assert by_name["deploy"].missing == []
+
+      section = Skills.prompt_section(context.bundle, context.definition, nil, context.opts)
+      assert section =~ "- zipper: Zip a folder"
+      assert section =~ "- pptx: cannot run here: needs troupe-absent-873"
+      refute section =~ "- pptx: Build a deck"
+
+      [tool] = Skills.tools(context.bundle, context.definition, nil, context.opts)
+      refute tool.description =~ "pptx"
+      assert {:error, reason} = Tool.invoke(tool, %{"name" => "pptx"}, ctx(context))
+      assert reason == {:skill_cannot_run, "pptx", ["troupe-absent-873"]}
+      assert Tool.Result.describe(reason) =~ "cannot run here: it needs troupe-absent-873"
+      assert {:ok, _content} = Tool.invoke(tool, %{"name" => "zipper"}, ctx(context))
+    end
+
+    test "a turn's hold keeps what a skill lacks, and writes nothing for one that lacks nothing",
+         context do
+      found = Skills.found(context.bundle, nil, context.opts)
+      hold = Hold.to_json([], found)
+
+      written = Map.new(hold["skills"]["bundle"], &{&1["name"], &1})
+      assert written["pptx"]["missing"] == ["troupe-absent-873"]
+      refute Map.has_key?(written["zipper"], "missing")
+
+      assert {:ok, [], folded, _hold} = Hold.fold(hold, nil)
+      folded = Map.new(folded.bundle, &{&1.name, &1})
+      assert folded["pptx"].missing == ["troupe-absent-873"]
+      assert Skills.runnable?(folded["zipper"])
+    end
+
+    test "only skills that cannot run leave no tool, and the prompt says so", context do
+      narrowed = entitled(context.bundle, %{"skills" => ["pptx"]})
+      assert Skills.tools(narrowed, context.definition, nil, context.opts) == []
+
+      section = Skills.prompt_section(narrowed, context.definition, nil, context.opts)
+      assert section =~ "- pptx: cannot run here: needs troupe-absent-873"
+      refute section =~ "call the skill tool"
+    end
+
+    test "an invalid requires is a warning, and the skill is still listed", context do
+      skill(context.dir, "odd", %{
+        "SKILL.md" =>
+          "---\nname: odd\ndescription: Odd\nrequires: [\"Bad Name\", troupe-absent-873]\n---\nX."
+      })
+
+      skill(context.dir, "flat", %{
+        "SKILL.md" => "---\nname: flat\ndescription: Flat\nrequires: zip\n---\nX."
+      })
+
+      # The suite logs nothing below `critical`; the warning is let through for this module.
+      Logger.put_module_level(Skills, :warning)
+      on_exit(fn -> Logger.delete_module_level(Skills) end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          listed = Skills.available(context.bundle, context.definition, nil, context.opts)
+          by_name = Map.new(listed, &{&1.name, &1})
+          assert by_name["odd"].missing == ["troupe-absent-873"]
+          assert by_name["flat"].missing == []
+        end)
+
+      assert log =~ "skill odd"
+      assert log =~ "Bad Name"
+      assert log =~ "skill flat"
     end
   end
 
