@@ -38,9 +38,9 @@ tauri-plugin-clipboard-manager = "~2.5"
 tauri-plugin-dialog = "2"
 # A notification when a session finishes or asks something while nobody is looking. The
 # page's own `Notification` is refused in WebView2, which denies the permission unless
-# the host answers for it, and wry answers only the clipboard's. `~2.7`, the minor of its
+# the host answers for it, and wry answers only the clipboard's. `~2.8`, the minor of its
 # JavaScript half in package.json, which moves with tauri in the one group, not behind it.
-tauri-plugin-notification = "~2.7"
+tauri-plugin-notification = "~2.8"
 # One copy of the app: a second launch, from the Start menu or from a click on a
 # notification, hands its arguments to the one running and exits. `~2.5`, the minor that
 # goes with tauri 2.12; it has no JavaScript half.
