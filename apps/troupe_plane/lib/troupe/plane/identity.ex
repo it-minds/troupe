@@ -102,6 +102,19 @@ defmodule Troupe.Plane.Identity do
   end
 
   @doc """
+  Make a group known by its identity-provider id, as a sign-in does for each id in the
+  groups claim. One nobody has seen is created, named by its id until a provider names it;
+  one already known is returned as it is, name included.
+  """
+  @spec learn_group(String.t()) :: {:ok, Group.t()} | {:error, Ecto.Changeset.t()}
+  def learn_group(external_id) do
+    case Repo.get_by(Group, external_id: external_id) do
+      nil -> upsert_group(%{external_id: external_id, display_name: external_id})
+      group -> {:ok, group}
+    end
+  end
+
+  @doc """
   Replace a user's group membership with exactly this list.
 
   Replace, not merge. A login carries the whole `groups` claim and a SCIM push carries
