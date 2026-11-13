@@ -101,13 +101,16 @@ defmodule Troupe.UI.NewSession do
           free: non_neg_integer(),
           capacity: non_neg_integer(),
           full: boolean(),
+          idle: boolean(),
           at_ceiling: boolean(),
           max_sessions: pos_integer() | nil
         }
 
   @doc """
   What a create would meet on a profile: no room below the ceiling is `full` (a create
-  waits for the next place), the ceiling is `at_ceiling` (a create is refused).
+  waits for the next place), the ceiling is `at_ceiling` (a create is refused). A profile
+  with no pod and nothing running is scaled to zero, `idle` and not full: a create there
+  starts a pod.
   """
   @spec room(map()) :: room()
   def room(row) do
@@ -116,11 +119,13 @@ defmodule Troupe.UI.NewSession do
     max = if is_integer(row["max_sessions"]), do: row["max_sessions"]
     at_ceiling = max != nil and active >= max
     free = max(capacity - active, 0)
+    idle = not at_ceiling and capacity == 0 and active == 0
 
     %{
       free: free,
       capacity: capacity,
-      full: not at_ceiling and free == 0,
+      full: not at_ceiling and not idle and free == 0,
+      idle: idle,
       at_ceiling: at_ceiling,
       max_sessions: max
     }
@@ -128,6 +133,16 @@ defmodule Troupe.UI.NewSession do
 
   defp int(n) when is_integer(n), do: n
   defp int(_other), do: 0
+
+  @doc """
+  The agent a session on a profile starts as when none is named: `build` where the profile
+  offers it, else the first it offers, the plane's own rule; `nil` where it offers none, and
+  the create then names none and the plane chooses or says why it cannot.
+  """
+  @spec default_agent([String.t()]) :: String.t() | nil
+  def default_agent(agents) do
+    if "build" in agents, do: "build", else: List.first(agents)
+  end
 
   @doc """
   The profile picked when nobody picked one, and why: the last used while it has room,
@@ -138,9 +153,10 @@ defmodule Troupe.UI.NewSession do
   def auto_pick(rows, last_used) do
     last = last_used && Enum.find(rows, &(&1["name"] == last_used))
 
+    # A profile scaled to zero has room: a create there starts a pod rather than waiting.
     roomy = fn row ->
       r = room(row)
-      r.free > 0 and not r.at_ceiling
+      (r.free > 0 or r.idle) and not r.at_ceiling
     end
 
     any = Enum.find(rows, roomy)

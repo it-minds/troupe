@@ -96,6 +96,38 @@ defmodule Troupe.NewSessionScreenTest do
                NewSessionPage.key(page, %Key{code: "enter", modifiers: []})
     end
 
+    test "starts as the agent the profile offers and sends it, never build the profile lacks" do
+      {_remote, origin} = plane()
+      row = %{"name" => "dev", "capacity" => 4, "active_sessions" => 0, "agents" => ["pr-reviewer"]}
+      page = %{page(origin, where: :platform) | profiles: [row]} |> typed("Review the diff")
+
+      assert NewSessionPage.plain(page) =~ "with [dev] as [pr-reviewer]"
+
+      assert {:start, _page, ^origin, %{profile: "dev", agent: "pr-reviewer"}} =
+               NewSessionPage.key(page, %Key{code: "enter", modifiers: []})
+
+      # Where the profile offers none, the create names none and the plane chooses.
+      page = %{page | profiles: [%{row | "agents" => []}]}
+      assert NewSessionPage.plain(page) =~ "with [dev] as [its default]"
+
+      assert {:start, _page, ^origin, %{profile: "dev", agent: nil}} =
+               NewSessionPage.key(page, %Key{code: "enter", modifiers: []})
+    end
+
+    test "calls a profile scaled to zero idle, not full, and starts on it rather than queueing" do
+      {_remote, origin} = plane()
+      row = %{"name" => "dev", "capacity" => 0, "active_sessions" => 0, "agents" => ["build"]}
+      page = %{page(origin, where: :platform) | profiles: [row]} |> typed("wake up")
+      text = NewSessionPage.plain(page)
+
+      refute text =~ "full"
+      refute text =~ "Full house"
+      assert NewSessionPage.resolved(page).full == false
+      assert NewSession.room(row).idle
+      assert [{"dev", "dev", "idle", true}] = NewSessionPage.options(%{page | open: :profile})
+      assert NewSession.auto_pick([row], "dev") == {"dev", "Picked dev because you used it last."}
+    end
+
     test "reads the tokens, which win over a chip and leave the message; a chip picked takes its token out" do
       {_remote, origin} = plane()
       page = page(origin, where: :platform, profile: "code") |> typed("@docs #plan write it up")

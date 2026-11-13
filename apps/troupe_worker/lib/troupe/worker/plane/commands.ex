@@ -752,15 +752,32 @@ defmodule Troupe.Worker.Plane.Commands do
   end
 
   # A tree that cannot be put back because the directory the session was recorded in is
-  # gone is named as such, so the plane can park the session rather than retry it
-  # (Decision 661). An object store or a key manager the pod cannot reach is named by
-  # `unreachable_error/1`. An exception — a `Troupe.Config.Error` from a profile's config —
-  # is its message, which says what to fix, where its inspected struct said nothing a
-  # person reads. Anything else is the opaque failure it always was.
+  # gone is named as such, so the plane can park the session rather than retry it; so is
+  # an agent the session cannot run as here, with its name. An object store or a key
+  # manager the pod cannot reach is named by `unreachable_error/1`. An exception — a
+  # `Troupe.Config.Error` from a profile's config — is its message, which says what to
+  # fix, where its inspected struct said nothing a person reads. Anything else is the
+  # opaque failure it always was.
   @doc false
   @spec activation_error(term()) :: Error.t()
   def activation_error({:not_a_directory, path}) do
     Error.new(:not_found, %{reason: "workspace_gone", detail: to_string(path)})
+  end
+
+  def activation_error({:not_on_profile, name}) do
+    Error.new(:invalid_params, %{
+      reason: "agent_not_here",
+      agent: name,
+      detail: "#{name} is not on this profile: its agents rule takes it away"
+    })
+  end
+
+  def activation_error({:unknown_agent, name}) do
+    Error.new(:invalid_params, %{
+      reason: "agent_not_here",
+      agent: name,
+      detail: "there is no agent named #{name} here"
+    })
   end
 
   def activation_error(%{__exception__: true} = error),

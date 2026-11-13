@@ -217,8 +217,10 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       profile_name: name,
       full: full,
       at_ceiling: at_ceiling,
-      agent: named_agent || default_agent,
+      agent: named_agent || default_agent || "its default",
       named_agent: named_agent,
+      # What the create names: on the platform the profile's default too, where it has one.
+      sent_agent: if(where == :platform, do: named_agent || default_agent, else: named_agent),
       cleaned: cleaned,
       title: title_of(page, cleaned),
       local_down: local_down,
@@ -242,10 +244,9 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     do:
       row["agents"] |> List.wrap() |> Enum.map(&if(is_map(&1), do: &1["name"], else: to_string(&1)))
 
-  defp default_of(row) do
-    agents = agents_of(row)
-    if "build" in agents or agents == [], do: "build", else: hd(agents)
-  end
+  # One the profile offers, which the create sends: a pod left to choose takes its own
+  # default. Where the profile offers none the create names none and the plane says why.
+  defp default_of(row), do: row |> agents_of() |> NewSession.default_agent()
 
   defp title_of(%{title: {title, _pos}}, _cleaned), do: title
   defp title_of(_page, cleaned), do: NewSession.title(cleaned)
@@ -382,6 +383,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
         cond do
           room.at_ceiling -> "AT ITS LIMIT"
           room.full -> "FULL"
+          room.idle -> "idle"
           true -> "#{room.free} of #{room.capacity} free"
         end
 
@@ -485,7 +487,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
           {:start, page, page.origin,
            %{
              profile: r.profile_name,
-             agent: r.named_agent,
+             agent: r.sent_agent,
              prompt: r.cleaned,
              title: title,
              team: page.team

@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { autoPickProfile, cleanMessage, messageTokens, profileRoom, stripTokens, titleFromMessage, tokensSentence, whoCanOpen } from "../src/index.js";
+import { autoPickProfile, cleanMessage, defaultProfileAgent, messageTokens, profileRoom, stripTokens, titleFromMessage, tokensSentence, whoCanOpen } from "../src/index.js";
 
 const names = { profiles: ["dev", "standard", "research-let"], agents: ["build", "plan", "orchestrate"] };
 
@@ -73,10 +73,32 @@ describe("the auto-pick", () => {
 
 describe("a profile's room", () => {
   it("is full below the ceiling, and at the ceiling is refused rather than queued", () => {
-    assert.deepEqual(profileRoom({ name: "dev", capacity: 4, active_sessions: 4, max_sessions: null }), { free: 0, capacity: 4, full: true, atCeiling: false, maxSessions: null });
+    assert.deepEqual(profileRoom({ name: "dev", capacity: 4, active_sessions: 4, max_sessions: null }), { free: 0, capacity: 4, full: true, idle: false, atCeiling: false, maxSessions: null });
     assert.equal(profileRoom({ name: "dev", capacity: 4, active_sessions: 4, max_sessions: 4 }).atCeiling, true);
     assert.equal(profileRoom({ name: "dev", capacity: 4, active_sessions: 4, max_sessions: 4 }).full, false);
     assert.equal(profileRoom({ name: "dev", capacity: 4, active_sessions: 1 }).full, false);
+  });
+});
+
+describe("a profile scaled to zero", () => {
+  const idle = { name: "dev", capacity: 0, active_sessions: 0, max_sessions: null };
+
+  it("is idle, not full: a create starts a pod rather than waiting for a place", () => {
+    assert.deepEqual(profileRoom(idle), { free: 0, capacity: 0, full: false, idle: true, atCeiling: false, maxSessions: null });
+  });
+
+  it("is not passed over as full by the auto-pick", () => {
+    const rows = [{ name: "standard", capacity: 4, active_sessions: 1 }, idle];
+    assert.deepEqual(autoPickProfile(rows, "dev"), { name: "dev", rule: "last", why: "Picked dev because you used it last." });
+  });
+});
+
+describe("the agent a platform session starts as", () => {
+  it("is build where the profile offers it, else the first it offers, else none to send", () => {
+    assert.equal(defaultProfileAgent(["pr-reviewer", "build", "plan"]), "build");
+    assert.equal(defaultProfileAgent(["pr-reviewer"]), "pr-reviewer");
+    assert.equal(defaultProfileAgent([]), null);
+    assert.equal(defaultProfileAgent(undefined), null);
   });
 });
 

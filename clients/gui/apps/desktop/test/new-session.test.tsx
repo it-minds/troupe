@@ -146,6 +146,40 @@ describe("the new-session screen", () => {
     await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session, once placed");
   });
 
+  it("starts as the agent the profile offers and sends it, never build the profile lacks", async () => {
+    const h = await signedIn({ profiles: ["dev"], agents: { dev: ["pr-reviewer"] } });
+    const s = await openStart();
+    await waitFor(() => sentence(s).includes("with dev as pr-reviewer"), "the profile's own agent");
+    type(ask(s), "Review the diff");
+    (await startButton(s)).click();
+    await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
+    const row = [...h.plane.rows.values()].find((r) => r.title === "Review the diff");
+    expect(row?.agent).toBe("pr-reviewer");
+  });
+
+  it("on a profile that offers no agent names none, and leaves the choice to the plane", async () => {
+    const h = await signedIn({ profiles: ["dev"], agents: { dev: [] } });
+    const s = await openStart();
+    await waitFor(() => sentence(s).includes("with dev as its default"), "no agent named");
+    type(ask(s), "Anything");
+    (await startButton(s)).click();
+    await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
+    const row = [...h.plane.rows.values()].find((r) => r.title === "Anything");
+    expect(row?.agent).toBeNull();
+  });
+
+  it("calls a profile scaled to zero idle, not full, and starts on it rather than queueing", async () => {
+    await signedIn({ profiles: ["dev"], room: { dev: { capacity: 0, active: 0 } } });
+    const s = await openStart();
+    await waitFor(() => sentence(s).includes("with dev"), "the sentence");
+    expect(why(s)).not.toContain("full");
+    expect(chip(s, "Which profile")!.className).not.toContain("tone-queued");
+    type(ask(s), "wake up");
+    expect((await startButton(s)).textContent).toBe("Start");
+    chip(s, "Which profile")!.click();
+    await sees("IDLE");
+  });
+
   it("at the ceiling turns the button off and says the number, then the plane's own sentence", async () => {
     await signedIn({ profiles: ["dev"], room: { dev: { capacity: 4, active: 2, max_sessions: 2 } } });
     const s = await openStart();

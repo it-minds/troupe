@@ -14,6 +14,17 @@ defmodule Troupe.Worker.UnrestorableTest do
     assert %Error{message: "internal_error"} = Commands.activation_error({:unreadable_segment, "k", :enoent})
   end
 
+  # An agent the profile does not have is said in words the plane parks the session on, and
+  # names the agent, rather than an opaque failure the plane would try again (#882).
+  test "an agent the profile does not have answers the plane as invalid_params/agent_not_here" do
+    for reason <- [{:not_on_profile, "build"}, {:unknown_agent, "build"}] do
+      assert %Error{message: "invalid_params", data: %{reason: "agent_not_here", agent: "build"} = data} =
+               Commands.activation_error(reason)
+
+      assert data.detail =~ "build"
+    end
+  end
+
   # A profile whose config does not load: what the plane and the person see is what to fix,
   # not `%Troupe.Config.Error{issues: [...]}`.
   test "a config that does not load is its message" do

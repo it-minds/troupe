@@ -1482,7 +1482,27 @@ defmodule Troupe.Plane.Harness do
   # version `create_row` pins: a name the pod would fail to load, or one the grant does
   # not give, is refused with the names it could have had, rather than placed, budgeted
   # and then failed on the pod.
-  defp agent_for(_profile, _team, nil), do: {:ok, nil}
+  #
+  # None named is the profile's default, resolved here and kept on the row, so the agent a
+  # session runs as is one the profile offers and every later activation sends the same
+  # one: a pod left to choose takes its own default, `build`, whatever the profile offers.
+  # A profile that offers no primary at all is refused here, as its pod would refuse it.
+  defp agent_for(profile, team, nil) do
+    %{agents: agents} = offering(profile, Identity.entitlements_for(team, profile))
+
+    case default_agent(agents) do
+      nil ->
+        {:error,
+         Error.new(:invalid_params, %{
+           field: "agent",
+           reason: "#{profile} offers no agent a session can start as",
+           agents: []
+         })}
+
+      agent ->
+        {:ok, agent}
+    end
+  end
 
   # A function agent is no session's agent: the harness starts it for its one job, so a
   # create naming one is told what it is for rather than that it does not exist.
@@ -1503,12 +1523,53 @@ defmodule Troupe.Plane.Harness do
 
       true ->
         {:error,
-         Error.new(:invalid_params, %{reason: "no primary agent named #{agent}", agents: agents})}
+         Error.new(:invalid_params, %{
+           field: "agent",
+           agent: agent,
+           reason: "no primary agent named #{agent}",
+           agents: agents
+         })}
     end
   end
 
   defp agent_for(_profile, _team, other) do
     {:error, Error.new(:invalid_params, %{reason: "agent is a name", agent: other})}
+  end
+
+  # The profile's default among the agents it offers: `build` where it is one, as it always
+  # was, else the first, the bundle's own first primary; `nil` where it offers none.
+  defp default_agent(agents) do
+    if "build" in agents, do: "build", else: List.first(agents)
+  end
+
+  # The agent an activation sends: the one on the row, what the session was created as or
+  # last switched to, or the profile's default for a row from before the plane resolved one
+  # at create time. Never left to the pod, whose own default is `build`.
+  defp run_as(%Session{agent: agent}, _team) when is_binary(agent), do: agent
+
+  defp run_as(%Session{} = session, team) do
+    entitlements = if team, do: Identity.entitlements_for(team, session.profile), else: []
+    %{agents: agents} = offering(session.profile, entitlements)
+    default_agent(agents)
+  end
+
+  # A session its pod will not run as its agent, because the profile's rule or a grant took
+  # the agent away since the plane chose it: parked read-only with why on its row, as one
+  # whose workspace is gone is. Trying it again every tick, or at every message, would meet
+  # the same refusal and only climb its epoch.
+  defp park_refused(session) do
+    Drain.park(session)
+    Sessions.put_status(session.id, %{"failed_reason" => "agent_not_here"})
+  end
+
+  defp agent_refusal(session, agent) do
+    Error.new(:forbidden, %{
+      reason:
+        "#{agent || "its agent"} is not an agent on #{session.profile}, " <>
+          "so this session cannot run there; it is read-only now",
+      agent: agent,
+      session_id: session.id
+    })
   end
 
   # The first input, sent by the plane so a session with nobody attached still does its
@@ -2166,6 +2227,12 @@ defmodule Troupe.Plane.Harness do
   # token the moment there is somewhere to use one.
   defp minted(%Session{state: "pending"} = session, _user, _role), do: {:ok, waiting_for(session)}
 
+  # A session that waited and was then refused its agent never ran, so there is nothing to
+  # read: the client still asking after it is told why rather than handed a reader.
+  defp minted(%Session{state: "read_only", failed_reason: "agent_not_here"} = session, _u, _r)
+       when session.last_seq == 0,
+       do: {:error, agent_refusal(session, session.agent)}
+
   # A link outlives the erasure of the session it was made for, and redeeming one comes
   # here without `visible/3`: no token for a session that is erased or on its way.
   defp minted(%Session{state: state} = session, _user, _role)
@@ -2455,7 +2522,7 @@ defmodule Troupe.Plane.Harness do
         "owner_subject" => session.owner_subject,
         "profile" => session.profile,
         "source" => session.workspace_source,
-        "agent" => agent,
+        "agent" => agent || run_as(session, team),
         "usage_seq" => session.usage_seq,
         "entitlements" => entitlement_set(session, team)
       }
@@ -2470,6 +2537,12 @@ defmodule Troupe.Plane.Harness do
       {:ok, result} ->
         activated(worker, session, params)
         {:ok, result}
+
+      # The pod will not run the session as the agent it was given. A create answers that
+      # and keeps no row; a session that waited is parked with why rather than queued again.
+      {:error, %Error{data: %{"reason" => "agent_not_here"} = data}} ->
+        Placement.release(session.profile, session.id)
+        refused_on_pod(session, team, data["agent"], Keyword.get(opts, :on_failure, :delete))
 
       {:error, reason} ->
         # The pod could not take it, so nothing may be left holding a slot for it. What
@@ -2486,6 +2559,22 @@ defmodule Troupe.Plane.Harness do
            detail: inspect(reason)
          })}
     end
+  end
+
+  defp refused_on_pod(session, team, agent, :delete) do
+    unplaced(session, team, :delete)
+
+    {:error,
+     Error.new(:invalid_params, %{
+       field: "agent",
+       agent: agent,
+       reason: "#{agent} is not an agent on #{session.profile}"
+     })}
+  end
+
+  defp refused_on_pod(session, _team, agent, :requeue) do
+    park_refused(session)
+    {:error, agent_refusal(session, agent)}
   end
 
   defp unplaced(session, team, :delete) do
@@ -2713,6 +2802,9 @@ defmodule Troupe.Plane.Harness do
         # and reports what is missing, which is how a session that ran while the plane
         # was unreachable still gets charged.
         "usage_seq" => session.usage_seq,
+        # The agent it runs as, which its root comes back on unless its log says it was
+        # switched since: without it the pod would take its own default.
+        "agent" => run_as(session, team_of(session)),
         # Re-resolved at every activation rather than read back from the log: a publish
         # can add an entry the team is not entitled to, and a session that came back
         # holding the set it was created with would be holding a stale one. The pod
@@ -2743,6 +2835,11 @@ defmodule Troupe.Plane.Harness do
            session_id: session.id,
            detail: inspect(reason)
          })}
+
+      # The pod will not run it as its agent: parked, as above, with why on its row.
+      {:error, %Error{data: %{"reason" => "agent_not_here"} = data}} ->
+        park_refused(session)
+        {:error, agent_refusal(session, data["agent"])}
 
       # Dormant again, holding neither the slot nor the slice it was just given: the pod
       # that refused it will not report a dormancy that would give them back.

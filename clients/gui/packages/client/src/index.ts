@@ -25,6 +25,7 @@ export {
   autoPickProfile,
   ceilingSentence,
   cleanMessage,
+  defaultProfileAgent,
   fullHouseSentence,
   messageTokens,
   profileRoom,
