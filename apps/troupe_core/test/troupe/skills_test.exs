@@ -133,6 +133,78 @@ defmodule Troupe.SkillsTest do
     end
   end
 
+  describe "a skill the bundle opens to agents" do
+    # The bundle's document says it, as materialising writes it beside the skills.
+    defp opened(context, agents_by_skill) do
+      skills = for {name, agents} <- agents_by_skill, do: %{"name" => name, "agents" => agents}
+      File.write!(Path.join(context.dir, "bundle.json"), Jason.encode!(%{"skills" => skills}))
+    end
+
+    test "an agent with no skills of its own loads one whose agents names it", context do
+      opened(context, [{"review-checklist", ["build", "plan"]}])
+      build = %Definition{name: "build", mode: :primary, prompt: ""}
+
+      assert [%{name: "review-checklist"}] = Skills.available(context.bundle, build)
+      assert Skills.prompt_section(context.bundle, build) =~ "- review-checklist: How we review"
+
+      assert [tool] = Skills.tools(context.bundle, build)
+      assert {:ok, content} = Tool.invoke(tool, %{"name" => "review-checklist"}, ctx(context))
+      assert content =~ @checklist
+
+      offered = build |> Tools.available(ctx(context)) |> Enum.map(&Tool.name/1)
+      assert "skill" in offered
+
+      # One the skill does not name still has none.
+      general = %Definition{name: "general", mode: :subagent, prompt: ""}
+      assert Skills.available(context.bundle, general) == []
+      assert Skills.tools(context.bundle, general) == []
+    end
+
+    test "agents: all opens it to every agent, beside what an agent's own list opens",
+         context do
+      opened(context, [{"deploy", "all"}])
+      build = %Definition{name: "build", mode: :primary, prompt: ""}
+
+      assert [%{name: "deploy"}] = Skills.available(context.bundle, build)
+
+      # The auditor's own `skills:` still counts, and adds to what the skill opens.
+      assert ["deploy", "review-checklist"] =
+               context.bundle |> Skills.available(auditor(context)) |> Enum.map(& &1.name)
+    end
+
+    test "a turn's hold keeps whom a skill opens itself to, and writes nothing where it says nothing",
+         context do
+      opened(context, [{"review-checklist", ["build"]}, {"deploy", "all"}])
+      build = %Definition{name: "build", mode: :primary, prompt: ""}
+
+      %{bundle: [_, _]} = found = Skills.found(context.bundle)
+      hold = Hold.to_json([], found)
+      written = Map.new(hold["skills"]["bundle"], &{&1["name"], &1})
+      assert written["review-checklist"]["agents"] == ["build"]
+      assert written["deploy"]["agents"] == "all"
+
+      assert {:ok, [], folded, _hold} = Hold.fold(hold, nil)
+      assert ["deploy", "review-checklist"] = folded |> Skills.offered(build) |> Enum.map(& &1.name)
+
+      # A bundle whose skills say nothing holds what it always held.
+      File.rm!(Path.join(context.dir, "bundle.json"))
+      plain = Hold.to_json([], Skills.found(context.bundle))
+      refute Enum.any?(plain["skills"]["bundle"], &Map.has_key?(&1, "agents"))
+    end
+
+    test "a team's grant still narrows what a skill opens", context do
+      opened(context, [{"review-checklist", "all"}, {"deploy", "all"}])
+      build = %Definition{name: "build", mode: :primary, prompt: ""}
+
+      narrowed = entitled(context.bundle, %{"skills" => ["deploy"]})
+      assert [%{name: "deploy"}] = Skills.available(narrowed, build)
+
+      none = entitled(context.bundle, %{"skills" => []})
+      assert Skills.available(none, build) == []
+      assert Skills.tools(none, build) == []
+    end
+  end
+
   describe "the team's entitlement set" do
     test "narrows the skills a profile may consult, and the prompt says so", context do
       definition = %Definition{

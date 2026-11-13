@@ -18,8 +18,9 @@ defmodule Troupe.Skills do
   any tool's do, so a transcript shows which skill was consulted and when. Nothing
   else is logged: the tool call *is* the record.
 
-  A bundle's skills are gated by the profile's `skills:` list and the team's
-  entitlements, since an admin published them for particular agents. A person's own
+  A bundle's skills are gated by the profile's `skills:` list, or the skill's own
+  `agents` naming the agent, and then the team's entitlements, since an admin published
+  them for particular agents. A person's own
   skills are offered to every agent of the session, because the person put them there
   for their own work. A skill on the disk of the same name as one of the bundle's is not
   read, whether or not this agent may consult the bundle's: a bundle is the plane's word,
@@ -115,8 +116,9 @@ defmodule Troupe.Skills do
 
   For the bundle the definition's `skills` decides: `all` is every skill in the bundle,
   a list is those names, and the default — no skills — is an empty list however many
-  the bundle carries. A name the definition lists and the bundle lacks is simply
-  absent; the plane refused such a definition at publish, so here it can only mean a
+  the bundle carries; and a skill whose `agents` in the bundle is `all` or names this
+  agent is offered whatever the definition lists. A name the definition lists and the
+  bundle lacks is simply absent; the plane refused such a definition at publish, so here it can only mean a
   bundle that was materialised by hand. The person's own skills (`Troupe.Skills.Local`)
   come from the config directory and the workspace given, every one of them, whatever
   the definition lists, but for those of a name the bundle has where the bundle wins
@@ -127,6 +129,7 @@ defmodule Troupe.Skills do
           required(:description) => String.t(),
           required(:layer) => :bundle | Local.layer(),
           required(:dir) => Path.t(),
+          optional(:agents) => :all | [String.t()] | nil,
           optional(:missing) => [String.t()]
         }
 
@@ -339,8 +342,9 @@ defmodule Troupe.Skills do
     |> Map.values()
   end
 
+  # The agent's own `skills:`, or the skill's `agents` naming the agent: either opens it.
   defp allowed(skills, definition) do
-    Enum.filter(skills, &Definition.allows_skill?(definition, &1.name))
+    Enum.filter(skills, &Definition.allows_skill?(definition, &1))
   end
 
   # The team's set, applied after the definition's own list. Two narrowings that compose

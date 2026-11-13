@@ -126,7 +126,22 @@ defmodule Troupe.Agent.Hold do
       "dir" => skill.dir
     }
     |> put_missing(skill)
+    |> put_agents(skill)
   end
+
+  # The agents a bundle's skill opens itself to, written only where it says, so a hold of
+  # skills that say nothing reads and hashes as it always did, and one restored still opens
+  # the skill to the agents it named.
+  defp put_agents(json, %{agents: :all}), do: Map.put(json, "agents", "all")
+  defp put_agents(json, %{agents: [_ | _] = agents}), do: Map.put(json, "agents", agents)
+  defp put_agents(json, _skill), do: json
+
+  defp restore_agents(skill, nil), do: skill
+  defp restore_agents(skill, agents), do: Map.put(skill, :agents, agents)
+
+  defp agents("all"), do: :all
+  defp agents(list) when is_list(list), do: list
+  defp agents(_none), do: nil
 
   # The programs a skill needs and this machine lacks, written only where there are some,
   # so a hold of skills that can all run reads and hashes as it always did.
@@ -141,5 +156,6 @@ defmodule Troupe.Agent.Hold do
       dir: json["dir"],
       missing: List.wrap(json["missing"])
     }
+    |> restore_agents(agents(json["agents"]))
   end
 end

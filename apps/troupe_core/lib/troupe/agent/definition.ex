@@ -29,7 +29,7 @@ defmodule Troupe.Agent.Definition do
   """
 
   alias Troupe.Config.{Trust, Yaml}
-  alias Troupe.Protocol.AgentDefinition
+  alias Troupe.Protocol.{AgentDefinition, Bundle}
 
   @enforce_keys [:name, :mode, :prompt]
   defstruct [
@@ -190,8 +190,15 @@ defmodule Troupe.Agent.Definition do
   `skills: all` opens every skill the bundle carries; a list names the ones it may
   read; the default, an empty list, is no skills at all — a profile that did not ask
   for any should not have its prompt grow because an admin published one.
+
+  Given a bundle's skill (a map with its `name` and `agents`), the skill may open itself
+  too: its `agents`, `all` or a list naming this agent, lets the agent load it whatever
+  its own `skills:` says, which is how a bundle opens a skill to the agents Troupe ships.
   """
-  @spec allows_skill?(t(), String.t()) :: boolean()
+  @spec allows_skill?(t(), String.t() | %{required(:name) => String.t()}) :: boolean()
+  def allows_skill?(%__MODULE__{} = definition, %{name: _} = skill),
+    do: Bundle.loads?(definition.name, definition.skills, skill)
+
   def allows_skill?(%__MODULE__{skills: :all}, _name), do: true
   def allows_skill?(%__MODULE__{skills: list}, name), do: name in list
 

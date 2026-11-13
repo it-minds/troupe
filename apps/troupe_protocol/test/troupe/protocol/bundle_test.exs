@@ -89,6 +89,99 @@ defmodule Troupe.Protocol.BundleTest do
                )
     end
 
+    test "a skill's agents is read as all, a list of names, or nothing said" do
+      opened = fn agents ->
+        doc =
+          document(%{
+            "skills" => [
+              %{
+                "name" => "review-checklist",
+                "agents" => agents,
+                "files" => %{"SKILL.md" => @skill_md}
+              }
+            ]
+          })
+
+        Bundle.validate(doc, known_agents: ["build", "plan"])
+      end
+
+      assert {:ok, %{skills: [%{agents: :all}]} = bundle} = opened.("all")
+      assert Bundle.definitions(bundle)["skills"]["review-checklist"]["agents"] == "all"
+
+      assert {:ok, %{skills: [%{agents: ["build", "reviewer"]}]} = bundle} =
+               opened.(["build", "reviewer", "build"])
+
+      assert Bundle.definitions(bundle)["skills"]["review-checklist"]["agents"] ==
+               ["build", "reviewer"]
+
+      assert {:ok, %{skills: [%{agents: nil}]} = bundle} = opened.(nil)
+      refute Map.has_key?(Bundle.definitions(bundle)["skills"]["review-checklist"], "agents")
+
+      for bad <- ["every", ["Build"], [1], %{"build" => true}] do
+        assert {:error, [message]} = opened.(bad), inspect(bad)
+        assert message =~ "skill review-checklist: agents is \"all\" or a list of agent names"
+      end
+    end
+
+    test "a draft's skill may be opened only to agents the bundle has or Troupe ships" do
+      doc =
+        document(%{
+          "skills" => [
+            %{
+              "name" => "review-checklist",
+              "agents" => ["build", "reviewer", "biuld"],
+              "files" => %{"SKILL.md" => @skill_md}
+            }
+          ]
+        })
+
+      assert {:error, [message]} = Bundle.validate(doc, known_agents: ["build"])
+      assert message =~ "skill review-checklist"
+      assert message =~ "biuld"
+      refute message =~ "reviewer"
+
+      # A version read again, where the built-ins are not given, is not held to the names.
+      assert {:ok, _} = Bundle.validate(doc)
+    end
+
+    test "an agent loads a skill its own skills opens, or one the skill opens to it" do
+      skill = %{name: "review-checklist", agents: nil}
+
+      assert Bundle.loads?("build", :all, skill)
+      assert Bundle.loads?("build", ["review-checklist"], skill)
+      refute Bundle.loads?("build", [], skill)
+      refute Bundle.loads?("build", nil, skill)
+
+      assert Bundle.loads?("build", [], %{skill | agents: :all})
+      assert Bundle.loads?("build", [], %{skill | agents: ["plan", "build"]})
+      refute Bundle.loads?("build", [], %{skill | agents: ["plan"]})
+    end
+
+    test "a materialised bundle's skills carry the agents its document opens them to" do
+      dir = Path.join(System.tmp_dir!(), "troupe-bundle-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      content =
+        document(%{
+          "skills" => [
+            %{"name" => "review-checklist", "files" => %{"SKILL.md" => @skill_md}},
+            %{"name" => "house-style", "agents" => "all", "files" => %{"SKILL.md" => "Write."}},
+            %{"name" => "for-build", "agents" => ["build"], "files" => %{"SKILL.md" => "B."}}
+          ]
+        })
+
+      {:ok, bundle} = Bundle.validate(content)
+      assert :ok = Bundle.materialize(bundle, content, dir)
+
+      assert [
+               %{name: "for-build", agents: ["build"]},
+               %{name: "house-style", agents: :all},
+               %{name: "review-checklist"} = says_nothing
+             ] = Bundle.list_skills(dir)
+
+      refute Map.has_key?(says_nothing, :agents)
+    end
+
     test "a skill needs a SKILL.md, relative file names, and a matching name" do
       no_manifest = %{"name" => "x", "files" => %{"notes.md" => "…"}}
 

@@ -794,7 +794,7 @@ defmodule Troupe.Plane.Admin do
         case Extends.resolve(name) do
           {:ok, resolved} ->
             own = get_in(resolved.attrs, ["spec", "llm", "model"])
-            {List.wrap(own), resolved.bundle.layers |> effective_agents() |> Enum.map(& &1.model)}
+            {List.wrap(own), resolved.bundle.layers |> compose_layers() |> effective_agents() |> Enum.map(& &1.model)}
 
           {:error, _reason} ->
             {[], []}
@@ -839,7 +839,9 @@ defmodule Troupe.Plane.Admin do
   `delegate` is the subagents an agent can hand work to: its bundle's, when it holds the
   `delegate` tool, which is how the harness decides; `nil` when it cannot delegate. `may`
   is the team's grant resolved as a session of the team's would be, so a grant that allows
-  other agents, or denies this one, says false.
+  other agents, or denies this one, says false. `loads` is the bundle's skills the agent
+  may load, by its own `skills:` or the skill's `agents`, before any grant narrows them:
+  an agent that loads none has no `skill` tool on the profile's pods.
 
   A platform admin's, as editing a bundle is.
   """
@@ -853,7 +855,9 @@ defmodule Troupe.Plane.Admin do
           {:error, _reason} -> []
         end
 
-      agents = effective_agents(layers)
+      composed = compose_layers(layers)
+      agents = effective_agents(composed)
+      skills = effective_skills(composed)
       grants = Identity.grants_for_profile(name)
       rule = agent_rule_of(profile)
       # What a primary may hand work to is what exists: a subagent the rule excludes is
@@ -878,6 +882,7 @@ defmodule Troupe.Plane.Admin do
           |> Map.put(:delegate, delegates(agent, subagents))
           |> Map.put(:teams, agent_teams(agent, name, grants))
           |> Map.put(:offered, AgentRule.allows?(rule, agent.name))
+          |> Map.put(:loads, loads(agent, skills))
           |> Map.delete(:tools)
         end
 
@@ -892,6 +897,7 @@ defmodule Troupe.Plane.Admin do
          profile: name,
          channel: layers |> Bundles.Effective.channels() |> List.last(),
          agents: rows,
+         skills: skills |> Enum.map(& &1.name) |> Enum.sort(),
          builtins: builtins,
          teams: grants |> Enum.map(& &1.team.name) |> Enum.sort(),
          # The profile's rule as it is in effect, and the names in it that match no agent
@@ -917,10 +923,12 @@ defmodule Troupe.Plane.Admin do
   # The agents of a chain's bundle in effect, each read as the harness reads its file, with
   # the profile and channel it came from. One that does not parse is left out: the bundle's
   # own check says so where it is published.
-  defp effective_agents([]), do: []
+  defp compose_layers([]), do: nil
+  defp compose_layers(layers), do: Bundles.Effective.compose(layers)
 
-  defp effective_agents(layers) do
-    composed = Bundles.Effective.compose(layers)
+  defp effective_agents(nil), do: []
+
+  defp effective_agents(composed) do
     from = for %{kind: "agents"} = entry <- composed.entries, into: %{}, do: {entry.name, entry}
 
     for %{"name" => agent, "definition" => text} <- List.wrap((composed.content || %{})["agents"]),
@@ -934,6 +942,22 @@ defmodule Troupe.Plane.Admin do
           }),
         not is_nil(row),
         do: row
+  end
+
+  # The skills of a chain's bundle in effect, each with the agents it opens itself to.
+  defp effective_skills(nil), do: []
+
+  defp effective_skills(composed) do
+    for %{"name" => skill} = entry <- List.wrap((composed.content || %{})["skills"]),
+        is_binary(skill),
+        do: %{name: skill, agents: Document.skill_agents(entry)}
+  end
+
+  # The bundle's skills an agent may load, by the rule a pod loads them by: its own
+  # `skills:` opens one, or the skill's `agents` names it. A team's grant narrows after.
+  defp loads(agent, skills) do
+    for(skill <- skills, Document.loads?(agent.name, agent.skills, skill), do: skill.name)
+    |> Enum.sort()
   end
 
   defp agent_row(name, text, extra) do
