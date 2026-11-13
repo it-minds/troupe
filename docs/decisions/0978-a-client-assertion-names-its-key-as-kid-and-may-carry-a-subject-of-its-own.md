@@ -12,6 +12,7 @@ paths:
   - charts/troupe/crds/workerprofile.yaml
   - docs/admin/profile-options.md
   - docs/admin/mcp-identity-keys.md
+  - clients/gui/apps/console/src/views/Profiles.tsx
 gist: The assertion header carries x5t#S256 and kid alike; iss/sub are spec.mcpIdentities[].subject or the clientId; jti a UUID v4; renew 5 min (or 1/4 life) early
 ---
 
@@ -38,6 +39,7 @@ client id. An assertion whose `iss` was the per-server client id was refused the
   not taken: deriving `sys-<profile>` from the profile's name, which would bind Troupe to
   one provider's naming and leave an installation that names its systems otherwise with no
   way to say so.
+- **The console** shows a subject beside the client on a profile's page; its editor has no identity fields and carries `mcpIdentities`, `subject` with it, through a save as loaded.
 - **`jti` a random UUID**, version 4, in place of 16 random bytes base64url: the shape
   identity providers that keep `jti`s for replay checks expect, and as unpredictable.
 - **Renewed five minutes before expiry**, or at three quarters of the token's life when
