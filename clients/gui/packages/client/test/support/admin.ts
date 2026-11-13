@@ -3876,6 +3876,7 @@ export function exampleAdmin(): FakeAdmin {
             {
               server: "wiki",
               clientId: "troupe-dev",
+              subject: "sys-dev",
               scope: "wiki.read",
               tokenUrl: "https://login.example.com/oauth2/token",
               transitKey: "troupe-dev",

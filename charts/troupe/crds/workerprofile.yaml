@@ -259,7 +259,16 @@ spec:
                         type: string
                         description: >-
                           The SHA-256 thumbprint of the certificate registered for the key, as
-                          the assertion's x5t#S256 carries it (base64url) or as 64 hex digits.
+                          the assertion's x5t#S256 and kid carry it (base64url) or as 64 hex
+                          digits.
+                      subject:
+                        type: string
+                        minLength: 1
+                        maxLength: 255
+                        description: >-
+                          The assertion's iss and sub, for an identity provider that knows the
+                          system by one subject while each server is its own client there.
+                          Absent means the clientId.
                       algorithm:
                         type: string
                         enum: [RS256, PS256]

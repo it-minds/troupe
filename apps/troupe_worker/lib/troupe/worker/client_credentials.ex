@@ -13,7 +13,7 @@ defmodule Troupe.Worker.ClientCredentials do
 
   A pod runs one profile, so one token per server is one per profile and server. It is
   kept here, in this process and nowhere else, and handed out until a little before it
-  expires (a minute, or a quarter of its life when that is shorter), when the next call
+  expires (five minutes, or a quarter of its life when that is shorter), when the next call
   gets a new one. A server that answers `401` gets one more, once (`Troupe.MCP.authorized/2`).
 
   The identities are read again whenever a token is asked for, from the file the operator
@@ -43,7 +43,9 @@ defmodule Troupe.Worker.ClientCredentials do
   @assertion_type "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
   # The assertion is used once, now, so it need not live long.
   @assertion_seconds 300
-  @renew_margin_ms 60_000
+  # Renewed five minutes before it runs out, which identity providers that issue hour-long
+  # tokens ask for, or at three quarters of a shorter life.
+  @renew_margin_ms 300_000
   # A token endpoint that says nothing of a token's life is taken at five minutes.
   @default_expires_in 300
   @http_timeout 15_000
@@ -232,22 +234,30 @@ defmodule Troupe.Worker.ClientCredentials do
 
   defp token_endpoint(_server, %MCPIdentity{token_url: url}), do: {:ok, url}
 
-  # RFC 7523: the client vouches for itself. `iss` and `sub` are the client, `aud` the
-  # token endpoint it is for, `jti` makes a replay recognisable, and the header names the
-  # certificate the identity provider checks the signature against.
+  # RFC 7523: the client vouches for itself. `iss` and `sub` are the identity's subject
+  # (its client unless it names another), `aud` the token endpoint it is for, `jti` makes a
+  # replay recognisable, and the header names the certificate the identity provider checks
+  # the signature against, twice: Entra reads `x5t#S256`, Authentik only `kid`, and each
+  # ignores the other.
   defp assertion(server, identity, endpoint, state) do
     now = System.system_time(:second)
+    subject = MCPIdentity.subject(identity)
 
-    header = %{"alg" => identity.algorithm, "typ" => "JWT", "x5t#S256" => identity.thumbprint}
+    header = %{
+      "alg" => identity.algorithm,
+      "typ" => "JWT",
+      "kid" => identity.thumbprint,
+      "x5t#S256" => identity.thumbprint
+    }
 
     claims = %{
-      "iss" => identity.client_id,
-      "sub" => identity.client_id,
+      "iss" => subject,
+      "sub" => subject,
       "aud" => endpoint,
       "iat" => now,
       "nbf" => now,
       "exp" => now + @assertion_seconds,
-      "jti" => 16 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+      "jti" => uuid4()
     }
 
     input = segment(header) <> "." <> segment(claims)
@@ -268,6 +278,18 @@ defmodule Troupe.Worker.ClientCredentials do
   end
 
   defp segment(map), do: map |> Jason.encode!() |> Base.url_encode64(padding: false)
+
+  # A random (version 4) UUID, the shape of `jti` an identity provider that checks it for
+  # replays expects.
+  defp uuid4 do
+    <<a::48, _version::4, b::12, _variant::2, c::62>> = :crypto.strong_rand_bytes(16)
+
+    <<a::48, 4::4, b::12, 2::2, c::62>>
+    |> Base.encode16(case: :lower)
+    |> then(fn <<p1::binary-8, p2::binary-4, p3::binary-4, p4::binary-4, p5::binary-12>> ->
+      Enum.join([p1, p2, p3, p4, p5], "-")
+    end)
+  end
 
   defp signing_failure(identity, :key_not_found) do
     "the transit key #{identity.transit_key}#{version_of(identity)} is not in OpenBao"

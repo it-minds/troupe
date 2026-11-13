@@ -513,7 +513,14 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
               {identities.map((m, i) => (
                 <tr key={`${String(m["server"])}-${i}`}>
                   <td>{show(m["server"])}</td>
-                  <td className="mono">{show(m["clientId"])}</td>
+                  <td className="mono">
+                    {show(m["clientId"])}
+                    {typeof m["subject"] === "string" && m["subject"] !== "" && (
+                      <span title="the assertion's iss and sub; the client id when empty; an Authentik system's id">
+                        {` · as ${m["subject"]}`}
+                      </span>
+                    )}
+                  </td>
                   <td className="mono">{show(m["scope"])}</td>
                   <td className="mono">{show(m["tokenUrl"])}</td>
                   <td className="mono">

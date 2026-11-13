@@ -79,6 +79,8 @@ describe("a profile", () => {
     await sees("credentialMode: profile");
     await sees('secretRef: {"name":"jira-mcp","key":"token"}');
     await sees("troupe-dev");
+    // A subject of the identity's own, the assertion's iss and sub, beside its client.
+    await sees("troupe-dev · as sys-dev");
     await sees("wiki.read");
     await sees("contents: write, pull_requests: write, checks: read");
     // One no section reads, as it is; and what the plane writes, apart.
@@ -141,7 +143,7 @@ describe("the editor", () => {
     const spec = fake.admin.profiles.find((p) => p.name === "dev")!.spec!;
     expect((spec["egress"] as Record<string, unknown>)["fqdns"]).toEqual(["llm-gw.example.com", "mcp.example.com", "wiki.example.com"]);
     expect(spec["mcpIdentities"]).toEqual([
-      { server: "wiki", clientId: "troupe-dev", scope: "wiki.read", tokenUrl: "https://login.example.com/oauth2/token", transitKey: "troupe-dev", keyVersion: 2, algorithm: "RS256" },
+      { server: "wiki", clientId: "troupe-dev", subject: "sys-dev", scope: "wiki.read", tokenUrl: "https://login.example.com/oauth2/token", transitKey: "troupe-dev", keyVersion: 2, algorithm: "RS256" },
     ]);
     expect(spec["github"]).toEqual({ permissions: { contents: "write", pull_requests: "write", checks: "read" } });
     expect(spec["sandboxHints"]).toEqual({ tmpfs: "1Gi" });
