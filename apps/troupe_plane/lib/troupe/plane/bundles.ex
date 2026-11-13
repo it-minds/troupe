@@ -102,11 +102,12 @@ defmodule Troupe.Plane.Bundles do
   The errors are sentences, one per thing wrong, so an admin fixes them in one pass;
   the egress check asks the cluster policy through `Troupe.Plane.ClusterPolicy`.
   """
-  @spec validate(map()) :: {:ok, Document.t()} | {:error, {:invalid_bundle, [String.t()]}}
-  def validate(content) do
+  @spec validate(map(), [Document.option()]) ::
+          {:ok, Document.t()} | {:error, {:invalid_bundle, [String.t()]}}
+  def validate(content, extra \\ []) do
     options = [egress_allowed?: &ClusterPolicy.egress_allowed?/1, builtin_agents: @builtin_agents]
 
-    case Document.validate(content, options) do
+    case Document.validate(content, options ++ extra) do
       {:ok, parsed} -> {:ok, parsed}
       {:error, messages} -> {:error, {:invalid_bundle, messages}}
     end
@@ -117,7 +118,8 @@ defmodule Troupe.Plane.Bundles do
   rules the daemon checks a person's and a repository's with (`Troupe.Protocol.AgentCheck`,
   #594), so a definition `agents.put` would refuse is refused here in the same words, one
   sentence per error, `agent <name>: <what is wrong>`. What only a session's harness can
-  know (its model's provider, an MCP server's tools) is a warning there and here alike.
+  know (its model's provider, an MCP server's tools) is a warning there and here alike. A
+  skill's `agents` may name only the draft's own agents and the ones Troupe ships.
 
   Only a draft is held to it. A version already published is checked by `validate/1`
   alone wherever it is read again (composed into a child's bundle, compared with a draft),
@@ -125,7 +127,7 @@ defmodule Troupe.Plane.Bundles do
   """
   @spec check(map()) :: {:ok, Document.t()} | {:error, {:invalid_bundle, [String.t()]}}
   def check(content) do
-    with {:ok, parsed} <- validate(content) do
+    with {:ok, parsed} <- validate(content, known_agents: @builtin_agents) do
       case Enum.flat_map(parsed.agents, &agent_errors/1) do
         [] -> {:ok, parsed}
         messages -> {:error, {:invalid_bundle, messages}}
@@ -537,6 +539,7 @@ defmodule Troupe.Plane.Bundles do
               %{
                 name: skill.name,
                 description: skill.description,
+                agents: Map.get(skill, :agents),
                 files: skill.files |> Map.keys() |> Enum.sort()
               }
             end),

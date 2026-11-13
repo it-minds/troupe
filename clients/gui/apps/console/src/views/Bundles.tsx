@@ -429,6 +429,7 @@ function Contents({ bundle }: { bundle: BundleDetail }): JSX.Element {
               <tr>
                 <th>Skill</th>
                 <th>What it is for</th>
+                <th>Opened to</th>
                 <th>Files</th>
               </tr>
             </thead>
@@ -437,6 +438,7 @@ function Contents({ bundle }: { bundle: BundleDetail }): JSX.Element {
                 <tr key={s.name}>
                   <td>{s.name}</td>
                   <td>{show(s.description)}</td>
+                  <td>{s.agents === "all" ? "every agent" : s.agents && s.agents.length > 0 ? s.agents.join(", ") : "the agents whose skills name it"}</td>
                   <td className="mono">{show(s.files)}</td>
                 </tr>
               ))}

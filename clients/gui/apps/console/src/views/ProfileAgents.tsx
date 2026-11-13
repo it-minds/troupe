@@ -25,6 +25,13 @@ function mayWords(agent: ProfileAgent): string {
   return autos.length ? `runs ${autos.join(", ")} without asking` : "asks before what its tools ask for";
 }
 
+// The bundle's skills the agent may load, said only where the bundle carries any: an agent
+// that loads none of them has no skill tool, which is what a session would otherwise find.
+function loadsWords(agent: ProfileAgent, skills: string[]): JSX.Element | null {
+  if (!agent.loads || skills.length === 0) return null;
+  return <span className="hint"> · {agent.loads.length > 0 ? `loads ${agent.loads.join(", ")}` : "loads none of its bundle's skills"}</span>;
+}
+
 export function ProfileAgentsList({ name }: { name: string }): JSX.Element {
   const { admin } = useConsole();
   const [load, reload] = useLoad(() => admin.profileAgents(name), [admin, name]);
@@ -68,6 +75,7 @@ export function ProfileAgentsList({ name }: { name: string }): JSX.Element {
                           {a.offered === false && <span className="hint"> · not on this profile: its agents rule leaves it out</span>}
                           {a.mode === "primary" && a.delegate && a.delegate.length > 0 && <span className="hint"> · delegates to {a.delegate.join(", ")}</span>}
                           {typeof a.max_turns === "number" && <span className="hint"> · at most {a.max_turns} turns</span>}
+                          {loadsWords(a, answer.skills ?? [])}
                         </td>
                         <td className="mono">{show(a.model ?? "the session's")}</td>
                         <td>{a.builtin ? "Shipped with Troupe" : `${a.channel ?? "?"}${a.from && a.from !== name ? ` (${a.from}'s)` : ""}`}</td>

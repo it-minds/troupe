@@ -580,7 +580,8 @@ export interface BundleDetail extends BundleSummary {
   detail: {
     schema?: unknown;
     agents?: Array<{ name: string; mode?: string | null; description?: string | null; skills?: string[] | null }>;
-    skills?: Array<{ name: string; description?: string | null; files?: string[] }>;
+    /** `agents`: the agents the skill opens itself to beside those whose own `skills:` opens it; null where it says nothing. */
+    skills?: Array<{ name: string; description?: string | null; agents?: string[] | "all" | null; files?: string[] }>;
     mcp_servers?: Array<{ name: string; url: string; credential_ref?: string | null; header?: string | null; permission?: string | null; tools?: string[] | null; secret?: string | null }>;
     [k: string]: unknown;
   } | null;
@@ -1316,7 +1317,14 @@ export interface ProfileAgent {
   /** The subagents it may delegate to; null where it cannot delegate. */
   delegate: string[] | null;
   max_turns: number | null;
+  /** Its own frontmatter's `skills:`. */
   skills: string[] | "all" | null;
+  /**
+   * The bundle's skills it may load: those its `skills:` opens and those whose `agents` names
+   * it or says all, before a team's grant narrows them. Empty: no `skill` tool on the pods.
+   * Absent from a plane before it.
+   */
+  loads?: string[];
   permissions: Record<string, "auto" | "ask" | "deny">;
   /** The profile whose channel gave it; null for a built-in. */
   from: string | null;
@@ -1345,6 +1353,8 @@ export interface ProfileAgents {
   rule?: { allow: string[] | null; deny: string[] } | null;
   /** Names the rule speaks of that are no agent the profile has today. */
   unmatched?: string[];
+  /** The skills its bundle in effect carries, by name; each agent's `loads` is those it may load. Absent from a plane before it. */
+  skills?: string[];
 }
 
 export interface AdminFilter {

@@ -792,6 +792,49 @@ defmodule Troupe.Plane.AdminTest do
       assert refused.data.required_role == "platform_admin"
     end
 
+    # A bundle's skill reaches an agent by the agent's own `skills:` or by the skill's
+    # `agents` (#886); each row says which it may load, so a gap is seen before a session.
+    test "each agent of a profile says which of its bundle's skills it loads", context do
+      skill = fn name, agents ->
+        %{"name" => name, "files" => %{"SKILL.md" => "Do it well."}}
+        |> then(&if(agents, do: Map.put(&1, "agents", agents), else: &1))
+      end
+
+      triager = "---\ndescription: Triages\nmode: primary\nskills: [triage-notes]\n---\nYou triage.\n"
+
+      assert {:ok, _} =
+               Admin.bundle_publish(context.root, "stable", %{
+                 "schema" => 1,
+                 "agents" => [%{"name" => "triager", "definition" => triager}],
+                 "skills" => [
+                   skill.("triage-notes", nil),
+                   skill.("house-style", "all"),
+                   skill.("build-only", ["build"])
+                 ]
+               })
+
+      assert {:ok, view} = Admin.profile_agents(context.root, "dev")
+      loads = Map.new(view.agents, &{&1.name, &1.loads})
+
+      assert loads["triager"] == ["house-style", "triage-notes"]
+      assert loads["build"] == ["build-only", "house-style"]
+      assert loads["plan"] == ["house-style"]
+      assert view.skills == ["build-only", "house-style", "triage-notes"]
+
+      # A name that is neither the bundle's agent nor one Troupe ships is refused by name.
+      typo = %{
+        "schema" => 1,
+        "skills" => [skill.("house-style", ["biuld", "plan"])]
+      }
+
+      assert {:error, error} = Admin.bundle_validate(context.root, typo)
+      assert [message] = error.data.errors
+      assert message =~ "skill house-style"
+      assert message =~ "biuld"
+      refute message =~ "plan"
+      assert {:error, ^error} = Admin.bundle_publish(context.root, "stable", typo)
+    end
+
     test "a model is picked from the ones the plane knows a provider serves, each with why",
          context do
       {:ok, _} =

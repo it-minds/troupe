@@ -15,7 +15,7 @@ console check the same thing.
 {"schema": 1,
  "agents":      [{"name": "pr-reviewer", "definition": "---\nmode: primary\n---\nYou review…"}],
  "skills":      [{"name": "review-checklist", "description": "How we review…",
-                  "files": {"SKILL.md": "…", "checklist.md": "…"}}],
+                  "agents": ["build", "pr-reviewer"], "files": {"SKILL.md": "…"}}],
  "mcp_servers": [{"name": "jira", "url": "https://mcp.jira.example/mcp",
                   "credential_ref": "JIRA_MCP_TOKEN", "header": "authorization",
                   "timeout_ms": 30000, "permission": "ask",
@@ -33,6 +33,10 @@ accepted for planes upgraded under one and never written again.
 On a pod the bundle's agents and skills, and Troupe's built-in agents, beat a working
 copy's of the same name unless the profile says otherwise
 ([profile-options.md](profile-options.md#a-repositorys-agents-and-skills-on-a-pod)).
+An agent loads the skills its own `skills:` opens (`all` or a list; none by default), and
+a skill opens itself with `agents`: `"all"`, or a list of names, Troupe's built-ins among
+them, so `build` loads a bundle's skill without a copy of `build` in the bundle. A team's
+grant narrows after both; `admin.profile.agents` says what each agent `loads` (Decision 980).
 
 **Validation.** At most 4 MiB; only those five keys; names `^[a-z0-9][a-z0-9-]{0,63}$`,
 unique per kind. An agent's definition must parse as frontmatter plus prompt, may list only
@@ -57,7 +61,7 @@ organisation's models for people's machines, the models its sessions have run on
 ones its bundle names; the plane never asks a provider for its list). **Copy** starts a new
 agent from one Troupe ships or one already published. A skill needs `SKILL.md`
 (whose `name`, if present, must be its own), relative text files with no `..`, at most
-512 KiB. An MCP `url` is `https://`, or `http://` to a `.svc` host, and its host must pass
+512 KiB; its `agents` may name only the bundle's agents and Troupe's. An MCP `url` is `https://`, or `http://` to a `.svc` host, and its host must pass
 the policy's egress check. Publishing to a channel a pod profile follows also refuses a
 `url` at a loopback, link-local, unspecified or cloud metadata address, in any spelling
 ([profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy));
@@ -102,18 +106,16 @@ several profiles, and each profile is its own client there, with its own certifi
 granted tools, so who it is goes on the profile, in `spec.mcpIdentities`. Its key is kept in
 OpenBao transit and signs without leaving it; there is no Secret to create. Setting up the
 client, the certificate and the key, and rotating them, is in
-[profiles and policy](profile-options.md#calling-an-mcp-server-as-the-profile)
-(Decision 747).
+[profiles and policy](profile-options.md#calling-an-mcp-server-as-the-profile) (Decision 747).
 
 **Publish, adopt, retire.** `admin.bundle.publish {channel, content}` validates, assigns
 the channel's next version, stores the document under `sha256:<canonical JSON>`, pushes
 `config.updated` to every pod on the channel and rewrites `mcpServers` on those profiles:
 the channel's servers composed again with the ones each profile wrote itself, which a
 publish keeps (Decision 910). A profile created on a channel, or moved onto one, gets the
-channel's current servers on its resource with that write, not at the channel's next
-publish.
-History is append-only; a rollback is a new version with the old content. Pods fetch the
-version over the control channel, verify the hash and materialise
+channel's current servers with that write, not at its next publish. History is
+append-only; a rollback is a new version with the old content. Pods fetch the version over
+the control channel, verify the hash and materialise
 `bundles/<hash>/{agents, skills, bundle.json}`; one that missed the push catches up at its
 next heartbeat. `admin.bundle.get` shows per profile which pods are `current`, `ahead` or
 `stale`. `admin.bundle.validate`, `admin.bundle.preview` and `admin.mcp.check` run the

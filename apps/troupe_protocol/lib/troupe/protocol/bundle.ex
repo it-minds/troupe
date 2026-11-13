@@ -12,6 +12,7 @@ defmodule Troupe.Protocol.Bundle do
       {"schema": 1,
        "agents":      [{"name": "pr-reviewer", "definition": "---\\nmode: primary\\n---\\nYou review…"}],
        "skills":      [{"name": "review-checklist", "description": "How we review…",
+                        "agents": ["build", "pr-reviewer"],
                         "files": {"SKILL.md": "…", "checklist.md": "…"}}],
        "mcp_servers": [{"name": "jira", "url": "https://mcp.jira.example/mcp",
                         "credential_ref": "JIRA_MCP_TOKEN", "header": "authorization",
@@ -29,7 +30,9 @@ defmodule Troupe.Protocol.Bundle do
   Names are `[a-z0-9-]`, unique per kind. An agent's definition must parse. A skill
   must have a `SKILL.md` whose frontmatter `name`, if present, is its own, and whose
   `requires`, if present, is a list of program names (`skill_requires/1`). An agent may
-  only list skills the bundle has. An MCP URL must be `https://`, or `http://` to a
+  only list skills the bundle has. A skill's `agents`, if present, is `"all"` or a list of
+  names, and a draft (`:known_agents` given) may name only the bundle's agents and those.
+  An MCP URL must be `https://`, or `http://` to a
   cluster-internal `.svc` host, and a credential reference must look like the name of
   an environment variable rather than like a secret — a value in the plane's database
   is on the forbidden list, and the check is the difference between forbidding it and
@@ -57,6 +60,16 @@ defmodule Troupe.Protocol.Bundle do
   module — the worker is the only thing holding the binary — but a bundle entry without one
   would be a bundle that says *run whatever is on the path under this name*, and the whole
   point of a content-addressed bundle is that it does not say that.
+
+  ## A skill says which agents may load it
+
+  An agent loads the skills its own frontmatter opens (`skills: all`, or a list). A skill
+  may say the other half: `"agents": "all"`, or a list of agent names, the built-in ones
+  included, opens it to those agents whatever their frontmatter says (`loads?/3`). Absent,
+  only the agent's own word counts. It is said on the skill because the skill is what the
+  bundle ships: Troupe's own agents cannot be given a frontmatter line without a copy of
+  them, and a child profile composing its chain's bundle takes the word with the skill. A
+  team's grant narrows after both, as it always has.
 
   ## `override`, for a bundle laid over another
 
@@ -88,7 +101,16 @@ defmodule Troupe.Protocol.Bundle do
   @slot_name ~r/\A[a-z][a-z0-9-]{0,63}\z/
 
   @type agent :: %{name: String.t(), definition: String.t(), parsed: AgentDefinition.t()}
-  @type skill :: %{name: String.t(), description: String.t(), files: %{String.t() => String.t()}}
+  @typedoc """
+  One skill. `agents` is the agents it is opened to beside those whose own `skills:` opens
+  it: `:all`, a list of names, or `nil` where the skill says nothing.
+  """
+  @type skill :: %{
+          name: String.t(),
+          description: String.t(),
+          agents: :all | [String.t()] | nil,
+          files: %{String.t() => String.t()}
+        }
   @typedoc """
   One MCP server a profile's sessions may use.
 
@@ -147,7 +169,10 @@ defmodule Troupe.Protocol.Bundle do
           acp_agents: [acp_agent()]
         }
 
-  @type option :: {:egress_allowed?, (String.t() -> boolean())} | {:builtin_agents, [String.t()]}
+  @type option ::
+          {:egress_allowed?, (String.t() -> boolean())}
+          | {:builtin_agents, [String.t()]}
+          | {:known_agents, [String.t()]}
 
   @doc "The schema version this code writes."
   @spec schema() :: pos_integer()
@@ -168,7 +193,10 @@ defmodule Troupe.Protocol.Bundle do
   Options: `:egress_allowed?`, a function of a hostname the caller answers from the
   cluster policy (absent means every host is allowed, which is right for a worker that
   is re-checking what the plane already admitted); `:builtin_agents`, the names an
-  agent may not replace without `override: true`.
+  agent may not replace without `override: true`; `:known_agents`, the names besides the
+  bundle's own agents a skill's `agents` may give, Troupe's built-ins, which a draft is
+  held to. Without it the names are not checked, so a version published under an older
+  Troupe, whose built-ins were others, is still read where it is read again.
   """
   @spec validate(map(), [option()]) :: {:ok, t()} | {:error, [String.t()]}
   def validate(content, opts \\ [])
@@ -206,19 +234,69 @@ defmodule Troupe.Protocol.Bundle do
   @doc """
   Each entry's definition by name, field by field, for a preview to say which field of an
   entry changed and not only which names came and went: an agent's frontmatter keys and
-  its `prompt`, the text after them; a skill's description and files; an MCP server's and
-  an ACP agent's settings as checked.
+  its `prompt`, the text after them; a skill's description and files, and the agents it
+  is opened to where it says; an MCP server's and an ACP agent's settings as checked.
   """
   @spec definitions(t()) :: %{String.t() => %{String.t() => map()}}
   def definitions(%{agents: agents, skills: skills, mcp_servers: servers} = bundle) do
     %{
       "agents" => Map.new(agents, &{&1.name, agent_fields(&1.definition)}),
-      "skills" =>
-        Map.new(skills, &{&1.name, %{"description" => &1.description, "files" => &1.files}}),
+      "skills" => Map.new(skills, &{&1.name, skill_fields(&1)}),
       "mcp_servers" => Map.new(servers, &{&1.name, fields(&1)}),
       "acp_agents" => bundle |> Map.get(:acp_agents, []) |> Map.new(&{&1.name, fields(&1)})
     }
   end
+
+  defp skill_fields(skill) do
+    fields = %{"description" => skill.description, "files" => skill.files}
+
+    case Map.get(skill, :agents) do
+      nil -> fields
+      agents -> Map.put(fields, "agents", word(agents))
+    end
+  end
+
+  @doc """
+  Whether an agent may load a skill: its own `skills:` opens it (`:all`, or a list naming
+  it), or the skill's `agents` does (`:all`, or a list naming the agent). The one rule a
+  pod loads by and the plane reports by; a team's grant narrows after it.
+  """
+  @spec loads?(String.t(), :all | [String.t()] | nil, %{
+          required(:name) => String.t(),
+          optional(:agents) => :all | [String.t()] | nil
+        }) :: boolean()
+  def loads?(agent, own, skill) do
+    opens?(own, skill.name) or opens?(Map.get(skill, :agents), agent)
+  end
+
+  defp opens?(:all, _name), do: true
+  defp opens?(list, name) when is_list(list), do: name in list
+  defp opens?(_none, _name), do: false
+
+  @doc """
+  The agents a skill entry of a document opens it to, read as `validate/2` reads them:
+  `:all`, a list of names, or `nil` where it says nothing or says something that is not
+  one of those. Lenient, for a document already admitted: a materialised bundle's, or a
+  chain's composed one.
+  """
+  @spec skill_agents(map()) :: :all | [String.t()] | nil
+  def skill_agents(entry) when is_map(entry) do
+    case parse_skill_agents(Map.get(entry, "agents")) do
+      {:ok, agents} -> agents
+      :error -> nil
+    end
+  end
+
+  defp parse_skill_agents(nil), do: {:ok, nil}
+  defp parse_skill_agents("all"), do: {:ok, :all}
+
+  defp parse_skill_agents(list) when is_list(list) do
+    if Enum.all?(list, &AgentDefinition.valid_name?/1),
+      do: {:ok, Enum.uniq(list)},
+      else: :error
+  end
+
+  defp parse_skill_agents(_other), do: :error
 
   defp agent_fields(text) do
     {frontmatter, body} = AgentDefinition.split_frontmatter(text)
@@ -363,9 +441,45 @@ defmodule Troupe.Protocol.Bundle do
     end
   end
 
-  @doc "Name and description of every skill in a materialised directory, for a prompt."
-  @spec list_skills(Path.t()) :: [%{name: String.t(), description: String.t()}]
-  def list_skills(dir), do: list_skills_in(Path.join(dir, "skills"))
+  @doc """
+  Name and description of every skill in a materialised directory, for a prompt, with the
+  agents its entry in the directory's `bundle.json` opens it to (`skill_agents/1`), where
+  it says; no `agents` where it says nothing or there is no `bundle.json` to say it.
+  """
+  @spec list_skills(Path.t()) :: [
+          %{
+            required(:name) => String.t(),
+            required(:description) => String.t(),
+            required(:dir) => Path.t(),
+            optional(:agents) => :all | [String.t()]
+          }
+        ]
+  def list_skills(dir) do
+    opened = opened_skills(dir)
+
+    dir
+    |> Path.join("skills")
+    |> list_skills_in()
+    |> Enum.map(fn skill ->
+      case Map.get(opened, skill.name) do
+        nil -> skill
+        agents -> Map.put(skill, :agents, agents)
+      end
+    end)
+  end
+
+  defp opened_skills(dir) do
+    path = Path.join(String.replace(dir, "\\", "/"), "bundle.json")
+
+    with {:ok, text} <- File.read(path),
+         {:ok, %{"skills" => skills}} when is_list(skills) <- Jason.decode(text) do
+      for %{"name" => name} = entry <- skills, is_binary(name), into: %{} do
+        {name, skill_agents(entry)}
+      end
+    else
+      _none -> %{}
+    end
+  end
 
   @doc """
   Every `<root>/<name>/SKILL.md` under a directory of skills, by name, with the
@@ -472,7 +586,8 @@ defmodule Troupe.Protocol.Bundle do
          :ok <- unique(:skills, skills),
          :ok <- unique(:mcp_servers, servers),
          :ok <- unique(:acp_agents, acp_agents),
-         :ok <- distinct_names(agents, acp_agents) do
+         :ok <- distinct_names(agents, acp_agents),
+         :ok <- skill_agents_known(skills, agents, Keyword.get(opts, :known_agents)) do
       {:ok,
        %{
          schema: @schema,
@@ -556,6 +671,26 @@ defmodule Troupe.Protocol.Bundle do
          "these names are both an agent and an acp_agent: #{Enum.join(MapSet.to_list(clash), ", ")}"
        ]}
     end
+  end
+
+  # As an agent may list only skills the bundle has, a skill may open itself only to agents
+  # there are: the bundle's own and the built-ins the caller names. A name that is neither
+  # would open the skill to nothing, which is a typo nobody would otherwise be told of.
+  defp skill_agents_known(_skills, _agents, nil), do: :ok
+
+  defp skill_agents_known(skills, agents, known) do
+    names = MapSet.new(Enum.map(agents, & &1.name) ++ known)
+
+    errors =
+      for %{agents: listed, name: skill} <- skills,
+          is_list(listed),
+          unknown = Enum.reject(listed, &MapSet.member?(names, &1)),
+          unknown != [] do
+        "skill #{skill} is opened to agents the bundle does not have and Troupe does not " <>
+          "ship: #{Enum.join(unknown, ", ")}"
+      end
+
+    if errors == [], do: :ok, else: {:error, errors}
   end
 
   defp check_size(content) do
@@ -655,12 +790,30 @@ defmodule Troupe.Protocol.Bundle do
          {:ok, manifest} <- Map.fetch(files, "SKILL.md") |> manifest_present(name),
          :ok <- manifest_name(name, manifest),
          :ok <- requires_ok(name, manifest),
-         :ok <- skill_size(name, files) do
-      {:ok, %{name: name, description: to_string(raw["description"] || ""), files: files}}
+         :ok <- skill_size(name, files),
+         {:ok, agents} <- skill_agents_ok(name, Map.get(raw, "agents")) do
+      {:ok,
+       %{
+         name: name,
+         description: to_string(raw["description"] || ""),
+         agents: agents,
+         files: files
+       }}
     end
   end
 
   defp skill(other), do: {:error, "skill #{inspect(other)} needs a name and files"}
+
+  defp skill_agents_ok(name, raw) do
+    case parse_skill_agents(raw) do
+      {:ok, agents} ->
+        {:ok, agents}
+
+      :error ->
+        {:error,
+         "skill #{name}: agents is \"all\" or a list of agent names, not #{inspect(raw)}"}
+    end
+  end
 
   defp manifest_present(:error, name), do: {:error, "skill #{name} has no SKILL.md"}
   defp manifest_present({:ok, text}, _name) when is_binary(text), do: {:ok, text}

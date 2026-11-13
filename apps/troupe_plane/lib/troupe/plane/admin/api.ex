@@ -553,7 +553,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.agents",
       function: :profile_agents,
       summary:
-        "A profile's agents, as its bundle in effect has them (composed through what it extends), for the console's builder: each with its mode, description, model, delegate (the subagents it may hand work to: its bundle's, when it holds the delegate tool), max_turns, skills, permissions, from (the profile whose channel gave it) and channel, builtin (a primary Troupe ships that the profile offers because its bundle has none of that name), its definition, offered (whether the profile's spec.agents rule, composed through what it extends, lets it exist there; a subagent it excludes is in no agent's delegate), and teams, each team granted the profile with may (whether its grant lets it run the agent). Beside them channel, the one the profile follows in effect, builtins, every agent Troupe ships with its definition, to copy from, teams, rule (spec.agents in effect: allow and deny, or null), and unmatched, the names the rule speaks of that are no agent the profile has today. A platform admin's, as editing a bundle is.",
+        "A profile's agents, as its bundle in effect has them (composed through what it extends), for the console's builder: each with its mode, description, model, delegate (the subagents it may hand work to: its bundle's, when it holds the delegate tool), max_turns, skills (its own frontmatter's), loads (the bundle's skills it may load: those its skills opens and those whose agents names it or says all, before a team's grant narrows them; empty is no skill tool), permissions, from (the profile whose channel gave it) and channel, builtin (a primary Troupe ships that the profile offers because its bundle has none of that name), its definition, offered (whether the profile's spec.agents rule, composed through what it extends, lets it exist there; a subagent it excludes is in no agent's delegate), and teams, each team granted the profile with may (whether its grant lets it run the agent). Beside them channel, the one the profile follows in effect, skills, the names of the skills its bundle in effect carries, builtins, every agent Troupe ships with its definition, to copy from, teams, rule (spec.agents in effect: allow and deny, or null), and unmatched, the names the rule speaks of that are no agent the profile has today. A platform admin's, as editing a bundle is.",
       risk: :read,
       arguments: [
         %Argument{
@@ -1234,7 +1234,8 @@ defmodule Troupe.Plane.Admin.API do
           name: "content",
           type: :object,
           required: true,
-          description: "The bundle document: agents, skills and mcp_servers."
+          description:
+            "The bundle document: agents, skills and mcp_servers. A skill may carry agents, \"all\" or a list of agent names (the bundle's or Troupe's built-ins, such as build), to open it to those agents beside the ones whose own skills: opens it; a name that is neither is refused."
         }
       ]
     },
@@ -1298,7 +1299,8 @@ defmodule Troupe.Plane.Admin.API do
           name: "content",
           type: :object,
           required: true,
-          description: "The bundle document: agents, skills and mcp_servers."
+          description:
+            "The bundle document: agents, skills and mcp_servers. A skill may carry agents, \"all\" or a list of agent names (the bundle's or Troupe's built-ins, such as build), to open it to those agents beside the ones whose own skills: opens it; a name that is neither is refused."
         }
       ]
     },
