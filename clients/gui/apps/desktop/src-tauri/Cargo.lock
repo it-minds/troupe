@@ -5050,7 +5050,7 @@ dependencies = [
 
 [[package]]
 name = "troupe-desktop"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "base64 0.23.1",
  "flate2",
