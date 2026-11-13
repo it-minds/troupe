@@ -29,6 +29,7 @@ import {
   autoPickProfile,
   ceilingSentence,
   cleanMessage,
+  defaultProfileAgent,
   fullHouseSentence,
   messageTokens,
   profileRoom,
@@ -136,7 +137,11 @@ export function StartSession({
   const profileName = tokens.profile ?? profileChip ?? auto.name;
   const prof = profiles.find((p) => p.name === profileName);
   const room = prof ? profileRoom(prof) : null;
-  const defaultAgent = local ? (localAgents.rows?.find((r) => (r.mode ?? "primary") === "primary")?.name ?? "build") : (prof?.agents.includes("build") ? "build" : (prof?.agents[0] ?? "build"));
+  // On the platform the default is one the profile offers, and the create sends it, since
+  // a pod left to choose takes its own; where the profile offers none, the create names
+  // none and the plane says why it cannot start one.
+  const platformDefault = defaultProfileAgent(prof?.agents);
+  const defaultAgent = local ? (localAgents.rows?.find((r) => (r.mode ?? "primary") === "primary")?.name ?? "build") : (platformDefault ?? "its default");
   const namedAgent = tokens.agent ?? agentChip;
   const agent = namedAgent ?? defaultAgent;
   const cleaned = cleanMessage(text, names);
@@ -239,7 +244,7 @@ export function StartSession({
     };
     if (!local && prof) {
       prefs.set(LAST_PROFILE, prof.name);
-      void castOnPlatform(auth!, prof, { agent: as, title: startedTitle, prompt: cleaned }, set, alive, (reason) => setCeilingSaid((c) => ({ ...c, [prof.name]: reason })));
+      void castOnPlatform(auth!, prof, { agent: as ?? platformDefault, title: startedTitle, prompt: cleaned }, set, alive, (reason) => setCeilingSaid((c) => ({ ...c, [prof.name]: reason })));
     } else if (daemon) {
       void castHere(daemon, { workspace: folder.trim(), agent: as, worktree, watch, privately, title: startedTitle, prompt: cleaned }, set);
     }
@@ -406,7 +411,7 @@ export function StartSession({
                     key={p.name}
                     label={p.name}
                     mono
-                    tag={r.atCeiling ? "AT ITS LIMIT" : r.full ? "FULL" : `${r.free} OF ${r.capacity} FREE`}
+                    tag={r.atCeiling ? "AT ITS LIMIT" : r.full ? "FULL" : r.idle ? "IDLE" : `${r.free} OF ${r.capacity} FREE`}
                     tone={r.full || r.atCeiling ? "queued" : "running"}
                     pressed={p.name === prof?.name}
                     detail={reach + only}

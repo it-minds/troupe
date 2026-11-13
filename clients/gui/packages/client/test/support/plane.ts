@@ -58,6 +58,12 @@ export interface PlaneOptions {
    * ceiling is refused with `capacity`, as the plane refuses it.
    */
   room?: Record<string, { capacity: number; active: number; max_sessions?: number | null }>;
+  /**
+   * The primaries each profile offers, by name, where they are not the default (`build`,
+   * `plan`, `explore`): what `profiles.list` answers as `agents` and what a create naming an
+   * agent is held to, as the plane holds it.
+   */
+  agents?: Record<string, string[]>;
   /** The teams every person signed in here is in, which `team:<name>` artifacts are for. */
   teams?: string[];
   /**
@@ -575,6 +581,10 @@ export class FakePlane {
     if (!row || row.state !== "pending") return;
     row.state = "active";
     this.opts.worker.createSession(id, { profile: row.profile });
+  }
+
+  private agentsOf(profile: string): string[] {
+    return this.opts.agents?.[profile] ?? ["build", "plan", "explore"];
   }
 
   private roomOf(profile: string): { capacity: number; active: number; max_sessions?: number | null } {
@@ -1138,7 +1148,7 @@ export class FakePlane {
               channel: "stable",
               bundle_version: "3",
               bundle_hash: "sha256:abc",
-              agents: ["build", "plan", "explore"],
+              agents: this.agentsOf(p),
               skills: [{ name: "review", description: "read a diff and comment" }],
               mcp_servers: ["github"],
             })),
@@ -1184,8 +1194,8 @@ export class FakePlane {
         const profile = String(params["profile"] ?? "");
         if (!profiles.includes(profile)) return { error: { code: -32002, message: "invalid_params", data: { profiles } } };
         const agent = params["agent"] === undefined ? undefined : String(params["agent"]);
-        if (agent && !["build", "plan", "explore"].includes(agent)) {
-          return { error: { code: -32602, message: "invalid_params", data: { agents: ["build", "plan", "explore"] } } };
+        if (agent && !this.agentsOf(profile).includes(agent)) {
+          return { error: { code: -32602, message: "invalid_params", data: { field: "agent", agent, agents: this.agentsOf(profile) } } };
         }
         const title = params["title"] === undefined ? undefined : String(params["title"]);
         const room = this.opts.room?.[profile];

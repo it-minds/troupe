@@ -89,6 +89,8 @@ export interface ProfileRoom {
   capacity: number;
   /** No room now, and below the ceiling: a create waits for the next place. */
   full: boolean;
+  /** No pod at all and nothing running: scaled to zero, so a create starts a pod. Not full. */
+  idle: boolean;
   /** At the administrator's ceiling: a create is refused. */
   atCeiling: boolean;
   maxSessions: number | null;
@@ -106,7 +108,18 @@ export function profileRoom(row: ProfileRoomRow): ProfileRoom {
   const maxSessions = typeof row.max_sessions === "number" ? row.max_sessions : null;
   const free = Math.max(0, row.capacity - row.active_sessions);
   const atCeiling = maxSessions !== null && row.active_sessions >= maxSessions;
-  return { free, capacity: row.capacity, full: !atCeiling && free <= 0, atCeiling, maxSessions };
+  const idle = !atCeiling && row.capacity <= 0 && row.active_sessions <= 0;
+  return { free, capacity: row.capacity, full: !atCeiling && !idle && free <= 0, idle, atCeiling, maxSessions };
+}
+
+/**
+ * The agent a session on a profile starts as when none is named: `build` where the profile
+ * offers it, else the first it offers, the plane's own rule. `null` where `profiles.list`
+ * offers none: the create then names none, and the plane chooses or says why it cannot.
+ */
+export function defaultProfileAgent(agents: readonly string[] | null | undefined): string | null {
+  const offered = agents ?? [];
+  return offered.includes("build") ? "build" : (offered[0] ?? null);
 }
 
 /** Which profile is picked when nobody picked one, and the sentence that says why. */
@@ -123,7 +136,11 @@ export interface AutoPick {
  */
 export function autoPickProfile(rows: readonly ProfileRoomRow[], lastUsed: string | null): AutoPick {
   const last = lastUsed ? rows.find((r) => r.name === lastUsed) : undefined;
-  const roomy = (r: ProfileRoomRow): boolean => profileRoom(r).free > 0 && !profileRoom(r).atCeiling;
+  // A profile scaled to zero has room: a create there starts a pod rather than waiting.
+  const roomy = (r: ProfileRoomRow): boolean => {
+    const room = profileRoom(r);
+    return (room.free > 0 || room.idle) && !room.atCeiling;
+  };
   if (last && roomy(last)) return { name: last.name, rule: "last", why: `Picked ${last.name} because you used it last.` };
   const any = rows.find(roomy);
   if (any && last) return { name: any.name, rule: "instead", why: `Picked ${any.name}: ${last.name} is full right now.` };
