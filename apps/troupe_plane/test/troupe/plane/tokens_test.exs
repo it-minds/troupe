@@ -125,6 +125,26 @@ defmodule Troupe.Plane.TokensTest do
       assert {:error, :bad_signature} = Token.verify(jwt, jwks, audience: "worker-dev-0")
     end
 
+    # The same r and s, each widened by a leading zero byte: 66 bytes that name the same
+    # two integers. A verifier that splits the signature in half and reads each half as a
+    # number accepts it, so one token has many valid signatures; only the fixed-width
+    # 64 bytes of ES256 verify.
+    test "an ES256 signature that is not exactly r || s is rejected" do
+      {:ok, jwt, _} = Tokens.mint(claims(), audience: "worker-dev-0")
+      {:ok, jwks} = Tokens.jwks()
+
+      [header, payload, signature] = String.split(jwt, ".")
+      <<r::binary-size(32), s::binary-size(32)>> = Base.url_decode64!(signature, padding: false)
+      widened = Base.url_encode64(<<0, r::binary, 0, s::binary>>, padding: false)
+
+      assert {:error, :bad_signature} =
+               Token.verify(Enum.join([header, payload, widened], "."), jwks,
+                 audience: "worker-dev-0"
+               )
+
+      assert {:ok, _} = Token.verify(jwt, jwks, audience: "worker-dev-0")
+    end
+
     test "an audience must be given: a verifier that does not care is refused" do
       {:ok, jwt, _} = Tokens.mint(claims(), audience: "worker-dev-0")
       {:ok, jwks} = Tokens.jwks()

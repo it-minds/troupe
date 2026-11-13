@@ -68,6 +68,27 @@ defmodule Troupe.Plane.BodyLimitTest do
     assert response.status == 413
   end
 
+  # Over HTTP/2 the server may join DATA frames and hand back more than the length a read
+  # asked for, so the limit is held by what the parser does with the overshoot, not by
+  # the read stopping at it.
+  test "a body sent with no length over HTTP/2 is read only as far as the limit", context do
+    over = json_of(@limit + 1)
+    chunks = for <<chunk::binary-size(16_384) <- over>>, do: chunk
+    rest = binary_part(over, length(chunks) * 16_384, byte_size(over) - length(chunks) * 16_384)
+
+    assert %{status: 413} = h2_post(context, [], chunks ++ [rest])
+  end
+
+  # The refusal asks an HTTP/1 client to close the connection. HTTP/2 has no such header,
+  # and a response carrying one is malformed: the server drops it rather than have the
+  # client reset the stream, so the 413 arrives as an answer and not as an error.
+  test "a body declared larger than the limit over HTTP/2 is answered 413", context do
+    answer = h2_post(context, [{"content-length", "#{@limit + 1}"}], :head_only)
+
+    assert answer.status == 413
+    refute List.keymember?(answer.headers, "connection", 0)
+  end
+
   test "a body at the limit is read and answered as the route answers it", context do
     under = json_of(@limit - 1024)
 
@@ -103,6 +124,67 @@ defmodule Troupe.Plane.BodyLimitTest do
   defp json_of(bytes) do
     padding = bytes - byte_size(~s({"pad":""}))
     ~s({"pad":") <> String.duplicate("a", padding) <> ~s("})
+  end
+
+  # A POST to `/rpc` over HTTP/2 without TLS (the plane answers the connection preface on
+  # its plain port): the head with `headers`, then `chunks` as far as the flow-control
+  # windows let them go, or no body at all for `:head_only`. The answer's status and
+  # headers, as soon as they arrive; what is left of the body is not sent after them.
+  defp h2_post(context, headers, chunks) do
+    %URI{port: port} = URI.parse(context.url)
+    {:ok, conn} = Mint.HTTP2.connect(:http, "127.0.0.1", port, mode: :passive)
+    head = [{"content-type", "application/json"} | headers]
+    {:ok, conn, ref} = Mint.HTTP2.request(conn, "POST", "/rpc", head, :stream)
+    h2_exchange(conn, ref, chunks, %{})
+  end
+
+  defp h2_exchange(conn, _ref, _chunks, %{status: _, headers: _} = answer) do
+    Mint.HTTP2.close(conn)
+    answer
+  end
+
+  defp h2_exchange(conn, ref, :head_only, answer), do: h2_receive(conn, ref, :head_only, answer)
+
+  defp h2_exchange(conn, ref, [], answer) do
+    case Mint.HTTP2.stream_request_body(conn, ref, :eof) do
+      {:ok, conn} -> h2_receive(conn, ref, :head_only, answer)
+      {:error, conn, _reason} -> h2_receive(conn, ref, :head_only, answer)
+    end
+  end
+
+  defp h2_exchange(conn, ref, [chunk | rest] = chunks, answer) do
+    window =
+      min(
+        Mint.HTTP2.get_window_size(conn, :connection),
+        Mint.HTTP2.get_window_size(conn, {:request, ref})
+      )
+
+    if window >= byte_size(chunk) do
+      case Mint.HTTP2.stream_request_body(conn, ref, chunk) do
+        {:ok, conn} -> h2_exchange(conn, ref, rest, answer)
+        {:error, conn, _reason} -> h2_receive(conn, ref, :head_only, answer)
+      end
+    else
+      h2_receive(conn, ref, chunks, answer)
+    end
+  end
+
+  defp h2_receive(conn, ref, chunks, answer) do
+    {conn, responses} =
+      case Mint.HTTP2.recv(conn, 0, 10_000) do
+        {:ok, conn, responses} -> {conn, responses}
+        {:error, conn, _reason, responses} when responses != [] -> {conn, responses}
+        {:error, _conn, reason, []} -> flunk("no answer over HTTP/2: #{inspect(reason)}")
+      end
+
+    answer =
+      Enum.reduce(responses, answer, fn
+        {:status, ^ref, status}, acc -> Map.put(acc, :status, status)
+        {:headers, ^ref, headers}, acc -> Map.put_new(acc, :headers, headers)
+        _other, acc -> acc
+      end)
+
+    h2_exchange(conn, ref, chunks, answer)
   end
 
   defp post(context, path, type, body) do

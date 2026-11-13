@@ -12,7 +12,9 @@ enforced, this says so.
 machine. The clients have their own gates: `mix check` in `clients/tui` (with
 `troupe.xref`), and `pnpm typecheck`, `test`, `tokens:check`, `icons:check` in
 `clients/gui`. A package both the TUI and the umbrella lock must be the same version in
-both lock files; `elixir scripts/locks-agree.exs` checks it.
+both lock files; `elixir scripts/locks-agree.exs` checks it. Neither lock may hold a package
+with a security advisory: `mix hex.audit`, at the root and in `clients/tui`, fails the pull
+request in `licences.yml` and in `scripts/ci`, since Dependabot does not read Hex.
 
 **The formatter's blind spot.** The root `.formatter.exs` lists
 `{config,lib,test}/**/*.{ex,exs}` relative to the root, and no app has its own, so
