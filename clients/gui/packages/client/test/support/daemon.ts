@@ -928,6 +928,12 @@ evoked where nothing is set and there was a sign-in. */
       create_agents_md: own.filter((i) => i.question === "create_agents_md").length,
     };
     const n = own.length;
+    // By kind, as the harness's notice counts the workspace's proposals.
+    const proposals: Record<string, number> = {};
+    for (const i of own) {
+      const kind = i.target === "workspace" ? "instructions" : (["rules", "agents", "commands", "skills", "workflows"].find((k) => i.path.startsWith(`${k}/`)) ?? (i.path === "mcp.json" ? "mcp" : "other"));
+      proposals[kind] = (proposals[kind] ?? 0) + 1;
+    }
     const sentences = [
       ...(due === "first"
         ? [`Other tools' files are here: \`troupe onboard\` would bring in ${n === 1 ? "1 file" : `${n} files`} as Troupe's own files. Run it in this workspace to see each as a diff and choose; nothing is written until you do.`]
@@ -945,6 +951,7 @@ evoked where nothing is set and there was a sign-in. */
       due,
       brief_due: briefDue,
       counts,
+      ...(due === "first" ? { proposals } : {}),
       message: sentences.join(" ") || "Other tools' files are here.",
       command: "troupe onboard",
       onboarding_version: o.version,

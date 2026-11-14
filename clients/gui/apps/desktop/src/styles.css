@@ -1190,7 +1190,9 @@ main {
   align-items: stretch;
   overflow: auto;
 }
+/* `--transcript-min`: the room the transcript keeps above the panels (`.stream`). */
 .conversation {
+  --transcript-min: min(9rem, 22vh);
   flex: 3 1 420px;
   min-width: 0;
   display: flex;
@@ -1206,14 +1208,22 @@ main {
     flex-wrap: nowrap;
     overflow: hidden;
   }
+  /* A window too short for the transcript's minimum, a panel's header and answers and
+     the composer together scrolls the column rather than clip it: the panel, sticky at
+     the column's bottom, keeps its answers on the screen, and the composer is under it. */
   .conversation {
     min-height: 0;
+    overflow-y: auto;
   }
 }
 
+/* The transcript keeps room for the last lines and the waiting line under them whatever
+   the panels below it ask, so an approval never hides what it answers: the panels give
+   way first, their bodies scrolling. On a very short window the minimum gives a little
+   too, so a panel's answers and the composer still fit. */
 .stream {
   flex: 1;
-  min-height: 0;
+  min-height: var(--transcript-min);
   overflow: auto;
   padding: var(--space-6);
   display: flex;
@@ -1871,19 +1881,29 @@ details.advanced > summary {
 .backstage section {
   min-width: 0;
 }
-/* A table in the pane wraps its cells, the long values most of all, so it fits the pane
-   and the pane never scrolls sideways; what still does not fit scrolls inside the table's
-   own frame. */
+/* A table in the pane wraps its cells so it fits the pane and the pane never scrolls
+   sideways; what still does not fit scrolls inside the table's own frame. Words wrap
+   between words: only a cell's one long token (a key, a path, a URL, a version, set in
+   code, in mono or marked `.token`) may break inside itself. */
 .backstage .table-scroll {
   max-width: 100%;
 }
+/* A narrower gutter than a page's table: four columns of whole words fit the pane. */
 .backstage .table th,
 .backstage .table td {
   white-space: normal;
+  padding-inline: var(--space-2);
 }
 .backstage .table td {
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
   min-width: 8ch;
+}
+.backstage .table td code,
+.backstage .table td .mono,
+.backstage .table td.mono,
+.backstage .table td.token {
+  overflow-wrap: anywhere;
 }
 
 /* The running order: done is struck through, the one in progress is lit along its
@@ -1964,19 +1984,51 @@ details.advanced > summary {
 /* The loudest thing on the screen, and the only reserved colour. Sticky at the bottom
    of the conversation so scrolling up to read the context never loses the decision.
    On the riser, edged in pink with a heavy top, standing in the footlight. No modal,
-   no dimming, no countdown. */
+   no dimming, no countdown.
+   Its header and its answers always show: what it is about is `.panel-body`, which
+   scrolls when the panel is held shorter than it would be. In the wide layout the
+   panel gives way to the transcript's minimum and to the composer, shrinking as a flex
+   item, but never below its header, its answers and a line or two of its body, a floor
+   the session screen measures (`useHeldPanels`); past that the column scrolls instead.
+   In the narrow layout, where the page scrolls, it is held under most of the window. */
 .approval {
   position: sticky;
   bottom: var(--space-3);
   z-index: 10;
+  flex: 0 1 auto;
+  min-height: 0;
   margin: 0 var(--space-6) var(--space-3);
   max-height: 72vh;
-  overflow-y: auto;
   background: var(--bg-raised);
   border: var(--bw-hairline) solid var(--waiting-solid);
   border-top: var(--bw-heavy) solid var(--waiting-solid);
   box-shadow: var(--sh-footlight);
   padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+/* Said again for the conversation's column, where the onboarding panel also carries the
+   start screen's `.start`, whose `flex: 1` would have it grow like the transcript. */
+.conversation > .approval {
+  flex: 0 1 auto;
+}
+@media (min-width: 720px) {
+  .conversation > .approval {
+    max-height: calc(100% - var(--transcript-min) - var(--space-3));
+  }
+}
+.approval > header,
+.approval > .answers,
+.approval > .also {
+  flex-shrink: 0;
+}
+/* Never squeezed past a line or two of what it is about, so there is always something
+   to read and a scroll to read the rest by. */
+.approval > .panel-body {
+  flex: 0 1 auto;
+  min-height: 3rem;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
