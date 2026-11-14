@@ -130,8 +130,17 @@ describe("artifacts", () => {
   it("says how to publish one where a tab has none, and that an administrator switched them off where one did", async () => {
     await open("#/artifacts", PEOPLE.bob);
     await sees("You have published nothing yet");
+    // Every way to publish, the desktop app's among them, where a person's own are listed.
+    await sees("the desktop app's Publish…");
     await sees("publish_artifact");
     await sees("/publish <file>");
+
+    // An empty Shared with you says what a link is and how one arrives, not how to publish.
+    (await seesLink("Shared with you", document.querySelector('nav[aria-label="Whose artifacts"]')!)).click();
+    await sees("Nothing is shared with you yet");
+    await sees("Somebody shares an artifact with you by sending its link; once you have opened it, it shows here.");
+    expect(document.body.textContent).not.toContain("publish_artifact");
+    expect(document.body.textContent).not.toContain("Nobody has given you a link");
     unmount!();
     unmount = null;
     await fake.stop();
@@ -155,7 +164,9 @@ describe("artifacts", () => {
     await sees("published by Carol (carol@example.com)", versions);
     await sees("Carol's weekly");
     await sees("the whole organisation");
-    await sees("From a worker on the plane by agent:build on the dev profile.");
+    // The agent as the apps name one, never the plane's `agent:` key.
+    await sees("From a worker on the plane on the dev profile, by build, an agent.");
+    expect(document.body.textContent).not.toContain("agent:build");
     expect(document.querySelector("iframe")).toBeNull();
     expect(document.body.innerHTML).not.toContain("Week forty-three in full");
 

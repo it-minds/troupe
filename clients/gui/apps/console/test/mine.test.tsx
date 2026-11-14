@@ -70,6 +70,52 @@ describe("Mine", () => {
     expect(methods.filter((m) => m.startsWith("admin.") && m !== "admin.teams.list")).toEqual([]);
   });
 
+  it("says where each of a member's sessions opens, and that only their own memory is theirs to change", async () => {
+    await fake.stop();
+    fake = await startFake(exampleAdmin(), {
+      memory: [{ scope: "organisation", name: null, version: 3, hash: "sha256:a", updated_at: "2026-10-22T10:00:00Z", text: "We write British English." }],
+      own: { [PEOPLE.carol.subject]: "I write British English." },
+    });
+    fake.plane.seed(PEOPLE.carol.subject, { id: "s-carol-1", title: "Tidy the icons", profile: "ux" });
+    await signedInAs(fake, PEOPLE.carol);
+    visit("#/mine");
+    unmount = render(<App />).unmount;
+
+    const sessions = () => document.querySelector<HTMLElement>('[aria-label="Your sessions"]');
+    const row = () => [...(sessions()?.querySelectorAll("tbody tr") ?? [])].find((r) => r.textContent?.includes("Tidy the icons")) ?? null;
+    await waitFor(() => row(), "carol's session");
+    await sees("Open it in the desktop app or the terminal.", row);
+    // A member has no Sessions page, so nothing links there.
+    // at once: the row was waited for above, and drawn whole
+    expect(row()!.querySelector("a")).toBeNull();
+
+    const memory = () => document.querySelector<HTMLElement>('[aria-label="Your memory"]');
+    await sees("Your organisation's and your teams' are read-only here", memory);
+    const own = () => document.querySelector<HTMLElement>('article[aria-label="Your own memory"]');
+    await sees("Yours to change.", own);
+    await seesButton("Change your memory", own()!);
+    // "Read-only" is said of the levels they cannot change, never of their own.
+    expect(own()!.textContent).not.toContain("Read-only");
+  });
+
+  it("links a team admin's session to Sessions, where their role may see it", async () => {
+    // s-4b81d003 is one of the design team's sessions, which bob administers.
+    fake.plane.seed(PEOPLE.bob.subject, { id: "s-4b81d003", title: "Icons, again", profile: "ux" });
+    fake.plane.seed(PEOPLE.bob.subject, { id: "s-bob-elsewhere", title: "Not on Sessions", profile: "ux" });
+    await signedInAs(fake, PEOPLE.bob);
+    visit("#/mine");
+    unmount = render(<App />).unmount;
+
+    const sessions = () => document.querySelector<HTMLElement>('[aria-label="Your sessions"]');
+    const row = (title: string) => [...(sessions()?.querySelectorAll("tbody tr") ?? [])].find((r) => r.textContent?.includes(title)) ?? null;
+    await waitFor(() => row("Icons, again")?.querySelector("a"), "the link to Sessions");
+    expect([...row("Icons, again")!.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#/sessions/s-4b81d003", "#/sessions/s-4b81d003"]);
+    await sees("Open it in the desktop app or the terminal.", () => row("Icons, again"));
+    // at once: drawn in the same answer as the row waited for above
+    expect(row("Not on Sessions")!.querySelector("a")).toBeNull();
+    await sees("Open it in the desktop app or the terminal.", () => row("Not on Sessions"));
+  });
+
   it("lets a person change their own memory, previewed line by line and saved over the version they edited", async () => {
     await fake.stop();
     fake = await startFake(exampleAdmin(), { own: { [PEOPLE.carol.subject]: "I write British English." } });

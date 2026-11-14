@@ -149,10 +149,13 @@ function Gallery({ tab, list }: { tab: ArtifactTab; list: ArtifactList }): JSX.E
         ))}
       </nav>
       {list.artifacts.length === 0 ? (
-        <Empty title={tab.kind === "mine" ? "You have published nothing yet" : tab.kind === "shared" ? "Nobody has given you a link yet" : tab.kind === "teams" ? "Nothing published for a team of yours yet" : "Nothing published here yet"}>
-          <p>
-            An agent publishes a page or a file with its <code>publish_artifact</code> tool, and you can from the terminal client with <code>{"/publish <file>"}</code>.
-          </p>
+        <Empty title={tab.kind === "mine" ? "You have published nothing yet" : tab.kind === "shared" ? "Nothing is shared with you yet" : tab.kind === "teams" ? "Nothing published for a team of yours yet" : "Nothing published here yet"}>
+          {tab.kind === "mine" && (
+            <p>
+              You publish a page or a file with the desktop app's Publish…, the terminal's <code>{"/publish <file>"}</code>, or an agent of yours with its <code>publish_artifact</code> tool.
+            </p>
+          )}
+          {tab.kind === "shared" && <p>A link opens one artifact to whoever has it. Somebody shares an artifact with you by sending its link; once you have opened it, it shows here.</p>}
           {tab.kind === "organisation" && list.publish_organisation === "platform_admins" && <p>Only a platform admin may publish to the whole organisation here.</p>}
         </Empty>
       ) : (
@@ -543,7 +546,9 @@ const WHERE: Record<string, string> = { pod: "a worker on the plane", laptop: "a
 function Origin({ artifact: a }: { artifact: ArtifactDetail }): JSX.Element {
   const { role } = useConsole();
   const o = a.origin ?? {};
-  const words = [o.where ? `From ${WHERE[o.where] ?? o.where}` : null, o.agent ? `by ${o.agent}` : null, o.profile ? `on the ${o.profile} profile` : null].filter(Boolean).join(" ");
+  // An agent is named as the apps name one, without the plane's `agent:` prefix.
+  const agent = o.agent ? o.agent.replace(/^agent:/, "") : null;
+  const words = [o.where ? `From ${WHERE[o.where] ?? o.where}` : null, o.profile ? `on the ${o.profile} profile` : null].filter(Boolean).join(" ") + (agent ? `${o.where || o.profile ? ", by" : "By"} ${agent}, an agent` : "");
   const session = o.session_id ?? null;
   return (
     <div className="artifact-origin">

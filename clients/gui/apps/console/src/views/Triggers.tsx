@@ -907,8 +907,16 @@ function TriggerForm({
           : null
       : null;
   const queryProblem = f.kind === "github" && /(^|\s)-?(repo|org|user|is|type|state|archived):/i.test(f.query) ? "The plane adds the repository and is:issue is:open itself." : null;
-  const githubMissing = f.kind === "github" && (!f.repository.trim() || (!f.label.trim() && !f.command.trim() && !f.sweep.trim()));
-  const missing = githubMissing || (creating && (!name || !f.principal || !f.profile || (f.kind === "schedule" && !f.cron.trim())));
+  // What the form still needs before it can be previewed, in the order the fields are, as a person would ask for them.
+  const wanted = [
+    creating && !name ? "a name" : null,
+    creating && !f.principal ? "a principal to run as" : null,
+    creating && !f.profile ? "a profile" : null,
+    f.kind === "github" && !f.repository.trim() ? "a repository" : null,
+    f.kind === "github" && !f.label.trim() && !f.command.trim() && !f.sweep.trim() ? "a label, a command or a sweep" : null,
+    creating && f.kind === "schedule" && !f.cron.trim() ? "a schedule" : null,
+  ].filter((w): w is string => w !== null);
+  const missing = wanted.length > 0;
   const set = (patch: Partial<TriggerFields>) => setF({ ...f, ...patch });
 
   if (previewing) {
@@ -958,7 +966,18 @@ function TriggerForm({
           </select>
         )}
       </Field>
-      <Field label="Profile" hint={`What its sessions start on: one ${team.name} is granted.`}>
+      <Field
+        label="Profile"
+        hint={
+          profiles.length ? (
+            `What its sessions start on: one ${team.name} is granted.`
+          ) : (
+            <>
+              No profile is granted to {team.name} yet: grant one under <a href={href({ page: "teams", team: team.name, tab: "access" })}>Access</a>.
+            </>
+          )
+        }
+      >
         {(p) => (
           <select {...p} value={f.profile} onChange={(e) => set({ profile: e.target.value })}>
             <option value="">choose a profile</option>
@@ -1051,6 +1070,7 @@ function TriggerForm({
         <button type="button" onClick={onCancel}>
           Cancel
         </button>
+        {missing && <span className="hint">Needs {inWords(wanted)}.</span>}
       </div>
     </form>
   );
@@ -1074,3 +1094,8 @@ function triggerWords(team: string, name: string, creating: boolean, changes: Re
   return out;
 }
 
+
+/** A list as a sentence says it: `a`, `a and b`, `a, b and c`. */
+function inWords(items: string[]): string {
+  return items.length < 2 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
