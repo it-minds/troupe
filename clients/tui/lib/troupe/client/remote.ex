@@ -222,7 +222,8 @@ defmodule Troupe.Client.Remote do
   # A pod's agents are its profile's bundle (root Decision 841): the worker reads and checks
   # them, and says so in the same words it refuses a write with, which are never sent.
   @pod_agents "On a pod the agents come from the profile's bundle and are read-only here: " <>
-                "change them in the console"
+                "an administrator changes them on the console's " <>
+                "Configure → Configuration bundles; ask one if you are not"
 
   @impl true
   # Named by the session and no path, which is what a session's token may read: its own

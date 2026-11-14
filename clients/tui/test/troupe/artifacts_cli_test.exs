@@ -204,6 +204,22 @@ defmodule Troupe.ArtifactsCLITest do
     assert said =~ "only its owner makes links to it"
   end
 
+  # The plane says when an administrator has switched artifacts off; the list says that,
+  # as the desktop app does, rather than that nothing is published yet (#894).
+  test "list says artifacts are off where the plane says so" do
+    {remote, url} = start_remote!(transport: :http, artifacts: [], artifacts_enabled: false)
+    login!(remote, url)
+    reattach()
+    eventually(fn -> match?({:ok, %{"linked" => true}}, Link.call("identity.get", %{})) end)
+
+    {0, said} = run(%{verb: :list})
+    assert said == "An administrator has switched artifacts off on this plane."
+    refute said =~ "nothing published"
+
+    {0, said} = run(%{verb: :list, json: true})
+    assert Jason.decode!(said) == []
+  end
+
   test "under Local only it is refused before anything is asked" do
     Application.put_env(:troupe, :local_only, true)
     on_exit(fn -> Application.delete_env(:troupe, :local_only) end)

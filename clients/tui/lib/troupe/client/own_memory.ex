@@ -92,7 +92,8 @@ defmodule Troupe.Client.OwnMemory do
   works it out (`memory.in_effect`): per topic the closest level's entry, `from` that level,
   with the lower levels' entries it `replaces`.
   """
-  @spec in_effect([map()], String.t() | nil) :: {:ok, [map()]} | {:error, String.t()}
+  @spec in_effect([map()], String.t() | nil) ::
+          {:ok, [map()]} | {:error, String.t() | :older_plane}
   def in_effect(levels, team) do
     params =
       case Enum.find(levels, &(&1.id == team)) do
@@ -101,11 +102,27 @@ defmodule Troupe.Client.OwnMemory do
       end
 
     case Link.call("memory.in_effect", params) do
-      {:ok, %{"entries" => entries}} -> {:ok, effect_rows(entries, levels)}
-      {:ok, _answer} -> {:ok, []}
-      {:error, reason} -> {:error, Artifacts.reason(reason)}
+      {:ok, %{"entries" => entries}} ->
+        {:ok, effect_rows(entries, levels)}
+
+      {:ok, _answer} ->
+        {:ok, []}
+
+      {:error, reason} ->
+        if older?(reason), do: {:error, :older_plane}, else: {:error, Artifacts.reason(reason)}
     end
   end
+
+  # A plane from before memory was entries (0.29) has no `memory.in_effect`: the daemon says
+  # so in its sentence for a method the plane does not know, and an older daemon passes the
+  # plane's own code on.
+  defp older?(%{code: -32_601}), do: true
+  defp older?(%{"code" => -32_601}), do: true
+
+  defp older?(reason) when is_binary(reason),
+    do: reason =~ "has no memory.in_effect" or reason =~ ~r/method[_ ]not[_ ]found/i
+
+  defp older?(_reason), do: false
 
   @doc "In-effect entries as an answer carries them, as rows of the page: `entry`, `from`, `replaces`."
   @spec effect_rows([map()], [map()]) :: [map()]

@@ -759,8 +759,9 @@ defmodule Troupe.Client do
   @spec memory_levels([map()]) :: [map()]
   defdelegate memory_levels(documents), to: OwnMemory, as: :levels
 
-  @doc "What a new session in a team starts knowing, as the plane works it out: the closest entry per topic and what it replaces."
-  @spec memory_in_effect([map()], String.t() | nil) :: {:ok, [map()]} | {:error, String.t()}
+  @doc "What a new session in a team starts knowing, as the plane works it out: the closest entry per topic and what it replaces; `:older_plane` from a plane before 0.29, which has no entries."
+  @spec memory_in_effect([map()], String.t() | nil) ::
+          {:ok, [map()]} | {:error, String.t() | :older_plane}
   defdelegate memory_in_effect(levels, team), to: OwnMemory, as: :in_effect
 
   @doc "In-effect entries as an answer carries them (the copy's, under Local only), as the page's rows."

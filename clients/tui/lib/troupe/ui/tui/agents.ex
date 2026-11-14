@@ -349,7 +349,8 @@ defmodule Troupe.UI.TUI.Agents do
     do:
       {:refused,
        get_in(page.details, [name, "editable_reason"]) ||
-         "#{name} is the profile's bundle's: change it in the console"}
+         "#{name} is the profile's bundle's: an administrator changes it on the console's " <>
+           "Configure → Configuration bundles; ask one if you are not"}
 
   defp not_bundle(_page, _row), do: :ok
 
