@@ -37,8 +37,8 @@ export {
 export type { AutoPick, MessageTokens, NewSessionWhere, ProfileRoom, ProfileRoomRow, TokenNames } from "./newSession.js";
 export { SessionView, createLocalSession, turnCompleted } from "./session.js";
 export type { SessionViewHooks, TurnResult } from "./session.js";
-export { AuthSession, PlaneUnreachableError, memoryTokenStore, webTokenStore, currentOrigin } from "./auth.js";
-export type { AuthSessionOptions, SignInProgress, TokenStore } from "./auth.js";
+export { AuthSession, PlaneUnreachableError, memoryReachedMarks, memoryTokenStore, webReachedMarks, webTokenStore, currentOrigin } from "./auth.js";
+export type { AuthSessionOptions, ReachedMarks, SignInProgress, TokenStore, UnreachableContext } from "./auth.js";
 export { beginRedirect, completeRedirect, hasRedirectAnswer, scrubRedirect, idpMetadata, pkcePair } from "./pkce.js";
 export type { BeginRedirectOptions, IdpMetadata, PkcePair, PendingRedirect, RedirectResult } from "./pkce.js";
 export { SessionAttachment, waitOn } from "./attach.js";
@@ -364,6 +364,7 @@ export {
   describeOverride,
   discoveryParams,
   formFromConfig,
+  inReadersWords,
   keySource,
   modelConfigError,
   providerTypes,

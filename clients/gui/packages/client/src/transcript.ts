@@ -825,7 +825,7 @@ function systemText(d: DurableEvent): string {
     case "session_dormant":
       return "session went dormant";
     case "session_activated":
-      return `session activated on ${str(d.data["pod"], "a pod")}`;
+      return "session woke on the platform";
     case "session_resumed":
       return d.data["moved"] ? "session resumed on another device" : "session resumed";
     case "fs_changed":

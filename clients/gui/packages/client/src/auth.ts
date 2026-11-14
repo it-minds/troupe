@@ -82,28 +82,89 @@ export interface SignInProgress {
 }
 
 /**
- * A browser refusing a cross-origin request tells the *page* almost nothing: `fetch`
- * rejects with a bare TypeError and the reason is in the console, not in the exception.
- * The plane's allowlist is the overwhelmingly likely cause, so say so, and say exactly
- * which origin has to be added rather than making somebody guess.
+ * Which planes this origin has had an answer from, ever. A page that has been answered
+ * once is not being refused by the plane's allowlist, so the allowlist is not named to it
+ * again. The default keeps the marks in `localStorage`; a store that cannot be read is a
+ * plane never reached, which only means the allowlist may be named when it need not be.
+ */
+export interface ReachedMarks {
+  has(planeUrl: string): boolean;
+  mark(planeUrl: string): void;
+}
+
+export function webReachedMarks(prefix = "troupe.reached."): ReachedMarks {
+  // Outside a browser there is no origin to be refused, and nothing to keep the marks in.
+  const storage = (): Storage | null => (currentOrigin() ? (globalThis.localStorage ?? null) : null);
+  return {
+    has(planeUrl) {
+      try {
+        return storage()?.getItem(prefix + planeUrl) === "1";
+      } catch {
+        return false; // private mode, or storage disabled
+      }
+    },
+    mark(planeUrl) {
+      try {
+        storage()?.setItem(prefix + planeUrl, "1");
+      } catch {
+        /* the allowlist may be named once more than it needs to be */
+      }
+    },
+  };
+}
+
+export function memoryReachedMarks(): ReachedMarks {
+  const held = new Set<string>();
+  return { has: (u) => held.has(u), mark: (u) => void held.add(u) };
+}
+
+/** What a caller knows about a plane that has stopped answering. */
+export interface UnreachableContext {
+  /** This session had an answer from the plane before this call failed. */
+  reached?: boolean;
+  /** This origin has had an answer from this plane at some time, in any session. */
+  reachedBefore?: boolean;
+}
+
+/**
+ * The plane did not answer: `fetch` failed before there was a response. A browser tells
+ * the page nothing about why — a plane that is down, an address mistyped and a
+ * cross-origin request the plane's allowlist refused all look the same from here — so
+ * the sentence says what is known and what a person can do. The allowlist is named only
+ * where it can be the reason: the page is on another origin than the plane, and has never
+ * had an answer from it.
  */
 export class PlaneUnreachableError extends Error {
   readonly planeUrl: string;
   readonly origin: string | null;
+  /** This session had reached the plane before; it stopped answering since. */
+  readonly reached: boolean;
 
-  constructor(planeUrl: string, origin: string | null, cause: unknown) {
-    // A browser tells the page nothing about why a cross-origin request failed — the
-    // reason is in a console it cannot read — so this cannot assert which of the two it
-    // was. It names both, and names the origin, because the allowlist is the one a
-    // person can do something about and guessing it wrong costs an afternoon.
-    const where = origin
-      ? `Either the plane is not reachable, or it does not allow this origin: a plane only answers a browser from an origin in its allowlist, and this build is served from ${origin}. Add ${origin} to TROUPE_CORS_ORIGINS on the plane and restart it.`
-      : "This is not a browser, so it is not the origin allowlist; check the URL and that the plane is reachable.";
-    super(`could not reach the plane at ${planeUrl}. ${where}`);
+  constructor(planeUrl: string, origin: string | null, cause: unknown, context: UnreachableContext = {}) {
+    const reached = context.reached === true;
+    super(`The plane at ${planeUrl} did not answer. ${PlaneUnreachableError.next(planeUrl, origin, reached, context.reachedBefore === true)}`);
     this.name = "PlaneUnreachableError";
     this.planeUrl = planeUrl;
     this.origin = origin;
+    this.reached = reached;
     this.cause = cause;
+  }
+
+  private static next(planeUrl: string, origin: string | null, reached: boolean, reachedBefore: boolean): string {
+    if (reached) return "It answered a moment ago; try again in a moment, and ask your administrator if it stays silent.";
+    const check = "Check the address and try again.";
+    if (origin && !reachedBefore && origin !== originOf(planeUrl)) {
+      return `${check} If the address is right, the plane may not allow pages served from ${origin}: an administrator adds ${origin} to TROUPE_CORS_ORIGINS on the plane.`;
+    }
+    return `${check} If the address is right, the plane may be down: ask your administrator.`;
+  }
+}
+
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
   }
 }
 
@@ -158,20 +219,6 @@ function providerSaid(e: PlaneHttpError): string {
   return `HTTP ${e.status}${e.body ? `: ${e.body.slice(0, 200)}` : ""}`;
 }
 
-/**
- * A `fetch` that fails before producing a response — the shape of a blocked
- * cross-origin request — is reported as one. An HTTP error is the plane answering, so
- * it is passed through untouched.
- */
-async function reachable<T>(planeUrl: string, origin: string | null, f: () => Promise<T>): Promise<T> {
-  try {
-    return await f();
-  } catch (e) {
-    if (e instanceof PlaneHttpError) throw e;
-    if (e instanceof TypeError) throw new PlaneUnreachableError(planeUrl, origin, e);
-    throw e;
-  }
-}
 
 export interface AuthSessionOptions {
   planeUrl: string;
@@ -186,6 +233,8 @@ export interface AuthSessionOptions {
    * saying nothing.
    */
   origin?: string | null;
+  /** Which planes this origin has reached before. Defaults to marks in `localStorage`. */
+  reachedMarks?: ReachedMarks;
   /**
    * Force a sign-in flow instead of inferring one.
    *
@@ -224,6 +273,8 @@ export class AuthSession {
   private readonly listeners = new Set<(credential: PlaneCredential) => void>();
   private breakglass = false;
   private readonly ended = new Set<(why: string) => void>();
+  private readonly marks: ReachedMarks;
+  private answered = false;
 
   constructor(opts: AuthSessionOptions) {
     this.planeUrl = opts.planeUrl.replace(/\/+$/, "");
@@ -231,6 +282,7 @@ export class AuthSession {
     this.store = opts.store ?? memoryTokenStore();
     this.renewMargin = opts.renewMarginSeconds ?? 120;
     this.origin = opts.origin === undefined ? currentOrigin() : opts.origin;
+    this.marks = opts.reachedMarks ?? webReachedMarks();
     this.now = opts.now ?? (() => Date.now());
     this.forcedFlow = opts.flow ?? null;
   }
@@ -250,7 +302,7 @@ export class AuthSession {
     const session = new AuthSession({ ...opts, planeUrl, store: memoryTokenStore() });
     let answer: BreakGlassAnswer;
     try {
-      answer = await reachable(session.planeUrl, session.origin, () => session.plane.breakGlass(breakglassToken));
+      answer = await session.reachable(() => session.plane.breakGlass(breakglassToken));
     } catch (e) {
       if (e instanceof PlaneHttpError && e.status === 403) throw new Error("The plane refused this break-glass token.");
       if (e instanceof PlaneHttpError && e.status === 404) throw new Error(`This plane has no break-glass door: nothing at ${session.planeUrl}/auth/breakglass.`);
@@ -258,7 +310,7 @@ export class AuthSession {
     }
     const expiresAt = typeof answer.expires_at === "number" ? answer.expires_at : Math.floor(Date.parse(answer.expires_at) / 1000);
     if (!Number.isFinite(expiresAt)) throw new Error(`the plane answered the break-glass exchange with no readable expiry: ${JSON.stringify(answer.expires_at)}`);
-    const me = await reachable(session.planeUrl, session.origin, () => session.plane.me(answer.token));
+    const me = await session.reachable(() => session.plane.me(answer.token));
     session.breakglass = true;
     session.credential = {
       ...me,
@@ -271,6 +323,35 @@ export class AuthSession {
     };
     session.notify(session.credential);
     return session;
+  }
+
+  /**
+   * One request to the plane. A `fetch` that fails before producing a response — a plane
+   * down, an address mistyped, a cross-origin request refused — is reported as the plane
+   * not answering, with what this session and this origin know of having reached it. An
+   * HTTP error is the plane answering, so it is passed through untouched, and counts.
+   */
+  private async reachable<T>(f: () => Promise<T>): Promise<T> {
+    try {
+      const answer = await f();
+      this.answeredNow();
+      return answer;
+    } catch (e) {
+      if (e instanceof PlaneHttpError) {
+        this.answeredNow();
+        throw e;
+      }
+      if (e instanceof TypeError) {
+        throw new PlaneUnreachableError(this.planeUrl, this.origin, e, { reached: this.answered, reachedBefore: this.marks.has(this.planeUrl) });
+      }
+      throw e;
+    }
+  }
+
+  private answeredNow(): void {
+    if (this.answered) return;
+    this.answered = true;
+    this.marks.mark(this.planeUrl);
   }
 
   /** Signed in through the break-glass door rather than the identity provider. */
@@ -314,7 +395,7 @@ export class AuthSession {
   }
 
   async discover(): Promise<Discovery> {
-    if (!this.discovery) this.discovery = await reachable(this.planeUrl, this.origin, () => this.plane.discover());
+    if (!this.discovery) this.discovery = await this.reachable(() => this.plane.discover());
     return this.discovery;
   }
 
@@ -370,10 +451,10 @@ export class AuthSession {
   /** Sign in with the device grant. Resolves once the person has approved. */
   async signIn(progress: SignInProgress = {}, signal?: AbortSignal): Promise<PlaneCredential> {
     const d = await this.discover();
-    progress.onStatus?.("asking the identity provider for a code…");
-    const auth = await reachable(this.planeUrl, this.origin, () => this.plane.startDeviceFlow(d));
+    progress.onStatus?.("Asking the identity provider for a code…");
+    const auth = await this.reachable(() => this.plane.startDeviceFlow(d));
     progress.onDeviceCode?.(auth);
-    progress.onStatus?.("waiting for you to approve the sign-in…");
+    progress.onStatus?.("Waiting for you to approve the sign-in…");
     const tokens = await this.plane.pollDeviceFlow(d, auth, signal ? { signal } : {});
     return this.adopt(tokens);
   }
@@ -415,7 +496,7 @@ export class AuthSession {
     const d = await this.discover();
     let tokens: IdpTokens;
     try {
-      tokens = await reachable(this.planeUrl, this.origin, () => this.plane.refreshIdp(d, refresh));
+      tokens = await this.reachable(() => this.plane.refreshIdp(d, refresh));
     } catch (e) {
       if (!refused(e)) throw e; // the plane, the network, or a provider that did not answer
       // Said out loud, because the only other trace is the sign-in screen, and that
@@ -522,7 +603,7 @@ export class AuthSession {
   private async enter(tokens: IdpTokens): Promise<PlaneCredential> {
     const idToken = tokens.id_token ?? tokens.access_token;
     if (!idToken) throw new Error("the identity provider returned no id token");
-    const credential = await reachable(this.planeUrl, this.origin, () => this.plane.exchange(idToken));
+    const credential = await this.reachable(() => this.plane.exchange(idToken));
     this.credential = credential;
     this.notify(credential);
     return credential;
@@ -541,6 +622,6 @@ export class AuthSession {
   /** One authenticated plane call, with the token renewed first if it is due. */
   async rpc<T = unknown>(method: string, params: unknown = {}): Promise<T> {
     const token = await this.token();
-    return reachable(this.planeUrl, this.origin, () => this.plane.rpc<T>(token, method, params));
+    return this.reachable(() => this.plane.rpc<T>(token, method, params));
   }
 }

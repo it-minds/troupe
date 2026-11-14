@@ -97,7 +97,7 @@ describe("an approval a rule asked for", () => {
     await sees("set by your organisation");
   });
 
-  it("names the worker profile, and which, when the rule came from the profile a pod session runs on", async () => {
+  it("names the profile, and which, when the rule came from the profile a pod session runs on", async () => {
     const entry: Extract<Entry, { kind: "approval" }> = {
       kind: "approval",
       seq: 4,
@@ -113,6 +113,6 @@ describe("an approval a rule asked for", () => {
 
     unmount = render(<ApprovalPanel entry={entry} canAnswer others={[]} onAnswer={async () => undefined} />).unmount;
     await waitFor(() => says("Asked by the rule") || null, "the rule");
-    await sees("Asked by the rule ask shell(git push), from the worker profile (fixing).");
+    await sees("Asked by the rule ask shell(git push), from the profile (fixing).");
   });
 });
