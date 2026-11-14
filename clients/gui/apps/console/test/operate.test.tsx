@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
+import { pod } from "../../../packages/client/test/support/admin.js";
 
 let fake: FakeDeployment;
 let unmount: (() => void) | null = null;
@@ -43,13 +44,40 @@ describe("workers and pods", () => {
     expect(button("Drain", row("troupe-w-dev-1")!)).toBeNull();
 
     button("Drain", row("troupe-w-dev-0")!)!.click();
-    await waitFor(() => says("Its 3 sessions are moved"), "the preview");
+    // dev's only other pod is draining itself, so nothing can take what this one holds.
+    await waitFor(() => says("Its 3 sessions are interrupted and sealed"), "the preview");
+    await sees("No other pod can take them; they will wait for one.");
+    expect(says("opened again on")).toBe(false);
     expect(go("Drain")).toBeUndefined();
     type(field("Type troupe-w-dev-0 to confirm")!, "troupe-w-dev-0");
     (await waitFor(() => go("Drain"), "the name typed")).click();
     await waitFor(() => says("Recorded in the audit as pod.drain on troupe-w-dev-0"), "the audit's note");
     await sees("troupe-w-dev-0 held 3 sessions: 3 moved.");
     expect(fake.admin.profiles.find((p) => p.name === "dev")!.pods[0]!.draining).toBe(true);
+  });
+
+  it("names the pod a drain moves sessions to, counting only one that can take them", async () => {
+    const dev = fake.admin.profiles.find((p) => p.name === "dev")!;
+    dev.pods.push(pod("troupe-w-dev-2", 2, { healthy: false }), pod("troupe-w-dev-3", 3));
+    await open("#/pods");
+    (await waitFor(() => row("troupe-w-dev-0") && button("Drain", row("troupe-w-dev-0")!), "dev's pods")).click();
+    // dev-1 is draining and dev-2 is broken: dev-3 is the one pod that can take them.
+    await waitFor(() => says("Its 3 sessions are moved: each is interrupted, sealed and opened again on troupe-w-dev-3, and a turn in flight is cancelled."), "the preview");
+    expect(says("other pods that can take them")).toBe(false);
+  });
+
+  it("says a pod in the singular, an image that is not there in words, and an ssh host as a machine", async () => {
+    await open("#/pods");
+    const section = (name: string) => document.querySelector<HTMLElement>(`section[aria-label="${name}"]`);
+    await waitFor(() => section("ux's pods"), "ux's pods");
+    await sees("ux · 1 of 1 pod", () => section("ux's pods"));
+    await sees("heavy · 1 of 2 pods", () => section("heavy's pods"));
+    // build-box is an ssh host with no image: a machine, as Hosts calls it, and no dash in a sentence.
+    const box = () => section("build-box's machines");
+    await sees("build-box · 1 of 1 machine", box);
+    await sees("build-box has no image yet, following the stable channel; 0 of 2 sessions in use.", box);
+    expect(box()!.textContent).not.toContain("runs —");
+    expect(box()!.querySelector("th")!.textContent).toBe("Machine");
   });
 
   it("shows every profile, the policy and every trigger as a repository would hold them", async () => {
