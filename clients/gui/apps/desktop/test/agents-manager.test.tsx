@@ -352,10 +352,15 @@ describe("each window's agent", () => {
       expect(harness.worker.calls.some((c) => c.method === "agents.list" && typeof c.params["session_id"] === "string" && !("workspace" in c.params))).toBe(true);
       expect(head.querySelector(".crumbs .profile")!.textContent).toBe("build");
 
-      // Edit is refused on a pod, in the worker's words.
+      // On the platform no agent's file is this computer's: the dialog says where they come
+      // from, once, offers no Edit, and does not send a member to the console.
+      const dialog = picker.closest<HTMLElement>('[role="dialog"]')!;
+      expect(dialog.querySelector(".note")?.textContent).toBe("The agents on dev come from its bundle.");
+      expect(dialog.textContent).not.toContain("console");
       option(picker, "plan")!.click();
-      (await enabled(picker, "Edit plan's file")).click();
-      await waitFor(() => picker.querySelector('[role="alert"]')?.textContent?.includes("read-only here"), "the edit refused");
+      await waitFor(() => button("Switch to plan", picker), "plan's actions");
+      expect(button("Edit plan's file", picker)).toBeNull();
+      expect(button("Edit build's file", picker)).toBeNull();
 
       (await enabled(picker, "Switch to plan")).click();
       await waitFor(() => harness.worker.calls.some((c) => c.method === "profile.switch" && c.params["profile"] === "plan"), "profile.switch on the pod");

@@ -1306,8 +1306,7 @@ defmodule Troupe.FakeRemote do
         "text" => "---\nmode: primary\n---\nYou build what the team asks for.\n",
         "editable" => false,
         "editable_reason" =>
-          "On a pod the agents come from the profile's bundle and are read-only here: " <>
-            "change them in the console",
+          "On the platform the agents come from the profile's bundle and are read-only here.",
         "also" => [],
         "running" => []
       })}, state}
@@ -1779,8 +1778,7 @@ defmodule Troupe.FakeRemote do
       "profile" => "code",
       "editable" => false,
       "editable_reason" =>
-        "On a pod the agents come from the profile's bundle and are read-only here: " <>
-          "change them in the console",
+        "On the platform the agents come from the profile's bundle and are read-only here.",
       "overrides" => [],
       "model" => nil,
       "tool_count" => 19,

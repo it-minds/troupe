@@ -8,11 +8,14 @@
 // greyed with the reason, one that cannot run here. The words are the daemon's; a daemon
 // from before them is read by its layer (`originOf`).
 //
-// The actions say what they will do before they do it, and what cannot be done here is
-// refused with why rather than hidden: Start a session on the agent, Switch the session to
-// it, and Edit its file, which opens a person's or a repository's agent in the editor their
-// system opens Markdown with (the shell's `openAgentFile`) and is refused, in the daemon's
-// sentence, for one Troupe ships or an organisation's bundle carries.
+// The actions say what they will do before they do it: Start a session on the agent, Switch
+// the session to it, and Edit its file, which opens a person's or a repository's agent in
+// the editor their system opens Markdown with (the shell's `openAgentFile`). What is never
+// done is not offered: the agent running now is marked as running, not offered as a switch,
+// and an agent whose file is not this computer's to change (one Troupe ships, one an
+// organisation's bundle carries, every one on the platform) says why in the daemon's
+// sentence instead of an Edit that would only refuse. What is refused when asked is said
+// on a line kept for it, so the picker does not move when a sentence appears.
 
 import { useMemo, useState } from "react";
 import type { JSX } from "react";
@@ -38,6 +41,11 @@ export function fromWords(row: AgentRow): string {
     (row.profile ? ` (the ${row.profile} profile)` : "") +
     (row.overrides && row.overrides.length > 0 ? ` · stands in for ${row.overrides.map((o) => o.origin ?? o.layer).join(", ")}` : "")
   );
+}
+
+/** A daemon's reason as a sentence: with its full stop, whether or not the daemon sent one. */
+function sentence(text: string): string {
+  return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
 /**
@@ -134,6 +142,7 @@ export function AgentPicker({
   onChoose,
   start,
   switchTo,
+  editable = true,
 }: {
   /** What the picker is, for a screen reader and a test: "Agents", "The agent it starts as". */
   label: string;
@@ -150,6 +159,8 @@ export function AgentPicker({
   onChoose?: (name: string) => void;
   start: PickerAction;
   switchTo: PickerAction;
+  /** False where no agent's file is this computer's, as on the platform: no Edit at all. */
+  editable?: boolean;
 }): JSX.Element {
   const [own, setOwn] = useState<string | null>(null);
   const [said, setSaid] = useState<{ text: string; refused: boolean } | null>(null);
@@ -174,7 +185,6 @@ export function AgentPicker({
 
   const edit = async (): Promise<void> => {
     if (!row) return;
-    if (row.editable === false) return setSaid({ text: row.editable_reason ?? `${row.name} is not changed here`, refused: true });
     const open = shell()?.openAgentFile;
     if (!row.path) return setSaid({ text: `${row.name} has no file to open here`, refused: true });
     if (!open) return setSaid({ text: `Opening ${row.path} in your editor takes the desktop app; the agents manager edits it here`, refused: true });
@@ -208,20 +218,29 @@ export function AgentPicker({
             <button type="button" className="primary" disabled={busy} onClick={() => void run(start)}>
               Start a session on {row.name}
             </button>
-            <button type="button" disabled={busy} onClick={() => void run(switchTo)}>
-              Switch to {row.name}
-            </button>
-            <button type="button" disabled={busy} onClick={() => void edit()}>
-              Edit {row.name}'s file
-            </button>
+            {row.name === current ? (
+              <span className="note">{row.name} runs now</span>
+            ) : (
+              <button type="button" disabled={busy} onClick={() => void run(switchTo)}>
+                Switch to {row.name}
+              </button>
+            )}
+            {editable && row.editable !== false && (
+              <button type="button" disabled={busy} onClick={() => void edit()}>
+                Edit {row.name}'s file
+              </button>
+            )}
           </div>
+          {editable && row.editable === false && row.editable_reason && <p className="note">{sentence(row.editable_reason)}</p>}
         </div>
       )}
-      {said && (
-        <p className={`micro${said.refused ? " error" : ""}`} role={said.refused ? "alert" : "status"}>
-          {said.text}
-        </p>
-      )}
+      <p className="micro agent-picker-said">
+        {said && (
+          <span className={said.refused ? "error" : undefined} role={said.refused ? "alert" : "status"}>
+            {said.text}
+          </span>
+        )}
+      </p>
     </div>
   );
 }

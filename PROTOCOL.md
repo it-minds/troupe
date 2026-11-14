@@ -1456,9 +1456,8 @@ and the choice of layer happen in one place. Writing is the daemon's, like `mcp.
 (Decision 700). On a pod a token a plane mints for one session reads and checks its own
 session's agents, `agents.get` and `agents.validate` naming the session and no
 `workspace` (#594), and is refused the rest (§7); with a token for no session, a pod reads
-and checks, and refuses `agents.put` and `agents.delete` as `forbidden` with `reason` "On a pod
-the agents come from the profile's bundle and are read-only here: change them in the
-console".
+and checks, and refuses `agents.put` and `agents.delete` as `forbidden` with `reason` "On the
+platform the agents come from the profile's bundle and are read-only here."
 
 ```json
 {"name": "plan", "workspace": "/home/me/project"}

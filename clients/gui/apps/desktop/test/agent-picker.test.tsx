@@ -9,6 +9,7 @@
 // On the chunk's tip the start screen on this computer had no agent to choose at all, the
 // head's switch was a drop-down that only switched, and nothing opened an agent's file.
 
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
@@ -114,16 +115,26 @@ describe("the agent picker", () => {
     expect(head.contains(box)).toBe(false);
     const picker = await waitFor(() => box.querySelector<HTMLElement>('[role="group"][aria-label="Agents"]'), "the picker");
 
+    // The line a refusal is said on is there before anything is said, a line high, so the
+    // dialog does not move when one is. jsdom lays nothing out, so the rule is read.
+    expect(picker.querySelector(".agent-picker-said")).not.toBeNull();
+    const sheet = "../src/styles.css";
+    const css = readFileSync(new URL(sheet, import.meta.url), "utf8");
+    const at = css.indexOf(".agent-picker-said {");
+    expect(css.slice(at, css.indexOf("}", at))).toContain("min-height: 1.3em");
+
+    // An agent whose file is not this computer's to change says why, with no Edit to refuse.
     (await waitFor(() => option(picker, "deploy"), "the bundle's agent")).click();
     expect(groupOf(picker, "deploy")).toBe("Your organisation's");
-    (await enabled(picker, "Edit deploy's file")).click();
-    await alertIn(picker, "deploy comes from the profile's bundle; change it in the console");
+    await waitFor(() => picker.querySelector(".agent-picker-detail")?.textContent?.includes("deploy comes from the profile's bundle; change it in the console."), "why it is not edited here");
+    expect(button("Edit deploy's file", picker)).toBeNull();
+    await waitFor(() => button("Switch to deploy", picker), "deploy offered as a switch");
     expect(opened).toEqual([]);
 
-    // Switching to the agent it runs says so, and asks nothing of the daemon.
+    // The agent it runs is marked as running, not offered as a switch.
     option(picker, "build")!.click();
-    (await enabled(picker, "Switch to build")).click();
-    await alertIn(picker, "This session runs build already.");
+    await waitFor(() => picker.querySelector(".agent-picker-detail .actions")?.textContent?.includes("build runs now"), "build marked as running");
+    expect(button("Switch to build", picker)).toBeNull();
     expect(daemon.calls.some((c) => c.method === "profile.switch")).toBe(false);
 
     option(picker, "plan")!.click();

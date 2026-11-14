@@ -17,7 +17,7 @@ import type { JSX } from "react";
 import type { AuthSession, DaemonClient, DaemonEndpoint, DaemonIdentity, RecentWorkspace, Worktree } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import type { MachineUser } from "../hooks";
-import { Confirm, Failed, Loading, Pill, Table, When } from "./bits";
+import { Confirm, Failed, hostOf, Loading, Pill, Table, When } from "./bits";
 import { Models } from "./Models";
 import { Rules } from "./Rules";
 
@@ -249,7 +249,7 @@ function WhoAmI({
         <>
           <p className="copy">
             Sessions started here are recorded as <strong>{identity.display_name ?? identity.subject}</strong>
-            {identity.plane_url ? <> , signed in at {identity.plane_url}</> : null}. That name travels: a session synced to the platform is
+            {identity.plane_url ? `, signed in to ${hostOf(identity.plane_url)}` : ""}. That name travels: a session synced to the platform is
             yours on any machine you sign in from.
           </p>
           <button onClick={() => void act(false)} disabled={busy}>

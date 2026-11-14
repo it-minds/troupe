@@ -173,6 +173,9 @@ describe("this computer linked by the sign-in, and a private session started", (
     expect(await honoured(daemon.planeToken)).toBe(true);
     goToThisComputer();
     await sees("Sessions started here are recorded as Alice");
+    // One sentence, the plane named by its host as the sign-in names it: no stray space, no scheme.
+    const recorded = [...document.querySelectorAll("p.copy")].find((p) => p.textContent?.startsWith("Sessions started here are recorded as Alice"))!;
+    expect(recorded.textContent).toContain(`recorded as Alice, signed in to ${new URL(harness.plane.baseUrl).host}. That name travels`);
     await seesButton("Stop using my account here");
 
     nav("Sessions")!.click();

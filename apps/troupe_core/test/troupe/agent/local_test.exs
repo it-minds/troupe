@@ -136,7 +136,7 @@ defmodule Troupe.Agent.LocalTest do
 
     assert Local.not_editable(plan) =~ "built in"
     assert Local.not_editable(mine) == nil
-    assert Local.not_editable(mine, pod: true) =~ "console"
+    assert Local.not_editable(mine, pod: true) == "On the platform the agents come from the profile's bundle and are read-only here."
     assert Local.not_editable(%{mine | source: :bundle}) =~ "the profile's bundle"
   end
 

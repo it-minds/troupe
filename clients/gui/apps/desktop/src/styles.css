@@ -3372,8 +3372,9 @@ details.advanced > summary {
   gap: var(--space-3);
 }
 .ns-called {
-  flex: 1 1 260px;
-  min-width: 0;
+  /* Wide enough for the label and its placeholder; the row wraps before it is cut. */
+  flex: 1 1 280px;
+  min-width: min(280px, 100%);
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -3388,12 +3389,24 @@ details.advanced > summary {
   color: var(--text-body);
 }
 .ns-start {
+  display: inline-grid;
+  justify-items: center;
+  align-items: center;
   min-height: var(--touch-target);
   padding: 0 var(--space-5);
   background: var(--running-fg);
   color: var(--text-inverse);
   font: var(--t-subheading);
   box-shadow: 4px 4px 0 var(--bg-shadow);
+}
+/* The widest label, drawn unseen in the same cell, holds the width whatever the label says. */
+.ns-start::after,
+.ns-start > span {
+  grid-area: 1 / 1;
+}
+.ns-start::after {
+  content: attr(data-widest);
+  visibility: hidden;
 }
 .ns-start.queue {
   background: var(--queued-fg);
@@ -4030,8 +4043,15 @@ pre.instruction {
 .agent-picker-detail {
   margin-top: var(--space-3);
 }
-.agent-picker .micro.error {
+.agent-picker .micro.error,
+.agent-picker-said .error {
   color: var(--error-fg);
+}
+/* The line a refusal or an answer is said on, kept whether or not anything is said, so
+   the dialog does not grow by a line when one is. */
+.agent-picker-said {
+  margin: var(--space-2) 0 0;
+  min-height: 1.3em;
 }
 /* A switch of the agent is a frame in the transcript, so the history says when the rules
    changed (#474). */

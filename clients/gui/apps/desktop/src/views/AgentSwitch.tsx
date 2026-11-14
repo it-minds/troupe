@@ -1,5 +1,5 @@
 // Which agent a window runs, in the session's head, and the one agent picker over it
-// (troupe #503 and #594, Decision 841).
+// (troupe #503 and #594).
 //
 // `profile.switch` changes the agent of a session, or of a branch, which is a session:
 // the conversation stays, and from its next turn the new definition's tools, permissions,
@@ -16,7 +16,8 @@
 //
 // From the picker a session is started on the agent too, beside this one (in the same
 // workspace on this computer, on the same profile on the platform), and a person's or a
-// repository's agent is opened in their editor.
+// repository's agent is opened in their editor. Only this computer's files are opened: on
+// the platform the dialog says where the agents come from instead, and offers no edit.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
@@ -101,7 +102,6 @@ export function AgentSwitch({
 
   const switchTo: PickerAction = canChange
     ? async (name) => {
-        if (name === current) throw new Error(`This session runs ${name} already.`);
         await view.switchProfile(name);
         setOpen(false);
       }
@@ -147,7 +147,8 @@ export function AgentSwitch({
       {open && (
         <Dialog label="The agent this session runs" onClose={() => setOpen(false)} className="agent-dialog">
           <h1>Agent</h1>
-          <AgentPicker label="Agents" rows={rows} error={error} current={current} start={start} switchTo={switchTo} />
+          {kind === "team" && <p className="note">{planeProfile ? `The agents on ${planeProfile} come from its bundle.` : "The agents on the platform come from the profile's bundle."}</p>}
+          <AgentPicker label="Agents" rows={rows} error={error} current={current} start={start} switchTo={switchTo} editable={onThisComputer(kind)} />
           <div className="actions">
             <button type="button" onClick={() => setOpen(false)}>
               Close
