@@ -3533,7 +3533,9 @@ details.advanced > summary {
   }
 }
 
-/* At the 380px floor the rail becomes a top strip and every track stacks. */
+/* At the 380px floor the rail becomes a top band and every track stacks. The band
+   wraps rather than scrolls sideways: the lockup and Sign out on its first line, and
+   every destination below them, in as many lines as the width needs, none hidden. */
 @media (max-width: 719px) {
   .app {
     flex-direction: column;
@@ -3541,21 +3543,28 @@ details.advanced > summary {
   .rail {
     width: auto;
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-1) var(--space-2);
     padding: var(--space-2) var(--space-3);
     border-right: none;
     border-bottom: var(--bw-hairline) solid var(--border-hairline);
-    overflow-x: auto;
   }
   .rail .wordmark {
     padding: 0 var(--space-2) 0 0;
   }
+  .rail .spacer {
+    display: none;
+  }
   .rail nav {
+    order: 1;
+    flex: 1 1 100%;
     flex-direction: row;
+    flex-wrap: wrap;
+    min-width: 0;
   }
   .rail nav button {
-    padding: var(--space-2) var(--space-3);
+    padding: var(--space-2) var(--space-2);
     border-left: none;
     border-bottom: var(--bw-marker) solid transparent;
     white-space: nowrap;
@@ -3581,6 +3590,20 @@ details.advanced > summary {
   }
   .rail .me button {
     margin-top: 0;
+    min-height: var(--touch-target);
+  }
+  /* The session head on a phone is one line under the way back: the title, the status,
+     and the backstage toggle. Who is here, the goal and the controls come with the
+     backstage, so the conversation keeps the screen. */
+  .session-head:not(.full) .crumbs > :not(button.link),
+  .session-head:not(.full) .goal-block,
+  .session-head:not(.full) .here,
+  .session-head:not(.full) .controls > :not(.pill):not(.backstage-toggle) {
+    display: none;
+  }
+  .session-head:not(.full) {
+    padding-top: var(--space-2);
+    padding-bottom: var(--space-2);
   }
   .screen-head,
   .toolbar,

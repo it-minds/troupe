@@ -125,7 +125,7 @@ function ProfilePods({ profile, busy, onDrain }: { profile: AdminProfile; busy: 
                 <th className="num">Sessions</th>
                 <th className="num">Disk</th>
                 <th>Last heard</th>
-                <th aria-label="Actions" />
+                <th className="row-actions" aria-label="Actions" />
               </tr>
             </thead>
             <tbody>

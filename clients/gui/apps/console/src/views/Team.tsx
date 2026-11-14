@@ -122,7 +122,7 @@ function Members({ team, onApplied }: { team: AdminTeam; onApplied: () => void }
                 <th>Group</th>
                 <th>Id at the provider</th>
                 <th>Linked by</th>
-                {platform && <th aria-label="Actions" />}
+                {platform && <th className="row-actions" aria-label="Actions" />}
               </tr>
             </thead>
             <tbody>
@@ -317,32 +317,34 @@ function Access({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
       {team.grants.length === 0 ? (
         <Empty title="No profile granted">This team can start no session until a platform admin grants it a profile.</Empty>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Profile</th>
-              <th>Team volume</th>
-              {platform && <th aria-label="Actions" />}
-            </tr>
-          </thead>
-          <tbody>
-            {team.grants.map((g) => (
-              <tr key={g.profile}>
-                <td>{g.profile}</td>
-                <td>{g.volume_mode ? (VOLUME[g.volume_mode] ?? g.volume_mode) : <span className="muted">none</span>}</td>
-                {platform && (
-                  <td className="row-actions">
-                    {!busy && (
-                      <button type="button" onClick={() => setRevoking(g.profile)}>
-                        Revoke
-                      </button>
-                    )}
-                  </td>
-                )}
+        <div className="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Profile</th>
+                <th>Team volume</th>
+                {platform && <th className="row-actions" aria-label="Actions" />}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {team.grants.map((g) => (
+                <tr key={g.profile}>
+                  <td>{g.profile}</td>
+                  <td>{g.volume_mode ? (VOLUME[g.volume_mode] ?? g.volume_mode) : <span className="muted">none</span>}</td>
+                  {platform && (
+                    <td className="row-actions">
+                      {!busy && (
+                        <button type="button" onClick={() => setRevoking(g.profile)}>
+                          Revoke
+                        </button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {revoking !== null && (
         <Preview

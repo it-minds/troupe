@@ -140,33 +140,35 @@ export function RemoteSessions({ load, reload }: { load: Load<RemoteRow[]>; relo
               shares one with you.
             </Empty>
           ) : (
-          <table className="sessions remote">
-            <thead>
-              <tr>
-                <th>Session</th>
-                <th>Laptop</th>
-                <th>Workspace</th>
-                <th>You may</th>
-                <th>Where it is</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td className="mono">
-                    <a href={href({ page: "mine", path: ["remote", r.id] })}>{r.id}</a>
-                  </td>
-                  <td>{r.your_role === "owner" ? "yours" : (r.owner_name ?? r.owner)}</td>
-                  <td>
-                    {r.workspace ?? "—"}
-                    {r.private ? " · private, unsealed while offered" : ""}
-                  </td>
-                  <td>{r.your_role === "observe" ? "follow it" : "steer it"}</td>
-                  <td>{presence(r)}</td>
+          <div className="scroll">
+            <table className="sessions remote">
+              <thead>
+                <tr>
+                  <th>Session</th>
+                  <th>Laptop</th>
+                  <th>Workspace</th>
+                  <th>You may</th>
+                  <th>Where it is</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id}>
+                    <td className="mono">
+                      <a href={href({ page: "mine", path: ["remote", r.id] })}>{r.id}</a>
+                    </td>
+                    <td>{r.your_role === "owner" ? "yours" : (r.owner_name ?? r.owner)}</td>
+                    <td>
+                      {r.workspace ?? "—"}
+                      {r.private ? " · private, unsealed while offered" : ""}
+                    </td>
+                    <td>{r.your_role === "observe" ? "follow it" : "steer it"}</td>
+                    <td>{presence(r)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           )
         }
       </Loaded>

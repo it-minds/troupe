@@ -11,6 +11,7 @@
 
 import type { MemoryBlameLine, MemoryLine } from "./admin.js";
 import type { MemoryEntry } from "./entries.js";
+import { inReadersWords } from "./config.js";
 
 /** One file or document `context.get` lists. */
 export interface InstructionFile {
@@ -142,7 +143,7 @@ function layerOf(scope: string): InstructionLayer {
 const HEADINGS: Record<InstructionLayer, string> = {
   organisation: "Organisation",
   team: "Team",
-  profile: "Worker profile",
+  profile: "Profile",
   person: "Your memory",
   yours: "Your own",
   repository: "Repository",
@@ -151,8 +152,9 @@ const HEADINGS: Record<InstructionLayer, string> = {
 
 function memorySource(from: InstructionsContext["memory_from"]): string {
   if (!from || !from.source) return "the plane";
-  if (from.fetched_at) return `${from.source}, fetched ${from.fetched_at}`;
-  return from.source;
+  const source = inReadersWords(from.source);
+  if (from.fetched_at) return `${source}, fetched ${from.fetched_at}`;
+  return source;
 }
 
 function fileSource(f: InstructionFile): string {
@@ -199,7 +201,7 @@ export function instructionLayers(context: InstructionsContext): InstructionRow[
     return {
       layer,
       heading: HEADINGS[layer],
-      what: memory ? (f.label ?? f.path) : f.path,
+      what: memory ? inReadersWords(f.label ?? f.path) : f.path,
       source: memory ? memorySource(context.memory_from) : fileSource(f),
       version: memory ? `version ${f.version ?? "?"}` : shortHash(f.hash),
       inForce: ["whole", "trimmed"].includes(f.status) || (memory && f.status !== "skipped"),

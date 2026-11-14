@@ -54,7 +54,7 @@ export function PublishedArtifacts(): JSX.Element {
                     <th className="num">Versions</th>
                     <th className="num">Stored</th>
                     <th>Published</th>
-                    <th aria-label="Actions" />
+                    <th className="row-actions" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -70,7 +70,7 @@ export function PublishedArtifacts(): JSX.Element {
                       <td className="num">{a.version}</td>
                       <td className="num">{bytes(a.total_bytes)}</td>
                       <td>{when(a.published_at)}</td>
-                      <td>
+                      <td className="row-actions">
                         {a.may_take_down && (
                           <button type="button" className="danger" disabled={taking !== null} onClick={() => setTaking(a)}>
                             Take down

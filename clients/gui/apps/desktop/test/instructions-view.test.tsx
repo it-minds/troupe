@@ -145,11 +145,11 @@ describe("a team session", () => {
     row.click();
     (await waitFor(() => document.querySelector(".backstage") && button("Instructions", backstage()), "the Instructions tab")).click();
 
-    await sees("the worker profile dev's memory");
+    await sees("the profile dev's memory");
     expect(rows()).toEqual([
-      "Organisation | the organisation's memory | the plane, with the session's activation | version 3",
-      "Team | the team engineering's memory | the plane, with the session's activation | version 2",
-      "Worker profile | the worker profile dev's memory | the plane, with the session's activation | version 1",
+      "Organisation | the organisation's memory | the plane, when the session started | version 3",
+      "Team | the team engineering's memory | the plane, when the session started | version 2",
+      "Profile | the profile dev's memory | the plane, when the session started | version 1",
       "Repository | /state/workspaces/team-1/AGENTS.md | the repository's root | abcdef01",
     ]);
   });

@@ -138,6 +138,6 @@ describe("signing in to the console", () => {
     type(await waitFor(() => field("The plane's address"), "the sign-in screen"), "http://127.0.0.1:1");
     button("Sign in")!.click();
     await waitFor(() => document.querySelector(".banner.error"), "the error");
-    await sees("could not reach the plane");
+    await sees("The plane at http://127.0.0.1:1 did not answer. Check the address and try again.");
   });
 });

@@ -625,7 +625,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
 
   def footer(_page),
     do:
-      " Enter starts · Shift/Alt+Enter new line · Tab the settings, then ←→ and Enter · 1-3 like last time · Esc closes "
+      " Enter starts · Tab the settings, then ←→ and Enter · Shift/Alt+Enter new line · 1-3 like last time · Esc closes "
 
   @spec render(t(), Rect.t(), map()) :: [{term(), Rect.t()}]
   def render(page, rect, _state) do

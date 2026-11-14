@@ -16,7 +16,9 @@ defmodule Troupe.UI.TUI.MemoryPage do
   back to one; `b` shows who wrote each line; `s` where this machine's copy stands. A save
   names the version it was made on, and one saved elsewhere first is shown beside the
   person's own, `l` reloading it. Under Local only every level is read from this machine's
-  copy and nothing is changed.
+  copy and nothing is changed. A plane older than 0.29 keeps memory as whole documents, with
+  no entries for a save to name and nothing to say what is in effect: there the levels are
+  read as entries off their text, nothing is changed, and the line above the list says why.
 
   Page state and keys; the server owns the process, the frame and the editor's hand-off.
   Everything it asks goes through `Troupe.Client`, to this computer's daemon.
@@ -31,6 +33,8 @@ defmodule Troupe.UI.TUI.MemoryPage do
 
   @type t :: map()
 
+  @older "This plane is older than 0.29: memory is read-only here."
+
   @doc "The page, read now."
   @spec open() :: t()
   def open do
@@ -42,6 +46,8 @@ defmodule Troupe.UI.TUI.MemoryPage do
       roles: Client.memory_roles(%{}),
       reach: nil,
       plane_url: nil,
+      # A plane from before memory was entries, which changes nothing here.
+      older: false,
       error: nil,
       tab: 0,
       team: nil,
@@ -106,7 +112,10 @@ defmodule Troupe.UI.TUI.MemoryPage do
   defp in_effect(page, _ask) do
     case Client.memory_in_effect(page.levels, page.team) do
       {:ok, rows} ->
-        %{page | effect: rows}
+        %{page | effect: rows, older: false}
+
+      {:error, :older_plane} ->
+        %{page | effect: [], older: true}
 
       {:error, reason} ->
         %{page | effect: [], status: "what is in effect could not be read: #{reason}"}
@@ -130,6 +139,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
   # The person's own, and a level above it the plane's roles say they may change; never
   # under Local only.
   defp editable?(%{local_only: true}, _level), do: false
+  defp editable?(%{older: true}, _level), do: false
   defp editable?(page, level), do: Client.memory_may_change?(page.roles, level)
 
   defp own(page), do: Enum.find(page.levels, &(&1.scope == "user"))
@@ -203,6 +213,9 @@ defmodule Troupe.UI.TUI.MemoryPage do
       page.local_only ->
         {:ok,
          %{page | status: "Local only: the plane is not asked, so your memory is read-only here"}}
+
+      page.older and code in ["a", "e", "f"] ->
+        {:ok, %{page | status: @older}}
 
       page.tab == 0 and code in ["a", "e", "f"] ->
         {:ok, %{page | status: "a, e and f change a level's entries: #{changeable(page)}"}}
@@ -602,6 +615,11 @@ defmodule Troupe.UI.TUI.MemoryPage do
   def footer(%{mode: :list, tab: 0}),
     do: " memory — ←/→ or 1–9 level · ↑↓ · Enter reads · t team · s status · Esc back "
 
+  # Read-only, the line offers nothing that changes a level.
+  def footer(%{mode: :list, older: true}),
+    do:
+      " memory — ←/→ level · ↑↓ · Enter reads · h versions · b who wrote it · s status · Esc back "
+
   def footer(%{mode: :list}),
     do:
       " memory — ←/→ level · ↑↓ · Enter reads · a add · e edit · f forget · h versions · b who wrote it · s status · Esc back "
@@ -647,6 +665,8 @@ defmodule Troupe.UI.TUI.MemoryPage do
   defp note(%{local_only: true}),
     do:
       "Local only: the plane is not asked. Read from this machine's copy; nothing is changed here."
+
+  defp note(%{older: true}), do: @older
 
   defp note(%{tab: 0} = page),
     do:
@@ -899,17 +919,18 @@ defmodule Troupe.UI.TUI.MemoryPage do
     if parts == [], do: "", else: " · " <> Enum.join(parts, " · ")
   end
 
-  # Where a save goes and which new sessions start with it, for the level being changed.
-  defp save_line(page) do
+  # Where a save goes and which new sessions start with it, for the level being changed; the
+  # key that saves only where it does, in the box of words, not while the topic is typed.
+  defp save_line(page, key \\ " · Ctrl-S") do
     case level(page) do
       %{scope: "organisation"} = level ->
-        "saves to #{title(page, level)} · new sessions in every team · Ctrl-S"
+        "saves to #{title(page, level)} · new sessions in every team" <> key
 
       %{scope: "team", name: name} ->
-        "saves to #{name} · new sessions in #{name} · Ctrl-S"
+        "saves to #{name} · new sessions in #{name}" <> key
 
       _own ->
-        "saves to Only you · your new sessions in any team · Ctrl-S"
+        "saves to Only you · your new sessions in any team" <> key
     end
   end
 
@@ -918,7 +939,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
     do: [page.reach, page.status] |> Enum.reject(&is_nil/1) |> Enum.map_join("", &("\n" <> &1))
 
   defp status_text(%{mode: {:topic, t}} = page),
-    do: "topic: #{t}▏   #{save_line(page)}" <> under(page)
+    do: "topic: #{t}▏   #{save_line(page, "")}" <> under(page)
 
   defp status_text(%{mode: {:box, _}, reach: reach} = page) when is_binary(reach),
     do: String.trim_leading(under(page))

@@ -218,7 +218,7 @@ function ProfileSections({ view }: { view: ProfileView }): JSX.Element {
       <section className="group">
         <h3>Reach</h3>
         {view.reach.length === 0 ? (
-          <p className="note">No host outside its own pod.</p>
+          <p className="note">No host outside the platform.</p>
         ) : (
           <ul className="chips">
             {view.reach.map((h) => (
@@ -233,8 +233,8 @@ function ProfileSections({ view }: { view: ProfileView }): JSX.Element {
       <section className="group">
         <h3>Limits</h3>
         <dl className="facts wide">
-          <dt>Per pod</dt>
-          <dd>{limits.sessions_per_pod === null ? "not said" : `${limits.sessions_per_pod} sessions`}</dd>
+          <dt>Sharing a machine</dt>
+          <dd>{limits.sessions_per_pod === null ? "not said" : `up to ${limits.sessions_per_pod} sessions`}</dd>
           <dt>At most</dt>
           <dd>{limits.max_sessions === null ? "no cap" : `${limits.max_sessions} sessions`}</dd>
           <dt>Now</dt>
