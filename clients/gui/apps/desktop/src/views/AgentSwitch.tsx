@@ -25,6 +25,7 @@ import type { AgentRow, AuthSession, DaemonClient, SessionKind } from "@troupe/c
 import type { SessionHandle } from "../hooks";
 import { AgentPicker } from "./AgentPicker";
 import type { PickerAction } from "./AgentPicker";
+import { Dialog } from "./bits";
 
 /** The agents a session could run, by its own listing, or as an older server answered. */
 function useRows(view: SessionHandle, daemon: DaemonClient | null, kind: SessionKind, workspace: string | null): { rows: AgentRow[] | null; error: string | null } {
@@ -130,6 +131,7 @@ export function AgentSwitch({
       <button
         type="button"
         className="agent-current"
+        aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="Agent"
         title="The agent this session runs: switch it, start another session on one, or edit one."
@@ -142,7 +144,17 @@ export function AgentSwitch({
           About
         </button>
       )}
-      {open && <AgentPicker label="Agents" rows={rows} error={error} current={current} start={start} switchTo={switchTo} />}
+      {open && (
+        <Dialog label="The agent this session runs" onClose={() => setOpen(false)} className="agent-dialog">
+          <h1>Agent</h1>
+          <AgentPicker label="Agents" rows={rows} error={error} current={current} start={start} switchTo={switchTo} />
+          <div className="actions">
+            <button type="button" onClick={() => setOpen(false)}>
+              Close
+            </button>
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 }

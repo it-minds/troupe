@@ -6,8 +6,9 @@
 // `waiting` is the only status that ever returns it. Which hue that is depends on the
 // theme; that it means exactly one thing does not.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { JSX, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { hasUnseen, moneyWords, syncWords, unseenSummary } from "@troupe/client";
 import type { FleetRow, SessionKind, SyncState } from "@troupe/client";
 import { Eye } from "./brand";
@@ -263,6 +264,69 @@ export function Table({ head, children }: { head: string[]; children: ReactNode 
         <tbody>{children}</tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * A form a person opened on purpose, drawn on the hard shadow over the screen rather than
+ * inside the row that holds its button, so the row keeps its height while it is open.
+ * Escape and a click on the scrim close it; it opens on its first field, or on whatever
+ * inside it asked for the focus, and gives the focus back to what had it when it closes.
+ */
+export function Dialog({
+  label,
+  onClose,
+  role = "dialog",
+  className,
+  children,
+}: {
+  label: string;
+  onClose: () => void;
+  role?: "dialog" | "alertdialog";
+  className?: string | undefined;
+  children: ReactNode;
+}): JSX.Element {
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const el = box.current;
+    if (el && !el.contains(document.activeElement)) {
+      const first =
+        el.querySelector<HTMLElement>("input:not([disabled]), select:not([disabled]), textarea:not([disabled])") ??
+        el.querySelector<HTMLElement>("button:not([disabled]), [href], [tabindex]:not([tabindex='-1'])");
+      (first ?? el).focus();
+    }
+    return () => {
+      if (before && before.isConnected) before.focus();
+    };
+  }, []);
+
+  // Drawn at the document's end, so nothing of the row it opened from (its wrapping, its
+  // type, its overflow) reaches it.
+  return createPortal(
+    <div
+      className="scrim"
+      onClick={onClose}
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        e.stopPropagation();
+        onClose();
+      }}
+    >
+      <div
+        ref={box}
+        className={className ? `dialog ${className}` : "dialog"}
+        role={role}
+        aria-modal="true"
+        aria-label={label}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -55,18 +55,25 @@ async function signedIn(): Promise<void> {
 const row = (text: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes(text));
 const shared = (): HTMLElement | null => document.querySelector<HTMLElement>('[aria-label="Shared with"]');
+const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Invite somebody"]');
 
-async function invite(person: string, pick: string, role: "observe" | "control"): Promise<void> {
+/** Opens the invitation from the head: it comes up in a dialog, never inside the head. */
+async function opened(): Promise<HTMLElement> {
   const group = await waitFor(shared, "the session's invitations");
   (await waitFor(() => button("Invite", group), "the Invite button")).click();
-  const field = await waitFor(() => group.querySelector<HTMLInputElement>(".invite-form input"), "the person field");
+  return waitFor(dialog, "the invitation's dialog");
+}
+
+async function invite(person: string, pick: string, role: "observe" | "control"): Promise<void> {
+  const box = await opened();
+  const field = await waitFor(() => box.querySelector<HTMLInputElement>(".invite-form input"), "the person field");
   type(field, person);
-  const found = await waitFor(() => [...group.querySelectorAll<HTMLButtonElement>(".people button")].find((b) => b.textContent?.startsWith(pick)), `${pick} in the picker`);
+  const found = await waitFor(() => [...box.querySelectorAll<HTMLButtonElement>(".people button")].find((b) => b.textContent?.startsWith(pick)), `${pick} in the picker`);
   found.click();
-  const select = group.querySelector<HTMLSelectElement>(".invite-form select")!;
+  const select = box.querySelector<HTMLSelectElement>(".invite-form select")!;
   select.value = role;
   select.dispatchEvent(new Event("change", { bubbles: true }));
-  (await waitFor(() => group.querySelector<HTMLButtonElement>('.invite-form button[type="submit"]:not([disabled])'), "the form's Invite")).click();
+  (await waitFor(() => box.querySelector<HTMLButtonElement>('.invite-form button[type="submit"]:not([disabled])'), "the form's Invite")).click();
 }
 
 describe("the owner of a session", () => {
@@ -88,6 +95,33 @@ describe("the owner of a session", () => {
     button("Remove Bea", shared()!)!.click();
     await waitFor(() => !harness.plane.invitations.get("s-pod-1")?.has("bea@example.com"), "the invitation taken back at the plane");
     await waitFor(() => !shared()?.textContent?.includes("Bea"), "Bea no longer named");
+  });
+
+  it("opens the invitation in a dialog, not inside the session's head, and Escape or the scrim closes it", async () => {
+    harness.plane.seed(ME, { id: "s-pod-4", title: "head stays put" });
+    await signedIn();
+    unmount = render(<App />).unmount;
+    (await waitFor(() => row("head stays put"), "the pod session's row")).click();
+
+    const box = await opened();
+    const head = document.querySelector<HTMLElement>(".session-head")!;
+    // The head holds the button that opened it, and none of the form.
+    expect(head.querySelector(".invite-form, input, select")).toBeNull();
+    expect(head.contains(box)).toBe(false);
+    expect(box.getAttribute("aria-modal")).toBe("true");
+    // It opens on its first field.
+    await waitFor(() => document.activeElement === box.querySelector(".invite-form input"), "the person field focused");
+    await waitFor(() => button("Invite", shared()!)?.getAttribute("aria-expanded") === "true", "the Invite button expanded");
+
+    box.querySelector("input")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await waitFor(() => dialog() === null, "the dialog closed on Escape");
+    await waitFor(() => button("Invite", shared()!)?.getAttribute("aria-expanded") === "false", "the Invite button collapsed");
+
+    // A click on the scrim closes it too; a click inside it does not.
+    (await opened()).click();
+    expect(dialog()).not.toBeNull();
+    (dialog()!.parentElement as HTMLElement).click();
+    await waitFor(() => dialog() === null, "the dialog closed from the scrim");
   });
 
   it("is told, in words, why somebody the profile does not cover cannot be invited", async () => {

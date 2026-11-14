@@ -265,11 +265,11 @@ describe("the agents manager", () => {
   });
 });
 
-/** The agent picker in a session's head, opened (troupe #594). */
+/** The agent picker from a session's head, opened in its dialog (troupe #594). */
 async function openPicker(head: ParentNode): Promise<HTMLElement> {
   const toggle = await waitFor(() => head.querySelector<HTMLButtonElement>('button[aria-label="Agent"]'), "the agent switch");
   if (toggle.getAttribute("aria-expanded") !== "true") toggle.click();
-  return waitFor(() => head.querySelector<HTMLElement>('[role="group"][aria-label="Agents"]'), "the agent picker");
+  return waitFor(() => document.querySelector<HTMLElement>('[role="dialog"] [role="group"][aria-label="Agents"]'), "the agent picker");
 }
 
 /** A button of the picker's, once it is drawn and not busy. */

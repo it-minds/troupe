@@ -886,6 +886,28 @@ main {
 .dialog .actions button {
   min-height: var(--touch-target);
 }
+/* A form in a dialog stacks like the dialog does: its sentence, its fields, its actions. */
+.dialog > form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.dialog > form p {
+  margin: 0;
+}
+.dialog .people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+/* The agent picker in its dialog is as wide as the screen allows: three groups of agents
+   and the chosen one's facts read better side by side than squeezed. */
+.dialog.agent-dialog {
+  width: min(760px, 100%);
+}
 
 /* A choice is a stack of tiles, or a row of them, each saying what it means for the
    reader. A tile stands on its shadow and lifts two pixels under the pointer; the
@@ -1839,9 +1861,29 @@ details.advanced > summary {
 .backstage h3::before {
   content: "// ";
 }
+/* Up to five tabs in a pane 380px wide: they wrap onto a second line rather than run
+   past the pane's edge. */
 .backstage .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
+}
+.backstage section {
+  min-width: 0;
+}
+/* A table in the pane wraps its cells, the long values most of all, so it fits the pane
+   and the pane never scrolls sideways; what still does not fit scrolls inside the table's
+   own frame. */
+.backstage .table-scroll {
+  max-width: 100%;
+}
+.backstage .table th,
+.backstage .table td {
+  white-space: normal;
+}
+.backstage .table td {
+  overflow-wrap: anywhere;
+  min-width: 8ch;
 }
 
 /* The running order: done is struck through, the one in progress is lit along its
@@ -3899,14 +3941,8 @@ pre.instruction {
   font: var(--t-ui-small);
 }
 /* The one agent picker (#594): the agents grouped by where they come from, the chosen
-   one's facts and the three things done with it. In the head it opens below the switch,
-   on the panel, the full width of the head. */
-.agent-switch .agent-picker {
-  flex-basis: 100%;
-  padding: var(--space-3);
-  border: var(--bw-hairline) solid var(--border-strong);
-  background: var(--bg-panel);
-}
+   one's facts and the three things done with it. From the head it opens in a dialog, so
+   the head keeps its height; the dialog is its panel. */
 .agent-picker-list {
   display: flex;
   flex-direction: column;
@@ -4097,18 +4133,12 @@ pre.instruction {
 }
 
 /* A private session's question before it is offered for steering (troupe #765): a person is
-   asked, so it is the reserved colour's edge, and nothing is offered until they answer. */
-.remote-consent {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+   asked, so it is the reserved colour's edge, and nothing is offered until they answer. It
+   is a dialog the person opened themselves, so it stands on the shadow like the others. */
+.dialog.remote-consent {
   border-left: var(--bw-marker) solid var(--waiting-solid);
-  background: var(--waiting-bg);
 }
-.remote-consent p {
-  flex: 1 1 100%;
+.dialog.remote-consent p {
   margin: 0;
   color: var(--waiting-fg);
 }

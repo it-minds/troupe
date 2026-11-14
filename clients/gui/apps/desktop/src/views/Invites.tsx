@@ -17,6 +17,7 @@ import type { JSX } from "react";
 import { emptyTranscript, fold, inviteRefusal, personName, removedSentence, roleWords } from "@troupe/client";
 import type { AuthSession, DaemonClient, FleetRow, Invitee, InviteRole, Person, TranscriptState, TroupeEvent } from "@troupe/client";
 import { inviteLine } from "./Remote";
+import { Dialog } from "./bits";
 
 /** How the head reaches a session's invitations: the plane for a pod session, the daemon for a private one. */
 interface Inviting {
@@ -125,12 +126,21 @@ export function InviteControl({
   };
 
   const person = chosen || query.trim();
+  const refused = error && (
+    <p className="error" role="alert">
+      {error}
+    </p>
+  );
+  const close = (): void => {
+    setOpen(false);
+    setError(null);
+  };
 
   return (
     <div className="invites" role="group" aria-label="Shared with">
       {words && <span className="shared">{words}</span>}
       {owner && (
-        <button className="tab" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={busy}>
+        <button className="tab" onClick={() => setOpen((o) => !o)} aria-haspopup="dialog" aria-expanded={open} disabled={busy}>
           Invite
         </button>
       )}
@@ -142,67 +152,72 @@ export function InviteControl({
         ))}
 
       {open && (
-        <form
-          className="invite-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (person) void act(() => reach.invite(person, role));
-          }}
-        >
-          <p>
-            {row.kind === "private"
-              ? "Invite somebody by name into this private session. Its key goes from this computer into their own slot at the key manager; the plane cannot read it. Somebody invited to steer it does so only while you offer it from elsewhere. Taking it back seals what follows under a new key they never get, and what they read before stays read."
-              : "Invite somebody by name. They act under this profile's rules, and see it in their list."}
-          </p>
-          <label>
-            Person
-            <input
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setChosen("");
-              }}
-              placeholder="A name or an email"
-            />
-          </label>
-          {found.length > 0 && (
-            <ul className="people" aria-label="People">
-              {found.map((p) => (
-                <li key={p.subject}>
-                  <button
-                    type="button"
-                    className={chosen === p.subject ? "tab on" : "tab"}
-                    onClick={() => {
-                      setChosen(p.subject);
-                      setQuery(personName(p));
-                    }}
-                  >
-                    {personName(p)}
-                    {p.email && p.email !== personName(p) ? ` · ${p.email}` : ""}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <label>
-            They may
-            <select value={role} onChange={(e) => setRole(e.target.value as InviteRole)}>
-              <option value="observe">Follow it</option>
-              {/* A private session is steered only while its owner offers it, which they say yes to first. */}
-              <option value="control">{row.kind === "private" ? "Steer it while offered" : "Steer it"}</option>
-            </select>
-          </label>
-          <button type="submit" disabled={busy || !person}>
-            Invite
-          </button>
-        </form>
+        <Dialog label="Invite somebody" onClose={close} className="invite-dialog">
+          <form
+            className="invite-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (person) void act(() => reach.invite(person, role));
+            }}
+          >
+            <h1>Invite somebody</h1>
+            <p>
+              {row.kind === "private"
+                ? "Invite somebody by name into this private session. Its key goes from this computer into their own slot at the key manager; the plane cannot read it. Somebody invited to steer it does so only while you offer it from elsewhere. Taking it back seals what follows under a new key they never get, and what they read before stays read."
+                : "Invite somebody by name. They act under this profile's rules, and see it in their list."}
+            </p>
+            <label>
+              Person
+              <input
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setChosen("");
+                }}
+                placeholder="A name or an email"
+              />
+            </label>
+            {found.length > 0 && (
+              <ul className="people" aria-label="People">
+                {found.map((p) => (
+                  <li key={p.subject}>
+                    <button
+                      type="button"
+                      className={chosen === p.subject ? "tab on" : "tab"}
+                      onClick={() => {
+                        setChosen(p.subject);
+                        setQuery(personName(p));
+                      }}
+                    >
+                      {personName(p)}
+                      {p.email && p.email !== personName(p) ? ` · ${p.email}` : ""}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <label>
+              They may
+              <select value={role} onChange={(e) => setRole(e.target.value as InviteRole)}>
+                <option value="observe">Follow it</option>
+                {/* A private session is steered only while its owner offers it, which they say yes to first. */}
+                <option value="control">{row.kind === "private" ? "Steer it while offered" : "Steer it"}</option>
+              </select>
+            </label>
+            {refused}
+            <div className="actions">
+              <button type="button" onClick={close}>
+                Cancel
+              </button>
+              <button type="submit" className="primary" disabled={busy || !person}>
+                Invite
+              </button>
+            </div>
+          </form>
+        </Dialog>
       )}
 
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
+      {!open && refused}
     </div>
   );
 }
