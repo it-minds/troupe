@@ -175,6 +175,15 @@ export function Cost({ micros }: { micros: number | null | undefined }): JSX.Ele
   );
 }
 
+/** A plane named as the app names it to a person: its host, without the scheme. */
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 export function When({ iso }: { iso: string | null }): JSX.Element {
   const [, tick] = useState(0);
   useEffect(() => {

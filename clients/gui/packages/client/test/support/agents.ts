@@ -113,7 +113,7 @@ export const BUILTIN_AGENTS: FakeAgent[] = [
 
 const ORIGIN: Record<FakeAgentLayer, string> = { builtin: "Shipped", bundle: "Your organisation's", user: "Yours", project: "This repository's" };
 
-const ON_A_POD = "On a pod the agents come from the profile's bundle and are read-only here: change them in the console";
+const ON_A_POD = "On the platform the agents come from the profile's bundle and are read-only here.";
 
 function split(text: string): { yaml: string; body: string } {
   if (!/^---\r?\n/.test(text)) return { yaml: "", body: text };

@@ -219,11 +219,11 @@ defmodule Troupe.Client.Remote do
   def manage_sources(_sid, _method, _params),
     do: {:error, "a remote session's MCP servers and skills are its profile's"}
 
-  # A pod's agents are its profile's bundle (root Decision 841): the worker reads and checks
+  # A pod's agents are its profile's bundle, read-only here: the worker reads and checks
   # them, and says so in the same words it refuses a write with, which are never sent.
-  @pod_agents "On a pod the agents come from the profile's bundle and are read-only here: " <>
+  @pod_agents "On the platform the agents come from the profile's bundle and are read-only here: " <>
                 "an administrator changes them on the console's " <>
-                "Configure → Configuration bundles; ask one if you are not"
+                "Configure → Configuration bundles; ask one if you are not."
 
   @impl true
   # Named by the session and no path, which is what a session's token may read: its own

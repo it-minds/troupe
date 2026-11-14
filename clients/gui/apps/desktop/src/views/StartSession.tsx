@@ -116,7 +116,7 @@ export function StartSession({
   const me = auth?.me?.subject ?? null;
   const lastUsed = useMemo(() => {
     const mine = rows
-      .filter((r) => r.kind === "team" && r.profile && (me === null || r.owner === null || r.owner === me))
+      .filter((r) => r.kind === "team" && r.profile && startedByThem(r, me))
       .sort((a, b) => (b.lastActiveAt ?? "").localeCompare(a.lastActiveAt ?? ""));
     return mine[0]?.profile ?? (prefs.get(LAST_PROFILE) || null);
   }, [rows, me]);
@@ -126,7 +126,10 @@ export function StartSession({
   const chosenWhere: NewSessionWhere = whereChip ?? (auth ? "platform" : "local");
   const localAgents = useWorkspaceAgents(daemon, chosenWhere === "local" || text.includes("/local") ? folder.trim() : "");
   const profileNames = profiles.map((p) => p.name);
-  const preProfile = profiles.find((p) => p.name === (profileChip ?? auto.name));
+  // The agents a `#agent` token may name are the profile in force's: an `@profile` in the
+  // message, read first, else the chip, else the pick.
+  const tokenProfile = messageTokens(text, { profiles: profileNames, agents: [] }).profile;
+  const preProfile = profiles.find((p) => p.name === (tokenProfile ?? profileChip ?? auto.name));
   const agentNames = [...(preProfile?.agents ?? []), ...(localAgents.rows ?? []).filter((r) => (r.mode ?? "primary") === "primary").map((r) => r.name)];
   const names = { profiles: profileNames, agents: agentNames };
 
@@ -456,15 +459,16 @@ export function StartSession({
                   setTitle(e.target.value);
                   setTitleTouched(true);
                 }}
-                placeholder="Named from your first line"
+                placeholder="Named from the first line"
                 aria-label="What to call it"
               />
             </label>
             <span className="ns-chord" aria-hidden="true">
               Ctrl ↵ · curtain up
             </span>
-            <button type="submit" className={full ? "ns-start queue" : "ns-start"} disabled={blocked}>
-              {full ? "Queue it" : cleaned ? "Start" : "Start empty"}
+            {/* As wide as its widest words, so the row holds still while the label changes. */}
+            <button type="submit" className={full ? "ns-start queue" : "ns-start"} disabled={blocked} data-widest="Start empty">
+              <span>{full ? "Queue it" : cleaned ? "Start" : "Start empty"}</span>
             </button>
           </div>
         </form>
@@ -690,6 +694,16 @@ interface Recent {
 }
 
 /**
+ * A platform session the person started themselves: theirs, and begun by a person, not by a
+ * trigger or a GitHub run that only ran under their name. A row from before origins were
+ * kept carries none, and counts as theirs.
+ */
+function startedByThem(r: FleetRow, me: string | null): boolean {
+  const kind = r.origin?.kind;
+  return (me === null || r.owner === null || r.owner === me) && (kind === undefined || kind === "user");
+}
+
+/**
  * The newest sessions to start another like: the person's own on the platform and those on
  * this computer, not a branch. A plane row's agent is the one it runs as; a daemon row's
  * `profile` is its agent, and its folder its workspace.
@@ -698,7 +712,7 @@ function recentSessions(rows: FleetRow[], me: string | null): Recent[] {
   return rows
     .filter((r) => r.kind === "team" || r.kind === "local" || r.kind === "private")
     .filter((r) => !(r.raw as { parent?: unknown } | null)?.parent)
-    .filter((r) => r.kind !== "team" || me === null || r.owner === null || r.owner === me)
+    .filter((r) => r.kind !== "team" || startedByThem(r, me))
     .sort((a, b) => (b.lastActiveAt ?? "").localeCompare(a.lastActiveAt ?? ""))
     .map((r) => {
       const raw = (r.raw ?? {}) as { workspace?: unknown; agent?: unknown };
