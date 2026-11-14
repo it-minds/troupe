@@ -404,6 +404,13 @@ defmodule Troupe.Client do
   @spec subscribe_settings() :: :ok
   def subscribe_settings, do: Troupe.Client.Events.subscribe_settings()
 
+  @doc """
+  Whether this process is connected to the local daemon now. The settings subscription
+  also hears `{:troupe_daemon_link, up?}` as the connection comes up or goes down.
+  """
+  @spec daemon_up?() :: boolean()
+  def daemon_up?, do: Troupe.Client.Daemon.Link.up?()
+
   @spec watch(session_id(), boolean()) :: {:ok, atom()} | :ok | {:error, term()}
   def watch(sid, enabled?), do: impl(sid).watch(sid, enabled?)
 

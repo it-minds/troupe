@@ -279,14 +279,18 @@ and say where they are changed. What a definition holds, and the built-ins, are 
 ## A new session
 
 `/new` opens the new-session screen with the message box first. Under it one sentence
-says how the session will run, `Runs [on the platform] with [code] as [build] · everyone
-on core can open it` (or `Runs [on this computer] in [folder] as [build] · only you can
-open it`). Tab moves to the chips and on to CALLED, ←→ between the chips, Enter opens the
-picker under the sentence: where it runs (*On this computer* is greyed, with why, until
-the daemon link is up), the recent folders, the profiles with their room (`FULL` in
-amber), the agent (on this computer the agent picker above). A line under the sentence
-says why the profile was picked: the last you used while it has room, else the first with
-room. `@profile`, `#agent`, `/local` and `/platform` typed in the box set the chips and are
+says how the session will run, `Runs [on the platform] with [code] as [build (default)] ·
+everyone on core can open it` (or `Runs [on this computer] in [folder] as [build] · only
+you can open it`). On the platform the agent is the profile's default until you pick one,
+and the platform fills it in. Tab moves to the chips and on to CALLED, ←→ between the
+chips, Enter opens the picker under the sentence: where it runs (*On this computer* is
+greyed, with why, until the daemon link is up, and switches on by itself once `troupe
+daemon` runs), the recent folders, the profiles with their room (`FULL` in amber), the
+agent (on this computer the agent picker above). A line under the sentence says why the
+profile was picked: the last you used while it has room, else the first with room; or
+why nothing can start there: not signed in (`troupe login`), a sign-in run out, the
+plane's error, a profile you may not use. `--private` is this computer's: a platform
+session from this screen is the team's. `@profile`, `#agent`, `/local` and `/platform` typed in the box set the chips and are
 taken out before the agent reads it; in this box `@name` naming a profile is not a file
 path, and `/local` is not a command. CALLED is the first line until you edit it.
 

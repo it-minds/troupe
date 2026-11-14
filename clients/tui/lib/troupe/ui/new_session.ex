@@ -180,12 +180,14 @@ defmodule Troupe.UI.NewSession do
     Enum.join(init, ", ") <> " and " <> last
   end
 
-  @doc "Who can open it, as the sentence ends: it follows from where it runs."
+  @doc """
+  Who can open it, as the sentence ends: it follows from where it runs. Private is this
+  computer's: a platform session from the screen is the team's, `--private` or not.
+  """
   @spec who(:local | :platform, [String.t()] | nil, boolean()) :: String.t()
   def who(:local, _teams, _private?), do: "only you can open it"
-  def who(_platform, _teams, true), do: "only you can open it"
-  def who(:platform, [_ | _] = teams, false), do: "everyone on #{and_list(teams)} can open it"
-  def who(:platform, _none, false), do: "your team can open it"
+  def who(:platform, [_ | _] = teams, _private?), do: "everyone on #{and_list(teams)} can open it"
+  def who(:platform, _none, _private?), do: "your team can open it"
 
   @doc ~S|"Set from your message: /local @dev #plan.", or nil with no token.|
   @spec tokens_sentence(tokens()) :: String.t() | nil
@@ -215,5 +217,60 @@ defmodule Troupe.UI.NewSession do
   @doc "The line while this computer's daemon is not there."
   @spec local_down() :: String.t()
   def local_down,
-    do: "This computer's Troupe app isn't running yet. Start it, and this switches on by itself."
+    do:
+      "This computer's daemon isn't running. Start it with troupe daemon, and this switches on by itself."
+
+  @doc """
+  The line for a platform start this computer cannot make: why there is no plane (`reason`
+  as `Troupe.Client.signed_in_plane/0` answers it), and that Enter starts it here instead.
+  """
+  @spec no_plane(term(), String.t() | nil) :: String.t()
+  def no_plane(reason, profile) do
+    what = if profile, do: "#{profile} is not on offer", else: "the platform is not on offer"
+
+    case reason do
+      :local_only ->
+        "Local only is on, so the platform is not asked and #{what}. Enter starts it on this computer."
+
+      none when none in [nil, :logged_out] ->
+        "This computer is not signed in to a platform, so #{what}: run troupe login <plane-url>. " <>
+          "Enter starts it on this computer."
+
+      other ->
+        "The platform is not reachable (#{Troupe.Client.profile_refusal(other)}), so #{what}. " <>
+          "Enter starts it on this computer."
+    end
+  end
+
+  @doc """
+  The line for a plane that answered the profile or session listing with an error, as the
+  plane's error, not as having no profile.
+  """
+  @spec plane_error(term()) :: String.t()
+  def plane_error(:logged_out),
+    do:
+      "This computer is not signed in to the platform: run troupe login <plane-url>, then /new again."
+
+  def plane_error("signed out" <> _rest),
+    do: "Your sign-in to the platform has run out: run troupe login <plane-url>, then /new again."
+
+  def plane_error(reason),
+    do: "The platform did not list your profiles: #{Troupe.Client.profile_refusal(reason)}."
+
+  @doc "The line for a profile the person may not start a session on."
+  @spec not_allowed(String.t()) :: String.t()
+  def not_allowed(name),
+    do: "You may not start a session on #{name}. The profile chip lists the ones you may."
+
+  @doc "The line for an agent chip with nothing to pick: why there is nothing."
+  @spec no_agents(:local | :platform, String.t() | nil, boolean()) :: String.t()
+  def no_agents(:local, _profile, false = _daemon_up?),
+    do:
+      "This computer's daemon is not running, so there is no agent to pick. Start it with troupe daemon."
+
+  def no_agents(:local, _profile, true), do: "This computer has no agent to pick."
+  def no_agents(:platform, nil, _daemon_up?), do: "There is no profile to pick an agent from."
+
+  def no_agents(:platform, profile, _daemon_up?),
+    do: "#{profile} offers no agents to pick."
 end

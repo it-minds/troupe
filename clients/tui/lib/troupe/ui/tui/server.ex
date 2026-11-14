@@ -675,6 +675,31 @@ defmodule Troupe.UI.TUI.Server do
   def handle_info({:new_session_wait, _ref}, state), do: {:noreply, state, render?: false}
   def handle_info({:new_session_done, _ref, _result}, state), do: {:noreply, state, render?: false}
 
+  # This computer's daemon link came up or went down: `/new`'s "On this computer" follows
+  # it. Coming up, the agents are read again off this process before the page switches on;
+  # going down, the page greys and asks after the daemon until it is back.
+  def handle_info({:troupe_daemon_link, true}, %{new_page: %{} = page} = state) do
+    check_daemon(page)
+    {:noreply, state, render?: false}
+  end
+
+  def handle_info({:troupe_daemon_link, false}, %{new_page: %{} = page} = state) do
+    if page.daemon_up, do: check_daemon_later()
+    state = %{state | new_page: NewSessionPage.daemon(page, false), dirty: true}
+    {:noreply, schedule_tick(state), render?: false}
+  end
+
+  def handle_info(:new_page_daemon_check, %{new_page: %{daemon_up: false} = page} = state) do
+    check_daemon(page)
+    {:noreply, state, render?: false}
+  end
+
+  def handle_info({:new_page_daemon, up?, agents}, %{new_page: %{} = page} = state) do
+    unless up?, do: check_daemon_later()
+    state = %{state | new_page: NewSessionPage.daemon(page, up?, agents), dirty: true}
+    {:noreply, schedule_tick(state), render?: false}
+  end
+
   def handle_info(_msg, state), do: {:noreply, state, render?: false}
 
   # A scrolled-up pane that ends up at the bottom (because the transcript shrank) follows
@@ -2286,19 +2311,51 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # The agent on screen is this computer's: the page starts a session here as it, and never
+  # sends it to the plane, whose profile has a default of its own.
   defp open_new_page(state, opts, origin \\ :default) do
-    origin = if origin == :default, do: new_page_plane(), else: origin
+    {origin, why} = if origin == :default, do: new_page_plane(), else: {origin, nil}
     agent = if Client.remote?(state.session_id), do: nil, else: state.default_agent
-    opts = Keyword.merge([origin: origin, workspace: here(state), agent: agent], opts)
-    %{put_cmd(state, "") | focus: :new_session, new_page: NewSessionPage.open(opts)}
+
+    opts =
+      Keyword.merge(
+        [origin: origin, plane_why: why, workspace: here(state), local_agent: agent],
+        opts
+      )
+
+    page = NewSessionPage.open(opts)
+    unless page.daemon_up, do: check_daemon_later()
+    %{put_cmd(state, "") | focus: :new_session, new_page: page}
   end
 
-  # The plane this machine is signed in to, unless Local only: the screen offers it.
+  # The plane this machine is signed in to, unless Local only: the screen offers it, and
+  # says why where there is none.
   defp new_page_plane do
     case Client.signed_in_plane() do
-      {:ok, origin} -> origin
-      {:error, _none} -> nil
+      {:ok, origin} -> {origin, nil}
+      {:error, why} -> {nil, why}
     end
+  end
+
+  # While the page has "On this computer" greyed, the daemon is asked after again, so it
+  # switches on by itself once `troupe daemon` runs; off the screen's process, as every
+  # daemon call is.
+  @daemon_check_ms 3_000
+
+  defp check_daemon_later, do: Process.send_after(self(), :new_page_daemon_check, @daemon_check_ms)
+
+  defp check_daemon(%{folder: folder}) do
+    server = self()
+
+    Task.start(fn ->
+      agents =
+        case Client.profiles({:local, folder}) do
+          {:ok, rows} -> Enum.map(rows, & &1.name)
+          {:error, _} -> nil
+        end
+
+      send(server, {:new_page_daemon, Client.daemon_up?(), agents})
+    end)
   end
 
   defp new_page_key(key, %{new_page: page} = state) do
@@ -2383,13 +2440,6 @@ defmodule Troupe.UI.TUI.Server do
 
   defp open_new(state, :branch, _agent) do
     with {:ok, sid} <- fork_of(state), do: Client.fork_session(sid)
-  end
-
-  defp open_new(_state, {:remote, profile}, _agent) do
-    case ensure_plane(Client.default_plane()) do
-      nil -> {:error, "no plane; run troupe login <plane-url> first"}
-      origin -> Client.create_session(origin, %{profile: profile})
-    end
   end
 
   # What `--branch` forks (root Decision 812): the branch whose window is activated, its own
