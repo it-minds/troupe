@@ -103,6 +103,8 @@ export {
   FINISH_PARTS,
   LEGACY_BUDGET_OPTIONS,
 } from "./transcript.js";
+export { ONCE_ONLY_SENTENCE, bytes, callConsequence, callEvidence, callHeadline, callScopedLabel, counted, toolGlyph, toolOutcome, toolTarget } from "./calls.js";
+export type { CallEvidence, CallWhere } from "./calls.js";
 export { SCRATCH_KINDS, foldScratch, scratchDocumentOf, scratchLine, scratchSize, scratchVersion } from "./scratch.js";
 export type {
   Entry,
