@@ -96,7 +96,7 @@ defmodule Troupe.KeyLineTest do
 
         text = Enum.join(rows, "\n")
 
-        for key <- ["Shift/Alt+Enter new line", "1-3 like last time"],
+        for key <- ["Ctrl-J new line", "Tab to the recents"],
             do: assert(text =~ key, "#{key} is not on the screen at #{unquote(width)} columns")
       end
     end
