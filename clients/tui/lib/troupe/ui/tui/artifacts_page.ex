@@ -13,7 +13,9 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   is cut there, and its last line offers the browser. `p` publishes a file of the workspace
   as `/publish` does (a team's where a team is named, unless `me` follows), `l` copies a view
   link to one of the person's own, `/` filters, `r` reads the list again, Esc goes back.
-  Under Local only nothing is asked, and the page says so.
+  Under Local only nothing is asked, and the page says so. Where an administrator has
+  switched artifacts off, the plane says so in its answer, and the page says it in the
+  desktop app's words in place of the empty list's offer; `p` then only says it.
 
   It holds page state and answers keys; the server owns the process and the frame, as with
   HQ. Everything it asks goes through `Troupe.Client`, to this computer's daemon.
@@ -31,6 +33,9 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
 
   @tabs [:all, :organisation, :team, :shared, :private]
 
+  # What the page says where the plane answers that artifacts are off: the desktop app's words.
+  @off "An administrator has switched artifacts off on this plane."
+
   @type t :: %{
           session_id: String.t(),
           workspace: String.t(),
@@ -38,6 +43,7 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
           tab: atom(),
           rows: [map()],
           organisation: String.t() | nil,
+          enabled: boolean(),
           error: String.t() | nil,
           cursor: non_neg_integer(),
           filter: String.t(),
@@ -58,6 +64,7 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
       tab: Keyword.get(opts, :tab, :all),
       rows: [],
       organisation: nil,
+      enabled: true,
       error: nil,
       cursor: 0,
       filter: "",
@@ -79,7 +86,14 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
 
     case Client.artifacts() do
       {:ok, answer} ->
-        page = %{page | rows: answer.artifacts, organisation: answer.organisation, error: nil}
+        page = %{
+          page
+          | rows: answer.artifacts,
+            organisation: answer.organisation,
+            enabled: answer.enabled,
+            error: nil
+        }
+
         index = was && Enum.find_index(visible(page), &(&1["id"] == was["id"]))
         %{page | cursor: index || min(page.cursor, max(length(visible(page)) - 1, 0))}
 
@@ -126,6 +140,7 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   def key(page, %{code: code}) when code in ["down", "j"], do: {:ok, move(page, 1)}
   def key(page, %{code: "/"}), do: {:ok, %{page | filtering: true, status: nil}}
   def key(page, %{code: "r"}), do: {:ok, %{load(page) | status: "read again"}}
+  def key(%{enabled: false} = page, %{code: "p"}), do: {:ok, %{page | status: @off}}
   def key(page, %{code: "p"}), do: {:ok, %{page | prompt: "", status: nil}}
   def key(page, %{code: "enter"}), do: {:ok, open_selected(page, nil)}
   def key(page, %{code: "v"}), do: {:ok, versions(page)}
@@ -401,6 +416,12 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   def footer(%{versions: %{}}),
     do: " ↑↓ a version · Enter opens it in the browser · m reads it here · Esc back "
 
+  # Off, `p` only says so, and the line does not offer it.
+  def footer(%{enabled: false}),
+    do:
+      " artifacts — ←/→ or 1–5 who for · ↑↓ · Enter opens in the browser · v version · m read here · " <>
+        "l link · / filter · r refresh · Esc back "
+
   def footer(_page),
     do:
       " artifacts — ←/→ or 1–5 who for · ↑↓ · Enter opens in the browser · v version · m read here · " <>
@@ -487,6 +508,9 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
       cond do
         is_binary(page.error) ->
           [page.error]
+
+        rows == [] and not page.enabled ->
+          [@off]
 
         rows == [] and page.filter != "" ->
           ["Nothing matches “#{page.filter}”: Esc on / clears it."]

@@ -232,6 +232,49 @@ defmodule Troupe.ArtifactsScreenTest do
     eventually(fn -> user_state(pid).focus == :command end)
   end
 
+  # An administrator has switched artifacts off: the page says so in the desktop app's words,
+  # not the empty list's offer to publish, and p says only that (#894).
+  test "artifacts switched off are said, and p publishes nothing" do
+    remote = signed_in(artifacts: [], artifacts_enabled: false)
+    {sid, _, _} = start_session!(script: [])
+    {pid, session} = start_tui(sid)
+    type(pid, "/artifacts")
+    press(pid, "enter")
+    eventually(fn -> user_state(pid).focus == :artifacts end)
+
+    off = "An administrator has switched artifacts off on this plane."
+    text = screen_text(pid, session)
+    assert text =~ off
+    refute text =~ "Nothing here yet"
+    refute text =~ "p publish"
+
+    press(pid, "p")
+    text = screen_text(pid, session)
+    assert user_state(pid).artifacts_page.prompt == nil
+    assert text |> String.split(off) |> length() == 3
+    refute Enum.any?(FakeRemote.calls(remote), &match?({"artifact.publish", _}, &1))
+  end
+
+  # The key line at 80 columns lost its end, Esc back with it (#894).
+  for width <- [80, 120] do
+    test "the key line keeps Esc back and Enter at #{width} columns, the rest under it" do
+      signed_in(artifacts: @rows)
+      {sid, _, _} = start_session!(script: [])
+      {pid, session} = start_tui(sid, width: unquote(width))
+      type(pid, "/artifacts")
+      press(pid, "enter")
+      eventually(fn -> user_state(pid).focus == :artifacts end)
+
+      rows = screen(pid, session)
+      line = Enum.find(rows, &(&1 =~ "Esc back" and &1 =~ "Enter opens in the browser"))
+      assert line, Enum.join(rows, "\n")
+      text = Enum.join(rows, "\n")
+
+      for key <- ["v version", "m read here", "p publish", "l link", "/ filter", "r refresh"],
+          do: assert(text =~ key, "#{key} is not on the screen at #{unquote(width)} columns")
+    end
+  end
+
   test "under Local only the screen says the plane is not asked, and asks it nothing" do
     remote = signed_in(artifacts: @rows)
     Application.put_env(:troupe, :local_only, true)

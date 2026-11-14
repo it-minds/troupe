@@ -213,7 +213,8 @@ defmodule Troupe.CLI.Remote do
       %{"fingerprint" => offered} ->
         say.(
           "it now offers the key #{offered} instead, which is not trusted: check it with the " <>
-            "plane's administrators (the console shows it), then run troupe plane-key accept #{offered}"
+            "plane's administrators (the console shows it on Configure → Integrations), then " <>
+            "run troupe plane-key accept #{offered}"
         )
 
         1
