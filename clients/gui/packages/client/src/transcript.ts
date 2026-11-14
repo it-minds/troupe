@@ -353,6 +353,46 @@ export interface OnboardingSuggested {
   due: string | undefined;
   /** `first`, `stale`, `outdated` or `none`, the same way. */
   briefDue: string | undefined;
+  /**
+   * What the harness's sentence was made of, for a client that words it for its own
+   * surface: the parts due (`first`, `outdated`, `brief`), the workspace's proposals by
+   * kind (`instructions`, `rules`, ...), how many files a client would ask about, and the
+   * versions the outdated parts name. Empty or undefined from a daemon that sent none.
+   */
+  reasons: string[];
+  proposals: Record<string, number>;
+  files: number | undefined;
+  onboardedVersion: number | undefined;
+  onboardingVersion: number | undefined;
+  briefVersion: number | undefined;
+  surveyVersion: number | undefined;
+}
+
+/** The kinds of file an `onboarding_suggested` counts, in the harness's order, and their words. */
+const ONBOARD_KINDS: Array<[string, string, string]> = [
+  ["instructions", "AGENTS.md", "AGENTS.md files"],
+  ["rules", "rule", "rules"],
+  ["agents", "agent", "agents"],
+  ["commands", "command", "commands"],
+  ["skills", "skill file", "skill files"],
+  ["workflows", "workflow", "workflows"],
+  ["mcp", "MCP servers file", "MCP servers files"],
+  ["other", "other file", "other files"],
+];
+
+/**
+ * The files an `onboarding_suggested` would bring in, in words: "1 AGENTS.md and 2 rules"
+ * by kind as the harness counts them, else "4 files"; undefined when it said neither.
+ */
+export function onboardingFiles(o: Pick<OnboardingSuggested, "proposals" | "files">): string | undefined {
+  const words: string[] = [];
+  for (const [kind, one, many] of ONBOARD_KINDS) {
+    const n = o.proposals[kind];
+    if (n !== undefined && n > 0) words.push(n === 1 ? `1 ${one}` : `${n} ${many}`);
+  }
+  if (words.length > 0) return words.length === 1 ? words[0] : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
+  if (o.files !== undefined && o.files > 0) return o.files === 1 ? "1 file" : `${o.files} files`;
+  return undefined;
 }
 
 export interface PresenceMember {
@@ -1256,8 +1296,18 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
 
     // What a session's start found due: onboarding other tools' files, or the brief
     // (troupe Decisions 827 and 835). The harness's own sentence goes in the stream, and
-    // what is due is kept for the screen that asks.
-    case "onboarding_suggested":
+    // what is due, and what the sentence was made of, is kept for the screen that asks.
+    case "onboarding_suggested": {
+      const reasons = Array.isArray(d.data["reasons"]) ? d.data["reasons"].filter((r): r is string => typeof r === "string") : [];
+      const given = d.data["proposals"];
+      const proposals: Record<string, number> = {};
+      if (given && typeof given === "object" && !Array.isArray(given)) {
+        for (const [kind, n] of Object.entries(given as Record<string, unknown>)) {
+          const count = num(n);
+          if (count !== null) proposals[kind] = count;
+        }
+      }
+      const counts = d.data["counts"] as Record<string, unknown> | undefined;
       return {
         ...next,
         onboarding: {
@@ -1265,9 +1315,17 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
           workspace: str(d.data["workspace"]) || undefined,
           due: str(d.data["due"]) || undefined,
           briefDue: str(d.data["brief_due"]) || undefined,
+          reasons,
+          proposals,
+          files: num(counts?.["files"]) ?? undefined,
+          onboardedVersion: num(d.data["onboarded_version"]) ?? undefined,
+          onboardingVersion: num(d.data["onboarding_version"]) ?? undefined,
+          briefVersion: num(d.data["brief_version"]) ?? undefined,
+          surveyVersion: num(d.data["survey_version"]) ?? undefined,
         },
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: str(d.data["message"], "other tools' files are here: troupe onboard brings them in") }],
       };
+    }
 
     // Something the configuration did to the session, said once under the root: the
     // harness's own sentence (troupe #644, an organisation's output ceiling shortened the

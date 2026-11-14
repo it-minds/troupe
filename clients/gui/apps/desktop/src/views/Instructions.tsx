@@ -18,6 +18,9 @@ import { instructionLayers } from "@troupe/client";
 import type { DaemonClient, InstructionRow, SessionView } from "@troupe/client";
 import { Loading, Table } from "./bits";
 
+/** The layers whose document is a memory document on the plane, named in words rather than by a path. */
+const MEMORY_LAYERS: ReadonlySet<string> = new Set(["organisation", "team", "profile", "person"]);
+
 export function Instructions({
   view,
   daemon,
@@ -71,7 +74,8 @@ export function Instructions({
               <tr key={`${r.layer}-${r.what}-${i}`} className={r.inForce ? undefined : "muted"}>
                 <td>{r.heading}</td>
                 <td>
-                  <code>{r.what}</code>
+                  {/* A file's path is a token, set in code; a memory document's label is words. */}
+                  {MEMORY_LAYERS.has(r.layer) ? r.what : <code>{r.what}</code>}
                   {r.note && <div className="micro muted">{r.note}</div>}
                 </td>
                 <td>{r.source}</td>

@@ -53,7 +53,7 @@ import type { PaletteScreen } from "./CommandPalette";
 import { Files } from "./Files";
 import { PodConfig } from "./PodConfig";
 import { Publish } from "./Publish";
-import { Curtain, ProseFrame, ReasoningFrame, StripLine, ToolFrame, useNow } from "./Frames";
+import { Curtain, InlineMarkdown, ProseFrame, ReasoningFrame, StripLine, ToolFrame, useNow } from "./Frames";
 import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
 import { Instructions } from "./Instructions";
@@ -61,7 +61,7 @@ import { MemoryPane } from "./Memory";
 import type { MemoryAsk } from "./Memory";
 import { OfferLine, OfferPanel } from "./Offer";
 import { SessionServers } from "./SessionServers";
-import { StartLine, StartPanel } from "./Onboard";
+import { onboardingNote, StartLine, StartPanel } from "./Onboard";
 import { inviteLine, RemoteLine, RemoteOfferControl } from "./Remote";
 import { InviteControl } from "./Invites";
 import { Cost, initials, Loading, personColour, Pill, Sync, When, Where } from "./bits";
@@ -155,6 +155,12 @@ export function Session({
   // the librarian for a session started here; what they came to is said in the transcript.
   const start = useStartQuestions(daemon, sessionId, view.state.onboarding, { local: here, canAnswer: !readOnly, startedIn });
   const notes = useStartNotes(daemon, sessionId, start.state?.said, view.state.lastSeq);
+  // The start's suggestion in this app's words: the panel's answers while it asks them.
+  const suggested = view.state.onboarding;
+  const startWords = suggested ? { seq: suggested.seq, text: onboardingNote(suggested, start.state?.asking ?? null) } : undefined;
+  // The panels under the transcript give way to it, down to their header and answers.
+  const column = useRef<HTMLDivElement>(null);
+  useHeldPanels(column);
   // Where a session on this computer works: what the start screen was told, what the list
   // says, or what the start's event named; the memory pane asks about its repository.
   const workspace =
@@ -277,11 +283,12 @@ export function Session({
       {away && <Away summary={away} onSeen={seenAway} />}
 
       <div className="stagearea">
-        <div className="conversation">
+        <div className="conversation" ref={column}>
           <Stream
             key={sessionId}
             state={view.state}
             notes={notes}
+            startWords={startWords}
             self={self}
             local={kind === "local"}
             detail={detail.level}
@@ -362,6 +369,56 @@ export function Session({
       </div>
     </section>
   );
+}
+
+/**
+ * Holds each panel in the conversation's column (an approval, a question, an offer, the
+ * start's questions) at least as tall as its header, its answers and its body's minimum,
+ * as they are drawn now. The panel shrinks as a flex item so the transcript keeps its
+ * minimum and the composer stays on the screen, its body scrolling; CSS alone cannot say
+ * where to stop, since a panel's floor is the height of its header and answers, which
+ * wrap with the column's width. Below the floor the column scrolls instead, the panel
+ * sticky at its bottom, and nothing overlaps.
+ */
+function useHeldPanels(column: { current: HTMLElement | null }): void {
+  useLayoutEffect(() => {
+    const el = column.current;
+    if (!el) return;
+    const px = (v: string): number => parseFloat(v) || 0;
+    const hold = (): void => {
+      for (const panel of el.querySelectorAll<HTMLElement>(":scope > .approval")) {
+        const body = panel.querySelector<HTMLElement>(":scope > .panel-body");
+        if (!body) continue;
+        const style = getComputedStyle(panel);
+        const parts = [...panel.children] as HTMLElement[];
+        let floor = px(style.paddingTop) + px(style.paddingBottom) + px(style.borderTopWidth) + px(style.borderBottomWidth) + px(style.rowGap) * (parts.length - 1);
+        for (const part of parts) floor += part === body ? px(getComputedStyle(body).minHeight) : part.offsetHeight;
+        panel.style.minHeight = `${Math.ceil(floor)}px`;
+      }
+    };
+    hold();
+    // A browser without the observers (the tests' page) keeps the floor it was given once.
+    if (typeof ResizeObserver === "undefined" || typeof MutationObserver === "undefined") return;
+    // The column's width, and each header's and answers' height (a font arriving, a line wrapping).
+    const sizes = new ResizeObserver(hold);
+    const watch = (): void => {
+      sizes.disconnect();
+      sizes.observe(el);
+      for (const part of el.querySelectorAll(":scope > .approval > :not(.panel-body)")) sizes.observe(part);
+    };
+    watch();
+    // A panel comes and goes, or what it says changes; the transcript's own changes are not its.
+    const panels = new MutationObserver((changes) => {
+      if (changes.every((c) => c.target instanceof Element && c.target.closest(".stream"))) return;
+      watch();
+      hold();
+    });
+    panels.observe(el, { childList: true, subtree: true });
+    return () => {
+      sizes.disconnect();
+      panels.disconnect();
+    };
+  }, [column]);
 }
 
 // The start's lines by daemon connection and session, each where it was said, for as long
@@ -744,6 +801,7 @@ function useLoopAnswer(view: SessionHandle["view"]): LoopInfo | null | undefined
 function Stream({
   state,
   notes,
+  startWords,
   self,
   local,
   detail,
@@ -755,6 +813,8 @@ function Stream({
   state: TranscriptState;
   /** This app's own lines, each after the event it was said at. */
   notes: Note[];
+  /** The start's `onboarding_suggested` at `seq` in this app's words; a null text keeps the harness's. */
+  startWords?: { seq: number; text: string | null } | undefined;
   self: string | undefined;
   /** A session on this computer, whose model settings are this person's to change. */
   local: boolean;
@@ -801,7 +861,16 @@ function Stream({
         <Fragment key={`${d.entry.kind}-${d.entry.seq}`}>
           {d.strip && <StripLine strip={d.strip} onToggle={() => toggle(d.turn)} />}
           {!d.hidden && (
-            <StreamEntry drawn={d} self={self} local={local} readBlob={readBlob} onSetup={onSetup} onScratch={onScratch} onSave={onSave} />
+            <StreamEntry
+              drawn={d}
+              words={startWords && startWords.seq === d.entry.seq ? startWords.text : null}
+              self={self}
+              local={local}
+              readBlob={readBlob}
+              onSetup={onSetup}
+              onScratch={onScratch}
+              onSave={onSave}
+            />
           )}
           <NotesAt notes={notes} from={d.entry.seq} to={drawn[i + 1]?.entry.seq ?? Infinity} />
         </Fragment>
@@ -886,6 +955,8 @@ function NotesAt({ notes, from, to }: { notes: Note[]; from: number; to: number 
 type EntryProps = {
   /** The entry, with the level it is drawn at. */
   drawn: Drawn;
+  /** What this app says for the entry instead of its text, where it words it itself. */
+  words: string | null;
   self: string | undefined;
   local: boolean;
   readBlob: (blob: string) => Promise<string>;
@@ -903,6 +974,7 @@ function sameEntry(a: EntryProps, b: EntryProps): boolean {
   return (
     a.drawn.entry === b.drawn.entry &&
     a.drawn.level === b.drawn.level &&
+    a.words === b.words &&
     a.self === b.self &&
     a.local === b.local &&
     a.readBlob === b.readBlob &&
@@ -914,6 +986,7 @@ function sameEntry(a: EntryProps, b: EntryProps): boolean {
 
 const StreamEntry = memo(function StreamEntry({
   drawn,
+  words,
   self,
   local,
   readBlob,
@@ -1030,7 +1103,9 @@ const StreamEntry = memo(function StreamEntry({
           <p
             className={`note ${entry.type === "llm_error" || entry.type === "budget_exhausted" || entry.type === "agent_failed" ? "error" : ""} ${entry.type === "profile_switched" ? "switched" : ""}`}
           >
-            {entry.text}
+            {/* The start's suggestion is the harness's sentence, written for a terminal in
+                Markdown: in this app's words where it has them, else rendered, never raw. */}
+            {entry.type === "onboarding_suggested" ? (words ?? <InlineMarkdown text={entry.text} />) : entry.text}
           </p>
           {step && (
             <p className="note">

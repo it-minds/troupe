@@ -11,8 +11,8 @@
 // says why and nothing is asked.
 
 import type { JSX } from "react";
-import { describeItem } from "@troupe/client";
-import type { StartAnswer, StartQuestion, StartState } from "@troupe/client";
+import { describeItem, onboardingFiles } from "@troupe/client";
+import type { OnboardingSuggested, StartAnswer, StartQuestion, StartState } from "@troupe/client";
 import { Pill } from "./bits";
 import { Mask } from "./brand";
 
@@ -31,7 +31,10 @@ export function StartPanel({ state, onAnswer }: { state: StartState; onAnswer: (
         <Pill status="waiting" />
         <h2>{asking.text}</h2>
       </header>
-      <Body asking={asking} />
+      {/* The files and the diff scroll; the header and the answers stay on the screen. */}
+      <div className="panel-body">
+        <Body asking={asking} />
+      </div>
       {state.error && <p className="also error">{state.error}</p>}
       <div className="answers">
         {answers(asking).map(([answer, label, kind]) => (
@@ -125,6 +128,40 @@ function Diff({ text }: { text: string }): JSX.Element {
       ))}
     </pre>
   );
+}
+
+/**
+ * The start's `onboarding_suggested` in this app's words, from what the harness's
+ * sentence was made of. The harness words it for a terminal (`troupe onboard`,
+ * `/memory refresh`); here the panel under the transcript asks, so the line names the
+ * panel's answers while the panel asks that question, and otherwise only says what is
+ * due, naming nothing that is not on the screen. Null from a daemon that sent no
+ * reasons or no count of the files, whose own sentence is then drawn instead.
+ */
+export function onboardingNote(o: OnboardingSuggested, asking: StartQuestion | null): string | null {
+  if (o.reasons.length === 0) return null;
+  const onboard = asking?.kind === "onboard";
+  const sentences: string[] = [];
+  for (const reason of o.reasons) {
+    if (reason === "first") {
+      const files = onboardingFiles(o);
+      if (files === undefined) return null;
+      sentences.push(
+        onboard
+          ? `Other tools' files are here: Onboard brings in ${files} as Troupe's own files, and Review shows each as a diff first. Nothing is written until you choose.`
+          : `Other tools' files are here: onboarding would bring in ${files} as Troupe's own files.`,
+      );
+    } else if (reason === "outdated") {
+      const was = o.onboardedVersion === undefined ? "older onboarding rules" : `version ${o.onboardedVersion} of the onboarding rules`;
+      const now = o.onboardingVersion === undefined ? "" : `, and this build's are version ${o.onboardingVersion}`;
+      sentences.push(`This workspace was onboarded under ${was}${now}${onboard ? ": Re-run shows what they would write now." : "."}`);
+    } else if (reason === "brief") {
+      const was = o.briefVersion === undefined ? "an older version" : `version ${o.briefVersion}`;
+      const now = o.surveyVersion === undefined ? "" : `, and this build's is version ${o.surveyVersion}`;
+      sentences.push(`The project brief was written by ${was} of the librarian's survey${now}${asking?.kind === "brief" ? ": Re-run has the librarian write it again." : "."}`);
+    }
+  }
+  return sentences.length > 0 ? sentences.join(" ") : null;
 }
 
 /**

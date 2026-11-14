@@ -89,8 +89,10 @@ describe("a session's start in a workspace onboarding is due in", () => {
     await startIn(REPO);
 
     const question = await asking(QUESTION);
-    // The harness's own line is in the stream too, as it was before anything asked.
-    await sees("Other tools' files are here");
+    // The start's line is in the stream too, in this app's words: what the panel's answers
+    // do, never the terminal's command or its Markdown (troupe #895).
+    await sees("Other tools' files are here: Onboard brings in 2 AGENTS.md files and 2 rules as Troupe's own files, and Review shows each as a diff first.");
+    expect(document.querySelector(".stream")!.textContent).not.toMatch(/`|troupe onboard/);
     // The files it is about, and what it passed over.
     expect([...question.querySelectorAll(".onboard-files li")].map((li) => li.textContent)).toEqual([
       "AGENTS.md new, and not there yet, from CLAUDE.md with .claude/CLAUDE.md",
@@ -264,6 +266,9 @@ describe("a team session", () => {
     const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("Plan the release")), "the team session's row");
     row.click();
     await waitFor(() => says("would bring in 2 rules"), "the harness's line");
+    // Nothing here words it, so the harness's sentence is drawn, its Markdown rendered.
+    expect(document.querySelector(".stream code")?.textContent).toBe("troupe onboard");
+    expect(document.querySelector(".stream")!.textContent).not.toContain("`");
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(panel()).toBeNull();
     expect(calls()).toEqual([]);

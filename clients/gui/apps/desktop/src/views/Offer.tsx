@@ -36,22 +36,25 @@ export function OfferPanel({ ask, onAnswer }: { ask: OfferAsk; onAnswer: (allow:
         <Pill status="waiting" />
         <h2>Offer your servers to this session?</h2>
       </header>
-      <p className="consequence">{ask.prompt}</p>
-      <p className="also">
-        The calls are made on this computer with your sign-in to {list(ask.servers)}. The session sees the tools, what it asks them and what
-        they answer, and never your sign-in. Everyone in it can see that it uses tools on your machine.
-      </p>
-      {picking && (
-        <fieldset className="servers" aria-label="Which servers to offer">
-          {ask.servers.map((server) => (
-            <label key={server} className="inline">
-              <input type="checkbox" checked={ticked.includes(server)} onChange={() => toggle(server)} disabled={answered} />
-              {server}
-              <span className="muted"> · {count(ask.tools.filter((t) => t.startsWith(`${server}.`)).length)}</span>
-            </label>
-          ))}
-        </fieldset>
-      )}
+      {/* What is offered scrolls; the header and the answers stay on the screen. */}
+      <div className="panel-body">
+        <p className="consequence">{ask.prompt}</p>
+        <p className="also">
+          The calls are made on this computer with your sign-in to {list(ask.servers)}. The session sees the tools, what it asks them and what
+          they answer, and never your sign-in. Everyone in it can see that it uses tools on your machine.
+        </p>
+        {picking && (
+          <fieldset className="servers" aria-label="Which servers to offer">
+            {ask.servers.map((server) => (
+              <label key={server} className="inline">
+                <input type="checkbox" checked={ticked.includes(server)} onChange={() => toggle(server)} disabled={answered} />
+                {server}
+                <span className="muted"> · {count(ask.tools.filter((t) => t.startsWith(`${server}.`)).length)}</span>
+              </label>
+            ))}
+          </fieldset>
+        )}
+      </div>
       <div className="answers">
         <button className="allow" onClick={() => answer(picking ? offering : true)} disabled={answered || offering.length === 0}>
           {picking && offering.length < ask.servers.length ? `Offer ${list(offering)}` : "Offer them"}
