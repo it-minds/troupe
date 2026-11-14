@@ -64,8 +64,9 @@ export const PERSON_BUDGET: number | null = 150_000_000;
 
 /**
  * Two profiles: `dev`, the full one, whose `core` grant leaves out the wiki server; and
- * `ux`, a lean one whose rule leaves out `build` and the librarian and whose `core` grant
- * leaves out `plan`.
+ * `ux`, a lean one with a primary of its bundle's own, whose rule leaves out `build` and
+ * the librarian and whose `core` grant leaves out `plan`: a session there starts as
+ * `designer`, the one primary left.
  */
 export function exampleProfiles(): FakeProfileSpec[] {
   return [
@@ -97,7 +98,7 @@ export function exampleProfiles(): FakeProfileSpec[] {
       bundle_version: "3",
       bundle_hash: "sha256:abc",
       bundle: {
-        agents: [],
+        agents: [{ name: "designer", mode: "primary", description: "Works from the design files and the component library" }],
         skills: [],
         mcp_servers: [{ name: "figma", url: "https://figma.example.com/mcp", credential_mode: "person", permission: "auto", tools: "all" }],
       },

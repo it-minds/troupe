@@ -158,7 +158,12 @@ export class FakeWorker {
     return this.clients.size;
   }
 
-  createSession(id: string, params: { workspace?: string; profile?: string; agent?: string; title?: string } = {}): Session {
+  /**
+   * A session placed here, as `session.activate` places one: `agent` is the one the plane
+   * sends (it resolves the profile's default itself), and `prompt`, on a first activation
+   * only, is the session's first turn, said by `owner` and answered like any other.
+   */
+  createSession(id: string, params: { workspace?: string; profile?: string; agent?: string; title?: string; prompt?: string; owner?: string } = {}): Session {
     const session: Session = {
       id,
       log: new SessionLog(),
@@ -188,6 +193,8 @@ export class FakeWorker {
       origin: { kind: "user" },
     });
     session.log.append("agent_started", { profile: session.profile, mode: session.agent, bundle_version: "3" });
+    const prompt = params.prompt?.trim();
+    if (prompt) void this.turn(session, prompt, `c-first-${id}`, { sub: params.owner ?? "user" });
     return session;
   }
 
@@ -690,7 +697,7 @@ export class FakeWorker {
    * One turn. The prefix of the prompt picks the script, so a test asks for the
    * behaviour it needs rather than for a model.
    */
-  private async turn(session: Session, text: string, commandId: string, token: PodToken): Promise<void> {
+  private async turn(session: Session, text: string, commandId: string, token: Pick<PodToken, "sub">): Promise<void> {
     const actor = { kind: "user", subject: token.sub };
     session.log.append("input_accepted", { command_id: commandId, author: token.sub }, actor);
     session.log.append("user_input", { source: "user", text }, actor);
