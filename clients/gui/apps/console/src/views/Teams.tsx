@@ -162,7 +162,7 @@ function Unlinked({ teams, onPick }: { teams: AdminTeam[]; onPick: (group: Admin
               <th>Group</th>
               <th>Id at the provider</th>
               <th>Last seen</th>
-              <th aria-label="Actions" />
+              <th className="row-actions" aria-label="Actions" />
             </tr>
           </thead>
           <tbody>

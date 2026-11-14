@@ -127,22 +127,24 @@ function TokenPermissions({ test }: { test: GitHubRepositoryTest }): JSX.Element
         A token for <span className="mono">{test.name}</span> (installation {test.installation_id}) was minted
         {test.revoked ? " and revoked at once" : ", and GitHub did not confirm it revoked: it expires within the hour"}. It is never shown.
       </p>
-      <table className="permissions">
-        <thead>
-          <tr>
-            <th scope="col">Permission</th>
-            <th scope="col">There</th>
-          </tr>
-        </thead>
-        <tbody>
-          {keys.map((k) => (
-            <tr key={k}>
-              <th scope="row">{PERMISSION_WORDS[k] ?? k.replace(/_/g, " ")}</th>
-              <td>{test.permissions[k] ?? "none"}</td>
+      <div className="scroll">
+        <table className="permissions">
+          <thead>
+            <tr>
+              <th scope="col">Permission</th>
+              <th scope="col">There</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {keys.map((k) => (
+              <tr key={k}>
+                <th scope="row">{PERMISSION_WORDS[k] ?? k.replace(/_/g, " ")}</th>
+                <td>{test.permissions[k] ?? "none"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
