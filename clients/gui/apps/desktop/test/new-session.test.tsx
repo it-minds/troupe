@@ -9,7 +9,7 @@ import { useState } from "react";
 import type { JSX } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
-import { DaemonClient, webTokenStore } from "@troupe/client";
+import { DaemonClient, LINES, webTokenStore } from "@troupe/client";
 import { App } from "../src/App";
 import { StartSession, castingTiming } from "../src/views/StartSession";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
@@ -78,6 +78,8 @@ describe("the new-session screen", () => {
     expect(why(s)).toBe("Picked dev: the first profile with room right now.");
     // at once: the message box is the first thing on the screen.
     expect(s.querySelector("textarea")).toBe(ask(s));
+    // The quip under the heading is one of the shared sentences.
+    expect(LINES.start_screen as readonly string[]).toContain(s.querySelector(".ns-quip")?.textContent);
 
     type(ask(s), "Rewrite the placement loop. Corners first.");
     await waitFor(() => called(s).value === "Rewrite the placement loop", "the title from the first line");
@@ -165,6 +167,12 @@ describe("the new-session screen", () => {
     queue.click();
 
     await sees("Waiting for a free place in dev");
+    // Each step says its own line after its facts: the wait from the waiting list, the rest from casting.
+    const asides = [...document.querySelectorAll(".ns-steps .ns-aside")].map((a) => a.textContent?.replace("// ", ""));
+    expect(asides).toHaveLength(3);
+    expect(LINES.waiting_for_a_place as readonly (string | undefined)[]).toContain(asides[1]);
+    for (const i of [0, 2]) expect(LINES.casting as readonly (string | undefined)[]).toContain(asides[i]);
+    expect(new Set(asides).size).toBe(3);
     const pending = [...h.plane.rows.values()].find((r) => r.state === "pending")!;
     await waitFor(() => h.plane.mints.filter((id) => id === pending.id).length >= 2, "token.mint asked again");
     // at once: still waiting, so nothing has opened.

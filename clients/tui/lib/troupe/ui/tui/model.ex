@@ -14,7 +14,7 @@ defmodule Troupe.UI.TUI.Model do
 
   alias Troupe.Client.Message
   alias Troupe.Event
-  alias Troupe.UI.ModelError
+  alias Troupe.UI.{Lines, ModelError}
 
   @typedoc "A tool call in a transcript. `lines` is `result` split for rendering; `preview` is the approval preview (a diff for edits), when one was shown; `started_at` and `ended_at` are the times its events carried, for the duration its frame's header says (TUI Decision 161)."
   @type tool_entry :: %{
@@ -167,7 +167,7 @@ defmodule Troupe.UI.TUI.Model do
   last of those turns, from its end until the next one starts (TUI Decision 160).
   `curtain` counts the phases of each kind the window's own agent has been through in its
   turn (thinking, acting, compacting), which choose the curtain line's flourish so none
-  repeats within a turn (TUI Decision 161).
+  repeats within a turn; `turn` and `turn_at` count the turns and say when this one began.
   """
   @type window :: %{
           path: String.t(),
@@ -466,7 +466,7 @@ defmodule Troupe.UI.TUI.Model do
         |> ensure_agent(path)
         |> update_agent(path, fn a -> %{a | ended_at: nil} end)
         |> working()
-        |> new_curtain(path)
+        |> new_curtain(path, ts)
         |> sent(path, d, ts)
 
       :input when d.source in [:user, :watch] ->
@@ -476,7 +476,7 @@ defmodule Troupe.UI.TUI.Model do
         |> update_agent(path, fn a -> %{a | ended_at: nil} end)
         |> unconfirmed(d)
         |> working()
-        |> new_curtain(path)
+        |> new_curtain(path, ts)
         |> sent(path, d, ts)
 
       # A remote session renders your own input before the server has seen it;
@@ -956,8 +956,12 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   # The curtain line's phases start again with each turn of the window's own agent.
-  defp new_curtain(%{path: path} = w, path), do: Map.put(w, :curtain, %{})
-  defp new_curtain(w, _path), do: w
+  defp new_curtain(%{path: path} = w, path, ts) do
+    turn = Map.get(Map.get(w, :curtain, %{}), :turn, 0) + 1
+    Map.put(w, :curtain, %{turn: turn, turn_at: ts})
+  end
+
+  defp new_curtain(w, _path, _ts), do: w
 
   ## What the window's own agent is waited on
 
@@ -1118,7 +1122,7 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   # A phase is a change of what the window's own agent does: thinking, acting, compacting.
-  # The count of each kind picks the flourish (`Frames.curtain/3`), so the third time it
+  # The count of each kind picks the flourish (`curtain_line/4`), so the third time it
   # thinks in a turn reads differently from the first.
   @phases [:thinking, :acting, :compacting]
 
@@ -2459,33 +2463,32 @@ defmodule Troupe.UI.TUI.Model do
   defp reasoning_body(text),
     do: text |> sanitize() |> String.split("\n") |> Enum.map(&{:reasoning_body, &1})
 
-  ## The curtain line (TUI Decision 161)
+  ## The curtain line
 
   # The flourish, by what the window's own agent is doing and how many times it has done
   # that this turn: the second time it thinks reads differently from the first, and past
   # the end of a list the line is its facts alone. Theatre, dry, never sorry and never a
-  # person; the set is `docs/design/frames.md`'s, and nowhere else: not the headless
-  # printer, `troupe bench`, CI or `--json`, which never draw this line.
-  @curtain %{
-    starting: ["the house lights go down"],
-    thinking: [
-      "the actors are powdering their nose",
-      "running lines in the wings",
-      "the prompter finds the page"
-    ],
-    acting: ["fetching props", "shifting the scenery", "the stagehands are at it"],
-    reading: ["reading the script", "checking the prompt book", "rereading the second act"],
-    compacting: ["cutting the second act", "trimming for time"]
-  }
+  # person; the words are `docs/design/lines.json`'s, taken in an order shuffled from the
+  # turn's seed (`curtain_seed/1`), and nowhere else: not the headless printer, `troupe
+  # bench`, CI or `--json`, which never draw this line. A turn past five minutes says it
+  # is a long one in place of the phase's line, the same line for the rest of the turn.
+  @long_turn_ms 300_000
 
   @reads ~w(read_file grep glob list_files git_read read_branch read_output recall web_fetch)
 
-  @doc "The curtain line's written set, by what it is said over."
-  @spec curtain_set() :: %{atom() => [String.t()]}
-  def curtain_set, do: @curtain
+  @doc """
+  The seed the window's own agent's turn takes its lines in the order of: the session's
+  id, else the window's path, and the turn's number, so two turns do not open the same
+  way and nothing repeats within one.
+  """
+  @spec curtain_seed(window()) :: String.t()
+  def curtain_seed(w) do
+    curtain = Map.get(w, :curtain, %{})
+    "#{Map.get(w, :session_id) || w.path}/#{Map.get(curtain, :turn, 0)}"
+  end
 
   @doc """
-  The curtain line the pane draws while a turn runs (TUI Decision 161): the flourish as a
+  The curtain line the pane draws while a turn runs: the flourish as a
   prefix, then the facts, `activity_line/4`'s words, which are always there and always in
   the same place — `◐ the actors are powdering their nose — thinking (00:12)`. Waiting on
   a person, a model error and a subagent's own pane get the facts alone, and so does a
@@ -2525,26 +2528,32 @@ defmodule Troupe.UI.TUI.Model do
   defp flourish(%{path: path} = w, path, now) do
     agent = Map.get(w.agents, path, new_agent())
     kind = Map.get(w.activity, path)
-    count = Map.get(Map.get(w, :curtain, %{}), kind, 1)
+    curtain = Map.get(w, :curtain, %{})
+    count = Map.get(curtain, kind, 1)
+    seed = curtain_seed(w)
+    long? = long_turn?(curtain, now)
 
     case {waiting(w, path, now), kind, running_names(agent)} do
       {{:request, ms}, _kind, _names} when ms >= @no_request_ms -> nil
       {{:answer, ms}, _kind, _names} when ms >= @no_answer_ms -> nil
-      {{:request, _ms}, _kind, []} -> Enum.at(@curtain.starting, 0)
-      {_wait, nil, []} -> Enum.at(@curtain.starting, 0)
-      {_wait, nil, names} -> Enum.at(phrases(names), 0)
-      {_wait, :thinking, _names} -> Enum.at(@curtain.thinking, count - 1)
-      {_wait, :compacting, _names} -> Enum.at(@curtain.compacting, count - 1)
-      {_wait, :acting, [_ | _] = names} -> Enum.at(phrases(names), count - 1)
-      {_wait, :acting, []} -> Enum.at(@curtain.acting, count - 1)
+      {_wait, kind, _names} when long? and kind in @phases -> Lines.first(:long_turn, seed)
+      {{:request, _ms}, _kind, []} -> Lines.first(:starting, seed)
+      {_wait, nil, []} -> Lines.first(:starting, seed)
+      {_wait, nil, names} -> Lines.pick(phrases(names), seed, 1)
+      {_wait, :thinking, _names} -> Lines.pick(:thinking, seed, count)
+      {_wait, :compacting, _names} -> Lines.pick(:compacting, seed, count)
+      {_wait, :acting, [_ | _] = names} -> Lines.pick(phrases(names), seed, count)
+      {_wait, :acting, []} -> Lines.pick(:acting, seed, count)
       _other -> nil
     end
   end
 
   defp flourish(_w, _path, _now), do: nil
 
-  defp phrases(names),
-    do: if(Enum.all?(names, &(&1 in @reads)), do: @curtain.reading, else: @curtain.acting)
+  defp long_turn?(%{turn_at: at}, now) when is_integer(at), do: now - at >= @long_turn_ms
+  defp long_turn?(_curtain, _now), do: false
+
+  defp phrases(names), do: if(Enum.all?(names, &(&1 in @reads)), do: :reading, else: :acting)
 
   defp running_names(agent),
     do: for({:tool, %{status: :running, name: name}} <- agent.transcript, do: name)

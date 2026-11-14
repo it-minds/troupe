@@ -1,4 +1,5 @@
 export * from "./types.js";
+export { LINES, first as firstLine, order as lineOrder, orderOf as lineOrderOf, pick as pickLine } from "./lines.js";export type { LineKind } from "./lines.js";
 export { TroupeConnection, TroupeRpcError, TroupeConnectionClosed, TroupeCallTimedOut, callTimeout, callTimeouts, waitWords } from "./connection.js";
 export type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
 export { PlaneClient, PlaneHttpError, normalizeEndpoint } from "./plane.js";

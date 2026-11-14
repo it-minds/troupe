@@ -25,16 +25,8 @@ defmodule Troupe.UI.TUI.NewSessionPage do
   alias ExRatatui.Text.{Line, Span}
   alias ExRatatui.Widgets.{Block, Paragraph}
   alias Troupe.Client
-  alias Troupe.UI.NewSession
+  alias Troupe.UI.{Lines, NewSession}
   alias Troupe.UI.TUI.{Input, Theme}
-
-  @quips [
-    "The stage is set. Give them the plot and step into the wings.",
-    "No auditions today. Everyone already knows their lines.",
-    "Break a leg. Or a build. Preferably not production.",
-    "Every good run starts with a cue line.",
-    "The house lights are down. What's the scene?"
-  ]
 
   @typedoc "The screen's state: a plain map, as HQ's is."
   @type t :: map()
@@ -53,6 +45,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     workspace = Keyword.fetch!(opts, :workspace)
     {profiles, sessions, plane_error} = plane_rows(origin)
     agents = local_agents(workspace)
+    seed = Keyword.get_lazy(opts, :seed, fn -> System.os_time(:millisecond) end)
 
     %{
       origin: origin,
@@ -82,7 +75,8 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       last_used: last_used(sessions),
       daemon_up: Keyword.get_lazy(opts, :daemon_up, &Client.daemon_up?/0),
       ceiling: %{},
-      quip: Enum.random(@quips),
+      seed: seed,
+      quip: Lines.first(:start_screen, seed),
       casting: nil
     }
   end
@@ -618,8 +612,12 @@ defmodule Troupe.UI.TUI.NewSessionPage do
   def footer(%{casting: %{failed: f}}) when is_binary(f),
     do: " casting — Enter or Esc back to the form "
 
-  def footer(%{casting: %{}}),
-    do: " casting — Esc stops waiting; the session starts by itself when a place frees "
+  def footer(%{casting: %{waiting: true}} = page),
+    do:
+      " #{Lines.first(:waiting_for_a_place, page.seed)} — Esc stops waiting; it starts when a place frees "
+
+  def footer(%{casting: %{}} = page),
+    do: " #{Lines.first(:casting, page.seed)} — Esc stops waiting; it starts when a place frees "
 
   def footer(%{open: open}) when open != nil, do: " ↑↓ move · Enter picks · Esc closes "
 

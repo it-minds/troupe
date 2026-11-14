@@ -30,7 +30,9 @@ import {
   ceilingSentence,
   cleanMessage,
   defaultProfileAgent,
+  firstLine,
   fullHouseSentence,
+  pickLine,
   messageTokens,
   profileRoom,
   stripTokens,
@@ -53,17 +55,8 @@ const LAST_PROFILE = "newSession.profile";
 /** How long the casting screen waits for the first turn to start before it opens the session anyway. */
 export const castingTiming = { firstTurnMs: 1500, retryFloorMs: 250 };
 
-// Decoration: one per page load, so it does not flicker while typing. Every line that
-// says something stays plain beside it.
-const QUIPS = [
-  "The stage is set. Give them the plot and step into the wings.",
-  "No auditions today. Everyone already knows their lines.",
-  "Break a leg. Or a build. Preferably not production.",
-  "Every good run starts with a cue line.",
-  "The house lights are down. What’s the scene?",
-];
-const CURTAINS = ["Curtain up.", "Places, everyone.", "Lights, cues, action."];
-const pickOne = (xs: string[]): string => xs[Math.floor(Math.random() * xs.length)] ?? xs[0]!;
+// Decoration: one per page load, so it does not flicker while typing; the lines are
+// docs/design/lines.json's, taken for a seed. Every line that says something stays plain beside it.
 
 export function StartSession({
   auth,
@@ -93,8 +86,9 @@ export function StartSession({
   /** Open the page saying what a profile gives a session. */
   onProfile?: ((name: string) => void) | undefined;
 }): JSX.Element {
-  const [quip] = useState(() => pickOne(QUIPS));
-  const [curtain] = useState(() => pickOne(CURTAINS));
+  const [seed] = useState(() => String(Date.now()));
+  const quip = firstLine("start_screen", seed);
+  const curtain = firstLine("curtain_up", seed);
   const { profiles, error: profilesError } = useProfiles(auth);
   const localReady = daemon !== null && daemonStatus === "connected";
 
@@ -266,6 +260,7 @@ export function StartSession({
       <CastingScreen
         casting={casting}
         curtain={curtain}
+        seed={seed}
         rows={rows}
         onRoute={(c) => onCreated(c.id!, c.kind!, c.workspace ?? undefined)}
         onBack={() => {
@@ -849,12 +844,15 @@ function refusal(e: unknown): string {
 function CastingScreen({
   casting: c,
   curtain,
+  seed,
   rows,
   onRoute,
   onBack,
 }: {
   casting: Casting;
   curtain: string;
+  /** What the step lines are taken in the order of. */
+  seed: string;
   rows: FleetRow[];
   onRoute: (c: Casting) => void;
   onBack: () => void;
@@ -880,9 +878,9 @@ function CastingScreen({
   }, [ready, c, onRoute]);
 
   const steps: Array<[string, string]> = [
-    [c.where === "local" ? `Opening ${c.folder} on this computer` : "Finding a machine on the platform", "building the set"],
-    [c.queued ? `Waiting for a free place in ${c.profile}` : `Setting up ${c.where === "local" ? c.agent : `${c.profile} as ${c.agent}`}`, c.queued ? "waiting in the wings" : "handing out scripts"],
-    [c.hasText ? "Handing over your instruction" : "Ready for your first message", "cue line"],
+    [c.where === "local" ? `Opening ${c.folder} on this computer` : "Finding a machine on the platform", pickLine("casting", seed, 1)!],
+    [c.queued ? `Waiting for a free place in ${c.profile}` : `Setting up ${c.where === "local" ? c.agent : `${c.profile} as ${c.agent}`}`, c.queued ? firstLine("waiting_for_a_place", seed) : pickLine("casting", seed, 2)!],
+    [c.hasText ? "Handing over your instruction" : "Ready for your first message", pickLine("casting", seed, 3)!],
   ];
 
   return (
