@@ -109,7 +109,10 @@ describe("the agent picker", () => {
     row.click();
     const head = await waitFor(() => document.querySelector<HTMLElement>(".session-head"), "the session");
     (await waitFor(() => head.querySelector<HTMLButtonElement>('button[aria-label="Agent"]'), "the agent switch")).click();
-    const picker = await waitFor(() => head.querySelector<HTMLElement>('[role="group"][aria-label="Agents"]'), "the picker");
+    // It opens in a dialog over the screen, so the head keeps its height.
+    const box = await waitFor(() => document.querySelector<HTMLElement>('[role="dialog"][aria-label="The agent this session runs"]'), "the agent's dialog");
+    expect(head.contains(box)).toBe(false);
+    const picker = await waitFor(() => box.querySelector<HTMLElement>('[role="group"][aria-label="Agents"]'), "the picker");
 
     (await waitFor(() => option(picker, "deploy"), "the bundle's agent")).click();
     expect(groupOf(picker, "deploy")).toBe("Your organisation's");

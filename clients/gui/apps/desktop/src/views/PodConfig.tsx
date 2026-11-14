@@ -44,7 +44,7 @@ export function PodConfig({ view }: { view: SessionView | null }): JSX.Element {
             <td>
               <code>{k.key}</code>
             </td>
-            <td>
+            <td title={k.withheld ? undefined : shown(k.value)}>
               {/* What it runs on, which the pod shows only to someone who may steer it. */}
               {k.withheld ? <span className="muted" title="Shown to the people who can steer this session">{shown(k.value)}</span> : shown(k.value)}
             </td>

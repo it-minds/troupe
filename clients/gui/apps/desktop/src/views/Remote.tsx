@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { PRIVATE_OFFER_SENTENCE, RESTART_SENTENCE, invitationWords, offerRestartWords, remoteOffer, remoteWhen, steerWords } from "@troupe/client";
 import type { DaemonClient, FleetRow, Invitation, PresenceMember, RemoteOffer, RemotePerson } from "@troupe/client";
+import { Dialog } from "./bits";
 
 type Role = "observe" | "control";
 
@@ -120,6 +121,18 @@ export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: Dae
   };
   const withdraw = (): Promise<void> => act(() => daemon.withdrawRemote(row.id));
   const steering = offer ? steeringWords({ ...offer, steering: steeringNow(offer.steering, presence) }) : null;
+  const refused = error && (
+    <p className="error" role="alert">
+      {error}
+    </p>
+  );
+  const sharing = open && !isPrivate;
+  const consenting = isPrivate && asking && !offer;
+  const close = (): void => {
+    setOpen(false);
+    setAsking(false);
+    setError(null);
+  };
 
   return (
     <div className="remote-offer" role="group" aria-label="Steer from elsewhere">
@@ -130,7 +143,7 @@ export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: Dae
           </span>
           {steering && <span className="steering">{steering}</span>}
           {!isPrivate && (
-            <button className="tab" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={busy}>
+            <button className="tab" onClick={() => setOpen((o) => !o)} aria-haspopup="dialog" aria-expanded={open} disabled={busy}>
               Share
             </button>
           )}
@@ -139,50 +152,71 @@ export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: Dae
           </button>
         </>
       ) : (
-        <button className="tab" onClick={() => (isPrivate ? setAsking((a) => !a) : setOpen((o) => !o))} aria-expanded={isPrivate ? asking : open} disabled={busy}>
+        <button
+          className="tab"
+          onClick={() => (isPrivate ? setAsking((a) => !a) : setOpen((o) => !o))}
+          aria-haspopup="dialog"
+          aria-expanded={isPrivate ? asking : open}
+          disabled={busy}
+        >
           Steer from elsewhere
         </button>
       )}
 
-      {isPrivate && asking && !offer && (
-        <div className="remote-consent" role="alertdialog" aria-label="Offer a private session">
+      {/* The question is the person's own to answer, so it waits for them on the shadow:
+          nothing is offered until they say yes, and Escape keeps it sealed. */}
+      {consenting && (
+        <Dialog label="Offer a private session" role="alertdialog" onClose={close} className="remote-consent">
+          <h1>Offer a private session</h1>
           <p>{PRIVATE_OFFER_SENTENCE}</p>
-          <button className="primary" onClick={() => void offerPrivate()} disabled={busy}>
-            Offer it
-          </button>
-          <button className="tab" onClick={() => setAsking(false)} disabled={busy}>
-            Keep it sealed
-          </button>
-        </div>
+          {refused}
+          <div className="actions">
+            <button className="tab" onClick={close} disabled={busy}>
+              Keep it sealed
+            </button>
+            <button className="primary" onClick={() => void offerPrivate()} disabled={busy}>
+              Offer it
+            </button>
+          </div>
+        </Dialog>
       )}
 
-      {open && !isPrivate && (
-        <form
-          className="remote-share"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void offerIt();
-          }}
-        >
-          <p>
-            Offer this session to the plane, so you can steer it from your other devices. The people you name can too.
-            Nothing listens on this computer: it keeps one connection to the plane while the session is offered.
-          </p>
-          <label>
-            Share with
-            <input value={share} onChange={(e) => setShare(e.target.value)} placeholder="ann@example.com, bo@example.com" />
-          </label>
-          <label>
-            They may
-            <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
-              <option value="control">Steer it</option>
-              <option value="observe">Follow it</option>
-            </select>
-          </label>
-          <button type="submit" disabled={busy}>
-            {offer ? "Share" : "Offer it"}
-          </button>
-        </form>
+      {sharing && (
+        <Dialog label={offer ? "Share this session" : "Steer from elsewhere"} onClose={close} className="remote-share-dialog">
+          <form
+            className="remote-share"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void offerIt();
+            }}
+          >
+            <h1>{offer ? "Share this session" : "Steer from elsewhere"}</h1>
+            <p>
+              Offer this session to the plane, so you can steer it from your other devices. The people you name can too.
+              Nothing listens on this computer: it keeps one connection to the plane while the session is offered.
+            </p>
+            <label>
+              Share with
+              <input value={share} onChange={(e) => setShare(e.target.value)} placeholder="ann@example.com, bo@example.com" />
+            </label>
+            <label>
+              They may
+              <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
+                <option value="control">Steer it</option>
+                <option value="observe">Follow it</option>
+              </select>
+            </label>
+            {refused}
+            <div className="actions">
+              <button type="button" onClick={close} disabled={busy}>
+                Cancel
+              </button>
+              <button type="submit" className="primary" disabled={busy}>
+                {offer ? "Share" : "Offer it"}
+              </button>
+            </div>
+          </form>
+        </Dialog>
       )}
 
       {offer && restart && (
@@ -191,11 +225,7 @@ export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: Dae
         </p>
       )}
 
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
+      {!sharing && !consenting && refused}
     </div>
   );
 }
