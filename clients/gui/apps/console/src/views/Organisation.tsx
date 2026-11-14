@@ -165,6 +165,7 @@ function DefaultRow({
             ].filter(Boolean)}
             verb={previewing === "reset" ? "Reset" : "Apply"}
             onCancel={() => setPreviewing(null)}
+            cancel={previewing === "put" ? "Back to editing" : "Cancel"}
             onConfirm={async () => {
               const answer = previewing === "reset" ? await admin.resetSetting(setting.key) : await admin.putSetting(setting.key, draft ?? "");
               const was = previewing;
@@ -298,6 +299,7 @@ function EnforcedSet({ setting, editable, onPut }: { setting: PlatformSetting; e
           effects={[...lines.map((l) => enforcing(keys.find((k) => k.key === l.field)!, l.to)), setting.consequence ?? ""].filter(Boolean)}
           verb="Apply"
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             const kept = Object.entries(set).filter(([key]) => rules.some((r) => r.key === key));
             const next = Object.fromEntries([...kept, ...Object.entries(asked).filter(([, v]) => v !== null)]);

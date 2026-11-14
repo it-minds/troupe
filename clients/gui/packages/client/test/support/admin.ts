@@ -1598,7 +1598,7 @@ export class FakeAdmin {
           ? { name: "Platform admins", ok: false, detail: "No platform admin group is set, so nobody who signs in is a platform admin.", took_ms: 0 }
           : members === null
             ? { name: "Platform admins", ok: false, detail: `${candidate} has never arrived in the ${claim} claim of anybody's token. Either the group id is wrong, or the provider is not sending group claims, or nobody in it has signed in yet.`, took_ms: 0 }
-            : { name: "Platform admins", ok: members.length > 0, detail: `${members.length} person/people known here carry ${candidate} in the ${claim} claim${you ? ", including you." : ", and you are not one of them."}`, took_ms: 0 };
+            : { name: "Platform admins", ok: members.length > 0, detail: `${members.length === 1 ? "1 person" : `${members.length} people`} known here ${members.length === 1 ? "carries" : "carry"} ${candidate} in the ${claim} claim${you ? ", including you." : ", and you are not one of them."}`, took_ms: 0 };
         const checks = [...this.providerChecks(this.signInValues()), adminCheck];
         return { result: { checks, ok: checks.every((c) => c.ok), group: candidate, redirect_uri: `${this.baseUrl()}/console` } };
       }
@@ -4165,9 +4165,9 @@ export function exampleAdmin(): FakeAdmin {
   });
   admin.github.webhook_secret_version = 1;
   admin.deliveries.push(
-    { id: "7a1e0c00-1", event: "issues", action: "opened", received_at: "2026-10-13T02:58:00Z", outcome: { runs: ["nightly-deps"] } },
+    { id: "7a1e0c00-1", event: "issues", action: "opened", received_at: "2026-10-13T02:58:00Z", outcome: { fired: [{ trigger: "nightly-deps", run: "r-0c11a7", session_id: null }] } },
     { id: "7a1e0c00-2", event: "pull_request_review", action: "submitted", received_at: "2026-10-13T09:12:00Z", outcome: { resumed: "s-7f3a9c24" } },
-    { id: "7a1e0c00-3", event: "push", action: null, received_at: "2026-10-13T09:30:00Z", outcome: { reason: "nothing here acts on a push" } },
+    { id: "7a1e0c00-3", event: "push", action: null, received_at: "2026-10-13T09:30:00Z", outcome: { ignored: "push is not an event this plane acts on" } },
   );
   admin.githubKnows = { app_id: 4242, slug: "troupe-example", fingerprint: "SHA256:qZk3cX9mVb2fT0aLr8Hn1yWp4sEo6uJd7gKi5", installations: [{ owner: "example-org", installation_id: 77001 }] };
   // The build box is a machine of somebody's, registered and enrolled; a second never was.

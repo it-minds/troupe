@@ -207,6 +207,11 @@ label code {
   text-transform: uppercase;
   white-space: nowrap;
 }
+/* An id in a status keeps its case: ids are case-sensitive, and upper-casing one names another. */
+.status code {
+  text-transform: none;
+  letter-spacing: 0;
+}
 .status.running {
   color: var(--running-fg);
 }
@@ -283,6 +288,21 @@ label code {
 .banner.breakglass p {
   margin: 0;
   max-width: var(--measure-reading);
+}
+.banner.refused {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-left-width: var(--bw-marker);
+  color: var(--text-body);
+}
+.banner.refused p {
+  margin: 0;
 }
 
 .wordmark {

@@ -92,7 +92,7 @@ describe("the group that decides who administers", () => {
     // A check for another value does not count for this one.
     expect(preview().disabled).toBe(true);
     button("Run the check", row("platform_admin_group")!)!.click();
-    await waitFor(() => says("3 person/people known here carry grp-core in the groups claim, including you."), "the passed check");
+    await waitFor(() => says("3 people known here carry grp-core in the groups claim, including you."), "the passed check");
     await waitFor(() => !preview().disabled, "the save unlocked");
     preview().click();
     button("Apply", await waitFor(() => row("platform_admin_group")!.querySelector(".preview") && row("platform_admin_group"), "the preview"))!.click();

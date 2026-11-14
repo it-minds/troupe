@@ -22,7 +22,7 @@ import { TEAM_TABS, href } from "../route";
 import type { TeamTab } from "../route";
 import { recorded, show, useConsole, useLoad } from "../console";
 import type { Load } from "../console";
-import { AuditNote, Empty, Field, Loaded, Locked, Preview, Region, Status, bytes, changed, count, money, useChange, when } from "./bits";
+import { AuditNote, Empty, Field, Loaded, Locked, Preview, Region, Status, bytes, changed, count, duration, money, useChange, when } from "./bits";
 import type { DiffLine, Done, FieldProps } from "./bits";
 import { Spend, Twice } from "./Teams";
 
@@ -48,7 +48,7 @@ export function Team({ name, tab }: { name: string; tab: TeamTab }): JSX.Element
           const team = teams.find((t) => t.name === name);
           if (!team) {
             return (
-              <Empty title={`No team called ${name}`}>
+              <Empty title={<>No team called <code>{name}</code></>}>
                 Or not one you administer. <a href={href({ page: "teams" })}>All teams</a>
               </Empty>
             );
@@ -213,6 +213,7 @@ function Members({ team, onApplied }: { team: AdminTeam; onApplied: () => void }
           ]}
           verb="Link"
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             await apply("team.link", team.name, () => admin.linkTeam(team.name, linking), `${linking} is linked to ${team.name}.`);
             setPreviewing(false);
@@ -418,6 +419,7 @@ function Access({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
           effects={grantWords(team, granting.profile, granting.volume, profiles.state === "ready" ? profiles.data.find((p) => p.name === granting.profile) : undefined)}
           verb="Grant"
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             await apply("team.grant", team.name, () => admin.grantTeam(team.name, granting.profile, granting.volume), `${team.name} may use ${granting.profile}.`);
             setPreviewing(false);
@@ -540,6 +542,7 @@ function Admins({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
           ].filter(Boolean)}
           verb="Name"
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             await apply("team.admin.add", team.name, () => admin.addTeamAdmin(team.name, asked), `${asked} administers ${team.name}.`);
             setPreviewing(false);
@@ -585,7 +588,7 @@ function valueWords(limit: Limit, value: unknown): string {
     case "money":
       return Number(value) === 0 ? "no ceiling" : money(Number(value));
     case "seconds":
-      return `${String(value)} s`;
+      return Number.isFinite(Number(value)) ? duration(Number(value)) : String(value);
     case "days":
       return `${String(value)} days`;
     case "mebibytes":
@@ -690,6 +693,7 @@ function Limits({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
           verb="Apply"
           typeToConfirm={erasesSooner ? team.name : null}
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             const changes = Object.fromEntries(lines.map((l) => [l.field, l.to]));
             const answer = await admin.updateTeam(team.name, changes);
@@ -713,7 +717,7 @@ function limitOf(field: string): Limit {
 function hintFor(limit: Limit, laddered: LadderValue | undefined): string | undefined {
   const unit =
     limit.kind === "money"
-      ? "In currency units; 0 is no ceiling."
+      ? "In dollars; 0 is no ceiling."
       : limit.kind === "seconds"
         ? "In seconds."
         : limit.kind === "days"
@@ -721,8 +725,19 @@ function hintFor(limit: Limit, laddered: LadderValue | undefined): string | unde
           : limit.kind === "mebibytes"
             ? "In MiB, for all the team's artifacts and their versions together; 0 is no quota."
             : "";
-  const ceiling = laddered ? `The platform allows at most ${valueWords(limit, laddered.ceiling)}.` : "";
+  const ceiling = laddered ? ceilingWords(limit, laddered.ceiling) : "";
   return [unit, ceiling].filter(Boolean).join(" ") || undefined;
+}
+
+/**
+ * What the rungs above a team allow, as a sentence: a switch is allowed or not, a number
+ * has a most it may be, and a rung with no ceiling allows anything.
+ */
+function ceilingWords(limit: Limit, ceiling: unknown): string {
+  if (limit.kind === "switch") return ceiling === false ? "The platform does not allow it." : "The platform allows it.";
+  if (ceiling === null || ceiling === undefined || ceiling === "") return "The platform sets no ceiling.";
+  if ((limit.kind === "money" || limit.kind === "mebibytes") && Number(ceiling) === 0) return "The platform sets no ceiling.";
+  return `The platform allows at most ${valueWords(limit, ceiling)}.`;
 }
 
 /** The ladder for one value: every rung that had an opinion, and the one in force. */
@@ -803,7 +818,7 @@ function consequence(team: string, line: DiffLine, laddered: LadderValue | undef
     case "budget_period":
       return to === "never" ? "The ceiling never turns over: what is spent stays spent." : "The ceiling turns over on the 1st of each month, UTC.";
     case "idle_timeout_seconds":
-      return `A ${team} session idle for ${show(to)} seconds goes dormant: it stops costing anything and wakes with its history.`;
+      return `A ${team} session idle for ${typeof to === "number" ? duration(to) : show(to)} goes dormant: it stops costing anything and wakes with its history.`;
     case "cache_eviction_days":
       return `A dormant ${team} session keeps its cache ${show(to)} days.`;
     case "erase_after_days":
@@ -981,6 +996,7 @@ function GitHub({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
           ]}
           verb="Apply"
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             const answer = await admin.updateTeam(team.name, { github: asked });
             setForm(null);

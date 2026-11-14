@@ -2486,12 +2486,15 @@ defmodule Troupe.Plane.Admin do
         OIDC.check_result(
           "Platform admins",
           members != [],
-          "#{length(members)} person/people known here carry #{candidate} in the #{claim} claim" <>
+          "#{people(length(members))} known here #{if length(members) == 1, do: "carries", else: "carry"} #{candidate} in the #{claim} claim" <>
             if(you, do: ", including you.", else: ", and you are not one of them."),
           0
         )
     end
   end
+
+  defp people(1), do: "1 person"
+  defp people(n), do: "#{n} people"
 
   defp presence(nil), do: nil
   defp presence(""), do: nil

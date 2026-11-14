@@ -136,6 +136,7 @@ export function PermissionRules({
           ]}
           verb="Apply"
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             const rules = ruleSetOf(after);
             const refused = checkRuleSet(rules);

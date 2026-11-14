@@ -177,6 +177,7 @@ function Document({
             setDraft(null);
           }}
           onCancel={() => setPreview(null)}
+          cancel="Back to editing"
         />
       )}
 

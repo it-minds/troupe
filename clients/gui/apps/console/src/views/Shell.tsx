@@ -97,6 +97,25 @@ export function Shell(): JSX.Element {
   useEffect(() => {
     globalThis.document.title = `${title} · Troupe console`;
   }, [title]);
+  // Signed out, the console has no screen to name.
+  useEffect(
+    () => () => {
+      globalThis.document.title = "Troupe console";
+    },
+    [],
+  );
+
+  // An address this role may not open shows where the role starts, says why in one line,
+  // and becomes that place's address, so the bar no longer names a page that is not shown.
+  const [refused, setRefused] = useState(false);
+  useEffect(() => {
+    if (here === route) {
+      setRefused(false);
+      return;
+    }
+    setRefused(area(route.page) !== null);
+    globalThis.history?.replaceState?.(globalThis.history.state, "", href(START));
+  }, [route, here, START]);
 
   // A new screen starts at its top, not wherever the last one was scrolled to.
   useEffect(() => {
@@ -156,6 +175,14 @@ export function Shell(): JSX.Element {
       </nav>
       <main className="main">
         {signed.me.breakglass && <BreakGlassBanner until={signed.auth.me?.expires_at ?? null} />}
+        {refused && (
+          <section className="banner refused" role="status" aria-label="Not for your role">
+            <p>{signed.role === "member" ? "That page is for administrators." : "That page is for platform administrators."}</p>
+            <button type="button" onClick={() => setRefused(false)}>
+              Dismiss
+            </button>
+          </section>
+        )}
         <header className="head">
           <span className="crumb">{crumb}</span>
           <h1>{title}</h1>

@@ -234,6 +234,7 @@ function SettingRow({
             ].filter(Boolean)}
             verb={previewing === "reset" ? "Reset" : "Apply"}
             onCancel={() => setPreviewing(null)}
+            cancel={previewing === "put" ? "Back to editing" : "Cancel"}
             onConfirm={async () => {
               const answer = previewing === "reset" ? await admin.resetSetting(setting.key) : await admin.putSetting(setting.key, draft ?? "");
               const was = previewing;
