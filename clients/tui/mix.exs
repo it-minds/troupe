@@ -73,6 +73,8 @@ defmodule Troupe.MixProject do
         "troupe.xref",
         # The colours and the mask are generated from the design tokens (issue #228).
         "troupe.palette --check",
+        # The status lines are generated from docs/design/lines.json (issue #911).
+        "troupe.lines --check",
         # The command reference is generated from the command tables (issue #124).
         "troupe.cli.reference --check",
         "test"

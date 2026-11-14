@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
+import { LINES, pickLine } from "@troupe/client";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { button, externalResources, render, startOnTheList, type, waitFor } from "./support";
@@ -449,22 +450,26 @@ describe("the curtain line", () => {
     session.log.append("user_input", { source: "user", text: "go" }, { kind: "user", subject: "ada" });
     expect(curtain()).toBeNull();
 
+    // The lines are taken in an order shuffled from the session's id and the turn's number.
+    const said = (kind: "thinking" | "reading" | "acting", n: number, turn = 1): string => pickLine(kind, `${session.id}/${turn}`, n)!;
+
     daemon.ephemeral(session, "agent_state", { state: "thinking" });
-    await waitFor(() => curtain()?.match(/^◐ the actors are powdering their nose — thinking \(00:0\d\)$/), "the first thinking");
+    await waitFor(() => curtain()?.match(new RegExp(`^◐ ${said("thinking", 1)} — thinking \\(00:0\\d\\)$`)), "the first thinking");
 
     daemon.ephemeral(session, "agent_state", { state: "acting" });
     session.log.append("tool_call_started", { call_id: "r1", name: "read_file", args: { path: "a.ex" } });
-    await waitFor(() => curtain()?.match(/^◐ reading the script — running read_file a\.ex \(00:0\d\)$/), "a read");
+    await waitFor(() => curtain()?.match(new RegExp(`^◐ ${said("reading", 1)} — running read_file a\\.ex \\(00:0\\d\\)$`)), "a read");
     session.log.append("tool_call_started", { call_id: "r2", name: "read_file", args: { path: "b.ex" } });
     session.log.append("tool_call_started", { call_id: "r3", name: "list_files", args: { path: "lib" } });
     await waitFor(() => curtain()?.match(/— running 3 tools: read_file a\.ex, read_file b\.ex, list_files lib \(00:0\d\)$/), "three reads");
     for (const id of ["r1", "r2", "r3"]) session.log.append("tool_call_completed", { call_id: id, ok: true, content: "x" });
 
     daemon.ephemeral(session, "agent_state", { state: "thinking" });
-    await waitFor(() => curtain()?.startsWith("◐ running lines in the wings — thinking ("), "the second thinking");
+    await waitFor(() => curtain()?.startsWith(`◐ ${said("thinking", 2)} — thinking (`), "the second thinking");
+    expect(said("thinking", 2)).not.toBe(said("thinking", 1));
     daemon.ephemeral(session, "agent_state", { state: "acting" });
     session.log.append("tool_call_started", { call_id: "s1", name: "shell", args: { command: "mix test" } });
-    await waitFor(() => curtain()?.startsWith("◐ shifting the scenery — running shell mix test ("), "the second act");
+    await waitFor(() => curtain()?.startsWith(`◐ ${said("acting", 2)} — running shell mix test (`), "the second act");
     session.log.append("tool_call_completed", { call_id: "s1", ok: true, content: "ok" });
 
     // Waiting on a person: the facts alone, in the reserved colour.
@@ -477,16 +482,21 @@ describe("the curtain line", () => {
     await waitFor(() => curtain() === null, "at rest");
     session.log.append("user_input", { source: "user", text: "again" }, { kind: "user", subject: "ada" });
     daemon.ephemeral(session, "agent_state", { state: "thinking" });
-    await waitFor(() => curtain()?.startsWith("◐ the actors are powdering their nose — thinking ("), "the list again");
+    // It is the second turn, so its order is the second turn's.
+    await waitFor(() => curtain()?.startsWith(`◐ ${said("thinking", 1, 2)} — thinking (`), "the list again");
   });
 
   it("says the facts alone past the end of a list, and nothing at rest after a model error, whose note says it", async () => {
     const session = daemon.seed(WORKSPACE);
     await open(session);
     session.log.append("user_input", { source: "user", text: "go" }, { kind: "user", subject: "ada" });
-    for (const state of ["thinking", "acting", "thinking", "acting", "thinking", "acting"]) daemon.ephemeral(session, "agent_state", { state });
+    // One more thinking than the list has lines: the facts alone.
+    for (let n = 0; n < LINES.thinking.length; n++) {
+      daemon.ephemeral(session, "agent_state", { state: "thinking" });
+      daemon.ephemeral(session, "agent_state", { state: "acting" });
+    }
     daemon.ephemeral(session, "agent_state", { state: "thinking" });
-    await waitFor(() => curtain()?.match(/^◐ thinking \(00:0\d\)$/), "the fourth thinking, facts alone");
+    await waitFor(() => curtain()?.match(/^◐ thinking \(00:0\d\)$/), "the thinking past its list, facts alone");
 
     session.log.append("llm_error", { reason: "rate limited" });
     daemon.ephemeral(session, "agent_state", { state: "idle" });

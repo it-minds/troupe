@@ -14,6 +14,7 @@
 
 import { useCallback, useState } from "react";
 import type { JSX } from "react";
+import { firstLine } from "@troupe/client";
 import type { AuthSession, DaemonClient, DaemonEndpoint, DaemonIdentity, RecentWorkspace, Worktree } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import type { MachineUser } from "../hooks";
@@ -147,7 +148,7 @@ function Connect({ daemon }: { daemon: DaemonState }): JSX.Element {
         <>
           <p className="copy">
             {daemon.status === "searching"
-              ? "Looking for the daemon this computer is running…"
+              ? `${firstLine("daemon_starting", "local")} — Looking for the daemon this computer is running…`
               : daemon.status === "absent"
                 ? "Nothing is running here yet. Starting it takes a second, and it keeps running after this window closes."
                 : "The daemon did not answer. It may have stopped since it last published where it was."}

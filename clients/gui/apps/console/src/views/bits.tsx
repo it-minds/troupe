@@ -4,6 +4,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import type { JSX, ReactNode } from "react";
+import { firstLine } from "@troupe/client";
 import { describeError, recorded, show, useConsole } from "../console";
 import type { Load } from "../console";
 
@@ -50,11 +51,18 @@ export function Field({
   );
 }
 
-export function Loading({ what }: { what: string }): JSX.Element {
+/**
+ * What is being read. A `slow` load, a whole page that takes a while (the audit trail, a
+ * check of the whole chain), says a line from the shared set before the facts, the same
+ * line for the same thing so it does not change under the person; a panel does not.
+ */
+export function Loading({ what, slow = false }: { what: string; slow?: boolean }): JSX.Element {
   return (
     <div className="state loading" role="status" aria-live="polite">
       <span className="bar" aria-hidden="true" />
-      <span>Loading {what}…</span>
+      <span>
+        {slow ? `${firstLine("loading", what)} — ` : ""}Loading {what}…
+      </span>
     </div>
   );
 }
@@ -84,8 +92,8 @@ export function Empty({ title, children }: { title: ReactNode; children?: ReactN
 }
 
 /** A read's three states, and the screen once it has its answer. */
-export function Loaded<T>({ load, what, retry, children }: { load: Load<T>; what: string; retry: () => void; children: (data: T) => ReactNode }): JSX.Element {
-  if (load.state === "loading") return <Loading what={what} />;
+export function Loaded<T>({ load, what, retry, slow = false, children }: { load: Load<T>; what: string; retry: () => void; slow?: boolean; children: (data: T) => ReactNode }): JSX.Element {
+  if (load.state === "loading") return <Loading what={what} slow={slow} />;
   if (load.state === "error") return <Failure error={load.error} what={what} retry={retry} />;
   return <>{children(load.data)}</>;
 }

@@ -16,7 +16,7 @@ defmodule Troupe.NewSessionScreenTest do
 
   alias ExRatatui.Event.Key
   alias Troupe.{Client, FakeRemote}
-  alias Troupe.UI.NewSession
+  alias Troupe.UI.{Lines, NewSession}
   alias Troupe.UI.TUI.NewSessionPage
 
   defp page(origin, opts) do
@@ -39,6 +39,42 @@ defmodule Troupe.NewSessionScreenTest do
     login!(remote, url)
     {:ok, origin} = Client.connect_plane(url)
     {remote, origin}
+  end
+
+  describe "the status lines" do
+    test "the start screen's quip is one of the shared sentences, chosen by the page's seed" do
+      one = page(nil, seed: "a")
+      assert one.quip == Lines.first(:start_screen, "a")
+      assert NewSessionPage.plain(one) =~ one.quip
+      assert page(nil, seed: "a").quip == one.quip
+
+      openings = for n <- 1..30, do: page(nil, seed: n).quip
+      assert length(Enum.uniq(openings)) > 3
+      assert Enum.all?(openings, &(&1 in Lines.all(:start_screen)))
+    end
+
+    test "the casting footer opens with a flourish and keeps its keys, in 80 columns" do
+      for seed <- 1..40 do
+        page = page(nil, seed: seed)
+        waiting = footer(%{page | casting: %{waiting: true, failed: nil}})
+        casting = footer(%{page | casting: %{waiting: false, failed: nil}})
+
+        assert waiting =~ Lines.first(:waiting_for_a_place, seed)
+        assert casting =~ Lines.first(:casting, seed)
+
+        for line <- [waiting, casting] do
+          assert line =~ "Esc stops waiting; it starts when a place frees"
+          assert String.length(line) <= 80
+        end
+      end
+    end
+
+    test "a failed start has no flourish: the footer says what the keys do" do
+      page = %{page(nil, seed: 1) | casting: %{waiting: false, failed: "no place"}}
+      assert footer(page) == " casting — Enter or Esc back to the form "
+    end
+
+    defp footer(page), do: NewSessionPage.footer(page)
   end
 
   describe "the rules" do

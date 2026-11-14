@@ -333,6 +333,10 @@ export interface CurtainState {
   sentAt: number | undefined;
   requestAt: number | undefined;
   byteAt: number | undefined;
+  /** Which turn of the session this is, counted from one: the picking rule's seed, with the session's id. */
+  turn: number;
+  /** When the turn began, by this client's clock: past a few minutes the line says it is a long one. */
+  turnAt: number | undefined;
 }
 
 /**
@@ -418,7 +422,7 @@ export const emptyTranscript: TranscriptState = {
   thinking: "",
   thinkingAt: undefined,
   agentState: {},
-  curtain: { phases: {}, since: undefined, sentAt: undefined, requestAt: undefined, byteAt: undefined },
+  curtain: { phases: {}, since: undefined, sentAt: undefined, requestAt: undefined, byteAt: undefined, turn: 0, turnAt: undefined },
   pending: [],
   todo: [],
   presence: [],
@@ -1007,9 +1011,14 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
       // A line somebody sent, or a loop's, starts a wait on the daemon's request too; the
       // harness's own notes to the model do not.
       const source = str(d.data["source"], "user");
-      const sentAt = ["harness", "subagent"].includes(source) ? next.curtain.sentAt : now();
+      const own = !["harness", "subagent"].includes(source);
+      const sentAt = own ? now() : next.curtain.sentAt;
       const started = isRoot(d.agent)
-        ? { ...next, failed: undefined, curtain: { ...next.curtain, phases: {}, sentAt, requestAt: undefined, byteAt: undefined } }
+        ? {
+            ...next,
+            failed: undefined,
+            curtain: { ...next.curtain, phases: {}, sentAt, requestAt: undefined, byteAt: undefined, turn: next.curtain.turn + (own ? 1 : 0), turnAt: own ? sentAt : next.curtain.turnAt },
+          }
         : next;
       // A loop's iteration starts the agent's turn like any input, but nobody typed it:
       // the note `loop_iteration_started` left says which iteration it is, rather than
@@ -1433,7 +1442,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
         ...next,
         loop,
         // An iteration is a turn of its own, and the curtain line's words start again.
-        curtain: { ...next.curtain, phases: {} },
+        curtain: { ...next.curtain, phases: {}, turn: next.curtain.turn + 1, turnAt: now() },
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: `loop iteration ${iteration}${loop.max ? `/${loop.max}` : ""}` }],
       };
     }

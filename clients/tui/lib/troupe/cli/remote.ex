@@ -21,6 +21,7 @@ defmodule Troupe.CLI.Remote do
   alias Troupe.PlaneKeys
   alias Troupe.Protocol
   alias Troupe.Remote.{Auth, Credentials, Discovery, HTTP, RPC, Tokens}
+  alias Troupe.UI.Lines
 
   @doc """
   Runs the device flow against a plane, stores the refresh token and links the daemon
@@ -335,7 +336,12 @@ defmodule Troupe.CLI.Remote do
         say.("  open #{request.verification_uri_complete || request.verification_uri}")
         say.("  and enter the code: #{request.user_code}")
         say.("")
-        say.("waiting for you to finish in the browser…")
+
+        say.(
+          Lines.first(:signing_in, request.user_code) <>
+            " — waiting for you to finish in the browser…"
+        )
+
         {:ok, request}
 
       {:error, reason} ->

@@ -750,14 +750,18 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     let state = fold(emptyTranscript, durable("user_input", { text: "go", source: "user" }), { now: 500 });
     state = fold(state, ephemeral("agent_state", { state: "thinking" }), { now: 1_000 });
     state = fold(state, ephemeral("agent_state", { state: "thinking" }), { now: 2_000 });
-    assert.deepEqual(state.curtain, { phases: { thinking: 1 }, since: 1_000, sentAt: 500, requestAt: undefined, byteAt: undefined });
+    assert.deepEqual(state.curtain, { phases: { thinking: 1 }, since: 1_000, sentAt: 500, requestAt: undefined, byteAt: undefined, turn: 1, turnAt: 500 });
     state = fold(state, ephemeral("agent_state", { state: "acting" }), { now: 3_000 });
     state = fold(state, ephemeral("agent_state", { state: "thinking" }), { now: 4_000 });
     // A subagent's state is its own and no phase of the root's.
     state = fold(state, ephemeral("agent_state", { state: "acting" }, ["root", "helper#1"]), { now: 5_000 });
-    assert.deepEqual(state.curtain, { phases: { thinking: 2, acting: 1 }, since: 4_000, sentAt: 500, requestAt: undefined, byteAt: undefined });
+    assert.deepEqual(state.curtain, { phases: { thinking: 2, acting: 1 }, since: 4_000, sentAt: 500, requestAt: undefined, byteAt: undefined, turn: 1, turnAt: 500 });
     state = fold(state, durable("user_input", { text: "again", source: "user" }));
     assert.deepEqual(state.curtain.phases, {});
+    // A turn is counted, which is what the lines' order is shuffled from; the harness's own note is none.
+    assert.equal(state.curtain.turn, 2);
+    state = fold(state, durable("user_input", { text: "cut", source: "harness" }));
+    assert.equal(state.curtain.turn, 2);
   });
 
   it("stamps the prompt, the daemon's request and its first byte, for what a screen says it waits on", () => {
